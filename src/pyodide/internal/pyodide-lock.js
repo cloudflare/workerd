@@ -1,3896 +1,4311 @@
 export const lockFile = {
-"info": {
-"arch": "wasm32",
-"platform": "emscripten_3_1_45",
-"version": "0.25.0a1",
-"python": "3.11.3"
-},
-"packages": {
-"asciitree": {
-"name": "asciitree",
-"version": "0.3.3",
-"file_name": "asciitree-0.3.3-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "75bac13782a5d10413e997cbd8677597709860fc8845ece8f5a8ea412b06ba3a",
-"package_type": "package",
-"imports": [
-"asciitree"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"astropy": {
-"name": "astropy",
-"version": "5.3.2",
-"file_name": "astropy-5.3.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "dcbde00ed34a61f79c905c8431779591638e9d68ef9e465d4e2dec430fb8e897",
-"package_type": "package",
-"imports": [
-"astropy"
-],
-"depends": [
-"distutils",
-"packaging",
-"numpy",
-"pyerfa",
-"pyyaml"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"atomicwrites": {
-"name": "atomicwrites",
-"version": "1.4.1",
-"file_name": "atomicwrites-1.4.1-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "d6fbaf1f51cceeae088f6eceae9f78d35967a54e14cdd22921fd21467e562834",
-"package_type": "package",
-"imports": [
-"atomicwrites"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"attrs": {
-"name": "attrs",
-"version": "23.1.0",
-"file_name": "attrs-23.1.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "78d14463eb0dc6ec0d7a0a4cce953006d352fdc759ee34ab5917acfc6e8b8234",
-"package_type": "package",
-"imports": [
-"attr",
-"attrs"
-],
-"depends": [
-"six"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"autograd": {
-"name": "autograd",
-"version": "1.6.2",
-"file_name": "autograd-1.6.2-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "2c133eda51eb095227353c01f6a6f55abd1728e70d3330335912bf6c8a62d29b",
-"package_type": "package",
-"imports": [
-"autograd"
-],
-"depends": [
-"numpy",
-"future"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"autograd-tests": {
-"name": "autograd-tests",
-"version": "1.6.2",
-"file_name": "autograd-tests.tar",
-"install_dir": "site",
-"sha256": "d132459939aec3917167f75ed1ccdab109ccd3113b7610bc41964fcaae61a3c1",
-"package_type": "package",
-"imports": [],
-"depends": [
-"autograd"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"awkward-cpp": {
-"name": "awkward-cpp",
-"version": "26",
-"file_name": "awkward_cpp-26-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "45a6bc8c325db514496980221142301c617ab9f41f6bcc0f534c6d2d2513eeb8",
-"package_type": "package",
-"imports": [
-"awkward_cpp"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"bcrypt": {
-"name": "bcrypt",
-"version": "4.0.1",
-"file_name": "bcrypt-4.0.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "90c00299a44e3d481091ab26be30f8a4a1e8bb15fa75cc972108b54634984d43",
-"package_type": "package",
-"imports": [
-"bcrypt"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"beautifulsoup4": {
-"name": "beautifulsoup4",
-"version": "4.12.2",
-"file_name": "beautifulsoup4-4.12.2-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "cf8df9c906568c75a56febc17833454721192aae2f1ba97e56b27cb0815c77fc",
-"package_type": "package",
-"imports": [
-"bs4"
-],
-"depends": [
-"soupsieve"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"beautifulsoup4-tests": {
-"name": "beautifulsoup4-tests",
-"version": "4.12.2",
-"file_name": "beautifulsoup4-tests.tar",
-"install_dir": "site",
-"sha256": "2aa5618d8b13f90d8984a50f87b935057d47ed68ffb9ed5ac0d0e33805a8d1cd",
-"package_type": "package",
-"imports": [],
-"depends": [
-"beautifulsoup4"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"biopython": {
-"name": "biopython",
-"version": "1.81",
-"file_name": "biopython-1.81-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "43c733953cd229476a9525bcee7402d5d4b64cc5c69082cdc505d10215079baa",
-"package_type": "package",
-"imports": [
-"Bio",
-"BioSQL"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"bitarray": {
-"name": "bitarray",
-"version": "2.8.1",
-"file_name": "bitarray-2.8.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "23966480e910495f9a103940b95f191dc8d35440cedb3913246e5225e55b558e",
-"package_type": "package",
-"imports": [
-"bitarray"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"bitarray-tests": {
-"name": "bitarray-tests",
-"version": "2.8.1",
-"file_name": "bitarray-tests.tar",
-"install_dir": "site",
-"sha256": "1ccc52e917816258b113a59c077988f45d4342d75a6316616877b8686299146f",
-"package_type": "package",
-"imports": [],
-"depends": [
-"bitarray"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"bitstring": {
-"name": "bitstring",
-"version": "4.1.1",
-"file_name": "bitstring-4.1.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "23bdbf6f306e347933165264a10e1c6d972b56c8ef74db4172ed68bb97f5dc81",
-"package_type": "package",
-"imports": [
-"bitstring"
-],
-"depends": [
-"bitarray"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"bleach": {
-"name": "bleach",
-"version": "6.0.0",
-"file_name": "bleach-6.0.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "742f04e9c864305fdd84a461d5aaf399179be77577f5e5f4f1f47f5970e08ef6",
-"package_type": "package",
-"imports": [
-"bleach"
-],
-"depends": [
-"webencodings",
-"packaging",
-"six"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"bokeh": {
-"name": "bokeh",
-"version": "3.2.2",
-"file_name": "bokeh-3.2.2-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "3440e21faf662f9dd4b3acfaeae5fd63775c460fd60ebcceecf42be9371f5ca1",
-"package_type": "package",
-"imports": [
-"bokeh"
-],
-"depends": [
-"distutils",
-"numpy",
-"jinja2",
-"pandas",
-"pillow",
-"python-dateutil",
-"six",
-"typing-extensions",
-"pyyaml",
-"xyzservices"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"boost-histogram": {
-"name": "boost-histogram",
-"version": "1.3.2",
-"file_name": "boost_histogram-1.3.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "9bc757302b8332eb4fa042b6f9cb2da140a7b59df28de054ea4c7216f65d708d",
-"package_type": "package",
-"imports": [
-"boost_histogram"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"brotli": {
-"name": "brotli",
-"version": "1.0.9",
-"file_name": "Brotli-1.0.9-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "0567439137d6babaa1cdc429c489d16cbc54b9ad99c1a1b415ff5e5eeaa56148",
-"package_type": "package",
-"imports": [
-"brotli"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cachetools": {
-"name": "cachetools",
-"version": "5.3.1",
-"file_name": "cachetools-5.3.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "31cc5b85b632e42eb6079362c73c181e485e3270d8065c77832035acf392744e",
-"package_type": "package",
-"imports": [
-"cachetools"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cartopy": {
-"name": "Cartopy",
-"version": "0.21.1",
-"file_name": "Cartopy-0.21.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "43d431d729eb2dd50140b4febed82f78031c01d7b4deef8888384f559d563f36",
-"package_type": "package",
-"imports": [
-"cartopy"
-],
-"depends": [
-"shapely",
-"pyshp",
-"pyproj",
-"geos",
-"matplotlib",
-"scipy"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"cartopy-tests": {
-"name": "Cartopy-tests",
-"version": "0.21.1",
-"file_name": "Cartopy-tests.tar",
-"install_dir": "site",
-"sha256": "d1be5769198ce304071703c9a013aca6a6ff90c06def752e2b1a6fc7afdd0b8d",
-"package_type": "package",
-"imports": [],
-"depends": [
-"cartopy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cbor-diag": {
-"name": "cbor-diag",
-"version": "1.0.1",
-"file_name": "cbor_diag-1.0.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "e14c512c356d3607a9238ba1026f0ff3ed37f8b329f57347ad8d8e3783a7b7c4",
-"package_type": "package",
-"imports": [
-"cbor_diag"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"certifi": {
-"name": "certifi",
-"version": "2023.7.22",
-"file_name": "certifi-2023.7.22-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "66cbf5edadb2d8846c3aff1b89955405297fac627146c4a1877a15b4a4a122d8",
-"package_type": "package",
-"imports": [
-"certifi"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cffi": {
-"name": "cffi",
-"version": "1.15.1",
-"file_name": "cffi-1.15.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "91999279f21f7c18d017fb9516ea11da12ffb5b2250f566c81a36d1ab4495747",
-"package_type": "package",
-"imports": [
-"cffi"
-],
-"depends": [
-"pycparser"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cffi_example": {
-"name": "cffi_example",
-"version": "0.1",
-"file_name": "cffi_example-0.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "4e80b88a98ddbd806991fa388d45235aabaf28dc8f413616dadc9ea8cae82574",
-"package_type": "package",
-"imports": [
-"cffi_example"
-],
-"depends": [
-"cffi"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cftime": {
-"name": "cftime",
-"version": "1.6.2",
-"file_name": "cftime-1.6.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "5f68527c94f37f441bc38eea24e2c91e71120bcb4203859b4de0eafcf0ff77f7",
-"package_type": "package",
-"imports": [
-"cftime"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"click": {
-"name": "click",
-"version": "8.1.7",
-"file_name": "click-8.1.7-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "d5f785ffad6a6341dc585a996866a2f60e9320e005c02b063f1e624a6eae7d00",
-"package_type": "package",
-"imports": [
-"click"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cligj": {
-"name": "cligj",
-"version": "0.7.2",
-"file_name": "cligj-0.7.2-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "ac1933025a56569a9a8e010af92fb50fa4cde336ba64f9c25799ec3ca3d9c8c3",
-"package_type": "package",
-"imports": [
-"cligj"
-],
-"depends": [
-"click"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cloudpickle": {
-"name": "cloudpickle",
-"version": "2.2.1",
-"file_name": "cloudpickle-2.2.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "0165c9129854ffc84f7b7c06a5ab92d5fa4d648b2dc632940e7975e25ea0fafd",
-"package_type": "package",
-"imports": [
-"cloudpickle"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cmyt": {
-"name": "cmyt",
-"version": "1.3.1",
-"file_name": "cmyt-1.3.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "c51c6eb579dcef9235ecfa4a48ec70aaf0874b29d914e61e54eb729d752f51bb",
-"package_type": "package",
-"imports": [
-"cmyt"
-],
-"depends": [
-"colorspacious",
-"matplotlib",
-"more-itertools",
-"numpy"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"cmyt-tests": {
-"name": "cmyt-tests",
-"version": "1.3.1",
-"file_name": "cmyt-tests.tar",
-"install_dir": "site",
-"sha256": "9efbd93d2076534816cbe4311f069810824b483e0251ff577c434356fc9f13a4",
-"package_type": "package",
-"imports": [],
-"depends": [
-"cmyt"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"colorspacious": {
-"name": "colorspacious",
-"version": "1.1.2",
-"file_name": "colorspacious-1.1.2-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "fe1b3f713a8435a6df6c70e41ebf1cd9cca9708fb5e44afd5f08a95446ab5c87",
-"package_type": "package",
-"imports": [
-"colorspacious"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"contourpy": {
-"name": "contourpy",
-"version": "1.2.0",
-"file_name": "contourpy-1.2.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "7b4ba83842fa3ed94d7ad18608f073d2c59d6e9cb8489de136af9206302bb3c9",
-"package_type": "package",
-"imports": [
-"contourpy"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"coolprop": {
-"name": "coolprop",
-"version": "6.4.3",
-"file_name": "CoolProp-6.4.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "f42df4f132f711b80907189c5f2479cc701afc8ada56da99da4644604d10c53d",
-"package_type": "package",
-"imports": [
-"CoolProp"
-],
-"depends": [
-"numpy",
-"matplotlib"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"coolprop-tests": {
-"name": "coolprop-tests",
-"version": "6.4.3",
-"file_name": "coolprop-tests.tar",
-"install_dir": "site",
-"sha256": "a1277e949ea0bd624da6de7f7eda13f722c569a1d3c55294514ccfb9802122f5",
-"package_type": "package",
-"imports": [],
-"depends": [
-"coolprop"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"coverage": {
-"name": "coverage",
-"version": "7.3.0",
-"file_name": "coverage-7.3.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "a4195a2490af073ec59e8b282929c6cf945e5d16486f9641170e72dcb4f7682c",
-"package_type": "package",
-"imports": [
-"coverage"
-],
-"depends": [
-"sqlite3"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cpp-exceptions-test": {
-"name": "cpp-exceptions-test",
-"version": "0.1",
-"file_name": "cpp-exceptions-test-0.1.zip",
-"install_dir": "dynlib",
-"sha256": "e7cb0699a1efefee9f50f0aaca17eb83589924dc1f7a8e737d4cb24a39d58aa6",
-"package_type": "shared_library",
-"imports": [],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"cramjam": {
-"name": "cramjam",
-"version": "2.6.2",
-"file_name": "cramjam-2.6.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "0b5f5e2751fab1605565afd21eba08ef45cafa2b74373901e6314734ab725433",
-"package_type": "package",
-"imports": [
-"cramjam"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cryptography": {
-"name": "cryptography",
-"version": "39.0.2",
-"file_name": "cryptography-39.0.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "374f293b06803f47a4b0f2841aa893c5c815d7d9590ab502a0f454d34066d5e1",
-"package_type": "package",
-"imports": [
-"cryptography"
-],
-"depends": [
-"openssl",
-"six",
-"cffi"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cssselect": {
-"name": "cssselect",
-"version": "1.2.0",
-"file_name": "cssselect-1.2.0-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "1ad77ff2e882c91c4f284b681b5a5182d1182cb009c1eecfd8fce1238ff93ae2",
-"package_type": "package",
-"imports": [
-"cssselect"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cycler": {
-"name": "cycler",
-"version": "0.11.0",
-"file_name": "cycler-0.11.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "30407ea4842311eb75bd0fa2e41058a57d9f98c7bfc06017acb5f080248a61c4",
-"package_type": "package",
-"imports": [
-"cycler"
-],
-"depends": [
-"six"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"cytoolz": {
-"name": "cytoolz",
-"version": "0.12.2",
-"file_name": "cytoolz-0.12.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "501cf1f7926f85cdae81161cd61dbea1b4ba78d4d9e2c89132502617498f685e",
-"package_type": "package",
-"imports": [
-"cytoolz"
-],
-"depends": [
-"nose",
-"toolz"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"cytoolz-tests": {
-"name": "cytoolz-tests",
-"version": "0.12.2",
-"file_name": "cytoolz-tests.tar",
-"install_dir": "site",
-"sha256": "7411673c44f598c53ffa734a26be5700404380d87412f934afa4977d0cdf974f",
-"package_type": "package",
-"imports": [],
-"depends": [
-"cytoolz"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"decorator": {
-"name": "decorator",
-"version": "5.1.1",
-"file_name": "decorator-5.1.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "fa6ec06de216e3170263ce68c712ccd24b3876f98acc123b4d218e563cd618f6",
-"package_type": "package",
-"imports": [
-"decorator"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"demes": {
-"name": "demes",
-"version": "0.2.3",
-"file_name": "demes-0.2.3-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "2409fd6c082054c07fe2f2d133282619c1e2b41e770e02af683e7ae04d7bacc7",
-"package_type": "package",
-"imports": [
-"demes"
-],
-"depends": [
-"attrs",
-"ruamel.yaml"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"deprecation": {
-"name": "deprecation",
-"version": "2.1.0",
-"file_name": "deprecation-2.1.0-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "bcf751c42227367c4f0a535dfe0905aa586e5cc99ee2bf746f7448dafefbb546",
-"package_type": "package",
-"imports": [
-"deprecation"
-],
-"depends": [
-"packaging"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"distlib": {
-"name": "distlib",
-"version": "0.3.7",
-"file_name": "distlib-0.3.7-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "c59756d5894e1a0ab65cc94beb668fbb0c0af06dd906a26d01c51d21165e7ea9",
-"package_type": "package",
-"imports": [
-"distlib"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"distutils": {
-"name": "distutils",
-"version": "1.0.0",
-"file_name": "distutils-1.0.0.zip",
-"install_dir": "stdlib",
-"sha256": "49ace58b77162e6eee921b9685d9273f779cbd1194bdc7a1162e8675f5f93bd2",
-"package_type": "cpython_module",
-"imports": [
-"distutils"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"docutils": {
-"name": "docutils",
-"version": "0.20.1",
-"file_name": "docutils-0.20.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "6a3a40efa0287828e9b474bac124083523d9f6808a23dd48723819e518599104",
-"package_type": "package",
-"imports": [
-"docutils"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"exceptiongroup": {
-"name": "exceptiongroup",
-"version": "1.1.3",
-"file_name": "exceptiongroup-1.1.3-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "0f03cc3f8ce6dfa361d23f78004bb02425f5e687b123827e28519869afb98381",
-"package_type": "package",
-"imports": [
-"exceptiongroup"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"fastparquet": {
-"name": "fastparquet",
-"version": "2023.7.0",
-"file_name": "fastparquet-2023.7.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "33d04d13890a07ef1227526edb258040289583134bdd2e9c62b41f7c066542a9",
-"package_type": "package",
-"imports": [
-"fastparquet"
-],
-"depends": [
-"cramjam",
-"numpy",
-"pandas",
-"fsspec",
-"packaging"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"fiona": {
-"name": "fiona",
-"version": "1.8.22",
-"file_name": "Fiona-1.8.22-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "6f0a0ef55ceb6fa7344b3578ab85b93f550dd55d8834108b40b7a03b046b1b5b",
-"package_type": "package",
-"imports": [
-"fiona"
-],
-"depends": [
-"attrs",
-"certifi",
-"setuptools",
-"six",
-"click",
-"cligj"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"fonttools": {
-"name": "fonttools",
-"version": "4.42.1",
-"file_name": "fonttools-4.42.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "2bf2f57c2f98586478d43d9fe5bd247cb1cd5f06ad1b5afebfe16a57255aad2e",
-"package_type": "package",
-"imports": [
-"fontTools"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"fpcast-test": {
-"name": "fpcast-test",
-"version": "0.1",
-"file_name": "fpcast_test-0.1.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "a6b9afe9eafcdb7cc2650846dd18e6953ddd67820d01f64442e8e81762bba7a9",
-"package_type": "package",
-"imports": [
-"fpcast_test"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"freesasa": {
-"name": "freesasa",
-"version": "2.2.0.post3",
-"file_name": "freesasa-2.2.0.post3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "c92190b0d5610cfef73170131397c3f37ecddef1bfbacd65364ee46ed9d5e728",
-"package_type": "package",
-"imports": [
-"freesasa"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"frozenlist": {
-"name": "frozenlist",
-"version": "1.4.0",
-"file_name": "frozenlist-1.4.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "63f33dcc19ea44f54505f4346c0eb0a6015433d1c56dd3ffe7331fa4ea7fbe4c",
-"package_type": "package",
-"imports": [
-"frozenlist"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"fsspec": {
-"name": "fsspec",
-"version": "2023.6.0",
-"file_name": "fsspec-2023.6.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "5f235c75706bec3a05c70298cd2938d92b11a0c05ad5175ca9292053f46b2f2f",
-"package_type": "package",
-"imports": [
-"fsspec"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"fsspec-tests": {
-"name": "fsspec-tests",
-"version": "2023.6.0",
-"file_name": "fsspec-tests.tar",
-"install_dir": "site",
-"sha256": "30a81a1bd0c11d54784f70aa0e25b58848d83f159cd1bde342519ff5ffe1809e",
-"package_type": "package",
-"imports": [],
-"depends": [
-"fsspec"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"future": {
-"name": "future",
-"version": "0.18.3",
-"file_name": "future-0.18.3-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "9265de0457fa26ccbdbd1b0605fcc3c78e2e62c9f128c09d97bdbd8e63bd4044",
-"package_type": "package",
-"imports": [
-"future"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"future-tests": {
-"name": "future-tests",
-"version": "0.18.3",
-"file_name": "future-tests.tar",
-"install_dir": "site",
-"sha256": "bcaa3b8468235cbaf44b9cf6b3732e8b283e324cdba8775c37aedf9c18bd2c36",
-"package_type": "package",
-"imports": [],
-"depends": [
-"future"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"galpy": {
-"name": "galpy",
-"version": "1.9.0",
-"file_name": "galpy-1.9.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "12da8e183c18edf4af842498f08fef1400f242bb2ac54602c59606e1c2ea2a4e",
-"package_type": "package",
-"imports": [
-"galpy"
-],
-"depends": [
-"numpy",
-"scipy",
-"matplotlib",
-"astropy",
-"future",
-"setuptools"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"gdal": {
-"name": "gdal",
-"version": "3.5.1",
-"file_name": "gdal-3.5.1.zip",
-"install_dir": "dynlib",
-"sha256": "ef5983edf5e62b7f45db4d2802d9bb04815fce0de99c8c0949c9f797f632ac58",
-"package_type": "shared_library",
-"imports": [],
-"depends": [
-"geos"
-],
-"unvendored_tests": false,
-"shared_library": true
-},
-"gensim": {
-"name": "gensim",
-"version": "4.3.1",
-"file_name": "gensim-4.3.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "fca037d66f532033843b8726d484f899fa33088b2943ab5856d0d400980966f2",
-"package_type": "package",
-"imports": [
-"gensim"
-],
-"depends": [
-"numpy",
-"scipy",
-"six",
-"smart_open"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"gensim-tests": {
-"name": "gensim-tests",
-"version": "4.3.1",
-"file_name": "gensim-tests.tar",
-"install_dir": "site",
-"sha256": "c19f083a1ed751815b9821bc28fff6ad19d440f588eb03c880b0a5b842c9ddc4",
-"package_type": "package",
-"imports": [],
-"depends": [
-"gensim"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"geopandas": {
-"name": "geopandas",
-"version": "0.13.2",
-"file_name": "geopandas-0.13.2-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "5b6380e25b84db49969f90bd5bbacd077c21f809d5c9ef61bde1db7c6994dec8",
-"package_type": "package",
-"imports": [
-"geopandas"
-],
-"depends": [
-"shapely",
-"fiona",
-"pyproj",
-"packaging",
-"pandas"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"geopandas-tests": {
-"name": "geopandas-tests",
-"version": "0.13.2",
-"file_name": "geopandas-tests.tar",
-"install_dir": "site",
-"sha256": "b5af6c971af0ca5e5ecf2074c97f660078b8ff02758346dfbf66c9a5dfb94d8a",
-"package_type": "package",
-"imports": [],
-"depends": [
-"geopandas"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"geos": {
-"name": "geos",
-"version": "3.10.3",
-"file_name": "geos-3.10.3.zip",
-"install_dir": "dynlib",
-"sha256": "c1b01707ddbcd98d941f7d2973afa7cba3914a2a100aeb71969058816bfe281c",
-"package_type": "shared_library",
-"imports": [],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"gmpy2": {
-"name": "gmpy2",
-"version": "2.1.5",
-"file_name": "gmpy2-2.1.5-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "7df84b6898912b4816544b892784027113546dd5a80f7f9583c94438f6c74c73",
-"package_type": "package",
-"imports": [
-"gmpy2"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"gsw": {
-"name": "gsw",
-"version": "3.6.16",
-"file_name": "gsw-3.6.16-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "3188f99958d7c06c963052a2adad38824968b52b393984593c1be28e8ac279ad",
-"package_type": "package",
-"imports": [
-"gsw"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"gsw-tests": {
-"name": "gsw-tests",
-"version": "3.6.16",
-"file_name": "gsw-tests.tar",
-"install_dir": "site",
-"sha256": "65f9445391992a9abb972149362a9d9016c43ae34725716e780ad4206d193434",
-"package_type": "package",
-"imports": [],
-"depends": [
-"gsw"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"h5py": {
-"name": "h5py",
-"version": "3.7.0",
-"file_name": "h5py-3.7.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "15bebf11d8626a3a1891faafe8237a2f688049b43f1d79f4d76b1a534bd1bae9",
-"package_type": "package",
-"imports": [
-"h5py"
-],
-"depends": [
-"numpy",
-"pkgconfig"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"h5py-tests": {
-"name": "h5py-tests",
-"version": "3.7.0",
-"file_name": "h5py-tests.tar",
-"install_dir": "site",
-"sha256": "8d37fb3160c869cf3e1b63b67cd63afab108e4e153334093fd572de12892b018",
-"package_type": "package",
-"imports": [],
-"depends": [
-"h5py"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"hashlib": {
-"name": "hashlib",
-"version": "1.0.0",
-"file_name": "hashlib-1.0.0.zip",
-"install_dir": "stdlib",
-"sha256": "c71c9657ac7ebac25320763778517b9fd4eb0b4346242af871742655c9b903ec",
-"package_type": "cpython_module",
-"imports": [
-"_hashlib"
-],
-"depends": [
-"openssl"
-],
-"unvendored_tests": false,
-"shared_library": true
-},
-"html5lib": {
-"name": "html5lib",
-"version": "1.1",
-"file_name": "html5lib-1.1-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "0fb1306f07e0b1193641d5c814d979491dad12819124a999c4f8d5f909edaab6",
-"package_type": "package",
-"imports": [
-"html5lib"
-],
-"depends": [
-"webencodings",
-"six"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"idna": {
-"name": "idna",
-"version": "3.4",
-"file_name": "idna-3.4-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "b0bdd1ffeb1e6d178a4168583b5223681bceab6b51473aac83edd1a493277557",
-"package_type": "package",
-"imports": [
-"idna"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"igraph": {
-"name": "igraph",
-"version": "0.10.6",
-"file_name": "igraph-0.10.6-cp39-abi3-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "83dd2e7be61018dd21414ab0c8ccb45b4f88d66b52fab7750f78c1ab4a4083a2",
-"package_type": "package",
-"imports": [
-"igraph"
-],
-"depends": [
-"texttable"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"imageio": {
-"name": "imageio",
-"version": "2.31.1",
-"file_name": "imageio-2.31.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "65b253eb226d37a80db590e3dba3b031951af85b424188f1c254e670070940d5",
-"package_type": "package",
-"imports": [
-"imageio"
-],
-"depends": [
-"numpy",
-"pillow"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"iniconfig": {
-"name": "iniconfig",
-"version": "2.0.0",
-"file_name": "iniconfig-2.0.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "802794fc49d68c662a68d856cefb9af326c221ca45e5dd1a254c4e783dade76e",
-"package_type": "package",
-"imports": [
-"iniconfig"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"jedi": {
-"name": "jedi",
-"version": "0.19.0",
-"file_name": "jedi-0.19.0-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "1177f7d1c691b4abfdf9d7e6e4e19b81c26d21104332f97c32b94bf0b81dc2d4",
-"package_type": "package",
-"imports": [
-"jedi"
-],
-"depends": [
-"parso"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"jedi-tests": {
-"name": "jedi-tests",
-"version": "0.19.0",
-"file_name": "jedi-tests.tar",
-"install_dir": "site",
-"sha256": "09fdebc0cb3520fc23f35e2a2a4d9dd5b1e026102da4ae4e7c28e0f94889feee",
-"package_type": "package",
-"imports": [],
-"depends": [
-"jedi"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"jinja2": {
-"name": "Jinja2",
-"version": "3.1.2",
-"file_name": "Jinja2-3.1.2-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "1e82643e9759a816ed3cc611456b1aba5fa758349161209fef9979adca1dd665",
-"package_type": "package",
-"imports": [
-"jinja2"
-],
-"depends": [
-"markupsafe"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"joblib": {
-"name": "joblib",
-"version": "1.3.2",
-"file_name": "joblib-1.3.2-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "309c3986f31a6dc4da2df432df5076307dd98c6e7d5619f23fd011665c3cbc48",
-"package_type": "package",
-"imports": [
-"joblib"
-],
-"depends": [
-"distutils"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"joblib-tests": {
-"name": "joblib-tests",
-"version": "1.3.2",
-"file_name": "joblib-tests.tar",
-"install_dir": "site",
-"sha256": "43aaaf37555cdcaa9f111e13c58340b2d8978ca2697502ae3f43b92f3984f988",
-"package_type": "package",
-"imports": [],
-"depends": [
-"joblib"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"jsonschema": {
-"name": "jsonschema",
-"version": "4.17.3",
-"file_name": "jsonschema-4.17.3-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "37915a7fdc2de4e0a74ff24e6f1bff9218d9265d4c391441fd98b0e77ec35d4d",
-"package_type": "package",
-"imports": [
-"jsonschema"
-],
-"depends": [
-"attrs",
-"pyrsistent"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"jsonschema-tests": {
-"name": "jsonschema-tests",
-"version": "4.17.3",
-"file_name": "jsonschema-tests.tar",
-"install_dir": "site",
-"sha256": "542714b427ad78b1138fb3ea8280f969343439671332075175ff57215e07b1c6",
-"package_type": "package",
-"imports": [],
-"depends": [
-"jsonschema"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"kiwisolver": {
-"name": "kiwisolver",
-"version": "1.4.4",
-"file_name": "kiwisolver-1.4.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "76c1d7286fe4aa4342a264d4beb1a26b81ca5884fbeca8319f3147f14657987f",
-"package_type": "package",
-"imports": [
-"kiwisolver"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"lazy-object-proxy": {
-"name": "lazy-object-proxy",
-"version": "1.9.0",
-"file_name": "lazy_object_proxy-1.9.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "7f25046ce1df9149821ccbb9151296853355c2c64e7c117fa914ea63c18df9a1",
-"package_type": "package",
-"imports": [
-"lazy_object_proxy"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"lazy_loader": {
-"name": "lazy_loader",
-"version": "0.3",
-"file_name": "lazy_loader-0.3-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "a52b6bf84f8080790ab5e36d562830e6e73642122f7e82dfa46cfdb83d5e134d",
-"package_type": "package",
-"imports": [
-"lazy_loader"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"lazy_loader-tests": {
-"name": "lazy_loader-tests",
-"version": "0.3",
-"file_name": "lazy_loader-tests.tar",
-"install_dir": "site",
-"sha256": "8d7be1c5adbbe6e1ebb52b45ffe47e0b87388c82941af920d1a5fadc785794bb",
-"package_type": "package",
-"imports": [],
-"depends": [
-"lazy_loader"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"libhdf5": {
-"name": "libhdf5",
-"version": "1.12.1",
-"file_name": "libhdf5-1.12.1.zip",
-"install_dir": "dynlib",
-"sha256": "baa675936aa39e14a9bad4044eef4587bb80b682eafbe86f85ba3b76acbbde10",
-"package_type": "shared_library",
-"imports": [],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"libheif": {
-"name": "libheif",
-"version": "1.12.0",
-"file_name": "libheif-1.12.0.zip",
-"install_dir": "dynlib",
-"sha256": "d8c2d700bfec1e54646cc8d109c29519fbeb7b4c921c4f53f4ebe0b34f10ab48",
-"package_type": "shared_library",
-"imports": [],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"libmagic": {
-"name": "libmagic",
-"version": "5.42",
-"file_name": "libmagic-5.42.zip",
-"install_dir": "dynlib",
-"sha256": "defdf90128f0033f7bd9b6584431b6f5c9d830644515bab88a7913d08d7378b4",
-"package_type": "shared_library",
-"imports": [],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"libnetcdf": {
-"name": "libnetcdf",
-"version": "4.9.2",
-"file_name": "libnetcdf-4.9.2.zip",
-"install_dir": "dynlib",
-"sha256": "80038f8bccd3a22c1fdadad63bb1a2ac8bc8ffe664d5da7ed13efa5cb38d07d1",
-"package_type": "shared_library",
-"imports": [],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"lightgbm": {
-"name": "lightgbm",
-"version": "3.3.5",
-"file_name": "lightgbm-3.3.5-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "22b65e1c7b0264a97001aa1357ff39b48ba8716ff6f15c3c83166676cb18bc83",
-"package_type": "package",
-"imports": [
-"lightgbm"
-],
-"depends": [
-"numpy",
-"scipy",
-"scikit-learn"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"logbook": {
-"name": "logbook",
-"version": "1.6.0",
-"file_name": "Logbook-1.6.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "56b4be480f885964ac01704e7e44c6441d2e58a341a7b9899f100d657bef9a5d",
-"package_type": "package",
-"imports": [
-"logbook"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"lxml": {
-"name": "lxml",
-"version": "4.9.3",
-"file_name": "lxml-4.9.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "ba4cf9c5b068f715eee0cd7f98d085846019aaa221baf90f102360bc11679798",
-"package_type": "package",
-"imports": [
-"lxml"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"lzma": {
-"name": "lzma",
-"version": "1.0.0",
-"file_name": "lzma-1.0.0.zip",
-"install_dir": "stdlib",
-"sha256": "e47cf939b8cd922743f551fd15aaa60aa1cb683512205c34ddd5f22595eb69c0",
-"package_type": "cpython_module",
-"imports": [
-"lzma",
-"_lzma"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"markupsafe": {
-"name": "MarkupSafe",
-"version": "2.1.3",
-"file_name": "MarkupSafe-2.1.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "71e0dd5110571443759fa94992fc23c7375f5ddf7b7ab0974cbc326ed19fd90d",
-"package_type": "package",
-"imports": [
-"markupsafe"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"matplotlib": {
-"name": "matplotlib",
-"version": "3.5.2",
-"file_name": "matplotlib-3.5.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "0602f0d13200e08ab11eb9b482f941730d2e0713a1924100488a9f63f2e2fbf2",
-"package_type": "package",
-"imports": [
-"pylab",
-"mpl_toolkits",
-"matplotlib"
-],
-"depends": [
-"cycler",
-"fonttools",
-"kiwisolver",
-"numpy",
-"packaging",
-"pillow",
-"pyparsing",
-"python-dateutil",
-"pytz",
-"matplotlib-pyodide"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"matplotlib-pyodide": {
-"name": "matplotlib-pyodide",
-"version": "0.2.0",
-"file_name": "matplotlib_pyodide-0.2.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "4c29165b543b1fb057214f76eee41edfa8056cf1633fa9af6df90a2507a6dc78",
-"package_type": "package",
-"imports": [
-"matplotlib_pyodide"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"matplotlib-tests": {
-"name": "matplotlib-tests",
-"version": "3.5.2",
-"file_name": "matplotlib-tests.tar",
-"install_dir": "site",
-"sha256": "afa8fae611303e07d1635556e3f391a4c130a409e503b9e616467ce146bf3d9b",
-"package_type": "package",
-"imports": [],
-"depends": [
-"matplotlib"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"micropip": {
-"name": "micropip",
-"version": "0.5.0",
-"file_name": "micropip-0.5.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "3d76cdfce22a477a2132d201cbffdc8e4437a2dc1d4c18e789d0f15d4208a1fc",
-"package_type": "package",
-"imports": [
-"micropip"
-],
-"depends": [
-"packaging"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"mne": {
-"name": "mne",
-"version": "1.5.0",
-"file_name": "mne-1.5.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "bbfcdea6ddb4072919b1c764c421059e003fadfe25b9beabc76c9b8ae93fa5f1",
-"package_type": "package",
-"imports": [
-"mne"
-],
-"depends": [
-"distutils",
-"numpy",
-"scipy",
-"setuptools",
-"decorator"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"mne-tests": {
-"name": "mne-tests",
-"version": "1.5.0",
-"file_name": "mne-tests.tar",
-"install_dir": "site",
-"sha256": "340c5a1d3963e60327a7732ce843fc98213b0752143863e0748e18689ec72790",
-"package_type": "package",
-"imports": [],
-"depends": [
-"mne"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"more-itertools": {
-"name": "more-itertools",
-"version": "10.1.0",
-"file_name": "more_itertools-10.1.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "cfbf1cbec0edceecaada6b0f0911bea4bcccb36ce02c26fd2eeded03cddc8899",
-"package_type": "package",
-"imports": [
-"more_itertools"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"mpmath": {
-"name": "mpmath",
-"version": "1.3.0",
-"file_name": "mpmath-1.3.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "bb4faa66ef2a29468a5d326139fdf96fc590d7cdeff1004fdbf69d3d4ebbb8c0",
-"package_type": "package",
-"imports": [
-"mpmath"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"mpmath-tests": {
-"name": "mpmath-tests",
-"version": "1.3.0",
-"file_name": "mpmath-tests.tar",
-"install_dir": "site",
-"sha256": "1154ccc998d5042cb4fbd9801d19879f55e6b3009299fc38341ab3919394fe88",
-"package_type": "package",
-"imports": [],
-"depends": [
-"mpmath"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"msgpack": {
-"name": "msgpack",
-"version": "1.0.5",
-"file_name": "msgpack-1.0.5-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "2968eaa4aa04e68191830769e177827ea3e3659600d0934981ad08c03093e09b",
-"package_type": "package",
-"imports": [
-"msgpack"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"msgspec": {
-"name": "msgspec",
-"version": "0.18.4",
-"file_name": "msgspec-0.18.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "044ce0c1b1870471e349f5fe74f611f5a514ba69137c0560b0e6371c0656291a",
-"package_type": "package",
-"imports": [
-"msgspec"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"msprime": {
-"name": "msprime",
-"version": "1.2.0",
-"file_name": "msprime-1.2.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "2ca580a4e73b673978368c175e95516b0651e72fe673c0cdbd2c4c8aeed5722d",
-"package_type": "package",
-"imports": [
-"msprime"
-],
-"depends": [
-"numpy",
-"newick",
-"tskit",
-"demes"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"multidict": {
-"name": "multidict",
-"version": "6.0.4",
-"file_name": "multidict-6.0.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "b40e6253f86361a158a650b2159d3fa43af1a9ef73866af0ba1d1e3bdaba9c58",
-"package_type": "package",
-"imports": [
-"multidict"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"munch": {
-"name": "munch",
-"version": "4.0.0",
-"file_name": "munch-4.0.0-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "105b53f5c59c274c8d0c550526a7c56c5f852419106f2f758a51274b9450719a",
-"package_type": "package",
-"imports": [
-"munch"
-],
-"depends": [
-"setuptools",
-"six"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"mypy": {
-"name": "mypy",
-"version": "1.5.1",
-"file_name": "mypy-1.5.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "9fc741ce9c84d40f63989f7faa686fa1a73450025469a6a1c77791cdce539d42",
-"package_type": "package",
-"imports": [
-"mypyc",
-"mypy"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"mypy-tests": {
-"name": "mypy-tests",
-"version": "1.5.1",
-"file_name": "mypy-tests.tar",
-"install_dir": "site",
-"sha256": "e5ea9b47c58dcef8eafacbcabfda9967070032e16b43ab6a1bc8916bcc778ee3",
-"package_type": "package",
-"imports": [],
-"depends": [
-"mypy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"netcdf4": {
-"name": "netcdf4",
-"version": "1.6.4",
-"file_name": "netCDF4-1.6.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "fd06044d73b337fb5893de6380ac40494dee8cb365b9a65cff5ba7712339a44d",
-"package_type": "package",
-"imports": [
-"netCDF4"
-],
-"depends": [
-"numpy",
-"packaging",
-"h5py",
-"cftime",
-"certifi"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"networkx": {
-"name": "networkx",
-"version": "3.1",
-"file_name": "networkx-3.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "5668a28bce7077553a6414cebe28d53ad126022e7411ae46b5cb7330e150d232",
-"package_type": "package",
-"imports": [
-"networkx"
-],
-"depends": [
-"decorator",
-"setuptools",
-"matplotlib",
-"numpy"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"networkx-tests": {
-"name": "networkx-tests",
-"version": "3.1",
-"file_name": "networkx-tests.tar",
-"install_dir": "site",
-"sha256": "d9cb5e3a077d67c18780efc496fc7369a08b849d511b449420e4e3456734248e",
-"package_type": "package",
-"imports": [],
-"depends": [
-"networkx"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"newick": {
-"name": "newick",
-"version": "1.9.0",
-"file_name": "newick-1.9.0-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "c8f235eda4d09716267500f1a8a25c9c2e9cca7a5e6ca0027540caea98cb9a4a",
-"package_type": "package",
-"imports": [
-"newick"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"nlopt": {
-"name": "nlopt",
-"version": "2.7.0",
-"file_name": "nlopt-2.7.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "211a976a20cff684fe910f51c501de75b6bf0bf9c425542f4327ec70d95e3030",
-"package_type": "package",
-"imports": [
-"nlopt"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"nltk": {
-"name": "nltk",
-"version": "3.8.1",
-"file_name": "nltk-3.8.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "b5728cfd21df9040c1df6b83045739e98935c489c64ff04d6a2fdb9a0f872b0c",
-"package_type": "package",
-"imports": [
-"nltk"
-],
-"depends": [
-"regex",
-"sqlite3"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"nltk-tests": {
-"name": "nltk-tests",
-"version": "3.8.1",
-"file_name": "nltk-tests.tar",
-"install_dir": "site",
-"sha256": "2986e1ef7863c124069e056ea189f61a0ef6bc03a60f0d7a054256f5c8496cd6",
-"package_type": "package",
-"imports": [],
-"depends": [
-"nltk"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"nose": {
-"name": "nose",
-"version": "1.3.7",
-"file_name": "nose-1.3.7-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "1bf6eadfb531540330385d127ce11b44c1b4224cbbb6d2f8f9547dd5c10c2be6",
-"package_type": "package",
-"imports": [
-"nose"
-],
-"depends": [
-"setuptools"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"numcodecs": {
-"name": "numcodecs",
-"version": "0.11.0",
-"file_name": "numcodecs-0.11.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "41108425cf3f5d1729c0f5d2c0872fc601532e8c77bb903db086489ef0198c2a",
-"package_type": "package",
-"imports": [
-"numcodecs"
-],
-"depends": [
-"numpy",
-"msgpack"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"numcodecs-tests": {
-"name": "numcodecs-tests",
-"version": "0.11.0",
-"file_name": "numcodecs-tests.tar",
-"install_dir": "site",
-"sha256": "492979330fee6cd86ad39eb5e2be5431dc4d4cc4c553f319f8422ef90cbbb3f0",
-"package_type": "package",
-"imports": [],
-"depends": [
-"numcodecs"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"numpy": {
-"name": "numpy",
-"version": "1.26.1",
-"file_name": "numpy-1.26.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "0d6100e3e2aa64028e163196c28439d58b71daf5780f83265262e183508800a3",
-"package_type": "package",
-"imports": [
-"numpy"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"numpy-tests": {
-"name": "numpy-tests",
-"version": "1.26.1",
-"file_name": "numpy-tests.tar",
-"install_dir": "site",
-"sha256": "df9a8bdc3f8026bbcd612f7cb485cfa6dbb99488d49932eb8b47b38e72f83ca7",
-"package_type": "package",
-"imports": [],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"openblas": {
-"name": "openblas",
-"version": "0.3.23",
-"file_name": "openblas-0.3.23.zip",
-"install_dir": "dynlib",
-"sha256": "52ea5bf783461ebf2f7287d0c274e0a7745a9970a3b80c10291fed66ffcc65d7",
-"package_type": "shared_library",
-"imports": [],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"opencv-python": {
-"name": "opencv-python",
-"version": "4.8.0.76",
-"file_name": "opencv_python-4.8.0.76-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "80f3a8c02f892a0d26edc80ebf6125fe5f0ca86f45d28344b19fa1c5688dc480",
-"package_type": "package",
-"imports": [
-"cv2"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"openssl": {
-"name": "openssl",
-"version": "1.1.1n",
-"file_name": "openssl-1.1.1n.zip",
-"install_dir": "dynlib",
-"sha256": "0a86aa1998f69d486043ecc9f534c055a0d83d6e7d9039279fe33b120320fbe3",
-"package_type": "shared_library",
-"imports": [],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"optlang": {
-"name": "optlang",
-"version": "1.7.0",
-"file_name": "optlang-1.7.0-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "34bacf955f2c5065dfc1b7c28034f5b582c21012bf1161c35a601e5e2fe45db9",
-"package_type": "package",
-"imports": [
-"optlang"
-],
-"depends": [
-"sympy",
-"six",
-"swiglpk"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"optlang-tests": {
-"name": "optlang-tests",
-"version": "1.7.0",
-"file_name": "optlang-tests.tar",
-"install_dir": "site",
-"sha256": "30c4bac9cf570574eee2323c833468954b3e20489bed0351709e597f2dc30395",
-"package_type": "package",
-"imports": [],
-"depends": [
-"optlang"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"orjson": {
-"name": "orjson",
-"version": "3.9.2",
-"file_name": "orjson-3.9.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "4ec57ab462018c622f63e29b3cccdd8e1b6bbdd8118129ef43a6fd980b70733c",
-"package_type": "package",
-"imports": [
-"orjson"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"packaging": {
-"name": "packaging",
-"version": "23.1",
-"file_name": "packaging-23.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "a52efa0516f3f0043c43593a8b6cca5db94f15e1a6b5c99a65f6b76662358a33",
-"package_type": "package",
-"imports": [
-"packaging"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pandas": {
-"name": "pandas",
-"version": "1.5.3",
-"file_name": "pandas-1.5.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "552337597213fd110b8aff9980dd810996193c98bdca603e5c24ba38f58aafce",
-"package_type": "package",
-"imports": [
-"pandas"
-],
-"depends": [
-"numpy",
-"python-dateutil",
-"pytz"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"pandas-tests": {
-"name": "pandas-tests",
-"version": "1.5.3",
-"file_name": "pandas-tests.tar",
-"install_dir": "site",
-"sha256": "2d374bc3583793bad31212a971d15f506367e75600bdb231f9f7e11028595d0e",
-"package_type": "package",
-"imports": [],
-"depends": [
-"pandas"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"parso": {
-"name": "parso",
-"version": "0.8.3",
-"file_name": "parso-0.8.3-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "9fc75ce0b3c5c195b626622eab936a376db5123f767e41ba86f8f902c2dc67a3",
-"package_type": "package",
-"imports": [
-"parso"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"patsy": {
-"name": "patsy",
-"version": "0.5.3",
-"file_name": "patsy-0.5.3-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "04a6b3e42c606b503fe0c064e397aa3f702bb3143626baecd8c96c713a6e63e3",
-"package_type": "package",
-"imports": [
-"patsy"
-],
-"depends": [
-"numpy",
-"six"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"patsy-tests": {
-"name": "patsy-tests",
-"version": "0.5.3",
-"file_name": "patsy-tests.tar",
-"install_dir": "site",
-"sha256": "507bf27d3250fea9a9750e6d6438e798b426573d88968973a5d51585f7873f61",
-"package_type": "package",
-"imports": [],
-"depends": [
-"patsy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"peewee": {
-"name": "peewee",
-"version": "3.16.3",
-"file_name": "peewee-3.16.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "d5748c201fa9445c5f19e1812cb9c2c98bef45c382414600bd71a98c94b927ba",
-"package_type": "package",
-"imports": [
-"peewee"
-],
-"depends": [
-"sqlite3",
-"cffi"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"peewee-tests": {
-"name": "peewee-tests",
-"version": "3.16.3",
-"file_name": "peewee-tests.tar",
-"install_dir": "site",
-"sha256": "7b9b974e1ec22a43d755dff1f6186dc3a1d687e38e464f588713e2e3283c3afa",
-"package_type": "package",
-"imports": [],
-"depends": [
-"peewee"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pillow": {
-"name": "Pillow",
-"version": "10.0.0",
-"file_name": "Pillow-10.0.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "0ef5eff85e8e8f9fff2be20ec4f6ba8a787f0ffdd631339d236f4ca2dc1fc89c",
-"package_type": "package",
-"imports": [
-"PIL"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pillow_heif": {
-"name": "pillow_heif",
-"version": "0.8.0",
-"file_name": "pillow_heif-0.8.0-cp36-abi3-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "a106bbdee4f6a81f17aea8e6bd9e92a3a46569b9adcd3361827273921f6fcb3f",
-"package_type": "package",
-"imports": [
-"pillow_heif"
-],
-"depends": [
-"cffi",
-"pillow",
-"libheif"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pkgconfig": {
-"name": "pkgconfig",
-"version": "1.5.5",
-"file_name": "pkgconfig-1.5.5-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "47f7f9fd52f0dd5bdd9308f4976363ba11cb4f813e46a13eb97d9849707046bc",
-"package_type": "package",
-"imports": [
-"pkgconfig"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pluggy": {
-"name": "pluggy",
-"version": "1.2.0",
-"file_name": "pluggy-1.2.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "43bdfb03b6598ee57deaaa8b0d5bc7c79a859ce61c73f93afdc66cc72c8c3b64",
-"package_type": "package",
-"imports": [
-"pluggy"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"protobuf": {
-"name": "protobuf",
-"version": "4.23.1",
-"file_name": "protobuf-4.23.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "2a0635f53c20d5ca028b102ef6f142282b4de206e251ec1df1afd63a6a5856a7",
-"package_type": "package",
-"imports": [
-"google"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"py": {
-"name": "py",
-"version": "1.11.0",
-"file_name": "py-1.11.0-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "7adfcb0fa444a184a42a5b6c083b948c1cb95a227996820806ff5942b44a2516",
-"package_type": "package",
-"imports": [
-"py"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyb2d": {
-"name": "pyb2d",
-"version": "0.7.2",
-"file_name": "b2d-0.7.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "d2d20a727ef2e8d48cbf9d46421d351621e2d61f56cbbe43dde0f05a0e74433f",
-"package_type": "package",
-"imports": [
-"b2d"
-],
-"depends": [
-"numpy",
-"pydantic",
-"setuptools"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyclipper": {
-"name": "pyclipper",
-"version": "1.3.0.post4",
-"file_name": "pyclipper-1.3.0.post4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "5d2491413994d7f8ba2a82215c2304a384860997eafbe5a0ae32067e7fc95b08",
-"package_type": "package",
-"imports": [
-"pyclipper"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pycparser": {
-"name": "pycparser",
-"version": "2.21",
-"file_name": "pycparser-2.21-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "e10313c50bcd84a178c6d9b7f03bdc4cc0fd0d77f48160293bf3075d8b31ebe2",
-"package_type": "package",
-"imports": [
-"pycparser"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pycryptodome": {
-"name": "pycryptodome",
-"version": "3.18.0",
-"file_name": "pycryptodome-3.18.0-cp35-abi3-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "b5cd5c0f894663697d43c8bf072355b8a84e06ef4262d7c4ab958b1361fbe985",
-"package_type": "package",
-"imports": [
-"Crypto"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"pycryptodome-tests": {
-"name": "pycryptodome-tests",
-"version": "3.18.0",
-"file_name": "pycryptodome-tests.tar",
-"install_dir": "site",
-"sha256": "acfc15a09c593e8a3fee44676725b09eafc0faabbcba885dc40a1471cfb84f96",
-"package_type": "package",
-"imports": [],
-"depends": [
-"pycryptodome"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pydantic": {
-"name": "pydantic",
-"version": "1.10.7",
-"file_name": "pydantic-1.10.7-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "42b55d48f17c6c256113a2fe89c416e13011a9a1bd3b6d5354b6bc1caa1e7828",
-"package_type": "package",
-"imports": [
-"pydantic"
-],
-"depends": [
-"typing-extensions"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pydecimal": {
-"name": "pydecimal",
-"version": "1.0.0",
-"file_name": "pydecimal-1.0.0.zip",
-"install_dir": "stdlib",
-"sha256": "e43ab4e67e6d21191af844d6ff4b874c653e5b09cc617cb081ee7cc9a061f709",
-"package_type": "cpython_module",
-"imports": [
-"_pydecimal"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"pydoc_data": {
-"name": "pydoc_data",
-"version": "1.0.0",
-"file_name": "pydoc_data-1.0.0.zip",
-"install_dir": "stdlib",
-"sha256": "01df1bc30b6ff5f4310cc2f07758f7bd31a51fe9ca5480f55b4ac4b79b9031b9",
-"package_type": "cpython_module",
-"imports": [
-"pydoc_data"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"pyerfa": {
-"name": "pyerfa",
-"version": "2.0.0.3",
-"file_name": "pyerfa-2.0.0.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "46ffffb956d34d66db2c686c26cead9d5dc274a746c53195b73d3f7f07886df0",
-"package_type": "package",
-"imports": [
-"erfa"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"pyerfa-tests": {
-"name": "pyerfa-tests",
-"version": "2.0.0.3",
-"file_name": "pyerfa-tests.tar",
-"install_dir": "site",
-"sha256": "d9c50d2dc03a6ca22246c7f652fe450f02537596150bc50c64a310cd9156c562",
-"package_type": "package",
-"imports": [],
-"depends": [
-"pyerfa"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pygments": {
-"name": "Pygments",
-"version": "2.16.1",
-"file_name": "Pygments-2.16.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "feac8d5230fea45dc729d70f9d1fece1f95b6d7f5b6f68b4dd16c7c6383c4a3b",
-"package_type": "package",
-"imports": [
-"pygments"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyheif": {
-"name": "pyheif",
-"version": "0.7.1",
-"file_name": "pyheif-0.7.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "077101fb53243f9afdf8acef6c36c334d4c09e73808d156c16bdbcb72b2fd218",
-"package_type": "package",
-"imports": [
-"pyheif"
-],
-"depends": [
-"cffi"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyinstrument": {
-"name": "pyinstrument",
-"version": "4.4.0",
-"file_name": "pyinstrument-4.4.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "06561ea9f75e4e752cb61e0a9fd624a4829eceeb3fed8d8a4db0c66c05cd3102",
-"package_type": "package",
-"imports": [
-"pyinstrument"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pynacl": {
-"name": "pynacl",
-"version": "1.5.0",
-"file_name": "PyNaCl-1.5.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "66831e3fc7a579dc4f653e73b6afda0d52280c6ab9138a7cc5ee0ad9baa2f634",
-"package_type": "package",
-"imports": [
-"nacl"
-],
-"depends": [
-"cffi"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyodide-http": {
-"name": "pyodide-http",
-"version": "0.2.1",
-"file_name": "pyodide_http-0.2.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "fb7aed1e9a91bed6be53ec0ac7394f7074c182348114a19dff3167d03fb9e782",
-"package_type": "package",
-"imports": [
-"pyodide_http"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyodide-tblib": {
-"name": "pyodide-tblib",
-"version": "1.7.0",
-"file_name": "pyodide_tblib-1.7.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "896c05be1bcb01c6bc00e1eff6a156e6ca2df21a341e4c67863147fada6b0763",
-"package_type": "package",
-"imports": [
-"tblib"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyparsing": {
-"name": "pyparsing",
-"version": "3.1.1",
-"file_name": "pyparsing-3.1.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "f4c55b28ab86434973027227e9605ed783dd888dbbcd02a6808a03fb38b1c252",
-"package_type": "package",
-"imports": [
-"pyparsing"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyproj": {
-"name": "pyproj",
-"version": "3.4.1",
-"file_name": "pyproj-3.4.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "2f13591274191ecf330cb8edb002a6bf915a5b562a5e5d464aac90b5ff716016",
-"package_type": "package",
-"imports": [
-"pyproj"
-],
-"depends": [
-"certifi",
-"sqlite3"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyrsistent": {
-"name": "pyrsistent",
-"version": "0.19.3",
-"file_name": "pyrsistent-0.19.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "b3f84d569dc0ac1fd89f6701da17f287e89ca24408f0098c26027719f48fa676",
-"package_type": "package",
-"imports": [
-"_pyrsistent_version",
-"pyrsistent"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pysam": {
-"name": "pysam",
-"version": "0.22.0",
-"file_name": "pysam-0.22.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "b1cbe7c382da38ed5a66929ef629b1daf68e4c1abfe8039200332a1ab2dbf157",
-"package_type": "package",
-"imports": [
-"pysam"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyshp": {
-"name": "pyshp",
-"version": "2.3.1",
-"file_name": "pyshp-2.3.1-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "ad14635f2f0f59fb6b791c81e0b4af466ad0d46905a0a9dd9fa75e43d70ad77a",
-"package_type": "package",
-"imports": [
-"shapefile"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pytest": {
-"name": "pytest",
-"version": "7.2.2",
-"file_name": "pytest-7.2.2-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "57470b823d99731a527b8d6a1dc460a1e92c27024de18527af9c24eca7796452",
-"package_type": "package",
-"imports": [
-"_pytest",
-"pytest"
-],
-"depends": [
-"atomicwrites",
-"attrs",
-"more-itertools",
-"pluggy",
-"py",
-"setuptools",
-"six",
-"iniconfig",
-"exceptiongroup"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pytest-benchmark": {
-"name": "pytest-benchmark",
-"version": "4.0.0",
-"file_name": "pytest_benchmark-4.0.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "ea742481c9b1dda2936428eed1f20c74f5c40cf324d7312f79ecf9caca06ded7",
-"package_type": "package",
-"imports": [
-"pytest_benchmark"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"python-dateutil": {
-"name": "python-dateutil",
-"version": "2.8.2",
-"file_name": "python_dateutil-2.8.2-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "b3036722ca9e12eb2cd73c20655efb381a4900e9e19ab89d28e0428b7b6b406c",
-"package_type": "package",
-"imports": [
-"dateutil"
-],
-"depends": [
-"six"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"python-magic": {
-"name": "python-magic",
-"version": "0.4.27",
-"file_name": "python_magic-0.4.27-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "839d40ce24450d7766eb91c45687f888665f07a4e8027cf37b5513c1bd1cb73c",
-"package_type": "package",
-"imports": [
-"magic"
-],
-"depends": [
-"libmagic"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"python-sat": {
-"name": "python-sat",
-"version": "0.1.7.dev26",
-"file_name": "python_sat-0.1.7.dev26-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "3804892530d0781f503ae53de8e8da2265982e3c3938f06bf52fb4ac79928e02",
-"package_type": "package",
-"imports": [
-"pysat"
-],
-"depends": [
-"six"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"python_solvespace": {
-"name": "python_solvespace",
-"version": "3.0.8",
-"file_name": "python_solvespace-3.0.8-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "da28f79dd45342a5e9dc7cd44005f1fefa5dad267c128d8088629b07e7808d08",
-"package_type": "package",
-"imports": [
-"python_solvespace"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pytz": {
-"name": "pytz",
-"version": "2023.3",
-"file_name": "pytz-2023.3-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "6fc5e09ddd9dd858f7db67b11b7d5fb92d4db790587b0992b7e4cc86b54a6dc7",
-"package_type": "package",
-"imports": [
-"pytz"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pywavelets": {
-"name": "pywavelets",
-"version": "1.4.1",
-"file_name": "PyWavelets-1.4.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "41779a12d436e31ce7d119e4ccb9b47b40d5b8d011063b8f9c188f17f60c7619",
-"package_type": "package",
-"imports": [
-"pywt"
-],
-"depends": [
-"distutils",
-"numpy",
-"matplotlib",
-"scipy"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"pywavelets-tests": {
-"name": "pywavelets-tests",
-"version": "1.4.1",
-"file_name": "pywavelets-tests.tar",
-"install_dir": "site",
-"sha256": "41fb0956c53ccaf31fd333aa49c4740e763f6ff4f485c903541d27b7366e134a",
-"package_type": "package",
-"imports": [],
-"depends": [
-"pywavelets"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyxel": {
-"name": "pyxel",
-"version": "1.9.10",
-"file_name": "pyxel-1.9.10-cp37-abi3-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "436846c0c1ca978e5309527093d9b666175357d68b059ca4986c968cf983400a",
-"package_type": "package",
-"imports": [
-"pyxel"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"pyyaml": {
-"name": "pyyaml",
-"version": "6.0.1",
-"file_name": "PyYAML-6.0.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "7477f249cd3a9d5cfc50c366407ea4727de310a40a935f9dc1ae5b2d02723c7a",
-"package_type": "package",
-"imports": [
-"_yaml",
-"yaml"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"rebound": {
-"name": "rebound",
-"version": "3.24.2",
-"file_name": "rebound-3.24.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "40a8495a520a0fa7f11144f51e7a5994f2f738fc984aa442cfbec1a18c9ce81a",
-"package_type": "package",
-"imports": [
-"rebound"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"reboundx": {
-"name": "reboundx",
-"version": "3.10.1",
-"file_name": "reboundx-3.10.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "9cc1d1c833a840d750cc68676245175202f222c4e50c203ad957757f8a6037d4",
-"package_type": "package",
-"imports": [
-"reboundx"
-],
-"depends": [
-"rebound",
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"regex": {
-"name": "regex",
-"version": "2023.8.8",
-"file_name": "regex-2023.8.8-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "893bd849a98ac3c410e34d40f117bdecdd78af45a3791636a6d370010de5df43",
-"package_type": "package",
-"imports": [
-"regex"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"regex-tests": {
-"name": "regex-tests",
-"version": "2023.8.8",
-"file_name": "regex-tests.tar",
-"install_dir": "site",
-"sha256": "1431b992757c6e0c2886460a31335a3ed6dc7c4f5efc693efeec57e2dcf8860c",
-"package_type": "package",
-"imports": [],
-"depends": [
-"regex"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"retrying": {
-"name": "retrying",
-"version": "1.3.4",
-"file_name": "retrying-1.3.4-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "7e117286a169e6e4bf09657c5cd9eca337dfe94fd99bb7c15fc2c7e30c8816f9",
-"package_type": "package",
-"imports": [
-"retrying"
-],
-"depends": [
-"six"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"river": {
-"name": "river",
-"version": "0.19.0",
-"file_name": "river-0.19.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "03c4c8a6c977390b93adc492fe1ed6e888ea663dea31f6b41991c62fee608841",
-"package_type": "package",
-"imports": [
-"river"
-],
-"depends": [
-"numpy",
-"pandas",
-"pytest",
-"scipy"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"river-tests": {
-"name": "river-tests",
-"version": "0.19.0",
-"file_name": "river-tests.tar",
-"install_dir": "site",
-"sha256": "a30b99480976c13519055500ff28ce70a6bd3b44f12da928218e81db8728d8a4",
-"package_type": "package",
-"imports": [],
-"depends": [
-"river"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"robotraconteur": {
-"name": "RobotRaconteur",
-"version": "0.15.1",
-"file_name": "RobotRaconteur-0.15.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "ba09131f548249db25c43ef9d8248aa2eff838a99e1b7957b09b4d1d92a143ff",
-"package_type": "package",
-"imports": [
-"RobotRaconteur"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"ruamel.yaml": {
-"name": "ruamel.yaml",
-"version": "0.17.32",
-"file_name": "ruamel.yaml-0.17.32-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "5fe2e568b40871f135e411da30d3aab91a1f4a715ee649ccceca294d3d541c38",
-"package_type": "package",
-"imports": [
-"ruamel"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"rust-panic-test": {
-"name": "rust-panic-test",
-"version": "1.0",
-"file_name": "rust_panic_test-1.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "53d28f71e30a5dbabcceedb34566149c5440f44cf1d340165bf18488bad7a34e",
-"package_type": "package",
-"imports": [
-"rust-panic-test"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"scikit-image": {
-"name": "scikit-image",
-"version": "0.21.0",
-"file_name": "scikit_image-0.21.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "5503da4ec73c2b3fadb71b26f6e7cd97c5ced1aa2c3c2b6416f9ae9d7ada5fcb",
-"package_type": "package",
-"imports": [
-"skimage"
-],
-"depends": [
-"packaging",
-"numpy",
-"scipy",
-"networkx",
-"pillow",
-"imageio",
-"pywavelets",
-"lazy_loader"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"scikit-image-tests": {
-"name": "scikit-image-tests",
-"version": "0.21.0",
-"file_name": "scikit-image-tests.tar",
-"install_dir": "site",
-"sha256": "d1ef8fa902aecb0a6c19fecbe391b4c933354839241e886828838aa448302688",
-"package_type": "package",
-"imports": [],
-"depends": [
-"scikit-image"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"scikit-learn": {
-"name": "scikit-learn",
-"version": "1.3.1",
-"file_name": "scikit_learn-1.3.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "873e22ae92349a5d7d01343a040f5ef6271750018195409510d140040d32b38b",
-"package_type": "package",
-"imports": [
-"sklearn"
-],
-"depends": [
-"scipy",
-"joblib",
-"threadpoolctl"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"scikit-learn-tests": {
-"name": "scikit-learn-tests",
-"version": "1.3.1",
-"file_name": "scikit-learn-tests.tar",
-"install_dir": "site",
-"sha256": "0e89ec53c3b7b1d89c85a23c6412fe449eb8cf651b38c995b7d258475ebef0c8",
-"package_type": "package",
-"imports": [],
-"depends": [
-"scikit-learn"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"scipy": {
-"name": "scipy",
-"version": "1.11.2",
-"file_name": "scipy-1.11.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "4aaef1785caa601c93c7f146fa4cf9180a5021ed93723f8bde208040d2afe8f2",
-"package_type": "package",
-"imports": [
-"scipy"
-],
-"depends": [
-"numpy",
-"openblas"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"scipy-tests": {
-"name": "scipy-tests",
-"version": "1.11.2",
-"file_name": "scipy-tests.tar",
-"install_dir": "site",
-"sha256": "4ba2b50f0e048efe5c41bb1b63ce34ec704df4b9466e9f6e58f6a9bf265ea93b",
-"package_type": "package",
-"imports": [],
-"depends": [
-"scipy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"screed": {
-"name": "screed",
-"version": "1.1.2",
-"file_name": "screed-1.1.2-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "bfff76a8341e0146d62e7a85f18b4522642440850a88ba6966d6e2e63678d18e",
-"package_type": "package",
-"imports": [
-"bigtests",
-"screed"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"screed-tests": {
-"name": "screed-tests",
-"version": "1.1.2",
-"file_name": "screed-tests.tar",
-"install_dir": "site",
-"sha256": "4638441d579d34f688ed62c11eff48e71437a4abac13c7846ba3512cfb18def0",
-"package_type": "package",
-"imports": [],
-"depends": [
-"screed"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"setuptools": {
-"name": "setuptools",
-"version": "68.1.2",
-"file_name": "setuptools-68.1.2-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "14bb231ea7a4cf59a23efdda941e8f9c348ab841953cd4c5fbc320064d80cbf0",
-"package_type": "package",
-"imports": [
-"_distutils_hack",
-"pkg_resources",
-"setuptools"
-],
-"depends": [
-"distutils",
-"pyparsing"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"shapely": {
-"name": "shapely",
-"version": "1.8.2",
-"file_name": "Shapely-1.8.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "1292e40ed720b637879e8c9761db18713cc785a146eb0e831dbf7b6b3288fac5",
-"package_type": "package",
-"imports": [
-"shapely"
-],
-"depends": [
-"numpy"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"shapely-tests": {
-"name": "shapely-tests",
-"version": "1.8.2",
-"file_name": "shapely-tests.tar",
-"install_dir": "site",
-"sha256": "644a1e9cb698ad21ae3bf3b9f2ea7fcb64490b6329c6090de5485b2805ffc9e0",
-"package_type": "package",
-"imports": [],
-"depends": [
-"shapely"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"sharedlib-test": {
-"name": "sharedlib-test",
-"version": "1.0",
-"file_name": "sharedlib-test-1.0.zip",
-"install_dir": "dynlib",
-"sha256": "914a4a5c837fefc055a15c5800a55cba642ea30084cd3fab1505405442760bf6",
-"package_type": "shared_library",
-"imports": [],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"sharedlib-test-py": {
-"name": "sharedlib-test-py",
-"version": "1.0",
-"file_name": "sharedlib_test_py-1.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "08f13a30b616fef18cbe8b76fc0058b74536c9377ac494b4fefa657acd73d51e",
-"package_type": "package",
-"imports": [
-"sharedlib_test"
-],
-"depends": [
-"sharedlib-test"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"simplejson": {
-"name": "simplejson",
-"version": "3.19.1",
-"file_name": "simplejson-3.19.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "14e3f928c29e9bf03b6e41ee9afc7527802c3d5fa31d2cb23ccf9249f9da95f5",
-"package_type": "package",
-"imports": [
-"simplejson"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"simplejson-tests": {
-"name": "simplejson-tests",
-"version": "3.19.1",
-"file_name": "simplejson-tests.tar",
-"install_dir": "site",
-"sha256": "3a7e168ab810aaf634c37233e5b5db550157e352ff09589931a89b58c86774fc",
-"package_type": "package",
-"imports": [],
-"depends": [
-"simplejson"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"sisl": {
-"name": "sisl",
-"version": "0.14.2",
-"file_name": "sisl-0.14.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "7f85976a72444828c328ada0a8252910a481f8e6e07cac3e68cab98794c89fab",
-"package_type": "package",
-"imports": [
-"sisl_toolbox",
-"sisl"
-],
-"depends": [
-"pyparsing",
-"numpy",
-"scipy",
-"tqdm",
-"xarray",
-"pandas",
-"matplotlib"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"sisl-tests": {
-"name": "sisl-tests",
-"version": "0.14.2",
-"file_name": "sisl-tests.tar",
-"install_dir": "site",
-"sha256": "f84b9dbfab33f674c1e3520b76ad733d573012e34174572044b6a03e2a9a1af1",
-"package_type": "package",
-"imports": [],
-"depends": [
-"sisl"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"six": {
-"name": "six",
-"version": "1.16.0",
-"file_name": "six-1.16.0-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "98b1098eb1a03f634479954b7e4f6da34469dd7548f0232b84635659cc2f8693",
-"package_type": "package",
-"imports": [
-"six"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"smart_open": {
-"name": "smart_open",
-"version": "6.3.0",
-"file_name": "smart_open-6.3.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "ceb58d02bd424beca455ba289e489de62064c6f33e1b6bbdf4ff0976907c1e4e",
-"package_type": "package",
-"imports": [
-"smart_open"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"soupsieve": {
-"name": "soupsieve",
-"version": "2.4.1",
-"file_name": "soupsieve-2.4.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "2fb602d8bb327a0d026160764185109ee5440a29d84e27d6c7c946f916c80093",
-"package_type": "package",
-"imports": [
-"soupsieve"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"sourmash": {
-"name": "sourmash",
-"version": "4.8.4",
-"file_name": "sourmash-4.8.4-py3-none-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "fae22020c8a015f55a5b8d4e7be10e8290161f6b9d42978f333455d696f73874",
-"package_type": "package",
-"imports": [
-"sourmash"
-],
-"depends": [
-"screed",
-"cffi",
-"deprecation",
-"cachetools",
-"numpy",
-"matplotlib",
-"scipy",
-"sqlite3",
-"bitstring"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"sparseqr": {
-"name": "sparseqr",
-"version": "1.2",
-"file_name": "sparseqr-1.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "31fd11fcaa6f23636a27cc1535ad6c3a916a8f2971d18e5a445bc0fb45e415a7",
-"package_type": "package",
-"imports": [
-"sparseqr"
-],
-"depends": [
-"pycparser",
-"cffi",
-"numpy",
-"scipy",
-"suitesparse",
-"distutils"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"sqlalchemy": {
-"name": "sqlalchemy",
-"version": "2.0.20",
-"file_name": "SQLAlchemy-2.0.20-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "734717eef5739ae5bcf8c927a04a4013489108bc94f55be5bc4e67b402d3edc8",
-"package_type": "package",
-"imports": [
-"sqlalchemy"
-],
-"depends": [
-"sqlite3",
-"typing-extensions"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"sqlalchemy-tests": {
-"name": "sqlalchemy-tests",
-"version": "2.0.20",
-"file_name": "sqlalchemy-tests.tar",
-"install_dir": "site",
-"sha256": "5e183fe7fea7e2710dfe40ae191de1ad6cfdda3e3588f82d1703d53c801cc11f",
-"package_type": "package",
-"imports": [],
-"depends": [
-"sqlalchemy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"sqlite3": {
-"name": "sqlite3",
-"version": "1.0.0",
-"file_name": "sqlite3-1.0.0.zip",
-"install_dir": "stdlib",
-"sha256": "3bbeec0beeae879b49b5aebfeae6a9019622912b8c282d7efda0f71321ceb974",
-"package_type": "cpython_module",
-"imports": [
-"sqlite3",
-"_sqlite3"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"ssl": {
-"name": "ssl",
-"version": "1.0.0",
-"file_name": "ssl-1.0.0.zip",
-"install_dir": "stdlib",
-"sha256": "9a83f538a04c94e8209ffa92896968924852888351d820ac50cef783d0121d4b",
-"package_type": "cpython_module",
-"imports": [
-"ssl",
-"_ssl"
-],
-"depends": [
-"openssl"
-],
-"unvendored_tests": false,
-"shared_library": true
-},
-"statsmodels": {
-"name": "statsmodels",
-"version": "0.14.0",
-"file_name": "statsmodels-0.14.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "e97d9e91cc97dc123c695456907552fce02592903011e8f70edb9a50d87e8f58",
-"package_type": "package",
-"imports": [
-"statsmodels"
-],
-"depends": [
-"distutils",
-"numpy",
-"scipy",
-"pandas",
-"patsy",
-"packaging"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"statsmodels-tests": {
-"name": "statsmodels-tests",
-"version": "0.14.0",
-"file_name": "statsmodels-tests.tar",
-"install_dir": "site",
-"sha256": "7d0e90ad137ee0c7a5d45258c06f55fba66e524e8c6578bb26f4b46043bda374",
-"package_type": "package",
-"imports": [],
-"depends": [
-"statsmodels"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"suitesparse": {
-"name": "suitesparse",
-"version": "5.11.0",
-"file_name": "suitesparse-5.11.0.zip",
-"install_dir": "dynlib",
-"sha256": "a1c1de3652825a65c3e00204d341b003c0155f4758fc4de5d1f442efff1877ca",
-"package_type": "shared_library",
-"imports": [],
-"depends": [
-"openblas"
-],
-"unvendored_tests": false,
-"shared_library": true
-},
-"svgwrite": {
-"name": "svgwrite",
-"version": "1.4.3",
-"file_name": "svgwrite-1.4.3-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "9c8219b7c21decf406a03d575e754bce7d54bcfa6ad0037ae2f5262a659b747a",
-"package_type": "package",
-"imports": [
-"svgwrite"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"swiglpk": {
-"name": "swiglpk",
-"version": "5.0.8",
-"file_name": "swiglpk-5.0.8-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "f1d87029f2ac30b539650d53e0b7bac4c6b4531841d5b8a6cbc3c5fbcae44be8",
-"package_type": "package",
-"imports": [
-"swiglpk"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"sympy": {
-"name": "sympy",
-"version": "1.12",
-"file_name": "sympy-1.12-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "e517f8da159a65a6032da66c21e814289e112b79c9720618628650cac63504ad",
-"package_type": "package",
-"imports": [
-"isympy",
-"sympy"
-],
-"depends": [
-"distutils",
-"mpmath"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"sympy-tests": {
-"name": "sympy-tests",
-"version": "1.12",
-"file_name": "sympy-tests.tar",
-"install_dir": "site",
-"sha256": "29a8ec7d3c20a6a4ef774564405e72dd5c3b0a107d84ad907fb5f1b056154325",
-"package_type": "package",
-"imports": [],
-"depends": [
-"sympy"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"termcolor": {
-"name": "termcolor",
-"version": "2.3.0",
-"file_name": "termcolor-2.3.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "9bce768fb7d89009903feef92731c75173735633a58eaf808a48c3357fbefa61",
-"package_type": "package",
-"imports": [
-"termcolor"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"test": {
-"name": "test",
-"version": "1.0.0",
-"file_name": "test-1.0.0.zip",
-"install_dir": "stdlib",
-"sha256": "15986e0c5d3f862e8421587155089920e1b325027669d3db73ad60b89995fbc0",
-"package_type": "cpython_module",
-"imports": [
-"test"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": true
-},
-"texttable": {
-"name": "texttable",
-"version": "1.6.7",
-"file_name": "texttable-1.6.7-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "0ef2086c6e43458ad46b2b7ebb3ef723a4d1db33bf0ec2b5184c9bd21b39a045",
-"package_type": "package",
-"imports": [
-"texttable"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"threadpoolctl": {
-"name": "threadpoolctl",
-"version": "3.2.0",
-"file_name": "threadpoolctl-3.2.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "ab1b20a8e046651643b4fd4319c1147b0aa438e959ab04c26ebedf68bd49d2a3",
-"package_type": "package",
-"imports": [
-"threadpoolctl"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"tomli": {
-"name": "tomli",
-"version": "2.0.1",
-"file_name": "tomli-2.0.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "a7dde08781d6ebff6fff34cfd3e9576f4c949cdf80eb548ba056f40e66835830",
-"package_type": "package",
-"imports": [
-"tomli"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"tomli-w": {
-"name": "tomli-w",
-"version": "1.0.0",
-"file_name": "tomli_w-1.0.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "0b17d1e3c8c891dad2978a3525f1c39f686a58a04870fab23218513a94ae50ec",
-"package_type": "package",
-"imports": [
-"tomli_w"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"toolz": {
-"name": "toolz",
-"version": "0.12.0",
-"file_name": "toolz-0.12.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "715daa640c0b1b245d8fc9826c3281dc1bfed4df2e92508d981f62f53b1e4378",
-"package_type": "package",
-"imports": [
-"tlz",
-"toolz"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"toolz-tests": {
-"name": "toolz-tests",
-"version": "0.12.0",
-"file_name": "toolz-tests.tar",
-"install_dir": "site",
-"sha256": "ddbdb478ef3b634e7c29d3cde8c7bf2c06da831a640393774db57486a9ffd835",
-"package_type": "package",
-"imports": [],
-"depends": [
-"toolz"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"tqdm": {
-"name": "tqdm",
-"version": "4.66.1",
-"file_name": "tqdm-4.66.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "13865d3f24875f155017cd18eaeff55cfe8c6570faeeb15caeaf9664662fb119",
-"package_type": "package",
-"imports": [
-"tqdm"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"traits": {
-"name": "traits",
-"version": "6.4.2",
-"file_name": "traits-6.4.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "d2a7cfe5d5a44c528d5b5e12c8c0442d2e4b35df6adff6ef53bd4166a50e19f2",
-"package_type": "package",
-"imports": [
-"traits"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"traits-tests": {
-"name": "traits-tests",
-"version": "6.4.2",
-"file_name": "traits-tests.tar",
-"install_dir": "site",
-"sha256": "63dae6d3e8a8a43d2f09258d8a7ba426791d6593c49b5b2742cab5b365e1de43",
-"package_type": "package",
-"imports": [],
-"depends": [
-"traits"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"tskit": {
-"name": "tskit",
-"version": "0.5.5",
-"file_name": "tskit-0.5.5-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "0c2cd20a11a9149dd2f8d66381d572a87605f3acb50ba469aa923d32183e1dbf",
-"package_type": "package",
-"imports": [
-"tskit"
-],
-"depends": [
-"numpy",
-"svgwrite",
-"jsonschema"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"typing-extensions": {
-"name": "typing-extensions",
-"version": "4.7.1",
-"file_name": "typing_extensions-4.7.1-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "289ec55a84c9106800ca674dec1270997b70c15d24d35a365a5ec53289ba75c2",
-"package_type": "package",
-"imports": [
-"typing_extensions"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"uncertainties": {
-"name": "uncertainties",
-"version": "3.1.7",
-"file_name": "uncertainties-3.1.7-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "846880636b658e3799b5f67f23e09932ebb1ba2f6840c583b44d74b56e2d71cb",
-"package_type": "package",
-"imports": [
-"uncertainties"
-],
-"depends": [
-"future"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"uncertainties-tests": {
-"name": "uncertainties-tests",
-"version": "3.1.7",
-"file_name": "uncertainties-tests.tar",
-"install_dir": "site",
-"sha256": "323a1965d2cb7520089388262c6f06dfd0383d469c44b518fad8bcfe27a38437",
-"package_type": "package",
-"imports": [],
-"depends": [
-"uncertainties"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"unyt": {
-"name": "unyt",
-"version": "2.9.5",
-"file_name": "unyt-2.9.5-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "55d0ff2ca5f9b2e5a58cf50f152959896ae8e504ffd98d03c2a83a10c78abde6",
-"package_type": "package",
-"imports": [
-"unyt"
-],
-"depends": [
-"numpy",
-"sympy"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"unyt-tests": {
-"name": "unyt-tests",
-"version": "2.9.5",
-"file_name": "unyt-tests.tar",
-"install_dir": "site",
-"sha256": "1e133e3cc87a253ce13ad4cbb4ca1d3b69e42860fbe8183d62cfc73d9635d0fa",
-"package_type": "package",
-"imports": [],
-"depends": [
-"unyt"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"webencodings": {
-"name": "webencodings",
-"version": "0.5.1",
-"file_name": "webencodings-0.5.1-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "e97ee714eb3ad1e772b94f579e34aaf5ebac77e7c3133bf218e41626cd8aa85a",
-"package_type": "package",
-"imports": [
-"webencodings"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"wordcloud": {
-"name": "wordcloud",
-"version": "1.9.2",
-"file_name": "wordcloud-1.9.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "428237934bdfa0e17ec261af9635c3404d37dc8ea6a9781ceb0af87bb2245a54",
-"package_type": "package",
-"imports": [
-"wordcloud"
-],
-"depends": [
-"matplotlib"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"wrapt": {
-"name": "wrapt",
-"version": "1.15.0",
-"file_name": "wrapt-1.15.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "6649678d69c0bcae8b72eca4807a21da7a68e0d784bead3100192e66b65a3f35",
-"package_type": "package",
-"imports": [
-"wrapt"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"xarray": {
-"name": "xarray",
-"version": "2023.10.0",
-"file_name": "xarray-2023.10.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "a020ab9a99a8e57b1df5506843caff71da15d36897efde4ad25157f984cae669",
-"package_type": "package",
-"imports": [
-"xarray"
-],
-"depends": [
-"numpy",
-"packaging",
-"pandas"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"xarray-tests": {
-"name": "xarray-tests",
-"version": "2023.10.0",
-"file_name": "xarray-tests.tar",
-"install_dir": "site",
-"sha256": "12f1cf39b38976dc77f764bb2014d8d6b22edbe9e36fec8df7f734646d25cd67",
-"package_type": "package",
-"imports": [],
-"depends": [
-"xarray"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"xgboost": {
-"name": "xgboost",
-"version": "1.6.1",
-"file_name": "xgboost-1.6.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "19f97c29e16aecd53585c7b756f2196f03de5e59bf0ab7e1182beca1803f5107",
-"package_type": "package",
-"imports": [
-"xgboost"
-],
-"depends": [
-"numpy",
-"scipy",
-"setuptools"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"xlrd": {
-"name": "xlrd",
-"version": "2.0.1",
-"file_name": "xlrd-2.0.1-py2.py3-none-any.whl",
-"install_dir": "site",
-"sha256": "48c5e28e7787868537aa27b36e789a16cc42b03b444d6b6fae3f0dacd7f9ff06",
-"package_type": "package",
-"imports": [
-"xlrd"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-},
-"xyzservices": {
-"name": "xyzservices",
-"version": "2023.7.0",
-"file_name": "xyzservices-2023.7.0-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "0207b2cf289dca4e9f33a0417811181d8b14cb8e8ec84f628e406f0bc1c0811e",
-"package_type": "package",
-"imports": [
-"xyzservices"
-],
-"depends": [],
-"unvendored_tests": true,
-"shared_library": false
-},
-"xyzservices-tests": {
-"name": "xyzservices-tests",
-"version": "2023.7.0",
-"file_name": "xyzservices-tests.tar",
-"install_dir": "site",
-"sha256": "10f48fdcd14e14b95973f678a7598c7792d6aeb0c329c488e896d63a6cc62daa",
-"package_type": "package",
-"imports": [],
-"depends": [
-"xyzservices"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"yarl": {
-"name": "yarl",
-"version": "1.9.2",
-"file_name": "yarl-1.9.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "58876de551ad3d6cae32e8d6cea3fba67f5a367be6fd0309d1faf13c3d3b1762",
-"package_type": "package",
-"imports": [
-"yarl"
-],
-"depends": [
-"multidict",
-"idna"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"yt": {
-"name": "yt",
-"version": "4.1.4",
-"file_name": "yt-4.1.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "fc3ba859e8926711cf8a0f38f749daee8368904ec472a254be35e76a39687817",
-"package_type": "package",
-"imports": [
-"yt"
-],
-"depends": [
-"numpy",
-"matplotlib",
-"sympy",
-"setuptools",
-"packaging",
-"unyt",
-"cmyt",
-"colorspacious",
-"tqdm",
-"tomli",
-"tomli-w"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"zarr": {
-"name": "zarr",
-"version": "2.13.3",
-"file_name": "zarr-2.13.3-py3-none-any.whl",
-"install_dir": "site",
-"sha256": "bf24e07a5e0d19fa991592b49db3bf4006cf6ae1669e889ec75ed340334de366",
-"package_type": "package",
-"imports": [
-"zarr"
-],
-"depends": [
-"numpy",
-"asciitree",
-"numcodecs"
-],
-"unvendored_tests": true,
-"shared_library": false
-},
-"zarr-tests": {
-"name": "zarr-tests",
-"version": "2.13.3",
-"file_name": "zarr-tests.tar",
-"install_dir": "site",
-"sha256": "9e233583b14aa6c22b99638969666fdb6ff6499023fd94e049242dfaab91860d",
-"package_type": "package",
-"imports": [],
-"depends": [
-"zarr"
-],
-"unvendored_tests": false,
-"shared_library": false
-},
-"zengl": {
-"name": "zengl",
-"version": "1.16.0",
-"file_name": "zengl-1.16.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
-"install_dir": "site",
-"sha256": "dc3456c092af16d2ccc6fa3f8ad33dfedee13aaacbd6a0484a0268ba1085e279",
-"package_type": "package",
-"imports": [
-"zengl",
-"_zengl"
-],
-"depends": [],
-"unvendored_tests": false,
-"shared_library": false
-}
-}
+  "info":{
+    "arch":"wasm32",
+    "platform":"emscripten_3_1_45",
+    "python":"3.11.3",
+    "version":"0.25.0a2"
+ },
+ "packages":{
+    "aiohttp":{
+       "depends":[
+          "aiosignal",
+          "async-timeout",
+          "attrs",
+          "charset-normalizer",
+          "frozenlist",
+          "multidict",
+          "yarl"
+       ],
+       "file_name":"aiohttp-3.8.6-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "aiohttp"
+       ],
+       "install_dir":"site",
+       "name":"aiohttp",
+       "package_type":"package",
+       "sha256":"854fd5c0610779fda4b15af0c7ad72e2ebc196901cb460b8743f4ab6f58437cb",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.8.6"
+    },
+    "aiohttp-tests":{
+       "depends":[
+          "aiohttp"
+       ],
+       "file_name":"aiohttp-tests.tar",
+       "imports":[
 
+       ],
+       "install_dir":"site",
+       "name":"aiohttp-tests",
+       "package_type":"package",
+       "sha256":"1ab2c053eacc8b66f11aa47f6b86d3a138c05d4483d4e99cd0f603c190e176b0",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.8.6"
+    },
+    "aiosignal":{
+       "depends":[
+          "frozenlist"
+       ],
+       "file_name":"aiosignal-1.3.1-py3-none-any.whl",
+       "imports":[
+          "aiosignal"
+       ],
+       "install_dir":"site",
+       "name":"aiosignal",
+       "package_type":"package",
+       "sha256":"fe100169fa086824836f032f332e08e277a2e421c9a0a3efb9e82360e8fa6bd2",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.3.1"
+    },
+    "asciitree":{
+       "depends":[
+
+       ],
+       "file_name":"asciitree-0.3.3-py3-none-any.whl",
+       "imports":[
+          "asciitree"
+       ],
+       "install_dir":"site",
+       "name":"asciitree",
+       "package_type":"package",
+       "sha256":"fb26507dc81b3f232443cc9416fc80480359028595170bde91eea7696df0be06",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.3.3"
+    },
+    "astropy":{
+       "depends":[
+          "distutils",
+          "packaging",
+          "numpy",
+          "pyerfa",
+          "pyyaml"
+       ],
+       "file_name":"astropy-5.3.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "astropy"
+       ],
+       "install_dir":"site",
+       "name":"astropy",
+       "package_type":"package",
+       "sha256":"9834027485c4896ea9941576239d375a76c0a3e65c8ecb7b0a769c7a92725f25",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"5.3.2"
+    },
+    "async-timeout":{
+       "depends":[
+
+       ],
+       "file_name":"async_timeout-4.0.3-py3-none-any.whl",
+       "imports":[
+          "async_timeout"
+       ],
+       "install_dir":"site",
+       "name":"async-timeout",
+       "package_type":"package",
+       "sha256":"8d28f6341ed56de528a2e3692b4320392e99d096306341de7af1e851f0b944a1",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.0.3"
+    },
+    "atomicwrites":{
+       "depends":[
+
+       ],
+       "file_name":"atomicwrites-1.4.1-py2.py3-none-any.whl",
+       "imports":[
+          "atomicwrites"
+       ],
+       "install_dir":"site",
+       "name":"atomicwrites",
+       "package_type":"package",
+       "sha256":"ae2b4899ce5e50eea00675059d2f754de8163a2c1864f540b83321f3e3828cfc",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.4.1"
+    },
+    "attrs":{
+       "depends":[
+          "six"
+       ],
+       "file_name":"attrs-23.1.0-py3-none-any.whl",
+       "imports":[
+          "attr",
+          "attrs"
+       ],
+       "install_dir":"site",
+       "name":"attrs",
+       "package_type":"package",
+       "sha256":"7386045958ed3ac79bf113a9a91b7eb15b5bb050d3b9d185b150d97c9af42462",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"23.1.0"
+    },
+    "autograd":{
+       "depends":[
+          "numpy",
+          "future"
+       ],
+       "file_name":"autograd-1.6.2-py3-none-any.whl",
+       "imports":[
+          "autograd"
+       ],
+       "install_dir":"site",
+       "name":"autograd",
+       "package_type":"package",
+       "sha256":"8e16efbda828fc35e026b541c1b073ba97b47fc15cdaeea8f6066222a47b3f6e",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.6.2"
+    },
+    "autograd-tests":{
+       "depends":[
+          "autograd"
+       ],
+       "file_name":"autograd-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"autograd-tests",
+       "package_type":"package",
+       "sha256":"853cc16666c6a14b9f2b49e62a4386b4b2b4d8491b965662f6ff5ebead5c77d4",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.6.2"
+    },
+    "awkward-cpp":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"awkward_cpp-26-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "awkward_cpp"
+       ],
+       "install_dir":"site",
+       "name":"awkward-cpp",
+       "package_type":"package",
+       "sha256":"a51896d9e2f5481d39f359bd97f34d12dac560c5b44fac8e9f9e3d52ecb3845b",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"26"
+    },
+    "b2d":{
+       "depends":[
+          "numpy",
+          "pydantic",
+          "setuptools"
+       ],
+       "file_name":"b2d-0.7.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "b2d"
+       ],
+       "install_dir":"site",
+       "name":"b2d",
+       "package_type":"package",
+       "sha256":"2c3956f7a7c04b8d61002612d5cf9ad1d5f2b5a04630700eb475bc94a3652d74",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.7.4"
+    },
+    "bcrypt":{
+       "depends":[
+
+       ],
+       "file_name":"bcrypt-4.0.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "bcrypt"
+       ],
+       "install_dir":"site",
+       "name":"bcrypt",
+       "package_type":"package",
+       "sha256":"d55db581585f0557c2fe3622cb1bf09503fb31edabd23e2e8e2caa79557cfbba",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.0.1"
+    },
+    "beautifulsoup4":{
+       "depends":[
+          "soupsieve"
+       ],
+       "file_name":"beautifulsoup4-4.12.2-py3-none-any.whl",
+       "imports":[
+          "bs4"
+       ],
+       "install_dir":"site",
+       "name":"beautifulsoup4",
+       "package_type":"package",
+       "sha256":"4a253cd25842a3d175570bbeb1d250e7769862340bcc4efeda683aece76e6dfd",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"4.12.2"
+    },
+    "beautifulsoup4-tests":{
+       "depends":[
+          "beautifulsoup4"
+       ],
+       "file_name":"beautifulsoup4-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"beautifulsoup4-tests",
+       "package_type":"package",
+       "sha256":"93e4dd3528cd496f9aaf56c1f09775beabbda187715eb9c3c13baae8077bf43c",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.12.2"
+    },
+    "biopython":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"biopython-1.81-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "Bio",
+          "BioSQL"
+       ],
+       "install_dir":"site",
+       "name":"biopython",
+       "package_type":"package",
+       "sha256":"1879610535d53d90d38da128ae277e893da683568444caa11e360a9a1144774d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.81"
+    },
+    "bitarray":{
+       "depends":[
+
+       ],
+       "file_name":"bitarray-2.8.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "bitarray"
+       ],
+       "install_dir":"site",
+       "name":"bitarray",
+       "package_type":"package",
+       "sha256":"80689f5702a9a92061b9aa5a42e0d3e2966ebf68f6ba01d9ba35a18b92458b89",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"2.8.1"
+    },
+    "bitarray-tests":{
+       "depends":[
+          "bitarray"
+       ],
+       "file_name":"bitarray-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"bitarray-tests",
+       "package_type":"package",
+       "sha256":"400ece37cd1a68543a9432edc4db7b520798087a63d472204a489ba734b1f939",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.8.1"
+    },
+    "bitstring":{
+       "depends":[
+          "bitarray"
+       ],
+       "file_name":"bitstring-4.1.1-py3-none-any.whl",
+       "imports":[
+          "bitstring"
+       ],
+       "install_dir":"site",
+       "name":"bitstring",
+       "package_type":"package",
+       "sha256":"6d1da3b3504386eb9463e75077e0b219c77037ef3d69885d3369dc01bb45b1cf",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.1.1"
+    },
+    "bleach":{
+       "depends":[
+          "webencodings",
+          "packaging",
+          "six"
+       ],
+       "file_name":"bleach-6.0.0-py3-none-any.whl",
+       "imports":[
+          "bleach"
+       ],
+       "install_dir":"site",
+       "name":"bleach",
+       "package_type":"package",
+       "sha256":"b1f4be00e20c6997de2540b734d813a69a03577ed23d553a717e7e052a583e78",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"6.0.0"
+    },
+    "bokeh":{
+       "depends":[
+          "distutils",
+          "numpy",
+          "jinja2",
+          "pandas",
+          "pillow",
+          "python-dateutil",
+          "six",
+          "typing-extensions",
+          "pyyaml",
+          "xyzservices"
+       ],
+       "file_name":"bokeh-3.2.2-py3-none-any.whl",
+       "imports":[
+          "bokeh"
+       ],
+       "install_dir":"site",
+       "name":"bokeh",
+       "package_type":"package",
+       "sha256":"4ad97fab8b0ae9d2ca32d9cd3bc434776948bc0692cf5a4a85bc23a76d6d5da0",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.2.2"
+    },
+    "boost-histogram":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"boost_histogram-1.3.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "boost_histogram"
+       ],
+       "install_dir":"site",
+       "name":"boost-histogram",
+       "package_type":"package",
+       "sha256":"75d83324cbdde87376422f4c7a49a368c5db2cb4baa1c456d29eb423360a11c9",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.3.2"
+    },
+    "brotli":{
+       "depends":[
+
+       ],
+       "file_name":"Brotli-1.0.9-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "brotli"
+       ],
+       "install_dir":"site",
+       "name":"brotli",
+       "package_type":"package",
+       "sha256":"e663cfc5e7e832f74bbb79fa5e04cde619b7241c1d74e95b3d3c806a61630454",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.0.9"
+    },
+    "cachetools":{
+       "depends":[
+
+       ],
+       "file_name":"cachetools-5.3.1-py3-none-any.whl",
+       "imports":[
+          "cachetools"
+       ],
+       "install_dir":"site",
+       "name":"cachetools",
+       "package_type":"package",
+       "sha256":"13a4549dc4e04bbd93d5cdf25b907cbce7bd3f3053f6e4cee13bac50bf4fbbc3",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"5.3.1"
+    },
+    "cartopy":{
+       "depends":[
+          "shapely",
+          "pyshp",
+          "pyproj",
+          "geos",
+          "matplotlib",
+          "scipy"
+       ],
+       "file_name":"Cartopy-0.21.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "cartopy"
+       ],
+       "install_dir":"site",
+       "name":"Cartopy",
+       "package_type":"package",
+       "sha256":"e9077a93f1cd0bfd481de4dbc4cb8c6a2bb77e9b688dd4915ce53a4642d86fff",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.21.1"
+    },
+    "cartopy-tests":{
+       "depends":[
+          "cartopy"
+       ],
+       "file_name":"Cartopy-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"Cartopy-tests",
+       "package_type":"package",
+       "sha256":"bb5b757afe1534494064395865223048c361c9ff24c6bd933762240206d384b7",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.21.1"
+    },
+    "cbor-diag":{
+       "depends":[
+
+       ],
+       "file_name":"cbor_diag-1.0.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "cbor_diag"
+       ],
+       "install_dir":"site",
+       "name":"cbor-diag",
+       "package_type":"package",
+       "sha256":"85fe0547cc996e251311531b0c92e6667b51c179a0f229ddb94fa8e879980ee8",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.0.1"
+    },
+    "certifi":{
+       "depends":[
+
+       ],
+       "file_name":"certifi-2023.7.22-py3-none-any.whl",
+       "imports":[
+          "certifi"
+       ],
+       "install_dir":"site",
+       "name":"certifi",
+       "package_type":"package",
+       "sha256":"547743a4a25572b995e27837ff82d5434d86f8d808d9b98515b90d0eb5dbea8d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2023.7.22"
+    },
+    "cffi":{
+       "depends":[
+          "pycparser"
+       ],
+       "file_name":"cffi-1.15.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "cffi"
+       ],
+       "install_dir":"site",
+       "name":"cffi",
+       "package_type":"package",
+       "sha256":"86ea1797df618dc7505c9416742c3d3e19aa3dbec713206a3801c74527e8389f",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.15.1"
+    },
+    "cffi_example":{
+       "depends":[
+          "cffi"
+       ],
+       "file_name":"cffi_example-0.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "cffi_example"
+       ],
+       "install_dir":"site",
+       "name":"cffi_example",
+       "package_type":"package",
+       "sha256":"d89bc060961edf8c08a508f236fd0b3617b870f50e31dd593da5eebbda2d3a3d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.1"
+    },
+    "cftime":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"cftime-1.6.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "cftime"
+       ],
+       "install_dir":"site",
+       "name":"cftime",
+       "package_type":"package",
+       "sha256":"66b2110d74571bcd1f06b85bbc6c3c950701ac9a518c61238a2f5f22427337b8",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.6.2"
+    },
+    "charset-normalizer":{
+       "depends":[
+
+       ],
+       "file_name":"charset_normalizer-3.3.2-py3-none-any.whl",
+       "imports":[
+          "charset_normalizer"
+       ],
+       "install_dir":"site",
+       "name":"charset-normalizer",
+       "package_type":"package",
+       "sha256":"998f8057f9cb9594e41f81fb8775a48e79bc672dbdc8f97756d514e35da336fa",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.3.2"
+    },
+    "click":{
+       "depends":[
+
+       ],
+       "file_name":"click-8.1.7-py3-none-any.whl",
+       "imports":[
+          "click"
+       ],
+       "install_dir":"site",
+       "name":"click",
+       "package_type":"package",
+       "sha256":"1f9b6161df3a49d19552bfa4a049cf10d4aa7f73fd3a225a7fef346cddcfdccf",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"8.1.7"
+    },
+    "cligj":{
+       "depends":[
+          "click"
+       ],
+       "file_name":"cligj-0.7.2-py3-none-any.whl",
+       "imports":[
+          "cligj"
+       ],
+       "install_dir":"site",
+       "name":"cligj",
+       "package_type":"package",
+       "sha256":"b6a6b729fa7b944c77834bf9c9d5d26e7797116fcadeafb43896e5054db86cdd",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.7.2"
+    },
+    "cloudpickle":{
+       "depends":[
+
+       ],
+       "file_name":"cloudpickle-2.2.1-py3-none-any.whl",
+       "imports":[
+          "cloudpickle"
+       ],
+       "install_dir":"site",
+       "name":"cloudpickle",
+       "package_type":"package",
+       "sha256":"d0be6900d8ece0f40491c8901991e699ead0def879b70ee8e9847539e3c3d4da",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.2.1"
+    },
+    "cmyt":{
+       "depends":[
+          "colorspacious",
+          "matplotlib",
+          "more-itertools",
+          "numpy"
+       ],
+       "file_name":"cmyt-1.3.1-py3-none-any.whl",
+       "imports":[
+          "cmyt"
+       ],
+       "install_dir":"site",
+       "name":"cmyt",
+       "package_type":"package",
+       "sha256":"1ce56c6d66e1b6b9ecc66741359962f72c2c26bb74a27870a440fc9863635fb1",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.3.1"
+    },
+    "cmyt-tests":{
+       "depends":[
+          "cmyt"
+       ],
+       "file_name":"cmyt-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"cmyt-tests",
+       "package_type":"package",
+       "sha256":"62594757d81a8ce6169a6183cff25a9b8f6e02fb7e31a93e5487539c02d5c4d8",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.3.1"
+    },
+    "colorspacious":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"colorspacious-1.1.2-py2.py3-none-any.whl",
+       "imports":[
+          "colorspacious"
+       ],
+       "install_dir":"site",
+       "name":"colorspacious",
+       "package_type":"package",
+       "sha256":"4697909f872afd9256dc49c5f9dae5c7f192fea346885755eab261537e79bb7c",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.1.2"
+    },
+    "contourpy":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"contourpy-1.2.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "contourpy"
+       ],
+       "install_dir":"site",
+       "name":"contourpy",
+       "package_type":"package",
+       "sha256":"70175343b93267850c1d3e9ef598136d24f11f2e390952c10059fcb72d5faecd",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.2.0"
+    },
+    "coolprop":{
+       "depends":[
+          "numpy",
+          "matplotlib"
+       ],
+       "file_name":"CoolProp-6.4.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "CoolProp"
+       ],
+       "install_dir":"site",
+       "name":"coolprop",
+       "package_type":"package",
+       "sha256":"cbae3ae545a718aa4d7a0ddeb8ec9b83df31413778e6ee3b344a447041886d87",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"6.4.3"
+    },
+    "coolprop-tests":{
+       "depends":[
+          "coolprop"
+       ],
+       "file_name":"coolprop-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"coolprop-tests",
+       "package_type":"package",
+       "sha256":"5dabce200039a84809325d9f42707a2802e5b5d7c985a88dd74908c05516f7ba",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"6.4.3"
+    },
+    "coverage":{
+       "depends":[
+          "sqlite3"
+       ],
+       "file_name":"coverage-7.3.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "coverage"
+       ],
+       "install_dir":"site",
+       "name":"coverage",
+       "package_type":"package",
+       "sha256":"1af63e51eaf475abbd6444294f56c86741627f3889835bb06a52511e222adb7d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"7.3.0"
+    },
+    "cpp-exceptions-test":{
+       "depends":[
+
+       ],
+       "file_name":"cpp-exceptions-test-0.1.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"cpp-exceptions-test",
+       "package_type":"shared_library",
+       "sha256":"7a899580edb61ac8fbcafbe07fa9c3d39460a967f7cfbde7960dceba66e9db26",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"0.1"
+    },
+    "cramjam":{
+       "depends":[
+
+       ],
+       "file_name":"cramjam-2.6.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "cramjam"
+       ],
+       "install_dir":"site",
+       "name":"cramjam",
+       "package_type":"package",
+       "sha256":"2a6bfdff4bc9730c36c73d6b97db9883bdeb25f75fa1bbd230d4080d3e02a5a3",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.6.2"
+    },
+    "cryptography":{
+       "depends":[
+          "openssl",
+          "six",
+          "cffi"
+       ],
+       "file_name":"cryptography-39.0.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "cryptography"
+       ],
+       "install_dir":"site",
+       "name":"cryptography",
+       "package_type":"package",
+       "sha256":"392265913d50b703c2604670adbb1a4775109bb1586cb6401adb1d8cba41c6df",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"39.0.2"
+    },
+    "cssselect":{
+       "depends":[
+
+       ],
+       "file_name":"cssselect-1.2.0-py2.py3-none-any.whl",
+       "imports":[
+          "cssselect"
+       ],
+       "install_dir":"site",
+       "name":"cssselect",
+       "package_type":"package",
+       "sha256":"8dfde5cc1cc9049ca1c6e47014931aa6fb75478b795e98c6d1ef3a01ecfe39a4",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.2.0"
+    },
+    "cycler":{
+       "depends":[
+          "six"
+       ],
+       "file_name":"cycler-0.11.0-py3-none-any.whl",
+       "imports":[
+          "cycler"
+       ],
+       "install_dir":"site",
+       "name":"cycler",
+       "package_type":"package",
+       "sha256":"8320ab5ce7427075ef94e054621a57dad1781373d1066727efb2730c3e8c312f",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.11.0"
+    },
+    "cytoolz":{
+       "depends":[
+          "nose",
+          "toolz"
+       ],
+       "file_name":"cytoolz-0.12.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "cytoolz"
+       ],
+       "install_dir":"site",
+       "name":"cytoolz",
+       "package_type":"package",
+       "sha256":"f0bc5ac082027428c56876b5bef1ea32a488771f114ebc955e415fc7585dbc2d",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.12.2"
+    },
+    "cytoolz-tests":{
+       "depends":[
+          "cytoolz"
+       ],
+       "file_name":"cytoolz-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"cytoolz-tests",
+       "package_type":"package",
+       "sha256":"87a54911c5a24cb81acfb4de896cbd1b10c90c9ad04201813a35d6cce90d3c27",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.12.2"
+    },
+    "decorator":{
+       "depends":[
+
+       ],
+       "file_name":"decorator-5.1.1-py3-none-any.whl",
+       "imports":[
+          "decorator"
+       ],
+       "install_dir":"site",
+       "name":"decorator",
+       "package_type":"package",
+       "sha256":"6539a0f84acca15fbb4d46a8a280b78666680ebd2e269d8870aa5bdb5837b71c",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"5.1.1"
+    },
+    "demes":{
+       "depends":[
+          "attrs",
+          "ruamel.yaml"
+       ],
+       "file_name":"demes-0.2.3-py3-none-any.whl",
+       "imports":[
+          "demes"
+       ],
+       "install_dir":"site",
+       "name":"demes",
+       "package_type":"package",
+       "sha256":"9000f7ab28d391b3eb1b7ad8600891384a3efa4c9dc26e63f63f41045136f86a",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.2.3"
+    },
+    "deprecation":{
+       "depends":[
+          "packaging"
+       ],
+       "file_name":"deprecation-2.1.0-py2.py3-none-any.whl",
+       "imports":[
+          "deprecation"
+       ],
+       "install_dir":"site",
+       "name":"deprecation",
+       "package_type":"package",
+       "sha256":"f89fc415bb71b2209fd4e795c65986531c05d72d2e64d510f4f217088d474a3d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.1.0"
+    },
+    "distlib":{
+       "depends":[
+
+       ],
+       "file_name":"distlib-0.3.7-py2.py3-none-any.whl",
+       "imports":[
+          "distlib"
+       ],
+       "install_dir":"site",
+       "name":"distlib",
+       "package_type":"package",
+       "sha256":"a277cd34e1da10b8a3c0c05e05d5f24b9a377ce9bd678d4dbd542e0334c5e39e",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.3.7"
+    },
+    "distutils":{
+       "depends":[
+
+       ],
+       "file_name":"distutils-1.0.0.zip",
+       "imports":[
+          "distutils"
+       ],
+       "install_dir":"stdlib",
+       "name":"distutils",
+       "package_type":"cpython_module",
+       "sha256":"d8cadd70c2fc9e3440bfe80aedd8d1d1666f869c79a0ec7d72adcb5e2ee2f183",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.0.0"
+    },
+    "docutils":{
+       "depends":[
+
+       ],
+       "file_name":"docutils-0.20.1-py3-none-any.whl",
+       "imports":[
+          "docutils"
+       ],
+       "install_dir":"site",
+       "name":"docutils",
+       "package_type":"package",
+       "sha256":"0963c458fd65f26db587cb1bc85f33e57025be1301a5d7059e8725578d9af459",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.20.1"
+    },
+    "exceptiongroup":{
+       "depends":[
+
+       ],
+       "file_name":"exceptiongroup-1.1.3-py3-none-any.whl",
+       "imports":[
+          "exceptiongroup"
+       ],
+       "install_dir":"site",
+       "name":"exceptiongroup",
+       "package_type":"package",
+       "sha256":"1306e3d66968fca296b531345bbe78644ed1c871e036cf52d0be12e569b83567",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.1.3"
+    },
+    "fastparquet":{
+       "depends":[
+          "cramjam",
+          "numpy",
+          "pandas",
+          "fsspec",
+          "packaging"
+       ],
+       "file_name":"fastparquet-2023.7.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "fastparquet"
+       ],
+       "install_dir":"site",
+       "name":"fastparquet",
+       "package_type":"package",
+       "sha256":"d737adbcb097c9782f5945e8508f4f550a07cb3757eeef3670d4767ed9652aa2",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2023.7.0"
+    },
+    "fiona":{
+       "depends":[
+          "attrs",
+          "certifi",
+          "setuptools",
+          "six",
+          "click",
+          "cligj"
+       ],
+       "file_name":"Fiona-1.8.22-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "fiona"
+       ],
+       "install_dir":"site",
+       "name":"fiona",
+       "package_type":"package",
+       "sha256":"b92ebf209d6887cfdf14b45bb0e7a410c97b1609a303f69627c37b0578a094a5",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.8.22"
+    },
+    "fonttools":{
+       "depends":[
+
+       ],
+       "file_name":"fonttools-4.42.1-py3-none-any.whl",
+       "imports":[
+          "fontTools"
+       ],
+       "install_dir":"site",
+       "name":"fonttools",
+       "package_type":"package",
+       "sha256":"5fa9c93bc21b06855024e322ae4da232475e66b8b541f1b0ff5c33822da47058",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.42.1"
+    },
+    "fpcast-test":{
+       "depends":[
+
+       ],
+       "file_name":"fpcast_test-0.1.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "fpcast_test"
+       ],
+       "install_dir":"site",
+       "name":"fpcast-test",
+       "package_type":"package",
+       "sha256":"1120280151760d20ec382f785b1d2b27e7995584a506ea94e991cbf8fea6ef0a",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.1.1"
+    },
+    "freesasa":{
+       "depends":[
+
+       ],
+       "file_name":"freesasa-2.2.0.post3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "freesasa"
+       ],
+       "install_dir":"site",
+       "name":"freesasa",
+       "package_type":"package",
+       "sha256":"def9f1530244caae05483cc4a60ebf8623468feae2d0786c31a3a64d8b3779f7",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.2.0.post3"
+    },
+    "frozenlist":{
+       "depends":[
+
+       ],
+       "file_name":"frozenlist-1.4.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "frozenlist"
+       ],
+       "install_dir":"site",
+       "name":"frozenlist",
+       "package_type":"package",
+       "sha256":"fac922df373487bcb5aea344b0d23d828a308c0460a2c0ae3792a7e2f828f377",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.4.0"
+    },
+    "fsspec":{
+       "depends":[
+
+       ],
+       "file_name":"fsspec-2023.6.0-py3-none-any.whl",
+       "imports":[
+          "fsspec"
+       ],
+       "install_dir":"site",
+       "name":"fsspec",
+       "package_type":"package",
+       "sha256":"becc121a3e198f4ed197c8cf6d471a5288b0c598c365462c043a7bad34142cc6",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"2023.6.0"
+    },
+    "fsspec-tests":{
+       "depends":[
+          "fsspec"
+       ],
+       "file_name":"fsspec-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"fsspec-tests",
+       "package_type":"package",
+       "sha256":"f63c7387ae802b3e0d8ac81d13653c3be05c72e611ecca15b9fab27a4178a44d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2023.6.0"
+    },
+    "future":{
+       "depends":[
+
+       ],
+       "file_name":"future-0.18.3-py3-none-any.whl",
+       "imports":[
+          "future"
+       ],
+       "install_dir":"site",
+       "name":"future",
+       "package_type":"package",
+       "sha256":"60189fdda509e850c9911d8b995a04e6286399be6d773885b800b5c10cd4b9c8",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.18.3"
+    },
+    "future-tests":{
+       "depends":[
+          "future"
+       ],
+       "file_name":"future-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"future-tests",
+       "package_type":"package",
+       "sha256":"6886cd32e934cdf748295bd69b30b3046d79eb5625fe2518020d386fccef178f",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.18.3"
+    },
+    "galpy":{
+       "depends":[
+          "numpy",
+          "scipy",
+          "matplotlib",
+          "astropy",
+          "future",
+          "setuptools"
+       ],
+       "file_name":"galpy-1.9.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "galpy"
+       ],
+       "install_dir":"site",
+       "name":"galpy",
+       "package_type":"package",
+       "sha256":"f75c44d345e16cc990b4f8f3c3380ad520d16f637229ea347ef869bf00fa7873",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.9.0"
+    },
+    "gdal":{
+       "depends":[
+          "geos"
+       ],
+       "file_name":"gdal-3.5.1.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"gdal",
+       "package_type":"shared_library",
+       "sha256":"728042045a7d6dde8fbc1a32f7dbb878c98da5dfbd577dc6428ca6563e2f3434",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"3.5.1"
+    },
+    "gensim":{
+       "depends":[
+          "numpy",
+          "scipy",
+          "six",
+          "smart_open"
+       ],
+       "file_name":"gensim-4.3.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "gensim"
+       ],
+       "install_dir":"site",
+       "name":"gensim",
+       "package_type":"package",
+       "sha256":"48605460b39d3f26160950b6b7fe93ac276ff9c44d00433d1b12dff4a3d11934",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"4.3.1"
+    },
+    "gensim-tests":{
+       "depends":[
+          "gensim"
+       ],
+       "file_name":"gensim-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"gensim-tests",
+       "package_type":"package",
+       "sha256":"288b2c2e1523a5e0751d9dae5d1a4996a4597abe5ff85b40a70f116fadf446c3",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.3.1"
+    },
+    "geopandas":{
+       "depends":[
+          "shapely",
+          "fiona",
+          "pyproj",
+          "packaging",
+          "pandas"
+       ],
+       "file_name":"geopandas-0.13.2-py3-none-any.whl",
+       "imports":[
+          "geopandas"
+       ],
+       "install_dir":"site",
+       "name":"geopandas",
+       "package_type":"package",
+       "sha256":"e13121638d499df5ce5934b89a24ec1c43040753e8c22fc0a1c92faf2b742efa",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.13.2"
+    },
+    "geopandas-tests":{
+       "depends":[
+          "geopandas"
+       ],
+       "file_name":"geopandas-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"geopandas-tests",
+       "package_type":"package",
+       "sha256":"22877d50f258cb570ba9e86d3da4d692ccbd2d935a196331ac4f3432b81cde56",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.13.2"
+    },
+    "geos":{
+       "depends":[
+
+       ],
+       "file_name":"geos-3.10.3.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"geos",
+       "package_type":"shared_library",
+       "sha256":"55561ff53f8369347821fcd1cf30fceb01a12a988a6596dd674303c865068b2a",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"3.10.3"
+    },
+    "gmpy2":{
+       "depends":[
+
+       ],
+       "file_name":"gmpy2-2.1.5-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "gmpy2"
+       ],
+       "install_dir":"site",
+       "name":"gmpy2",
+       "package_type":"package",
+       "sha256":"043c9b5e4abe52518f502fa5a56fba0040aa5310ecea5dd6d9eca492c1c3ca8d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.1.5"
+    },
+    "gsw":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"gsw-3.6.16-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "gsw"
+       ],
+       "install_dir":"site",
+       "name":"gsw",
+       "package_type":"package",
+       "sha256":"2a90fd15837bf082a7910cab42e642decbe383940ebb526a7ce0773cccef1ec1",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.6.16"
+    },
+    "gsw-tests":{
+       "depends":[
+          "gsw"
+       ],
+       "file_name":"gsw-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"gsw-tests",
+       "package_type":"package",
+       "sha256":"2a7815563dd0fed00865656d3da39d890ef065f0c00c1144879582b88ec0da7d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.6.16"
+    },
+    "h5py":{
+       "depends":[
+          "numpy",
+          "pkgconfig"
+       ],
+       "file_name":"h5py-3.7.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "h5py"
+       ],
+       "install_dir":"site",
+       "name":"h5py",
+       "package_type":"package",
+       "sha256":"11acf34caf10a0924d7fd9a4dbb9fc97d0069eb2a22ca3f78ba42f2c7b9545e0",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.7.0"
+    },
+    "h5py-tests":{
+       "depends":[
+          "h5py"
+       ],
+       "file_name":"h5py-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"h5py-tests",
+       "package_type":"package",
+       "sha256":"d7f4b1f756ffd5537c81ed18893bb80873d3ccaaba3c8b7a95f07c01a6861e3e",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.7.0"
+    },
+    "hashlib":{
+       "depends":[
+          "openssl"
+       ],
+       "file_name":"hashlib-1.0.0.zip",
+       "imports":[
+          "_hashlib"
+       ],
+       "install_dir":"stdlib",
+       "name":"hashlib",
+       "package_type":"cpython_module",
+       "sha256":"72129cb53e800f1c78e190d0b0b4a006ef63df8027a8f37437df8f2516e5a82e",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.0.0"
+    },
+    "html5lib":{
+       "depends":[
+          "webencodings",
+          "six"
+       ],
+       "file_name":"html5lib-1.1-py2.py3-none-any.whl",
+       "imports":[
+          "html5lib"
+       ],
+       "install_dir":"site",
+       "name":"html5lib",
+       "package_type":"package",
+       "sha256":"05d32aa50ad724ce1be6e427719d5624c69686984a1f945f90f012f5aa6599dc",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.1"
+    },
+    "idna":{
+       "depends":[
+
+       ],
+       "file_name":"idna-3.4-py3-none-any.whl",
+       "imports":[
+          "idna"
+       ],
+       "install_dir":"site",
+       "name":"idna",
+       "package_type":"package",
+       "sha256":"7d910323658c592ef83305f5189251f33fd58288349b4a40445c2d159bbdaefe",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.4"
+    },
+    "igraph":{
+       "depends":[
+          "texttable"
+       ],
+       "file_name":"igraph-0.10.6-cp39-abi3-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "igraph"
+       ],
+       "install_dir":"site",
+       "name":"igraph",
+       "package_type":"package",
+       "sha256":"9691cf80615b7aabad9b43cb4663daef3eee1f90c19e6a3604eec9ab898a5f93",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.10.6"
+    },
+    "imageio":{
+       "depends":[
+          "numpy",
+          "pillow"
+       ],
+       "file_name":"imageio-2.31.1-py3-none-any.whl",
+       "imports":[
+          "imageio"
+       ],
+       "install_dir":"site",
+       "name":"imageio",
+       "package_type":"package",
+       "sha256":"e7fd110720324c826bd7f66035eed45d392d9105346321e437aabb2e46a85bf9",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.31.1"
+    },
+    "iniconfig":{
+       "depends":[
+
+       ],
+       "file_name":"iniconfig-2.0.0-py3-none-any.whl",
+       "imports":[
+          "iniconfig"
+       ],
+       "install_dir":"site",
+       "name":"iniconfig",
+       "package_type":"package",
+       "sha256":"65626eae0e1503ed3b8bcf850513a6727d5b94f179fc94d7f98eaf0ccf17e45d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.0.0"
+    },
+    "jedi":{
+       "depends":[
+          "parso"
+       ],
+       "file_name":"jedi-0.19.0-py2.py3-none-any.whl",
+       "imports":[
+          "jedi"
+       ],
+       "install_dir":"site",
+       "name":"jedi",
+       "package_type":"package",
+       "sha256":"4f4ae884153bed284a1842696592ae691650f011c3bed537dcefe35d5ba5e8f7",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.19.0"
+    },
+    "jedi-tests":{
+       "depends":[
+          "jedi"
+       ],
+       "file_name":"jedi-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"jedi-tests",
+       "package_type":"package",
+       "sha256":"1b4df53e6ebfd353a555719d808878816f8acc7777b45ccbe0c528872f090fb1",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.19.0"
+    },
+    "jinja2":{
+       "depends":[
+          "markupsafe"
+       ],
+       "file_name":"Jinja2-3.1.2-py3-none-any.whl",
+       "imports":[
+          "jinja2"
+       ],
+       "install_dir":"site",
+       "name":"Jinja2",
+       "package_type":"package",
+       "sha256":"f411eb0e076459c2abbe87cfcb63d5ef02ef4563957cbbdb8155ede3e4439b6a",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.1.2"
+    },
+    "joblib":{
+       "depends":[
+          "distutils"
+       ],
+       "file_name":"joblib-1.3.2-py3-none-any.whl",
+       "imports":[
+          "joblib"
+       ],
+       "install_dir":"site",
+       "name":"joblib",
+       "package_type":"package",
+       "sha256":"e4ffd9ea772c7941a4b8c3fdfb2c9e4bef6e4db38e5d8660b391b3a1fa43f2f0",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.3.2"
+    },
+    "joblib-tests":{
+       "depends":[
+          "joblib"
+       ],
+       "file_name":"joblib-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"joblib-tests",
+       "package_type":"package",
+       "sha256":"d033523cf68a2805393270419a2188d0f39d919326be8b9b2b2719da4e71d665",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.3.2"
+    },
+    "jsonschema":{
+       "depends":[
+          "attrs",
+          "pyrsistent"
+       ],
+       "file_name":"jsonschema-4.17.3-py3-none-any.whl",
+       "imports":[
+          "jsonschema"
+       ],
+       "install_dir":"site",
+       "name":"jsonschema",
+       "package_type":"package",
+       "sha256":"095d6d4265f6d3e39a0fd453f6c71e3899c4ad0bc5a137338adca397a79f8c3b",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"4.17.3"
+    },
+    "jsonschema-tests":{
+       "depends":[
+          "jsonschema"
+       ],
+       "file_name":"jsonschema-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"jsonschema-tests",
+       "package_type":"package",
+       "sha256":"def354e1d4a6728081459edb3f0a4ec295f669763aa654a15a1b853638cc3152",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.17.3"
+    },
+    "kiwisolver":{
+       "depends":[
+
+       ],
+       "file_name":"kiwisolver-1.4.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "kiwisolver"
+       ],
+       "install_dir":"site",
+       "name":"kiwisolver",
+       "package_type":"package",
+       "sha256":"c1d99133bcd0993c00002c87f457bf549659d8612b32cee960ff7e8b060675fd",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.4.4"
+    },
+    "lazy-object-proxy":{
+       "depends":[
+
+       ],
+       "file_name":"lazy_object_proxy-1.9.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "lazy_object_proxy"
+       ],
+       "install_dir":"site",
+       "name":"lazy-object-proxy",
+       "package_type":"package",
+       "sha256":"fa9e94277db2e5f12db3e0f2a656b78cbda2daaf7da298227df87d47bcfff53b",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.9.0"
+    },
+    "lazy_loader":{
+       "depends":[
+
+       ],
+       "file_name":"lazy_loader-0.3-py3-none-any.whl",
+       "imports":[
+          "lazy_loader"
+       ],
+       "install_dir":"site",
+       "name":"lazy_loader",
+       "package_type":"package",
+       "sha256":"eb7ac08870c2a6c7ba6bcaaa2b1fd3d9ddca6dbe6e4cab988c6eafe96166813b",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.3"
+    },
+    "lazy_loader-tests":{
+       "depends":[
+          "lazy_loader"
+       ],
+       "file_name":"lazy_loader-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"lazy_loader-tests",
+       "package_type":"package",
+       "sha256":"1abead0a2b9467ff27e2f052cf3906d9587ded6cb458e00d40dd378b7cecc57e",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.3"
+    },
+    "libhdf5":{
+       "depends":[
+
+       ],
+       "file_name":"libhdf5-1.12.1.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"libhdf5",
+       "package_type":"shared_library",
+       "sha256":"82758fc30e2293ba0c73e6bf4b56002fb7a5ac89aca3450a6adfd21b1068dc36",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.12.1"
+    },
+    "libheif":{
+       "depends":[
+
+       ],
+       "file_name":"libheif-1.12.0.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"libheif",
+       "package_type":"shared_library",
+       "sha256":"22ab7046a94d2c3e4e126fc36793f1b319d93ce346f15821f30e0b53f85a9014",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.12.0"
+    },
+    "libmagic":{
+       "depends":[
+
+       ],
+       "file_name":"libmagic-5.42.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"libmagic",
+       "package_type":"shared_library",
+       "sha256":"a129e9770a769487eb55eec74f4899b62577e651ce5bde3d12ae0d889d8d3625",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"5.42"
+    },
+    "libnetcdf":{
+       "depends":[
+
+       ],
+       "file_name":"libnetcdf-4.9.2.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"libnetcdf",
+       "package_type":"shared_library",
+       "sha256":"3c1d42331b6250428279ce4deb82ffbbba28d60a5ba4ef1b0ee9391964f61bfc",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"4.9.2"
+    },
+    "lightgbm":{
+       "depends":[
+          "numpy",
+          "scipy",
+          "scikit-learn"
+       ],
+       "file_name":"lightgbm-3.3.5-py3-none-any.whl",
+       "imports":[
+          "lightgbm"
+       ],
+       "install_dir":"site",
+       "name":"lightgbm",
+       "package_type":"package",
+       "sha256":"f8c26c69f44df137e2b5d12f89313c162d3eae68183116490fc0b1da9512b04b",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.3.5"
+    },
+    "logbook":{
+       "depends":[
+
+       ],
+       "file_name":"Logbook-1.6.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "logbook"
+       ],
+       "install_dir":"site",
+       "name":"logbook",
+       "package_type":"package",
+       "sha256":"8e9c68329edb82540bba96b19096cd7bc206fb69987d8aae3c04730f54ef6f31",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.6.0"
+    },
+    "lxml":{
+       "depends":[
+
+       ],
+       "file_name":"lxml-4.9.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "lxml"
+       ],
+       "install_dir":"site",
+       "name":"lxml",
+       "package_type":"package",
+       "sha256":"2bd90df5e4edc571bce34fc07b60134a280f7b11654cbccffebc57752be4b7f9",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.9.3"
+    },
+    "lzma":{
+       "depends":[
+
+       ],
+       "file_name":"lzma-1.0.0.zip",
+       "imports":[
+          "lzma",
+          "_lzma"
+       ],
+       "install_dir":"stdlib",
+       "name":"lzma",
+       "package_type":"cpython_module",
+       "sha256":"3f00fb8cb952334af632a235e3dac232bc50f90bbdffedb78fe2d0ab7e5c0878",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.0.0"
+    },
+    "markupsafe":{
+       "depends":[
+
+       ],
+       "file_name":"MarkupSafe-2.1.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "markupsafe"
+       ],
+       "install_dir":"site",
+       "name":"MarkupSafe",
+       "package_type":"package",
+       "sha256":"e1fe6162d64df9b7e675ba700189defc9808c2e9de3d5c626ff7f56ede0fb0d1",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.1.3"
+    },
+    "matplotlib":{
+       "depends":[
+          "cycler",
+          "fonttools",
+          "kiwisolver",
+          "numpy",
+          "packaging",
+          "pillow",
+          "pyparsing",
+          "python-dateutil",
+          "pytz",
+          "matplotlib-pyodide"
+       ],
+       "file_name":"matplotlib-3.5.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pylab",
+          "mpl_toolkits",
+          "matplotlib"
+       ],
+       "install_dir":"site",
+       "name":"matplotlib",
+       "package_type":"package",
+       "sha256":"5af190a621d5169b704050a578b5c0c6a3b73116973d7980afd2fd332fb180fa",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.5.2"
+    },
+    "matplotlib-pyodide":{
+       "depends":[
+
+       ],
+       "file_name":"matplotlib_pyodide-0.2.0-py3-none-any.whl",
+       "imports":[
+          "matplotlib_pyodide"
+       ],
+       "install_dir":"site",
+       "name":"matplotlib-pyodide",
+       "package_type":"package",
+       "sha256":"aa773ea485c1b2cd559eea047a9b36dec324b1bc2e6a7dfe315dffc60aa2b158",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.2.0"
+    },
+    "matplotlib-tests":{
+       "depends":[
+          "matplotlib"
+       ],
+       "file_name":"matplotlib-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"matplotlib-tests",
+       "package_type":"package",
+       "sha256":"6a1a99de43c7fc533afc92de6298e957659135832741ceff71f06ced8d20647a",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.5.2"
+    },
+    "micropip":{
+       "depends":[
+          "packaging"
+       ],
+       "file_name":"micropip-0.5.0-py3-none-any.whl",
+       "imports":[
+          "micropip"
+       ],
+       "install_dir":"site",
+       "name":"micropip",
+       "package_type":"package",
+       "sha256":"15af913a2cedfcd84693ef14e67cfdfcd6691a68241159e26821dae755e5ba08",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.5.0"
+    },
+    "mne":{
+       "depends":[
+          "distutils",
+          "numpy",
+          "scipy",
+          "setuptools",
+          "decorator"
+       ],
+       "file_name":"mne-1.5.0-py3-none-any.whl",
+       "imports":[
+          "mne"
+       ],
+       "install_dir":"site",
+       "name":"mne",
+       "package_type":"package",
+       "sha256":"74087844d2789b69d37bf9ba99b32b633c73e268afd43303ce712c009576bc1c",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.5.0"
+    },
+    "mne-tests":{
+       "depends":[
+          "mne"
+       ],
+       "file_name":"mne-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"mne-tests",
+       "package_type":"package",
+       "sha256":"8f388b4ee518be5b95740e83ecae6165d7d8f534d1d9cee813034afab8a35386",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.5.0"
+    },
+    "more-itertools":{
+       "depends":[
+
+       ],
+       "file_name":"more_itertools-10.1.0-py3-none-any.whl",
+       "imports":[
+          "more_itertools"
+       ],
+       "install_dir":"site",
+       "name":"more-itertools",
+       "package_type":"package",
+       "sha256":"8e49503c0c6db99bdccd214b9a3e6ba4d868b580fd1bcb78550ae6696394b4e5",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"10.1.0"
+    },
+    "mpmath":{
+       "depends":[
+
+       ],
+       "file_name":"mpmath-1.3.0-py3-none-any.whl",
+       "imports":[
+          "mpmath"
+       ],
+       "install_dir":"site",
+       "name":"mpmath",
+       "package_type":"package",
+       "sha256":"8f6857216e07e4d098734ea7cf73f71bc622237567e5ef533ac6c7132f8e22c6",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.3.0"
+    },
+    "mpmath-tests":{
+       "depends":[
+          "mpmath"
+       ],
+       "file_name":"mpmath-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"mpmath-tests",
+       "package_type":"package",
+       "sha256":"cc2bd04d7937afd764a16ced4b6188954aa3f6c9b4f8472768ba26e2823e6985",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.3.0"
+    },
+    "msgpack":{
+       "depends":[
+
+       ],
+       "file_name":"msgpack-1.0.5-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "msgpack"
+       ],
+       "install_dir":"site",
+       "name":"msgpack",
+       "package_type":"package",
+       "sha256":"6abae98f247aaaddf601cfa26bbc6819ddf3523fc4813c7a934c31d1297850e5",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.0.5"
+    },
+    "msgspec":{
+       "depends":[
+
+       ],
+       "file_name":"msgspec-0.18.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "msgspec"
+       ],
+       "install_dir":"site",
+       "name":"msgspec",
+       "package_type":"package",
+       "sha256":"6d1a30d674c7ca35790fc457177e127b5c93111bb51da49200ec5f2c3e669654",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.18.4"
+    },
+    "msprime":{
+       "depends":[
+          "numpy",
+          "newick",
+          "tskit",
+          "demes"
+       ],
+       "file_name":"msprime-1.2.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "msprime"
+       ],
+       "install_dir":"site",
+       "name":"msprime",
+       "package_type":"package",
+       "sha256":"92db0eb46e39d823d6f4b65ff6c31d9f7fcd655252b909d0ded8f9bc945fd6e2",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.2.0"
+    },
+    "multidict":{
+       "depends":[
+
+       ],
+       "file_name":"multidict-6.0.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "multidict"
+       ],
+       "install_dir":"site",
+       "name":"multidict",
+       "package_type":"package",
+       "sha256":"ecc8490799421361ad9b49e93124a47461f0d4d382d33f853923cc1ec24648cc",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"6.0.4"
+    },
+    "munch":{
+       "depends":[
+          "setuptools",
+          "six"
+       ],
+       "file_name":"munch-4.0.0-py2.py3-none-any.whl",
+       "imports":[
+          "munch"
+       ],
+       "install_dir":"site",
+       "name":"munch",
+       "package_type":"package",
+       "sha256":"2f20ba18013117b4b20d17c8f220dfecf89ea70c76a5477ac6dbdc2bdad17755",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.0.0"
+    },
+    "mypy":{
+       "depends":[
+
+       ],
+       "file_name":"mypy-1.5.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "mypyc",
+          "mypy"
+       ],
+       "install_dir":"site",
+       "name":"mypy",
+       "package_type":"package",
+       "sha256":"bc6bf0cbbe3ad6ea833ac8e3d05af32a84d8177696613b82b0978b97aa002824",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.5.1"
+    },
+    "mypy-tests":{
+       "depends":[
+          "mypy"
+       ],
+       "file_name":"mypy-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"mypy-tests",
+       "package_type":"package",
+       "sha256":"d01e6aa71cbc96c43e0aa7fa49731cbd666e06de25fcbb78147fc3ffe84855bb",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.5.1"
+    },
+    "netcdf4":{
+       "depends":[
+          "numpy",
+          "packaging",
+          "h5py",
+          "cftime",
+          "certifi"
+       ],
+       "file_name":"netCDF4-1.6.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "netCDF4"
+       ],
+       "install_dir":"site",
+       "name":"netcdf4",
+       "package_type":"package",
+       "sha256":"d54ccc1195cdc839aa8551bf99e94405dc927ea4592138092c51daa7e717229e",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.6.4"
+    },
+    "networkx":{
+       "depends":[
+          "decorator",
+          "setuptools",
+          "matplotlib",
+          "numpy"
+       ],
+       "file_name":"networkx-3.1-py3-none-any.whl",
+       "imports":[
+          "networkx"
+       ],
+       "install_dir":"site",
+       "name":"networkx",
+       "package_type":"package",
+       "sha256":"7f2a3842978c9c03da05f5e43c900d480fa7103b614500ae6ea5a8572e979de7",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.1"
+    },
+    "networkx-tests":{
+       "depends":[
+          "networkx"
+       ],
+       "file_name":"networkx-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"networkx-tests",
+       "package_type":"package",
+       "sha256":"4097fa179befd9c5664605a709eadf81ace3d78ebf4b02dc9960cd578795f5be",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.1"
+    },
+    "newick":{
+       "depends":[
+
+       ],
+       "file_name":"newick-1.9.0-py2.py3-none-any.whl",
+       "imports":[
+          "newick"
+       ],
+       "install_dir":"site",
+       "name":"newick",
+       "package_type":"package",
+       "sha256":"2f6f5999473c6437d3983562f403f0c041fbbe7f48de31bac4aa58a809247167",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.9.0"
+    },
+    "nlopt":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"nlopt-2.7.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "nlopt"
+       ],
+       "install_dir":"site",
+       "name":"nlopt",
+       "package_type":"package",
+       "sha256":"8972865b92aac5e066209f2cc8f897c98e9c751a457077d4fc735ce9b286073b",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.7.0"
+    },
+    "nltk":{
+       "depends":[
+          "regex",
+          "sqlite3"
+       ],
+       "file_name":"nltk-3.8.1-py3-none-any.whl",
+       "imports":[
+          "nltk"
+       ],
+       "install_dir":"site",
+       "name":"nltk",
+       "package_type":"package",
+       "sha256":"88fc2cdd22198de29f266a54d069d6cc8da60a28a2cce08d126d97e96d4fc45f",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.8.1"
+    },
+    "nltk-tests":{
+       "depends":[
+          "nltk"
+       ],
+       "file_name":"nltk-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"nltk-tests",
+       "package_type":"package",
+       "sha256":"edcec21cce941892161dd37ff0bc1e8ad20e5d4b831a9bbdfb325675739c4fbe",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.8.1"
+    },
+    "nose":{
+       "depends":[
+          "setuptools"
+       ],
+       "file_name":"nose-1.3.7-py3-none-any.whl",
+       "imports":[
+          "nose"
+       ],
+       "install_dir":"site",
+       "name":"nose",
+       "package_type":"package",
+       "sha256":"9dad6d8168192618108180d25f87fce54a21b2f6d81620de2e9dd3f71ce8bac6",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.3.7"
+    },
+    "numcodecs":{
+       "depends":[
+          "numpy",
+          "msgpack"
+       ],
+       "file_name":"numcodecs-0.11.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "numcodecs"
+       ],
+       "install_dir":"site",
+       "name":"numcodecs",
+       "package_type":"package",
+       "sha256":"8493bfb004c5cbb7d76e15a07800cfdb414bb0183f7b521a5b5144da17cd8cf2",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.11.0"
+    },
+    "numcodecs-tests":{
+       "depends":[
+          "numcodecs"
+       ],
+       "file_name":"numcodecs-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"numcodecs-tests",
+       "package_type":"package",
+       "sha256":"e4a3e1db742bdb5a094785c7fe64f2707282d8ab78a77263dd117d3cc9ab398c",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.11.0"
+    },
+    "numpy":{
+       "depends":[
+
+       ],
+       "file_name":"numpy-1.26.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "numpy"
+       ],
+       "install_dir":"site",
+       "name":"numpy",
+       "package_type":"package",
+       "sha256":"323c7770cb5a7b359e2228afc340cb1339447f00ec5fdc2ee48e3259099558aa",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.26.1"
+    },
+    "numpy-tests":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"numpy-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"numpy-tests",
+       "package_type":"package",
+       "sha256":"77cd2ec423d0e70915c0571347f2af08b985596cca7fb6290bc64178f798d436",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.26.1"
+    },
+    "openblas":{
+       "depends":[
+
+       ],
+       "file_name":"openblas-0.3.23.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"openblas",
+       "package_type":"shared_library",
+       "sha256":"5bf713b60fe7e1059fde281a41453a7371a8af5ca12064c27077ee3265d52de2",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"0.3.23"
+    },
+    "opencv-python":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"opencv_python-4.8.0.76-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "cv2"
+       ],
+       "install_dir":"site",
+       "name":"opencv-python",
+       "package_type":"package",
+       "sha256":"96cdd4d78f534082f7b3941a731c31b0aacf1965748a45f0d64963894e1d1c13",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.8.0.76"
+    },
+    "openssl":{
+       "depends":[
+
+       ],
+       "file_name":"openssl-1.1.1n.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"openssl",
+       "package_type":"shared_library",
+       "sha256":"c316da64fe4bad222a034a79425d2a63b8f64fe121acdecb684d74df06202180",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.1.1n"
+    },
+    "optlang":{
+       "depends":[
+          "sympy",
+          "six",
+          "swiglpk"
+       ],
+       "file_name":"optlang-1.7.0-py2.py3-none-any.whl",
+       "imports":[
+          "optlang"
+       ],
+       "install_dir":"site",
+       "name":"optlang",
+       "package_type":"package",
+       "sha256":"23c274ef947379bba89cfa45970a629d0bc58cf82bf9a63e732ed8e3720f0077",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.7.0"
+    },
+    "optlang-tests":{
+       "depends":[
+          "optlang"
+       ],
+       "file_name":"optlang-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"optlang-tests",
+       "package_type":"package",
+       "sha256":"d55a2a4b12cd2b808624f20a1a41ee830f0e1ab94d2d51c83b7967a68154778c",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.7.0"
+    },
+    "orjson":{
+       "depends":[
+
+       ],
+       "file_name":"orjson-3.9.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "orjson"
+       ],
+       "install_dir":"site",
+       "name":"orjson",
+       "package_type":"package",
+       "sha256":"a588f5a349ffe55785047912028e43327270d37f2672188e0d8c00fd4ba3cf1d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.9.2"
+    },
+    "packaging":{
+       "depends":[
+
+       ],
+       "file_name":"packaging-23.1-py3-none-any.whl",
+       "imports":[
+          "packaging"
+       ],
+       "install_dir":"site",
+       "name":"packaging",
+       "package_type":"package",
+       "sha256":"1c52cd3001c09e0a9798d98a5669a39148b7f6732d54e01d10fadc8598cc2cce",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"23.1"
+    },
+    "pandas":{
+       "depends":[
+          "numpy",
+          "python-dateutil",
+          "pytz"
+       ],
+       "file_name":"pandas-1.5.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pandas"
+       ],
+       "install_dir":"site",
+       "name":"pandas",
+       "package_type":"package",
+       "sha256":"6c7f383300d8c0224aff5ddb5e59a1662e00aee03e4f8ef9655032c0da7dd08b",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.5.3"
+    },
+    "pandas-tests":{
+       "depends":[
+          "pandas"
+       ],
+       "file_name":"pandas-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"pandas-tests",
+       "package_type":"package",
+       "sha256":"5f7fb8b0e9ca8856c093f39570014f3e1ae532f8d68de3835d9485beace7f8a7",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.5.3"
+    },
+    "parso":{
+       "depends":[
+
+       ],
+       "file_name":"parso-0.8.3-py2.py3-none-any.whl",
+       "imports":[
+          "parso"
+       ],
+       "install_dir":"site",
+       "name":"parso",
+       "package_type":"package",
+       "sha256":"534028219f51f0ae31543db279b1d4ebfec93fda1d413f6f33a8dad59369f475",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.8.3"
+    },
+    "patsy":{
+       "depends":[
+          "numpy",
+          "six"
+       ],
+       "file_name":"patsy-0.5.3-py2.py3-none-any.whl",
+       "imports":[
+          "patsy"
+       ],
+       "install_dir":"site",
+       "name":"patsy",
+       "package_type":"package",
+       "sha256":"68fce84ced6fdabc211e0bb15a65a8bc86fb1168e7d66dfcd7ade7069c15185c",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.5.3"
+    },
+    "patsy-tests":{
+       "depends":[
+          "patsy"
+       ],
+       "file_name":"patsy-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"patsy-tests",
+       "package_type":"package",
+       "sha256":"54a38db7a1db7e64c496ae893e5bc19a43db5b838e4e0fc8814ab402e3609ead",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.5.3"
+    },
+    "peewee":{
+       "depends":[
+          "sqlite3",
+          "cffi"
+       ],
+       "file_name":"peewee-3.16.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "peewee"
+       ],
+       "install_dir":"site",
+       "name":"peewee",
+       "package_type":"package",
+       "sha256":"eff9c450ddd23395f490437d253a880d51bda78dadcc866eb9536821eef243c4",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.16.3"
+    },
+    "peewee-tests":{
+       "depends":[
+          "peewee"
+       ],
+       "file_name":"peewee-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"peewee-tests",
+       "package_type":"package",
+       "sha256":"919abb68dcddccab72ffddcb4cbb23e25058b0db78c2adbeca25ef86db9e0f4d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.16.3"
+    },
+    "pillow":{
+       "depends":[
+
+       ],
+       "file_name":"Pillow-10.0.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "PIL"
+       ],
+       "install_dir":"site",
+       "name":"Pillow",
+       "package_type":"package",
+       "sha256":"ec41e3c984df46dc6ea5153a2e62dbc9a1b67036a288ae6ddd2cb931cca7df39",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"10.0.0"
+    },
+    "pillow_heif":{
+       "depends":[
+          "cffi",
+          "pillow",
+          "libheif"
+       ],
+       "file_name":"pillow_heif-0.8.0-cp36-abi3-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pillow_heif"
+       ],
+       "install_dir":"site",
+       "name":"pillow_heif",
+       "package_type":"package",
+       "sha256":"e7790b122e60aba187cfd1d3ec910e0235063b95b7bfbde284ac2d206a58c8e7",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.8.0"
+    },
+    "pkgconfig":{
+       "depends":[
+
+       ],
+       "file_name":"pkgconfig-1.5.5-py3-none-any.whl",
+       "imports":[
+          "pkgconfig"
+       ],
+       "install_dir":"site",
+       "name":"pkgconfig",
+       "package_type":"package",
+       "sha256":"eb68dbf89ce1b4ad9f1778d3f415ea7c3fdde38689a10838e8e1e4aaaf7b7401",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.5.5"
+    },
+    "pluggy":{
+       "depends":[
+
+       ],
+       "file_name":"pluggy-1.2.0-py3-none-any.whl",
+       "imports":[
+          "pluggy"
+       ],
+       "install_dir":"site",
+       "name":"pluggy",
+       "package_type":"package",
+       "sha256":"2a535450361eced5956838339504dd82baa6894a51c216c88dff4bbe8be672a0",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.2.0"
+    },
+    "protobuf":{
+       "depends":[
+
+       ],
+       "file_name":"protobuf-4.23.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "google"
+       ],
+       "install_dir":"site",
+       "name":"protobuf",
+       "package_type":"package",
+       "sha256":"26566ac0b42e4edd078ff866228703b8d9ddf1cea6a3e9559c232f81d9e1dd91",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.23.1"
+    },
+    "py":{
+       "depends":[
+
+       ],
+       "file_name":"py-1.11.0-py2.py3-none-any.whl",
+       "imports":[
+          "py"
+       ],
+       "install_dir":"site",
+       "name":"py",
+       "package_type":"package",
+       "sha256":"20b4c33073cf90b767d93335556e34895171dd16f65124c8a5219400b7128436",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.11.0"
+    },
+    "pyclipper":{
+       "depends":[
+
+       ],
+       "file_name":"pyclipper-1.3.0.post4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pyclipper"
+       ],
+       "install_dir":"site",
+       "name":"pyclipper",
+       "package_type":"package",
+       "sha256":"8461612adcdc611d1bd7b6cfc86d4a5e40ef11bfcd9403e857ec4740d50d6496",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.3.0.post4"
+    },
+    "pycparser":{
+       "depends":[
+
+       ],
+       "file_name":"pycparser-2.21-py2.py3-none-any.whl",
+       "imports":[
+          "pycparser"
+       ],
+       "install_dir":"site",
+       "name":"pycparser",
+       "package_type":"package",
+       "sha256":"1bf16284f2b19a6fa91d09f028a6e4a76e42f94ee2940456a1cb8fed8a1d7314",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.21"
+    },
+    "pycryptodome":{
+       "depends":[
+
+       ],
+       "file_name":"pycryptodome-3.18.0-cp35-abi3-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "Crypto"
+       ],
+       "install_dir":"site",
+       "name":"pycryptodome",
+       "package_type":"package",
+       "sha256":"5ae3073b2f6cee67e4f8d431e175abeb90235feeea1a316750229c652d103083",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.18.0"
+    },
+    "pycryptodome-tests":{
+       "depends":[
+          "pycryptodome"
+       ],
+       "file_name":"pycryptodome-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"pycryptodome-tests",
+       "package_type":"package",
+       "sha256":"7f78aed02fd5103a9cfc001d46f659351f3e1c4a5fedee9cace5d334825f0bd2",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.18.0"
+    },
+    "pydantic":{
+       "depends":[
+          "typing-extensions"
+       ],
+       "file_name":"pydantic-1.10.7-py3-none-any.whl",
+       "imports":[
+          "pydantic"
+       ],
+       "install_dir":"site",
+       "name":"pydantic",
+       "package_type":"package",
+       "sha256":"e8ec7048d6a09d348f153ed8bfe580a89756e930dab5310d7311ee4925172abc",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.10.7"
+    },
+    "pydecimal":{
+       "depends":[
+
+       ],
+       "file_name":"pydecimal-1.0.0.zip",
+       "imports":[
+          "_pydecimal"
+       ],
+       "install_dir":"stdlib",
+       "name":"pydecimal",
+       "package_type":"cpython_module",
+       "sha256":"9906dc6bce0a1f8fce2fb3c6b87a7a91ca6e48a7e07f4183ded4bcf5b0b446b3",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.0.0"
+    },
+    "pydoc_data":{
+       "depends":[
+
+       ],
+       "file_name":"pydoc_data-1.0.0.zip",
+       "imports":[
+          "pydoc_data"
+       ],
+       "install_dir":"stdlib",
+       "name":"pydoc_data",
+       "package_type":"cpython_module",
+       "sha256":"dba6e2ba40cf34f09e4619e04f06d9e299234c22505efa95fb4ee92a924843f0",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.0.0"
+    },
+    "pyerfa":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"pyerfa-2.0.0.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "erfa"
+       ],
+       "install_dir":"site",
+       "name":"pyerfa",
+       "package_type":"package",
+       "sha256":"108281ab32585d15f113d18df016786d7e97311a0a15e12a00f886a954ab2bb2",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"2.0.0.3"
+    },
+    "pyerfa-tests":{
+       "depends":[
+          "pyerfa"
+       ],
+       "file_name":"pyerfa-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"pyerfa-tests",
+       "package_type":"package",
+       "sha256":"13a1fdd3e573a8b7f187eed54f453f767bf4e5288251efa451e234c363686f6a",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.0.0.3"
+    },
+    "pygments":{
+       "depends":[
+
+       ],
+       "file_name":"Pygments-2.16.1-py3-none-any.whl",
+       "imports":[
+          "pygments"
+       ],
+       "install_dir":"site",
+       "name":"Pygments",
+       "package_type":"package",
+       "sha256":"fd639d354f131822297f32468c1d0b4d4631373b893157c791723c2859714bfb",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.16.1"
+    },
+    "pyheif":{
+       "depends":[
+          "cffi"
+       ],
+       "file_name":"pyheif-0.7.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pyheif"
+       ],
+       "install_dir":"site",
+       "name":"pyheif",
+       "package_type":"package",
+       "sha256":"155c3e1b522a43630c805b8758b991e78dcf488450f84d77e99f7a55c7aaf9fa",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.7.1"
+    },
+    "pyinstrument":{
+       "depends":[
+
+       ],
+       "file_name":"pyinstrument-4.4.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pyinstrument"
+       ],
+       "install_dir":"site",
+       "name":"pyinstrument",
+       "package_type":"package",
+       "sha256":"378ff23a15f53f0cb0d089022bbad0fe49fe7ea971fa09ed57a535477ab76e62",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.4.0"
+    },
+    "pynacl":{
+       "depends":[
+          "cffi"
+       ],
+       "file_name":"PyNaCl-1.5.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "nacl"
+       ],
+       "install_dir":"site",
+       "name":"pynacl",
+       "package_type":"package",
+       "sha256":"5472da2430053af787c2b7b80219e6ed66b29f2d49483506feee91ebde6d0f89",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.5.0"
+    },
+    "pyodide-http":{
+       "depends":[
+
+       ],
+       "file_name":"pyodide_http-0.2.1-py3-none-any.whl",
+       "imports":[
+          "pyodide_http"
+       ],
+       "install_dir":"site",
+       "name":"pyodide-http",
+       "package_type":"package",
+       "sha256":"658afcd5b9b988bc088680a9c57d1bb6662b6fb60b40f469aaac0029d0189bc2",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.2.1"
+    },
+    "pyparsing":{
+       "depends":[
+
+       ],
+       "file_name":"pyparsing-3.1.1-py3-none-any.whl",
+       "imports":[
+          "pyparsing"
+       ],
+       "install_dir":"site",
+       "name":"pyparsing",
+       "package_type":"package",
+       "sha256":"66f134552b8a660c0c6d4123189de503f4b8931a1226c25fb5eee4044ce0ef7e",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.1.1"
+    },
+    "pyproj":{
+       "depends":[
+          "certifi",
+          "sqlite3"
+       ],
+       "file_name":"pyproj-3.4.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pyproj"
+       ],
+       "install_dir":"site",
+       "name":"pyproj",
+       "package_type":"package",
+       "sha256":"703953cd99875a3a52d38acc7f92501cd18293d9cf01905004a881af621f4a96",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.4.1"
+    },
+    "pyrsistent":{
+       "depends":[
+
+       ],
+       "file_name":"pyrsistent-0.19.3-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "_pyrsistent_version",
+          "pyrsistent"
+       ],
+       "install_dir":"site",
+       "name":"pyrsistent",
+       "package_type":"package",
+       "sha256":"04555daa7915bed393f9c32704ae6638b507101e0952135004a5f663f7f9ca69",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.19.3"
+    },
+    "pysam":{
+       "depends":[
+
+       ],
+       "file_name":"pysam-0.22.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pysam"
+       ],
+       "install_dir":"site",
+       "name":"pysam",
+       "package_type":"package",
+       "sha256":"0a57b514bb77df7edd688914cad4ecae932e3304a9c78f80df80fa153389857f",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.22.0"
+    },
+    "pyshp":{
+       "depends":[
+
+       ],
+       "file_name":"pyshp-2.3.1-py2.py3-none-any.whl",
+       "imports":[
+          "shapefile"
+       ],
+       "install_dir":"site",
+       "name":"pyshp",
+       "package_type":"package",
+       "sha256":"28ce478caf57b2863a17e8ca1dd67903babb3b2ef202ce15c32c2cc64253ea96",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.3.1"
+    },
+    "pytest":{
+       "depends":[
+          "atomicwrites",
+          "attrs",
+          "more-itertools",
+          "pluggy",
+          "py",
+          "setuptools",
+          "six",
+          "iniconfig",
+          "exceptiongroup"
+       ],
+       "file_name":"pytest-7.2.2-py3-none-any.whl",
+       "imports":[
+          "_pytest",
+          "pytest"
+       ],
+       "install_dir":"site",
+       "name":"pytest",
+       "package_type":"package",
+       "sha256":"10aa700d1a351061b759ea1c631e9efe685e15bdcc884331df89769d1053672b",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"7.2.2"
+    },
+    "pytest-benchmark":{
+       "depends":[
+
+       ],
+       "file_name":"pytest_benchmark-4.0.0-py3-none-any.whl",
+       "imports":[
+          "pytest_benchmark"
+       ],
+       "install_dir":"site",
+       "name":"pytest-benchmark",
+       "package_type":"package",
+       "sha256":"3b61f286d0675971a67debb48f4f3d5b8cc6757bf207b9ea639071af36b74ceb",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.0.0"
+    },
+    "python-dateutil":{
+       "depends":[
+          "six"
+       ],
+       "file_name":"python_dateutil-2.8.2-py2.py3-none-any.whl",
+       "imports":[
+          "dateutil"
+       ],
+       "install_dir":"site",
+       "name":"python-dateutil",
+       "package_type":"package",
+       "sha256":"0bf56aed7b371f3b5dd0e42f443cdc409a27f357bb6da344d17977e3014c3860",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.8.2"
+    },
+    "python-magic":{
+       "depends":[
+          "libmagic"
+       ],
+       "file_name":"python_magic-0.4.27-py2.py3-none-any.whl",
+       "imports":[
+          "magic"
+       ],
+       "install_dir":"site",
+       "name":"python-magic",
+       "package_type":"package",
+       "sha256":"e2dc33aad018a28df14a9385613b00da4eab8f2b1a022ac5b850cb28e1648e69",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.4.27"
+    },
+    "python-sat":{
+       "depends":[
+          "six"
+       ],
+       "file_name":"python_sat-0.1.7.dev26-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pysat"
+       ],
+       "install_dir":"site",
+       "name":"python-sat",
+       "package_type":"package",
+       "sha256":"5c033d78c5bdf488dd22a93e563d9662cebd7a067f51b6c2f1c43b8f580e312e",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.1.7.dev26"
+    },
+    "python_solvespace":{
+       "depends":[
+
+       ],
+       "file_name":"python_solvespace-3.0.8-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "python_solvespace"
+       ],
+       "install_dir":"site",
+       "name":"python_solvespace",
+       "package_type":"package",
+       "sha256":"6c28bd075b97ff40caf3960ce596a5a0ffc7af2d6713cd1bfd49a264acf2d40b",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.0.8"
+    },
+    "pytz":{
+       "depends":[
+
+       ],
+       "file_name":"pytz-2023.3-py2.py3-none-any.whl",
+       "imports":[
+          "pytz"
+       ],
+       "install_dir":"site",
+       "name":"pytz",
+       "package_type":"package",
+       "sha256":"ff1c4fc865d6842908b2e1f46021cc6bc935f8c4484cab6f0fdaf8e9977a25de",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2023.3"
+    },
+    "pywavelets":{
+       "depends":[
+          "distutils",
+          "numpy",
+          "matplotlib",
+          "scipy"
+       ],
+       "file_name":"PyWavelets-1.4.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pywt"
+       ],
+       "install_dir":"site",
+       "name":"pywavelets",
+       "package_type":"package",
+       "sha256":"a7b2d449f15a5d6c4c9bbe2ed9a441902ed5165ead1e67236d9fdc2a409c384d",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.4.1"
+    },
+    "pywavelets-tests":{
+       "depends":[
+          "pywavelets"
+       ],
+       "file_name":"pywavelets-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"pywavelets-tests",
+       "package_type":"package",
+       "sha256":"6770d4953324a538e9bc320fdd1013bc045d4110dda2fffbdbd7427f38adf89f",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.4.1"
+    },
+    "pyxel":{
+       "depends":[
+
+       ],
+       "file_name":"pyxel-1.9.10-cp37-abi3-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "pyxel"
+       ],
+       "install_dir":"site",
+       "name":"pyxel",
+       "package_type":"package",
+       "sha256":"67c2849eb3bb587546a608aebde03817cadd936d8b3696b00693e3967e9a07fd",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.9.10"
+    },
+    "pyyaml":{
+       "depends":[
+
+       ],
+       "file_name":"PyYAML-6.0.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "_yaml",
+          "yaml"
+       ],
+       "install_dir":"site",
+       "name":"pyyaml",
+       "package_type":"package",
+       "sha256":"8157ac93d290081a2544277360443a76fc6fb6571f6946537a093a8325e41f63",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"6.0.1"
+    },
+    "rebound":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"rebound-3.24.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "rebound"
+       ],
+       "install_dir":"site",
+       "name":"rebound",
+       "package_type":"package",
+       "sha256":"e5450c5094e077ed4eb1e9f0623b79d7d7ced01e0ebe0927225e9b4051f4cb18",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.24.2"
+    },
+    "reboundx":{
+       "depends":[
+          "rebound",
+          "numpy"
+       ],
+       "file_name":"reboundx-3.10.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "reboundx"
+       ],
+       "install_dir":"site",
+       "name":"reboundx",
+       "package_type":"package",
+       "sha256":"751f2eb356d3a7a5c34452abe24fceeca6306a9f6a0ac178aca4a9103dadb976",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.10.1"
+    },
+    "regex":{
+       "depends":[
+
+       ],
+       "file_name":"regex-2023.8.8-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "regex"
+       ],
+       "install_dir":"site",
+       "name":"regex",
+       "package_type":"package",
+       "sha256":"41c11f8c57c3f9725898ad61d5b05f06d39df14f6b512eeb485a92168823b836",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"2023.8.8"
+    },
+    "regex-tests":{
+       "depends":[
+          "regex"
+       ],
+       "file_name":"regex-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"regex-tests",
+       "package_type":"package",
+       "sha256":"06a4e804dc1b46024db4cb931de5208d6e2d1ccd8aa5e0cdc8516e947313feaf",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2023.8.8"
+    },
+    "retrying":{
+       "depends":[
+          "six"
+       ],
+       "file_name":"retrying-1.3.4-py3-none-any.whl",
+       "imports":[
+          "retrying"
+       ],
+       "install_dir":"site",
+       "name":"retrying",
+       "package_type":"package",
+       "sha256":"fa9c2a971c150c071ff8b52f2c2ce63a7dd741ca5ca875102f1030a6cdfad544",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.3.4"
+    },
+    "river":{
+       "depends":[
+          "numpy",
+          "pandas",
+          "pytest",
+          "scipy"
+       ],
+       "file_name":"river-0.19.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "river"
+       ],
+       "install_dir":"site",
+       "name":"river",
+       "package_type":"package",
+       "sha256":"feafa8ecbf1208d1748de289a10ebb452d12d324c8a60548fe20131ce5cad32d",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.19.0"
+    },
+    "river-tests":{
+       "depends":[
+          "river"
+       ],
+       "file_name":"river-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"river-tests",
+       "package_type":"package",
+       "sha256":"9f8a1c73c12a24758d5cf274e4a0974df25b4dc2c7868ccaba3867a8589ee640",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.19.0"
+    },
+    "robotraconteur":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"RobotRaconteur-0.15.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "RobotRaconteur"
+       ],
+       "install_dir":"site",
+       "name":"RobotRaconteur",
+       "package_type":"package",
+       "sha256":"bbc3dc43bccb1b5c6ab32c51e83c1d451894f03e80c752ca9bd5c4c36e09e622",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.15.1"
+    },
+    "ruamel.yaml":{
+       "depends":[
+
+       ],
+       "file_name":"ruamel.yaml-0.17.32-py3-none-any.whl",
+       "imports":[
+          "ruamel"
+       ],
+       "install_dir":"site",
+       "name":"ruamel.yaml",
+       "package_type":"package",
+       "sha256":"b19df2abe4bc0872417e21bc0dc44b9c56da991440b8f737bc502bf9408fa8f7",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.17.32"
+    },
+    "rust-panic-test":{
+       "depends":[
+
+       ],
+       "file_name":"rust_panic_test-1.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "rust-panic-test"
+       ],
+       "install_dir":"site",
+       "name":"rust-panic-test",
+       "package_type":"package",
+       "sha256":"733325f5db013c40c38ac91cc93286b014f3d142bedf430991f34f6fce9563d2",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.0"
+    },
+    "scikit-image":{
+       "depends":[
+          "packaging",
+          "numpy",
+          "scipy",
+          "networkx",
+          "pillow",
+          "imageio",
+          "pywavelets",
+          "lazy_loader"
+       ],
+       "file_name":"scikit_image-0.21.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "skimage"
+       ],
+       "install_dir":"site",
+       "name":"scikit-image",
+       "package_type":"package",
+       "sha256":"c1ce4d916365517a8cd2a22e551b0f390b310b71719ac5ee0afa7bd5c1e0b401",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.21.0"
+    },
+    "scikit-image-tests":{
+       "depends":[
+          "scikit-image"
+       ],
+       "file_name":"scikit-image-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"scikit-image-tests",
+       "package_type":"package",
+       "sha256":"e7533c586c5db492fd68aeeb82af92a2c16b532debe5cb35bf7879132d74b5a2",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.21.0"
+    },
+    "scikit-learn":{
+       "depends":[
+          "scipy",
+          "joblib",
+          "threadpoolctl"
+       ],
+       "file_name":"scikit_learn-1.3.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "sklearn"
+       ],
+       "install_dir":"site",
+       "name":"scikit-learn",
+       "package_type":"package",
+       "sha256":"e63d82e4e04234f6eeb49f0904654acd6b5764b63567f64c0500e700af98b0b0",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.3.1"
+    },
+    "scikit-learn-tests":{
+       "depends":[
+          "scikit-learn"
+       ],
+       "file_name":"scikit-learn-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"scikit-learn-tests",
+       "package_type":"package",
+       "sha256":"6a120cd94260ab1e93e63905bb5aa6aaeb028b8a20a1648eaac05938ee135449",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.3.1"
+    },
+    "scipy":{
+       "depends":[
+          "numpy",
+          "openblas"
+       ],
+       "file_name":"scipy-1.11.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "scipy"
+       ],
+       "install_dir":"site",
+       "name":"scipy",
+       "package_type":"package",
+       "sha256":"94e5c43b9e9e877b9ea991102ba0a6f9b4aa5b8ebbefcc27a66e50226cb6aa43",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.11.2"
+    },
+    "scipy-tests":{
+       "depends":[
+          "scipy"
+       ],
+       "file_name":"scipy-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"scipy-tests",
+       "package_type":"package",
+       "sha256":"96872c6fc60aff93da8c1b40197b2de54c0d3a0b24021c4493a3a023bbd16274",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.11.2"
+    },
+    "screed":{
+       "depends":[
+
+       ],
+       "file_name":"screed-1.1.2-py2.py3-none-any.whl",
+       "imports":[
+          "bigtests",
+          "screed"
+       ],
+       "install_dir":"site",
+       "name":"screed",
+       "package_type":"package",
+       "sha256":"21d86f53256e5d51ba44a9fd1d64a63994d0f7ecf954d8413c343846d97b304d",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.1.2"
+    },
+    "screed-tests":{
+       "depends":[
+          "screed"
+       ],
+       "file_name":"screed-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"screed-tests",
+       "package_type":"package",
+       "sha256":"90a0ff98ee61ceba88ca3570fae3eb078c6b480ee2759d20d1cfafb2ce7381ca",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.1.2"
+    },
+    "setuptools":{
+       "depends":[
+          "distutils",
+          "pyparsing"
+       ],
+       "file_name":"setuptools-68.1.2-py3-none-any.whl",
+       "imports":[
+          "_distutils_hack",
+          "pkg_resources",
+          "setuptools"
+       ],
+       "install_dir":"site",
+       "name":"setuptools",
+       "package_type":"package",
+       "sha256":"bc6795827a6332eea8b78943ff939f0e672cab2a779c8364255665f58b54fc95",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"68.1.2"
+    },
+    "shapely":{
+       "depends":[
+          "numpy"
+       ],
+       "file_name":"Shapely-1.8.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "shapely"
+       ],
+       "install_dir":"site",
+       "name":"shapely",
+       "package_type":"package",
+       "sha256":"e9743338fa38d23f9ef58251c5e6b82359c3dd62705107d686458dbbe968e30d",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.8.2"
+    },
+    "shapely-tests":{
+       "depends":[
+          "shapely"
+       ],
+       "file_name":"shapely-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"shapely-tests",
+       "package_type":"package",
+       "sha256":"53cbb821363dec1009d297e64ae628db81fb45b193eebbf9ec8ece0e0e619e86",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.8.2"
+    },
+    "sharedlib-test":{
+       "depends":[
+
+       ],
+       "file_name":"sharedlib-test-1.0.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"sharedlib-test",
+       "package_type":"shared_library",
+       "sha256":"dcd78a95eb0c4f4b1f638e5ee1565857b5ea750d4aef076fef963de578b356d4",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.0"
+    },
+    "sharedlib-test-py":{
+       "depends":[
+          "sharedlib-test"
+       ],
+       "file_name":"sharedlib_test_py-1.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "sharedlib_test"
+       ],
+       "install_dir":"site",
+       "name":"sharedlib-test-py",
+       "package_type":"package",
+       "sha256":"28eb32fd58336f8844a875b87d42c20edaf9d2f120708f7581ed37574f5d941a",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.0"
+    },
+    "simplejson":{
+       "depends":[
+
+       ],
+       "file_name":"simplejson-3.19.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "simplejson"
+       ],
+       "install_dir":"site",
+       "name":"simplejson",
+       "package_type":"package",
+       "sha256":"c0dfd2948e07743c957196449fe04903f12e0a49cd3dc6cdae9a936d4ddb8289",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.19.1"
+    },
+    "simplejson-tests":{
+       "depends":[
+          "simplejson"
+       ],
+       "file_name":"simplejson-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"simplejson-tests",
+       "package_type":"package",
+       "sha256":"58ce47e899fe3d52ad4166d9e13853dac28d068c847788085d32dc3286c7a0af",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.19.1"
+    },
+    "sisl":{
+       "depends":[
+          "pyparsing",
+          "numpy",
+          "scipy",
+          "tqdm",
+          "xarray",
+          "pandas",
+          "matplotlib"
+       ],
+       "file_name":"sisl-0.14.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "sisl_toolbox",
+          "sisl"
+       ],
+       "install_dir":"site",
+       "name":"sisl",
+       "package_type":"package",
+       "sha256":"af2da3845b64b9e3509fe159cfa285f40dc3d4a0620e72abbf356c2feb6e37d6",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.14.2"
+    },
+    "sisl-tests":{
+       "depends":[
+          "sisl"
+       ],
+       "file_name":"sisl-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"sisl-tests",
+       "package_type":"package",
+       "sha256":"3053f108f5f5c010f7d3e2e98f8e8f3e5010a5eef66365419b799af8eb84707b",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.14.2"
+    },
+    "six":{
+       "depends":[
+
+       ],
+       "file_name":"six-1.16.0-py2.py3-none-any.whl",
+       "imports":[
+          "six"
+       ],
+       "install_dir":"site",
+       "name":"six",
+       "package_type":"package",
+       "sha256":"af66f234ee7a11352e1f5e7f28d134b9aef03183c8b7e57838c8fd0670ffb69c",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.16.0"
+    },
+    "smart_open":{
+       "depends":[
+
+       ],
+       "file_name":"smart_open-6.3.0-py3-none-any.whl",
+       "imports":[
+          "smart_open"
+       ],
+       "install_dir":"site",
+       "name":"smart_open",
+       "package_type":"package",
+       "sha256":"45783a97bbadc6c574d5f20c69979327d5d7e5a781e49ffd702a409fa83ff2d8",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"6.3.0"
+    },
+    "soupsieve":{
+       "depends":[
+
+       ],
+       "file_name":"soupsieve-2.4.1-py3-none-any.whl",
+       "imports":[
+          "soupsieve"
+       ],
+       "install_dir":"site",
+       "name":"soupsieve",
+       "package_type":"package",
+       "sha256":"975d127ea2dd9c024b607e08a0dbaf06bd97c618668f8558a5d6f0abf733a18f",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.4.1"
+    },
+    "sourmash":{
+       "depends":[
+          "screed",
+          "cffi",
+          "deprecation",
+          "cachetools",
+          "numpy",
+          "matplotlib",
+          "scipy",
+          "sqlite3",
+          "bitstring"
+       ],
+       "file_name":"sourmash-4.8.4-py3-none-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "sourmash"
+       ],
+       "install_dir":"site",
+       "name":"sourmash",
+       "package_type":"package",
+       "sha256":"92b42cb1e99fbe8a0a89cd0fea803ad9bbe2d5a598cf5abfe6f8c72c19594ee3",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.8.4"
+    },
+    "sparseqr":{
+       "depends":[
+          "pycparser",
+          "cffi",
+          "numpy",
+          "scipy",
+          "suitesparse",
+          "distutils"
+       ],
+       "file_name":"sparseqr-1.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "sparseqr"
+       ],
+       "install_dir":"site",
+       "name":"sparseqr",
+       "package_type":"package",
+       "sha256":"f8b804383ef963cba4d891b2e5f1475e96dc187c629e9c07024ce5b5c9ed356a",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.2"
+    },
+    "sqlalchemy":{
+       "depends":[
+          "sqlite3",
+          "typing-extensions"
+       ],
+       "file_name":"SQLAlchemy-2.0.20-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "sqlalchemy"
+       ],
+       "install_dir":"site",
+       "name":"sqlalchemy",
+       "package_type":"package",
+       "sha256":"26d916aec88466f14e872d48541cd61adf52b5a0e2f04c4e689036aa6cb27dbf",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"2.0.20"
+    },
+    "sqlalchemy-tests":{
+       "depends":[
+          "sqlalchemy"
+       ],
+       "file_name":"sqlalchemy-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"sqlalchemy-tests",
+       "package_type":"package",
+       "sha256":"d20dacde41cb32f60bebaa883936e7417add9db2f2ef26bd877cb0182942d153",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.0.20"
+    },
+    "sqlite3":{
+       "depends":[
+
+       ],
+       "file_name":"sqlite3-1.0.0.zip",
+       "imports":[
+          "sqlite3",
+          "_sqlite3"
+       ],
+       "install_dir":"stdlib",
+       "name":"sqlite3",
+       "package_type":"cpython_module",
+       "sha256":"af3dcc095eaf30d9d0b6ac318b780ec53e5ba73d7b86d3b56c9585a08c25fc1c",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.0.0"
+    },
+    "ssl":{
+       "depends":[
+          "openssl"
+       ],
+       "file_name":"ssl-1.0.0.zip",
+       "imports":[
+          "ssl",
+          "_ssl"
+       ],
+       "install_dir":"stdlib",
+       "name":"ssl",
+       "package_type":"cpython_module",
+       "sha256":"9088d85ceb960416cce39aab4c2144c0934efa2175bf50573c24aed93db360c9",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.0.0"
+    },
+    "statsmodels":{
+       "depends":[
+          "distutils",
+          "numpy",
+          "scipy",
+          "pandas",
+          "patsy",
+          "packaging"
+       ],
+       "file_name":"statsmodels-0.14.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "statsmodels"
+       ],
+       "install_dir":"site",
+       "name":"statsmodels",
+       "package_type":"package",
+       "sha256":"09aeeef9344333e6868846aeaae64be7c88bfb919fb3d9de98a320bf0e6d64f6",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.14.0"
+    },
+    "statsmodels-tests":{
+       "depends":[
+          "statsmodels"
+       ],
+       "file_name":"statsmodels-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"statsmodels-tests",
+       "package_type":"package",
+       "sha256":"c6dd610d90324a101517aa69c5ad32f1f4c0c371260a28bd485d02def3176e72",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.14.0"
+    },
+    "suitesparse":{
+       "depends":[
+          "openblas"
+       ],
+       "file_name":"suitesparse-5.11.0.zip",
+       "imports":[
+
+       ],
+       "install_dir":"dynlib",
+       "name":"suitesparse",
+       "package_type":"shared_library",
+       "sha256":"5dbea0b8df376de1c6732ac1f08338022be6fe119028411ac66595ca575f6769",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"5.11.0"
+    },
+    "svgwrite":{
+       "depends":[
+
+       ],
+       "file_name":"svgwrite-1.4.3-py3-none-any.whl",
+       "imports":[
+          "svgwrite"
+       ],
+       "install_dir":"site",
+       "name":"svgwrite",
+       "package_type":"package",
+       "sha256":"95b206dc1a5977b054559fc95d7b32eb7385036b79c64ba95f0c8c5045e86fd5",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.4.3"
+    },
+    "swiglpk":{
+       "depends":[
+
+       ],
+       "file_name":"swiglpk-5.0.8-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "swiglpk"
+       ],
+       "install_dir":"site",
+       "name":"swiglpk",
+       "package_type":"package",
+       "sha256":"3a3a342a2723faa155da7da680506b911f8750002e9245fe017d43f788b14d88",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"5.0.8"
+    },
+    "sympy":{
+       "depends":[
+          "distutils",
+          "mpmath"
+       ],
+       "file_name":"sympy-1.12-py3-none-any.whl",
+       "imports":[
+          "isympy",
+          "sympy"
+       ],
+       "install_dir":"site",
+       "name":"sympy",
+       "package_type":"package",
+       "sha256":"ef0d3e829d41757b6de728380f9b0684151ce2c2070498c635b32a4177a2bc83",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"1.12"
+    },
+    "sympy-tests":{
+       "depends":[
+          "sympy"
+       ],
+       "file_name":"sympy-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"sympy-tests",
+       "package_type":"package",
+       "sha256":"d95ca3cb38ef68ea05a7e669035d2bf51eab417357b27f4b3943c1c3a5d6592e",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.12"
+    },
+    "tblib":{
+       "depends":[
+
+       ],
+       "file_name":"tblib-3.0.0-py3-none-any.whl",
+       "imports":[
+          "tblib"
+       ],
+       "install_dir":"site",
+       "name":"tblib",
+       "package_type":"package",
+       "sha256":"9a7ff2c2aba05a32411b5381417c5f5f1f68dddd195b5f27241d3bc6be4c72c7",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.0.0"
+    },
+    "termcolor":{
+       "depends":[
+
+       ],
+       "file_name":"termcolor-2.3.0-py3-none-any.whl",
+       "imports":[
+          "termcolor"
+       ],
+       "install_dir":"site",
+       "name":"termcolor",
+       "package_type":"package",
+       "sha256":"84534b40c4bd1d5d576412f2bb3c8c942beddafab11fe03363d7074be5886f7d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.3.0"
+    },
+    "test":{
+       "depends":[
+
+       ],
+       "file_name":"test-1.0.0.zip",
+       "imports":[
+          "test"
+       ],
+       "install_dir":"stdlib",
+       "name":"test",
+       "package_type":"cpython_module",
+       "sha256":"770290c458238159d25ce7cf55c3c22961297e20c8c260b4fd490682db3eeda4",
+       "shared_library":true,
+       "unvendored_tests":false,
+       "version":"1.0.0"
+    },
+    "texttable":{
+       "depends":[
+
+       ],
+       "file_name":"texttable-1.6.7-py2.py3-none-any.whl",
+       "imports":[
+          "texttable"
+       ],
+       "install_dir":"site",
+       "name":"texttable",
+       "package_type":"package",
+       "sha256":"f6a7bb37320f4a1fc4c0f315609d2d071d497f57c57932bc2ff79da9c1c9abc4",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.6.7"
+    },
+    "threadpoolctl":{
+       "depends":[
+
+       ],
+       "file_name":"threadpoolctl-3.2.0-py3-none-any.whl",
+       "imports":[
+          "threadpoolctl"
+       ],
+       "install_dir":"site",
+       "name":"threadpoolctl",
+       "package_type":"package",
+       "sha256":"b5e0af61311a4e4c1fe875dc880e9f668817c0eea15a0a35ed1c81269b64aca2",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.2.0"
+    },
+    "tomli":{
+       "depends":[
+
+       ],
+       "file_name":"tomli-2.0.1-py3-none-any.whl",
+       "imports":[
+          "tomli"
+       ],
+       "install_dir":"site",
+       "name":"tomli",
+       "package_type":"package",
+       "sha256":"c8a1bc2f9306b0f2549afe51ec6f9e2daf8fb16cc32502316ed25c0596ec9490",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.0.1"
+    },
+    "tomli-w":{
+       "depends":[
+
+       ],
+       "file_name":"tomli_w-1.0.0-py3-none-any.whl",
+       "imports":[
+          "tomli_w"
+       ],
+       "install_dir":"site",
+       "name":"tomli-w",
+       "package_type":"package",
+       "sha256":"382bc8caa39b519229408c847ba9f471defef738116431c508e93b877500b051",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.0.0"
+    },
+    "toolz":{
+       "depends":[
+
+       ],
+       "file_name":"toolz-0.12.0-py3-none-any.whl",
+       "imports":[
+          "tlz",
+          "toolz"
+       ],
+       "install_dir":"site",
+       "name":"toolz",
+       "package_type":"package",
+       "sha256":"7fa1b8935a7313656499ef7eb6b327f073db5c77f7f2b19667f249b24c8f557d",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"0.12.0"
+    },
+    "toolz-tests":{
+       "depends":[
+          "toolz"
+       ],
+       "file_name":"toolz-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"toolz-tests",
+       "package_type":"package",
+       "sha256":"f67b2147cad877d7d787177fc7ff74d919ab7daa2fbe85426c9ff2f4557fa0fe",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.12.0"
+    },
+    "tqdm":{
+       "depends":[
+
+       ],
+       "file_name":"tqdm-4.66.1-py3-none-any.whl",
+       "imports":[
+          "tqdm"
+       ],
+       "install_dir":"site",
+       "name":"tqdm",
+       "package_type":"package",
+       "sha256":"ea144d101ec8ef0a8858cc7a802f4970f59593f4ac28bd96b40d7fd61e5294b1",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.66.1"
+    },
+    "traits":{
+       "depends":[
+
+       ],
+       "file_name":"traits-6.4.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "traits"
+       ],
+       "install_dir":"site",
+       "name":"traits",
+       "package_type":"package",
+       "sha256":"55c5c2a095992a101ac5b9b76fe93b9a178b744694095262e8966e39bbfe258a",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"6.4.2"
+    },
+    "traits-tests":{
+       "depends":[
+          "traits"
+       ],
+       "file_name":"traits-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"traits-tests",
+       "package_type":"package",
+       "sha256":"e405b6beb8fcf23d9c0a5debd4ec35529f9e8ae0d802daca2e1e6d70228ef41d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"6.4.2"
+    },
+    "tskit":{
+       "depends":[
+          "numpy",
+          "svgwrite",
+          "jsonschema"
+       ],
+       "file_name":"tskit-0.5.5-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "tskit"
+       ],
+       "install_dir":"site",
+       "name":"tskit",
+       "package_type":"package",
+       "sha256":"4b2ba5946c79285dfbb32ede79f26fcd7242f5a03af969b1a34fda1edbd1db66",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.5.5"
+    },
+    "typing-extensions":{
+       "depends":[
+
+       ],
+       "file_name":"typing_extensions-4.7.1-py3-none-any.whl",
+       "imports":[
+          "typing_extensions"
+       ],
+       "install_dir":"site",
+       "name":"typing-extensions",
+       "package_type":"package",
+       "sha256":"f209b05fb1299486306cbe726632c3f2675201bb05c4bc2eab8ee29ee1480c8f",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.7.1"
+    },
+    "uncertainties":{
+       "depends":[
+          "future"
+       ],
+       "file_name":"uncertainties-3.1.7-py2.py3-none-any.whl",
+       "imports":[
+          "uncertainties"
+       ],
+       "install_dir":"site",
+       "name":"uncertainties",
+       "package_type":"package",
+       "sha256":"48dae9e23dd68ae19d18433a71b5c2cb3f94d36dc8363828d885c5ef833a8909",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"3.1.7"
+    },
+    "uncertainties-tests":{
+       "depends":[
+          "uncertainties"
+       ],
+       "file_name":"uncertainties-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"uncertainties-tests",
+       "package_type":"package",
+       "sha256":"28256453a1bc3711c633abcbae7e9427677e1941296f8b40a26e3614ce46eef9",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"3.1.7"
+    },
+    "unyt":{
+       "depends":[
+          "numpy",
+          "sympy"
+       ],
+       "file_name":"unyt-2.9.5-py2.py3-none-any.whl",
+       "imports":[
+          "unyt"
+       ],
+       "install_dir":"site",
+       "name":"unyt",
+       "package_type":"package",
+       "sha256":"6f28e07ee05ea58760275ed0bed9190526015ef83199dae4c2b79b06c023438b",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"2.9.5"
+    },
+    "unyt-tests":{
+       "depends":[
+          "unyt"
+       ],
+       "file_name":"unyt-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"unyt-tests",
+       "package_type":"package",
+       "sha256":"2f98183db96445bccab4e824a80b23022cab70c58e558ee18913f38972f64d65",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.9.5"
+    },
+    "webencodings":{
+       "depends":[
+
+       ],
+       "file_name":"webencodings-0.5.1-py2.py3-none-any.whl",
+       "imports":[
+          "webencodings"
+       ],
+       "install_dir":"site",
+       "name":"webencodings",
+       "package_type":"package",
+       "sha256":"6701acc9bfc9e931ccdf1eb0831ca4167122c05ac2ffdb2ef4b2f44862cd4e70",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"0.5.1"
+    },
+    "wordcloud":{
+       "depends":[
+          "matplotlib"
+       ],
+       "file_name":"wordcloud-1.9.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "wordcloud"
+       ],
+       "install_dir":"site",
+       "name":"wordcloud",
+       "package_type":"package",
+       "sha256":"c9b0b2e49a79fa63ed295cb9cf850730cedd37b4155669cd6df6ae1321842415",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.9.2"
+    },
+    "wrapt":{
+       "depends":[
+
+       ],
+       "file_name":"wrapt-1.15.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "wrapt"
+       ],
+       "install_dir":"site",
+       "name":"wrapt",
+       "package_type":"package",
+       "sha256":"5752fb3f421b6bc77d5b2ea28b43c4104782311a12424fc9b4e94ee7f7fa15a5",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.15.0"
+    },
+    "xarray":{
+       "depends":[
+          "numpy",
+          "packaging",
+          "pandas"
+       ],
+       "file_name":"xarray-2023.12.0-py3-none-any.whl",
+       "imports":[
+          "xarray"
+       ],
+       "install_dir":"site",
+       "name":"xarray",
+       "package_type":"package",
+       "sha256":"d8c03afc94699cd417b2da23d6cd17a3cf41f6e340e77de7f3932dad4903201e",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"2023.12.0"
+    },
+    "xarray-tests":{
+       "depends":[
+          "xarray"
+       ],
+       "file_name":"xarray-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"xarray-tests",
+       "package_type":"package",
+       "sha256":"2872d95a846f07bdc867808c41b833be494c33e2f1e439012a68f6617b54e7e4",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2023.12.0"
+    },
+    "xgboost":{
+       "depends":[
+          "numpy",
+          "scipy",
+          "setuptools"
+       ],
+       "file_name":"xgboost-1.6.1-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "xgboost"
+       ],
+       "install_dir":"site",
+       "name":"xgboost",
+       "package_type":"package",
+       "sha256":"811b3c1834407172206dd25f335839d9667ba9698e31ba9f8ea89d58b025e79c",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.6.1"
+    },
+    "xlrd":{
+       "depends":[
+
+       ],
+       "file_name":"xlrd-2.0.1-py2.py3-none-any.whl",
+       "imports":[
+          "xlrd"
+       ],
+       "install_dir":"site",
+       "name":"xlrd",
+       "package_type":"package",
+       "sha256":"101d97830986609d629998e9b817823675e4a032ebd74ba53570f1bcef26b39d",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.0.1"
+    },
+    "xyzservices":{
+       "depends":[
+
+       ],
+       "file_name":"xyzservices-2023.7.0-py3-none-any.whl",
+       "imports":[
+          "xyzservices"
+       ],
+       "install_dir":"site",
+       "name":"xyzservices",
+       "package_type":"package",
+       "sha256":"e8e5c22a8d243fd7a31f75771008ccf96db1beb2f4743fbaa0535fad72e65470",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"2023.7.0"
+    },
+    "xyzservices-tests":{
+       "depends":[
+          "xyzservices"
+       ],
+       "file_name":"xyzservices-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"xyzservices-tests",
+       "package_type":"package",
+       "sha256":"3f0374173170f7bd6fedbd7419f6d873472eb0a2e42cd87065a85800220be0f5",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2023.7.0"
+    },
+    "yarl":{
+       "depends":[
+          "multidict",
+          "idna"
+       ],
+       "file_name":"yarl-1.9.2-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "yarl"
+       ],
+       "install_dir":"site",
+       "name":"yarl",
+       "package_type":"package",
+       "sha256":"f90a986be6e14dd1f93ec05bc69dec016af5f40a94e6932317640189cdca07ac",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.9.2"
+    },
+    "yt":{
+       "depends":[
+          "numpy",
+          "matplotlib",
+          "sympy",
+          "setuptools",
+          "packaging",
+          "unyt",
+          "cmyt",
+          "colorspacious",
+          "tqdm",
+          "tomli",
+          "tomli-w"
+       ],
+       "file_name":"yt-4.1.4-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "yt"
+       ],
+       "install_dir":"site",
+       "name":"yt",
+       "package_type":"package",
+       "sha256":"a02e1e23cba66e9c4ad06b5181b8bc0641e45710e95c2ab5a0d60ac2dec55675",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"4.1.4"
+    },
+    "zarr":{
+       "depends":[
+          "numpy",
+          "asciitree",
+          "numcodecs"
+       ],
+       "file_name":"zarr-2.13.3-py3-none-any.whl",
+       "imports":[
+          "zarr"
+       ],
+       "install_dir":"site",
+       "name":"zarr",
+       "package_type":"package",
+       "sha256":"4daa37039dd470cbdb4ca9bcb443ebe7bde6c1cd83b46eecca09e3bb516ef1a3",
+       "shared_library":false,
+       "unvendored_tests":true,
+       "version":"2.13.3"
+    },
+    "zarr-tests":{
+       "depends":[
+          "zarr"
+       ],
+       "file_name":"zarr-tests.tar",
+       "imports":[
+
+       ],
+       "install_dir":"site",
+       "name":"zarr-tests",
+       "package_type":"package",
+       "sha256":"9475516162c08bde9870377e3cad2c60cd9a85f5318e9d6e323e0ee1ef23d715",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"2.13.3"
+    },
+    "zengl":{
+       "depends":[
+
+       ],
+       "file_name":"zengl-1.16.0-cp311-cp311-emscripten_3_1_45_wasm32.whl",
+       "imports":[
+          "zengl",
+          "_zengl"
+       ],
+       "install_dir":"site",
+       "name":"zengl",
+       "package_type":"package",
+       "sha256":"c9ab9f7770c47c4c5cf845a924717832bb2a596baae60f4415d8bcda193bbb11",
+       "shared_library":false,
+       "unvendored_tests":false,
+       "version":"1.16.0"
+    }
+ }
 };

@@ -9,8 +9,8 @@ function initializePackageIndex(pyodide, lockfile) {
     );
   }
   const API = pyodide._api;
-  API.config.indexURL = "https://cdn.jsdelivr.net/pyodide/v0.25.0a1/full/";
-  globalThis.location = "https://cdn.jsdelivr.net/pyodide/v0.25.0a1/full/";
+  API.config.indexURL = "https://cdn.jsdelivr.net/pyodide/v0.25.0a2/full/";
+  globalThis.location = "https://cdn.jsdelivr.net/pyodide/v0.25.0a2/full/";
   API.lockfile_info = lockfile.info;
   API.lockfile_packages = lockfile.packages;
   API.repodata_packages = lockfile.packages;
@@ -53,9 +53,11 @@ export default {
 
     const pyodide = await loadPyodide();
     initializePackageIndex(pyodide, lockFile);
+
     // Loop through globals that define Python modules in the metadata passed to our Worker. For
     // each one, save it in Pyodide's file system.
     const pythonRequirements = [];
+    const micropipRequirements = [];
     for (const { name, value } of metadata.globals) {
       if (value.pythonModule !== undefined) {
         pyodide.FS.writeFile(`/session/${name}.py`, value.pythonModule, {
@@ -64,11 +66,27 @@ export default {
       }
 
       if (value.pythonRequirement !== undefined) {
-        pythonRequirements.push(name);
+        switch (name) {
+          case "langchain":
+            micropipRequirements.push("langchain<=0.0.339");
+            break;
+          case "openai":
+            micropipRequirements.push("openai<=0.28.1");
+            break;
+          default:
+            pythonRequirements.push(name);
+        }
       }
     }
-    await pyodide.loadPackage(pythonRequirements);
 
+    if (micropipRequirements.length > 0) {
+      await pyodide.loadPackage("micropip");
+      await pyodide.loadPackage("ssl");
+      const micropip = pyodide.pyimport("micropip");
+      await micropip.install(micropipRequirements);
+    }
+
+    await pyodide.loadPackage(pythonRequirements);
     const result = await pyodide.pyimport(metadata.mainModule).fetch(request);
 
     return result;
