@@ -404,10 +404,10 @@ http_archive(
         "//:patches/v8/0012-Fix-V8-ICU-build.patch",
         "//:patches/v8/0013-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
     ],
-    sha256 = "1202ec7841f98d7dda35f998dc0e29f177f01c2d573adcde900d8633da4668dc",
-    strip_prefix = "v8-v8-5eefc59",
+    sha256 = "6a2d63f1d877e8065d63ba3125e6c4d1fde2b62e46048dab68fe6ea8baca5b27",
+    strip_prefix = "v8-12.0.267.14",
     type = "tgz",
-    url = "https://github.com/v8/v8/tarball/5eefc590c868d8dfb411e53053c963fe42dcda74",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.0.267.14.tar.gz",
 )
 
 new_git_repository(
