@@ -29,7 +29,7 @@ public:
 
   double getDatabaseSize();
 
-  JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(SqlStorage) {
     JSG_METHOD(exec);
     JSG_METHOD(prepare);
 
@@ -101,7 +101,7 @@ public:
   double getRowsWritten();
 
   kj::Array<jsg::JsRef<jsg::JsString>> getColumnNames(jsg::Lock& js);
-  JSG_RESOURCE_TYPE(Cursor, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(Cursor) {
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);
     JSG_READONLY_PROTOTYPE_PROPERTY(columnNames, getColumnNames);
@@ -200,7 +200,7 @@ public:
 
   jsg::Ref<Cursor> run(jsg::Arguments<BindingValue> bindings);
 
-  JSG_RESOURCE_TYPE(Statement, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(Statement) {
     JSG_CALLABLE(run);
   }
 

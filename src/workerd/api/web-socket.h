@@ -168,7 +168,7 @@ public:
   jsg::Ref<WebSocket> getFirst() { return sockets[0].addRef(); }
   jsg::Ref<WebSocket> getSecond() { return sockets[1].addRef(); }
 
-  JSG_RESOURCE_TYPE(WebSocketPair, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(WebSocketPair) {
     // TODO(soon): These really should be using an indexed property handler rather
     // than named instance properties but jsg does not yet have support for that.
     JSG_READONLY_INSTANCE_PROPERTY(0, getFirst);

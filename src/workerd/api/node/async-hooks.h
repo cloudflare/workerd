@@ -63,7 +63,7 @@ public:
     KJ_UNIMPLEMENTED("asyncLocalStorage.disable() is not implemented");
   }
 
-  JSG_RESOURCE_TYPE(AsyncLocalStorage, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(AsyncLocalStorage) {
     JSG_METHOD(run);
     JSG_METHOD(exit);
     JSG_METHOD(getStore);
@@ -181,7 +181,7 @@ public:
       jsg::Optional<v8::Local<v8::Value>> thisArg,
       jsg::Arguments<jsg::Value>);
 
-  JSG_RESOURCE_TYPE(AsyncResource, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(AsyncResource) {
     JSG_STATIC_METHOD_NAMED(bind, staticBind);
     JSG_METHOD(asyncId);
     JSG_METHOD(triggerAsyncId);
