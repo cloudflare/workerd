@@ -106,6 +106,8 @@ jobs:
         # Set a custom output root directory to avoid long file name issues.
         run: |
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
+          # TODO: Test that the build is still compatible with the latest LLVM release
+          choco upgrade llvm --version=18.1.6
       - name: Configure download mirrors
         shell: bash
         run: |
