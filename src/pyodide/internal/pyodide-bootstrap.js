@@ -1,6 +1,7 @@
 import { loadPyodide } from "pyodide:python";
 import { getMetadata } from "pyodide:current-bundle";
 import { lockFile } from "pyodide:package-lock.json";
+import { getPatches } from "pyodide:patches";
 
 function initializePackageIndex(pyodide, lockfile) {
   if (!lockfile.packages) {
@@ -84,6 +85,12 @@ export default {
       await pyodide.loadPackage("ssl");
       const micropip = pyodide.pyimport("micropip");
       await micropip.install(micropipRequirements);
+
+      const patches = getPatches();
+      // TODO(EW-8055): Why does micropip.list not work?
+      if (JSON.parse(micropip.freeze())["packages"]["aiohttp"] !== undefined) {
+        pyodide.runPython(patches["aiohttp_fetch_patch.py"]);
+      }
     }
 
     await pyodide.loadPackage(pythonRequirements);

@@ -24,4 +24,8 @@ kj::StringPtr getPyodideLock() {
   return _::lookupModule("pyodide-internal:pyodide-lock");
 }
 
+kj::StringPtr getPyodidePatch(kj::StringPtr name) {
+  return _::lookupModule(kj::str("pyodide:internal/patches/", name));
+}
+
 }  // namespace workerd

@@ -39,7 +39,7 @@ wd_js_bundle(
     name = "pyodide",
     builtin_modules = [
         "python.js",
-    ],
+    ] + glob(["internal/patches/*.py"]),
     import_name = "pyodide",
     internal_data_modules = ["generated/python_stdlib.zip"],
     internal_modules = [
