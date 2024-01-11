@@ -422,6 +422,9 @@ public:
   // been committed yet.
   void abort(jsg::Optional<kj::String> reason);
 
+  // Sets and returns a new hibernation manager in an actor if there's none or returns the existing.
+  Worker::Actor::HibernationManager& maybeInitHibernationManager(Worker::Actor& actor);
+
   // Adds a WebSocket to the set attached to this object.
   // `ws.accept()` must NOT have been called separately.
   // Once called, any incoming messages will be delivered

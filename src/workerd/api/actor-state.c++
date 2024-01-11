@@ -835,6 +835,15 @@ void DurableObjectState::abort(jsg::Optional<kj::String> reason) {
   kj::throwFatalException(kj::mv(error));
 }
 
+Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManager(Worker::Actor& actor) {
+  if (actor.getHibernationManager() == kj::none) {
+    // If there's no hibernation manager created yet, we should create one.
+    actor.setHibernationManager(kj::refcounted<HibernationManagerImpl>(
+        actor.getLoopback(), KJ_REQUIRE_NONNULL(actor.getHibernationEventType())));
+  }
+  return KJ_REQUIRE_NONNULL(actor.getHibernationManager());
+}
+
 void DurableObjectState::acceptWebSocket(
     jsg::Ref<WebSocket> ws,
     jsg::Optional<kj::Array<kj::String>> tags) {
@@ -850,11 +859,6 @@ void DurableObjectState::acceptWebSocket(
 
   // We need to get a HibernationManager to give the websocket to.
   auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
-  if (a.getHibernationManager() == kj::none) {
-    a.setHibernationManager(
-        kj::refcounted<HibernationManagerImpl>(
-            a.getLoopback(), KJ_REQUIRE_NONNULL(a.getHibernationEventType())));
-  }
   // HibernationManager's acceptWebSocket() will throw if the websocket is in an incompatible state.
   // Note that not providing a tag is equivalent to providing an empty tag array.
   // Any duplicate tags will be ignored.
@@ -878,7 +882,7 @@ void DurableObjectState::acceptWebSocket(
     }
     return kj::Array<kj::String>();
   }();
-  KJ_REQUIRE_NONNULL(a.getHibernationManager()).acceptWebSocket(kj::mv(ws), distinctTags);
+  maybeInitHibernationManager(a).acceptWebSocket(kj::mv(ws), distinctTags);
 }
 
 kj::Array<jsg::Ref<api::WebSocket>> DurableObjectState::getWebSockets(
@@ -916,14 +920,8 @@ void DurableObjectState::setWebSocketAutoResponse(
       "Response cannot be larger than ", maxRequestOrResponseSize, " bytes. ",
       "A response of size ", reqResp->getResponse().size(), " was provided."));
 
-  if (a.getHibernationManager() == kj::none) {
-    // If there's no hibernation manager created yet, we should create one and
-    // set its auto response.
-    a.setHibernationManager(kj::refcounted<HibernationManagerImpl>(
-            a.getLoopback(), KJ_REQUIRE_NONNULL(a.getHibernationEventType())));
-  }
-  KJ_REQUIRE_NONNULL(a.getHibernationManager()).setWebSocketAutoResponse(
-      reqResp->getRequest(), reqResp->getResponse());
+  maybeInitHibernationManager(a).setWebSocketAutoResponse(reqResp->getRequest(),
+      reqResp->getResponse());
 }
 
 kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> DurableObjectState::getWebSocketAutoResponse() {
@@ -956,12 +954,7 @@ void DurableObjectState::setHibernatableWebSocketEventTimeout(jsg::Optional<uint
   // We want to limit the duration of an event to a maximum of 7 days (604800 * 1000 millis).
   JSG_REQUIRE(t <= 604800 * 1000, Error, "Event timeout should not exceed 604800000 ms.");
 
-  if (a.getHibernationManager() == kj::none) {
-    // If there's no hibernation manager created yet, we should create one.
-    a.setHibernationManager(kj::refcounted<HibernationManagerImpl>(
-        a.getLoopback(), KJ_REQUIRE_NONNULL(a.getHibernationEventType())));
-  }
-  KJ_REQUIRE_NONNULL(a.getHibernationManager()).setEventTimeout(t);
+  maybeInitHibernationManager(a).setEventTimeout(t);
 }
 
 kj::Maybe<uint32_t> DurableObjectState::getHibernatableWebSocketEventTimeout() {
