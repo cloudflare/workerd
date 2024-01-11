@@ -19,6 +19,7 @@
 #include <workerd/api/hyperdrive.h>
 #include <workerd/api/kv.h>
 #include <workerd/api/modules.h>
+#include <workerd/api/pyodide.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
@@ -342,6 +343,14 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
               module.getName(),
               module.getNodeJsCompatModule()));
     }
+    case config::Worker::Module::PYTHON_MODULE: {
+      // Nothing to do. Handled in compileModules.
+      return kj::none;
+    }
+    case config::Worker::Module::PYTHON_REQUIREMENT: {
+      // Nothing to do. Handled in compileModules.
+      return kj::none;
+    }
   }
   KJ_UNREACHABLE;
 }
@@ -354,10 +363,70 @@ void WorkerdApi::compileModules(
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
 
-    for (auto module: conf.getModules()) {
+    auto confModules = conf.getModules();
+    // TODO: Before removing the autogate check, be sure to put this code behind an `experimental`
+    // flag check. We don't want to release this to workerd users without it being behind that flag.
+    using namespace workerd::api::pyodide;
+    if (util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES) &&
+        hasPythonModules(confModules)) {
+      auto mainModule = confModules.begin();
+      // Inject pyodide bootstrap module.
+      {
+        capnp::MallocMessageBuilder message;
+        auto module = message.getRoot<config::Worker::Module>();
+        module.setEsModule(getPyodideBootstrap());
+        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
+        auto path = kj::Path::parse(mainModule->getName());
+        modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
+      }
+      // Inject metadata that the bootstrap module will read.
+      auto metadataModuleName = kj::Path::parse("pyodide:current-bundle");
+      {
+        capnp::MallocMessageBuilder message;
+        auto module = message.getRoot<config::Worker::Module>();
+        module.setEsModule(generatePyodideMetadata(conf));
+
+        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
+        modules->add(metadataModuleName, kj::mv(KJ_REQUIRE_NONNULL(info)));
+      }
+      // Inject the pyodide-lock.json file.
+      auto lockModuleName = kj::Path::parse("pyodide:package-lock.json");
+      {
+        capnp::MallocMessageBuilder message;
+        auto module = message.getRoot<config::Worker::Module>();
+        module.setEsModule(getPyodideLock());
+
+        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
+        modules->add(lockModuleName, kj::mv(KJ_REQUIRE_NONNULL(info)));
+      }
+      // Inject pyodide python patches.
+      auto patchesModuleName = kj::Path::parse("pyodide:patches");
+      {
+        capnp::MallocMessageBuilder message;
+        auto module = message.getRoot<config::Worker::Module>();
+        module.setEsModule(generatePyodidePatches());
+
+        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
+        modules->add(patchesModuleName, kj::mv(KJ_REQUIRE_NONNULL(info)));
+      }
+      // Inject pyodide python patches.
+      auto embeddedPackagesName = kj::Path::parse("pyodide:embedded_packages");
+      {
+        capnp::MallocMessageBuilder message;
+        auto module = message.getRoot<config::Worker::Module>();
+        module.setData(getPyodideEmbeddedPackages());
+
+        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
+        modules->add(embeddedPackagesName, kj::mv(KJ_REQUIRE_NONNULL(info)));
+      }
+    }
+
+    for (auto module: confModules) {
       auto path = kj::Path::parse(module.getName());
-      auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
-      modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
+      auto maybeInfo = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
+      KJ_IF_SOME(info, maybeInfo) {
+        modules->add(path, kj::mv(info));
+      }
     }
 
     api::registerModules(*modules, getFeatureFlags());

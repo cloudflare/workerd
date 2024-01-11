@@ -98,6 +98,7 @@ wd_cc_library(
         ":workerd_capnp",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:rtti",
+        "//src/workerd/api:pyodide",
         "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",

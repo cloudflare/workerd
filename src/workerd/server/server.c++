@@ -2711,7 +2711,12 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
             moduleBuilder.setName(kj::str(actualSpecifier));
           }
 
-          return WorkerdApi::tryCompileModule(js, moduleBuilder, observer, featureFlags);
+          auto module = WorkerdApi::tryCompileModule(js, moduleBuilder, observer, featureFlags);
+          if (module == kj::none) {
+            KJ_LOG(ERROR, "Fallback service does not support this module type",
+                moduleBuilder.which());
+          }
+          return module;
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
           KJ_LOG(ERROR, "Fallback service failed to fetch module", exception, spec);

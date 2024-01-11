@@ -12,6 +12,7 @@ filegroup(
                 "html-rewriter.c++",
                 "rtti.c++",
                 "**/*test*.c++",
+                "pyodide.c++",
             ],
         ),
         "//conditions:default": glob(
@@ -20,6 +21,7 @@ filegroup(
                 "html-rewriter.c++",
                 "rtti.c++",
                 "**/*test*.c++",
+                "pyodide.c++",
                 "gpu/*.c++",
             ],
         ),
@@ -37,6 +39,7 @@ filegroup(
                 "modules.h",
                 "rtti.h",
                 "**/*test*.h",
+                "pyodide.h",
             ],
         ),
         "//conditions:default": glob(
@@ -46,6 +49,7 @@ filegroup(
                 "modules.h",
                 "rtti.h",
                 "**/*test*.h",
+                "pyodide.h",
                 "gpu/*.h",
             ],
         ),
@@ -77,6 +81,17 @@ wd_cc_library(
     deps = [
         "//src/workerd/io",
         "@com_cloudflare_lol_html//:lolhtml",
+    ],
+)
+
+wd_cc_library(
+    name = "pyodide",
+    srcs = ["pyodide.c++"],
+    hdrs = ["pyodide.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/server:workerd_capnp",
+        "//src/pyodide:pyodide",
     ],
 )
 
