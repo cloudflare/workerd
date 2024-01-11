@@ -198,6 +198,14 @@ void HibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
   });
 }
 
+void HibernationManagerImpl::setEventTimeout(kj::Maybe<uint32_t> timeoutMs) {
+  eventTimeoutMs = timeoutMs;
+}
+
+kj::Maybe<uint32_t> HibernationManagerImpl::getEventTimeout() {
+  return eventTimeoutMs;
+}
+
 void HibernationManagerImpl::dropHibernatableWebSocket(HibernatableWebSocket& hib) {
   removeFromAllWs(hib);
 }
@@ -211,7 +219,6 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
     HibernatableWebSocket& hib, kj::Maybe<kj::Exception>& maybeError) {
   kj::Maybe<kj::Promise<void>> event;
   KJ_IF_SOME(error, maybeError) {
-
     auto websocketId = randomUUID(kj::none);
     webSocketsForEventHandler.insert(kj::str(websocketId), &hib);
     kj::Maybe<api::HibernatableSocketParams> params;
@@ -227,6 +234,8 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
       // Otherwise, we need to dispatch an error event!
       params = api::HibernatableSocketParams(kj::mv(error), kj::mv(websocketId));
     }
+
+    KJ_REQUIRE_NONNULL(params).setTimeout(eventTimeoutMs);
     // Dispatch the event.
     auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
     event = workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
@@ -327,6 +336,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
     }
 
     auto params = kj::mv(KJ_REQUIRE_NONNULL(maybeParams));
+    params.setTimeout(eventTimeoutMs);
     auto isClose = params.isCloseEvent();
     // Dispatch the event.
     auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});

@@ -459,8 +459,31 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
+// This promise is used to set the timeout for hibernatable websocket events. It's expected to be
+// dropped in most cases, as long as the hibernatable websocket event promise completes before it.
+kj::Promise<void> ServiceWorkerGlobalScope::eventTimeoutPromise(uint32_t timeoutMs) {
+  auto& actor = KJ_ASSERT_NONNULL(IoContext::current().getActor());
+  co_await IoContext::current().afterLimitTimeout(timeoutMs * kj::MILLISECONDS);
+  // This is the ActorFlushReason for eviction in Cloudflare's internal implementation.
+  auto evictionCode = 2;
+  actor.shutdown(evictionCode, JSG_KJ_EXCEPTION(DISCONNECTED, Error,
+    "broken.dropped; Actor exceeded event execution time and was disconnected."));
+}
+
+kj::Promise<void> ServiceWorkerGlobalScope::setHibernatableEventTimeout(kj::Promise<void> event,
+    kj::Maybe<uint32_t> eventTimeoutMs) {
+  // If we have a maximum event duration timeout set, we should prevent the actor from running
+  // for more than the user selected duration.
+  auto timeoutMs = eventTimeoutMs.orDefault((uint32_t)0);
+  if (timeoutMs > 0) {
+    return event.exclusiveJoin(eventTimeoutPromise(timeoutMs));
+  }
+  return event;
+}
+
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
     kj::OneOf<kj::String, kj::Array<byte>> message,
+    kj::Maybe<uint32_t> eventTimeoutMs,
     kj::String websocketId,
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
   auto event = jsg::alloc<HibernatableWebSocketEvent>();
@@ -469,8 +492,8 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketMessage) {
-      auto promise = handler(lock, kj::mv(websocket), kj::mv(message));
-      event->waitUntil(kj::mv(promise));
+      event->waitUntil(setHibernatableEventTimeout(
+          handler(lock, kj::mv(websocket), kj::mv(message)), eventTimeoutMs));
     }
     // We want to deliver a message, but if no webSocketMessage handler is exported, we shouldn't fail
   }
@@ -478,6 +501,7 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
 
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(
     HibernatableSocketParams::Close close,
+    kj::Maybe<uint32_t> eventTimeoutMs,
     kj::String websocketId,
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
   auto event = jsg::alloc<HibernatableWebSocketEvent>();
@@ -492,9 +516,9 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(
       api::WebSocket::HibernatableReleaseState::CLOSE);
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketClose) {
-      auto promise = handler(lock, kj::mv(websocket), close.code, kj::mv(close.reason),
-                                close.wasClean);
-      event->waitUntil(kj::mv(promise));
+      event->waitUntil(setHibernatableEventTimeout(
+          handler(lock, kj::mv(websocket), close.code, kj::mv(close.reason),
+                           close.wasClean), eventTimeoutMs));
     }
     // We want to deliver close, but if no webSocketClose handler is exported, we shouldn't fail
   }
@@ -502,6 +526,7 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(
 
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(
     kj::Exception e,
+    kj::Maybe<uint32_t> eventTimeoutMs,
     kj::String websocketId,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
@@ -519,8 +544,9 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketError) {
-      auto promise = handler(js, kj::mv(websocket), js.exceptionToJs(kj::mv(e)));
-      event->waitUntil(kj::mv(promise));
+      event->waitUntil(setHibernatableEventTimeout(
+          handler(js, kj::mv(websocket), js.exceptionToJs(kj::mv(e))),
+          eventTimeoutMs));
     }
     // We want to deliver an error, but if no webSocketError handler is exported, we shouldn't fail
   }

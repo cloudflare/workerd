@@ -78,6 +78,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(
               kj::mv(text.message),
+              eventParameters.eventTimeoutMs,
               kj::mv(eventParameters.websocketId),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
@@ -85,6 +86,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(
               kj::mv(data.message),
+              eventParameters.eventTimeoutMs,
               kj::mv(eventParameters.websocketId),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
@@ -92,6 +94,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
           return lock.getGlobalScope().sendHibernatableWebSocketClose(
               kj::mv(close),
+              eventParameters.eventTimeoutMs,
               kj::mv(eventParameters.websocketId),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
@@ -99,6 +102,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         KJ_CASE_ONEOF(e, HibernatableSocketParams::Error) {
           return lock.getGlobalScope().sendHibernatableWebSocketError(
               kj::mv(e.error),
+              eventParameters.eventTimeoutMs,
               kj::mv(eventParameters.websocketId),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
@@ -155,6 +159,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
       KJ_UNREACHABLE;
     }
     message.setWebsocketId(kj::mv(eventParameters.websocketId));
+    KJ_IF_SOME(t, eventParameters.eventTimeoutMs) {
+      message.setEventTimeoutMs(t);
+    }
   }
 
   return req.send().then([](auto resp) {
@@ -213,6 +220,7 @@ HibernatableSocketParams HibernatableWebSocketCustomEventImpl::consumeParams() {
         break;
       }
     }
+    KJ_REQUIRE_NONNULL(eventParameters).setTimeout(p->getMessage().getEventTimeoutMs());
     return kj::mv(KJ_REQUIRE_NONNULL(eventParameters));
   }
   return kj::mv(KJ_REQUIRE_NONNULL(params.tryGet<HibernatableSocketParams>()));

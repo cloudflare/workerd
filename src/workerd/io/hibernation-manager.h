@@ -44,6 +44,13 @@ public:
 
   friend class api::HibernatableWebSocketEvent;
 
+  // Sets/Unset the maximum time in milliseconds that an hibernatable websocket event can run for.
+  // If the timeout is reached, event is canceled.
+  void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) override;
+
+  // Gets the event timeout if set.
+  kj::Maybe<uint32_t> getEventTimeout() override;
+
 private:
   class HibernatableWebSocket;
 
@@ -194,5 +201,6 @@ private:
   kj::TaskSet readLoopTasks;
   kj::Own<AutoRequestResponsePair> autoResponsePair = kj::heap<AutoRequestResponsePair>();
   kj::Maybe<TimerChannel&> timer;
+  kj::Maybe<uint32_t> eventTimeoutMs;
 };
 }; // namespace workerd

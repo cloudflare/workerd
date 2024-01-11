@@ -304,20 +304,26 @@ public:
   jsg::Promise<void> test(
       Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
 
+  kj::Promise<void> eventTimeoutPromise(uint32_t timeoutMs);
+  kj::Promise<void> setHibernatableEventTimeout(kj::Promise<void> event, kj::Maybe<uint32_t> eventTimeoutMs);
+
   void sendHibernatableWebSocketMessage(
       kj::OneOf<kj::String, kj::Array<byte>> message,
+      kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
   void sendHibernatableWebSocketClose(
       HibernatableSocketParams::Close close,
+      kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
   void sendHibernatableWebSocketError(
       kj::Exception e,
+      kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);

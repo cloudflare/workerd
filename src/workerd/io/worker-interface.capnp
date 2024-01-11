@@ -158,6 +158,7 @@ struct HibernatableWebSocketEventMessage {
     # TODO(someday): This could be an Exception instead of Text.
   }
   websocketId @6: Text;
+  eventTimeoutMs @7: UInt32;
 }
 
 struct HibernatableWebSocketResponse {

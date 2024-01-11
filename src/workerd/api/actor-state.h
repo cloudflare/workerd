@@ -422,6 +422,9 @@ public:
   // been committed yet.
   void abort(jsg::Optional<kj::String> reason);
 
+  // Sets and returns a new hibernation manager in an actor if there's none or returns the existing.
+  Worker::Actor::HibernationManager& maybeInitHibernationManager(Worker::Actor& actor);
+
   // Adds a WebSocket to the set attached to this object.
   // `ws.accept()` must NOT have been called separately.
   // Once called, any incoming messages will be delivered
@@ -460,6 +463,13 @@ public:
   // Get the last auto response timestamp or null
   kj::Maybe<kj::Date> getWebSocketAutoResponseTimestamp(jsg::Ref<WebSocket> ws);
 
+  // Sets or unsets the timeout for hibernatable websocket events, preventing the execution of
+  // the event from taking longer than the specified timeout, if set.
+  void setHibernatableWebSocketEventTimeout(jsg::Optional<uint32_t> timeoutMs);
+
+  // Get the currently set hibernatable websocket event timeout if set, or kj::none if not.
+  kj::Maybe<uint32_t> getHibernatableWebSocketEventTimeout();
+
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
@@ -470,6 +480,8 @@ public:
     JSG_METHOD(setWebSocketAutoResponse);
     JSG_METHOD(getWebSocketAutoResponse);
     JSG_METHOD(getWebSocketAutoResponseTimestamp);
+    JSG_METHOD(setHibernatableWebSocketEventTimeout);
+    JSG_METHOD(getHibernatableWebSocketEventTimeout);
 
     if (flags.getWorkerdExperimental()) {
       // TODO(someday): This currently exists for testing purposes only but maybe it could be

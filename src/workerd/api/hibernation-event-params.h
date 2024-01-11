@@ -32,6 +32,7 @@ namespace workerd::api {
 
     kj::OneOf<Text, Data, Close, Error> eventType;
     kj::String websocketId;
+    kj::Maybe<uint32_t> eventTimeoutMs;
 
     explicit HibernatableSocketParams(kj::String message, kj::String id)
         : eventType(Text { kj::mv(message) }), websocketId(kj::mv(id)) {}
@@ -46,6 +47,10 @@ namespace workerd::api {
 
     bool isCloseEvent() {
       return eventType.is<Close>();
+    }
+
+    void setTimeout(kj::Maybe<uint32_t> timeoutMs) {
+      eventTimeoutMs = kj::mv(timeoutMs);
     }
   };
 }; // namespace workerd::api
