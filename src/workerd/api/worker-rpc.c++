@@ -59,11 +59,11 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
   }
 
   auto callResult = builder.send();
-  auto customEventResult = worker->customEvent(kj::mv(event));
+  auto customEventResult = worker->customEvent(kj::mv(event)).attach(kj::mv(worker));
 
   // If customEvent throws, we'll cancel callResult and propagate the exception. Otherwise, we'll
   // just wait until callResult finishes.
-  co_return co_await callResult.exclusiveJoin(customEventResult
+  return callResult.exclusiveJoin(customEventResult
       .then([](auto&&) -> kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> {
         return kj::NEVER_DONE;
       }));
@@ -73,14 +73,15 @@ kj::Maybe<jsg::JsValue> WorkerRpc::getNamed(jsg::Lock& js, kj::StringPtr name) {
   // Named intercept is enabled, this means we won't default to legacy behavior.
   // The return value of the function is a promise that resolves once the remote returns the result
   // of the RPC call.
-  return jsg::JsValue(js.wrapReturningFunction(js.v8Context(), [this, methodName=kj::str(name)]
-      (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+  return jsg::JsValue(js.wrapPromiseReturningFunction(js.v8Context(),
+      [this, methodName=kj::str(name)]
+      (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> jsg::Promise<jsg::Value> {
         auto& ioContext = IoContext::current();
         // Wait for the RPC to resolve and then process the result.
-        return js.wrapSimplePromise(ioContext.awaitIo(js, sendWorkerRpc(js, methodName, args),
+        return ioContext.awaitIo(js, sendWorkerRpc(js, methodName, args),
             [](jsg::Lock& js, auto result) -> jsg::Value {
           return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
-        }));
+        });
       }
   ));
 }
