@@ -101,6 +101,10 @@ public:
 
   kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) override;
 
+  void setPendingClosure() override {
+    isPendingClosure = true;
+  }
+
 private:
   void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
   void doClose(jsg::Lock& js);
@@ -142,6 +146,10 @@ private:
   kj::OneOf<Unlocked, Locked, PipeLocked, ReaderLocked> readState = Unlocked();
   bool disturbed = false;
   bool readPending = false;
+
+  // Used by Sockets code to signal to the ReadableStream that it should error when read from
+  // because the socket is currently being closed.
+  bool isPendingClosure = false;
 
   friend class ReadableStream;
   friend class WritableStreamInternalController;
@@ -212,6 +220,10 @@ public:
   bool isErrored() override;
 
   inline bool isByteOriented() const override { return true; }
+
+  void setPendingClosure() override {
+    isPendingClosure = true;
+  }
 private:
 
   struct AbortOptions {
@@ -258,6 +270,10 @@ private:
   // WritableStream is closed.
   kj::Maybe<jsg::Promise<void>> maybeClosureWaitable;
   bool waitingOnClosureWritableAlready = false;
+
+  // Used by Sockets code to signal to the WritableStream that it should error when written to
+  // because the socket is currently being closed.
+  bool isPendingClosure = false;
 
   void increaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
   void decreaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);

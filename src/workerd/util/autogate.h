@@ -16,6 +16,8 @@ enum class AutogateKey {
   // Allow builtin modules to be wasm modules. Used for Python project.
   // Gates code in jsg/modules.h
   BUILTIN_WASM_MODULES,
+  // Enable new behaviour of Socket::close (specifically waiting for proxy result before closing).
+  SOCKETS_AWAIT_PROXY_BEFORE_CLOSE,
   NumOfKeys // Reserved for iteration.
 };
 
