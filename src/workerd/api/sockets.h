@@ -27,6 +27,12 @@ struct SocketAddress {
   JSG_STRUCT(hostname, port);
 };
 
+struct SocketInfo {
+  jsg::Optional<kj::String> remoteAddress;
+  jsg::Optional<kj::String> localAddress;
+  JSG_STRUCT(remoteAddress, localAddress);
+};
+
 typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
 
 struct SocketOptions {
@@ -48,7 +54,7 @@ public:
       jsg::PromiseResolverPair<void> closedPrPair, kj::Promise<void> watchForDisconnectTask,
       jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
       bool isSecureSocket, kj::String domain, bool isDefaultFetchPort,
-      jsg::PromiseResolverPair<void> openedPrPair)
+      jsg::PromiseResolverPair<SocketInfo> openedPrPair)
       : connectionStream(context.addObject(kj::mv(connectionStream))),
         readable(kj::mv(readableParam)), writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),
@@ -67,7 +73,7 @@ public:
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed() {
     return closedPromise;
   }
-  jsg::MemoizedIdentity<jsg::Promise<void>>& getOpened() {
+  jsg::MemoizedIdentity<jsg::Promise<SocketInfo>>& getOpened() {
     return openedPromise;
   }
 
@@ -99,6 +105,7 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
     JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
     JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
+    JSG_READONLY_PROTOTYPE_PROPERTY(opened, getOpened);
     JSG_METHOD(close);
     JSG_METHOD(startTls);
   }
@@ -125,8 +132,8 @@ private:
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;
   // This fulfiller is used to resolve the `openedPromise` below.
-  jsg::Promise<void>::Resolver openedResolver;
-  jsg::MemoizedIdentity<jsg::Promise<void>> openedPromise;
+  jsg::Promise<SocketInfo>::Resolver openedResolver;
+  jsg::MemoizedIdentity<jsg::Promise<SocketInfo>> openedPromise;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
@@ -191,7 +198,8 @@ void registerSocketsModule(
   api::SocketOptions,                \
   api::SocketAddress,                \
   api::TlsOptions,                   \
-  api::SocketsModule
+  api::SocketsModule,                \
+  api::SocketInfo
 
 // The list of sockets.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
