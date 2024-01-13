@@ -85,7 +85,6 @@ kj::Promise<R2Result> doR2HTTPGetRequest(
     kj::Maybe<kj::StringPtr> jwt, CompatibilityFlags::Reader flags);
 
 kj::Promise<R2Result> doR2HTTPPutRequest(
-    jsg::Lock& js,
     kj::Own<kj::HttpClient> client,
     kj::Maybe<R2PutValue> value,
     kj::Maybe<uint64_t> streamSize,
