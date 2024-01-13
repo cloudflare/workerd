@@ -1581,16 +1581,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
       // We want to support bidirectional streaming, so we actually don't want to wait for the
       // request to finish before we deliver the response to the app.
 
-      static auto const handleCancelablePump =
-          [](jsg::Lock& js,
-             IoContext& ioContext,
-             kj::Maybe<jsg::Ref<AbortSignal>>& signal,
-             jsg::Ref<ReadableStream>& jsBody,
-             kj::Own<WritableStreamSink> stream) -> kj::Promise<void> {
+      // jsBody is not used directly within the function but is passed in so that
+      // the coroutine frame keeps it alive.
+      static constexpr auto handleCancelablePump =
+          [](kj::Promise<void> promise, auto jsBody) -> kj::Promise<void> {
         try {
-          // Note that it is not safe to access any of the captures after the co_await.
-          co_await AbortSignal::maybeCancelWrap(signal,
-              ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), true)));
+          co_await promise;
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
           if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
@@ -1603,8 +1599,11 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
       };
 
       // TODO(someday): Allow deferred proxying for bidirectional streaming.
-      ioContext.addWaitUntil(handleCancelablePump(js, ioContext, signal, jsBody, kj::mv(stream)));
-
+      ioContext.addWaitUntil(handleCancelablePump(
+          AbortSignal::maybeCancelWrap(signal,
+              ioContext.waitForDeferredProxy(
+                  jsBody->pumpTo(js, kj::mv(stream), true))),
+          jsBody.addRef()));
     } else {
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, uint64_t(0));
     }
