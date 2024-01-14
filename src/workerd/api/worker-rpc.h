@@ -20,6 +20,11 @@
 
 namespace workerd::api {
 
+// TODO(soon): This size limit is loosely based on Cap'n Proto's 'traversalLimitInWords'.
+// JS RPC does not support streaming messages yet, and until it does we should prevent
+// large messages from being sent.
+constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 32 * 1024 * 1024;
+
 // A WorkerRpc object forwards JS method calls to the remote Worker/Durable Object over RPC.
 // Since methods are not known until runtime, WorkerRpc doesn't define any JS methods.
 // Instead, we use JSG_NAMED_INTERCEPT to intercept property accesses of names that are not known at
