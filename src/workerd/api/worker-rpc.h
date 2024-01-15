@@ -20,10 +20,12 @@
 
 namespace workerd::api {
 
-// TODO(soon): This size limit is loosely based on Cap'n Proto's 'traversalLimitInWords'.
-// JS RPC does not support streaming messages yet, and until it does we should prevent
-// large messages from being sent.
-constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 32 * 1024 * 1024;
+// For the same reason we limit the size of WebSocket messages to 1MB, we limit RPC payloads.
+// Very large messages would both cause problems for the underlying Cap'n Proto transport,
+// as well as put too much memory pressure on the isolate. Applications which need to move
+// large amounts of data should split the data into several smaller chunks transmitted through
+// separate calls.
+constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 
 // A WorkerRpc object forwards JS method calls to the remote Worker/Durable Object over RPC.
 // Since methods are not known until runtime, WorkerRpc doesn't define any JS methods.
