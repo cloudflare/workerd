@@ -52,9 +52,9 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
   // Note that we may fail to serialize some element, in which case this will throw back to JS.
   if (argv.size() > 0) {
     auto ser = serializeV8(js, js.arr(argv.asPtr()));
-    // TODO(soon): We will drop this requirement once we support streaming.
-    JSG_ASSERT(ser.size() < MAX_JS_RPC_MESSAGE_SIZE, Error,
-        "Serialized RPC request is too large: ", ser.size(), " <= ", MAX_JS_RPC_MESSAGE_SIZE);
+    JSG_ASSERT(ser.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
+        "Serialized RPC requests are limited to 1MiB, but the size of this request was: ",
+        ser.size(), " bytes.");
     builder.initSerializedArgs().setV8Serialized(kj::mv(ser));
   }
 
@@ -127,10 +127,9 @@ public:
       return ctx.awaitJs(js, js.toPromise(invokeFn(js, fn, handle, serializedArgs))
           .then(js, ctx.addFunctor([callContext](jsg::Lock& js, jsg::Value value) mutable {
         auto result = serializeV8(js, jsg::JsValue(value.getHandle(js)));
-        // TODO(soon): We will drop this requirement once we support streaming.
-        JSG_ASSERT(result.size() < MAX_JS_RPC_MESSAGE_SIZE, Error,
-            "Serialized RPC response is too large: ", result.size(),
-            " <= ", MAX_JS_RPC_MESSAGE_SIZE);
+        JSG_ASSERT(result.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
+            "Serialized RPC responses are limited to 1MiB, but the size of this response was: ",
+            result.size(), " bytes.");
         auto builder = callContext.initResults(capnp::MessageSize { result.size() / 8 + 8, 0 });
         builder.initResult().setV8Serialized(kj::mv(result));
       })));
