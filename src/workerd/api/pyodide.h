@@ -28,4 +28,15 @@ kj::StringPtr getPyodidePatch(kj::StringPtr name) {
   return _::lookupModule(kj::str("pyodide:internal/patches/", name));
 }
 
+capnp::Data::Reader getPyodideEmbeddedPackages() {
+  // TODO(later): strip the version from this.
+  auto moduleName = "pyodide:generated/pyodide_packages_unzipped_0.1.tar";
+  for (auto m : PYODIDE_BUNDLE->getModules()) {
+    if (m.getName() == moduleName) {
+      return m.getSrc();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace workerd

@@ -2,6 +2,7 @@ import { loadPyodide } from "pyodide:python";
 import { getMetadata } from "pyodide:current-bundle";
 import { lockFile } from "pyodide:package-lock.json";
 import { getPatches } from "pyodide:patches";
+import embeddedPackages from "pyodide:embedded_packages";
 
 function initializePackageIndex(pyodide, lockfile) {
   if (!lockfile.packages) {
@@ -47,6 +48,44 @@ function initializePackageIndex(pyodide, lockfile) {
   };
 }
 
+// These packages are currently embedded inside workerd and so don't need to
+// be separately installed.
+const EMBEDDED_PYTHON_PACKAGES = [
+  "tqdm",
+  "openai",
+  "numpy",
+  "SQLAlchemy",
+  "typing_extensions",
+  "PyYAML",
+  "aiohttp",
+  "aiosignal",
+  "frozenlist",
+  "async_timeout",
+  "attrs",
+  "six",
+  "charset_normalizer",
+  "multidict",
+  "yarl",
+  "idna",
+  "pydantic",
+  "certifi",
+  "langchain",
+  "anyio",
+  "tenacity",
+  "langsmith",
+  "dataclasses_json",
+  "jsonpatch",
+  "requests",
+  "sniffio",
+  "marshmallow",
+  "urllib3",
+  "typing_inspect",
+  "jsonpointer",
+  "mypy_extensions",
+  "micropip",
+  "packaging"
+];
+
 export default {
   async fetch(request, env) {
     // The metadata is a JSON-serialised WorkerBundle (defined in pipeline.capnp).
@@ -57,6 +96,7 @@ export default {
 
     // Loop through globals that define Python modules in the metadata passed to our Worker. For
     // each one, save it in Pyodide's file system.
+    let hasRequirements = false;
     const pythonRequirements = [];
     const micropipRequirements = [];
     for (const { name, value } of metadata.globals) {
@@ -67,25 +107,38 @@ export default {
       }
 
       if (value.pythonRequirement !== undefined) {
-        switch (name) {
-          case "langchain":
-            micropipRequirements.push("langchain<=0.0.339");
-            break;
-          case "openai":
-            micropipRequirements.push("openai<=0.28.1");
-            break;
-          default:
-            pythonRequirements.push(name);
+        hasRequirements = true;
+        if (!EMBEDDED_PYTHON_PACKAGES.includes(name)) {
+          pythonRequirements.push(name);
         }
       }
     }
 
-    if (micropipRequirements.length > 0) {
-      await pyodide.loadPackage("micropip");
-      await pyodide.loadPackage("ssl");
-      const micropip = pyodide.pyimport("micropip");
-      await micropip.install(micropipRequirements);
+    if (hasRequirements) {
+      const name = "pyodide_packages_unzipped_0.1.tar";
+      const path = `/lib/python3.11/site-packages/${name}`;
+      pyodide.FS.writeFile(path, new Uint8Array(embeddedPackages), {
+        encoding: 'binary',
+      });
 
+      pyodide.runPython(`
+      import tarfile
+      import os
+
+      tar_file_path = "${path}"
+      containing_dir = os.path.dirname(tar_file_path)
+      with tarfile.open(tar_file_path, 'r') as tar:
+        tar.extractall(containing_dir)
+      `)
+
+      const micropip = pyodide.pyimport("micropip");
+      if (micropipRequirements.length > 0) {
+        // Micropip and ssl packages are contained in the tarball which is extracted above. This means
+        // we should be able to load micropip directly now.
+        await micropip.install(micropipRequirements);
+      }
+
+      // Apply patches that enable some packages to work.
       const patches = getPatches();
       // TODO(EW-8055): Why does micropip.list not work?
       if (JSON.parse(micropip.freeze())["packages"]["aiohttp"] !== undefined) {
@@ -93,7 +146,9 @@ export default {
       }
     }
 
+
     await pyodide.loadPackage(pythonRequirements);
+
     const result = await pyodide.pyimport(metadata.mainModule).fetch(request);
 
     return result;

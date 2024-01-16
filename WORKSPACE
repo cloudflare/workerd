@@ -111,6 +111,14 @@ http_archive(
     build_file = "//:build/BUILD.pyodide",
 )
 
+http_archive(
+    name = "pyodide_packages",
+    sha256 = "f8fca2c4ecc09a57c86a2ed8d217e955d7599a83dad73fb989c86206706fdff6",
+    type = "zip",
+    urls = ["https://github.com/dom96/pyodide_packages/releases/download/v0.1/pyodide_packages_unzipped_0.1.tar.zip"],
+    build_file = "//:build/BUILD.pyodide_packages",
+)
+
 # ========================================================================================
 # Dawn
 #

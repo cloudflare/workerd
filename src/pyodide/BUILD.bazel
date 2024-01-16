@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@bazel_skylib//rules:copy_directory.bzl", "copy_directory")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
@@ -12,6 +13,12 @@ copy_file(
     name = "python_stdlib.zip@rule",
     src = "@pyodide//:pyodide/python_stdlib.zip",
     out = "generated/python_stdlib.zip",
+)
+
+copy_file(
+    name = "pyodide_packages_file.zip@rule",
+    src = "@pyodide_packages//:pyodide_packages_unzipped_0.1.tar",
+    out = "generated/pyodide_packages_unzipped_0.1.tar",
 )
 
 PRELUDE = """
@@ -39,6 +46,7 @@ wd_js_bundle(
     name = "pyodide",
     builtin_modules = [
         "python.js",
+        "generated/pyodide_packages_unzipped_0.1.tar"
     ] + glob(["internal/patches/*.py"]),
     import_name = "pyodide",
     internal_data_modules = ["generated/python_stdlib.zip"],
@@ -53,5 +61,6 @@ wd_js_bundle(
         "pyodide.asm.js@rule",
         "pyodide.asm.wasm@rule",
         "python_stdlib.zip@rule",
+        "pyodide_packages_file.zip@rule"
     ],
 )
