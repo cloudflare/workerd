@@ -225,15 +225,26 @@ public:
   static constexpr int READY_STATE_CLOSED = 3;
 
   // Creates the Native object when we recreate the WebSocket when waking from hibernation.
-  IoOwn<Native> initNative(IoContext& ioContext, kj::WebSocket& ws, bool closedOutgoingConn);
+  IoOwn<Native> initNative(
+      IoContext& ioContext,
+      kj::WebSocket& ws,
+      kj::Array<kj::StringPtr> tags,
+      bool closedOutgoingConn);
 
   // Some properties of the `api::WebSocket` that need to survive hibernation. When we initiate
   // the hibernation process, we want to move these properties out of the `api::WebSocket`.
+  // When we recreate the websocket due to activity, we move the properties back in.
   struct HibernationPackage {
     kj::Maybe<kj::String> url;
     kj::Maybe<kj::String> protocol;
     kj::Maybe<kj::String> extensions;
     kj::Maybe<kj::Array<byte>> serializedAttachment;
+
+    // `maybeTags` is only non-empty when we're recreating the api::WebSocket.
+    // We don't need to populate it when hibernating because the tags are already
+    // stored in the HibernationManager.
+    kj::Maybe<kj::Array<kj::StringPtr>> maybeTags;
+
     // True forever once the JS WebSocket calls `close()`.
     bool closedOutgoingConnection = false;
   };
@@ -277,9 +288,12 @@ public:
 
   // Extract the kj::WebSocket from this api::WebSocket (if applicable). The kj::WebSocket will be
   // owned elsewhere, but the api::WebSocket will retain a reference.
-  kj::Own<kj::WebSocket> acceptAsHibernatable();
+  kj::Own<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::StringPtr> tags);
 
   void tryReleaseNative(jsg::Lock& js);
+
+  // Accesses the tags of the hibernatable websocket.
+  kj::Array<kj::StringPtr> getHibernatableTags();
 
   enum class HibernatableReleaseState {
     // The way we release Hibernatable WebSockets slightly differs from regular WebSockets.
@@ -293,6 +307,7 @@ public:
   // our `Accepted` state to prepare the state to transition to `Released`.
   void initiateHibernatableRelease(jsg::Lock& js,
       kj::Own<kj::WebSocket> ws,
+      kj::Array<kj::String> tags,
       HibernatableReleaseState releaseState);
 
   bool awaitingHibernatableError();
@@ -455,6 +470,19 @@ private:
       // If we are "releasing", we may prevent the websocket from doing certain things like calling
       // send/close. We're more restrictive if we're delivering an Error than delivering a Close.
       HibernatableReleaseState releaseState = HibernatableReleaseState::NONE;
+
+      // There are two possible states for tagsRef:
+      //  1. kj::Array<kj::StringPtr>
+      //      - Tags are owned by the HibernationManager, we just reference them to save memory.
+      //  2. kj::Array<kj::String>
+      //      - We're going to be dispatching a Close or an Error event, i.e. the
+      //        HibernatableWebSocket is free to go away. We can no longer rely on tags stored in
+      //        the HibernationManager, so instead we copy the data into the api::WebSocket.
+      //
+      // We could just copy all tags into api::WebSocket everytime we reactivate/wake from
+      // hibernation, but it could add up to 2.56KB of memory for each websocket.
+      // With a maximum of 32k websockets, that could put a lot of memory pressure on the DO.
+      kj::OneOf<kj::Array<kj::StringPtr>, kj::Array<kj::String>> tagsRef;
     };
 
     explicit Accepted(kj::Own<kj::WebSocket> ws, Native& native, IoContext& context);
@@ -473,17 +501,17 @@ private:
       kj::WebSocket& operator*();
 
       kj::Maybe<kj::Own<kj::WebSocket>&> getIfNotHibernatable();
-
       kj::Maybe<Hibernatable&> getIfHibernatable();
+      kj::Array<kj::StringPtr> getHibernatableTags();
 
       // Transitions our Hibernatable websocket to a "Releasing" state.
       // The websocket will transition to `Released` when convenient.
       void initiateHibernatableRelease(jsg::Lock& js,
           kj::Own<kj::WebSocket> ws,
+          kj::Array<kj::String> tags,
           HibernatableReleaseState state);
 
       bool isAwaitingRelease();
-
       bool isAwaitingError();
 
     private:

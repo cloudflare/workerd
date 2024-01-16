@@ -23,18 +23,24 @@ public:
 
   static jsg::Ref<HibernatableWebSocketEvent> constructor(kj::String type) = delete;
 
-  // When we call a close or error event, we need to move the owned websocket back into the
-  // api::WebSocket to extend its lifetime. The way we obtain the websocket from the
-  // HibernationManager is somewhat fragile, so it's better if we group the reference and owned
-  // websocket together.
+  // When we call a close or error event, we need to move the owned websocket and the tags back into
+  // the api::WebSocket to extend their lifetimes. This is because the HibernatableWebSocket, which
+  // has owned these things for the entire duration of the connection, is free to go away after we
+  // dispatch the final event. JS may still want to access the underlying kj::WebSocket or the tags,
+  // so we have to transfer ownership to JS-land.
   struct ItemsForRelease {
     jsg::Ref<WebSocket> webSocketRef;
     kj::Own<kj::WebSocket> ownedWebSocket;
+    kj::Array<kj::String> tags;
 
-    explicit ItemsForRelease(jsg::Ref<WebSocket> ref, kj::Own<kj::WebSocket> owned);
+    explicit ItemsForRelease(
+        jsg::Ref<WebSocket> ref,
+        kj::Own<kj::WebSocket> owned,
+        kj::Array<kj::String> tags);
   };
 
-  // Only call this once (when transferring ownership of the websocket back to the api::WebSocket).
+  // Call this when transferring ownership of the kj::WebSocket and tags to the api::WebSocket.
+  //
   // Gets a reference to the api::WebSocket, and moves the owned kj::WebSocket out of the
   // HibernatableWebSocket whose event we are currently delivering.
   ItemsForRelease prepareForRelease(jsg::Lock& lock, kj::StringPtr websocketId);

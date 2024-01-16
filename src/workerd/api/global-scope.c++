@@ -513,6 +513,7 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(
   auto releasePackage = event->prepareForRelease(lock, websocketId);
   auto websocket = kj::mv(releasePackage.webSocketRef);
   websocket->initiateHibernatableRelease(lock, kj::mv(releasePackage.ownedWebSocket),
+      kj::mv(releasePackage.tags),
       api::WebSocket::HibernatableReleaseState::CLOSE);
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketClose) {
@@ -539,6 +540,7 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(
   auto releasePackage = event->prepareForRelease(lock, websocketId);
   auto& websocket = releasePackage.webSocketRef;
   websocket->initiateHibernatableRelease(lock, kj::mv(releasePackage.ownedWebSocket),
+      kj::mv(releasePackage.tags),
       WebSocket::HibernatableReleaseState::ERROR);
   jsg::Lock& js(lock);
 

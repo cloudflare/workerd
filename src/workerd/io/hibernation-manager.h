@@ -82,6 +82,17 @@ private:
     ~HibernatableWebSocket() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(HibernatableWebSocket);
 
+    // Returns the tags associated with this HibernatableWebSocket.
+    kj::Array<kj::StringPtr> getTags();
+
+    // Returns the tags associated with this HibernatableWebSocket.
+    // Note that this returns an array of Strings, unlike `getTags()`.
+    // Copying the strings each time tags are requested would be expensive,
+    // so we only do it when we're delivering a close/error event because
+    // we will be destroying the HibernatableWebSocket object,
+    // which the tags need to outlive.
+    kj::Array<kj::String> cloneTags();
+
     // Returns a reference to the active websocket. If the websocket is currently hibernating,
     // we have to unhibernate it first. The process moves values from the HibernatableWebSocket
     // to the api::WebSocket.

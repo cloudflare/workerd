@@ -14,9 +14,10 @@ HibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
     HibernationManagerImpl& manager)
     : tagItems(kj::heapArray<TagListItem>(tags.size())),
       activeOrPackage(kj::mv(websocket)),
-      // Extract's the kj::Own<kj::WebSocket> from api::WebSocket so the HibernatableWebSocket
-      // can own it. The api::WebSocket retains a reference to our ws.
-      ws(activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable()),
+      // The `ws` starts off empty because we need to set up our tagging infrastructure before
+      // calling api::WebSocket::acceptAsHibernatable(). We will transfer ownership of the
+      // kj::WebSocket prior to starting the readLoop.
+      ws(kj::none),
       manager(manager) {}
 
 HibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() noexcept(false) {
@@ -40,9 +41,28 @@ HibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() noexcept
   }
 }
 
+kj::Array<kj::StringPtr> HibernationManagerImpl::HibernatableWebSocket::getTags() {
+  auto tags = kj::heapArray<kj::StringPtr>(tagItems.size());
+  for (auto i: kj::indices(tagItems)) {
+    tags[i] = tagItems[i].tag;
+  }
+  return tags;
+}
+
+kj::Array<kj::String> HibernationManagerImpl::HibernatableWebSocket::cloneTags() {
+  auto tags = kj::heapArray<kj::String>(tagItems.size());
+  for (auto i: kj::indices(tagItems)) {
+    tags[i] = kj::str(tagItems[i].tag);
+  }
+  return tags;
+}
+
 jsg::Ref<api::WebSocket> HibernationManagerImpl::HibernatableWebSocket::getActiveOrUnhibernate(
     jsg::Lock& js) {
   KJ_IF_SOME(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
+    // Recreate our tags array for the api::WebSocket.
+    package.maybeTags = getTags();
+
     // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
     // that was stored in the corresponding HibernatableWebSocket. We also move autoResponsePromise
     // from the hibernation manager to api::websocket to prevent possible ws.send races.
@@ -119,6 +139,11 @@ void HibernationManagerImpl::acceptWebSocket(
     // in `tagToWs`.
     tagListItem.list = *list.get();
   }
+
+  // Before starting the readLoop, we need to move the kj::Own<kj::WebSocket> from the
+  // api::WebSocket into the HibernatableWebSocket and accept the api::WebSocket as "hibernatable".
+  refToHibernatable.ws = refToHibernatable.activeOrPackage.get<jsg::Ref<api::WebSocket>>()
+      ->acceptAsHibernatable(refToHibernatable.getTags());
 
   // Finally, we initiate the readloop for this HibernatableWebSocket and
   // give the task to the HibernationManager so it lives long.
