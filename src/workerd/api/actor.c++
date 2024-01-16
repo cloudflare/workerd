@@ -114,6 +114,26 @@ jsg::Ref<WorkerRpc> ColoLocalActorNamespace::get(kj::String actorId) {
       kj::mv(outgoingFactory), Fetcher::RequiresHostAndProtocol::YES, isInHouse);
 }
 
+jsg::Promise<void> ColoLocalActorNamespace::destroy(jsg::Lock& js, kj::String actorId) {
+  JSG_REQUIRE(actorId.size() > 0 && actorId.size() <= 2048, TypeError,
+              "Actor ID length must be in the range [1, 2048].");
+
+  auto& context = IoContext::current();
+
+  auto actorChannel =
+      context.getColoLocalActorChannel(channel, actorId, context.getCurrentTraceSpan());
+
+  // We now have a worker interface to work with.
+  auto workerInterface = actorChannel->startRequest({});
+
+  // The internal event code for actorDestroy events is 10.
+  auto actorDestroyEventCode = 10;
+  return context.awaitIo(
+      workerInterface
+          ->customEvent(kj::heap<api::ActorDestroyCustomEventImpl>(actorDestroyEventCode))
+          .ignoreResult());
+}
+
 // =======================================================================================
 
 kj::String DurableObjectId::toString() {

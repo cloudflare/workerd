@@ -29,9 +29,13 @@ public:
     : channel(channel) {}
 
   jsg::Ref<WorkerRpc> get(kj::String actorId);
+  jsg::Promise<void> destroy(jsg::Lock& js, kj::String actorId);
 
-  JSG_RESOURCE_TYPE(ColoLocalActorNamespace) {
+  JSG_RESOURCE_TYPE(ColoLocalActorNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
+    if (flags.getDurableObjectDestroy()){
+      JSG_METHOD(destroy);
+    }
   }
 
 private:
