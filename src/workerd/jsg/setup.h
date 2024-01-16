@@ -390,6 +390,11 @@ public:
             returningFunction) override {
       return jsgIsolate.wrapper->wrap(context, kj::none, kj::mv(returningFunction));
     }
+    v8::Local<v8::Function> wrapPromiseReturningFunction(v8::Local<v8::Context> context,
+      jsg::Function<jsg::Promise<jsg::Value>(
+          const v8::FunctionCallbackInfo<v8::Value>& info)> returningFunction) override {
+      return jsgIsolate.wrapper->wrap(context, kj::none, kj::mv(returningFunction));
+    }
     kj::String toString(v8::Local<v8::Value> value) override {
       return jsgIsolate.wrapper->template unwrap<kj::String>(
           v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());

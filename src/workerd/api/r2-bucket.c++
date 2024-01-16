@@ -532,7 +532,7 @@ R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
     cancelReader.cancel();
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
-    auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::mv(value), kj::none,
+    auto promise = doR2HTTPPutRequest(kj::mv(client), kj::mv(value), kj::none,
                                       kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
@@ -618,7 +618,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     auto requestJson = json.encode(requestBuilder);
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
-    auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson),
+    auto promise = doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson),
                                       path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
@@ -672,7 +672,7 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Ar
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, adminBucket);
-    auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson),
+    auto promise = doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson),
                                       path, jwt);
 
     return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {

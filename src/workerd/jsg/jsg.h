@@ -2102,6 +2102,9 @@ public:
   // pays attention to the return value.
   virtual v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
       jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)> returningFunction) = 0;
+  virtual v8::Local<v8::Function> wrapPromiseReturningFunction(v8::Local<v8::Context> context,
+      jsg::Function<jsg::Promise<jsg::Value>(
+          const v8::FunctionCallbackInfo<v8::Value>& info)> returningFunction) = 0;
   // TODO(later): See if we can easily combine wrapSimpleFunction and wrapReturningFunction
   // into one.
 

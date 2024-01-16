@@ -207,15 +207,20 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
                              "https://fake-host/message"_kjc,
                              headers, serialized.data.size());
 
-  auto pending = context.registerPendingEvent();
-  co_await req.body->write(serialized.data.begin(), serialized.data.size());
-  auto response = co_await req.response;
+  static constexpr auto handleSend = [](auto req, auto serialized, auto client)
+      -> kj::Promise<void> {
+    co_await req.body->write(serialized.data.begin(), serialized.data.size());
+    auto response = co_await req.response;
 
-  JSG_REQUIRE(response.statusCode == 200, Error,
-              kj::str("Queue send failed: ", response.statusText));
+    JSG_REQUIRE(response.statusCode == 200, Error,
+                kj::str("Queue send failed: ", response.statusText));
 
-  // Read and discard response body, otherwise we might burn the HTTP connection.
-  co_await response.body->readAllBytes().ignoreResult();
+    // Read and discard response body, otherwise we might burn the HTTP connection.
+    co_await response.body->readAllBytes().ignoreResult();
+  };
+
+  return handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client))
+      .attach(context.registerPendingEvent());
 };
 
 kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch) {
@@ -297,15 +302,19 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
                              "https://fake-host/batch"_kjc,
                              headers, body.size());
 
-  auto pendingEvent = context.registerPendingEvent();
-  co_await req.body->write(body.begin(), body.size());
-  auto response = co_await req.response;
+  static constexpr auto handleWrite = [](auto req, auto body, auto client) -> kj::Promise<void> {
+    co_await req.body->write(body.begin(), body.size());
+    auto response = co_await req.response;
 
-  JSG_REQUIRE(response.statusCode == 200, Error,
-              kj::str("Queue sendBatch failed: ", response.statusText));
+    JSG_REQUIRE(response.statusCode == 200, Error,
+                kj::str("Queue sendBatch failed: ", response.statusText));
 
-  // Read and discard response body, otherwise we might burn the HTTP connection.
-  co_await response.body->readAllBytes().ignoreResult();
+    // Read and discard response body, otherwise we might burn the HTTP connection.
+    co_await response.body->readAllBytes().ignoreResult();
+  };
+
+  return handleWrite(kj::mv(req), kj::mv(body), kj::mv(client))
+      .attach(context.registerPendingEvent());
 };
 
 QueueMessage::QueueMessage(jsg::Lock& js,

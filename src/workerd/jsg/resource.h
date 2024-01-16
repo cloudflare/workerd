@@ -20,6 +20,12 @@
 #include "meta.h"
 #include <workerd/jsg/modules.capnp.h>
 
+// The signature of SetAccessor changes in v8 12.1 to drop the v8::AccessControl
+// parameter.
+#if (V8_MAJOR_VERSION < 12) || ((V8_MAJOR_VERSION == 12) && (V8_MINOR_VERSION < 1))
+#define V8_PASS_ACCESS_CONTROL
+#endif
+
 namespace std {
   inline auto KJ_HASHCODE(const std::type_index& idx) {
     // Make std::type_index (which points to std::type_info) usable as a kj::HashMap key.
@@ -852,7 +858,9 @@ struct ResourceTypeBuilder {
         Gcb::callback,
         &SetterCallback<TypeWrapper, name, Setter, setter, isContext>::callback,
         v8::Local<v8::Value>(),
+#ifdef V8_PASS_ACCESS_CONTROL
         v8::AccessControl::DEFAULT,
+#endif
         Gcb::enumerable ? v8::PropertyAttribute::None : v8::PropertyAttribute::DontEnum);
   }
 
@@ -884,7 +892,9 @@ struct ResourceTypeBuilder {
         &Gcb::callback,
         nullptr,
         v8::Local<v8::Value>(),
+#ifdef V8_PASS_ACCESS_CONTROL
         v8::AccessControl::DEFAULT,
+#endif
         Gcb::enumerable ? v8::PropertyAttribute::ReadOnly
                         : static_cast<v8::PropertyAttribute>(
                             v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
@@ -923,7 +933,9 @@ struct ResourceTypeBuilder {
         &Gcb::callback,
         nullptr,
         v8::Local<v8::Value>(),
+#ifdef V8_PASS_ACCESS_CONTROL
         v8::AccessControl::DEFAULT,
+#endif
         static_cast<v8::PropertyAttribute>(
           v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
   }

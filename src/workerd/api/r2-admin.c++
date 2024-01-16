@@ -34,7 +34,7 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(jsg::Lock& js, kj::String name,
   createBucketBuilder.setBucket(name);
 
   auto requestJson = json.encode(requestBuilder);
-  auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none,
+  auto promise = doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none,
                                     kj::mv(requestJson), nullptr, jwt);
 
   return context.awaitIo(js, kj::mv(promise),
@@ -120,7 +120,7 @@ jsg::Promise<void> R2Admin::delete_(jsg::Lock& js, kj::String name,
   deleteBucketBuilder.setBucket(name);
 
   auto requestJson = json.encode(requestBuilder);
-  auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none,
+  auto promise = doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none,
                                     kj::mv(requestJson), nullptr, jwt);
 
   return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock&, R2Result r2Result) mutable {

@@ -1082,7 +1082,19 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
       js.terminateExecution();
     }
 
+    // Running the microtask queue can itself trigger a pending exception in the isolate.
+    v8::TryCatch tryCatch(workerLock.getIsolate());
+
     js.runMicrotasks();
+
+    if (tryCatch.HasCaught()) {
+      // It really shouldn't be possible for microtasks to throw regular exceptions.
+      // so if we got here it should be a terminal condition.
+      KJ_ASSERT(tryCatch.HasTerminated());
+      // If we do not reset here we end up with a dangling exception in the isolate that
+      // leads to an assert in v8 when the Lock is destroyed.
+      tryCatch.Reset();
+    }
   });
 
   v8::TryCatch tryCatch(workerLock.getIsolate());
