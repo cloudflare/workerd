@@ -524,22 +524,28 @@ int getHighWaterMark(const UnderlyingSource& underlyingSource,
 
 // It is possible for the controller state to be released synchronously while
 // we are in the middle of a read. When that happens we need to defer the actual
-// close/error state change until the read call is complete. ReadPendingScope
-// handles this for us. It is constructed when we start a read and destructed
-// synchronously when the call to read completes.
-template <typename C>
-struct ReadPendingScope {
-  jsg::Lock& js;
-  C& controller;
-  ReadPendingScope(jsg::Lock& js, C& controller)
-      : js(js), controller(controller) {
+// close/error state change until the read call is complete. deferControllerStateChange
+// handles this for us by making sure that pendingReadCount is
+// incremented until the read operation completes and deferring
+// a state change until it is 0
+template <typename Controller>
+jsg::Promise<ReadResult> deferControllerStateChange(
+    jsg::Lock& js,
+    Controller& controller,
+    kj::FunctionParam<jsg::Promise<ReadResult>()> readCallback) {
+  bool decrementCount = true;
+  // The readCallback and the controller.doClose(..) and controller.doError(...)
+  // methods, as well as the methods can trigger JavaScript errors to be thrown
+  // synchronously in some cases. We want to make sure non-fatal errors cause the
+  // stream to error and only fatal cases bubble up.
+  return js.tryCatch([&] {
     controller.pendingReadCount++;
-  }
-  KJ_DISALLOW_COPY_AND_MOVE(ReadPendingScope);
-  ~ReadPendingScope() noexcept(false) {
-    // When we have no pending reads left, we need to check to see if we have a
-    // pending close or errored state.
+    auto result = readCallback();
+    decrementCount = false;
     --controller.pendingReadCount;
+
+    KJ_ASSERT(!js.v8Isolate->IsExecutionTerminating());
+
     if (!controller.isReadPending()) {
       KJ_IF_SOME(state, controller.maybePendingState) {
         KJ_SWITCH_ONEOF(state) {
@@ -550,11 +556,18 @@ struct ReadPendingScope {
             controller.doError(js, errored.getHandle(js));
           }
         }
+        controller.maybePendingState = kj::none;
       }
-      controller.maybePendingState = kj::none;
     }
-  }
-};
+
+    return kj::mv(result);
+  }, [&](jsg::Value exception) -> jsg::Promise<ReadResult> {
+    if (decrementCount) --controller.pendingReadCount;
+    controller.doError(js, exception.getHandle(js));
+    controller.maybePendingState = kj::none;
+    return js.rejectedPromise<ReadResult>(kj::mv(exception));
+  });
+}
 
 // The ReadableStreamJsController provides the implementation of custom
 // ReadableStreams backed by a user-code provided Underlying Source. The implementation
@@ -704,7 +717,11 @@ private:
   friend ReadableLockImpl;
   friend ReadableLockImpl::PipeLocked;
 
-  friend struct ReadPendingScope<ReadableStreamJsController>;
+  template <typename Controller>
+  friend jsg::Promise<ReadResult> deferControllerStateChange(
+    jsg::Lock& js,
+    Controller& controller,
+    kj::FunctionParam<jsg::Promise<ReadResult>()> readCallback);
 };
 
 // The WritableStreamJsController provides the implementation of custom
@@ -2467,12 +2484,14 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // The ReadableStreamDefaultController does not support ByobOptions.
       // It should never happen, but let's make sure.
       KJ_ASSERT(maybeByobOptions == kj::none);
-      ReadPendingScope readPendingScope(js, *this);
-      return consumer->read(js);
+      return deferControllerStateChange(js, *this, [&]() mutable {
+        return consumer->read(js);
+      });
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      ReadPendingScope readPendingScope(js, *this);
-      return consumer->read(js, kj::mv(maybeByobOptions));
+      return deferControllerStateChange(js, *this, [&]() mutable {
+        return consumer->read(js, kj::mv(maybeByobOptions));
+      });
     }
   }
   KJ_UNREACHABLE;
@@ -2750,15 +2769,19 @@ public:
     }
   }
 
+  size_t pendingReadCount = 0;
+  kj::Maybe<kj::OneOf<StreamStates::Closed, StreamStates::Errored>> maybePendingState = kj::none;
+
+  bool isReadPending() const {
+    return pendingReadCount > 0;
+  }
+
 private:
   kj::Maybe<IoContext&> ioContext;
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable> state;
   uint64_t limit;
   kj::Vector<jsg::BackingStore> parts;
   uint64_t runningTotal = 0;
-
-  size_t pendingReadCount = 0;
-  kj::Maybe<kj::OneOf<StreamStates::Closed, StreamStates::Errored>> maybePendingState = kj::none;
 
   jsg::Promise<PartList> loop(jsg::Lock& js) {
     // It really shouldn't be possible for this to be called here given how we are sequencing
@@ -2783,12 +2806,13 @@ private:
       }
       KJ_CASE_ONEOF(readable, Readable) {
         const auto read = [&](auto& js) {
-          ReadPendingScope scope(js, *this);
-          if constexpr (kj::isSameType<T, ByteReadable>()) {
-            return readable->read(js, kj::none);
-          } else {
-            return readable->read(js);
-          }
+          return deferControllerStateChange(js, *this, [&]() mutable {
+            if constexpr (kj::isSameType<T, ByteReadable>()) {
+              return readable->read(js, kj::none);
+            } else {
+              return readable->read(js);
+            }
+          });
         };
 
         auto onSuccess = [this](auto& js, ReadResult result) {
@@ -2860,12 +2884,6 @@ private:
       maybePendingState = kj::mv(pending);
     }
   }
-
-  bool isReadPending() const {
-    return pendingReadCount > 0;
-  }
-
-  friend struct ReadPendingScope<AllReader<T>>;
 };
 
 template <typename T>
@@ -2972,7 +2990,7 @@ private:
             "Attempting to continue pump after isolate execution terminating.");
 
         const auto read = [&](auto& js) {
-          // There's no need to use a ReadPendingScope here because synchronous
+          // There's no need to use deferControllerStateChange here because synchronous
           // calls to doClose/doError will not impact the lifetime of the readable
           // state.
           if constexpr (kj::isSameType<T, ByteReadable>()) {
