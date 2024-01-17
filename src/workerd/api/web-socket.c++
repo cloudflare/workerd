@@ -739,7 +739,21 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
           reportError(js, KJ_EXCEPTION(DISCONNECTED, "WebSocket peer disconnected"));
         }
       } else if (native.closedIncoming && native.closedOutgoing) {
-        if (native.state.is<Accepted>()) {
+        if (awaitingHibernatableRelease()) {
+          // TODO(someday): These async races can be pretty complicated, and while it's good to have
+          // tests to make sure we're not broken, it would be nice to refactor this code eventually.
+
+          // Hibernatable WebSockets had a subtle race condition where one pump() promise would
+          // start right after a previous pump() completed, but before this continuation ran.
+          //
+          // This race prevented close messages from being sent from inside the webSocketClose()
+          // handler because prior to the CLOSE getting sent in the second pump(), the promise
+          // continuation following the first pump() would transition us from Accepted to Released,
+          // triggering the canceler and cancelling the outgoing CLOSE of the second pump() promise.
+          //
+          // For a more detailed explanation, see https://github.com/cloudflare/workerd/pull/1535.
+          tryReleaseNative(js);
+        } else if (native.state.is<Accepted>()) {
           // Native WebSocket no longer needed; release.
           native.state.init<Released>();
         } else if (native.state.is<Released>()) {
