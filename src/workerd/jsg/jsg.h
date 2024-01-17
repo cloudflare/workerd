@@ -2249,6 +2249,14 @@ public:
   void terminateExecution();
 
 private:
+  // Mark the jsg::Lock as being disallowed from being passed as a parameter into
+  // a kj promise coroutine. Note that this only blocks directly passing the Lock
+  // in. Types that have the Lock included as a member field won't be caught and
+  // should themselves be marked with KJ_DISALLOW_AS_COROUTINE_PARAM. Note also
+  // that this would not stop someone from passing the v8::Isolate reference into
+  // the coroutine and using `Lock::from(...)` to get the Lock. Don't do that.
+  // jsg::Lock should NOT be used within a kj promise coroutine.
+  KJ_DISALLOW_AS_COROUTINE_PARAM;
   friend class IsolateBase;
   template <typename TypeWrapper>
   friend class Isolate;

@@ -27,6 +27,11 @@ static_assert(!isGcVisitable<BoxBox>());
 static_assert(isGcVisitable<TestStruct>());
 static_assert(isGcVisitable<kj::Maybe<TestStruct>>());
 
+// jsg::Lock is not acceptable as a coroutine param
+static_assert(kj::_::isDisallowedInCoroutine<Lock>());
+static_assert(kj::_::isDisallowedInCoroutine<Lock&>());
+static_assert(kj::_::isDisallowedInCoroutine<Lock*>());
+
 // ========================================================================================
 
 V8System v8System;
