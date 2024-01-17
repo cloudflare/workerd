@@ -385,10 +385,17 @@ public:
   template <typename T>
   jsg::Promise<T> awaitIoWithInputLock(kj::Promise<T> promise);
 
+  template <typename T>
+  jsg::Promise<T> awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> promise);
   template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIoWithInputLock(jsg::Lock& js,
                                                              kj::Promise<T> promise,
                                                              Func&& func);
+  template <typename T, typename Func, typename ErrorFunc>
+  jsg::PromiseForResult<Func, T, true> awaitIoWithInputLock(jsg::Lock& js,
+                                                             kj::Promise<T> promise,
+                                                             Func&& func,
+                                                             ErrorFunc&& errorFunc);
 
   // DEPRECATED: Like awaitIo() but:
   // - Does not have a continuation function, so suffers from the problems described in
@@ -981,8 +988,26 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoWithInputLock(
   }
 }
 
+template <typename T, typename Func, typename ErrorFunc>
+jsg::PromiseForResult<Func, T, true> IoContext::awaitIoWithInputLock(
+    jsg::Lock& js, kj::Promise<T> promise, Func&& func, ErrorFunc&& errorFunc) {
+  if constexpr (jsg::isVoid<T>()) {
+    return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getInputLock())
+        .then(js, addFunctor(kj::fwd<Func>(func)), addFunctor(kj::fwd<ErrorFunc>(errorFunc)));
+  } else {
+    return awaitIoImpl<true>(promise.attach(registerPendingEvent()), getInputLock())
+        .then(js, addFunctorIoOwnParam<T, true>(kj::fwd<Func>(func)),
+                  addFunctor(kj::fwd<ErrorFunc>(errorFunc)));
+  }
+}
+
 template <typename T>
 jsg::Promise<T> IoContext::awaitIoWithInputLock(kj::Promise<T> promise) {
+  return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getInputLock());
+}
+
+template <typename T>
+jsg::Promise<T> IoContext::awaitIoWithInputLock(jsg::Lock&, kj::Promise<T> promise) {
   return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getInputLock());
 }
 
