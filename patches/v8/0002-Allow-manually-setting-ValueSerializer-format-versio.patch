@@ -1,4 +1,4 @@
-From a8f62f70ab91dc492f4f7ea5694543361ce5c328 Mon Sep 17 00:00:00 2001
+From 029d28b2a8470a26bb60c54781a0835910dcc583 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
@@ -28,10 +28,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 5703f0f3da3981af216a9057cee3d598481680b4..600fd75068e46e2160cb537c242b4449b6223dd6 100644
+index d5e17d0b9927a89c12013c5b0d3075f47751f48a..f59eed43d782fe434e4dcbcd7fb7cb4c5f2590b4 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3489,6 +3489,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3546,6 +3546,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  
@@ -43,10 +43,10 @@ index 5703f0f3da3981af216a9057cee3d598481680b4..600fd75068e46e2160cb537c242b4449
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 6cde1bbf19b559ac42434f59be9fe13bfbb7f9de..bda96357a9de989bbe9f241455d0e97ed1acc012 100644
+index 1b2eefa1ea67e0ea9f03641bf2e454a1046cb267..f0b1956253fe603ad6da30a41fb923078ef6bd78 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
-@@ -266,6 +266,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
+@@ -267,6 +267,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
      : isolate_(isolate),
        delegate_(delegate),
        zone_(isolate->allocator(), ZONE_NAME),
@@ -54,7 +54,7 @@ index 6cde1bbf19b559ac42434f59be9fe13bfbb7f9de..bda96357a9de989bbe9f241455d0e97e
        id_map_(isolate->heap(), ZoneAllocationPolicy(&zone_)),
        array_buffer_transfer_map_(isolate->heap(),
                                   ZoneAllocationPolicy(&zone_)) {
-@@ -285,9 +286,17 @@ ValueSerializer::~ValueSerializer() {
+@@ -286,9 +287,17 @@ ValueSerializer::~ValueSerializer() {
    }
  }
  
@@ -73,7 +73,7 @@ index 6cde1bbf19b559ac42434f59be9fe13bfbb7f9de..bda96357a9de989bbe9f241455d0e97e
  }
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
-@@ -1010,10 +1019,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
+@@ -1011,10 +1020,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
    WriteVarint(static_cast<uint8_t>(tag));
    WriteVarint(static_cast<uint32_t>(view->byte_offset()));
    WriteVarint(static_cast<uint32_t>(view->byte_length()));

@@ -1,0 +1,34 @@
+From a47d50088b890513103fdb048e452243415a6a84 Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Tue, 9 Jan 2024 07:34:27 -0800
+Subject: [PATCH] Replace ANNOTATE_MEMORY_IS_INITIALIZED with
+ ABSL_ANNOTATE_MEMORY_IS_INITIALIZED
+
+---
+ tcmalloc/internal/percpu_tcmalloc.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tcmalloc/internal/percpu_tcmalloc.h b/tcmalloc/internal/percpu_tcmalloc.h
+index 3abe1b7..1156c67 100644
+--- a/tcmalloc/internal/percpu_tcmalloc.h
++++ b/tcmalloc/internal/percpu_tcmalloc.h
+@@ -1100,7 +1100,7 @@ inline size_t TcmallocSlab<NumClasses>::PopBatch(size_t size_class,
+
+   // PopBatch is implemented in assembly, msan does not know that the returned
+   // batch is initialized.
+-  ANNOTATE_MEMORY_IS_INITIALIZED(batch, n * sizeof(batch[0]));
++  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(batch, n * sizeof(batch[0]));
+   TSANAcquireBatch(batch, n);
+   return n;
+ }
+@@ -1120,7 +1120,7 @@ inline auto TcmallocSlab<NumClasses>::AllocSlabs(
+   } else {
+     reused_slabs = static_cast<Slabs*>(alloc(size, kPhysicalPageAlign));
+     // MSan does not see writes in assembly.
+-    ANNOTATE_MEMORY_IS_INITIALIZED(reused_slabs, size);
++    ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(reused_slabs, size);
+   }
+   return {reused_slabs, can_reuse ? size : 0};
+ }
+--
+2.40.1

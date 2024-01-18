@@ -1,4 +1,4 @@
-From 2b3cf4416ac4112cfadab1adaadc3bef0ce8c471 Mon Sep 17 00:00:00 2001
+From 10c232c3282ceda1c144b4edf0d762a2289fa23f Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Tue, 23 May 2023 09:18:57 -0500
 Subject: Make v8::Locker automatically call isolate->Enter().
@@ -13,7 +13,7 @@ This is a major change in API semantics, however, which makes it unlikely to be 
  1 file changed, 2 insertions(+)
 
 diff --git a/src/execution/v8threads.cc b/src/execution/v8threads.cc
-index 9d4437c75e62cd003f957bdf7147c30c96a7d010..6cca4773929fc526d03cb64b0a448925f8f3f813 100644
+index 4205817b73f3d954be4109d91721037b3aa2d4ee..91e1a43d305d06fdf07fccdf80eb07e86115619b 100644
 --- a/src/execution/v8threads.cc
 +++ b/src/execution/v8threads.cc
 @@ -40,6 +40,7 @@ void Locker::Initialize(v8::Isolate* isolate) {

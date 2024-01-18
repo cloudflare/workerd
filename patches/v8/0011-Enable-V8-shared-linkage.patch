@@ -1,4 +1,4 @@
-From 4e589192991d3ce2358dc78b27267dd883d8471b Mon Sep 17 00:00:00 2001
+From ab92e41e703b846b461befaf8af2f8be706c4065 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage
@@ -9,10 +9,10 @@ Subject: Enable V8 shared linkage
  2 files changed, 6 insertions(+), 4 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index cb12609f12374905c31892534cf9d44d555202bd..4ec995b8140f39e3b1ec25f7e8fc487262067e66 100644
+index be82fc2e20a10ded7cd8a949af0533a74290d49d..fab5eb2419f1e6eee3d05c510bc2cb8637d19c83 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1416,7 +1416,6 @@ filegroup(
+@@ -1421,7 +1421,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
@@ -20,7 +20,7 @@ index cb12609f12374905c31892534cf9d44d555202bd..4ec995b8140f39e3b1ec25f7e8fc4872
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3523,6 +3522,10 @@ filegroup(
+@@ -3555,6 +3554,10 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -31,7 +31,7 @@ index cb12609f12374905c31892534cf9d44d555202bd..4ec995b8140f39e3b1ec25f7e8fc4872
      ],
  )
  
-@@ -3975,6 +3978,8 @@ v8_library(
+@@ -4009,6 +4012,8 @@ v8_library(
      name = "v8",
      srcs = [
          ":v8_inspector_files",
