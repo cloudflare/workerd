@@ -1104,6 +1104,16 @@ private:
   v8::Local<v8::Context> context;
 };
 
+class ModuleRegistryBase {
+public:
+  virtual ~ModuleRegistryBase() noexcept(false) {}
+  virtual void attachToIsolate(Lock& js, const CompilationObserver& observer) = 0;
+};
+
+struct NewContextOptions {
+  kj::Maybe<ModuleRegistryBase&> newModuleRegistry = kj::none;
+};
+
 // TypeWrapper mixin for resource types (application-defined C++ classes declared with a
 // JSG_RESOURCE_TYPE block).
 template <typename TypeWrapper, typename T>
@@ -1210,6 +1220,7 @@ public:
   template <typename... Args>
   JsContext<T> newContext(
       jsg::Lock& js,
+      jsg::NewContextOptions options,
       CompilationObserver& compilationObserver,
       T*, Args&&... args) {
     // Construct an instance of this type to be used as the Javascript global object, creating
@@ -1257,9 +1268,12 @@ public:
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
 
-    auto moduleRegistry = ModuleRegistryImpl<TypeWrapper>::install(
-        isolate, context, compilationObserver);
-    ptr->setModuleRegistry(kj::mv(moduleRegistry));
+    KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
+      newModuleRegistry.attachToIsolate(js, compilationObserver);
+    } else {
+      ptr->setModuleRegistry(ModuleRegistryImpl<TypeWrapper>::install(
+          isolate, context, compilationObserver));
+    }
 
     return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
       polyfillSymbols(js, context);
