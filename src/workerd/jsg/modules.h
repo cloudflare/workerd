@@ -233,7 +233,7 @@ public:
         jsg::Ref<jsg::Object>& moduleContext,
         kj::StringPtr name,
         kj::StringPtr content) {
-      v8::ScriptOrigin origin(lock.v8Isolate, v8StrIntern(lock.v8Isolate, name));
+      v8::ScriptOrigin origin(v8StrIntern(lock.v8Isolate, name));
       v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
       auto context = lock.v8Context();
       auto handle = lock.wrap(context, moduleContext.addRef());
@@ -266,7 +266,7 @@ public:
         Ref<CommonJsModuleContext>& moduleContext,
         kj::StringPtr name,
         kj::StringPtr content) {
-      v8::ScriptOrigin origin(lock.v8Isolate, v8StrIntern(lock.v8Isolate, name));
+      v8::ScriptOrigin origin(v8StrIntern(lock.v8Isolate, name));
       v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
       auto context = lock.v8Context();
       auto handle = lock.wrap(context, moduleContext.addRef());

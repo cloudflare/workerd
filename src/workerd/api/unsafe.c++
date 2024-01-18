@@ -30,7 +30,7 @@ UnsafeEval::newFunction(jsg::Lock& js, jsg::JsString script, jsg::Optional<kj::S
   KJ_DEFER(js.setAllowEval(false));
 
   auto nameStr = js.str(getName(name, ANON_STR));
-  v8::ScriptOrigin origin(js.v8Isolate, nameStr);
+  v8::ScriptOrigin origin(nameStr);
   v8::ScriptCompiler::Source source(script, origin);
 
   auto argNames = KJ_MAP(arg, args) {
@@ -79,7 +79,7 @@ UnsafeEval::newAsyncFunction(jsg::Lock& js, jsg::JsString script, jsg::Optional<
   prepared = v8::String::Concat(js.v8Isolate, prepared, js.strIntern(";"));
   prepared = v8::String::Concat(js.v8Isolate, prepared, nameStr);
 
-  v8::ScriptOrigin origin(js.v8Isolate, nameStr);
+  v8::ScriptOrigin origin(nameStr);
   v8::ScriptCompiler::Source source(prepared, origin);
 
   auto compiled = jsg::check(v8::ScriptCompiler::Compile(js.v8Context(), &source));
