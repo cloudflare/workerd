@@ -14,6 +14,7 @@ def _capnp_embed_impl(ctx):
 _capnp_embed = rule(
   attrs = {
     "src": attr.label(allow_single_file = True),
+    "deps": attr.label_list(),
   },
   implementation = _capnp_embed_impl
 )
@@ -23,6 +24,7 @@ def capnp_embed(
   src,
   visibility = None,
   target_compatible_with = None,
+  deps = [],
 ):
   """
   Bazel rule to include `src` in a Cap'n Proto search path for embedding.
@@ -34,7 +36,8 @@ def capnp_embed(
     name = name + "_gen",
     src = src,
     visibility = visibility,
-    target_compatible_with = target_compatible_with
+    target_compatible_with = target_compatible_with,
+    deps = deps
   )
   native.cc_library(
     name = name

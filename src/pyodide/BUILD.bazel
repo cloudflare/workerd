@@ -1,7 +1,58 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("@bazel_skylib//rules:copy_directory.bzl", "copy_directory")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "capnp_provider")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
+load("//:build/capnp_embed.bzl", "capnp_embed")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
+
+
+# copy_file(
+#     name = "pyodide_packages_file.zip@rule",
+#     src = "@pyodide_packages//:pyodide_packages_unzipped_0.1.tar",
+#     out = "pyodide_packages_unzipped_0.1.tar",
+# )
+
+copy_file(
+    name = "t1",
+    src = "@pyodide_packages//:pyodide_packages_unzipped_0.1.tar",
+    out = "generated/pyodide_packages_unzipped_0.1.tar",
+)
+
+copy_file(
+    name = "t2",
+    src = "packages-tar.capnp",
+    out = "generated/packages-tar.capnp",
+)
+
+# capnp_provider(
+#     name = "lib_tar_gen",
+#     includes = ["generated/"],
+#     inputs = ["generated/pyodide_packages_unzipped_0.1.tar"],
+#     src_prefix = "",
+# )
+
+capnp_embed(
+    name = "t3",
+    src = "generated/pyodide_packages_unzipped_0.1.tar",
+    deps = [ "t1" ]
+)
+
+capnp_embed(
+    name = "t4",
+    src = "generated/packages-tar.capnp",
+    deps = [ "t2"]
+)
+
+
+cc_capnp_library(
+    name = "pyodide-packages-tar_capnp",
+    srcs = ["generated/packages-tar.capnp"],
+    visibility = ["//visibility:public"],
+    deps = [":t3", ":t4"]
+)
 
 copy_file(
     name = "pyodide.asm.wasm@rule",
@@ -15,11 +66,7 @@ copy_file(
     out = "generated/python_stdlib.zip",
 )
 
-copy_file(
-    name = "pyodide_packages_file.zip@rule",
-    src = "@pyodide_packages//:pyodide_packages_unzipped_0.1.tar",
-    out = "generated/pyodide_packages_unzipped_0.1.tar",
-)
+
 
 PRELUDE = """
 import { newWasmModule, monotonicDateNow, wasmInstantiate } from "pyodide-internal:builtin_wrappers";
@@ -45,8 +92,7 @@ expand_template(
 wd_js_bundle(
     name = "pyodide",
     builtin_modules = [
-        "python.js",
-        "generated/pyodide_packages_unzipped_0.1.tar"
+        "python.js"
     ] + glob(["internal/patches/*.py"]),
     import_name = "pyodide",
     internal_data_modules = ["generated/python_stdlib.zip"],
@@ -61,6 +107,6 @@ wd_js_bundle(
         "pyodide.asm.js@rule",
         "pyodide.asm.wasm@rule",
         "python_stdlib.zip@rule",
-        "pyodide_packages_file.zip@rule"
+        # "pyodide_packages_file.zip@rule"
     ],
 )

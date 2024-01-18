@@ -74,6 +74,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_HTTP_ISOLATE_TYPES,
   EW_SOCKETS_ISOLATE_TYPES,
   EW_KV_ISOLATE_TYPES,
+  EW_PYODIDE_ISOLATE_TYPES,
   EW_QUEUE_ISOLATE_TYPES,
   EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES,
   EW_R2_PUBLIC_BETA_ISOLATE_TYPES,
@@ -408,16 +409,6 @@ void WorkerdApi::compileModules(
 
         auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
         modules->add(patchesModuleName, kj::mv(KJ_REQUIRE_NONNULL(info)));
-      }
-      // Inject pyodide python patches.
-      auto embeddedPackagesName = kj::Path::parse("pyodide:embedded_packages");
-      {
-        capnp::MallocMessageBuilder message;
-        auto module = message.getRoot<config::Worker::Module>();
-        module.setData(getPyodideEmbeddedPackages());
-
-        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
-        modules->add(embeddedPackagesName, kj::mv(KJ_REQUIRE_NONNULL(info)));
       }
     }
 
