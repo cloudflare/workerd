@@ -8,6 +8,10 @@
 
 namespace workerd::jsg {
 
+#ifndef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+#error "V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA must be defined"
+#endif
+
 // Provides for basic internal async context tracking. Eventually, it is expected that
 // this will be provided by V8 assuming that the AsyncContext proposal advances through
 // TC-39. For now, however, we implement a model that is similar but not quite identical

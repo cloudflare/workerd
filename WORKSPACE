@@ -164,12 +164,19 @@ http_archive(
 #   old for tcmalloc. Absurdly, Bazel simply ignores later attempts to define the same repo name,
 #   rather than erroring out. Thus this leads to confusing compiler errors in tcmalloc complaining
 #   that ABSL_ATTRIBUTE_PURE_FUNCTION is not defined.
-http_archive(
+new_git_repository(
     name = "com_google_absl",
-    sha256 = "3a889795d4dede1094572d98a3a85e9484573a83282a72a6491eae853af07d08",
-    strip_prefix = "abseil-abseil-cpp-861e53c",
-    type = "tgz",
-    url = "https://github.com/abseil/abseil-cpp/tarball/861e53c8f075c8c4d67bd4c82217c57239fc97cf",
+    remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
+    commit = "0764ad493e54a79c7e3e02fc3412ef55b4835b9e",
+    shallow_since = "1701253303 -0800"
+)
+bind(
+    name = "absl_flat_hash_set",
+    actual = "@com_google_absl//absl/container:flat_hash_set",
+)
+bind(
+    name = "absl_flat_hash_map",
+    actual = "@com_google_absl//absl/container:flat_hash_map",
 )
 
 # tcmalloc requires this "rules_fuzzing" package. Its build files fail analysis without it, even
@@ -196,6 +203,10 @@ http_archive(
     strip_prefix = "google-tcmalloc-ca82471",
     type = "tgz",
     url = "https://github.com/google/tcmalloc/tarball/ca82471188f4832e82d2e77078ecad66f4c425d5",
+    patches = [
+        "//:patches/tcmalloc/0001-Replace-ANNOTATE_MEMORY_IS_INITIALIZED-with-ABSL_ANN.patch",
+    ],
+    patch_args = ["-p1"],
 )
 
 # ========================================================================================
@@ -403,11 +414,12 @@ http_archive(
         "//:patches/v8/0011-Enable-V8-shared-linkage.patch",
         "//:patches/v8/0012-Fix-V8-ICU-build.patch",
         "//:patches/v8/0013-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
+        "//:patches/v8/0014-Always-enable-continuation-preserved-data-in-the-bui.patch",
     ],
-    sha256 = "6a2d63f1d877e8065d63ba3125e6c4d1fde2b62e46048dab68fe6ea8baca5b27",
-    strip_prefix = "v8-12.0.267.14",
+    sha256 = "45e0ba667fb1a86f834d6a92b513c43fcfdc672525c8a5a60bfdb56eec137d4a",
+    strip_prefix = "v8-12.1.285.26",
     type = "tgz",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.0.267.14.tar.gz",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.1.285.26.tar.gz",
 )
 
 new_git_repository(

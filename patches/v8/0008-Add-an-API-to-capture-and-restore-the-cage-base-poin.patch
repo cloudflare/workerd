@@ -1,4 +1,4 @@
-From ac99498f6339d5610bd1c969d3b80286523083e6 Mon Sep 17 00:00:00 2001
+From 44878c36ee87d51dadd3815bf5de749d05cfe189 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Tue, 23 May 2023 09:24:11 -0500
 Subject: Add an API to capture and restore the cage base pointers.
@@ -60,7 +60,7 @@ index 22b7a8767a83a702a2601bdfd4c0f71206df0ad5..fee48faffe82400595dca17197c5bbee
  
  #endif  // INCLUDE_V8_LOCKER_H_
 diff --git a/src/execution/v8threads.cc b/src/execution/v8threads.cc
-index 6cca4773929fc526d03cb64b0a448925f8f3f813..c8ec9ee02356eba8977ef14a9de42ef9c23cb69e 100644
+index 91e1a43d305d06fdf07fccdf80eb07e86115619b..dfe5da8f6bdc5a30d65b7f31d0e3a42fbe49d22b 100644
 --- a/src/execution/v8threads.cc
 +++ b/src/execution/v8threads.cc
 @@ -6,6 +6,7 @@
@@ -71,7 +71,7 @@ index 6cca4773929fc526d03cb64b0a448925f8f3f813..c8ec9ee02356eba8977ef14a9de42ef9
  #include "src/debug/debug.h"
  #include "src/execution/execution.h"
  #include "src/execution/isolate-inl.h"
-@@ -330,4 +331,35 @@ void ThreadManager::IterateArchivedThreads(ThreadVisitor* v) {
+@@ -329,4 +330,35 @@ void ThreadManager::IterateArchivedThreads(ThreadVisitor* v) {
  ThreadId ThreadManager::CurrentId() { return ThreadId::Current(); }
  
  }  // namespace internal

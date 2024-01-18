@@ -1,4 +1,4 @@
-From 333416eabea56d35811db3f93dd4309ec03675da Mon Sep 17 00:00:00 2001
+From 42ae0d533772f9aae98f0f17454802e2b2af3bc0 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Tue, 11 Apr 2023 14:41:31 -0400
 Subject: Disable bazel whole-archive build
