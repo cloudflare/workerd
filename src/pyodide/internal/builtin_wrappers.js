@@ -110,5 +110,5 @@ export async function wasmInstantiate(module, imports) {
     module = UnsafeEval.newWasmModule(module);
   }
   const instance = new WebAssembly.Instance(module, imports);
-  return {module, instance};
+  return { module, instance };
 }

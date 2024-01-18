@@ -29,6 +29,7 @@ The present approach is just the fastest way to get something working.
 ## What's happening here?
 
 Pyodide's distribution consists of:
+
 1. The main "emscripten binary" which is `pyodide.asm.js` and `pyodide.asm.wasm`
 2. A loader `pyodide.js`
 3. The Python + Pyodide stdlib `python_stdlib.zip`
