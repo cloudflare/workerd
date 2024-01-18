@@ -101,6 +101,24 @@ async function test(storage) {
   assert.throws(() => sql.exec(''), 'SQL code did not contain a statement')
   assert.throws(() => sql.exec(';'), 'SQL code did not contain a statement')
 
+  // Queries with comments
+  {
+    const result = [...sql.exec('--a comment \nSELECT 123;')]
+    assert.equal(result.length, 1)
+    assert.equal(result[0]['123'], 123)
+  }
+  {
+    const result = [...sql.exec('SELECT 123;\n-- a meaningful comment\nSELECT 456;')]
+    assert.equal(result.length, 2)
+    assert.equal(result[0]['123'], 123)
+    assert.equal(result[1]['456'], 456)
+  }
+  {
+    const result = [...sql.exec('SELECT 123;\n-- a meaningful comment')]
+    assert.equal(result.length, 1)
+    assert.equal(result[0]['123'], 123)
+  }
+
   // Invalid statements
   assert.throws(() => sql.exec('SELECT ;'), /syntax error at offset 7/)
   assert.throws(() => sql.exec('SELECT -;'), /syntax error at offset 8/)
