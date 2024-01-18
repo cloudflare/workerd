@@ -86,10 +86,45 @@ const EMBEDDED_PYTHON_PACKAGES = [
   "packaging"
 ];
 
+function transformMetadata(metadata) {
+  // Workerd's metadata is slightly different. We transform it here to the format used upstream.
+  if (metadata.globals !== undefined) {
+    return metadata;
+  }
+
+  var metadata = metadata;
+  metadata.globals = [];
+  for (const module of metadata.modules) {
+    if (metadata.mainModule === undefined) {
+      // The first module is the main module.
+      metadata.mainModule = module.name;
+    }
+
+    if (module.pythonModule !== undefined) {
+      metadata.globals.push({
+        name: module.name,
+        value: {
+          pythonModule: module.pythonModule
+        }
+      })
+    }
+
+    if (module.pythonRequirement !== undefined) {
+      metadata.globals.push({
+        name: module.name,
+        value: {
+          pythonRequirement: module.pythonRequirement
+        }
+      })
+    }
+  }
+  return metadata;
+}
+
 export default {
   async fetch(request, env) {
     // The metadata is a JSON-serialised WorkerBundle (defined in pipeline.capnp).
-    const metadata = getMetadata();
+    const metadata = transformMetadata(getMetadata());
 
     const pyodide = await loadPyodide();
     initializePackageIndex(pyodide, lockFile);
@@ -149,8 +184,6 @@ export default {
 
     await pyodide.loadPackage(pythonRequirements);
 
-    const result = await pyodide.pyimport(metadata.mainModule).fetch(request);
-
-    return result;
+    return await pyodide.pyimport(metadata.mainModule).fetch(request);
   },
 };

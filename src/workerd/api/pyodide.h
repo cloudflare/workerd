@@ -1,42 +1,26 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
 #include <pyodide/pyodide.capnp.h>
 #include <kj/debug.h>
+#include <workerd/server/workerd.capnp.h>
 
-namespace workerd {
+namespace workerd::api::pyodide {
 
-namespace _ {
-kj::StringPtr lookupModule(kj::StringPtr name) {
-  for (auto m : PYODIDE_BUNDLE->getModules()) {
-    if (m.getName() == name) {
-      return m.getSrc().asChars().begin();
-    }
-  }
-  KJ_UNREACHABLE;
-}
-}
+kj::StringPtr getPyodideBootstrap();
 
-kj::StringPtr getPyodideBootstrap() {
-  return _::lookupModule("pyodide-internal:pyodide-bootstrap");
-}
+kj::StringPtr getPyodideLock();
 
-kj::StringPtr getPyodideLock() {
-  return _::lookupModule("pyodide-internal:pyodide-lock");
-}
+kj::StringPtr getPyodidePatch(kj::StringPtr name);
 
-kj::StringPtr getPyodidePatch(kj::StringPtr name) {
-  return _::lookupModule(kj::str("pyodide:internal/patches/", name));
-}
+kj::String generatePyodideMetadata(server::config::Worker::Reader conf);
 
-capnp::Data::Reader getPyodideEmbeddedPackages() {
-  // TODO(later): strip the version from this.
-  auto moduleName = "pyodide:generated/pyodide_packages_unzipped_0.1.tar";
-  for (auto m : PYODIDE_BUNDLE->getModules()) {
-    if (m.getName() == moduleName) {
-      return m.getSrc();
-    }
-  }
-  KJ_UNREACHABLE;
-}
+kj::String generatePyodidePatches();
+
+bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
+
+capnp::Data::Reader getPyodideEmbeddedPackages();
 
 }  // namespace workerd

@@ -262,6 +262,15 @@ struct Worker {
       # (a) allows for importing Node.js-compat built-ins without the node: specifier-prefix
       # (b) exposes the subset of common Node.js globals such as process, Buffer, etc that
       #     we implement in the workerd runtime.
+
+      pythonModule @8 :Text;
+      # A Python module. All bundles containing this value type are converted into a JS/WASM Worker
+      # Bundle prior to execution.
+
+      pythonRequirement @9 :Text;
+      # A Python package that is required by this bundle. The package must be supported by
+      # Pyodide (https://pyodide.org/en/stable/usage/packages-in-pyodide.html). All packages listed
+      # will be installed prior to the execution of the worker.
     }
   }
 
