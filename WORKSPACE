@@ -176,7 +176,6 @@ git_repository(
     name = "com_google_absl",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
     commit = "0764ad493e54a79c7e3e02fc3412ef55b4835b9e",
-    shallow_since = "1701253303 -0800"
 )
 bind(
     name = "absl_flat_hash_set",
@@ -399,8 +398,11 @@ npm_repositories()
 # Note that googlesource does not generate tarballs deterministically, so we cannot use
 # http_archive: https://github.com/google/gitiles/issues/84
 #
-# It would seem that googlesource would rather we use git protocol (ideally with shallow clones).
+# It would seem that googlesource would rather we use git protocol.
 # Fine, we can do that.
+#
+# We previously used shallow_since for our git-based dependencies, but this may actually be
+# harmful: https://github.com/bazelbuild/bazel/issues/12857
 #
 # There is an official mirror for V8 itself on GitHub, but not for dependencies like zlib (Chromium
 # fork), icu (Chromium fork), and trace_event, so we still have to use git for them.
@@ -474,7 +476,6 @@ git_repository(
     build_file = "@v8//:bazel/BUILD.trace_event_common",
     commit = "29ac73db520575590c3aceb0a6f1f58dda8934f6",
     remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
-    shallow_since = "1695357423 -0700",
 )
 
 # This sets up a hermetic python3, rather than depending on what is installed.
