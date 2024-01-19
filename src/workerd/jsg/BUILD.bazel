@@ -179,7 +179,6 @@ wd_cc_capnp_library(
 wd_cc_capnp_library(
     name = "rtti_test_capnp",
     srcs = ["rtti-test.capnp"],
-    data = glob(["rtti-test-*.js"]),
     deps = [":modules_capnp"],
 )
 
