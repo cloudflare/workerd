@@ -361,4 +361,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # The client stub is currently guarded by the experimental flag, however, we don't want to let
   # experimental clients call JS methods over RPC if the Worker receiving the request hasn't
   # explicitly exposed its methods to RPC.
+
+  noImportScripts @40 :Bool
+      $compatEnableFlag("no_global_importscripts")
+      $compatDisableFlag("global_importscripts")
+      $compatEnableDate("2024-03-04");
+  # Removes the non-implemented importScripts() function from the global scope.
 }
