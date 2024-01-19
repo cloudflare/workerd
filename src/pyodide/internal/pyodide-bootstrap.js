@@ -150,7 +150,7 @@ export default {
     }
 
     if (hasRequirements) {
-      const name = "pyodide_packages_unzipped_0.1.tar";
+      const name = "pyodide_packages_unzipped_0.2.tar";
       const path = `/lib/python3.11/site-packages/${name}`;
       pyodide.FS.writeFile(path, new Uint8Array(embeddedPackages), {
         encoding: 'binary',
