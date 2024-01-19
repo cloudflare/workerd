@@ -84,14 +84,4 @@ To update the version of V8 used by workerd, the steps are:
      bazel test //...
      ```
 
-    You may see advice in the build output about shallow-since dates for the V8 related
-    git repositories:
-
-    ```sh
-    DEBUG: Rule 'v8' indicated that a canonical reproducible form can be obtained by modifying arguments shallow_since = "1683898886 +0000"
-    ```
-
-    You can follow the advice in these messages and update the shallow-since dates for
-    the V8 related git repositories in the WORKSPACE file.
-
 12. Commit your workerd changes and push them for review.
