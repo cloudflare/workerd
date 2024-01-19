@@ -18,13 +18,13 @@ To update the version of V8 used by workerd, the steps are:
 
 4. Sync the local copy of V8 to the version used by workerd.
 
-   First find, the commit hash of the "v8" `git_repository` in the workerd [WORKSPACE](../WORKSPACE) file.
+   First find, the tag of the "v8" `http_archive` in the workerd [WORKSPACE](../WORKSPACE) file.
 
-   Then sync your fetched version v8 so that it corresponds to that hash.
+   Then sync your fetched version v8 based on the tag.
 
    ```sh
    cd v8/v8
-   git checkout <commit_hash>
+   git checkout <tag>
    gclient sync
    ```
 
@@ -58,16 +58,15 @@ To update the version of V8 used by workerd, the steps are:
 8. Remove the existing patches from `workerd/patches/v8` and copy the latest patches
    for the V8 directory there.
 
-9. Update the `git_repository` for V8 in the `workerd/WORKSPACE` file.
+9. Update the `http_archive` for V8 in the `workerd/WORKSPACE` file.
 
     The list of patches should be refreshed if new patches are being added or existing
     patches are being removed.
 
-    The `commit` in the `git_repository` for V8 should be updated to match
-    the version corresponding to the version of V8 being updated. This can be found
-    by running `git rev-parse <version>` in the local V8 git repo, e.g. `git rev-parse 11.4.183.8`.
+    `strip_prefix` and `url` in the `http_archive` for V8 should be updated based on the new V8
+    version/tag.
 
-    See [V8 git_repository in WORKSPACE](https://github.com/cloudflare/workerd/blob/2d124ecd2d1132537d37bd5e166ac1aec4f7397f/WORKSPACE#L263)
+    See [V8 http_archive in WORKSPACE](https://github.com/cloudflare/workerd/blob/587ad90dd1e91d2660c271018056f4189fca3501/WORKSPACE#L408)
 
 10. Update V8's dependencies in `workerd/WORKSPACE`.
 
