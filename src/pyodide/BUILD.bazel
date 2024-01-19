@@ -17,8 +17,8 @@ copy_file(
 
 copy_file(
     name = "pyodide_packages_file.zip@rule",
-    src = "@pyodide_packages//:pyodide_packages_unzipped_0.1.tar",
-    out = "generated/pyodide_packages_unzipped_0.1.tar",
+    src = "@pyodide_packages//:pyodide_packages_unzipped_0.2.tar",
+    out = "generated/pyodide_packages_unzipped_0.2.tar",
 )
 
 PRELUDE = """
@@ -46,7 +46,7 @@ wd_js_bundle(
     name = "pyodide",
     builtin_modules = [
         "python.js",
-        "generated/pyodide_packages_unzipped_0.1.tar"
+        "generated/pyodide_packages_unzipped_0.2.tar"
     ] + glob(["internal/patches/*.py"]),
     import_name = "pyodide",
     internal_data_modules = ["generated/python_stdlib.zip"],
