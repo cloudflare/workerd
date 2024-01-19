@@ -319,14 +319,15 @@ JSG_DECLARE_ISOLATE_TYPE(LockLogIsolate, LockLogContext);
 KJ_TEST("jsg::Lock logWarning") {
   LockLogIsolate isolate(v8System, kj::heap<IsolateObserver>());
   bool called = false;
-  V8StackScope stackScope;
-  LockLogIsolate::Lock lock(isolate, stackScope);
-  lock.setLoggerCallback([&called](jsg::Lock& js, auto message) {
-    KJ_ASSERT(message == "Yes that happened"_kj);
-    called = true;
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    LockLogIsolate::Lock lock(isolate, stackScope);
+    lock.setLoggerCallback([&called](jsg::Lock& js, auto message) {
+      KJ_ASSERT(message == "Yes that happened"_kj);
+      called = true;
+    });
+    lock.logWarning("Yes that happened"_kj);
+    KJ_ASSERT(called);
   });
-  lock.logWarning("Yes that happened"_kj);
-  KJ_ASSERT(called);
 }
 
 // ========================================================================================
@@ -420,12 +421,13 @@ JSG_DECLARE_ISOLATE_TYPE(IsolateUuidIsolate, IsolateUuidContext);
 
 KJ_TEST("jsg::Lock getUuid") {
   IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
-  V8StackScope stackScope;
-  IsolateUuidIsolate::Lock lock(isolate, stackScope);
-  // Returns the same value
-  KJ_ASSERT(lock.getUuid() == lock.getUuid());
-  KJ_ASSERT(isolate.getUuid() == lock.getUuid());
-  KJ_ASSERT(lock.getUuid().size() == 36);
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    IsolateUuidIsolate::Lock lock(isolate, stackScope);
+    // Returns the same value
+    KJ_ASSERT(lock.getUuid() == lock.getUuid());
+    KJ_ASSERT(isolate.getUuid() == lock.getUuid());
+    KJ_ASSERT(lock.getUuid().size() == 36);
+  });
 }
 
 }  // namespace
