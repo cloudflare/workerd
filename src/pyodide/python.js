@@ -1,4 +1,4 @@
-import { tarInfo } from "pyodide-internal:tar";
+import { parseTarInfo } from "pyodide-internal:tar";
 import { createTarFS } from "pyodide-internal:tarfs";
 
 /**
@@ -260,7 +260,7 @@ function simpleRunPython(emscriptenModule, code) {
 }
 
 function mountLib(pyodide) {
-  const [info, _] = tarInfo();
+  const [info, _] = parseTarInfo();
   const tarFS = createTarFS(pyodide._module);
   pyodide.FS.mkdirTree("/session/lib/python3.11/site-packages");
   pyodide.FS.mount(tarFS, { info }, "/session/lib/python3.11/site-packages");
