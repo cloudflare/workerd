@@ -19,7 +19,7 @@ interface ForwardableEmailMessage extends EmailMessage {
   /**
    * Stream of the email message content.
    */
-  readonly raw: ReadableStream;
+  readonly raw: ReadableStream<Uint8Array>;
   /**
    * An [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
    */

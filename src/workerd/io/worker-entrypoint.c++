@@ -642,10 +642,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
 #ifdef KJ_DEBUG
 void requestGc(const Worker& worker) {
   TRACE_EVENT("workerd", "Debug: requestGc()");
-  jsg::V8StackScope stackScope;
-  auto& isolate = worker.getIsolate();
-  auto lock = isolate.getApi().lock(stackScope);
-  lock->requestGcForTesting();
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    auto& isolate = worker.getIsolate();
+    auto lock = isolate.getApi().lock(stackScope);
+    lock->requestGcForTesting();
+  });
 }
 
 template <typename T>

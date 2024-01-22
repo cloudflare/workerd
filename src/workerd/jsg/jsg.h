@@ -2271,27 +2271,40 @@ private:
   bool warningsLogged;
 };
 
-// One of this MUST be allocated on the stack before taking an isolate lock. It must be allocated
-// before any handles on the stack. This MUST NOT be allocated on the heap.
-//
-// The reason why Isolate::Lock doesn't take care of this automatically is because it is often
-// allocated on the heap. The purpose of V8StackScope is to capture the start of the stack
-// range that V8 must scan when performing conservative stack-scanning garbage collection.
-class V8StackScope {
+
+// The V8StackScope is used only as a marker to prove that we are running in the V8 stack
+// established by calling runInV8Stack(...)
+class V8StackScope final {
 public:
-  V8StackScope();
   KJ_DISALLOW_COPY_AND_MOVE(V8StackScope);
 
-  // No interface.
-
 private:
+  V8StackScope() = default;
+  KJ_DISALLOW_AS_COROUTINE_PARAM;
+
+  static auto runInV8StackImpl(void* pos, auto callback) __attribute__((noinline)) {
 #if V8_HAS_STACK_START_MARKER
-  // This currently depends on a V8 patch which hasn't been upstreamed. Note that workerd does
-  // not use this patch; it's only used internally. The patch is needed in order to work around
-  // oddities of our internal environment which do not apply to workerd. For workerd, V8's default
-  // behavior is just fine.
-  v8::StackStartMarker v8Marker;
+    // This currently depends on a V8 patch which hasn't been upstreamed. Note that workerd does
+    // not use this patch; it's only used internally. The patch is needed in order to work around
+    // oddities of our internal environment which do not apply to workerd. For workerd, V8's default
+    // behavior is just fine.
+    v8::StackStartMarker marker(pos);
 #endif
+    // We create a V8StackScope only as proof that we are running in the V8 stack.
+    V8StackScope stackScope;
+    return callback(stackScope);
+  }
+
+  friend auto runInV8Stack(auto callback);
+};
+
+// Ensures that a v8::StackStartMarker is allocated on the stack before calling the callback.
+// This must be used, for instance, before taking an isolate lock.
+// The reason why Isolate::Lock doesn't take care of this automatically is because it is often
+// allocated on the heap. The purpose of using runInV8Stack is to capture the start of the stack
+// range that V8 must scan when performing conservative stack-scanning garbage collection.
+auto runInV8Stack(auto callback) {
+  return V8StackScope::runInV8StackImpl(__builtin_frame_address(0), kj::mv(callback));
 };
 
 // =======================================================================================

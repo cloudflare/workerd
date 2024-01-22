@@ -303,7 +303,7 @@ void NonModuleScript::run(v8::Local<v8::Context> context) const {
 NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js, kj::StringPtr name) {
   // Create a dummy script origin for it to appear in Sources panel.
   auto isolate = js.v8Isolate;
-  v8::ScriptOrigin origin(isolate, v8StrIntern(isolate, name));
+  v8::ScriptOrigin origin(v8StrIntern(isolate, name));
   v8::ScriptCompiler::Source source(v8Str(isolate, code), origin);
   return NonModuleScript(js,
       check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
@@ -375,8 +375,7 @@ v8::Local<v8::Module> compileEsmModule(
   const bool resourceIsOpaque = false;
   const bool isWasm = false;
   const bool isModule = true;
-  v8::ScriptOrigin origin(js.v8Isolate,
-                          v8StrIntern(js.v8Isolate, name),
+  v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name),
                           resourceLineOffset,
                           resourceColumnOffset,
                           resourceIsSharedCrossOrigin, scriptId, {},
@@ -433,7 +432,7 @@ v8::Local<v8::Module> createSyntheticModule(
   return v8::Module::CreateSyntheticModule(
       js.v8Isolate,
       v8StrIntern(js.v8Isolate, name),
-      exportNames,
+      v8::MemorySpan<const v8::Local<v8::String>>(exportNames.data(), exportNames.size()),
       &evaluateSyntheticModuleCallback);
 }
 }  // namespace

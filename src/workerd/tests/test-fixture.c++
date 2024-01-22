@@ -301,22 +301,25 @@ TestFixture::TestFixture(SetupParams&& params)
     waitUntilTasks(*errorHandler),
     headerTable(headerTableBuilder.build()) {
   KJ_IF_SOME(id, params.actorId) {
-    auto lock = Worker::Lock(*worker, Worker::Lock::TakeSynchronously(kj::none));
-    auto makeActorCache = [](
-        const ActorCache::SharedLru& sharedLru, OutputGate& outputGate, ActorCache::Hooks& hooks) {
-      return kj::heap<ActorCache>(
-        kj::heap<server::EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate, hooks);
-    };
-    auto makeStorage = [](
-        jsg::Lock& js, const Worker::Api& api, ActorCacheInterface& actorCache)
-        -> jsg::Ref<api::DurableObjectStorage> {
-      return jsg::alloc<api::DurableObjectStorage>(
-        IoContext::current().addObject(actorCache));
-    };
-    actor = kj::refcounted<Worker::Actor>(
-        *worker, /*tracker=*/kj::none, kj::mv(id), /*hasTransient=*/false, makeActorCache,
-        /*classname=*/kj::none, makeStorage, lock, kj::refcounted<MockActorLoopback>(),
-        *timerChannel, kj::refcounted<ActorObserver>(), kj::none, kj::none);
+    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+      auto lock = Worker::Lock(*worker, Worker::Lock::TakeSynchronously(kj::none), stackScope);
+      auto makeActorCache = [](const ActorCache::SharedLru& sharedLru,
+                               OutputGate& outputGate,
+                               ActorCache::Hooks& hooks) {
+        return kj::heap<ActorCache>(
+          kj::heap<server::EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate, hooks);
+      };
+      auto makeStorage = [](
+          jsg::Lock& js, const Worker::Api& api, ActorCacheInterface& actorCache)
+          -> jsg::Ref<api::DurableObjectStorage> {
+        return jsg::alloc<api::DurableObjectStorage>(
+          IoContext::current().addObject(actorCache));
+      };
+      actor = kj::refcounted<Worker::Actor>(
+          *worker, /*tracker=*/kj::none, kj::mv(id), /*hasTransient=*/false, makeActorCache,
+          /*classname=*/kj::none, makeStorage, lock, kj::refcounted<MockActorLoopback>(),
+          *timerChannel, kj::refcounted<ActorObserver>(), kj::none, kj::none);
+    });
   }
 }
 

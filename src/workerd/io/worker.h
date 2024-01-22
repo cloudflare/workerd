@@ -480,7 +480,7 @@ public:
     //   out how to work around it, so here we are with a raw pointer. :/
   };
 
-  explicit Lock(const Worker& worker, LockType lockType);
+  explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   KJ_DISALLOW_COPY_AND_MOVE(Lock);
   ~Lock() noexcept(false);
 
@@ -531,7 +531,6 @@ public:
 private:
   struct Impl;
 
-  jsg::V8StackScope stackScope;
   Worker& worker;
   kj::Own<Impl> impl;
 

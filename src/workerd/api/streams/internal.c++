@@ -415,8 +415,10 @@ public:
         //
         // Synchronous lock is OK here since it only happens during preview. We don't have a
         // metrics object to provide ,though.
-        Worker::Lock lock(*worker, Worker::Lock::TakeSynchronously(*requestMetrics));
-        lock.logWarning(msg);
+        jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+          Worker::Lock lock(*worker, Worker::Lock::TakeSynchronously(*requestMetrics), stackScope);
+          lock.logWarning(msg);
+        });
       }
     }
   }

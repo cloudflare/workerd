@@ -325,8 +325,4 @@ kj::String Name::toString(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-V8StackScope::V8StackScope() {
-  kj::requireOnStack(this, "V8StackScope must be allocated on the stack");
-}
-
 }  // namespace workerd::jsg
