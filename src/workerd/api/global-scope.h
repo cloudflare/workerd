@@ -133,12 +133,14 @@ class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
 public:
   jsg::Unimplemented importScripts(kj::String s) { return {}; };
 
-  JSG_RESOURCE_TYPE(WorkerGlobalScope) {
+  JSG_RESOURCE_TYPE(WorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
 
     JSG_NESTED_TYPE(EventTarget);
 
-    JSG_METHOD(importScripts);
+    if (!flags.getNoImportScripts()) {
+      JSG_METHOD(importScripts);
+    }
 
     JSG_TS_DEFINE(type WorkerGlobalScopeEventMap = {
       fetch: FetchEvent;
