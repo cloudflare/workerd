@@ -6,13 +6,13 @@ load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 copy_file(
     name = "pyodide_packages_archive",
-    src = "@pyodide_packages//:pyodide_packages_unzipped_0.2.tar",
-    out = "generated/pyodide_packages_unzipped_0.1.tar",
+    src = "@pyodide_packages//:pyodide_packages.tar",
+    out = "generated/pyodide_packages.tar",
 )
 
 capnp_embed(
     name = "pyodide_packages_archive_embed",
-    src = "generated/pyodide_packages_unzipped_0.1.tar",
+    src = "generated/pyodide_packages.tar",
     deps = ["pyodide_packages_archive"],
 )
 
@@ -88,13 +88,18 @@ expand_template(
 
 wd_js_bundle(
     name = "pyodide",
-    builtin_modules = [
-        "python.js",
-    ] + glob(["internal/patches/*.py"]),
+    builtin_modules = glob([
+        "*.js",
+        "internal/patches/*.py",
+    ]),
     import_name = "pyodide",
-    internal_data_modules = ["generated/python_stdlib.zip"],
+    internal_data_modules = ["generated/python_stdlib.zip"] + glob([
+        "internal/*.py",
+        "internal/patches/*.py",
+    ]),
     internal_modules = [
         "generated/pyodide.asm.js",
+        "internal/pyodide-lock.js",
     ] + glob([
         "internal/*.js",
     ]),

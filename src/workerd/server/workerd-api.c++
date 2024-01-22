@@ -390,26 +390,6 @@ void WorkerdApi::compileModules(
         auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
         modules->add(metadataModuleName, kj::mv(KJ_REQUIRE_NONNULL(info)));
       }
-      // Inject the pyodide-lock.json file.
-      auto lockModuleName = kj::Path::parse("pyodide:package-lock.json");
-      {
-        capnp::MallocMessageBuilder message;
-        auto module = message.getRoot<config::Worker::Module>();
-        module.setEsModule(getPyodideLock());
-
-        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
-        modules->add(lockModuleName, kj::mv(KJ_REQUIRE_NONNULL(info)));
-      }
-      // Inject pyodide python patches.
-      auto patchesModuleName = kj::Path::parse("pyodide:patches");
-      {
-        capnp::MallocMessageBuilder message;
-        auto module = message.getRoot<config::Worker::Module>();
-        module.setEsModule(generatePyodidePatches());
-
-        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
-        modules->add(patchesModuleName, kj::mv(KJ_REQUIRE_NONNULL(info)));
-      }
     }
 
     for (auto module: confModules) {
