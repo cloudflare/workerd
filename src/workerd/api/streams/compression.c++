@@ -173,12 +173,11 @@ public:
         kj::throwFatalException(kj::cp(exception));
       }
       KJ_CASE_ONEOF(open, Open) {
-        for (auto &piece : pieces) {
-          if (piece.size() != 0) {
-            co_await write(piece.begin(), piece.size());
-          }
-        }
-        co_return;
+        if (pieces.size() == 0) return kj::READY_NOW;
+        return write(pieces[0].begin(), pieces[0].size())
+            .then([this, pieces = pieces.slice(1)]() mutable {
+          return write(pieces);
+        });
       }
     }
     KJ_UNREACHABLE;
