@@ -22,16 +22,18 @@ KJ_TEST("eval() is blocked") {
       "throws", "EvalError: Code generation from strings disallowed for this context");
 
   {
-    V8StackScope stackScope;
-    EvalIsolate::Lock(e.getIsolate(), stackScope).setAllowEval(true);
+    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+      EvalIsolate::Lock(e.getIsolate(), stackScope).setAllowEval(true);
+    });
   }
 
   e.expectEval("eval('123')", "number", "123");
   e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)", "number", "444");
 
   {
-    V8StackScope stackScope;
-    EvalIsolate::Lock(e.getIsolate(), stackScope).setAllowEval(false);
+    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+      EvalIsolate::Lock(e.getIsolate(), stackScope).setAllowEval(false);
+    });
   }
 
   e.expectEval("eval('123')",
@@ -67,19 +69,21 @@ JSG_DECLARE_ISOLATE_TYPE(ConfigIsolate, ConfigContext, ConfigContext::Nested,
 KJ_TEST("configuration values reach nested type declarations") {
   {
     ConfigIsolate isolate(v8System, 123, kj::heap<IsolateObserver>());
-    V8StackScope stackScope;
-    ConfigIsolate::Lock lock(isolate, stackScope);
-    v8::HandleScope handleScope(lock.v8Isolate);
-    lock.newContext<ConfigContext>().getHandle(lock);
+    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+      ConfigIsolate::Lock lock(isolate, stackScope);
+      v8::HandleScope handleScope(lock.v8Isolate);
+      lock.newContext<ConfigContext>().getHandle(lock);
+    });
   }
   {
     KJ_EXPECT_LOG(ERROR, "failed: expected configuration == 123");
 
     ConfigIsolate isolate(v8System, 456, kj::heap<IsolateObserver>());
-    V8StackScope stackScope;
-    ConfigIsolate::Lock lock(isolate, stackScope);
-    v8::HandleScope handleScope(lock.v8Isolate);
-    lock.newContext<ConfigContext>().getHandle(lock);
+    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+      ConfigIsolate::Lock lock(isolate, stackScope);
+      v8::HandleScope handleScope(lock.v8Isolate);
+      lock.newContext<ConfigContext>().getHandle(lock);
+    });
   }
 }
 

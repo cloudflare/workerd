@@ -145,10 +145,20 @@ IoContext::IoContext(ThreadContext& thread,
 
         KJ_IF_SOME(exception, maybeException) {
           Worker::AsyncLock asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
-          Worker::Lock lock(*worker, asyncLock);
-          lock.logUncaughtException(
-              jsg::extractTunneledExceptionDescription(exception.getDescription()));
-          kj::throwFatalException(kj::mv(exception));
+
+          static constexpr auto handle = [](
+              Worker::AsyncLock& asyncLock,
+              const Worker& worker,
+              auto exception) {
+            jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+              Worker::Lock lock(worker, asyncLock, stackScope);
+              lock.logUncaughtException(
+                  jsg::extractTunneledExceptionDescription(exception.getDescription()));
+              kj::throwFatalException(kj::mv(exception));
+            });
+          };
+
+          handle(asyncLock, *worker, kj::mv(exception));
         }
       }))();
     }
@@ -994,10 +1004,13 @@ class IoContext::Scope {
   // Encapsulates all the different scopes we need to set up to enter the I/O context.
 
 public:
-  Scope(IoContext& context, Worker::LockType lockType, kj::Maybe<InputGate::Lock> inputLock)
+  Scope(IoContext& context,
+        Worker::LockType lockType,
+        kj::Maybe<InputGate::Lock> inputLock,
+        jsg::V8StackScope& stackScope)
       : context(context),
         threadScope(context),
-        workerLock(*context.worker, lockType),
+        workerLock(*context.worker, lockType, stackScope),
         handleScope(workerLock.getIsolate()),
         jsContextScope(workerLock.getContext()),
         promiseContextScope(workerLock.getIsolate(), context.getPromiseContextTag(workerLock)) {
@@ -1037,103 +1050,106 @@ private:
 };
 
 void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
-                             Worker::LockType lockType, kj::Maybe<InputGate::Lock> inputLock,
-                             bool allowPermanentException) {
+                        Worker::LockType lockType,
+                        kj::Maybe<InputGate::Lock> inputLock,
+                        bool allowPermanentException) {
   KJ_IF_SOME(l, inputLock) {
     KJ_REQUIRE(l.isFor(KJ_ASSERT_NONNULL(actor).getInputGate()));
   }
 
   getIoChannelFactory().getTimer().syncTime();
 
-  Scope scope(*this, lockType, kj::mv(inputLock));
-  auto& workerLock = scope.getWorkerLock();
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    Scope scope(*this, lockType, kj::mv(inputLock), stackScope);
+    auto& workerLock = scope.getWorkerLock();
 
-  if (!allowPermanentException) {
-    workerLock.requireNoPermanentException();
-  }
-
-  kj::Own<void> event;
-  if (takePendingEvent) {
-    // Prevent finalizers from running while we're still executing JavaScript.
-    event = registerPendingEvent();
-  }
-
-  auto limiterScope = limitEnforcer->enterJs(workerLock, *this);
-
-  bool gotTermination = false;
-
-  KJ_DEFER({
-    // Always clear out all pending V8 events before leaving the scope. This ensures that
-    // there's never any unfinished work waiting to run when we return to the event loop.
-    //
-    // Alternatively, we could use kj::evalLater() to queue a callback which runs the microtasks.
-    // This would perhaps prevent a microtask loop from blocking incoming I/O events. However,
-    // in practice this seems like a dubious scenario. A script that does while(1) will always
-    // block I/O, so why should a script in a promise loop not? If scripts want to use 100% of
-    // CPU but also receive I/O as it arrives, we should offer some API to explicitly request
-    // polling for I/O.
-    jsg::Lock& js = workerLock;
-
-    if (gotTermination) {
-      // We already consumed the termination pseudo-exception, so if we call RunMicrotasks() now,
-      // they will run with no limit. But if we call TerminateExecution() again now, it will
-      // conveniently cause RunMicrotasks() to terminate _right after_ dequeuing the contents of
-      // the task queue, which is perfect, because it effectively cancels them all.
-      js.terminateExecution();
+    if (!allowPermanentException) {
+      workerLock.requireNoPermanentException();
     }
 
-    // Running the microtask queue can itself trigger a pending exception in the isolate.
+    kj::Own<void> event;
+    if (takePendingEvent) {
+      // Prevent finalizers from running while we're still executing JavaScript.
+      event = registerPendingEvent();
+    }
+
+    auto limiterScope = limitEnforcer->enterJs(workerLock, *this);
+
+    bool gotTermination = false;
+
+    KJ_DEFER({
+      // Always clear out all pending V8 events before leaving the scope. This ensures that
+      // there's never any unfinished work waiting to run when we return to the event loop.
+      //
+      // Alternatively, we could use kj::evalLater() to queue a callback which runs the microtasks.
+      // This would perhaps prevent a microtask loop from blocking incoming I/O events. However,
+      // in practice this seems like a dubious scenario. A script that does while(1) will always
+      // block I/O, so why should a script in a promise loop not? If scripts want to use 100% of
+      // CPU but also receive I/O as it arrives, we should offer some API to explicitly request
+      // polling for I/O.
+      jsg::Lock& js = workerLock;
+
+      if (gotTermination) {
+        // We already consumed the termination pseudo-exception, so if we call RunMicrotasks() now,
+        // they will run with no limit. But if we call TerminateExecution() again now, it will
+        // conveniently cause RunMicrotasks() to terminate _right after_ dequeuing the contents of
+        // the task queue, which is perfect, because it effectively cancels them all.
+        js.terminateExecution();
+      }
+
+      // Running the microtask queue can itself trigger a pending exception in the isolate.
+      v8::TryCatch tryCatch(workerLock.getIsolate());
+
+      js.runMicrotasks();
+
+      if (tryCatch.HasCaught()) {
+        // It really shouldn't be possible for microtasks to throw regular exceptions.
+        // so if we got here it should be a terminal condition.
+        KJ_ASSERT(tryCatch.HasTerminated());
+        // If we do not reset here we end up with a dangling exception in the isolate that
+        // leads to an assert in v8 when the Lock is destroyed.
+        tryCatch.Reset();
+      }
+    });
+
     v8::TryCatch tryCatch(workerLock.getIsolate());
+    try {
+      runnable.run(workerLock);
+    } catch (const jsg::JsExceptionThrown&) {
+      if (tryCatch.HasTerminated()) {
+        gotTermination = true;
+        limiterScope = nullptr;
 
-    js.runMicrotasks();
+        // Check if we hit a limit.
+        limitEnforcer->requireLimitsNotExceeded();
 
-    if (tryCatch.HasCaught()) {
-      // It really shouldn't be possible for microtasks to throw regular exceptions.
-      // so if we got here it should be a terminal condition.
-      KJ_ASSERT(tryCatch.HasTerminated());
-      // If we do not reset here we end up with a dangling exception in the isolate that
-      // leads to an assert in v8 when the Lock is destroyed.
-      tryCatch.Reset();
-    }
-  });
-
-  v8::TryCatch tryCatch(workerLock.getIsolate());
-  try {
-    runnable.run(workerLock);
-  } catch (const jsg::JsExceptionThrown&) {
-    if (tryCatch.HasTerminated()) {
-      gotTermination = true;
-      limiterScope = nullptr;
-
-      // Check if we hit a limit.
-      limitEnforcer->requireLimitsNotExceeded();
-
-      // That should have thrown, so we shouldn't get here.
-      KJ_FAIL_ASSERT("script terminated for unknown reasons");
-    } else {
-      if (tryCatch.Message().IsEmpty()) {
-        // Should never happen, but check for it because otherwise V8 will crash.
-        KJ_LOG(ERROR, "tryCatch.Message() was empty even when not HasTerminated()??");
-        JSG_FAIL_REQUIRE(Error, "(JavaScript exception with no message)");
+        // That should have thrown, so we shouldn't get here.
+        KJ_FAIL_ASSERT("script terminated for unknown reasons");
       } else {
-        auto jsException = tryCatch.Exception();
+        if (tryCatch.Message().IsEmpty()) {
+          // Should never happen, but check for it because otherwise V8 will crash.
+          KJ_LOG(ERROR, "tryCatch.Message() was empty even when not HasTerminated()??");
+          JSG_FAIL_REQUIRE(Error, "(JavaScript exception with no message)");
+        } else {
+          auto jsException = tryCatch.Exception();
 
-        // TODO(someday): We log "uncaught exception" here whenever throwing from JS to C++.
-        //   However, the C++ code calling us may still catch the exception and do its own logging,
-        //   or may even tunnel it back to JavaScript, making this log line redundant or maybe even
-        //   wrong (if the exception is in fact caught later). But, it's difficult to be sure that
-        //   all C++ consumers log properly, and even if they do, the stack trace is lost once the
-        //   exception has been tunneled into a KJ exception, so the later logging won't be as
-        //   useful. We should improve the tunneling to include stack traces and ensure that all
-        //   consumers do in fact log exceptions, then we can remove this.
-        workerLock.logUncaughtException(UncaughtExceptionSource::INTERNAL,
-                                        jsg::JsValue(jsException),
-                                        jsg::JsMessage(tryCatch.Message()));
+          // TODO(someday): We log "uncaught exception" here whenever throwing from JS to C++.
+          //   However, the C++ code calling us may still catch the exception and do its own logging,
+          //   or may even tunnel it back to JavaScript, making this log line redundant or maybe even
+          //   wrong (if the exception is in fact caught later). But, it's difficult to be sure that
+          //   all C++ consumers log properly, and even if they do, the stack trace is lost once the
+          //   exception has been tunneled into a KJ exception, so the later logging won't be as
+          //   useful. We should improve the tunneling to include stack traces and ensure that all
+          //   consumers do in fact log exceptions, then we can remove this.
+          workerLock.logUncaughtException(UncaughtExceptionSource::INTERNAL,
+                                          jsg::JsValue(jsException),
+                                          jsg::JsMessage(tryCatch.Message()));
 
-        jsg::throwTunneledException(workerLock.getIsolate(), jsException);
+          jsg::throwTunneledException(workerLock.getIsolate(), jsException);
+        }
       }
     }
-  }
+  });
 }
 
 static constexpr auto kAsyncIoErrorMessage =

@@ -261,107 +261,109 @@ bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
 
 namespace {
   static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params) {
-    V8StackScope stackScope;
-    if (params.array_buffer_allocator == nullptr &&
-        params.array_buffer_allocator_shared == nullptr) {
-      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
-          v8::ArrayBuffer::Allocator::NewDefaultAllocator());
-    }
-    return v8::Isolate::New(params);
+    return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
+      if (params.array_buffer_allocator == nullptr &&
+          params.array_buffer_allocator_shared == nullptr) {
+        params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+            v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+      }
+      return v8::Isolate::New(params);
+    });
   }
 }
 
-IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams, kj::Own<IsolateObserver> observer)
+IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams,
+                         kj::Own<IsolateObserver> observer)
     : system(system),
       ptr(newIsolate(kj::mv(createParams))),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
-  V8StackScope stackScope;
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    v8::CppHeapCreateParams params {
+      {},
+      v8::WrapperDescriptor(
+          Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+          Wrappable::CPPGC_SHIM_FIELD_INDEX,
+          Wrappable::WRAPPABLE_TAG)
+    };
 
-  v8::CppHeapCreateParams params {
-    {},
-    v8::WrapperDescriptor(
-        Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-        Wrappable::CPPGC_SHIM_FIELD_INDEX,
-        Wrappable::WRAPPABLE_TAG)
-  };
+    params.marking_support = cppgc::Heap::MarkingType::kAtomic;
+    params.sweeping_support = cppgc::Heap::SweepingType::kAtomic;
+    // We currently don't attempt to support incremental marking or sweeping. We probably could
+    // support them, but it will take some careful investigation and testing. It's not clear if
+    // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
+    // full atomic mark-sweep usually doesn't require much of a pause.
+    //
+    // We probably won't ever support concurrent marking or sweeping because concurrent GC is only
+    // expected to be a win if there are idle CPU cores available. Workers normally run on servers
+    // that are handling many requests at once, thus it's expected CPU cores will be fully
+    // utilized. This differs from browser environments, where a user is typically doing only one
+    // thing at a time and thus likely has CPU cores to spare.
 
-  params.marking_support = cppgc::Heap::MarkingType::kAtomic;
-  params.sweeping_support = cppgc::Heap::SweepingType::kAtomic;
-  // We currently don't attempt to support incremental marking or sweeping. We probably could
-  // support them, but it will take some careful investigation and testing. It's not clear if
-  // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
-  // full atomic mark-sweep usually doesn't require much of a pause.
-  //
-  // We probably won't ever support concurrent marking or sweeping because concurrent GC is only
-  // expected to be a win if there are idle CPU cores available. Workers normally run on servers
-  // that are handling many requests at once, thus it's expected CPU cores will be fully
-  // utilized. This differs from browser environments, where a user is typically doing only one
-  // thing at a time and thus likely has CPU cores to spare.
+    // const_cast here because V8's `Platform` interface doesn't use constness for thread-safety and
+    // V8 wants a non-const pointer here, but the object is in fact thread-safe.
+    cppgcHeap = v8::CppHeap::Create(const_cast<V8PlatformWrapper*>(&system.platformWrapper), params);
+    ptr->AttachCppHeap(cppgcHeap.get());
+    ptr->SetEmbedderRootsHandler(&heapTracer);
 
-  // const_cast here because V8's `Platform` interface doesn't use constness for thread-safety and
-  // V8 wants a non-const pointer here, but the object is in fact thread-safe.
-  cppgcHeap = v8::CppHeap::Create(const_cast<V8PlatformWrapper*>(&system.platformWrapper), params);
-  ptr->AttachCppHeap(cppgcHeap.get());
-  ptr->SetEmbedderRootsHandler(&heapTracer);
+    ptr->SetFatalErrorHandler(&fatalError);
+    ptr->SetOOMErrorHandler(&oomError);
 
-  ptr->SetFatalErrorHandler(&fatalError);
-  ptr->SetOOMErrorHandler(&oomError);
+    ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
+    ptr->SetData(0, this);
 
-  ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
-  ptr->SetData(0, this);
+    ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
+    ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
 
-  ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
-  ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
+    // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
+    // attacks.
+    ptr->SetAllowAtomicsWait(false);
 
-  // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
-  // attacks.
-  ptr->SetAllowAtomicsWait(false);
+    ptr->SetJitCodeEventHandler(v8::kJitCodeEventDefault, &jitCodeEvent);
 
-  ptr->SetJitCodeEventHandler(v8::kJitCodeEventDefault, &jitCodeEvent);
+    // V8 10.5 introduced this API which is used to resolve the promise returned by
+    // WebAssembly.compile(). For some reason, the default implementation of the callback does not
+    // work -- the promise is never resolved. The only thing the default version does differently
+    // is it creates a `MicrotasksScope` with `kDoNotRunMicrotasks`. I do not understand what that
+    // is even supposed to do, but it seems related to `MicrotasksPolicy::kScoped`, which we don't
+    // use, we use `kExplicit`. Replacing the callback seems to solve the problem?
+    ptr->SetWasmAsyncResolvePromiseCallback(
+        [](v8::Isolate* isolate, v8::Local<v8::Context> context,
+          v8::Local<v8::Promise::Resolver> resolver,
+          v8::Local<v8::Value> result, v8::WasmAsyncSuccess success) {
+      switch (success) {
+        case v8::WasmAsyncSuccess::kSuccess:
+          resolver->Resolve(context, result).FromJust();
+          break;
+        case v8::WasmAsyncSuccess::kFail:
+          resolver->Reject(context, result).FromJust();
+          break;
+      }
+    });
 
-  // V8 10.5 introduced this API which is used to resolve the promise returned by
-  // WebAssembly.compile(). For some reason, the default implementation of the callback does not
-  // work -- the promise is never resolved. The only thing the default version does differently
-  // is it creates a `MicrotasksScope` with `kDoNotRunMicrotasks`. I do not understand what that
-  // is even supposed to do, but it seems related to `MicrotasksPolicy::kScoped`, which we don't
-  // use, we use `kExplicit`. Replacing the callback seems to solve the problem?
-  ptr->SetWasmAsyncResolvePromiseCallback(
-      [](v8::Isolate* isolate, v8::Local<v8::Context> context,
-         v8::Local<v8::Promise::Resolver> resolver,
-         v8::Local<v8::Value> result, v8::WasmAsyncSuccess success) {
-    switch (success) {
-      case v8::WasmAsyncSuccess::kSuccess:
-        resolver->Resolve(context, result).FromJust();
-        break;
-      case v8::WasmAsyncSuccess::kFail:
-        resolver->Reject(context, result).FromJust();
-        break;
+    // Create opaqueTemplate
+    {
+      // We don't need a v8::Locker here since there's no way another thread could be using the
+      // isolate yet, but we do need v8::Isolate::Scope.
+      v8::Isolate::Scope isolateScope(ptr);
+      v8::HandleScope scope(ptr);
+      auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
+      opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
+      this->opaqueTemplate.Reset(ptr, opaqueTemplate);
     }
   });
-
-  // Create opaqueTemplate
-  {
-    // We don't need a v8::Locker here since there's no way another thread could be using the
-    // isolate yet, but we do need v8::Isolate::Scope.
-    v8::Isolate::Scope isolateScope(ptr);
-    v8::HandleScope scope(ptr);
-    auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
-    opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
-    this->opaqueTemplate.Reset(ptr, opaqueTemplate);
-  }
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
-  V8StackScope stackScope;
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    ptr->DetachCppHeap();
 
-  ptr->DetachCppHeap();
+    // It's not really clear CppHeap's destructor automatically destroys all heap-allocated objects.
+    // To be safe we call `Terminate()`.
+    cppgcHeap->Terminate();
 
-  // It's not really clear CppHeap's destructor automatically destroys all heap-allocated objects.
-  // To be safe we call `Terminate()`.
-  cppgcHeap->Terminate();
-
-  ptr->Dispose();
+    ptr->Dispose();
+  });
 }
 
 v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isolate) {
@@ -370,25 +372,26 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
 
 void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   // Delete all wrappers.
-  V8StackScope stackScope;
-  v8::Locker lock(ptr);
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    v8::Locker lock(ptr);
 
-  // Make sure everything in the deferred destruction queue is dropped.
-  clearDestructionQueue();
+    // Make sure everything in the deferred destruction queue is dropped.
+    clearDestructionQueue();
 
-  // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
-  // may call into the heap tracer.
-  KJ_DEFER(heapTracer.destroy());
+    // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
+    // may call into the heap tracer.
+    KJ_DEFER(heapTracer.destroy());
 
-  // Make sure opaqueTemplate is destroyed under lock (but not until later).
-  KJ_DEFER(opaqueTemplate.Reset());
+    // Make sure opaqueTemplate is destroyed under lock (but not until later).
+    KJ_DEFER(opaqueTemplate.Reset());
 
-  // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable that
-  // is destroyed before the lock is released.
-  kj::Own<void> typeWrapperInstanceInner = kj::mv(typeWrapperInstance);
+    // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
+    // that is destroyed before the lock is released.
+    kj::Own<void> typeWrapperInstanceInner = kj::mv(typeWrapperInstance);
 
-  // Destroy all wrappers.
-  heapTracer.clearWrappers();
+    // Destroy all wrappers.
+    heapTracer.clearWrappers();
+  });
 }
 
 void IsolateBase::fatalError(const char* location, const char* message) {
