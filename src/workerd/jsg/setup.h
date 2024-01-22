@@ -289,13 +289,14 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 //     MyIsolate isolate(system);
 //
 //     // Lock the isolate in this thread (creates a v8::Isolate::Scope).
-//     MyIsolate::Lock lock(isolate);
+//     isolate.runInLockScope([&] (MyIsolate::Lock& lock) {
+//       // Create a context based on MyContextType.
+//       v8::Local<v8::Context> context = lock.newContext(lock.isolate, MyContextType());
 //
-//     // Create a context based on MyContextType.
-//     v8::Local<v8::Context> context = lock.newContext(lock.isolate, MyContextType());
+//       // Create an instance of MyType.
+//       v8::Local<v8::Object> obj = lock.getTypeHandler<MyType>().wrap(context, MyType());
+//     });
 //
-//     // Create an instance of MyType.
-//     v8::Local<v8::Object> obj = lock.getTypeHandler<MyType>().wrap(context, MyType());
 template <typename TypeWrapper>
 class Isolate: public IsolateBase {
 public:
@@ -347,6 +348,8 @@ public:
         : jsg::Lock(isolate.ptr), jsgIsolate(const_cast<Isolate&>(isolate)) {
       jsgIsolate.clearDestructionQueue();
     }
+    KJ_DISALLOW_COPY_AND_MOVE(Lock);
+    KJ_DISALLOW_AS_COROUTINE_PARAM;
 
     // Creates a `TypeHandler` for the given type. You can use this to convert between the type
     // and V8 handles, as well as to allocate instances of the type on the V8 heap (if it is
@@ -430,6 +433,16 @@ public:
   private:
     Isolate& jsgIsolate;
   };
+
+  // The func must be a callback with the signature: void(jsg::Lock&)
+  void runInLockScope(auto func) {
+    runInV8Stack([&](V8StackScope& stackScope) {
+      Lock lock(*this, stackScope);
+      lock.withinHandleScope([&] {
+        func(lock);
+      });
+    });
+  }
 
 private:
   kj::SpaceFor<TypeWrapper> wrapperSpace;

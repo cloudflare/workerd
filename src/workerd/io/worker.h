@@ -552,6 +552,7 @@ private:
   friend class Worker::Isolate;
 };
 
+// The func must be a callback with the signature: T (jsg::Lock&), where T is any type.
 auto Worker::runInLockScope(LockType lockType, auto func) const {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> auto {
     Worker::Lock lock(*this, lockType, stackScope);

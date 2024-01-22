@@ -27,9 +27,7 @@ KJ_TEST("AES-KW key wrap") {
   // Basic test that I wrote when I was seeing heap corruption. Found it easier to iterate on with
   // ASAN/valgrind than using our conformance tests with test-runner.
   jsg::test::Evaluator<CryptoContext, CryptoIsolate> e(v8System);
-  CryptoIsolate &cryptoIsolate = e.getIsolate();
-  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    CryptoIsolate::Lock isolateLock(cryptoIsolate, stackScope);
+  e.getIsolate().runInLockScope([&](CryptoIsolate::Lock& isolateLock) {
     auto isolate = isolateLock.v8Isolate;
     auto& js = jsg::Lock::from(isolate);
 
@@ -96,16 +94,14 @@ KJ_TEST("AES-CTR key wrap") {
   // wrap if it didn't have "encrypt" in its usages when created.
 
   jsg::test::Evaluator<CryptoContext, CryptoIsolate> e(v8System);
-  CryptoIsolate &cryptoIsolate = e.getIsolate();
-  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    CryptoIsolate::Lock isolateLock(cryptoIsolate, stackScope);
+  e.getIsolate().runInLockScope([&](CryptoIsolate::Lock& isolateLock) {
     auto isolate = isolateLock.v8Isolate;
 
     isolateLock.withinHandleScope([&] {
       auto context = isolateLock.newContext<CryptoContext>().getHandle(isolateLock);
       auto contextScope = isolateLock.enterContextScope(context);
 
-      auto& js = jsg::Lock::from(isolate);
+      jsg::Lock& js = isolateLock;
 
       SubtleCrypto subtle;
 
