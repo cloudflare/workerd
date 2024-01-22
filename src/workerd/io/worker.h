@@ -105,6 +105,8 @@ public:
 
   class Lock;
 
+  inline auto runInLockScope(LockType lockType, auto func) const;
+
   class AsyncLock;
 
   // Places this thread into the queue of threads which are interested in locking this isolate,
@@ -480,8 +482,8 @@ public:
     //   out how to work around it, so here we are with a raw pointer. :/
   };
 
-  explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   KJ_DISALLOW_COPY_AND_MOVE(Lock);
+  KJ_DISALLOW_AS_COROUTINE_PARAM;
   ~Lock() noexcept(false);
 
   void requireNoPermanentException();
@@ -529,6 +531,7 @@ public:
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
 
 private:
+  explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   struct Impl;
 
   Worker& worker;
@@ -548,6 +551,13 @@ private:
   kj::OneOf<Lock::TakeSynchronously, AsyncLock*> origin;
   friend class Worker::Isolate;
 };
+
+auto Worker::runInLockScope(LockType lockType, auto func) const {
+  return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> auto {
+    Worker::Lock lock(*this, lockType, stackScope);
+    return func(lock);
+  });
+}
 
 // Represents the thread's ownership of an isolate's asynchronous lock. Call `takeAsyncLock()`
 // on a `Worker` or `Worker::Isolate` to obtain this. Pass it to the constructor of

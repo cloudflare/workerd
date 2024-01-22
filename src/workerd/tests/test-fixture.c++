@@ -301,8 +301,7 @@ TestFixture::TestFixture(SetupParams&& params)
     waitUntilTasks(*errorHandler),
     headerTable(headerTableBuilder.build()) {
   KJ_IF_SOME(id, params.actorId) {
-    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      auto lock = Worker::Lock(*worker, Worker::Lock::TakeSynchronously(kj::none), stackScope);
+    worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
       auto makeActorCache = [](const ActorCache::SharedLru& sharedLru,
                                OutputGate& outputGate,
                                ActorCache::Hooks& hooks) {

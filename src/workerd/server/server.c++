@@ -1532,18 +1532,9 @@ public:
             // promise. If a new request comes in while we're waiting to get the lock then we will
             // cancel this promise.
             Worker::AsyncLock asyncLock = co_await worker.takeAsyncLockWithoutRequest(nullptr);
-
-            static constexpr auto handle = [](
-                const Worker& worker,
-                Worker::AsyncLock& asyncLock,
-                auto& m) {
-              jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-                Worker::Lock lock(worker, asyncLock, stackScope);
-                m.hibernateWebSockets(lock);
-              });
-            };
-
-            handle(*workerStrongRef, asyncLock, *m);
+            workerStrongRef->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+              m->hibernateWebSockets(lock);
+            });
           }
           a->shutdown(0, KJ_EXCEPTION(DISCONNECTED,
               "broken.dropped; Actor freed due to inactivity"));
@@ -1808,8 +1799,7 @@ public:
 
           auto loopback = kj::refcounted<Loopback>(*this, kj::str(idPtr));
 
-          return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) mutable -> GetActorResult {
-            Worker::Lock lock(*service.worker, asyncLock, stackScope);
+          return service.worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
             // We define this event ID in the internal codebase, but to have WebSocket Hibernation
             // work for local development we need to pass an event type.
             static constexpr uint16_t hibernationEventTypeId = 8;
@@ -2774,8 +2764,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       errorReporter);
 
   {
-    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      Worker::Lock lock(*worker, Worker::Lock::TakeSynchronously(kj::none), stackScope);
+    worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
       lock.validateHandlers(errorReporter);
     });
   }

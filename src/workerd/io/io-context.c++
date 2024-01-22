@@ -145,20 +145,11 @@ IoContext::IoContext(ThreadContext& thread,
 
         KJ_IF_SOME(exception, maybeException) {
           Worker::AsyncLock asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
-
-          static constexpr auto handle = [](
-              Worker::AsyncLock& asyncLock,
-              const Worker& worker,
-              auto exception) {
-            jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-              Worker::Lock lock(worker, asyncLock, stackScope);
-              lock.logUncaughtException(
-                  jsg::extractTunneledExceptionDescription(exception.getDescription()));
-              kj::throwFatalException(kj::mv(exception));
-            });
-          };
-
-          handle(asyncLock, *worker, kj::mv(exception));
+          worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+            lock.logUncaughtException(
+                jsg::extractTunneledExceptionDescription(exception.getDescription()));
+            kj::throwFatalException(kj::mv(exception));
+          });
         }
       }))();
     }
@@ -991,8 +982,7 @@ void IoContext::runInContextScope(
   KJ_DEFER(threadLocalRequest = previousRequest);
   threadLocalRequest = this;
 
-  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    Worker::Lock lock(*worker, lockType, stackScope);
+  worker->runInLockScope(lockType, [&](Worker::Lock& lock) {
     KJ_REQUIRE(currentInputLock == kj::none);
     KJ_REQUIRE(currentLock == kj::none);
     KJ_DEFER(currentLock = kj::none; currentInputLock = kj::none);
