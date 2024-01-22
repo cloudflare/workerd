@@ -7,7 +7,8 @@
 
 namespace workerd::api::pyodide {
 
-// A special binding object that allows for dynamic evaluation.
+// A function to read a segment of the tar file into a buffer
+// Set up this way to avoid copying files that aren't accessed.
 class PackagesTarReader: public jsg::Object {
 public:
   PackagesTarReader() = default;
