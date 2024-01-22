@@ -1035,7 +1035,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     });
 
     // The PromiseCrossContextCallback is used to allow cross-IoContext promise following.
-    // When the IoContext::Scope is entered, we set the "promise context tag" associated
+    // When the IoContext scope is entered, we set the "promise context tag" associated
     // with the IoContext on the Isolate that is locked. Any Promise that is created within
     // that scope will be tagged with the same promise context tag. When an attempt to
     // follow a promise occurs (e.g. either using Promise.prototype.then() or await, etc)

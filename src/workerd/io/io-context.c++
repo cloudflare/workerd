@@ -976,78 +976,50 @@ Worker::Actor& IoContext::getActorOrThrow() {
   return KJ_ASSERT_NONNULL(actor, "not an actor request");
 }
 
-class IoContext::ThreadScope {
-  // Encapsulates making the IoContext current for the thread within some scope.
-
-public:
-  ThreadScope(IoContext& context)
-      : previousRequest(threadLocalRequest) {
-    KJ_REQUIRE(context.threadId == getThreadId(), "IoContext cannot switch threads");
-    threadLocalRequest = &context;
-  }
-
-  ~ThreadScope() {
-    threadLocalRequest = previousRequest;
-  }
-
-private:
-  IoContext* previousRequest;
+void IoContext::runInContextScope(
+    Worker::LockType lockType,
+    kj::Maybe<InputGate::Lock> inputLock,
+    kj::Function<void(Worker::Lock&)> func) {
   // The previously-current context, before we entered this scope. We have to allow opening
   // multiple nested scopes especially to support destructors: destroying objects related to a
   // subrequest in one worker could transitively destroy resources belonging to the next worker in
   // the pipeline. We can't delay destruction to a future turn of the event loop because it's
   // common for child objects to contain pointers back to stuff owned by the parent that could
   // then be dangling.
-};
+  KJ_REQUIRE(threadId == getThreadId(), "IoContext cannot switch threads");
+  IoContext* previousRequest = threadLocalRequest;
+  KJ_DEFER(threadLocalRequest = previousRequest);
+  threadLocalRequest = this;
 
-class IoContext::Scope {
-  // Encapsulates all the different scopes we need to set up to enter the I/O context.
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    Worker::Lock lock(*worker, lockType, stackScope);
+    KJ_REQUIRE(currentInputLock == kj::none);
+    KJ_REQUIRE(currentLock == kj::none);
+    KJ_DEFER(currentLock = kj::none; currentInputLock = kj::none);
+    currentInputLock = kj::mv(inputLock);
+    currentLock = lock;
 
-public:
-  Scope(IoContext& context,
-        Worker::LockType lockType,
-        kj::Maybe<InputGate::Lock> inputLock,
-        jsg::V8StackScope& stackScope)
-      : context(context),
-        threadScope(context),
-        workerLock(*context.worker, lockType, stackScope),
-        handleScope(workerLock.getIsolate()),
-        jsContextScope(workerLock.getContext()),
-        promiseContextScope(workerLock.getIsolate(), context.getPromiseContextTag(workerLock)) {
-    KJ_REQUIRE(context.currentInputLock == kj::none);
-    KJ_REQUIRE(context.currentLock == kj::none);
-    context.currentInputLock = kj::mv(inputLock);
-    context.currentLock = workerLock;
+    jsg::Lock& js = lock;
+    js.withinHandleScope([&] {
+      v8::Context::Scope contextScope(lock.getContext());
+      v8::Isolate::PromiseContextScope promiseContextScope(
+          lock.getIsolate(), getPromiseContextTag(lock));
 
-    KJ_ON_SCOPE_FAILURE(context.currentLock = kj::none; context.currentInputLock = kj::none);
-
-    {
-      // Handle any pending deletions that arrived while the worker was processing a different
-      // request.
-      auto lock = context.deleteQueue->crossThreadDeleteQueue.lockExclusive();
-      auto& state = KJ_ASSERT_NONNULL(*lock);
-      for (auto& object: state.queue) {
-        OwnedObjectList::unlink(*object);
+      {
+        // Handle any pending deletions that arrived while the worker was processing a different
+        // request.
+        auto l = deleteQueue->crossThreadDeleteQueue.lockExclusive();
+        auto& state = KJ_ASSERT_NONNULL(*l);
+        for (auto& object: state.queue) {
+          OwnedObjectList::unlink(*object);
+        }
+        state.queue.clear();
       }
-      state.queue.clear();
-    }
-  }
-  ~Scope() {
-    context.currentLock = nullptr;
-    context.currentInputLock = kj::none;
-  }
 
-  Worker::Lock& getWorkerLock() { return workerLock; }
-
-private:
-
-  IoContext& context;
-  ThreadScope threadScope;
-  Worker::Lock workerLock;
-  v8::HandleScope handleScope;
-  v8::Context::Scope jsContextScope;
-  v8::Isolate::PromiseContextScope promiseContextScope;
-};
+      func(lock);
+    });
+  });
+}
 
 void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
                         Worker::LockType lockType,
@@ -1059,10 +1031,7 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
 
   getIoChannelFactory().getTimer().syncTime();
 
-  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    Scope scope(*this, lockType, kj::mv(inputLock), stackScope);
-    auto& workerLock = scope.getWorkerLock();
-
+  runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
     if (!allowPermanentException) {
       workerLock.requireNoPermanentException();
     }
