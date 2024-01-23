@@ -14,11 +14,15 @@ public:
   PackagesTarReader() = default;
 
   void read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
-    auto x = *PYODIDE_PACKAGES_TAR;
-    kj::byte* start = buf.begin();
-    for (int i = 0; i < buf.size(); i++) {
-      start[i] = x[offset + i];
+    int tarSize = PYODIDE_PACKAGES_TAR->size();
+    if (offset >= tarSize) {
+      return;
     }
+    int toCopy = buf.size();
+    if (tarSize - offset < toCopy) {
+      toCopy = tarSize - offset;
+    }
+    memcpy(buf.begin(), &((*PYODIDE_PACKAGES_TAR)[0]) + offset, toCopy);
   }
 
   JSG_RESOURCE_TYPE(PackagesTarReader) {
