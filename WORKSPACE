@@ -3,7 +3,7 @@ workspace(name = "workerd")
 # ========================================================================================
 # Bazel basics
 
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository", "new_git_repository")
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
 
 http_archive(
@@ -172,11 +172,10 @@ http_archive(
 #   old for tcmalloc. Absurdly, Bazel simply ignores later attempts to define the same repo name,
 #   rather than erroring out. Thus this leads to confusing compiler errors in tcmalloc complaining
 #   that ABSL_ATTRIBUTE_PURE_FUNCTION is not defined.
-new_git_repository(
+git_repository(
     name = "com_google_absl",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
     commit = "0764ad493e54a79c7e3e02fc3412ef55b4835b9e",
-    shallow_since = "1701253303 -0800"
 )
 bind(
     name = "absl_flat_hash_set",
@@ -248,9 +247,11 @@ cc_library(
 http_archive(
     name = "zlib",
     build_file_content = _zlib_build,
-    sha256 = "8a9ba2898e1d0d774eca6ba5b4627a11e5588ba85c8851336eb38de4683050a7",
-    strip_prefix = "zlib-1.3",
-    urls = ["https://zlib.net/zlib-1.3.tar.xz"],
+    sha256 = "38ef96b8dfe510d42707d9c781877914792541133e1870841463bfa73f883e32",
+    strip_prefix = "zlib-1.3.1",
+    # Using the .tar.xz artifact from the release page – for many other dependencies we use a
+    # snapshot based on the tag of a release instead.
+    urls = ["https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.xz"],
 )
 
 http_file(
@@ -399,8 +400,11 @@ npm_repositories()
 # Note that googlesource does not generate tarballs deterministically, so we cannot use
 # http_archive: https://github.com/google/gitiles/issues/84
 #
-# It would seem that googlesource would rather we use git protocol (ideally with shallow clones).
+# It would seem that googlesource would rather we use git protocol.
 # Fine, we can do that.
+#
+# We previously used shallow_since for our git-based dependencies, but this may actually be
+# harmful: https://github.com/bazelbuild/bazel/issues/12857
 #
 # There is an official mirror for V8 itself on GitHub, but not for dependencies like zlib (Chromium
 # fork), icu (Chromium fork), and trace_event, so we still have to use git for them.
@@ -430,7 +434,7 @@ http_archive(
     url = "https://github.com/v8/v8/archive/refs/tags/12.1.285.26.tar.gz",
 )
 
-new_git_repository(
+git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
     commit = "a622de35ac311c5ad390a7af80724634e5dc61ed",
@@ -451,7 +455,6 @@ http_archive(
     strip_prefix = "perfetto-39.0",
     type = "tgz",
     url = "https://github.com/google/perfetto/archive/refs/tags/v39.0.tar.gz",
-
 )
 
 # For use with perfetto
@@ -470,12 +473,11 @@ new_local_repository(
     build_file_content = ""
 )
 
-new_git_repository(
+git_repository(
     name = "com_googlesource_chromium_base_trace_event_common",
     build_file = "@v8//:bazel/BUILD.trace_event_common",
     commit = "29ac73db520575590c3aceb0a6f1f58dda8934f6",
     remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
-    shallow_since = "1695357423 -0700",
 )
 
 # This sets up a hermetic python3, rather than depending on what is installed.

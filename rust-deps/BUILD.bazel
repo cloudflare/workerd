@@ -51,14 +51,6 @@ CARGO_BAZEL = select({
 # To repin crates: bazel run //rust-deps:crates_vendor -- --repin
 crates_vendor(
     name = "crates_vendor",
-    annotations = {
-        "lolhtml": [crate.annotation(
-            shallow_since = "1690827348 +0100",
-        )],
-        "lol_html": [crate.annotation(
-            shallow_since = "1690827348 +0100",
-        )],
-    },
     cargo_bazel = CARGO_BAZEL,
     mode = "remote",
     packages = PACKAGES,
