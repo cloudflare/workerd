@@ -23,6 +23,7 @@ const config :Workerd.Config = (
 const mainWorker :Workerd.Worker = (
   modules = [
     (name = "worker", pythonModule = embed "./worker.py"),
+    (name = "fastapi", pythonRequirement = "fastapi"),
   ],
   compatibilityDate = "2023-12-18",
   compatibilityFlags = ["experimental"],
