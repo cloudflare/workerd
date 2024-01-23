@@ -66,15 +66,4 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
   return false;
 }
 
-capnp::Data::Reader getPyodideEmbeddedPackages() {
-  // TODO(later): strip the version from this.
-  auto moduleName = "pyodide:generated/pyodide_packages_unzipped_0.2.tar";
-  for (auto m : PYODIDE_BUNDLE->getModules()) {
-    if (m.getName() == moduleName) {
-      return m.getSrc();
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
 }  // namespace workerd

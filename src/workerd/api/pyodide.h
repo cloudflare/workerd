@@ -21,6 +21,4 @@ kj::String generatePyodidePatches();
 
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
 
-capnp::Data::Reader getPyodideEmbeddedPackages();
-
 }  // namespace workerd

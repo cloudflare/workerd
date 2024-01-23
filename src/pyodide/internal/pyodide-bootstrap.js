@@ -2,12 +2,11 @@ import { loadPyodide } from "pyodide:python";
 import { getMetadata } from "pyodide:current-bundle";
 import { lockFile } from "pyodide:package-lock.json";
 import { getPatches } from "pyodide:patches";
-import embeddedPackages from "pyodide:embedded_packages";
 
 function initializePackageIndex(pyodide, lockfile) {
   if (!lockfile.packages) {
     throw new Error(
-      "Loaded pyodide lock file does not contain the expected key 'packages'.",
+      "Loaded pyodide lock file does not contain the expected key 'packages'."
     );
   }
   const API = pyodide._api;
@@ -83,7 +82,7 @@ const EMBEDDED_PYTHON_PACKAGES = [
   "jsonpointer",
   "mypy_extensions",
   "micropip",
-  "packaging"
+  "packaging",
 ];
 
 function transformMetadata(metadata) {
@@ -104,18 +103,18 @@ function transformMetadata(metadata) {
       metadata.globals.push({
         name: module.name,
         value: {
-          pythonModule: module.pythonModule
-        }
-      })
+          pythonModule: module.pythonModule,
+        },
+      });
     }
 
     if (module.pythonRequirement !== undefined) {
       metadata.globals.push({
         name: module.name,
         value: {
-          pythonRequirement: module.pythonRequirement
-        }
-      })
+          pythonRequirement: module.pythonRequirement,
+        },
+      });
     }
   }
   return metadata;
@@ -150,22 +149,6 @@ export default {
     }
 
     if (hasRequirements) {
-      const name = "pyodide_packages_unzipped_0.2.tar";
-      const path = `/lib/python3.11/site-packages/${name}`;
-      pyodide.FS.writeFile(path, new Uint8Array(embeddedPackages), {
-        encoding: 'binary',
-      });
-
-      pyodide.runPython(`
-      import tarfile
-      import os
-
-      tar_file_path = "${path}"
-      containing_dir = os.path.dirname(tar_file_path)
-      with tarfile.open(tar_file_path, 'r') as tar:
-        tar.extractall(containing_dir)
-      `)
-
       const micropip = pyodide.pyimport("micropip");
       if (micropipRequirements.length > 0) {
         // Micropip and ssl packages are contained in the tarball which is extracted above. This means
@@ -175,12 +158,10 @@ export default {
 
       // Apply patches that enable some packages to work.
       const patches = getPatches();
-      // TODO(EW-8055): Why does micropip.list not work?
-      if (JSON.parse(micropip.freeze())["packages"]["aiohttp"] !== undefined) {
+      if (micropip.list().has("aiohttp") !== undefined) {
         pyodide.runPython(patches["aiohttp_fetch_patch.py"]);
       }
     }
-
 
     await pyodide.loadPackage(pythonRequirements);
 

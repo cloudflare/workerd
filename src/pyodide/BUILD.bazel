@@ -1,7 +1,42 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
-load("@bazel_skylib//rules:copy_directory.bzl", "copy_directory")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
+load("//:build/capnp_embed.bzl", "capnp_embed")
+load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
+
+copy_file(
+    name = "pyodide_packages_archive",
+    src = "@pyodide_packages//:pyodide_packages_unzipped_0.2.tar",
+    out = "generated/pyodide_packages_unzipped_0.1.tar",
+)
+
+capnp_embed(
+    name = "pyodide_packages_archive_embed",
+    src = "generated/pyodide_packages_unzipped_0.1.tar",
+    deps = ["pyodide_packages_archive"],
+)
+
+copy_file(
+    name = "packages_capnp_file",
+    src = "pyodide_packages.capnp",
+    out = "generated/pyodide_packages.capnp",
+)
+
+capnp_embed(
+    name = "packages_capnp_file_embed",
+    src = "generated/pyodide_packages.capnp",
+    deps = ["packages_capnp_file"],
+)
+
+cc_capnp_library(
+    name = "pyodide_packages_capnp",
+    srcs = ["generated/pyodide_packages.capnp"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":packages_capnp_file_embed",
+        ":pyodide_packages_archive_embed",
+    ],
+)
 
 copy_file(
     name = "pyodide.asm.wasm@rule",
@@ -15,12 +50,6 @@ copy_file(
     out = "generated/python_stdlib.zip",
 )
 
-copy_file(
-    name = "pyodide_packages_file.zip@rule",
-    src = "@pyodide_packages//:pyodide_packages_unzipped_0.2.tar",
-    out = "generated/pyodide_packages_unzipped_0.2.tar",
-)
-
 PRELUDE = """
 import { newWasmModule, monotonicDateNow, wasmInstantiate } from "pyodide-internal:builtin_wrappers";
 
@@ -28,25 +57,39 @@ function addEventListener(){}
 """
 
 REPLACEMENTS = [
-    ["var _createPyodideModule", PRELUDE + "export const _createPyodideModule"],
-    ["globalThis._createPyodideModule = _createPyodideModule;", ""],
-    ["new WebAssembly.Module", "newWasmModule"],
-    ["WebAssembly.instantiate", "wasmInstantiate"],
-    ["Date.now", "monotonicDateNow"],
+    [
+        "var _createPyodideModule",
+        PRELUDE + "export const _createPyodideModule",
+    ],
+    [
+        "globalThis._createPyodideModule = _createPyodideModule;",
+        "",
+    ],
+    [
+        "new WebAssembly.Module",
+        "newWasmModule",
+    ],
+    [
+        "WebAssembly.instantiate",
+        "wasmInstantiate",
+    ],
+    [
+        "Date.now",
+        "monotonicDateNow",
+    ],
 ]
 
 expand_template(
     name = "pyodide.asm.js@rule",
     out = "generated/pyodide.asm.js",
-    template = "@pyodide//:pyodide/pyodide.asm.js",
     substitutions = dict(REPLACEMENTS),
+    template = "@pyodide//:pyodide/pyodide.asm.js",
 )
 
 wd_js_bundle(
     name = "pyodide",
     builtin_modules = [
         "python.js",
-        "generated/pyodide_packages_unzipped_0.2.tar"
     ] + glob(["internal/patches/*.py"]),
     import_name = "pyodide",
     internal_data_modules = ["generated/python_stdlib.zip"],
@@ -61,6 +104,5 @@ wd_js_bundle(
         "pyodide.asm.js@rule",
         "pyodide.asm.wasm@rule",
         "python_stdlib.zip@rule",
-        "pyodide_packages_file.zip@rule"
     ],
 )

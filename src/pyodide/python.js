@@ -1,3 +1,6 @@
+import { parseTarInfo } from "pyodide-internal:tar";
+import { createTarFS } from "pyodide-internal:tarfs";
+
 /**
  * This file is a simplified version of the Pyodide loader:
  * https://github.com/pyodide/pyodide/blob/main/src/js/pyodide.ts
@@ -6,14 +9,12 @@
  * `pyodide.loadPackage`. In trade we add memory snapshots here.
  */
 
-
 /**
  * _createPyodideModule and pyodideWasmModule together are produced by the
  * Emscripten linker
  */
 import { _createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
 import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
-
 
 /**
  * The Python and Pyodide stdlib zipped together. The zip format is convenient
@@ -48,7 +49,6 @@ import stdlib from "pyodide-internal:generated/python_stdlib.zip";
  */
 let MEMORY = undefined;
 
-
 /**
  * This is passed as a preRun hook in EmscriptenSettings, run just before
  * main(). It ensures that the file system includes the stuff that main() needs,
@@ -82,7 +82,6 @@ function prepareFileSystem(Module) {
   Module.FS.mkdir(Module.API.config.env.HOME);
 }
 
-
 /**
  * A hook that the Emscripten runtime calls to perform the WebAssembly
  * instantiation action. Once instantiated, this callback function should call
@@ -100,13 +99,15 @@ function prepareFileSystem(Module) {
 function instantiateWasm(wasmImports, successCallback) {
   (async function () {
     // Instantiate pyodideWasmModule with wasmImports
-    const instance = await WebAssembly.instantiate(pyodideWasmModule, wasmImports);
+    const instance = await WebAssembly.instantiate(
+      pyodideWasmModule,
+      wasmImports
+    );
     successCallback(instance, pyodideWasmModule);
   })();
 
   return {};
 }
-
 
 /**
  * The Emscripten settings object
@@ -140,7 +141,7 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
     // They used to have an `environment` setting that did this but it has been
     // removed =(
     // TODO: consider patching this in patch_pyodide_js.bzl instead.
-    globalThis.window = {};       // makes ENVIRONMENT_IS_WEB    = true
+    globalThis.window = {}; // makes ENVIRONMENT_IS_WEB    = true
     globalThis.importScripts = 1; // makes ENVIRONMENT_IS_WORKER = false
     const p = _createPyodideModule(emscriptenSettings);
     delete globalThis.window;
@@ -153,7 +154,6 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
     throw e;
   }
 }
-
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -259,11 +259,25 @@ function simpleRunPython(emscriptenModule, code) {
   }
 }
 
+function mountLib(pyodide) {
+  const [info, _] = parseTarInfo();
+  const tarFS = createTarFS(pyodide._module);
+  pyodide.FS.mkdirTree("/session/lib/python3.11/site-packages");
+  pyodide.FS.mount(tarFS, { info }, "/session/lib/python3.11/site-packages");
+  const sys = pyodide.pyimport("sys");
+  sys.path.push("/session/lib/python3.11/site-packages");
+  sys.destroy();
+}
+
 export async function loadPyodide() {
   const emscriptenSettings = getEmscriptenSettings();
-  const emscriptenModule = await instantiateEmscriptenModule(emscriptenSettings);
+  const emscriptenModule = await instantiateEmscriptenModule(
+    emscriptenSettings
+  );
   prepareWasmLinearMemory(emscriptenModule);
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
   emscriptenModule.API.finalizeBootstrap();
-  return emscriptenModule.API.public_api;
+  const pyodide = emscriptenModule.API.public_api;
+  mountLib(pyodide);
+  return pyodide;
 }

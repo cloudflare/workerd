@@ -63,11 +63,13 @@ wd_cc_library(
     hdrs = [
         "rtti.h",
         "modules.h",
+        "//src/pyodide:generated/pyodide_packages.capnp.h"
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":html-rewriter",
         "//src/workerd/io",
+        "//src/pyodide:pyodide_packages_capnp",
     ],
 )
 
@@ -87,11 +89,12 @@ wd_cc_library(
 wd_cc_library(
     name = "pyodide",
     srcs = ["pyodide.c++"],
-    hdrs = ["pyodide.h"],
+    hdrs = ["pyodide.h", "//src/pyodide:generated/pyodide_packages.capnp.h"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/server:workerd_capnp",
         "//src/pyodide:pyodide",
+        "//src/pyodide:pyodide_packages_capnp",
     ],
 )
 
