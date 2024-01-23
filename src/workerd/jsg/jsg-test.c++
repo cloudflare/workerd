@@ -319,8 +319,7 @@ JSG_DECLARE_ISOLATE_TYPE(LockLogIsolate, LockLogContext);
 KJ_TEST("jsg::Lock logWarning") {
   LockLogIsolate isolate(v8System, kj::heap<IsolateObserver>());
   bool called = false;
-  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    LockLogIsolate::Lock lock(isolate, stackScope);
+  isolate.runInLockScope([&](LockLogIsolate::Lock& lock) {
     lock.setLoggerCallback([&called](jsg::Lock& js, auto message) {
       KJ_ASSERT(message == "Yes that happened"_kj);
       called = true;
@@ -421,13 +420,15 @@ JSG_DECLARE_ISOLATE_TYPE(IsolateUuidIsolate, IsolateUuidContext);
 
 KJ_TEST("jsg::Lock getUuid") {
   IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
-  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    IsolateUuidIsolate::Lock lock(isolate, stackScope);
+  bool called = false;
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
     // Returns the same value
     KJ_ASSERT(lock.getUuid() == lock.getUuid());
     KJ_ASSERT(isolate.getUuid() == lock.getUuid());
     KJ_ASSERT(lock.getUuid().size() == 36);
+    called = true;
   });
+  KJ_ASSERT(called);
 }
 
 }  // namespace

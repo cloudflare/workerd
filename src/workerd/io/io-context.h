@@ -815,8 +815,12 @@ private:
     return *getCurrentIncomingRequest().ioChannelFactory;
   }
 
-  class ThreadScope;
-  class Scope;
+  // Run the given callback within the scope of this IoContext. This encapsultes the
+  // setup of a number of scopes that must be entered prior to running within the
+  // context, including entering the V8StackScope and acquiring the Worker::Lock.
+  void runInContextScope(Worker::LockType lockType,
+                         kj::Maybe<InputGate::Lock> inputLock,
+                         kj::Function<void(Worker::Lock&)> func);
 
   friend class Finalizeable;
   friend class DeleteQueue;

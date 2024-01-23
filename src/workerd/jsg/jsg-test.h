@@ -27,119 +27,115 @@ public:
     return isolate;
   }
 
-  void expectEvalModule(kj::StringPtr code, kj::StringPtr expectedType, kj::StringPtr expectedValue) {
-    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      typename IsolateType::Lock lock(getIsolate(), stackScope);
+  void expectEvalModule(kj::StringPtr code,
+                        kj::StringPtr expectedType,
+                        kj::StringPtr expectedValue) {
+    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
+      jsg::Lock& js = lock;
+      js.withinHandleScope([&] {
+        // Create a new context.
+        auto jsContext = lock.template newContext<ContextType>();
+        v8::Local<v8::Context> context = jsContext.getHandle(lock.v8Isolate);
 
-      // Create a stack-allocated handle scope.
-      v8::HandleScope handleScope(lock.v8Isolate);
+        // Enter the context for the module
+        v8::Context::Scope contextScope(context);
 
-      // Create a new context.
-      auto jsContext = lock.template newContext<ContextType>();
-      v8::Local<v8::Context> context = jsContext.getHandle(lock.v8Isolate);
+        // Compile code as "main" module
+        CompilationObserver observer;
+        auto modules = ModuleRegistryImpl<ContextType>::from(lock);
+        auto p = kj::Path::parse("main");
+        modules->add(p, jsg::ModuleRegistry::ModuleInfo(
+            lock, "main", code, ModuleInfoCompileOption::BUNDLE, observer));
 
-      // Enter the context for the module
-      v8::Context::Scope contextScope(context);
+        // Instantiate the module
+        auto& moduleInfo = KJ_REQUIRE_NONNULL(modules->resolve(lock, p));
+        auto module = moduleInfo.module.getHandle(lock);
+        jsg::instantiateModule(lock, module);
 
-      // Compile code as "main" module
-      CompilationObserver observer;
-      auto modules = ModuleRegistryImpl<ContextType>::from(lock);
-      auto p = kj::Path::parse("main");
-      modules->add(p, jsg::ModuleRegistry::ModuleInfo(
-          lock, "main", code, ModuleInfoCompileOption::BUNDLE, observer));
+        // Module has to export "run" function
+        auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
+        auto runValue = check(moduleNs->Get(context, v8StrIntern(lock.v8Isolate, "run"_kj)));
 
-      // Instantiate the module
-      auto& moduleInfo = KJ_REQUIRE_NONNULL(modules->resolve(lock, p));
-      auto module = moduleInfo.module.getHandle(lock);
-      jsg::instantiateModule(lock, module);
+        v8::TryCatch catcher(lock.v8Isolate);
 
-      // Module has to export "run" function
-      auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
-      auto runValue = check(moduleNs->Get(context, v8StrIntern(lock.v8Isolate, "run"_kj)));
+        // Run the function to get the result.
+        v8::Local<v8::Value> result;
+        if (v8::Function::Cast(*runValue)->Call(context, context->Global(), 0, nullptr)
+                .ToLocal(&result)) {
+          v8::String::Utf8Value type(lock.v8Isolate, result->TypeOf(lock.v8Isolate));
+          v8::String::Utf8Value value(lock.v8Isolate, result);
 
-      v8::TryCatch catcher(lock.v8Isolate);
+          KJ_EXPECT(*type == expectedType, *type, expectedType);
+          KJ_EXPECT(*value == expectedValue, *value, expectedValue);
+        } else if (catcher.HasCaught()) {
+          v8::String::Utf8Value message(lock.v8Isolate, catcher.Exception());
 
-      // Run the function to get the result.
-      v8::Local<v8::Value> result;
-      if (v8::Function::Cast(*runValue)->Call(context, context->Global(), 0, nullptr).ToLocal(&result)) {
-        v8::String::Utf8Value type(lock.v8Isolate, result->TypeOf(lock.v8Isolate));
-        v8::String::Utf8Value value(lock.v8Isolate, result);
-
-        KJ_EXPECT(*type == expectedType, *type, expectedType);
-        KJ_EXPECT(*value == expectedValue, *value, expectedValue);
-      } else if (catcher.HasCaught()) {
-        v8::String::Utf8Value message(lock.v8Isolate, catcher.Exception());
-
-        KJ_EXPECT(expectedType == "throws", expectedType, catcher.Exception());
-        KJ_EXPECT(*message == expectedValue, *message, expectedValue);
-      } else {
-        KJ_FAIL_EXPECT("returned empty handle but didn't throw exception?");
-      }
+          KJ_EXPECT(expectedType == "throws", expectedType, catcher.Exception());
+          KJ_EXPECT(*message == expectedValue, *message, expectedValue);
+        } else {
+          KJ_FAIL_EXPECT("returned empty handle but didn't throw exception?");
+        }
+      });
     });
   }
 
   void expectEval(kj::StringPtr code, kj::StringPtr expectedType, kj::StringPtr expectedValue) {
-    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      typename IsolateType::Lock lock(getIsolate(), stackScope);
+    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
+      jsg::Lock& js = lock;
+      js.withinHandleScope([&] {
+        // Create a new context.
+        v8::Local<v8::Context> context =
+            lock.template newContext<ContextType>().getHandle(lock.v8Isolate);
 
-      // Create a stack-allocated handle scope.
-      v8::HandleScope handleScope(lock.v8Isolate);
+        // Enter the context for compiling and running the hello world script.
+        v8::Context::Scope contextScope(context);
 
-      // Create a new context.
-      v8::Local<v8::Context> context =
-          lock.template newContext<ContextType>().getHandle(lock.v8Isolate);
+        // Create a string containing the JavaScript source code.
+        v8::Local<v8::String> source = jsg::v8Str(lock.v8Isolate, code);
 
-      // Enter the context for compiling and running the hello world script.
-      v8::Context::Scope contextScope(context);
+        // Compile the source code.
+        v8::Local<v8::Script> script;
+        if (!v8::Script::Compile(context, source).ToLocal(&script)) {
+          KJ_FAIL_EXPECT("code didn't parse", code);
+          return;
+        }
 
-      // Create a string containing the JavaScript source code.
-      v8::Local<v8::String> source = jsg::v8Str(lock.v8Isolate, code);
+        v8::TryCatch catcher(lock.v8Isolate);
 
-      // Compile the source code.
-      v8::Local<v8::Script> script;
-      if (!v8::Script::Compile(context, source).ToLocal(&script)) {
-        KJ_FAIL_EXPECT("code didn't parse", code);
-        return;
-      }
+        // Run the script to get the result.
+        v8::Local<v8::Value> result;
+        if (script->Run(context).ToLocal(&result)) {
+          v8::String::Utf8Value type(lock.v8Isolate, result->TypeOf(lock.v8Isolate));
+          v8::String::Utf8Value value(lock.v8Isolate, result);
 
-      v8::TryCatch catcher(lock.v8Isolate);
+          KJ_EXPECT(*type == expectedType, *type, expectedType);
+          KJ_EXPECT(*value == expectedValue, *value, expectedValue);
+        } else if (catcher.HasCaught()) {
+          v8::String::Utf8Value message(lock.v8Isolate, catcher.Exception());
 
-      // Run the script to get the result.
-      v8::Local<v8::Value> result;
-      if (script->Run(context).ToLocal(&result)) {
-        v8::String::Utf8Value type(lock.v8Isolate, result->TypeOf(lock.v8Isolate));
-        v8::String::Utf8Value value(lock.v8Isolate, result);
-
-        KJ_EXPECT(*type == expectedType, *type, expectedType);
-        KJ_EXPECT(*value == expectedValue, *value, expectedValue);
-      } else if (catcher.HasCaught()) {
-        v8::String::Utf8Value message(lock.v8Isolate, catcher.Exception());
-
-        KJ_EXPECT(expectedType == "throws", expectedType, catcher.Exception());
-        KJ_EXPECT(*message == expectedValue, *message, expectedValue);
-      } else {
-        KJ_FAIL_EXPECT("returned empty handle but didn't throw exception?");
-      }
+          KJ_EXPECT(expectedType == "throws", expectedType, catcher.Exception());
+          KJ_EXPECT(*message == expectedValue, *message, expectedValue);
+        } else {
+          KJ_FAIL_EXPECT("returned empty handle but didn't throw exception?");
+        }
+      });
     });
   }
 
   void setAllowEval(bool b) {
-    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      typename IsolateType::Lock lock(getIsolate(), stackScope);
+    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
       lock.setAllowEval(b);
     });
   }
 
   void setCaptureThrowsAsRejections(bool b) {
-    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      typename IsolateType::Lock lock(getIsolate(), stackScope);
+    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
       lock.setCaptureThrowsAsRejections(b);
     });
   }
 
   void runMicrotasks() {
-    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      typename IsolateType::Lock lock(getIsolate(), stackScope);
+    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
       lock.runMicrotasks();
     });
   }

@@ -770,8 +770,7 @@ struct Worker::Script::Impl {
       const Worker& worker,
       kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>>& asyncContext,
       DynamicImportHandler handler) {
-    return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      Worker::Lock lock(worker, asyncLock, stackScope);
+    return worker.runInLockScope(asyncLock, [&](Worker::Lock& lock) {
       jsg::Lock& js = lock;
 
       return js.withinHandleScope([&]() -> DynamicImportResult {
@@ -1035,7 +1034,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     });
 
     // The PromiseCrossContextCallback is used to allow cross-IoContext promise following.
-    // When the IoContext::Scope is entered, we set the "promise context tag" associated
+    // When the IoContext scope is entered, we set the "promise context tag" associated
     // with the IoContext on the Isolate that is locked. Any Promise that is created within
     // that scope will be tagged with the same promise context tag. When an attempt to
     // follow a promise occurs (e.g. either using Promise.prototype.then() or await, etc)
@@ -2995,8 +2994,7 @@ Worker::Actor::~Actor() noexcept(false) {
   //   potentially colocate multiple actors on the same thread, but they are always from the same
   //   namespace and hence would be locking the same isolate anyway -- it's not like one of the
   //   other actors could be running while we wait for this lock.
-  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    Worker::Lock lock(*worker, Worker::Lock::TakeSynchronously(kj::none), stackScope);
+  worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
     impl = nullptr;
   });
 }

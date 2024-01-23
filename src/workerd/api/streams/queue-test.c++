@@ -18,8 +18,7 @@ JSG_DECLARE_ISOLATE_TYPE(QueueIsolate, QueueContext);
 
 void preamble(auto callback) {
   QueueIsolate isolate(v8System, kj::heap<jsg::IsolateObserver>());
-  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    QueueIsolate::Lock lock(isolate, stackScope);
+  isolate.runInLockScope([&](QueueIsolate::Lock& lock) {
     lock.withinHandleScope([&] {
       v8::Local<v8::Context> context = lock.newContext<QueueContext>().getHandle(lock);
       v8::Context::Scope contextScope(context);

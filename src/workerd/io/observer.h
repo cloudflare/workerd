@@ -138,10 +138,12 @@ public:
 
   // Use like so:
   //
-  //   auto lockTiming = MetricsCollector::ScriptReplica::LockTiming::tryCreate(script, maybeRequest);
+  //   auto lockTiming = MetricsCollector::ScriptReplica::LockTiming::tryCreate(
+  //       script, maybeRequest);
   //   MetricsCollector::ScriptReplica::LockRecord record(lockTiming);
-  //   JsgWorkerIsolate::Lock lock(isolate);
-  //   record.locked();
+  //   isolate.runInLockScope([&](MyIsolate::Lock& lock) {
+  //     record.locked();
+  //   });
   //
   // And `record()` will report the time spent waiting for the lock (including any asynchronous
   // time you might insert between the construction of `lockTiming` and `LockRecord()`), plus
