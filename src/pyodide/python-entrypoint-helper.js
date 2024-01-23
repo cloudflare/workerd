@@ -146,6 +146,8 @@ export async function setupPackages(pyodide, origMetadata) {
   }
 
   if (micropipRequirements.length > 0) {
+    // Micropip and ssl packages are pre-loaded via the packages tarball. This means
+    // we should be able to load micropip directly now.
     const micropip = pyodide.pyimport("micropip");
     await micropip.install(micropipRequirements);
   }

@@ -23,8 +23,10 @@ def request_to_scope(req, ws=False):
 
     headers = [tuple(x) for x in req.headers]
     url = URL.new(req.url)
+    assert url.protocol[-1] == ':'
     scheme = url.protocol[:-1]
     path = url.pathname
+    assert url.search[0] == '?'
     query_string = url.search[1:].encode()
     if ws:
         ty = "websocket"
@@ -172,5 +174,4 @@ async def fetch(app, req):
 
 
 async def websocket(app, req):
-    # await start_application(app)
     return await process_websocket(app, req)
