@@ -8,7 +8,7 @@ export function createTarFS(Module) {
     },
     createNode(parent, name, info) {
       let mode = info.mode;
-      const isDir = info.children !== "undefined";
+      const isDir = info.children !== undefined;
       if (isDir) {
         mode |= 1 << 14; // set S_IFDIR
       } else {
