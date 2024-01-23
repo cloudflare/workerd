@@ -176,3 +176,19 @@ kj_test(
 ) for f in glob(
     ["**/*.wd-test"],
 )]
+
+# Enable GPU tests if experimental GPU support is enabled. Unfortunately, this depends on the right
+# drivers being available on Linux and macOS, so turn it off by default. Run GPU tests with
+# `bazel test //src/workerd/api:gpu/<test name>`.
+[wd_test(
+    src = f,
+    args = ["--experimental"],
+    data = [f.removesuffix(".gpu-wd-test") + ".js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+) for f in glob(
+    ["**/*.gpu-wd-test"],
+)]

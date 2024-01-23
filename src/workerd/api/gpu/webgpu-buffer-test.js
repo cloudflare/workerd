@@ -1,8 +1,5 @@
 import { deepEqual, ok, equal } from "node:assert";
 
-// run manually for now
-// bazel run --//src/workerd/io:enable_experimental_webgpu //src/workerd/server:workerd -- test `realpath ./src/workerd/api/gpu/webgpu-buffer-test.gpu-wd-test` --verbose --experimental
-
 export class DurableObjectExample {
   constructor(state) {
     this.state = state;
