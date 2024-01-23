@@ -105,17 +105,17 @@ http_archive(
 
 http_archive(
     name = "pyodide",
-    sha256 = "9136265cb046e4dea12a38a19afc154ddc6c525b6a96632c63c3192bff2d6839",
+    sha256 = "ebe015d9e0c766af3679378699ac145f0fc320a49213b4734fd30bc28c68c360",
     type = "tar.bz2",
-    urls = ["https://github.com/pyodide/pyodide/releases/download/0.25.0a2/pyodide-core-0.25.0a2.tar.bz2"],
+    urls = ["https://github.com/pyodide/pyodide/releases/download/0.25.0/pyodide-core-0.25.0.tar.bz2"],
     build_file = "//:build/BUILD.pyodide",
 )
 
 http_archive(
     name = "pyodide_packages",
-    sha256 = "35f144f2bc1e59421fadd72cfca3fad9735f55e92a75fe7072bfc8a15aee489a",
+    sha256 = "d23ee77143bec0f3c11e32e5eb7a7c530a25b1f8ac36203050853fa38bdd8236",
     type = "zip",
-    urls = ["https://github.com/dom96/pyodide_packages/releases/download/v0.2/pyodide_packages_unzipped_0.2.tar.zip"],
+    urls = ["https://github.com/dom96/pyodide_packages/releases/download/v0.6/pyodide_packages.tar.zip"],
     build_file = "//:build/BUILD.pyodide_packages",
 )
 

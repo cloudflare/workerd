@@ -11,8 +11,8 @@ function initializePackageIndex(pyodide, lockfile) {
     );
   }
   const API = pyodide._api;
-  API.config.indexURL = "https://cdn.jsdelivr.net/pyodide/v0.25.0a2/full/";
-  globalThis.location = "https://cdn.jsdelivr.net/pyodide/v0.25.0a2/full/";
+  API.config.indexURL = "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/";
+  globalThis.location = "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/";
   API.lockfile_info = lockfile.info;
   API.lockfile_packages = lockfile.packages;
   API.repodata_packages = lockfile.packages;
@@ -150,7 +150,7 @@ export default {
     }
 
     if (hasRequirements) {
-      const name = "pyodide_packages_unzipped_0.2.tar";
+      const name = "pyodide_packages.tar";
       const path = `/lib/python3.11/site-packages/${name}`;
       pyodide.FS.writeFile(path, new Uint8Array(embeddedPackages), {
         encoding: 'binary',

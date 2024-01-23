@@ -3,7 +3,7 @@ export const lockFile = {
     "arch":"wasm32",
     "platform":"emscripten_3_1_45",
     "python":"3.11.3",
-    "version":"0.25.0a2"
+    "version":"0.25.0"
  },
  "packages":{
     "aiohttp":{
