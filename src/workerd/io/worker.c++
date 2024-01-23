@@ -2395,7 +2395,7 @@ private:
 
     kj::Promise<void> receiveLoop() {
      for (;;) {
-        auto message = co_await webSocket.receive();
+        auto message = co_await webSocket.receive(MAX_MESSAGE_SIZE);
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
             incomingQueue.lockExclusive()->messages.add(kj::mv(text));
@@ -2455,6 +2455,11 @@ private:
     kj::WebSocket& webSocket;                 // only accessed on the InspectorService thread.
     std::atomic_bool receivedClose;           // accessed on any thread (only transitions false -> true).
     kj::Maybe<InspectorChannelImpl&> channel; // only accessed on the isolate thread.
+
+    // Sometimes the inspector protocol sends large messages. KJ defaults to a 1MB size limit
+    // for WebSocket messages, which makes sense for production use cases, but for debug we should
+    // be OK to go larger. So, we'll accept 128MB.
+    static constexpr size_t MAX_MESSAGE_SIZE = 128u << 20;
   };
 
   WebSocketIoHandler ioHandler;
