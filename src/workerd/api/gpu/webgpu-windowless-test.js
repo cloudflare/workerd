@@ -1,8 +1,5 @@
 import { ok, deepEqual, equal } from "node:assert";
 
-// run manually for now
-// bazel run --//src/workerd/io:enable_experimental_webgpu //src/workerd/server:workerd -- test `realpath ./src/workerd/api/gpu/webgpu-windowless-test.gpu-wd-test` --verbose --experimental
-
 async function hash(data) {
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
