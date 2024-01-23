@@ -64,9 +64,7 @@ public:
   class QueueEventInfo;
   class EmailEventInfo;
   class TailEventInfo;
-  class HibernatableWebSocketMessageEventInfo;
-  class HibernatableWebSocketCloseEventInfo;
-  class HibernatableWebSocketErrorEventInfo;
+  class HibernatableWebSocketEventInfo;
   class CustomEventInfo;
 
   explicit TraceItem(jsg::Lock& js, const Trace& trace);
@@ -78,9 +76,7 @@ public:
                     jsg::Ref<EmailEventInfo>,
                     jsg::Ref<TailEventInfo>,
                     jsg::Ref<CustomEventInfo>,
-                    jsg::Ref<HibernatableWebSocketMessageEventInfo>,
-                    jsg::Ref<HibernatableWebSocketCloseEventInfo>,
-                    jsg::Ref<HibernatableWebSocketErrorEventInfo>> EventInfo;
+                    jsg::Ref<HibernatableWebSocketEventInfo>> EventInfo;
   kj::Maybe<EventInfo> getEvent(jsg::Lock& js);
   kj::Maybe<double> getEventTimestamp();
 
@@ -318,15 +314,40 @@ private:
   kj::Maybe<kj::String> scriptName;
 };
 
-class TraceItem::HibernatableWebSocketMessageEventInfo final: public jsg::Object {
+class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
 public:
-  explicit HibernatableWebSocketMessageEventInfo(const Trace& trace,
+  class Message;
+  class Close;
+  class Error;
+
+  explicit HibernatableWebSocketEventInfo(const Trace& trace,
       const Trace::HibernatableWebSocketEventInfo::Message& eventInfo);
+  explicit HibernatableWebSocketEventInfo(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Close& eventInfo);
+  explicit HibernatableWebSocketEventInfo(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Error& eventInfo);
+
+  using Type = kj::OneOf<jsg::Ref<Message>, jsg::Ref<Close>, jsg::Ref<Error>>;
+
+  Type getEvent();
+
+  JSG_RESOURCE_TYPE(HibernatableWebSocketEventInfo) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(getWebSocketEvent, getEvent);
+  }
+
+private:
+  Type eventType;
+};
+
+class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Object {
+public:
+  explicit Message(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Message& eventInfo): eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "message"_kj;
   kj::StringPtr getWebSocketEventType() { return webSocketEventType; }
 
-  JSG_RESOURCE_TYPE(HibernatableWebSocketMessageEventInfo) {
+  JSG_RESOURCE_TYPE(Message) {
     JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
   }
 
@@ -334,10 +355,10 @@ private:
   const Trace::HibernatableWebSocketEventInfo::Message& eventInfo;
 };
 
-class TraceItem::HibernatableWebSocketCloseEventInfo final: public jsg::Object {
+class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object {
 public:
-  explicit HibernatableWebSocketCloseEventInfo(const Trace& trace,
-      const Trace::HibernatableWebSocketEventInfo::Close& eventInfo);
+  explicit Close(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Close& eventInfo): eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "close"_kj;
   kj::StringPtr getWebSocketEventType() { return webSocketEventType; }
@@ -345,7 +366,7 @@ public:
   uint16_t getCode();
   bool getWasClean();
 
-  JSG_RESOURCE_TYPE(HibernatableWebSocketCloseEventInfo) {
+  JSG_RESOURCE_TYPE(Close) {
     JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
     JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
     JSG_READONLY_INSTANCE_PROPERTY(wasClean, getWasClean);
@@ -355,15 +376,15 @@ private:
   const Trace::HibernatableWebSocketEventInfo::Close& eventInfo;
 };
 
-class TraceItem::HibernatableWebSocketErrorEventInfo final: public jsg::Object {
+class TraceItem::HibernatableWebSocketEventInfo::Error final: public jsg::Object {
 public:
-  explicit HibernatableWebSocketErrorEventInfo(const Trace& trace,
-      const Trace::HibernatableWebSocketEventInfo::Error& eventInfo);
+  explicit Error(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Error& eventInfo): eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "error"_kj;
   kj::StringPtr getWebSocketEventType() { return webSocketEventType; }
 
-  JSG_RESOURCE_TYPE(HibernatableWebSocketErrorEventInfo) {
+  JSG_RESOURCE_TYPE(Error) {
     JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
   }
 
@@ -512,9 +533,10 @@ private:
   api::TraceItem::FetchEventInfo,                                 \
   api::TraceItem::FetchEventInfo::Request,                        \
   api::TraceItem::FetchEventInfo::Response,                       \
-  api::TraceItem::HibernatableWebSocketMessageEventInfo,          \
-  api::TraceItem::HibernatableWebSocketCloseEventInfo,            \
-  api::TraceItem::HibernatableWebSocketErrorEventInfo,            \
+  api::TraceItem::HibernatableWebSocketEventInfo,                 \
+  api::TraceItem::HibernatableWebSocketEventInfo::Message,        \
+  api::TraceItem::HibernatableWebSocketEventInfo::Close,          \
+  api::TraceItem::HibernatableWebSocketEventInfo::Error,          \
   api::TraceLog,                                                  \
   api::TraceException,                                            \
   api::TraceDiagnosticChannelEvent,                               \
