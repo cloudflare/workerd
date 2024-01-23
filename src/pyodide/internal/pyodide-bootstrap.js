@@ -167,21 +167,4 @@ export default {
 
     return await pyodide.pyimport(metadata.mainModule).fetch(request);
   },
-  async test() {
-    try {
-      const metadata = transformMetadata(getMetadata());
-      const pyodide = await loadPyodide();
-      for (const { name, value } of metadata.globals) {
-        if (value.pythonModule !== undefined) {
-          pyodide.FS.writeFile(`/session/${name}.py`, value.pythonModule, {
-            canOwn: true,
-          });
-        }
-      }
-      await pyodide.pyimport(metadata.mainModule).test();
-    } catch (e) {
-      console.log(e);
-      console.log(e.stack);
-    }
-  },
 };
