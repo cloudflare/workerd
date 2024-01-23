@@ -21,7 +21,7 @@ kj::StringPtr lookupModule(kj::StringPtr name) {
 }
 
 kj::StringPtr getPyodideBootstrap() {
-  return _::lookupModule("pyodide:pyodide-bootstrap");
+  return _::lookupModule("pyodide:python-entrypoint");
 }
 
 kj::String generatePyodideMetadata(server::config::Worker::Reader conf) {

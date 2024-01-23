@@ -1,3 +1,7 @@
+
+// This file is a BUILTIN module that provides most of the actual implementation
+// for the python-entrypoint.js USER module.
+
 export { loadPyodide } from "pyodide-internal:python";
 import { lockFile } from "pyodide-internal:pyodide-lock";
 
