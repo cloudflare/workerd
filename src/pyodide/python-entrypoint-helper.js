@@ -59,6 +59,7 @@ const EMBEDDED_PYTHON_PACKAGES = [
   "attrs",
   "certifi",
   "charset_normalizer",
+  "dataclasses_json",
   "distro",
   "fastapi",
   "frozenlist",
@@ -66,17 +67,31 @@ const EMBEDDED_PYTHON_PACKAGES = [
   "httpcore",
   "httpx",
   "idna",
+  "jsonpatch",
+  "jsonpointer",
   "langchain",
+  "langchain_community",
+  "langchain_core",
+  "langsmith",
+  "marshmallow",
   "micropip",
   "multidict",
+  "mypy_extensions",
+  "numpy",
   "openai",
   "packaging",
   "pydantic",
+  "PyYAML",
+  "requests",
   "setuptools",
   "sniffio",
+  "SQLAlchemy",
   "starlette",
+  "tenacity",
   "tqdm",
   "typing_extensions",
+  "typing_inspect",
+  "urllib3",
   "yarl",
 ];
 
@@ -152,8 +167,10 @@ export async function setupPackages(pyodide, origMetadata) {
     await micropip.install(micropipRequirements);
   }
 
-  // Apply patches that enable some packages to work.
-  if (requirements.includes("aiohttp")) {
+  // Apply patches that enable some packages to work. We don't currently list
+  // out transitive dependencies so these checks are very brittle.
+  // TODO: Fix this
+  if (requirements.includes("aiohttp") || requirements.includes("openai") || requirements.includes("langchain")) {
     const mod = await import("pyodide-internal:patches/aiohttp_fetch_patch.py");
     pyodide.FS.writeFile(
       "/lib/python3.11/site-packages/aiohttp_fetch_patch.py",
