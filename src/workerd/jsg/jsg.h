@@ -2158,20 +2158,6 @@ public:
     }
   }
 
-  // An opaque RAII type that encapsulates the v8::Context::Scope. The purpose
-  // here is to abstract away (somewhat) direct use of the v8 API.
-  class ContextScope {
-  public:
-    ContextScope(v8::Local<v8::Context> context) : scope(context) {}
-    KJ_DISALLOW_COPY_AND_MOVE(ContextScope);
-  private:
-    v8::Context::Scope scope;
-    friend class Lock;
-  };
-
-  // Ensures that we are currently within the scope of the given v8::Context
-  ContextScope enterContextScope(v8::Local<v8::Context> context);
-
   // ====================================================================================
   JsObject global() KJ_WARN_UNUSED_RESULT;
   JsValue undefined() KJ_WARN_UNUSED_RESULT;
@@ -2271,6 +2257,15 @@ private:
   bool warningsLogged;
 };
 
+// Ensures that the given fn is run within both a handlescope and the context scope.
+// The lock must be assignable to a jsg::Lock, and the context must be or be assignable
+// to a v8::Local<v8::Context>. The context will be evaluated within the handle scope.
+#define JSG_WITHIN_CONTEXT_SCOPE(lock, context, fn)                            \
+    ((jsg::Lock&)lock).withinHandleScope([&]() -> auto {                       \
+    v8::Local<v8::Context> ctx = context;                                      \
+    KJ_ASSERT(!ctx.IsEmpty(), "unable to enter invalid v8::Context");          \
+    v8::Context::Scope scope(ctx);                                             \
+    return fn((jsg::Lock&)lock); })
 
 // The V8StackScope is used only as a marker to prove that we are running in the V8 stack
 // established by calling runInV8Stack(...)

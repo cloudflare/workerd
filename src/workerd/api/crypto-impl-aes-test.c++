@@ -93,84 +93,82 @@ KJ_TEST("AES-CTR key wrap") {
   // Basic test that let me repro an issue where using an AES key that's not AES-KW would fail to
   // wrap if it didn't have "encrypt" in its usages when created.
 
+  const jsg::TypeHandler<SubtleCrypto::JsonWebKey>* jwkHandler = nullptr;
+  // Not testing JWK here, so valid value isn't needed.
+
+  static constexpr kj::byte RAW_KEY_DATA[] = {
+    0x52, 0x4b, 0x67, 0x25, 0xe3, 0x56, 0xaa, 0xce,
+    0x7e, 0x76, 0x9b, 0x48, 0x92, 0x55, 0x49, 0x06,
+    0x12, 0x5e, 0xf5, 0xae, 0xce, 0x39, 0xde, 0xc2,
+    0x5b, 0x27, 0x33, 0x4e, 0x6e, 0x52, 0x32, 0x4e
+  };
+
+  static constexpr kj::ArrayPtr<const kj::byte> KEY_DATA(RAW_KEY_DATA, 32);
+
+  SubtleCrypto subtle;
+
+  static constexpr auto getWrappingKey = [](jsg::Lock& js, SubtleCrypto& subtle) {
+    return subtle.importKeySync(js, "raw",
+      kj::heapArray<kj::byte>(KEY_DATA),
+      SubtleCrypto::ImportKeyAlgorithm {
+        .name = kj::str("AES-CTR")
+      },
+      false /* extractable */,
+      { kj::str("wrapKey"), kj::str("unwrapKey") });
+  };
+
+  static constexpr auto getEnc = [] {
+    return SubtleCrypto::EncryptAlgorithm {
+      .name = kj::str("AES-CTR"),
+      .counter = kj::arr<uint8_t>(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16),
+      .length = 5,
+    };
+  };
+
+  static constexpr auto getImportKeyAlg = [] {
+    return SubtleCrypto::ImportKeyAlgorithm {
+      .name = kj::str("AES-CBC"),
+      .length = 256,
+    };
+  };
+
   jsg::test::Evaluator<CryptoContext, CryptoIsolate> e(v8System);
+  bool completed = false;
+
   e.getIsolate().runInLockScope([&](CryptoIsolate::Lock& isolateLock) {
-    auto isolate = isolateLock.v8Isolate;
-
-    isolateLock.withinHandleScope([&] {
-      auto context = isolateLock.newContext<CryptoContext>().getHandle(isolateLock);
-      auto contextScope = isolateLock.enterContextScope(context);
-
-      jsg::Lock& js = isolateLock;
-
-      SubtleCrypto subtle;
-
-      auto wrappingKey = [&] {
-        auto keyMaterial = kj::heapArray<kj::byte>(
-              {0x52, 0x4b, 0x67, 0x25, 0xe3, 0x56, 0xaa, 0xce, 0x7e, 0x76, 0x9b,
-                0x48, 0x92, 0x55, 0x49, 0x06, 0x12, 0x5e, 0xf5, 0xae, 0xce, 0x39,
-                0xde, 0xc2, 0x5b, 0x27, 0x33, 0x4e, 0x6e, 0x52, 0x32, 0x4e});
-
-        SubtleCrypto::ImportKeyAlgorithm algorithm = {
-            .name = kj::str("AES-CTR"),
-        };
-        bool extractable = false;
-
-        return subtle.importKeySync(jsg::Lock::from(isolate),
-            "raw", kj::mv(keyMaterial), kj::mv(algorithm), extractable,
-            {kj::str("wrapKey"), kj::str("unwrapKey")});
-      }();
-
-      const auto unwrappedKeyMaterial = kj::heapArray<kj::byte>(
-              {0x52, 0x4b, 0x67, 0x25, 0xe3, 0x56, 0xaa, 0xce, 0x7e, 0x76, 0x9b,
-                0x48, 0x92, 0x55, 0x49, 0x06, 0x12, 0x5e, 0xf5, 0xae, 0xce, 0x39,
-                0xde, 0xc2, 0x5b, 0x27, 0x33, 0x4e, 0x6e, 0x52, 0x32, 0x4e});
-      SubtleCrypto::ImportKeyAlgorithm importAlgorithm;
-      importAlgorithm.length = 256;
-      importAlgorithm.name = kj::str("AES-CBC");
-
-      const jsg::TypeHandler<SubtleCrypto::JsonWebKey>* jwkHandler = nullptr;
-      // Not testing JWK here, so valid value isn't needed.
-
-      bool completed = false;
-
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<CryptoContext>().getHandle(isolateLock),
+        [&](jsg::Lock& js) {
+      auto wrappingKey = getWrappingKey(js, subtle);
       subtle.importKey(
-          jsg::Lock::from(isolate),
-          kj::str("raw"),
-          kj::heapArray(unwrappedKeyMaterial.asPtr()),
-          kj::mv(importAlgorithm),
+          js, kj::str("raw"),
+          kj::heapArray(KEY_DATA),
+          getImportKeyAlg(),
           true, kj::arr(kj::str("decrypt")))
               .then(js, [&] (jsg::Lock&, jsg::Ref<CryptoKey> toWrap) {
-        SubtleCrypto::EncryptAlgorithm enc;
-        enc.name = kj::str("AES-CTR");
-        enc.counter = kj::arr<uint8_t>(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
-        enc.length = 5;
-        return subtle.wrapKey(isolateLock, kj::str("raw"), *toWrap, *wrappingKey,
-                              kj::mv(enc), *jwkHandler);
+        return subtle.wrapKey(
+            js, kj::str("raw"), *toWrap, *wrappingKey,
+            getEnc(), *jwkHandler);
       }).then(js, [&] (jsg::Lock&, kj::Array<kj::byte> wrapped) {
-        SubtleCrypto::EncryptAlgorithm enc;
-        enc.name = kj::str("AES-CTR");
-        enc.counter = kj::arr<uint8_t>(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
-        enc.length = 5;
-
-        SubtleCrypto::ImportKeyAlgorithm importAlgorithm;
-        importAlgorithm.length = 256;
-        importAlgorithm.name = kj::str("AES-CBC");
-
-        return subtle.unwrapKey(isolateLock, kj::str("raw"), kj::mv(wrapped), *wrappingKey,
-                        kj::mv(enc), kj::mv(importAlgorithm), true,
-                        kj::arr(kj::str("encrypt")), *jwkHandler);
+        return subtle.unwrapKey(js,
+            kj::str("raw"),
+            kj::mv(wrapped),
+            *wrappingKey,
+            getEnc(),
+            getImportKeyAlg(),
+            true, kj::arr(kj::str("encrypt")), *jwkHandler);
       }).then(js, [&] (jsg::Lock& js, jsg::Ref<CryptoKey> unwrapped) {
         return subtle.exportKey(js, kj::str("raw"), *unwrapped);
       }).then(js, [&] (jsg::Lock&, api::SubtleCrypto::ExportKeyData roundTrippedKeyMaterial) {
-        KJ_ASSERT(roundTrippedKeyMaterial.get<kj::Array<kj::byte>>() == unwrappedKeyMaterial);
+        KJ_ASSERT(roundTrippedKeyMaterial.get<kj::Array<kj::byte>>() == KEY_DATA);
         completed = true;
       });
 
-      e.runMicrotasks(isolateLock);
-      KJ_ASSERT(completed, "Microtasks did not run fully.");
+      js.runMicrotasks();
     });
   });
+
+  KJ_ASSERT(completed, "Microtasks did not run fully.");
 }
 #if __clang__ && __has_feature(undefined_behavior_sanitizer)
 #pragma clang attribute pop // __attribute__((no_sanitize("null"))

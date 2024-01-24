@@ -209,16 +209,14 @@ void HibernationManagerImpl::setTimerChannel(TimerChannel& timerChannel) {
 }
 
 void HibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
-  jsg::Lock& js(lock);
-  js.withinHandleScope([&] {
-    js.enterContextScope(lock.getContext());
+  JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
     for (auto& ws : allWs) {
       KJ_IF_SOME(active, ws->activeOrPackage.tryGet<jsg::Ref<api::WebSocket>>()) {
         // Transfers ownership of properties from api::WebSocket to HibernatableWebSocket via the
         // HibernationPackage.
         ws->activeOrPackage.init<api::WebSocket::HibernationPackage>(
             active.get()->buildPackageForHibernation());
-      }
+      } else {}  // Here to quash compiler warning
     }
   });
 }
