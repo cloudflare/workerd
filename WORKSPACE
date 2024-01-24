@@ -113,10 +113,10 @@ http_archive(
 
 http_archive(
     name = "pyodide_packages",
-    sha256 = "88b83c1f1c7d586208dbd00f69dd66997f89244875122c4b38aad9b098fe305e",
-    type = "zip",
-    urls = ["https://github.com/dom96/pyodide_packages/releases/download/v0.8/pyodide_packages.tar.zip"],
     build_file = "//:build/BUILD.pyodide_packages",
+    sha256 = "e06106417ba4dea25f85c030a84025dcc70cd2ddbdc710e3a84c56187ba163d7",
+    type = "zip",
+    urls = ["https://github.com/dom96/pyodide_packages/releases/download/v0.9/pyodide_packages.tar.zip"],
 )
 
 # ========================================================================================
