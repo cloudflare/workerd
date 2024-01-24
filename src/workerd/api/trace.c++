@@ -162,6 +162,20 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
       KJ_CASE_ONEOF(tracedTrace, Trace::TraceEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::TailEventInfo>(trace, tracedTrace));
       }
+      KJ_CASE_ONEOF(hibWs, Trace::HibernatableWebSocketEventInfo) {
+        KJ_SWITCH_ONEOF(hibWs.type) {
+          KJ_CASE_ONEOF(message, Trace::HibernatableWebSocketEventInfo::Message) {
+            return kj::Maybe(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo>(trace, message));
+          }
+          KJ_CASE_ONEOF(close, Trace::HibernatableWebSocketEventInfo::Close) {
+            return kj::Maybe(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo>(trace, close));
+          }
+          KJ_CASE_ONEOF(error, Trace::HibernatableWebSocketEventInfo::Error) {
+            return kj::Maybe(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo>(trace, error));
+          }
+        }
+        KJ_UNREACHABLE;
+      }
       KJ_CASE_ONEOF(custom, Trace::CustomEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::CustomEventInfo>(trace, custom));
       }
@@ -194,6 +208,7 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
       KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) { return info.addRef(); }
       KJ_CASE_ONEOF(info, jsg::Ref<EmailEventInfo>) { return info.addRef(); }
       KJ_CASE_ONEOF(info, jsg::Ref<TailEventInfo>) { return info.addRef(); }
+      KJ_CASE_ONEOF(info, jsg::Ref<HibernatableWebSocketEventInfo>) { return info.addRef(); }
       KJ_CASE_ONEOF(info, jsg::Ref<CustomEventInfo>) { return info.addRef(); }
     }
     KJ_UNREACHABLE;
@@ -452,6 +467,48 @@ ScriptVersion::ScriptVersion(const ScriptVersion& other)
 TraceItem::CustomEventInfo::CustomEventInfo(const Trace& trace,
                                             const Trace::CustomEventInfo& eventInfo)
     : eventInfo(eventInfo) {}
+
+TraceItem::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
+    const Trace& trace,
+    const Trace::HibernatableWebSocketEventInfo::Message& eventInfo)
+        : eventType(
+            jsg::alloc<TraceItem::HibernatableWebSocketEventInfo::Message>(trace, eventInfo)) {}
+
+TraceItem::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
+    const Trace& trace,
+    const Trace::HibernatableWebSocketEventInfo::Close& eventInfo)
+        : eventType(
+            jsg::alloc<TraceItem::HibernatableWebSocketEventInfo::Close>(trace, eventInfo)) {}
+
+TraceItem::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
+    const Trace& trace,
+    const Trace::HibernatableWebSocketEventInfo::Error& eventInfo)
+        : eventType(
+            jsg::alloc<TraceItem::HibernatableWebSocketEventInfo::Error>(trace, eventInfo)) {}
+
+TraceItem::HibernatableWebSocketEventInfo::Type
+    TraceItem::HibernatableWebSocketEventInfo::getEvent() {
+  KJ_SWITCH_ONEOF(eventType) {
+    KJ_CASE_ONEOF(m, jsg::Ref<TraceItem::HibernatableWebSocketEventInfo::Message>) {
+      return m.addRef();
+    }
+    KJ_CASE_ONEOF(c, jsg::Ref<TraceItem::HibernatableWebSocketEventInfo::Close>) {
+      return c.addRef();
+    }
+    KJ_CASE_ONEOF(e, jsg::Ref<TraceItem::HibernatableWebSocketEventInfo::Error>) {
+      return e.addRef();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+uint16_t TraceItem::HibernatableWebSocketEventInfo::Close::getCode() {
+  return eventInfo.code;
+}
+
+bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() {
+  return eventInfo.wasClean;
+}
 
 TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const Trace::Log& log)
     : timestamp(getTraceLogTimestamp(log)),

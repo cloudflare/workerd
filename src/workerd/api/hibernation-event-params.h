@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <kj/common.h>
 #include <kj/string.h>
 #include <kj/debug.h>
@@ -21,7 +22,7 @@ namespace workerd::api {
     };
 
     struct Close {
-      int code;
+      uint16_t code;
       kj::String reason;
       bool wasClean;
     };
@@ -38,7 +39,7 @@ namespace workerd::api {
         : eventType(Text { kj::mv(message) }), websocketId(kj::mv(id)) {}
     explicit HibernatableSocketParams(kj::Array<kj::byte> message, kj::String id)
         : eventType(Data { kj::mv(message) }), websocketId(kj::mv(id)) {}
-    explicit HibernatableSocketParams(int code, kj::String reason, bool wasClean, kj::String id)
+    explicit HibernatableSocketParams(uint16_t code, kj::String reason, bool wasClean, kj::String id)
         : eventType(Close { code, kj::mv(reason), wasClean }), websocketId(kj::mv(id)) {}
     explicit HibernatableSocketParams(kj::Exception e, kj::String id)
         : eventType(Error { kj::mv(e) }), websocketId(kj::mv(id)) {}
