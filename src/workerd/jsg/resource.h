@@ -1227,13 +1227,14 @@ public:
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
 
-    auto moduleRegistry = ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver);
+    auto moduleRegistry = ModuleRegistryImpl<TypeWrapper>::install(
+        isolate, context, compilationObserver);
     ptr->setModuleRegistry(kj::mv(moduleRegistry));
 
-    v8::Context::Scope context_scope(context);
-    setupJavascript(js, context);
-
-    return JsContext<T>(context, kj::mv(ptr));
+    return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+      setupJavascript(js);
+      return JsContext<T>(context, kj::mv(ptr));
+    });
   }
 
   kj::Maybe<T&> tryUnwrap(
@@ -1322,9 +1323,8 @@ private:
     return scope.Escape(constructor);
   }
 
-  void setupJavascript(jsg::Lock& js, v8::Local<v8::Context> context) {
-    v8::Context::Scope context_scope(context);
-    JsSetup<TypeWrapper, T> setup(js, context);
+  void setupJavascript(jsg::Lock& js) {
+    JsSetup<TypeWrapper, T> setup(js, js.v8Context());
 
     if constexpr (isDetected<GetConfiguration, T>()) {
       T::template registerMembers<decltype(setup), T>(setup, configuration);
