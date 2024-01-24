@@ -64,6 +64,7 @@ public:
   class QueueEventInfo;
   class EmailEventInfo;
   class TailEventInfo;
+  class HibernatableWebSocketEventInfo;
   class CustomEventInfo;
 
   explicit TraceItem(jsg::Lock& js, const Trace& trace);
@@ -74,7 +75,8 @@ public:
                     jsg::Ref<QueueEventInfo>,
                     jsg::Ref<EmailEventInfo>,
                     jsg::Ref<TailEventInfo>,
-                    jsg::Ref<CustomEventInfo>> EventInfo;
+                    jsg::Ref<CustomEventInfo>,
+                    jsg::Ref<HibernatableWebSocketEventInfo>> EventInfo;
   kj::Maybe<EventInfo> getEvent(jsg::Lock& js);
   kj::Maybe<double> getEventTimestamp();
 
@@ -312,6 +314,84 @@ private:
   kj::Maybe<kj::String> scriptName;
 };
 
+class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
+public:
+  class Message;
+  class Close;
+  class Error;
+
+  explicit HibernatableWebSocketEventInfo(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Message& eventInfo);
+  explicit HibernatableWebSocketEventInfo(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Close& eventInfo);
+  explicit HibernatableWebSocketEventInfo(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Error& eventInfo);
+
+  using Type = kj::OneOf<jsg::Ref<Message>, jsg::Ref<Close>, jsg::Ref<Error>>;
+
+  Type getEvent();
+
+  JSG_RESOURCE_TYPE(HibernatableWebSocketEventInfo) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(getWebSocketEvent, getEvent);
+  }
+
+private:
+  Type eventType;
+};
+
+class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Object {
+public:
+  explicit Message(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Message& eventInfo): eventInfo(eventInfo) {}
+
+  static constexpr kj::StringPtr webSocketEventType = "message"_kj;
+  kj::StringPtr getWebSocketEventType() { return webSocketEventType; }
+
+  JSG_RESOURCE_TYPE(Message) {
+    JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
+  }
+
+private:
+  const Trace::HibernatableWebSocketEventInfo::Message& eventInfo;
+};
+
+class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object {
+public:
+  explicit Close(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Close& eventInfo): eventInfo(eventInfo) {}
+
+  static constexpr kj::StringPtr webSocketEventType = "close"_kj;
+  kj::StringPtr getWebSocketEventType() { return webSocketEventType; }
+
+  uint16_t getCode();
+  bool getWasClean();
+
+  JSG_RESOURCE_TYPE(Close) {
+    JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
+    JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
+    JSG_READONLY_INSTANCE_PROPERTY(wasClean, getWasClean);
+  }
+
+private:
+  const Trace::HibernatableWebSocketEventInfo::Close& eventInfo;
+};
+
+class TraceItem::HibernatableWebSocketEventInfo::Error final: public jsg::Object {
+public:
+  explicit Error(const Trace& trace,
+      const Trace::HibernatableWebSocketEventInfo::Error& eventInfo): eventInfo(eventInfo) {}
+
+  static constexpr kj::StringPtr webSocketEventType = "error"_kj;
+  kj::StringPtr getWebSocketEventType() { return webSocketEventType; }
+
+  JSG_RESOURCE_TYPE(Error) {
+    JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
+  }
+
+private:
+  const Trace::HibernatableWebSocketEventInfo::Error& eventInfo;
+};
+
 class TraceItem::CustomEventInfo final: public jsg::Object {
 public:
   explicit CustomEventInfo(const Trace& trace, const Trace::CustomEventInfo& eventInfo);
@@ -439,24 +519,28 @@ private:
   kj::Array<kj::Own<workerd::Trace>> traces;
 };
 
-#define EW_TRACE_ISOLATE_TYPES                \
-  api::ScriptVersion,                         \
-  api::TailEvent,                             \
-  api::TraceItem,                             \
-  api::TraceItem::AlarmEventInfo,             \
-  api::TraceItem::CustomEventInfo,            \
-  api::TraceItem::ScheduledEventInfo,         \
-  api::TraceItem::QueueEventInfo,             \
-  api::TraceItem::EmailEventInfo,             \
-  api::TraceItem::TailEventInfo,              \
-  api::TraceItem::TailEventInfo::TailItem,    \
-  api::TraceItem::FetchEventInfo,             \
-  api::TraceItem::FetchEventInfo::Request,    \
-  api::TraceItem::FetchEventInfo::Response,   \
-  api::TraceLog,                              \
-  api::TraceException,                        \
-  api::TraceDiagnosticChannelEvent,           \
-  api::TraceMetrics,                          \
+#define EW_TRACE_ISOLATE_TYPES                                    \
+  api::ScriptVersion,                                             \
+  api::TailEvent,                                                 \
+  api::TraceItem,                                                 \
+  api::TraceItem::AlarmEventInfo,                                 \
+  api::TraceItem::CustomEventInfo,                                \
+  api::TraceItem::ScheduledEventInfo,                             \
+  api::TraceItem::QueueEventInfo,                                 \
+  api::TraceItem::EmailEventInfo,                                 \
+  api::TraceItem::TailEventInfo,                                  \
+  api::TraceItem::TailEventInfo::TailItem,                        \
+  api::TraceItem::FetchEventInfo,                                 \
+  api::TraceItem::FetchEventInfo::Request,                        \
+  api::TraceItem::FetchEventInfo::Response,                       \
+  api::TraceItem::HibernatableWebSocketEventInfo,                 \
+  api::TraceItem::HibernatableWebSocketEventInfo::Message,        \
+  api::TraceItem::HibernatableWebSocketEventInfo::Close,          \
+  api::TraceItem::HibernatableWebSocketEventInfo::Error,          \
+  api::TraceLog,                                                  \
+  api::TraceException,                                            \
+  api::TraceDiagnosticChannelEvent,                               \
+  api::TraceMetrics,                                              \
   api::UnsafeTraceMetrics
 // The list of trace.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 

@@ -243,11 +243,6 @@ kj::StringPtr Lock::getUuid() const {
   return IsolateBase::from(v8Isolate).getUuid();
 }
 
-Lock::ContextScope Lock::enterContextScope(v8::Local<v8::Context> context) {
-  KJ_ASSERT(!context.IsEmpty(), "unable to enter invalid v8::Context");
-  return ContextScope(context);
-}
-
 void Lock::runMicrotasks() {
   v8Isolate->PerformMicrotaskCheckpoint();
 }

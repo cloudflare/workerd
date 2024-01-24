@@ -71,9 +71,39 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     a.setHibernationManager(kj::addRef(KJ_REQUIRE_NONNULL(manager)));
   }
 
+  auto eventParameters = consumeParams();
+
+  KJ_IF_MAYBE(t, incomingRequest->getWorkerTracer()) {
+    Trace::HibernatableWebSocketEventInfo::Type type = [&]()
+        -> Trace::HibernatableWebSocketEventInfo::Type {
+      KJ_SWITCH_ONEOF(eventParameters.eventType) {
+        KJ_CASE_ONEOF(_, HibernatableSocketParams::Text) {
+          return Trace::HibernatableWebSocketEventInfo::Message{};
+        }
+        KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
+          return Trace::HibernatableWebSocketEventInfo::Message{};
+        }
+        KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
+          return Trace::HibernatableWebSocketEventInfo::Close{
+            .code = close.code,
+            .wasClean = close.wasClean
+          };
+        }
+        KJ_CASE_ONEOF(_, HibernatableSocketParams::Error) {
+          return Trace::HibernatableWebSocketEventInfo::Error{};
+        }
+      }
+      KJ_UNREACHABLE;
+    }();
+
+    t->setEventInfo(context.now(),
+      Trace::HibernatableWebSocketEventInfo(kj::mv(type))
+    );
+  }
+
   try {
     co_await context.run(
-        [entrypointName=entrypointName, &context, eventParameters=consumeParams()]
+        [entrypointName=entrypointName, &context, eventParameters = kj::mv(eventParameters)]
         (Worker::Lock& lock) mutable {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {

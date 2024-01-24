@@ -762,51 +762,10 @@ struct Worker::Script::Impl {
   struct DynamicImportResult {
     jsg::Value value;
     bool isException = false;
+    DynamicImportResult(jsg::Value value, bool isException = false)
+        : value(kj::mv(value)), isException(isException) {}
   };
   using DynamicImportHandler = kj::Function<jsg::Value()>;
-
-  static DynamicImportResult getDynamicImportResult(
-      Worker::AsyncLock& asyncLock,
-      const Worker& worker,
-      kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>>& asyncContext,
-      DynamicImportHandler handler) {
-    return worker.runInLockScope(asyncLock, [&](Worker::Lock& lock) {
-      jsg::Lock& js = lock;
-
-      return js.withinHandleScope([&]() -> DynamicImportResult {
-        // Cannot use js.v8Context() here because that assumes we've already entered
-        // the v8::Context::Scope...
-        auto contextScope = js.enterContextScope(lock.getContext());
-        jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
-
-        // We have to wrap the call to handler in a try catch here because
-        // we have to tunnel any jsg::JsExceptionThrown instances back.
-        v8::TryCatch tryCatch(js.v8Isolate);
-        kj::Maybe<kj::Exception> maybeLimitError;
-        try {
-          auto limitScope = worker.getIsolate().getLimitEnforcer()
-              .enterDynamicImportJs(lock, maybeLimitError);
-          return { .value = handler() };
-        } catch (jsg::JsExceptionThrown&) {
-          // Handled below...
-        } catch (kj::Exception& ex) {
-          kj::throwFatalException(kj::mv(ex));
-        }
-
-        KJ_ASSERT(tryCatch.HasCaught());
-        if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
-          // There's nothing else we can do here but throw a generic fatal exception.
-          KJ_IF_SOME(limitError, maybeLimitError) {
-            kj::throwFatalException(kj::mv(limitError));
-          } else {
-            kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
-                "Failed to load dynamic module."));
-          }
-        }
-        return { .value = js.v8Ref(tryCatch.Exception()), .isException = true };
-      });
-    });
-  }
 
   void configureDynamicImports(jsg::Lock& js, jsg::ModuleRegistry& modules) {
     static auto constexpr handleDynamicImport =
@@ -817,7 +776,38 @@ struct Worker::Script::Impl {
       co_await kj::evalLater([] {});
       auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
 
-      co_return getDynamicImportResult(asyncLock, *worker, asyncContext, kj::mv(handler));
+      co_return worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+        return JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(),
+            [&](jsg::Lock& js) {
+          jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
+
+          // We have to wrap the call to handler in a try catch here because
+          // we have to tunnel any jsg::JsExceptionThrown instances back.
+          v8::TryCatch tryCatch(js.v8Isolate);
+          kj::Maybe<kj::Exception> maybeLimitError;
+          try {
+            auto limitScope = worker->getIsolate().getLimitEnforcer()
+                .enterDynamicImportJs(lock, maybeLimitError);
+            return DynamicImportResult(handler());
+          } catch (jsg::JsExceptionThrown&) {
+            // Handled below...
+          } catch (kj::Exception& ex) {
+            kj::throwFatalException(kj::mv(ex));
+          }
+
+          KJ_ASSERT(tryCatch.HasCaught());
+          if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
+            // There's nothing else we can do here but throw a generic fatal exception.
+            KJ_IF_SOME(limitError, maybeLimitError) {
+              kj::throwFatalException(kj::mv(limitError));
+            } else {
+              kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
+                  "Failed to load dynamic module."));
+            }
+          }
+          return DynamicImportResult(js.v8Ref(tryCatch.Exception()), true);
+        });
+      });
     };
 
     modules.setDynamicImportCallback([](jsg::Lock& js, DynamicImportHandler handler) mutable {
@@ -1126,89 +1116,89 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
             lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
       }
 
-      auto contextScope = lock.enterContextScope(context);
+      JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+        // const_cast OK because we hold the isolate lock.
+        Worker::Isolate& lockedWorkerIsolate = const_cast<Isolate&>(*isolate);
 
-      // const_cast OK because we hold the isolate lock.
-      Worker::Isolate& lockedWorkerIsolate = const_cast<Isolate&>(*isolate);
-
-      if (logNewScript) {
-        // HACK: Log a message indicating that a new script was loaded. This is used only when the
-        //   inspector is enabled. We want to do this immediately after the context is created,
-        //   before the user gets a chance to modify the behavior of the console, which if they did,
-        //   we'd then need to be more careful to apply time limits and such.
-        lockedWorkerIsolate.logMessage(lock,
-            static_cast<uint16_t>(cdp::LogType::WARNING), "Script modified; context reset.");
-      }
-
-      // We need to register this context with the inspector, otherwise errors won't be reported. But
-      // we want it to be un-registered as soon as the script has been compiled, otherwise the
-      // inspector will end up with multiple contexts active which is very confusing for the user
-      // (since they'll have to select from the drop-down which context to use).
-      //
-      // (For modules, the context was already registered by `setupContext()`, above.
-      KJ_IF_SOME(i, isolate->impl->inspector) {
-        if (!source.is<ModulesSource>()) {
-          i.get()->contextCreated(v8_inspector::V8ContextInfo(context,
-              1, jsg::toInspectorStringView("Compiler")));
+        if (logNewScript) {
+          // HACK: Log a message indicating that a new script was loaded. This is used only when the
+          //   inspector is enabled. We want to do this immediately after the context is created,
+          //   before the user gets a chance to modify the behavior of the console, which if they did,
+          //   we'd then need to be more careful to apply time limits and such.
+          lockedWorkerIsolate.logMessage(lock,
+              static_cast<uint16_t>(cdp::LogType::WARNING), "Script modified; context reset.");
         }
-      }
-      KJ_DEFER({
-        if (!source.is<ModulesSource>()) {
-          KJ_IF_SOME(i, isolate->impl->inspector) {
-            i.get()->contextDestroyed(context);
-          } else {
-            // Else block to avoid dangling else clang warning.
+
+        // We need to register this context with the inspector, otherwise errors won't be reported. But
+        // we want it to be un-registered as soon as the script has been compiled, otherwise the
+        // inspector will end up with multiple contexts active which is very confusing for the user
+        // (since they'll have to select from the drop-down which context to use).
+        //
+        // (For modules, the context was already registered by `setupContext()`, above.
+        KJ_IF_SOME(i, isolate->impl->inspector) {
+          if (!source.is<ModulesSource>()) {
+            i.get()->contextCreated(v8_inspector::V8ContextInfo(context,
+                1, jsg::toInspectorStringView("Compiler")));
           }
-        }
-      });
+        } else {}  // Here to squash a compiler warning
+        KJ_DEFER({
+          if (!source.is<ModulesSource>()) {
+            KJ_IF_SOME(i, isolate->impl->inspector) {
+              i.get()->contextDestroyed(context);
+            } else {
+              // Else block to avoid dangling else clang warning.
+            }
+          }
+        });
 
-      v8::TryCatch catcher(lock.v8Isolate);
-      kj::Maybe<kj::Exception> maybeLimitError;
+        v8::TryCatch catcher(lock.v8Isolate);
+        kj::Maybe<kj::Exception> maybeLimitError;
 
-      try {
         try {
-          KJ_SWITCH_ONEOF(source) {
-            KJ_CASE_ONEOF(script, ScriptSource) {
-              impl->globals = script.compileGlobals(lock, isolate->getApi(), isolate->impl->metrics);
+          try {
+            KJ_SWITCH_ONEOF(source) {
+              KJ_CASE_ONEOF(script, ScriptSource) {
+                impl->globals = script.compileGlobals(lock, isolate->getApi(), isolate->impl->metrics);
 
-              {
-                // It's unclear to me if CompileUnboundScript() can get trapped in any infinite loops or
-                // excessively-expensive computation requiring a time limit. We'll go ahead and apply a time
-                // limit just to be safe. Don't add it to the rollover bank, though.
-                auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-                impl->unboundScriptOrMainModule =
-                    jsg::NonModuleScript::compile(script.mainScript, lock, script.mainScriptName);
+                {
+                  // It's unclear to me if CompileUnboundScript() can get trapped in any infinite loops or
+                  // excessively-expensive computation requiring a time limit. We'll go ahead and apply a time
+                  // limit just to be safe. Don't add it to the rollover bank, though.
+                  auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
+                  impl->unboundScriptOrMainModule =
+                      jsg::NonModuleScript::compile(script.mainScript, lock, script.mainScriptName);
+                }
+
+                break;
               }
 
-              break;
+              KJ_CASE_ONEOF(modulesSource, ModulesSource) {
+                auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
+                auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
+                impl->configureDynamicImports(lock, modules);
+                modulesSource.compileModules(lock, isolate->getApi());
+                impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
+                break;
+              }
             }
 
-            KJ_CASE_ONEOF(modulesSource, ModulesSource) {
-              auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-              auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
-              impl->configureDynamicImports(lock, modules);
-              modulesSource.compileModules(lock, isolate->getApi());
-              impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
-              break;
-            }
+            parseMetrics->done();
+          } catch (const kj::Exception& e) {
+            lock.throwException(kj::cp(e));
+            // lock.throwException() here will throw a jsg::JsExceptionThrown which we catch
+            // in the outer try/catch.
           }
-
-          parseMetrics->done();
-        } catch (const kj::Exception& e) {
-          lock.throwException(kj::cp(e));
-          // lock.throwException() here will throw a jsg::JsExceptionThrown which we catch
-          // in the outer try/catch.
+        } catch (const jsg::JsExceptionThrown&) {
+          reportStartupError(id,
+                            lock,
+                            isolate->impl->inspector,
+                            isolate->getLimitEnforcer(),
+                            kj::mv(maybeLimitError),
+                            catcher,
+                            errorReporter,
+                            impl->permanentException);
         }
-      } catch (const jsg::JsExceptionThrown&) {
-        reportStartupError(id,
-                          lock,
-                          isolate->impl->inspector,
-                          isolate->getLimitEnforcer(),
-                          kj::mv(maybeLimitError),
-                          catcher,
-                          errorReporter,
-                          impl->permanentException);
-      }
+      });
     });
   });
 }
@@ -1356,117 +1346,117 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       }
 
       // Enter the context for compiling and running the script.
-      auto contextScope = lock.enterContextScope(context);
+      JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+        v8::TryCatch catcher(lock.v8Isolate);
+        kj::Maybe<kj::Exception> maybeLimitError;
 
-      v8::TryCatch catcher(lock.v8Isolate);
-      kj::Maybe<kj::Exception> maybeLimitError;
-
-      try {
         try {
-          currentSpan = maybeMakeSpan("lw:globals_instantiation"_kjc);
+          try {
+            currentSpan = maybeMakeSpan("lw:globals_instantiation"_kjc);
 
-          v8::Local<v8::Object> bindingsScope;
-          if (script->isModular()) {
-            // Use `env` variable.
-            bindingsScope = v8::Object::New(lock.v8Isolate);
-          } else {
-            // Use global-scope bindings.
-            bindingsScope = context->Global();
-          }
-
-          // Load globals.
-          // const_cast OK because we hold the lock.
-          for (auto& global: const_cast<Script&>(*script).impl->globals) {
-            lock.v8Set(bindingsScope, global.name, global.value);
-          }
-
-          compileBindings(lock, script->isolate->getApi(), bindingsScope);
-
-          // Execute script.
-          currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
-
-          KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
-            KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
-              auto limitScope = script->isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-              unboundScript.run(lock.v8Context());
+            v8::Local<v8::Object> bindingsScope;
+            if (script->isModular()) {
+              // Use `env` variable.
+              bindingsScope = v8::Object::New(lock.v8Isolate);
+            } else {
+              // Use global-scope bindings.
+              bindingsScope = context->Global();
             }
-            KJ_CASE_ONEOF(mainModule, kj::Path) {
-              auto& registry = (*jsContext)->getModuleRegistry();
-              KJ_IF_SOME(entry, registry.resolve(lock, mainModule, kj::none)) {
-                JSG_REQUIRE(entry.maybeSynthetic == kj::none, TypeError,
-                            "Main module must be an ES module.");
-                auto module = entry.module.getHandle(lock);
 
-                {
-                  auto limitScope = script->isolate->getLimitEnforcer()
-                      .enterStartupJs(lock, maybeLimitError);
+            // Load globals.
+            // const_cast OK because we hold the lock.
+            for (auto& global: const_cast<Script&>(*script).impl->globals) {
+              lock.v8Set(bindingsScope, global.name, global.value);
+            }
 
-                  jsg::instantiateModule(lock, module);
-                }
+            compileBindings(lock, script->isolate->getApi(), bindingsScope);
 
-                if (maybeLimitError != kj::none) {
-                  // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
-                  // thrown an exception.
-                  throw jsg::JsExceptionThrown();
-                }
+            // Execute script.
+            currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
 
-                v8::Local<v8::Value> ns = module->GetModuleNamespace();
+            KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
+              KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
+                auto limitScope = script->isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
+                unboundScript.run(lock.v8Context());
+              }
+              KJ_CASE_ONEOF(mainModule, kj::Path) {
+                auto& registry = (*jsContext)->getModuleRegistry();
+                KJ_IF_SOME(entry, registry.resolve(lock, mainModule, kj::none)) {
+                  JSG_REQUIRE(entry.maybeSynthetic == kj::none, TypeError,
+                              "Main module must be an ES module.");
+                  auto module = entry.module.getHandle(lock);
 
-                {
-                  // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
-                  // module, even if subsequent calls pass a different context. Verify that we didn't
-                  // switch contexts.
-                  auto creationContext = jsg::check(ns.As<v8::Object>()->GetCreationContext());
-                  KJ_ASSERT(creationContext == context,
-                      "module was originally instantiated in a different context");
-                }
+                  {
+                    auto limitScope = script->isolate->getLimitEnforcer()
+                        .enterStartupJs(lock, maybeLimitError);
 
-                impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
+                    jsg::instantiateModule(lock, module);
+                  }
 
-                auto handlers = script->isolate->getApi().unwrapExports(lock, ns);
+                  if (maybeLimitError != kj::none) {
+                    // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
+                    // thrown an exception.
+                    throw jsg::JsExceptionThrown();
+                  }
 
-                for (auto& handler: handlers.fields) {
-                  KJ_SWITCH_ONEOF(handler.value) {
-                    KJ_CASE_ONEOF(obj, api::ExportedHandler) {
-                      obj.env = lock.v8Ref(bindingsScope.As<v8::Value>());
-                      obj.ctx = jsg::alloc<api::ExecutionContext>();
+                  v8::Local<v8::Value> ns = module->GetModuleNamespace();
 
-                      if (handler.name == "default") {
-                        // The default export is given the string name "default". I guess that means that
-                        // you can't actually name an export "default"? Anyway, this is our default
-                        // handler.
-                        impl->defaultHandler = kj::mv(obj);
-                      } else {
-                        impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
+                  {
+                    // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
+                    // module, even if subsequent calls pass a different context. Verify that we didn't
+                    // switch contexts.
+                    auto creationContext = jsg::check(ns.As<v8::Object>()->GetCreationContext());
+                    KJ_ASSERT(creationContext == context,
+                        "module was originally instantiated in a different context");
+                  }
+
+                  impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
+
+                  auto handlers = script->isolate->getApi().unwrapExports(lock, ns);
+
+                  for (auto& handler: handlers.fields) {
+                    KJ_SWITCH_ONEOF(handler.value) {
+                      KJ_CASE_ONEOF(obj, api::ExportedHandler) {
+                        obj.env = lock.v8Ref(bindingsScope.As<v8::Value>());
+                        obj.ctx = jsg::alloc<api::ExecutionContext>();
+
+                        if (handler.name == "default") {
+                          // The default export is given the string name "default". I guess that means that
+                          // you can't actually name an export "default"? Anyway, this is our default
+                          // handler.
+                          impl->defaultHandler = kj::mv(obj);
+                        } else {
+                          impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
+                        }
+                      }
+                      KJ_CASE_ONEOF(cls, DurableObjectConstructor) {
+                        impl->actorClasses.insert(kj::mv(handler.name), kj::mv(cls));
                       }
                     }
-                    KJ_CASE_ONEOF(cls, DurableObjectConstructor) {
-                      impl->actorClasses.insert(kj::mv(handler.name), kj::mv(cls));
-                    }
                   }
+                } else {
+                  JSG_FAIL_REQUIRE(TypeError, "Main module name is not present in bundle.");
                 }
-              } else {
-                JSG_FAIL_REQUIRE(TypeError, "Main module name is not present in bundle.");
               }
             }
-          }
 
-          startupMetrics->done();
-        } catch (const kj::Exception& e) {
-          lock.throwException(kj::cp(e));
-          // lock.throwException() here will throw a jsg::JsExceptionThrown which we catch
-          // in the outer try/catch.
+            startupMetrics->done();
+          } catch (const kj::Exception& e) {
+            lock.throwException(kj::cp(e));
+            // lock.throwException() here will throw a jsg::JsExceptionThrown which we catch
+            // in the outer try/catch.
+          }
+        } catch (const jsg::JsExceptionThrown&) {
+          reportStartupError(script->id,
+                            lock,
+                            script->isolate->impl->inspector,
+                            script->isolate->getLimitEnforcer(),
+                            kj::mv(maybeLimitError),
+                            catcher,
+                            errorReporter,
+                            impl->permanentException);
         }
-      } catch (const jsg::JsExceptionThrown&) {
-        reportStartupError(script->id,
-                          lock,
-                          script->isolate->impl->inspector,
-                          script->isolate->getLimitEnforcer(),
-                          kj::mv(maybeLimitError),
-                          catcher,
-                          errorReporter,
-                          impl->permanentException);
-      }
+      });
     });
   });
 }
@@ -1740,12 +1730,8 @@ void Worker::Lock::logErrorOnce(kj::StringPtr description) {
 void Worker::Lock::logUncaughtException(kj::StringPtr description) {
   // We don't add the exception to traces here, since it turns out that this path only gets hit by
   // intermediate exception handling.
-
   KJ_IF_SOME(i, worker.script->isolate->impl->inspector) {
-    jsg::Lock& js = *this;
-    js.withinHandleScope([&] {
-      auto context = getContext();
-      auto contextScope = js.enterContextScope(context);
+    JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
       jsg::sendExceptionToInspector(js, *i.get(), description);
     });
   }
@@ -1761,9 +1747,7 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
   if (IoContext::hasCurrent()) {
     auto& ioContext = IoContext::current();
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
-      jsg::Lock& js = *this;
-      js.withinHandleScope([&] {
-        auto contextScope = js.enterContextScope(getContext());
+      JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
         addExceptionToTrace(impl->inner, ioContext, tracer, source, exception,
             worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));
       });
@@ -1771,9 +1755,7 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
   }
 
   KJ_IF_SOME(i, worker.script->isolate->impl->inspector) {
-    jsg::Lock& js = *this;
-    js.withinHandleScope([&] {
-      auto contextScope = js.enterContextScope(getContext());
+    JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
       sendExceptionToInspector(js, *i.get(), source, exception, message);
     });
   }
@@ -1790,10 +1772,7 @@ void Worker::Lock::reportPromiseRejectEvent(v8::PromiseRejectMessage& message) {
 }
 
 void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
-  jsg::Lock& js = *this;
-  js.withinHandleScope([&] {
-    auto contextScope = js.enterContextScope(getContext());
-    // Ignore event types that represent internally-generated events.
+  JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
     kj::HashSet<kj::StringPtr> ignoredHandlers;
     ignoredHandlers.insert("alarm"_kj);
     ignoredHandlers.insert("unhandledrejection"_kj);
@@ -1836,7 +1815,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
 
       KJ_IF_SOME(h, worker.impl->defaultHandler) {
         report(kj::none, h);
-      }
+      } else {}  // Here to squash a compiler warning.
       for (auto& entry: worker.impl->namedHandlers) {
         report(kj::StringPtr(entry.key), entry.value);
       }
@@ -2216,11 +2195,10 @@ public:
         inspector.contextCreated(
             v8_inspector::V8ContextInfo(dummyContext, 1, v8_inspector::StringView(
                 reinterpret_cast<const uint8_t*>("Worker"), 6)));
-        {
-          auto contextScope = lock->enterContextScope(dummyContext);
-          jsg::sendExceptionToInspector(*lock, inspector,
+        JSG_WITHIN_CONTEXT_SCOPE(*lock, dummyContext, [&](jsg::Lock& js) {
+          jsg::sendExceptionToInspector(js, inspector,
               jsg::extractTunneledExceptionDescription(limitError.getDescription()));
-        }
+        });
         inspector.contextDestroyed(dummyContext);
       });
     }
@@ -2651,9 +2629,7 @@ void Worker::Isolate::disconnectInspector() {
 
 void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
   if (impl->inspector != kj::none) {
-    jsg::Lock& js = lock;
-    js.withinHandleScope([&] {
-      auto contextScope = js.enterContextScope(lock.getContext());
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
       logMessage(js, static_cast<uint16_t>(cdp::LogType::WARNING), description);
     });
   }
@@ -2879,14 +2855,13 @@ struct Worker::Actor::Impl {
         shutdownFulfiller(kj::mv(paf.fulfiller)),
         hibernationManager(kj::mv(manager)),
         hibernationEventType(kj::mv(hibernationEventType)) {
-    jsg::Lock& js = lock;
-    js.withinHandleScope([&] {
-      auto contextScope = js.enterContextScope(lock.getContext());
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
       if (hasTransient) {
         transient.emplace(js, js.obj());
       }
 
-      actorCache = makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks);
+      actorCache = makeActorCache(self.worker->getIsolate().impl->actorCacheLru,
+          outputGate, hooks);
     });
   }
 };

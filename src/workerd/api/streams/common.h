@@ -510,6 +510,10 @@ public:
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
 
   virtual kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) = 0;
+
+  // Used by sockets to signal that the ReadableStream shouldn't allow reads due to pending
+  // closure.
+  virtual void setPendingClosure() = 0;
 };
 
 kj::Own<ReadableStreamController> newReadableStreamJsController();
@@ -679,6 +683,10 @@ public:
 
   // True is this controller requires ArrayBuffer(Views) to be written to it.
   virtual bool isByteOriented() const = 0;
+
+  // Used by sockets to signal that the WritableStream shouldn't allow writes due to pending
+  // closure.
+  virtual void setPendingClosure() = 0;
 };
 
 kj::Own<WritableStreamController> newWritableStreamJsController();
