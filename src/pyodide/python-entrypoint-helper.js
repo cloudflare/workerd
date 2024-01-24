@@ -1,11 +1,11 @@
+// This file is a BUILTIN module that provides the actual implementation for the
+// python-entrypoint.js USER module.
 
-// This file is a BUILTIN module that provides most of the actual implementation
-// for the python-entrypoint.js USER module.
+import { loadPyodide } from "pyodide-internal:python";
+import { default as lockfile } from "pyodide-internal:generated/pyodide-lock.json";
+import { default as origMetadata } from "pyodide-internal:runtime-generated/current-bundle";
 
-export { loadPyodide } from "pyodide-internal:python";
-import { lockFile } from "pyodide-internal:pyodide-lock";
-
-function initializePackageIndex(pyodide, lockfile) {
+function initializePackageIndex(pyodide) {
   if (!lockfile.packages) {
     throw new Error(
       "Loaded pyodide lock file does not contain the expected key 'packages'."
@@ -130,11 +130,11 @@ function transformMetadata(metadata) {
   return metadata;
 }
 
-export async function setupPackages(pyodide, origMetadata) {
+async function setupPackages(pyodide) {
   // The metadata is a JSON-serialised WorkerBundle (defined in pipeline.capnp).
   const metadata = transformMetadata(origMetadata);
 
-  initializePackageIndex(pyodide, lockFile);
+  initializePackageIndex(pyodide);
 
   // Loop through globals that define Python modules in the metadata passed to our Worker. For
   // each one, save it in Pyodide's file system.
@@ -170,7 +170,11 @@ export async function setupPackages(pyodide, origMetadata) {
   // Apply patches that enable some packages to work. We don't currently list
   // out transitive dependencies so these checks are very brittle.
   // TODO: Fix this
-  if (requirements.includes("aiohttp") || requirements.includes("openai") || requirements.includes("langchain")) {
+  if (
+    requirements.includes("aiohttp") ||
+    requirements.includes("openai") ||
+    requirements.includes("langchain")
+  ) {
     const mod = await import("pyodide-internal:patches/aiohttp_fetch_patch.py");
     pyodide.FS.writeFile(
       "/lib/python3.11/site-packages/aiohttp_fetch_patch.py",
@@ -190,3 +194,20 @@ export async function setupPackages(pyodide, origMetadata) {
 
   return pyodide.pyimport(metadata.mainModule);
 }
+
+export default {
+  async fetch(request, env) {
+    const pyodide = await loadPyodide();
+    const mainModule = await setupPackages(pyodide);
+    return await mainModule.fetch(request);
+  },
+  async test() {
+    try {
+      const pyodide = await loadPyodide();
+      const mainModule = await setupPackages(pyodide);
+      return await mainModule.test();
+    } catch (e) {
+      console.warn(e);
+    }
+  },
+};

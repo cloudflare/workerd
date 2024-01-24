@@ -1,5 +1,5 @@
-load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 
 CAPNP_TEMPLATE = """@{schema_id};
 
@@ -64,6 +64,10 @@ def _gen_api_bundle_capnpn_impl(ctx):
         _render_module(ctx.attr.internal_data_modules[m], m.label, "data", "internal")
         for m in ctx.attr.internal_data_modules
     ]
+    modules += [
+        _render_module(ctx.attr.internal_json_modules[m], m.label, "json", "internal")
+        for m in ctx.attr.internal_json_modules
+    ]
 
     content = CAPNP_TEMPLATE.format(
         schema_id = ctx.attr.schema_id,
@@ -81,6 +85,7 @@ gen_api_bundle_capnpn = rule(
         "internal_modules": attr.label_keyed_string_dict(allow_files = True),
         "internal_wasm_modules": attr.label_keyed_string_dict(allow_files = True),
         "internal_data_modules": attr.label_keyed_string_dict(allow_files = True),
+        "internal_json_modules": attr.label_keyed_string_dict(allow_files = True),
         "declarations": attr.string_dict(),
         "data": attr.label_list(allow_files = True),
         "const_name": attr.string(mandatory = True),
@@ -117,6 +122,7 @@ def wd_js_bundle(
         internal_modules = [],
         internal_wasm_modules = [],
         internal_data_modules = [],
+        internal_json_modules = [],
         declarations = [],
         deps = []):
     """Generate cc capnp library with js api bundle.
@@ -137,6 +143,7 @@ def wd_js_bundle(
      internal_modules: list of js source files for internal modules
      internal_wasm_modules: list of wasm source files
      internal_data_modules: list of data source files
+     internal_json_modules: list of json source files
      declarations: d.ts label set
      deps: dependency list
     """
@@ -156,6 +163,10 @@ def wd_js_bundle(
         m: "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
         for m in internal_data_modules
     }
+    internal_json_modules_dict = {
+        m: "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
+        for m in internal_json_modules
+    }
 
     builtin_modules_dict, builtin_declarations = _copy_modules(
         builtin_modules_dict,
@@ -173,12 +184,17 @@ def wd_js_bundle(
         internal_data_modules_dict,
         declarations,
     )
+    internal_json_modules_dict, _ = _copy_modules(
+        internal_json_modules_dict,
+        declarations,
+    )
 
     data = (
         list(builtin_modules_dict) +
         list(internal_modules_dict) +
         list(internal_wasm_modules_dict) +
         list(internal_data_modules_dict) +
+        list(internal_json_modules_dict) +
         list(builtin_declarations.values()) +
         list(internal_declarations.values())
     )
@@ -192,6 +208,7 @@ def wd_js_bundle(
         internal_modules = internal_modules_dict,
         internal_wasm_modules = internal_wasm_modules_dict,
         internal_data_modules = internal_data_modules_dict,
+        internal_json_modules = internal_json_modules_dict,
         declarations = builtin_declarations | internal_declarations,
         data = data,
         deps = deps,

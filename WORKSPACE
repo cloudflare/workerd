@@ -105,10 +105,10 @@ http_archive(
 
 http_archive(
     name = "pyodide",
-    sha256 = "9136265cb046e4dea12a38a19afc154ddc6c525b6a96632c63c3192bff2d6839",
-    type = "tar.bz2",
-    urls = ["https://github.com/pyodide/pyodide/releases/download/0.25.0a2/pyodide-core-0.25.0a2.tar.bz2"],
     build_file = "//:build/BUILD.pyodide",
+    sha256 = "ebe015d9e0c766af3679378699ac145f0fc320a49213b4734fd30bc28c68c360",
+    type = "tar.bz2",
+    urls = ["https://github.com/pyodide/pyodide/releases/download/0.25.0/pyodide-core-0.25.0.tar.bz2"],
 )
 
 http_archive(

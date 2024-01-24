@@ -370,9 +370,9 @@ void WorkerdApi::compileModules(
     using namespace workerd::api::pyodide;
     if (util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES) &&
         hasPythonModules(confModules)) {
-      auto mainModule = confModules.begin();
       // Inject pyodide bootstrap module.
       {
+        auto mainModule = confModules.begin();
         capnp::MallocMessageBuilder message;
         auto module = message.getRoot<config::Worker::Module>();
         module.setEsModule(getPyodideBootstrap());
@@ -381,14 +381,22 @@ void WorkerdApi::compileModules(
         modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
       }
       // Inject metadata that the bootstrap module will read.
-      auto metadataModuleName = kj::Path::parse("pyodide:current-bundle");
       {
-        capnp::MallocMessageBuilder message;
-        auto module = message.getRoot<config::Worker::Module>();
-        module.setEsModule(generatePyodideMetadata(conf));
+        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+        using JsonModuleInfo = jsg::ModuleRegistry::JsonModuleInfo;
+        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
 
-        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
-        modules->add(metadataModuleName, kj::mv(KJ_REQUIRE_NONNULL(info)));
+        auto specifier = "pyodide-internal:runtime-generated/current-bundle";
+        modules->addBuiltinModule(
+            specifier,
+            [specifier, conf](jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+              auto metadata = generatePyodideMetadata(conf);
+              auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(js);
+
+              return ModuleInfo(lock, specifier, kj::none,
+                                JsonModuleInfo(lock, Impl::compileJsonGlobal(lock, metadata)));
+            },
+            jsg::ModuleRegistry::Type::INTERNAL);
       }
     }
 

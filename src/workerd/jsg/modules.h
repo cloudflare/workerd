@@ -461,6 +461,17 @@ public:
                 },
                 type);
             continue;
+          case Module::JSON:
+            addBuiltinModule(
+                specifier,
+                [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+                  auto data = jsg::check(
+                      v8::JSON::Parse(lock.v8Context(), lock.wrapString(module.getJson())));
+                  return jsg::ModuleRegistry::ModuleInfo(
+                      lock, specifier, kj::none, jsg::ModuleRegistry::JsonModuleInfo(lock, data));
+                },
+                type);
+            continue;
           case Module::SRC:
             KJ_UNREACHABLE
           }

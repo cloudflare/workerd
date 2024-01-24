@@ -18,6 +18,7 @@ struct Module {
     src @1 :Data; # JS / TS code
     wasm @4 :Data; # Wasm module
     data @5 :Data; # Binary data module
+    json @6 :Text; # Json module
   }
   tsDeclaration @3 :Text;
 
