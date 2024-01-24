@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "standard.h"
+#include <kj/debug.h>
 #include "readable.h"
 #include "writable.h"
 #include <workerd/jsg/buffersource.h>
@@ -684,6 +685,10 @@ public:
 
   kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) override;
 
+  void setPendingClosure() override {
+    KJ_UNIMPLEMENTED("only implemented for WritableStreamInternalController");
+  }
+
 private:
   bool hasPendingReadRequests();
 
@@ -815,6 +820,10 @@ public:
   bool isErrored() override;
 
   inline bool isByteOriented() const override { return false; }
+
+  void setPendingClosure() override {
+    KJ_UNIMPLEMENTED("only implemented for WritableStreamInternalController");
+  }
 
 private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);

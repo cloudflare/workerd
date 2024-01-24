@@ -485,6 +485,12 @@ jsg::Ref<ReadableStream> ReadableStreamInternalController::addRef() {
 kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
     jsg::Lock& js,
     kj::Maybe<ByobOptions> maybeByobOptions) {
+
+  if (isPendingClosure) {
+    return js.rejectedPromise<ReadResult>(
+        js.v8TypeError("This ReadableStream belongs to an object that is closing."_kj));
+  }
+
   std::shared_ptr<v8::BackingStore> store;
   size_t byteLength = 0;
   size_t byteOffset = 0;
@@ -596,6 +602,11 @@ jsg::Promise<void> ReadableStreamInternalController::pipeTo(
   KJ_DASSERT(!isLockedToReader());
   KJ_DASSERT(!destination.isLockedToWriter());
 
+  if (isPendingClosure) {
+    return js.rejectedPromise<void>(
+        js.v8TypeError("This ReadableStream belongs to an object that is closing."_kj));
+  }
+
   disturbed = true;
   KJ_IF_SOME(promise, destination.tryPipeFrom(js,
                                                KJ_ASSERT_NONNULL(owner).addRef(),
@@ -655,6 +666,8 @@ void ReadableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
 ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& js) {
   JSG_REQUIRE(!isLockedToReader(), TypeError,
                "This ReadableStream is currently locked to a reader.");
+  JSG_REQUIRE(!isPendingClosure, TypeError,
+               "This ReadableStream belongs to an object that is closing.");
   readState.init<Locked>();
   disturbed = true;
   KJ_SWITCH_ONEOF(state) {
@@ -815,6 +828,10 @@ jsg::Ref<WritableStream> WritableStreamInternalController::addRef() {
 jsg::Promise<void> WritableStreamInternalController::write(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> value) {
+  if (isPendingClosure) {
+    return js.rejectedPromise<void>(
+        js.v8TypeError("This WritableStream belongs to an object that is closing."_kj));
+  }
   if (isClosedOrClosing()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This WritableStream has been closed."_kj));
@@ -1916,6 +1933,10 @@ jsg::Promise<kj::Array<byte>> ReadableStreamInternalController::readAllBytes(
     return js.rejectedPromise<kj::Array<byte>>(KJ_EXCEPTION(FAILED,
         "jsg.TypeError: This ReadableStream is currently locked to a reader."));
   }
+  if (isPendingClosure) {
+    return js.rejectedPromise<kj::Array<byte>>(
+        js.v8TypeError("This ReadableStream belongs to an object that is closing."_kj));
+  }
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       return js.resolvedPromise(kj::Array<byte>());
@@ -1938,6 +1959,10 @@ jsg::Promise<kj::String> ReadableStreamInternalController::readAllText(
   if (isLockedToReader()) {
     return js.rejectedPromise<kj::String>(KJ_EXCEPTION(FAILED,
         "jsg.TypeError: This ReadableStream is currently locked to a reader."));
+  }
+  if (isPendingClosure) {
+    return js.rejectedPromise<kj::String>(
+        js.v8TypeError("This ReadableStream belongs to an object that is closing."_kj));
   }
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
