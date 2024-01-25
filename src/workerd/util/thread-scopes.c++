@@ -13,7 +13,6 @@ using kj::uint;
 namespace {
 
 thread_local uint allowV8BackgroundThreadScopeCount = 0;
-thread_local uint isolateShutdownThreadScopeCount = 0;
 
 bool multiTenantProcess = false;
 bool predictableMode = false;
@@ -35,18 +34,6 @@ AllowV8BackgroundThreadsScope::~AllowV8BackgroundThreadsScope() noexcept(false) 
 
 bool AllowV8BackgroundThreadsScope::isActive() {
   return allowV8BackgroundThreadScopeCount > 0;
-}
-
-IsolateShutdownScope::IsolateShutdownScope() {
-  ++isolateShutdownThreadScopeCount;
-}
-
-IsolateShutdownScope::~IsolateShutdownScope() noexcept(false) {
-  --isolateShutdownThreadScopeCount;
-}
-
-bool IsolateShutdownScope::isActive() {
-  return isolateShutdownThreadScopeCount > 0;
 }
 
 bool isMultiTenantProcess() {
