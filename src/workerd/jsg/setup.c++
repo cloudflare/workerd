@@ -303,6 +303,11 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
     // const_cast here because V8's `Platform` interface doesn't use constness for thread-safety and
     // V8 wants a non-const pointer here, but the object is in fact thread-safe.
     cppgcHeap = v8::CppHeap::Create(const_cast<V8PlatformWrapper*>(&system.platformWrapper), params);
+
+    // TODO(soon): V8 has deprecated the AttachCppHeap/DetachCppHeap APIs in favor of setting
+    // the CppHeap via the CreateParams. Unfortunately there's a bug in V8 when using the new
+    // approach so we'll continue to use the deprecated APIs for now. Unfortunately this means
+    // that we'll have a deprecation warning in the builds for a while.
     ptr->AttachCppHeap(cppgcHeap.get());
     ptr->SetEmbedderRootsHandler(&heapTracer);
 
@@ -356,6 +361,10 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
 IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    // TODO(soon): V8 has deprecated the AttachCppHeap/DetachCppHeap APIs in favor of setting
+    // the CppHeap via the CreateParams. Unfortunately there's a bug in V8 when using the new
+    // approach so we'll continue to use the deprecated APIs for now. Unfortunately this means
+    // that we'll have a deprecation warning in the builds for a while.
     ptr->DetachCppHeap();
 
     // It's not really clear CppHeap's destructor automatically destroys all heap-allocated objects.
