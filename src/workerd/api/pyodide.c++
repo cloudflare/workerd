@@ -21,15 +21,7 @@ kj::StringPtr lookupModule(kj::StringPtr name) {
 }
 
 kj::StringPtr getPyodideBootstrap() {
-  return _::lookupModule("pyodide-internal:pyodide-bootstrap");
-}
-
-kj::StringPtr getPyodideLock() {
-  return _::lookupModule("pyodide-internal:pyodide-lock");
-}
-
-kj::StringPtr getPyodidePatch(kj::StringPtr name) {
-  return _::lookupModule(kj::str("pyodide:internal/patches/", name));
+  return _::lookupModule("pyodide:python-entrypoint");
 }
 
 kj::String generatePyodideMetadata(server::config::Worker::Reader conf) {
@@ -37,22 +29,6 @@ kj::String generatePyodideMetadata(server::config::Worker::Reader conf) {
   capnp::JsonCodec jsonCodec;
   jsonCodec.setPrettyPrint(false);
   result = kj::str(result, jsonCodec.encode(conf));
-  result = kj::str(result, "; }");
-  return result;
-}
-
-kj::String generatePyodidePatches() {
-  capnp::JsonCodec jsonCodec;
-  jsonCodec.setPrettyPrint(false);
-  jsonCodec.handleByAnnotation<capnp::json::Value>();
-  capnp::MallocMessageBuilder arena;
-  auto jsonRoot = arena.getRoot<capnp::JsonValue>();
-  auto obj = jsonRoot.initObject(1);
-  obj[0].setName("aiohttp_fetch_patch.py");
-  obj[0].initValue().setString(getPyodidePatch("aiohttp_fetch_patch.py"));
-
-  kj::String result = kj::str("export function getPatches() { return ");
-  result = kj::str(result, jsonCodec.encode(jsonRoot.asReader()));
   result = kj::str(result, "; }");
   return result;
 }

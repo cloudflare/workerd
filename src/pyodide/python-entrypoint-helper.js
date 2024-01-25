@@ -1,7 +1,9 @@
-import { loadPyodide } from "pyodide:python";
-import { getMetadata } from "pyodide:current-bundle";
-import { lockFile } from "pyodide:package-lock.json";
-import { getPatches } from "pyodide:patches";
+
+// This file is a BUILTIN module that provides most of the actual implementation
+// for the python-entrypoint.js USER module.
+
+export { loadPyodide } from "pyodide-internal:python";
+import { lockFile } from "pyodide-internal:pyodide-lock";
 
 function initializePackageIndex(pyodide, lockfile) {
   if (!lockfile.packages) {
@@ -50,39 +52,47 @@ function initializePackageIndex(pyodide, lockfile) {
 // These packages are currently embedded inside workerd and so don't need to
 // be separately installed.
 const EMBEDDED_PYTHON_PACKAGES = [
-  "tqdm",
-  "openai",
-  "numpy",
-  "SQLAlchemy",
-  "typing_extensions",
-  "PyYAML",
   "aiohttp",
   "aiosignal",
-  "frozenlist",
+  "anyio",
   "async_timeout",
   "attrs",
-  "six",
-  "charset_normalizer",
-  "multidict",
-  "yarl",
-  "idna",
-  "pydantic",
   "certifi",
-  "langchain",
-  "anyio",
-  "tenacity",
-  "langsmith",
+  "charset_normalizer",
   "dataclasses_json",
+  "distro",
+  "fastapi",
+  "frozenlist",
+  "h11",
+  "httpcore",
+  "httpx",
+  "idna",
   "jsonpatch",
-  "requests",
-  "sniffio",
-  "marshmallow",
-  "urllib3",
-  "typing_inspect",
   "jsonpointer",
-  "mypy_extensions",
+  "langchain",
+  "langchain_community",
+  "langchain_core",
+  "langsmith",
+  "marshmallow",
   "micropip",
+  "multidict",
+  "mypy_extensions",
+  "numpy",
+  "openai",
   "packaging",
+  "pydantic",
+  "PyYAML",
+  "requests",
+  "setuptools",
+  "sniffio",
+  "SQLAlchemy",
+  "starlette",
+  "tenacity",
+  "tqdm",
+  "typing_extensions",
+  "typing_inspect",
+  "urllib3",
+  "yarl",
 ];
 
 function transformMetadata(metadata) {
@@ -120,51 +130,63 @@ function transformMetadata(metadata) {
   return metadata;
 }
 
-export default {
-  async fetch(request, env) {
-    // The metadata is a JSON-serialised WorkerBundle (defined in pipeline.capnp).
-    const metadata = transformMetadata(getMetadata());
+export async function setupPackages(pyodide, origMetadata) {
+  // The metadata is a JSON-serialised WorkerBundle (defined in pipeline.capnp).
+  const metadata = transformMetadata(origMetadata);
 
-    const pyodide = await loadPyodide();
-    initializePackageIndex(pyodide, lockFile);
+  initializePackageIndex(pyodide, lockFile);
 
-    // Loop through globals that define Python modules in the metadata passed to our Worker. For
-    // each one, save it in Pyodide's file system.
-    let hasRequirements = false;
-    const pythonRequirements = [];
-    const micropipRequirements = [];
-    for (const { name, value } of metadata.globals) {
-      if (value.pythonModule !== undefined) {
-        pyodide.FS.writeFile(`/session/${name}.py`, value.pythonModule, {
-          canOwn: true,
-        });
-      }
-
-      if (value.pythonRequirement !== undefined) {
-        hasRequirements = true;
-        if (!EMBEDDED_PYTHON_PACKAGES.includes(name)) {
-          pythonRequirements.push(name);
-        }
-      }
+  // Loop through globals that define Python modules in the metadata passed to our Worker. For
+  // each one, save it in Pyodide's file system.
+  const requirements = [];
+  const pythonRequirements = [];
+  const micropipRequirements = [];
+  for (const { name, value } of metadata.globals) {
+    if (value.pythonModule !== undefined) {
+      pyodide.FS.writeFile(`/session/${name}.py`, value.pythonModule, {
+        canOwn: true,
+      });
     }
 
-    if (hasRequirements) {
-      const micropip = pyodide.pyimport("micropip");
-      if (micropipRequirements.length > 0) {
-        // Micropip and ssl packages are contained in the tarball which is extracted above. This means
-        // we should be able to load micropip directly now.
-        await micropip.install(micropipRequirements);
-      }
-
-      // Apply patches that enable some packages to work.
-      const patches = getPatches();
-      if (micropip.list().has("aiohttp") !== undefined) {
-        pyodide.runPython(patches["aiohttp_fetch_patch.py"]);
+    if (value.pythonRequirement !== undefined) {
+      requirements.push(name);
+      if (!EMBEDDED_PYTHON_PACKAGES.includes(name)) {
+        pythonRequirements.push(name);
       }
     }
+  }
 
+  if (pythonRequirements.length > 0) {
     await pyodide.loadPackage(pythonRequirements);
+  }
 
-    return await pyodide.pyimport(metadata.mainModule).fetch(request);
-  },
-};
+  if (micropipRequirements.length > 0) {
+    // Micropip and ssl packages are pre-loaded via the packages tarball. This means
+    // we should be able to load micropip directly now.
+    const micropip = pyodide.pyimport("micropip");
+    await micropip.install(micropipRequirements);
+  }
+
+  // Apply patches that enable some packages to work. We don't currently list
+  // out transitive dependencies so these checks are very brittle.
+  // TODO: Fix this
+  if (requirements.includes("aiohttp") || requirements.includes("openai") || requirements.includes("langchain")) {
+    const mod = await import("pyodide-internal:patches/aiohttp_fetch_patch.py");
+    pyodide.FS.writeFile(
+      "/lib/python3.11/site-packages/aiohttp_fetch_patch.py",
+      new Uint8Array(mod.default),
+      { canOwn: true }
+    );
+    pyodide.pyimport("aiohttp_fetch_patch");
+  }
+  if (requirements.includes("fastapi")) {
+    const mod = await import("pyodide-internal:asgi.py");
+    pyodide.FS.writeFile(
+      "/lib/python3.11/site-packages/asgi.py",
+      new Uint8Array(mod.default),
+      { canOwn: true }
+    );
+  }
+
+  return pyodide.pyimport(metadata.mainModule);
+}

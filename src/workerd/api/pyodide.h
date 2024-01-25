@@ -11,13 +11,7 @@ namespace workerd::api::pyodide {
 
 kj::StringPtr getPyodideBootstrap();
 
-kj::StringPtr getPyodideLock();
-
-kj::StringPtr getPyodidePatch(kj::StringPtr name);
-
 kj::String generatePyodideMetadata(server::config::Worker::Reader conf);
-
-kj::String generatePyodidePatches();
 
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
 
