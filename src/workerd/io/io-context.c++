@@ -990,9 +990,7 @@ void IoContext::runInContextScope(
     currentInputLock = kj::mv(inputLock);
     currentLock = lock;
 
-    jsg::Lock& js = lock;
-    js.withinHandleScope([&] {
-      v8::Context::Scope contextScope(lock.getContext());
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
       v8::Isolate::PromiseContextScope promiseContextScope(
           lock.getIsolate(), getPromiseContextTag(lock));
 
