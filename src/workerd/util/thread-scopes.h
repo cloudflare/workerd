@@ -32,18 +32,6 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(AllowV8BackgroundThreadsScope);
 };
 
-// Create this on the stack when tearing down isolates. This hints to the PageAllocator that all
-// page discards should be deferred until the whole cage is destroyed.
-class IsolateShutdownScope {
-public:
-  IsolateShutdownScope();
-  ~IsolateShutdownScope() noexcept(false);
-
-  static bool isActive();
-
-  KJ_DISALLOW_COPY_AND_MOVE(IsolateShutdownScope);
-};
-
 // Tracks whether the process hosts isolates from multiple parties that don't know about each
 // other. In such a case, we must take additional precautions against Spectre, and prohibit
 // functionality which cannot be made spectre-safe.
