@@ -746,6 +746,10 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
   return result;
 }
 
+const jsg::MemStats WorkerdApi::getCurrentMemStats(jsg::Lock& js) const {
+  return impl->jsgIsolate.getCurrentMemStats(js);
+}
+
 const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
   return kj::downcast<const WorkerdApi>(api);
 }

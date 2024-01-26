@@ -195,6 +195,8 @@ public:
   void setModuleFallbackCallback(
        kj::Function<ModuleFallbackCallback>&& callback) const override;
 
+  const jsg::MemStats getCurrentMemStats(jsg::Lock&) const override;
+
 private:
   struct Impl;
   kj::Own<Impl> impl;

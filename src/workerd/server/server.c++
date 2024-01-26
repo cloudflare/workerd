@@ -18,6 +18,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
+#include <workerd/util/mem-utils.h>
 #include <time.h>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
@@ -1074,6 +1075,93 @@ private:
   kj::MutexGuarded<const InspectorService*> inspectorService;
   friend class Server::InspectorService;
 };
+
+// The ClimemServiceRegistrar will expose a climem service port for each isolate that
+// is attached.
+class Server::ClimemServiceRegistrar final {
+public:
+  class ClimemErrorHandler final: public kj::TaskSet::ErrorHandler {
+  public:
+    void taskFailed(kj::Exception&& exception) override {
+      KJ_LOG(ERROR, "Climem errored", exception);
+    }
+  };
+  static ClimemErrorHandler INSTANCE;
+
+  ClimemServiceRegistrar(kj::StringPtr address) : address(kj::str(address)) {}
+  ~ClimemServiceRegistrar() noexcept(true) {}
+  KJ_DISALLOW_COPY_AND_MOVE(ClimemServiceRegistrar);
+
+  static kj::Promise<void> handleConnection(
+      kj::Own<kj::AsyncIoStream> conn,
+      kj::Timer& timer,
+      Worker::Isolate* isolate,
+      const Worker& worker,
+      kj::StringPtr name) {
+    KJ_LOG(INFO, kj::str("Climem connected to ", name));
+    try {
+      for (;;) {
+        co_await timer.afterDelay(100 * kj::MILLISECONDS);
+        auto asyncLock = co_await worker.takeAsyncLockWithoutRequest(nullptr);
+        auto stats = worker.runInLockScope(asyncLock, [&](auto& lock) {
+          return isolate->getCurrentMemStats(lock)
+            .toString(util::tryGetResidentSetMemory());
+        });
+        co_await conn->write(stats.begin(), stats.size());
+      }
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+        // Normal disconnection. Ignore and move on.
+        KJ_LOG(INFO, kj::str("Climem disconnected from ", name));
+        co_return;
+      }
+      kj::throwFatalException(kj::mv(exception));
+    }
+  }
+
+  void registerIsolate(kj::StringPtr name, Worker::Isolate* isolate) {
+    auto thread = kj::heap<kj::Thread>([&worker=worker, name, isolate, address=address.asPtr()] {
+      kj::AsyncIoContext io = kj::setupAsyncIo();
+      auto& network = io.provider->getNetwork();
+      auto& timer = io.provider->getTimer();
+
+      auto listen = (kj::coCapture([&worker, &network, &timer, name, address, isolate]()
+          -> kj::Promise<void>{
+        auto parsed = co_await network.parseAddress(address, 0);
+        auto listener = parsed->listen();
+        kj::TaskSet tasks(INSTANCE);
+
+        KJ_LOG(INFO, kj::str("Climem listening for ", name, " on ", listener->getPort()));
+
+        for (;;) {
+          auto conn = co_await listener->accept();
+          tasks.add(handleConnection(kj::mv(conn), timer, isolate,
+                                     KJ_ASSERT_NONNULL(worker), name));
+        }
+
+        co_return;
+      }))();
+
+      kj::NEVER_DONE.wait(io.waitScope);
+    });
+    thread->detach();
+  }
+
+  void setWorker(Worker& newWorker) {
+    worker = newWorker;
+  }
+
+private:
+  kj::String address;
+  kj::Maybe<const Worker&> worker;
+
+  kj::Promise<void> attach(kj::Own<kj::AsyncIoStream> conn, kj::Timer& timer) {
+    return kj::NEVER_DONE;
+  }
+};
+
+Server::ClimemServiceRegistrar::ClimemErrorHandler Server::ClimemServiceRegistrar::INSTANCE;
 
 // Implements the interface for the devtools inspector protocol.
 //
@@ -2558,6 +2646,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   KJ_IF_SOME(isolateRegistrar, inspectorIsolateRegistrar) {
     isolateRegistrar->registerIsolate(name, isolate.get());
   }
+  KJ_IF_SOME(climemRegistrar, climemServiceRegistrar) {
+    climemRegistrar->registerIsolate(name, isolate.get());
+  }
 
   if (conf.hasModuleFallback()) {
     KJ_REQUIRE(experimental,
@@ -2762,6 +2853,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       nullptr,          // systemTracer -- TODO(beta): factor out
       Worker::Lock::TakeSynchronously(kj::none),
       errorReporter);
+
+  KJ_IF_SOME(climemRegistrar, climemServiceRegistrar) {
+    climemRegistrar->setWorker(*worker);
+  }
 
   {
     worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
@@ -3281,6 +3376,10 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
       }
     }
     inspectorIsolateRegistrar = kj::mv(registrar);
+  }
+
+  KJ_IF_SOME(climemAddress, climemOverride) {
+    climemServiceRegistrar = kj::heap<ClimemServiceRegistrar>(climemAddress);
   }
 
   // Second pass: Build services.

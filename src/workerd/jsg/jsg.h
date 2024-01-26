@@ -2302,6 +2302,25 @@ auto runInV8Stack(auto callback) {
   return V8StackScope::runInV8StackImpl(__builtin_frame_address(0), kj::mv(callback));
 };
 
+
+// =======================================================================================
+struct MemStats {
+  size_t total_heap_size;
+  size_t total_heap_size_executable;
+  size_t total_physical_size;
+  size_t total_available_size;
+  size_t total_global_handles_size;
+  size_t used_global_handles_size;
+  size_t used_heap_size;
+  size_t heap_size_limit;
+  size_t malloced_memory;
+  size_t external_memory;
+  size_t peak_malloced_memory;
+  size_t number_of_native_contexts;
+  size_t number_of_detached_contexts;
+  kj::String toString(kj::Maybe<size_t> maybeRss) const;
+};
+
 // =======================================================================================
 // inline implementation details
 

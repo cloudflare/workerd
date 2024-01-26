@@ -124,6 +124,26 @@ public:
 
   IsolateObserver& getObserver() { return *observer; }
 
+  inline const MemStats getCurrentMemStats(Lock&) const {
+    v8::HeapStatistics stats;
+    ptr->GetHeapStatistics(&stats);
+    return {
+      .total_heap_size = stats.total_heap_size(),
+      .total_heap_size_executable = stats.total_heap_size_executable(),
+      .total_physical_size = stats.total_physical_size(),
+      .total_available_size = stats.total_available_size(),
+      .total_global_handles_size = stats.total_global_handles_size(),
+      .used_global_handles_size = stats.used_global_handles_size(),
+      .used_heap_size = stats.used_heap_size(),
+      .heap_size_limit = stats.heap_size_limit(),
+      .malloced_memory = stats.malloced_memory(),
+      .external_memory = stats.external_memory(),
+      .peak_malloced_memory = stats.peak_malloced_memory(),
+      .number_of_native_contexts = stats.number_of_native_contexts(),
+      .number_of_detached_contexts = stats.number_of_detached_contexts(),
+    };
+  }
+
 private:
   template <typename TypeWrapper>
   friend class Isolate;

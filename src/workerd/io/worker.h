@@ -334,6 +334,8 @@ public:
 
   kj::Own<const WeakIsolateRef> getWeakRef() const;
 
+  const jsg::MemStats getCurrentMemStats(jsg::Lock&) const;
+
 private:
   kj::Promise<AsyncLock> takeAsyncLockImpl(
       kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
@@ -440,6 +442,10 @@ public:
   // WebCrypto algorithms supported.
   virtual kj::Maybe<const api::CryptoAlgorithm&> getCryptoAlgorithm(kj::StringPtr name) const {
     return kj::none;
+  }
+
+  virtual const jsg::MemStats getCurrentMemStats(jsg::Lock&) const {
+    return {};
   }
 
   // Set the module fallback service callback, if any.

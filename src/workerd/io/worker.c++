@@ -10,6 +10,7 @@
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
+#include <workerd/util/string-buffer.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/xthreadnotifier.h>
 #include <workerd/api/actor-state.h>
@@ -1243,6 +1244,10 @@ Worker::Script::~Script() noexcept(false) {
     }
     impl = nullptr;
   });
+}
+
+const jsg::MemStats Worker::Isolate::getCurrentMemStats(jsg::Lock& lock) const {
+  return api->getCurrentMemStats(lock);
 }
 
 const Worker::Isolate& Worker::Isolate::from(jsg::Lock& js) {

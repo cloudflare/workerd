@@ -6,6 +6,7 @@
 #include "setup.h"
 #include "workerd/jsg/util.h"
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/string-buffer.h>
 
 namespace workerd::jsg {
 
@@ -319,5 +320,37 @@ kj::String Name::toString(jsg::Lock& js) {
   }
   KJ_UNREACHABLE;
 }
+
+kj::String jsg::MemStats::toString(
+    kj::Maybe<size_t> maybeRss) const {
+  StringBuffer<256> buf(256);
+  buf.append("{");
+
+  // These first ones are modeled after Node.js' process.memoryUsage() and use
+  // the same names for consistency. These are used to support the interaction
+  // with the climem tool
+  buf.append("\"rss\":", kj::str(maybeRss.orDefault(0)), ",");
+  buf.append("\"heapTotal\":", kj::str(total_heap_size), ",");
+  buf.append("\"heapUsed\":", kj::str(used_heap_size), ",");
+  buf.append("\"external\":", kj::str(external_memory), ",");
+  // We use the external metric for arrayBuffers too..
+  buf.append("\"arrayBuffers\":", kj::str(external_memory), ",");
+
+  // These additional fields aren't currently used by climem but are useful
+  // for additional context.
+  buf.append("\"totalSizeSizeExec\":", kj::str(total_heap_size_executable), ",");
+  buf.append("\"totalPhysicalSize\":", kj::str(total_physical_size), ",");
+  buf.append("\"totalAvailableSize\":", kj::str(total_available_size), ",");
+  buf.append("\"totalGlobalHandlesSize\":", kj::str(total_global_handles_size), ",");
+  buf.append("\"usedGlobalHandlesSize\":", kj::str(used_global_handles_size), ",");
+  buf.append("\"heapSizeLimit\":", kj::str(heap_size_limit), ",");
+  buf.append("\"mallocedMemory\":", kj::str(malloced_memory), ",");
+  buf.append("\"peakMallocedMemory\":", kj::str(peak_malloced_memory), ",");
+  buf.append("\"numberOfNativeContexts\":", kj::str(number_of_native_contexts), ",");
+  buf.append("\"numberOfDetachedContexts\":", kj::str(number_of_detached_contexts));
+
+  buf.append("}\n");
+  return buf.toString();
+};
 
 }  // namespace workerd::jsg

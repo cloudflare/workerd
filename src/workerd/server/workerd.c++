@@ -593,6 +593,8 @@ public:
                           "<addr> instead of the address specified in the config file.")
         .addOptionWithArg({'i', "inspector-addr"}, CLI_METHOD(enableInspector), "<addr>",
                           "Enable the inspector protocol to connect to the address <addr>.")
+        .addOptionWithArg({'m', "climem"}, CLI_METHOD(enableClimem), "<addr>",
+                          "Enable a local memory-monitor service")
 #if defined(WORKERD_USE_PERFETTO)
         // TODO(later): In the future, we might want to enable providing a perfetto
         // TraceConfig structure here rather than just the categories.
@@ -785,6 +787,10 @@ public:
 
   void enableInspector(kj::StringPtr param) {
     server.enableInspector(kj::str(param));
+  }
+
+  void enableClimem(kj::StringPtr param) {
+    server.enableClimem(kj::str(param));
   }
 
   void enableControl(kj::StringPtr param) {
