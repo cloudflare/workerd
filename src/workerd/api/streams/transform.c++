@@ -42,6 +42,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
     // and allowed to be garbage collected.
 
     auto controller = jsg::alloc<TransformStreamDefaultController>(js);
+    auto transformer = kj::mv(maybeTransformer).orDefault({});
 
     auto readable = ReadableStream::constructor(
         js,
@@ -66,6 +67,9 @@ jsg::Ref<TransformStream> TransformStream::constructor(
                   (jsg::Lock& js, auto reason) mutable {
             return controller->cancel(js, reason);
           })),
+          .expectedLength = transformer.expectedLength.map([](uint64_t expectedLength) {
+            return expectedLength;
+          }),
         },
         kj::mv(maybeReadableStrategy));
 
@@ -102,7 +106,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
 
     // The controller will store c++ references to both the readable and writable
     // streams underlying controllers.
-    controller->init(js, readable, writable, kj::mv(maybeTransformer));
+    controller->init(js, readable, writable, kj::mv(transformer));
 
     return jsg::alloc<TransformStream>(kj::mv(readable), kj::mv(writable));
   }
