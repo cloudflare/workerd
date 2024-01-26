@@ -39,10 +39,10 @@ apple_support_dependencies()
 
 http_archive(
     name = "capnp-cpp",
-    integrity = "sha256-eLxPfuuwuX9FTYCHgB8Q6tpBq/aVHzBbi8yie8WwpAo",
-    strip_prefix = "capnproto-capnproto-af4c99d/c++",
+    sha256 = "f14d3f4469044de19f447a20a8bfeed59cfdd5b15d2bed6d96dcef7c63c9ccd7",
+    strip_prefix = "capnproto-capnproto-ae261d9/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/af4c99d89dea3e6e299c3ff953ee03326fce80d6"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/ae261d9fde3dbedc8c0334ae2a342b18ce43857a"],
 )
 
 http_archive(
@@ -69,10 +69,14 @@ http_archive(
 
 http_archive(
     name = "rules_python",
-    sha256 = "84aec9e21cc56fbc7f1335035a71c850d1b9b5cc6ff497306f84cced9a769841",
-    strip_prefix = "rules_python-0.23.1",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.23.1/rules_python-0.23.1.tar.gz",
+    sha256 = "9d04041ac92a0985e344235f5d946f71ac543f1b1565f2cdbc9a2aaee8adf55b",
+    strip_prefix = "rules_python-0.26.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.26.0/rules_python-0.26.0.tar.gz",
 )
+
+load("@rules_python//python:repositories.bzl", "py_repositories")
+
+py_repositories()
 
 http_archive(
     name = "com_google_benchmark",
@@ -81,9 +85,10 @@ http_archive(
     url = "https://github.com/google/benchmark/archive/refs/tags/v1.8.2.tar.gz",
 )
 
-load("@com_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
-
-benchmark_deps()
+# These are part of what's needed to get `bazel query 'deps(//...)'`, to work, but this is difficult to support
+# based on our dependencies – just use cquery instead.
+# load("@com_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
+# benchmark_deps()
 
 http_archive(
     name = "brotli",
@@ -141,7 +146,6 @@ http_archive(
     strip_prefix = "KhronosGroup-Vulkan-Utility-Libraries-5b3147a",
     type = "tgz",
     url = "https://github.com/KhronosGroup/Vulkan-Utility-Libraries/tarball/5b3147a535e28a48ae760efacdf97b296d9e8c73",
-
 )
 
 http_archive(
@@ -151,7 +155,6 @@ http_archive(
     strip_prefix = "KhronosGroup-Vulkan-Headers-aff5071",
     type = "tgz",
     url = "https://github.com/KhronosGroup/Vulkan-Headers/tarball/aff5071d4ee6215c60a91d8d983cad91bb25fb57",
-
 )
 
 http_archive(
@@ -167,20 +170,21 @@ http_archive(
 
 # tcmalloc requires Abseil.
 #
-# WARNING: This MUST appear before rules_fuzzing_depnedencies(), below. Otherwise,
-#   rules_fuzzing_depnedencies() will choose to pull in a different version of Abseil that is too
-#   old for tcmalloc. Absurdly, Bazel simply ignores later attempts to define the same repo name,
-#   rather than erroring out. Thus this leads to confusing compiler errors in tcmalloc complaining
-#   that ABSL_ATTRIBUTE_PURE_FUNCTION is not defined.
+# WARNING: This MUST appear before rules_fuzzing_dependencies(), below. Otherwise,
+#   rules_fuzzing_dependencies() will choose to pull in an older version of Abseil. Absurdly, Bazel
+#   simply ignores later attempts to define the same repo name, rather than erroring out. This led
+#   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
     commit = "0764ad493e54a79c7e3e02fc3412ef55b4835b9e",
+    remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
+
 bind(
     name = "absl_flat_hash_set",
     actual = "@com_google_absl//absl/container:flat_hash_set",
 )
+
 bind(
     name = "absl_flat_hash_map",
     actual = "@com_google_absl//absl/container:flat_hash_map",
@@ -190,14 +194,17 @@ bind(
 # though it is unused for our purposes.
 http_archive(
     name = "rules_fuzzing",
-    sha256 = "bc286c36bf40c5447d8e4ee047f471c934fe99d4acba0de7a866f38d2ea83a21",
-    strip_prefix = "rules_fuzzing-0.1.1",
-    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.tar.gz"],
+    sha256 = "f6f3f42c48576acd5653bf07637deee2ae4ebb77ccdb0dacc67c184508bedc8c",
+    strip_prefix = "rules_fuzzing-0.4.1",
+    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.4.1.tar.gz"],
 )
 
 load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
 
-rules_fuzzing_dependencies()
+rules_fuzzing_dependencies(
+    honggfuzz = False,
+    jazzer = False,
+)
 
 load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
 
@@ -206,14 +213,14 @@ rules_fuzzing_init()
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
+    patch_args = ["-p1"],
+    patches = [
+        "//:patches/tcmalloc/0001-Replace-ANNOTATE_MEMORY_IS_INITIALIZED-with-ABSL_ANN.patch",
+    ],
     sha256 = "10b1217154c2b432241ded580d6b0e0b01f5d2566b4eeacf2edf937b87683274",
     strip_prefix = "google-tcmalloc-ca82471",
     type = "tgz",
     url = "https://github.com/google/tcmalloc/tarball/ca82471188f4832e82d2e77078ecad66f4c425d5",
-    patches = [
-        "//:patches/tcmalloc/0001-Replace-ANNOTATE_MEMORY_IS_INITIALIZED-with-ABSL_ANN.patch",
-    ],
-    patch_args = ["-p1"],
 )
 
 # ========================================================================================
@@ -446,11 +453,11 @@ git_repository(
 
 http_archive(
     name = "perfetto",
+    patch_args = ["-p1"],
     patches = [
         "//:patches/perfetto/0001-Rename-ui-build-to-ui-build.sh-to-allow-bazel-build-.patch",
     ],
-    patch_args = ["-p1"],
-    repo_mapping = {"@perfetto_dep_zlib" : "@zlib"},
+    repo_mapping = {"@perfetto_dep_zlib": "@zlib"},
     sha256 = "241cbaddc9ff4e5d1de2d28497fef40b5510e9ca60808815bf4944d0d2f026db",
     strip_prefix = "perfetto-39.0",
     type = "tgz",
@@ -460,17 +467,17 @@ http_archive(
 # For use with perfetto
 http_archive(
     name = "com_google_protobuf",
+    sha256 = "2ee9dcec820352671eb83e081295ba43f7a4157181dad549024d7070d079cf65",
     strip_prefix = "protobuf-3.9.0",
     type = "tgz",
-    sha256 = "2ee9dcec820352671eb83e081295ba43f7a4157181dad549024d7070d079cf65",
     url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.9.0.tar.gz",
 )
 
 # For use with perfetto
 new_local_repository(
     name = "perfetto_cfg",
+    build_file_content = "",
     path = "build/perfetto",
-    build_file_content = ""
 )
 
 git_repository(
@@ -548,7 +555,7 @@ new_local_repository(
         name = "lolhtml",
         hdrs = ["@workerd//rust-deps:lol_html_api"],
         deps = ["@workerd//rust-deps"],
-        # TODO(soon): This workaround appears to be needed when linking the rust library – figure
+        # TODO(soon): This workaround appears to be needed when linking the rust library - figure
         # out why and develop a better approach to address this.
         linkopts = select({
           "@platforms//os:windows": ["ntdll.lib"],
