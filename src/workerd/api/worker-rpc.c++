@@ -55,7 +55,7 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
     JSG_ASSERT(ser.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
         "Serialized RPC requests are limited to 1MiB, but the size of this request was: ",
         ser.size(), " bytes.");
-    builder.initSerializedArgs().setV8Serialized(kj::mv(ser));
+    builder.initArgs().setV8Serialized(kj::mv(ser));
   }
 
   auto callResult = builder.send();
@@ -99,7 +99,7 @@ public:
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
     auto methodName = kj::heapString(callContext.getParams().getMethodName());
-    auto serializedArgs = callContext.getParams().getSerializedArgs().getV8Serialized().asBytes();
+    auto serializedArgs = callContext.getParams().getArgs().getV8Serialized().asBytes();
 
     // We want to fulfill the callPromise so customEvent can continue executing
     // regardless of the outcome of `call()`.

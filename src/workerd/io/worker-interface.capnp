@@ -189,11 +189,11 @@ struct JsValue {
 }
 
 interface JsRpcTarget {
-  call @0 (methodName :Text, serializedArgs :JsValue) -> (result :JsValue);
+  call @0 (methodName :Text, args :JsValue) -> (result :JsValue);
   # Runs a Worker/DO's RPC method.
   #
-  # `methodName` is the name of the method to run, and
-  # `serializedArgs` is an array of arguments that have been serialized by the v8 serializer.
+  # `methodName` is the name of the method to run, and `args` is a JsValue that is always a
+  # JavaScript Array, containing the arguments to the call.
 }
 
 interface EventDispatcher @0xf20697475ec1752d {
