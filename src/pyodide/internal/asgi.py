@@ -23,10 +23,10 @@ def request_to_scope(req, ws=False):
 
     headers = [tuple(x) for x in req.headers]
     url = URL.new(req.url)
-    assert url.protocol[-1] == ':'
+    assert url.protocol[-1] == ":"
     scheme = url.protocol[:-1]
     path = url.pathname
-    assert url.search[0] == '?'
+    assert "?".startswith(url.search[0:1])
     query_string = url.search[1:].encode()
     if ws:
         ty = "websocket"

@@ -25,12 +25,9 @@ kj::StringPtr getPyodideBootstrap() {
 }
 
 kj::String generatePyodideMetadata(server::config::Worker::Reader conf) {
-  kj::String result = kj::str("export function getMetadata() { return ");
   capnp::JsonCodec jsonCodec;
   jsonCodec.setPrettyPrint(false);
-  result = kj::str(result, jsonCodec.encode(conf));
-  result = kj::str(result, "; }");
-  return result;
+  return jsonCodec.encode(conf);
 }
 
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules) {

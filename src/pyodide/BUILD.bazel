@@ -50,6 +50,12 @@ copy_file(
     out = "generated/python_stdlib.zip",
 )
 
+copy_file(
+    name = "pyodide-lock.js@rule",
+    src = "@pyodide//:pyodide/pyodide-lock.json",
+    out = "generated/pyodide-lock.json",
+)
+
 PRELUDE = """
 import { newWasmModule, monotonicDateNow, wasmInstantiate } from "pyodide-internal:builtin_wrappers";
 
@@ -97,9 +103,9 @@ wd_js_bundle(
         "internal/*.py",
         "internal/patches/*.py",
     ]),
+    internal_json_modules = ["generated/pyodide-lock.json"],
     internal_modules = [
         "generated/pyodide.asm.js",
-        "internal/pyodide-lock.js",
     ] + glob([
         "internal/*.js",
     ]),
@@ -108,6 +114,7 @@ wd_js_bundle(
     deps = [
         "pyodide.asm.js@rule",
         "pyodide.asm.wasm@rule",
+        "pyodide-lock.js@rule",
         "python_stdlib.zip@rule",
     ],
 )
