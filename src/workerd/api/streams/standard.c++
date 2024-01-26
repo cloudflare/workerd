@@ -702,6 +702,8 @@ private:
             kj::Own<ValueReadable>,
             kj::Own<ByteReadable>> state = StreamStates::Closed();
 
+  kj::Maybe<uint64_t> expectedLength = kj::none;
+
   // The lock state is separate because a closed or errored stream can still be locked.
   ReadableLockImpl lock;
 
@@ -2588,6 +2590,8 @@ void ReadableStreamJsController::setup(
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
   auto type = underlyingSource.type.map([](kj::StringPtr s) { return s; }).orDefault(""_kj);
 
+  expectedLength = underlyingSource.expectedLength;
+
   if (type == "bytes") {
     auto autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize.orDefault(
         UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE);
@@ -3325,7 +3329,7 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(jsg::Lock& 
 }
 
 kj::Maybe<uint64_t> ReadableStreamJsController::tryGetLength(StreamEncoding encoding) {
-  return kj::none;
+  return expectedLength;
 }
 
 kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(

@@ -92,7 +92,11 @@ struct UnderlyingSource {
   jsg::Optional<jsg::Function<PullAlgorithm>> pull;
   jsg::Optional<jsg::Function<CancelAlgorithm>> cancel;
 
-  JSG_STRUCT(type, autoAllocateChunkSize, start, pull, cancel);
+  // The expectedLength is a non-standard extension used to support specifying the
+  // content-length when using a ReadableStream as the body of a request or response.
+  jsg::Optional<uint64_t> expectedLength;
+
+  JSG_STRUCT(type, autoAllocateChunkSize, start, pull, cancel, expectedLength);
   JSG_STRUCT_TS_DEFINE(interface UnderlyingByteSource {
     type: "bytes";
     autoAllocateChunkSize?: number;
@@ -149,7 +153,12 @@ struct Transformer {
   jsg::Optional<jsg::Function<TransformAlgorithm>> transform;
   jsg::Optional<jsg::Function<FlushAlgorithm>> flush;
 
-  JSG_STRUCT(readableType, writableType, start, transform, flush);
+  // The expectedLength is a non-standard extension used to support specifying the
+  // content-length when using a TransformStream readable side as the body of a
+  // request or response.
+  jsg::Optional<uint64_t> expectedLength;
+
+  JSG_STRUCT(readableType, writableType, start, transform, flush, expectedLength);
   JSG_STRUCT_TS_OVERRIDE(<I = any, O = any> {
     start?: (controller: TransformStreamDefaultController<O>) => void | Promise<void>;
     transform?: (chunk: I, controller: TransformStreamDefaultController<O>) => void | Promise<void>;
