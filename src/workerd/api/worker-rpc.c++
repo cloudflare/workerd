@@ -51,11 +51,14 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
   // If we have arguments, serialize them.
   // Note that we may fail to serialize some element, in which case this will throw back to JS.
   if (argv.size() > 0) {
+    // TODO(perf): It would be nice if we could serialize directly into the capnp message to avoid
+    // a redundant copy of the bytes here. Maybe we could even cancel serialization early if it
+    // goes over the size limit.
     auto ser = serializeV8(js, js.arr(argv.asPtr()));
     JSG_ASSERT(ser.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
         "Serialized RPC requests are limited to 1MiB, but the size of this request was: ",
         ser.size(), " bytes.");
-    builder.initArgs().setV8Serialized(kj::mv(ser));
+    builder.initArgs().setV8Serialized(ser);
   }
 
   auto callResult = builder.send();
