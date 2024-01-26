@@ -43,6 +43,14 @@ jsg::Ref<TransformStream> TransformStream::constructor(
 
     auto controller = jsg::alloc<TransformStreamDefaultController>(js);
 
+    // By default, let's signal backpressure on the readable side by setting the highWaterMark
+    // to zero if a strategy is not given. This effectively means that writes/reads will be
+    // one to one as long as the writer is respecting backpressure signals. If buffering
+    // occurs, it will happen in the writable side of the transform stream.
+    auto readableStrategy = kj::mv(maybeReadableStrategy).orDefault(StreamQueuingStrategy {
+      .highWaterMark = 0,
+    });
+
     auto readable = ReadableStream::constructor(
         js,
         UnderlyingSource {
@@ -67,7 +75,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
             return controller->cancel(js, reason);
           })),
         },
-        kj::mv(maybeReadableStrategy));
+        kj::mv(readableStrategy));
 
     auto writable = WritableStream::constructor(
         js,
