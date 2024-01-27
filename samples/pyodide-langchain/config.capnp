@@ -23,8 +23,10 @@ const config :Workerd.Config = (
 const mainWorker :Workerd.Worker = (
   modules = [
     (name = "worker", pythonModule = embed "./worker.py"),
-    (name = "fastapi==0.103.2", pythonRequirement = ""),
-    (name = "ssl", pythonRequirement = ""),
+    (name = "aiohttp", pythonRequirement = "aiohttp"),
+    (name = "ssl", pythonRequirement = "ssl"),
+    (name = "langchain==0.0.339", pythonRequirement = ""),
+    (name = "openai==0.28.1", pythonRequirement = ""),
   ],
   compatibilityDate = "2023-12-18",
   compatibilityFlags = ["experimental"],

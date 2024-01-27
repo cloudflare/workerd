@@ -12,8 +12,8 @@ function initializePackageIndex(pyodide) {
     );
   }
   const API = pyodide._api;
-  API.config.indexURL = "https://cdn.jsdelivr.net/pyodide/v0.25.0a2/full/";
-  globalThis.location = "https://cdn.jsdelivr.net/pyodide/v0.25.0a2/full/";
+  API.config.indexURL = "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/";
+  globalThis.location = "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/";
   API.lockfile_info = lockfile.info;
   API.lockfile_packages = lockfile.packages;
   API.repodata_packages = lockfile.packages;
@@ -151,19 +151,17 @@ async function setupPackages(pyodide) {
 
     if (value.pythonRequirement !== undefined) {
       requirements.push(name);
-      if (!EMBEDDED_PYTHON_PACKAGES.includes(name)) {
-        pythonRequirements.push(name);
-      }
       // Packages are not embedded in workerd.
       // TODO: Improve package loading in workerd.
       if (isWorkerd) {
         micropipRequirements.push(name);
+        continue;
+      }
+
+      if (!EMBEDDED_PYTHON_PACKAGES.includes(name)) {
+        pythonRequirements.push(name);
       }
     }
-  }
-
-  if (isWorkerd) {
-    pythonRequirements.push("micropip");
   }
 
   if (pythonRequirements.length > 0) {

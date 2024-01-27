@@ -6,8 +6,6 @@ async def fetch(request):
 
 def test():
     import fastapi
-    import langchain
-    import asgi
 
 
 # Set up fastapi app
