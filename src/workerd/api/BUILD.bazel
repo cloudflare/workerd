@@ -61,15 +61,17 @@ wd_cc_library(
     name = "rtti",
     srcs = ["rtti.c++"],
     hdrs = [
-        "rtti.h",
         "modules.h",
+        "rtti.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h"
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":html-rewriter",
-        "//src/workerd/io",
+        "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
+        "//src/workerd/io",
+        "//src/workerd/jsg:rtti",
     ],
 )
 
@@ -79,22 +81,27 @@ wd_cc_library(
     name = "html-rewriter",
     srcs = ["html-rewriter.c++"],
     hdrs = ["html-rewriter.h"],
+    implementation_deps = [
+        "@com_cloudflare_lol_html//:lolhtml",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
-        "@com_cloudflare_lol_html//:lolhtml",
     ],
 )
 
 wd_cc_library(
     name = "pyodide",
     srcs = ["pyodide.c++"],
-    hdrs = ["pyodide.h", "//src/pyodide:generated/pyodide_extra.capnp.h"],
+    hdrs = [
+        "pyodide.h",
+        "//src/pyodide:generated/pyodide_extra.capnp.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/workerd/server:workerd_capnp",
-        "//src/pyodide:pyodide",
+        "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
+        "//src/workerd/server:workerd_capnp",
     ],
 )
 
@@ -130,7 +137,7 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
-    ]
+    ],
 )
 
 kj_test(
@@ -159,5 +166,3 @@ kj_test(
 ) for f in glob(
     ["**/*.wd-test"],
 )]
-
-

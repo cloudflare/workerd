@@ -1,12 +1,9 @@
-
 cc_library(
     name = "ada-url",
-    hdrs = ["ada.h", "ada_c.h"],
     srcs = ["ada.cpp"],
+    hdrs = [
+        "ada.h",
+        "ada_c.h",
+    ],
     visibility = ["//visibility:public"],
-    include_prefix = ".",
-    copts = ["-w"],
-    defines = [
-      "ADA_SSE2=1"
-    ]
 )

@@ -55,6 +55,10 @@ wd_cc_library(
         ":set_enable_experimental_webgpu": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU"],
         "//conditions:default": [],
     }),
+    implementation_deps = [
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":capnp",
@@ -63,18 +67,13 @@ wd_cc_library(
         ":worker-interface",
         "//src/cloudflare",
         "//src/node",
-        "//src/pyodide",
-        "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:r2-api_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/jsg:rtti",
         "//src/workerd/util:sqlite",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj:kj-async",
-        "@capnp-cpp//src/kj/compat:kj-brotli",
-        "@capnp-cpp//src/kj/compat:kj-gzip",
     ] + select({
         ":set_enable_experimental_webgpu": ["@dawn"],
         "//conditions:default": [],
@@ -88,8 +87,8 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":capnp",
-        "//src/workerd/util:perfetto",
         "//src/workerd/util:own-util",
+        "//src/workerd/util:perfetto",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-http",
@@ -109,7 +108,7 @@ wd_cc_library(
 wd_cc_library(
     name = "limit-enforcer",
     hdrs = ["limit-enforcer.h"],
-    visibility = ["//visibility:public"]
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_library(

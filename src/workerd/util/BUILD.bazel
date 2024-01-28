@@ -61,11 +61,13 @@ wd_cc_library(
         "sqlite.h",
         "sqlite-kv.h",
     ],
+    implementation_deps = [
+        "@sqlite3",
+    ],
     visibility = ["//visibility:public"],
     deps = [
-        "@capnp-cpp//src/kj:kj-async",
-        "@sqlite3",
         "//src/workerd/util:sentry",
+        "@capnp-cpp//src/kj:kj-async",
     ],
 )
 
