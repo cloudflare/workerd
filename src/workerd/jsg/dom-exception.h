@@ -106,6 +106,12 @@ public:
 #undef JSG_DOM_EXCEPTION_CONSTANT_CXX
 #undef JSG_DOM_EXCEPTION_CONSTANT_JS
 
+  void visitForMemoryInfo(MemoryTracker& tracker) const {
+    tracker.trackField("message", message);
+    tracker.trackField("name", name);
+    tracker.trackField("errorForStack", errorForStack);
+  }
+
 private:
   kj::String message;
   kj::String name;

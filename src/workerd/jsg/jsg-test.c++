@@ -35,7 +35,7 @@ static_assert(kj::_::isDisallowedInCoroutine<Lock*>());
 // ========================================================================================
 
 V8System v8System;
-class ContextGlobalObject: public Object, public ContextGlobal { };
+class ContextGlobalObject: public Object, public ContextGlobal {};
 
 struct TestContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(TestContext) {}

@@ -9,6 +9,7 @@
 #include "async-context.h"
 #include "type-wrapper.h"
 #include "v8-platform-wrapper.h"
+#include "v8-profiler.h"
 #include <workerd/util/batch-queue.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
@@ -124,9 +125,17 @@ public:
 
   IsolateObserver& getObserver() { return *observer; }
 
+  // Implementation of MemoryRetainer
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const;
+  kj::StringPtr jsgGetMemoryName() const { return "IsolateBase"_kjc; }
+  size_t jsgGetMemorySelfSize() const { return sizeof(IsolateBase); }
+  bool jsgGetMemoryInfoIsRootNode() const { return true; }
+
 private:
   template <typename TypeWrapper>
   friend class Isolate;
+
+  static void buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data);
 
   // The internals of a jsg::Ref<T> to be deleted.
   class RefToDelete {

@@ -30,6 +30,12 @@ struct OpaqueWrappable<T, false>: public Wrappable {
 
   T value;
   bool movedAway = false;
+
+  kj::StringPtr jsgGetMemoryName() const override { return "OpaqueWrappable"_kjc; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(OpaqueWrappable); }
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+    Wrappable::jsgGetMemoryInfo(tracker);
+  }
 };
 
 template <typename T>
@@ -37,6 +43,12 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
   // When T is GC-visitable, make sure to implement visitation.
 
   using OpaqueWrappable<T, false>::OpaqueWrappable;
+
+  kj::StringPtr jsgGetMemoryName() const override { return "OpaqueWrappable"_kjc; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(OpaqueWrappable); }
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+    Wrappable::jsgGetMemoryInfo(tracker);
+  }
 
   void jsgVisitForGc(GcVisitor& visitor) override {
     if (!this->movedAway) {
@@ -381,9 +393,14 @@ public:
       return addRef(Lock::from(deprecatedIsolate));
     }
 
+    JSG_MEMORY_INFO(Resolver) {
+      tracker.trackField("resolver", v8Resolver);
+    }
+
   private:
     v8::Isolate* deprecatedIsolate;
     V8Ref<v8::Promise::Resolver> v8Resolver;
+    friend class MemoryTracker;
   };
 
   void visitForGc(GcVisitor& visitor) {
@@ -410,6 +427,12 @@ public:
   auto catch_(ErrorFunc&& errorFunc)
       KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return catch_<false>(Lock::from(deprecatedIsolate), kj::fwd<ErrorFunc>(errorFunc));
+  }
+
+  JSG_MEMORY_INFO(Promise) {
+    KJ_IF_SOME(promise, v8Promise) {
+      tracker.trackField("promise", promise);
+    }
   }
 
 private:
@@ -479,6 +502,7 @@ private:
   friend class Lock;
   template <typename TypeWrapper>
   friend class PromiseWrapper;
+  friend class MemoryTracker;
 };
 
 template <typename T>
@@ -495,6 +519,11 @@ template <typename T>
 struct PromiseResolverPair {
   Promise<T> promise;
   typename Promise<T>::Resolver resolver;
+
+  JSG_MEMORY_INFO(PromiseResolverPair) {
+    tracker.trackField("promise", promise);
+    tracker.trackField("resolver", resolver);
+  }
 };
 
 template <typename T>
@@ -732,6 +761,12 @@ public:
 
   void clear();
 
+  JSG_MEMORY_INFO(UnhandledRejectionHandler) {
+    // TODO (soon): Can we reasonably measure the function handler?
+    tracker.trackField("unhandledRejections", unhandledRejections);
+    tracker.trackField("warnedRejections", warnedRejections);
+  }
+
 private:
   // Used as part of the book keeping for unhandled rejections. When an
   // unhandled rejection occurs, the unhandledRejections Table will be updated.
@@ -772,6 +807,13 @@ private:
     size_t rejectionNumber;
 
     uint hashCode() const { return hash; }
+
+    JSG_MEMORY_INFO(UnhandledRejection) {
+      tracker.trackField("promise", promise);
+      tracker.trackField("value", value);
+      visitForMemoryInfo(tracker);
+    }
+    void visitForMemoryInfo(MemoryTracker& tracker) const;
   };
 
   // A v8::Promise with memoized hash code.
@@ -781,6 +823,10 @@ private:
 
     HashedPromise(v8::Local<v8::Promise> promise)
         : promise(promise), hash(promise->GetIdentityHash()) {}
+
+    JSG_MEMORY_INFO(HashedPromise) {
+      tracker.trackField("promise", promise);
+    }
   };
 
   struct UnhandledRejectionCallbacks {

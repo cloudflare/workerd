@@ -9,7 +9,7 @@ namespace workerd::jsg::test {
 namespace {
 
 V8System v8System;
-class ContextGlobalObject: public Object, public ContextGlobal { };
+class ContextGlobalObject: public Object, public ContextGlobal {};
 
 struct BoxContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(BoxContext) {
@@ -356,6 +356,7 @@ struct StaticContext: public ContextGlobalObject {
     static Unimplemented unimplementedStaticMethod() { return {}; }
 
     static void delete_() {}
+
 
     JSG_RESOURCE_TYPE(StaticMethods) {
       JSG_STATIC_METHOD(passThrough);

@@ -14,6 +14,8 @@
 #include <kj/debug.h>
 #include <type_traits>
 #include <v8.h>
+#include <v8-profiler.h>
+#include <workerd/jsg/memory.h>
 #include "macro-meta.h"
 #include "wrappable.h"
 #include "util.h"
@@ -45,6 +47,13 @@ namespace workerd::jsg {
       ::workerd::jsg::JsgKind::RESOURCE; \
   using jsgSuper = jsgThis; \
   using jsgThis = Type; \
+  inline kj::StringPtr jsgGetMemoryName() const override { return #Type##_kjc; } \
+  inline size_t jsgGetMemorySelfSize() const override { return sizeof(Type); } \
+  inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override { \
+    const Type* self = static_cast<const Type*>(this); \
+    jsgSuper::jsgGetMemoryInfo(tracker); \
+    ::workerd::jsg::visitSubclassForMemoryInfo<Type>(self, tracker); \
+  } \
   template <typename> \
   friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing(); \
   template <typename T> \
@@ -745,6 +754,8 @@ private:
   // Implement move constructor when the source of the move has previously been visited for
   // garbage collection.
   void moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTracedRef) noexcept;
+
+  friend class MemoryTracker;
 };
 
 // A drop-in replacement for v8::Global<T>. Its big feature is that, like jsg::Data, a
@@ -789,6 +800,7 @@ public:
 
 private:
   friend class GcVisitor;
+  friend class MemoryTracker;
 };
 
 using Value = V8Ref<v8::Value>;
@@ -819,6 +831,16 @@ private:
   HashableV8Ref(v8::Isolate* isolate, v8::Local<T> handle, int identityHash)
       : V8Ref<T>(isolate, handle), identityHash(identityHash) {}
 };
+
+template <V8Value T>
+MemoryTracker& MemoryTracker::trackField(
+    kj::StringPtr edgeName,
+    const V8Ref<T>& value,
+    kj::Maybe<kj::StringPtr> nodeName) {
+  // Even though we're passing in a template T, casting to a v8::Value is sufficient here.
+  return trackField(edgeName, value.handle.Get(isolate_)
+      .template As<v8::Value>(), nodeName);
+}
 
 // A value of type T, or `undefined`.
 //
@@ -921,9 +943,18 @@ struct Dict {
   struct Field {
     Key name;
     Value value;
+
+    JSG_MEMORY_INFO(Field) {
+      tracker.trackField(name);
+      tracker.trackField(value);
+    }
   };
 
   kj::Array<Field> fields;
+
+  JSG_MEMORY_INFO(Dict) {
+    tracker.trackField(fields);
+  }
 };
 
 template <typename T> class TypeHandler;
@@ -1015,16 +1046,33 @@ public:
 
   inline void jsgVisitForGc(GcVisitor& visitor) override {}
 
+  // Subclasses should override these to provide appropriate information for
+  // the heap snapshot process.
+  inline kj::StringPtr jsgGetMemoryName() const override { return "Object"; }
+  inline size_t jsgGetMemorySelfSize() const override { return sizeof(Object); }
+  inline void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+    Wrappable::jsgGetMemoryInfo(tracker);
+  }
+  inline v8::Local<v8::Object> jsgGetMemoryInfoWrapperObject(v8::Isolate* isolate) override {
+    return Wrappable::jsgGetMemoryInfoWrapperObject(isolate);
+  }
+  inline bool jsgGetMemoryInfoIsRootNode() const override {
+    return Wrappable::jsgGetMemoryInfoIsRootNode();
+  }
+
   static constexpr bool jsgHasReflection = false;
   template <typename TypeWrapper>
   inline void jsgInitReflection(TypeWrapper& wrapper) {}
 
 private:
+  inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
   inline void visitForGc(GcVisitor& visitor) {}
   template <typename>
   friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();
   template <typename T>
   friend void visitSubclassForGc(T* obj, GcVisitor& visitor);
+  template <typename T>
+  friend void visitSubclassForMemoryInfo(const T* obj, MemoryTracker& visitor);
   template <typename T>
   friend class Ref;
   friend class kj::Refcounted;
@@ -1041,6 +1089,7 @@ private:
   friend class ObjectWrapper;
   template <typename>
   friend class SelfPropertyReader;
+  friend class MemoryTracker;
 };
 
 // Ref<T> is a reference to a resource type (a type with a JSG_RESOURCE_TYPE block) living on
@@ -1171,6 +1220,14 @@ private:
   friend class GcVisitor;
 };
 
+template <MemoryRetainer T>
+MemoryTracker& MemoryTracker::trackField(
+    kj::StringPtr edgeName,
+    const Ref<T>& value,
+    kj::Maybe<kj::StringPtr> nodeName) {
+  return trackField(edgeName, value.get(), nodeName);
+}
+
 template <typename T, typename... Params>
 Ref<T> alloc(Params&&... params) {
   return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...));
@@ -1203,11 +1260,27 @@ public:
 
   void visitForGc(GcVisitor& visitor);
 
+  JSG_MEMORY_INFO(MemoizedIdentity) {
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(val, T) {
+        if constexpr (MemoryRetainer<T>) {
+          tracker.trackField("value", val);
+        } else {
+          tracker.trackFieldWithSize("value", sizeof(T));
+        }
+      }
+      KJ_CASE_ONEOF(val, Value) {
+        tracker.trackField("value", val);
+      }
+    }
+  }
+
 private:
   kj::OneOf<T, Value> value;
 
   template <typename TypeWrapper>
   friend class MemoizedIdentityWrapper;
+  friend class MemoryTracker;
 };
 
 // Accept this type from JavaScript when you want to receive an object's identity in addition to
@@ -1223,6 +1296,15 @@ struct Identified {
 
   // The object's unwrapped value.
   T unwrapped;
+
+  JSG_MEMORY_INFO(Identified) {
+    tracker.trackField("identity", identity);
+    if constexpr (MemoryRetainer<T>) {
+      tracker.trackField("unwrapped", unwrapped);
+    } else {
+      tracker.trackFieldWithSize("unwrapped", sizeof(T));
+    }
+  }
 };
 
 // jsg::Name represents a value that is either a string or a v8::Symbol. It is most useful for
@@ -1244,6 +1326,17 @@ public:
 
   kj::String toString(jsg::Lock& js);
 
+  JSG_MEMORY_INFO(Name) {
+    KJ_SWITCH_ONEOF(inner) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        tracker.trackField("inner", str);
+      }
+      KJ_CASE_ONEOF(sym, V8Ref<v8::Symbol>) {
+        tracker.trackField("inner", sym);
+      }
+    }
+  }
+
 private:
   int hash;
   kj::OneOf<kj::String, V8Ref<v8::Symbol>> inner;
@@ -1254,6 +1347,8 @@ private:
   friend class NameWrapper;
 
   void visitForGc(GcVisitor& visitor);
+
+  friend class MemoryTracker;
 };
 
 // jsg::Function<T> behaves much like kj::Function<T>, but can be passed to/from JS. It works in

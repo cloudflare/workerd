@@ -14,6 +14,7 @@
 #include <kj/vector.h>
 #include <kj/list.h>
 #include <v8.h>
+#include <workerd/jsg/memory.h>
 
 namespace cppgc { class Visitor; }
 
@@ -116,6 +117,27 @@ public:
   // namespace of JSG_RESOURCE types.
   virtual void jsgVisitForGc(GcVisitor& visitor);
 
+  virtual kj::StringPtr jsgGetMemoryName() const {
+    KJ_UNIMPLEMENTED("jsgGetTypeName is not implemented. "
+                     "It must be overridden by subclasses");
+  }
+
+  virtual size_t jsgGetMemorySelfSize() const {
+    KJ_UNIMPLEMENTED("jsgGetMemorySelfSize is not implemented. "
+                     "It must be overridden by subclasses");
+  }
+
+  virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+  virtual bool jsgGetMemoryInfoIsRootNode() const { return strongRefcount > 0; }
+
+  virtual v8::Local<v8::Object> jsgGetMemoryInfoWrapperObject(v8::Isolate* isolate) {
+    KJ_IF_SOME(handle, tryGetHandle(isolate)) {
+      return handle;
+    }
+    return v8::Local<v8::Object>();
+  }
+
   // Detaches the wrapper from V8 and returns the reference that V8 had previously held.
   // (Typically, the caller will ignore the return value, thus dropping the reference.)
   kj::Own<Wrappable> detachWrapper(bool shouldFreelistShim);
@@ -160,6 +182,7 @@ private:
 
   friend class GcVisitor;
   friend class HeapTracer;
+  friend class MemoryTracker;
 };
 
 // For historical reasons, this is actually implemented in setup.c++.
@@ -194,6 +217,11 @@ public:
   bool IsRoot(const v8::TracedReference<v8::Value>& handle) override;
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
   bool TryResetRoot(const v8::TracedReference<v8::Value>& handle) override;
+
+  kj::StringPtr jsgGetMemoryName() const { return "HeapTracer"_kjc; }
+  size_t jsgGetMemorySelfSize() const { return sizeof(*this); }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
+  bool jsgGetMemoryInfoIsRootNode() const { return false; }
 
 private:
   v8::Isolate* isolate;
