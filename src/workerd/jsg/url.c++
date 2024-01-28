@@ -2,7 +2,7 @@
 #include <kj/hash.h>
 
 extern "C" {
-  #include <ada_c.h>
+  #include "ada_c.h"
 }
 
 #include <kj/debug.h>
