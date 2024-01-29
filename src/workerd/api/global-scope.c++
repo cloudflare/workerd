@@ -364,6 +364,7 @@ void ServiceWorkerGlobalScope::startScheduled(
 
 kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
     kj::Date scheduledTime,
+    kj::Duration timeout,
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
 
   auto& context = IoContext::current();
@@ -386,21 +387,41 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
 
     auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
 
-    auto alarmResultPromise = context
-        .run([exportedHandler, &alarm,
+    return context
+        .run([exportedHandler, &context, timeout, &alarm,
               maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)]
              (Worker::Lock& lock) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
       jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
+      // We want to limit alarm handler walltime to 15 minutes at most. If the timeout promise
+      // completes we want to cancel the alarm handler. If the alarm handler promise completes first
+      // timeout will be canceled.
+      auto timeoutPromise = context.afterLimitTimeout(timeout).then([&context]() -> kj::Promise<WorkerInterface::AlarmResult> {
+        LOG_NOSENTRY(WARNING, "Alarm exceeded its allowed execution time");
+        // We don't want to delete the alarm since we have not successfully completed the alarm
+        // execution.
+        auto& actor = KJ_ASSERT_NONNULL(context.getActor());
+        auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
+        persistent.cancelDeferredAlarmDeletion();
+        // We don't want the handler to keep running after timeout.
+        context.abort(JSG_KJ_EXCEPTION(FAILED, Error, "Alarm exceeded its allowed execution time"));
+        // We want timed out alarms to be treated as user errors. As such, we'll mark them as
+        // retriable, and we'll count the retries against the alarm retries limit. This will ensure
+        // that the handler will attempt to run for a number of times before giving up and deleting
+        // the alarm.
+        return WorkerInterface::AlarmResult {
+          .retry = true,
+          .retryCountsAgainstLimit = true,
+          .outcome = EventOutcome::EXCEEDED_CPU
+        };
+      });
+
       return alarm(lock).then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
         return WorkerInterface::AlarmResult {
           .retry = false,
           .outcome = EventOutcome::OK
         };
-      });
-    });
-
-    return alarmResultPromise
-        .catch_([&context, deferredDelete = kj::mv(deferredDelete)](kj::Exception&& e) mutable {
+      }).exclusiveJoin(kj::mv(timeoutPromise));
+    }).catch_([&context, deferredDelete = kj::mv(deferredDelete)](kj::Exception&& e) mutable {
       auto& actor = KJ_ASSERT_NONNULL(context.getActor());
       auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
       persistent.cancelDeferredAlarmDeletion();
@@ -419,7 +440,8 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
         .retryCountsAgainstLimit = !context.isOutputGateBroken(),
         .outcome = outcome
       };
-    }).then([&context](WorkerInterface::AlarmResult result) -> kj::Promise<WorkerInterface::AlarmResult> {
+    })
+    .then([&context](WorkerInterface::AlarmResult result) -> kj::Promise<WorkerInterface::AlarmResult> {
       return context.waitForOutputLocks().then([result]() {
         return kj::mv(result);
       }, [](kj::Exception&& e) {

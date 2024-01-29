@@ -303,6 +303,7 @@ public:
   // Received runAlarm (called from C++, not JS).
   kj::Promise<WorkerInterface::AlarmResult> runAlarm(
       kj::Date scheduledTime,
+      kj::Duration timeout,
       Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received test() (called from C++, not JS). See WorkerInterface::test(). This version returns

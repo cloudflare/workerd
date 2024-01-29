@@ -120,6 +120,9 @@ public:
   // Like limitDrain() but applies a time limit to scheduled event processing.
   virtual kj::Promise<void> limitScheduled() = 0;
 
+  // Like limitDrain() and limitScheduled() but applies a time limit to alarm event processing.
+  virtual kj::Duration getAlarmLimit() = 0;
+
   // Gets a byte size limit to apply to operations that will buffer a possibly large amount of
   // data in C++ memory, such as reading an entire HTTP response into an `ArrayBuffer`.
   virtual size_t getBufferingLimit() = 0;
