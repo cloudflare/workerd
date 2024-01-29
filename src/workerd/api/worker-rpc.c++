@@ -72,21 +72,19 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
       }));
 }
 
-kj::Maybe<jsg::JsValue> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
+kj::Maybe<WorkerRpc::RpcFunction> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
   // Named intercept is enabled, this means we won't default to legacy behavior.
   // The return value of the function is a promise that resolves once the remote returns the result
   // of the RPC call.
-  return jsg::JsValue(js.wrapPromiseReturningFunction(js.v8Context(),
-      [this, methodName=kj::str(name)]
+  return RpcFunction([this, methodName=kj::str(name)]
       (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> jsg::Promise<jsg::Value> {
-        auto& ioContext = IoContext::current();
-        // Wait for the RPC to resolve and then process the result.
-        return ioContext.awaitIo(js, sendWorkerRpc(js, methodName, args),
-            [](jsg::Lock& js, auto result) -> jsg::Value {
-          return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
-        });
-      }
-  ));
+    auto& ioContext = IoContext::current();
+    // Wait for the RPC to resolve and then process the result.
+    return ioContext.awaitIo(js, sendWorkerRpc(js, methodName, args),
+        [](jsg::Lock& js, auto result) -> jsg::Value {
+      return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
+    });
+  });
 }
 
 // The capability that lets us call remote methods over RPC.

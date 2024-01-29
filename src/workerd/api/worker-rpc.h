@@ -50,7 +50,10 @@ public:
       kj::StringPtr name,
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  kj::Maybe<jsg::JsValue> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
+  using RpcFunction = jsg::Function<jsg::Promise<jsg::Value>(
+      const v8::FunctionCallbackInfo<v8::Value>& info)>;
+
+  kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
 
   // WARNING: Adding a new JSG_METHOD to a class that extends WorkerRpc can conflict with RPC method
   // names defined on your remote target. For example, if you add a new method `bar()` to the
