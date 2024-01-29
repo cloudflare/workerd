@@ -608,8 +608,14 @@ private:
 
 class JsValue;
 
-template <typename TypeWrapper, typename T>
-struct NamedInterceptorCallbacks: public v8::NamedPropertyHandlerConfiguration {
+template <typename TypeWrapper, typename T, typename GetNamedMethod, GetNamedMethod getNamedMethod>
+struct NamedInterceptorCallbacks;
+
+template <typename TypeWrapper, typename T, typename U,
+          kj::Maybe<jsg::JsValue> (U::*getNamedMethod)(jsg::Lock&, kj::StringPtr)>
+struct NamedInterceptorCallbacks<
+    TypeWrapper, T, kj::Maybe<jsg::JsValue> (U::*)(jsg::Lock&, kj::StringPtr), getNamedMethod>
+    : public v8::NamedPropertyHandlerConfiguration {
   NamedInterceptorCallbacks() : v8::NamedPropertyHandlerConfiguration(
     getter,
     nullptr,
@@ -624,8 +630,7 @@ struct NamedInterceptorCallbacks: public v8::NamedPropertyHandlerConfiguration {
         static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
         static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))) {}
 
-  template <typename U>
-  static kj::Maybe<T&> unwrapThis(const v8::PropertyCallbackInfo<U>& info) {
+  static kj::Maybe<T&> unwrapThis(const v8::PropertyCallbackInfo<v8::Value>& info) {
     auto context = info.GetIsolate()->GetCurrentContext();
     if (info.This()->InternalFieldCount() != 3) return kj::none;
     return extractInternalPointer<T, false>(context, info.This());
@@ -637,7 +642,7 @@ struct NamedInterceptorCallbacks: public v8::NamedPropertyHandlerConfiguration {
     auto& lock = Lock::from(isolate);
     KJ_IF_SOME(self, unwrapThis(info)) {
       lock.tryCatch([&] {
-        KJ_IF_SOME(value, self.getNamed(lock, kj::str(name.As<v8::String>()))) {
+        KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(name.As<v8::String>()))) {
           info.GetReturnValue().Set(v8::Local<v8::Value>(value));
         }
       }, [&](Value exception) {
@@ -677,9 +682,10 @@ struct ResourceTypeBuilder {
       v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
   }
 
-  template <typename Type>
+  template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerNamedIntercept() {
-    prototype->SetHandler(NamedInterceptorCallbacks<TypeWrapper, Type> {});
+    prototype->SetHandler(
+        NamedInterceptorCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod> {});
   }
 
   template<typename Type>

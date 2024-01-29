@@ -477,9 +477,9 @@ using HasGetTemplateOverload = decltype(
 
 // Configures the resource type to implement named property interception.
 // @see the definition of jsg::NamedIntercept in resource.h for more information.
-#define JSG_NAMED_INTERCEPT() \
+#define JSG_NAMED_INTERCEPT(method) \
   do { \
-   registry.template registerNamedIntercept<Self>(); \
+   registry.template registerNamedIntercept<Self, decltype(&Self::method), &Self::method>(); \
   } while (false)
 
 // Use inside a JSG_RESOURCE_TYPE block to declare that this type should be considered a "root" for

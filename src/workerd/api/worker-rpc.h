@@ -50,7 +50,7 @@ public:
       kj::StringPtr name,
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name);
+  kj::Maybe<jsg::JsValue> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
 
   // WARNING: Adding a new JSG_METHOD to a class that extends WorkerRpc can conflict with RPC method
   // names defined on your remote target. For example, if you add a new method `bar()` to the
@@ -66,7 +66,7 @@ public:
   // change log.
   JSG_RESOURCE_TYPE(WorkerRpc, CompatibilityFlags::Reader flags) {
     if (flags.getWorkerdExperimental()) {
-      JSG_NAMED_INTERCEPT();
+      JSG_NAMED_INTERCEPT(getRpcMethod);
     }
     JSG_INHERIT(Fetcher);
   }

@@ -549,7 +549,7 @@ struct BuildRtti<Configuration, const T&> {
 
 // count all members in the structure
 struct MemberCounter {
-  template <typename Type>
+  template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerNamedIntercept() { /* not a member */}
 
   template<const char* name, typename Method, Method method>
@@ -817,7 +817,7 @@ struct MembersBuilder {
     }
   }
 
-  template <typename Type>
+  template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerNamedIntercept() {
     // Nothing to do in this case.
   }

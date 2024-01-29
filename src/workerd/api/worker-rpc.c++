@@ -72,7 +72,7 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
       }));
 }
 
-kj::Maybe<jsg::JsValue> WorkerRpc::getNamed(jsg::Lock& js, kj::StringPtr name) {
+kj::Maybe<jsg::JsValue> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
   // Named intercept is enabled, this means we won't default to legacy behavior.
   // The return value of the function is a promise that resolves once the remote returns the result
   // of the RPC call.
