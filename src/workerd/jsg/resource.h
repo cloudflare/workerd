@@ -630,30 +630,25 @@ struct NamedInterceptorCallbacks<
         static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
         static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))) {}
 
-  static kj::Maybe<T&> unwrapThis(const v8::PropertyCallbackInfo<v8::Value>& info) {
-    auto context = info.GetIsolate()->GetCurrentContext();
-    if (info.This()->InternalFieldCount() != 3) return kj::none;
-    return extractInternalPointer<T, false>(context, info.This());
-  }
-
   static void getter(v8::Local<v8::Name> name,
                        const v8::PropertyCallbackInfo<v8::Value>& info) {
-    auto isolate = info.GetIsolate();
-    auto& lock = Lock::from(isolate);
-    KJ_IF_SOME(self, unwrapThis(info)) {
-      lock.tryCatch([&] {
-        KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(name.As<v8::String>()))) {
-          auto& wrapper = TypeWrapper::from(isolate);
-          auto context = isolate->GetCurrentContext();
-          auto obj = info.This();
-          info.GetReturnValue().Set(wrapper.wrap(context, obj, kj::fwd<Ret>(value)));
-        }
-      }, [&](Value exception) {
-        // Catch any jsg::JsExceptionThrown or kj::Exceptions that are thrown
-        // and just reschedule the exception on the isolate.
-        isolate->ThrowException(exception.getHandle(lock));
-      });
-    }
+    liftKj(info, [&]() -> v8::Local<v8::Value> {
+      auto isolate = info.GetIsolate();
+      auto context = isolate->GetCurrentContext();
+      auto obj = info.This();
+      auto& wrapper = TypeWrapper::from(isolate);
+      if (!wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+        throwTypeError(isolate, "Illegal invocation");
+      }
+      auto& self = extractInternalPointer<T, false>(context, obj);
+      auto& lock = Lock::from(isolate);
+      KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(name.As<v8::String>()))) {
+        return wrapper.wrap(context, obj, kj::fwd<Ret>(value));
+      } else {
+        // Return an empty handle to indicate the member doesn't exist.
+        return {};
+      }
+    });
   }
 };
 
