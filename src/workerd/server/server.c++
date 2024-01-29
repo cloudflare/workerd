@@ -139,7 +139,8 @@ struct Server::GlobalContext {
   GlobalContext(Server& server, jsg::V8System& v8System,
                 kj::HttpHeaderTable::Builder& headerTableBuilder)
       : v8System(v8System),
-        httpOverCapnpFactory(byteStreamFactory, headerTableBuilder),
+        httpOverCapnpFactory(byteStreamFactory, headerTableBuilder,
+                             capnp::HttpOverCapnpFactory::LEVEL_2),
         threadContext(server.timer, server.entropySource,
             headerTableBuilder, httpOverCapnpFactory,
             byteStreamFactory,
