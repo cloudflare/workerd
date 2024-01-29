@@ -12,8 +12,8 @@ function initializePackageIndex(pyodide) {
     );
   }
   const API = pyodide._api;
-  API.config.indexURL = "https://cdn.jsdelivr.net/pyodide/v0.25.0a2/full/";
-  globalThis.location = "https://cdn.jsdelivr.net/pyodide/v0.25.0a2/full/";
+  API.config.indexURL = "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/";
+  globalThis.location = "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/";
   API.lockfile_info = lockfile.info;
   API.lockfile_packages = lockfile.packages;
   API.repodata_packages = lockfile.packages;
@@ -49,7 +49,7 @@ function initializePackageIndex(pyodide) {
   };
 }
 
-// These packages are currently embedded inside workerd and so don't need to
+// These packages are currently embedded inside EW and so don't need to
 // be separately installed.
 const EMBEDDED_PYTHON_PACKAGES = [
   "aiohttp",
@@ -133,6 +133,7 @@ function transformMetadata(metadata) {
 async function setupPackages(pyodide) {
   // The metadata is a JSON-serialised WorkerBundle (defined in pipeline.capnp).
   const metadata = transformMetadata(origMetadata);
+  const isWorkerd = metadata.modules !== undefined;
 
   initializePackageIndex(pyodide);
 
@@ -150,6 +151,13 @@ async function setupPackages(pyodide) {
 
     if (value.pythonRequirement !== undefined) {
       requirements.push(name);
+      // Packages are not embedded in workerd.
+      // TODO: Improve package loading in workerd.
+      if (isWorkerd) {
+        micropipRequirements.push(name);
+        continue;
+      }
+
       if (!EMBEDDED_PYTHON_PACKAGES.includes(name)) {
         pythonRequirements.push(name);
       }
@@ -163,6 +171,7 @@ async function setupPackages(pyodide) {
   if (micropipRequirements.length > 0) {
     // Micropip and ssl packages are pre-loaded via the packages tarball. This means
     // we should be able to load micropip directly now.
+
     const micropip = pyodide.pyimport("micropip");
     await micropip.install(micropipRequirements);
   }
