@@ -383,10 +383,6 @@ struct InterceptContext: public ContextGlobalObject {
       return kj::none;
     }
 
-    kj::Array<kj::String> listNamed(Lock& js) override {
-      return kj::arr(kj::str("foo"));
-    }
-
     JSG_RESOURCE_TYPE(ProxyImpl) {
       JSG_READONLY_PROTOTYPE_PROPERTY(bar, getBar);
       JSG_NAMED_INTERCEPT();
@@ -401,10 +397,6 @@ JSG_DECLARE_ISOLATE_TYPE(InterceptIsolate, InterceptContext, InterceptContext::P
 
 KJ_TEST("Named interceptor") {
   Evaluator<InterceptContext, InterceptIsolate> e(v8System);
-  // Calling Object.keys(p) here just to verify that it does not throw.
-  // Also, the test tries modifying the known intercepted property foo but verifies
-  // that the value is readonly/unchanged.
-  e.expectEval("p = new ProxyImpl; Object.keys(p); p.foo = 123; p.foo", "string", "bar");
   e.expectEval("p = new ProxyImpl; p.bar", "number", "123");
   e.expectEval("p = new ProxyImpl; Reflect.has(p, 'foo')", "boolean", "true");
   e.expectEval("p = new ProxyImpl; Reflect.has(p, 'bar')", "boolean", "true");

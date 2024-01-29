@@ -629,21 +629,6 @@ class JsValue;
 //     return kj::none;
 //   }
 //
-//   // Return the attributes, if any, of a given named property
-//   kj::Maybe<jsg::NamedIntercept::Attribute> queryNamed(jsg::Lock& js,
-//                                                        kj::StringPtr name) override {
-//     auto list = listNamed(js);
-//     for (auto& item : list) {
-//       if (item == name) return jsg::NamedIntercept::READ_ONLY_ATTRIBUTE;
-//     }
-//     return kj::none;
-//   }
-//
-//   // Return a list of the named properties that can be handled dynamically.
-//   kj::Array<kj::String> listNamed(Lock& js) override {
-//     return kj::arr(kj::str("foo"));
-//   }
-//
 //   JSG_RESOURCE_TYPE(ProxyImpl) {
 //     JSG_READONLY_PROTOTYPE_PROPERTY(bar, getBar);
 //     JSG_NAMED_INTERCEPT();
@@ -651,37 +636,9 @@ class JsValue;
 // };
 class NamedIntercept {
 public:
-  enum class Attribute {
-    NONE = v8::PropertyAttribute::None,
-    READ_ONLY = v8::PropertyAttribute::ReadOnly,
-    DONT_ENUM = v8::PropertyAttribute::DontEnum,
-    DONT_DELETE = v8::PropertyAttribute::DontDelete,
-  };
-
   // Returns the value associated with the given name, or kj::none if the name is not known.
   virtual kj::Maybe<JsValue> getNamed(Lock& js, kj::StringPtr name);
-
-  // Returns the Attribute(s) for the given name, or kj::none if the name is not known.
-  virtual kj::Maybe<Attribute> queryNamed(Lock& js, kj::StringPtr name);
-
-  // List all names that are known (all names for which getNamed and queryNamed should never
-  // return kj::none)
-  virtual kj::Array<kj::String> listNamed(Lock& js);
-
-  static const Attribute READ_ONLY_ATTRIBUTE;
 };
-
-inline constexpr NamedIntercept::Attribute operator|(NamedIntercept::Attribute a,
-                                                     NamedIntercept::Attribute b) {
-  return static_cast<NamedIntercept::Attribute>(static_cast<int>(a) | static_cast<int>(b));
-}
-inline constexpr NamedIntercept::Attribute operator&(NamedIntercept::Attribute a,
-                                                     NamedIntercept::Attribute b) {
-  return static_cast<NamedIntercept::Attribute>(static_cast<int>(a) & static_cast<int>(b));
-}
-inline constexpr NamedIntercept::Attribute operator~(NamedIntercept::Attribute a) {
-  return static_cast<NamedIntercept::Attribute>(~static_cast<uint>(a));
-}
 
 template <typename TypeWrapper, typename T,
           typename = kj::EnableIf<std::is_assignable_v<NamedIntercept, T>>>
@@ -689,9 +646,9 @@ struct NamedInterceptorCallbacks: public v8::NamedPropertyHandlerConfiguration {
   NamedInterceptorCallbacks() : v8::NamedPropertyHandlerConfiguration(
     getter,
     nullptr,
-    query,
     nullptr,
-    enumerator,
+    nullptr,
+    nullptr,
     nullptr,
     nullptr,
     v8::Local<v8::Value>(),
@@ -716,39 +673,6 @@ struct NamedInterceptorCallbacks: public v8::NamedPropertyHandlerConfiguration {
         KJ_IF_SOME(value, self.getNamed(lock, kj::str(name.As<v8::String>()))) {
           info.GetReturnValue().Set(v8::Local<v8::Value>(value));
         }
-      }, [&](Value exception) {
-        // Catch any jsg::JsExceptionThrown or kj::Exceptions that are thrown
-        // and just reschedule the exception on the isolate.
-        isolate->ThrowException(exception.getHandle(lock));
-      });
-    }
-  }
-
-  static void query(v8::Local<v8::Name> name,
-                    const v8::PropertyCallbackInfo<v8::Integer>& info) {
-    KJ_IF_SOME(self, unwrapThis(info)) {
-      auto isolate = info.GetIsolate();
-      auto& lock = Lock::from(isolate);
-      lock.tryCatch([&] {
-        KJ_IF_SOME(attr, self.queryNamed(lock, kj::str(name.As<v8::String>()))) {
-          info.GetReturnValue().Set(v8::Integer::New(isolate, static_cast<int32_t>(attr)));
-        }
-      }, [&](Value exception) {
-        // Catch any jsg::JsExceptionThrown or kj::Exceptions that are thrown
-        // and just reschedule the exception on the isolate.
-        isolate->ThrowException(exception.getHandle(lock));
-      });
-    }
-  }
-
-  static void enumerator(const v8::PropertyCallbackInfo<v8::Array>& info) {
-    KJ_IF_SOME(self, unwrapThis(info)) {
-      auto isolate = info.GetIsolate();
-      auto& lock = Lock::from(isolate);
-      auto& wrapper = TypeWrapper::from(isolate);
-      lock.tryCatch([&] {
-        auto value = wrapper.wrap(isolate->GetCurrentContext(), kj::none, self.listNamed(lock));
-        info.GetReturnValue().Set(value.template As<v8::Array>());
       }, [&](Value exception) {
         // Catch any jsg::JsExceptionThrown or kj::Exceptions that are thrown
         // and just reschedule the exception on the isolate.

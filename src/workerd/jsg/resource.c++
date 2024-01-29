@@ -8,9 +8,6 @@ namespace workerd::jsg {
 
 // TODO(cleanup): Factor out toObject(), getInterned() into some sort of v8 tools module?
 
-const NamedIntercept::Attribute NamedIntercept::READ_ONLY_ATTRIBUTE =
-    NamedIntercept::Attribute::READ_ONLY | NamedIntercept::Attribute::DONT_DELETE;
-
 void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context) {
   auto global = context->Global();
 
