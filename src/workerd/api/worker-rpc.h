@@ -34,7 +34,7 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 //
 // WorkerRpc only supports method calls. You cannot, for instance, access a property of a
 // Durable Object over RPC.
-class WorkerRpc : public Fetcher, public jsg::NamedIntercept {
+class WorkerRpc : public Fetcher {
 public:
   WorkerRpc(
       IoOwn<OutgoingFactory> outgoingFactory,
@@ -50,7 +50,7 @@ public:
       kj::StringPtr name,
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name) override;
+  kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name);
 
   // WARNING: Adding a new JSG_METHOD to a class that extends WorkerRpc can conflict with RPC method
   // names defined on your remote target. For example, if you add a new method `bar()` to the

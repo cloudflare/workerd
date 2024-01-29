@@ -367,14 +367,13 @@ KJ_TEST("Test JSG_CALLABLE") {
 
 // ========================================================================================
 struct InterceptContext: public ContextGlobalObject {
-  struct ProxyImpl: public jsg::Object,
-                    public jsg::NamedIntercept {
+  struct ProxyImpl: public jsg::Object {
     static jsg::Ref<ProxyImpl> constructor() { return jsg::alloc<ProxyImpl>(); }
 
     int getBar() { return 123; }
 
-    // NamedIntercept implementation
-    kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name) override {
+    // JSG_NAMED_INTERCEPT implementation
+    kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name) {
       if (name == "foo") {
         return kj::Maybe(js.str("bar"_kj));
       } else if (name == "abc") {

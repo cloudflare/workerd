@@ -608,40 +608,7 @@ private:
 
 class JsValue;
 
-// A utility class that allows dynamic evaluation of properties on the JavaScript wrapper.
-// TODO(soon): Currently, this mechanism only supports read-only properties. The setter
-// interceptor is not implemented. That is, for a known dynamic name like `foo`, it is not
-// yet possible to set `obj.foo = whatever` in JS. However, it remains possible to
-// set unknown properties on the object (properties for which `queryNamed()` and `getNamed()`
-// would return kj::none).
-//
-// struct ProxyImpl: public jsg::Object,
-//                   public jsg::NamedIntercept {
-//   static jsg::Ref<ProxyImpl> constructor() { return jsg::alloc<ProxyImpl>(); }
-//
-//   int getBar() { return 123; }
-//
-//   // Return the value, if any, of a given named property
-//   kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name) override {
-//     if (name == "foo") {
-//       return kj::Maybe(js.str("bar"_kj));
-//     }
-//     return kj::none;
-//   }
-//
-//   JSG_RESOURCE_TYPE(ProxyImpl) {
-//     JSG_READONLY_PROTOTYPE_PROPERTY(bar, getBar);
-//     JSG_NAMED_INTERCEPT();
-//   }
-// };
-class NamedIntercept {
-public:
-  // Returns the value associated with the given name, or kj::none if the name is not known.
-  virtual kj::Maybe<JsValue> getNamed(Lock& js, kj::StringPtr name);
-};
-
-template <typename TypeWrapper, typename T,
-          typename = kj::EnableIf<std::is_assignable_v<NamedIntercept, T>>>
+template <typename TypeWrapper, typename T>
 struct NamedInterceptorCallbacks: public v8::NamedPropertyHandlerConfiguration {
   NamedInterceptorCallbacks() : v8::NamedPropertyHandlerConfiguration(
     getter,
@@ -710,8 +677,7 @@ struct ResourceTypeBuilder {
       v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
   }
 
-  template <typename Type,
-            typename = kj::EnableIf<std::is_assignable_v<NamedIntercept, Type>>>
+  template <typename Type>
   inline void registerNamedIntercept() {
     prototype->SetHandler(NamedInterceptorCallbacks<TypeWrapper, Type> {});
   }

@@ -554,9 +554,4 @@ private:
   v8::Local<v8::Message> inner;
 };
 
-inline kj::Maybe<JsValue>
-NamedIntercept::getNamed(Lock&, kj::StringPtr) {
-  return kj::none;
-}
-
 }  // namespace workerd::jsg
