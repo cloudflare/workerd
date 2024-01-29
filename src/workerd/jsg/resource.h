@@ -611,10 +611,10 @@ class JsValue;
 template <typename TypeWrapper, typename T, typename GetNamedMethod, GetNamedMethod getNamedMethod>
 struct NamedInterceptorCallbacks;
 
-template <typename TypeWrapper, typename T, typename U,
-          kj::Maybe<jsg::JsValue> (U::*getNamedMethod)(jsg::Lock&, kj::StringPtr)>
+template <typename TypeWrapper, typename T, typename U, typename Ret,
+          kj::Maybe<Ret> (U::*getNamedMethod)(jsg::Lock&, kj::StringPtr)>
 struct NamedInterceptorCallbacks<
-    TypeWrapper, T, kj::Maybe<jsg::JsValue> (U::*)(jsg::Lock&, kj::StringPtr), getNamedMethod>
+    TypeWrapper, T, kj::Maybe<Ret> (U::*)(jsg::Lock&, kj::StringPtr), getNamedMethod>
     : public v8::NamedPropertyHandlerConfiguration {
   NamedInterceptorCallbacks() : v8::NamedPropertyHandlerConfiguration(
     getter,
@@ -643,7 +643,10 @@ struct NamedInterceptorCallbacks<
     KJ_IF_SOME(self, unwrapThis(info)) {
       lock.tryCatch([&] {
         KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(name.As<v8::String>()))) {
-          info.GetReturnValue().Set(v8::Local<v8::Value>(value));
+          auto& wrapper = TypeWrapper::from(isolate);
+          auto context = isolate->GetCurrentContext();
+          auto obj = info.This();
+          info.GetReturnValue().Set(wrapper.wrap(context, obj, kj::fwd<Ret>(value)));
         }
       }, [&](Value exception) {
         // Catch any jsg::JsExceptionThrown or kj::Exceptions that are thrown

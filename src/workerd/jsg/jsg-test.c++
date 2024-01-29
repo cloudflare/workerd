@@ -373,9 +373,9 @@ struct InterceptContext: public ContextGlobalObject {
     int getBar() { return 123; }
 
     // JSG_NAMED_INTERCEPT implementation
-    kj::Maybe<jsg::JsValue> testGetNamed(jsg::Lock& js, kj::StringPtr name) {
+    kj::Maybe<kj::StringPtr> testGetNamed(jsg::Lock& js, kj::StringPtr name) {
       if (name == "foo") {
-        return kj::Maybe(js.str("bar"_kj));
+        return "bar"_kj;
       } else if (name == "abc") {
         JSG_FAIL_REQUIRE(TypeError, "boom");
       }
