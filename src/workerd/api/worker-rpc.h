@@ -29,8 +29,8 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 
 // A WorkerRpc object forwards JS method calls to the remote Worker/Durable Object over RPC.
 // Since methods are not known until runtime, WorkerRpc doesn't define any JS methods.
-// Instead, we use JSG_NAMED_INTERCEPT to intercept property accesses of names that are not known at
-// compile time.
+// Instead, we use JSG_WILDCARD_PROPERTY to intercept property accesses of names that are not known
+// at compile time.
 //
 // WorkerRpc only supports method calls. You cannot, for instance, access a property of a
 // Durable Object over RPC.
@@ -69,7 +69,7 @@ public:
   // change log.
   JSG_RESOURCE_TYPE(WorkerRpc, CompatibilityFlags::Reader flags) {
     if (flags.getWorkerdExperimental()) {
-      JSG_NAMED_INTERCEPT(getRpcMethod);
+      JSG_WILDCARD_PROPERTY(getRpcMethod);
     }
     JSG_INHERIT(Fetcher);
   }

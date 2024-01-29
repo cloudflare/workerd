@@ -372,7 +372,7 @@ struct InterceptContext: public ContextGlobalObject {
 
     int getBar() { return 123; }
 
-    // JSG_NAMED_INTERCEPT implementation
+    // JSG_WILDCARD_PROPERTY implementation
     kj::Maybe<kj::StringPtr> testGetNamed(jsg::Lock& js, kj::StringPtr name) {
       if (name == "foo") {
         return "bar"_kj;
@@ -384,7 +384,7 @@ struct InterceptContext: public ContextGlobalObject {
 
     JSG_RESOURCE_TYPE(ProxyImpl) {
       JSG_READONLY_PROTOTYPE_PROPERTY(bar, getBar);
-      JSG_NAMED_INTERCEPT(testGetNamed);
+      JSG_WILDCARD_PROPERTY(testGetNamed);
     }
   };
 

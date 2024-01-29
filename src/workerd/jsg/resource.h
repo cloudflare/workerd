@@ -604,19 +604,19 @@ private:
 };
 
 // ======================================================================================
-// NamedIntercept implementation
+// WildcardProperty implementation
 
 class JsValue;
 
 template <typename TypeWrapper, typename T, typename GetNamedMethod, GetNamedMethod getNamedMethod>
-struct NamedInterceptorCallbacks;
+struct WildcardPropertyCallbacks;
 
 template <typename TypeWrapper, typename T, typename U, typename Ret,
           kj::Maybe<Ret> (U::*getNamedMethod)(jsg::Lock&, kj::StringPtr)>
-struct NamedInterceptorCallbacks<
+struct WildcardPropertyCallbacks<
     TypeWrapper, T, kj::Maybe<Ret> (U::*)(jsg::Lock&, kj::StringPtr), getNamedMethod>
     : public v8::NamedPropertyHandlerConfiguration {
-  NamedInterceptorCallbacks() : v8::NamedPropertyHandlerConfiguration(
+  WildcardPropertyCallbacks() : v8::NamedPropertyHandlerConfiguration(
     getter,
     nullptr,
     nullptr,
@@ -681,9 +681,9 @@ struct ResourceTypeBuilder {
   }
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
-  inline void registerNamedIntercept() {
+  inline void registerWildcardProperty() {
     prototype->SetHandler(
-        NamedInterceptorCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod> {});
+        WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod> {});
   }
 
   template<typename Type>
