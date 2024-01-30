@@ -475,11 +475,24 @@ using HasGetTemplateOverload = decltype(
     wrapper.initReflection(this, __VA_ARGS__); \
   }
 
-// Configures the resource type to implement named property interception.
-// @see the definition of jsg::NamedIntercept in resource.h for more information.
-#define JSG_NAMED_INTERCEPT() \
+// Declares a wildcart property getter. If a property is requested that isn't already present on
+// the object or its prototypes, the wildcard property getter will be given a chance to return the
+// property.
+//
+// Example:
+//
+//   struct MyType {
+//     // Get the value of the named dynamic property. Returns none if the property doesn't exist.
+//     // `SomeType` can be any type that JSG is able to convert to JavaScript.
+//     kj::Maybe<SomeType> getWildcard(jsg::Lock& js, kj::StringPtr name);
+//
+//     JSG_RESOURCE_TYPE(MyType) {
+//       JSG_WILDCARD_PROPERTY(getWildcard);
+//     }
+//   };
+#define JSG_WILDCARD_PROPERTY(method) \
   do { \
-   registry.template registerNamedIntercept<Self>(); \
+   registry.template registerWildcardProperty<Self, decltype(&Self::method), &Self::method>(); \
   } while (false)
 
 // Use inside a JSG_RESOURCE_TYPE block to declare that this type should be considered a "root" for

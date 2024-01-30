@@ -554,25 +554,4 @@ private:
   v8::Local<v8::Message> inner;
 };
 
-inline kj::Maybe<JsValue>
-NamedIntercept::getNamed(Lock&, kj::StringPtr) {
-  return kj::none;
-}
-
-inline kj::Maybe<NamedIntercept::Attribute>
-NamedIntercept::queryNamed(Lock& js, kj::StringPtr name) {
-  // By default, we currently only support read only properties.
-  auto list = listNamed(js);
-  for (auto& item : list) {
-    if (item == name) return jsg::NamedIntercept::READ_ONLY_ATTRIBUTE;
-  }
-  return kj::none;
-}
-
-inline kj::Array<kj::String>
-NamedIntercept::listNamed(Lock&) {
-  return kj::Array<kj::String>();
-}
-
-
 }  // namespace workerd::jsg

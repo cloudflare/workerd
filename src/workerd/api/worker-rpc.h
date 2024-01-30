@@ -29,12 +29,12 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 
 // A WorkerRpc object forwards JS method calls to the remote Worker/Durable Object over RPC.
 // Since methods are not known until runtime, WorkerRpc doesn't define any JS methods.
-// Instead, we use JSG_NAMED_INTERCEPT to intercept property accesses of names that are not known at
-// compile time.
+// Instead, we use JSG_WILDCARD_PROPERTY to intercept property accesses of names that are not known
+// at compile time.
 //
 // WorkerRpc only supports method calls. You cannot, for instance, access a property of a
 // Durable Object over RPC.
-class WorkerRpc : public Fetcher, public jsg::NamedIntercept {
+class WorkerRpc : public Fetcher {
 public:
   WorkerRpc(
       IoOwn<OutgoingFactory> outgoingFactory,
@@ -50,7 +50,10 @@ public:
       kj::StringPtr name,
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name) override;
+  using RpcFunction = jsg::Function<jsg::Promise<jsg::Value>(
+      const v8::FunctionCallbackInfo<v8::Value>& info)>;
+
+  kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
 
   // WARNING: Adding a new JSG_METHOD to a class that extends WorkerRpc can conflict with RPC method
   // names defined on your remote target. For example, if you add a new method `bar()` to the
@@ -66,7 +69,7 @@ public:
   // change log.
   JSG_RESOURCE_TYPE(WorkerRpc, CompatibilityFlags::Reader flags) {
     if (flags.getWorkerdExperimental()) {
-      JSG_NAMED_INTERCEPT();
+      JSG_WILDCARD_PROPERTY(getRpcMethod);
     }
     JSG_INHERIT(Fetcher);
   }

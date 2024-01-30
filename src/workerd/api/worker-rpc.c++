@@ -51,11 +51,14 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
   // If we have arguments, serialize them.
   // Note that we may fail to serialize some element, in which case this will throw back to JS.
   if (argv.size() > 0) {
+    // TODO(perf): It would be nice if we could serialize directly into the capnp message to avoid
+    // a redundant copy of the bytes here. Maybe we could even cancel serialization early if it
+    // goes over the size limit.
     auto ser = serializeV8(js, js.arr(argv.asPtr()));
     JSG_ASSERT(ser.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
         "Serialized RPC requests are limited to 1MiB, but the size of this request was: ",
         ser.size(), " bytes.");
-    builder.initSerializedArgs().setV8Serialized(kj::mv(ser));
+    builder.initArgs().setV8Serialized(ser);
   }
 
   auto callResult = builder.send();
@@ -69,21 +72,19 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
       }));
 }
 
-kj::Maybe<jsg::JsValue> WorkerRpc::getNamed(jsg::Lock& js, kj::StringPtr name) {
+kj::Maybe<WorkerRpc::RpcFunction> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
   // Named intercept is enabled, this means we won't default to legacy behavior.
   // The return value of the function is a promise that resolves once the remote returns the result
   // of the RPC call.
-  return jsg::JsValue(js.wrapPromiseReturningFunction(js.v8Context(),
-      [this, methodName=kj::str(name)]
+  return RpcFunction([this, methodName=kj::str(name)]
       (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> jsg::Promise<jsg::Value> {
-        auto& ioContext = IoContext::current();
-        // Wait for the RPC to resolve and then process the result.
-        return ioContext.awaitIo(js, sendWorkerRpc(js, methodName, args),
-            [](jsg::Lock& js, auto result) -> jsg::Value {
-          return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
-        });
-      }
-  ));
+    auto& ioContext = IoContext::current();
+    // Wait for the RPC to resolve and then process the result.
+    return ioContext.awaitIo(js, sendWorkerRpc(js, methodName, args),
+        [](jsg::Lock& js, auto result) -> jsg::Value {
+      return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
+    });
+  });
 }
 
 // The capability that lets us call remote methods over RPC.
@@ -99,7 +100,7 @@ public:
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
     auto methodName = kj::heapString(callContext.getParams().getMethodName());
-    auto serializedArgs = callContext.getParams().getSerializedArgs().getV8Serialized().asBytes();
+    auto serializedArgs = callContext.getParams().getArgs().getV8Serialized().asBytes();
 
     // We want to fulfill the callPromise so customEvent can continue executing
     // regardless of the outcome of `call()`.

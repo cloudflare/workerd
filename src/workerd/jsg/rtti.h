@@ -549,9 +549,8 @@ struct BuildRtti<Configuration, const T&> {
 
 // count all members in the structure
 struct MemberCounter {
-  template <typename Type,
-            typename = kj::EnableIf<std::is_assignable_v<NamedIntercept, Type>>>
-  inline void registerNamedIntercept() { /* not a member */}
+  template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
+  inline void registerWildcardProperty() { /* not a member */}
 
   template<const char* name, typename Method, Method method>
   inline void registerMethod() { ++members; }
@@ -818,9 +817,8 @@ struct MembersBuilder {
     }
   }
 
-  template <typename Type,
-            typename = kj::EnableIf<std::is_assignable_v<NamedIntercept, Type>>>
-  inline void registerNamedIntercept() {
+  template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
+  inline void registerWildcardProperty() {
     // Nothing to do in this case.
   }
 };

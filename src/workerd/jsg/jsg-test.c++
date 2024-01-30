@@ -367,29 +367,24 @@ KJ_TEST("Test JSG_CALLABLE") {
 
 // ========================================================================================
 struct InterceptContext: public ContextGlobalObject {
-  struct ProxyImpl: public jsg::Object,
-                    public jsg::NamedIntercept {
+  struct ProxyImpl: public jsg::Object {
     static jsg::Ref<ProxyImpl> constructor() { return jsg::alloc<ProxyImpl>(); }
 
     int getBar() { return 123; }
 
-    // NamedIntercept implementation
-    kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name) override {
+    // JSG_WILDCARD_PROPERTY implementation
+    kj::Maybe<kj::StringPtr> testGetNamed(jsg::Lock& js, kj::StringPtr name) {
       if (name == "foo") {
-        return kj::Maybe(js.str("bar"_kj));
+        return "bar"_kj;
       } else if (name == "abc") {
         JSG_FAIL_REQUIRE(TypeError, "boom");
       }
       return kj::none;
     }
 
-    kj::Array<kj::String> listNamed(Lock& js) override {
-      return kj::arr(kj::str("foo"));
-    }
-
     JSG_RESOURCE_TYPE(ProxyImpl) {
       JSG_READONLY_PROTOTYPE_PROPERTY(bar, getBar);
-      JSG_NAMED_INTERCEPT();
+      JSG_WILDCARD_PROPERTY(testGetNamed);
     }
   };
 
@@ -401,10 +396,6 @@ JSG_DECLARE_ISOLATE_TYPE(InterceptIsolate, InterceptContext, InterceptContext::P
 
 KJ_TEST("Named interceptor") {
   Evaluator<InterceptContext, InterceptIsolate> e(v8System);
-  // Calling Object.keys(p) here just to verify that it does not throw.
-  // Also, the test tries modifying the known intercepted property foo but verifies
-  // that the value is readonly/unchanged.
-  e.expectEval("p = new ProxyImpl; Object.keys(p); p.foo = 123; p.foo", "string", "bar");
   e.expectEval("p = new ProxyImpl; p.bar", "number", "123");
   e.expectEval("p = new ProxyImpl; Reflect.has(p, 'foo')", "boolean", "true");
   e.expectEval("p = new ProxyImpl; Reflect.has(p, 'bar')", "boolean", "true");
