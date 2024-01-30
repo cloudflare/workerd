@@ -565,6 +565,10 @@ public:
       JSG_METHOD(scheduled);
     }
 
+    // TODO(soon): Deprecate get/put/delete convenience methods, remove via compat flag. These were
+    // never documented for service bindings. Extremely old KV bindings relied on them, before
+    // KV had its own separate API implementation -- anyone with such old KV bindings may have to
+    // recreate them when updating their compat flags for this removal.
     JSG_METHOD(get);
     JSG_METHOD(put);
     JSG_METHOD_NAMED(delete, delete_);
