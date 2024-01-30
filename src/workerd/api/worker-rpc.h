@@ -48,7 +48,7 @@ public:
   //
   // Note: Unlike usual KJ convention, it is NOT necessary to make sure the `WorkerRpc` object
   // outlives the returned Promise. This is handled internally.
-  kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> sendWorkerRpc(
+  jsg::Promise<jsg::Value> sendWorkerRpc(
       jsg::Lock& js,
       kj::StringPtr name,
       const v8::FunctionCallbackInfo<v8::Value>& args);

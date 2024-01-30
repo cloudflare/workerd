@@ -30,7 +30,7 @@ jsg::JsValue deserializeV8(jsg::Lock& js, kj::ArrayPtr<const kj::byte> ser) {
 }
 } // namespace
 
-kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorkerRpc(
+jsg::Promise<jsg::Value> WorkerRpc::sendWorkerRpc(
     jsg::Lock& js,
     kj::StringPtr name,
     const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -70,10 +70,15 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
   // Note: `callResult` does not depend on the `WorkerRpc` object staying live! This is important
   // as `sendWorkerRpc()` is documented as returning a Promise that is allowed to outlive the
   // `WorkerRpc` object itself.
-  return callResult.exclusiveJoin(customEventResult
+  auto promise = callResult.exclusiveJoin(customEventResult
       .then([](auto&&) -> kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> {
         return kj::NEVER_DONE;
       }));
+
+  return ioContext.awaitIo(js, kj::mv(promise),
+      [](jsg::Lock& js, auto result) -> jsg::Value {
+    return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
+  });
 }
 
 kj::Maybe<WorkerRpc::RpcFunction> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
@@ -94,12 +99,7 @@ kj::Maybe<WorkerRpc::RpcFunction> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::Str
     JSG_REQUIRE(args.This() == KJ_ASSERT_NONNULL(self.tryGetHandle(js)), TypeError,
         "Illegal invocation");
 
-    auto& ioContext = IoContext::current();
-    // Wait for the RPC to resolve and then process the result.
-    return ioContext.awaitIo(js, self->sendWorkerRpc(js, methodName, args),
-        [](jsg::Lock& js, auto result) -> jsg::Value {
-      return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
-    });
+    return self->sendWorkerRpc(js, methodName, args);
   }));
 }
 
