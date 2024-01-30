@@ -845,6 +845,14 @@ async function testIoStats(storage) {
     assert.deepEqual(rows.rowsRead, 2)
     assert.deepEqual(colCounts, [2, 2])
   }
+
+  // Temporary tables (i.e. for IN clauses) don't contribute to rowsWritten
+  {
+    const cursor = sql.exec(`SELECT * FROM abc WHERE a IN (1,2,3,4,5,6)`)
+    const rows = Array.from(cursor)
+    assert.deepEqual(cursor.rowsRead, 2)
+    assert.deepEqual(cursor.rowsWritten, 0)
+  }
 }
 
 async function testForeignKeys(storage) {

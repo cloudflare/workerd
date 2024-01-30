@@ -545,7 +545,7 @@ KJ_TEST("SQLite write row counters (basic)") {
     KJ_EXPECT(stats.written == 2);
   }
 
-  // On an indexed table, each updated row is two writes. This is probably due to the index update.
+  // Same as above, but with an index.
   {
     db.run("DELETE FROM things");
     db.run("INSERT INTO things (id) VALUES (1)");
@@ -555,7 +555,7 @@ KJ_TEST("SQLite write row counters (basic)") {
 
     RowCounts stats = countRowsTouched(db, "UPDATE things SET id = id * 10 WHERE id >= 3");
     KJ_EXPECT(stats.read >= 4);  // At least one read per updated row
-    KJ_EXPECT(stats.written == 4);
+    KJ_EXPECT(stats.written == 2);
   }
 }
 
