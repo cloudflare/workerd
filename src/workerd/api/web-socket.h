@@ -608,10 +608,6 @@ private:
     kj::Maybe<kj::String> extensions;
   };
 
-  // If we created this WebSocket inside a critical section (ex. a blockConcurrencyWhile callback)
-  // then we need to get the InputGate::Lock and pass it to context.run() when delivering events.
-  kj::Maybe<InputGate::CriticalSection&> maybeCriticalSection;
-
   // So that each end of a WebSocketPair can keep track of its pair.
   kj::Maybe<jsg::Ref<WebSocket>> maybePair;
 
