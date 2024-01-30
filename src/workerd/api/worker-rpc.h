@@ -45,6 +45,9 @@ public:
   // Serializes the method name and arguments, calls customEvent to get the capability, and uses
   // the capability to send our request to the remote Worker. This resolves once the RPC promise
   // resolves.
+  //
+  // Note: Unlike usual KJ convention, it is NOT necessary to make sure the `WorkerRpc` object
+  // outlives the returned Promise. This is handled internally.
   kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> sendWorkerRpc(
       jsg::Lock& js,
       kj::StringPtr name,

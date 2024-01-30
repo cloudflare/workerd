@@ -66,6 +66,10 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
 
   // If customEvent throws, we'll cancel callResult and propagate the exception. Otherwise, we'll
   // just wait until callResult finishes.
+  //
+  // Note: `callResult` does not depend on the `WorkerRpc` object staying live! This is important
+  // as `sendWorkerRpc()` is documented as returning a Promise that is allowed to outlive the
+  // `WorkerRpc` object itself.
   return callResult.exclusiveJoin(customEventResult
       .then([](auto&&) -> kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> {
         return kj::NEVER_DONE;
@@ -73,18 +77,30 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
 }
 
 kj::Maybe<WorkerRpc::RpcFunction> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
-  // Named intercept is enabled, this means we won't default to legacy behavior.
-  // The return value of the function is a promise that resolves once the remote returns the result
-  // of the RPC call.
-  return RpcFunction([this, methodName=kj::str(name)]
+  return RpcFunction(JSG_VISITABLE_LAMBDA(
+      (methodName = kj::str(name), self = JSG_THIS),
+      (self),
       (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> jsg::Promise<jsg::Value> {
+    // Let's make sure that the returned function wasn't invoked using a different `this` than the
+    // one intended. We don't really _have to_ check this, but if we don't, then we have to forever
+    // support tearing RPC methods off their owning objects and invoking them elsewhere. Enforcing
+    // it might allow future implementation flexibility. (We use the terrible error message
+    // "Illegal invocation" because this is the exact message V8 normally generates when invoking a
+    // native function with the wrong `this`.)
+    //
+    // TODO(cleanup): Ideally, we'd actually obtain `self` by unwrapping `args.This()` to a
+    // `jsg::Ref<JsRpcCapability>` instead of capturing it, but there isn't a JSG-blessed way to do
+    // that.
+    JSG_REQUIRE(args.This() == KJ_ASSERT_NONNULL(self.tryGetHandle(js)), TypeError,
+        "Illegal invocation");
+
     auto& ioContext = IoContext::current();
     // Wait for the RPC to resolve and then process the result.
-    return ioContext.awaitIo(js, sendWorkerRpc(js, methodName, args),
+    return ioContext.awaitIo(js, self->sendWorkerRpc(js, methodName, args),
         [](jsg::Lock& js, auto result) -> jsg::Value {
       return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
     });
-  });
+  }));
 }
 
 // The capability that lets us call remote methods over RPC.
