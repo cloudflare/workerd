@@ -86,7 +86,7 @@ diff -u5 -r sqlite-src-3440000.pristine/src/vdbeapi.c sqlite-src-3440000/src/vdb
    return (int)v;
 diff -u5 -r sqlite-src-3440000.pristine/src/vdbe.c sqlite-src-3440000/src/vdbe.c
 --- sqlite-src-3440000.pristine/src/vdbe.c	2023-11-01 04:31:37.000000000 -0700
-+++ sqlite-src-3440000/src/vdbe.c	2023-11-03 15:13:45.737325860 -0700
++++ sqlite-src-3440000/src/vdbe.c	2024-01-30 10:49:55.735518937 -0800
 @@ -3708,10 +3708,11 @@
    if( pOp->p3 ){
      nEntry = sqlite3BtreeRowCountEst(pCrsr);
@@ -129,7 +129,7 @@ diff -u5 -r sqlite-src-3440000.pristine/src/vdbe.c sqlite-src-3440000/src/vdbe.c
  #endif
  
    assert( (pOp->p5 & OPFLAG_LASTROWID)==0 || (pOp->p5 & OPFLAG_NCHANGE)!=0 );
-+  p->aLibsqlCounter[LIBSQL_STMTSTATUS_ROWS_WRITTEN - LIBSQL_STMTSTATUS_BASE]++;
++  if (!pC->isEphemeral) p->aLibsqlCounter[LIBSQL_STMTSTATUS_ROWS_WRITTEN - LIBSQL_STMTSTATUS_BASE]++;
    if( pOp->p5 & OPFLAG_NCHANGE ){
      p->nChange++;
      if( pOp->p5 & OPFLAG_LASTROWID ) db->lastRowid = x.nKey;
@@ -141,7 +141,7 @@ diff -u5 -r sqlite-src-3440000.pristine/src/vdbe.c sqlite-src-3440000/src/vdbe.c
  
    /* Invoke the update-hook if required. */
    if( opflags & OPFLAG_NCHANGE ){
-+    p->aLibsqlCounter[LIBSQL_STMTSTATUS_ROWS_WRITTEN - LIBSQL_STMTSTATUS_BASE]++;
++    if (!pC->isEphemeral) p->aLibsqlCounter[LIBSQL_STMTSTATUS_ROWS_WRITTEN - LIBSQL_STMTSTATUS_BASE]++;
      p->nChange++;
      if( db->xUpdateCallback && ALWAYS(pTab!=0) && HasRowid(pTab) ){
        db->xUpdateCallback(db->pUpdateArg, SQLITE_DELETE, zDb, pTab->zName,
@@ -189,7 +189,7 @@ diff -u5 -r sqlite-src-3440000.pristine/src/vdbe.c sqlite-src-3440000/src/vdbe.c
    pIn2 = &aMem[pOp->p2];
    assert( (pIn2->flags & MEM_Blob) || (pOp->p5 & OPFLAG_PREFORMAT) );
    if( pOp->p5 & OPFLAG_NCHANGE ) p->nChange++;
-+  p->aLibsqlCounter[LIBSQL_STMTSTATUS_ROWS_WRITTEN - LIBSQL_STMTSTATUS_BASE]++;
++  if (!pC->isEphemeral) p->aLibsqlCounter[LIBSQL_STMTSTATUS_ROWS_WRITTEN - LIBSQL_STMTSTATUS_BASE]++;
    assert( pC->eCurType==CURTYPE_BTREE );
    assert( pC->isTable==0 );
    rc = ExpandBlob(pIn2);
