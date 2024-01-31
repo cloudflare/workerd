@@ -63,12 +63,14 @@ wd_cc_library(
     hdrs = [
         "rtti.h",
         "modules.h",
-        "//src/pyodide:generated/pyodide_packages.capnp.h"
+        "//src/pyodide:generated/pyodide_packages.capnp.h",
+        "//src/workerd/server:workerd.capnp.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":html-rewriter",
         "//src/workerd/io",
+        "//src/workerd/server:workerd_capnp",
         "//src/pyodide:pyodide_packages_capnp",
     ],
 )

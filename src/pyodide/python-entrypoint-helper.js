@@ -3,7 +3,8 @@
 
 import { loadPyodide } from "pyodide-internal:python";
 import { default as lockfile } from "pyodide-internal:generated/pyodide-lock.json";
-import { default as origMetadata } from "pyodide-internal:runtime-generated/current-bundle";
+import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
+
 
 function initializePackageIndex(pyodide) {
   if (!lockfile.packages) {
@@ -51,7 +52,7 @@ function initializePackageIndex(pyodide) {
 
 // These packages are currently embedded inside EW and so don't need to
 // be separately installed.
-const EMBEDDED_PYTHON_PACKAGES = [
+const EMBEDDED_PYTHON_PACKAGES = new Set([
   "aiohttp",
   "aiosignal",
   "anyio",
@@ -93,87 +94,19 @@ const EMBEDDED_PYTHON_PACKAGES = [
   "typing_inspect",
   "urllib3",
   "yarl",
-];
-
-function transformMetadata(metadata) {
-  // Workerd's metadata is slightly different. We transform it here to the format used upstream.
-  if (metadata.globals !== undefined) {
-    return metadata;
-  }
-
-  var metadata = metadata;
-  metadata.globals = [];
-  for (const module of metadata.modules) {
-    if (metadata.mainModule === undefined) {
-      // The first module is the main module.
-      metadata.mainModule = module.name;
-    }
-
-    if (module.pythonModule !== undefined) {
-      metadata.globals.push({
-        name: module.name,
-        value: {
-          pythonModule: module.pythonModule,
-        },
-      });
-    }
-
-    if (module.pythonRequirement !== undefined) {
-      metadata.globals.push({
-        name: module.name,
-        value: {
-          pythonRequirement: module.pythonRequirement,
-        },
-      });
-    }
-  }
-  return metadata;
-}
+]);
 
 async function setupPackages(pyodide) {
   // The metadata is a JSON-serialised WorkerBundle (defined in pipeline.capnp).
-  const metadata = transformMetadata(origMetadata);
-  const isWorkerd = metadata.modules !== undefined;
+  const isWorkerd = MetadataReader.isWorkerd();
 
   initializePackageIndex(pyodide);
-
-  // Loop through globals that define Python modules in the metadata passed to our Worker. For
-  // each one, save it in Pyodide's file system.
-  const requirements = [];
-  const pythonRequirements = [];
-  const micropipRequirements = [];
-  for (const { name, value } of metadata.globals) {
-    if (value.pythonModule !== undefined) {
-      pyodide.FS.writeFile(`/session/${name}.py`, value.pythonModule, {
-        canOwn: true,
-      });
-    }
-
-    if (value.pythonRequirement !== undefined) {
-      requirements.push(name);
-      // Packages are not embedded in workerd.
-      // TODO: Improve package loading in workerd.
-      if (isWorkerd) {
-        micropipRequirements.push(name);
-        continue;
-      }
-
-      if (!EMBEDDED_PYTHON_PACKAGES.includes(name)) {
-        pythonRequirements.push(name);
-      }
-    }
-  }
+  const requirements = MetadataReader.getRequirements();
+  const pythonRequirements = isWorkerd ? requirements : requirements.filter(req => !EMBEDDED_PYTHON_PACKAGES.has(req));
 
   if (pythonRequirements.length > 0) {
-    await pyodide.loadPackage(pythonRequirements);
-  }
-
-  if (micropipRequirements.length > 0) {
-    // Micropip and ssl packages are pre-loaded via the packages tarball. This means
-    // we should be able to load micropip directly now.
-
     const micropip = pyodide.pyimport("micropip");
-    await micropip.install(micropipRequirements);
+    await micropip.install(pythonRequirements);
   }
 
   // Apply patches that enable some packages to work. We don't currently list
@@ -201,7 +134,7 @@ async function setupPackages(pyodide) {
     );
   }
 
-  return pyodide.pyimport(metadata.mainModule);
+  return pyodide.pyimport(MetadataReader.getMainModule());
 }
 
 export default {

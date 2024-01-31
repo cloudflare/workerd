@@ -381,20 +381,19 @@ void WorkerdApi::compileModules(
         modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
       }
       // Inject metadata that the bootstrap module will read.
+      using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+      using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+      using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
       {
-        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
-        using JsonModuleInfo = jsg::ModuleRegistry::JsonModuleInfo;
-        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
-
-        auto specifier = "pyodide-internal:runtime-generated/current-bundle";
+        auto specifier = "pyodide-internal:runtime-generated/metadata";
+        auto metadataReader = makePyodideMetadataReader(conf);
         modules->addBuiltinModule(
             specifier,
-            [specifier, conf](jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-              auto metadata = generatePyodideMetadata(conf);
-              auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(js);
-
-              return ModuleInfo(lock, specifier, kj::none,
-                                JsonModuleInfo(lock, Impl::compileJsonGlobal(lock, metadata)));
+            [specifier = kj::str(specifier), metadataReader = kj::mv(metadataReader)](
+                jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+              auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+              auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(metadataReader));
+              return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
             },
             jsg::ModuleRegistry::Type::INTERNAL);
       }

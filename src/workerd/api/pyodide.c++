@@ -24,12 +24,6 @@ kj::StringPtr getPyodideBootstrap() {
   return _::lookupModule("pyodide:python-entrypoint");
 }
 
-kj::String generatePyodideMetadata(server::config::Worker::Reader conf) {
-  capnp::JsonCodec jsonCodec;
-  jsonCodec.setPrettyPrint(false);
-  return jsonCodec.encode(conf);
-}
-
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules) {
   for (auto module: modules) {
     if (module.isPythonModule()) {
