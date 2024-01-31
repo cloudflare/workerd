@@ -35,6 +35,10 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  inline kj::Own<WeakRef<ReadableStreamController::Reader>> addWeakRef() {
+    return self->addRef();
+  }
+
 private:
   struct Initial {};
   // While a Reader is attached to a ReadableStream, it holds a strong reference to the
@@ -52,6 +56,8 @@ private:
 
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
+
+  kj::Own<WeakRef<ReadableStreamController::Reader>> self;
 
   friend class ReadableStreamDefaultReader;
   friend class ReadableStreamBYOBReader;
@@ -96,6 +102,8 @@ public:
   void lockToStream(jsg::Lock& js, ReadableStream& stream);
 
   inline bool isByteOriented() const override { return false; }
+
+  kj::Own<WeakRef<Reader>> addWeakRef() override { return impl.addWeakRef(); }
 
 private:
   ReaderImpl impl;
@@ -161,6 +169,8 @@ public:
   void lockToStream(jsg::Lock& js, ReadableStream& stream);
 
   inline bool isByteOriented() const override { return true; }
+
+  kj::Own<WeakRef<Reader>> addWeakRef() override { return impl.addWeakRef(); }
 
 private:
   ReaderImpl impl;

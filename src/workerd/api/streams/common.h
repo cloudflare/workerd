@@ -318,9 +318,9 @@ public:
     // passing along the closed promise that will be used to communicate state to the
     // user code.
     //
-    // The Reader will hold a reference to the controller that will be cleared when the reader
-    // is released or destroyed. The controller is guaranteed to either outlive or detach the
-    // reader so the ReadableStreamController& reference should remain valid.
+    // The Reader holds a strong reference to the controller. The Controller will hold a weak
+    // reference to the reader. It is ok for the reader itself to be freed/garbage collected
+    // while still being attached to the controller, but not the other way around.
     virtual void attach(
         ReadableStreamController& controller,
         jsg::Promise<void> closedPromise) = 0;
@@ -328,6 +328,12 @@ public:
     // When a Reader lock is released, the controller will signal to the reader that it has been
     // detached.
     virtual void detach() = 0;
+
+    virtual kj::Own<WeakRef<Reader>> addWeakRef() = 0;
+
+  private:
+    static kj::Badge<Reader> getBadge() { return kj::Badge<Reader>(); }
+    friend class ReaderImpl;
   };
 
   struct ByobOptions {
@@ -479,12 +485,12 @@ public:
 
   // Locks this controller to the given reader, returning true if the lock was successful, or false
   // if the controller was already locked.
-  virtual bool lockReader(jsg::Lock& js, Reader& reader) = 0;
+  virtual bool lockReader(jsg::Lock& js, kj::Own<WeakRef<Reader>> reader) = 0;
 
   // Removes the lock and releases the reader from this controller.
   // maybeJs will be nullptr when the isolate lock is not available.
   // If maybeJs is set, the reader's closed promise will be resolved.
-  virtual void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) = 0;
+  virtual void releaseReader(jsg::Lock& js, Reader& reader) = 0;
 
   virtual kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) = 0;
 
@@ -574,8 +580,9 @@ public:
     // passing along the closed and ready promises that will be used to communicate state to the
     // user code.
     //
-    // The controller is guaranteed to either outlive the Writer or will detach the Writer so the
-    // WritableStreamController& reference should always remain valid.
+    // The Writer holds a strong reference to the controller. The Controller will hold a weak
+    // reference to the writer. It is ok for the writer itself to be freed/garbage collected
+    // while still being attached to the controller, but not the other way around.
     virtual void attach(
         WritableStreamController& controller,
         jsg::Promise<void> closedPromise,
@@ -588,6 +595,12 @@ public:
     // The ready promise can be replaced whenever backpressure is signaled by the underlying
     // controller.
     virtual void replaceReadyPromise(jsg::Promise<void> readyPromise) = 0;
+
+    virtual kj::Own<WeakRef<Writer>> addWeakRef() = 0;
+
+  private:
+    static kj::Badge<Writer> getBadge() { return kj::Badge<Writer>(); }
+    friend class WritableStreamDefaultWriter;
   };
 
   struct PendingAbort {
@@ -672,12 +685,10 @@ public:
 
   // Locks this controller to the given writer, returning true if the lock was successful, or false
   // if the controller was already locked.
-  virtual bool lockWriter(jsg::Lock& js, Writer& writer) = 0;
+  virtual bool lockWriter(jsg::Lock& js, kj::Own<WeakRef<Writer>>) = 0;
 
   // Removes the lock and releases the writer from this controller.
-  // maybeJs will be nullptr when the isolate lock is not available.
-  // If maybeJs is set, the writer's closed and ready promises will be resolved.
-  virtual void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) = 0;
+  virtual void releaseWriter(jsg::Lock& js, Writer& writer) = 0;
 
   virtual kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) = 0;
 
@@ -710,19 +721,27 @@ struct Locked {};
 
 // When a reader is locked to a ReadableStream, a ReaderLock instance
 // is used internally to represent the locked state in the ReadableStreamController.
+// ReaderLocked maintains a weak referene to the actual Reader instance. It's ok
+// for the Reader to be garbage collected while the ReadableStream is still alive but
+// not vis versa. The Reader holds a strong reference to the ReadableStream only while
+// it is attached.
 class ReaderLocked {
 public:
   ReaderLocked(
-      ReadableStreamController::Reader& reader,
+      kj::Own<WeakRef<ReadableStreamController::Reader>> reader,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
-      : reader(reader),
+      : reader(kj::mv(reader)),
         closedFulfiller(kj::mv(closedFulfiller)),
         canceler(kj::mv(canceler)) {}
 
   ReaderLocked(ReaderLocked&&) = default;
   ~ReaderLocked() noexcept(false) {
-    KJ_IF_SOME(r, reader) { r.detach(); }
+    if (reader.get() != nullptr) {
+      reader->runIfAlive([](auto& r) {
+        r.detach();
+      });
+    }
   }
   KJ_DISALLOW_COPY(ReaderLocked);
 
@@ -730,8 +749,9 @@ public:
     visitor.visit(closedFulfiller);
   }
 
-  ReadableStreamController::Reader& getReader() {
-    return KJ_ASSERT_NONNULL(reader);
+  kj::Maybe<ReadableStreamController::Reader&> getReader() {
+    if (reader.get() == nullptr) return kj::none;
+    return reader->tryGet();
   }
 
   kj::Maybe<jsg::Promise<void>::Resolver>& getClosedFulfiller() {
@@ -743,34 +763,43 @@ public:
   }
 
 private:
-  kj::Maybe<ReadableStreamController::Reader&> reader;
+  kj::Own<WeakRef<ReadableStreamController::Reader>> reader;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
   kj::Maybe<IoOwn<kj::Canceler>> canceler;
 };
 
 // When a writer is locked to a WritableStream, a WriterLock instance
 // is used internally to represent the locked state in the WritableStreamController.
+// WriterLocked maintains a weak reference to the actual Writer instance. It's ok
+// for the Writer to be garbage collected while the WritableStream is still alive but
+// not vis versa. The Writer holds a strong reference to the WritableStream only while
+// it is attached.
 class WriterLocked {
 public:
   WriterLocked(
-      WritableStreamController::Writer& writer,
+      kj::Own<WeakRef<WritableStreamController::Writer>> writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
-      : writer(writer),
+      : writer(kj::mv(writer)),
         closedFulfiller(kj::mv(closedFulfiller)),
         readyFulfiller(kj::mv(readyFulfiller)) {}
 
   WriterLocked(WriterLocked&&) = default;
   ~WriterLocked() noexcept(false) {
-    KJ_IF_SOME(w, writer) { w.detach(); }
+    if (writer.get() != nullptr) {
+      writer->runIfAlive([&](auto& w) {
+        w.detach();
+      });
+    }
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(closedFulfiller, readyFulfiller);
   }
 
-  WritableStreamController::Writer& getWriter() {
-    return KJ_ASSERT_NONNULL(writer);
+  kj::Maybe<WritableStreamController::Writer&> getWriter() {
+    if (writer.get() == nullptr) return kj::none;
+    return writer->tryGet();
   }
 
   kj::Maybe<jsg::Promise<void>::Resolver>& getClosedFulfiller() {
@@ -782,14 +811,15 @@ public:
   }
 
   void setReadyFulfiller(jsg::PromiseResolverPair<void>& pair) {
-    KJ_IF_SOME(w, writer) {
+    if (writer.get() == nullptr) return;
+    writer->runIfAlive([&](auto& w) {
       readyFulfiller = kj::mv(pair.resolver);
       w.replaceReadyPromise(kj::mv(pair.promise));
-    }
+    });
   }
 
 private:
-  kj::Maybe<WritableStreamController::Writer&> writer;
+  kj::Own<WeakRef<WritableStreamController::Writer>> writer;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
   kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller;
 };

@@ -12,11 +12,9 @@ class WritableStreamDefaultWriter: public jsg::Object,
                                    public WritableStreamController::Writer {
 public:
   explicit WritableStreamDefaultWriter();
-
-  ~WritableStreamDefaultWriter() noexcept(false) override;
+  ~WritableStreamDefaultWriter() override;
 
   // JavaScript API
-
   static jsg::Ref<WritableStreamDefaultWriter> constructor(
       jsg::Lock& js,
       jsg::Ref<WritableStream> stream);
@@ -75,6 +73,8 @@ public:
 
   void replaceReadyPromise(jsg::Promise<void> readyPromise) override;
 
+  inline kj::Own<WeakRef<Writer>> addWeakRef() override { return self->addRef(); }
+
 private:
   struct Initial {};
   // While a Writer is attached to a WritableStream, it holds a strong reference to the
@@ -92,6 +92,8 @@ private:
 
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> readyPromise;
+
+  kj::Own<WeakRef<WritableStreamController::Writer>> self;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

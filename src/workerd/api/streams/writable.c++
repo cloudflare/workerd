@@ -8,15 +8,12 @@
 namespace workerd::api {
 
 WritableStreamDefaultWriter::WritableStreamDefaultWriter()
-    : ioContext(tryGetIoContext()) {}
-
-WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
-  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
-    // Because this can be called during gc or other cleanup, it is important
-    // that releasing the writer does not cause the closed promise be resolved
-    // since that requires v8 heap allocations.
-    stream->getController().releaseWriter(*this, kj::none);
-  }
+    : Writer(), ioContext(tryGetIoContext()),
+      self(kj::refcounted<WeakRef<WritableStreamController::Writer>>(
+          WritableStreamController::Writer::getBadge(),
+          *this)) {}
+WritableStreamDefaultWriter::~WritableStreamDefaultWriter() {
+  self->invalidate(WritableStreamController::Writer::getBadge());
 }
 
 jsg::Ref<WritableStreamDefaultWriter> WritableStreamDefaultWriter::constructor(
@@ -130,7 +127,7 @@ jsg::MemoizedIdentity<jsg::Promise<void>>& WritableStreamDefaultWriter::getReady
 
 void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& stream) {
   KJ_ASSERT(!stream.isLocked());
-  KJ_ASSERT(stream.getController().lockWriter(js, *this));
+  KJ_ASSERT(stream.getController().lockWriter(js, addWeakRef()));
 }
 
 void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
@@ -140,7 +137,7 @@ void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
       KJ_FAIL_ASSERT("this writer was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
-      stream->getController().releaseWriter(*this, js);
+      stream->getController().releaseWriter(js, *this);
       state.init<Released>();
       return;
     }

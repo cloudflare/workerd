@@ -11,15 +11,12 @@ namespace workerd::api {
 
 ReaderImpl::ReaderImpl(ReadableStreamController::Reader& reader) :
     ioContext(tryGetIoContext()),
-    reader(reader) {}
+    reader(reader),
+    self(kj::refcounted<WeakRef<ReadableStreamController::Reader>>(
+      ReadableStreamController::Reader::getBadge(), reader)) {}
 
 ReaderImpl::~ReaderImpl() noexcept(false) {
-  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
-    // There's a very good likelihood that this is called during GC or other
-    // cleanup so we have to make sure that releasing the reader does not also
-    // trigger resolution of the close promise.
-    stream->getController().releaseReader(reader, kj::none);
-  }
+  self->invalidate(ReadableStreamController::Reader::getBadge());
 }
 
 void ReaderImpl::attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) {
@@ -79,7 +76,7 @@ jsg::MemoizedIdentity<jsg::Promise<void>>& ReaderImpl::getClosed() {
 
 void ReaderImpl::lockToStream(jsg::Lock& js, ReadableStream& stream) {
   KJ_ASSERT(!stream.isLocked());
-  KJ_ASSERT(stream.getController().lockReader(js, reader));
+  KJ_ASSERT(stream.getController().lockReader(js, reader.addWeakRef()));
 }
 
 jsg::Promise<ReadResult> ReaderImpl::read(
@@ -138,7 +135,7 @@ void ReaderImpl::releaseLock(jsg::Lock& js) {
       KJ_FAIL_ASSERT("this reader was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
-      stream->getController().releaseReader(reader, js);
+      stream->getController().releaseReader(js, reader);
       state.init<Released>();
       return;
     }
@@ -163,7 +160,8 @@ void ReaderImpl::visitForGc(jsg::GcVisitor& visitor) {
 
 // ======================================================================================
 
-ReadableStreamDefaultReader::ReadableStreamDefaultReader() : impl(*this) {}
+ReadableStreamDefaultReader::ReadableStreamDefaultReader()
+    : Reader(), impl(*this) {}
 
 jsg::Ref<ReadableStreamDefaultReader> ReadableStreamDefaultReader::constructor(
     jsg::Lock& js,
@@ -213,7 +211,8 @@ void ReadableStreamDefaultReader::visitForGc(jsg::GcVisitor& visitor) {
 
 // ======================================================================================
 
-ReadableStreamBYOBReader::ReadableStreamBYOBReader() : impl(*this) {}
+ReadableStreamBYOBReader::ReadableStreamBYOBReader()
+    : Reader(), impl(*this) {}
 
 jsg::Ref<ReadableStreamBYOBReader> ReadableStreamBYOBReader::constructor(
     jsg::Lock& js,

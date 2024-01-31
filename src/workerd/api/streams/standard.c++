@@ -45,10 +45,10 @@ public:
 
   bool isLockedToReader() const { return !state.template is<Unlocked>(); }
 
-  bool lockReader(jsg::Lock& js, Controller& self, Reader& reader);
+  bool lockReader(jsg::Lock& js, Controller& self, kj::Own<WeakRef<Reader>> reader);
 
   // See the comment for releaseReader in common.h for details on the use of maybeJs
-  void releaseReader(Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs);
+  void releaseReader(jsg::Lock& js, Controller& self, Reader& reader);
 
   bool lock();
 
@@ -125,10 +125,10 @@ public:
 
   bool isLockedToWriter() const;
 
-  bool lockWriter(jsg::Lock& js, Controller& self, Writer& writer);
+  bool lockWriter(jsg::Lock& js, Controller& self, kj::Own<WeakRef<Writer>> writer);
 
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
-  void releaseWriter(Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs);
+  void releaseWriter(jsg::Lock& js, Controller& self, Writer& writer);
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -179,7 +179,7 @@ template <typename Controller>
 bool ReadableLockImpl<Controller>::lockReader(
     jsg::Lock& js,
     Controller& self,
-    Reader& reader) {
+    kj::Own<WeakRef<Reader>> reader) {
   if (isLockedToReader()) {
     return false;
   }
@@ -187,7 +187,8 @@ bool ReadableLockImpl<Controller>::lockReader(
   auto prp = js.newPromiseAndResolver<void>();
   prp.promise.markAsHandled(js);
 
-  auto lock = ReaderLocked(reader, kj::mv(prp.resolver));
+  auto lock = ReaderLocked(kj::mv(reader), kj::mv(prp.resolver));
+  // Take care not to access reader after this point. Use the lock.
 
   if (self.state.template is<StreamStates::Closed>()) {
     maybeResolvePromise(js, lock.getClosedFulfiller());
@@ -196,41 +197,37 @@ bool ReadableLockImpl<Controller>::lockReader(
   }
 
   state = kj::mv(lock);
-  reader.attach(self, kj::mv(prp.promise));
+
+  auto& inner = KJ_ASSERT_NONNULL(state.template get<ReaderLocked>().getReader());
+  inner.attach(self, kj::mv(prp.promise));
+
   return true;
 }
 
 template <typename Controller>
 void ReadableLockImpl<Controller>::releaseReader(
+    jsg::Lock& js,
     Controller& self,
-    Reader& reader,
-    kj::Maybe<jsg::Lock&> maybeJs) {
+    Reader& reader) {
   KJ_IF_SOME(locked, state.template tryGet<ReaderLocked>()) {
-    KJ_ASSERT(&locked.getReader() == &reader);
-
-    KJ_IF_SOME(js, maybeJs) {
-      JSG_REQUIRE(!self.hasPendingReadRequests(),
-                  TypeError,
-                  "Cannot call releaseLock() on a reader with outstanding read promises.");
-
-      maybeRejectPromise<void>(js,
-          locked.getClosedFulfiller(),
-          js.v8TypeError("This ReadableStream reader has been released."_kj));
+    KJ_IF_SOME(r, locked.getReader()) {
+      KJ_ASSERT(&r == &reader);
     }
+
+    JSG_REQUIRE(!self.hasPendingReadRequests(),
+                TypeError,
+                "Cannot call releaseLock() on a reader with outstanding read promises.");
+
+    maybeRejectPromise<void>(js,
+        locked.getClosedFulfiller(),
+        js.v8TypeError("This ReadableStream reader has been released."_kj));
 
     // Keep the kj::mv(locked) after the isolate and hasPendingReadRequests check above.
     // Moving will release the references and we don't want to do that if the hasPendingReadRequests
     // check fails.
     auto lock = kj::mv(locked);
 
-    // When maybeJs is nullptr, that means releaseReader was called when the reader is
-    // being deconstructed and not as the result of explicitly calling releaseLock and
-    // we do not have an isolate lock. In that case, we don't want to change the lock
-    // state itself. Moving the lock above will free the lock state while keeping the
-    // ReadableStream marked as locked.
-    if (maybeJs != kj::none) {
-      state.template init<Unlocked>();
-    }
+    state.template init<Unlocked>();
   }
 }
 
@@ -328,7 +325,9 @@ bool WritableLockImpl<Controller>::isLockedToWriter() const {
 }
 
 template <typename Controller>
-bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, Writer& writer) {
+bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js,
+                                              Controller& self,
+                                              kj::Own<WeakRef<Writer>> writer) {
   if (isLockedToWriter()) {
     return false;
   }
@@ -338,7 +337,8 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   auto readyPrp = js.newPromiseAndResolver<void>();
   readyPrp.promise.markAsHandled(js);
 
-  auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
+  auto lock = WriterLocked(kj::mv(writer), kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
+  // Take care not to access writer directly after this point. Use the lock
 
   if (self.state.template is<StreamStates::Closed>()) {
     maybeResolvePromise(js, lock.getClosedFulfiller());
@@ -353,32 +353,27 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   }
 
   state = kj::mv(lock);
-  writer.attach(self, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+
+  auto& inner = KJ_ASSERT_NONNULL(state.template get<WriterLocked>().getWriter());
+  inner.attach(self, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 
 template <typename Controller>
 void WritableLockImpl<Controller>::releaseWriter(
+    jsg::Lock& js,
     Controller& self,
-    Writer& writer,
-    kj::Maybe<jsg::Lock&> maybeJs) {
+    Writer& writer) {
   auto& locked = state.template get<WriterLocked>();
-  KJ_ASSERT(&locked.getWriter() == &writer);
-  KJ_IF_SOME(js, maybeJs) {
-    maybeRejectPromise<void>(js,
-        locked.getClosedFulfiller(),
-        js.v8TypeError("This WritableStream writer has been released."_kj));
+  KJ_IF_SOME(w, locked.getWriter()) {
+    KJ_ASSERT(&w == &writer);
   }
+  maybeRejectPromise<void>(js,
+      locked.getClosedFulfiller(),
+      js.v8TypeError("This WritableStream writer has been released."_kj));
   auto lock = kj::mv(locked);
 
-  // When maybeJs is nullptr, that means releaseWriter was called when the writer is
-  // being deconstructed and not as the result of explicitly calling releaseLock and
-  // we do not have an isolate lock. In that case, we don't want to change the lock
-  // state itself. Moving the lock above will free the lock state while keeping the
-  // WritableStream marked as locked.
-  if (maybeJs != kj::none) {
-    state.template init<Unlocked>();
-  }
+  state.template init<Unlocked>();
 }
 
 template <typename Controller>
@@ -647,7 +642,7 @@ public:
 
   bool isLockedToReader() const override;
 
-  bool lockReader(jsg::Lock& js, Reader& reader) override;
+  bool lockReader(jsg::Lock& js, kj::Own<WeakRef<Reader>> reader) override;
 
   kj::Maybe<v8::Local<v8::Value>> isErrored(jsg::Lock& js);
 
@@ -665,8 +660,7 @@ public:
       jsg::Lock& js,
       kj::Maybe<ByobOptions> byobOptions) override;
 
-  // See the comment for releaseReader in common.h for details on the use of maybeJs
-  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseReader(jsg::Lock& js, Reader& reader) override;
 
   void setOwnerRef(ReadableStream& stream) override;
 
@@ -784,14 +778,14 @@ public:
 
   inline bool isWritable() const { return state.is<Controller>(); }
 
-  bool lockWriter(jsg::Lock& js, Writer& writer) override;
+  bool lockWriter(jsg::Lock& js, kj::Own<WeakRef<Writer>> writer) override;
 
   void maybeRejectReadyPromise(jsg::Lock& js, v8::Local<v8::Value> reason);
 
   void maybeResolveReadyPromise(jsg::Lock& js);
 
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
-  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseWriter(jsg::Lock& js, Writer& writer) override;
 
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
 
@@ -2407,8 +2401,8 @@ bool ReadableStreamJsController::isLockedToReader() const {
   return lock.isLockedToReader();
 }
 
-bool ReadableStreamJsController::lockReader(jsg::Lock& js, Reader& reader) {
-  return lock.lockReader(js, *this, reader);
+bool ReadableStreamJsController::lockReader(jsg::Lock& js, kj::Own<WeakRef<Reader>> reader) {
+  return lock.lockReader(js, *this, kj::mv(reader));
 }
 
 jsg::Promise<void> ReadableStreamJsController::pipeTo(
@@ -2508,10 +2502,8 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
   KJ_UNREACHABLE;
 }
 
-void ReadableStreamJsController::releaseReader(
-    Reader& reader,
-    kj::Maybe<jsg::Lock&> maybeJs) {
-  lock.releaseReader(*this, reader, maybeJs);
+void ReadableStreamJsController::releaseReader(jsg::Lock& js, Reader& reader) {
+  lock.releaseReader(js, *this, reader);
 }
 
 ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
@@ -3562,8 +3554,8 @@ bool WritableStreamJsController::isLockedToWriter() const {
   return !lock.state.is<Unlocked>();
 }
 
-bool WritableStreamJsController::lockWriter(jsg::Lock& js, Writer& writer) {
-  return lock.lockWriter(js, *this, writer);
+bool WritableStreamJsController::lockWriter(jsg::Lock& js, kj::Own<WeakRef<Writer>> writer) {
+  return lock.lockWriter(js, *this, kj::mv(writer));
 }
 
 void WritableStreamJsController::maybeRejectReadyPromise(
@@ -3587,10 +3579,8 @@ void WritableStreamJsController::maybeResolveReadyPromise(jsg::Lock& js) {
   }
 }
 
-void WritableStreamJsController::releaseWriter(
-    Writer& writer,
-    kj::Maybe<jsg::Lock&> maybeJs) {
-  lock.releaseWriter(*this, writer, maybeJs);
+void WritableStreamJsController::releaseWriter(jsg::Lock& js, Writer& writer) {
+  lock.releaseWriter(js, *this, writer);
 }
 
 kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamJsController::removeSink(jsg::Lock& js) {

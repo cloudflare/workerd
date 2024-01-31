@@ -471,12 +471,7 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> WritableStreamSink::tryPumpFrom(
 
 // =======================================================================================
 
-ReadableStreamInternalController::~ReadableStreamInternalController() noexcept(false) {
-  KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
-    auto lock = kj::mv(locked);
-    readState.init<Unlocked>();
-  }
-}
+ReadableStreamInternalController::~ReadableStreamInternalController() noexcept(false) {}
 
 jsg::Ref<ReadableStream> ReadableStreamInternalController::addRef() {
   return KJ_ASSERT_NONNULL(owner).addRef();
@@ -761,7 +756,7 @@ kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::remov
   KJ_UNREACHABLE;
 }
 
-bool ReadableStreamInternalController::lockReader(jsg::Lock& js, Reader& reader) {
+bool ReadableStreamInternalController::lockReader(jsg::Lock& js, kj::Own<WeakRef<Reader>> reader) {
   if (isLockedToReader()) {
     return false;
   }
@@ -769,8 +764,9 @@ bool ReadableStreamInternalController::lockReader(jsg::Lock& js, Reader& reader)
   auto prp = js.newPromiseAndResolver<void>();
   prp.promise.markAsHandled(js);
 
-  auto lock = ReaderLocked(reader, kj::mv(prp.resolver),
+  auto lock = ReaderLocked(kj::mv(reader), kj::mv(prp.resolver),
       IoContext::current().addObject(kj::heap<kj::Canceler>()));
+  // Take care not to access reader directly after this point. Use the lock.
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
@@ -785,41 +781,29 @@ bool ReadableStreamInternalController::lockReader(jsg::Lock& js, Reader& reader)
   }
 
   readState = kj::mv(lock);
-  reader.attach(*this, kj::mv(prp.promise));
+
+  auto& inner = KJ_ASSERT_NONNULL(readState.get<ReaderLocked>().getReader());
+  inner.attach(*this, kj::mv(prp.promise));
   return true;
 }
 
-void ReadableStreamInternalController::releaseReader(
-    Reader& reader,
-    kj::Maybe<jsg::Lock&> maybeJs) {
+void ReadableStreamInternalController::releaseReader(jsg::Lock& js, Reader& reader) {
   KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
-    KJ_ASSERT(&locked.getReader() == &reader);
-    KJ_IF_SOME(js, maybeJs) {
-      JSG_REQUIRE(KJ_ASSERT_NONNULL(locked.getCanceler())->isEmpty(), TypeError,
-                   "Cannot call releaseLock() on a reader with outstanding read promises.");
-      maybeRejectPromise<void>(js,
-          locked.getClosedFulfiller(),
-          js.v8TypeError("This ReadableStream reader has been released."_kj));
+    KJ_IF_SOME(r, locked.getReader()) {
+      KJ_ASSERT(&r == &reader);
     }
-    auto lock = kj::mv(locked);
+    JSG_REQUIRE(KJ_ASSERT_NONNULL(locked.getCanceler())->isEmpty(), TypeError,
+                  "Cannot call releaseLock() on a reader with outstanding read promises.");
+    maybeRejectPromise<void>(js,
+        locked.getClosedFulfiller(),
+        js.v8TypeError("This ReadableStream reader has been released."_kj));
 
-    // When maybeJs is nullptr, that means releaseReader was called when the reader is
-    // being deconstructed and not as the result of explicitly calling releaseLock. In
-    // that case, we don't want to change the lock state itself because we do not have
-    // an isolate lock. Moving the lock above will free the lock state while keeping the
-    // ReadableStream marked as locked.
-    if (maybeJs != kj::none) {
-      readState.template init<Unlocked>();
-    }
+    auto lock = kj::mv(locked);
+    readState.template init<Unlocked>();
   }
 }
 
-WritableStreamInternalController::~WritableStreamInternalController() noexcept(false) {
-  KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
-    auto lock = kj::mv(locked);
-    writeState.init<Unlocked>();
-  }
-}
+WritableStreamInternalController::~WritableStreamInternalController() noexcept(false) {}
 
 jsg::Ref<WritableStream> WritableStreamInternalController::addRef() {
   return KJ_ASSERT_NONNULL(owner).addRef();
@@ -1246,7 +1230,7 @@ kj::Maybe<int> WritableStreamInternalController::getDesiredSize() {
   KJ_UNREACHABLE;
 }
 
-bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer) {
+bool WritableStreamInternalController::lockWriter(jsg::Lock& js, kj::Own<WeakRef<Writer>> writer) {
   if (isLockedToWriter()) {
     return false;
   }
@@ -1257,7 +1241,8 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   auto readyPrp = js.newPromiseAndResolver<void>();
   readyPrp.promise.markAsHandled(js);
 
-  auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
+  auto lock = WriterLocked(kj::mv(writer), kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
+  // Careful not to access writer directly after this point. Access is through the lock.
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
@@ -1274,30 +1259,26 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   }
 
   writeState = kj::mv(lock);
-  writer.attach(*this, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+
+  auto& inner = KJ_ASSERT_NONNULL(writeState.get<WriterLocked>().getWriter());
+  inner.attach(*this, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+
   return true;
 }
 
-void WritableStreamInternalController::releaseWriter(
-    Writer& writer,
-    kj::Maybe<jsg::Lock&> maybeJs) {
+void WritableStreamInternalController::releaseWriter(jsg::Lock& js, Writer& writer) {
   KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
-    KJ_ASSERT(&locked.getWriter() == &writer);
-    KJ_IF_SOME(js, maybeJs) {
-      maybeRejectPromise<void>(js,
-          locked.getClosedFulfiller(),
-          js.v8TypeError("This WritableStream writer has been released."_kj));
+    KJ_IF_SOME(w, locked.getWriter()) {
+      // Just an extra verification.
+      KJ_ASSERT(&w == &writer);
     }
-    auto lock = kj::mv(locked);
 
-    // When maybeJs is nullptr, that means releaseWriter was called when the writer is
-    // being deconstructed and not as the result of explicitly calling releaseLock and
-    // we do not have an isolate lock. In that case, we don't want to change the lock
-    // state itself. Moving the lock above will free the lock state while keeping the
-    // WritableStream marked as locked.
-    if (maybeJs != kj::none) {
-      writeState.template init<Unlocked>();
-    }
+    maybeRejectPromise<void>(js,
+        locked.getClosedFulfiller(),
+        js.v8TypeError("This WritableStream writer has been released."_kj));
+
+    auto lock = kj::mv(locked);
+    writeState.template init<Unlocked>();
   }
 }
 

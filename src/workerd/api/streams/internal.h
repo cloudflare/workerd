@@ -81,10 +81,9 @@ public:
 
   bool isLockedToReader() const override { return !readState.is<Unlocked>(); }
 
-  bool lockReader(jsg::Lock& js, Reader& reader) override;
+  bool lockReader(jsg::Lock& js, kj::Own<WeakRef<Reader>> reader) override;
 
-  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
-  // See the comment for releaseReader in common.h for details on the use of maybeJs
+  void releaseReader(jsg::Lock& js, Reader& reader) override;
 
   kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) override;
 
@@ -201,9 +200,9 @@ public:
 
   bool isLockedToWriter() const override { return !writeState.is<Unlocked>(); }
 
-  bool lockWriter(jsg::Lock& js, Writer& writer) override;
+  bool lockWriter(jsg::Lock& js, kj::Own<WeakRef<Writer>> writer) override;
 
-  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
+  void releaseWriter(jsg::Lock& js, Writer& writer) override;
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override {

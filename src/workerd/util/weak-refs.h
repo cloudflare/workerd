@@ -94,6 +94,10 @@ public:
   inline kj::Own<WeakRef> addRef() { return kj::addRef(*this); }
   inline bool isValid() const { return maybeThing != kj::none; }
 
+  inline void invalidate(kj::Badge<T>) {
+    invalidate();
+  }
+
 private:
   friend T;
 
