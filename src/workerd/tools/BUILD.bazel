@@ -79,6 +79,7 @@ filegroup(
         "//src/workerd/tools:api_encoder_" + label
         for (date, label) in compat_dates
     ],
+    tags = ["no-arm64"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
@@ -97,6 +98,8 @@ filegroup(
             "--compatibility-date",
             date,
         ] if date else []),
+        # Cross-compiling is not supported as this runs in target cfg.
+        tags = ["no-arm64"],
         target_compatible_with = select({
             "@platforms//os:windows": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -126,12 +129,16 @@ cc_ast_dump(
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
-    deps = [":api_encoder_lib", ":compile_api_headers_only"],
+    deps = [
+        ":api_encoder_lib",
+        ":compile_api_headers_only",
+    ],
 )
 
 rust_binary(
     name = "param_extractor_bin",
     srcs = ["param-extractor.rs"],
+    tags = ["no-downstream"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
@@ -163,6 +170,7 @@ run_binary(
         "--output",
         "$(location param-names.json)",
     ],
+    tags = ["no-downstream"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
