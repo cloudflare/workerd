@@ -16,6 +16,10 @@ type D1Result<T = unknown> = D1Response & {
   results: T[]
 }
 
+type D1RawOptions = {
+  columnNames?: boolean
+}
+
 type D1UpstreamFailure = {
   results?: never
   error: string
@@ -85,12 +89,12 @@ class D1Database {
   public async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
-    const exec = await this._sendOrThrow(
+    const exec = (await this._sendOrThrow(
       '/query',
       statements.map((s: D1PreparedStatement) => s.statement),
       statements.map((s: D1PreparedStatement) => s.params),
       'ROWS_AND_COLUMNS'
-    ) as D1UpstreamSuccess<T>[]
+    )) as D1UpstreamSuccess<T>[]
     return exec.map(toArrayOfObjects)
   }
 
@@ -303,7 +307,7 @@ class D1PreparedStatement {
     )
   }
 
-  public async raw<T = unknown[]>(): Promise<T[]> {
+  public async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
     const s = firstIfArray(
       await this.database._sendOrThrow<Record<string, unknown>>(
         '/query',
@@ -319,6 +323,9 @@ class D1PreparedStatement {
     if (Array.isArray(s.results)) {
       const raw: T[] = []
       for (const row of s.results) {
+        if (options?.columnNames && raw.length === 0) {
+          raw.push(Array.from(Object.keys(row)) as T)
+        }
         const entry = Object.keys(row).map((k) => {
           return row[k]
         })
@@ -327,7 +334,10 @@ class D1PreparedStatement {
       return raw
     } else {
       // Otherwise, data is already in the correct format
-      return s.results.rows as T[]
+      return [
+        ...(options?.columnNames ? [s.results.columns as T] : []),
+        ...(s.results.rows as T[]),
+      ]
     }
   }
 }
@@ -353,8 +363,9 @@ function toArrayOfObjects<T>(response: D1UpstreamSuccess<T>): D1Result<T> {
     const { rows, columns } = results
     return {
       ...response,
-      results: rows.map((row) =>
-        Object.fromEntries(row.map((cell, i) => [columns[i], cell]))
+      results: rows.map(
+        (row) =>
+          Object.fromEntries(row.map((cell, i) => [columns[i], cell])) as T
       ),
     }
   }

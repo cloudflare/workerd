@@ -333,7 +333,7 @@ export const test_d1_api = test(async (DB) => {
   )
 
   await itShould(
-    'not lose data for duplicate columns in a join using raw',
+    'not lose data for duplicate columns in a join using raw()',
     () => DB.prepare(`SELECT * FROM abc, cde;`).raw(),
     [
       [1, 2, 3, 'A', 'B', 'C'],
@@ -346,8 +346,38 @@ export const test_d1_api = test(async (DB) => {
   )
 
   await itShould(
+    'add columns using  .raw({ columnNames: true })',
+    () => DB.prepare(`SELECT * FROM abc, cde;`).raw({ columnNames: true }),
+    [
+      ['a', 'b', 'c', 'c', 'd', 'e'],
+      [1, 2, 3, 'A', 'B', 'C'],
+      [1, 2, 3, 'D', 'E', 'F'],
+      [1, 2, 3, 'G', 'H', 'I'],
+      [4, 5, 6, 'A', 'B', 'C'],
+      [4, 5, 6, 'D', 'E', 'F'],
+      [4, 5, 6, 'G', 'H', 'I'],
+    ]
+  )
+
+  await itShould(
+    'not add columns using  .raw({ columnNames: false })',
+    () => DB.prepare(`SELECT * FROM abc, cde;`).raw({ columnNames: false }),
+    [
+      [1, 2, 3, 'A', 'B', 'C'],
+      [1, 2, 3, 'D', 'E', 'F'],
+      [1, 2, 3, 'G', 'H', 'I'],
+      [4, 5, 6, 'A', 'B', 'C'],
+      [4, 5, 6, 'D', 'E', 'F'],
+      [4, 5, 6, 'G', 'H', 'I'],
+    ]
+  )
+
+  await itShould(
     'return 0 rows_written for IN clauses',
-    () => DB.prepare(`SELECT * from cde WHERE c IN ('A','B','C','X','Y','Z')`).all(),
+    () =>
+      DB.prepare(
+        `SELECT * from cde WHERE c IN ('A','B','C','X','Y','Z')`
+      ).all(),
     {
       success: true,
       results: [{ c: 'A', d: 'B', e: 'C' }],
