@@ -1838,7 +1838,7 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
   for (auto& event : queue) {
     KJ_SWITCH_ONEOF(event.event) {
       KJ_CASE_ONEOF(write, Write) {
-        visitor.visit(write.promise, write.ref);
+        visitor.visit(write.promise);
       }
       KJ_CASE_ONEOF(close, Close) {
         visitor.visit(close.promise);

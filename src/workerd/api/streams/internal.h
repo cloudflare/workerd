@@ -283,7 +283,6 @@ private:
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
     std::shared_ptr<v8::BackingStore> ownBytes;
     kj::ArrayPtr<const kj::byte> bytes;
-    kj::Maybe<jsg::Ref<WritableStream>> ref;
   };
   struct Close {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
