@@ -144,7 +144,9 @@ async function setupPackages(pyodide) {
   const micropipRequirements = [];
   for (const { name, value } of metadata.globals) {
     if (value.pythonModule !== undefined) {
-      pyodide.FS.writeFile(`/session/${name}.py`, value.pythonModule, {
+      // Support both modules names with the `.py` extension as well as without.
+      const pyFilename = name.endsWith(".py") ? name : `${name}.py`;
+      pyodide.FS.writeFile(`/session/${pyFilename}`, value.pythonModule, {
         canOwn: true,
       });
     }
@@ -201,7 +203,11 @@ async function setupPackages(pyodide) {
     );
   }
 
-  return pyodide.pyimport(metadata.mainModule);
+  // The main module can have a `.py` extension, strip it if it exists.
+  const mainName = metadata.mainModule;
+  const mainModule = mainName.endsWith(".py") ? mainName.slice(0, -3) : mainName;
+
+  return pyodide.pyimport(mainModule);
 }
 
 export default {
