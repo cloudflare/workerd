@@ -381,10 +381,10 @@ void WorkerdApi::compileModules(
         modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
       }
       // Inject metadata that the bootstrap module will read.
-      using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
-      using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
-      using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
       {
+        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+        using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
         auto specifier = "pyodide-internal:runtime-generated/metadata";
         auto metadataReader = makePyodideMetadataReader(conf);
         modules->addBuiltinModule(
