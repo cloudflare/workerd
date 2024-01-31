@@ -370,17 +370,17 @@ void WorkerdApi::compileModules(
     using namespace workerd::api::pyodide;
     if (util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES) &&
         hasPythonModules(confModules)) {
-      // Inject pyodide bootstrap module.
+      // Inject pyodide entrypoint module.
       {
         auto mainModule = confModules.begin();
         capnp::MallocMessageBuilder message;
         auto module = message.getRoot<config::Worker::Module>();
-        module.setEsModule(getPyodideBootstrap());
+        module.setEsModule(PYTHON_ENTRYPOINT);
         auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
         auto path = kj::Path::parse(mainModule->getName());
         modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
       }
-      // Inject metadata that the bootstrap module will read.
+      // Inject metadata that the entrypoint module will read.
       {
         using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
         using JsonModuleInfo = jsg::ModuleRegistry::JsonModuleInfo;
