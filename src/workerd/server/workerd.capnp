@@ -267,7 +267,7 @@ struct Worker {
       # A Python module. All bundles containing this value type are converted into a JS/WASM Worker
       # Bundle prior to execution.
 
-      pythonRequirement @9 :Text;
+      pythonRequirement @9 :Void;
       # A Python package that is required by this bundle. The package must be supported by
       # Pyodide (https://pyodide.org/en/stable/usage/packages-in-pyodide.html). All packages listed
       # will be installed prior to the execution of the worker.
