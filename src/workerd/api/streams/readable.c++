@@ -155,6 +155,9 @@ void ReaderImpl::releaseLock(jsg::Lock& js) {
 }
 
 void ReaderImpl::visitForGc(jsg::GcVisitor& visitor) {
+  KJ_IF_SOME(readable, state.tryGet<Attached>()) {
+    visitor.visit(readable);
+  }
   visitor.visit(closedPromise);
 }
 
