@@ -378,7 +378,6 @@ function mapD1Result<T>(result: D1UpstreamResponse<T>): D1UpstreamResponse<T> {
 
 async function toJson<T = unknown>(response: Response): Promise<T> {
   const body = await response.text()
-  console.log({ body })
   try {
     return JSON.parse(body) as T
   } catch (e) {

@@ -29,6 +29,15 @@ export class D1MockDO {
 
   runQuery(query, resultsFormat) {
     const { sql, params = [] } = query
+
+    const changes_stmt = this.sql.prepare(
+      `SELECT total_changes() as changes, last_insert_rowid() as last_row_id`
+    )
+    const size_before = this.sql.databaseSize
+    const [[changes_before, last_row_id_before]] = Array.from(
+      changes_stmt().raw()
+    )
+
     const stmt = this.sql.prepare(sql)(...params)
     const columnNames = stmt.columnNames
     const rawResults = Array.from(stmt.raw())
@@ -42,10 +51,35 @@ export class D1MockDO {
             Object.fromEntries(columnNames.map((c, i) => [c, row[i]]))
           )
 
+    const [[changes_after, last_row_id_after]] = Array.from(
+      changes_stmt().raw()
+    )
+
+    const size_after = this.sql.databaseSize
+    const num_changes = changes_after - changes_before
+    const has_changes = num_changes !== 0
+    const last_row_changed = last_row_id_after !== last_row_id_before
+
+    const db_size_different = size_after != size_before
+
+    // `changed_db` includes multiple ways the DB might be altered
+    const changed_db = has_changes || last_row_changed || db_size_different
+
+    const { rowsRead: rows_read, rowsWritten: rows_written } = stmt;
+
     return {
       success: true,
       results,
-      meta: { duration: 0.001, served_by: 'd1-mock' },
+      meta: {
+        duration: Math.random() * 0.01,
+        served_by: 'd1-mock',
+        changes: num_changes,
+        last_row_id: last_row_id_after,
+        changed_db,
+        size_after,
+        rows_read,
+        rows_written,
+      },
     }
   }
 }

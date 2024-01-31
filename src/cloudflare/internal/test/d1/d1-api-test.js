@@ -37,12 +37,30 @@ const itShould = async (description, ...assertions) => {
       const expected = assertions[i + 1]
       const actual = await cb()
       deleteAnything(expected, actual)
-      assert.deepEqual(actual, expected)
+      try {
+        assert.deepEqual(actual, expected)
+      } catch (e) {
+        console.log(actual)
+        throw e
+      }
     }
   } catch (e) {
     throw new Error(`TEST ERROR!\n❌ Failed to ${description}\n${e.message}`)
   }
 }
+
+// Make it easy to specify only a the meta properties we're interested in
+const meta = (values) => ({
+  duration: anything,
+  served_by: anything,
+  changes: anything,
+  last_row_id: anything,
+  changed_db: anything,
+  size_after: anything,
+  rows_read: anything,
+  rows_written: anything,
+  ...values,
+})
 
 export const test_d1_api = test(async (DB) => {
   await itShould(
@@ -66,7 +84,7 @@ export const test_d1_api = test(async (DB) => {
     {
       success: true,
       results: [],
-      meta: anything,
+      meta: meta({ changed_db: false }),
     }
   )
 
@@ -236,16 +254,60 @@ export const test_d1_api = test(async (DB) => {
   await itShould(
     'create two tables with overlapping column names',
     () =>
-      DB.exec(`
-        CREATE TABLE abc (a INT, b INT, c INT);
-        CREATE TABLE cde (c INT, d INT, e INT);
-        INSERT INTO abc VALUES (1,2,3),(4,5,6);
-        INSERT INTO cde VALUES (7,8,9),(1,2,3);
-      `),
-    {
-      count: 4,
-      duration: anything,
-    }
+      DB.batch([
+        DB.prepare(`CREATE TABLE abc (a INT, b INT, c INT);`),
+        DB.prepare(`CREATE TABLE cde (c TEXT, d TEXT, e TEXT);`),
+        DB.prepare(`INSERT INTO abc VALUES (1,2,3),(4,5,6);`),
+        DB.prepare(
+          `INSERT INTO cde VALUES ("A", "B", "C"),("D","E","F"),("G","H","I");`
+        ),
+      ]),
+    [
+      {
+        success: true,
+        results: [],
+        meta: meta({
+          changed_db: true,
+          changes: 0,
+          last_row_id: 2,
+          rows_read: 1,
+          rows_written: 2,
+        }),
+      },
+      {
+        success: true,
+        results: [],
+        meta: meta({
+          changed_db: true,
+          changes: 0,
+          last_row_id: 2,
+          rows_read: 1,
+          rows_written: 2,
+        }),
+      },
+      {
+        success: true,
+        results: [],
+        meta: meta({
+          changed_db: true,
+          changes: 2,
+          last_row_id: 2,
+          rows_read: 0,
+          rows_written: 2,
+        }),
+      },
+      {
+        success: true,
+        results: [],
+        meta: meta({
+          changed_db: true,
+          changes: 3,
+          last_row_id: 3,
+          rows_read: 0,
+          rows_written: 3,
+        }),
+      },
+    ]
   )
 
   await itShould(
@@ -254,12 +316,19 @@ export const test_d1_api = test(async (DB) => {
     {
       success: true,
       results: [
-        { a: 1, b: 2, c: 7, d: 8, e: 9 },
-        { a: 1, b: 2, c: 1, d: 2, e: 3 },
-        { a: 4, b: 5, c: 7, d: 8, e: 9 },
-        { a: 4, b: 5, c: 1, d: 2, e: 3 },
+        { a: 1, b: 2, c: 'A', d: 'B', e: 'C' },
+        { a: 1, b: 2, c: 'D', d: 'E', e: 'F' },
+        { a: 1, b: 2, c: 'G', d: 'H', e: 'I' },
+        { a: 4, b: 5, c: 'A', d: 'B', e: 'C' },
+        { a: 4, b: 5, c: 'D', d: 'E', e: 'F' },
+        { a: 4, b: 5, c: 'G', d: 'H', e: 'I' },
       ],
-      meta: anything,
+      meta: meta({
+        changed_db: false,
+        changes: 0,
+        rows_read: 8,
+        rows_written: 0,
+      }),
     }
   )
 
@@ -267,10 +336,22 @@ export const test_d1_api = test(async (DB) => {
     'not lose data for duplicate columns in a join using raw',
     () => DB.prepare(`SELECT * FROM abc, cde;`).raw(),
     [
-      [1, 2, 3, 7, 8, 9],
-      [1, 2, 3, 1, 2, 3],
-      [4, 5, 6, 7, 8, 9],
-      [4, 5, 6, 1, 2, 3],
+      [1, 2, 3, 'A', 'B', 'C'],
+      [1, 2, 3, 'D', 'E', 'F'],
+      [1, 2, 3, 'G', 'H', 'I'],
+      [4, 5, 6, 'A', 'B', 'C'],
+      [4, 5, 6, 'D', 'E', 'F'],
+      [4, 5, 6, 'G', 'H', 'I'],
     ]
+  )
+
+  await itShould(
+    'return 0 rows_written for IN clauses',
+    () => DB.prepare(`SELECT * from cde WHERE c IN ('A','B','C','X','Y','Z')`).all(),
+    {
+      success: true,
+      results: [{ c: 'A', d: 'B', e: 'C' }],
+      meta: meta({ rows_read: 3, rows_written: 0 }),
+    }
   )
 })
