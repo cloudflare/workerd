@@ -675,7 +675,7 @@ MemoryTracker& MemoryTracker::trackInlineField(
     const T* retainer,
     kj::Maybe<kj::StringPtr> edgeName) {
   track(retainer, edgeName);
-  KJ_ASSERT_NONNULL(getCurrentNode()).size_ -= retainer->getMemorySelfSize();
+  KJ_ASSERT_NONNULL(getCurrentNode()).size_ -= retainer->jsgGetMemorySelfSize();
   return *this;
 }
 

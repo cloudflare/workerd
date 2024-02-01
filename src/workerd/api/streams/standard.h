@@ -256,6 +256,11 @@ public:
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(resolver, value);
     }
+
+    JSG_MEMORY_INFO(WriteRequest) {
+      tracker.trackField("resolver", resolver);
+      tracker.trackField("value", value);
+    }
   };
 
   WritableImpl(kj::Own<WeakRef<WritableStreamJsController>> owner);
@@ -320,6 +325,10 @@ public:
   bool isWritable() const;
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  kj::StringPtr jsgGetMemoryName() const;
+  size_t jsgGetMemorySelfSize() const;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
 
@@ -582,6 +591,8 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(signal, getSignal);
     JSG_METHOD(error);
   }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   kj::Maybe<IoContext&> ioContext;
