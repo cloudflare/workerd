@@ -122,6 +122,11 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("promise", promise);
+    tracker.trackField("reason", reason);
+  }
+
 private:
   jsg::V8Ref<v8::Promise> promise;
   jsg::Value reason;
@@ -655,6 +660,10 @@ public:
 
   TimeoutId::Generator timeoutIdGenerator;
   // The generator for all timeout IDs associated with this scope.
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("unhandledRejections", unhandledRejections);
+  }
 
 private:
   jsg::UnhandledRejectionHandler unhandledRejections;
