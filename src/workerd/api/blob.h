@@ -60,6 +60,18 @@ public:
     JSG_METHOD(stream);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    KJ_SWITCH_ONEOF(ownData) {
+      KJ_CASE_ONEOF(data, kj::Array<byte>) {
+        tracker.trackField("ownData", data);
+      }
+      KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
+        tracker.trackField("ownData", data);
+      }
+    }
+    tracker.trackField("type", type);
+  }
+
 private:
   kj::OneOf<kj::Array<byte>, jsg::Ref<Blob>> ownData;
   kj::ArrayPtr<const byte> data;
@@ -104,6 +116,10 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(name, getName);
       JSG_READONLY_INSTANCE_PROPERTY(lastModified, getLastModified);
     }
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("name", name);
   }
 
 private:
