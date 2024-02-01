@@ -13,6 +13,7 @@ jsg::V8System v8System;
 
 struct QueueContext: public jsg::Object, public jsg::ContextGlobal {
   JSG_RESOURCE_TYPE(QueueContext) {}
+  const jsg::Object& getSelfObject() const override { return *this; }
 };
 JSG_DECLARE_ISOLATE_TYPE(QueueIsolate, QueueContext);
 

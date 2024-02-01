@@ -12,6 +12,7 @@ namespace {
 V8System v8System;
 
 struct DOMExceptionContext: public Object, public ContextGlobal {
+  const jsg::Object& getSelfObject() const override { return *this; }
   JSG_RESOURCE_TYPE(DOMExceptionContext) {
     JSG_NESTED_TYPE(DOMException);
   }

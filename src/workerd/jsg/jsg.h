@@ -16,6 +16,7 @@
 #include <v8.h>
 #include <v8-profiler.h>
 #include <workerd/jsg/memory.h>
+#include <workerd/util/weak-refs.h>
 #include "macro-meta.h"
 #include "wrappable.h"
 #include "util.h"
@@ -1529,13 +1530,26 @@ class ModuleRegistry;
 // The lifetime of the global object matches the lifetime of the JavaScript context.
 class ContextGlobal {
 public:
-  ContextGlobal() {}
+  inline ContextGlobal()
+      : self(kj::refcounted<WeakRef<ContextGlobal>>(kj::Badge<ContextGlobal> {}, *this)) {}
+  inline virtual ~ContextGlobal() noexcept(false) {
+    KJ_DASSERT(self.get() != nullptr);
+    self->invalidate();
+  }
 
   KJ_DISALLOW_COPY_AND_MOVE(ContextGlobal);
 
   ModuleRegistry& getModuleRegistry() { return *moduleRegistry; }
 
+  inline kj::Own<WeakRef<ContextGlobal>> addWeakRef() {
+    KJ_ASSERT(self.get() != nullptr);
+    return self->addRef();
+  }
+
+  virtual const Object& getSelfObject() const = 0;
+
 private:
+  kj::Own<WeakRef<ContextGlobal>> self;
   kj::Own<ModuleRegistry> moduleRegistry;
 
   void setModuleRegistry(kj::Own<ModuleRegistry> registry) {
@@ -2481,6 +2495,10 @@ inline v8::Local<v8::Data> Data::getHandle(jsg::Lock& js) {
 template <typename T>
 inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) {
   return handle.Get(js.v8Isolate);
+}
+
+MemoryTracker& MemoryTracker::trackField(const ContextGlobal& value) {
+ return trackField(nullptr, value.getSelfObject());
 }
 
 }  // namespace workerd::jsg

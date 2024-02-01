@@ -170,6 +170,12 @@ void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate,
 void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
   tracker.trackField("uuid", uuid);
   tracker.trackField("heapTracer", heapTracer);
+  for (auto& ctx : contextGlobals) {
+    KJ_ASSERT(ctx.get() != nullptr);
+    ctx->runIfAlive([&](ContextGlobal& context) {
+      tracker.trackField(context);
+    });
+  }
 }
 
 void IsolateBase::deferDestruction(Item item) {
@@ -678,6 +684,18 @@ kj::StringPtr IsolateBase::getUuid() {
   // Lazily create a random UUID for this isolate.
   KJ_IF_SOME(u, uuid) { return u; }
   return uuid.emplace(randomUUID(kj::none));
+}
+
+void IsolateBase::purgeInvalidContextGlobals() {
+  auto released = contextGlobals.releaseAsArray();
+  contextGlobals.clear();
+  KJ_ASSERT(contextGlobals.empty());
+  for (auto& ctx : released) {
+    KJ_ASSERT(ctx.get() != nullptr);
+    if (ctx->isValid()) {
+      contextGlobals.add(kj::mv(ctx));
+    }
+  }
 }
 
 }  // namespace workerd::jsg

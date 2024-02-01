@@ -10,6 +10,7 @@ namespace {
 V8System v8System;
 
 struct GeneratorContext: public Object, public ContextGlobal {
+  const jsg::Object& getSelfObject() const override { return *this; }
 
   uint generatorTest(Lock& js, Generator<kj::String> generator) {
 

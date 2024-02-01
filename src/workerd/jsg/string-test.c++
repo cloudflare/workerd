@@ -351,6 +351,7 @@ KJ_TEST("UsvString from kj::String") {
 V8System v8System;
 
 struct UsvStringContext: public jsg::Object, public jsg::ContextGlobal {
+  const jsg::Object& getSelfObject() const override { return *this; }
   UsvString testUsv(jsg::Optional<UsvString> str) {
     return kj::mv(str).orDefault(usv("undefined"));
   }

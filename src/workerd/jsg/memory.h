@@ -27,6 +27,7 @@ class MemoryRetainerNode;
 
 template <typename T> class V8Ref;
 template <typename T> class Ref;
+class ContextGlobal;
 
 enum class MemoryInfoDetachedState {
   UNKNOWN,
@@ -89,6 +90,8 @@ public:
   inline MemoryTracker& trackInlineFieldWithSize(
       kj::StringPtr edgeName, size_t size,
       kj::Maybe<kj::StringPtr> nodeName = kj::none) KJ_LIFETIMEBOUND;
+
+  inline MemoryTracker& trackField(const ContextGlobal& value) KJ_LIFETIMEBOUND;
 
   template <MemoryRetainer T>
   inline MemoryTracker& trackField(

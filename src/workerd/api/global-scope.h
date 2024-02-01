@@ -136,6 +136,8 @@ private:
 
 class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
 public:
+  const jsg::Object& getSelfObject() const override { return *this; }
+
   jsg::Unimplemented importScripts(kj::String s) { return {}; };
 
   JSG_RESOURCE_TYPE(WorkerGlobalScope, CompatibilityFlags::Reader flags) {

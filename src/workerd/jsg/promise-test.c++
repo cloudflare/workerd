@@ -14,6 +14,7 @@ int promiseTestResult = 0;
 kj::String catchTestResult;
 
 struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
+  const jsg::Object& getSelfObject() const override { return *this; }
   Promise<kj::String> makePromise(jsg::Lock& js) {
     auto [ p, r ] = js.newPromiseAndResolver<int>();
     resolver = kj::mv(r);

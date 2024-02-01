@@ -15,6 +15,7 @@ namespace {
 jsg::V8System v8System;
 
 struct CaptureThrowContext: public jsg::Object, public ContextGlobal {
+  const jsg::Object& getSelfObject() const override { return *this; }
   kj::Promise<int> test1() {
     JSG_FAIL_REQUIRE(TypeError, "boom");
   }

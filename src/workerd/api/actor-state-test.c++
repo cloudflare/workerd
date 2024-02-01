@@ -27,6 +27,7 @@ jsg::V8System v8System;
 struct ActorStateContext: public jsg::Object, public jsg::ContextGlobal {
   JSG_RESOURCE_TYPE(ActorStateContext) {
   }
+  const jsg::Object& getSelfObject() const override { return *this; }
 };
 JSG_DECLARE_ISOLATE_TYPE(ActorStateIsolate, ActorStateContext);
 

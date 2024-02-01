@@ -102,6 +102,7 @@ private:
 };
 
 struct TraceTestContext: public Object, public ContextGlobal {
+  const jsg::Object& getSelfObject() const override { return *this; }
   kj::Maybe<jsg::Ref<NumberBox>> strongRef;
   // A strong reference to a NumberBox which may be get and set.
 

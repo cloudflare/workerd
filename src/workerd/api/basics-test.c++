@@ -53,6 +53,8 @@ struct BasicsContext: public jsg::Object, public jsg::ContextGlobal {
   JSG_RESOURCE_TYPE(BasicsContext) {
     JSG_METHOD(test);
   }
+
+  const jsg::Object& getSelfObject() const override { return *this; }
 };
 JSG_DECLARE_ISOLATE_TYPE(
   BasicsIsolate,

@@ -9,7 +9,10 @@ namespace workerd::jsg::test {
 namespace {
 
 V8System v8System;
-class ContextGlobalObject: public Object, public ContextGlobal {};
+class ContextGlobalObject: public Object, public ContextGlobal {
+public:
+  const jsg::Object& getSelfObject() const override { return *this; }
+};
 
 struct BoxContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(BoxContext) {

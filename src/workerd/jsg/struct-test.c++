@@ -17,6 +17,7 @@ struct SelfStruct {
 };
 
 struct StructContext: public Object, public ContextGlobal {
+  const jsg::Object& getSelfObject() const override { return *this; }
   kj::String readTestStruct(TestStruct s) {
     return kj::str(s.str, ", ", s.num, ", ", s.box->value);
   }

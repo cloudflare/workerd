@@ -239,12 +239,14 @@ private:
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 
-  friend class IsolateBase;
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
   HeapTracer heapTracer;
   std::unique_ptr<v8::CppHeap> cppgcHeap;
   kj::Own<IsolateObserver> observer;
+
+  kj::Vector<kj::Own<WeakRef<ContextGlobal>>> contextGlobals;
+  void purgeInvalidContextGlobals();
 
   friend class Data;
   friend class Wrappable;
@@ -355,6 +357,7 @@ public:
     // order for V8's stack-scanning GC to find them.
     Lock(const Isolate& isolate, V8StackScope&)
         : jsg::Lock(isolate.ptr), jsgIsolate(const_cast<Isolate&>(isolate)) {
+      jsgIsolate.purgeInvalidContextGlobals();
       jsgIsolate.clearDestructionQueue();
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
@@ -436,7 +439,10 @@ public:
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
 
-      return jsgIsolate.wrapper->newContext(*this, jsgIsolate.getObserver(), (T*)nullptr, kj::fwd<Args>(args)...);
+      auto ctx = jsgIsolate.wrapper->newContext(*this, jsgIsolate.getObserver(),
+          (T*)nullptr, kj::fwd<Args>(args)...);
+      jsgIsolate.contextGlobals.add(ctx->addWeakRef());
+      return kj::mv(ctx);
     }
 
   private:

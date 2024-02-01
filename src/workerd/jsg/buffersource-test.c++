@@ -12,6 +12,7 @@ namespace {
 V8System v8System;
 
 struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
+  const jsg::Object& getSelfObject() const override { return *this; }
   BufferSource takeBufferSource(BufferSource buf) {
     auto ptr = buf.asArrayPtr();
     KJ_ASSERT(!buf.isDetached());
