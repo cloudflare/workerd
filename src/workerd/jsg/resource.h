@@ -653,6 +653,16 @@ struct WildcardPropertyCallbacks<
   }
 };
 
+template<typename TypeWrapper>
+decltype(std::declval<TypeWrapper&>().jsgGetMemoryName()) typeWrapperName(TypeWrapper &typeWrapper) {
+  return typeWrapper.jsgGetMemoryName();
+}
+
+template<typename TypeWrapper>
+kj::StringPtr typeWrapperName(TypeWrapper &typeWrapper) {
+  return "Object"_kj;
+}
+
 // ======================================================================================
 
 // Used by the JSG_METHOD macro to register a method on a resource type.
@@ -679,6 +689,9 @@ struct ResourceTypeBuilder {
     inspectProperties = v8::ObjectTemplate::New(isolate);
     prototype->Set(symbol, inspectProperties, static_cast<v8::PropertyAttribute>(
       v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+
+    auto toStringTagSymbol = v8::Symbol::GetToStringTag(isolate);
+    prototype->Set(toStringTagSymbol, v8StrIntern(isolate, typeWrapperName(typeWrapper)), v8::PropertyAttribute::ReadOnly);
   }
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
