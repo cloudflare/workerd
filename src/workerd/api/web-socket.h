@@ -339,11 +339,11 @@ public:
   // Same as accept(), but websockets that are created with `new WebSocket()` in JS cannot call
   // accept(). Instead, we only permit the C++ constructor to call this "internal" version of accept()
   // so that the websocket can start processing messages once the connection has been established.
-  void internalAccept(jsg::Lock& js);
+  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
 
   // We defer the actual logic of accept() and internalAccept() to this method, since they largely
   // share code.
-  void startReadLoop(jsg::Lock& js);
+  void startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
 
   void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message);
   void close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<kj::String> reason);
@@ -630,7 +630,7 @@ private:
       IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native,
       AutoResponse& autoResponse);
 
-  kj::Promise<kj::Maybe<kj::Exception>> readLoop();
+  kj::Promise<kj::Maybe<kj::Exception>> readLoop(kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
 
   void reportError(jsg::Lock& js, kj::Exception&& e);
   void reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err);

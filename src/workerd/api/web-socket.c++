@@ -120,7 +120,7 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
     }
 
     // Fire open event.
-    internalAccept(js);
+    internalAccept(js, IoContext::current().getCriticalSection());
     dispatchOpen(js);
   }).catch_(js, [this, self = JSG_THIS](jsg::Lock& js, jsg::Value&& e) mutable {
     // Fire error event.
@@ -375,14 +375,14 @@ void WebSocket::accept(jsg::Lock& js) {
     return;
   }
 
-  internalAccept(js);
+  internalAccept(js, IoContext::current().getCriticalSection());
 }
 
-void WebSocket::internalAccept(jsg::Lock& js) {
+void WebSocket::internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
   auto& native = *farNative;
   auto nativeWs = kj::mv(KJ_ASSERT_NONNULL(native.state.tryGet<AwaitingAcceptanceOrCoupling>()).ws);
   native.state.init<Accepted>(kj::mv(nativeWs), native, IoContext::current());
-  return startReadLoop(js);
+  return startReadLoop(js, kj::mv(cs));
 }
 
 WebSocket::Accepted::Accepted(kj::Own<kj::WebSocket> wsParam, Native& native, IoContext& context)
@@ -448,7 +448,7 @@ WebSocket::Accepted::~Accepted() noexcept(false) {
   }
 }
 
-void WebSocket::startReadLoop(jsg::Lock& js) {
+void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
   // If the kj::WebSocket happens to be an AbortableWebSocket (see util/abortable.h), then
   // calling readLoop here could throw synchronously if the canceler has already been tripped.
   // Using kj::evalNow() here let's us capture that and handle correctly.
@@ -456,7 +456,7 @@ void WebSocket::startReadLoop(jsg::Lock& js) {
   // We catch exceptions and return Maybe<Exception> instead since we want to handle the exceptions
   // in awaitIo() below, but we don't want the KJ exception converted to JavaScript before we can
   // examine it.
-  kj::Promise<kj::Maybe<kj::Exception>> promise = readLoop();
+  kj::Promise<kj::Maybe<kj::Exception>> promise = readLoop(kj::mv(cs));
 
   auto& context = IoContext::current();
 
@@ -901,7 +901,8 @@ kj::Array<kj::StringPtr> WebSocket::getHibernatableTags() {
   return accepted.ws.getHibernatableTags();
 }
 
-kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop() {
+kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
+    kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
   try {
     // Note that we'll throw if the websocket has enabled hibernation.
     auto& ws = *KJ_REQUIRE_NONNULL(
@@ -947,7 +948,7 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop() {
         }
 
         return true;
-      });
+      }, mapAddRef(cs));
 
       if (!result) co_return kj::none;
     }
