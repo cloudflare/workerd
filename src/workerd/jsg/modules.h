@@ -27,6 +27,11 @@ public:
   JSG_RESOURCE_TYPE(CommonJsModuleObject) {
     JSG_INSTANCE_PROPERTY(exports, getExports, setExports);
   }
+
+  void visitForMemoryInfo(MemoryTracker& tracker) const {
+    tracker.trackField("exports", exports);
+  }
+
 private:
   jsg::Value exports;
 };
@@ -52,6 +57,12 @@ public:
   }
 
   jsg::Ref<CommonJsModuleObject> module;
+
+  void visitForMemoryInfo(MemoryTracker& tracker) const {
+    tracker.trackField("exports", exports);
+    tracker.trackFieldWithSize("path", path.size());
+  }
+
 private:
   kj::Path path;
   jsg::Value exports;
@@ -90,6 +101,12 @@ public:
     JSG_INSTANCE_PROPERTY(exports, getExports, setExports);
     JSG_READONLY_INSTANCE_PROPERTY(path, getPath);
   }
+
+  void visitForMemoryInfo(MemoryTracker& tracker) const {
+    tracker.trackField("exports", exports);
+    tracker.trackField("path", path);
+  }
+
 private:
   jsg::Value exports;
   kj::String path;
@@ -131,6 +148,12 @@ public:
   }
 
   jsg::Ref<NodeJsModuleObject> module;
+
+  void visitForMemoryInfo(MemoryTracker& tracker) const {
+    tracker.trackField("exports", exports);
+    tracker.trackFieldWithSize("path", path.size());
+  }
+
 private:
   kj::Path path;
   jsg::Value exports;
@@ -184,6 +207,10 @@ public:
   ModuleRegistry() { }
 
   using Type = ModuleType;
+
+  JSG_MEMORY_INFO(ModuleRegistry) {
+    // TODO(soon): Implement memory tracking for ModuleRegistry
+  }
 
   enum class ResolveOption {
     // Default resolution. Check the worker bundle first, then builtins.

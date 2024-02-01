@@ -6,6 +6,7 @@
 
 #include "jsg.h"
 #include "struct.h"
+#include <workerd/jsg/memory.h>
 #include <concepts>
 #include <deque>
 
@@ -670,6 +671,14 @@ public:
     }
   }
 
+  JSG_MEMORY_INFO(IteratorBase) {
+    if constexpr (MemoryRetainer<State>) {
+      tracker.trackField("state", state);
+    } else {
+      tracker.trackFieldWithSize("state", sizeof(State));
+    }
+  }
+
 private:
   State state;
 
@@ -703,6 +712,10 @@ public:
     Optional<Type> value;
     JSG_STRUCT(done, value);
   };
+
+  JSG_MEMORY_INFO(AsyncIteratorImpl) {
+    // TODO(soon): Implement memory tracking
+  }
 
 private:
   std::deque<Promise<void>> pendingStack;
@@ -780,10 +793,30 @@ public:
     }
   }
 
+  JSG_MEMORY_INFO(AsyncIteratorBase) {
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(fin, Finished) {
+        tracker.trackFieldWithSize("state", sizeof(Finished));
+      }
+      KJ_CASE_ONEOF(state, InnerState) {
+        tracker.trackField("state", state);
+      }
+    }
+  }
+
 private:
   struct InnerState {
     State state;
     AsyncIteratorImpl impl;
+
+    JSG_MEMORY_INFO(InnerState) {
+      if constexpr (MemoryRetainer<State>) {
+        tracker.trackField("state", state);
+      } else {
+        tracker.trackField("state", sizeof(State));
+      }
+      tracker.trackField("impl", impl);
+    }
   };
 
   kj::OneOf<Finished, InnerState> state;

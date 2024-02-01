@@ -11,7 +11,7 @@ namespace workerd::jsg::test {
 namespace {
 
 V8System v8System;
-class ContextGlobalObject: public Object, public ContextGlobal { };
+class ContextGlobalObject: public Object, public ContextGlobal {};
 
 struct FreezeContext: public ContextGlobalObject {
   void recursivelyFreeze(v8::Local<v8::Value> value, v8::Isolate* isolate) {

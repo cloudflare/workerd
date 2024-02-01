@@ -129,6 +129,15 @@ public:
   };
   struct Dead {};
 
+  kj::StringPtr jsgGetMemoryName() const { return "CppgcShim"_kjc; }
+  size_t jsgGetMemorySelfSize() const { return sizeof(CppgcShim); }
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const {
+    KJ_IF_SOME(active, state.tryGet<Active>()) {
+      tracker.trackField("wrappable", active.wrappable);
+    }
+  }
+  bool jsgGetMemoryInfoIsRootNode() const { return false; }
+
   mutable kj::OneOf<Active, Freelisted, Dead> state;
   // This is `mutable` because `Trace()` is const. We configure V8 to perform traces atomically in
   // the main thread so concurrency is not a concern.
@@ -169,6 +178,13 @@ void HeapTracer::clearFreelistedShims() {
       break;
     }
   }
+}
+
+void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  for (const auto& wrapper : wrappers) {
+    tracker.trackField("wrapper", wrapper);
+  }
+  // TODO(soon): Track the other fields here?
 }
 
 kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
@@ -324,6 +340,10 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
     GcVisitor visitor(*this, kj::none);
     jsgVisitForGc(visitor);
   }
+}
+
+void Wrappable::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("cppgcshim", cppgcShim);
 }
 
 v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(

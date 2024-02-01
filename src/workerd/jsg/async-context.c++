@@ -4,6 +4,7 @@
 #include "async-context.h"
 #include "jsg.h"
 #include "setup.h"
+#include <workerd/jsg/memory.h>
 #include <v8.h>
 
 namespace workerd::jsg {
@@ -40,6 +41,13 @@ AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry) {
   storage.upsert(kj::mv(storageEntry), [](StorageEntry& existing, StorageEntry&& row) mutable {
     existing.value = kj::mv(row.value);
   });
+}
+
+AsyncContextFrame::StorageEntry::StorageEntry(kj::Own<StorageKey> key, Value value)
+    : key(kj::mv(key)), value(kj::mv(value)) {}
+
+AsyncContextFrame::StorageEntry AsyncContextFrame::StorageEntry::clone(Lock& js) {
+  return StorageEntry(kj::addRef(*key), value.addRef(js));
 }
 
 kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(Lock& js) {
@@ -172,10 +180,7 @@ AsyncContextFrame::StorageScope::StorageScope(
     Lock& js,
     StorageKey& key,
     Value store)
-    : frame(AsyncContextFrame::create(js, StorageEntry {
-        .key = kj::addRef(key),
-        .value = kj::mv(store)
-      })),
+    : frame(AsyncContextFrame::create(js, StorageEntry(kj::addRef(key), kj::mv(store)))),
       scope(js, *frame) {}
 
 v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(v8::Isolate* isolate) {

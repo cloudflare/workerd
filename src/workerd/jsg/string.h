@@ -369,6 +369,10 @@ public:
     return slice(start.position(), end.position());
   }
 
+  JSG_MEMORY_INFO(UsvString) {
+    tracker.trackField("buffer", buffer);
+  }
+
 private:
   kj::Array<uint32_t> buffer;
 

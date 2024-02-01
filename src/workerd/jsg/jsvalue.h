@@ -455,12 +455,18 @@ public:
   operator V8Ref<U>() && { return kj::mv(value).template cast<U>(
       Lock::from(v8::Isolate::GetCurrent())); }
 
+  JSG_MEMORY_INFO(JsRef) {
+    tracker.trackField("value", value);
+  }
+
 private:
   Value value;
   friend class JsValue;
 #define V(Name) friend class Js##Name;
   JS_TYPE_CLASSES(V)
 #undef V
+
+  friend class MemoryTracker;
 };
 
 template <typename T, typename Self>

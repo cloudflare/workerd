@@ -203,4 +203,9 @@ void UnhandledRejectionHandler::ensureProcessingWarnings(jsg::Lock& js) {
   });
 }
 
+void UnhandledRejectionHandler::UnhandledRejection::visitForMemoryInfo(
+    MemoryTracker& tracker) const {
+  tracker.trackField("asyncContextFrame", asyncContextFrame);
+}
+
 }  // namespace workerd::jsg

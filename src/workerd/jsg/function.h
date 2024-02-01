@@ -23,6 +23,20 @@ public:
   virtual Ret operator()(Lock& js, Args&&... args) = 0;
 
   const bool needsGcTracing;
+
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "WrappableFunction"_kjc;
+  }
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(WrappableFunction<Ret(Args...)>);
+  }
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+    Wrappable::jsgGetMemoryInfo(tracker);
+    visitForMemoryInfo(tracker);
+  }
+  virtual void visitForMemoryInfo(MemoryTracker& tracker) const {
+    // TODO(soon): Implement tracking for WrappableFunction.
+  }
 };
 
 template <typename Signature, typename Impl, bool = hasPublicVisitForGc<Impl>()>
@@ -240,6 +254,17 @@ public:
     }
   }
 
+  JSG_MEMORY_INFO(Function) {
+    KJ_SWITCH_ONEOF(impl) {
+      KJ_CASE_ONEOF(ref, Ref<NativeFunction>) {
+        tracker.trackField("native", ref);
+      }
+      KJ_CASE_ONEOF(impl, JsImpl) {
+        tracker.trackField("impl", impl);
+      }
+    }
+  }
+
 private:
   Function(Ref<NativeFunction>&& func) : impl(kj::mv(func)) {}
 
@@ -247,9 +272,15 @@ private:
     Wrapper* wrapper;
     Value receiver;
     V8Ref<v8::Function> handle;
+
+    JSG_MEMORY_INFO(JsImpl) {
+      tracker.trackField("receiver", receiver);
+      tracker.trackField("handle", handle);
+    }
   };
 
   kj::OneOf<Ref<NativeFunction>, JsImpl> impl;
+  friend class MemoryTracker;
 };
 
 template <typename T>

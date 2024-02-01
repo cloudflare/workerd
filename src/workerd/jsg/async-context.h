@@ -90,6 +90,8 @@ public:
       return this == &other;
     }
 
+    JSG_MEMORY_INFO(StorageKey) {}
+
   private:
     uint hash;
     bool dead = false;
@@ -98,12 +100,12 @@ public:
   struct StorageEntry {
     kj::Own<StorageKey> key;
     Value value;
+    StorageEntry(kj::Own<StorageKey> key, Value value);
+    StorageEntry clone(Lock& js);
 
-    inline StorageEntry clone(Lock& js) {
-      return {
-        .key = kj::addRef(*key),
-        .value = value.addRef(js)
-      };
+    JSG_MEMORY_INFO(StorageEntry) {
+      tracker.trackField("key", key);
+      tracker.trackField("value", value);
     }
   };
 
@@ -188,6 +190,13 @@ public:
     StorageScope(Lock& js, StorageKey& key, Value store);
     KJ_DISALLOW_COPY(StorageScope);
   };
+
+  kj::StringPtr jsgGetMemoryName() const override { return "AsyncContextFrame"_kjc; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(AsyncContextFrame); }
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+    Wrappable::jsgGetMemoryInfo(tracker);
+    tracker.trackField("storage", storage);
+  }
 
 private:
   struct StorageEntryCallbacks {
