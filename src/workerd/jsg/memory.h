@@ -12,6 +12,7 @@
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/hash.h>
+#include <kj/map.h>
 #include <kj/table.h>
 #include <kj/string.h>
 #include <v8-profiler.h>
@@ -159,6 +160,19 @@ public:
       kj::Maybe<kj::StringPtr> elementName = kj::none,
       bool subtractFromSelf = true) KJ_LIFETIMEBOUND;
 
+  template <typename Key, typename Value>
+  MemoryTracker& trackField(
+      kj::StringPtr edgeName,
+      const kj::HashMap<Key, Value>& value,
+      kj::Maybe<kj::StringPtr> nodeName = kj::none) KJ_LIFETIMEBOUND;
+
+  // template <typename Key, typename Value>
+  // MemoryTracker& trackField(
+  //     kj::StringPtr edgeName,
+  //     const Key& key,
+  //     const Value& value,
+  //     kj::Maybe<kj::StringPtr> nodeName = kj::none) KJ_LIFETIMEBOUND;
+
   template <MemoryRetainer T, typename Iterator = typename T::const_iterator>
   inline MemoryTracker& trackField(
       kj::StringPtr edgeName,
@@ -193,15 +207,6 @@ public:
   inline MemoryTracker& trackField(
       kj::StringPtr edgeName,
       const std::basic_string<T>& value,
-      kj::Maybe<kj::StringPtr> nodeName = kj::none) KJ_LIFETIMEBOUND;
-
-  template <typename T,
-            typename test_for_number = typename std::
-                enable_if<std::numeric_limits<T>::is_specialized, bool>::type,
-            typename dummy = bool>
-  inline MemoryTracker& trackField(
-      kj::StringPtr edgeName,
-      const T& value,
       kj::Maybe<kj::StringPtr> nodeName = kj::none) KJ_LIFETIMEBOUND;
 
   template <V8Value T>
@@ -243,38 +248,16 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(MemoryTracker);
 
 private:
-
-  struct NodeMapEntry {
-    const void* retainer;
-    MemoryRetainerNode* node;
-  };
-
-  struct NodeMapCallbacks {
-    const void* keyForRow(const NodeMapEntry& row) const {
-      return row.retainer;
-    }
-    bool matches(const NodeMapEntry& row, const void* key) const {
-      return row.retainer == key;
-    }
-    kj::uint hashCode(const void* row) const {
-      return kj::hashCode(row);
-    }
-  };
-
-  using NodeMap = kj::Table<NodeMapEntry, kj::HashIndex<NodeMapCallbacks>,
-                                          kj::InsertionOrderIndex>;
-
   v8::Isolate* isolate_;
   v8::EmbedderGraph* graph_;
   std::stack<MemoryRetainerNode*> nodeStack_;
-  NodeMap seen_;
+  kj::HashMap<const void*, MemoryRetainerNode*> seen_;
   KJ_DISALLOW_AS_COROUTINE_PARAM;
 
   inline explicit MemoryTracker(v8::Isolate* isolate,
                                 v8::EmbedderGraph* graph)
     : isolate_(isolate),
-      graph_(graph),
-      seen_(NodeMapCallbacks(), {}) {}
+      graph_(graph) {}
 
   inline kj::Maybe<MemoryRetainerNode&> getCurrentNode() const;
 
@@ -311,7 +294,9 @@ public:
 
   const char* NamePrefix() override { return PREFIX; }
 
-  size_t SizeInBytes() override { return size_; }
+  size_t SizeInBytes() override {
+    return size_;
+  }
 
   bool IsRootNode() override {
     KJ_IF_SOME(check, checkIsRootNode) {
@@ -346,8 +331,8 @@ private:
   template <MemoryRetainer T>
   inline MemoryRetainerNode(MemoryTracker* tracker,
                             const T* retainer)
-      : retainer_(retainer) {
-    KJ_ASSERT(retainer_ != nullptr);
+      : name_(retainer->jsgGetMemoryName()),
+        size_(retainer->jsgGetMemorySelfSize()) {
     v8::HandleScope handle_scope(tracker->isolate());
     if constexpr (MemoryRetainerObject<T>) {
       v8::Local<v8::Object> obj =
@@ -358,8 +343,6 @@ private:
       checkIsRootNode = [retainer]() { return retainer->jsgGetMemoryInfoIsRootNode(); };
     }
 
-    name_ = retainer->jsgGetMemoryName();
-    size_ = retainer->jsgGetMemorySelfSize();
     if constexpr (MemoryRetainerDetachedState<T>) {
       detachedness_ = fromDetachedState(retainer->jsgGetMemoryInfoDetachedState());
     }
@@ -369,18 +352,17 @@ private:
                             kj::StringPtr name,
                             size_t size,
                             bool isRootNode = false)
-      : isRootNode_(isRootNode),
-        name_(name),
-        size_(size) {}
+      : name_(name),
+        size_(size),
+        isRootNode_(isRootNode) {}
 
-  const void* retainer_ = nullptr;
+  kj::StringPtr name_;
+  size_t size_ = 0;
   v8::EmbedderGraph::Node* wrapper_node_ = nullptr;
 
   kj::Maybe<kj::Function<bool()>> checkIsRootNode = kj::none;
 
   bool isRootNode_ = false;
-  kj::StringPtr name_;
-  size_t size_ = 0;
   v8::EmbedderGraph::Node::Detachedness detachedness_ =
       v8::EmbedderGraph::Node::Detachedness::kUnknown;
 
@@ -405,7 +387,7 @@ MemoryTracker& MemoryTracker::trackInlineFieldWithSize(
     kj::StringPtr edgeName, size_t size,
     kj::Maybe<kj::StringPtr> nodeName) {
   if (size > 0) addNode(getNodeName(nodeName, edgeName), size, edgeName);
-  KJ_ASSERT_NONNULL(getCurrentNode()).size_ = size;
+  KJ_ASSERT_NONNULL(getCurrentNode()).size_ -= size;
   return *this;
 }
 
@@ -505,6 +487,23 @@ MemoryTracker& MemoryTracker::trackField(
   return *this;
 }
 
+template <typename Key, typename Value>
+MemoryTracker& MemoryTracker::trackField(
+    kj::StringPtr edgeName,
+    const kj::HashMap<Key, Value>& value,
+    kj::Maybe<kj::StringPtr> nodeName) {
+  if (value.size() == 0) return *this;
+  pushNode(getNodeName(nodeName, edgeName),
+      sizeof(kj::HashMap<Key, Value>), edgeName);
+
+  for (const auto& entry : value) {
+    trackField("key", entry.key);
+    trackField("value", entry.value);
+  }
+  popNode();
+  return *this;
+}
+
 template <MemoryRetainer T, typename Iterator>
 MemoryTracker& MemoryTracker::trackField(
     kj::StringPtr edgeName,
@@ -587,23 +586,14 @@ MemoryTracker& MemoryTracker::trackField(
   if (value == nullptr) return *this;
   KJ_IF_SOME(found, seen_.find(value)) {
     KJ_IF_SOME(currentNode, getCurrentNode()) {
-      graph_->AddEdge(&currentNode, found.node, edgeName.cStr());
+      graph_->AddEdge(&currentNode, found, edgeName.cStr());
     } else {
-      graph_->AddEdge(nullptr, found.node, edgeName.cStr());
+      graph_->AddEdge(nullptr, found, edgeName.cStr());
     }
     return *this;
   }
 
   return track(value, edgeName);
-}
-
-template <typename T, typename test_for_number, typename dummy>
-MemoryTracker& MemoryTracker::trackField(
-    kj::StringPtr edgeName,
-    const T& value,
-    kj::Maybe<kj::StringPtr> nodeName) {
-  KJ_ASSERT_NONNULL(getCurrentNode()).size_ += sizeof(T);
-  return *this;
 }
 
 template <V8Value T>
@@ -653,9 +643,9 @@ MemoryTracker& MemoryTracker::track(const T* retainer, kj::Maybe<kj::StringPtr> 
   KJ_IF_SOME(found, seen_.find(retainer)) {
     KJ_IF_SOME(currentNode, getCurrentNode()) {
       KJ_IF_SOME(name, edgeName) {
-        graph_->AddEdge(&currentNode, found.node, name.cStr());
+        graph_->AddEdge(&currentNode, found, name.cStr());
       } else {
-        graph_->AddEdge(&currentNode, found.node, nullptr);
+        graph_->AddEdge(&currentNode, found, nullptr);
       }
     }
     return *this;
@@ -689,11 +679,11 @@ MemoryTracker& MemoryTracker::trackInlineField(
 template <MemoryRetainer T>
 MemoryRetainerNode* MemoryTracker::addNode(const T* retainer,
                                            kj::Maybe<kj::StringPtr> edgeName) {
-  KJ_IF_SOME(found, seen_.find(retainer)) { return found.node; }
+  KJ_IF_SOME(found, seen_.find(retainer)) { return found; }
 
   MemoryRetainerNode* n = new MemoryRetainerNode(this, retainer);
   graph_->AddNode(std::unique_ptr<v8::EmbedderGraph::Node>(n));
-  seen_.upsert({retainer, n},[](auto&,auto&&) {});
+  seen_.insert(retainer, n);
 
   KJ_IF_SOME(currentNode, getCurrentNode()) {
     KJ_IF_SOME(name, edgeName) {

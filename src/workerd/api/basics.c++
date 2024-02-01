@@ -744,4 +744,45 @@ CustomEvent::CustomEventInit::operator Event::Init() {
   };
 }
 
+size_t EventTarget::EventHandler::JavaScriptHandler::jsgGetMemorySelfSize() const {
+  return sizeof(JavaScriptHandler);
+}
+
+void EventTarget::EventHandler::JavaScriptHandler::jsgGetMemoryInfo(
+    jsg::MemoryTracker& tracker) const {
+  tracker.trackField("identity", identity);
+  tracker.trackField("callback", callback);
+  if (abortHandler != kj::none) {
+    tracker.trackFieldWithSize("abortHandler", sizeof(kj::Own<NativeHandler>) +
+                                                sizeof(NativeHandler));
+  }
+}
+
+size_t EventTarget::EventHandler::jsgGetMemorySelfSize() const {
+  return sizeof(EventHandler);
+}
+
+void EventTarget::EventHandler::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(handler) {
+    KJ_CASE_ONEOF(js, JavaScriptHandler) {
+      tracker.trackField("js", js);
+    }
+    KJ_CASE_ONEOF(native, NativeHandlerRef) {
+      tracker.trackFieldWithSize("native", sizeof(NativeHandlerRef));
+    }
+  }
+}
+
+size_t EventTarget::EventHandlerSet::jsgGetMemorySelfSize() const {
+  return sizeof(EventHandlerSet);
+}
+
+void EventTarget::EventHandlerSet::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("handlers", handlers, kj::none, kj::none, false);
+}
+
+void EventTarget::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("typeMap", typeMap);
+}
+
 }  // namespace workerd::api

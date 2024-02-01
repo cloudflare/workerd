@@ -148,6 +148,11 @@ public:
     JSG_STATIC_CONSTANT(BUBBLING_PHASE);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("type", ownType);
+    tracker.trackField("target", target);
+  }
+
 private:
   kj::StringPtr type;
   kj::String ownType;
@@ -213,6 +218,10 @@ public:
   JSG_RESOURCE_TYPE(CustomEvent) {
     JSG_INHERIT(Event);
     JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("detail", detail);
   }
 
 private:
@@ -334,6 +343,8 @@ public:
       jsg::Function<void(jsg::Ref<Event>)> func,
       bool once = false);
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   void addNativeListener(jsg::Lock& js, NativeHandler& handler);
   bool removeNativeListener(NativeHandler& handler);
@@ -352,6 +363,10 @@ private:
           handler->visitForGc(visitor);
         }
       }
+
+      kj::StringPtr jsgGetMemoryName() const { return "JavaScriptHandler"_kjc; }
+      size_t jsgGetMemorySelfSize() const;
+      void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
     };
 
     struct NativeHandlerRef {
@@ -367,6 +382,10 @@ private:
 
     // When once is true, the handler will be removed after it is invoked one time.
     bool once = false;
+
+    kj::StringPtr jsgGetMemoryName() const { return "EventHandler"_kjc; }
+    size_t jsgGetMemorySelfSize() const;
+    void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
   };
 
   struct EventHandlerHashCallbacks {
@@ -389,6 +408,10 @@ private:
 
     EventHandlerSet()
         : handlers(EventHandlerHashCallbacks(), {}) {}
+
+    kj::StringPtr jsgGetMemoryName() const { return "EventHandlerSet"_kjc; }
+    size_t jsgGetMemorySelfSize() const;
+    void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
   };
 
   EventHandlerSet& getOrCreate(kj::StringPtr str) KJ_LIFETIMEBOUND;
@@ -492,6 +515,13 @@ public:
 
   RefcountedCanceler& getCanceler();
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    EventTarget::visitForMemoryInfo(tracker);
+    tracker.trackInlineFieldWithSize("IoOwn<RefcountedCanceler>",
+        sizeof(IoOwn<RefcountedCanceler>));
+    tracker.trackField("reason", reason);
+  }
+
 private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
@@ -523,6 +553,10 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(signal, getSignal);
     }
     JSG_METHOD(abort);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("signal", signal);
   }
 
 private:

@@ -67,6 +67,10 @@ public:
     });
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("data", data);
+  }
+
 private:
   jsg::JsRef<jsg::JsValue> data;
 
@@ -112,6 +116,10 @@ public:
     // CloseEvent will be referenced from the `WebSocketEventMap` define
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("reason", reason);
+  }
+
 private:
   int code;
   kj::String reason;
@@ -145,6 +153,11 @@ public:
 
     JSG_TS_ROOT();
     // ErrorEvent will be referenced from the `WebSocketEventMap` define
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("message", message);
+    tracker.trackField("error", error);
   }
 
 private:
