@@ -2287,4 +2287,36 @@ kj::Own<WritableStreamController> newWritableStreamInternalController(
       kj::mv(maybeClosureWaitable));
 }
 
+kj::StringPtr WritableStreamInternalController::jsgGetMemoryName() const {
+  return "WritableStreamInternalController"_kj;
+}
+
+size_t WritableStreamInternalController::jsgGetMemorySelfSize() const  {
+  return sizeof(WritableStreamInternalController);
+}
+void WritableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      tracker.trackField("error", errored);
+    }
+    KJ_CASE_ONEOF(_, Writable) {
+      // Ideally we'd be able to track the size of any pending writes held in the sink's
+      // queue but since it is behind an IoOwn and we won't be holding the IoContext here,
+      // we can't.
+      tracker.trackFieldWithSize("IoOwn<WritableStreamSink>",
+          sizeof(IoOwn<WritableStreamSink>));
+    }
+  }
+  KJ_IF_SOME(writerLocked, writeState.tryGet<WriterLocked>()) {
+    tracker.trackField("writerLocked", writerLocked);
+  }
+  tracker.trackField("pendingAbort", maybePendingAbort);
+  tracker.trackField("maybeClosureWaitable", maybeClosureWaitable);
+
+  for (auto& event : queue) {
+    tracker.trackField("event", event);
+  }
+}
+
 }  // namespace workerd::api

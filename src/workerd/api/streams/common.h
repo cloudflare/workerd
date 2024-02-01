@@ -624,6 +624,12 @@ public:
     }
 
     static kj::Maybe<PendingAbort> dequeue(kj::Maybe<PendingAbort>& maybePendingAbort);
+
+    JSG_MEMORY_INFO(PendingAbort) {
+      tracker.trackField("resolver", resolver);
+      tracker.trackField("promise", promise);
+      tracker.trackField("reason", reason);
+    }
   };
 
   virtual ~WritableStreamController() noexcept(false) {}
@@ -696,6 +702,11 @@ public:
   // Used by sockets to signal that the WritableStream shouldn't allow writes due to pending
   // closure.
   virtual void setPendingClosure() = 0;
+
+  // For menmory tracking
+  virtual kj::StringPtr jsgGetMemoryName() const = 0;
+  virtual size_t jsgGetMemorySelfSize() const = 0;
+  virtual void jsgGetMemoryInfo(jsg::MemoryTracker& info) const = 0;
 };
 
 kj::Own<WritableStreamController> newWritableStreamJsController();
@@ -798,6 +809,11 @@ public:
     writer = kj::none;
     closedFulfiller = kj::none;
     readyFulfiller = kj::none;
+  }
+
+  JSG_MEMORY_INFO(WriterLocked) {
+    tracker.trackField("closedFulfiller", closedFulfiller);
+    tracker.trackField("readyFulfiller", readyFulfiller);
   }
 
 private:

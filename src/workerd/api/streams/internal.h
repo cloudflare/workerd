@@ -224,6 +224,10 @@ public:
   void setPendingClosure() override {
     isPendingClosure = true;
   }
+
+  kj::StringPtr jsgGetMemoryName() const override;
+  size_t jsgGetMemorySelfSize() const override;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
 private:
 
   struct AbortOptions {
@@ -283,12 +287,25 @@ private:
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
     std::shared_ptr<v8::BackingStore> ownBytes;
     kj::ArrayPtr<const kj::byte> bytes;
+
+    JSG_MEMORY_INFO(Write) {
+      tracker.trackField("resolver", promise);
+      if (ownBytes != nullptr) {
+        tracker.trackFieldWithSize("backing", ownBytes->ByteLength());
+      }
+    }
   };
   struct Close {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
+    JSG_MEMORY_INFO(Close) {
+      tracker.trackField("promise", promise);
+    }
   };
   struct Flush {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
+    JSG_MEMORY_INFO(Flush) {
+      tracker.trackField("promise", promise);
+    }
   };
   struct Pipe {
     WritableStreamInternalController& parent;
@@ -302,10 +319,28 @@ private:
     bool checkSignal(jsg::Lock& js);
     jsg::Promise<void> pipeLoop(jsg::Lock& js);
     jsg::Promise<void> write(v8::Local<v8::Value> value);
+
+    JSG_MEMORY_INFO(Pipe) {
+      tracker.trackField("resolver", promise);
+      tracker.trackField("signal", maybeSignal);
+    }
   };
   struct WriteEvent {
     kj::Maybe<IoOwn<kj::Promise<void>>> outputLock;  // must wait for this before actually writing
     kj::OneOf<Write, Pipe, Close, Flush> event;
+
+    JSG_MEMORY_INFO(WriteEvent) {
+      if (outputLock != kj::none) {
+        tracker.trackFieldWithSize("outputLock",
+            sizeof(IoOwn<kj::Promise<void>>));
+      }
+      KJ_SWITCH_ONEOF(event) {
+        KJ_CASE_ONEOF(w, Write) { tracker.trackField("inner", w); }
+        KJ_CASE_ONEOF(p, Pipe) { tracker.trackField("inner", p); }
+        KJ_CASE_ONEOF(c, Close) { tracker.trackField("inner", c); }
+        KJ_CASE_ONEOF(f, Flush) { tracker.trackField("inner", f); }
+      }
+    }
   };
 
   std::deque<WriteEvent> queue;

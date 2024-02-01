@@ -137,6 +137,19 @@ public:
                 PipeToOptions& options);
   void releasePipeLock();
 
+  JSG_MEMORY_INFO(WritableLockImpl) {
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(unlocked, Unlocked) {}
+      KJ_CASE_ONEOF(locked, Locked) {}
+      KJ_CASE_ONEOF(writerLocked, WriterLocked) {
+        tracker.trackField("writerLocked", writerLocked);
+      }
+      KJ_CASE_ONEOF(pipeLocked, PipeLocked) {
+        tracker.trackField("pipeLocked", pipeLocked);
+      }
+    }
+  }
+
 private:
   struct PipeLocked {
     ReadableStreamController::PipeController& source;
@@ -150,6 +163,11 @@ private:
     kj::Maybe<jsg::Promise<void>> checkSignal(
         jsg::Lock& js,
         Controller& self);
+
+    JSG_MEMORY_INFO(PipeLocked) {
+      tracker.trackField("readableStreamRef", readableStreamRef);
+      tracker.trackField("signal", maybeSignal);
+    }
   };
   kj::OneOf<Unlocked, Locked, WriterLocked, PipeLocked> state = Unlocked();
 
@@ -826,6 +844,10 @@ public:
   void setPendingClosure() override {
     KJ_UNIMPLEMENTED("only implemented for WritableStreamInternalController");
   }
+
+  kj::StringPtr jsgGetMemoryName() const override;
+  size_t jsgGetMemorySelfSize() const override;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
 
 private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
@@ -4072,6 +4094,68 @@ TransformStreamDefaultController::tryGetWritableController() {
     return controller->tryGet();
   }
   return kj::none;
+}
+
+template <class Self>
+kj::StringPtr WritableImpl<Self>::jsgGetMemoryName() const {
+  return "WritableImpl"_kjc;
+}
+
+template <class Self>
+size_t WritableImpl<Self>::jsgGetMemorySelfSize() const {
+  return sizeof(WritableImpl<Self>);
+}
+
+template <class Self>
+void WritableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("signal", signal);
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+    KJ_CASE_ONEOF(error, StreamStates::Errored) {}
+    KJ_CASE_ONEOF(erroring, StreamStates::Erroring) {}
+    KJ_CASE_ONEOF(writable, Writable) {}
+  }
+
+  tracker.trackField("abortAlgorithm", algorithms.abort);
+  tracker.trackField("closeAlgorithm", algorithms.close);
+  tracker.trackField("writeAlgorithm", algorithms.write);
+  tracker.trackField("sizeAlgorithm", algorithms.size);
+
+  for (auto& request : writeRequests) {
+    tracker.trackField("pendingWrite", request);
+  }
+
+  tracker.trackField("inFlightWrite", inFlightWrite);
+  tracker.trackField("inFlightClose", inFlightClose);
+  tracker.trackField("closeRequest", closeRequest);
+  tracker.trackField("maybePendingAbort", maybePendingAbort);
+}
+
+kj::StringPtr WritableStreamJsController::jsgGetMemoryName() const {
+  return "WritableStreamJsController"_kjc;
+}
+
+size_t WritableStreamJsController::jsgGetMemorySelfSize() const {
+  return sizeof(WritableStreamJsController) - sizeof(WritableLockImpl);
+}
+
+void WritableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+    KJ_CASE_ONEOF(error, StreamStates::Errored) {
+      tracker.trackField("error", error);
+    }
+    KJ_CASE_ONEOF(controller, Controller) {
+      tracker.trackField("controller", controller);
+    }
+  }
+  tracker.trackField("lock", lock);
+  tracker.trackField("maybeAbortPromise", maybeAbortPromise);
+}
+
+void WritableStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackInlineField(&impl, "impl"_kj);
 }
 
 }  // namespace workerd::api
