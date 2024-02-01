@@ -720,10 +720,7 @@ static void stopProfiling(jsg::Lock& js,
       }
 
       auto hitLineCount = allNodes[i]->GetHitLineCount();
-      v8::CpuProfileNode::LineTick* lineBuffer =
-          (v8::CpuProfileNode::LineTick*)malloc(
-          hitLineCount * sizeof(v8::CpuProfileNode::LineTick));
-      KJ_DEFER(free(lineBuffer));
+      v8::CpuProfileNode::LineTick lineBuffer[hitLineCount];
       allNodes[i]->GetLineTicks(lineBuffer, hitLineCount);
 
       auto positionTicks = nodeBuilder.initPositionTicks(hitLineCount);
