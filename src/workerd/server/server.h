@@ -54,6 +54,9 @@ public:
   void enableInspector(kj::String addr) {
     inspectorOverride = kj::mv(addr);
   }
+  void enableClimem(kj::String addr) {
+    climemOverride = kj::mv(addr);
+  }
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
   }
@@ -83,6 +86,8 @@ public:
   class InspectorService;
   class InspectorServiceIsolateRegistrar;
 
+  class ClimemServiceRegistrar;
+
 private:
   kj::Filesystem& fs;
   kj::Timer& timer;
@@ -104,7 +109,9 @@ private:
   kj::HashMap<kj::String, kj::String> externalOverrides;
 
   kj::Maybe<kj::String> inspectorOverride;
+  kj::Maybe<kj::String> climemOverride;
   kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorIsolateRegistrar;
+  kj::Maybe<kj::Own<ClimemServiceRegistrar>> climemServiceRegistrar;
   kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
 
   struct GlobalContext;

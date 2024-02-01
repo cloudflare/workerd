@@ -26,6 +26,7 @@ wd_cc_library(
 wd_cc_library(
     name = "util",
     srcs = [
+        "mem-utils.c++",
         "mimetype.c++",
         "stream-utils.c++",
         "uuid.c++",
