@@ -2,7 +2,7 @@
 
 #include <kj/common.h>
 #include <pyodide/pyodide.capnp.h>
-#include <pyodide/generated/pyodide_packages.capnp.h>
+#include <pyodide/generated/pyodide_extra.capnp.h>
 #include <workerd/util/autogate.h>
 
 namespace workerd::api::pyodide {

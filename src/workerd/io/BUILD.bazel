@@ -64,7 +64,7 @@ wd_cc_library(
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide",
-        "//src/pyodide:pyodide_packages_capnp",
+        "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:r2-api_capnp",
         "//src/workerd/jsg",

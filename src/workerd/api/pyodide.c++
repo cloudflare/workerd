@@ -9,21 +9,6 @@
 
 namespace workerd::api::pyodide {
 
-namespace _ {
-kj::StringPtr lookupModule(kj::StringPtr name) {
-  for (auto m : PYODIDE_BUNDLE->getModules()) {
-    if (m.getName() == name) {
-      return m.getSrc().asChars().begin();
-    }
-  }
-  KJ_UNREACHABLE;
-}
-}
-
-kj::StringPtr getPyodideBootstrap() {
-  return _::lookupModule("pyodide:python-entrypoint");
-}
-
 kj::String generatePyodideMetadata(server::config::Worker::Reader conf) {
   capnp::JsonCodec jsonCodec;
   jsonCodec.setPrettyPrint(false);
