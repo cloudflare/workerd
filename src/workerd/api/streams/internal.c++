@@ -472,8 +472,7 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> WritableStreamSink::tryPumpFrom(
 // =======================================================================================
 
 ReadableStreamInternalController::~ReadableStreamInternalController() noexcept(false) {
-  KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
-    auto lock = kj::mv(locked);
+  if (readState.is<ReaderLocked>()) {
     readState.init<Unlocked>();
   }
 }
@@ -801,12 +800,12 @@ void ReadableStreamInternalController::releaseReader(
           locked.getClosedFulfiller(),
           js.v8TypeError("This ReadableStream reader has been released."_kj));
     }
-    auto lock = kj::mv(locked);
+    locked.clear();
 
     // When maybeJs is nullptr, that means releaseReader was called when the reader is
     // being deconstructed and not as the result of explicitly calling releaseLock. In
     // that case, we don't want to change the lock state itself because we do not have
-    // an isolate lock. Moving the lock above will free the lock state while keeping the
+    // an isolate lock. Clearing the lock above will free the lock state while keeping the
     // ReadableStream marked as locked.
     if (maybeJs != kj::none) {
       readState.template init<Unlocked>();
@@ -815,8 +814,7 @@ void ReadableStreamInternalController::releaseReader(
 }
 
 WritableStreamInternalController::~WritableStreamInternalController() noexcept(false) {
-  KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
-    auto lock = kj::mv(locked);
+  if (writeState.is<WriterLocked>()) {
     writeState.init<Unlocked>();
   }
 }
@@ -1288,12 +1286,12 @@ void WritableStreamInternalController::releaseWriter(
           locked.getClosedFulfiller(),
           js.v8TypeError("This WritableStream writer has been released."_kj));
     }
-    auto lock = kj::mv(locked);
+    locked.clear();
 
     // When maybeJs is nullptr, that means releaseWriter was called when the writer is
     // being deconstructed and not as the result of explicitly calling releaseLock and
     // we do not have an isolate lock. In that case, we don't want to change the lock
-    // state itself. Moving the lock above will free the lock state while keeping the
+    // state itself. Clearing the lock above will free the lock state while keeping the
     // WritableStream marked as locked.
     if (maybeJs != kj::none) {
       writeState.template init<Unlocked>();
