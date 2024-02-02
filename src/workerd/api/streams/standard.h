@@ -190,6 +190,10 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  kj::StringPtr jsgGetMemoryName() const;
+  size_t jsgGetMemorySelfSize() const;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   struct Algorithms {
     kj::Maybe<jsg::Function<UnderlyingSource::StartAlgorithm>> start;
@@ -233,6 +237,10 @@ private:
   struct PendingCancel {
     kj::Maybe<jsg::Promise<void>::Resolver> fulfiller;
     jsg::Promise<void> promise;
+    JSG_MEMORY_INFO(PendingCancel) {
+      tracker.trackField("fulfiller", fulfiller);
+      tracker.trackField("promise", promise);
+    }
   };
   kj::Maybe<PendingCancel> maybePendingCancel;
 
@@ -427,6 +435,10 @@ public:
 
   kj::Own<WeakRef<ReadableStreamDefaultController>> getWeakRef();
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackInlineField(&impl, "impl"_kjc);
+  }
+
 private:
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
@@ -481,6 +493,8 @@ public:
   }
 
   bool isPartiallyFulfilled();
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   struct Impl {
@@ -541,6 +555,11 @@ public:
     JSG_METHOD(close);
     JSG_METHOD(enqueue);
     JSG_METHOD(error);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackInlineField(&impl, "impl"_kjc);
+    tracker.trackField("maybeByobRequest", maybeByobRequest);
   }
 
 private:

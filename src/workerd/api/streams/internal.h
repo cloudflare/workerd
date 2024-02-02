@@ -105,6 +105,10 @@ public:
     isPendingClosure = true;
   }
 
+  kj::StringPtr jsgGetMemoryName() const override;
+  size_t jsgGetMemorySelfSize() const override;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
+
 private:
   void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
   void doClose(jsg::Lock& js);
@@ -135,6 +139,10 @@ private:
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
     void visitForGc(jsg::GcVisitor& visitor) { visitor.visit(ref); }
+
+    kj::StringPtr jsgGetMemoryName() const;
+    size_t jsgGetMemorySelfSize() const;
+    void jsgGetMemoryInfo(jsg::MemoryTracker& info) const;
 
   private:
     ReadableStreamInternalController& inner;

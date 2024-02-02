@@ -524,4 +524,20 @@ jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
   return kj::none;
 }
 
+kj::StringPtr ReaderImpl::jsgGetMemoryName() const { return "ReaderImpl"_kjc; }
+
+size_t ReaderImpl::jsgGetMemorySelfSize() const { return sizeof(ReaderImpl); }
+
+void ReaderImpl::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
+    tracker.trackField("stream", stream);
+  }
+  tracker.trackField("closedPromise", closedPromise);
+}
+
+void ReadableStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("controller", controller);
+  tracker.trackField("eofResolverPair", eofResolverPair);
+}
+
 }  // namespace workerd::api

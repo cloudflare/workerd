@@ -2288,7 +2288,7 @@ kj::Own<WritableStreamController> newWritableStreamInternalController(
 }
 
 kj::StringPtr WritableStreamInternalController::jsgGetMemoryName() const {
-  return "WritableStreamInternalController"_kj;
+  return "WritableStreamInternalController"_kjc;
 }
 
 size_t WritableStreamInternalController::jsgGetMemorySelfSize() const  {
@@ -2316,6 +2316,52 @@ void WritableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& trac
 
   for (auto& event : queue) {
     tracker.trackField("event", event);
+  }
+}
+
+kj::StringPtr ReadableStreamInternalController::PipeLocked::jsgGetMemoryName() const {
+  return "ReadableStreamInternalController::PipeLocked"_kjc;
+}
+size_t ReadableStreamInternalController::PipeLocked::jsgGetMemorySelfSize() const {
+  return sizeof(PipeLocked);
+}
+
+void ReadableStreamInternalController::PipeLocked::jsgGetMemoryInfo(
+    jsg::MemoryTracker& tracker) const {
+  tracker.trackField("ref", ref);
+}
+
+kj::StringPtr ReadableStreamInternalController::jsgGetMemoryName() const {
+  return "ReadableStreamInternalController"_kjc;
+}
+
+size_t ReadableStreamInternalController::jsgGetMemorySelfSize() const {
+  return sizeof(ReadableStreamInternalController);
+}
+
+void ReadableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+    KJ_CASE_ONEOF(error, StreamStates::Errored) {
+      tracker.trackField("error", error);
+    }
+    KJ_CASE_ONEOF(readable, Readable) {
+      // Ideally we'd be able to track the size of any pending reads held in the source's
+      // queue but since it is behind an IoOwn and we won't be holding the IoContext here,
+      // we can't.
+      tracker.trackFieldWithSize("IoOwn<ReadableStreamSource>",
+          sizeof(IoOwn<ReadableStreamSource>));
+    }
+  }
+  KJ_SWITCH_ONEOF(readState) {
+    KJ_CASE_ONEOF(unlocked, Unlocked) {}
+    KJ_CASE_ONEOF(locked, Locked) {}
+    KJ_CASE_ONEOF(pipeLocked, PipeLocked) {
+      tracker.trackField("pipeLocked", pipeLocked);
+    }
+    KJ_CASE_ONEOF(readerLocked, ReaderLocked) {
+      tracker.trackField("readerLocked", readerLocked);
+    }
   }
 }
 
