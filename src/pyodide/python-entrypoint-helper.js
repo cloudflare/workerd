@@ -8,7 +8,7 @@ import { default as origMetadata } from "pyodide-internal:runtime-generated/curr
 function initializePackageIndex(pyodide) {
   if (!lockfile.packages) {
     throw new Error(
-      "Loaded pyodide lock file does not contain the expected key 'packages'."
+      "Loaded pyodide lock file does not contain the expected key 'packages'.",
     );
   }
   const API = pyodide._api;
@@ -137,6 +137,15 @@ async function setupPackages(pyodide) {
 
   initializePackageIndex(pyodide);
 
+  {
+    const mod = await import("pyodide-internal:relaxed_call.py");
+    pyodide.FS.writeFile(
+      "/lib/python3.11/site-packages/relaxed_call.py",
+      new Uint8Array(mod.default),
+      { canOwn: true },
+    );
+  }
+
   // Loop through globals that define Python modules in the metadata passed to our Worker. For
   // each one, save it in Pyodide's file system.
   const requirements = [];
@@ -190,47 +199,51 @@ async function setupPackages(pyodide) {
     pyodide.FS.writeFile(
       "/lib/python3.11/site-packages/aiohttp_fetch_patch.py",
       new Uint8Array(mod.default),
-      { canOwn: true }
+      { canOwn: true },
     );
     pyodide.pyimport("aiohttp_fetch_patch");
   }
-  if (requirements.some(req => req.startsWith("fastapi"))) {
+  if (requirements.some((req) => req.startsWith("fastapi"))) {
     const mod = await import("pyodide-internal:asgi.py");
     pyodide.FS.writeFile(
       "/lib/python3.11/site-packages/asgi.py",
       new Uint8Array(mod.default),
-      { canOwn: true }
+      { canOwn: true },
     );
   }
 
   // The main module can have a `.py` extension, strip it if it exists.
   const mainName = metadata.mainModule;
-  const mainModule = mainName.endsWith(".py") ? mainName.slice(0, -3) : mainName;
+  const mainModule = mainName.endsWith(".py")
+    ? mainName.slice(0, -3)
+    : mainName;
 
   return pyodide.pyimport(mainModule);
 }
 
-let mainModule;
+let result;
 async function getMainModule() {
-  if (mainModule) {
-    return mainModule;
+  if (result) {
+    return result;
   }
   // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
   // When we do it in top level scope we seem to get a broken file system.
   const pyodide = await loadPyodide();
-  mainModule = await setupPackages(pyodide);
-  return mainModule;
+  const mainModule = await setupPackages(pyodide);
+  const relaxed_call = pyodide.pyimport("relaxed_call").relaxed_call;
+  result = { mainModule, relaxed_call };
+  return result;
 }
 
 export default {
-  async fetch(request, env) {
-    const mainModule = await getMainModule();
-    return await mainModule.fetch(request);
+  async fetch(ctx, env) {
+    const { relaxed_call, mainModule } = await getMainModule();
+    return await relaxed_call(mainModule.fetch, ctx, env);
   },
-  async test() {
+  async test(ctx, env) {
     try {
-      const mainModule = await getMainModule();
-      return await mainModule.test();
+      const { relaxed_call, mainModule } = await getMainModule();
+      return await relaxed_call(mainModule.test, ctx, env);
     } catch (e) {
       console.warn(e);
     }
