@@ -775,7 +775,7 @@ public:
 
     JSG_MEMORY_INFO(ByteQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
-      tracker.trackInlineField(&pullInto, "pullInto"_kj);
+      tracker.trackField("pullInto", pullInto);
     }
   };
 
@@ -1041,11 +1041,11 @@ kj::StringPtr ValueQueue::Consumer::jsgGetMemoryName() const {
 }
 
 size_t ValueQueue::Consumer::jsgGetMemorySelfSize() const {
-  return sizeof(ValueQueue::Consumer) - sizeof(ConsumerImpl);
+  return sizeof(ValueQueue::Consumer);
 }
 
 void ValueQueue::Consumer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackInlineField(&impl, "impl"_kjc);
+  tracker.trackField("impl", impl);
 }
 
 kj::StringPtr ValueQueue::jsgGetMemoryName() const {
@@ -1053,11 +1053,11 @@ kj::StringPtr ValueQueue::jsgGetMemoryName() const {
 }
 
 size_t ValueQueue::jsgGetMemorySelfSize() const {
-  return sizeof(ValueQueue) - sizeof(QueueImpl);
+  return sizeof(ValueQueue);
 }
 
 void ValueQueue::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackInlineField(&impl, "impl"_kjc);
+  tracker.trackField("impl", impl);
 }
 
 kj::StringPtr ByteQueue::Consumer::jsgGetMemoryName() const {
@@ -1065,11 +1065,11 @@ kj::StringPtr ByteQueue::Consumer::jsgGetMemoryName() const {
 }
 
 size_t ByteQueue::Consumer::jsgGetMemorySelfSize() const {
-  return sizeof(ByteQueue::Consumer) - sizeof(ConsumerImpl);
+  return sizeof(ByteQueue::Consumer);
 }
 
 void ByteQueue::Consumer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackInlineField(&impl, "impl"_kjc);
+  tracker.trackField("impl", impl);
 }
 
 kj::StringPtr ByteQueue::jsgGetMemoryName() const {
@@ -1077,11 +1077,11 @@ kj::StringPtr ByteQueue::jsgGetMemoryName() const {
 }
 
 size_t ByteQueue::jsgGetMemorySelfSize() const {
-  return sizeof(ByteQueue) - sizeof(QueueImpl);
+  return sizeof(ByteQueue);
 }
 
 void ByteQueue::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackInlineField(&impl, "impl"_kjc);
+  tracker.trackField("impl", impl);
 }
 
 } // workerd::api
