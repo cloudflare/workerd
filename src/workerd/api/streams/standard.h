@@ -436,7 +436,7 @@ public:
   kj::Own<WeakRef<ReadableStreamDefaultController>> getWeakRef();
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackInlineField(&impl, "impl"_kjc);
+    tracker.trackField("impl", impl);
   }
 
 private:
@@ -558,7 +558,7 @@ public:
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackInlineField(&impl, "impl"_kjc);
+    tracker.trackField("impl", impl);
     tracker.trackField("maybeByobRequest", maybeByobRequest);
   }
 
@@ -678,6 +678,8 @@ public:
   jsg::Promise<void> close(jsg::Lock& js);
   jsg::Promise<void> pull(jsg::Lock& js);
   jsg::Promise<void> cancel(jsg::Lock& js, v8::Local<v8::Value> reason);
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   struct Algorithms {

@@ -102,7 +102,7 @@ public:
   inline bool isByteOriented() const override { return false; }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackInlineField(&impl, "impl"_kj);
+    tracker.trackField("impl", impl);
   }
 
 private:
@@ -171,7 +171,7 @@ public:
   inline bool isByteOriented() const override { return true; }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackInlineField(&impl, "impl"_kj);
+    tracker.trackField("impl", impl);
   }
 
 private:

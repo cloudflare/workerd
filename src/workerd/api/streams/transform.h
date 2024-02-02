@@ -63,6 +63,11 @@ public:
     }
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("readable", readable);
+    tracker.trackField("writable", writable);
+  }
+
 private:
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;

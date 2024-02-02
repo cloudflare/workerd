@@ -1753,7 +1753,7 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
 
   JSG_MEMORY_INFO(ValueReadable) {
     KJ_IF_SOME(s, state) {
-      tracker.trackInlineField(&s, "state"_kjc);
+      tracker.trackField("state", s);
     }
   }
 
@@ -1857,7 +1857,7 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
 
   JSG_MEMORY_INFO(ByteReadable) {
     KJ_IF_SOME(s, state) {
-      tracker.trackInlineField(&s, "state"_kjc);
+      tracker.trackField("state", s);
     }
   }
 
@@ -4185,7 +4185,7 @@ kj::StringPtr WritableStreamJsController::jsgGetMemoryName() const {
 }
 
 size_t WritableStreamJsController::jsgGetMemorySelfSize() const {
-  return sizeof(WritableStreamJsController) - sizeof(WritableLockImpl);
+  return sizeof(WritableStreamJsController);
 }
 
 void WritableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -4203,7 +4203,7 @@ void WritableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) c
 }
 
 void WritableStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackInlineField(&impl, "impl"_kj);
+  tracker.trackField("impl", impl);
 }
 
 kj::StringPtr ReadableStreamJsController::jsgGetMemoryName() const {
@@ -4211,7 +4211,7 @@ kj::StringPtr ReadableStreamJsController::jsgGetMemoryName() const {
 }
 
 size_t ReadableStreamJsController::jsgGetMemorySelfSize() const {
-  return sizeof(ReadableStreamJsController) - sizeof(ReadableLockImpl);
+  return sizeof(ReadableStreamJsController);
 }
 
 void ReadableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -4228,7 +4228,7 @@ void ReadableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) c
     }
   }
 
-  tracker.trackInlineField(&lock, "lock"_kj);
+  tracker.trackField("lock", lock);
 
   KJ_IF_SOME(pendingState, maybePendingState) {
     KJ_SWITCH_ONEOF(pendingState) {
@@ -4275,6 +4275,13 @@ void ReadableStreamBYOBRequest::visitForMemoryInfo(jsg::MemoryTracker& tracker) 
     tracker.trackField("controller", impl.controller);
     tracker.trackField("view", impl.view);
   }
+}
+
+void TransformStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("startPromise", startPromise);
+  tracker.trackField("maybeBackpressureChange", maybeBackpressureChange);
+  tracker.trackField("transformAlgorithm", algorithms.transform);
+  tracker.trackField("flushAlgorithm", algorithms.flush);
 }
 
 }  // namespace workerd::api
