@@ -8,11 +8,14 @@ interface D1Meta {
   changes: number;
 }
 
-interface D1Result<T = unknown> {
-  results: T[];
+interface D1Response {
   success: true;
   meta: D1Meta & Record<string, unknown>;
   error?: never;
+}
+
+type D1Result<T = unknown> = D1Response & {
+  results: T[];
 }
 
 interface D1ExecResult {
@@ -31,7 +34,7 @@ declare abstract class D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
   first<T = unknown>(colName: string): Promise<T | null>;
   first<T = Record<string, unknown>>(): Promise<T | null>;
-  run<T = Record<string, unknown>>(): Promise<D1Result<T>>;
+  run(): Promise<D1Response>;
   all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
   raw<T = unknown[]>(): Promise<T[]>;
 }
