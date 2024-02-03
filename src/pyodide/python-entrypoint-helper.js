@@ -210,16 +210,18 @@ async function setupPackages(pyodide) {
   return pyodide.pyimport(mainModule);
 }
 
-let mainModule;
-async function getMainModule() {
-  if (mainModule) {
-    return mainModule;
+let mainModulePromise;
+function getMainModule() {
+  if (!mainModulePromise) {
+    return mainModulePromise;
   }
-  // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
-  // When we do it in top level scope we seem to get a broken file system.
-  const pyodide = await loadPyodide();
-  mainModule = await setupPackages(pyodide);
-  return mainModule;
+  mainModulePromise = (async function() {
+    // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
+    // When we do it in top level scope we seem to get a broken file system.
+    const pyodide = await loadPyodide();
+    return await setupPackages(pyodide);
+  })();
+  return mainModulePromise;
 }
 
 export default {
