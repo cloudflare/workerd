@@ -236,14 +236,14 @@ async function getMainModule() {
 }
 
 export default {
-  async fetch(ctx, env) {
+  async fetch(request, env, ctx) {
     const { relaxed_call, mainModule } = await getMainModule();
-    return await relaxed_call(mainModule.fetch, ctx, env);
+    return await relaxed_call(mainModule.fetch, request, env, ctx);
   },
-  async test(ctx, env) {
+  async test(ctrl, env, ctx) {
     try {
       const { relaxed_call, mainModule } = await getMainModule();
-      return await relaxed_call(mainModule.test, ctx, env);
+      return await relaxed_call(mainModule.test, ctrl, env, ctx);
     } catch (e) {
       console.warn(e);
     }
