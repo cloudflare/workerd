@@ -1,7 +1,7 @@
 #pragma once
 
 #include <kj/common.h>
-#include <pyodide/generated/pyodide_packages.capnp.h>
+#include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide.capnp.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>

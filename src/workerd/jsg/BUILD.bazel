@@ -18,6 +18,7 @@ wd_cc_library(
         exclude = [
             "exception.h",
             "observer.h",
+            "memory.h",
             "rtti.h",
             "url-test-corpus-failures.h",
             "url-test-corpus-success.h",
@@ -26,6 +27,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":exception",
+        ":memory-tracker",
         ":modules_capnp",
         ":observer",
         ":url",
@@ -33,6 +35,16 @@ wd_cc_library(
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "//src/workerd/util:autogate",
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "memory-tracker",
+    hdrs = ["memory.h"],
+    visibility = ["//visibility:public"],
+    deps = [
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
     ],
@@ -48,6 +60,7 @@ wd_cc_library(
     deps = [
         "@capnp-cpp//src/kj",
         "@ada-url",
+        ":memory-tracker",
     ],
 )
 

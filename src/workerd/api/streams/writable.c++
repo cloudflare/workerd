@@ -197,6 +197,9 @@ bool WritableStream::inspectExpectsBytes() {
 }
 
 void WritableStreamDefaultWriter::visitForGc(jsg::GcVisitor& visitor) {
+  KJ_IF_SOME(writable, state.tryGet<Attached>()) {
+    visitor.visit(writable);
+  }
   visitor.visit(closedPromise, readyPromise);
 }
 

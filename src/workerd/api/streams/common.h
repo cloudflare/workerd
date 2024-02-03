@@ -742,6 +742,12 @@ public:
     return canceler;
   }
 
+  void clear() {
+    reader = kj::none;
+    closedFulfiller = kj::none;
+    canceler = kj::none;
+  }
+
 private:
   kj::Maybe<ReadableStreamController::Reader&> reader;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
@@ -786,6 +792,12 @@ public:
       readyFulfiller = kj::mv(pair.resolver);
       w.replaceReadyPromise(kj::mv(pair.promise));
     }
+  }
+
+  void clear() {
+    writer = kj::none;
+    closedFulfiller = kj::none;
+    readyFulfiller = kj::none;
   }
 
 private:

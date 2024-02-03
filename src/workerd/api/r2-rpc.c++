@@ -98,6 +98,7 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     // finds a corner case for the heuristic so that we don't fail the GET with an opaque
     // internal error.
     KJ_REQUIRE(metadataSize <= 1024 * 1024, "R2 metadata size seems way too large");
+    KJ_REQUIRE(metadataSize >= 0, "R2 metadata size parsed as negative");
 
     auto metadataBuffer = kj::heapArray<char>(metadataSize);
     auto metadataReadLength =

@@ -18,6 +18,7 @@
 #include "wrappable.h"
 #include <typeindex>
 #include "meta.h"
+#include <workerd/jsg/memory.h>
 #include <workerd/jsg/modules.capnp.h>
 
 // The signature of SetAccessor changes in v8 12.1 to drop the v8::AccessControl

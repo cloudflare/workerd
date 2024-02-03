@@ -207,6 +207,10 @@ public:
     return BackingStore(backingStore, byteLength, byteOffset, elementSize, ctor, integerType);
   }
 
+  JSG_MEMORY_INFO(BackingStore) {
+    tracker.trackFieldWithSize("buffer", size());
+  }
+
 private:
   std::shared_ptr<v8::BackingStore> backingStore;
   size_t byteLength;
@@ -362,6 +366,13 @@ public:
   // Sets the detach key that must be provided with the detach(...) method
   // to successfully detach the backing store.
   void setDetachKey(Lock& js, v8::Local<v8::Value> key);
+
+  JSG_MEMORY_INFO(BufferSource) {
+    tracker.trackField("handle", handle);
+    KJ_IF_SOME(backing, maybeBackingStore) {
+      tracker.trackField("backing", backing);
+    }
+  }
 
 private:
   Value handle;

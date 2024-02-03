@@ -1,6 +1,7 @@
 #pragma once
 #include <kj/string.h>
 #include <kj/common.h>
+#include <workerd/jsg/memory.h>
 
 namespace workerd::jsg {
 
@@ -98,6 +99,16 @@ public:
   // Convert a Unicode hostname to ASCII.
   static kj::Array<const char> idnToAscii(kj::ArrayPtr<const char> value) KJ_WARN_UNUSED_RESULT;
 
+  JSG_MEMORY_INFO(Url) {
+    tracker.trackFieldWithSize("inner", getProtocol().size() +
+                                        getUsername().size() +
+                                        getPassword().size() +
+                                        getHost().size() +
+                                        getPathname().size() +
+                                        getHash().size() +
+                                        getSearch().size());
+  }
+
 private:
   Url(kj::Own<void> inner);
   kj::Own<void> inner;
@@ -164,6 +175,10 @@ public:
   EntryIterator getEntries() const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   kj::Array<const char> toStr() const KJ_WARN_UNUSED_RESULT;
+
+  JSG_MEMORY_INFO(Url) {
+    tracker.trackField("inner", toStr());
+  }
 
 private:
   UrlSearchParams(kj::Own<void> inner);

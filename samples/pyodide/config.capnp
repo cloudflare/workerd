@@ -22,7 +22,7 @@ const config :Workerd.Config = (
 
 const mainWorker :Workerd.Worker = (
   modules = [
-    (name = "worker", pythonModule = embed "./worker.py"),
+    (name = "worker.py", pythonModule = embed "./worker.py"),
   ],
   compatibilityDate = "2023-12-18",
   compatibilityFlags = ["experimental"],

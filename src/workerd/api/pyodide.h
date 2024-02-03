@@ -9,8 +9,6 @@
 
 namespace workerd::api::pyodide {
 
-kj::StringPtr getPyodideBootstrap();
-
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
 
 }  // namespace workerd

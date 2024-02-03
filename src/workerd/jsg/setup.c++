@@ -159,6 +159,19 @@ IsolateBase& IsolateBase::from(v8::Isolate* isolate) {
   return *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
 }
 
+void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate,
+                                     v8::EmbedderGraph* graph,
+                                     void* data) {
+  const auto base = reinterpret_cast<IsolateBase*>(data);
+  MemoryTracker tracker(isolate, graph);
+  tracker.track(base);
+}
+
+void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
+  tracker.trackField("uuid", uuid);
+  tracker.trackField("heapTracer", heapTracer);
+}
+
 void IsolateBase::deferDestruction(Item item) {
   queue.lockExclusive()->push(kj::mv(item));
 }
@@ -345,6 +358,8 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
           break;
       }
     });
+
+    ptr->GetHeapProfiler()->AddBuildEmbedderGraphCallback(buildEmbedderGraph, this);
 
     // Create opaqueTemplate
     {
