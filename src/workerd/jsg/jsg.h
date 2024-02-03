@@ -834,13 +834,12 @@ private:
 };
 
 template <V8Value T>
-MemoryTracker& MemoryTracker::trackField(
+void MemoryTracker::trackField(
     kj::StringPtr edgeName,
     const V8Ref<T>& value,
     kj::Maybe<kj::StringPtr> nodeName) {
   // Even though we're passing in a template T, casting to a v8::Value is sufficient here.
-  return trackField(edgeName, value.handle.Get(isolate_)
-      .template As<v8::Value>(), nodeName);
+  trackField(edgeName, value.handle.Get(isolate_).template As<v8::Value>(), nodeName);
 }
 
 // A value of type T, or `undefined`.
@@ -1222,11 +1221,11 @@ private:
 };
 
 template <MemoryRetainer T>
-MemoryTracker& MemoryTracker::trackField(
+void MemoryTracker::trackField(
     kj::StringPtr edgeName,
     const Ref<T>& value,
     kj::Maybe<kj::StringPtr> nodeName) {
-  return trackField(edgeName, value.get(), nodeName);
+  trackField(edgeName, value.get(), nodeName);
 }
 
 template <typename T, typename... Params>
@@ -2497,8 +2496,8 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) {
   return handle.Get(js.v8Isolate);
 }
 
-MemoryTracker& MemoryTracker::trackField(const ContextGlobal& value) {
- return trackField(nullptr, value.getSelfObject());
+void MemoryTracker::trackField(const ContextGlobal& value) {
+ trackField(nullptr, value.getSelfObject());
 }
 
 }  // namespace workerd::jsg
