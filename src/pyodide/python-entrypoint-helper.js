@@ -221,18 +221,21 @@ async function setupPackages(pyodide) {
   return pyodide.pyimport(mainModule);
 }
 
-let result;
-async function getMainModule() {
-  if (result) {
-    return result;
+let mainModulePromise;
+function getMainModule() {
+  if (!mainModulePromise) {
+    return mainModulePromise;
   }
-  // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
-  // When we do it in top level scope we seem to get a broken file system.
-  const pyodide = await loadPyodide();
-  const mainModule = await setupPackages(pyodide);
-  const relaxed_call = pyodide.pyimport("relaxed_call").relaxed_call;
-  result = { mainModule, relaxed_call };
-  return result;
+  mainModulePromise = (async function() {
+    // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
+    // When we do it in top level scope we seem to get a broken file system.
+    const pyodide = await loadPyodide();
+    const mainModule = await setupPackages(pyodide);
+    const relaxed_call = pyodide.pyimport("relaxed_call").relaxed_call;
+    result = { mainModule, relaxed_call };
+    return result;
+  })();
+  return mainModulePromise;
 }
 
 export default {
