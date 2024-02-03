@@ -3,7 +3,7 @@
 
 import { loadPyodide } from "pyodide-internal:python";
 import { default as lockfile } from "pyodide-internal:generated/pyodide-lock.json";
-import { default as origMetadata } from "pyodide-internal:runtime-generated/current-bundle";
+import { default as metadata } from "pyodide-internal:runtime-generated/current-bundle";
 
 function initializePackageIndex(pyodide) {
   if (!lockfile.packages) {
@@ -98,42 +98,19 @@ const EMBEDDED_PYTHON_PACKAGES = [
 function transformMetadata(metadata) {
   // Workerd's metadata is slightly different. We transform it here to the format used upstream.
   if (metadata.globals !== undefined) {
-    return metadata;
+    return;
   }
-
-  var metadata = metadata;
-  metadata.globals = [];
-  for (const module of metadata.modules) {
-    if (metadata.mainModule === undefined) {
-      // The first module is the main module.
-      metadata.mainModule = module.name;
-    }
-
-    if (module.pythonModule !== undefined) {
-      metadata.globals.push({
-        name: module.name,
-        value: {
-          pythonModule: module.pythonModule,
-        },
-      });
-    }
-
-    if (module.pythonRequirement !== undefined) {
-      metadata.globals.push({
-        name: module.name,
-        value: {
-          pythonRequirement: module.pythonRequirement,
-        },
-      });
-    }
-  }
-  return metadata;
+  metadata.globals = metadata.modules.map((mod) => ({
+    name: mod.name,
+    value: mod,
+  }));
+  metadata.mainModule = metadata.modules[0].name;
 }
 
 async function setupPackages(pyodide) {
   // The metadata is a JSON-serialised WorkerBundle (defined in pipeline.capnp).
-  const metadata = transformMetadata(origMetadata);
   const isWorkerd = metadata.modules !== undefined;
+  transformMetadata(metadata);
 
   initializePackageIndex(pyodide);
 
@@ -149,6 +126,20 @@ async function setupPackages(pyodide) {
       pyodide.FS.writeFile(`/session/${pyFilename}`, value.pythonModule, {
         canOwn: true,
       });
+      continue;
+    }
+    if (value.text !== undefined) {
+      pyodide.FS.writeFile(`/session/${name}`, value.text, {
+        canOwn: true,
+      });
+      continue;
+    }
+
+    if (value.data !== undefined) {
+      pyodide.FS.writeFile(`/session/${name}`, value.data, {
+        canOwn: true,
+      });
+      continue;
     }
 
     if (value.pythonRequirement !== undefined) {
