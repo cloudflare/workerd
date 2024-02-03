@@ -13,6 +13,7 @@ filegroup(
                 "rtti.c++",
                 "**/*test*.c++",
                 "pyodide.c++",
+                "pyodide/pyodide.c++",
             ],
         ),
         "//conditions:default": glob(
@@ -22,6 +23,7 @@ filegroup(
                 "rtti.c++",
                 "**/*test*.c++",
                 "pyodide.c++",
+                "pyodide/pyodide.c++",
                 "gpu/*.c++",
             ],
         ),
@@ -94,16 +96,22 @@ wd_cc_library(
 
 wd_cc_library(
     name = "pyodide",
-    srcs = ["pyodide.c++"],
+    srcs = [
+        "pyodide.c++",
+        "pyodide/pyodide.c++",
+    ],
     hdrs = [
         "pyodide.h",
+        "pyodide/pyodide.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
+        "//src/workerd/jsg",
         "//src/workerd/server:workerd_capnp",
+        "//src/workerd/util:autogate",
     ],
 )
 
