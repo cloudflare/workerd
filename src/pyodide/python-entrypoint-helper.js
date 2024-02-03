@@ -223,7 +223,7 @@ async function setupPackages(pyodide) {
 
 let mainModulePromise;
 function getMainModule() {
-  if (!mainModulePromise) {
+  if (mainModulePromise !== undefined) {
     return mainModulePromise;
   }
   mainModulePromise = (async function() {
