@@ -125,20 +125,16 @@ jsg::Promise<jsg::Value> WorkerRpc::sendWorkerRpc(
   }
 
   auto callResult = builder.send();
-  auto customEventResult = worker->customEvent(kj::mv(event)).attach(kj::mv(worker));
 
-  // If customEvent throws, we'll cancel callResult and propagate the exception. Otherwise, we'll
-  // just wait until callResult finishes.
-  //
-  // Note: `callResult` does not depend on the `WorkerRpc` object staying live! This is important
-  // as `sendWorkerRpc()` is documented as returning a Promise that is allowed to outlive the
-  // `WorkerRpc` object itself.
-  auto promise = callResult.exclusiveJoin(customEventResult
-      .then([](auto&&) -> kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> {
-        return kj::NEVER_DONE;
-      }));
+  // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we don't
+  // actually care about the result of the event. If it throws, the membrane will already have
+  // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
+  // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
+  // caught elsewhere.
+  ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker))
+      .then([](auto&&) {}, [](kj::Exception&&) {}));
 
-  return ioContext.awaitIo(js, kj::mv(promise),
+  return ioContext.awaitIo(js, kj::mv(callResult),
       [](jsg::Lock& js, auto result) -> jsg::Value {
     return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
   });
