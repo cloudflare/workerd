@@ -230,13 +230,17 @@ interface EventDispatcher @0xf20697475ec1752d {
   # the success of the batch, including which messages should be considered acknowledged and which
   # should be retried.
 
-  getJsRpcTarget @9 () -> (server :JsRpcTarget);
-  # Starts a JS rpc "session" (for now, a session is one request/response).
-  # The returned JsRpcTarget capability allows us to invoke remote methods on the destination
-  # Worker/Durable Object.
+  jsRpcSession @9 () -> (topLevel :JsRpcTarget);
+  # Opens a JS rpc "session". The call does not return until the session is complete.
   #
-  # We use customEvent() to dispatch this event.
-  # In the future, we can add an argument to pass a capability to the server.
+  # `topLevel` is the top-level RPC target, on which exactly one method call can be made. This
+  # call must be made using pipelining since `jsRpcSession()` won't return until after the call
+  # completes.
+  #
+  # If, through the one top-level call, new capabilities are exchanged between the client and
+  # server, then `jsRpcSession()` won't return until all those capabilities have been dropped.
+  #
+  # In C++, we use `WorkerInterface::customEvent()` to dispatch this event.
 
   obsolete5 @5();
   obsolete6 @6();

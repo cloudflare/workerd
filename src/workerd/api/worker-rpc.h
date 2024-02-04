@@ -8,7 +8,7 @@
 // delivering the RPC event.
 //
 // Upon invoking a method, the stub (WorkerRpc) obtains a capability (JsRpcTarget) by dispatching a
-// `getJsRpcTarget` custom event. See worker-interface.capnp for the definition.
+// `jsRpcSession` custom event. See worker-interface.capnp for the definition.
 // The stub then uses the JsRpcTarget capability to send the serialized method name and arguments
 // over RPC to the remote Worker/DO.
 
@@ -85,11 +85,11 @@ private:
     static constexpr uint16_t WORKER_RPC_EVENT_TYPE = 9;
 };
 
-// `getJsRpcTarget` returns a capability that provides the client a way to call remote methods
+// `jsRpcSession` returns a capability that provides the client a way to call remote methods
 // over RPC. We drain the IncomingRequest after the capability is used to run the relevant JS.
-class GetJsRpcTargetCustomEventImpl final: public WorkerInterface::CustomEvent {
+class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
 public:
-  GetJsRpcTargetCustomEventImpl(uint16_t typeId,
+  JsRpcSessionCustomEventImpl(uint16_t typeId,
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
     : capFulfiller(kj::mv(paf.fulfiller)),

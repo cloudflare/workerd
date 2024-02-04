@@ -99,8 +99,8 @@ jsg::Promise<jsg::Value> WorkerRpc::sendWorkerRpc(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
 
   auto& ioContext = IoContext::current();
-  auto worker = getClient(ioContext, kj::none, "getJsRpcTarget"_kjc);
-  auto event = kj::heap<api::GetJsRpcTargetCustomEventImpl>(WORKER_RPC_EVENT_TYPE);
+  auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
+  auto event = kj::heap<api::JsRpcSessionCustomEventImpl>(WORKER_RPC_EVENT_TYPE);
 
   rpc::JsRpcTarget::Client client = event->getCap();
   auto builder = client.callRequest();
@@ -285,7 +285,7 @@ private:
 // completes, since it is actually returned as the result of the top-level RPC call, but that
 // call doesn't return until the `CompletionMembrane` says all capabilities were dropped, so this
 // would create a cycle.
-class GetJsRpcTargetCustomEventImpl::ServerTopLevelMembrane final
+class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final
     : public capnp::MembranePolicy, public kj::Refcounted {
 public:
   explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
@@ -318,7 +318,7 @@ private:
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> doneFulfiller;
 };
 
-kj::Promise<WorkerInterface::CustomEvent::Result> GetJsRpcTargetCustomEventImpl::run(
+kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName) {
   incomingRequest->delivered();
@@ -338,7 +338,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> GetJsRpcTargetCustomEventImpl:
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result>
-  GetJsRpcTargetCustomEventImpl::sendRpc(
+  JsRpcSessionCustomEventImpl::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     kj::TaskSet& waitUntilTasks,
@@ -357,12 +357,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
     }
   });
 
-  auto req = dispatcher.getJsRpcTargetRequest();
+  auto req = dispatcher.jsRpcSessionRequest();
   auto sent = req.send();
 
   this->capFulfiller->fulfill(
       capnp::membrane(
-          sent.getServer(),
+          sent.getTopLevel(),
           kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise))));
 
   try {
