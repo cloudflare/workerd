@@ -95,14 +95,11 @@ private:
 
 jsg::Promise<jsg::Value> WorkerRpc::sendWorkerRpc(
     jsg::Lock& js,
+    rpc::JsRpcTarget::Client client,
     kj::StringPtr name,
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-
   auto& ioContext = IoContext::current();
-  auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
-  auto event = kj::heap<api::JsRpcSessionCustomEventImpl>(WORKER_RPC_EVENT_TYPE);
 
-  rpc::JsRpcTarget::Client client = event->getCap();
   auto builder = client.callRequest();
   builder.setMethodName(name);
 
@@ -125,14 +122,6 @@ jsg::Promise<jsg::Value> WorkerRpc::sendWorkerRpc(
   }
 
   auto callResult = builder.send();
-
-  // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we don't
-  // actually care about the result of the event. If it throws, the membrane will already have
-  // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
-  // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
-  // caught elsewhere.
-  ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker))
-      .then([](auto&&) {}, [](kj::Exception&&) {}));
 
   return ioContext.awaitIo(js, kj::mv(callResult),
       [](jsg::Lock& js, auto result) -> jsg::Value {
@@ -158,7 +147,7 @@ kj::Maybe<WorkerRpc::RpcFunction> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::Str
     JSG_REQUIRE(args.This() == KJ_ASSERT_NONNULL(self.tryGetHandle(js)), TypeError,
         "Illegal invocation");
 
-    return self->sendWorkerRpc(js, methodName, args);
+    return sendWorkerRpc(js, *self->capnpClient, methodName, args);
   }));
 }
 

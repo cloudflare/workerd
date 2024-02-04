@@ -28,7 +28,7 @@ public:
   ColoLocalActorNamespace(uint channel)
     : channel(channel) {}
 
-  jsg::Ref<WorkerRpc> get(kj::String actorId);
+  jsg::Ref<Fetcher> get(kj::String actorId);
 
   JSG_RESOURCE_TYPE(ColoLocalActorNamespace) {
     JSG_METHOD(get);
@@ -71,19 +71,19 @@ private:
 };
 
 // Stub object used to send messages to a remote durable object.
-class DurableObject final: public WorkerRpc {
+class DurableObject final: public Fetcher {
 
 public:
   DurableObject(jsg::Ref<DurableObjectId> id, IoOwn<OutgoingFactory> outgoingFactory,
                 RequiresHostAndProtocol requiresHost)
-    : WorkerRpc(kj::mv(outgoingFactory), requiresHost, true /* isInHouse */),
+    : Fetcher(kj::mv(outgoingFactory), requiresHost, true /* isInHouse */),
       id(kj::mv(id)) {}
 
   jsg::Ref<DurableObjectId> getId() { return id.addRef(); };
   jsg::Optional<kj::StringPtr> getName() { return id->getName(); }
 
   JSG_RESOURCE_TYPE(DurableObject) {
-    JSG_INHERIT(WorkerRpc);
+    JSG_INHERIT(Fetcher);
 
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);

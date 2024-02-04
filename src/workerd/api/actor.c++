@@ -97,7 +97,7 @@ private:
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
-jsg::Ref<WorkerRpc> ColoLocalActorNamespace::get(kj::String actorId) {
+jsg::Ref<Fetcher> ColoLocalActorNamespace::get(kj::String actorId) {
   JSG_REQUIRE(actorId.size() > 0 && actorId.size() <= 2048, TypeError,
       "Actor ID length must be in the range [1, 2048].");
 
@@ -108,7 +108,7 @@ jsg::Ref<WorkerRpc> ColoLocalActorNamespace::get(kj::String actorId) {
   auto outgoingFactory = context.addObject(kj::mv(factory));
 
   bool isInHouse = true;
-  return jsg::alloc<WorkerRpc>(
+  return jsg::alloc<Fetcher>(
       kj::mv(outgoingFactory), Fetcher::RequiresHostAndProtocol::YES, isInHouse);
 }
 

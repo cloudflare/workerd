@@ -7,15 +7,16 @@
 // This file contains the generic stub object (WorkerRpc), as well as classes for sending and
 // delivering the RPC event.
 //
-// Upon invoking a method, the stub (WorkerRpc) obtains a capability (JsRpcTarget) by dispatching a
-// `jsRpcSession` custom event. See worker-interface.capnp for the definition.
-// The stub then uses the JsRpcTarget capability to send the serialized method name and arguments
-// over RPC to the remote Worker/DO.
+// `WorkerRpc` specifically represents a capability that was introduced as part of some broader
+// RPC session. `Fetcher`, on the other hand, also supports RPC methods, where each method call
+// begins a new session (by dispatching a `jsRpcSession` custom event). Service bindings and
+// Durable Object stubs both extend from `Fetcher`, and so allow such calls.
+//
+// See worker-interface.capnp for the underlying protocol.
 
-#include <workerd/api/http.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/function.h>
-#include <workerd/api/basics.h>
+#include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.capnp.h>
 
 namespace workerd::api {
@@ -34,22 +35,25 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 //
 // WorkerRpc only supports method calls. You cannot, for instance, access a property of a
 // Durable Object over RPC.
-class WorkerRpc : public Fetcher {
+//
+// The `WorkerRpc` type is used to represent capabilities passed across some previous JS RPC call.
+// It is NOT the type of a Durable Object stub nor a service binding. Those are instances of
+// `Fetcher`, which has a `getRpcMethod()` call of its own that mostly delegates to
+// `WorkerRpc::sendWorkerRpc()`.
+class WorkerRpc: public jsg::Object {
 public:
-  WorkerRpc(
-      IoOwn<OutgoingFactory> outgoingFactory,
-      RequiresHostAndProtocol requiresHost,
-      bool inHouse)
-    : Fetcher(kj::mv(outgoingFactory), requiresHost, inHouse) {}
+  WorkerRpc(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
+      : capnpClient(kj::mv(capnpClient)) {}
 
   // Serializes the method name and arguments, calls customEvent to get the capability, and uses
   // the capability to send our request to the remote Worker. This resolves once the RPC promise
   // resolves.
   //
-  // Note: Unlike usual KJ convention, it is NOT necessary to make sure the `WorkerRpc` object
-  // outlives the returned Promise. This is handled internally.
-  jsg::Promise<jsg::Value> sendWorkerRpc(
+  // This is a static helper, no `WorkerRpc` object is needed. This is the shared implementation
+  // between `WorkerRpc::getRpcMethod()` and `Fetcher::getRpcMethod()`.
+  static jsg::Promise<jsg::Value> sendWorkerRpc(
       jsg::Lock& js,
+      rpc::JsRpcTarget::Client client,
       kj::StringPtr name,
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
@@ -58,31 +62,12 @@ public:
 
   kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
 
-  // WARNING: Adding a new JSG_METHOD to a class that extends WorkerRpc can conflict with RPC method
-  // names defined on your remote target. For example, if you add a new method `bar()` to the
-  // Durable Object stub, which extends WorkerRpc, then any scripts with a DO that defines `bar()`
-  // and which call `stub.bar()` will stop calling the method over RPC, and start calling the method
-  // you're adding to the Durable Object stub.
-  //
-  // This also applies to classes from which your final stub object is derived from. For example,
-  // since the Durable Object stub extends WorkerRpc, and WorkerRpc extends Fetcher, any new
-  // JSG_METHOD defined on Fetcher will override name interception on the Durable Object stub.
-  //
-  // New JSG_METHODs should be gated via compatibility flag/date and should be announced in the
-  // change log.
-  JSG_RESOURCE_TYPE(WorkerRpc, CompatibilityFlags::Reader flags) {
-    if (flags.getWorkerdExperimental()) {
-      JSG_WILDCARD_PROPERTY(getRpcMethod);
-    }
-    JSG_INHERIT(Fetcher);
+  JSG_RESOURCE_TYPE(WorkerRpc) {
+    JSG_WILDCARD_PROPERTY(getRpcMethod);
   }
+
 private:
-  // Event ID for WorkerRpc.
-  //
-  // Similar to WebSocket hibernation, we define this event ID in the internal codebase, but since
-  // we don't create WorkerRpc stubs from our internal code, we can't pass the event type in --
-  // so we hardcode it here.
-  static constexpr uint16_t WORKER_RPC_EVENT_TYPE = 9;
+  IoOwn<rpc::JsRpcTarget::Client> capnpClient;
 };
 
 // `jsRpcSession` returns a capability that provides the client a way to call remote methods
@@ -111,6 +96,13 @@ public:
   }
 
   rpc::JsRpcTarget::Client getCap() { return clientCap; }
+
+  // Event ID for WorkerRpc.
+  //
+  // Similar to WebSocket hibernation, we define this event ID in the internal codebase, but since
+  // we don't create WorkerRpc stubs from our internal code, we can't pass the event type in --
+  // so we hardcode it here.
+  static constexpr uint16_t WORKER_RPC_EVENT_TYPE = 9;
 
 private:
   kj::Own<kj::PromiseFulfiller<workerd::rpc::JsRpcTarget::Client>> capFulfiller;

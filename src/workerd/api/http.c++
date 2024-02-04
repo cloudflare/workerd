@@ -7,6 +7,7 @@
 #include "system-streams.h"
 #include "util.h"
 #include "queue.h"
+#include "worker-rpc.h"
 #include <kj/encoding.h>
 #include <kj/compat/url.h>
 #include <kj/memory.h>
@@ -1865,6 +1866,36 @@ jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(
     jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
     jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit) {
   return fetchImpl(js, JSG_THIS, kj::mv(requestOrUrl), kj::mv(requestInit));
+}
+
+kj::Maybe<Fetcher::RpcFunction> Fetcher::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
+  // This is like WorkerRpc::getRpcMethod(), but we also initiate a whole new JS RPC session each
+  // time the method is called.
+  return RpcFunction(JSG_VISITABLE_LAMBDA(
+      (methodName = kj::str(name), self = JSG_THIS),
+      (self),
+      (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> jsg::Promise<jsg::Value> {
+    // Same as WorkerRpc::getRpcMethod(), we want to prevent calling on the wrong `this`.
+    JSG_REQUIRE(args.This() == KJ_ASSERT_NONNULL(self.tryGetHandle(js)), TypeError,
+        "Illegal invocation");
+
+    auto& ioContext = IoContext::current();
+    auto worker = self->getClient(ioContext, kj::none, "jsRpcSession"_kjc);
+    auto event = kj::heap<api::JsRpcSessionCustomEventImpl>(
+        JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
+
+    auto result = WorkerRpc::sendWorkerRpc(js, event->getCap(), methodName, args);
+
+    // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we don't
+    // actually care about the result of the event. If it throws, the membrane will already have
+    // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
+    // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
+    // caught elsewhere.
+    ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker))
+        .then([](auto&&) {}, [](kj::Exception&&) {}));
+
+    return result;
+  }));
 }
 
 static jsg::Promise<void> throwOnError(jsg::Lock& js,
