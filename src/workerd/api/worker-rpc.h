@@ -119,6 +119,8 @@ private:
   // limited return type.
   rpc::JsRpcTarget::Client clientCap;
   uint16_t typeId;
+
+  class ServerTopLevelMembrane;
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES  \

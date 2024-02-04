@@ -6,10 +6,12 @@
 #include <workerd/io/features.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/jsg/ser.h>
+#include <capnp/membrane.h>
 
 namespace workerd::api {
 
 namespace {
+
 kj::Array<kj::byte> serializeV8(jsg::Lock& js, jsg::JsValue value) {
   jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
@@ -28,6 +30,67 @@ jsg::JsValue deserializeV8(jsg::Lock& js, kj::ArrayPtr<const kj::byte> ser) {
 
   return deserializer.readValue(js);
 }
+
+// A membrane applied which detects when no capabilities are held any longer, at which point it
+// fulfills a fulfiller.
+//
+// TODO(cleanup): This is generally useful, should it be part of capnp?
+class CompletionMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+public:
+  explicit CompletionMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
+      : doneFulfiller(kj::mv(doneFulfiller)) {}
+  ~CompletionMembrane() noexcept(false) {
+    doneFulfiller->fulfill();
+  }
+
+  kj::Maybe<capnp::Capability::Client> inboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Maybe<capnp::Capability::Client> outboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Own<MembranePolicy> addRef() override {
+    return kj::addRef(*this);
+  }
+
+private:
+  kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
+};
+
+// A membrane which revokes when some Promise is fulfilled.
+//
+// TODO(cleanup): This is generally useful, should it be part of capnp?
+class RevokerMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+public:
+  explicit RevokerMembrane(kj::Promise<void> promise)
+      : promise(promise.fork()) {}
+
+  kj::Maybe<capnp::Capability::Client> inboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Maybe<capnp::Capability::Client> outboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Own<MembranePolicy> addRef() override {
+    return kj::addRef(*this);
+  }
+
+  kj::Maybe<kj::Promise<void>> onRevoked() override {
+    return promise.addBranch();
+  }
+
+private:
+  kj::ForkedPromise<void> promise;
+};
+
 } // namespace
 
 jsg::Promise<jsg::Value> WorkerRpc::sendWorkerRpc(
@@ -108,19 +171,14 @@ kj::Maybe<WorkerRpc::RpcFunction> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::Str
 class JsRpcTargetImpl final : public rpc::JsRpcTarget::Server {
 public:
   JsRpcTargetImpl(
-      kj::Own<kj::PromiseFulfiller<void>> callFulfiller,
       IoContext& ctx,
       kj::Maybe<kj::StringPtr> entrypointName)
-      : callFulfiller(kj::mv(callFulfiller)), ctx(ctx), entrypointName(entrypointName) {}
+      : ctx(ctx), entrypointName(entrypointName) {}
 
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
     auto methodName = kj::heapString(callContext.getParams().getMethodName());
     auto serializedArgs = callContext.getParams().getArgs().getV8Serialized().asBytes();
-
-    // We want to fulfill the callPromise so customEvent can continue executing
-    // regardless of the outcome of `call()`.
-    KJ_DEFER(callFulfiller->fulfill(););
 
     // Try to execute the requested method.
     co_return co_await ctx.run(
@@ -216,22 +274,63 @@ private:
     }
   };
 
-  // We use the callFulfiller to let the custom event know we've finished executing the method.
-  kj::Own<kj::PromiseFulfiller<void>> callFulfiller;
   IoContext& ctx;
   kj::Maybe<kj::StringPtr> entrypointName;
+};
+
+// A membrane which wraps the top-level JsRpcTarget of an RPC session on the server side. The
+// purpose of this membrane is to allow only a single top-level call, which then gets a
+// `CompletionMembrane` wrapped around it. Note that we can't just wrap `CompletionMembrane` around
+// the top-level object directly because that capability will not be dropped until the RPC session
+// completes, since it is actually returned as the result of the top-level RPC call, but that
+// call doesn't return until the `CompletionMembrane` says all capabilities were dropped, so this
+// would create a cycle.
+class GetJsRpcTargetCustomEventImpl::ServerTopLevelMembrane final
+    : public capnp::MembranePolicy, public kj::Refcounted {
+public:
+  explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
+      : doneFulfiller(kj::mv(doneFulfiller)) {}
+  ~ServerTopLevelMembrane() noexcept(false) {
+    KJ_IF_SOME(f, doneFulfiller) {
+      f->reject(KJ_EXCEPTION(DISCONNECTED,
+          "JS RPC session canceled without calling an RPC method."));
+    }
+  }
+
+  kj::Maybe<capnp::Capability::Client> inboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    auto f = kj::mv(JSG_REQUIRE_NONNULL(doneFulfiller,
+        Error, "Only one RPC method call is allowed on this object."));
+    doneFulfiller = kj::none;
+    return capnp::membrane(kj::mv(target), kj::refcounted<CompletionMembrane>(kj::mv(f)));
+  }
+
+  kj::Maybe<capnp::Capability::Client> outboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    KJ_FAIL_ASSERT("ServerTopLevelMembrane shouldn't have outgoing capabilities");
+  }
+
+  kj::Own<MembranePolicy> addRef() override {
+    return kj::addRef(*this);
+  }
+
+private:
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> doneFulfiller;
 };
 
 kj::Promise<WorkerInterface::CustomEvent::Result> GetJsRpcTargetCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName) {
   incomingRequest->delivered();
-  auto [callPromise, callFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(kj::heap<JsRpcTargetImpl>(
-      kj::mv(callFulfiller), incomingRequest->getContext(), entrypointName));
+  auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
+  capFulfiller->fulfill(
+      capnp::membrane(
+          kj::heap<JsRpcTargetImpl>(incomingRequest->getContext(), entrypointName),
+          kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
-  // `callPromise` resolves once `JsRpcTargetImpl::call()` (invoked by client) completes.
-  co_await callPromise;
+  // `donePromise` resolves once there are no longer any capabilities pointing between the client
+  // and server as part of this session.
+  co_await donePromise;
   co_await incomingRequest->drain();
   co_return WorkerInterface::CustomEvent::Result {
     .outcome = EventOutcome::OK
@@ -244,11 +343,38 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
     capnp::ByteStreamFactory& byteStreamFactory,
     kj::TaskSet& waitUntilTasks,
     rpc::EventDispatcher::Client dispatcher) {
+  // We arrange to revoke all capabilities in this session as soon as `sendRpc()` completes or is
+  // canceled. Normally, the server side doesn't return if any capabilities still exist, so this
+  // only makes a difference in the case that some sort of an error occurred. We don't strictly
+  // have to revoke the capabilities as they are probably already broken anyway, but revoking them
+  // helps to ensure that the underlying transport isn't "held open" waiting for the JS garbage
+  // collector to actually collect the WorkerRpc objects.
+  auto revokePaf = kj::newPromiseAndFulfiller<void>();
+
+  KJ_DEFER({
+    if (revokePaf.fulfiller->isWaiting()) {
+      revokePaf.fulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "JS-RPC session canceled"));
+    }
+  });
+
   auto req = dispatcher.getJsRpcTargetRequest();
   auto sent = req.send();
-  this->capFulfiller->fulfill(sent.getServer());
 
-  auto resp = co_await sent;
+  this->capFulfiller->fulfill(
+      capnp::membrane(
+          sent.getServer(),
+          kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise))));
+
+  try {
+    co_await sent;
+  } catch (...) {
+    auto e = kj::getCaughtExceptionAsKj();
+    if (revokePaf.fulfiller->isWaiting()) {
+      revokePaf.fulfiller->reject(kj::cp(e));
+    }
+    kj::throwFatalException(kj::mv(e));
+  }
+
   co_return WorkerInterface::CustomEvent::Result {
     .outcome = EventOutcome::OK
   };
