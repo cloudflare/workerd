@@ -77,12 +77,12 @@ public:
     JSG_INHERIT(Fetcher);
   }
 private:
-    // Event ID for WorkerRpc.
-    //
-    // Similar to WebSocket hibernation, we define this event ID in the internal codebase, but since
-    // we don't create WorkerRpc stubs from our internal code, we can't pass the event type in --
-    // so we hardcode it here.
-    static constexpr uint16_t WORKER_RPC_EVENT_TYPE = 9;
+  // Event ID for WorkerRpc.
+  //
+  // Similar to WebSocket hibernation, we define this event ID in the internal codebase, but since
+  // we don't create WorkerRpc stubs from our internal code, we can't pass the event type in --
+  // so we hardcode it here.
+  static constexpr uint16_t WORKER_RPC_EVENT_TYPE = 9;
 };
 
 // `jsRpcSession` returns a capability that provides the client a way to call remote methods
