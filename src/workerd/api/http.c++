@@ -1869,13 +1869,13 @@ jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(
 }
 
 kj::Maybe<Fetcher::RpcFunction> Fetcher::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
-  // This is like WorkerRpc::getRpcMethod(), but we also initiate a whole new JS RPC session each
-  // time the method is called.
+  // This is like JsRpcCapability::getRpcMethod(), but we also initiate a whole new JS RPC session
+  // each time the method is called.
   return RpcFunction(JSG_VISITABLE_LAMBDA(
       (methodName = kj::str(name), self = JSG_THIS),
       (self),
       (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> jsg::Promise<jsg::Value> {
-    // Same as WorkerRpc::getRpcMethod(), we want to prevent calling on the wrong `this`.
+    // Same as JsRpcCapability::getRpcMethod(), we want to prevent calling on the wrong `this`.
     JSG_REQUIRE(args.This() == KJ_ASSERT_NONNULL(self.tryGetHandle(js)), TypeError,
         "Illegal invocation");
 
@@ -1884,7 +1884,7 @@ kj::Maybe<Fetcher::RpcFunction> Fetcher::getRpcMethod(jsg::Lock& js, kj::StringP
     auto event = kj::heap<api::JsRpcSessionCustomEventImpl>(
         JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
 
-    auto result = WorkerRpc::sendWorkerRpc(js, event->getCap(), methodName, args);
+    auto result = JsRpcCapability::sendJsRpc(js, event->getCap(), methodName, args);
 
     // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we don't
     // actually care about the result of the event. If it throws, the membrane will already have

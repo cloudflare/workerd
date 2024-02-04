@@ -4,12 +4,12 @@
 
 #pragma once
 // Classes for calling a remote Worker/Durable Object's methods from the stub over RPC.
-// This file contains the generic stub object (WorkerRpc), as well as classes for sending and
+// This file contains the generic stub object (JsRpcCapability), as well as classes for sending and
 // delivering the RPC event.
 //
-// `WorkerRpc` specifically represents a capability that was introduced as part of some broader
-// RPC session. `Fetcher`, on the other hand, also supports RPC methods, where each method call
-// begins a new session (by dispatching a `jsRpcSession` custom event). Service bindings and
+// `JsRpcCapability` specifically represents a capability that was introduced as part of some
+// broader RPC session. `Fetcher`, on the other hand, also supports RPC methods, where each method
+// call begins a new session (by dispatching a `jsRpcSession` custom event). Service bindings and
 // Durable Object stubs both extend from `Fetcher`, and so allow such calls.
 //
 // See worker-interface.capnp for the underlying protocol.
@@ -28,30 +28,30 @@ namespace workerd::api {
 // separate calls.
 constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 
-// A WorkerRpc object forwards JS method calls to the remote Worker/Durable Object over RPC.
-// Since methods are not known until runtime, WorkerRpc doesn't define any JS methods.
+// A JsRpcCapability object forwards JS method calls to the remote Worker/Durable Object over RPC.
+// Since methods are not known until runtime, JsRpcCapability doesn't define any JS methods.
 // Instead, we use JSG_WILDCARD_PROPERTY to intercept property accesses of names that are not known
 // at compile time.
 //
-// WorkerRpc only supports method calls. You cannot, for instance, access a property of a
+// JsRpcCapability only supports method calls. You cannot, for instance, access a property of a
 // Durable Object over RPC.
 //
-// The `WorkerRpc` type is used to represent capabilities passed across some previous JS RPC call.
-// It is NOT the type of a Durable Object stub nor a service binding. Those are instances of
+// The `JsRpcCapability` type is used to represent capabilities passed across some previous JS RPC
+// call. It is NOT the type of a Durable Object stub nor a service binding. Those are instances of
 // `Fetcher`, which has a `getRpcMethod()` call of its own that mostly delegates to
-// `WorkerRpc::sendWorkerRpc()`.
-class WorkerRpc: public jsg::Object {
+// `JsRpcCapability::sendJsRpc()`.
+class JsRpcCapability: public jsg::Object {
 public:
-  WorkerRpc(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
+  JsRpcCapability(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
       : capnpClient(kj::mv(capnpClient)) {}
 
   // Serializes the method name and arguments, calls customEvent to get the capability, and uses
   // the capability to send our request to the remote Worker. This resolves once the RPC promise
   // resolves.
   //
-  // This is a static helper, no `WorkerRpc` object is needed. This is the shared implementation
-  // between `WorkerRpc::getRpcMethod()` and `Fetcher::getRpcMethod()`.
-  static jsg::Promise<jsg::Value> sendWorkerRpc(
+  // This is a static helper, no `JsRpcCapability` object is needed. This is the shared
+  // implementation between `JsRpcCapability::getRpcMethod()` and `Fetcher::getRpcMethod()`.
+  static jsg::Promise<jsg::Value> sendJsRpc(
       jsg::Lock& js,
       rpc::JsRpcTarget::Client client,
       kj::StringPtr name,
@@ -62,7 +62,7 @@ public:
 
   kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
 
-  JSG_RESOURCE_TYPE(WorkerRpc) {
+  JSG_RESOURCE_TYPE(JsRpcCapability) {
     JSG_WILDCARD_PROPERTY(getRpcMethod);
   }
 
@@ -97,11 +97,11 @@ public:
 
   rpc::JsRpcTarget::Client getCap() { return clientCap; }
 
-  // Event ID for WorkerRpc.
+  // Event ID for jsRpcSession.
   //
   // Similar to WebSocket hibernation, we define this event ID in the internal codebase, but since
-  // we don't create WorkerRpc stubs from our internal code, we can't pass the event type in --
-  // so we hardcode it here.
+  // we don't create JsRpcSessionCustomEventImpl from our internal code, we can't pass the event
+  // type in -- so we hardcode it here.
   static constexpr uint16_t WORKER_RPC_EVENT_TYPE = 9;
 
 private:
@@ -116,6 +116,6 @@ private:
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES  \
-  api::WorkerRpc
+  api::JsRpcCapability
 
 }; // namespace workerd::api
