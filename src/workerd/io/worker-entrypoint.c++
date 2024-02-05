@@ -558,6 +558,20 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
           return lock.getGlobalScope().runAlarm(scheduledTime, lock, handler);
         });
 
+        // The alarm handler was successfully complete. We must guarantee this same alarm does not
+        // run again.
+        if (result.outcome == EventOutcome::OK){
+          // When an alarm handler completes its execution, the alarm is marked ready for deletion in
+          // actor-cache. This alarm change will only be reflected in the alarmsXX table, once cache
+          // flushes and changes are written to CRDB.
+          // If there are any pending flushes, they are locked with the actor output gate until
+          // they complete. We should wait until the output gate locks are released.
+          // If we don't wait, it's possible for alarm manager to pull the wrong alarm value (the
+          // same alarm that just completed) from CRDB before these changes are actually made,
+          // rerunning it, when it shouldn't.
+          co_await actor.getOutputGate().wait();
+        }
+
         // We succeeded, inform any other entrypoints that may be waiting upon us.
         af.fulfill(result);
         cancellationGuard.cancel();
