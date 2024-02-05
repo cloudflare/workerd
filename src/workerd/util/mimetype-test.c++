@@ -401,6 +401,13 @@ KJ_TEST("WHATWG tests") {
   KJ_ASSERT(MimeType::isJavascript(MimeType::JAVASCRIPT));
   KJ_ASSERT(MimeType::isJavascript(MimeType::XJAVASCRIPT));
   KJ_ASSERT(MimeType::isJavascript(MimeType::TEXT_JAVASCRIPT));
+
+  KJ_ASSERT(MimeType::isText(MimeType::PLAINTEXT));
+  KJ_ASSERT(MimeType::isText(MimeType::JSON));
+  KJ_ASSERT(MimeType::isText(MimeType::JAVASCRIPT));
+  KJ_ASSERT(MimeType::isText(MimeType::XJAVASCRIPT));
+  KJ_ASSERT(MimeType::isText(
+      KJ_ASSERT_NONNULL(MimeType::tryParse("application/json; charset=\"utf-8\""))));
 }
 
 }  // namespace

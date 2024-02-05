@@ -101,19 +101,16 @@ jobs:
         # Exclude large benchmarking binaries created in debug and asan configurations to avoid
         # running out of disk space on the runner (nominally 14GB). We typically have two copies
         # of generated artifacts: one under bazel output-base and one in the bazel disk cache.
-        # This should not be needed on Linux, where we can use shared linkage so binary sizes are
-        # much less of an issue.
-        if: matrix.os.name != 'linux' && (contains(matrix.config.suffix, 'debug') || contains(matrix.config.suffix, 'asan'))
+        # Also only generate limited debug info – these binaries are only used for testing and
+        # don't need to run within a debugger, so information needed for symbolication is
+        # sufficient. The host configuration compiles in opt mode/without debug info by default, so
+        # there's no need to set host_copt here.
+        if: contains(matrix.config.suffix, 'debug') || contains(matrix.config.suffix, 'asan')
         shell: bash
         run: |
           cat <<EOF >> .bazelrc
-          build:limit-storage -- -//src/workerd/tests:bench-api-headers
-          build:limit-storage -//src/workerd/tests:bench-global-scope
-          build:limit-storage -//src/workerd/tests:bench-json
-          build:limit-storage -//src/workerd/tests:bench-kj-headers
-          build:limit-storage -//src/workerd/tests:bench-mimetype
-          build:limit-storage -//src/workerd/tests:bench-regex
-          build:limit-storage -//src/workerd/tests:bench-tools
+          build:limit-storage --build_tag_filters=-off-by-default,-benchmark
+          build:limit-storage --copt="-g1"
           build:asan --config=limit-storage
           build:debug --config=limit-storage
           EOF
