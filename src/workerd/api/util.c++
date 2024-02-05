@@ -225,20 +225,16 @@ kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
   return kj::none;
 }
 
-void maybeWarnIfNotText(kj::StringPtr str) {
+void maybeWarnIfNotText(jsg::Lock& js, kj::StringPtr str) {
+  KJ_IF_SOME(parsed, MimeType::tryParse(str)) {
+    if (MimeType::isText(parsed)) return;
+  }
   // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
   // search-and-replace across your whole site and you forgot that it'll apply to images too.
   // When running in the fiddle, let's warn the developer if they do this.
-  if (!str.startsWith("text/") &&
-      !str.endsWith("charset=UTF-8") &&
-      !str.endsWith("charset=utf-8") &&
-      !str.endsWith("xml") &&
-      !str.endsWith("json") &&
-      !str.endsWith("javascript")) {
-    IoContext::current().logWarning(kj::str(
-        "Called .text() on an HTTP body which does not appear to be text. The body's "
-        "Content-Type is \"", str, "\". The result will probably be corrupted. Consider "
-        "checking the Content-Type header before interpreting entities as text."));
-  }
+  js.logWarning(kj::str(
+      "Called .text() on an HTTP body which does not appear to be text. The body's "
+      "Content-Type is \"", str, "\". The result will probably be corrupted. Consider "
+      "checking the Content-Type header before interpreting entities as text."));
 }
 }  // namespace workerd::api

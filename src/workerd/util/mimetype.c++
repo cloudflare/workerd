@@ -332,6 +332,14 @@ const MimeType MimeType::MANIFEST_JSON = MimeType("application"_kj, "manifest+js
 const MimeType MimeType::VTT = MimeType("text"_kj, "vtt"_kj);
 const MimeType MimeType::EVENT_STREAM = MimeType("text"_kj, "event-stream"_kj);
 
+bool MimeType::isText(const MimeType& mimeType) {
+  auto type = mimeType.type();
+  return type == "text" ||
+      isXml(mimeType) ||
+      isJson(mimeType) ||
+      isJavascript(mimeType);
+}
+
 bool MimeType::isXml(const MimeType& mimeType) {
   auto type = mimeType.type();
   auto subtype = mimeType.subtype();

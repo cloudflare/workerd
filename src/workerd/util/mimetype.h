@@ -76,6 +76,7 @@ public:
   static bool isImage(const MimeType& mimeType);
   static bool isVideo(const MimeType& mimeType);
   static bool isAudio(const MimeType& mimeType);
+  static bool isText(const MimeType& mimeType);
 
   static const MimeType JSON;
   static const MimeType PLAINTEXT;

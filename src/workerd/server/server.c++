@@ -4,6 +4,7 @@
 
 #include "server.h"
 #include <kj/debug.h>
+#include <kj/glob-filter.h>
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
@@ -3459,103 +3460,6 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 // =======================================================================================
 // Server::test()
 
-namespace {
-
-// Implements glob filters. Copied from kj/test.{h,c++}, modified only to avoid copying the
-// pattern in the constructor.
-class GlobFilter {
-  // TODO(cleanup): Should this be a public API in KJ?
-
-public:
-  explicit GlobFilter(kj::StringPtr pattern): pattern(pattern) {}
-
-  bool matches(kj::StringPtr name) {
-    // Get out your computer science books. We're implementing a non-deterministic finite automaton.
-    //
-    // Our NDFA has one "state" corresponding to each character in the pattern.
-    //
-    // As you may recall, an NDFA can be transformed into a DFA where every state in the DFA
-    // represents some combination of states in the NDFA. Therefore, we actually have to store a
-    // list of states here. (Actually, what we really want is a set of states, but because our
-    // patterns are mostly non-cyclic a list of states should work fine and be a bit more efficient.)
-
-    // Our state list starts out pointing only at the start of the pattern.
-    states.resize(0);
-    states.add(0);
-
-    kj::Vector<uint> scratch;
-
-    // Iterate through each character in the name.
-    for (char c: name) {
-      // Pull the current set of states off to the side, so that we can populate `states` with the
-      // new set of states.
-      kj::Vector<uint> oldStates = kj::mv(states);
-      states = kj::mv(scratch);
-      states.resize(0);
-
-      // The pattern can omit a leading path. So if we're at a '/' then enter the state machine at
-      // the beginning on the next char.
-      if (c == '/' || c == '\\') {
-        states.add(0);
-      }
-
-      // Process each state.
-      for (uint state: oldStates) {
-        applyState(c, state);
-      }
-
-      // Store the previous state vector for reuse.
-      scratch = kj::mv(oldStates);
-    }
-
-    // If any one state is at the end of the pattern (or at a wildcard just before the end of the
-    // pattern), we have a match.
-    for (uint state: states) {
-      while (state < pattern.size() && pattern[state] == '*') {
-        ++state;
-      }
-      if (state == pattern.size()) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-private:
-  kj::StringPtr pattern;
-  kj::Vector<uint> states;
-
-  void applyState(char c, int state) {
-    if (state < pattern.size()) {
-      switch (pattern[state]) {
-        case '*':
-          // At a '*', we both re-add the current state and attempt to match the *next* state.
-          if (c != '/' && c != '\\') {  // '*' doesn't match '/'.
-            states.add(state);
-          }
-          applyState(c, state + 1);
-          break;
-
-        case '?':
-          // A '?' matches one character (never a '/').
-          if (c != '/' && c != '\\') {
-            states.add(state + 1);
-          }
-          break;
-
-        default:
-          // Any other character matches only itself.
-          if (c == pattern[state]) {
-            states.add(state + 1);
-          }
-          break;
-      }
-    }
-  }
-};
-
-}  // namespace
-
 kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader config,
                                kj::StringPtr servicePattern,
                                kj::StringPtr entrypointPattern) {
@@ -3575,8 +3479,8 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
   // TODO(someday): If the inspector is enabled, pause and wait for an inspector connection before
   //   proceeding?
 
-  GlobFilter serviceGlob(servicePattern);
-  GlobFilter entrypointGlob(entrypointPattern);
+  kj::GlobFilter serviceGlob(servicePattern);
+  kj::GlobFilter entrypointGlob(entrypointPattern);
 
   uint passCount = 0, failCount = 0;
 

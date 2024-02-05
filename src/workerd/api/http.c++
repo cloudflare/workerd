@@ -643,7 +643,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
       auto& context = IoContext::current();
       if (context.isInspectorEnabled()) {
         KJ_IF_SOME(type, headersRef.get(jsg::ByteString(kj::str("Content-Type")))) {
-          maybeWarnIfNotText(type);
+          maybeWarnIfNotText(js, type);
         }
       }
 
