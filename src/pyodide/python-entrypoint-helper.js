@@ -126,7 +126,7 @@ async function setupPackages(pyodide) {
     );
     pyodide.pyimport("aiohttp_fetch_patch");
   }
-  if (requirements.includes("fastapi")) {
+  if (requirements.some(req => req.startsWith("fastapi"))) {
     const mod = await import("pyodide-internal:asgi.py");
     pyodide.FS.writeFile(
       "/lib/python3.11/site-packages/asgi.py",
@@ -141,16 +141,28 @@ async function setupPackages(pyodide) {
   return pyodide.pyimport(mainModuleName);
 }
 
+let mainModulePromise;
+function getMainModule() {
+  if (mainModulePromise !== undefined) {
+    return mainModulePromise;
+  }
+  mainModulePromise = (async function() {
+    // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
+    // When we do it in top level scope we seem to get a broken file system.
+    const pyodide = await loadPyodide();
+    return await setupPackages(pyodide);
+  })();
+  return mainModulePromise;
+}
+
 export default {
   async fetch(request, env) {
-    const pyodide = await loadPyodide();
-    const mainModule = await setupPackages(pyodide);
+    const mainModule = await getMainModule();
     return await mainModule.fetch(request);
   },
   async test() {
     try {
-      const pyodide = await loadPyodide();
-      const mainModule = await setupPackages(pyodide);
+      const mainModule = await getMainModule();
       return await mainModule.test();
     } catch (e) {
       console.warn(e);
