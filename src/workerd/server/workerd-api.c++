@@ -365,18 +365,18 @@ void WorkerdApi::compileModules(
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
 
     auto confModules = conf.getModules();
-    // TODO: Before removing the autogate check, be sure to put this code behind an `experimental`
-    // flag check. We don't want to release this to workerd users without it being behind that flag.
     using namespace workerd::api::pyodide;
-    if (util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES) &&
-        hasPythonModules(confModules)) {
-      // Inject pyodide entrypoint module.
+    auto featureFlags = getFeatureFlags();
+    if (hasPythonModules(confModules)) {
+      KJ_REQUIRE(featureFlags.getWorkerdExperimental(),
+          "The experimental compatibility flag is required to use Python.");
+      // Inject pyodide bootstrap module.
       {
         auto mainModule = confModules.begin();
         capnp::MallocMessageBuilder message;
         auto module = message.getRoot<config::Worker::Module>();
         module.setEsModule(PYTHON_ENTRYPOINT);
-        auto info = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
+        auto info = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
         auto path = kj::Path::parse(mainModule->getName());
         modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
       }
@@ -402,13 +402,13 @@ void WorkerdApi::compileModules(
 
     for (auto module: confModules) {
       auto path = kj::Path::parse(module.getName());
-      auto maybeInfo = tryCompileModule(lockParam, module, modules->getObserver(), getFeatureFlags());
+      auto maybeInfo = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
       KJ_IF_SOME(info, maybeInfo) {
         modules->add(path, kj::mv(info));
       }
     }
 
-    api::registerModules(*modules, getFeatureFlags());
+    api::registerModules(*modules, featureFlags);
 
     // todo(perf): we'd like to find a way to precompile these on server startup and use isolate
     // cloning for faster worker creation.

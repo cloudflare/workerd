@@ -13,8 +13,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
     case AutogateKey::TEST_WORKERD:
       return "test-workerd"_kj;
-    case AutogateKey::BUILTIN_WASM_MODULES:
-      return "builtin-wasm-modules"_kj;
     case AutogateKey::SOCKETS_AWAIT_PROXY_BEFORE_CLOSE:
       return "sockets-await-proxy-before-close"_kj;
     case AutogateKey::NumOfKeys:
