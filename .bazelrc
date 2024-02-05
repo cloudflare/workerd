@@ -207,8 +207,13 @@ build:windows_no_dbg -c opt
 build:windows_no_dbg --copt='-O0' --host_copt='-O0'
 build:windows_no_dbg --copt='/Od' --host_copt='/Od'
 build:windows_no_dbg --copt='/INCREMENTAL:NO' --host_copt='/INCREMENTAL:NO'
-build:windows_no_dbg --noincompatible_use_host_features
 build:windows_no_dbg --features=-smaller_binary --features=-disable_assertions_feature
+
+# Mitigate the large size impact of Windows debug binaries somewhat by applying string merging and
+# linker garbage collection.
+build:windows_dbg --config=debug
+build:windows_dbg --copt='/Gy' --copt='/Gw' --copt='/GF'
+build:windows_dbg --linkopt='/OPT:REF'
 
 build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20'
 build:windows --cxxopt='/await' --host_cxxopt='/await'
