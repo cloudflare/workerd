@@ -224,7 +224,33 @@ class EventTarget: public jsg::Object {
 public:
 
   // RAII-style listener that can be attached to an EventTarget.
-  class NativeHandler;
+  class NativeHandler {
+  public:
+    using Signature = void(jsg::Ref<Event>);
+    NativeHandler(jsg::Lock& js, jsg::Ref<EventTarget> target, kj::String type,
+        jsg::Function<Signature> func, bool once = false);
+    ~NativeHandler() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(NativeHandler);
+
+    void operator()(jsg::Lock&js, jsg::Ref<Event> event);
+
+    uint hashCode() const;
+
+    void visitForGc(jsg::GcVisitor& visitor);
+  private:
+    void detach();
+
+    kj::String type;
+    struct State {
+      jsg::Ref<EventTarget> target;
+      jsg::Function<Signature> func;
+    };
+
+    kj::Maybe<State> state;
+    bool once;
+
+    friend class EventTarget;
+  };
 
   ~EventTarget() noexcept(false);
 
@@ -300,10 +326,10 @@ public:
   static jsg::Ref<EventTarget> constructor();
 
   // Registers a lambda that will be called when the given event type is emitted.
-  // The handler will be registered for as long as the returned opaque kj::Own<void>
+  // The handler will be registered for as long as the returned kj::Own<NativeHandler>
   // handle is held. If the EventTarget is destroyed while the native handler handle
   // is held, it will be automatically detached.
-  kj::Own<void> newNativeHandler(jsg::Lock& js,
+  kj::Own<NativeHandler> newNativeHandler(jsg::Lock& js,
       kj::String type,
       jsg::Function<void(jsg::Ref<Event>)> func,
       bool once = false);
@@ -322,6 +348,9 @@ private:
 
       void visitForGc(jsg::GcVisitor& visitor) {
         visitor.visit(identity, callback);
+        KJ_IF_SOME(handler, abortHandler) {
+          handler->visitForGc(visitor);
+        }
       }
     };
 
