@@ -13,11 +13,6 @@ const config :Workerd.Config = (
       service = "main"
     ),
   ],
-  autogates = [
-    # Pyodide is included as a builtin wasm module so it requires the
-    # corresponding autogate flag.
-    "workerd-autogate-builtin-wasm-modules",
-  ]
 );
 
 const mainWorker :Workerd.Worker = (

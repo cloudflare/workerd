@@ -1023,7 +1023,7 @@ jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
     if (context.isInspectorEnabled()) {
       // httpMetadata can't be null because GetResult always populates it.
       KJ_IF_SOME(type, KJ_REQUIRE_NONNULL(httpMetadata).contentType) {
-        maybeWarnIfNotText(type);
+        maybeWarnIfNotText(js, type);
       }
     }
 

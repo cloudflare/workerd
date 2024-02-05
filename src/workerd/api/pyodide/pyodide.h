@@ -34,8 +34,7 @@ public:
 #define EW_PYODIDE_ISOLATE_TYPES api::pyodide::PackagesTarReader
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
-  if (featureFlags.getWorkerdExperimental() &&
-      util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES)) {
+  if (featureFlags.getWorkerdExperimental()) {
     registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
   }
   registry.template addBuiltinModule<PackagesTarReader>("pyodide-internal:packages_tar_reader",
