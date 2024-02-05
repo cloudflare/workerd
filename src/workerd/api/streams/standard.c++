@@ -218,10 +218,10 @@ void ReadableLockImpl<Controller>::releaseReader(
           js.v8TypeError("This ReadableStream reader has been released."_kj));
     }
 
-    // Keep the kj::mv(locked) after the isolate and hasPendingReadRequests check above.
-    // Moving will release the references and we don't want to do that if the hasPendingReadRequests
-    // check fails.
-    auto lock = kj::mv(locked);
+    // Keep the locked.clear() after the isolate and hasPendingReadRequests check above.
+    // Clearing will release the references and we don't want to do that if the
+    // hasPendingReadRequests check fails.
+    locked.clear();
 
     // When maybeJs is nullptr, that means releaseReader was called when the reader is
     // being deconstructed and not as the result of explicitly calling releaseLock and
@@ -369,7 +369,7 @@ void WritableLockImpl<Controller>::releaseWriter(
         locked.getClosedFulfiller(),
         js.v8TypeError("This WritableStream writer has been released."_kj));
   }
-  auto lock = kj::mv(locked);
+  locked.clear();
 
   // When maybeJs is nullptr, that means releaseWriter was called when the writer is
   // being deconstructed and not as the result of explicitly calling releaseLock and
