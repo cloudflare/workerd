@@ -101,6 +101,6 @@ double dateNow();
 
 // =======================================================================================
 
-void maybeWarnIfNotText(kj::StringPtr str);
+void maybeWarnIfNotText(jsg::Lock& js, kj::StringPtr str);
 
 }  // namespace workerd::api
