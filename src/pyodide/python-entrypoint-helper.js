@@ -134,8 +134,11 @@ async function setupPackages(pyodide) {
       { canOwn: true }
     );
   }
-
-  return pyodide.pyimport(MetadataReader.getMainModule());
+  let mainModuleName = MetadataReader.getMainModule();
+  if (mainModuleName.endsWith(".py")) {
+    mainModuleName = mainModuleName.slice(0, -3);
+  }
+  return pyodide.pyimport(mainModuleName);
 }
 
 export default {
