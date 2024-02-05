@@ -222,7 +222,7 @@ async function setupPackages(pyodide) {
 }
 
 let mainModulePromise;
-function getMainModule() {
+function getPyodide() {
   if (mainModulePromise !== undefined) {
     return mainModulePromise;
   }
@@ -232,20 +232,19 @@ function getMainModule() {
     const pyodide = await loadPyodide();
     const mainModule = await setupPackages(pyodide);
     const relaxed_call = pyodide.pyimport("relaxed_call").relaxed_call;
-    result = { mainModule, relaxed_call };
-    return result;
+    return { mainModule, relaxed_call };
   })();
   return mainModulePromise;
 }
 
 export default {
   async fetch(request, env, ctx) {
-    const { relaxed_call, mainModule } = await getMainModule();
+    const { relaxed_call, mainModule } = await getPyodide();
     return await relaxed_call(mainModule.fetch, request, env, ctx);
   },
   async test(ctrl, env, ctx) {
     try {
-      const { relaxed_call, mainModule } = await getMainModule();
+      const { relaxed_call, mainModule } = await getPyodide();
       return await relaxed_call(mainModule.test, ctrl, env, ctx);
     } catch (e) {
       console.warn(e);
