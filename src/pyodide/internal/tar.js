@@ -4,7 +4,6 @@ import { default as Reader } from "pyodide-internal:packages_tar_reader";
 // And some trial and error with real tar files.
 // https://en.wikipedia.org/wiki/Tar_(computing)#File_format
 
-
 const decoder = new TextDecoder();
 function decodeString(buf) {
   const nullIdx = buf.indexOf(0);
