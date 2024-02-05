@@ -472,6 +472,7 @@ private:
   class Type##_TypeWrapper final: public Type##_TypeWrapperBase { \
   public: \
     using Type##_TypeWrapperBase::TypeWrapper; \
+    kj::StringPtr jsgGetName() const { return #Type##_kjc; } \
   }; \
   class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> { \
   public: \
