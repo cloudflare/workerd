@@ -6,8 +6,7 @@ files from the Pyodide release as public to workerd) and
 `workerd/api/pyodide/pyodide.h` which adds the bundle to the module registry if
 the appropriate flags are set.
 
-It requires the `workerd-autogate-builtin-wasm-modules` autogate flag and the
-`experimental` compatibility flag to enable.
+It requires the `experimental` compatibility flag to enable.
 
 See `samples/pyodide/` for an example using this in its current state.
 
