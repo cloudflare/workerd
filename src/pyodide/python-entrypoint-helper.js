@@ -105,6 +105,7 @@ async function setupPackages(pyodide) {
   const pythonRequirements = isWorkerd ? requirements : requirements.filter(req => !EMBEDDED_PYTHON_PACKAGES.has(req));
 
   if (pythonRequirements.length > 0) {
+    // Our embedded packages tarball always contains at least `micropip` so we can load it here safely.
     const micropip = pyodide.pyimport("micropip");
     await micropip.install(pythonRequirements);
   }
