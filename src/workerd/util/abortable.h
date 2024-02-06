@@ -134,11 +134,6 @@ public:
     return impl.getInner().receivedByteCount();
   }
 
-  kj::Maybe<kj::String> getPreferredExtensions(ExtensionsContext ctx) override {
-    return impl.getInner().getPreferredExtensions(ctx);
-  };
-
-
 private:
   AbortableImpl<kj::WebSocket> impl;
 };
