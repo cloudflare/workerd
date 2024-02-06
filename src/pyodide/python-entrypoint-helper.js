@@ -146,6 +146,8 @@ async function setupPackages(pyodide) {
   let mainModuleName = MetadataReader.getMainModule();
   if (mainModuleName.endsWith(".py")) {
     mainModuleName = mainModuleName.slice(0, -3);
+  } else {
+    throw new Error("Main module needs to end with a .py file extension");
   }
   return pyodide.pyimport(mainModuleName);
 }

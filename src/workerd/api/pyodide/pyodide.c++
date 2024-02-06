@@ -81,7 +81,6 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
   auto contents = kj::heapArrayBuilder<kj::Array<kj::byte>>(numFiles);
   auto requirements = kj::heapArrayBuilder<kj::String>(numRequirements);
   for (auto module : modules) {
-    bool pymodule = false;
     switch (module.which()) {
     case Worker::Module::TEXT:
       contents.add(kj::heapArray(module.getText().asBytes()));
@@ -93,7 +92,7 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
       contents.add(kj::heapArray(module.getJson().asBytes()));
       break;
     case Worker::Module::PYTHON_MODULE:
-      pymodule = true;
+      KJ_REQUIRE(module.getName().endsWith(".py"));
       contents.add(kj::heapArray(module.getPythonModule().asBytes()));
       break;
     case Worker::Module::PYTHON_REQUIREMENT:
@@ -102,12 +101,7 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
     default:
       continue;
     }
-    auto name = module.getName();
-    if (pymodule && !name.endsWith(".py")) {
-      names.add(kj::str(name, ".py"));
-    } else {
-      names.add(kj::str(name));
-    }
+    names.add(kj::str(module.getName()));
   }
   return jsg::alloc<PyodideMetadataReader>(kj::mv(mainModule), names.finish(), contents.finish(),
                                            requirements.finish(), true);
