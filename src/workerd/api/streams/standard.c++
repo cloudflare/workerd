@@ -61,6 +61,25 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  kj::StringPtr jsgGetMemoryName() const {
+    return "ReadableLockImpl"_kjc;
+  }
+  size_t jsgGetMemorySelfSize() const {
+    return sizeof(ReadableLockImpl);
+  }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(locked, Locked) {}
+      KJ_CASE_ONEOF(unlocked, Unlocked) {}
+      KJ_CASE_ONEOF(pipeLocked, PipeLocked) {
+        tracker.trackField("pipeLocked", pipeLocked);
+      }
+      KJ_CASE_ONEOF(readerLocked, ReaderLocked) {
+        tracker.trackField("readerLocked", readerLocked);
+      }
+    }
+  }
+
 private:
   class PipeLocked: public PipeController {
   public:
@@ -104,6 +123,10 @@ private:
 
     void visitForGc(jsg::GcVisitor& visitor) ;
 
+    JSG_MEMORY_INFO(PipeLocked) {
+      tracker.trackField("writableStreamRef", writableStreamRef);
+    }
+
   private:
     Controller& inner;
     jsg::Ref<WritableStream> writableStreamRef;
@@ -137,6 +160,19 @@ public:
                 PipeToOptions& options);
   void releasePipeLock();
 
+  JSG_MEMORY_INFO(WritableLockImpl) {
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(unlocked, Unlocked) {}
+      KJ_CASE_ONEOF(locked, Locked) {}
+      KJ_CASE_ONEOF(writerLocked, WriterLocked) {
+        tracker.trackField("writerLocked", writerLocked);
+      }
+      KJ_CASE_ONEOF(pipeLocked, PipeLocked) {
+        tracker.trackField("pipeLocked", pipeLocked);
+      }
+    }
+  }
+
 private:
   struct PipeLocked {
     ReadableStreamController::PipeController& source;
@@ -150,6 +186,11 @@ private:
     kj::Maybe<jsg::Promise<void>> checkSignal(
         jsg::Lock& js,
         Controller& self);
+
+    JSG_MEMORY_INFO(PipeLocked) {
+      tracker.trackField("readableStreamRef", readableStreamRef);
+      tracker.trackField("signal", maybeSignal);
+    }
   };
   kj::OneOf<Unlocked, Locked, WriterLocked, PipeLocked> state = Unlocked();
 
@@ -689,6 +730,10 @@ public:
     KJ_UNIMPLEMENTED("only implemented for WritableStreamInternalController");
   }
 
+  kj::StringPtr jsgGetMemoryName() const override;
+  size_t jsgGetMemorySelfSize() const override;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override;
+
 private:
   bool hasPendingReadRequests();
 
@@ -826,6 +871,10 @@ public:
   void setPendingClosure() override {
     KJ_UNIMPLEMENTED("only implemented for WritableStreamInternalController");
   }
+
+  kj::StringPtr jsgGetMemoryName() const override;
+  size_t jsgGetMemorySelfSize() const override;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
 
 private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
@@ -1609,6 +1658,11 @@ struct ReadableState {
   kj::Maybe<kj::OneOf<ReadableStreamJsController*, AllReaderWeakRef>> owner;
   kj::Own<Consumer> consumer;
 
+  JSG_MEMORY_INFO(ReadableState) {
+    tracker.trackField("controller", controller);
+    tracker.trackField("consumer", consumer);
+  }
+
   ReadableState(
       jsg::Ref<Controller> controller, auto owner, auto stateListener)
       : controller(kj::mv(controller)),
@@ -1696,6 +1750,12 @@ struct ReadableState {
 struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener {
   using State = ReadableState<ReadableStreamDefaultController, api::ValueQueue::Consumer>;
   kj::Maybe<State> state;
+
+  JSG_MEMORY_INFO(ValueReadable) {
+    KJ_IF_SOME(s, state) {
+      tracker.trackField("state", s);
+    }
+  }
 
   ValueReadable(jsg::Ref<ReadableStreamDefaultController> controller, auto owner)
       : state(State(kj::mv(controller), owner, this)) {}
@@ -1794,6 +1854,12 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
   using State = ReadableState<ReadableByteStreamController, api::ByteQueue::Consumer>;
   kj::Maybe<State> state;
   int autoAllocateChunkSize;
+
+  JSG_MEMORY_INFO(ByteReadable) {
+    KJ_IF_SOME(s, state) {
+      tracker.trackField("state", s);
+    }
+  }
 
   ByteReadable(
       jsg::Ref<ReadableByteStreamController> controller,
@@ -4072,6 +4138,150 @@ TransformStreamDefaultController::tryGetWritableController() {
     return controller->tryGet();
   }
   return kj::none;
+}
+
+template <class Self>
+kj::StringPtr WritableImpl<Self>::jsgGetMemoryName() const {
+  return "WritableImpl"_kjc;
+}
+
+template <class Self>
+size_t WritableImpl<Self>::jsgGetMemorySelfSize() const {
+  return sizeof(WritableImpl<Self>);
+}
+
+template <class Self>
+void WritableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("signal", signal);
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+    KJ_CASE_ONEOF(error, StreamStates::Errored) {
+      tracker.trackField("error", error);
+    }
+    KJ_CASE_ONEOF(erroring, StreamStates::Erroring) {
+      tracker.trackField("erroring", erroring.reason);
+    }
+    KJ_CASE_ONEOF(writable, Writable) {}
+  }
+
+  tracker.trackField("abortAlgorithm", algorithms.abort);
+  tracker.trackField("closeAlgorithm", algorithms.close);
+  tracker.trackField("writeAlgorithm", algorithms.write);
+  tracker.trackField("sizeAlgorithm", algorithms.size);
+
+  for (auto& request : writeRequests) {
+    tracker.trackField("pendingWrite", request);
+  }
+
+  tracker.trackField("inFlightWrite", inFlightWrite);
+  tracker.trackField("inFlightClose", inFlightClose);
+  tracker.trackField("closeRequest", closeRequest);
+  tracker.trackField("maybePendingAbort", maybePendingAbort);
+}
+
+kj::StringPtr WritableStreamJsController::jsgGetMemoryName() const {
+  return "WritableStreamJsController"_kjc;
+}
+
+size_t WritableStreamJsController::jsgGetMemorySelfSize() const {
+  return sizeof(WritableStreamJsController);
+}
+
+void WritableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+    KJ_CASE_ONEOF(error, StreamStates::Errored) {
+      tracker.trackField("error", error);
+    }
+    KJ_CASE_ONEOF(controller, Controller) {
+      tracker.trackField("controller", controller);
+    }
+  }
+  tracker.trackField("lock", lock);
+  tracker.trackField("maybeAbortPromise", maybeAbortPromise);
+}
+
+void WritableStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("impl", impl);
+}
+
+kj::StringPtr ReadableStreamJsController::jsgGetMemoryName() const {
+  return "ReadableStreamJsController"_kjc;
+}
+
+size_t ReadableStreamJsController::jsgGetMemorySelfSize() const {
+  return sizeof(ReadableStreamJsController);
+}
+
+void ReadableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+    KJ_CASE_ONEOF(error, StreamStates::Errored) {
+      tracker.trackField("error", error);
+    }
+    KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
+      tracker.trackField("readable", readable);
+    }
+    KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
+      tracker.trackField("readable", readable);
+    }
+  }
+
+  tracker.trackField("lock", lock);
+
+  KJ_IF_SOME(pendingState, maybePendingState) {
+    KJ_SWITCH_ONEOF(pendingState) {
+      KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+      KJ_CASE_ONEOF(error, StreamStates::Errored) {
+        tracker.trackField("pendingError", error);
+      }
+    }
+  }
+}
+
+template <class Self>
+kj::StringPtr ReadableImpl<Self>::jsgGetMemoryName() const {
+  return "ReadableImpl"_kjc;
+}
+
+template <class Self>
+size_t ReadableImpl<Self>::jsgGetMemorySelfSize() const {
+  return sizeof(ReadableImpl);
+}
+
+template <class Self>
+void ReadableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+    KJ_CASE_ONEOF(error, StreamStates::Errored) {
+      tracker.trackField("error", error);
+    }
+    KJ_CASE_ONEOF(queue, Queue) {
+      tracker.trackField("queue", queue);
+    }
+  }
+
+  tracker.trackField("startAlgorithm", algorithms.start);
+  tracker.trackField("pullAlgorithm", algorithms.pull);
+  tracker.trackField("cancelAlgorithm", algorithms.cancel);
+  tracker.trackField("sizeAlgorithm", algorithms.size);
+  tracker.trackField("pendingCancel", maybePendingCancel);
+}
+
+void ReadableStreamBYOBRequest::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_IF_SOME(impl, maybeImpl) {
+    tracker.trackField("readRequest", impl.readRequest);
+    tracker.trackField("controller", impl.controller);
+    tracker.trackField("view", impl.view);
+  }
+}
+
+void TransformStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("startPromise", startPromise);
+  tracker.trackField("maybeBackpressureChange", maybeBackpressureChange);
+  tracker.trackField("transformAlgorithm", algorithms.transform);
+  tracker.trackField("flushAlgorithm", algorithms.flush);
 }
 
 }  // namespace workerd::api

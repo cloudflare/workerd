@@ -35,6 +35,10 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  kj::StringPtr jsgGetMemoryName() const;
+  size_t jsgGetMemorySelfSize() const;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   struct Initial {};
   // While a Reader is attached to a ReadableStream, it holds a strong reference to the
@@ -96,6 +100,10 @@ public:
   void lockToStream(jsg::Lock& js, ReadableStream& stream);
 
   inline bool isByteOriented() const override { return false; }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("impl", impl);
+  }
 
 private:
   ReaderImpl impl;
@@ -161,6 +169,10 @@ public:
   void lockToStream(jsg::Lock& js, ReadableStream& stream);
 
   inline bool isByteOriented() const override { return true; }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("impl", impl);
+  }
 
 private:
   ReaderImpl impl;
@@ -369,6 +381,9 @@ public:
   // Used by ReadableStreamInternalController to signal EOF being reached. Can be called even if
   // `onEof` wasn't called.
   void signalEof(jsg::Lock& js);
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   kj::Maybe<IoContext&> ioContext;
   kj::Own<ReadableStreamController> controller;

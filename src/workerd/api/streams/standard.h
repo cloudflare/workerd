@@ -190,6 +190,10 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  kj::StringPtr jsgGetMemoryName() const;
+  size_t jsgGetMemorySelfSize() const;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   struct Algorithms {
     kj::Maybe<jsg::Function<UnderlyingSource::StartAlgorithm>> start;
@@ -233,6 +237,10 @@ private:
   struct PendingCancel {
     kj::Maybe<jsg::Promise<void>::Resolver> fulfiller;
     jsg::Promise<void> promise;
+    JSG_MEMORY_INFO(PendingCancel) {
+      tracker.trackField("fulfiller", fulfiller);
+      tracker.trackField("promise", promise);
+    }
   };
   kj::Maybe<PendingCancel> maybePendingCancel;
 
@@ -255,6 +263,11 @@ public:
 
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(resolver, value);
+    }
+
+    JSG_MEMORY_INFO(WriteRequest) {
+      tracker.trackField("resolver", resolver);
+      tracker.trackField("value", value);
     }
   };
 
@@ -320,6 +333,10 @@ public:
   bool isWritable() const;
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  kj::StringPtr jsgGetMemoryName() const;
+  size_t jsgGetMemorySelfSize() const;
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
 
@@ -418,6 +435,10 @@ public:
 
   kj::Own<WeakRef<ReadableStreamDefaultController>> getWeakRef();
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("impl", impl);
+  }
+
 private:
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
@@ -472,6 +493,8 @@ public:
   }
 
   bool isPartiallyFulfilled();
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   struct Impl {
@@ -534,6 +557,11 @@ public:
     JSG_METHOD(error);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("impl", impl);
+    tracker.trackField("maybeByobRequest", maybeByobRequest);
+  }
+
 private:
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
@@ -582,6 +610,8 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(signal, getSignal);
     JSG_METHOD(error);
   }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   kj::Maybe<IoContext&> ioContext;
@@ -648,6 +678,8 @@ public:
   jsg::Promise<void> close(jsg::Lock& js);
   jsg::Promise<void> pull(jsg::Lock& js);
   jsg::Promise<void> cancel(jsg::Lock& js, v8::Local<v8::Value> reason);
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   struct Algorithms {

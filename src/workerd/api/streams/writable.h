@@ -75,6 +75,8 @@ public:
 
   void replaceReadyPromise(jsg::Promise<void> readyPromise) override;
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   struct Initial {};
   // While a Writer is attached to a WritableStream, it holds a strong reference to the
@@ -155,6 +157,8 @@ public:
       getWriter(): WritableStreamDefaultWriter<W>;
     });
   }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   kj::Maybe<IoContext&> ioContext;

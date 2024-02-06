@@ -263,6 +263,10 @@ public:
     return kj::none;
   }
 
+  inline kj::StringPtr jsgGetMemoryName() const;
+  inline size_t jsgGetMemorySelfSize() const;
+  inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   struct Closed {};
   using Errored = jsg::Value;
@@ -492,6 +496,10 @@ public:
     }
   }
 
+  inline kj::StringPtr jsgGetMemoryName() const;
+  inline size_t jsgGetMemorySelfSize() const;
+  inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   // A sentinel used in the buffer to signal that close() has been called.
   struct Close {};
@@ -502,6 +510,10 @@ private:
     std::deque<kj::OneOf<QueueEntry, Close>> buffer;
     std::deque<ReadRequest> readRequests;
     size_t queueTotalSize = 0;
+
+    inline kj::StringPtr jsgGetMemoryName() const;
+    inline size_t jsgGetMemorySelfSize() const;
+    inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
   };
 
   QueueImpl& queue;
@@ -583,7 +595,9 @@ public:
   using ConsumerImpl = ConsumerImpl<ValueQueue>;
   using QueueImpl = QueueImpl<ValueQueue>;
 
-  struct State {};
+  struct State {
+    JSG_MEMORY_INFO(ValueQueue::State) {}
+  };
 
   struct ReadRequest {
     jsg::Promise<ReadResult>::Resolver resolver;
@@ -591,6 +605,10 @@ public:
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js, jsg::Value value);
     void reject(jsg::Lock& js, jsg::Value& value);
+
+    JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
+      tracker.trackField("resolver", resolver);
+    }
   };
 
   // A value queue entry consists of an arbitrary JavaScript value and a size that is
@@ -608,6 +626,10 @@ public:
 
     kj::Own<Entry> clone(jsg::Lock& js);
 
+    JSG_MEMORY_INFO(ValueQueue::Entry) {
+      tracker.trackField("value", value);
+    }
+
   private:
     jsg::Value value;
     size_t size;
@@ -616,6 +638,10 @@ public:
   struct QueueEntry {
     kj::Own<Entry> entry;
     QueueEntry clone(jsg::Lock& js);
+
+    JSG_MEMORY_INFO(ValueQueue::QueueEntry) {
+      tracker.trackField("entry", entry);
+    }
   };
 
   class Consumer final {
@@ -650,6 +676,10 @@ public:
 
     void visitForGc(jsg::GcVisitor& visitor);
 
+    inline kj::StringPtr jsgGetMemoryName() const;
+    inline size_t jsgGetMemorySelfSize() const;
+    inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
+
   private:
     ConsumerImpl impl;
 
@@ -677,6 +707,10 @@ public:
   bool hasPartiallyFulfilledRead();
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  inline kj::StringPtr jsgGetMemoryName() const;
+  inline size_t jsgGetMemorySelfSize() const;
+  inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   QueueImpl impl;
@@ -722,6 +756,10 @@ public:
       size_t filled = 0;
       size_t atLeast = 1;
       Type type = Type::DEFAULT;
+
+      JSG_MEMORY_INFO(ByteQueue::ReadRequest::PullInto) {
+        tracker.trackField("store", store);
+      }
     } pullInto;
 
     ReadRequest(jsg::Promise<ReadResult>::Resolver resolver,
@@ -734,6 +772,11 @@ public:
     void reject(jsg::Lock& js, jsg::Value& value);
 
     kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, QueueImpl& queue);
+
+    JSG_MEMORY_INFO(ByteQueue::ReadRequest) {
+      tracker.trackField("resolver", resolver);
+      tracker.trackField("pullInto", pullInto);
+    }
   };
 
   // The ByobRequest is essentially a handle to the ByteQueue::ReadRequest that can be given to a
@@ -774,6 +817,8 @@ public:
 
     v8::Local<v8::Uint8Array> getView(jsg::Lock& js);
 
+    JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
+
   private:
     kj::Maybe<ReadRequest&> request;
     ConsumerImpl& consumer;
@@ -782,6 +827,12 @@ public:
 
   struct State {
     std::deque<kj::Own<ByobRequest>> pendingByobReadRequests;
+
+    JSG_MEMORY_INFO(ByteQueue::State) {
+      for (auto& request : pendingByobReadRequests) {
+        tracker.trackField("pendingByobReadRequest", request);
+      }
+    }
   };
 
   // A byte queue entry consists of a jsg::BackingStore containing a non-zero-length
@@ -798,6 +849,10 @@ public:
 
     kj::Own<Entry> clone(jsg::Lock& js);
 
+    JSG_MEMORY_INFO(ByteQueue::Entry) {
+      tracker.trackField("store", store);
+    }
+
   private:
     jsg::BackingStore store;
   };
@@ -807,6 +862,10 @@ public:
     size_t offset;
 
     QueueEntry clone(jsg::Lock& js);
+
+    JSG_MEMORY_INFO(ByteQueue::QueueEntry) {
+      tracker.trackField("entry", entry);
+    }
   };
 
   class Consumer {
@@ -839,6 +898,10 @@ public:
     bool hasReadRequests();
 
     void visitForGc(jsg::GcVisitor& visitor);
+
+    inline kj::StringPtr jsgGetMemoryName() const;
+    inline size_t jsgGetMemorySelfSize() const;
+    inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
   private:
     ConsumerImpl impl;
@@ -876,6 +939,10 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  inline kj::StringPtr jsgGetMemoryName() const;
+  inline size_t jsgGetMemorySelfSize() const;
+  inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   QueueImpl impl;
 
@@ -896,5 +963,125 @@ private:
   friend ConsumerImpl;
   friend class Consumer;
 };
+
+template <typename Self>
+kj::StringPtr QueueImpl<Self>::jsgGetMemoryName() const {
+  return "QueueImpl"_kjc;
+}
+
+template <typename Self>
+size_t QueueImpl<Self>::jsgGetMemorySelfSize() const {
+  return sizeof(QueueImpl<Self>);
+}
+
+template <typename Self>
+void QueueImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(ready, Ready) {}
+    KJ_CASE_ONEOF(closed, Closed) {}
+    KJ_CASE_ONEOF(errored, Errored) {
+      tracker.trackField("error", errored);
+    }
+  }
+}
+
+template <typename Self>
+kj::StringPtr ConsumerImpl<Self>::jsgGetMemoryName() const {
+  return "ConsumerImpl"_kjc;
+}
+
+template <typename Self>
+size_t ConsumerImpl<Self>::jsgGetMemorySelfSize() const {
+  return sizeof(ConsumerImpl<Self>);
+}
+
+template <typename Self>
+void ConsumerImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(close, Closed) {}
+    KJ_CASE_ONEOF(error, Errored) {
+      tracker.trackField("error", error);
+    }
+    KJ_CASE_ONEOF(ready, Ready) {
+      tracker.trackField("inner", ready);
+    }
+  }
+}
+
+template <typename Self>
+kj::StringPtr ConsumerImpl<Self>::Ready::jsgGetMemoryName() const {
+  return "ConsumerImpl::Ready"_kjc;
+}
+
+template <typename Self>
+size_t ConsumerImpl<Self>::Ready::jsgGetMemorySelfSize() const {
+  return sizeof(Ready);
+}
+
+template <typename Self>
+void ConsumerImpl<Self>::Ready::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  for (auto& entry : buffer) {
+    KJ_SWITCH_ONEOF(entry) {
+      KJ_CASE_ONEOF(c, Close) {
+        tracker.trackFieldWithSize("pendingClose", sizeof(Close));
+      }
+      KJ_CASE_ONEOF(e, QueueEntry) {
+        tracker.trackField("entry", e);
+      }
+    }
+  }
+
+  for (auto& request : readRequests) {
+    tracker.trackField("pendingRead", request);
+  }
+}
+
+kj::StringPtr ValueQueue::Consumer::jsgGetMemoryName() const {
+  return "ValueQueue::Consumer"_kjc;
+}
+
+size_t ValueQueue::Consumer::jsgGetMemorySelfSize() const {
+  return sizeof(ValueQueue::Consumer);
+}
+
+void ValueQueue::Consumer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("impl", impl);
+}
+
+kj::StringPtr ValueQueue::jsgGetMemoryName() const {
+  return "ValueQueue"_kjc;
+}
+
+size_t ValueQueue::jsgGetMemorySelfSize() const {
+  return sizeof(ValueQueue);
+}
+
+void ValueQueue::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("impl", impl);
+}
+
+kj::StringPtr ByteQueue::Consumer::jsgGetMemoryName() const {
+  return "ByteQueue::Consumer"_kjc;
+}
+
+size_t ByteQueue::Consumer::jsgGetMemorySelfSize() const {
+  return sizeof(ByteQueue::Consumer);
+}
+
+void ByteQueue::Consumer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("impl", impl);
+}
+
+kj::StringPtr ByteQueue::jsgGetMemoryName() const {
+  return "ByteQueue"_kjc;
+}
+
+size_t ByteQueue::jsgGetMemorySelfSize() const {
+  return sizeof(ByteQueue);
+}
+
+void ByteQueue::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("impl", impl);
+}
 
 } // workerd::api

@@ -280,4 +280,16 @@ jsg::Ref<WritableStream> WritableStream::constructor(
   return kj::mv(stream);
 }
 
+void WritableStreamDefaultWriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_IF_SOME(ref, state.tryGet<Attached>()) {
+    tracker.trackField("attached", ref);
+  }
+  tracker.trackField("closedPromise", closedPromise);
+  tracker.trackField("readyPromise", readyPromise);
+}
+
+void WritableStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("controller", controller);
+}
+
 }  // namespace workerd::api
