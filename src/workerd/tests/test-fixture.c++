@@ -15,6 +15,7 @@
 #include <workerd/server/server.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/stream-utils.h>
+#include <workerd/util/entropy.h>
 
 #include "test-fixture.h"
 
@@ -101,26 +102,6 @@ static constexpr kj::StringPtr mainModuleSource = R"SCRIPT(
 static constexpr kj::StringPtr mainModuleName = "main"_kj;
 
 static constexpr kj::StringPtr scriptId = "script"_kj;
-
-class MockEntropySource final: public kj::EntropySource {
-public:
-  ~MockEntropySource() {}
-  void generate(kj::ArrayPtr<kj::byte> buffer) override {
-    for (kj::byte& b: buffer) {
-     b = counter++;
-    }
-  }
-
-  template <typename T>
-  T rand() {
-    T r;
-    this->generate(kj::arrayPtr(&r, 1).asBytes());
-    return r;
-  }
-
-private:
-  kj::byte counter = 0;
-};
 
 struct MockLimitEnforcer final: public LimitEnforcer {
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override { return {}; }
@@ -263,7 +244,7 @@ TestFixture::TestFixture(SetupParams&& params)
     io(params.waitScope == kj::none ? kj::Maybe(kj::setupAsyncIo()) : kj::Maybe<kj::AsyncIoContext>(kj::none)),
     timer(kj::heap<MockTimer>()),
     timerChannel(kj::heap<MockTimerChannel>()),
-    entropySource(kj::heap<MockEntropySource>()),
+    entropySource(getMockEntropySource()),
     threadContextHeaderBundle(headerTableBuilder),
     httpOverCapnpFactory(byteStreamFactory,
       capnp::HttpOverCapnpFactory::HeaderIdBundle(headerTableBuilder),

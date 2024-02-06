@@ -21,12 +21,15 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/server",
+        "//src/workerd/util:entropy",
     ],
 )
 
 kj_test(
     src = "test-fixture-test.c++",
-    deps = [":test-fixture"],
+    deps = [
+        ":test-fixture",
+    ],
 )
 
 # Use `bazel run //src/workerd/tests:bench-json` to benchmark
