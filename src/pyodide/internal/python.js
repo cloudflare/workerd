@@ -1,5 +1,6 @@
 import { parseTarInfo } from "pyodide-internal:tar";
 import { createTarFS } from "pyodide-internal:tarfs";
+import { createMetadataFS } from "pyodide-internal:metadatafs";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -262,10 +263,14 @@ function simpleRunPython(emscriptenModule, code) {
 function mountLib(pyodide) {
   const [info, _] = parseTarInfo();
   const tarFS = createTarFS(pyodide._module);
+  const mdFS = createMetadataFS(pyodide._module);
   pyodide.FS.mkdirTree("/session/lib/python3.11/site-packages");
+  pyodide.FS.mkdirTree("/session/metadata");
   pyodide.FS.mount(tarFS, { info }, "/session/lib/python3.11/site-packages");
+  pyodide.FS.mount(mdFS, {}, "/session/metadata");
   const sys = pyodide.pyimport("sys");
   sys.path.push("/session/lib/python3.11/site-packages");
+  sys.path.push("/session/metadata");
   sys.destroy();
 }
 
