@@ -9,7 +9,7 @@ import { default as MetadataReader } from "pyodide-internal:runtime-generated/me
 function initializePackageIndex(pyodide) {
   if (!lockfile.packages) {
     throw new Error(
-      "Loaded pyodide lock file does not contain the expected key 'packages'."
+      "Loaded pyodide lock file does not contain the expected key 'packages'.",
     );
   }
   const API = pyodide._api;
@@ -101,6 +101,15 @@ async function setupPackages(pyodide) {
   const isWorkerd = MetadataReader.isWorkerd();
 
   initializePackageIndex(pyodide);
+  {
+    const mod = await import("pyodide-internal:relaxed_call.py");
+    pyodide.FS.writeFile(
+      "/lib/python3.11/site-packages/relaxed_call.py",
+      new Uint8Array(mod.default),
+      { canOwn: true },
+    );
+  }
+
   const requirements = MetadataReader.getRequirements();
   const pythonRequirements = isWorkerd ? requirements : requirements.filter(req => !EMBEDDED_PYTHON_PACKAGES.has(req));
 
@@ -122,16 +131,16 @@ async function setupPackages(pyodide) {
     pyodide.FS.writeFile(
       "/lib/python3.11/site-packages/aiohttp_fetch_patch.py",
       new Uint8Array(mod.default),
-      { canOwn: true }
+      { canOwn: true },
     );
     pyodide.pyimport("aiohttp_fetch_patch");
   }
-  if (requirements.some(req => req.startsWith("fastapi"))) {
+  if (requirements.some((req) => req.startsWith("fastapi"))) {
     const mod = await import("pyodide-internal:asgi.py");
     pyodide.FS.writeFile(
       "/lib/python3.11/site-packages/asgi.py",
       new Uint8Array(mod.default),
-      { canOwn: true }
+      { canOwn: true },
     );
   }
   let mainModuleName = MetadataReader.getMainModule();
@@ -142,7 +151,7 @@ async function setupPackages(pyodide) {
 }
 
 let mainModulePromise;
-function getMainModule() {
+function getPyodide() {
   if (mainModulePromise !== undefined) {
     return mainModulePromise;
   }
@@ -150,20 +159,22 @@ function getMainModule() {
     // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
     // When we do it in top level scope we seem to get a broken file system.
     const pyodide = await loadPyodide();
-    return await setupPackages(pyodide);
+    const mainModule = await setupPackages(pyodide);
+    const relaxed_call = pyodide.pyimport("relaxed_call").relaxed_call;
+    return { mainModule, relaxed_call };
   })();
   return mainModulePromise;
 }
 
 export default {
-  async fetch(request, env) {
-    const mainModule = await getMainModule();
-    return await mainModule.fetch(request);
+  async fetch(request, env, ctx) {
+    const { relaxed_call, mainModule } = await getPyodide();
+    return await relaxed_call(mainModule.fetch, request, env, ctx);
   },
-  async test() {
+  async test(ctrl, env, ctx) {
     try {
-      const mainModule = await getMainModule();
-      return await mainModule.test();
+      const { relaxed_call, mainModule } = await getPyodide();
+      return await relaxed_call(mainModule.test, ctrl, env, ctx);
     } catch (e) {
       console.warn(e);
     }
