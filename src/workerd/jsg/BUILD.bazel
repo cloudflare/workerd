@@ -10,6 +10,7 @@ wd_cc_library(
         ["*.c++"],
         exclude = [
             "exception.c++",
+            "memory.c++",
             "*-test.c++",
         ],
     ),
@@ -43,6 +44,7 @@ wd_cc_library(
 wd_cc_library(
     name = "memory-tracker",
     hdrs = ["memory.h"],
+    srcs = ["memory.c++"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",

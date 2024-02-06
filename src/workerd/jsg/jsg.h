@@ -833,12 +833,12 @@ private:
 };
 
 template <V8Value T>
-MemoryTracker& MemoryTracker::trackField(
+void MemoryTracker::trackField(
     kj::StringPtr edgeName,
     const V8Ref<T>& value,
     kj::Maybe<kj::StringPtr> nodeName) {
   // Even though we're passing in a template T, casting to a v8::Value is sufficient here.
-  return trackField(edgeName, value.handle.Get(isolate_)
+  trackField(edgeName, value.handle.Get(isolate_)
       .template As<v8::Value>(), nodeName);
 }
 
@@ -1221,11 +1221,11 @@ private:
 };
 
 template <MemoryRetainer T>
-MemoryTracker& MemoryTracker::trackField(
+void MemoryTracker::trackField(
     kj::StringPtr edgeName,
     const Ref<T>& value,
     kj::Maybe<kj::StringPtr> nodeName) {
-  return trackField(edgeName, value.get(), nodeName);
+  trackField(edgeName, value.get(), nodeName);
 }
 
 template <typename T, typename... Params>

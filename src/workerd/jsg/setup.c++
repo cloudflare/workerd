@@ -162,9 +162,17 @@ IsolateBase& IsolateBase::from(v8::Isolate* isolate) {
 void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate,
                                      v8::EmbedderGraph* graph,
                                      void* data) {
-  const auto base = reinterpret_cast<IsolateBase*>(data);
-  MemoryTracker tracker(isolate, graph);
-  tracker.track(base);
+  try {
+    const auto base = reinterpret_cast<IsolateBase*>(data);
+    MemoryTracker tracker(isolate, graph);
+    tracker.track(base);
+  } catch (...) {
+    // Generating the heap snapshot should be a safe process that does not
+    // throw any exceptions. We'll treat any exception here as fatal, including
+    // JsExceptionThrown. Note that we're not entered into any particular v8::Context
+    // here so pulling out the details of the exception would be tricky anyway.
+    kj::throwFatalException(kj::getCaughtExceptionAsKj());
+  }
 }
 
 void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
