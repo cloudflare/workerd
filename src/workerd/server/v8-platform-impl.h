@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include <workerd/jsg/setup.h>
+#include <libplatform/libplatform.h>
 #include <v8-platform.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd::server {
 
@@ -16,12 +17,11 @@ namespace workerd::server {
 //
 // Everything else gets passed through to the wrapped v8::Platform implementation (presumably
 // from `jsg::defaultPlatform()`).
-class WorkerdPlatform final: public v8::Platform {
+class WorkerdPlatform final : public v8::Platform {
 public:
   // This takes a reference to its wrapped platform because otherwise we would have to destroy a
   // kj::Own in our noexcept destructor (feasible but ugly).
-  explicit WorkerdPlatform(v8::Platform& inner)
-      : inner(inner) {}
+  explicit WorkerdPlatform(v8::Platform& inner) : inner(inner) {}
 
   ~WorkerdPlatform() noexcept {}
 
@@ -44,27 +44,27 @@ public:
     return inner.GetForegroundTaskRunner(isolate);
   }
 
-  void CallOnWorkerThread(std::unique_ptr<v8::Task> task) noexcept override {
-    return inner.CallOnWorkerThread(kj::mv(task));
-  }
-
-  void CallDelayedOnWorkerThread(std::unique_ptr<v8::Task> task,
-                                 double delay_in_seconds) noexcept override {
-    return inner.CallDelayedOnWorkerThread(kj::mv(task), delay_in_seconds);
+  std::unique_ptr<v8::JobHandle>
+  CreateJobImpl(v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task,
+                const v8::SourceLocation& location) noexcept override {
+    // TODO(soon): Investigate whether we need to do more work to make sure these "jobs" do not
+    //   actually run in parallel.
+    return v8::platform::NewDefaultJobHandle(this, priority, std::move(job_task), 1);
   }
 
   bool IdleTasksEnabled(v8::Isolate* isolate) noexcept override {
     return inner.IdleTasksEnabled(isolate);
   }
 
-  std::unique_ptr<v8::JobHandle> PostJob(
-      v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task) noexcept override {
-    return inner.PostJob(priority, kj::mv(job_task));
+  void PostTaskOnWorkerThreadImpl(v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
+                                  const v8::SourceLocation& location) override {
+    inner.CallOnWorkerThread(kj::mv(task));
   }
 
-  std::unique_ptr<v8::JobHandle> CreateJob(
-      v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task) noexcept override {
-    return inner.CreateJob(priority, kj::mv(job_task));
+  void PostDelayedTaskOnWorkerThreadImpl(v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
+                                         double delay_in_seconds,
+                                         const v8::SourceLocation& location) override {
+    inner.CallDelayedOnWorkerThread(kj::mv(task), delay_in_seconds);
   }
 
   double MonotonicallyIncreasingTime() noexcept override {
@@ -86,4 +86,4 @@ private:
   v8::Platform& inner;
 };
 
-}
+} // namespace workerd::server
