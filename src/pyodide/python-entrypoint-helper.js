@@ -101,6 +101,15 @@ async function setupPackages(pyodide) {
   const isWorkerd = MetadataReader.isWorkerd();
 
   initializePackageIndex(pyodide);
+  {
+    const mod = await import("pyodide-internal:relaxed_call.py");
+    pyodide.FS.writeFile(
+      "/lib/python3.11/site-packages/relaxed_call.py",
+      new Uint8Array(mod.default),
+      { canOwn: true },
+    );
+  }
+
   const requirements = MetadataReader.getRequirements();
   const pythonRequirements = isWorkerd ? requirements : requirements.filter(req => !EMBEDDED_PYTHON_PACKAGES.has(req));
 
