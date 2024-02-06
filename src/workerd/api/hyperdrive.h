@@ -43,6 +43,14 @@ public:
     JSG_METHOD(connect);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("randomHost", randomHost);
+    tracker.trackField("database", database);
+    tracker.trackField("user", user);
+    tracker.trackField("password", password);
+    tracker.trackField("scheme", scheme);
+  }
+
 private:
   uint clientIndex;
   kj::String randomHost;

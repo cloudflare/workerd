@@ -32,6 +32,10 @@ private:
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(parent);
     }
+
+    JSG_MEMORY_INFO(IteratorState) {
+      tracker.trackField("parent", parent);
+    }
   };
 
 public:
@@ -51,6 +55,18 @@ public:
   struct Entry {
     kj::String name;
     kj::OneOf<jsg::Ref<File>, kj::String> value;
+
+    JSG_MEMORY_INFO(Entry) {
+      tracker.trackField("name", name);
+      KJ_SWITCH_ONEOF(value) {
+        KJ_CASE_ONEOF(file, jsg::Ref<File>) {
+          tracker.trackField("value", file);
+        }
+        KJ_CASE_ONEOF(str, kj::String) {
+          tracker.trackField("value", str);
+        }
+      }
+    }
   };
 
   kj::ArrayPtr<const Entry> getData() { return data; }
@@ -140,6 +156,10 @@ public:
         forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: FormData) => void, thisArg?: This): void;
       });
     }
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("data", data.asPtr());
   }
 
 private:

@@ -136,6 +136,12 @@ public:
     });
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("id", id);
+    tracker.trackField("body", body);
+    tracker.trackFieldWithSize("IoPtr<QueueEventResult>", sizeof(IoPtr<QueueEventResult>));
+  }
+
 private:
   kj::String id;
   kj::Date timestamp;
@@ -182,6 +188,14 @@ public:
     });
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    for (auto& message: messages) {
+      tracker.trackField("message", message);
+    }
+    tracker.trackField("queueName", queueName);
+    tracker.trackFieldWithSize("IoPtr<QueueEventResult>", sizeof(IoPtr<QueueEventResult>));
+  }
+
 private:
   // TODO(perf): Should we store these in a v8 array directly rather than this intermediate kj
   // array to avoid one intermediate copy?
@@ -216,6 +230,10 @@ public:
     JSG_TS_OVERRIDE(MessageBatch<Body = unknown> {
       readonly messages: readonly Message<Body>[];
     });
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("event", event);
   }
 
 private:

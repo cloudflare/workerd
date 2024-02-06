@@ -536,7 +536,7 @@ void MemoryTracker::trackField(
     decCurrentNodeSize(sizeof(T));
   }
   pushNode(nodeName.orDefault(edgeName), sizeof(T), edgeName);
-  for (const auto item : value) {
+  for (const auto& item : value) {
     trackField(nullptr, item, elementName);
   }
   nodeStack_.pop();
@@ -554,7 +554,7 @@ void MemoryTracker::trackField(
     decCurrentNodeSize(sizeof(T));
   }
   pushNode(nodeName.orDefault(edgeName), sizeof(T), edgeName);
-  for (const auto item : value) {
+  for (const auto& item : value) {
     trackField(nullptr, item, elementName);
   }
   nodeStack_.pop();

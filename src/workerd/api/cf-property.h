@@ -42,6 +42,19 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  JSG_MEMORY_INFO(CfProperty) {
+    KJ_IF_SOME(v, value) {
+      KJ_SWITCH_ONEOF(v) {
+        KJ_CASE_ONEOF(str, kj::String) {
+          tracker.trackField("value", str);
+        }
+        KJ_CASE_ONEOF(obj, jsg::JsRef<jsg::JsObject>) {
+          tracker.trackField("value", obj);
+        }
+      }
+    }
+  }
+
 private:
   kj::Maybe<kj::OneOf<kj::String, jsg::JsRef<jsg::JsObject>>> value;
 };
