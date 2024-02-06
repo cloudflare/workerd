@@ -17,6 +17,11 @@ public:
   struct AdditionalHeader {
     kj::String name;
     kj::String value;
+
+    JSG_MEMORY_INFO(AdditionalHeader) {
+      tracker.trackField("name", name);
+      tracker.trackField("value", value);
+    }
   };
 
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
@@ -153,6 +158,10 @@ public:
 
       delete(key: Key): Promise<void>;
     });
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const  {
+    tracker.trackField("additionalHeaders", additionalHeaders.asPtr());
   }
 
 protected:

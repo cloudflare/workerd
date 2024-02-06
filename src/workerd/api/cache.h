@@ -74,6 +74,10 @@ public:
     // Use RequestInfo type alias to allow `URL`s as cache keys
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("cacheName", cacheName);
+  }
+
 private:
   kj::Maybe<kj::String> cacheName;
 
@@ -107,6 +111,10 @@ public:
     JSG_METHOD(keys);
 
     JSG_READONLY_INSTANCE_PROPERTY(default, getDefault);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("default", default_);
   }
 
 private:
