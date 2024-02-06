@@ -120,6 +120,10 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(error, getError);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("error", error_);
+  }
+
 private:
   jsg::Ref<GPUError> error_;
 

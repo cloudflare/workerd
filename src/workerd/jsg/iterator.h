@@ -813,7 +813,7 @@ private:
       if constexpr (MemoryRetainer<State>) {
         tracker.trackField("state", state);
       } else {
-        tracker.trackField("state", sizeof(State));
+        tracker.trackFieldWithSize("state", sizeof(State));
       }
       tracker.trackField("impl", impl);
     }
