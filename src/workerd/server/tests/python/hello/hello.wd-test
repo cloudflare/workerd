@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "python-hello",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py")
+        ],
+        compatibilityDate = "2024-01-15",
+        compatibilityFlags = ["experimental"],
+      )
+    ),
+  ],
+);

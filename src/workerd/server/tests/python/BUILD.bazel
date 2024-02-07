@@ -1,0 +1,34 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "hello/hello.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        [
+            "hello/*",
+        ],
+        exclude = ["**/*.wd-test"],
+    ),
+)
+
+wd_test(
+    src = "env-param/env.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        [
+            "env-param/*",
+        ],
+        exclude = ["**/*.wd-test"],
+    ),
+)
+
+wd_test(
+    src = "langchain/langchain.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        [
+            "langchain/*",
+        ],
+        exclude = ["**/*.wd-test"],
+    ),
+)
