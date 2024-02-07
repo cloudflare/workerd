@@ -163,6 +163,12 @@ public:
     });
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    for (const auto& entry : headers) {
+      tracker.trackField(entry.first, entry.second);
+    }
+  }
+
 private:
   struct Header {
     jsg::ByteString key;   // lower-cased name
@@ -186,6 +192,14 @@ private:
     explicit Header(jsg::ByteString key, jsg::ByteString name, jsg::ByteString value)
         : key(kj::mv(key)), name(kj::mv(name)), values(1) {
       values.add(kj::mv(value));
+    }
+
+    JSG_MEMORY_INFO(Header) {
+      tracker.trackField("key", key);
+      tracker.trackField("name", name);
+      for (const auto& value : values) {
+        tracker.trackField(nullptr, value);
+      }
     }
   };
 
@@ -238,6 +252,9 @@ public:
   struct RefcountedBytes final: public kj::Refcounted {
     kj::Array<kj::byte> bytes;
     RefcountedBytes(kj::Array<kj::byte>&& bytes): bytes(kj::mv(bytes)) {}
+    JSG_MEMORY_INFO(RefcountedBytes) {
+      tracker.trackFieldWithSize("bytes", bytes.size());
+    }
   };
 
   // The Fetch spec calls this type the body's "source", even though it really is a buffer. I end
@@ -278,11 +295,26 @@ public:
           view(ownBytes.get<jsg::Ref<Blob>>()->getData()) {}
 
     Buffer clone(jsg::Lock& js);
+
+    JSG_MEMORY_INFO(Buffer) {
+      KJ_SWITCH_ONEOF(ownBytes) {
+        KJ_CASE_ONEOF(bytes, kj::Own<RefcountedBytes>) {
+          tracker.trackField("bytes", bytes);
+        }
+        KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+          tracker.trackField("blob", blob);
+        }
+      }
+    }
   };
 
   struct Impl {
     jsg::Ref<ReadableStream> stream;
     kj::Maybe<Buffer> buffer;
+    JSG_MEMORY_INFO(Impl) {
+      tracker.trackField("stream", stream);
+      tracker.trackField("buffer", buffer);
+    }
   };
 
   struct ExtractedBody {
@@ -344,6 +376,10 @@ public:
     // the official TypeScript types, so users might be depending on it.
     JSG_TS_OVERRIDE({ json<T>(): Promise<T>; });
     // Allow JSON body type to be specified
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("impl", impl);
   }
 
 protected:
@@ -843,6 +879,15 @@ public:
     }
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("url", url);
+    tracker.trackField("headers", headers);
+    tracker.trackField("fetcher", fetcher);
+    tracker.trackField("signal", signal);
+    tracker.trackField("thisSignal", thisSignal);
+    tracker.trackField("cf", cf);
+  }
+
 private:
   kj::HttpMethod method;
   kj::String url;
@@ -1020,6 +1065,17 @@ public:
     // Use `BodyInit` and `ResponseInit` type aliases in constructor instead of inlining
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("statusText", statusText);
+    tracker.trackField("headers", headers);
+    tracker.trackField("webSocket", webSocket);
+    tracker.trackField("cf", cf);
+    for (const auto& url : urlList) {
+      tracker.trackField("urlList", url);
+    }
+    tracker.trackField("asyncContext", asyncContext);
+  }
+
 private:
   int statusCode;
   kj::String statusText;
@@ -1083,6 +1139,13 @@ public:
     JSG_METHOD(passThroughOnException);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("request", request);
+    KJ_IF_SOME(respondWithCalled, state.tryGet<RespondWithCalled>()) {
+      tracker.trackField("promise", respondWithCalled.promise);
+    }
+  }
+
 private:
   jsg::Ref<Request> request;
 
@@ -1096,6 +1159,9 @@ private:
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(request);
+    KJ_IF_SOME(respondWithCalled, state.tryGet<RespondWithCalled>()) {
+      visitor.visit(respondWithCalled.promise);
+    }
   }
 };
 
