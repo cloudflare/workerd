@@ -179,6 +179,7 @@ export default {
       return await relaxed_call(mainModule.test, ctrl, env, ctx);
     } catch (e) {
       console.warn(e);
+      throw e;
     }
   },
 };
