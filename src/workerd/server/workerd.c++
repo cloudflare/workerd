@@ -21,7 +21,6 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/supported-compatibility-date.capnp.h>
 #include <workerd/util/autogate.h>
-#include <workerd/util/entropy.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
@@ -69,6 +68,15 @@ static kj::StringPtr getVersionString() {
   static const kj::String result = kj::str("workerd ", SUPPORTED_COMPATIBILITY_DATE);
   return result;
 }
+
+// =======================================================================================
+
+class EntropySourceImpl: public kj::EntropySource {
+public:
+  void generate(kj::ArrayPtr<kj::byte> buffer) override {
+    KJ_ASSERT(RAND_bytes(buffer.begin(), buffer.size()) == 1);
+  }
+};
 
 // =======================================================================================
 // Some generic CLI helpers so that we can throw exceptions rather than return
@@ -482,7 +490,7 @@ class CliMain: public SchemaFileImpl::ErrorReporter {
 public:
   CliMain(kj::ProcessContext& context, char** argv)
       : context(context), argv(argv),
-        server(*fs, io.provider->getTimer(), io.provider->getNetwork(), getEntropySource(),
+        server(*fs, io.provider->getTimer(), io.provider->getNetwork(), entropySource,
             Worker::ConsoleMode::STDOUT, [&](kj::String error) {
           if (watcher == kj::none) {
             // TODO(someday): Don't just fail on the first error, keep going in order to report
@@ -1147,6 +1155,7 @@ private:
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
   kj::AsyncIoContext io = kj::setupAsyncIo();
+  EntropySourceImpl entropySource;
 
   kj::Vector<kj::Path> importPath;
   capnp::SchemaParser schemaParser;

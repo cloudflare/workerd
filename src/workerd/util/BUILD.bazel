@@ -128,24 +128,12 @@ wd_cc_library(
     deps = [":sentry", "@capnp-cpp//src/kj", "@capnp-cpp//src/capnp"],
 )
 
-wd_cc_library(
-    name = "entropy",
-    srcs = ["entropy.c++"],
-    hdrs = ["entropy.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-      "@ssl",
-      "@capnp-cpp//src/kj/compat:kj-http",
-    ]
-)
-
 exports_files(["autogate.h"])
 
 [kj_test(
     src = f,
     deps = [
         ":util",
-        ":entropy",
     ],
 ) for f in glob(
     ["*-test.c++"],
