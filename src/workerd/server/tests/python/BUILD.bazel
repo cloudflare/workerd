@@ -40,3 +40,14 @@ wd_test(
         "//conditions:default": [],
     }),
 )
+
+wd_test(
+    src = "subdirectory/subdirectory.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        [
+            "subdirectory/**",
+        ],
+        exclude = ["**/*.wd-test"],
+    ),
+)
