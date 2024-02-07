@@ -554,8 +554,16 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
             [scheduledTime, entrypointName=entrypointName, &context](Worker::Lock& lock){
           jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
+          // TODO(soon): Set the alarm timeout to 15 minutes.
+          // If we have an invalid timeout, set it to the default value of 30 minutes.
+          auto timeout = context.getLimitEnforcer().getAlarmLimit();
+          if (timeout == 0 * kj::MILLISECONDS) {
+            LOG_NOSENTRY(WARNING, "Invalid alarm timeout value. Using 30 minutes", timeout);
+            timeout = 30 * kj::MINUTES;
+          }
+
           auto handler = lock.getExportedHandler(entrypointName, context.getActor());
-          return lock.getGlobalScope().runAlarm(scheduledTime, lock, handler);
+          return lock.getGlobalScope().runAlarm(scheduledTime, timeout, lock, handler);
         });
 
         // The alarm handler was successfully complete. We must guarantee this same alarm does not
