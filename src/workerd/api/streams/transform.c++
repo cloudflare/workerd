@@ -137,8 +137,8 @@ jsg::Ref<TransformStream> TransformStream::constructor(
 jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
     jsg::Lock& js,
     jsg::Optional<IdentityTransformStream::QueuingStrategy> maybeQueuingStrategy) {
-  auto readableSide = kj::refcounted<IdentityTransformStreamImpl>();
-  auto writableSide = kj::addRef(*readableSide);
+  auto readableSide = kj::rc<IdentityTransformStreamImpl>();
+  auto writableSide = readableSide.addRef();
 
   auto& ioContext = IoContext::current();
 
@@ -148,8 +148,8 @@ jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
   }
 
   return jsg::alloc<IdentityTransformStream>(
-      jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide), maybeHighWaterMark));
+      jsg::alloc<ReadableStream>(ioContext, readableSide.toOwn()),
+      jsg::alloc<WritableStream>(ioContext, writableSide.toOwn(), maybeHighWaterMark));
 }
 
 jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
@@ -161,8 +161,8 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
   JSG_REQUIRE(expectedLength <= MAX_SAFE_INTEGER, TypeError,
       "FixedLengthStream requires an integer expected length less than 2^53.");
 
-  auto readableSide = kj::refcounted<IdentityTransformStreamImpl>(uint64_t(expectedLength));
-  auto writableSide = kj::addRef(*readableSide);
+  auto readableSide = kj::rc<IdentityTransformStreamImpl>(uint64_t(expectedLength));
+  auto writableSide = readableSide.addRef();
 
   auto& ioContext = IoContext::current();
 
@@ -175,8 +175,8 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
   }
 
   return jsg::alloc<FixedLengthStream>(
-      jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide), maybeHighWaterMark));
+      jsg::alloc<ReadableStream>(ioContext, readableSide.toOwn()),
+      jsg::alloc<WritableStream>(ioContext, writableSide.toOwn(), maybeHighWaterMark));
 }
 
 }  // namespace workerd::api

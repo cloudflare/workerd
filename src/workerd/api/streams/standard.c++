@@ -814,8 +814,8 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
-  kj::Own<WeakRef<WritableStreamJsController>> getWeakRef() {
-    return kj::addRef(*weakRef);
+  kj::Rc<WeakRef<WritableStreamJsController>> getWeakRef() {
+    return weakRef.addRef();
   }
 
   bool isClosedOrClosing() override;
@@ -835,7 +835,7 @@ private:
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Controller> state = StreamStates::Closed();
   WritableLockImpl lock;
   kj::Maybe<jsg::Promise<void>> maybeAbortPromise;
-  kj::Own<WeakRef<WritableStreamJsController>> weakRef;
+  kj::Rc<WeakRef<WritableStreamJsController>> weakRef;
 
   friend WritableLockImpl;
 };
@@ -1125,7 +1125,7 @@ bool ReadableImpl<Self>::hasPendingReadRequests() {
 // ======================================================================================
 
 template <typename Self>
-WritableImpl<Self>::WritableImpl(kj::Own<WeakRef<WritableStreamJsController>> owner)
+WritableImpl<Self>::WritableImpl(kj::Rc<WeakRef<WritableStreamJsController>> owner)
     : owner(kj::mv(owner)),
       signal(jsg::alloc<AbortSignal>()) {}
 
@@ -1587,7 +1587,7 @@ kj::Maybe<T&> tryGetAs(auto& ref) {
 class AllReaderBase {
 public:
   AllReaderBase()
-      : ref(kj::refcounted<WeakRef<AllReaderBase>>(kj::Badge<AllReaderBase>(), *this)) {}
+      : ref(kj::rc<WeakRef<AllReaderBase>>(kj::Badge<AllReaderBase>(), *this)) {}
   virtual ~AllReaderBase() noexcept(false) {
     ref->invalidate();
   }
@@ -1596,15 +1596,15 @@ public:
   virtual void doClose(jsg::Lock& js) = 0;
   virtual void doError(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
 
-  kj::Own<WeakRef<AllReaderBase>> addWeakRef() { return ref->addRef(); }
+  kj::Rc<WeakRef<AllReaderBase>> addWeakRef() { return ref.addRef(); }
 
 private:
-  kj::Own<WeakRef<AllReaderBase>> ref;
+  kj::Rc<WeakRef<AllReaderBase>> ref;
 };
 
 template <typename Controller, typename Consumer>
 struct ReadableState {
-  using AllReaderWeakRef = kj::Own<WeakRef<AllReaderBase>>;
+  using AllReaderWeakRef = kj::Rc<WeakRef<AllReaderBase>>;
   jsg::Ref<Controller> controller;
   kj::Maybe<kj::OneOf<ReadableStreamJsController*, AllReaderWeakRef>> owner;
   kj::Own<Consumer> consumer;
@@ -1937,15 +1937,15 @@ ReadableStreamDefaultController::ReadableStreamDefaultController(
     StreamQueuingStrategy queuingStrategy)
     : ioContext(tryGetIoContext()),
       impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)),
-      weakRef(kj::refcounted<WeakRef<ReadableStreamDefaultController>>(
+      weakRef(kj::rc<WeakRef<ReadableStreamDefaultController>>(
           kj::Badge<ReadableStreamDefaultController>(), *this)) {}
 
 ReadableStreamDefaultController::~ReadableStreamDefaultController() noexcept(false) {
   weakRef->invalidate();
 }
 
-kj::Own<WeakRef<ReadableStreamDefaultController>> ReadableStreamDefaultController::getWeakRef() {
-  return kj::addRef(*weakRef);
+kj::Rc<WeakRef<ReadableStreamDefaultController>> ReadableStreamDefaultController::getWeakRef() {
+  return weakRef.addRef();
 }
 
 
@@ -3367,7 +3367,7 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 // ======================================================================================
 
 WritableStreamDefaultController::WritableStreamDefaultController(
-    kj::Own<WeakRef<WritableStreamJsController>> owner)
+    kj::Rc<WeakRef<WritableStreamJsController>> owner)
     : ioContext(tryGetIoContext()), impl(kj::mv(owner)) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(
@@ -3421,17 +3421,17 @@ jsg::Promise<void> WritableStreamDefaultController::write(
 // ======================================================================================
 WritableStreamJsController::WritableStreamJsController()
     : ioContext(tryGetIoContext()),
-      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(
+      weakRef(kj::rc<WeakRef<WritableStreamJsController>>(
           kj::Badge<WritableStreamJsController>(), *this)) {}
 
 WritableStreamJsController::WritableStreamJsController(StreamStates::Closed closed)
     : ioContext(tryGetIoContext()), state(closed),
-      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(
+      weakRef(kj::rc<WeakRef<WritableStreamJsController>>(
           kj::Badge<WritableStreamJsController>(), *this)) {}
 
 WritableStreamJsController::WritableStreamJsController(StreamStates::Errored errored)
     : ioContext(tryGetIoContext()), state(kj::mv(errored)),
-      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(
+      weakRef(kj::rc<WeakRef<WritableStreamJsController>>(
           kj::Badge<WritableStreamJsController>(), *this)) {}
 
 jsg::Promise<void> WritableStreamJsController::abort(
@@ -3607,7 +3607,7 @@ void WritableStreamJsController::setup(
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  state = jsg::alloc<WritableStreamDefaultController>(kj::addRef(*weakRef));
+  state = jsg::alloc<WritableStreamDefaultController>(weakRef.addRef());
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 

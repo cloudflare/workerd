@@ -452,6 +452,7 @@ public:
   // 2. Can be safely destroyed from any thread.
   // 3. Invalidates itself when the request ends (such that dereferencing throws).
   template <typename T> IoOwn<T> addObject(kj::Own<T> obj);
+  template <typename T> IoOwn<T> addObject(kj::Rc<T> obj);
 
   // Wraps a reference in a wrapper which:
   // 1. Will throw an exception if dereferenced while the IoContext is not current for the
@@ -1154,6 +1155,11 @@ template <typename T>
 inline IoOwn<T> IoContext::addObject(kj::Own<T> obj) {
   requireCurrent();
   return deleteQueue->addObject(kj::mv(obj), ownedObjects);
+}
+
+template <typename T>
+inline IoOwn<T> IoContext::addObject(kj::Rc<T> obj) {
+  return addObject(obj.toOwn());
 }
 
 template <typename T>

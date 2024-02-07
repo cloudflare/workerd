@@ -2004,16 +2004,16 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
         : sink(kj::mv(sink)), source(kj::mv(source)) {}
   };
 
-  auto holder = kj::refcounted<Holder>(kj::mv(sink), kj::mv(source));
+  auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
   return holder->source->pumpTo(*holder->sink, end).then(
-      [&holder=*holder](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
-    proxy.proxyTask = proxy.proxyTask.attach(kj::addRef(holder));
+      [holder=holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
+    proxy.proxyTask = proxy.proxyTask.attach(kj::mv(holder));
     return kj::mv(proxy);
-  }, [&holder=*holder](kj::Exception&& ex) mutable {
-    holder.sink->abort(kj::cp(ex));
-    holder.source->cancel(kj::cp(ex));
+  }, [holder=holder.addRef()](kj::Exception&& ex) mutable {
+    holder->sink->abort(kj::cp(ex));
+    holder->source->cancel(kj::cp(ex));
     return kj::mv(ex);
-  }).attach(kj::mv(holder));
+  });
 }
 
 kj::Promise<size_t> IdentityTransformStreamImpl::tryRead(

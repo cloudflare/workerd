@@ -258,7 +258,7 @@ public:
     }
   };
 
-  WritableImpl(kj::Own<WeakRef<WritableStreamJsController>> owner);
+  WritableImpl(kj::Rc<WeakRef<WritableStreamJsController>> owner);
 
   jsg::Promise<void> abort(jsg::Lock& js,
                             jsg::Ref<Self> self,
@@ -347,7 +347,7 @@ private:
 
   struct Writable {};
 
-  kj::Own<WeakRef<WritableStreamJsController>> owner;
+  kj::Rc<WeakRef<WritableStreamJsController>> owner;
   jsg::Ref<AbortSignal> signal;
   kj::OneOf<StreamStates::Closed,
             StreamStates::Errored,
@@ -416,12 +416,12 @@ public:
     });
   }
 
-  kj::Own<WeakRef<ReadableStreamDefaultController>> getWeakRef();
+  kj::Rc<WeakRef<ReadableStreamDefaultController>> getWeakRef();
 
 private:
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
-  kj::Own<WeakRef<ReadableStreamDefaultController>> weakRef;
+  kj::Rc<WeakRef<ReadableStreamDefaultController>> weakRef;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
@@ -555,7 +555,7 @@ class WritableStreamDefaultController: public jsg::Object {
 public:
   using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
-  explicit WritableStreamDefaultController(kj::Own<WeakRef<WritableStreamJsController>> owner);
+  explicit WritableStreamDefaultController(kj::Rc<WeakRef<WritableStreamJsController>> owner);
 
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 
@@ -680,8 +680,8 @@ private:
   kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();
   kj::Maybe<WritableStreamJsController&> tryGetWritableController();
 
-  kj::Maybe<kj::Own<WeakRef<ReadableStreamDefaultController>>> maybeReadableController;
-  kj::Maybe<kj::Own<WeakRef<WritableStreamJsController>>> maybeWritableController;
+  kj::Maybe<kj::Rc<WeakRef<ReadableStreamDefaultController>>> maybeReadableController;
+  kj::Maybe<kj::Rc<WeakRef<WritableStreamJsController>>> maybeWritableController;
   Algorithms algorithms;
   bool backpressure = false;
   kj::Maybe<jsg::PromiseResolverPair<void>> maybeBackpressureChange;

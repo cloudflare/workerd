@@ -392,15 +392,15 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::St
                "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
   auto readableSide =
-      kj::refcounted<CompressionStreamImpl<Context::Mode::COMPRESS>>(kj::mv(format),
-                                                                     Context::ContextFlags::NONE);
-  auto writableSide = kj::addRef(*readableSide);
+      kj::rc<CompressionStreamImpl<Context::Mode::COMPRESS>>(kj::mv(format),
+                                                             Context::ContextFlags::NONE);
+  auto writableSide = readableSide.addRef();
 
   auto& ioContext = IoContext::current();
 
   return jsg::alloc<CompressionStream>(
-    jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-    jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+    jsg::alloc<ReadableStream>(ioContext, readableSide.toOwn()),
+    jsg::alloc<WritableStream>(ioContext, writableSide.toOwn()));
 }
 
 jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj::String format) {
@@ -408,18 +408,18 @@ jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj
                "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
   auto readableSide =
-      kj::refcounted<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(
+      kj::rc<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(
           kj::mv(format),
           FeatureFlags::get(js).getStrictCompression() ?
               Context::ContextFlags::STRICT :
               Context::ContextFlags::NONE);
-  auto writableSide = kj::addRef(*readableSide);
+  auto writableSide = readableSide.addRef();
 
   auto& ioContext = IoContext::current();
 
   return jsg::alloc<DecompressionStream>(
-    jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-    jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+    jsg::alloc<ReadableStream>(ioContext, readableSide.toOwn()),
+    jsg::alloc<WritableStream>(ioContext, writableSide.toOwn()));
 }
 
 }  // namespace workerd::api
