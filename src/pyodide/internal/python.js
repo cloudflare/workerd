@@ -65,14 +65,14 @@ let MEMORY = undefined;
  * knot for us.
  *
  * We also make an empty home directory and an empty global site-packages
- * directory `/lib/python3.11/site-packages`.
+ * directory `/lib/pythonv.vv/site-packages`.
  *
  * This is a simpified version of the `prepareFileSystem` function here:
  * https://github.com/pyodide/pyodide/blob/main/src/js/module.ts
  */
 function prepareFileSystem(Module) {
-  const pymajor = 3;
-  const pyminor = 11;
+  const pymajor = Module._py_version_major();
+  const pyminor = Module._py_version_minor();
   Module.FS.mkdirTree("/lib");
   Module.FS.mkdirTree(`/lib/python${pymajor}.${pyminor}/site-packages`);
   Module.FS.writeFile(
@@ -185,8 +185,8 @@ const SNAPSHOT_IMPORTS = [
   "_pyodide._core_docs",
   "traceback",
   "collections.abc",
-  // Asyncio is the really slow one here. In native Python3.11 on my machine,
-  // `import asyncio` takes ~50 ms.
+  // Asyncio is the really slow one here. In native Python on my machine, `import asyncio` takes ~50
+  // ms.
   "asyncio",
   "inspect",
   "tarfile",
@@ -264,12 +264,15 @@ function mountLib(pyodide) {
   const [info, _] = parseTarInfo();
   const tarFS = createTarFS(pyodide._module);
   const mdFS = createMetadataFS(pyodide._module);
-  pyodide.FS.mkdirTree("/session/lib/python3.11/site-packages");
+  const pymajor = pyodide._module._py_version_major();
+  const pyminor = pyodide._module._py_version_minor();
+  const site_packages = `/session/lib/python${pymajor}.${pyminor}/site-packages`;
+  pyodide.FS.mkdirTree(site_packages);
   pyodide.FS.mkdirTree("/session/metadata");
-  pyodide.FS.mount(tarFS, { info }, "/session/lib/python3.11/site-packages");
+  pyodide.FS.mount(tarFS, { info }, site_packages);
   pyodide.FS.mount(mdFS, {}, "/session/metadata");
   const sys = pyodide.pyimport("sys");
-  sys.path.push("/session/lib/python3.11/site-packages");
+  sys.path.push(site_packages);
   sys.path.push("/session/metadata");
   sys.destroy();
 }

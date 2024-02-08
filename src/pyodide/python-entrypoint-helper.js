@@ -13,8 +13,10 @@ function initializePackageIndex(pyodide) {
     );
   }
   const API = pyodide._api;
-  API.config.indexURL = "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/";
-  globalThis.location = "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/";
+  const indexURL = `https://cdn.jsdelivr.net/pyodide/v${pyodide.version}/full/`;
+  API.config.indexURL = indexURL;
+  // TODO: explain here why we are setting `globalThis.location`
+  globalThis.location = indexURL;
   API.lockfile_info = lockfile.info;
   API.lockfile_packages = lockfile.packages;
   API.repodata_packages = lockfile.packages;
@@ -100,11 +102,15 @@ async function setupPackages(pyodide) {
   // The metadata is a JSON-serialised WorkerBundle (defined in pipeline.capnp).
   const isWorkerd = MetadataReader.isWorkerd();
 
+  const pymajor = pyodide._module._py_version_major();
+  const pyminor = pyodide._module._py_version_minor();
+  const site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
+
   initializePackageIndex(pyodide);
   {
     const mod = await import("pyodide-internal:relaxed_call.py");
     pyodide.FS.writeFile(
-      "/lib/python3.11/site-packages/relaxed_call.py",
+      `${site_packages}/relaxed_call.py`,
       new Uint8Array(mod.default),
       { canOwn: true },
     );
@@ -129,7 +135,7 @@ async function setupPackages(pyodide) {
   ) {
     const mod = await import("pyodide-internal:patches/aiohttp_fetch_patch.py");
     pyodide.FS.writeFile(
-      "/lib/python3.11/site-packages/aiohttp_fetch_patch.py",
+      `${site_packages}/aiohttp_fetch_patch.py`,
       new Uint8Array(mod.default),
       { canOwn: true },
     );
@@ -138,7 +144,7 @@ async function setupPackages(pyodide) {
   if (requirements.some((req) => req.startsWith("fastapi"))) {
     const mod = await import("pyodide-internal:asgi.py");
     pyodide.FS.writeFile(
-      "/lib/python3.11/site-packages/asgi.py",
+      `${site_packages}/asgi.py`,
       new Uint8Array(mod.default),
       { canOwn: true },
     );
