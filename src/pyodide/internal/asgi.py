@@ -18,7 +18,7 @@ def acquire_js_buffer(pybuffer):
         buf.release()
 
 
-def request_to_scope(req, ws=False):
+def request_to_scope(req, env, ws=False):
     from js import URL
 
     headers = [tuple(x) for x in req.headers]
@@ -41,6 +41,7 @@ def request_to_scope(req, ws=False):
         "path": path,
         "query_string": query_string,
         "type": ty,
+        "env": env
     }
 
 
@@ -74,7 +75,7 @@ async def start_application(app):
     await ready
 
 
-async def process_request(app, req):
+async def process_request(app, req, env):
     from js import Response, Object
     from pyodide.ffi import create_proxy
 
@@ -113,7 +114,7 @@ async def process_request(app, req):
             )
             result.set_result(resp)
 
-    await app(request_to_scope(req), receive, send)
+    await app(request_to_scope(req, env), receive, send)
     return await result
 
 
@@ -163,14 +164,15 @@ async def process_websocket(app, req):
         received = await queue.get()
         return received
 
-    ensure_future(app(request_to_scope(req, ws=True), ws_receive, ws_send))
+    env = {}
+    ensure_future(app(request_to_scope(req, env, ws=True), ws_receive, ws_send))
 
     return Response.new(None, status=101, webSocket=client)
 
 
-async def fetch(app, req):
+async def fetch(app, req, env):
     await start_application(app)
-    return await process_request(app, req)
+    return await process_request(app, req, env)
 
 
 async def websocket(app, req):
