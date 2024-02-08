@@ -1306,7 +1306,7 @@ kj::Promise<DeferredProxy<void>> Response::send(
       KJ_IF_SOME(config, ws->getPreferredExtensions(kj::WebSocket::ExtensionsContext::RESPONSE)) {
         // We try to get extensions for use in a response (i.e. for a server side websocket).
         // This allows us to `optimizedPumpTo()` `webSocket`.
-        outHeaders.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, config);
+        outHeaders.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, kj::mv(config));
       } else {
         // `webSocket` is not a WebSocketImpl, we want to support whatever valid config the client
         // requested, so we'll just use the client's requested headers.
