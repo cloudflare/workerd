@@ -945,15 +945,17 @@ struct Dict {
     Value value;
 
     JSG_MEMORY_INFO(Field) {
-      tracker.trackField(name);
-      tracker.trackField(value);
+      tracker.trackField("name", name);
+      tracker.trackField("value", value);
     }
   };
 
   kj::Array<Field> fields;
 
   JSG_MEMORY_INFO(Dict) {
-    tracker.trackField(fields);
+    for (const auto& field : fields) {
+      tracker.trackField(nullptr, field);
+    }
   }
 };
 

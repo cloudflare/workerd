@@ -44,6 +44,12 @@ class R2MultipartUpload: public jsg::Object {
       JSG_METHOD(complete);
     }
 
+    void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+      tracker.trackField("key", key);
+      tracker.trackField("uploadId", uploadId);
+      tracker.trackField("bucket", bucket);
+    }
+
   protected:
     kj::String key;
     kj::String uploadId;

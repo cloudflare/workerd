@@ -127,6 +127,14 @@ public:
     jsg::Optional<kj::Array<kj::byte>> sha256;
     jsg::Optional<kj::Array<kj::byte>> sha384;
     jsg::Optional<kj::Array<kj::byte>> sha512;
+
+    void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+      tracker.trackField("md5", md5);
+      tracker.trackField("sha1", sha1);
+      tracker.trackField("sha256", sha256);
+      tracker.trackField("sha384", sha384);
+      tracker.trackField("sha512", sha512);
+    }
   };
 
   struct HttpMetadata {
@@ -144,6 +152,14 @@ public:
     JSG_STRUCT_TS_OVERRIDE(R2HTTPMetadata);
 
     HttpMetadata clone() const;
+
+    JSG_MEMORY_INFO(HttpMetadata) {
+      tracker.trackField("contentType", contentType);
+      tracker.trackField("contentLanguage", contentLanguage);
+      tracker.trackField("contentDisposition", contentDisposition);
+      tracker.trackField("contentEncoding", contentEncoding);
+      tracker.trackField("cacheControl", cacheControl);
+    }
   };
 
   struct PutOptions {
@@ -221,6 +237,15 @@ public:
       JSG_TS_OVERRIDE(R2Object);
     }
 
+    void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+      tracker.trackField("name", name);
+      tracker.trackField("version", version);
+      tracker.trackField("etag", etag);
+      tracker.trackField("checksums", checksums);
+      tracker.trackField("httpMetadata", httpMetadata);
+      tracker.trackField("customMetadata", customMetadata);
+    }
+
   protected:
     kj::String name;
     kj::String version;
@@ -270,6 +295,10 @@ public:
       JSG_TS_OVERRIDE(R2ObjectBody {
         json<T>(): Promise<T>;
       });
+    }
+
+    void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+      tracker.trackField("body", body);
     }
   private:
     jsg::Ref<ReadableStream> body;
@@ -401,6 +430,11 @@ public:
     kj::Maybe<kj::Date> uploadedAfter;
     bool secondsGranularity = false;
   };
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("adminBucket", adminBucket);
+    tracker.trackField("jwt", jwt);
+  }
 
 protected:
   kj::Maybe<kj::StringPtr> adminBucketName() const {
