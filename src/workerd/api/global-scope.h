@@ -255,6 +255,11 @@ struct ExportedHandler {
   // Values to pass for `env` and `ctx` when calling handlers. Note these have to be the last members
   // so that they don't interfere with `JSG_STRUCT`'s machinations.
 
+  // env and ctx values that need to be passed to the handler function. If the ExportedHandler
+  // represents a class instance (e.g. Durable Object instance), then `env` is is the JS value
+  // `undefined` and `ctx` is `kj::none`.
+  // TODO(cleanup): Why isn't `env` a `jsg::Optional` too? Or maybe the pair should be wrapped in
+  //   a struct that is `Maybe`?
   jsg::Value env = nullptr;
   jsg::Optional<jsg::Ref<ExecutionContext>> ctx = kj::none;
   // TODO(cleanup): These are shoved here as a bit of a hack. At present, this is convenient and

@@ -183,10 +183,19 @@ public:
       // We will try to get the function, if we can't we'll throw an error to the client.
       auto fn = tryGetFn(lock, ctx, handle, methodName);
 
+      v8::Local<v8::Value> invocationResult;
+      KJ_IF_SOME(execCtx, handler.ctx) {
+        invocationResult = invokeFnInsertingEnvCtx(js, fn, handle, serializedArgs,
+            handler.env.getHandle(js),
+            lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()));
+      } else {
+        invocationResult = invokeFn(js, fn, handle, serializedArgs);
+      }
+
       // We have a function, so let's call it and serialize the result for RPC.
       // If the function returns a promise we will wait for the promise to finish so we can
       // serialize the result.
-      return ctx.awaitJs(js, js.toPromise(invokeFn(js, fn, handle, serializedArgs))
+      return ctx.awaitJs(js, js.toPromise(invocationResult)
           .then(js, ctx.addFunctor([callContext](jsg::Lock& js, jsg::Value value) mutable {
         auto result = serializeV8(js, jsg::JsValue(value.getHandle(js)));
         JSG_ASSERT(result.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
@@ -258,6 +267,46 @@ private:
     } else {
       return jsg::check(fn->Call(js.v8Context(), thisArg, 0, nullptr));
     }
+  };
+
+  // Like `invokeFn`, but inject the `env` and `ctx` values between the first and second
+  // parameters. Used for service bindings that use functional syntax.
+  v8::Local<v8::Value> invokeFnInsertingEnvCtx(
+      jsg::Lock& js,
+      v8::Local<v8::Function> fn,
+      v8::Local<v8::Object> thisArg,
+      kj::ArrayPtr<const kj::byte> serializedArgs,
+      v8::Local<v8::Value> env,
+      jsg::JsObject ctx) {
+    kj::Maybe<jsg::JsArray> argsArray;
+    size_t size = 0;
+    if (serializedArgs.size() > 0) {
+      auto array = KJ_REQUIRE_NONNULL(
+          deserializeV8(js, serializedArgs).tryCast<jsg::JsArray>(),
+          "expected JsArray when deserializing arguments.");
+      size = array.size();
+      argsArray = kj::mv(array);
+    }
+
+    KJ_STACK_ARRAY(v8::Local<v8::Value>, arguments, kj::max(size + 2, 3), 8, 8);
+
+    if (size > 0) {
+      arguments[0] = KJ_ASSERT_NONNULL(argsArray).get(js, 0);
+    } else {
+      arguments[0] = js.undefined();
+    }
+
+    arguments[1] = env;
+    arguments[2] = ctx;
+
+    if (size > 1) {
+      auto array = KJ_ASSERT_NONNULL(argsArray);
+      for (size_t i = 1; i < array.size(); ++i) {
+        arguments[i + 2] = array.get(js, i);
+      }
+    }
+
+    return jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.begin()));
   };
 
   IoContext& ctx;

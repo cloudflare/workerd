@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "js-rpc-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "js-rpc-test.js")
+        ],
+        compatibilityDate = "2024-01-01",
+        compatibilityFlags = ["js_rpc","nodejs_compat","experimental"],
+        bindings = [
+          (name = "self", service = "js-rpc-test"),
+          (name = "twelve", json = "12"),
+        ]
+      )
+    ),
+  ],
+);

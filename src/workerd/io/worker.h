@@ -37,6 +37,7 @@ namespace api {
   class Socket;
   class WebSocket;
   class WebSocketRequestResponsePair;
+  class ExecutionContext;
 }
 
 class ThreadContext;
@@ -441,6 +442,12 @@ public:
   virtual kj::Maybe<const api::CryptoAlgorithm&> getCryptoAlgorithm(kj::StringPtr name) const {
     return kj::none;
   }
+
+  // Apply JSG wrapping to the given ExecutionContext. This is needed in particular by the RPC
+  // server-side implementation, when invoking a top-level RPC method that takes env and ctx as
+  // params.
+  virtual jsg::JsObject wrapExecutionContext(
+      jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
 
   // Set the module fallback service callback, if any.
   using ModuleFallbackCallback =

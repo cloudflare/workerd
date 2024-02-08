@@ -196,6 +196,12 @@ const jsg::TypeHandler<api::QueueExportedHandler>&
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
 }
 
+jsg::JsObject WorkerdApi::wrapExecutionContext(
+    jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
+  return jsg::JsObject(kj::downcast<JsgWorkerdIsolate::Lock>(lock)
+      .wrap(lock.v8Context(), kj::mv(ref)));
+}
+
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
