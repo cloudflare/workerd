@@ -681,7 +681,7 @@ struct ResourceTypeBuilder {
       v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
 
     auto toStringTagSymbol = v8::Symbol::GetToStringTag(isolate);
-    prototype->Set(toStringTagSymbol, v8StrIntern(isolate, typeWrapper.jsgGetName()), static_cast<v8::PropertyAttribute>(0));
+    prototype->Set(toStringTagSymbol, v8StrIntern(isolate, Self::jsgGetName()), static_cast<v8::PropertyAttribute>(0));
   }
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>

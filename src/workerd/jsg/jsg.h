@@ -47,7 +47,7 @@ namespace workerd::jsg {
       ::workerd::jsg::JsgKind::RESOURCE; \
   using jsgSuper = jsgThis; \
   using jsgThis = Type; \
-  inline kj::StringPtr jsgGetName() const { return #Type##_kjc; } \
+  static inline kj::StringPtr jsgGetName() { return #Type##_kjc; } \
   inline kj::StringPtr jsgGetMemoryName() const override { return #Type##_kjc; } \
   inline size_t jsgGetMemorySelfSize() const override { return sizeof(Type); } \
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override { \
