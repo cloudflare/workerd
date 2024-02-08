@@ -93,6 +93,10 @@ public:
     JSG_METHOD(list);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("jwt", jwt);
+  }
+
 private:
   R2Bucket::FeatureFlags featureFlags;
   uint subrequestChannel;
