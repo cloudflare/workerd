@@ -1,0 +1,42 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "hello/hello.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        [
+            "hello/*",
+        ],
+        exclude = ["**/*.wd-test"],
+    ),
+)
+
+wd_test(
+    src = "env-param/env.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        [
+            "env-param/*",
+        ],
+        exclude = ["**/*.wd-test"],
+    ),
+)
+
+wd_test(
+    src = "langchain/langchain.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        [
+            "langchain/*",
+        ],
+        exclude = ["**/*.wd-test"],
+    ),
+    # TODO: fails in micropip on windows with:
+    #
+    # ValueError: Can't fetch metadata for 'openai'. Please make sure you have entered a correct
+    # package name and correctly specified index_urls (if you changed them).
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
