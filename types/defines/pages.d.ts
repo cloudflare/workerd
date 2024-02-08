@@ -1,7 +1,7 @@
 type Params<P extends string = any> = Record<P, string | string[]>;
 
 type EventContext<Env, P extends string, Data> = {
-  request: Request;
+  request: Request<unknown, IncomingRequestCfProperties<unknown>>;
   functionPath: string;
   waitUntil: (promise: Promise<any>) => void;
   passThroughOnException: () => void;
@@ -18,7 +18,7 @@ type PagesFunction<
 > = (context: EventContext<Env, Params, Data>) => Response | Promise<Response>;
 
 type EventPluginContext<Env, P extends string, Data, PluginArgs> = {
-  request: Request;
+  request: Request<unknown, IncomingRequestCfProperties<unknown>>;
   functionPath: string;
   waitUntil: (promise: Promise<any>) => void;
   passThroughOnException: () => void;
