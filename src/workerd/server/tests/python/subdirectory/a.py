@@ -8,4 +8,3 @@ def fetch(request):
 
 def test():
     print("Hi there, this is a test", x)
-    raise Exception("stop")
