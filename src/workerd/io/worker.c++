@@ -2918,6 +2918,10 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
     context.addWaitUntil(context.run([this, &cls = *cls](Worker::Lock& lock) {
       jsg::Lock& js = lock;
 
+      // Explicitly ensure that the DO constructor does not inherit an async context
+      // when it runs.
+      jsg::AsyncContextFrame::Scope asyncContextScope(js, nullptr);
+
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
       KJ_IF_SOME(c, impl->actorCache) {
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
