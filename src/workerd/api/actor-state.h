@@ -373,6 +373,21 @@ public:
     JSG_TS_OVERRIDE(type ActorState = never);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    KJ_SWITCH_ONEOF(id) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        tracker.trackField("id", str);
+      }
+      KJ_CASE_ONEOF(id, kj::Own<ActorIdFactory::ActorId>) {
+        // TODO(later): This only yields the shallow size of the ActorId and not the
+        // size of the actual value. Should probably make ActorID a MemoryRetainer.
+        tracker.trackFieldWithSize("id", sizeof(ActorIdFactory::ActorId));
+      }
+    }
+    tracker.trackField("transient", transient);
+    tracker.trackField("persistent", persistent);
+  }
+
 private:
   Worker::Actor::Id id;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> transient;
@@ -394,6 +409,11 @@ public:
   JSG_RESOURCE_TYPE(WebSocketRequestResponsePair) {
     JSG_READONLY_PROTOTYPE_PROPERTY(request, getRequest);
     JSG_READONLY_PROTOTYPE_PROPERTY(response, getResponse);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("request", request);
+    tracker.trackField("response", response);
   }
 
 private:
@@ -502,6 +522,20 @@ public:
       blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
     });
     // Make `storage` non-optional
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    KJ_SWITCH_ONEOF(id) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        tracker.trackField("id", str);
+      }
+      KJ_CASE_ONEOF(id, kj::Own<ActorIdFactory::ActorId>) {
+        // TODO(later): This only yields the shallow size of the ActorId and not the
+        // size of the actual value. Should probably make ActorID a MemoryRetainer.
+        tracker.trackFieldWithSize("id", sizeof(ActorIdFactory::ActorId));
+      }
+    }
+    tracker.trackField("storage", storage);
   }
 
 private:

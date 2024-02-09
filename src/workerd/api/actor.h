@@ -64,6 +64,10 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("id", sizeof(ActorIdFactory::ActorId));
+  }
+
 private:
   kj::Own<ActorIdFactory::ActorId> id;
 
@@ -98,6 +102,10 @@ public:
     JSG_TS_OVERRIDE(DurableObjectStub);
     // Rename this resource type to DurableObjectStub, and make DurableObject
     // the interface implemented by users' Durable Object classes.
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("id", id);
   }
 
 private:

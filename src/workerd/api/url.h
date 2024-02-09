@@ -107,7 +107,26 @@ public:
   explicit URL(kj::Url&& u);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackFieldWithSize("url", url->toString().size());
+    size_t size = 0;
+    size += url->scheme.size();
+    KJ_IF_SOME(ui, url->userInfo) {
+      size += ui.username.size();
+      KJ_IF_SOME(pwd, ui.password) {
+        size += pwd.size();
+      }
+    }
+    size += url->host.size();
+    for (const auto& p: url->path) {
+      size += p.size();
+    }
+    for (const auto& param : url->query) {
+      size += param.name.size();
+      size += param.value.size();
+    }
+    KJ_IF_SOME(frag, url->fragment) {
+      size += frag.size();
+    }
+    tracker.trackFieldWithSize("inner", size);
     tracker.trackField("searchParams", searchParams);
   }
 
