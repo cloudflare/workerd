@@ -76,6 +76,10 @@ public:
         JSG_METHOD(copy);
       };
 
+      void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+        tracker.trackField("digest", _digest);
+      }
+
     private:
       void checkDigestLength(const EVP_MD* md, kj::Maybe<uint32_t> xofLen);
 
@@ -99,6 +103,10 @@ public:
         JSG_METHOD(update);
         JSG_METHOD(digest);
       };
+
+      void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+        tracker.trackField("digest", _digest);
+      }
 
     private:
       jsg::Optional<kj::Array<kj::byte>> _digest;

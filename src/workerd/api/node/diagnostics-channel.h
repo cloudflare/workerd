@@ -42,11 +42,16 @@ public:
 
   const jsg::Name& getName() const;
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
 
   struct StoreEntry {
     kj::Own<jsg::AsyncContextFrame::StorageKey> key;
     TransformCallback transform;
+    JSG_MEMORY_INFO(StoreEntry) {
+      tracker.trackField("transform", transform);
+    }
   };
 
   struct StoreCallbacks {
@@ -87,6 +92,8 @@ public:
   }
 
   kj::Maybe<Channel&> tryGetChannel(jsg::Lock& js, jsg::Name& name);
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   kj::HashMap<kj::String, jsg::Ref<Channel>> channels;

@@ -99,6 +99,12 @@ public:
     JSG_METHOD_NAMED(toJSON, toString);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    // TODO(cleanup): Better to have jsg::MimeType be a MemoryRetainer directly
+    tracker.trackFieldWithSize("mimeType", inner.toString().size());
+    tracker.trackField("params", params);
+  }
+
 private:
   workerd::MimeType inner;
   jsg::Ref<MIMEParams> params;
