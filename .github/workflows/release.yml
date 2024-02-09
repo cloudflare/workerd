@@ -13,7 +13,7 @@ jobs:
     # the build job uses 20.04 for libc compatibility.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - id: echo
         run: |
           echo "::set-output name=version::1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0"
@@ -25,10 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: mukunku/tag-exists-action@v1.3.0
+      - uses: mukunku/tag-exists-action@v1.6.0
         id: check_tag
         with:
           tag: v${{ needs.version.outputs.version }}
@@ -42,7 +42,7 @@ jobs:
     if: ${{ needs.check-tag.outputs.exists != 'true' }}
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - run: git tag v${{ needs.version.outputs.version }} && git push origin v${{ needs.version.outputs.version }}
@@ -67,10 +67,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: build (${{ matrix.os-name }})
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
       - name: Cache
         id: cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/bazel-disk-cache
           # Use a different cache key than for tests here, otherwise the release cache could end up
@@ -114,7 +116,7 @@ jobs:
           # generated for the release configuration. Regular symbols are still included.
           strip -S bazel-bin/src/workerd/server/workerd
       - name: Upload binary
-        uses: actions/upload-artifact@v3.1.0
+        uses: actions/upload-artifact@v3.1.3
         with:
           name: ${{ runner.os }}-${{ runner.arch }}-binary
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
@@ -168,16 +170,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout workers-sdk
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: cloudflare/workers-sdk
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v3
         with:
           version: 8.8.0
       - name: Use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: "pnpm"

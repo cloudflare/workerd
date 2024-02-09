@@ -21,7 +21,7 @@ jobs:
       release_version: ${{ steps.echo.outputs.release_version }}
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - id: echo
         run: |
           echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
@@ -37,12 +37,12 @@ jobs:
         arch: [darwin-64, darwin-arm64, linux-64, linux-arm64, windows-64]
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Use Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
@@ -51,7 +51,7 @@ jobs:
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
-      - uses: robinraju/release-downloader@v1.6
+      - uses: robinraju/release-downloader@v1.9
         with:
           tag: v${{ needs.version.outputs.release_version }}
           fileName: workerd-${{ matrix.arch }}.gz
@@ -78,12 +78,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Use Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 

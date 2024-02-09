@@ -21,7 +21,7 @@ jobs:
       release_version: ${{ steps.echo.outputs.release_version }}
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - id: echo
         run: |
           echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
@@ -31,10 +31,10 @@ jobs:
     runs-on: ubuntu-22.04
     needs: version
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Cache
         id: cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/bazel-disk-cache
           # The types cache is significantly smaller than the whole cache (350MB as of writing), so
