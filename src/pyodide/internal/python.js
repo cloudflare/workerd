@@ -1,6 +1,7 @@
 import { parseTarInfo } from "pyodide-internal:tar";
 import { createTarFS } from "pyodide-internal:tarfs";
 import { createMetadataFS } from "pyodide-internal:metadatafs";
+import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -161,6 +162,8 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
  * APIs, we call this function. If `MEMORY` is defined, then we will have passed
  * `noInitialRun: true` and so the C runtime is in an incoherent state until we
  * restore the linear memory from the snapshot.
+ *
+ * Returns `true` when existing memory snapshot was loaded.
  */
 async function prepareWasmLinearMemory(emscriptenModule) {
   if (MEMORY) {
@@ -169,9 +172,11 @@ async function prepareWasmLinearMemory(emscriptenModule) {
     // probably always do that.
     emscriptenModule.growMemory(MEMORY.byteLength);
     // restore memory from snapshot
-    emscriptenModule.HEAP8.set(new Uint8Array(MEMORY));
+    emscriptenModule.HEAP8.set(MEMORY);
+    return true;
   } else {
     await makeLinearMemorySnapshot(emscriptenModule);
+    return false;
   }
 }
 
@@ -208,6 +213,7 @@ const SNAPSHOT_IMPORTS = [
  * linear memory into MEMORY.
  */
 async function makeLinearMemorySnapshot(emscriptenModule) {
+  // TODO: make memory snapshot with more than just these hardcoded imports, use real script imports.
   const toImport = SNAPSHOT_IMPORTS.join(",");
   const toDelete = Array.from(
     new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".")[0]))
@@ -277,15 +283,53 @@ function mountLib(pyodide) {
   sys.destroy();
 }
 
-export async function loadPyodide() {
+export async function loadPyodide(context) {
+  // Lookup memory snapshot from artifact store.
+  const maybeMemorySnapshot = ArtifactBundler.getMemorySnapshot();
+  if (maybeMemorySnapshot) {
+    // Simple sanity check to ensure this snapshot isn't corrupted.
+    //
+    // TODO(later): we need better detection when this is corrupted. Right now the isolate will
+    // just die.
+    if (maybeMemorySnapshot.length > 100) {
+      MEMORY = maybeMemorySnapshot;
+    }
+  }
+
   const emscriptenSettings = getEmscriptenSettings();
   const emscriptenModule = await instantiateEmscriptenModule(
     emscriptenSettings
   );
-  prepareWasmLinearMemory(emscriptenModule);
+  const usingExistingMemorySnapshot = await prepareWasmLinearMemory(emscriptenModule);
+
+  // Upload `MEMORY` to artifact store so long as a new memory snapshot was generated.
+  const isTestMode = maybeMemorySnapshot && maybeMemorySnapshot.byteLength < 100;
+  if (ArtifactBundler.isEnabled() && !usingExistingMemorySnapshot) {
+    const uploadCb = async () => {
+      const success = await ArtifactBundler.uploadMemorySnapshot(new Uint8Array(MEMORY).slice());
+      if (!success) {
+        console.warn("Memory snapshot upload failed.");
+      }
+    }
+
+    // Await in test-mode as we have no easy way to verify waitUntil in ew-test-bin.
+    if (isTestMode) {
+      await uploadCb();
+    } else {
+      context.waitUntil(uploadCb);
+    }
+  }
+
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
   emscriptenModule.API.finalizeBootstrap();
   const pyodide = emscriptenModule.API.public_api;
   mountLib(pyodide);
+
+  // This is just here for our test suite. Ugly but just about the only way to test this.
+  if (isTestMode) {
+    const snapshotString = new TextDecoder().decode(maybeMemorySnapshot);
+    pyodide.registerJsModule("cf_internal_test_utils", { snapshot: snapshotString });
+  }
+
   return pyodide;
 }

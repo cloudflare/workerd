@@ -411,6 +411,21 @@ void WorkerdApi::compileModules(
             },
             jsg::ModuleRegistry::Type::INTERNAL);
       }
+      // Inject artifact bundler.
+      {
+        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+        using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
+        auto specifier = "pyodide-internal:artifacts";
+        modules->addBuiltinModule(specifier,
+            [specifier = kj::str(specifier)](
+                jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+          auto wrap = wrapper.wrap(js.v8Context(), kj::none, ArtifactBundler::makeDisabledBundler());
+          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+        },
+            jsg::ModuleRegistry::Type::INTERNAL);
+      }
     }
 
     for (auto module: confModules) {

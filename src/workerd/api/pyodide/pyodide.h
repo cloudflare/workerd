@@ -6,6 +6,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
+#include <workerd/io/io-context.h>
 
 namespace workerd::api::pyodide {
 
@@ -78,12 +79,81 @@ public:
   }
 };
 
+// A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
+// CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
+class ArtifactBundler : public jsg::Object {
+public:
+  ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot,
+      kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)> uploadMemorySnapshotCb)
+      : existingSnapshot(kj::mv(existingSnapshot)),
+        uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
+        hasUploaded(false) {};
+
+  ArtifactBundler()
+      : existingSnapshot(kj::none),
+        uploadMemorySnapshotCb(kj::none),
+        hasUploaded(false) {};
+
+  jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
+    // Prevent multiple uploads.
+    if (hasUploaded) {
+      return js.rejectedPromise<bool>(
+          js.typeError("This ArtifactBundle has already uploaded a memory snapshot"));
+    }
+
+    // TODO(later): Only upload if `snapshot` isn't identical to `existingSnapshot`.
+
+    if (uploadMemorySnapshotCb == kj::none) {
+      return js.rejectedPromise<bool>(js.typeError("ArtifactBundler is disabled"));
+    }
+    auto& cb = KJ_REQUIRE_NONNULL(uploadMemorySnapshotCb);
+    hasUploaded = true;
+    auto& context = IoContext::current();
+    return context.awaitIo(cb(kj::mv(snapshot)));
+  };
+
+  jsg::Optional<kj::Array<kj::byte>> getMemorySnapshot(jsg::Lock& js) {
+    KJ_IF_SOME(val, existingSnapshot) {
+      return kj::mv(val);
+    }
+    return kj::none;
+  }
+
+  bool isEnabled() {
+    return uploadMemorySnapshotCb != kj::none;
+  }
+
+  static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
+    return jsg::alloc<ArtifactBundler>();
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    KJ_IF_SOME(snapshot, existingSnapshot) {
+      tracker.trackFieldWithSize("snapshot", snapshot.size());
+    }
+  }
+
+  JSG_RESOURCE_TYPE(ArtifactBundler) {
+    JSG_METHOD(uploadMemorySnapshot);
+    JSG_METHOD(getMemorySnapshot);
+    JSG_METHOD(isEnabled);
+  }
+private:
+  // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
+  // up cold starts.
+  kj::Maybe<kj::Array<kj::byte>> existingSnapshot;
+  kj::Maybe<kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)>> uploadMemorySnapshotCb;
+  bool hasUploaded;
+};
+
 using Worker = server::config::Worker;
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
 
-#define EW_PYODIDE_ISOLATE_TYPES                                                                   \
-  api::pyodide::PackagesTarReader, api::pyodide::PyodideMetadataReader
+#define EW_PYODIDE_ISOLATE_TYPES       \
+  api::pyodide::PackagesTarReader,     \
+  api::pyodide::PyodideMetadataReader, \
+  api::pyodide::ArtifactBundler
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
   if (featureFlags.getWorkerdExperimental()) {
