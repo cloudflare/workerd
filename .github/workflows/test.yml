@@ -40,10 +40,12 @@ jobs:
     runs-on: ${{ matrix.os.image }}
     name: test (${{ matrix.os.name }}${{ matrix.config.suffix }})
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
       - name: Cache
         id: cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/bazel-disk-cache
           key: bazel-disk-cache-${{ matrix.os.name }}-${{ runner.arch }}${{ matrix.config.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
