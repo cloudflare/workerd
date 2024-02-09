@@ -18,6 +18,12 @@ public:
     JSG_METHOD(keys);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    for (const auto& feature : enabled_) {
+      tracker.trackField(nullptr, feature);
+    }
+  }
+
 private:
   kj::HashSet<GPUFeatureName> enabled_;
   bool has(kj::String name);

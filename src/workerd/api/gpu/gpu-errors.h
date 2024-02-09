@@ -21,6 +21,10 @@ public:
     return message_;
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("message", message_);
+  }
+
 private:
   kj::String message_;
 };
@@ -56,6 +60,11 @@ public:
   JSG_RESOURCE_TYPE(GPUDeviceLostInfo) {
     JSG_READONLY_PROTOTYPE_PROPERTY(message, getMessage);
     JSG_READONLY_PROTOTYPE_PROPERTY(reason, getReason);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("message", message_);
+    tracker.trackField("reason", reason_);
   }
 
 private:

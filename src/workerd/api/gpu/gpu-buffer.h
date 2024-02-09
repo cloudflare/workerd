@@ -29,6 +29,13 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(mapState, getMapState);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    for (const auto& mapping : mapped_) {
+      tracker.trackField(nullptr, mapping);
+    }
+    tracker.trackField("detachKey", detachKey_);
+  }
+
 private:
   // https://www.w3.org/TR/webgpu/#buffer-interface
   enum class State {
@@ -46,6 +53,9 @@ private:
       return s < end && e > start;
     }
     jsg::V8Ref<v8::ArrayBuffer> buffer;
+    JSG_MEMORY_INFO(Mapping) {
+      tracker.trackField("buffer", buffer);
+    }
   };
 
   wgpu::Buffer buffer_;

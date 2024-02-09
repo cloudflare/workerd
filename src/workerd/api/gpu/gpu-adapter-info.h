@@ -19,6 +19,13 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(description, getDescription);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("vendor", vendor_);
+    tracker.trackField("architecture", architecture_);
+    tracker.trackField("device", device_);
+    tracker.trackField("description", description_);
+  }
+
 private:
   kj::String vendor_;
   kj::String architecture_;

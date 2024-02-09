@@ -64,6 +64,12 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(messages, getMessages);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    for (const auto& message : messages_) {
+      tracker.trackField(nullptr, message);
+    }
+  }
+
 private:
   kj::Vector<jsg::Ref<GPUCompilationMessage>> messages_;
   kj::ArrayPtr<jsg::Ref<GPUCompilationMessage>> getMessages() {
