@@ -323,7 +323,7 @@ private:
   class NativeHandler {
   public:
     using Signature = void(jsg::Ref<Event>);
-    NativeHandler(jsg::Lock& js, jsg::Ref<EventTarget> target, kj::String type,
+    NativeHandler(jsg::Lock& js, EventTarget& target, kj::String type,
         jsg::Function<Signature> func, bool once = false);
     ~NativeHandler() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(NativeHandler);
@@ -338,7 +338,9 @@ private:
 
     kj::String type;
     struct State {
-      jsg::Ref<EventTarget> target;
+      // target's destructor will null out `state`, so this is OK to be a bare reference.
+      EventTarget& target;
+
       jsg::Function<Signature> func;
     };
 

@@ -33,17 +33,17 @@ bool isSpecialEventType(kj::StringPtr type) {
 
 EventTarget::NativeHandler::NativeHandler(
     jsg::Lock& js,
-    jsg::Ref<EventTarget> target,
+    EventTarget& target,
     kj::String type,
     jsg::Function<Signature> func,
     bool once)
     : type(kj::mv(type)),
       state(State {
-        .target = kj::mv(target),
+        .target = target,
         .func = kj::mv(func),
       }),
       once(once) {
-  KJ_ASSERT_NONNULL(state).target->addNativeListener(js, *this);
+  target.addNativeListener(js, *this);
 }
 
 EventTarget::NativeHandler::~NativeHandler() noexcept(false) { detach(); }
@@ -52,8 +52,7 @@ void EventTarget::NativeHandler::operator()(jsg::Lock& js, jsg::Ref<Event> event
   KJ_IF_SOME(s, state) {
     if (once) {
       auto fn = kj::mv(s.func);
-      auto target = kj::mv(s.target);
-      state = kj::none;
+      detach();
       fn(js, kj::mv(event));
       // Note that the function may have detached itself and caused the NativeHandler
       // to be destroyed. Let's be careful not to touch it after this point.
@@ -71,13 +70,12 @@ uint EventTarget::NativeHandler::hashCode() const {
 void EventTarget::NativeHandler::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(s, state) {
     visitor.visit(s.func);
-    visitor.visit(s.target);
   }
 }
 
 void EventTarget::NativeHandler::detach() {
   KJ_IF_SOME(s, state) {
-    s.target->removeNativeListener(*this);
+    s.target.removeNativeListener(*this);
     state = kj::none;
   }
 }
@@ -87,7 +85,7 @@ kj::Own<void> EventTarget::newNativeHandler(
     kj::String type,
     jsg::Function<void(jsg::Ref<Event>)> func,
     bool once) {
-  return kj::heap<EventTarget::NativeHandler>(js, JSG_THIS, kj::mv(type), kj::mv(func), once);
+  return kj::heap<EventTarget::NativeHandler>(js, *this, kj::mv(type), kj::mv(func), once);
 }
 
 const EventTarget::EventHandler::Handler& EventTarget::EventHandlerHashCallbacks::keyForRow(
@@ -192,7 +190,18 @@ jsg::Ref<EventTarget> EventTarget::constructor() {
   return jsg::alloc<EventTarget>();
 }
 
-EventTarget::~EventTarget() noexcept(false) {}
+EventTarget::~EventTarget() noexcept(false) {
+  for (auto& entry : typeMap) {
+    for (auto& handler : entry.value.handlers) {
+      KJ_IF_SOME(native, handler.handler.tryGet<EventHandler::NativeHandlerRef>()) {
+        // Note: Can't call `detach()` here because it would loop back and call
+        // `removeNativeListener()` on us, invalidating the `typeMap` iterator. We'll directly
+        // null out the state.
+        native.handler.state = kj::none;
+      }
+    }
+  }
+}
 
 size_t EventTarget::getHandlerCount(kj::StringPtr type) const {
   KJ_IF_SOME(handlerSet, typeMap.find(type)) {
