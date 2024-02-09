@@ -658,7 +658,7 @@ void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
           visitor.visit(js);
         }
         KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-          // This is just a ref to the native handler, no need to visit.
+          visitor.visit(native.handler);
         }
       }
     }
