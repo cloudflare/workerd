@@ -123,6 +123,13 @@ protected:
            CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
+  kj::StringPtr jsgGetMemoryName() const override { return "AesKeyBase"_kjc; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(AesKeyBase); }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    tracker.trackFieldWithSize("keyData", keyData.size());
+    tracker.trackField("keyAlgorithm", keyAlgorithm);
+  }
+
 private:
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override final { return keyAlgorithm; }
 

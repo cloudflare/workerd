@@ -125,6 +125,7 @@ public:
   struct KeyAlgorithm {
     kj::StringPtr name;
     JSG_STRUCT(name);
+    JSG_MEMORY_INFO(KeyAlgorithm) {}
   };
 
   struct AesKeyAlgorithm {
@@ -135,6 +136,8 @@ public:
     uint16_t length;
 
     JSG_STRUCT(name, length);
+
+    JSG_MEMORY_INFO(AesKeyAlgorithm) {}
   };
 
   struct HmacKeyAlgorithm {
@@ -151,6 +154,7 @@ public:
     uint16_t length;
 
     JSG_STRUCT(name, hash, length);
+    JSG_MEMORY_INFO(HmacKeyAlgorithm) {}
   };
 
   using BigInteger = kj::Array<kj::byte>;
@@ -192,6 +196,8 @@ public:
     }
 
     JSG_STRUCT(name, modulusLength, publicExponent, hash);
+
+    JSG_MEMORY_INFO(RsaKeyAlgorithm) {}
   };
 
   struct EllipticKeyAlgorithm {
@@ -202,6 +208,8 @@ public:
     kj::StringPtr namedCurve;
 
     JSG_STRUCT(name, namedCurve);
+
+    JSG_MEMORY_INFO(EllipticKeyAlgorithm) {}
   };
 
   // Catch-all that can be used for extension algorithms. Combines fields of several known types.
@@ -275,6 +283,8 @@ public:
   // the algorithm parameters or the algorithm name. We will also ensure
   // that a timing-safe comparison is used for the key material.
   bool operator==(const CryptoKey& other) const;
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   kj::Own<Impl> impl;
@@ -650,6 +660,10 @@ public:
     JSG_TS_OVERRIDE(extends WritableStream<ArrayBuffer | ArrayBufferView>);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("promise", promise);
+  }
+
 private:
   jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>> promise;
 
@@ -697,6 +711,14 @@ public:
           | BigUint64Array
       >(buffer: T): T;
     });
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(subtle);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("subtle", subtle);
   }
 
 private:

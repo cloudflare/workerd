@@ -220,4 +220,7 @@ void checkPbkdfLimits(jsg::Lock& js, size_t iterations) {
   }
 }
 
+void CryptoKey::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("impl", impl);
+}
 }  // namespace workerd::api

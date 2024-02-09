@@ -18,6 +18,13 @@ public:
       : CryptoKey::Impl(extractable, usages),
         keyData(kj::mv(keyData)), keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
+  kj::StringPtr jsgGetMemoryName() const override { return "HmacKey"; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(HmacKey); }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    tracker.trackFieldWithSize("keyData", keyData.size());
+    tracker.trackField("keyAlgorithm", keyAlgorithm);
+  }
+
 private:
   kj::Array<kj::byte> sign(
       SubtleCrypto::SignAlgorithm&& algorithm,

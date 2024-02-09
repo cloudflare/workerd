@@ -217,6 +217,10 @@ public:
   virtual bool equals(const Impl& other) const = 0;
   virtual bool equals(const kj::Array<kj::byte>& other) const;
 
+  virtual kj::StringPtr jsgGetMemoryName() const { return "CryptoKey::Impl"; }
+  virtual size_t jsgGetMemorySelfSize() const { return sizeof(Impl); }
+  virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {}
+
 private:
   const bool extractable;
   const CryptoKeyUsageSet usages;

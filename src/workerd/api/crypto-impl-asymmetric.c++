@@ -341,6 +341,10 @@ public:
     return false;
   }
 
+  kj::StringPtr jsgGetMemoryName() const override { return "AsymmetricKey"; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(AsymmetricKey); }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {}
+
 private:
   virtual SubtleCrypto::JsonWebKey exportJwk() const = 0;
   virtual kj::Array<kj::byte> exportRaw() const = 0;
@@ -532,6 +536,13 @@ public:
       kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
     : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
       keyAlgorithm(kj::mv(keyAlgorithm)) {}
+
+  kj::StringPtr jsgGetMemoryName() const override { return "AsymmetricKey"; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(AsymmetricKey); }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    AsymmetricKey::jsgGetMemoryInfo(tracker);
+    tracker.trackField("keyAlgorithm", keyAlgorithm);
+  }
 
 protected:
   CryptoKey::RsaKeyAlgorithm keyAlgorithm;
@@ -1527,6 +1538,13 @@ public:
       SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
       CryptoKeyUsageSet privateKeyUsages, CryptoKeyUsageSet publicKeyUsages);
 
+  kj::StringPtr jsgGetMemoryName() const override { return "EllipticKey"; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(EllipticKey); }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    AsymmetricKey::jsgGetMemoryInfo(tracker);
+    tracker.trackField("keyAlgorithm", keyAlgorithm);
+  }
+
 private:
   static kj::Array<kj::byte> bigNumToPaddedArray(const BIGNUM& n, size_t paddedLength) {
     kj::Vector<kj::byte> result(paddedLength);
@@ -2132,6 +2150,12 @@ public:
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
     // Node.js implementation for EdDsa keys currently does not provide any detail
     return CryptoKey::AsymmetricKeyDetails {};
+  }
+
+  kj::StringPtr jsgGetMemoryName() const override { return "EdDsaKey"; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(EdDsaKey); }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    AsymmetricKey::jsgGetMemoryInfo(tracker);
   }
 
 private:
