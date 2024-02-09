@@ -73,7 +73,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   auto eventParameters = consumeParams();
 
-  KJ_IF_MAYBE(t, incomingRequest->getWorkerTracer()) {
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     Trace::HibernatableWebSocketEventInfo::Type type = [&]()
         -> Trace::HibernatableWebSocketEventInfo::Type {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
@@ -96,7 +96,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
       KJ_UNREACHABLE;
     }();
 
-    t->setEventInfo(context.now(),
+    t.setEventInfo(context.now(),
       Trace::HibernatableWebSocketEventInfo(kj::mv(type))
     );
   }
