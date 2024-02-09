@@ -231,36 +231,6 @@ private:
 // An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
 public:
-
-  // RAII-style listener that can be attached to an EventTarget.
-  class NativeHandler {
-  public:
-    using Signature = void(jsg::Ref<Event>);
-    NativeHandler(jsg::Lock& js, jsg::Ref<EventTarget> target, kj::String type,
-        jsg::Function<Signature> func, bool once = false);
-    ~NativeHandler() noexcept(false);
-    KJ_DISALLOW_COPY_AND_MOVE(NativeHandler);
-
-    void operator()(jsg::Lock&js, jsg::Ref<Event> event);
-
-    uint hashCode() const;
-
-    void visitForGc(jsg::GcVisitor& visitor);
-  private:
-    void detach();
-
-    kj::String type;
-    struct State {
-      jsg::Ref<EventTarget> target;
-      jsg::Function<Signature> func;
-    };
-
-    kj::Maybe<State> state;
-    bool once;
-
-    friend class EventTarget;
-  };
-
   ~EventTarget() noexcept(false);
 
   size_t getHandlerCount(kj::StringPtr type) const;
@@ -349,6 +319,35 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
+  // RAII-style listener that can be attached to an EventTarget.
+  class NativeHandler {
+  public:
+    using Signature = void(jsg::Ref<Event>);
+    NativeHandler(jsg::Lock& js, jsg::Ref<EventTarget> target, kj::String type,
+        jsg::Function<Signature> func, bool once = false);
+    ~NativeHandler() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(NativeHandler);
+
+    void operator()(jsg::Lock&js, jsg::Ref<Event> event);
+
+    uint hashCode() const;
+
+    void visitForGc(jsg::GcVisitor& visitor);
+  private:
+    void detach();
+
+    kj::String type;
+    struct State {
+      jsg::Ref<EventTarget> target;
+      jsg::Function<Signature> func;
+    };
+
+    kj::Maybe<State> state;
+    bool once;
+
+    friend class EventTarget;
+  };
+
   void addNativeListener(jsg::Lock& js, NativeHandler& handler);
   bool removeNativeListener(NativeHandler& handler);
 
@@ -602,8 +601,6 @@ public:
 
 private:
 };
-
-KJ_DECLARE_NON_POLYMORPHIC(workerd::api::EventTarget::NativeHandler);
 
 #define EW_BASICS_ISOLATE_TYPES                \
     api::Event,                                \
