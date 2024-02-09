@@ -1181,4 +1181,23 @@ bool WebSocket::Accepted::isHibernatable() {
   return ws.getIfNotHibernatable() == kj::none;
 }
 
+void WebSocketPair::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField(nullptr, sockets[0]);
+  tracker.trackField(nullptr, sockets[1]);
+}
+
+void WebSocket::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("url", url);
+  tracker.trackField("protocol", protocol);
+  tracker.trackField("extensions", extensions);
+  KJ_IF_SOME(attachment, serializedAttachment) {
+    tracker.trackFieldWithSize("attachment", attachment.size());
+  }
+  tracker.trackFieldWithSize("IoOwn<Native>", sizeof(IoOwn<Native>));
+  tracker.trackField("error", error);
+  tracker.trackFieldWithSize("IoOwn<OutgoingMessagesMap>", sizeof(IoOwn<OutgoingMessagesMap>));
+  tracker.trackField("autoResponseStatus", autoResponseStatus);
+  tracker.trackField("maybePair", maybePair);
+}
+
 }  // namespace workerd::api
