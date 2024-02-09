@@ -475,7 +475,9 @@ public:
   kj::Array<kj::StringPtr> getTags(jsg::Lock& js, jsg::Ref<api::WebSocket> ws);
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
-    JSG_METHOD(waitUntil);
+    if (!flags.getNoDurableObjectWaitUntil()) {
+      JSG_METHOD(waitUntil);
+    }
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_METHOD(blockConcurrencyWhile);

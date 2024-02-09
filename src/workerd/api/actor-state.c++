@@ -793,6 +793,8 @@ DurableObjectState::DurableObjectState(Worker::Actor::Id actorId,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage)
     : id(kj::mv(actorId)), storage(kj::mv(storage)) {}
 
+// Deprecated. This method is unnecessary because Durable Objects execute for at least 60 seconds
+// after the last client disconnects.
 void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
 }

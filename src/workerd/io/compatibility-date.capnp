@@ -367,4 +367,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("global_importscripts")
       $compatEnableDate("2024-03-04");
   # Removes the non-implemented importScripts() function from the global scope.
+
+  noDurableObjectWaitUntil @41 :Bool
+      $compatEnableFlag("no_durable_object_waituntil")
+      $compatDisableFlag("durable_object_waituntil")
+      $compatEnableDate("2024-03-04");
+  # Removes the unnecessary waitUntil() method of DurableObjectState.
 }
