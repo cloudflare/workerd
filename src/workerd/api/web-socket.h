@@ -212,8 +212,15 @@ public:
     // With this override in place, `one` and `two` will be typed `WebSocket`.
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   jsg::Ref<WebSocket> sockets[2];
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(sockets[0]);
+    visitor.visit(sockets[1]);
+  }
 };
 
 class WebSocket: public EventTarget {
@@ -439,6 +446,8 @@ public:
     JSG_TS_OVERRIDE(extends EventTarget<WebSocketEventMap>);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   kj::Maybe<kj::String> url;
   kj::Maybe<kj::String> protocol = kj::String();
@@ -608,6 +617,13 @@ private:
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
     bool isClosed = false;
+
+    JSG_MEMORY_INFO(AutoResponse) {
+      tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
+      for (const auto& message : pendingAutoResponseDeque) {
+        tracker.trackField(nullptr, message);
+      }
+    }
   };
 
   AutoResponse autoResponseStatus;

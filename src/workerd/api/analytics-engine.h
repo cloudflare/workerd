@@ -59,6 +59,10 @@ public:
     JSG_TS_OVERRIDE(AnalyticsEngineDataset);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("dataset", dataset);
+  }
+
 private:
   double millisToNanos(double m) {
     return m * 1000000;
