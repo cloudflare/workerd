@@ -627,4 +627,85 @@ auto TraceCustomEventImpl::sendRpc(
   };
 }
 
+void TailEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  for (const auto& event : events) {
+    tracker.trackField(nullptr, event);
+  }
+}
+
+void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  KJ_IF_SOME(event, eventInfo) {
+    KJ_SWITCH_ONEOF(event) {
+      KJ_CASE_ONEOF(info, jsg::Ref<FetchEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<ScheduledEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<AlarmEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<EmailEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<TailEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<CustomEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<HibernatableWebSocketEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+    }
+  }
+  for (const auto& log : logs) {
+    tracker.trackField("log", log);
+  }
+  for (const auto& exception: exceptions) {
+    tracker.trackField("exception", exception);
+  }
+  for (const auto& event: diagnosticChannelEvents) {
+    tracker.trackField("diagnosticChannelEvent", event);
+  }
+  tracker.trackField("scriptName", scriptName);
+  tracker.trackField("scriptVersion", scriptVersion);
+  tracker.trackField("dispatchNamespace", dispatchNamespace);
+  KJ_IF_SOME(tags, scriptTags) {
+    for (const auto& tag: tags) {
+      tracker.trackField("scriptTag", tag);
+    }
+  }
+  tracker.trackField("outcome", outcome);
+}
+
+void TraceItem::FetchEventInfo::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("request", request);
+  tracker.trackField("response", response);
+}
+
+void TraceItem::TailEventInfo::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  for (const auto& event : consumedEvents) {
+    tracker.trackField(nullptr, event);
+  }
+}
+
+void TraceItem::HibernatableWebSocketEventInfo::visitForMemoryInfo(
+    jsg::MemoryTracker& tracker) const {
+  KJ_SWITCH_ONEOF(eventType) {
+    KJ_CASE_ONEOF(message, jsg::Ref<Message>) {
+      tracker.trackField("message", message);
+    }
+    KJ_CASE_ONEOF(close, jsg::Ref<Close>) {
+      tracker.trackField("close", close);
+    }
+    KJ_CASE_ONEOF(error, jsg::Ref<Error>) {
+      tracker.trackField("error", error);
+    }
+  }
+}
+
 }  // namespace workerd::api

@@ -14,6 +14,7 @@
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/util/own-util.h>
+#include <workerd/jsg/memory.h>
 
 namespace kj {
   enum class HttpMethod;
@@ -73,6 +74,11 @@ public:
       kj::String value;
 
       void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder);
+
+      JSG_MEMORY_INFO(Header) {
+        tracker.trackField("name", name);
+        tracker.trackField("value", value);
+      }
     };
 
     kj::HttpMethod method;

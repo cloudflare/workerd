@@ -37,6 +37,8 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(traces, getEvents);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   kj::Array<jsg::Ref<TraceItem>> events;
 
@@ -54,6 +56,12 @@ struct ScriptVersion {
   jsg::Optional<kj::String> message;
 
   JSG_STRUCT(id, tag, message);
+
+  JSG_MEMORY_INFO(ScriptVersion) {
+    tracker.trackField("id", id);
+    tracker.trackField("tag", tag);
+    tracker.trackField("message", message);
+  }
 };
 
 class TraceItem final: public jsg::Object {
@@ -104,6 +112,8 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(outcome, getOutcome);
   }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   kj::Maybe<EventInfo> eventInfo;
@@ -156,6 +166,8 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(request, getRequest);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   jsg::Ref<Request> request;
   jsg::Optional<jsg::Ref<Response>> response;
@@ -173,6 +185,15 @@ public:
            kj::Array<Trace::FetchEventInfo::Header> headers,
            kj::String method,
            kj::String url);
+
+    JSG_MEMORY_INFO(Detail) {
+      tracker.trackField("cf", cf);
+      for (const auto& header : headers) {
+        tracker.trackField(nullptr, header);
+      }
+      tracker.trackField("method", method);
+      tracker.trackField("url", url);
+    }
   };
 
   explicit Request(jsg::Lock& js, const Trace& trace, const Trace::FetchEventInfo& eventInfo);
@@ -194,6 +215,10 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(url, getUrl);
 
     JSG_METHOD(getUnredacted);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("detail", detail);
   }
 
 private:
@@ -225,6 +250,10 @@ public:
   JSG_RESOURCE_TYPE(ScheduledEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scheduledTime, getScheduledTime);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(cron, getCron);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("cron", cron);
   }
 
 private:
@@ -259,6 +288,10 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(batchSize, getBatchSize);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("queueName", queueName);
+  }
+
 private:
   kj::String queueName;
   uint32_t batchSize;
@@ -276,6 +309,11 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(mailFrom, getMailFrom);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(rcptTo, getRcptTo);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(rawSize, getRawSize);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("mailFrom", mailFrom);
+    tracker.trackField("rcptTo", rcptTo);
   }
 
 private:
@@ -296,6 +334,8 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(consumedEvents, getConsumedEvents);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   kj::Array<jsg::Ref<TailItem>> consumedEvents;
 };
@@ -308,6 +348,10 @@ public:
 
   JSG_RESOURCE_TYPE(TailItem) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptName, getScriptName);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("scriptName", scriptName);
   }
 
 private:
@@ -334,6 +378,8 @@ public:
   JSG_RESOURCE_TYPE(HibernatableWebSocketEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(getWebSocketEvent, getEvent);
   }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
   Type eventType;
@@ -418,6 +464,11 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("channel", channel);
+    tracker.trackFieldWithSize("message", message.size());
+  }
+
 private:
   double timestamp;
   kj::String channel;
@@ -438,6 +489,11 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("level", level);
+    tracker.trackField("message", message);
+  }
+
 private:
   double timestamp;
   kj::String level;
@@ -456,6 +512,11 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(name, getName);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("name", name);
+    tracker.trackField("message", message);
   }
 
 private:

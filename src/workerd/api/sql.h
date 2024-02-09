@@ -122,7 +122,7 @@ public:
   JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<Cursor>, rawIteratorNext);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    if (state != nullptr) {
+    if (state != kj::none) {
       tracker.trackFieldWithSize("IoOwn<State>", sizeof(IoOwn<State>));
     }
     tracker.trackField("statement", statement);
