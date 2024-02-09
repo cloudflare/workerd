@@ -276,4 +276,18 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::Statement::run(jsg::Arguments<BindingVa
   return result;
 }
 
+void SqlStorage::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("storage", storage);
+  tracker.trackFieldWithSize("IoPtr<SqliteDatabase>",
+      sizeof(IoPtr<SqliteDatabase>));
+  if (pragmaPageCount != kj::none) {
+    tracker.trackFieldWithSize("IoPtr<SqllitDatabase::Statement>",
+        sizeof(IoPtr<SqliteDatabase::Statement>));
+  }
+  if (pragmaGetMaxPageCount != kj::none) {
+    tracker.trackFieldWithSize("IoPtr<SqllitDatabase::Statement>",
+        sizeof(IoPtr<SqliteDatabase::Statement>));
+  }
+}
+
 }  // namespace workerd::api

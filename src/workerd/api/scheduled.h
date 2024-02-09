@@ -26,6 +26,11 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(cron, getCron);
       JSG_METHOD(noRetry);
   }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("cron", cron);
+  }
+
 private:
   double scheduledTime;
   kj::String cron;
@@ -45,6 +50,10 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(scheduledTime, getScheduledTime);
     JSG_READONLY_INSTANCE_PROPERTY(cron, getCron);
     JSG_METHOD(noRetry);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("event", event);
   }
 
 private:

@@ -39,6 +39,9 @@ struct SocketOptions {
   jsg::Optional<kj::String> secureTransport;
   bool allowHalfOpen = false;
   JSG_STRUCT(secureTransport, allowHalfOpen);
+  JSG_MEMORY_INFO(SocketOptions) {
+    tracker.trackField("secureTransport", secureTransport);
+  }
 };
 
 struct TlsOptions {
@@ -113,6 +116,25 @@ public:
     JSG_METHOD(startTls);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("connectionStream",
+        sizeof(IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>>));
+    tracker.trackFieldWithSize("tlsStarter",
+        sizeof(IoOwn<kj::TlsStarterCallback>));
+    tracker.trackFieldWithSize("watchForDisconnectTask",
+        sizeof(IoOwn<kj::Promise<void>>));
+    tracker.trackField("readable", readable);
+    tracker.trackField("writable", writable);
+    tracker.trackField("closedResolver", closedResolver);
+    tracker.trackField("closedPromiseCopy", closedPromiseCopy);
+    tracker.trackField("closedPromise", closedPromise);
+    tracker.trackField("options", options);
+    tracker.trackField("domain", domain);
+    tracker.trackField("openedResolver", openedResolver);
+    tracker.trackField("openedPromiseCopy", openedPromiseCopy);
+    tracker.trackField("openedPromise", openedPromise);
+  }
+
 private:
   // TODO(cleanup): Combine all the IoOwns here into one, to improve efficiency and make
   //   shutdown order clearer.
@@ -167,7 +189,10 @@ private:
   };
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(readable, writable);
+    visitor.visit(readable, writable, closedResolver,
+                  closedPromiseCopy, closedPromise,
+                  openedResolver, openedPromiseCopy,
+                  openedPromise);
   }
 };
 

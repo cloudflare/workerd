@@ -39,6 +39,8 @@ public:
     JSG_NESTED_TYPE(Statement);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(storage);
@@ -119,6 +121,14 @@ public:
   JSG_ITERATOR(RowIterator, rows, RowDict, jsg::Ref<Cursor>, rowIteratorNext);
   JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<Cursor>, rawIteratorNext);
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    if (state != nullptr) {
+      tracker.trackFieldWithSize("IoOwn<State>", sizeof(IoOwn<State>));
+    }
+    tracker.trackField("statement", statement);
+    tracker.trackField("cachedColumnNames", ownCachedColumnNames);
+  }
+
 private:
   // Helper class to cache column names for a query so that we don't have to recreate the V8
   // strings for every row.
@@ -129,6 +139,14 @@ private:
     kj::ArrayPtr<jsg::JsRef<jsg::JsString>> get() { return KJ_REQUIRE_NONNULL(names); }
 
     void ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source);
+
+    JSG_MEMORY_INFO(cachedColumnNames) {
+      KJ_IF_SOME(list, names) {
+        for (const auto& name : list) {
+          tracker.trackField(nullptr, name);
+        }
+      }
+    }
 
   private:
     kj::Maybe<kj::Array<jsg::JsRef<jsg::JsString>>> names;
@@ -202,6 +220,13 @@ public:
 
   JSG_RESOURCE_TYPE(Statement) {
     JSG_CALLABLE(run);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize(
+        "IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>>",
+        sizeof(IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>>));
+    tracker.trackField("cachedColumnNames", cachedColumnNames);
   }
 
 private:
