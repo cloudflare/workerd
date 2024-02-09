@@ -335,10 +335,13 @@ public:
   static jsg::Ref<EventTarget> constructor();
 
   // Registers a lambda that will be called when the given event type is emitted.
-  // The handler will be registered for as long as the returned kj::Own<NativeHandler>
+  // The handler will be registered for as long as the returned kj::Own<void>
   // handle is held. If the EventTarget is destroyed while the native handler handle
   // is held, it will be automatically detached.
-  kj::Own<NativeHandler> newNativeHandler(jsg::Lock& js,
+  //
+  // The caller must not do anything with the returned Own<void> except drop it. This is why it
+  // is Own<void> and not Own<NativeHandler>.
+  kj::Own<void> newNativeHandler(jsg::Lock& js,
       kj::String type,
       jsg::Function<void(jsg::Ref<Event>)> func,
       bool once = false);
@@ -353,15 +356,21 @@ private:
     struct JavaScriptHandler {
       jsg::HashableV8Ref<v8::Object> identity;
       HandlerFunction callback;
-      // If the event handler is registered with an AbortSignal, then the abortHandler
-      // is set and will ensure that the handler is removed correctly.
-      kj::Maybe<kj::Own<NativeHandler>> abortHandler;
+
+      // If the event handler is registered with an AbortSignal, then the abortHandler points
+      // at the NativeHandler representing that registration, so that if this object is GC'd before
+      // the AbortSignal is signaleled, we unregister ourselves from listening on it. Note that
+      // this is Own<void> for the same reason newNativeHandler() returns Own<void>: We are not
+      // supposed to do anything with this except drop it.
+      kj::Maybe<kj::Own<void>> abortHandler;
 
       void visitForGc(jsg::GcVisitor& visitor) {
         visitor.visit(identity, callback);
-        KJ_IF_SOME(handler, abortHandler) {
-          handler->visitForGc(visitor);
-        }
+
+        // Note that we intentionally do NOT visit `abortHandler`. This is because the JS handles
+        // held by `abortHandler` are not ever accessed by this path. Instead, they are accessed
+        // by the AbortSignal, if and when it fires. So it is the AbortSignal's responsibility to
+        // visit the NativeHandler's content.
       }
 
       kj::StringPtr jsgGetMemoryName() const { return "JavaScriptHandler"_kjc; }
