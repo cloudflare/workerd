@@ -6,10 +6,12 @@
 #include <workerd/io/features.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/jsg/ser.h>
+#include <capnp/membrane.h>
 
 namespace workerd::api {
 
 namespace {
+
 kj::Array<kj::byte> serializeV8(jsg::Lock& js, jsg::JsValue value) {
   jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
@@ -28,18 +30,76 @@ jsg::JsValue deserializeV8(jsg::Lock& js, kj::ArrayPtr<const kj::byte> ser) {
 
   return deserializer.readValue(js);
 }
+
+// A membrane applied which detects when no capabilities are held any longer, at which point it
+// fulfills a fulfiller.
+//
+// TODO(cleanup): This is generally useful, should it be part of capnp?
+class CompletionMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+public:
+  explicit CompletionMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
+      : doneFulfiller(kj::mv(doneFulfiller)) {}
+  ~CompletionMembrane() noexcept(false) {
+    doneFulfiller->fulfill();
+  }
+
+  kj::Maybe<capnp::Capability::Client> inboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Maybe<capnp::Capability::Client> outboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Own<MembranePolicy> addRef() override {
+    return kj::addRef(*this);
+  }
+
+private:
+  kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
+};
+
+// A membrane which revokes when some Promise is fulfilled.
+//
+// TODO(cleanup): This is generally useful, should it be part of capnp?
+class RevokerMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+public:
+  explicit RevokerMembrane(kj::Promise<void> promise)
+      : promise(promise.fork()) {}
+
+  kj::Maybe<capnp::Capability::Client> inboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Maybe<capnp::Capability::Client> outboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Own<MembranePolicy> addRef() override {
+    return kj::addRef(*this);
+  }
+
+  kj::Maybe<kj::Promise<void>> onRevoked() override {
+    return promise.addBranch();
+  }
+
+private:
+  kj::ForkedPromise<void> promise;
+};
+
 } // namespace
 
-kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorkerRpc(
+jsg::Promise<jsg::Value> JsRpcCapability::sendJsRpc(
     jsg::Lock& js,
+    rpc::JsRpcTarget::Client client,
     kj::StringPtr name,
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-
   auto& ioContext = IoContext::current();
-  auto worker = getClient(ioContext, kj::none, "getJsRpcTarget"_kjc);
-  auto event = kj::heap<api::GetJsRpcTargetCustomEventImpl>(WORKER_RPC_EVENT_TYPE);
 
-  rpc::JsRpcTarget::Client client = event->getCap();
   auto builder = client.callRequest();
   builder.setMethodName(name);
 
@@ -62,29 +122,34 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> WorkerRpc::sendWorke
   }
 
   auto callResult = builder.send();
-  auto customEventResult = worker->customEvent(kj::mv(event)).attach(kj::mv(worker));
 
-  // If customEvent throws, we'll cancel callResult and propagate the exception. Otherwise, we'll
-  // just wait until callResult finishes.
-  return callResult.exclusiveJoin(customEventResult
-      .then([](auto&&) -> kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> {
-        return kj::NEVER_DONE;
-      }));
+  return ioContext.awaitIo(js, kj::mv(callResult),
+      [](jsg::Lock& js, auto result) -> jsg::Value {
+    return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
+  });
 }
 
-kj::Maybe<WorkerRpc::RpcFunction> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
-  // Named intercept is enabled, this means we won't default to legacy behavior.
-  // The return value of the function is a promise that resolves once the remote returns the result
-  // of the RPC call.
-  return RpcFunction([this, methodName=kj::str(name)]
+kj::Maybe<JsRpcCapability::RpcFunction> JsRpcCapability::getRpcMethod(
+    jsg::Lock& js, kj::StringPtr name) {
+  return RpcFunction(JSG_VISITABLE_LAMBDA(
+      (methodName = kj::str(name), self = JSG_THIS),
+      (self),
       (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> jsg::Promise<jsg::Value> {
-    auto& ioContext = IoContext::current();
-    // Wait for the RPC to resolve and then process the result.
-    return ioContext.awaitIo(js, sendWorkerRpc(js, methodName, args),
-        [](jsg::Lock& js, auto result) -> jsg::Value {
-      return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
-    });
-  });
+    // Let's make sure that the returned function wasn't invoked using a different `this` than the
+    // one intended. We don't really _have to_ check this, but if we don't, then we have to forever
+    // support tearing RPC methods off their owning objects and invoking them elsewhere. Enforcing
+    // it might allow future implementation flexibility. (We use the terrible error message
+    // "Illegal invocation" because this is the exact message V8 normally generates when invoking a
+    // native function with the wrong `this`.)
+    //
+    // TODO(cleanup): Ideally, we'd actually obtain `self` by unwrapping `args.This()` to a
+    // `jsg::Ref<JsRpcCapability>` instead of capturing it, but there isn't a JSG-blessed way to do
+    // that.
+    JSG_REQUIRE(args.This() == KJ_ASSERT_NONNULL(self.tryGetHandle(js)), TypeError,
+        "Illegal invocation");
+
+    return sendJsRpc(js, *self->capnpClient, methodName, args);
+  }));
 }
 
 // The capability that lets us call remote methods over RPC.
@@ -92,19 +157,14 @@ kj::Maybe<WorkerRpc::RpcFunction> WorkerRpc::getRpcMethod(jsg::Lock& js, kj::Str
 class JsRpcTargetImpl final : public rpc::JsRpcTarget::Server {
 public:
   JsRpcTargetImpl(
-      kj::Own<kj::PromiseFulfiller<void>> callFulfiller,
       IoContext& ctx,
       kj::Maybe<kj::StringPtr> entrypointName)
-      : callFulfiller(kj::mv(callFulfiller)), ctx(ctx), entrypointName(entrypointName) {}
+      : ctx(ctx), entrypointName(entrypointName) {}
 
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
     auto methodName = kj::heapString(callContext.getParams().getMethodName());
     auto serializedArgs = callContext.getParams().getArgs().getV8Serialized().asBytes();
-
-    // We want to fulfill the callPromise so customEvent can continue executing
-    // regardless of the outcome of `call()`.
-    KJ_DEFER(callFulfiller->fulfill(););
 
     // Try to execute the requested method.
     co_return co_await ctx.run(
@@ -200,22 +260,63 @@ private:
     }
   };
 
-  // We use the callFulfiller to let the custom event know we've finished executing the method.
-  kj::Own<kj::PromiseFulfiller<void>> callFulfiller;
   IoContext& ctx;
   kj::Maybe<kj::StringPtr> entrypointName;
 };
 
-kj::Promise<WorkerInterface::CustomEvent::Result> GetJsRpcTargetCustomEventImpl::run(
+// A membrane which wraps the top-level JsRpcTarget of an RPC session on the server side. The
+// purpose of this membrane is to allow only a single top-level call, which then gets a
+// `CompletionMembrane` wrapped around it. Note that we can't just wrap `CompletionMembrane` around
+// the top-level object directly because that capability will not be dropped until the RPC session
+// completes, since it is actually returned as the result of the top-level RPC call, but that
+// call doesn't return until the `CompletionMembrane` says all capabilities were dropped, so this
+// would create a cycle.
+class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final
+    : public capnp::MembranePolicy, public kj::Refcounted {
+public:
+  explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
+      : doneFulfiller(kj::mv(doneFulfiller)) {}
+  ~ServerTopLevelMembrane() noexcept(false) {
+    KJ_IF_SOME(f, doneFulfiller) {
+      f->reject(KJ_EXCEPTION(DISCONNECTED,
+          "JS RPC session canceled without calling an RPC method."));
+    }
+  }
+
+  kj::Maybe<capnp::Capability::Client> inboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    auto f = kj::mv(JSG_REQUIRE_NONNULL(doneFulfiller,
+        Error, "Only one RPC method call is allowed on this object."));
+    doneFulfiller = kj::none;
+    return capnp::membrane(kj::mv(target), kj::refcounted<CompletionMembrane>(kj::mv(f)));
+  }
+
+  kj::Maybe<capnp::Capability::Client> outboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    KJ_FAIL_ASSERT("ServerTopLevelMembrane shouldn't have outgoing capabilities");
+  }
+
+  kj::Own<MembranePolicy> addRef() override {
+    return kj::addRef(*this);
+  }
+
+private:
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> doneFulfiller;
+};
+
+kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName) {
   incomingRequest->delivered();
-  auto [callPromise, callFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(kj::heap<JsRpcTargetImpl>(
-      kj::mv(callFulfiller), incomingRequest->getContext(), entrypointName));
+  auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
+  capFulfiller->fulfill(
+      capnp::membrane(
+          kj::heap<JsRpcTargetImpl>(incomingRequest->getContext(), entrypointName),
+          kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
-  // `callPromise` resolves once `JsRpcTargetImpl::call()` (invoked by client) completes.
-  co_await callPromise;
+  // `donePromise` resolves once there are no longer any capabilities pointing between the client
+  // and server as part of this session.
+  co_await donePromise;
   co_await incomingRequest->drain();
   co_return WorkerInterface::CustomEvent::Result {
     .outcome = EventOutcome::OK
@@ -223,16 +324,43 @@ kj::Promise<WorkerInterface::CustomEvent::Result> GetJsRpcTargetCustomEventImpl:
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result>
-  GetJsRpcTargetCustomEventImpl::sendRpc(
+  JsRpcSessionCustomEventImpl::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     kj::TaskSet& waitUntilTasks,
     rpc::EventDispatcher::Client dispatcher) {
-  auto req = dispatcher.getJsRpcTargetRequest();
-  auto sent = req.send();
-  this->capFulfiller->fulfill(sent.getServer());
+  // We arrange to revoke all capabilities in this session as soon as `sendRpc()` completes or is
+  // canceled. Normally, the server side doesn't return if any capabilities still exist, so this
+  // only makes a difference in the case that some sort of an error occurred. We don't strictly
+  // have to revoke the capabilities as they are probably already broken anyway, but revoking them
+  // helps to ensure that the underlying transport isn't "held open" waiting for the JS garbage
+  // collector to actually collect the JsRpcCapability objects.
+  auto revokePaf = kj::newPromiseAndFulfiller<void>();
 
-  auto resp = co_await sent;
+  KJ_DEFER({
+    if (revokePaf.fulfiller->isWaiting()) {
+      revokePaf.fulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "JS-RPC session canceled"));
+    }
+  });
+
+  auto req = dispatcher.jsRpcSessionRequest();
+  auto sent = req.send();
+
+  this->capFulfiller->fulfill(
+      capnp::membrane(
+          sent.getTopLevel(),
+          kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise))));
+
+  try {
+    co_await sent;
+  } catch (...) {
+    auto e = kj::getCaughtExceptionAsKj();
+    if (revokePaf.fulfiller->isWaiting()) {
+      revokePaf.fulfiller->reject(kj::cp(e));
+    }
+    kj::throwFatalException(kj::mv(e));
+  }
+
   co_return WorkerInterface::CustomEvent::Result {
     .outcome = EventOutcome::OK
   };

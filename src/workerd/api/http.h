@@ -410,13 +410,15 @@ struct SocketOptions;
 struct SocketAddress;
 typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
 
-// A capability to send HTTP requests to some destination other than the public internet.
-// This is the type of `request.fetcher` (if it is not null).
+// Represents a client to a remote "web service".
 //
-// Actually, this interface could support more than just HTTP. This interface is really the
-// JavaScript wapper around `WorkerInterface`. It is the type used by worker-to-worker bindings.
-// As we add support for non-HTTP event types that can be invoked remotely, they should be added
-// here.
+// Originally, this meant an HTTP service, and `Fetcher` had just one method, `fetch()`, hence the
+// name. However, `Fetcher` is really the JavaScript type for a `WorkerInterface`, and is used in
+// particular to represent service bindings as well as Durable Object stubs. As such, as Workers
+// have grown new ways to talk to other Workers, `Fetcher` has added methods other than `fetch()`.
+//
+// TODO(cleanup): This probably doesn't belong in `http.h` anymore. And perhaps it should be
+//   renamed, though I haven't heard any great suggestions for what the name should be.
 class Fetcher: public jsg::Object {
 public:
   // Should we use a fake https base url if we lack a scheme+authority?
@@ -554,9 +556,19 @@ public:
 
   jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
+  using RpcFunction = jsg::Function<jsg::Promise<jsg::Value>(
+      const v8::FunctionCallbackInfo<v8::Value>& info)>;
+
+  kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
+
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
-    // WARNING: New JSG_METHODs on Fetcher should be gated via compatibility flag to prevent
-    // objects that use WorkerRpc from breaking. See `worker-rpc.h` for more detail.
+    // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
+    // confilcts with JS RPC methods (implemented via the wildcard property). Ideally, we do not
+    // add any new methods here, and instead rely on RPC for all future needs.
+    //
+    // Similarly, subclasses of `Fetcher` (notably, `DurableObject`) must follow the same rule,
+    // as any methods added to them will shadow RPC methods of the same name.
+
     JSG_METHOD(fetch);
     JSG_METHOD(connect);
 
@@ -565,9 +577,17 @@ public:
       JSG_METHOD(scheduled);
     }
 
+    // TODO(soon): Deprecate get/put/delete convenience methods, remove via compat flag. These were
+    // never documented for service bindings. Extremely old KV bindings relied on them, before
+    // KV had its own separate API implementation -- anyone with such old KV bindings may have to
+    // recreate them when updating their compat flags for this removal.
     JSG_METHOD(get);
     JSG_METHOD(put);
     JSG_METHOD_NAMED(delete, delete_);
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_WILDCARD_PROPERTY(getRpcMethod);
+    }
 
     JSG_TS_OVERRIDE({
       fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
