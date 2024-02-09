@@ -106,6 +106,11 @@ public:
   // Treat as private -- needs to be public for jsg::alloc<T>()...
   explicit URL(kj::Url&& u);
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("url", url->toString().size());
+    tracker.trackField("searchParams", searchParams);
+  }
+
 private:
   friend class URLSearchParams;
 
@@ -211,6 +216,10 @@ public:
         forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
       });
     }
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("url", url->toString().size());
   }
 
 private:
