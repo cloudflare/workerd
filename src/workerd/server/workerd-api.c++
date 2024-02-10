@@ -186,6 +186,14 @@ jsg::Dict<NamedExport> WorkerdApi::unwrapExports(
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
       .unwrap<jsg::Dict<NamedExport>>(lock.v8Context(), moduleNamespace);
 }
+WorkerdApi::EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
+  auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
+
+  return {
+    .statelessService = typedLock.getConstructor<api::StatelessService>(lock.v8Context()),
+    .durableObject = typedLock.getConstructor<api::DurableObjectBase>(lock.v8Context()),
+  };
+}
 const jsg::TypeHandler<Worker::Api::ErrorInterface>&
     WorkerdApi::getErrorInterfaceTypeHandler(jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();

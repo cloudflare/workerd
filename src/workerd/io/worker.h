@@ -426,6 +426,20 @@ public:
   virtual jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
 
+  struct EntrypointClasses {
+    // Class constructor for StatelessSevice.
+    jsg::JsObject statelessService;
+
+    // Class constructor for DurableObject (aka api::DurableObjectBase).
+    jsg::JsObject durableObject;
+  };
+
+  // Get the constructors for classes from which entrypoint classes may inherit.
+  //
+  // This can be used to check which class a particular entrypoint inherits from, by following
+  // the prototype chain from the entrypoint class's constructor.
+  virtual EntrypointClasses getEntrypointClasses(jsg::Lock& lock) const = 0;
+
   // Convenience struct for accessing typical Error properties.
   struct ErrorInterface {
     jsg::Optional<kj::String> name;

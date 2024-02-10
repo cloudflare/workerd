@@ -389,6 +389,25 @@ public:
           context, handle, jsg::TypeErrorContext::other());
     }
 
+    // Returns the constructor function for a given type declared as JSG_RESOURCE_TYPE.
+    //
+    // Note there's a useful property of class constructor functions: A constructor's __proto__
+    // is set to the parent type's constructor. Thus you can discover whether one class is a
+    // subclass of another by following the __proto__ chain.
+    //
+    // TODO(cleanup): This should return `JsFunction`, but there is no such type. We only have
+    //   `jsg::Function<...>` (or perhaps more appropriately, `jsg::Constructor<...>`), but we
+    //   don't actually know the function signature so that's not useful here. Should we add a
+    //   `JsFunction` that has no signature?
+    template <typename T>
+    jsg::JsObject getConstructor(v8::Local<v8::Context> context) {
+      v8::EscapableHandleScope scope(v8Isolate);
+      v8::Local<v8::FunctionTemplate> tpl =
+          jsgIsolate.wrapper->template getTemplate(v8Isolate, (T*)nullptr);
+      v8::Local<v8::Object> prototype = check(tpl->GetFunction(context));
+      return jsg::JsObject(scope.Escape(prototype));
+    }
+
     v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) override {
       return jsgIsolate.wrapper->wrap(v8Isolate, kj::none, kj::mv(data));
     }
