@@ -226,7 +226,10 @@ private:
         name == "alarm" ||
         name == "webSocketMessage" ||
         name == "webSocketClose" ||
-        name == "webSocketError") {
+        name == "webSocketError" ||
+        // All JS classes define a method `constructor` on the prototype, but we don't actually
+        // want this to be callable over RPC!
+        name == "constructor") {
       return true;
     }
     return false;
