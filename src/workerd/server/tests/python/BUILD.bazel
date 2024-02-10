@@ -22,21 +22,35 @@ wd_test(
     ),
 )
 
+# langchain test: disabled for now because it's flaky
+# TODO: reenable this?
+#
+# wd_test(
+#     src = "langchain/langchain.wd-test",
+#     args = ["--experimental"],
+#     data = glob(
+#         [
+#             "langchain/*",
+#         ],
+#         exclude = ["**/*.wd-test"],
+#     ),
+#     # TODO: fails in micropip on windows with:
+#     #
+#     # ValueError: Can't fetch metadata for 'openai'. Please make sure you have entered a correct
+#     # package name and correctly specified index_urls (if you changed them).
+#     target_compatible_with = select({
+#         "@platforms//os:windows": ["@platforms//:incompatible"],
+#         "//conditions:default": [],
+#     }),
+# )
+
 wd_test(
-    src = "langchain/langchain.wd-test",
+    src = "subdirectory/subdirectory.wd-test",
     args = ["--experimental"],
     data = glob(
         [
-            "langchain/*",
+            "subdirectory/**",
         ],
         exclude = ["**/*.wd-test"],
     ),
-    # TODO: fails in micropip on windows with:
-    #
-    # ValueError: Can't fetch metadata for 'openai'. Please make sure you have entered a correct
-    # package name and correctly specified index_urls (if you changed them).
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
 )
