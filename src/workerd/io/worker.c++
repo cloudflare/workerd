@@ -1669,17 +1669,22 @@ v8::Local<v8::Context> Worker::Lock::getContext() {
   }
 }
 
-kj::Maybe<api::ExportedHandler&> Worker::Lock::getExportedHandler(
+template <typename T>
+static inline kj::Own<T> fakeOwn(T& ref) {
+  return kj::Own<T>(&ref, kj::NullDisposer::instance);
+}
+
+kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     kj::Maybe<kj::StringPtr> name, kj::Maybe<Worker::Actor&> actor) {
   KJ_IF_SOME(a, actor) {
     KJ_IF_SOME(h, a.getHandler()) {
-      return h;
+      return fakeOwn(h);
     }
   }
 
   KJ_IF_SOME(n, name) {
     KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)){
-      return h;
+      return fakeOwn(h);
     } else {
       if (worker.impl->actorClasses.find(n) != kj::none) {
         LOG_ERROR_PERIODICALLY("worker is not an actor but class name was requested", n);
@@ -1690,7 +1695,7 @@ kj::Maybe<api::ExportedHandler&> Worker::Lock::getExportedHandler(
       KJ_FAIL_ASSERT("worker_do_not_log; Unable to get exported handler");
     }
   } else {
-    return worker.impl->defaultHandler;
+    return worker.impl->defaultHandler.map(fakeOwn<api::ExportedHandler>);
   }
 }
 

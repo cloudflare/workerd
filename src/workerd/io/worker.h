@@ -528,7 +528,7 @@ public:
   //
   // If running in an actor, the name is ignored and the entrypoint originally used to construct
   // the actor is returned.
-  kj::Maybe<api::ExportedHandler&> getExportedHandler(
+  kj::Maybe<kj::Own<api::ExportedHandler>> getExportedHandler(
       kj::Maybe<kj::StringPtr> entrypointName, kj::Maybe<Worker::Actor&> actor);
 
   // Get the C++ object representing the global scope.

@@ -177,17 +177,17 @@ public:
       JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
           "The receiving Worker does not allow its methods to be called over RPC.");
 
-      auto& handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ctx.getActor()),
-                                         "Failed to get handler to worker.");
-      auto handle = handler.self.getHandle(lock);
+      auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ctx.getActor()),
+                                        "Failed to get handler to worker.");
+      auto handle = handler->self.getHandle(lock);
 
       // We will try to get the function, if we can't we'll throw an error to the client.
       auto fn = tryGetFn(lock, ctx, handle, methodName);
 
       v8::Local<v8::Value> invocationResult;
-      KJ_IF_SOME(execCtx, handler.ctx) {
+      KJ_IF_SOME(execCtx, handler->ctx) {
         invocationResult = invokeFnInsertingEnvCtx(js, fn, handle, serializedArgs,
-            handler.env.getHandle(js),
+            handler->env.getHandle(js),
             lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()));
       } else {
         invocationResult = invokeFn(js, fn, handle, serializedArgs);
