@@ -11,8 +11,16 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["js_rpc","nodejs_compat","experimental"],
         bindings = [
           (name = "self", service = "js-rpc-test"),
+          (name = "MyService", service = (name = "js-rpc-test", entrypoint = "MyService")),
+          (name = "MyActor", durableObjectNamespace = "MyActor"),
           (name = "twelve", json = "12"),
-        ]
+        ],
+
+        durableObjectNamespaces = [
+          (className = "MyActor", uniqueKey = "foo"),
+        ],
+
+        durableObjectStorage = (inMemory = void),
       )
     ),
   ],

@@ -45,13 +45,14 @@ class IoContext;
 class InputGate;
 class OutputGate;
 
-// Type signature of a durable object implementation class.
-typedef jsg::Constructor<api::ExportedHandler(
-      jsg::Ref<api::DurableObjectState> durableObject, jsg::Value env)>
-    DurableObjectConstructor;
+// Type signature of an entrypoint implementation class (Durable Object or stateless service).
+typedef kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::Ref<api::DurableObjectState>>
+    ExecutionContextOrState;
+typedef jsg::Constructor<api::ExportedHandler(ExecutionContextOrState ctx, jsg::Value env)>
+    EntrypointClass;
 
-// The type of a top-level export -- either a simple handler or a durable object class.
-typedef kj::OneOf<DurableObjectConstructor, api::ExportedHandler> NamedExport;
+// The type of a top-level export -- either a simple handler or a class.
+typedef kj::OneOf<EntrypointClass, api::ExportedHandler> NamedExport;
 
 // An instance of a Worker.
 //

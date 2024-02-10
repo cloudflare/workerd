@@ -181,8 +181,16 @@ public:
                                         "Failed to get handler to worker.");
       auto handle = handler->self.getHandle(lock);
 
+      // `handler->ctx` is present when we're invoking a freestanding function, and therefore
+      // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup
+      // should obviously permit instance properties, since we expect the export is a plain object.
+      // Otherwise, though, the export is a class. In that case, we have set the rule that we will
+      // only allow class properties (aka prototype properties) to be accessed, to avoid
+      // programmers shooting themselves in the foot by forgetting to make their members private.
+      bool allowInstanceProperties = handler->ctx != kj::none;
+
       // We will try to get the function, if we can't we'll throw an error to the client.
-      auto fn = tryGetFn(lock, ctx, handle, methodName);
+      auto fn = tryGetFn(lock, ctx, handle, methodName, allowInstanceProperties);
 
       v8::Local<v8::Value> invocationResult;
       KJ_IF_SOME(execCtx, handler->ctx) {
@@ -229,11 +237,21 @@ private:
       Worker::Lock& lock,
       IoContext& ctx,
       v8::Local<v8::Object> handle,
-      kj::StringPtr methodName) {
+      kj::StringPtr methodName,
+      bool allowInstanceProperties) {
+    jsg::Lock& js(lock);
+
+    if (!allowInstanceProperties) {
+      auto proto = handle->GetPrototype();
+      // This assert can't fail because we only take this branch when operating on a class
+      // instance.
+      KJ_ASSERT(proto->IsObject());
+      handle = proto.As<v8::Object>();
+    }
+
     auto methodStr = jsg::v8StrIntern(lock.getIsolate(), methodName);
     auto fnHandle = jsg::check(handle->Get(lock.getContext(), methodStr));
 
-    jsg::Lock& js(lock);
     v8::Local<v8::Object> obj = js.obj();
     auto objProto = obj->GetPrototype().As<v8::Object>();
 
