@@ -173,13 +173,19 @@ public:
         (Worker::Lock& lock) mutable -> kj::Promise<void> {
 
       jsg::Lock& js = lock;
-      // JS RPC is not enabled on the server side, we cannot call any methods.
-      JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
-          "The receiving Worker does not allow its methods to be called over RPC.");
 
       auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ctx.getActor()),
                                         "Failed to get handler to worker.");
       auto handle = handler->self.getHandle(lock);
+
+      if (handler->missingSuperclass) {
+        // JS RPC is not enabled on the server side, we cannot call any methods.
+        JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
+            "The receiving Durable Object does not support RPC, because its class was not declared "
+            "with `extends DurableObject`. In order to enable RPC, make sure your class "
+            "extends the special class `DurableObject`, which can be imported from the module "
+            "\"cloudflare:entrypoints\".");
+      }
 
       // `handler->ctx` is present when we're invoking a freestanding function, and therefore
       // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup

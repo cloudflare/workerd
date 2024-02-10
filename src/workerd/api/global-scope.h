@@ -266,6 +266,10 @@ struct ExportedHandler {
   //   works for all use cases. If we have bindings or things on ctx that vary on a per-request basis,
   //   this won't work as well, I guess, but we can cross that bridge when we come to it.
 
+  // If true, this is a Durable Object class that failed to extend `DurableObject`. We will not
+  // permit RPC to this class.
+  bool missingSuperclass = false;
+
   jsg::Optional<jsg::Ref<ExecutionContext>> getCtx() {
     return ctx.map([&](jsg::Ref<ExecutionContext>& p) { return p.addRef(); });
   }

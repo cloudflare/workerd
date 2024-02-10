@@ -59,6 +59,17 @@ export class MyActor extends DurableObject {
   }
 }
 
+export class ActorNoExtends {
+  async fetch(req) {
+    return new Response("from ActorNoExtends");
+  }
+
+  // This can't be called!
+  async foo() {
+    return 123;
+  }
+}
+
 export default class DefaultService extends StatelessService {
   async fetch(req) {
     return new Response("default service");
@@ -135,6 +146,28 @@ export let namedActorBinding = {
     assert.strictEqual(await stub.increment(5), 5);
     assert.strictEqual(await stub.increment(2), 7);
     assert.strictEqual(await stub.increment(8), 15);
+  },
+}
+
+// Test that if the actor class doesn't extend `DurableObject`, we don't allow RPC.
+export let actorWithoutExtendsRejectsRpc = {
+  async test(controller, env, ctx) {
+    let id = env.ActorNoExtends.idFromName("foo");
+    let stub = env.ActorNoExtends.get(id);
+
+    // fetch() works.
+    let resp = await stub.fetch("http://foo");
+    assert.strictEqual(await resp.text(), "from ActorNoExtends");
+
+    // RPC does not.
+    await assert.rejects(() => stub.foo(), {
+      name: "TypeError",
+      message:
+          "The receiving Durable Object does not support RPC, because its class was not declared " +
+          "with `extends DurableObject`. In order to enable RPC, make sure your class " +
+          "extends the special class `DurableObject`, which can be imported from the module " +
+          "\"cloudflare:entrypoints\"."
+    });
   },
 }
 

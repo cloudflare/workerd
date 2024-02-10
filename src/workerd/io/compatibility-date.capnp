@@ -357,10 +357,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   jsRpc @39 :Bool
       $compatEnableFlag("js_rpc")
       $experimental;
-  # Enables JS RPC on the server side.
-  # The client stub is currently guarded by the experimental flag, however, we don't want to let
-  # experimental clients call JS methods over RPC if the Worker receiving the request hasn't
-  # explicitly exposed its methods to RPC.
+  # Enables JS RPC on the server side for Durable Object classes that do not explicitly extend
+  # `DurableObjects`.
+  #
+  # This flag is obsolete but supported temporarily to avoid breaking people who used it. All code
+  # should switch to using `extends DurableObject` as the way to enable RPC.
+  #
+  # As of this writing, it is still necessary to enable the general `experimental` flag to use RPC
+  # on both the client and server sides.
 
   noImportScripts @40 :Bool
       $compatEnableFlag("no_global_importscripts")

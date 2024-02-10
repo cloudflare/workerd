@@ -8,17 +8,19 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "js-rpc-test.js")
         ],
         compatibilityDate = "2024-01-01",
-        compatibilityFlags = ["js_rpc","nodejs_compat","experimental"],
+        compatibilityFlags = ["nodejs_compat","experimental"],
         bindings = [
           (name = "self", service = (name = "js-rpc-test", entrypoint = "nonClass")),
           (name = "MyService", service = (name = "js-rpc-test", entrypoint = "MyService")),
           (name = "MyActor", durableObjectNamespace = "MyActor"),
+          (name = "ActorNoExtends", durableObjectNamespace = "ActorNoExtends"),
           (name = "defaultExport", service = "js-rpc-test"),
           (name = "twelve", json = "12"),
         ],
 
         durableObjectNamespaces = [
           (className = "MyActor", uniqueKey = "foo"),
+          (className = "ActorNoExtends", uniqueKey = "bar"),
         ],
 
         durableObjectStorage = (inMemory = void),
