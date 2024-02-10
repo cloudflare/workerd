@@ -63,6 +63,19 @@ public:
     JSG_METHOD(getSizes);
     JSG_METHOD(read);
   }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("mainModule", mainModule);
+    for (const auto& name : names) {
+      tracker.trackField("name", name);
+    }
+    for (const auto& content : contents) {
+      tracker.trackField("content", content);
+    }
+    for (const auto& requirement : requirements) {
+      tracker.trackField("requirement", requirement);
+    }
+  }
 };
 
 using Worker = server::config::Worker;

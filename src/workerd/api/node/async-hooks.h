@@ -200,6 +200,10 @@ public:
   // Returns the jsg::AsyncContextFrame captured when the AsyncResource was created, if any.
   kj::Maybe<jsg::AsyncContextFrame&> getFrame();
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("frame", frame);
+  }
+
 private:
   kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> frame;
 

@@ -150,4 +150,21 @@ void DiagnosticsChannelModule::visitForGc(jsg::GcVisitor& visitor) {
   }
 }
 
+void Channel::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("name", name);
+  for (auto& sub : subscribers) {
+    tracker.trackField("subscribers", sub.key);
+    tracker.trackField("subscribers", sub.value);
+  }
+  for (auto& store : stores) {
+    tracker.trackField("stores", store);
+  }
+}
+
+void DiagnosticsChannelModule::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  for (auto& channel : channels) {
+    tracker.trackField(nullptr, channel.value);
+  }
+}
+
 }  // namespace workerd::api::node

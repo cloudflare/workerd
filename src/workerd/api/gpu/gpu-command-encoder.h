@@ -53,6 +53,10 @@ public:
     JSG_METHOD(clearBuffer);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("label", label_);
+  }
+
 private:
   wgpu::CommandEncoder encoder_;
   kj::String label_;
