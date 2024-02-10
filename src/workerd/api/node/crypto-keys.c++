@@ -50,6 +50,12 @@ public:
     return kj::heapArray(keyData.asPtr());
   }
 
+  kj::StringPtr jsgGetMemoryName() const override { return "SecretKey"; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(SecretKey); }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    tracker.trackFieldWithSize("keyData", keyData.size());
+  }
+
 private:
   ZeroOnFree keyData;
 };

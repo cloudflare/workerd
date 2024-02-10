@@ -15,6 +15,13 @@ public:
       : CryptoKey::Impl(extractable, usages),
         keyData(kj::mv(keyData)), keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
+  kj::StringPtr jsgGetMemoryName() const override { return "Pbkdf2Key"; }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(Pbkdf2Key); }
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    tracker.trackFieldWithSize("keyData", keyData.size());
+    tracker.trackField("keyAlgorithm", keyAlgorithm);
+  }
+
 private:
   kj::Array<kj::byte> deriveBits(
       jsg::Lock& js, SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
