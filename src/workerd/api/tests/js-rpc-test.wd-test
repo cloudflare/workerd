@@ -10,9 +10,10 @@ const unitTests :Workerd.Config = (
         compatibilityDate = "2024-01-01",
         compatibilityFlags = ["js_rpc","nodejs_compat","experimental"],
         bindings = [
-          (name = "self", service = "js-rpc-test"),
+          (name = "self", service = (name = "js-rpc-test", entrypoint = "nonClass")),
           (name = "MyService", service = (name = "js-rpc-test", entrypoint = "MyService")),
           (name = "MyActor", durableObjectNamespace = "MyActor"),
+          (name = "defaultExport", service = "js-rpc-test"),
           (name = "twelve", json = "12"),
         ],
 

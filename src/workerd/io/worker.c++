@@ -421,7 +421,9 @@ struct Worker::Impl {
   // The environment blob to pass to handlers.
   kj::Maybe<jsg::Value> env;
 
-  kj::Maybe<api::ExportedHandler> defaultHandler;
+  // Note: The default export is given the string name "default", because that's what V8 tells us,
+  // and so it's easiest to go with it. I guess that means that you can't actually name an export
+  // "default"?
   kj::HashMap<kj::String, api::ExportedHandler> namedHandlers;
   kj::HashMap<kj::String, EntrypointClass> actorClasses;
   kj::HashMap<kj::String, EntrypointClass> statelessClasses;
@@ -1420,14 +1422,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         obj.env = lock.v8Ref(bindingsScope.As<v8::Value>());
                         obj.ctx = jsg::alloc<api::ExecutionContext>();
 
-                        if (handler.name == "default") {
-                          // The default export is given the string name "default". I guess that means that
-                          // you can't actually name an export "default"? Anyway, this is our default
-                          // handler.
-                          impl->defaultHandler = kj::mv(obj);
-                        } else {
-                          impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
-                        }
+                        impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
                       }
                       KJ_CASE_ONEOF(cls, EntrypointClass) {
                         bool isActor = js.withinHandleScope([&]() {
@@ -1711,32 +1706,43 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     }
   }
 
-  KJ_IF_SOME(n, name) {
-    KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)){
-      return fakeOwn(h);
-    } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
-      jsg::Lock& js = *this;
-      auto handler = kj::heap(cls(js, jsg::alloc<api::ExecutionContext>(),
-          KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
+  kj::StringPtr n = name.orDefault("default"_kj);
+  KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)){
+    return fakeOwn(h);
+  } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
+    jsg::Lock& js = *this;
+    auto handler = kj::heap(cls(js, jsg::alloc<api::ExecutionContext>(),
+        KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
-      // HACK: We set handler.env and handler.ctx to undefined because we already passed the real
-      //   env and ctx into the constructor, and we want the handler methods to act like they take
-      //   just one parameter.
-      handler->env = js.v8Ref(js.v8Undefined());
-      handler->ctx = kj::none;
+    // HACK: We set handler.env and handler.ctx to undefined because we already passed the real
+    //   env and ctx into the constructor, and we want the handler methods to act like they take
+    //   just one parameter.
+    handler->env = js.v8Ref(js.v8Undefined());
+    handler->ctx = kj::none;
 
-      return handler;
-    } else {
-      if (worker.impl->actorClasses.find(n) != kj::none) {
-        LOG_ERROR_PERIODICALLY("worker is not an actor but class name was requested", n);
-      } else {
-        LOG_ERROR_PERIODICALLY("worker has no such named entrypoint", n);
-      }
-
-      KJ_FAIL_ASSERT("worker_do_not_log; Unable to get exported handler");
+    return handler;
+  } else if (name == kj::none) {
+    // If the default export was requested, and we didn't find a handler for it, we'll fall back
+    // to addEventListener().
+    // TODO(cleanup): The intention has always been that we only use addEventListener() for
+    //   service-worker-syntax scripts, but apparently the code has long allowed it for
+    //   modules-based script too, if they lacked an `export default`. Yikes! However, it looks
+    //   to me like the validator would have rejected modules-based scripts that lacked a default
+    //   export, so perhaps this is not a real problem in production. We'd better find out by
+    //   logging, though...
+    if (worker.impl->context == kj::none) {
+      LOG_ERROR_PERIODICALLY(
+          "modules-based script has no default export; falling back to addEventListener()");
     }
+    return kj::none;
   } else {
-    return worker.impl->defaultHandler.map(fakeOwn<api::ExportedHandler>);
+    if (worker.impl->actorClasses.find(n) != kj::none) {
+      LOG_ERROR_PERIODICALLY("worker is not an actor but class name was requested", n);
+    } else {
+      LOG_ERROR_PERIODICALLY("worker has no such named entrypoint", n);
+    }
+
+    KJ_FAIL_ASSERT("worker_do_not_log; Unable to get exported handler");
   }
 }
 
@@ -1856,19 +1862,25 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         }
       };
 
-      KJ_IF_SOME(h, worker.impl->defaultHandler) {
-        report(kj::none, h);
-      } else {}  // Here to squash a compiler warning.
+      auto getEntrypointName = [&](kj::StringPtr key) -> kj::Maybe<kj::StringPtr> {
+        if (key == "default"_kj) {
+          return kj::none;
+        } else {
+          return key;
+        }
+      };
+
       for (auto& entry: worker.impl->namedHandlers) {
-        report(kj::StringPtr(entry.key), entry.value);
+        report(getEntrypointName(entry.key), entry.value);
       }
       for (auto& entry: worker.impl->actorClasses) {
-        errorReporter.addHandler(kj::StringPtr(entry.key), "class");
+        errorReporter.addHandler(getEntrypointName(entry.key), "class");
       }
       for (auto& entry: worker.impl->statelessClasses) {
         // We want to report all of the stateless class's members. To do this, we examine its
         // prototype, and it's prototype's prototype, and so on, until we get to Object's
         // prototype, which we ignore.
+        auto entrypointName = getEntrypointName(entry.key);
         js.withinHandleScope([&]() {
           // Find the prototype for `Object` by creating one.
           auto obj = js.obj();
@@ -1905,7 +1917,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
                 isNew = false;
               });
               if (isNew) {
-                errorReporter.addHandler(kj::StringPtr(entry.key), namePtr);
+                errorReporter.addHandler(entrypointName, namePtr);
               }
             }
 

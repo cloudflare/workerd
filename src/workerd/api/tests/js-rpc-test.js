@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import {StatelessService,DurableObject} from 'cloudflare:entrypoints';
 
-export default {
+export let nonClass = {
   async noArgs(x, env, ctx) {
     return (x === undefined) ? (env.twelve + 1) : "param not undefined?";
   },
@@ -59,6 +59,12 @@ export class MyActor extends DurableObject {
   }
 }
 
+export default class DefaultService extends StatelessService {
+  async fetch(req) {
+    return new Response("default service");
+  }
+}
+
 export let basicServiceBinding = {
   async test(controller, env, ctx) {
     // Test service binding RPC.
@@ -101,5 +107,13 @@ export let namedActorBinding = {
     assert.strictEqual(await stub.increment(5), 5);
     assert.strictEqual(await stub.increment(2), 7);
     assert.strictEqual(await stub.increment(8), 15);
+  },
+}
+
+// Test calling the default export when it is a class.
+export let defaultExportClass = {
+  async test(controller, env, ctx) {
+    let resp = await env.defaultExport.fetch("http://foo");
+    assert.strictEqual(await resp.text(), "default service");
   },
 }
