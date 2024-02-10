@@ -5,6 +5,7 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/actor-state.h>
 #include <workerd/jsg/ser.h>
 #include <capnp/membrane.h>
 
@@ -414,4 +415,16 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
     .outcome = EventOutcome::OK
   };
 }
+
+// =======================================================================================
+
+jsg::Ref<StatelessService> StatelessService::constructor(
+    jsg::Ref<ExecutionContext> ctx, jsg::JsObject env) {
+  return jsg::alloc<StatelessService>();
+}
+jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
+    jsg::Ref<DurableObjectState> ctx, jsg::JsObject env) {
+  return jsg::alloc<DurableObjectBase>();
+}
+
 }; // namespace workerd::api

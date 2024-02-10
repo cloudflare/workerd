@@ -115,7 +115,72 @@ private:
   class ServerTopLevelMembrane;
 };
 
+// Base class for exported RPC services.
+//
+// When the worker's top-level module exports a class that extends this class, it means that it
+// is a stateless service.
+//
+//     import {StatelessService} from "cloudflare:workers";
+//     export class MyService extends StatelessService {
+//       async fetch(req) { ... }
+//       async someRpcMethod(a, b) { ... }
+//     }
+class StatelessService: public jsg::Object {
+public:
+  // Generally, subclasses should override this constructor to save the `ctx` and `env` values as
+  // class properties.
+  //
+  // We don't create properties automatically because:
+  // - The properties should be private, but private properties declared in a base class won't be
+  //   visible to the derived class.
+  // - The names `ctx` and `env` aren't otherwise specified by the API. We'd have to argue about
+  //   whether these are the names we really want to formalize. Letting the subclass choose its
+  //   names avoids that.
+  static jsg::Ref<StatelessService> constructor(jsg::Ref<ExecutionContext> ctx, jsg::JsObject env);
+
+  JSG_RESOURCE_TYPE(StatelessService) {}
+};
+
+// Like StatelessService, but this is the base class for Durable Object classes.
+//
+// Note that the name of this class as seen by JavaScript is `DurableObject`, but using that name
+// in C++ would conflict with the type name currently used by DO stubs.
+// TODO(cleanup): Rename DO stubs to `DurableObjectStub`?
+//
+// Historically, DO classes were not expected to inherit anything. However, this made it impossible
+// to tell whether an exported class was intended to be a DO class vs. something else. Originally
+// there were no other kinds of exported classes so this was fine. Going forward, we encourage
+// everyone to be explicit by inheriting this, and we require it if you want to use RPC.
+class DurableObjectBase: public jsg::Object {
+public:
+  static jsg::Ref<DurableObjectBase> constructor(
+        jsg::Ref<DurableObjectState> state, jsg::JsObject env);
+
+  JSG_RESOURCE_TYPE(DurableObjectBase) {}
+};
+
+// The "cloudflare:entrypoints" module, which exposes the StatelessService and DurableObject types
+// for extending.
+class EntrypointsModule: public jsg::Object {
+public:
+  JSG_RESOURCE_TYPE(EntrypointsModule) {
+    JSG_NESTED_TYPE(StatelessService);
+    JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
+  }
+};
+
 #define EW_WORKER_RPC_ISOLATE_TYPES  \
-  api::JsRpcCapability
+  api::JsRpcCapability,              \
+  api::StatelessService,             \
+  api::DurableObjectBase,            \
+  api::EntrypointsModule
+
+template <class Registry>
+void registerRpcModules(Registry& registry, CompatibilityFlags::Reader flags) {
+  if (flags.getWorkerdExperimental()) {
+    registry.template addBuiltinModule<EntrypointsModule>(
+        "cloudflare-internal:entrypoints", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  }
+}
 
 }; // namespace workerd::api
