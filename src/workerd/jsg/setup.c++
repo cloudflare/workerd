@@ -216,6 +216,9 @@ HeapTracer::HeapTracer(v8::Isolate* isolate): isolate(isolate) {
 
   isolate->AddGCEpilogueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
+#ifdef KJ_DEBUG
+    TracedRefRegistry::current().checkTraceObserversAfterGc();
+#endif
     auto& self = *reinterpret_cast<HeapTracer*>(data);
     for (Wrappable* wrappable: self.detachLater) {
       wrappable->detachWrapper(true);

@@ -5,6 +5,7 @@
 #include "wrappable.h"
 #include "jsg.h"
 #include "setup.h"
+#include "util.h"
 #include <kj/debug.h>
 #include <kj/async.h>
 #include <v8-cppgc.h>
@@ -20,7 +21,32 @@ namespace {
 
 static thread_local bool inCppgcShimDestructor = false;
 
+#ifdef KJ_DEBUG
+static thread_local TracedRefRegistry tracedRefRegistry;
+#endif
 };
+
+#ifdef KJ_DEBUG
+TracedRefRegistry& TracedRefRegistry::current() {
+  return tracedRefRegistry;
+}
+
+void TracedRefRegistry::TraceObserver::checkTraced() {
+  if (!traced_) {
+    KJ_LOG(WARNING, kj::str("jsg::TracedRef<",
+        fullyQualifiedTypeName(type_) ,
+        "> not traced during gc: "));
+  }
+  // Reset for the next check
+  traced_ = false;
+}
+
+void TracedRefRegistry::checkTraceObserversAfterGc() {
+  for (auto& observer : observers) {
+    observer->checkTraced();
+  }
+}
+#endif
 
 bool HeapTracer::isInCppgcDestructor() { return inCppgcShimDestructor; }
 

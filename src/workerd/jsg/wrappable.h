@@ -25,6 +25,46 @@ using kj::uint;
 class GcVisitor;
 class HeapTracer;
 
+#ifdef KJ_DEBUG
+class TracedRefRegistry {
+public:
+  TracedRefRegistry() = default;
+  KJ_DISALLOW_COPY_AND_MOVE(TracedRefRegistry);
+
+  class TraceObserver final {
+  public:
+    inline TraceObserver(TracedRefRegistry& reg, const std::type_info& info)
+        : reg(reg), type_(info) {}
+    inline ~TraceObserver() noexcept(false) {
+      reg.observers.eraseMatch(this);
+    }
+    KJ_DISALLOW_COPY_AND_MOVE(TraceObserver);
+
+    inline void traced() { traced_ = true; }
+    void checkTraced();
+
+  private:
+    TracedRefRegistry& reg;
+    const std::type_info& type_;
+    bool traced_ = false;
+  };
+
+  template <typename T>
+  inline kj::Own<TraceObserver> addTraceObserver() {
+    auto ob = kj::heap<TraceObserver>(*this, typeid(T));
+    observers.insert(ob.get());
+    return kj::mv(ob);
+  }
+
+  void checkTraceObserversAfterGc();
+
+  static TracedRefRegistry& current();
+
+private:
+  kj::HashSet<TraceObserver*> observers;
+};
+#endif
+
 // Base class for C++ objects which can be "wrapped" for JavaScript consumption. A JavaScript
 // "wrapper" object is created, and then the JS wrapper and C++ Wrappable are "attached" to each
 // other via attachWrapper().

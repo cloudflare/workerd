@@ -1077,6 +1077,8 @@ private:
   friend void visitSubclassForMemoryInfo(const T* obj, MemoryTracker& visitor);
   template <typename T>
   friend class Ref;
+  template <typename T>
+  friend class TracedRef;
   friend class kj::Refcounted;
   template <typename T>
   friend kj::Own<T> kj::addRef(T& object);
@@ -1220,6 +1222,8 @@ private:
   template <typename>
   friend class ObjectWrapper;
   friend class GcVisitor;
+  template <typename>
+  friend class TracedRef;
 };
 
 template <MemoryRetainer T>
@@ -1229,6 +1233,135 @@ void MemoryTracker::trackField(
     kj::Maybe<kj::StringPtr> nodeName) {
   trackField(edgeName, value.get(), nodeName);
 }
+
+// A TraceRef is essentially a Ref<T> that is always weak and must be traced during GC.
+template <typename T>
+class TracedRef {
+public:
+  TracedRef(decltype(nullptr))
+      : inner(nullptr)
+#ifdef KJ_DEBUG
+        , traceObserver(TracedRefRegistry::current().addTraceObserver<T>())
+#endif
+      {}
+  TracedRef(Ref<T>&& other)
+      : inner(kj::mv(other.inner))
+#ifdef KJ_DEBUG
+        , traceObserver(TracedRefRegistry::current().addTraceObserver<T>())
+#endif
+      {
+#ifdef KJ_DEBUG
+    if (other.parent != kj::none) {
+      KJ_LOG(WARNING, "Moving a Ref<T> that has been gc traced is unsupported");
+    }
+#endif
+    other.strong = false;
+  }
+
+  TracedRef(kj::Own<T> innerParam)
+      : inner(kj::mv(innerParam))
+#ifdef KJ_DEBUG
+        , traceObserver(TracedRefRegistry::current().addTraceObserver<T>())
+#endif
+  {}
+
+  template <typename U, typename = kj::EnableIf<kj::canConvert<U&, T&>()>>
+  TracedRef(Ref<U>&& other)
+      : inner(kj::mv(other.inner))
+#ifdef KJ_DEBUG
+        , traceObserver(TracedRefRegistry::current().addTraceObserver<T>())
+#endif
+  {
+#ifdef KJ_DEBUG
+    if (other.parent != kj::none) {
+      KJ_LOG(WARNING, "Moving a Ref<T> that has been gc traced is unsupported");
+    }
+#endif
+    other.strong = false;
+  }
+
+  template <typename U>
+  TracedRef& operator=(Ref<U>&& other) {
+    destroy();
+#ifdef KJ_DEBUG
+    if (other.parent != kj::none) {
+      KJ_LOG(WARNING, "Moving a Ref<T> that has been gc traced is unsupported");
+    }
+    traceObserver = TracedRefRegistry::current().addTraceObserver<T>();
+#endif
+    inner = kj::mv(other.inner);
+    other.strong = false;
+    return *this;
+  }
+
+  ~TracedRef() noexcept(false) { destroy(); }
+  KJ_DISALLOW_COPY_AND_MOVE(TracedRef);
+
+  T* operator->() { return inner.get(); }
+  // Intentionally not implementing get() or operator* because we don't want to encourage
+  // getting the raw pointer.
+
+  // If the object has a JS wrapper, return it. Note that the JS wrapper is initialized lazily
+  // when the object is first passed to JS, so you can't be sure that it exists. To reliably
+  // get a handle (creating it on-demand if necessary), use a TypeHandler<Ref<T>>.
+  kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) {
+    return inner->tryGetHandle(isolate);
+  }
+
+  kj::Maybe<v8::Local<v8::Object>> tryGetHandle(Lock& js);
+
+  // Attach a JavaScript object which implements the JS interface for this C++ object. Normally,
+  // this happens automatically the first time the Ref is passed across the FFI barrier into JS.
+  // This method may be useful in order to use a different wrapper type than the one that would
+  // be used automatically. This method is also useful when implementing TypeWrapperExtensions.
+  //
+  // It is an error to attach a wrapper when another wrapper is already attached. Hence,
+  // typically this should only be called on a newly-allocated object.
+  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
+  }
+
+  Ref<T> addRef() { return Ref<T>(kj::addRef(*inner)); }
+
+  bool isStrong() const { return strong; }
+
+private:
+  kj::Own<T> inner;
+
+#ifdef KJ_DEBUG
+  kj::Own<TracedRefRegistry::TraceObserver> traceObserver;
+#endif
+
+  bool strong = false;
+
+  // If this has ever been traced, the parent object from which the trace originated. This is kept
+  // for debugging purposes only -- there should only ever be one parent for a particular ref.
+  //
+  // This field does NOT move when the Ref moves, because it's a property of the specific Ref
+  // location.
+  kj::Maybe<Wrappable&> parent;
+
+  void destroy() {
+#ifdef KJ_DEBUG
+    traceObserver = nullptr;
+#endif
+    if (auto ptr = inner.get(); ptr != nullptr) {
+      inner->maybeDeferDestruction(false, kj::mv(inner), static_cast<Wrappable*>(ptr));
+    }
+  }
+
+  template <typename>
+  friend class Ref;
+  template <typename U, typename... Params>
+  friend Ref<U> alloc(Params&&... params);
+  template <typename U>
+  friend Ref<U> _jsgThis(U* obj);
+  template <typename, typename>
+  friend class ResourceWrapper;
+  template <typename>
+  friend class ObjectWrapper;
+  friend class GcVisitor;
+};
 
 template <typename T, typename... Params>
 Ref<T> alloc(Params&&... params) {
@@ -1621,6 +1754,14 @@ class GcVisitor {
 public:
   template <typename T>
   void visit(Ref<T>& ref) {
+    ref.inner->visitRef(*this, ref.parent, ref.strong);
+  }
+
+  template <typename T>
+  void visit(TracedRef<T>& ref) {
+#ifdef KJ_DEBUG
+    ref.traceObserver->traced();
+#endif
     ref.inner->visitRef(*this, ref.parent, ref.strong);
   }
 

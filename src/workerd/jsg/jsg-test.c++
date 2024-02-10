@@ -34,7 +34,9 @@ static_assert(kj::_::isDisallowedInCoroutine<Lock*>());
 
 // ========================================================================================
 
-V8System v8System;
+const kj::StringPtr exposeGc = "--expose-gc"_kjc;
+auto flags = kj::arr(exposeGc);
+V8System v8System(flags);
 class ContextGlobalObject: public Object, public ContextGlobal {};
 
 struct TestContext: public ContextGlobalObject {
@@ -422,6 +424,32 @@ KJ_TEST("jsg::Lock getUuid") {
   KJ_ASSERT(called);
 }
 
+// ========================================================================================
+struct TracedRefContext: public ContextGlobalObject {
+  struct Bar: public Object {
+    JSG_RESOURCE_TYPE(Bar) {}
+  };
+  struct Foo: public Object {
+    JSG_RESOURCE_TYPE(Foo) {}
+    TracedRef<Bar> bar1 = alloc<Bar>();
+    TracedRef<Bar> bar2 = alloc<Bar>();
+    static Ref<Foo> constructor() { return alloc<Foo>(); }
+    void visitForGc(GcVisitor& visitor) {
+      visitor.visit(bar2);
+    }
+  };
+  JSG_RESOURCE_TYPE(TracedRefContext) {
+    JSG_NESTED_TYPE(Foo);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(TracedRefIsolate, TracedRefContext,
+                         TracedRefContext::Foo,
+                         TracedRefContext::Bar);
+
+KJ_TEST("jsg::TracedRef") {
+  Evaluator<TracedRefContext, TracedRefIsolate> e(v8System);
+  e.expectEval("const foo = new Foo(); gc()", "undefined", "undefined");
+}
 }  // namespace
 
 }  // namespace workerd::jsg::test
