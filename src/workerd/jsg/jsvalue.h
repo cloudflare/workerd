@@ -340,8 +340,6 @@ public:
 
   using JsBase<v8::Object, JsObject>::JsBase;
 
-  explicit JsObject(v8::Local<v8::Map> inner);
-
   void recursivelyFreeze(Lock&);
   JsObject jsonClone(Lock&);
 };

@@ -12,8 +12,6 @@ bool JsValue::operator==(const JsValue& other) const {
   return inner == other.inner;
 }
 
-JsObject::JsObject(v8::Local<v8::Map> inner) : JsObject(inner.As<v8::Object>()) {}
-
 JsObject::operator JsMap() const {
   KJ_ASSERT(inner->IsMap());
   return JsMap(inner.As<v8::Map>());
