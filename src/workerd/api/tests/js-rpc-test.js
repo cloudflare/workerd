@@ -96,6 +96,34 @@ export let namedServiceBinding = {
       name: "TypeError",
       message: "The RPC receiver does not implement the method \"instanceMethod\"."
     });
+
+    let getByName = name => {
+      let func = env.MyService.getRpcMethodForTestOnly(name);
+      return func.bind(env.MyService);
+    };
+
+    // Check getRpcMethodForTestOnly() actually works.
+    assert.strictEqual(await getByName("twoArgsMethod")(2, 3), 18);
+
+    // Check we cannot call reserved methods.
+    await assert.rejects(() => getByName("constructor")(), {
+      name: "TypeError",
+      message: "'constructor' is a reserved method and cannot be called over RPC."
+    });
+    await assert.rejects(() => getByName("fetch")(), {
+      name: "TypeError",
+      message: "'fetch' is a reserved method and cannot be called over RPC."
+    });
+
+    // Check we cannot call methods of Object.
+    await assert.rejects(() => getByName("toString")(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"toString\"."
+    });
+    await assert.rejects(() => getByName("hasOwnProperty")(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"hasOwnProperty\"."
+    });
   },
 }
 
