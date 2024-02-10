@@ -108,6 +108,8 @@ public:
     JSG_METHOD(transform);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
 private:
   void visitForGc(jsg::GcVisitor& visitor);
 

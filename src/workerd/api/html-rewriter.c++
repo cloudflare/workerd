@@ -177,6 +177,12 @@ struct UnregisteredElementHandlers {
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(element, comments, text);
   }
+
+  JSG_MEMORY_INFO(UnregisteredElementHandlers) {
+    tracker.trackField("element", element);
+    tracker.trackField("comments", comments);
+    tracker.trackField("text", text);
+  }
 };
 
 struct UnregisteredDocumentHandlers {
@@ -192,6 +198,13 @@ struct UnregisteredDocumentHandlers {
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(doctype, comments, text, end);
+  }
+
+  JSG_MEMORY_INFO(UnregisteredDocumentHandlers) {
+    tracker.trackField("doctype", doctype);
+    tracker.trackField("comments", comments);
+    tracker.trackField("text", text);
+    tracker.trackField("end", end);
   }
 };
 
@@ -988,10 +1001,27 @@ struct HTMLRewriter::Impl {
   //
   //   In the meantime, we keep this list of handlers around and "replay" their registration, in
   //   order, on the builder object that we create inside of .transform().
+
+  JSG_MEMORY_INFO(HTMLRewriter::Impl) {
+    for (const auto& handlers : unregisteredHandlers) {
+      KJ_SWITCH_ONEOF(handlers) {
+        KJ_CASE_ONEOF(h, UnregisteredElementHandlers) {
+          tracker.trackField(nullptr, h);
+        }
+        KJ_CASE_ONEOF(h, UnregisteredDocumentHandlers) {
+          tracker.trackField(nullptr, h);
+        }
+      }
+    }
+  }
 };
 
 HTMLRewriter::HTMLRewriter(): impl(kj::heap<Impl>()) {}
 HTMLRewriter::~HTMLRewriter() noexcept(false) {}
+
+void HTMLRewriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("impl", impl);
+}
 
 jsg::Ref<HTMLRewriter> HTMLRewriter::constructor() {
   return jsg::alloc<HTMLRewriter>();
