@@ -178,6 +178,9 @@ public:
   bool operator==(const JsValue& other) const KJ_WARN_UNUSED_RESULT {
     return inner == other.inner;
   }
+  bool operator==(const JsBase& other) const KJ_WARN_UNUSED_RESULT {
+    return inner == other.inner;
+  }
   explicit JsBase(v8::Local<T> inner) : inner(inner) { requireOnStack(this); }
   JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 private:
