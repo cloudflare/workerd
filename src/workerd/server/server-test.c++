@@ -307,7 +307,6 @@ public:
         root(kj::newInMemoryDirectory(*this)),
         pwd(kj::Path({"current", "dir"})),
         cwd(root->openSubdir(pwd, kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT)),
-        clock(kj::systemPreciseMonotonicClock()),
         timer(kj::origin<kj::TimePoint>()),
         server(*this, timer, mockNetwork, *this, Worker::ConsoleMode::INSPECTOR_ONLY,
                 [this](kj::String error) {
@@ -336,7 +335,6 @@ public:
   // Start the server. Call before connect().
   void start(kj::Promise<void> drainWhen = kj::NEVER_DONE) {
     KJ_REQUIRE(runTask == kj::none);
-    timer.advanceTo(clock.now());
     auto task = server.run(v8System, *config, kj::mv(drainWhen))
         .eagerlyEvaluate([](kj::Exception&& e) {
       KJ_FAIL_EXPECT(e);
@@ -384,11 +382,13 @@ public:
     return receiveSubrequest(addr, {"public"_kj}, {}, loc);
   }
 
-  // Block's for `seconds` seconds before returning.
+  // Advance the timer through `seconds` seconds of virtual time.
   void wait(size_t seconds) {
     auto delayPromise = timer.afterDelay(seconds * kj::SECONDS).eagerlyEvaluate(nullptr);
     while (!delayPromise.poll(ws)) {
-      timer.advanceTo(clock.now());
+      // Since this test has no external I/O at all other than time, we know no events could
+      // possibly occur until the next timer event. So just advance directly to it and continue.
+      timer.advanceTo(KJ_ASSERT_NONNULL(timer.nextEvent()));
     }
     delayPromise.wait(ws);
   }
@@ -400,7 +400,6 @@ public:
   kj::Own<const kj::Directory> root;
   kj::Path pwd;
   kj::Own<const kj::Directory> cwd;
-  const kj::MonotonicClock& clock;
   kj::TimerImpl timer;
   Server server;
 
