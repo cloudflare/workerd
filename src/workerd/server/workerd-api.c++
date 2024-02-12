@@ -190,7 +190,7 @@ WorkerdApi::EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) 
   auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
 
   return {
-    .statelessService = typedLock.getConstructor<api::StatelessService>(lock.v8Context()),
+    .workerEntrypoint = typedLock.getConstructor<api::WorkerEntrypoint>(lock.v8Context()),
     .durableObject = typedLock.getConstructor<api::DurableObjectBase>(lock.v8Context()),
   };
 }

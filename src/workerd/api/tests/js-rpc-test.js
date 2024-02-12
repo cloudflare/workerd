@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import {StatelessService,DurableObject} from 'cloudflare:entrypoints';
+import {WorkerEntrypoint,DurableObject} from 'cloudflare:entrypoints';
 
 export let nonClass = {
   async noArgs(x, env, ctx) {
@@ -15,7 +15,7 @@ export let nonClass = {
   },
 }
 
-export class MyService extends StatelessService {
+export class MyService extends WorkerEntrypoint {
   #env;
 
   constructor(ctx, env) {
@@ -70,7 +70,7 @@ export class ActorNoExtends {
   }
 }
 
-export default class DefaultService extends StatelessService {
+export default class DefaultService extends WorkerEntrypoint {
   async fetch(req) {
     return new Response("default service");
   }
@@ -89,7 +89,7 @@ export let extendingEntrypointClasses = {
   async test(controller, env, ctx) {
     // Verify that we can instantiate classes that inherit built-in classes.
     let svc = new MyService(ctx, env);
-    assert.equal(svc instanceof StatelessService, true);
+    assert.equal(svc instanceof WorkerEntrypoint, true);
   },
 }
 

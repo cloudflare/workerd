@@ -7,5 +7,5 @@
 
 import entrypoints from 'cloudflare-internal:entrypoints';
 
-export const StatelessService = entrypoints.StatelessService;
+export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;

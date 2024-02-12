@@ -445,9 +445,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
 
 // =======================================================================================
 
-jsg::Ref<StatelessService> StatelessService::constructor(
+jsg::Ref<WorkerEntrypoint> WorkerEntrypoint::constructor(
     jsg::Ref<ExecutionContext> ctx, jsg::JsObject env) {
-  return jsg::alloc<StatelessService>();
+  return jsg::alloc<WorkerEntrypoint>();
 }
 jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
     jsg::Ref<DurableObjectState> ctx, jsg::JsObject env) {

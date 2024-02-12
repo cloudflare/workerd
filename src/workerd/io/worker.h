@@ -428,8 +428,8 @@ public:
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
 
   struct EntrypointClasses {
-    // Class constructor for StatelessSevice.
-    jsg::JsObject statelessService;
+    // Class constructor for WorkerEntrypoint.
+    jsg::JsObject workerEntrypoint;
 
     // Class constructor for DurableObject (aka api::DurableObjectBase).
     jsg::JsObject durableObject;

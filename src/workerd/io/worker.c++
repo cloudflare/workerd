@@ -1440,7 +1440,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                                 .missingSuperclass = false,
                               });
                               return;
-                            } else if (handle == entrypointClasses.statelessService) {
+                            } else if (handle == entrypointClasses.workerEntrypoint) {
                               impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
                               return;
                             }

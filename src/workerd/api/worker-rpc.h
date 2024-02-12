@@ -120,12 +120,12 @@ private:
 // When the worker's top-level module exports a class that extends this class, it means that it
 // is a stateless service.
 //
-//     import {StatelessService} from "cloudflare:workers";
-//     export class MyService extends StatelessService {
+//     import {WorkerEntrypoint} from "cloudflare:workers";
+//     export class MyService extends WorkerEntrypoint {
 //       async fetch(req) { ... }
 //       async someRpcMethod(a, b) { ... }
 //     }
-class StatelessService: public jsg::Object {
+class WorkerEntrypoint: public jsg::Object {
 public:
   // Generally, subclasses should override this constructor to save the `ctx` and `env` values as
   // class properties.
@@ -136,12 +136,12 @@ public:
   // - The names `ctx` and `env` aren't otherwise specified by the API. We'd have to argue about
   //   whether these are the names we really want to formalize. Letting the subclass choose its
   //   names avoids that.
-  static jsg::Ref<StatelessService> constructor(jsg::Ref<ExecutionContext> ctx, jsg::JsObject env);
+  static jsg::Ref<WorkerEntrypoint> constructor(jsg::Ref<ExecutionContext> ctx, jsg::JsObject env);
 
-  JSG_RESOURCE_TYPE(StatelessService) {}
+  JSG_RESOURCE_TYPE(WorkerEntrypoint) {}
 };
 
-// Like StatelessService, but this is the base class for Durable Object classes.
+// Like WorkerEntrypoint, but this is the base class for Durable Object classes.
 //
 // Note that the name of this class as seen by JavaScript is `DurableObject`, but using that name
 // in C++ would conflict with the type name currently used by DO stubs.
@@ -159,19 +159,19 @@ public:
   JSG_RESOURCE_TYPE(DurableObjectBase) {}
 };
 
-// The "cloudflare:entrypoints" module, which exposes the StatelessService and DurableObject types
+// The "cloudflare:entrypoints" module, which exposes the WorkerEntrypoint and DurableObject types
 // for extending.
 class EntrypointsModule: public jsg::Object {
 public:
   JSG_RESOURCE_TYPE(EntrypointsModule) {
-    JSG_NESTED_TYPE(StatelessService);
+    JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
   }
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES  \
   api::JsRpcCapability,              \
-  api::StatelessService,             \
+  api::WorkerEntrypoint,             \
   api::DurableObjectBase,            \
   api::EntrypointsModule
 
