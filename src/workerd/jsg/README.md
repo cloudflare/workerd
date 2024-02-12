@@ -1551,7 +1551,7 @@ KJ_DEFER(key->reset());
 // with the scope exits.
 ```
 
-## jsg::MemoryTracker and heap snapshot detail collection
+## `jsg::MemoryTracker` and heap snapshot detail collection
 
 The `jsg::MemoryTracker` is used to integrate with v8's `BuildEmbedderGraph` API.
 It constructs the graph of embedder objects to be included in a generated
@@ -1617,7 +1617,7 @@ JSG_MEMORY_INFO(Foo) {
   }
 ```
 
-All j`sg::Object` instances provide a basic implementation of these methods.
+All `jsg::Object` instances provide a basic implementation of these methods.
 Within a `jsg::Object`, your only responsibility would be to implement the
 helper `visitForMemoryInfo(jsg::MemoryTracker& tracker) const` method only
 if the type has additional fields that need to be tracked. This works a
@@ -1645,5 +1645,5 @@ fairly expensive to create, however, so care should be taken not to make
 things too complicated. Ideally, none of the implementation methods in a
 type should allocate. There is some allocation occuring internally while
 building the graph, of course, but the methods for visitation (in particular
-the jsgGetMemoryInfo(...) method) should not perform any allocations if it
+the `jsgGetMemoryInfo(...)` method) should not perform any allocations if it
 can be avoided.
