@@ -231,36 +231,6 @@ private:
 // An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
 public:
-
-  // RAII-style listener that can be attached to an EventTarget.
-  class NativeHandler {
-  public:
-    using Signature = void(jsg::Ref<Event>);
-    NativeHandler(jsg::Lock& js, jsg::Ref<EventTarget> target, kj::String type,
-        jsg::Function<Signature> func, bool once = false);
-    ~NativeHandler() noexcept(false);
-    KJ_DISALLOW_COPY_AND_MOVE(NativeHandler);
-
-    void operator()(jsg::Lock&js, jsg::Ref<Event> event);
-
-    uint hashCode() const;
-
-    void visitForGc(jsg::GcVisitor& visitor);
-  private:
-    void detach();
-
-    kj::String type;
-    struct State {
-      jsg::Ref<EventTarget> target;
-      jsg::Function<Signature> func;
-    };
-
-    kj::Maybe<State> state;
-    bool once;
-
-    friend class EventTarget;
-  };
-
   ~EventTarget() noexcept(false);
 
   size_t getHandlerCount(kj::StringPtr type) const;
@@ -335,10 +305,13 @@ public:
   static jsg::Ref<EventTarget> constructor();
 
   // Registers a lambda that will be called when the given event type is emitted.
-  // The handler will be registered for as long as the returned kj::Own<NativeHandler>
+  // The handler will be registered for as long as the returned kj::Own<void>
   // handle is held. If the EventTarget is destroyed while the native handler handle
   // is held, it will be automatically detached.
-  kj::Own<NativeHandler> newNativeHandler(jsg::Lock& js,
+  //
+  // The caller must not do anything with the returned Own<void> except drop it. This is why it
+  // is Own<void> and not Own<NativeHandler>.
+  kj::Own<void> newNativeHandler(jsg::Lock& js,
       kj::String type,
       jsg::Function<void(jsg::Ref<Event>)> func,
       bool once = false);
@@ -346,6 +319,37 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
+  // RAII-style listener that can be attached to an EventTarget.
+  class NativeHandler {
+  public:
+    using Signature = void(jsg::Ref<Event>);
+    NativeHandler(jsg::Lock& js, EventTarget& target, kj::String type,
+        jsg::Function<Signature> func, bool once = false);
+    ~NativeHandler() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(NativeHandler);
+
+    void operator()(jsg::Lock&js, jsg::Ref<Event> event);
+
+    uint hashCode() const;
+
+    void visitForGc(jsg::GcVisitor& visitor);
+  private:
+    void detach();
+
+    kj::String type;
+    struct State {
+      // target's destructor will null out `state`, so this is OK to be a bare reference.
+      EventTarget& target;
+
+      jsg::Function<Signature> func;
+    };
+
+    kj::Maybe<State> state;
+    bool once;
+
+    friend class EventTarget;
+  };
+
   void addNativeListener(jsg::Lock& js, NativeHandler& handler);
   bool removeNativeListener(NativeHandler& handler);
 
@@ -353,15 +357,21 @@ private:
     struct JavaScriptHandler {
       jsg::HashableV8Ref<v8::Object> identity;
       HandlerFunction callback;
-      // If the event handler is registered with an AbortSignal, then the abortHandler
-      // is set and will ensure that the handler is removed correctly.
-      kj::Maybe<kj::Own<NativeHandler>> abortHandler;
+
+      // If the event handler is registered with an AbortSignal, then the abortHandler points
+      // at the NativeHandler representing that registration, so that if this object is GC'd before
+      // the AbortSignal is signaleled, we unregister ourselves from listening on it. Note that
+      // this is Own<void> for the same reason newNativeHandler() returns Own<void>: We are not
+      // supposed to do anything with this except drop it.
+      kj::Maybe<kj::Own<void>> abortHandler;
 
       void visitForGc(jsg::GcVisitor& visitor) {
         visitor.visit(identity, callback);
-        KJ_IF_SOME(handler, abortHandler) {
-          handler->visitForGc(visitor);
-        }
+
+        // Note that we intentionally do NOT visit `abortHandler`. This is because the JS handles
+        // held by `abortHandler` are not ever accessed by this path. Instead, they are accessed
+        // by the AbortSignal, if and when it fires. So it is the AbortSignal's responsibility to
+        // visit the NativeHandler's content.
       }
 
       kj::StringPtr jsgGetMemoryName() const { return "JavaScriptHandler"_kjc; }
@@ -593,8 +603,6 @@ public:
 
 private:
 };
-
-KJ_DECLARE_NON_POLYMORPHIC(workerd::api::EventTarget::NativeHandler);
 
 #define EW_BASICS_ISOLATE_TYPES                \
     api::Event,                                \
