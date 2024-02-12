@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import {WorkerEntrypoint,DurableObject} from 'cloudflare:entrypoints';
+import {WorkerEntrypoint,DurableObject} from 'cloudflare:workers';
 
 export let nonClass = {
   async noArgs(x, env, ctx) {
@@ -166,7 +166,7 @@ export let actorWithoutExtendsRejectsRpc = {
           "The receiving Durable Object does not support RPC, because its class was not declared " +
           "with `extends DurableObject`. In order to enable RPC, make sure your class " +
           "extends the special class `DurableObject`, which can be imported from the module " +
-          "\"cloudflare:entrypoints\"."
+          "\"cloudflare:workers\"."
     });
   },
 }

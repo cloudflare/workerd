@@ -184,7 +184,7 @@ public:
             "The receiving Durable Object does not support RPC, because its class was not declared "
             "with `extends DurableObject`. In order to enable RPC, make sure your class "
             "extends the special class `DurableObject`, which can be imported from the module "
-            "\"cloudflare:entrypoints\".");
+            "\"cloudflare:workers\".");
       }
 
       // `handler->ctx` is present when we're invoking a freestanding function, and therefore

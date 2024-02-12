@@ -159,7 +159,7 @@ public:
   JSG_RESOURCE_TYPE(DurableObjectBase) {}
 };
 
-// The "cloudflare:entrypoints" module, which exposes the WorkerEntrypoint and DurableObject types
+// The "cloudflare:workers" module, which exposes the WorkerEntrypoint and DurableObject types
 // for extending.
 class EntrypointsModule: public jsg::Object {
 public:
@@ -179,7 +179,7 @@ template <class Registry>
 void registerRpcModules(Registry& registry, CompatibilityFlags::Reader flags) {
   if (flags.getWorkerdExperimental()) {
     registry.template addBuiltinModule<EntrypointsModule>(
-        "cloudflare-internal:entrypoints", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+        "cloudflare-internal:workers", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   }
 }
 
