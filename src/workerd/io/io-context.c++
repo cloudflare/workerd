@@ -606,7 +606,8 @@ auto IoContext::TimeoutManagerImpl::addState(
     auto& state = it->second;
     auto delay = state.params.msDelay;
     auto repeat = state.params.repeat;
-    KJ_FAIL_ASSERT("Saw a timeout id collision", getTimeoutCount(), id.toNumber(), delay, repeat);
+    KJ_FAIL_ASSERT("Saw a timeout id collision", getTimeoutCount(), timeoutsStarted, id.toNumber(),
+        delay, repeat);
   }
 
   return { id, it };
