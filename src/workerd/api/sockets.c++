@@ -263,33 +263,7 @@ jsg::Ref<Socket> connectImpl(
   return connectImplNoOutputLock(js, kj::mv(fetcher), kj::mv(address), kj::mv(options));
 }
 
-// Closes the underlying socket connection. This is an old implementation and will be removed soon.
-// See closeImplNew below for the new implementation.
-//
-// TODO(later): remove once safe
-jsg::Promise<void> Socket::closeImplOld(jsg::Lock& js) {
-  // Forcibly close the readable/writable streams.
-  auto cancelPromise = readable->getController().cancel(js, kj::none);
-  auto abortPromise = writable->getController().abort(js, kj::none);
-  // The below is effectively `Promise.all(cancelPromise, abortPromise)`
-  return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise), this](jsg::Lock& js) mutable {
-    return abortPromise.then(js, [this](jsg::Lock& js) {
-      resolveFulfiller(js, kj::none);
-      return js.resolvedPromise();
-    }, [this](jsg::Lock& js, jsg::Value err) {
-      errorHandler(js, kj::mv(err));
-      return js.resolvedPromise();
-    });
-  }, [this](jsg::Lock& js, jsg::Value err) {
-    errorHandler(js, kj::mv(err));
-    return js.resolvedPromise();
-  });
-}
-
-// Closes the underlying socket connection, but only after the socket connection is properly
-// established through any configured proxy. This method also flushes the writable stream prior to
-// closing.
-jsg::Promise<void> Socket::closeImplNew(jsg::Lock& js) {
+jsg::Promise<void> Socket::close(jsg::Lock& js) {
   if (isClosing) {
     return closedPromiseCopy.whenResolved(js);
   }
@@ -320,14 +294,6 @@ jsg::Promise<void> Socket::closeImplNew(jsg::Lock& js) {
   }).catch_(js, [this](jsg::Lock& js, jsg::Value err) {
     errorHandler(js, kj::mv(err));
   });
-}
-
-jsg::Promise<void> Socket::close(jsg::Lock& js) {
-  if (util::Autogate::isEnabled(util::AutogateKey::SOCKETS_AWAIT_PROXY_BEFORE_CLOSE)) {
-    return closeImplNew(js);
-  } else {
-    return closeImplOld(js);
-  }
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {

@@ -84,6 +84,10 @@ public:
   }
 
   // Closes the socket connection.
+  //
+  // The closure is only performed after the socket connection is properly
+  // established through any configured proxy. This method also flushes the writable stream prior to
+  // closing.
   jsg::Promise<void> close(jsg::Lock& js);
 
   // Flushes write buffers then performs a TLS handshake on the current Socket connection.
