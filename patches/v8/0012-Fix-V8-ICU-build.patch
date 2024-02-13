@@ -1,4 +1,4 @@
-From 4c01cb76c54c8d3365c711b44413fb3da2917a11 Mon Sep 17 00:00:00 2001
+From 8ec1bbc4c6c97e087ec33192d2230e377c6fc140 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 26 Jul 2023 18:40:13 +0200
 Subject: Fix V8/ICU build
