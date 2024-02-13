@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "volatile-cache-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "volatile-cache-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "CACHE", volatileCache = (
+            id = "abc123",
+            limits = (
+              maxKeys = 2,
+              maxValueSize = 1024,
+              maxTotalValueSize = 2056,
+            ),
+          )),
+          (name = "CACHE2", volatileCache = (
+            id = "abc321",
+            limits = (
+              maxKeys = 2,
+              maxValueSize = 1024,
+              maxTotalValueSize = 2056,
+            ),
+          )),
+          (name = "CACHE3", volatileCache = (
+            id = "xyz321",
+            limits = (
+              maxKeys = 2,
+              maxValueSize = 500,
+              maxTotalValueSize = 600,
+            ),
+          ))
+        ]
+      )
+    ),
+  ],
+);
