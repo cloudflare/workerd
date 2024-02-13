@@ -6,6 +6,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/volatile-cache.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/io-channels.h>
@@ -276,7 +277,8 @@ TestFixture::TestFixture(SetupParams&& params)
       testV8System,
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
       *isolateLimitEnforcer,
-      kj::atomicRefcounted<IsolateObserver>())),
+      kj::atomicRefcounted<IsolateObserver>(),
+      volatileCacheMap)),
     workerIsolate(kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(api),
       kj::atomicRefcounted<IsolateObserver>(),

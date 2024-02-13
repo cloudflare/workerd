@@ -8,6 +8,10 @@
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/jsg/setup.h>
 
+namespace workerd::api {
+class VolatileCacheMap;
+}
+
 namespace workerd::server {
 
 // A Worker::Api implementation with support for all the APIs supported by the OSS runtime.
@@ -16,7 +20,8 @@ public:
   WorkerdApi(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
       IsolateLimitEnforcer& limitEnforcer,
-      kj::Own<jsg::IsolateObserver> observer);
+      kj::Own<jsg::IsolateObserver> observer,
+      api::VolatileCacheMap& volatileCacheMap);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
@@ -116,6 +121,23 @@ public:
         };
       }
     };
+
+    struct VolatileCache {
+      kj::String cacheId;
+      uint32_t maxKeys;
+      uint32_t maxValueSize;
+      uint64_t maxTotalValueSize;
+
+      VolatileCache clone() const {
+        return VolatileCache {
+          .cacheId = kj::str(cacheId),
+          .maxKeys = maxKeys,
+          .maxValueSize = maxValueSize,
+          .maxTotalValueSize = maxTotalValueSize,
+        };
+      }
+    };
+
     struct EphemeralActorNamespace {
       uint actorChannel;
 
@@ -178,7 +200,7 @@ public:
     kj::String name;
     kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
               DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped,
-              AnalyticsEngine, Hyperdrive, UnsafeEval> value;
+              AnalyticsEngine, Hyperdrive, UnsafeEval, VolatileCache> value;
 
     Global clone() const;
   };

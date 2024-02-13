@@ -386,6 +386,17 @@ struct Worker {
       unsafeEval @23 :Void;
       # A simple binding that enables access to the UnsafeEval API.
 
+      volatileCache :group {
+        # A binding representing access to an in-memory cache.
+
+        id @24 :Text;
+        # The identifier associated with this cache. Any number of isolates
+        # can access the same in-memory cache (within the same process), and
+        # each worker may use any number of in-memory caches.
+
+        limits @25 :VolatileCacheLimits;
+      }
+
       # TODO(someday): dispatch, other new features
     }
 
@@ -481,6 +492,12 @@ struct Worker {
         wrapKey @6;
         unwrapKey @7;
       }
+    }
+
+    struct VolatileCacheLimits {
+      maxKeys @0 :UInt32;
+      maxValueSize @1 :UInt32;
+      maxTotalValueSize @2 :UInt64;
     }
 
     struct WrappedBinding {
