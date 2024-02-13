@@ -1551,3 +1551,99 @@ KJ_DEFER(key->reset());
 // with the scope exits.
 ```
 
+## `jsg::MemoryTracker` and heap snapshot detail collection
+
+The `jsg::MemoryTracker` is used to integrate with v8's `BuildEmbedderGraph` API.
+It constructs the graph of embedder objects to be included in a generated
+heap snapshot.
+
+The API is implemented using a visitor pattern. V8 calls the `BuilderEmbedderGraph`
+callback (set in `setup.h`) which in turn begins walking through the known embedder
+objects collecting the necessary information include in the heap snapshot.
+Generally this information consists only of the names of fields, and the sizes of
+any memory-retaining values represented by the fields (e.g. heap allocations).
+
+To instrument a struct or class so that it can be included in the graph, the
+type must implement *at least* the following three methods:
+
+ * `kj::StringPtr jsgGetMemoryName() const;`
+ * `size_t jsgGetMemorySelfSize() const;`
+ * `void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;`
+
+The `jsgGetMemoryName()` method returns the name that will be used to identify
+the type in the graph. This will be prefixed with `workerd / ` in the actual
+generated snapshot. For instance, if this method returns `"Foo"_kjc`, the heap
+snapshot will contain `"workerd / Foo"`.
+
+The `jsgGetMemorySelfSize()` method returns the *shallow* size of the type.
+This would typically be implemented using `sizeof(Type)`, and in the vast
+majority of cases that's all it does. It is provided as a method, however,
+in order to allow a type the ability to customize the size calculation.
+
+The `jsgGetMemoryInfo(...)` method is the method that is actually called to
+collect details for the graph. Note that this method is NOT expected to be called
+within the scope of an `IoContext`. It *will* be called while within the isolate
+lock, however.
+
+Types may also implement the following additional methods to further customize
+how they are represented in the graph:
+
+ * `v8::Local<v8::Object> jsgGetMemoryInfoWrapperObject();`
+ * `MemoryInfoDetachedState jsgGetMemoryInfoDetachedState() const;`
+ * `bool jsgGetMemoryInfoIsRootNode() const;`
+
+Note that the `jsgGetMemoryInfoWrapperObject()` method is called from within
+a `v8::HandleScope`.
+
+For extremely simple cases, the `JSG_MEMORY_INFO` macro can be used to simplify
+implementing these methods. It is a shortcut that provides basic implementations
+of the `jsgGetMemoryName()` and `jsgGetMemorySelfSize()` methods:
+
+```cpp
+JSG_MEMORY_INFO(Foo) {
+  tracker.trackField("bar", bar);
+}
+```
+
+... is equivalent to:
+
+```cpp
+  kj::StringPtr jsgGetMemoryName() const { return "Foo"_kjc; }
+
+  size_t jsgGetMemorySelfSize() const { return sizeof(Foo); }
+
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("bar", bar);
+  }
+```
+
+All `jsg::Object` instances provide a basic implementation of these methods.
+Within a `jsg::Object`, your only responsibility would be to implement the
+helper `visitForMemoryInfo(jsg::MemoryTracker& tracker) const` method only
+if the type has additional fields that need to be tracked. This works a
+lot like the `visitForGc(...)` method used for gc tracing:
+
+```cpp
+class Foo : public jsg::Object {
+public:
+  JSG_RESOURCE_TYPE(Foo) {}
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("bar", bar);
+  }
+  // ...
+};
+```
+
+The constructed graph should include any fields that materially contribute
+the retained memory of the type. This graph is primarily used for analysis
+and investigation of memory issues in an application (e.g. hunting down
+memory leaks, detecting bugs, optimizing memory usage, etc) so the information
+should include details that are most useful for those purposes.
+This code is only ever called when a heap snapshot is being generated so
+typically it should have very little cost. Heap snapshots are generally
+fairly expensive to create, however, so care should be taken not to make
+things too complicated. Ideally, none of the implementation methods in a
+type should allocate. There is some allocation occuring internally while
+building the graph, of course, but the methods for visitation (in particular
+the `jsgGetMemoryInfo(...)` method) should not perform any allocations if it
+can be avoided.
