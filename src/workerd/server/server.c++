@@ -2494,6 +2494,17 @@ static kj::Maybe<WorkerdApi::Global> createBinding(
       }
       return makeGlobal(Global::UnsafeEval {});
     }
+    case config::Worker::Binding::VOLATILE_CACHE: {
+      auto cache = binding.getVolatileCache();
+      KJ_REQUIRE(cache.hasId() && cache.hasLimits());
+      Global::VolatileCache cacheCopy;
+      cacheCopy.cacheId = kj::str(cache.getId());
+      auto limits = cache.getLimits();
+      cacheCopy.maxKeys = limits.getMaxKeys();
+      cacheCopy.maxValueSize = limits.getMaxValueSize();
+      cacheCopy.maxTotalValueSize = limits.getMaxTotalValueSize();
+      return makeGlobal(kj::mv(cacheCopy));
+    }
   }
   errorReporter.addError(kj::str(
       errorContext, "has unrecognized type. Was the config compiled with a newer version of "
@@ -2616,7 +2627,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   auto api = kj::heap<WorkerdApi>(globalContext->v8System,
                                   featureFlags.asReader(),
                                   *limitEnforcer,
-                                  kj::atomicAddRef(*observer));
+                                  kj::atomicAddRef(*observer),
+                                  volatileCacheMap);
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
