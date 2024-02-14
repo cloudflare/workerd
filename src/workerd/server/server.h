@@ -9,7 +9,7 @@
 #include <kj/one-of.h>
 #include <kj/async-io.h>
 #include <workerd/io/worker.h>
-#include <workerd/api/volatile-cache.h>
+#include <workerd/api/memory-cache.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/sqlite.h>
 #include <workerd/server/alarm-scheduler.h>
@@ -95,7 +95,7 @@ private:
 
   Worker::ConsoleMode consoleMode;
 
-  api::VolatileCacheMap volatileCacheMap;
+  api::MemoryCacheMap memoryCacheMap;
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;

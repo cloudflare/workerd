@@ -30,7 +30,7 @@
 #include <workerd/api/trace.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/urlpattern.h>
-#include <workerd/api/volatile-cache.h>
+#include <workerd/api/memory-cache.h>
 #include <workerd/api/node/node.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/util/thread-scopes.h>
@@ -84,7 +84,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_STREAMS_ISOLATE_TYPES,
   EW_TRACE_ISOLATE_TYPES,
   EW_UNSAFE_ISOLATE_TYPES,
-  EW_VOLATILE_CACHE_ISOLATE_TYPES,
+  EW_MEMORY_CACHE_ISOLATE_TYPES,
   EW_URL_ISOLATE_TYPES,
   EW_URL_STANDARD_ISOLATE_TYPES,
   EW_URLPATTERN_ISOLATE_TYPES,
@@ -108,7 +108,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 struct WorkerdApi::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
   JsgWorkerdIsolate jsgIsolate;
-  api::VolatileCacheMap& volatileCacheMap;
+  api::MemoryCacheMap& memoryCacheMap;
 
   class Configuration {
   public:
@@ -129,10 +129,10 @@ struct WorkerdApi::Impl {
        CompatibilityFlags::Reader featuresParam,
        IsolateLimitEnforcer& limitEnforcer,
        kj::Own<jsg::IsolateObserver> observer,
-       api::VolatileCacheMap& volatileCacheMap)
+       api::MemoryCacheMap& memoryCacheMap)
       : features(capnp::clone(featuresParam)),
         jsgIsolate(v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
-        volatileCacheMap(volatileCacheMap) {}
+        memoryCacheMap(memoryCacheMap) {}
 
   static v8::Local<v8::String> compileTextGlobal(JsgWorkerdIsolate::Lock& lock,
       capnp::Text::Reader reader) {
@@ -172,8 +172,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     CompatibilityFlags::Reader features,
     IsolateLimitEnforcer& limitEnforcer,
     kj::Own<jsg::IsolateObserver> observer,
-    api::VolatileCacheMap& volatileCacheMap)
-    : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer), volatileCacheMap)) {}
+    api::MemoryCacheMap& memoryCacheMap)
+    : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer), memoryCacheMap)) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -572,7 +572,7 @@ static v8::Local<v8::Value> createBindingValue(
     const WorkerdApi::Global& global,
     CompatibilityFlags::Reader featureFlags,
     uint32_t ownerId,
-    api::VolatileCacheMap& volatileCacheMap) {
+    api::MemoryCacheMap& memoryCacheMap) {
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   using Global = WorkerdApi::Global;
   auto context = lock.v8Context();
@@ -638,13 +638,13 @@ static v8::Local<v8::Value> createBindingValue(
       value = lock.wrap(context, kj::mv(importedKey));
     }
 
-    KJ_CASE_ONEOF(cache, Global::VolatileCache) {
-      api::SharedVolatileCache::Limits limits = {.maxKeys = cache.maxKeys,
+    KJ_CASE_ONEOF(cache, Global::MemoryCache) {
+      api::SharedMemoryCache::Limits limits = {.maxKeys = cache.maxKeys,
         .maxValueSize = cache.maxValueSize,
         .maxTotalValueSize = cache.maxTotalValueSize};
-      api::SharedVolatileCache& sharedCache = volatileCacheMap.getInstance(cache.cacheId);
-      api::SharedVolatileCache::Use cacheUse(sharedCache, limits);
-      value = lock.wrap(context, jsg::alloc<api::VolatileCache>(kj::mv(cacheUse)));
+      api::SharedMemoryCache& sharedCache = memoryCacheMap.getInstance(cache.cacheId);
+      api::SharedMemoryCache::Use cacheUse(sharedCache, limits);
+      value = lock.wrap(context, jsg::alloc<api::MemoryCache>(kj::mv(cacheUse)));
     }
 
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
@@ -686,7 +686,7 @@ static v8::Local<v8::Value> createBindingValue(
         for (const auto& innerBinding: wrapped.innerBindings) {
           lock.v8Set(env, innerBinding.name,
                      createBindingValue(lock, innerBinding, featureFlags, ownerId,
-                                         volatileCacheMap));
+                                         memoryCacheMap));
         }
 
         // obtain exported function to call
@@ -729,7 +729,7 @@ void WorkerdApi::compileGlobals(
       lockParam.withinHandleScope([&] {
         // Don't use String's usual TypeHandler here because we want to intern the string.
         auto value = createBindingValue(lock, global, featureFlags, ownerId,
-                                        impl->volatileCacheMap);
+                                        impl->memoryCacheMap);
         KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
         lockParam.v8Set(target, global.name, value);
       });
@@ -771,7 +771,7 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
     KJ_CASE_ONEOF(key, Global::CryptoKey) {
       result.value = key.clone();
     }
-    KJ_CASE_ONEOF(cache, Global::VolatileCache) {
+    KJ_CASE_ONEOF(cache, Global::MemoryCache) {
       result.value = cache.clone();
     }
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {

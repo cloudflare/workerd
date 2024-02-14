@@ -1,4 +1,4 @@
-#include "volatile-cache.h"
+#include "memory-cache.h"
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
@@ -34,7 +34,7 @@ static bool hasExpired(const kj::Maybe<double>& expiration, bool allowOutsideIoC
   return false;
 }
 
-void SharedVolatileCache::suggest(const Limits& limits) {
+void SharedMemoryCache::suggest(const Limits& limits) {
   auto data = this->data.lockExclusive();
   bool isKnownLimit = data->suggestedLimits.find(limits) != data->suggestedLimits.end();
   data->suggestedLimits.insert(limits);
@@ -43,7 +43,7 @@ void SharedVolatileCache::suggest(const Limits& limits) {
   }
 }
 
-void SharedVolatileCache::unsuggest(const Limits& limits) {
+void SharedMemoryCache::unsuggest(const Limits& limits) {
   auto data = this->data.lockExclusive();
   auto loc = data->suggestedLimits.find(limits);
   KJ_ASSERT(loc != data->suggestedLimits.end());
@@ -51,7 +51,7 @@ void SharedVolatileCache::unsuggest(const Limits& limits) {
   resize(*data);
 }
 
-void SharedVolatileCache::resize(ThreadUnsafeData& data) {
+void SharedMemoryCache::resize(ThreadUnsafeData& data) {
   data.effectiveLimits = Limits::min();
   for (const auto& limits: data.suggestedLimits) {
     data.effectiveLimits = Limits::max(data.effectiveLimits, limits.normalize());
@@ -71,7 +71,7 @@ void SharedVolatileCache::resize(ThreadUnsafeData& data) {
 
   // First, remove any values that might be too large.
   while (data.cache.size() != 0) {
-    VolatileCacheEntry& largestEntry = *data.cache.ordered<2>().begin();
+    MemoryCacheEntry& largestEntry = *data.cache.ordered<2>().begin();
     if (largestEntry.size() <= data.effectiveLimits.maxValueSize) {
       break;
     }
@@ -86,7 +86,7 @@ void SharedVolatileCache::resize(ThreadUnsafeData& data) {
   }
 }
 
-kj::Maybe<kj::Own<CacheValue>> SharedVolatileCache::getWhileLocked(
+kj::Maybe<kj::Own<CacheValue>> SharedMemoryCache::getWhileLocked(
     ThreadUnsafeData& data, const kj::String& key) {
   KJ_IF_SOME(existingCacheEntry, data.cache.find(key)) {
     if (hasExpired(existingCacheEntry.expiration)) {
@@ -101,7 +101,7 @@ kj::Maybe<kj::Own<CacheValue>> SharedVolatileCache::getWhileLocked(
     auto cacheValue = kj::atomicAddRef(*existingCacheEntry.value);
 
     // Update the liveliness.
-    VolatileCacheEntry entry = data.cache.release(existingCacheEntry);
+    MemoryCacheEntry entry = data.cache.release(existingCacheEntry);
     entry.liveliness = data.stepLiveliness();
     data.cache.insert(kj::mv(entry));
 
@@ -111,7 +111,7 @@ kj::Maybe<kj::Own<CacheValue>> SharedVolatileCache::getWhileLocked(
   }
 }
 
-void SharedVolatileCache::putWhileLocked(ThreadUnsafeData& data,
+void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
     const kj::String& key,
     kj::Own<CacheValue>&& value,
     kj::Maybe<double> expiration) {
@@ -130,11 +130,11 @@ void SharedVolatileCache::putWhileLocked(ThreadUnsafeData& data,
     return;
   }
 
-  kj::Maybe<VolatileCacheEntry&> existingEntry = data.cache.find(key.asPtr());
+  kj::Maybe<MemoryCacheEntry&> existingEntry = data.cache.find(key.asPtr());
   KJ_IF_SOME(entry, existingEntry) {
     size_t oldValueSize = entry.size();
     KJ_ASSERT(data.totalValueSize >= oldValueSize);
-    VolatileCacheEntry updatedEntry = data.cache.release(entry);
+    MemoryCacheEntry updatedEntry = data.cache.release(entry);
     data.totalValueSize -= oldValueSize;
     while (data.totalValueSize + valueSize > data.effectiveLimits.maxTotalValueSize) {
       // We have already released the existing entry for our key, so there is no
@@ -155,7 +155,7 @@ void SharedVolatileCache::putWhileLocked(ThreadUnsafeData& data,
     while (data.totalValueSize + valueSize > data.effectiveLimits.maxTotalValueSize) {
       evictNextWhileLocked(data);
     }
-    VolatileCacheEntry newEntry = {
+    MemoryCacheEntry newEntry = {
       kj::str(key),
       data.stepLiveliness(),
       kj::mv(value),
@@ -166,12 +166,12 @@ void SharedVolatileCache::putWhileLocked(ThreadUnsafeData& data,
   }
 }
 
-void SharedVolatileCache::evictNextWhileLocked(ThreadUnsafeData& data, bool allowOutsideIoContext) {
+void SharedMemoryCache::evictNextWhileLocked(ThreadUnsafeData& data, bool allowOutsideIoContext) {
   // The caller is responsible for ensuring that the cache is not empty already.
   KJ_REQUIRE(data.cache.size() > 0);
 
   // If there is an entry that has expired already, evict that one.
-  VolatileCacheEntry& maybeExpired = *data.cache.ordered<3>().begin();
+  MemoryCacheEntry& maybeExpired = *data.cache.ordered<3>().begin();
   KJ_ASSERT(data.totalValueSize >= maybeExpired.size());
   if (hasExpired(maybeExpired.expiration, allowOutsideIoContext)) {
     data.totalValueSize -= maybeExpired.size();
@@ -180,13 +180,13 @@ void SharedVolatileCache::evictNextWhileLocked(ThreadUnsafeData& data, bool allo
   }
 
   // Otherwise, if no entry has expired, evict the least recently used entry.
-  VolatileCacheEntry& leastRecentlyUsed = *data.cache.ordered<1>().begin();
+  MemoryCacheEntry& leastRecentlyUsed = *data.cache.ordered<1>().begin();
   KJ_ASSERT(data.totalValueSize >= leastRecentlyUsed.size());
   data.totalValueSize -= leastRecentlyUsed.size();
   data.cache.erase(leastRecentlyUsed);
 }
 
-void SharedVolatileCache::removeIfExistsWhileLocked(ThreadUnsafeData& data, const kj::String& key) {
+void SharedMemoryCache::removeIfExistsWhileLocked(ThreadUnsafeData& data, const kj::String& key) {
   KJ_IF_SOME(entry, data.cache.find(key)) {
     // This DOES NOT count as an eviction because it might happen while
     // replacing the existing cache entry with a new one, when the new one is
@@ -198,13 +198,13 @@ void SharedVolatileCache::removeIfExistsWhileLocked(ThreadUnsafeData& data, cons
   }
 }
 
-kj::Maybe<kj::Own<CacheValue>> SharedVolatileCache::Use::getWithoutFallback(const kj::String& key) {
+kj::Maybe<kj::Own<CacheValue>> SharedMemoryCache::Use::getWithoutFallback(const kj::String& key) {
   auto data = cache.data.lockExclusive();
   return cache.getWhileLocked(*data, key);
 }
 
-kj::OneOf<kj::Own<CacheValue>, kj::Promise<SharedVolatileCache::Use::GetWithFallbackOutcome>>
-SharedVolatileCache::Use::getWithFallback(const kj::String& key) {
+kj::OneOf<kj::Own<CacheValue>, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>
+SharedMemoryCache::Use::getWithFallback(const kj::String& key) {
   auto data = cache.data.lockExclusive();
   KJ_IF_SOME(existingValue, cache.getWhileLocked(*data, key)) {
     return kj::mv(existingValue);
@@ -225,7 +225,7 @@ SharedVolatileCache::Use::getWithFallback(const kj::String& key) {
   }
 }
 
-SharedVolatileCache::Use::FallbackDoneCallback SharedVolatileCache::Use::prepareFallback(
+SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::Use::prepareFallback(
     InProgress& inProgress) {
   // We need to detect if the Promise that we are about to create ever settles,
   // as opposed to being destroyed without either being resolved or rejecting.
@@ -267,7 +267,7 @@ SharedVolatileCache::Use::FallbackDoneCallback SharedVolatileCache::Use::prepare
   };
 }
 
-void SharedVolatileCache::Use::handleFallbackFailure(InProgress& inProgress) {
+void SharedMemoryCache::Use::handleFallbackFailure(InProgress& inProgress) {
   kj::Own<kj::CrossThreadPromiseFulfiller<GetWithFallbackOutcome>> nextFulfiller;
 
   // If there is another queued fallback, retrieve it and remove it from the
@@ -322,7 +322,7 @@ static kj::Own<CacheValue> hackySerialize(jsg::Lock& js, jsg::JsRef<jsg::JsValue
   });
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsValue>> VolatileCache::read(jsg::Lock& js,
+jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
     jsg::NonCoercible<kj::String> key,
     jsg::Optional<FallbackFunction> optionalFallback) {
   if (key.value.size() > MAX_KEY_SIZE) {
@@ -336,17 +336,17 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> VolatileCache::read(jsg::Lock& js,
         jsg::Deserializer deserializer(js, result->bytes.asPtr());
         return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
       }
-      KJ_CASE_ONEOF(promise, kj::Promise<SharedVolatileCache::Use::GetWithFallbackOutcome>) {
+      KJ_CASE_ONEOF(promise, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>) {
         return IoContext::current().awaitIo(js, kj::mv(promise),
             [fallback = kj::mv(fallback), key = kj::str(key.value)](
-                jsg::Lock& js, SharedVolatileCache::Use::GetWithFallbackOutcome cacheResult) mutable
+                jsg::Lock& js, SharedMemoryCache::Use::GetWithFallbackOutcome cacheResult) mutable
             -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
           KJ_SWITCH_ONEOF(cacheResult) {
             KJ_CASE_ONEOF(serialized, kj::Own<CacheValue>) {
               jsg::Deserializer deserializer(js, serialized->bytes.asPtr());
               return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
             }
-            KJ_CASE_ONEOF(callback, SharedVolatileCache::Use::FallbackDoneCallback) {
+            KJ_CASE_ONEOF(callback, SharedMemoryCache::Use::FallbackDoneCallback) {
               auto& context = IoContext::current();
               auto heapCallback = kj::heap(kj::mv(callback));
 
@@ -361,7 +361,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> VolatileCache::read(jsg::Lock& js,
                   JSG_REQUIRE(
                       !kj::isNaN(expiration), TypeError, "Expiration time must not be NaN.");
                 }
-                (*callback)(SharedVolatileCache::Use::FallbackResult{
+                (*callback)(SharedMemoryCache::Use::FallbackResult{
                   kj::mv(serialized), result.expiration});
                 return kj::mv(result.value);
               })
@@ -387,17 +387,17 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> VolatileCache::read(jsg::Lock& js,
   }
 }
 
-SharedVolatileCache& VolatileCacheMap::getInstance(kj::StringPtr cacheId) const {
+SharedMemoryCache& MemoryCacheMap::getInstance(kj::StringPtr cacheId) const {
   auto lock = caches.lockExclusive();
   return *lock->findOrCreate(cacheId, [this, &cacheId]() {
     auto handler = additionalResizeMemoryLimitHandler.map([](
-            const SharedVolatileCache::AdditionalResizeMemoryLimitHandler& handler)
-                -> SharedVolatileCache::AdditionalResizeMemoryLimitHandler& {
-      return const_cast<SharedVolatileCache::AdditionalResizeMemoryLimitHandler&>(handler);
+            const SharedMemoryCache::AdditionalResizeMemoryLimitHandler& handler)
+                -> SharedMemoryCache::AdditionalResizeMemoryLimitHandler& {
+      return const_cast<SharedMemoryCache::AdditionalResizeMemoryLimitHandler&>(handler);
     });
     return HashMap::Entry{
       kj::str(cacheId),
-      kj::heap<SharedVolatileCache>(cacheId, handler)
+      kj::heap<SharedMemoryCache>(cacheId, handler)
     };
   });
 }

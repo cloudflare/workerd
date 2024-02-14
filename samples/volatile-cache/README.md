@@ -1,4 +1,4 @@
-# Volatile-Cache Example
+# Memory-Cache Example
 
 To run the example on http://localhost:8080
 

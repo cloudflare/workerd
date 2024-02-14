@@ -33,7 +33,7 @@ const helloWorld :Workerd.Worker = (
   compatibilityDate = "2023-02-28",
 
   bindings = [
-    (name = "CACHE", volatileCache = (
+    (name = "CACHE", memoryCache = (
       id = "abc123",
       limits = (
         maxKeys = 10,
