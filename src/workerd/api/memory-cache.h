@@ -428,30 +428,16 @@ private:
   SharedMemoryCache::Use cacheUse;
 };
 
-// Data structure that maps unique cache identifiers to cache instances.
-// This allows separate isolates to access the same in-memory caches.
-class MemoryCacheMap {
+// The MemoryCacheProvider provides the internal implementation of the MemoryCache mechanism.
+// It is responsible for owning the SharedMemoryCache instances and providing them to the
+// bindings as needed. The default implementation (created and returned by createDefault())
+// uses a simple in-memory map to store the SharedMemoryCache instances.
+class MemoryCacheProvider {
 public:
-  MemoryCacheMap(
-      kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
-          additionalResizeMemoryLimitHandler = kj::none)
-      : additionalResizeMemoryLimitHandler(kj::mv(additionalResizeMemoryLimitHandler)) {}
-  KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheMap);
+  virtual SharedMemoryCache& getInstance(kj::StringPtr cacheId) const = 0;
 
-  // Gets an existing SharedMemoryCache instance or creates a new one if no
-  // cache with the given id exists.
-  SharedMemoryCache& getInstance(kj::StringPtr cacheId) const;
-
-private:
-  using HashMap = kj::HashMap<kj::String, kj::Own<SharedMemoryCache>>;
-
-  kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
-      additionalResizeMemoryLimitHandler;
-
-  // All existing in-memory caches.
-  kj::MutexGuarded<HashMap> caches;
-  // TODO(later): consider using a kj::Table with a HashIndex that uses
-  // SharedMemoryCache::uuid() instead.
+  static kj::Own<MemoryCacheProvider> createDefault(
+    kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler> additionalResizeMemoryLimitHandler = kj::none);
 };
 
 // clang-format off

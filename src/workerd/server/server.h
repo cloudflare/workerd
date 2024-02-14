@@ -95,7 +95,7 @@ private:
 
   Worker::ConsoleMode consoleMode;
 
-  api::MemoryCacheMap memoryCacheMap;
+  kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
