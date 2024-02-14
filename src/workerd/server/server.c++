@@ -2494,10 +2494,10 @@ static kj::Maybe<WorkerdApi::Global> createBinding(
       }
       return makeGlobal(Global::UnsafeEval {});
     }
-    case config::Worker::Binding::VOLATILE_CACHE: {
-      auto cache = binding.getVolatileCache();
+    case config::Worker::Binding::MEMORY_CACHE: {
+      auto cache = binding.getMemoryCache();
       KJ_REQUIRE(cache.hasId() && cache.hasLimits());
-      Global::VolatileCache cacheCopy;
+      Global::MemoryCache cacheCopy;
       cacheCopy.cacheId = kj::str(cache.getId());
       auto limits = cache.getLimits();
       cacheCopy.maxKeys = limits.getMaxKeys();
@@ -2628,7 +2628,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
                                   featureFlags.asReader(),
                                   *limitEnforcer,
                                   kj::atomicAddRef(*observer),
-                                  volatileCacheMap);
+                                  memoryCacheMap);
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.

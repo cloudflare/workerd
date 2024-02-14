@@ -2,15 +2,15 @@ using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "volatile-cache-test",
+    ( name = "memory-cache-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "volatile-cache-test.js")
+          (name = "worker", esModule = embed "memory-cache-test.js")
         ],
         compatibilityDate = "2023-01-15",
         compatibilityFlags = ["nodejs_compat"],
         bindings = [
-          (name = "CACHE", volatileCache = (
+          (name = "CACHE", memoryCache = (
             id = "abc123",
             limits = (
               maxKeys = 2,
@@ -18,7 +18,7 @@ const unitTests :Workerd.Config = (
               maxTotalValueSize = 2056,
             ),
           )),
-          (name = "CACHE2", volatileCache = (
+          (name = "CACHE2", memoryCache = (
             id = "abc321",
             limits = (
               maxKeys = 2,
@@ -26,7 +26,7 @@ const unitTests :Workerd.Config = (
               maxTotalValueSize = 2056,
             ),
           )),
-          (name = "CACHE3", volatileCache = (
+          (name = "CACHE3", memoryCache = (
             id = "xyz321",
             limits = (
               maxKeys = 2,

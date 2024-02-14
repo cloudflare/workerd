@@ -9,7 +9,7 @@
 #include <workerd/jsg/setup.h>
 
 namespace workerd::api {
-class VolatileCacheMap;
+class MemoryCacheMap;
 }
 
 namespace workerd::server {
@@ -21,7 +21,7 @@ public:
       CompatibilityFlags::Reader features,
       IsolateLimitEnforcer& limitEnforcer,
       kj::Own<jsg::IsolateObserver> observer,
-      api::VolatileCacheMap& volatileCacheMap);
+      api::MemoryCacheMap& memoryCacheMap);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
@@ -122,14 +122,14 @@ public:
       }
     };
 
-    struct VolatileCache {
+    struct MemoryCache {
       kj::String cacheId;
       uint32_t maxKeys;
       uint32_t maxValueSize;
       uint64_t maxTotalValueSize;
 
-      VolatileCache clone() const {
-        return VolatileCache {
+      MemoryCache clone() const {
+        return MemoryCache {
           .cacheId = kj::str(cacheId),
           .maxKeys = maxKeys,
           .maxValueSize = maxValueSize,
@@ -200,7 +200,7 @@ public:
     kj::String name;
     kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
               DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped,
-              AnalyticsEngine, Hyperdrive, UnsafeEval, VolatileCache> value;
+              AnalyticsEngine, Hyperdrive, UnsafeEval, MemoryCache> value;
 
     Global clone() const;
   };

@@ -17,7 +17,7 @@ struct CacheValue: kj::AtomicRefcounted {
   kj::Array<kj::byte> bytes;
 };
 
-struct VolatileCacheEntry {
+struct MemoryCacheEntry {
   // The key that this entry is associated with.
   kj::String key;
 
@@ -57,7 +57,7 @@ struct CacheValueProduceResult {
 
 // An in-memory cache that can be accessed by any number of workers/isolates
 // within the same process.
-class SharedVolatileCache {
+class SharedMemoryCache {
 private:
   struct InProgress;
   struct ThreadUnsafeData;
@@ -112,11 +112,11 @@ public:
     }
   };
 
-  KJ_DISALLOW_COPY_AND_MOVE(SharedVolatileCache);
+  KJ_DISALLOW_COPY_AND_MOVE(SharedMemoryCache);
 
   using AdditionalResizeMemoryLimitHandler = kj::Function<void(ThreadUnsafeData&)>;
 
-  SharedVolatileCache(const kj::StringPtr& uuid,
+  SharedMemoryCache(const kj::StringPtr& uuid,
       kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler)
       : data(),
         additionalResizeMemoryLimitHandler(additionalResizeMemoryLimitHandler),
@@ -134,7 +134,7 @@ public:
   public:
     KJ_DISALLOW_COPY(Use);
 
-    Use(SharedVolatileCache& cache, const Limits& limits): cache(cache), limits(limits) {
+    Use(SharedMemoryCache& cache, const Limits& limits): cache(cache), limits(limits) {
       cache.suggest(limits);
     }
     Use(Use&& other): cache(other.cache), limits(other.limits) { cache.suggest(limits); }
@@ -176,7 +176,7 @@ public:
     // erased.
     void handleFallbackFailure(InProgress& inProgress);
 
-    SharedVolatileCache& cache;
+    SharedMemoryCache& cache;
     Limits limits;
   };
 
@@ -212,12 +212,12 @@ private:
   };
 
   // Called when initializing globals (i.e., bindings) for an isolate. Each
-  // cache binding holds one SharedVolatileCache::Use, which automatically calls
+  // cache binding holds one SharedMemoryCache::Use, which automatically calls
   // this function when created. This call will never reduce the effective cache
   // limits, but might increase them.
   void suggest(const Limits& limits);
 
-  // Called when a cache global and its associated SharedVolatileCache::Use is
+  // Called when a cache global and its associated SharedMemoryCache::Use is
   // destroyed. This call might reduce the effective cache limits. If all uses
   // have been destroyed, the effective limits will be reset to Limits::min(),
   // effectively clearing the cache.
@@ -255,10 +255,10 @@ private:
   // operations.
   class KeyCallbacks {
   public:
-    inline const kj::String& keyForRow(const VolatileCacheEntry& entry) const { return entry.key; }
+    inline const kj::String& keyForRow(const MemoryCacheEntry& entry) const { return entry.key; }
 
     template <typename KeyLike>
-    inline bool matches(const VolatileCacheEntry& e, KeyLike&& key) const {
+    inline bool matches(const MemoryCacheEntry& e, KeyLike&& key) const {
       return e.key == key;
     }
 
@@ -272,17 +272,17 @@ private:
   // liveliness. This is used to evict the least recently used entry.
   class LivelinessCallbacks {
   public:
-    inline const uint64_t& keyForRow(const VolatileCacheEntry& entry) const {
+    inline const uint64_t& keyForRow(const MemoryCacheEntry& entry) const {
       return entry.liveliness;
     }
 
     template <typename KeyLike>
-    inline bool matches(const VolatileCacheEntry& e, KeyLike&& key) const {
+    inline bool matches(const MemoryCacheEntry& e, KeyLike&& key) const {
       return e.liveliness == key;
     }
 
     template <typename KeyLike>
-    inline bool isBefore(const VolatileCacheEntry& e, KeyLike&& key) const {
+    inline bool isBefore(const MemoryCacheEntry& e, KeyLike&& key) const {
       return e.liveliness < key;
     }
   };
@@ -294,17 +294,17 @@ private:
   // when a new version of a worker is deployed.
   class ValueSizeCallbacks {
   public:
-    inline const VolatileCacheEntry& keyForRow(const VolatileCacheEntry& entry) const {
+    inline const MemoryCacheEntry& keyForRow(const MemoryCacheEntry& entry) const {
       return entry;
     }
 
     template <typename KeyLike>
-    inline bool matches(const VolatileCacheEntry& e, KeyLike&& key) const {
+    inline bool matches(const MemoryCacheEntry& e, KeyLike&& key) const {
       return e.size() == key.size() && e.key == key.key;
     }
 
     template <typename KeyLike>
-    inline bool isBefore(const VolatileCacheEntry& e, KeyLike&& key) const {
+    inline bool isBefore(const MemoryCacheEntry& e, KeyLike&& key) const {
       size_t szl = e.size(), szr = key.size();
       if (szl != szr) return szl > szr;
       return e.key < key.key;
@@ -317,17 +317,17 @@ private:
   // at the very end, ordered by their cache keys.
   class ExpirationCallbacks {
   public:
-    inline const VolatileCacheEntry& keyForRow(const VolatileCacheEntry& entry) const {
+    inline const MemoryCacheEntry& keyForRow(const MemoryCacheEntry& entry) const {
       return entry;
     }
 
     template <typename KeyLike>
-    inline bool matches(const VolatileCacheEntry& e, KeyLike&& key) const {
+    inline bool matches(const MemoryCacheEntry& e, KeyLike&& key) const {
       return e.expiration == key.expiration && e.key == key.key;
     }
 
     template <typename KeyLike>
-    inline bool isBefore(const VolatileCacheEntry& e, KeyLike&& key) const {
+    inline bool isBefore(const MemoryCacheEntry& e, KeyLike&& key) const {
       const kj::Maybe<double>&expl = e.expiration, expr = key.expiration;
       if (expl != expr) return isBefore(expl, expr);
       return e.key < key.key;
@@ -376,7 +376,7 @@ private:
     size_t totalValueSize = 0;
 
     // The actual cache contents.
-    kj::Table<VolatileCacheEntry,            // row type
+    kj::Table<MemoryCacheEntry,            // row type
         kj::HashIndex<KeyCallbacks>,         // index over keys
         kj::TreeIndex<LivelinessCallbacks>,  // index over liveliness
         kj::TreeIndex<ValueSizeCallbacks>,   // index over value sizes
@@ -407,12 +407,12 @@ private:
 };
 
 // JavaScript class that allows accessing an in-memory cache.
-// Each instance of this class holds a SharedVolatileCache::Use object and
+// Each instance of this class holds a SharedMemoryCache::Use object and
 // all calls from JavaScript are essentially forwarded to that object, which
 // manages interaction with the shared cache in a thread-safe manner.
-class VolatileCache: public jsg::Object {
+class MemoryCache: public jsg::Object {
 public:
-  VolatileCache(SharedVolatileCache::Use&& use): cacheUse(kj::mv(use)) {}
+  MemoryCache(SharedMemoryCache::Use&& use): cacheUse(kj::mv(use)) {}
 
   using FallbackFunction = jsg::Function<jsg::Promise<CacheValueProduceResult>(kj::String)>;
 
@@ -422,41 +422,41 @@ public:
       jsg::NonCoercible<kj::String> key,
       jsg::Optional<FallbackFunction> optionalFallback);
 
-  JSG_RESOURCE_TYPE(VolatileCache) { JSG_METHOD(read); }
+  JSG_RESOURCE_TYPE(MemoryCache) { JSG_METHOD(read); }
 
 private:
-  SharedVolatileCache::Use cacheUse;
+  SharedMemoryCache::Use cacheUse;
 };
 
 // Data structure that maps unique cache identifiers to cache instances.
 // This allows separate isolates to access the same in-memory caches.
-class VolatileCacheMap {
+class MemoryCacheMap {
 public:
-  VolatileCacheMap(
-      kj::Maybe<SharedVolatileCache::AdditionalResizeMemoryLimitHandler>
+  MemoryCacheMap(
+      kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
           additionalResizeMemoryLimitHandler = kj::none)
       : additionalResizeMemoryLimitHandler(kj::mv(additionalResizeMemoryLimitHandler)) {}
-  KJ_DISALLOW_COPY_AND_MOVE(VolatileCacheMap);
+  KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheMap);
 
-  // Gets an existing SharedVolatileCache instance or creates a new one if no
+  // Gets an existing SharedMemoryCache instance or creates a new one if no
   // cache with the given id exists.
-  SharedVolatileCache& getInstance(kj::StringPtr cacheId) const;
+  SharedMemoryCache& getInstance(kj::StringPtr cacheId) const;
 
 private:
-  using HashMap = kj::HashMap<kj::String, kj::Own<SharedVolatileCache>>;
+  using HashMap = kj::HashMap<kj::String, kj::Own<SharedMemoryCache>>;
 
-  kj::Maybe<SharedVolatileCache::AdditionalResizeMemoryLimitHandler>
+  kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
       additionalResizeMemoryLimitHandler;
 
   // All existing in-memory caches.
   kj::MutexGuarded<HashMap> caches;
   // TODO(later): consider using a kj::Table with a HashIndex that uses
-  // SharedVolatileCache::uuid() instead.
+  // SharedMemoryCache::uuid() instead.
 };
 
 // clang-format off
-#define EW_VOLATILE_CACHE_ISOLATE_TYPES                                                   \
-  api::VolatileCache,                                                                     \
+#define EW_MEMORY_CACHE_ISOLATE_TYPES                                                   \
+  api::MemoryCache,                                                                     \
   api::CacheValueProduceResult
 // clang-format on
 

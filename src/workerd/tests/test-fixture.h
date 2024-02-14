@@ -12,7 +12,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/server/workerd.capnp.h>
-#include <workerd/api/volatile-cache.h>
+#include <workerd/api/memory-cache.h>
 
 namespace workerd {
 
@@ -99,7 +99,7 @@ private:
   ThreadContext threadContext;
   kj::Own<IsolateLimitEnforcer> isolateLimitEnforcer;
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
-  api::VolatileCacheMap volatileCacheMap;
+  api::MemoryCacheMap memoryCacheMap;
   kj::Own<Worker::Api> api;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;
