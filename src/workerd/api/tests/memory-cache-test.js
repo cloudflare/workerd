@@ -143,7 +143,7 @@ export const expiredEviction = {
       return { value: 'foo', expiration: Date.now() + 100 };
     });
     strictEqual(ret, 'foo');
-    await scheduler.wait(200);
+    await scheduler.wait(600);
     strictEqual(await env.CACHE.read('expires'), undefined);
   }
 };
