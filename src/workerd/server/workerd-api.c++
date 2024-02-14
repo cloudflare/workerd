@@ -643,7 +643,8 @@ static v8::Local<v8::Value> createBindingValue(
       api::SharedMemoryCache::Limits limits = {.maxKeys = cache.maxKeys,
         .maxValueSize = cache.maxValueSize,
         .maxTotalValueSize = cache.maxTotalValueSize};
-      api::SharedMemoryCache& sharedCache = memoryCacheProvider.getInstance(cache.cacheId);
+      api::SharedMemoryCache& sharedCache =
+          memoryCacheProvider.getInstance(cache.cacheId, ownerId);
       api::SharedMemoryCache::Use cacheUse(sharedCache, limits);
       value = lock.wrap(context, jsg::alloc<api::MemoryCache>(kj::mv(cacheUse)));
     }

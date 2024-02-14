@@ -434,7 +434,8 @@ private:
 // uses a simple in-memory map to store the SharedMemoryCache instances.
 class MemoryCacheProvider {
 public:
-  virtual SharedMemoryCache& getInstance(kj::StringPtr cacheId) const = 0;
+  virtual ~MemoryCacheProvider() noexcept(false) = default;
+  virtual SharedMemoryCache& getInstance(kj::StringPtr cacheId, uint32_t ownerId) const = 0;
 
   static kj::Own<MemoryCacheProvider> createDefault(
     kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler> additionalResizeMemoryLimitHandler = kj::none);

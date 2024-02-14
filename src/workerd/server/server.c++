@@ -29,6 +29,7 @@
 #include <workerd/util/http-util.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/uuid.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/api/worker-rpc.h>
 #include "workerd-api.h"
@@ -2497,9 +2498,17 @@ static kj::Maybe<WorkerdApi::Global> createBinding(
     }
     case config::Worker::Binding::MEMORY_CACHE: {
       auto cache = binding.getMemoryCache();
-      KJ_REQUIRE(cache.hasId() && cache.hasLimits());
+      // TODO(cleanup): Should we have some reasonable default for these so they can
+      // be optional?
+      KJ_REQUIRE(cache.hasLimits());
       Global::MemoryCache cacheCopy;
-      cacheCopy.cacheId = kj::str(cache.getId());
+      // The id is optional. If provided, then multiple bindings with the same id will
+      // share the same cache. Otherwise, a unique id is generated for the cache.
+      if (cache.hasId()) {
+        cacheCopy.cacheId = kj::str(cache.getId());
+      } else {
+        cacheCopy.cacheId = randomUUID(kj::none);
+      }
       auto limits = cache.getLimits();
       cacheCopy.maxKeys = limits.getMaxKeys();
       cacheCopy.maxValueSize = limits.getMaxValueSize();

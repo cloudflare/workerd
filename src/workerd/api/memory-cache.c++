@@ -402,7 +402,7 @@ public:
 
   // Gets an existing SharedMemoryCache instance or creates a new one if no
   // cache with the given id exists.
-  SharedMemoryCache& getInstance(kj::StringPtr cacheId) const override;
+  SharedMemoryCache& getInstance(kj::StringPtr cacheId, uint32_t ownerId) const override;
 
 private:
   using HashMap = kj::HashMap<kj::String, kj::Own<SharedMemoryCache>>;
@@ -416,17 +416,19 @@ private:
   // SharedMemoryCache::uuid() instead.
 };
 
-SharedMemoryCache& MemoryCacheMap::getInstance(kj::StringPtr cacheId) const {
+SharedMemoryCache& MemoryCacheMap::getInstance(
+    kj::StringPtr cacheId, uint32_t ownerId) const {
   auto lock = caches.lockExclusive();
-  return *lock->findOrCreate(cacheId, [this, &cacheId]() {
+  auto id = kj::str(cacheId, "::", ownerId);
+  return *lock->findOrCreate(id, [this, &id]() {
     auto handler = additionalResizeMemoryLimitHandler.map([](
             const SharedMemoryCache::AdditionalResizeMemoryLimitHandler& handler)
                 -> SharedMemoryCache::AdditionalResizeMemoryLimitHandler& {
       return const_cast<SharedMemoryCache::AdditionalResizeMemoryLimitHandler&>(handler);
     });
     return HashMap::Entry{
-      kj::str(cacheId),
-      kj::heap<SharedMemoryCache>(cacheId, handler)
+      kj::str(id),
+      kj::heap<SharedMemoryCache>(id, handler)
     };
   });
 }
