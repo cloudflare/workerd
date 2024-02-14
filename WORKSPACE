@@ -491,13 +491,13 @@ git_repository(
 load("@rules_python//python:repositories.bzl", "python_register_toolchains")
 
 python_register_toolchains(
-    name = "python3_11",
+    name = "python3_12",
     ignore_root_user_error = True,
     # https://github.com/bazelbuild/rules_python/blob/main/python/versions.bzl
-    python_version = "3.11",
+    python_version = "3.12",
 )
 
-load("@python3_11//:defs.bzl", "interpreter")
+load("@python3_12//:defs.bzl", "interpreter")
 load("@rules_python//python:pip.bzl", "pip_parse")
 
 pip_parse(
