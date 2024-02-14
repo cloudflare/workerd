@@ -273,12 +273,13 @@ TestFixture::TestFixture(SetupParams&& params)
     threadContext(*timer, *entropySource, threadContextHeaderBundle, httpOverCapnpFactory, byteStreamFactory, false),
     isolateLimitEnforcer(kj::heap<MockIsolateLimitEnforcer>()),
     errorReporter(kj::heap<MockErrorReporter>()),
+    memoryCacheProvider(api::MemoryCacheProvider::createDefault()),
     api(kj::heap<server::WorkerdApi>(
       testV8System,
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
       *isolateLimitEnforcer,
       kj::atomicRefcounted<IsolateObserver>(),
-      memoryCacheMap)),
+      *memoryCacheProvider)),
     workerIsolate(kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(api),
       kj::atomicRefcounted<IsolateObserver>(),

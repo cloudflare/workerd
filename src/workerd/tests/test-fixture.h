@@ -99,7 +99,7 @@ private:
   ThreadContext threadContext;
   kj::Own<IsolateLimitEnforcer> isolateLimitEnforcer;
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
-  api::MemoryCacheMap memoryCacheMap;
+  kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
   kj::Own<Worker::Api> api;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;

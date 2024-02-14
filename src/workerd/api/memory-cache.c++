@@ -387,6 +387,35 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
   }
 }
 
+// ======================================================================================
+
+namespace {
+// Data structure that maps unique cache identifiers to cache instances.
+// This allows separate isolates to access the same in-memory caches.
+class MemoryCacheMap: public MemoryCacheProvider {
+public:
+  MemoryCacheMap(
+      kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
+          additionalResizeMemoryLimitHandler = kj::none)
+      : additionalResizeMemoryLimitHandler(kj::mv(additionalResizeMemoryLimitHandler)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheMap);
+
+  // Gets an existing SharedMemoryCache instance or creates a new one if no
+  // cache with the given id exists.
+  SharedMemoryCache& getInstance(kj::StringPtr cacheId) const override;
+
+private:
+  using HashMap = kj::HashMap<kj::String, kj::Own<SharedMemoryCache>>;
+
+  kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
+      additionalResizeMemoryLimitHandler;
+
+  // All existing in-memory caches.
+  kj::MutexGuarded<HashMap> caches;
+  // TODO(later): consider using a kj::Table with a HashIndex that uses
+  // SharedMemoryCache::uuid() instead.
+};
+
 SharedMemoryCache& MemoryCacheMap::getInstance(kj::StringPtr cacheId) const {
   auto lock = caches.lockExclusive();
   return *lock->findOrCreate(cacheId, [this, &cacheId]() {
@@ -400,6 +429,12 @@ SharedMemoryCache& MemoryCacheMap::getInstance(kj::StringPtr cacheId) const {
       kj::heap<SharedMemoryCache>(cacheId, handler)
     };
   });
+}
+}  // namespace
+
+kj::Own<MemoryCacheProvider> MemoryCacheProvider::createDefault(
+    kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler> additionalResizeMemoryLimitHandler) {
+  return kj::heap<MemoryCacheMap>(kj::mv(additionalResizeMemoryLimitHandler));
 }
 
 }  // namespace workerd::api

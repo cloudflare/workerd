@@ -9,7 +9,7 @@
 #include <workerd/jsg/setup.h>
 
 namespace workerd::api {
-class MemoryCacheMap;
+class MemoryCacheProvider;
 }
 
 namespace workerd::server {
@@ -21,7 +21,7 @@ public:
       CompatibilityFlags::Reader features,
       IsolateLimitEnforcer& limitEnforcer,
       kj::Own<jsg::IsolateObserver> observer,
-      api::MemoryCacheMap& memoryCacheMap);
+      api::MemoryCacheProvider& memoryCacheProvider);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);

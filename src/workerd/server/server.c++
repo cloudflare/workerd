@@ -128,7 +128,8 @@ Server::Server(kj::Filesystem& fs, kj::Timer& timer, kj::Network& network,
                kj::EntropySource& entropySource, Worker::ConsoleMode consoleMode,
                kj::Function<void(kj::String)> reportConfigError)
     : fs(fs), timer(timer), network(network), entropySource(entropySource),
-      reportConfigError(kj::mv(reportConfigError)), consoleMode(consoleMode), tasks(*this) {}
+      reportConfigError(kj::mv(reportConfigError)), consoleMode(consoleMode),
+      memoryCacheProvider(api::MemoryCacheProvider::createDefault()), tasks(*this) {}
 
 Server::~Server() noexcept(false) {}
 
@@ -2628,7 +2629,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
                                   featureFlags.asReader(),
                                   *limitEnforcer,
                                   kj::atomicAddRef(*observer),
-                                  memoryCacheMap);
+                                  *memoryCacheProvider);
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.

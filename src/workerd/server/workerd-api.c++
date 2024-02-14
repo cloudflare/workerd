@@ -108,7 +108,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 struct WorkerdApi::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
   JsgWorkerdIsolate jsgIsolate;
-  api::MemoryCacheMap& memoryCacheMap;
+  api::MemoryCacheProvider& memoryCacheProvider;
 
   class Configuration {
   public:
@@ -129,10 +129,10 @@ struct WorkerdApi::Impl {
        CompatibilityFlags::Reader featuresParam,
        IsolateLimitEnforcer& limitEnforcer,
        kj::Own<jsg::IsolateObserver> observer,
-       api::MemoryCacheMap& memoryCacheMap)
+       api::MemoryCacheProvider& memoryCacheProvider)
       : features(capnp::clone(featuresParam)),
         jsgIsolate(v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
-        memoryCacheMap(memoryCacheMap) {}
+        memoryCacheProvider(memoryCacheProvider) {}
 
   static v8::Local<v8::String> compileTextGlobal(JsgWorkerdIsolate::Lock& lock,
       capnp::Text::Reader reader) {
@@ -172,8 +172,9 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     CompatibilityFlags::Reader features,
     IsolateLimitEnforcer& limitEnforcer,
     kj::Own<jsg::IsolateObserver> observer,
-    api::MemoryCacheMap& memoryCacheMap)
-    : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer), memoryCacheMap)) {}
+    api::MemoryCacheProvider& memoryCacheProvider)
+    : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer),
+                          memoryCacheProvider)) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -572,7 +573,7 @@ static v8::Local<v8::Value> createBindingValue(
     const WorkerdApi::Global& global,
     CompatibilityFlags::Reader featureFlags,
     uint32_t ownerId,
-    api::MemoryCacheMap& memoryCacheMap) {
+    api::MemoryCacheProvider& memoryCacheProvider) {
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   using Global = WorkerdApi::Global;
   auto context = lock.v8Context();
@@ -642,7 +643,7 @@ static v8::Local<v8::Value> createBindingValue(
       api::SharedMemoryCache::Limits limits = {.maxKeys = cache.maxKeys,
         .maxValueSize = cache.maxValueSize,
         .maxTotalValueSize = cache.maxTotalValueSize};
-      api::SharedMemoryCache& sharedCache = memoryCacheMap.getInstance(cache.cacheId);
+      api::SharedMemoryCache& sharedCache = memoryCacheProvider.getInstance(cache.cacheId);
       api::SharedMemoryCache::Use cacheUse(sharedCache, limits);
       value = lock.wrap(context, jsg::alloc<api::MemoryCache>(kj::mv(cacheUse)));
     }
@@ -686,7 +687,7 @@ static v8::Local<v8::Value> createBindingValue(
         for (const auto& innerBinding: wrapped.innerBindings) {
           lock.v8Set(env, innerBinding.name,
                      createBindingValue(lock, innerBinding, featureFlags, ownerId,
-                                         memoryCacheMap));
+                                         memoryCacheProvider));
         }
 
         // obtain exported function to call
@@ -729,7 +730,7 @@ void WorkerdApi::compileGlobals(
       lockParam.withinHandleScope([&] {
         // Don't use String's usual TypeHandler here because we want to intern the string.
         auto value = createBindingValue(lock, global, featureFlags, ownerId,
-                                        impl->memoryCacheMap);
+                                        impl->memoryCacheProvider);
         KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
         lockParam.v8Set(target, global.name, value);
       });
