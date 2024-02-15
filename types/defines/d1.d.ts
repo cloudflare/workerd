@@ -36,5 +36,6 @@ declare abstract class D1PreparedStatement {
   first<T = Record<string, unknown>>(): Promise<T | null>;
   run(): Promise<D1Response>;
   all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
-  raw<T = unknown[]>(): Promise<T[]>;
+  raw<T = unknown[]>(options: {columnNames: true}): Promise<[string[], ...T[]]>;
+  raw<T = unknown[]>(options?: {columnNames?: false}): Promise<T[]>;
 }

@@ -10,6 +10,16 @@ export const handler: ExportedHandler<{ DB: D1Database }> = {
   async fetch(request, env) {
     const stmt = env.DB.prepare(`SELECT * FROM tbl WHERE id = ?`);
 
+    // RUN
+    {
+      const response = await stmt.bind(1).run();
+      expectType<{
+        meta: Record<string, unknown>;
+        success: boolean;
+        results?: never;
+      }>(response);
+    }
+
     // ALL
     {
       const { results } = await stmt.bind(1).all();
@@ -26,8 +36,29 @@ export const handler: ExportedHandler<{ DB: D1Database }> = {
       expectType<unknown[][]>(results);
     }
     {
-      const results = await stmt.bind(1).raw<[string, string]>();
-      expectType<[string, string][]>(results);
+      const results = await stmt.bind(1).raw<[string, number, boolean]>();
+      expectType<[string, number, boolean][]>(results);
+    }
+    {
+      const results = await stmt.bind(1).raw<[string, number, boolean]>({});
+      expectType<[string, number, boolean][]>(results);
+    }
+    {
+      const results = await stmt
+        .bind(1)
+        .raw<[string, number, boolean]>({ columnNames: false });
+      expectType<[string, number, boolean][]>(results);
+    }
+    {
+      const results = await stmt.bind(1).raw({ columnNames: true });
+      expectType<[string[], ...unknown[]]>(results);
+    }
+    {
+      const [columns, ...rows] = await stmt
+        .bind(1)
+        .raw<[string, number, boolean]>({ columnNames: true });
+      expectType<string[]>(columns);
+      expectType<[string, number, boolean][]>(rows);
     }
 
     // FIRST
