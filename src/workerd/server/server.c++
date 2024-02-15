@@ -2497,6 +2497,11 @@ static kj::Maybe<WorkerdApi::Global> createBinding(
       return makeGlobal(Global::UnsafeEval {});
     }
     case config::Worker::Binding::MEMORY_CACHE: {
+      if (!experimental) {
+        errorReporter.addError(kj::str(
+          "MemoryCache bindings are an experimental feature which may change or go away "
+          "in the future. You must run workerd with `--experimental` to use this feature."));
+      }
       auto cache = binding.getMemoryCache();
       // TODO(cleanup): Should we have some reasonable default for these so they can
       // be optional?
