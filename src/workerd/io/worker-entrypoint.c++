@@ -60,7 +60,7 @@ public:
       kj::HttpConnectSettings settings) override;
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
-  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<bool> test() override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
@@ -96,7 +96,7 @@ private:
   kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
 
   kj::Promise<WorkerEntrypoint::AlarmResult> runAlarmImpl(
-      kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Date scheduledTime);
+      kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Date scheduledTime, uint32_t retryCount);
 
 public:  // For kj::heap() only; pretend this is private.
   WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
@@ -502,7 +502,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
 }
 
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
-    kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Date scheduledTime) {
+    kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Date scheduledTime, uint32_t retryCount) {
   // We want to de-duplicate alarm requests as follows:
   // - An alarm must not be canceled once it is running, UNLESS the whole actor is shut down.
   // - If multiple alarm invocations arrive with the same scheduled time, we only run one.
@@ -551,7 +551,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
       try {
         auto result = co_await context.run(
-            [scheduledTime, entrypointName=entrypointName, &context](Worker::Lock& lock){
+            [scheduledTime, retryCount, entrypointName=entrypointName, &context](Worker::Lock& lock){
           jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
           // If we have an invalid timeout, set it to the default value of 15 minutes.
@@ -562,7 +562,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
           }
 
           auto handler = lock.getExportedHandler(entrypointName, context.getActor());
-          return lock.getGlobalScope().runAlarm(scheduledTime, timeout, lock, handler);
+          return lock.getGlobalScope().runAlarm(scheduledTime, timeout, retryCount, lock, handler);
         });
 
         // The alarm handler was successfully complete. We must guarantee this same alarm does not
@@ -600,14 +600,14 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 }
 
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
-    kj::Date scheduledTime) {
+    kj::Date scheduledTime, uint32_t retryCount) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::runAlarm()");
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "runAlarm() can only be called once"));
   this->incomingRequest = kj::none;
 
   auto& context = incomingRequest->getContext();
-  auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime);
+  auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount);
   return maybeAddGcPassForTest(context, kj::mv(promise));
 }
 

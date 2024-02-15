@@ -183,6 +183,23 @@ public:
   }
 };
 
+// AlarmEventInfo is a jsg::Object used to pass alarm invocation info to an alarm handler.
+class AlarmInvocationInfo: public jsg::Object {
+public:
+  AlarmInvocationInfo(uint32_t retry): retryCount(retry) {}
+
+  bool getIsRetry() { return retryCount > 0; }
+  uint32_t getRetryCount() { return retryCount; }
+
+  JSG_RESOURCE_TYPE(AlarmInvocationInfo) {
+    JSG_READONLY_INSTANCE_PROPERTY(isRetry, getIsRetry);
+    JSG_READONLY_INSTANCE_PROPERTY(retryCount, getRetryCount);
+  }
+
+private:
+  uint32_t retryCount = 0;
+};
+
 // Type signature for handlers exported from the root module.
 //
 // We define each handler method as a LenientOptional rather than as a plain Optional in order to
@@ -202,7 +219,7 @@ struct ExportedHandler {
       jsg::Ref<ScheduledController> controller, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ScheduledHandler>> scheduled;
 
-  typedef kj::Promise<void> AlarmHandler();
+  typedef kj::Promise<void> AlarmHandler(jsg::Ref<AlarmInvocationInfo> alarmInfo);
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
@@ -313,6 +330,7 @@ public:
   kj::Promise<WorkerInterface::AlarmResult> runAlarm(
       kj::Date scheduledTime,
       kj::Duration timeout,
+      uint32_t retryCount,
       Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received test() (called from C++, not JS). See WorkerInterface::test(). This version returns
@@ -691,6 +709,7 @@ private:
   api::ServiceWorkerGlobalScope::StructuredCloneOptions, \
   api::PromiseRejectionEvent,                            \
   api::Navigator,                                        \
-  api::Performance
+  api::Performance,                                      \
+  api::AlarmInvocationInfo
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

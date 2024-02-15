@@ -112,7 +112,7 @@ private:
     bool retry;
     bool retryCountsAgainstLimit;
   };
-  kj::Promise<RetryInfo> runAlarm(const ActorKey& actor, kj::Date scheduledTime);
+  kj::Promise<RetryInfo> runAlarm(const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount);
 
   void setAlarmInMemory(kj::Own<ActorKey> actor, kj::Date scheduledTime);
 
