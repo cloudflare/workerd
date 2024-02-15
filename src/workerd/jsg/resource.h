@@ -679,6 +679,30 @@ struct ResourceTypeBuilder {
     inspectProperties = v8::ObjectTemplate::New(isolate);
     prototype->Set(symbol, inspectProperties, static_cast<v8::PropertyAttribute>(
       v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+
+    auto toStringTagSymbol = v8::Symbol::GetToStringTag(isolate);
+
+    prototype->SetAccessor(toStringTagSymbol, ResourceTypeBuilder::getAndLogToStringTag, &ResourceTypeBuilder::setAndLogToStringTag);
+  }
+
+  static void setAndLogToStringTag(v8::Local<v8::Name> property, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info){
+    LOG_ERROR_PERIODICALLY("toStringTag has been set");
+    auto isolate = info.GetIsolate();
+    auto context = isolate->GetCurrentContext();
+    auto res = info.This()->Set(context, ::workerd::jsg::v8StrIntern(isolate, "__workerd_internal_toStringTag"), value);
+    if(res.IsNothing()) {
+      LOG_ERROR_PERIODICALLY("toStringTag has failed to set");
+    }
+  }
+
+  static void getAndLogToStringTag(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info){
+    LOG_ERROR_PERIODICALLY("toStringTag has been gotten");
+    auto isolate = info.GetIsolate();
+    auto context = isolate->GetCurrentContext();
+    v8::Local<v8::Value> val;
+    if(info.This()->Get(context, ::workerd::jsg::v8StrIntern(isolate, "__workerd_internal_toStringTag")).ToLocal(&val)) {
+      info.GetReturnValue().Set(val);
+    }
   }
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
