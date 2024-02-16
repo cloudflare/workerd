@@ -268,8 +268,10 @@ private:
     // we intend to call is not the one defined on the Object prototype.
     bool isImplemented = fnHandle != jsg::check(objProto->Get(js.v8Context(), methodStr));
 
-    JSG_REQUIRE(isImplemented && fnHandle->IsFunction(), TypeError,
+    JSG_REQUIRE(isImplemented, TypeError,
         kj::str("The RPC receiver does not implement the method \"", methodName, "\"."));
+    JSG_REQUIRE(fnHandle->IsFunction(), TypeError,
+        kj::str("\"", methodName, "\" is not a function."));
     JSG_REQUIRE(!isReservedName(methodName), TypeError,
         kj::str("'", methodName, "' is a reserved method and cannot be called over RPC."));
     return fnHandle.As<v8::Function>();

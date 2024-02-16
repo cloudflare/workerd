@@ -55,6 +55,11 @@ export class MyService extends WorkerEntrypoint {
     assert.strictEqual(x, undefined);
     return new Response("method = " + req.method + ", url = " + req.url);
   }
+
+  // Define a property to test behavior of property accessors.
+  get nonFunctionProperty() { return {foo: 123}; }
+
+  get functionProperty() { return (a, b) => a - b; }
 }
 
 export class MyActor extends DurableObject {
@@ -137,6 +142,9 @@ export let namedServiceBinding = {
     assert.strictEqual(await env.MyService.oneArgMethod(3), 36);
     assert.strictEqual(await env.MyService.twoArgsMethod(123, 2), 258);
 
+    // Properties that return a function can actually be called.
+    assert.strictEqual(await env.MyService.functionProperty(19, 6), 13);
+
     // `fetch()` is special, the params get converted into a Request.
     let resp = await env.MyService.fetch("http://foo", {method: "POST"});
     assert.strictEqual(await resp.text(), "method = POST, url = http://foo");
@@ -172,6 +180,26 @@ export let namedServiceBinding = {
     await assert.rejects(() => getByName("hasOwnProperty")(), {
       name: "TypeError",
       message: "The RPC receiver does not implement the method \"hasOwnProperty\"."
+    });
+
+    // Check we cannot access `env` or `ctx`.
+    await assert.rejects(() => getByName("env")(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"env\"."
+    });
+    await assert.rejects(() => getByName("ctx")(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"ctx\"."
+    });
+
+    // Check what happens if we access something that's actually declared as a property on the
+    // class. The difference in error message proves to us that `env` and `ctx` weren't visible at
+    // all, which is what we want.
+    // TODO(soon): When we add pipelining support, also make sure that functions inside `env` and
+    //   `ctx` can't be accessed.
+    await assert.rejects(() => getByName("nonFunctionProperty")(), {
+      name: "TypeError",
+      message: "\"nonFunctionProperty\" is not a function."
     });
   },
 }
