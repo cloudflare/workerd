@@ -3,14 +3,25 @@ import {WorkerEntrypoint,DurableObject} from 'cloudflare:workers';
 
 export let nonClass = {
   async noArgs(x, env, ctx) {
+    assert.strictEqual(typeof ctx.waitUntil, "function");
     return (x === undefined) ? (env.twelve + 1) : "param not undefined?";
   },
 
   async oneArg(i, env, ctx) {
+    assert.strictEqual(typeof ctx.waitUntil, "function");
     return env.twelve * i;
   },
 
-  async twoArgs(i, env, ctx, j) {
+  async oneArgOmitCtx(i, env) {
+    return env.twelve * i + 1;
+  },
+
+  async oneArgOmitEnvCtx(i) {
+    return 2 * i;
+  },
+
+  async twoArgs(i, j, env, ctx) {
+    assert.strictEqual(typeof ctx.waitUntil, "function");
     return i * j + env.twelve;
   },
 }
@@ -81,7 +92,10 @@ export let basicServiceBinding = {
     // Test service binding RPC.
     assert.strictEqual(await env.self.noArgs(), 13);
     assert.strictEqual(await env.self.oneArg(3), 36);
+    assert.strictEqual(await env.self.oneArgOmitCtx(3), 37);
+    assert.strictEqual(await env.self.oneArgOmitEnvCtx(3), 6);
     assert.strictEqual(await env.self.twoArgs(123, 2), 258);
+    assert.strictEqual(await env.self.twoArgs(123, 2, "foo", "bar", "baz"), 258);
   },
 }
 

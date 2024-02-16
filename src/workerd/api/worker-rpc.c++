@@ -306,31 +306,52 @@ private:
       kj::ArrayPtr<const kj::byte> serializedArgs,
       v8::Local<v8::Value> env,
       jsg::JsObject ctx) {
-    kj::Maybe<jsg::JsArray> argsArray;
-    size_t size = 0;
+    // Determine the function arity (how many parameters it was declared to accept) by reading the
+    // `.length` attribute.
+    auto arity = js.withinHandleScope([&]() {
+      auto length = jsg::check(fn->Get(js.v8Context(), js.strIntern("length")));
+      return jsg::check(length->IntegerValue(js.v8Context()));
+    });
+
+    // Avoid excessive allocation from a maliciously-set `length`.
+    JSG_REQUIRE(arity >= 0 && arity < 256, TypeError,
+        "RPC function has unreasonable length attribute: ", arity);
+
+    if (arity < 3) {
+      // If a function has fewer than three arguments, assume that env or ctx was omitted, since
+      // historical handlers that existed before RPC worked that way.
+      arity = 3;
+    }
+
+    // We're going to pass all the arguments from the client to the function, but we are going to
+    // insert `env` and `ctx`. We assume the last two arguments that the function declared are
+    // `env` and `ctx`, so we can determine where to insert them based on the function's arity.
+    kj::Maybe<jsg::JsArray> argsArrayFromClient;
+    size_t argCountFromClient = 0;
     if (serializedArgs.size() > 0) {
       auto array = KJ_REQUIRE_NONNULL(
           deserializeV8(js, serializedArgs).tryCast<jsg::JsArray>(),
           "expected JsArray when deserializing arguments.");
-      size = array.size();
-      argsArray = kj::mv(array);
+      argCountFromClient = array.size();
+      argsArrayFromClient = kj::mv(array);
     }
 
-    KJ_STACK_ARRAY(v8::Local<v8::Value>, arguments, kj::max(size + 2, 3), 8, 8);
+    KJ_STACK_ARRAY(v8::Local<v8::Value>, arguments, kj::max(argCountFromClient + 2, arity), 8, 8);
 
-    if (size > 0) {
-      arguments[0] = KJ_ASSERT_NONNULL(argsArray).get(js, 0);
-    } else {
-      arguments[0] = js.undefined();
+    for (auto i: kj::zeroTo(arity - 2)) {
+      if (argCountFromClient > i) {
+        arguments[i] = KJ_ASSERT_NONNULL(argsArrayFromClient).get(js, i);
+      } else {
+        arguments[i] = js.undefined();
+      }
     }
 
-    arguments[1] = env;
-    arguments[2] = ctx;
+    arguments[arity - 2] = env;
+    arguments[arity - 1] = ctx;
 
-    if (size > 1) {
-      auto array = KJ_ASSERT_NONNULL(argsArray);
-      for (size_t i = 1; i < array.size(); ++i) {
-        arguments[i + 2] = array.get(js, i);
+    KJ_IF_SOME(a, argsArrayFromClient) {
+      for (size_t i = arity - 2; i < argCountFromClient; ++i) {
+        arguments[i + 2] = a.get(js, i);
       }
     }
 
