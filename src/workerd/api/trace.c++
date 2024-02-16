@@ -439,12 +439,8 @@ double TraceDiagnosticChannelEvent::getTimestamp() { return timestamp; }
 
 ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
     : id{[&]() -> kj::Maybe<kj::String> {
-        auto upper = version.getId().getUpper();
-        auto lower = version.getId().getLower();
-        if (upper == 0 && lower == 0) {
-          return kj::none;
-        }
-        return UUIDToString(upper, lower);
+        return UUID::fromUpperLower(version.getId().getUpper(), version.getId().getLower())
+            .map([](const auto& uuid) { return uuid.toString(); });
       }()},
       tag{[&]() -> kj::Maybe<kj::String> {
         if (version.hasTag()) {
