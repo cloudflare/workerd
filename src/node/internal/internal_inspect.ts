@@ -2436,7 +2436,7 @@ function hasEntries(value: unknown): value is { [kEntries]: [unknown, unknown][]
 // Default custom inspect implementation for JSG resource types
 function formatJsgResourceType(
   this: Record<PropertyKey, unknown>,
-  additionalProperties: Record<string, symbol>,
+  additionalProperties: Record<string, symbol /* value-func */ | false /* unimplemented-marker */>,
   depth: number,
   options: InspectOptionsStylized
 ): unknown {
@@ -2453,8 +2453,10 @@ function formatJsgResourceType(
   // Add all instance and prototype non-function-valued properties
   let current: object = this;
   do {
+    // `Object.getOwnPropertyDescriptor()` throws `Illegal Invocation` for our prototypes here.
     for (const key of Object.getOwnPropertyNames(current)) {
-      // `Object.getOwnPropertyDescriptor()` throws `Illegal Invocation` for our prototypes here
+      // If this property is unimplemented, don't try to log it
+      if (additionalProperties[key] === false) continue;
       const value = this[key];
       // Ignore function-valued and static properties
       if (typeof value === "function" || this.constructor.propertyIsEnumerable(key)) continue;
@@ -2464,7 +2466,10 @@ function formatJsgResourceType(
 
   // Add additional inspect-only properties as non-enumerable so they appear in square brackets
   for (const [key, symbol] of Object.entries(additionalProperties)) {
-    Object.defineProperty(record, key, { value: this[symbol], enumerable: false });
+    // This is an additional property if it's not an unimplemented marker
+    if (symbol !== false) {
+      Object.defineProperty(record, key, { value: this[symbol], enumerable: false });
+    }
   }
 
   // Format the plain object
