@@ -10,6 +10,7 @@
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/unsafe.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/io/worker.h>
 #include <cloudflare/cloudflare.capnp.h>
 
@@ -28,6 +29,7 @@ void registerModules(Registry& registry, auto featureFlags) {
   }
   registerSocketsModule(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
+  registerRpcModules(registry, featureFlags);
 }
 
 }  // namespace workerd::api

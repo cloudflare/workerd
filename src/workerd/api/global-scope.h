@@ -255,11 +255,20 @@ struct ExportedHandler {
   // Values to pass for `env` and `ctx` when calling handlers. Note these have to be the last members
   // so that they don't interfere with `JSG_STRUCT`'s machinations.
 
+  // env and ctx values that need to be passed to the handler function. If the ExportedHandler
+  // represents a class instance (e.g. Durable Object instance), then `env` is is the JS value
+  // `undefined` and `ctx` is `kj::none`.
+  // TODO(cleanup): Why isn't `env` a `jsg::Optional` too? Or maybe the pair should be wrapped in
+  //   a struct that is `Maybe`?
   jsg::Value env = nullptr;
   jsg::Optional<jsg::Ref<ExecutionContext>> ctx = kj::none;
   // TODO(cleanup): These are shoved here as a bit of a hack. At present, this is convenient and
   //   works for all use cases. If we have bindings or things on ctx that vary on a per-request basis,
   //   this won't work as well, I guess, but we can cross that bridge when we come to it.
+
+  // If true, this is a Durable Object class that failed to extend `DurableObject`. We will not
+  // permit RPC to this class.
+  bool missingSuperclass = false;
 
   jsg::Optional<jsg::Ref<ExecutionContext>> getCtx() {
     return ctx.map([&](jsg::Ref<ExecutionContext>& p) { return p.addRef(); });

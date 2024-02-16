@@ -560,6 +560,9 @@ public:
       const v8::FunctionCallbackInfo<v8::Value>& info)>;
 
   kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
+  kj::Maybe<RpcFunction> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
+    return getRpcMethod(js, name);
+  }
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
@@ -587,6 +590,11 @@ public:
 
     if (flags.getWorkerdExperimental()) {
       JSG_WILDCARD_PROPERTY(getRpcMethod);
+
+      // We export a copy of getRpcMethod for use in tests only which allows the caller to provide
+      // an arbitrary string as the method name. This allows invoking methods that would normally
+      // be shadowed by non-wildcard methods.
+      JSG_METHOD(getRpcMethodForTestOnly);
     }
 
     JSG_TS_OVERRIDE({

@@ -421,9 +421,17 @@ struct Worker::Impl {
   // The environment blob to pass to handlers.
   kj::Maybe<jsg::Value> env;
 
-  kj::Maybe<api::ExportedHandler> defaultHandler;
+  struct ActorClassInfo {
+    EntrypointClass cls;
+    bool missingSuperclass;
+  };
+
+  // Note: The default export is given the string name "default", because that's what V8 tells us,
+  // and so it's easiest to go with it. I guess that means that you can't actually name an export
+  // "default"?
   kj::HashMap<kj::String, api::ExportedHandler> namedHandlers;
-  kj::HashMap<kj::String, DurableObjectConstructor> actorClasses;
+  kj::HashMap<kj::String, ActorClassInfo> actorClasses;
+  kj::HashMap<kj::String, EntrypointClass> statelessClasses;
 
   // If set, then any attempt to use this worker shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
@@ -1409,7 +1417,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
 
-                  auto handlers = script->isolate->getApi().unwrapExports(lock, ns);
+                  auto& api = script->isolate->getApi();
+                  auto handlers = api.unwrapExports(lock, ns);
+                  auto entrypointClasses = api.getEntrypointClasses(lock);
 
                   for (auto& handler: handlers.fields) {
                     KJ_SWITCH_ONEOF(handler.value) {
@@ -1417,17 +1427,39 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         obj.env = lock.v8Ref(bindingsScope.As<v8::Value>());
                         obj.ctx = jsg::alloc<api::ExecutionContext>();
 
-                        if (handler.name == "default") {
-                          // The default export is given the string name "default". I guess that means that
-                          // you can't actually name an export "default"? Anyway, this is our default
-                          // handler.
-                          impl->defaultHandler = kj::mv(obj);
-                        } else {
-                          impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
-                        }
+                        impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
                       }
-                      KJ_CASE_ONEOF(cls, DurableObjectConstructor) {
-                        impl->actorClasses.insert(kj::mv(handler.name), kj::mv(cls));
+                      KJ_CASE_ONEOF(cls, EntrypointClass) {
+                        js.withinHandleScope([&]() {
+                          jsg::JsObject handle(KJ_ASSERT_NONNULL(cls.tryGetHandle(js.v8Isolate)));
+
+                          for (;;) {
+                            if (handle == entrypointClasses.durableObject) {
+                              impl->actorClasses.insert(kj::mv(handler.name), Impl::ActorClassInfo {
+                                .cls = kj::mv(cls),
+                                .missingSuperclass = false,
+                              });
+                              return;
+                            } else if (handle == entrypointClasses.workerEntrypoint) {
+                              impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
+                              return;
+                            }
+
+                            handle = KJ_UNWRAP_OR(handle.getPrototype().tryCast<jsg::JsObject>(), {
+                              // Reached end of prototype chain.
+
+                              // For historical reasons, we assume a class is a Durable Object
+                              // class if it doesn't inherit anything.
+                              // TODO(someday): Log a warning suggesting extending DurableObject.
+                              // TODO(someday): Introduce a compat flag that makes this required.
+                              impl->actorClasses.insert(kj::mv(handler.name), Impl::ActorClassInfo {
+                                .cls = kj::mv(cls),
+                                .missingSuperclass = true,
+                              });
+                              return;
+                            });
+                          }
+                        });
                       }
                     }
                   }
@@ -1669,28 +1701,56 @@ v8::Local<v8::Context> Worker::Lock::getContext() {
   }
 }
 
-kj::Maybe<api::ExportedHandler&> Worker::Lock::getExportedHandler(
+template <typename T>
+static inline kj::Own<T> fakeOwn(T& ref) {
+  return kj::Own<T>(&ref, kj::NullDisposer::instance);
+}
+
+kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     kj::Maybe<kj::StringPtr> name, kj::Maybe<Worker::Actor&> actor) {
   KJ_IF_SOME(a, actor) {
     KJ_IF_SOME(h, a.getHandler()) {
-      return h;
+      return fakeOwn(h);
     }
   }
 
-  KJ_IF_SOME(n, name) {
-    KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)){
-      return h;
-    } else {
-      if (worker.impl->actorClasses.find(n) != kj::none) {
-        LOG_ERROR_PERIODICALLY("worker is not an actor but class name was requested", n);
-      } else {
-        LOG_ERROR_PERIODICALLY("worker has no such named entrypoint", n);
-      }
+  kj::StringPtr n = name.orDefault("default"_kj);
+  KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)){
+    return fakeOwn(h);
+  } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
+    jsg::Lock& js = *this;
+    auto handler = kj::heap(cls(js, jsg::alloc<api::ExecutionContext>(),
+        KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
-      KJ_FAIL_ASSERT("worker_do_not_log; Unable to get exported handler");
+    // HACK: We set handler.env and handler.ctx to undefined because we already passed the real
+    //   env and ctx into the constructor, and we want the handler methods to act like they take
+    //   just one parameter.
+    handler->env = js.v8Ref(js.v8Undefined());
+    handler->ctx = kj::none;
+
+    return handler;
+  } else if (name == kj::none) {
+    // If the default export was requested, and we didn't find a handler for it, we'll fall back
+    // to addEventListener().
+    // TODO(cleanup): The intention has always been that we only use addEventListener() for
+    //   service-worker-syntax scripts, but apparently the code has long allowed it for
+    //   modules-based script too, if they lacked an `export default`. Yikes! However, it looks
+    //   to me like the validator would have rejected modules-based scripts that lacked a default
+    //   export, so perhaps this is not a real problem in production. We'd better find out by
+    //   logging, though...
+    if (worker.impl->context == kj::none) {
+      LOG_ERROR_PERIODICALLY(
+          "modules-based script has no default export; falling back to addEventListener()");
     }
+    return kj::none;
   } else {
-    return worker.impl->defaultHandler;
+    if (worker.impl->actorClasses.find(n) != kj::none) {
+      LOG_ERROR_PERIODICALLY("worker is not an actor but class name was requested", n);
+    } else {
+      LOG_ERROR_PERIODICALLY("worker has no such named entrypoint", n);
+    }
+
+    KJ_FAIL_ASSERT("worker_do_not_log; Unable to get exported handler");
   }
 }
 
@@ -1810,14 +1870,68 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         }
       };
 
-      KJ_IF_SOME(h, worker.impl->defaultHandler) {
-        report(kj::none, h);
-      } else {}  // Here to squash a compiler warning.
+      auto getEntrypointName = [&](kj::StringPtr key) -> kj::Maybe<kj::StringPtr> {
+        if (key == "default"_kj) {
+          return kj::none;
+        } else {
+          return key;
+        }
+      };
+
       for (auto& entry: worker.impl->namedHandlers) {
-        report(kj::StringPtr(entry.key), entry.value);
+        report(getEntrypointName(entry.key), entry.value);
       }
       for (auto& entry: worker.impl->actorClasses) {
-        errorReporter.addHandler(kj::StringPtr(entry.key), "class");
+        errorReporter.addHandler(getEntrypointName(entry.key), "class");
+      }
+      for (auto& entry: worker.impl->statelessClasses) {
+        // We want to report all of the stateless class's members. To do this, we examine its
+        // prototype, and it's prototype's prototype, and so on, until we get to Object's
+        // prototype, which we ignore.
+        auto entrypointName = getEntrypointName(entry.key);
+        js.withinHandleScope([&]() {
+          // Find the prototype for `Object` by creating one.
+          auto obj = js.obj();
+          jsg::JsValue prototypeOfObject = obj.getPrototype();
+
+          // Walk the prototype chain.
+          jsg::JsObject ctor(KJ_ASSERT_NONNULL(entry.value.tryGetHandle(js.v8Isolate)));
+          jsg::JsValue proto = ctor.get(js, "prototype");
+          kj::HashSet<kj::String> seenNames;
+          for (;;) {
+            auto protoObj = JSG_REQUIRE_NONNULL(proto.tryCast<jsg::JsObject>(),
+                TypeError, "Exported entrypoint class's prototype chain does not end in Object.");
+            if (protoObj == prototypeOfObject) {
+              // Reached the prototype for `Object`. Stop here.
+              break;
+            }
+
+            // Awkwardly, the prototype's members are not typically enumerable, so we have to
+            // enumerate them rather directly.
+            jsg::JsArray properties = protoObj.getPropertyNames(
+                js, jsg::KeyCollectionFilter::OWN_ONLY,
+                jsg::PropertyFilter::SKIP_SYMBOLS,
+                jsg::IndexFilter::SKIP_INDICES);
+            for (auto i: kj::zeroTo(properties.size())) {
+              auto name = properties.get(js, i).toString(js);
+              if (name == "constructor"_kj) {
+                // Don't treat special method `constructor` as an exported handler.
+                continue;
+              }
+
+              // Only report each method name once, even if it overrides a method in a superclass.
+              bool isNew = true;
+              kj::StringPtr namePtr = seenNames.upsert(kj::mv(name), [&](auto&, auto&&) {
+                isNew = false;
+              });
+              if (isNew) {
+                errorReporter.addHandler(entrypointName, namePtr);
+              }
+            }
+
+            proto = protoObj.getPrototype();
+          }
+        });
       }
     }
   });
@@ -2716,7 +2830,7 @@ struct Worker::Actor::Impl {
   // instance is constructed as part of the first request to be delivered.
   kj::OneOf<
     NoClass,                         // not class-based
-    DurableObjectConstructor*,       // constructor not run yet
+    Worker::Impl::ActorClassInfo*,   // constructor not run yet
     Initializing,                    // constructor currently running
     api::ExportedHandler,            // fully constructed
     kj::Exception                    // constructor threw
@@ -2911,15 +3025,15 @@ Worker::Actor::Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, A
 }
 
 void Worker::Actor::ensureConstructed(IoContext& context) {
-  KJ_IF_SOME(cls, impl->classInstance.tryGet<DurableObjectConstructor*>()) {
-    context.addWaitUntil(context.run([this, &cls = *cls](Worker::Lock& lock) {
+  KJ_IF_SOME(info, impl->classInstance.tryGet<Worker::Impl::ActorClassInfo*>()) {
+    context.addWaitUntil(context.run([this, &info = *info](Worker::Lock& lock) {
       jsg::Lock& js = lock;
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
       KJ_IF_SOME(c, impl->actorCache) {
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
-      auto handler = cls(lock,
+      auto handler = info.cls(lock,
           jsg::alloc<api::DurableObjectState>(cloneId(), kj::mv(storage)),
           KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
 
@@ -2929,6 +3043,7 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
       //   on the actor's state field instead.
       handler.env = js.v8Ref(js.v8Undefined());
       handler.ctx = kj::none;
+      handler.missingSuperclass = info.missingSuperclass;
 
       impl->classInstance = kj::mv(handler);
     }).catch_([this](kj::Exception&& e) {
@@ -3071,7 +3186,7 @@ void Worker::Actor::assertCanSetAlarm() {
       JSG_FAIL_REQUIRE(TypeError,
           "Your Durable Object must be class-based in order to call setAlarm()");
     }
-    KJ_CASE_ONEOF(_, DurableObjectConstructor*) {
+    KJ_CASE_ONEOF(_, Worker::Impl::ActorClassInfo*) {
       KJ_FAIL_ASSERT("setAlarm() invoked before Durable Object ctor");
     }
     KJ_CASE_ONEOF(_, Impl::Initializing) {
@@ -3209,7 +3324,7 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
     KJ_CASE_ONEOF(_, Impl::NoClass) {
       return kj::none;
     }
-    KJ_CASE_ONEOF(_, DurableObjectConstructor*) {
+    KJ_CASE_ONEOF(_, Worker::Impl::ActorClassInfo*) {
       KJ_FAIL_ASSERT("ensureConstructed() wasn't called");
     }
     KJ_CASE_ONEOF(_, Impl::Initializing) {

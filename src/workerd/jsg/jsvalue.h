@@ -178,6 +178,9 @@ public:
   bool operator==(const JsValue& other) const KJ_WARN_UNUSED_RESULT {
     return inner == other.inner;
   }
+  bool operator==(const JsBase& other) const KJ_WARN_UNUSED_RESULT {
+    return inner == other.inner;
+  }
   explicit JsBase(v8::Local<T> inner) : inner(inner) { requireOnStack(this); }
   JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 private:
@@ -338,9 +341,14 @@ public:
                              IndexFilter indexFilter) KJ_WARN_UNUSED_RESULT;
   JsArray previewEntries(bool* isKeyValue) KJ_WARN_UNUSED_RESULT;
 
-  using JsBase<v8::Object, JsObject>::JsBase;
+  // Returns the object's prototype, i.e. the property `__proto__`.
+  //
+  // Note that when called on a class constructor, this does NOT return `.prototype`, it still
+  // returns `.__proto__`. Usefully, though, a class constructor's `__proto__` is always the
+  // parent class's constructor.
+  inline JsValue getPrototype() { return JsValue(inner->GetPrototype()); }
 
-  explicit JsObject(v8::Local<v8::Map> inner);
+  using JsBase<v8::Object, JsObject>::JsBase;
 
   void recursivelyFreeze(Lock&);
   JsObject jsonClone(Lock&);

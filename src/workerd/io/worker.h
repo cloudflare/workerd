@@ -37,6 +37,7 @@ namespace api {
   class Socket;
   class WebSocket;
   class WebSocketRequestResponsePair;
+  class ExecutionContext;
 }
 
 class ThreadContext;
@@ -44,13 +45,14 @@ class IoContext;
 class InputGate;
 class OutputGate;
 
-// Type signature of a durable object implementation class.
-typedef jsg::Constructor<api::ExportedHandler(
-      jsg::Ref<api::DurableObjectState> durableObject, jsg::Value env)>
-    DurableObjectConstructor;
+// Type signature of an entrypoint implementation class (Durable Object or stateless service).
+typedef kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::Ref<api::DurableObjectState>>
+    ExecutionContextOrState;
+typedef jsg::Constructor<api::ExportedHandler(ExecutionContextOrState ctx, jsg::Value env)>
+    EntrypointClass;
 
-// The type of a top-level export -- either a simple handler or a durable object class.
-typedef kj::OneOf<DurableObjectConstructor, api::ExportedHandler> NamedExport;
+// The type of a top-level export -- either a simple handler or a class.
+typedef kj::OneOf<EntrypointClass, api::ExportedHandler> NamedExport;
 
 // An instance of a Worker.
 //
@@ -425,6 +427,20 @@ public:
   virtual jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
 
+  struct EntrypointClasses {
+    // Class constructor for WorkerEntrypoint.
+    jsg::JsObject workerEntrypoint;
+
+    // Class constructor for DurableObject (aka api::DurableObjectBase).
+    jsg::JsObject durableObject;
+  };
+
+  // Get the constructors for classes from which entrypoint classes may inherit.
+  //
+  // This can be used to check which class a particular entrypoint inherits from, by following
+  // the prototype chain from the entrypoint class's constructor.
+  virtual EntrypointClasses getEntrypointClasses(jsg::Lock& lock) const = 0;
+
   // Convenience struct for accessing typical Error properties.
   struct ErrorInterface {
     jsg::Optional<kj::String> name;
@@ -441,6 +457,12 @@ public:
   virtual kj::Maybe<const api::CryptoAlgorithm&> getCryptoAlgorithm(kj::StringPtr name) const {
     return kj::none;
   }
+
+  // Apply JSG wrapping to the given ExecutionContext. This is needed in particular by the RPC
+  // server-side implementation, when invoking a top-level RPC method that takes env and ctx as
+  // params.
+  virtual jsg::JsObject wrapExecutionContext(
+      jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
 
   // Set the module fallback service callback, if any.
   using ModuleFallbackCallback =
@@ -521,7 +543,7 @@ public:
   //
   // If running in an actor, the name is ignored and the entrypoint originally used to construct
   // the actor is returned.
-  kj::Maybe<api::ExportedHandler&> getExportedHandler(
+  kj::Maybe<kj::Own<api::ExportedHandler>> getExportedHandler(
       kj::Maybe<kj::StringPtr> entrypointName, kj::Maybe<Worker::Actor&> actor);
 
   // Get the C++ object representing the global scope.

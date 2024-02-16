@@ -186,6 +186,14 @@ jsg::Dict<NamedExport> WorkerdApi::unwrapExports(
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
       .unwrap<jsg::Dict<NamedExport>>(lock.v8Context(), moduleNamespace);
 }
+WorkerdApi::EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
+  auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
+
+  return {
+    .workerEntrypoint = typedLock.getConstructor<api::WorkerEntrypoint>(lock.v8Context()),
+    .durableObject = typedLock.getConstructor<api::DurableObjectBase>(lock.v8Context()),
+  };
+}
 const jsg::TypeHandler<Worker::Api::ErrorInterface>&
     WorkerdApi::getErrorInterfaceTypeHandler(jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();
@@ -194,6 +202,12 @@ const jsg::TypeHandler<Worker::Api::ErrorInterface>&
 const jsg::TypeHandler<api::QueueExportedHandler>&
     WorkerdApi::getQueueTypeHandler(jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
+}
+
+jsg::JsObject WorkerdApi::wrapExecutionContext(
+    jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
+  return jsg::JsObject(kj::downcast<JsgWorkerdIsolate::Lock>(lock)
+      .wrap(lock.v8Context(), kj::mv(ref)));
 }
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,

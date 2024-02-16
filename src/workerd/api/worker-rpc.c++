@@ -5,6 +5,7 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/actor-state.h>
 #include <workerd/jsg/ser.h>
 #include <capnp/membrane.h>
 
@@ -172,21 +173,44 @@ public:
         (Worker::Lock& lock) mutable -> kj::Promise<void> {
 
       jsg::Lock& js = lock;
-      // JS RPC is not enabled on the server side, we cannot call any methods.
-      JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
-          "The receiving Worker does not allow its methods to be called over RPC.");
 
-      auto& handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ctx.getActor()),
-                                         "Failed to get handler to worker.");
-      auto handle = handler.self.getHandle(lock);
+      auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ctx.getActor()),
+                                        "Failed to get handler to worker.");
+      auto handle = handler->self.getHandle(lock);
+
+      if (handler->missingSuperclass) {
+        // JS RPC is not enabled on the server side, we cannot call any methods.
+        JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
+            "The receiving Durable Object does not support RPC, because its class was not declared "
+            "with `extends DurableObject`. In order to enable RPC, make sure your class "
+            "extends the special class `DurableObject`, which can be imported from the module "
+            "\"cloudflare:workers\".");
+      }
+
+      // `handler->ctx` is present when we're invoking a freestanding function, and therefore
+      // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup
+      // should obviously permit instance properties, since we expect the export is a plain object.
+      // Otherwise, though, the export is a class. In that case, we have set the rule that we will
+      // only allow class properties (aka prototype properties) to be accessed, to avoid
+      // programmers shooting themselves in the foot by forgetting to make their members private.
+      bool allowInstanceProperties = handler->ctx != kj::none;
 
       // We will try to get the function, if we can't we'll throw an error to the client.
-      auto fn = tryGetFn(lock, ctx, handle, methodName);
+      auto fn = tryGetFn(lock, ctx, handle, methodName, allowInstanceProperties);
+
+      v8::Local<v8::Value> invocationResult;
+      KJ_IF_SOME(execCtx, handler->ctx) {
+        invocationResult = invokeFnInsertingEnvCtx(js, methodName, fn, handle, serializedArgs,
+            handler->env.getHandle(js),
+            lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()));
+      } else {
+        invocationResult = invokeFn(js, fn, handle, serializedArgs);
+      }
 
       // We have a function, so let's call it and serialize the result for RPC.
       // If the function returns a promise we will wait for the promise to finish so we can
       // serialize the result.
-      return ctx.awaitJs(js, js.toPromise(invokeFn(js, fn, handle, serializedArgs))
+      return ctx.awaitJs(js, js.toPromise(invocationResult)
           .then(js, ctx.addFunctor([callContext](jsg::Lock& js, jsg::Value value) mutable {
         auto result = serializeV8(js, jsg::JsValue(value.getHandle(js)));
         JSG_ASSERT(result.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
@@ -208,7 +232,10 @@ private:
         name == "alarm" ||
         name == "webSocketMessage" ||
         name == "webSocketClose" ||
-        name == "webSocketError") {
+        name == "webSocketError" ||
+        // All JS classes define a method `constructor` on the prototype, but we don't actually
+        // want this to be callable over RPC!
+        name == "constructor") {
       return true;
     }
     return false;
@@ -219,11 +246,21 @@ private:
       Worker::Lock& lock,
       IoContext& ctx,
       v8::Local<v8::Object> handle,
-      kj::StringPtr methodName) {
+      kj::StringPtr methodName,
+      bool allowInstanceProperties) {
+    jsg::Lock& js(lock);
+
+    if (!allowInstanceProperties) {
+      auto proto = handle->GetPrototype();
+      // This assert can't fail because we only take this branch when operating on a class
+      // instance.
+      KJ_ASSERT(proto->IsObject());
+      handle = proto.As<v8::Object>();
+    }
+
     auto methodStr = jsg::v8StrIntern(lock.getIsolate(), methodName);
     auto fnHandle = jsg::check(handle->Get(lock.getContext(), methodStr));
 
-    jsg::Lock& js(lock);
     v8::Local<v8::Object> obj = js.obj();
     auto objProto = obj->GetPrototype().As<v8::Object>();
 
@@ -231,8 +268,10 @@ private:
     // we intend to call is not the one defined on the Object prototype.
     bool isImplemented = fnHandle != jsg::check(objProto->Get(js.v8Context(), methodStr));
 
-    JSG_REQUIRE(isImplemented && fnHandle->IsFunction(), TypeError,
+    JSG_REQUIRE(isImplemented, TypeError,
         kj::str("The RPC receiver does not implement the method \"", methodName, "\"."));
+    JSG_REQUIRE(fnHandle->IsFunction(), TypeError,
+        kj::str("\"", methodName, "\" is not a function."));
     JSG_REQUIRE(!isReservedName(methodName), TypeError,
         kj::str("'", methodName, "' is a reserved method and cannot be called over RPC."));
     return fnHandle.As<v8::Function>();
@@ -258,6 +297,87 @@ private:
     } else {
       return jsg::check(fn->Call(js.v8Context(), thisArg, 0, nullptr));
     }
+  };
+
+  // Like `invokeFn`, but inject the `env` and `ctx` values between the first and second
+  // parameters. Used for service bindings that use functional syntax.
+  v8::Local<v8::Value> invokeFnInsertingEnvCtx(
+      jsg::Lock& js,
+      kj::StringPtr methodName,
+      v8::Local<v8::Function> fn,
+      v8::Local<v8::Object> thisArg,
+      kj::ArrayPtr<const kj::byte> serializedArgs,
+      v8::Local<v8::Value> env,
+      jsg::JsObject ctx) {
+    // Determine the function arity (how many parameters it was declared to accept) by reading the
+    // `.length` attribute.
+    auto arity = js.withinHandleScope([&]() {
+      auto length = jsg::check(fn->Get(js.v8Context(), js.strIntern("length")));
+      return jsg::check(length->IntegerValue(js.v8Context()));
+    });
+
+    // Avoid excessive allocation from a maliciously-set `length`.
+    JSG_REQUIRE(arity >= 0 && arity < 256, TypeError,
+        "RPC function has unreasonable length attribute: ", arity);
+
+    if (arity < 3) {
+      // If a function has fewer than three arguments, reproduce the historical behavior where
+      // we'd pass the main argument followed by `env` and `ctx` and the undeclared parameters
+      // would just be truncated.
+      arity = 3;
+    }
+
+    // We're going to pass all the arguments from the client to the function, but we are going to
+    // insert `env` and `ctx`. We assume the last two arguments that the function declared are
+    // `env` and `ctx`, so we can determine where to insert them based on the function's arity.
+    kj::Maybe<jsg::JsArray> argsArrayFromClient;
+    size_t argCountFromClient = 0;
+    if (serializedArgs.size() > 0) {
+      auto array = KJ_REQUIRE_NONNULL(
+          deserializeV8(js, serializedArgs).tryCast<jsg::JsArray>(),
+          "expected JsArray when deserializing arguments.");
+      argCountFromClient = array.size();
+      argsArrayFromClient = kj::mv(array);
+    }
+
+    // For now, we are disallowing multiple arguments with bare function syntax, due to a footgun:
+    // if you forget to add `env, ctx` to your arg list, then the last arguments from the client
+    // will be replaced with `env` and `ctx`. Probably this would be quickly noticed in testing,
+    // but if you were to accidentally reflect `env` back to the client, it would be a severe
+    // security flaw.
+    JSG_REQUIRE(arity == 3, TypeError,
+        "Cannot call handler function \"", methodName, "\" over RPC because it has the wrong "
+        "number of arguments. A simple function handler can only be called over RPC if it has "
+        "exactly the arguments (arg, env, ctx), where only the first argument comes from the "
+        "client. To support multi-argument RPC functions, use class-based syntax (extending "
+        "WorkerEntrypoint) instead.");
+    JSG_REQUIRE(argCountFromClient == 1, TypeError,
+        "Attempted to call RPC function \"", methodName, "\" with the wrong number of arguments. "
+        "When calling a top-level handler function that is not declared as part of a class, you "
+        "must always send exactly one argument. In order to support variable numbers of "
+        "arguments, the server must use class-based syntax (extending WorkerEntrypoint) "
+        "instead.");
+
+    KJ_STACK_ARRAY(v8::Local<v8::Value>, arguments, kj::max(argCountFromClient + 2, arity), 8, 8);
+
+    for (auto i: kj::zeroTo(arity - 2)) {
+      if (argCountFromClient > i) {
+        arguments[i] = KJ_ASSERT_NONNULL(argsArrayFromClient).get(js, i);
+      } else {
+        arguments[i] = js.undefined();
+      }
+    }
+
+    arguments[arity - 2] = env;
+    arguments[arity - 1] = ctx;
+
+    KJ_IF_SOME(a, argsArrayFromClient) {
+      for (size_t i = arity - 2; i < argCountFromClient; ++i) {
+        arguments[i + 2] = a.get(js, i);
+      }
+    }
+
+    return jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.begin()));
   };
 
   IoContext& ctx;
@@ -365,4 +485,35 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
     .outcome = EventOutcome::OK
   };
 }
+
+// =======================================================================================
+
+jsg::Ref<WorkerEntrypoint> WorkerEntrypoint::constructor(
+    const v8::FunctionCallbackInfo<v8::Value>& args,
+    jsg::Ref<ExecutionContext> ctx, jsg::JsObject env) {
+  // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
+  //   `This()`. There ought to be a better way to get access to `this` in a constructor.
+  //   We *also* delcare `ctx` and `env` params more explicitly just for the sake of type checking.
+  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
+
+  jsg::JsObject self(args.This());
+  self.set(js, "ctx", jsg::JsValue(args[0]));
+  self.set(js, "env", jsg::JsValue(args[1]));
+  return jsg::alloc<WorkerEntrypoint>();
+}
+
+jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
+    const v8::FunctionCallbackInfo<v8::Value>& args,
+    jsg::Ref<DurableObjectState> ctx, jsg::JsObject env) {
+  // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
+  //   `This()`. There ought to be a better way to get access to `this` in a constructor.
+  //   We *also* delcare `ctx` and `env` params more explicitly just for the sake of type checking.
+  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
+
+  jsg::JsObject self(args.This());
+  self.set(js, "ctx", jsg::JsValue(args[0]));
+  self.set(js, "env", jsg::JsValue(args[1]));
+  return jsg::alloc<DurableObjectBase>();
+}
+
 }; // namespace workerd::api

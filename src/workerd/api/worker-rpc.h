@@ -115,7 +115,69 @@ private:
   class ServerTopLevelMembrane;
 };
 
+// Base class for exported RPC services.
+//
+// When the worker's top-level module exports a class that extends this class, it means that it
+// is a stateless service.
+//
+//     import {WorkerEntrypoint} from "cloudflare:workers";
+//     export class MyService extends WorkerEntrypoint {
+//       async fetch(req) { ... }
+//       async someRpcMethod(a, b) { ... }
+//     }
+//
+// `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
+// define a constructor.
+class WorkerEntrypoint: public jsg::Object {
+public:
+  static jsg::Ref<WorkerEntrypoint> constructor(
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      jsg::Ref<ExecutionContext> ctx, jsg::JsObject env);
+
+  JSG_RESOURCE_TYPE(WorkerEntrypoint) {}
+};
+
+// Like WorkerEntrypoint, but this is the base class for Durable Object classes.
+//
+// Note that the name of this class as seen by JavaScript is `DurableObject`, but using that name
+// in C++ would conflict with the type name currently used by DO stubs.
+// TODO(cleanup): Rename DO stubs to `DurableObjectStub`?
+//
+// Historically, DO classes were not expected to inherit anything. However, this made it impossible
+// to tell whether an exported class was intended to be a DO class vs. something else. Originally
+// there were no other kinds of exported classes so this was fine. Going forward, we encourage
+// everyone to be explicit by inheriting this, and we require it if you want to use RPC.
+class DurableObjectBase: public jsg::Object {
+public:
+  static jsg::Ref<DurableObjectBase> constructor(
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      jsg::Ref<DurableObjectState> ctx, jsg::JsObject env);
+
+  JSG_RESOURCE_TYPE(DurableObjectBase) {}
+};
+
+// The "cloudflare:workers" module, which exposes the WorkerEntrypoint and DurableObject types
+// for extending.
+class EntrypointsModule: public jsg::Object {
+public:
+  JSG_RESOURCE_TYPE(EntrypointsModule) {
+    JSG_NESTED_TYPE(WorkerEntrypoint);
+    JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
+  }
+};
+
 #define EW_WORKER_RPC_ISOLATE_TYPES  \
-  api::JsRpcCapability
+  api::JsRpcCapability,              \
+  api::WorkerEntrypoint,             \
+  api::DurableObjectBase,            \
+  api::EntrypointsModule
+
+template <class Registry>
+void registerRpcModules(Registry& registry, CompatibilityFlags::Reader flags) {
+  if (flags.getWorkerdExperimental()) {
+    registry.template addBuiltinModule<EntrypointsModule>(
+        "cloudflare-internal:workers", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  }
+}
 
 }; // namespace workerd::api
