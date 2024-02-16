@@ -160,6 +160,10 @@ public:
     return wrap<void>(other.pumpTo(getInner()));
   }
 
+  kj::Maybe<kj::String> getPreferredExtensions(ExtensionsContext ctx) override {
+    return getInner().getPreferredExtensions(ctx);
+  };
+
   uint64_t sentByteCount() override { return 0; }
   uint64_t receivedByteCount() override { return 0; }
 
