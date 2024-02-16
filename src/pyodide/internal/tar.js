@@ -120,7 +120,7 @@ export function parseTarInfo() {
       directory.children.set(info.name, info);
     } else {
       // fail if we encounter other values of type (e.g., symlink, LongName, etc)
-      throw new Error(`Unexpected type ${info.type}`);
+      throw new Error(`Python TarFS error: Unexpected type ${info.type}`);
     }
   }
 }
