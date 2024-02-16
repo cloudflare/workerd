@@ -123,14 +123,14 @@ public:
     };
 
     struct MemoryCache {
-      kj::String cacheId;
+      kj::Maybe<kj::String> cacheId = kj::none;
       uint32_t maxKeys;
       uint32_t maxValueSize;
       uint64_t maxTotalValueSize;
 
       MemoryCache clone() const {
         return MemoryCache {
-          .cacheId = kj::str(cacheId),
+          .cacheId = cacheId.map([](auto& id) { return kj::str(id);}),
           .maxKeys = maxKeys,
           .maxValueSize = maxValueSize,
           .maxTotalValueSize = maxTotalValueSize,
