@@ -200,7 +200,7 @@ public:
 
       v8::Local<v8::Value> invocationResult;
       KJ_IF_SOME(execCtx, handler->ctx) {
-        invocationResult = invokeFnInsertingEnvCtx(js, fn, handle, serializedArgs,
+        invocationResult = invokeFnInsertingEnvCtx(js, methodName, fn, handle, serializedArgs,
             handler->env.getHandle(js),
             lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()));
       } else {
@@ -301,6 +301,7 @@ private:
   // parameters. Used for service bindings that use functional syntax.
   v8::Local<v8::Value> invokeFnInsertingEnvCtx(
       jsg::Lock& js,
+      kj::StringPtr methodName,
       v8::Local<v8::Function> fn,
       v8::Local<v8::Object> thisArg,
       kj::ArrayPtr<const kj::byte> serializedArgs,
@@ -318,8 +319,9 @@ private:
         "RPC function has unreasonable length attribute: ", arity);
 
     if (arity < 3) {
-      // If a function has fewer than three arguments, assume that env or ctx was omitted, since
-      // historical handlers that existed before RPC worked that way.
+      // If a function has fewer than three arguments, reproduce the historical behavior where
+      // we'd pass the main argument followed by `env` and `ctx` and the undeclared parameters
+      // would just be truncated.
       arity = 3;
     }
 
@@ -335,6 +337,24 @@ private:
       argCountFromClient = array.size();
       argsArrayFromClient = kj::mv(array);
     }
+
+    // For now, we are disallowing multiple arguments with bare function syntax, due to a footgun:
+    // if you forget to add `env, ctx` to your arg list, then the last arguments from the client
+    // will be replaced with `env` and `ctx`. Probably this would be quickly noticed in testing,
+    // but if you were to accidentally reflect `env` back to the client, it would be a severe
+    // security flaw.
+    JSG_REQUIRE(arity == 3, TypeError,
+        "Cannot call handler function \"", methodName, "\" over RPC because it has the wrong "
+        "number of arguments. A simple function handler can only be called over RPC if it has "
+        "exactly the arguments (arg, env, ctx), where only the first argument comes from the "
+        "client. To support multi-argument RPC functions, use class-based syntax (extending "
+        "WorkerEntrypoint) instead.");
+    JSG_REQUIRE(argCountFromClient == 1, TypeError,
+        "Attempted to call RPC function \"", methodName, "\" with the wrong number of arguments. "
+        "When calling a top-level handler function that is not declared as part of a class, you "
+        "must always send exactly one argument. In order to support variable numbers of "
+        "arguments, the server must use class-based syntax (extending WorkerEntrypoint) "
+        "instead.");
 
     KJ_STACK_ARRAY(v8::Local<v8::Value>, arguments, kj::max(argCountFromClient + 2, arity), 8, 8);
 
