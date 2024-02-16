@@ -130,7 +130,7 @@ Server::Server(kj::Filesystem& fs, kj::Timer& timer, kj::Network& network,
                kj::Function<void(kj::String)> reportConfigError)
     : fs(fs), timer(timer), network(network), entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)), consoleMode(consoleMode),
-      memoryCacheProvider(api::MemoryCacheProvider::createDefault()), tasks(*this) {}
+      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()), tasks(*this) {}
 
 Server::~Server() noexcept(false) {}
 
@@ -2501,18 +2501,21 @@ static kj::Maybe<WorkerdApi::Global> createBinding(
         errorReporter.addError(kj::str(
           "MemoryCache bindings are an experimental feature which may change or go away "
           "in the future. You must run workerd with `--experimental` to use this feature."));
+        return kj::none;
       }
       auto cache = binding.getMemoryCache();
       // TODO(cleanup): Should we have some reasonable default for these so they can
       // be optional?
-      KJ_REQUIRE(cache.hasLimits());
+      if (!cache.hasLimits()) {
+        errorReporter.addError(kj::str("MemoryCache bindings must specify limits. Please "
+            "update the binding in the worker configuration and try again."));
+        return kj::none;
+      }
       Global::MemoryCache cacheCopy;
       // The id is optional. If provided, then multiple bindings with the same id will
       // share the same cache. Otherwise, a unique id is generated for the cache.
       if (cache.hasId()) {
         cacheCopy.cacheId = kj::str(cache.getId());
-      } else {
-        cacheCopy.cacheId = randomUUID(kj::none);
       }
       auto limits = cache.getLimits();
       cacheCopy.maxKeys = limits.getMaxKeys();
