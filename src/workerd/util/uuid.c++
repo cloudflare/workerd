@@ -5,7 +5,7 @@
 #include "uuid.h"
 
 #include <openssl/rand.h>
-#include <kj/debug.h>
+#include <cstdlib>
 
 namespace workerd {
 namespace {
@@ -42,6 +42,7 @@ kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource) {
   // character of the fourth grouping is always either
   // an a, b, 8, or 9.
 
+  // clang-format off
   return kj::String(kj::arr<char>(
     HEX(buffer[0]),
     HEX(buffer[1]),
@@ -65,11 +66,54 @@ kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource) {
     HEX(buffer[15]),
     '\0'
   ));
+  // clang-format on
 
 #undef HEX
 }
 
-kj::String UUIDToString(uint64_t upper, uint64_t lower) {
+kj::Maybe<UUID> UUID::fromUpperLower(uint64_t upper, uint64_t lower) {
+  if (upper == 0 && lower == 0) {
+    return kj::none;
+  }
+  return UUID(upper, lower);
+}
+
+kj::Maybe<UUID> UUID::fromString(kj::StringPtr str) {
+  if (str.size() != 36u) {
+    return kj::none;
+  }
+  uint64_t upper = 0;
+  uint64_t lower = 0;
+  auto begin = str.cStr();
+  char* p;
+  upper += (strtoull(begin, &p, 16) << 32u);
+  if (p - begin != 8 || *p != '-') {
+    return kj::none;
+  }
+  upper += (strtoull(++p, &p, 16) << 16u);
+  if (p - begin != 13 || *p != '-') {
+    return kj::none;
+  }
+  upper += (strtoull(++p, &p, 16));
+  if (p - begin != 18 || *p != '-') {
+    return kj::none;
+  }
+  lower += (strtoull(++p, &p, 16) << 48u);
+  if (p - begin != 23 || *p != '-') {
+    return kj::none;
+  }
+  lower += (strtoull(++p, &p, 16));
+  if (p - begin != 36) {
+    return kj::none;
+  }
+  if (upper == 0 && lower == 0) {
+    return kj::none;
+  }
+  return UUID(upper, lower);
+}
+
+
+kj::String UUID::toString() const {
   // clang-format off
   return kj::str(
     HEX_DIGITS[(upper >> 60u) & 0xf],
@@ -112,4 +156,4 @@ kj::String UUIDToString(uint64_t upper, uint64_t lower) {
   // clang-format on
 }
 
-}
+} // namespace workerd

@@ -6,6 +6,7 @@
 
 #include <kj/compat/http.h>
 #include <kj/string.h>
+#include <kj/hash.h>
 
 namespace workerd {
 
@@ -14,10 +15,55 @@ namespace workerd {
 // source, it is safe to assume that the output of this function is unique.
 kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource);
 
-// Convert a UUID represented by two 64-bit integers to a string in the 8-4-4-4-12 format i.e.
-// a dash-separated hex string in the form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
-// The `upper` parameter represents the most signficant bits and `lower` the least significant bits
-// of the UUID value.
-kj::String UUIDToString(uint64_t upper, uint64_t lower);
+// A 128-bit universally unique identifier (UUID).
+//
+// A UUID can be created from and converted between between two formats:
+// 1. Upper/lower format: an "upper" field representing the most signficant bits and "lower" field
+//    representings the least significant bits.
+// 2. Stringified 8-4-4-4-12 hex format.
+//
+// A "null UUID" (a UUID with a value of 0) is considered invalid and is not possible to create.
+class UUID {
+public:
+  // Create a UUID from upper and lower parts. If the UUID would be null, return kj::none.
+  //
+  // For example, creating a UUID from upper and lower values of 81985529216486895 and
+  // 81985529216486895 respectively yields a UUID which stringifies to
+  // "01234567-89ab-cdef-0123-456789abcdef".
+  static kj::Maybe<UUID> fromUpperLower(uint64_t upper, uint64_t lower);
 
-}
+  // Create a UUID from 8-4-4-4-12 hex format. If the provided string is not valid, or the UUID
+  // would be null, return kj::none.
+  static kj::Maybe<UUID> fromString(kj::StringPtr str);
+
+  uint64_t getUpper() const {
+    return upper;
+  }
+
+  uint64_t getLower() const {
+    return lower;
+  }
+
+  // Stringify the UUID to 8-4-4-4-12 hex format.
+  //
+  // Note that this is NOT just a debugging API. Its behaviour is relied upon to implement
+  // user-facing APIs.
+  kj::String toString() const;
+
+  bool operator==(const UUID& other) const {
+    return upper == other.upper && lower == other.lower;
+  }
+
+  size_t hashCode() const {
+    return kj::hashCode(upper, lower);
+  }
+
+private:
+  uint64_t upper;
+  uint64_t lower;
+
+  UUID(uint64_t upper, uint64_t lower) : upper(upper), lower(lower) {}
+};
+
+
+} // namespace workerd
