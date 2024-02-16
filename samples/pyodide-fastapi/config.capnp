@@ -17,8 +17,8 @@ const config :Workerd.Config = (
 
 const mainWorker :Workerd.Worker = (
   modules = [
-    (name = "worker", pythonModule = embed "./worker.py"),
-    (name = "fastapi==0.103.2", pythonRequirement = ""),
+    (name = "worker.py", pythonModule = embed "./worker.py"),
+    (name = "fastapi", pythonRequirement = ""),
     (name = "ssl", pythonRequirement = ""),
   ],
   compatibilityDate = "2023-12-18",

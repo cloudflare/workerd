@@ -30,7 +30,7 @@ function decodeHeader(buf) {
   const mode = decodeNumber(buf, 100, 8);
   const size = decodeNumber(buf, 124, 12);
   const modtime = decodeNumber(buf, 136, 12);
-  const type = Number(String.fromCharCode(buf[156]));
+  const type = String.fromCharCode(buf[156]);
   return {
     path,
     name: path,
@@ -102,7 +102,7 @@ export function parseTarInfo() {
       directories.push(directory);
       directory = directory.children.get(parts[i]);
     }
-    if (info.type === 5) {
+    if (info.type === "5") {
       // a directory
       directories.push(directory);
       info.parts = parts;
@@ -110,14 +110,17 @@ export function parseTarInfo() {
       info.children = new Map();
       directory.children.set(info.name, info);
       directory = info;
-    } else {
-      // hopefully a normal file, we ignore other values of type (e.g., symlink)
+    } else if (info.type === "0") {
+      // a normal file
       info.contentsOffset = contentsOffset;
       info.name = info.path.slice(directory.path.length);
       if (info.name.endsWith(".so")) {
         soFiles.push(info.path);
       }
       directory.children.set(info.name, info);
+    } else {
+      // fail if we encounter other values of type (e.g., symlink, LongName, etc)
+      throw new Error(`Python TarFS error: Unexpected type ${info.type}`);
     }
   }
 }

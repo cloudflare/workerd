@@ -17,7 +17,7 @@ const config :Workerd.Config = (
 
 const mainWorker :Workerd.Worker = (
   modules = [
-    (name = "worker", pythonModule = embed "./worker.py"),
+    (name = "worker.py", pythonModule = embed "./worker.py"),
     (name = "aiohttp", pythonRequirement = "aiohttp"),
     (name = "ssl", pythonRequirement = "ssl"),
     (name = "langchain==0.0.339", pythonRequirement = ""),

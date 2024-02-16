@@ -107,14 +107,6 @@ async function setupPackages(pyodide) {
   const site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
 
   initializePackageIndex(pyodide);
-  {
-    const mod = await import("pyodide-internal:relaxed_call.py");
-    pyodide.FS.writeFile(
-      `${site_packages}/relaxed_call.py`,
-      new Uint8Array(mod.default),
-      { canOwn: true },
-    );
-  }
 
   const requirements = MetadataReader.getRequirements();
   const pythonRequirements = isWorkerd ? requirements : requirements.filter(req => !EMBEDDED_PYTHON_PACKAGES.has(req));
@@ -168,21 +160,20 @@ function getPyodide() {
     // When we do it in top level scope we seem to get a broken file system.
     const pyodide = await loadPyodide();
     const mainModule = await setupPackages(pyodide);
-    const relaxed_call = pyodide.pyimport("relaxed_call").relaxed_call;
-    return { mainModule, relaxed_call };
+    return { mainModule };
   })();
   return mainModulePromise;
 }
 
 export default {
   async fetch(request, env, ctx) {
-    const { relaxed_call, mainModule } = await getPyodide();
-    return await relaxed_call(mainModule.fetch, request, env, ctx);
+    const { mainModule } = await getPyodide();
+    return await mainModule.fetch.callRelaxed(request, env, ctx);
   },
   async test(ctrl, env, ctx) {
     try {
-      const { relaxed_call, mainModule } = await getPyodide();
-      return await relaxed_call(mainModule.test, ctrl, env, ctx);
+      const { mainModule } = await getPyodide();
+      return await mainModule.test.callRelaxed(ctrl, env, ctx);
     } catch (e) {
       console.warn(e);
       throw e;
