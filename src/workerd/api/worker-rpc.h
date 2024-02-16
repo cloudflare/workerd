@@ -125,18 +125,14 @@ private:
 //       async fetch(req) { ... }
 //       async someRpcMethod(a, b) { ... }
 //     }
+//
+// `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
+// define a constructor.
 class WorkerEntrypoint: public jsg::Object {
 public:
-  // Generally, subclasses should override this constructor to save the `ctx` and `env` values as
-  // class properties.
-  //
-  // We don't create properties automatically because:
-  // - The properties should be private, but private properties declared in a base class won't be
-  //   visible to the derived class.
-  // - The names `ctx` and `env` aren't otherwise specified by the API. We'd have to argue about
-  //   whether these are the names we really want to formalize. Letting the subclass choose its
-  //   names avoids that.
-  static jsg::Ref<WorkerEntrypoint> constructor(jsg::Ref<ExecutionContext> ctx, jsg::JsObject env);
+  static jsg::Ref<WorkerEntrypoint> constructor(
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      jsg::Ref<ExecutionContext> ctx, jsg::JsObject env);
 
   JSG_RESOURCE_TYPE(WorkerEntrypoint) {}
 };
@@ -154,7 +150,8 @@ public:
 class DurableObjectBase: public jsg::Object {
 public:
   static jsg::Ref<DurableObjectBase> constructor(
-        jsg::Ref<DurableObjectState> state, jsg::JsObject env);
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      jsg::Ref<DurableObjectState> ctx, jsg::JsObject env);
 
   JSG_RESOURCE_TYPE(DurableObjectBase) {}
 };

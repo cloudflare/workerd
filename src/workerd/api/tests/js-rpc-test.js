@@ -27,11 +27,11 @@ export let nonClass = {
 }
 
 export class MyService extends WorkerEntrypoint {
-  #env;
-
   constructor(ctx, env) {
     super(ctx, env);
-    this.#env = env;
+
+    assert.strictEqual(this.ctx, ctx);
+    assert.strictEqual(this.env, env);
 
     // This shouldn't be callable!
     this.instanceMethod = () => {
@@ -40,15 +40,15 @@ export class MyService extends WorkerEntrypoint {
   }
 
   async noArgsMethod(x) {
-    return (x === undefined) ? (this.#env.twelve + 1) : "param not undefined?";
+    return (x === undefined) ? (this.env.twelve + 1) : "param not undefined?";
   }
 
   async oneArgMethod(i) {
-    return this.#env.twelve * i;
+    return this.env.twelve * i;
   }
 
   async twoArgsMethod(i, j) {
-    return i * j + this.#env.twelve;
+    return i * j + this.env.twelve;
   }
 
   async fetch(req, x) {
@@ -60,8 +60,11 @@ export class MyService extends WorkerEntrypoint {
 export class MyActor extends DurableObject {
   #counter = 0;
 
-  constructor(state, env) {
-    super(state, env);
+  constructor(ctx, env) {
+    super(ctx, env);
+
+    assert.strictEqual(this.ctx, ctx);
+    assert.strictEqual(this.env, env);
   }
 
   async increment(amount) {
@@ -83,7 +86,8 @@ export class ActorNoExtends {
 
 export default class DefaultService extends WorkerEntrypoint {
   async fetch(req) {
-    return new Response("default service");
+    // Test this.env here just to prove omitting the constructor entirely works.
+    return new Response("default service " + this.env.twelve);
   }
 }
 
@@ -209,6 +213,6 @@ export let actorWithoutExtendsRejectsRpc = {
 export let defaultExportClass = {
   async test(controller, env, ctx) {
     let resp = await env.defaultExport.fetch("http://foo");
-    assert.strictEqual(await resp.text(), "default service");
+    assert.strictEqual(await resp.text(), "default service 12");
   },
 }

@@ -1,7 +1,13 @@
 export class DurableObject {
-  public constructor(state: unknown, env: unknown);
+  public constructor(ctx: unknown, env: unknown);
+
+  public ctx: unknown;
+  public env: unknown;
 }
 
 export class WorkerEntrypoint {
   public constructor(ctx: unknown, env: unknown);
+
+  public ctx: unknown;
+  public env: unknown;
 }
