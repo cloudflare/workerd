@@ -23,8 +23,14 @@ public:
   };
 
   struct Released {
+    // The serialized data.
     kj::Array<kj::byte> data;
+
+    // All instances of SharedArrayBuffer seen during serialization. Pass these along to the
+    // deserializer to achieve actual sharing of buffers.
     kj::Array<std::shared_ptr<v8::BackingStore>> sharedArrayBuffers;
+
+    // All ArrayBuffers that were passed to `transfer()`.
     kj::Array<std::shared_ptr<v8::BackingStore>> transferredArrayBuffers;
   };
 
@@ -33,8 +39,17 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(Serializer);
 
+  // Write a value.
+  //
+  // You can call this multiple times to write multiple values, then call `readValue()` the same
+  // number of times on the deserialization side.
   void write(Lock& js, const JsValue& value);
 
+  // Implements the `transfer` option of `structuredClone()`. Pass each item in the transfer array
+  // to this method before calling `write()`. This gives the Serializer permission to serialize
+  // these values by detaching them (destroying the caller's handle) rather than make a copy. The
+  // detached content will show up as part of `Released`, where it should then be delivered to the
+  // Deserializer later.
   void transfer(Lock& js, const JsValue& value);
 
   Released release();
