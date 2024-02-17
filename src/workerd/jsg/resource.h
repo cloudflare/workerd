@@ -596,6 +596,11 @@ private:
 
   // Maps type_info values to functions that can be used to get the associated template. Used by
   // ResourceWrapper.
+  //
+  // Fun fact: Comparing type_index on Linux is a simple pointer comparison. On Windows it is a
+  // string comparison (of the type names). On Mac arm64 it could be either, there's a special bit
+  // in the type_info that indicates if it is known to be unique. See
+  // _LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION in <typeinfo> for more.
   kj::HashMap<std::type_index, GetTypeInfoFunc*> resourceTypeMap;
 
   template <typename, typename>
