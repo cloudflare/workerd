@@ -136,12 +136,15 @@ capnp_embed(
     src = ":trimmed-supported-compatibility-date-gen",
 )
 
+# TODO(cleanup): Split this target up further, as many depnedents don't need all the files here.
+#   Avoiding the dependency on supported-compatibility-date.capnp is often helpful due to the
+#   transitive dependency on `trimmed-supported-compatibility-date.txt` which is dynamically
+#   generated.
 wd_cc_capnp_library(
     name = "capnp",
     srcs = [
         "actor-storage.capnp",
         "cdp.capnp",
-        "compatibility-date.capnp",
         "supported-compatibility-date.capnp",
         "worker-interface.capnp",
     ],
@@ -149,6 +152,7 @@ wd_cc_capnp_library(
     deps = [
         ":outcome_capnp",
         ":script_version_capnp",
+        ":compatibility_date_capnp",
         ":trimmed-supported-compatibility-date",
         "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
     ],
@@ -163,6 +167,12 @@ wd_cc_capnp_library(
 wd_cc_capnp_library(
     name = "script_version_capnp",
     srcs = ["script-version.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_capnp_library(
+    name = "compatibility_date_capnp",
+    srcs = ["compatibility-date.capnp"],
     visibility = ["//visibility:public"],
 )
 
