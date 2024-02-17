@@ -1,7 +1,7 @@
-From 8316053ffc2767486f2722aecb0a4af623474a26 Mon Sep 17 00:00:00 2001
+From ea78783b6fdbf53d19efcf5dadb9c4292218c8e4 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
-Subject: Speed up V8 bazel build by always using target cfg
+Subject: [PATCH 09/19] Speed up V8 bazel build by always using target cfg
 
 See the workerd build cfg changes for rationale. This provides a significant
 speedup for the build: Components like ICU were previously compiled in
@@ -16,7 +16,7 @@ this also improves build times.
  2 files changed, 57 insertions(+), 16 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 14d0c35fd606afa89d870a4f0ecdb567c7b75cad..be82fc2e20a10ded7cd8a949af0533a74290d49d 100644
+index 14d0c35fd60..be82fc2e20a 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -74,7 +74,7 @@ index 14d0c35fd606afa89d870a4f0ecdb567c7b75cad..be82fc2e20a10ded7cd8a949af0533a7
      ],
  )
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 0c59518819cb685fe9f68080d6bdbeb0b7ff5033..7053ca31b999ae7423e7485ee6392a09f9de4aa9 100644
+index 0c59518819c..7053ca31b99 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -336,6 +336,15 @@ def v8_library(
@@ -162,3 +162,6 @@ index 0c59518819cb685fe9f68080d6bdbeb0b7ff5033..7053ca31b999ae7423e7485ee6392a09
 +        ),
 +    },
 +)
+-- 
+2.34.1
+

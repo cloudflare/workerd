@@ -1,7 +1,7 @@
-From 42ae0d533772f9aae98f0f17454802e2b2af3bc0 Mon Sep 17 00:00:00 2001
+From 24866314f6731cc395d6b6199c0b764ca55fc022 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Tue, 11 Apr 2023 14:41:31 -0400
-Subject: Disable bazel whole-archive build
+Subject: [PATCH 06/19] Disable bazel whole-archive build
 
 V8's bazel configuration system adds the alwayslink parameter (equivalent
 to --Wl,-whole-archive on Linux) to all V8 libraries, causing all V8
@@ -14,7 +14,7 @@ allows the linker to eliminate unused symbols.
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
-index 4843ea09f99fa1b45bf66af8fd971adfd89efe45..73a25df55abc380092a0177bb13364e6f216ce95 100644
+index 4843ea09f99..73a25df55ab 100644
 --- a/bazel/BUILD.icu
 +++ b/bazel/BUILD.icu
 @@ -56,7 +56,7 @@ cc_library(
@@ -35,3 +35,6 @@ index 4843ea09f99fa1b45bf66af8fd971adfd89efe45..73a25df55abc380092a0177bb13364e6
  )
  
  cc_library(
+-- 
+2.34.1
+

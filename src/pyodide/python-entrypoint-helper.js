@@ -173,7 +173,7 @@ export default {
   async test(ctrl, env, ctx) {
     try {
       const { mainModule } = await getPyodide();
-      return await mainModule.test.callRelaxed(ctrl, env, ctx);
+      return await mainModule.test.callSyncifying(ctrl, env, ctx);
     } catch (e) {
       console.warn(e);
       throw e;

@@ -1,7 +1,7 @@
-From ab92e41e703b846b461befaf8af2f8be706c4065 Mon Sep 17 00:00:00 2001
+From b98dca40e565211ef22f7e55dd969ac2b81f2c69 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
-Subject: Enable V8 shared linkage
+Subject: [PATCH 11/19] Enable V8 shared linkage
 
 ---
  BUILD.bazel    | 7 ++++++-
@@ -9,7 +9,7 @@ Subject: Enable V8 shared linkage
  2 files changed, 6 insertions(+), 4 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index be82fc2e20a10ded7cd8a949af0533a74290d49d..fab5eb2419f1e6eee3d05c510bc2cb8637d19c83 100644
+index be82fc2e20a..fab5eb2419f 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -1421,7 +1421,6 @@ filegroup(
@@ -41,7 +41,7 @@ index be82fc2e20a10ded7cd8a949af0533a74290d49d..fab5eb2419f1e6eee3d05c510bc2cb86
          ":is_not_v8_enable_turbofan": [
              # With Turbofan disabled, we only include the stubbed-out API.
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 7053ca31b999ae7423e7485ee6392a09f9de4aa9..8f47a6477e8e99fd330dac5338f3f1d5f536ec64 100644
+index 7053ca31b99..8f47a6477e8 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -293,7 +293,6 @@ def v8_library(
@@ -68,3 +68,6 @@ index 7053ca31b999ae7423e7485ee6392a09f9de4aa9..8f47a6477e8e99fd330dac5338f3f1d5
              **kwargs
          )
  
+-- 
+2.34.1
+

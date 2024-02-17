@@ -1,7 +1,7 @@
-From 029d28b2a8470a26bb60c54781a0835910dcc583 Mon Sep 17 00:00:00 2001
+From 8600761aa89ee3d84a0633635314cd1400b903d7 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
-Subject: Allow manually setting ValueSerializer format version
+Subject: [PATCH 02/19] Allow manually setting ValueSerializer format version
 
 Refs: https://bitbucket.cfdata.org/projects/MIRRORS/repos/v8/pull-requests/2/overview
 ---
@@ -12,7 +12,7 @@ Refs: https://bitbucket.cfdata.org/projects/MIRRORS/repos/v8/pull-requests/2/ove
  4 files changed, 29 insertions(+), 3 deletions(-)
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
-index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347dec6c0c7d 100644
+index 40ad805c797..596be18adeb 100644
 --- a/include/v8-value-serializer.h
 +++ b/include/v8-value-serializer.h
 @@ -154,6 +154,11 @@ class V8_EXPORT ValueSerializer {
@@ -28,7 +28,7 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index d5e17d0b9927a89c12013c5b0d3075f47751f48a..f59eed43d782fe434e4dcbcd7fb7cb4c5f2590b4 100644
+index d5e17d0b992..f59eed43d78 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -3546,6 +3546,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
@@ -43,7 +43,7 @@ index d5e17d0b9927a89c12013c5b0d3075f47751f48a..f59eed43d782fe434e4dcbcd7fb7cb4c
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 1b2eefa1ea67e0ea9f03641bf2e454a1046cb267..f0b1956253fe603ad6da30a41fb923078ef6bd78 100644
+index 1b2eefa1ea6..f0b1956253f 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -267,6 +267,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
@@ -89,7 +89,7 @@ index 1b2eefa1ea67e0ea9f03641bf2e454a1046cb267..f0b1956253fe603ad6da30a41fb92307
  }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 8d9602b129a6156f051690ed595ca699bb132af4..4747119155007e1fa0075440fefa1dfee036c48a 100644
+index 8d9602b129a..47471191550 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -54,6 +54,11 @@ class ValueSerializer {
@@ -112,3 +112,6 @@ index 8d9602b129a6156f051690ed595ca699bb132af4..4747119155007e1fa0075440fefa1dfe
  
    // To avoid extra lookups in the identity map, ID+1 is actually stored in the
    // map (checking if the used identity is zero is the fast way of checking if
+-- 
+2.34.1
+

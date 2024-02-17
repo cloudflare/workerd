@@ -1,0 +1,167 @@
+From d4331033ea2b83c1ab8e93de392dc8fe66c0c1c1 Mon Sep 17 00:00:00 2001
+From: Francis McCabe <fgm@chromium.org>
+Date: Fri, 26 Jan 2024 22:49:25 +0000
+Subject: [PATCH 18/19] [wasm][type reflection] Implement dynamic flag for wasm
+ type reflection.
+
+Enables origin trial for JSPI.
+
+Bug: v8:7742
+Change-Id: I6745e62406fc17a64845b48380a6099d58e8ea15
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/5230821
+Reviewed-by: Ilya Rezvov <irezvov@chromium.org>
+Reviewed-by: Thibaud Michaud <thibaudm@chromium.org>
+Commit-Queue: Francis McCabe <fgm@chromium.org>
+Cr-Commit-Position: refs/heads/main@{#92092}
+---
+ src/wasm/wasm-features.cc |  4 ++
+ src/wasm/wasm-js.cc       | 89 +++++++++++++++++++++++----------------
+ src/wasm/wasm-js.h        |  3 ++
+ 3 files changed, 59 insertions(+), 37 deletions(-)
+
+diff --git a/src/wasm/wasm-features.cc b/src/wasm/wasm-features.cc
+index 1ae9d11a294..b10f68fb308 100644
+--- a/src/wasm/wasm-features.cc
++++ b/src/wasm/wasm-features.cc
+@@ -51,6 +51,10 @@ WasmFeatures WasmFeatures::FromContext(Isolate* isolate,
+   }
+   if (isolate->IsWasmJSPIEnabled(context)) {
+     features.Add(kFeature_jspi);
++    features.Add(kFeature_type_reflection);
++  }
++  if (v8_flags.experimental_wasm_type_reflection) {
++    features.Add(kFeature_type_reflection);
+   }
+   // This space intentionally left blank for future Wasm origin trials.
+   return features;
+diff --git a/src/wasm/wasm-js.cc b/src/wasm/wasm-js.cc
+index 1ae0edf42be..e9eae3f9907 100644
+--- a/src/wasm/wasm-js.cc
++++ b/src/wasm/wasm-js.cc
+@@ -3242,43 +3242,7 @@ void WasmJs::Install(Isolate* isolate, bool exposed_on_global_object) {
+   const auto enabled_features = wasm::WasmFeatures::FromFlags();
+ 
+   if (enabled_features.has_type_reflection()) {
+-#define INSTANCE_PROTO_HANDLE(Name) \
+-  handle(JSObject::cast(native_context->Name()->instance_prototype()), isolate)
+-    InstallFunc(isolate, INSTANCE_PROTO_HANDLE(wasm_table_constructor), "type",
+-                WebAssemblyTableType, 0, false, NONE,
+-                SideEffectType::kHasNoSideEffect);
+-    InstallFunc(isolate, INSTANCE_PROTO_HANDLE(wasm_memory_constructor), "type",
+-                WebAssemblyMemoryType, 0, false, NONE,
+-                SideEffectType::kHasNoSideEffect);
+-    InstallFunc(isolate, INSTANCE_PROTO_HANDLE(wasm_global_constructor), "type",
+-                WebAssemblyGlobalType, 0, false, NONE,
+-                SideEffectType::kHasNoSideEffect);
+-    InstallFunc(isolate, INSTANCE_PROTO_HANDLE(wasm_tag_constructor), "type",
+-                WebAssemblyTagType, 0);
+-#undef INSTANCE_PROTO_HANDLE
+-
+-    // Create the Function object.
+-    Handle<JSFunction> function_constructor = InstallConstructorFunc(
+-        isolate, webassembly, "Function", WebAssemblyFunction);
+-    SetDummyInstanceTemplate(isolate, function_constructor);
+-    JSFunction::EnsureHasInitialMap(function_constructor);
+-    Handle<JSObject> function_proto(
+-        JSObject::cast(function_constructor->instance_prototype()), isolate);
+-    Handle<Map> function_map =
+-        Map::Copy(isolate, isolate->sloppy_function_without_prototype_map(),
+-                  "WebAssembly.Function");
+-    CHECK(JSObject::SetPrototype(
+-              isolate, function_proto,
+-              handle(native_context->function_function()->prototype(), isolate),
+-              false, kDontThrow)
+-              .FromJust());
+-    JSFunction::SetInitialMap(isolate, function_constructor, function_map,
+-                              function_proto);
+-    InstallFunc(isolate, function_proto, "type", WebAssemblyFunctionType, 0);
+-    SimpleInstallFunction(isolate, function_proto, "bind",
+-                          Builtin::kWebAssemblyFunctionPrototypeBind, 1, false);
+-    // Make all exported functions an instance of {WebAssembly.Function}.
+-    native_context->set_wasm_exported_function_map(*function_map);
++    InstallTypeReflection(isolate, native_context);
+   }
+ 
+   // Create the Suspender object.
+@@ -3326,6 +3290,13 @@ void WasmJs::InstallConditionalFeatures(Isolate* isolate,
+              .FromMaybe(true)) {
+       InstallSuspenderConstructor(isolate, context);
+     }
++
++    // Install Wasm type reflection features (if not already done).
++    Handle<String> function_string = v8_str(isolate, "Function");
++    if (!JSObject::HasRealNamedProperty(isolate, webassembly, function_string)
++             .FromMaybe(true)) {
++      InstallTypeReflection(isolate, context);
++    }
+   }
+ }
+ 
+@@ -3340,6 +3311,50 @@ void WasmJs::InstallSuspenderConstructor(Isolate* isolate,
+                    WasmSuspenderObject::kHeaderSize, "WebAssembly.Suspender");
+ }
+ 
++// static
++void WasmJs::InstallTypeReflection(Isolate* isolate,
++                                   Handle<NativeContext> context) {
++  Handle<JSObject> webassembly(context->wasm_webassembly_object(), isolate);
++
++#define INSTANCE_PROTO_HANDLE(Name) \
++  handle(JSObject::cast(context->Name()->instance_prototype()), isolate)
++  InstallFunc(isolate, INSTANCE_PROTO_HANDLE(wasm_table_constructor), "type",
++              WebAssemblyTableType, 0, false, NONE,
++              SideEffectType::kHasNoSideEffect);
++  InstallFunc(isolate, INSTANCE_PROTO_HANDLE(wasm_memory_constructor), "type",
++              WebAssemblyMemoryType, 0, false, NONE,
++              SideEffectType::kHasNoSideEffect);
++  InstallFunc(isolate, INSTANCE_PROTO_HANDLE(wasm_global_constructor), "type",
++              WebAssemblyGlobalType, 0, false, NONE,
++              SideEffectType::kHasNoSideEffect);
++  InstallFunc(isolate, INSTANCE_PROTO_HANDLE(wasm_tag_constructor), "type",
++              WebAssemblyTagType, 0);
++#undef INSTANCE_PROTO_HANDLE
++
++  // Create the Function object.
++  Handle<JSFunction> function_constructor = InstallConstructorFunc(
++      isolate, webassembly, "Function", WebAssemblyFunction);
++  SetDummyInstanceTemplate(isolate, function_constructor);
++  JSFunction::EnsureHasInitialMap(function_constructor);
++  Handle<JSObject> function_proto(
++      JSObject::cast(function_constructor->instance_prototype()), isolate);
++  Handle<Map> function_map =
++      Map::Copy(isolate, isolate->sloppy_function_without_prototype_map(),
++                "WebAssembly.Function");
++  CHECK(JSObject::SetPrototype(
++            isolate, function_proto,
++            handle(context->function_function()->prototype(), isolate), false,
++            kDontThrow)
++            .FromJust());
++  JSFunction::SetInitialMap(isolate, function_constructor, function_map,
++                            function_proto);
++  InstallFunc(isolate, function_proto, "type", WebAssemblyFunctionType, 0);
++  SimpleInstallFunction(isolate, function_proto, "bind",
++                        Builtin::kWebAssemblyFunctionPrototypeBind, 1, false);
++  // Make all exported functions an instance of {WebAssembly.Function}.
++  context->set_wasm_exported_function_map(*function_map);
++}
++
+ namespace wasm {
+ // static
+ std::unique_ptr<WasmStreaming> StartStreamingForTesting(
+diff --git a/src/wasm/wasm-js.h b/src/wasm/wasm-js.h
+index d682a3df638..12c3f7e863f 100644
+--- a/src/wasm/wasm-js.h
++++ b/src/wasm/wasm-js.h
+@@ -77,6 +77,9 @@ class WasmJs {
+   V8_EXPORT_PRIVATE static void InstallConditionalFeatures(
+       Isolate* isolate, Handle<NativeContext> context);
+ 
++  V8_EXPORT_PRIVATE static void InstallTypeReflection(
++      Isolate* isolate, Handle<NativeContext> context);
++
+   V8_EXPORT_PRIVATE static void InstallSuspenderConstructor(
+       Isolate* isolate, Handle<NativeContext> context);
+ };
+-- 
+2.34.1
+

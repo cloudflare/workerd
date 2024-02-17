@@ -1,7 +1,7 @@
-From 025482cca7b65b7692d2905fdf8eb8844cd560c3 Mon Sep 17 00:00:00 2001
+From 28f0788c64a98a4c5a805a14ea5c190ece87f24c Mon Sep 17 00:00:00 2001
 From: Alex Robinson <arobinson@cloudflare.com>
 Date: Wed, 2 Mar 2022 15:58:04 -0600
-Subject: Allow manually setting ValueDeserializer format version
+Subject: [PATCH 01/19] Allow manually setting ValueDeserializer format version
 
 For many years, V8's serialization version didn't change. In the meantime,
 we accidentally stored data that was missing a version header. This patch
@@ -22,7 +22,7 @@ like:
  3 files changed, 18 insertions(+)
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
-index 0cb3e045bc46ec732956318b980e749d1847d06d..40ad805c7970cc9379e69f046205836dbd760373 100644
+index 0cb3e045bc4..40ad805c797 100644
 --- a/include/v8-value-serializer.h
 +++ b/include/v8-value-serializer.h
 @@ -293,6 +293,13 @@ class V8_EXPORT ValueDeserializer {
@@ -40,7 +40,7 @@ index 0cb3e045bc46ec732956318b980e749d1847d06d..40ad805c7970cc9379e69f046205836d
     * Reads raw data in various common formats to the buffer.
     * Note that integer types are read in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 84d7d170cd0a96ec4d9cf772b13f779a3bd5bbeb..d5e17d0b9927a89c12013c5b0d3075f47751f48a 100644
+index 84d7d170cd0..d5e17d0b992 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -3678,6 +3678,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
@@ -55,7 +55,7 @@ index 84d7d170cd0a96ec4d9cf772b13f779a3bd5bbeb..d5e17d0b9927a89c12013c5b0d3075f4
    PREPARE_FOR_EXECUTION(context, ValueDeserializer, ReadValue);
    i::MaybeHandle<i::Object> result;
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 9b2d97cf79a21ff6d352172efaf53fdca4ac8e7b..8d9602b129a6156f051690ed595ca699bb132af4 100644
+index 9b2d97cf79a..8d9602b129a 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -217,6 +217,13 @@ class ValueDeserializer {
@@ -72,3 +72,6 @@ index 9b2d97cf79a21ff6d352172efaf53fdca4ac8e7b..8d9602b129a6156f051690ed595ca699
    /*
     * Deserializes a V8 object from the buffer.
     */
+-- 
+2.34.1
+

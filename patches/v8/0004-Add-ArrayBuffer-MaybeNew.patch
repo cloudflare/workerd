@@ -1,7 +1,7 @@
-From f8be71a7afa20ded149f594f7ac38e53d2c85fa0 Mon Sep 17 00:00:00 2001
+From 643989a3af36a11c045b9ee66b875edef586b45f Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Fri, 16 Sep 2022 21:41:45 -0500
-Subject: Add `ArrayBuffer::MaybeNew()`.
+Subject: [PATCH 04/19] Add `ArrayBuffer::MaybeNew()`.
 
 In Cloudflare's edge runtime, this is part of a larger patch that allows graceful handling of allocations that exceed memory limits. `workerd` currently doesn't enforce any limits, so to reduce complexity we just forward to `New()`.
 
@@ -11,7 +11,7 @@ In Cloudflare's edge runtime, this is part of a larger patch that allows gracefu
  1 file changed, 8 insertions(+)
 
 diff --git a/include/v8-array-buffer.h b/include/v8-array-buffer.h
-index 804fc42c4b56dd9b79f0fdc49e94c0e101e510e8..369e770351b80c60cae43866139e3a5396de08bd 100644
+index 804fc42c4b5..369e770351b 100644
 --- a/include/v8-array-buffer.h
 +++ b/include/v8-array-buffer.h
 @@ -210,6 +210,14 @@ class V8_EXPORT ArrayBuffer : public Object {
@@ -29,3 +29,6 @@ index 804fc42c4b56dd9b79f0fdc49e94c0e101e510e8..369e770351b80c60cae43866139e3a53
    /**
     * Create a new ArrayBuffer. Allocate |byte_length| bytes.
     * Allocated memory will be owned by a created ArrayBuffer and
+-- 
+2.34.1
+

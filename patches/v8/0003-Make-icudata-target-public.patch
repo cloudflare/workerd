@@ -1,7 +1,7 @@
-From 727f8f091a86edfe8c006cff310f1def08cbed6b Mon Sep 17 00:00:00 2001
+From 83d4dbe30820e50cbd96bacab1df4b7bc3b7164a Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 17 Sep 2022 11:11:15 -0500
-Subject: Make `:icudata` target public.
+Subject: [PATCH 03/19] Make `:icudata` target public.
 
 Dependencies are required to load this file, so it ought to be exposed for them to use.
 ---
@@ -9,7 +9,7 @@ Dependencies are required to load this file, so it ought to be exposed for them 
  1 file changed, 1 insertion(+)
 
 diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
-index 2ae79a5784f252ab69b58cd47d131aec65d34701..4843ea09f99fa1b45bf66af8fd971adfd89efe45 100644
+index 2ae79a5784f..4843ea09f99 100644
 --- a/bazel/BUILD.icu
 +++ b/bazel/BUILD.icu
 @@ -5,6 +5,7 @@
@@ -20,3 +20,6 @@ index 2ae79a5784f252ab69b58cd47d131aec65d34701..4843ea09f99fa1b45bf66af8fd971adf
  )
  
  cc_library(
+-- 
+2.34.1
+
