@@ -1,0 +1,158 @@
+From c3c2e758c48d5c1860beb8f451028c820beafebf Mon Sep 17 00:00:00 2001
+From: Francis McCabe <fgm@chromium.org>
+Date: Wed, 24 Jan 2024 22:32:46 +0000
+Subject: [PATCH 17/19] [wasm][js][jspi]Set up wasm-experimental-jspi as a
+ flag.
+
+The old experimental-stack-switching flag implies this new one.
+
+The new flag is intended to be more precise, and allow for future
+experimentation around core stack switching.
+
+Bug: v8:12191
+Change-Id: I8ea2df700fc98836f759b5faf54cf0c37270a79c
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/5232216
+Commit-Queue: Francis McCabe <fgm@chromium.org>
+Reviewed-by: Deepti Gandluri <gdeepti@chromium.org>
+Reviewed-by: Jakob Kummerow <jkummerow@chromium.org>
+Cr-Commit-Position: refs/heads/main@{#92017}
+---
+ src/execution/isolate.cc                    | 4 ++--
+ src/flags/flag-definitions.h                | 5 +++--
+ src/wasm/wasm-feature-flags.h               | 5 +++++
+ src/wasm/wasm-features.cc                   | 2 +-
+ src/wasm/wasm-js.cc                         | 2 +-
+ test/mjsunit/wasm/stack-switching-export.js | 2 +-
+ test/mjsunit/wasm/stack-switching.js        | 2 +-
+ test/unittests/api/api-wasm-unittest.cc     | 6 ++----
+ 8 files changed, 16 insertions(+), 12 deletions(-)
+
+diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
+index 3f5fd6016f3..b3d8b0b99b8 100644
+--- a/src/execution/isolate.cc
++++ b/src/execution/isolate.cc
+@@ -3078,7 +3078,7 @@ bool Isolate::IsWasmJSPIEnabled(Handle<NativeContext> context) {
+   }
+ 
+   // Otherwise use the runtime flag.
+-  return v8_flags.experimental_wasm_stack_switching;
++  return v8_flags.experimental_wasm_jspi;
+ #else
+   return false;
+ #endif
+@@ -4896,7 +4896,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+ 
+ #ifdef V8_ENABLE_WEBASSEMBLY
+   // Set up for JSPI
+-  if (v8_flags.experimental_wasm_stack_switching) WasmInitJSPIFeature();
++  if (v8_flags.experimental_wasm_jspi) WasmInitJSPIFeature();
+ 
+ #if V8_STATIC_ROOTS_BOOL
+   // Protect the payload of wasm null.
+diff --git a/src/flags/flag-definitions.h b/src/flags/flag-definitions.h
+index ac750c1ad82..d2e4a7811ad 100644
+--- a/src/flags/flag-definitions.h
++++ b/src/flags/flag-definitions.h
+@@ -1462,8 +1462,9 @@ FOREACH_WASM_SHIPPED_FEATURE_FLAG(DECL_WASM_FLAG)
+ 
+ DEFINE_IMPLICATION(experimental_wasm_gc, experimental_wasm_typed_funcref)
+ 
+-DEFINE_IMPLICATION(experimental_wasm_stack_switching,
+-                   experimental_wasm_type_reflection)
++DEFINE_IMPLICATION(experimental_wasm_stack_switching, experimental_wasm_jspi)
++
++DEFINE_IMPLICATION(experimental_wasm_jspi, experimental_wasm_type_reflection)
+ 
+ DEFINE_BOOL(wasm_staging, false, "enable staged wasm features")
+ 
+diff --git a/src/wasm/wasm-feature-flags.h b/src/wasm/wasm-feature-flags.h
+index 76ec5c96e19..ba295d7c37c 100644
+--- a/src/wasm/wasm-feature-flags.h
++++ b/src/wasm/wasm-feature-flags.h
+@@ -45,6 +45,11 @@
+   /* V8 side owner: thibaudm, fgm */                                           \
+   V(stack_switching, "stack switching", false)                                 \
+                                                                                \
++  /* JavaScript Promise Integration proposal. */                               \
++  /* https://github.com/WebAssembly/js-promise-integration */                  \
++  /* V8 side owner: thibaudm, fgm */                                           \
++  V(jspi, "javascript promise integration", false)                             \
++                                                                               \
+   /* Imported Strings Proposal. */                                             \
+   /* https://github.com/WebAssembly/design/issues/1480 */                      \
+   /* Prototype spec: https://bit.ly/wasm-imported-strings */                   \
+diff --git a/src/wasm/wasm-features.cc b/src/wasm/wasm-features.cc
+index 9f141a374f3..1ae9d11a294 100644
+--- a/src/wasm/wasm-features.cc
++++ b/src/wasm/wasm-features.cc
+@@ -50,7 +50,7 @@ WasmFeatures WasmFeatures::FromContext(Isolate* isolate,
+     features.Add(kFeature_imported_strings);
+   }
+   if (isolate->IsWasmJSPIEnabled(context)) {
+-    features.Add(kFeature_stack_switching);
++    features.Add(kFeature_jspi);
+   }
+   // This space intentionally left blank for future Wasm origin trials.
+   return features;
+diff --git a/src/wasm/wasm-js.cc b/src/wasm/wasm-js.cc
+index dadf75c2548..1ae0edf42be 100644
+--- a/src/wasm/wasm-js.cc
++++ b/src/wasm/wasm-js.cc
+@@ -3282,7 +3282,7 @@ void WasmJs::Install(Isolate* isolate, bool exposed_on_global_object) {
+   }
+ 
+   // Create the Suspender object.
+-  if (enabled_features.has_stack_switching()) {
++  if (enabled_features.has_jspi()) {
+     InstallSuspenderConstructor(isolate, native_context);
+   }
+ 
+diff --git a/test/mjsunit/wasm/stack-switching-export.js b/test/mjsunit/wasm/stack-switching-export.js
+index db559f95376..5fcc88138cf 100644
+--- a/test/mjsunit/wasm/stack-switching-export.js
++++ b/test/mjsunit/wasm/stack-switching-export.js
+@@ -3,7 +3,7 @@
+ // found in the LICENSE file.
+ 
+ // Flags: --wasm-generic-wrapper --expose-gc --allow-natives-syntax
+-// Flags: --experimental-wasm-stack-switching
++// Flags: --experimental-wasm-jspi
+ 
+ // This is a port of the generic-wrapper.js tests for the JS Promise Integration
+ // variant of the wrapper. We don't suspend the stacks in this test, we only
+diff --git a/test/mjsunit/wasm/stack-switching.js b/test/mjsunit/wasm/stack-switching.js
+index a87344201a4..0e7e6e6bc3a 100644
+--- a/test/mjsunit/wasm/stack-switching.js
++++ b/test/mjsunit/wasm/stack-switching.js
+@@ -2,7 +2,7 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-// Flags: --allow-natives-syntax --experimental-wasm-stack-switching
++// Flags: --allow-natives-syntax --experimental-wasm-jspi
+ // Flags: --expose-gc --wasm-stack-switching-stack-size=100
+ // Flags: --experimental-wasm-typed-funcref
+ 
+diff --git a/test/unittests/api/api-wasm-unittest.cc b/test/unittests/api/api-wasm-unittest.cc
+index b47fb9e85bf..e1adaea935d 100644
+--- a/test/unittests/api/api-wasm-unittest.cc
++++ b/test/unittests/api/api-wasm-unittest.cc
+@@ -296,13 +296,11 @@ TEST_F(ApiWasmTest, WasmEnableDisableJSPI) {
+   i::Handle<i::NativeContext> context = v8::Utils::OpenHandle(*context_local);
+   // Test enabling/disabling via flag.
+   {
+-    i::FlagScope<bool> flag_strings(
+-        &i::v8_flags.experimental_wasm_stack_switching, true);
++    i::FlagScope<bool> flag_strings(&i::v8_flags.experimental_wasm_jspi, true);
+     EXPECT_TRUE(i_isolate()->IsWasmJSPIEnabled(context));
+   }
+   {
+-    i::FlagScope<bool> flag_strings(
+-        &i::v8_flags.experimental_wasm_stack_switching, false);
++    i::FlagScope<bool> flag_strings(&i::v8_flags.experimental_wasm_jspi, false);
+     EXPECT_FALSE(i_isolate()->IsWasmJSPIEnabled(context));
+   }
+   // Test enabling/disabling via callback.
+-- 
+2.34.1
+

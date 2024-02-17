@@ -1,0 +1,656 @@
+From a6f2dc26a0526e70e54ebb8392fc2fd7eabcafe1 Mon Sep 17 00:00:00 2001
+From: Francis McCabe <fgm@chromium.org>
+Date: Tue, 23 Jan 2024 17:07:28 +0000
+Subject: [PATCH 16/19] Refactor flag for JSPI to allow dynamic setting
+
+Set up JSPI when InstallConditionalFeatures is performed.
+
+Bug: v8:12191
+Change-Id: I1254de9e1dcc02c00f140ee179e6ab73f45f4314
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/5174170
+Reviewed-by: Adam Klein <adamk@chromium.org>
+Commit-Queue: Francis McCabe <fgm@chromium.org>
+Cr-Commit-Position: refs/heads/main@{#91962}
+---
+ include/v8-callbacks.h                  |   3 +
+ include/v8-isolate.h                    |   2 +
+ src/api/api.cc                          |   4 +
+ src/compiler/wasm-compiler.cc           |   2 +-
+ src/execution/frames.cc                 |  17 ++--
+ src/execution/frames.h                  |   6 +-
+ src/execution/isolate.cc                | 122 +++++++++++++-----------
+ src/execution/isolate.h                 |  10 +-
+ src/init/bootstrapper.cc                |   3 +
+ src/runtime/runtime-wasm.cc             |   1 -
+ src/wasm/wasm-engine.cc                 |  16 ++--
+ src/wasm/wasm-external-refs.cc          |   5 -
+ src/wasm/wasm-features.cc               |   3 +
+ src/wasm/wasm-js.cc                     |  41 ++++++--
+ src/wasm/wasm-js.h                      |   3 +
+ test/unittests/api/api-wasm-unittest.cc |  22 +++++
+ 16 files changed, 164 insertions(+), 96 deletions(-)
+
+diff --git a/include/v8-callbacks.h b/include/v8-callbacks.h
+index 8736ed62924..f931a88f3dd 100644
+--- a/include/v8-callbacks.h
++++ b/include/v8-callbacks.h
+@@ -342,6 +342,9 @@ using SharedArrayBufferConstructorEnabledCallback =
+ using JavaScriptCompileHintsMagicEnabledCallback =
+     bool (*)(Local<Context> context);
+ 
++// --- Callback for checking if WebAssembly JSPI is enabled ---
++using WasmJSPIEnabledCallback = bool (*)(Local<Context> context);
++
+ /**
+  * HostImportModuleDynamicallyCallback is called when we
+  * require the embedder to load a module. This is used as part of the dynamic
+diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+index b7e62f7afc3..36f861069cc 100644
+--- a/include/v8-isolate.h
++++ b/include/v8-isolate.h
+@@ -1580,6 +1580,8 @@ class V8_EXPORT Isolate {
+   void SetSharedArrayBufferConstructorEnabledCallback(
+       SharedArrayBufferConstructorEnabledCallback callback);
+ 
++  void SetWasmJSPIEnabledCallback(WasmJSPIEnabledCallback callback);
++
+   /**
+    * Register callback to control whether compile hints magic comments are
+    * enabled.
+diff --git a/src/api/api.cc b/src/api/api.cc
+index b3b92936b5d..313ede283b8 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -10394,6 +10394,9 @@ CALLBACK_SETTER(WasmImportedStringsEnabledCallback,
+                 WasmImportedStringsEnabledCallback,
+                 wasm_imported_strings_enabled_callback)
+ 
++CALLBACK_SETTER(WasmJSPIEnabledCallback, WasmJSPIEnabledCallback,
++                wasm_jspi_enabled_callback)
++
+ CALLBACK_SETTER(SharedArrayBufferConstructorEnabledCallback,
+                 SharedArrayBufferConstructorEnabledCallback,
+                 sharedarraybuffer_constructor_enabled_callback)
+@@ -10413,6 +10416,7 @@ void Isolate::InstallConditionalFeatures(Local<Context> context) {
+     i::WasmJs::InstallConditionalFeatures(i_isolate,
+                                           Utils::OpenHandle(*context));
+   }
++
+ #endif  // V8_ENABLE_WEBASSEMBLY
+ }
+ 
+diff --git a/src/compiler/wasm-compiler.cc b/src/compiler/wasm-compiler.cc
+index 6845c9801fc..582a1155321 100644
+--- a/src/compiler/wasm-compiler.cc
++++ b/src/compiler/wasm-compiler.cc
+@@ -8024,7 +8024,7 @@ class WasmWrapperGraphBuilder : public WasmGraphBuilder {
+     // source position 0 encodes the call to the imported JS code.
+     SetSourcePosition(call, 0);
+ 
+-    if (v8_flags.experimental_wasm_stack_switching && suspend) {
++    if (suspend) {
+       call = BuildSuspend(call, Param(1), Param(0));
+     }
+ 
+diff --git a/src/execution/frames.cc b/src/execution/frames.cc
+index 0ff40488664..4f2dd108593 100644
+--- a/src/execution/frames.cc
++++ b/src/execution/frames.cc
+@@ -76,7 +76,7 @@ class StackHandlerIterator {
+     // Make sure the handler has already been unwound to this frame. With stack
+     // switching this is not equivalent to the inequality below, because the
+     // frame and the handler could be in different stacks.
+-    DCHECK_IMPLIES(!v8_flags.experimental_wasm_stack_switching,
++    DCHECK_IMPLIES(frame->isolate()->wasm_stacks() == nullptr,
+                    frame->sp() <= AddressOf(handler));
+     // For CWasmEntry frames, the handler was registered by the last C++
+     // frame (Execution::CallWasm), so even though its address is already
+@@ -141,12 +141,11 @@ void StackFrameIterator::Advance() {
+ 
+   // Advance to the calling frame.
+   frame_ = SingletonFor(type, &state);
+-
+   // When we're done iterating over the stack frames, the handler
+   // chain must have been completely unwound. Except for wasm stack-switching:
+   // we stop at the end of the current segment.
+ #if V8_ENABLE_WEBASSEMBLY
+-  DCHECK_IMPLIES(done() && !v8_flags.experimental_wasm_stack_switching,
++  DCHECK_IMPLIES(done() && isolate()->wasm_stacks() == nullptr,
+                  handler_ == nullptr);
+ #else
+   DCHECK_IMPLIES(done(), handler_ == nullptr);
+@@ -744,7 +743,7 @@ StackFrame::Type StackFrameIterator::ComputeStackFrameType(
+     StackFrame::State* state) const {
+ #if V8_ENABLE_WEBASSEMBLY
+   if (state->fp == kNullAddress) {
+-    DCHECK(v8_flags.experimental_wasm_stack_switching);
++    DCHECK(isolate_->wasm_stacks() != nullptr);  // I.e., JSPI active
+     return StackFrame::NO_FRAME_TYPE;
+   }
+ #endif
+@@ -838,7 +837,7 @@ StackFrame::Type StackFrameIteratorForProfiler::ComputeStackFrameType(
+     StackFrame::State* state) const {
+ #if V8_ENABLE_WEBASSEMBLY
+   if (state->fp == kNullAddress) {
+-    DCHECK(v8_flags.experimental_wasm_stack_switching);
++    DCHECK(isolate_->wasm_stacks() != nullptr);  // I.e., JSPI active
+     return StackFrame::NO_FRAME_TYPE;
+   }
+ #endif
+@@ -1274,7 +1273,7 @@ void CommonFrame::ComputeCallerState(State* state) const {
+   if (state->fp == kNullAddress) {
+     // An empty FP signals the first frame of a stack segment. The caller is
+     // on a different stack, or is unbound (suspended stack).
+-    DCHECK(v8_flags.experimental_wasm_stack_switching);
++    // DCHECK(isolate_->wasm_stacks() != nullptr); // I.e., JSPI active
+     return;
+   }
+ #endif
+@@ -1494,8 +1493,7 @@ void WasmFrame::Iterate(RootVisitor* v) const {
+   Address central_stack_sp = Memory<Address>(
+       fp() + WasmImportWrapperFrameConstants::kCentralStackSPOffset);
+   FullObjectSlot parameters_limit(
+-      v8_flags.experimental_wasm_stack_switching && type == WASM_TO_JS &&
+-              central_stack_sp != kNullAddress
++      type == WASM_TO_JS && central_stack_sp != kNullAddress
+           ? central_stack_sp
+           : frame_header_base.address() - spill_slot_space);
+ #else
+@@ -1729,8 +1727,7 @@ void TypedFrame::Iterate(RootVisitor* v) const {
+   Address central_stack_sp =
+       Memory<Address>(fp() + WasmToJSWrapperConstants::kCentralStackSPOffset);
+   FullObjectSlot parameters_limit(
+-      v8_flags.experimental_wasm_stack_switching && is_wasm_to_js &&
+-              central_stack_sp != kNullAddress
++      is_wasm_to_js && central_stack_sp != kNullAddress
+           ? central_stack_sp
+           : frame_header_base.address() - spill_slots_size);
+ #else
+diff --git a/src/execution/frames.h b/src/execution/frames.h
+index 8f62ba5f56c..1d96e1ca01b 100644
+--- a/src/execution/frames.h
++++ b/src/execution/frames.h
+@@ -1601,8 +1601,8 @@ class StackFrameIteratorForProfiler : public StackFrameIteratorBase {
+ 
+   bool IsValidStackAddress(Address addr) const {
+ #if V8_ENABLE_WEBASSEMBLY
+-    if (V8_UNLIKELY(v8_flags.experimental_wasm_stack_switching)) {
+-      wasm::StackMemory* head = wasm_stacks_;
++    wasm::StackMemory* head = wasm_stacks_;
++    if (head != nullptr) {
+       if (head->Contains(addr)) return true;
+       for (wasm::StackMemory* current = head->next(); current != head;
+            current = current->next()) {
+@@ -1632,7 +1632,7 @@ class StackFrameIteratorForProfiler : public StackFrameIteratorBase {
+   ExternalCallbackScope* external_callback_scope_;
+   Address top_link_register_;
+ #if V8_ENABLE_WEBASSEMBLY
+-  wasm::StackMemory* wasm_stacks_;
++  wasm::StackMemory* wasm_stacks_ = nullptr;
+ #endif
+ };
+ 
+diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
+index 08f352d9f33..3f5fd6016f3 100644
+--- a/src/execution/isolate.cc
++++ b/src/execution/isolate.cc
+@@ -592,9 +592,9 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
+   // Iterate over pointers on native execution stack.
+ #if V8_ENABLE_WEBASSEMBLY
+   wasm::WasmCodeRefScope wasm_code_ref_scope;
+-  if (v8_flags.experimental_wasm_stack_switching) {
+-    wasm::StackMemory* current = wasm_stacks_;
+-    DCHECK_NOT_NULL(current);
++
++  wasm::StackMemory* current = wasm_stacks_;
++  if (current != nullptr) {
+     do {
+       if (current->IsActive()) {
+         // The active stack's jump buffer does not match the current state, use
+@@ -2020,23 +2020,12 @@ Tagged<Object> Isolate::UnwindAndFindHandler() {
+         ReadOnlyRoots(this).undefined_value());
+   }
+ 
+-  int visited_frames = 0;
+-
+-#if V8_ENABLE_WEBASSEMBLY
+-  // Iterate the chain of stack segments for wasm stack switching.
+-  Tagged<WasmContinuationObject> current_stack;
+-  if (v8_flags.experimental_wasm_stack_switching) {
+-    current_stack =
+-        WasmContinuationObject::cast(root(RootIndex::kActiveContinuation));
+-  }
+-#endif
+-
+   // Compute handler and stack unwinding information by performing a full walk
+   // over the stack and dispatching according to the frame type.
++  int visited_frames = 0;
+   for (StackFrameIterator iter(this);; iter.Advance(), visited_frames++) {
+ #if V8_ENABLE_WEBASSEMBLY
+-    if (v8_flags.experimental_wasm_stack_switching &&
+-        iter.frame()->type() == StackFrame::STACK_SWITCH) {
++    if (iter.frame()->type() == StackFrame::STACK_SWITCH) {
+       Tagged<Code> code =
+           builtins()->code(Builtin::kWasmReturnPromiseOnSuspendAsm);
+       HandlerTable table(code);
+@@ -2161,32 +2150,30 @@ Tagged<Object> Isolate::UnwindAndFindHandler() {
+         // out to user code that could throw.
+         UNREACHABLE();
+       }
+-      case StackFrame::WASM_TO_JS:
+-        if (v8_flags.experimental_wasm_stack_switching) {
+-          Tagged<Object> suspender_obj = root(RootIndex::kActiveSuspender);
+-          if (!IsUndefined(suspender_obj)) {
+-            Tagged<WasmSuspenderObject> suspender =
+-                WasmSuspenderObject::cast(suspender_obj);
+-            // If the wasm-to-js wrapper was on a secondary stack and switched
+-            // to the central stack, handle the implicit switch back.
+-            Address central_stack_sp = *reinterpret_cast<Address*>(
++      case StackFrame::WASM_TO_JS: {
++        Tagged<Object> suspender_obj = root(RootIndex::kActiveSuspender);
++        if (!IsUndefined(suspender_obj)) {
++          Tagged<WasmSuspenderObject> suspender =
++              WasmSuspenderObject::cast(suspender_obj);
++          // If the wasm-to-js wrapper was on a secondary stack and switched
++          // to the central stack, handle the implicit switch back.
++          Address central_stack_sp = *reinterpret_cast<Address*>(
++              frame->fp() +
++              WasmImportWrapperFrameConstants::kCentralStackSPOffset);
++          bool switched_stacks = central_stack_sp != kNullAddress;
++          if (switched_stacks) {
++            DCHECK_EQ(1, suspender->has_js_frames());
++            suspender->set_has_js_frames(0);
++            thread_local_top()->is_on_central_stack_flag_ = false;
++            Address secondary_stack_limit = Memory<Address>(
+                 frame->fp() +
+-                WasmImportWrapperFrameConstants::kCentralStackSPOffset);
+-            bool switched_stacks = central_stack_sp != kNullAddress;
+-            if (switched_stacks) {
+-              DCHECK_EQ(1, suspender->has_js_frames());
+-              suspender->set_has_js_frames(0);
+-              thread_local_top()->is_on_central_stack_flag_ = false;
+-              Address secondary_stack_limit = Memory<Address>(
+-                  frame->fp() +
+-                  WasmImportWrapperFrameConstants::kSecondaryStackLimitOffset);
+-              stack_guard()->SetStackLimitForStackSwitching(
+-                  secondary_stack_limit);
+-            }
+-#endif
++                WasmImportWrapperFrameConstants::kSecondaryStackLimitOffset);
++            stack_guard()->SetStackLimitForStackSwitching(
++                secondary_stack_limit);
+           }
+         }
+         break;
++      }
+ #endif  // V8_ENABLE_WEBASSEMBLY
+ 
+       case StackFrame::MAGLEV:
+@@ -2229,7 +2216,7 @@ Tagged<Object> Isolate::UnwindAndFindHandler() {
+         DCHECK_NULL(wasm::GetWasmCodeManager()->LookupCode(this, frame->pc()));
+ #endif
+ #if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64
+-        if (v8_flags.experimental_wasm_stack_switching) {
++        {
+           Tagged<Code> code = stub_frame->LookupCode();
+           if (code->builtin_id() == Builtin::kWasmToJsWrapperCSA) {
+             // If the wasm-to-js wrapper was on a secondary stack and switched
+@@ -2367,7 +2354,7 @@ Tagged<Object> Isolate::UnwindAndFindHandler() {
+   }
+ 
+   UNREACHABLE();
+-}
++}  // namespace internal
+ 
+ namespace {
+ 
+@@ -3082,6 +3069,21 @@ bool Isolate::IsWasmStringRefEnabled(Handle<NativeContext> context) {
+ #endif
+ }
+ 
++bool Isolate::IsWasmJSPIEnabled(Handle<NativeContext> context) {
++#ifdef V8_ENABLE_WEBASSEMBLY
++  v8::WasmJSPIEnabledCallback jspi_callback = wasm_jspi_enabled_callback();
++  if (jspi_callback) {
++    v8::Local<v8::Context> api_context = v8::Utils::ToLocal(context);
++    if (jspi_callback(api_context)) return true;
++  }
++
++  // Otherwise use the runtime flag.
++  return v8_flags.experimental_wasm_stack_switching;
++#else
++  return false;
++#endif
++}
++
+ bool Isolate::IsWasmInliningEnabled(Handle<NativeContext> context) {
+   // If Wasm GC is explicitly enabled via a callback, also enable inlining.
+ #ifdef V8_ENABLE_WEBASSEMBLY
+@@ -4893,22 +4895,9 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+   }
+ 
+ #ifdef V8_ENABLE_WEBASSEMBLY
+-  if (v8_flags.experimental_wasm_stack_switching) {
+-    std::unique_ptr<wasm::StackMemory> stack(
+-        wasm::StackMemory::GetCurrentStackView(this));
+-    this->wasm_stacks() = stack.get();
+-    if (v8_flags.trace_wasm_stack_switching) {
+-      PrintF("Set up native stack object (limit: %p, base: %p)\n",
+-             stack->jslimit(), reinterpret_cast<void*>(stack->base()));
+-    }
+-    HandleScope scope(this);
+-    Handle<WasmContinuationObject> continuation = WasmContinuationObject::New(
+-        this, std::move(stack), wasm::JumpBuffer::Active, AllocationType::kOld);
+-    heap()
+-        ->roots_table()
+-        .slot(RootIndex::kActiveContinuation)
+-        .store(*continuation);
+-  }
++  // Set up for JSPI
++  if (v8_flags.experimental_wasm_stack_switching) WasmInitJSPIFeature();
++
+ #if V8_STATIC_ROOTS_BOOL
+   // Protect the payload of wasm null.
+   if (!page_allocator()->DecommitPages(
+@@ -5419,6 +5408,27 @@ void Isolate::FireCallCompletedCallbackInternal(
+   }
+ }
+ 
++#ifdef V8_ENABLE_WEBASSEMBLY
++void Isolate::WasmInitJSPIFeature() {
++  if (IsUndefined(root(RootIndex::kActiveContinuation))) {
++    std::unique_ptr<wasm::StackMemory> stack(
++        wasm::StackMemory::GetCurrentStackView(this));
++    this->wasm_stacks() = stack.get();
++    if (v8_flags.trace_wasm_stack_switching) {
++      PrintF("Set up native stack object (limit: %p, base: %p)\n",
++             stack->jslimit(), reinterpret_cast<void*>(stack->base()));
++    }
++    HandleScope scope(this);
++    Handle<WasmContinuationObject> continuation = WasmContinuationObject::New(
++        this, std::move(stack), wasm::JumpBuffer::Active, AllocationType::kOld);
++    heap()
++        ->roots_table()
++        .slot(RootIndex::kActiveContinuation)
++        .store(*continuation);
++  }
++}
++#endif
++
+ void Isolate::UpdatePromiseHookProtector() {
+   if (Protectors::IsPromiseHookIntact(this)) {
+     HandleScope scope(this);
+diff --git a/src/execution/isolate.h b/src/execution/isolate.h
+index 8182a9c0c07..da4f8308125 100644
+--- a/src/execution/isolate.h
++++ b/src/execution/isolate.h
+@@ -514,6 +514,7 @@ using DebugObjectCache = std::vector<Handle<HeapObject>>;
+     wasm_imported_strings_enabled_callback, nullptr)                          \
+   V(JavaScriptCompileHintsMagicEnabledCallback,                               \
+     compile_hints_magic_enabled_callback, nullptr)                            \
++  V(WasmJSPIEnabledCallback, wasm_jspi_enabled_callback, nullptr)             \
+   /* State for Relocatable. */                                                \
+   V(Relocatable*, relocatable_top, nullptr)                                   \
+   V(DebugObjectCache*, string_stream_debug_object_cache, nullptr)             \
+@@ -598,7 +599,6 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+ 
+     FIELD_ACCESSOR(uintptr_t, stack_limit)
+     FIELD_ACCESSOR(ThreadState*, thread_state)
+-
+ #if USE_SIMULATOR
+     FIELD_ACCESSOR(Simulator*, simulator)
+ #endif
+@@ -790,6 +790,10 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+ 
+   void InstallConditionalFeatures(Handle<NativeContext> context);
+ 
++#if V8_ENABLE_WEBASSEMBLY
++  void WasmInitJSPIFeature();
++#endif
++
+   bool IsSharedArrayBufferConstructorEnabled(Handle<NativeContext> context);
+ 
+   bool IsWasmGCEnabled(Handle<NativeContext> context);
+@@ -797,7 +801,7 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+   bool IsWasmInliningEnabled(Handle<NativeContext> context);
+   bool IsWasmInliningIntoJSEnabled(Handle<NativeContext> context);
+   bool IsWasmImportedStringsEnabled(Handle<NativeContext> context);
+-
++  bool IsWasmJSPIEnabled(Handle<NativeContext> context);
+   bool IsCompileHintsMagicEnabled(Handle<NativeContext> context);
+ 
+   THREAD_LOCAL_TOP_ADDRESS(Tagged<Context>, pending_handler_context)
+@@ -2659,7 +2663,7 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+ 
+ #ifdef V8_ENABLE_WEBASSEMBLY
+   wasm::WasmCodeLookupCache* wasm_code_look_up_cache_ = nullptr;
+-  wasm::StackMemory* wasm_stacks_;
++  wasm::StackMemory* wasm_stacks_ = nullptr;
+ #endif
+ 
+   // Enables the host application to provide a mechanism for recording a
+diff --git a/src/init/bootstrapper.cc b/src/init/bootstrapper.cc
+index a81270141e4..822ce5229c9 100644
+--- a/src/init/bootstrapper.cc
++++ b/src/init/bootstrapper.cc
+@@ -252,6 +252,9 @@ class Genesis {
+ #undef DECLARE_FEATURE_INITIALIZATION
+   void InitializeGlobal_regexp_linear_flag();
+   void InitializeGlobal_sharedarraybuffer();
++#if V8_ENABLE_WEBASSEMBLY
++  void InitializeWasmJSPI();
++#endif
+ 
+   enum ArrayBufferKind { ARRAY_BUFFER, SHARED_ARRAY_BUFFER };
+   Handle<JSFunction> CreateArrayBuffer(Handle<String> name,
+diff --git a/src/runtime/runtime-wasm.cc b/src/runtime/runtime-wasm.cc
+index 2be3f0bb692..a99ee7f4a63 100644
+--- a/src/runtime/runtime-wasm.cc
++++ b/src/runtime/runtime-wasm.cc
+@@ -1195,7 +1195,6 @@ RUNTIME_FUNCTION(Runtime_WasmArrayInitSegment) {
+ // Allocate a new suspender, and prepare for stack switching by updating the
+ // active continuation, active suspender and stack limit.
+ RUNTIME_FUNCTION(Runtime_WasmAllocateSuspender) {
+-  CHECK(v8_flags.experimental_wasm_stack_switching);
+   HandleScope scope(isolate);
+   Handle<WasmSuspenderObject> suspender = WasmSuspenderObject::New(isolate);
+ 
+diff --git a/src/wasm/wasm-engine.cc b/src/wasm/wasm-engine.cc
+index f01abea2576..b0a39f4d9be 100644
+--- a/src/wasm/wasm-engine.cc
++++ b/src/wasm/wasm-engine.cc
+@@ -1583,23 +1583,25 @@ void ReportLiveCodeFromFrameForGC(
+ void WasmEngine::ReportLiveCodeFromStackForGC(Isolate* isolate) {
+   wasm::WasmCodeRefScope code_ref_scope;
+   std::unordered_set<wasm::WasmCode*> live_wasm_code;
+-  if (v8_flags.experimental_wasm_stack_switching) {
+-    wasm::StackMemory* current = isolate->wasm_stacks();
+-    DCHECK_NOT_NULL(current);
+-    do {
+-      if (current->IsActive()) {
++
++  wasm::StackMemory* current = isolate->wasm_stacks();
++
++  if (current != nullptr) {
++      do {
++        if (current->IsActive()) {
+         // The active stack's jump buffer does not match the current state, use
+         // the thread info below instead.
+         current = current->next();
+         continue;
+-      }
++        }
+       for (StackFrameIterator it(isolate, current); !it.done(); it.Advance()) {
+         StackFrame* const frame = it.frame();
+         ReportLiveCodeFromFrameForGC(isolate, frame, live_wasm_code);
+       }
+       current = current->next();
+-    } while (current != isolate->wasm_stacks());
++      } while (current != isolate->wasm_stacks());
+   }
++
+   for (StackFrameIterator it(isolate); !it.done(); it.Advance()) {
+     StackFrame* const frame = it.frame();
+     ReportLiveCodeFromFrameForGC(isolate, frame, live_wasm_code);
+diff --git a/src/wasm/wasm-external-refs.cc b/src/wasm/wasm-external-refs.cc
+index 44aabfa4ea5..ad984843a2d 100644
+--- a/src/wasm/wasm-external-refs.cc
++++ b/src/wasm/wasm-external-refs.cc
+@@ -655,15 +655,12 @@ double flat_string_to_f64(Address string_address) {
+ }
+ 
+ void sync_stack_limit(Isolate* isolate) {
+-  CHECK(v8_flags.experimental_wasm_stack_switching);
+   DisallowGarbageCollection no_gc;
+ 
+   isolate->SyncStackLimit();
+ }
+ 
+ intptr_t switch_to_the_central_stack(Isolate* isolate, uintptr_t current_sp) {
+-  CHECK(v8_flags.experimental_wasm_stack_switching);
+-
+   ThreadLocalTop* thread_local_top = isolate->thread_local_top();
+   StackGuard* stack_guard = isolate->stack_guard();
+ 
+@@ -683,8 +680,6 @@ intptr_t switch_to_the_central_stack(Isolate* isolate, uintptr_t current_sp) {
+ }
+ 
+ void switch_from_the_central_stack(Isolate* isolate) {
+-  CHECK(v8_flags.experimental_wasm_stack_switching);
+-
+   ThreadLocalTop* thread_local_top = isolate->thread_local_top();
+   CHECK_NE(thread_local_top->secondary_stack_sp_, 0);
+   CHECK_NE(thread_local_top->secondary_stack_limit_, 0);
+diff --git a/src/wasm/wasm-features.cc b/src/wasm/wasm-features.cc
+index 690edc4fe1d..9f141a374f3 100644
+--- a/src/wasm/wasm-features.cc
++++ b/src/wasm/wasm-features.cc
+@@ -49,6 +49,9 @@ WasmFeatures WasmFeatures::FromContext(Isolate* isolate,
+   if (isolate->IsWasmImportedStringsEnabled(context)) {
+     features.Add(kFeature_imported_strings);
+   }
++  if (isolate->IsWasmJSPIEnabled(context)) {
++    features.Add(kFeature_stack_switching);
++  }
+   // This space intentionally left blank for future Wasm origin trials.
+   return features;
+ }
+diff --git a/src/wasm/wasm-js.cc b/src/wasm/wasm-js.cc
+index 0a1757419bf..dadf75c2548 100644
+--- a/src/wasm/wasm-js.cc
++++ b/src/wasm/wasm-js.cc
+@@ -2090,7 +2090,8 @@ void WebAssemblyFunction(const v8::FunctionCallbackInfo<v8::Value>& info) {
+ 
+   i::wasm::Suspend suspend = i::wasm::kNoSuspend;
+   i::wasm::Promise promise = i::wasm::kNoPromise;
+-  if (i::v8_flags.experimental_wasm_stack_switching) {
++
++  if (i_isolate->IsWasmJSPIEnabled(i_isolate->native_context())) {
+     // Optional third argument for JS Promise Integration.
+     if (!info[2]->IsNullOrUndefined() && !info[2]->IsObject()) {
+       thrower.TypeError(
+@@ -3282,11 +3283,7 @@ void WasmJs::Install(Isolate* isolate, bool exposed_on_global_object) {
+ 
+   // Create the Suspender object.
+   if (enabled_features.has_stack_switching()) {
+-    Handle<JSFunction> suspender_constructor = InstallConstructorFunc(
+-        isolate, webassembly, "Suspender", WebAssemblySuspender);
+-    native_context->set_wasm_suspender_constructor(*suspender_constructor);
+-    SetupConstructor(isolate, suspender_constructor, WASM_SUSPENDER_OBJECT_TYPE,
+-                     WasmSuspenderObject::kHeaderSize, "WebAssembly.Suspender");
++    InstallSuspenderConstructor(isolate, native_context);
+   }
+ 
+   // Setup importable strings.
+@@ -3310,15 +3307,39 @@ void WasmJs::InstallConditionalFeatures(Isolate* isolate,
+   Handle<JSObject> webassembly = Handle<JSObject>::cast(wasm_obj);
+   if (!webassembly->map()->is_extensible()) return;
+ 
+-  if (isolate->IsWasmImportedStringsEnabled(context)) {
+-    Handle<String> string_string = isolate->factory()->String_string();
+-    if (!JSObject::HasRealNamedProperty(isolate, webassembly, string_string)
++  /*
++    If you need to install some optional features, follow the pattern:
++
++    if (isolate->IsMyWasmFeatureEnabled(context)) {
++      Handle<String> feature = isolate->factory()->...;
++      if (!JSObject::HasRealNamedProperty(isolate, webassembly, feature)
++               .FromMaybe(true)) {
++        InstallFeature(isolate, webassembly);
++      }
++    }
++  */
++
++  // Install JSPI-related features.
++  if (isolate->IsWasmJSPIEnabled(context)) {
++    Handle<String> suspender_string = v8_str(isolate, "Suspender");
++    if (!JSObject::HasRealNamedProperty(isolate, webassembly, suspender_string)
+              .FromMaybe(true)) {
+-      InstallStrings(isolate, webassembly);
++      InstallSuspenderConstructor(isolate, context);
+     }
+   }
+ }
+ 
++// static
++void WasmJs::InstallSuspenderConstructor(Isolate* isolate,
++                                         Handle<NativeContext> context) {
++  Handle<JSObject> webassembly(context->wasm_webassembly_object(), isolate);
++  Handle<JSFunction> suspender_constructor = InstallConstructorFunc(
++      isolate, webassembly, "Suspender", WebAssemblySuspender);
++  context->set_wasm_suspender_constructor(*suspender_constructor);
++  SetupConstructor(isolate, suspender_constructor, WASM_SUSPENDER_OBJECT_TYPE,
++                   WasmSuspenderObject::kHeaderSize, "WebAssembly.Suspender");
++}
++
+ namespace wasm {
+ // static
+ std::unique_ptr<WasmStreaming> StartStreamingForTesting(
+diff --git a/src/wasm/wasm-js.h b/src/wasm/wasm-js.h
+index 6467236d10c..d682a3df638 100644
+--- a/src/wasm/wasm-js.h
++++ b/src/wasm/wasm-js.h
+@@ -76,6 +76,9 @@ class WasmJs {
+ 
+   V8_EXPORT_PRIVATE static void InstallConditionalFeatures(
+       Isolate* isolate, Handle<NativeContext> context);
++
++  V8_EXPORT_PRIVATE static void InstallSuspenderConstructor(
++      Isolate* isolate, Handle<NativeContext> context);
+ };
+ 
+ }  // namespace v8::internal
+diff --git a/test/unittests/api/api-wasm-unittest.cc b/test/unittests/api/api-wasm-unittest.cc
+index 78746250e2d..b47fb9e85bf 100644
+--- a/test/unittests/api/api-wasm-unittest.cc
++++ b/test/unittests/api/api-wasm-unittest.cc
+@@ -290,4 +290,26 @@ TEST_F(ApiWasmTest, WasmEnableDisableImportedStrings) {
+       i::wasm::WasmFeatures::FromIsolate(i_isolate()).has_imported_strings());
+ }
+ 
++TEST_F(ApiWasmTest, WasmEnableDisableJSPI) {
++  Local<Context> context_local = Context::New(isolate());
++  Context::Scope context_scope(context_local);
++  i::Handle<i::NativeContext> context = v8::Utils::OpenHandle(*context_local);
++  // Test enabling/disabling via flag.
++  {
++    i::FlagScope<bool> flag_strings(
++        &i::v8_flags.experimental_wasm_stack_switching, true);
++    EXPECT_TRUE(i_isolate()->IsWasmJSPIEnabled(context));
++  }
++  {
++    i::FlagScope<bool> flag_strings(
++        &i::v8_flags.experimental_wasm_stack_switching, false);
++    EXPECT_FALSE(i_isolate()->IsWasmJSPIEnabled(context));
++  }
++  // Test enabling/disabling via callback.
++  isolate()->SetWasmJSPIEnabledCallback([](auto) { return true; });
++  EXPECT_TRUE(i_isolate()->IsWasmJSPIEnabled(context));
++  isolate()->SetWasmJSPIEnabledCallback([](auto) { return false; });
++  EXPECT_FALSE(i_isolate()->IsWasmJSPIEnabled(context));
++}
++
+ }  // namespace v8
+-- 
+2.34.1
+

@@ -52,7 +52,7 @@ export function monotonicDateNow() {
  *      - Normally ctypes allocates all closures up front
  */
 export function newWasmModule(buffer) {
-  checkCallee();
+  // checkCallee();
   return UnsafeEval.newWasmModule(buffer);
 }
 

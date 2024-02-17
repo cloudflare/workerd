@@ -1,7 +1,7 @@
-From 9e93f5c62780aac7bf8649f76ecd3181df1473dc Mon Sep 17 00:00:00 2001
+From 23ee0a53b953720dc19b295ffd1e9f4007b59e37 Mon Sep 17 00:00:00 2001
 From: Brendan Coll <bcoll@cloudflare.com>
 Date: Thu, 16 Mar 2023 11:56:10 +0000
-Subject: Allow Windows builds under Bazel
+Subject: [PATCH 05/19] Allow Windows builds under Bazel
 
 ---
  BUILD.bazel              | 29 +++++++++++++++++------------
@@ -10,7 +10,7 @@ Subject: Allow Windows builds under Bazel
  3 files changed, 84 insertions(+), 12 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 20af81b002fc1aefc14abb27085a7480d2f440a7..14d0c35fd606afa89d870a4f0ecdb567c7b75cad 100644
+index 20af81b002f..14d0c35fd60 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -703,6 +703,7 @@ filegroup(
@@ -114,7 +114,7 @@ index 20af81b002fc1aefc14abb27085a7480d2f440a7..14d0c35fd606afa89d870a4f0ecdb567
      python_version = "PY3",
      tags = [
 diff --git a/bazel/config/BUILD.bazel b/bazel/config/BUILD.bazel
-index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c72ee8847a 100644
+index 67454fa90ee..7efff1ab909 100644
 --- a/bazel/config/BUILD.bazel
 +++ b/bazel/config/BUILD.bazel
 @@ -286,6 +286,7 @@ selects.config_setting_group(
@@ -183,7 +183,7 @@ index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c7
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index b0b5eab46219f2abd263221de12c07a5cc7b2b10..0c59518819cb685fe9f68080d6bdbeb0b7ff5033 100644
+index b0b5eab4621..0c59518819c 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -117,6 +117,24 @@ def _default_args():
@@ -251,3 +251,6 @@ index b0b5eab46219f2abd263221de12c07a5cc7b2b10..0c59518819cb685fe9f68080d6bdbeb0
              "//conditions:default": "",
          }),
      )
+-- 
+2.34.1
+

@@ -1,7 +1,7 @@
-From 4c01cb76c54c8d3365c711b44413fb3da2917a11 Mon Sep 17 00:00:00 2001
+From 936a8071a4f36d101681d12cf9ca7f12ec673810 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 26 Jul 2023 18:40:13 +0200
-Subject: Fix V8/ICU build
+Subject: [PATCH 12/19] Fix V8/ICU build
 
 1) ICU changed how a header is included, but V8's bazel build file has not been
    updated to make the header available.
@@ -16,7 +16,7 @@ Subject: Fix V8/ICU build
  2 files changed, 1 insertion(+), 2 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index fab5eb2419f1e6eee3d05c510bc2cb8637d19c83..a3ee9a450a1aa3cc2a019d148af2efada41a3061 100644
+index fab5eb2419f..a3ee9a450a1 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -4103,7 +4103,6 @@ v8_binary(
@@ -28,7 +28,7 @@ index fab5eb2419f1e6eee3d05c510bc2cb8637d19c83..a3ee9a450a1aa3cc2a019d148af2efad
          "//external:icu",
      ],
 diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
-index 73a25df55abc380092a0177bb13364e6f216ce95..3b26219eb56f4e8247af8dad476ebced2ad763af 100644
+index 73a25df55ab..3b26219eb56 100644
 --- a/bazel/BUILD.icu
 +++ b/bazel/BUILD.icu
 @@ -96,7 +96,7 @@ cc_library(
@@ -40,3 +40,6 @@ index 73a25df55abc380092a0177bb13364e6f216ce95..3b26219eb56f4e8247af8dad476ebced
      copts = select({
          "@platforms//os:windows": [
              "/wd4005",  # Macro redefinition.
+-- 
+2.34.1
+
