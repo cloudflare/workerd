@@ -7,12 +7,15 @@
 
 namespace workerd::jsg {
 
+Serializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
+
 Serializer::Serializer(Lock& js, kj::Maybe<Options> maybeOptions)
     : ser(js.v8Isolate, this) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Serializer must be allocated on the stack");
 #endif
-  auto options = maybeOptions.orDefault({});
+  auto options = kj::mv(maybeOptions).orDefault({});
+  externalHandler = options.externalHandler;
   KJ_IF_SOME(version, options.version) {
     KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
     KJ_ASSERT(jsg::check(ser.SetWriteVersion(version)));
@@ -130,6 +133,8 @@ void Serializer::write(Lock& js, const JsValue& value) {
   KJ_ASSERT(check(ser.WriteValue(js.v8Context(), value)));
 }
 
+Deserializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
+
 Deserializer::Deserializer(
     Lock& js,
     kj::ArrayPtr<const kj::byte> data,
@@ -159,7 +164,8 @@ void Deserializer::init(
     Lock& js,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<Options> maybeOptions) {
-  auto options = maybeOptions.orDefault({});
+  auto options = kj::mv(maybeOptions).orDefault({});
+  externalHandler = options.externalHandler;
   if (options.readHeader) {
     check(deser.ReadHeader(js.v8Context()));
   }

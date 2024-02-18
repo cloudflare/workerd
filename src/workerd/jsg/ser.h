@@ -53,11 +53,34 @@ namespace workerd::jsg {
 //   tag version; the only way to change is to define a new version.
 class Serializer final: v8::ValueSerializer::Delegate {
 public:
+  // "Externals" are values which can be serialized, but refer to some external resource, rather
+  // than being self-contained. The way externals are supported depends on the serialization
+  // context: passing externals over RPC, for example, is completely different from storing them
+  // to disk.
+  //
+  // A `Serializer` instance may have an `ExternalHandler` which can be used when serializing
+  // externals. This type has no methods, but is meant to be subclassed. A host object which
+  // represents an external and is trying to serialize itself should use dynamic_cast to try to
+  // downcast `ExternalHandler` to any particular handler interface it supports. If the handler
+  // doesn't implement any supported subclass, then serialization is not possible, and an
+  // appropriate exception should be thrown.
+  class ExternalHandler {
+  public:
+    // We declare the destructor just so that this class has a virtual method, which ensures it is
+    // polymorphic (has a vtable) so that dynamic_cast can be used on it. We mark this method pure
+    // (`= 0`) so that `ExternalHandler` itself cannot be instantiated.
+    virtual ~ExternalHandler() noexcept(false) = 0;
+  };
+
   struct Options {
     // When set, overrides the default wire format version with the one provided.
     kj::Maybe<uint32_t> version;
     // When set to true, the serialization header is not written to the output buffer.
     bool omitHeader = false;
+
+    // ExternalHandler, if any. Typically this would be allocated on the stack just before the
+    // Serializer.
+    kj::Maybe<ExternalHandler&> externalHandler;
   };
 
   struct Released {
@@ -76,6 +99,8 @@ public:
   inline ~Serializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
   KJ_DISALLOW_COPY_AND_MOVE(Serializer);
+
+  kj::Maybe<ExternalHandler&> getExternalHandler() { return externalHandler; }
 
   // Write a value.
   //
@@ -108,6 +133,8 @@ private:
       v8::Isolate* isolate,
       v8::Local<v8::SharedArrayBuffer> sab) override;
 
+  kj::Maybe<ExternalHandler&> externalHandler;
+
   kj::Vector<JsValue> sharedArrayBuffers;
   kj::Vector<JsValue> arrayBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
@@ -121,9 +148,19 @@ private:
 // the stack.
 class Deserializer final: v8::ValueDeserializer::Delegate {
 public:
+  // Exactly like Serializer::ExternalHandler, but for Deserializer.
+  class ExternalHandler {
+  public:
+    virtual ~ExternalHandler() noexcept(false) = 0;
+  };
+
   struct Options {
     kj::Maybe<uint32_t> version;
     bool readHeader = true;
+
+    // ExternalHandler, if any. Typically this would be allocated on the stack just before the
+    // Deserializer.
+    kj::Maybe<ExternalHandler&> externalHandler;
   };
 
   explicit Deserializer(
@@ -141,6 +178,8 @@ public:
   ~Deserializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
   KJ_DISALLOW_COPY_AND_MOVE(Deserializer);
+
+  kj::Maybe<ExternalHandler&> getExternalHandler() { return externalHandler; }
 
   JsValue readValue(Lock& js);
 
@@ -163,6 +202,8 @@ private:
       v8::Isolate* isolate,
       uint32_t clone_id) override;
   v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate* isolate) override;
+
+  kj::Maybe<ExternalHandler&> externalHandler;
 
   v8::ValueDeserializer deser;
   kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedBackingStores;
