@@ -37,6 +37,9 @@ namespace std {
 
 namespace workerd::jsg {
 
+class Serializer;
+class Deserializer;
+
 // Return true if the type requires GC visitation, which we assume is the case if the type or any
 // superclass (other than Object) declares a `visitForGc()` method.
 template <typename T>
@@ -603,10 +606,34 @@ private:
   // _LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION in <typeinfo> for more.
   kj::HashMap<std::type_index, GetTypeInfoFunc*> resourceTypeMap;
 
+  // Map types to serializers. Given an `Object`, to serialize it, extract its typeinfo and look
+  // it up in this table. See jsg::Serializer for more about serialization.
+  //
+  // "Why not just use a virtual function?" Virtual functions give the wrong semantics for
+  // serialization, since it's essential that we use the serializer for the most-derived class,
+  // not for some parent class. If Foo extends Bar, and Bar is serializable, but Foo does not
+  // declare a serializer, then Foo is *not* serializable. Bar's serializer is not sufficient,
+  // since it doesn't know about Foo's extensions. But to get the right behavior from virtual
+  // calls, Foo would have to explicitly override Bar's serialize method to make it throw an
+  // exception instead. This seems error-prone.
+  //
+  // It also just provides nice symmetry with `deserializerMap`.
+  //
+  // The SerializeFunc() must always start by writing a tag.
+  typedef void SerializeFunc(Lock& js, jsg::Object& instance, Serializer& serializer);
+  kj::HashMap<std::type_index, SerializeFunc*> serializerMap;
+
+  // Map tag numbers to deserializer functions.
+  typedef v8::Local<v8::Object> DeserializeFunc(
+      TypeWrapper&, Lock& js, uint tag, Deserializer& deserializer);
+  kj::HashMap<uint, DeserializeFunc*> deserializerMap;
+
   template <typename, typename>
   friend class ResourceWrapper;
   template <typename>
   friend class ObjectWrapper;
+  template <typename>
+  friend class Isolate;
 };
 
 // ======================================================================================
@@ -1054,7 +1081,8 @@ public:
       : configuration(kj::fwd<MetaConfiguration>(configuration)) { }
 
   inline void initTypeWrapper() {
-    static_cast<TypeWrapper&>(*this).resourceTypeMap.insert(typeid(T),
+    TypeWrapper& wrapper = static_cast<TypeWrapper&>(*this);
+    wrapper.resourceTypeMap.insert(typeid(T),
         [](TypeWrapper& wrapper, v8::Isolate* isolate)
         -> typename DynamicResourceTypeMap<TypeWrapper>::DynamicTypeInfo {
       kj::Maybe<typename DynamicResourceTypeMap<TypeWrapper>::ReflectionInitializer&> rinit;
@@ -1065,6 +1093,39 @@ public:
       }
       return { wrapper.getTemplate(isolate, (T*)nullptr), rinit };
     });
+
+    if constexpr (static_cast<uint>(T::jsgSerializeTag) !=
+                  static_cast<uint>(T::jsgSuper::jsgSerializeTag)) {
+      // This type is declared JSG_SERIALIZABLE.
+      // HACK: The type of `serializer` should be `Serializer&`, not `auto&`, but Clang complains
+      //   about the `writeRawUint32()` call being made on an incomplete type if `ser.h` hasn't been
+      //   included -- *even if* T doesn't declare itself serializable and therefore this branch
+      //   should not be compiled at all! Unsure if this is a compiler bug.
+      wrapper.serializerMap.insert(typeid(T),
+          [](Lock& js, jsg::Object& instance, auto& serializer) {
+        serializer.writeRawUint32(static_cast<uint>(T::jsgSerializeTag));
+        static_cast<T&>(instance).serialize(js, serializer);
+      });
+
+      typename TypeWrapper::DeserializeFunc* deserializeFunc =
+          [](TypeWrapper& wrapper, Lock& js, uint tag, Deserializer& deserializer) {
+        // Cast the tag to the application's preferred tag type.
+        auto typedTag = static_cast<decltype(T::jsgSerializeTag)>(tag);
+        return wrapper.wrap(js.v8Context(), kj::none, T::deserialize(js, typedTag, deserializer));
+      };
+
+      // We make duplicatse here fatal because it's really hard to debug exceptions thrown during
+      // isolate startup and frankly this is pretty fatal for the runtime anyway.
+      auto reportDuplicate = [](auto&, auto&&) noexcept {
+        KJ_FAIL_REQUIRE("JSG_SERIALIZABLE declaration tried to register a duplicate type tag");
+      };
+
+      wrapper.deserializerMap.upsert(static_cast<uint>(T::jsgSerializeTag), deserializeFunc,
+          reportDuplicate);
+      for (auto& oldTag: T::jsgSerializeOldTags) {
+        wrapper.deserializerMap.upsert(static_cast<uint>(oldTag), deserializeFunc, reportDuplicate);
+      }
+    }
   }
 
   static constexpr const std::type_info& getName(T*) { return typeid(T); }

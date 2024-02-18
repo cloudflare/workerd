@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "ser.h"
+#include "setup.h"
 
 namespace workerd::jsg {
 
@@ -41,6 +42,47 @@ void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
   // makeDOMException could throw an exception. If it does, we'll end up crashing but that's ok?
   auto isolate = v8::Isolate::GetCurrent();
   isolate->ThrowException(makeDOMException(isolate, message, "DataCloneError"));
+}
+
+v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  try {
+    if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
+        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPABLE_TAG_FIELD_INDEX) !=
+            &Wrappable::WRAPPABLE_TAG) {
+      // v8::ValueSerializer by default will send us anything that has internal fields, but this
+      // object doesn't appear to match the internal fields expected on a JSG object.
+
+      // Call the default implementation to get the default error message.
+      return v8::ValueSerializer::Delegate::WriteHostObject(isolate, object);
+    }
+
+    Wrappable* wrappable = reinterpret_cast<Wrappable*>(
+        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+
+    // HACK: Although we don't technically know yet that `wrappable` is an `Object`, we know that
+    //   only subclasses of `Object` register serializers. So *if* a serializer is found, then this
+    //   cast is valid, and the pointer won't be accessed otherwise. We can't do a dynamic_cast
+    //   here since `Wrappable` is privately inherited by `Object` and anyway we don't want the
+    //   overhead of dynamic_cast.
+    // TODO(cleanup): Probably `Wrappable` should contain a bool indicating if it is an `Object`
+    //   or not?
+    Object* obj = reinterpret_cast<jsg::Object*>(wrappable);
+
+    if (!IsolateBase::from(isolate).serialize(
+          Lock::from(isolate), typeid(*wrappable), *obj, *this)) {
+      // This type is not serializable.
+
+      // Call the default implementation to get the default error message.
+      return v8::ValueSerializer::Delegate::WriteHostObject(isolate, object);
+    }
+
+    return v8::Just(true);
+  } catch (JsExceptionThrown&) {
+    return v8::Nothing<bool>();
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return v8::Nothing<bool>();
+  }
 }
 
 Serializer::Released Serializer::release() {
@@ -137,6 +179,24 @@ JsValue Deserializer::readValue(Lock& js) {
   return JsValue(check(deser.ReadValue(js.v8Context())));
 }
 
+uint Deserializer::readRawUint32() {
+  uint32_t result;
+  KJ_ASSERT(deser.ReadUint32(&result), "deserialization failure, possible corruption");
+  return result;
+}
+
+uint64_t Deserializer::readRawUint64() {
+  uint64_t result;
+  KJ_ASSERT(deser.ReadUint64(&result), "deserialization failure, possible corruption");
+  return result;
+}
+
+kj::ArrayPtr<const kj::byte> Deserializer::readRawBytes(size_t size) {
+  const void* data;
+  KJ_ASSERT(deser.ReadRawBytes(size, &data), "deserialization failure, possible corruption");
+  return kj::arrayPtr(reinterpret_cast<const kj::byte*>(data), size);
+}
+
 v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
     v8::Isolate* isolate,
     uint32_t clone_id) {
@@ -145,6 +205,23 @@ v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
     return v8::SharedArrayBuffer::New(isolate, backingStores[clone_id]);
   }
   return v8::MaybeLocal<v8::SharedArrayBuffer>();
+}
+
+v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
+  try {
+    uint tag = readRawUint32();
+    KJ_IF_SOME(result, IsolateBase::from(isolate).deserialize(Lock::from(isolate), tag, *this)) {
+      return result;
+    } else {
+      // Unknown tag is a platform error, so use KJ assert.
+      KJ_FAIL_ASSERT("encountered unknown tag in deserialization", tag);
+    }
+  } catch (JsExceptionThrown&) {
+    return {};
+  } catch (...) {
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    return {};
+  }
 }
 
 void SerializedBufferDisposer::disposeImpl(
