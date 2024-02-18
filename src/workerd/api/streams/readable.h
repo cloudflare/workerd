@@ -124,7 +124,14 @@ public:
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
-  jsg::Promise<ReadResult> read(jsg::Lock& js, v8::Local<v8::ArrayBufferView> byobBuffer);
+
+  struct ReadableStreamBYOBReaderReadOptions {
+    jsg::Optional<int> min;
+    JSG_STRUCT(min);
+  };
+
+  jsg::Promise<ReadResult> read(jsg::Lock& js, v8::Local<v8::ArrayBufferView> byobBuffer,
+      jsg::Optional<ReadableStreamBYOBReaderReadOptions> options);
 
   // Non-standard extension so that reads can specify a minimum number of bytes to read. It's a
   // struct so that we could eventually add things like timeouts if we need to. Since there's no
