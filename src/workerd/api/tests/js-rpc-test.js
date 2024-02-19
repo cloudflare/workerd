@@ -1,5 +1,17 @@
 import assert from 'node:assert';
-import {WorkerEntrypoint,DurableObject} from 'cloudflare:workers';
+import {WorkerEntrypoint,DurableObject,RpcStub,RpcTarget} from 'cloudflare:workers';
+
+class MyCounter extends RpcTarget {
+  constructor(i = 0) {
+    super();
+    this.i = i;
+  }
+
+  async increment(j) {
+    this.i += j;
+    return this.i;
+  }
+}
 
 export let nonClass = {
   async noArgs(x, env, ctx) {
@@ -242,5 +254,13 @@ export let defaultExportClass = {
   async test(controller, env, ctx) {
     let resp = await env.defaultExport.fetch("http://foo");
     assert.strictEqual(await resp.text(), "default service 12");
+  },
+}
+
+export let loopbackJsRpcTarget = {
+  async test(controller, env, ctx) {
+    let stub = new RpcStub(new MyCounter(4));
+    assert.strictEqual(await stub.increment(5), 9);
+    assert.strictEqual(await stub.increment(7), 16);
   },
 }

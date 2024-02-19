@@ -449,6 +449,36 @@ private:
   kj::Own<IoContext::WeakRef> weakIoContext;
 };
 
+class TransientJsRpcTarget final: public JsRpcTargetBase {
+public:
+  TransientJsRpcTarget(IoContext& ioCtx, jsg::JsRef<jsg::JsObject> object)
+      : JsRpcTargetBase(ioCtx), object(kj::mv(object)) {}
+
+  TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) {
+    return {
+      .target = object.getHandle(lock),
+      .envCtx = kj::none,
+    };
+  }
+
+private:
+  jsg::JsRef<jsg::JsObject> object;
+};
+
+jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object) {
+  auto& ioctx = IoContext::current();
+
+  // We really only took `jsg::Ref<JsRpcTarget>` as the input type for type-checking reasons, but
+  // we'd prefer to store the JS handle. There definitely must be one since we just received this
+  // object from JS.
+  auto handle = jsg::JsRef<jsg::JsObject>(js,
+      jsg::JsObject(KJ_ASSERT_NONNULL(object.tryGetHandle(js))));
+
+  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(ioctx, kj::mv(handle));
+
+  return jsg::alloc<JsRpcStub>(ioctx.addObject(kj::heap(kj::mv(cap))));
+}
+
 // JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {

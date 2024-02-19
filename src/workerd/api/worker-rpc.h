@@ -28,6 +28,15 @@ namespace workerd::api {
 // separate calls.
 constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 
+// Base class for objects which can be sent over RPC, but doing so actually sends a stub which
+// makes RPCs back to the original object.
+class JsRpcTarget: public jsg::Object {
+public:
+  static jsg::Ref<JsRpcTarget> constructor() { return jsg::alloc<JsRpcTarget>(); }
+
+  JSG_RESOURCE_TYPE(JsRpcTarget) {}
+};
+
 // A JsRpcStub object forwards JS method calls to the remote Worker/Durable Object over RPC.
 // Since methods are not known until runtime, JsRpcStub doesn't define any JS methods.
 // Instead, we use JSG_WILDCARD_PROPERTY to intercept property accesses of names that are not known
@@ -44,6 +53,14 @@ class JsRpcStub: public jsg::Object {
 public:
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
       : capnpClient(kj::mv(capnpClient)) {}
+
+  // Given a JsRpcTarget, make an RPC stub from it.
+  //
+  // Usually, applications won't use this constructor directly. Rather, they will define types
+  // that extend `JsRpcTarget` and then they will simply return those. The serializer will
+  // automatically handle `JsRpcTarget` by wrapping it in `JsRpcStub`. However, it can be useful
+  // for testing to be able to construct a loopback stub.
+  static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
 
   // Serializes the method name and arguments, calls customEvent to get the capability, and uses
   // the capability to send our request to the remote Worker. This resolves once the RPC promise
@@ -163,11 +180,14 @@ public:
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
+    JSG_NESTED_TYPE_NAMED(JsRpcStub, RpcStub);
+    JSG_NESTED_TYPE_NAMED(JsRpcTarget, RpcTarget);
   }
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES  \
   api::JsRpcStub,                    \
+  api::JsRpcTarget,                  \
   api::WorkerEntrypoint,             \
   api::DurableObjectBase,            \
   api::EntrypointsModule
