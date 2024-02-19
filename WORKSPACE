@@ -434,6 +434,7 @@ http_archive(
         "//:patches/v8/0012-Fix-V8-ICU-build.patch",
         "//:patches/v8/0013-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
         "//:patches/v8/0014-Always-enable-continuation-preserved-data-in-the-bui.patch",
+        "//:patches/v8/0015-Attach-continuation-context-to-Promise-thenable-task.patch",
     ],
     sha256 = "45e0ba667fb1a86f834d6a92b513c43fcfdc672525c8a5a60bfdb56eec137d4a",
     strip_prefix = "v8-12.1.285.26",

@@ -1,0 +1,165 @@
+From ecb1e7084e1afe72fa335536e7f8cf9f9951df64 Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Tue, 6 Feb 2024 17:21:53 -0800
+Subject: Attach continuation context to Promise thenable task
+
+---
+ src/builtins/builtins-microtask-queue-gen.cc | 42 ++++++++++++++++
+ src/builtins/promise-misc.tq                 | 50 +++++++++++++++-----
+ src/heap/factory.cc                          |  8 ++++
+ src/objects/promise.tq                       |  4 ++
+ 4 files changed, 91 insertions(+), 13 deletions(-)
+
+diff --git a/src/builtins/builtins-microtask-queue-gen.cc b/src/builtins/builtins-microtask-queue-gen.cc
+index 764c2b3eaf3fe763285560b62c95f32aa1f2e85a..377a6710888be8287e76b0c0787ed7699da47136 100644
+--- a/src/builtins/builtins-microtask-queue-gen.cc
++++ b/src/builtins/builtins-microtask-queue-gen.cc
+@@ -203,6 +203,30 @@ void MicrotaskQueueBuiltinsAssembler::RunSingleMicrotask(
+     const TNode<Object> thenable = LoadObjectField(
+         microtask, PromiseResolveThenableJobTask::kThenableOffset);
+ 
++#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
++    TNode<Object> isolate_preserved_embedder_data = LoadObjectField(
++        microtask, PromiseResolveThenableJobTask::
++                       kIsolateContinuationPreservedEmbedderDataOffset);
++    Label isolate_preserved_data_done(this);
++    GotoIf(IsUndefined(isolate_preserved_embedder_data),
++           &isolate_preserved_data_done);
++    SetContinuationPreservedEmbedderData(isolate_preserved_embedder_data);
++    Goto(&isolate_preserved_data_done);
++    BIND(&isolate_preserved_data_done);
++
++    TNode<Object> context_preserved_embedder_data = LoadObjectField(
++        microtask, PromiseResolveThenableJobTask::
++                       kContextContinuationPreservedEmbedderDataOffset);
++    Label context_preserved_data_done(this);
++    GotoIf(IsUndefined(context_preserved_embedder_data),
++           &context_preserved_data_done);
++    StoreContextElement(native_context,
++                        Context::CONTINUATION_PRESERVED_EMBEDDER_DATA_INDEX,
++                        context_preserved_embedder_data);
++    Goto(&context_preserved_data_done);
++    BIND(&context_preserved_data_done);
++#endif  // V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
++
+     RunAllPromiseHooks(PromiseHookType::kBefore, microtask_context,
+                    CAST(promise_to_resolve));
+ 
+@@ -215,6 +239,24 @@ void MicrotaskQueueBuiltinsAssembler::RunSingleMicrotask(
+     RunAllPromiseHooks(PromiseHookType::kAfter, microtask_context,
+                    CAST(promise_to_resolve));
+ 
++#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
++    Label isolate_preserved_data_reset_done(this);
++    GotoIf(IsUndefined(isolate_preserved_embedder_data),
++           &isolate_preserved_data_reset_done);
++    SetContinuationPreservedEmbedderData(UndefinedConstant());
++    Goto(&isolate_preserved_data_reset_done);
++    BIND(&isolate_preserved_data_reset_done);
++
++    Label context_preserved_data_reset_done(this);
++    GotoIf(IsUndefined(context_preserved_embedder_data),
++           &context_preserved_data_reset_done);
++    StoreContextElement(native_context,
++                        Context::CONTINUATION_PRESERVED_EMBEDDER_DATA_INDEX,
++                        UndefinedConstant());
++    Goto(&context_preserved_data_reset_done);
++    BIND(&context_preserved_data_reset_done);
++#endif  // V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
++
+     RewindEnteredContext(saved_entered_context_count);
+     SetCurrentContext(current_context);
+     Goto(&done);
+diff --git a/src/builtins/promise-misc.tq b/src/builtins/promise-misc.tq
+index 0abec7c6d2faa13a7b193ff66a53619d2d00fb64..3e36fe3123c158d727bfc5ad94942b841413598b 100644
+--- a/src/builtins/promise-misc.tq
++++ b/src/builtins/promise-misc.tq
+@@ -358,19 +358,43 @@ macro NewPromiseResolveThenableJobTask(
+   // Proxy object, which would throw when it is called anyway. So instead of
+   // setting the context to null as the spec does, we just use the current
+   // realm.
+-  const thenContext: Context = ExtractHandlerContext(then);
+-  const nativeContext = LoadNativeContext(thenContext);
+-
+-  // 1. Let job be a new Job abstract closure with no parameters that
+-  //    captures promiseToResolve, thenable, and then...
+-  // 5. Return { [[Job]]: job, [[Realm]]: thenRealm }.
+-  return new PromiseResolveThenableJobTask{
+-    map: PromiseResolveThenableJobTaskMapConstant(),
+-    context: nativeContext,
+-    promise_to_resolve: promiseToResolve,
+-    thenable,
+-    then
+-  };
++  @if(V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA) {
++    const thenContext: Context = ExtractHandlerContext(then);
++    const isolateContinuationData = GetContinuationPreservedEmbedderData();
++    const nativeContext = LoadNativeContext(thenContext);
++
++    // 1. Let job be a new Job abstract closure with no parameters that
++    //    captures promiseToResolve, thenable, and then...
++    // 5. Return { [[Job]]: job, [[Realm]]: thenRealm }.
++    return new PromiseResolveThenableJobTask{
++      map: PromiseResolveThenableJobTaskMapConstant(),
++      context: nativeContext,
++      promise_to_resolve: promiseToResolve,
++      thenable,
++      then,
++      isolate_continuation_preserved_embedder_data: isolateContinuationData,
++      context_continuation_preserved_embedder_data:
++          *ContextSlot(
++          nativeContext,
++          ContextSlot::CONTINUATION_PRESERVED_EMBEDDER_DATA_INDEX)
++    };
++  }
++
++  @ifnot(V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA) {
++    const thenContext: Context = ExtractHandlerContext(then);
++    const nativeContext = LoadNativeContext(thenContext);
++
++    // 1. Let job be a new Job abstract closure with no parameters that
++    //    captures promiseToResolve, thenable, and then...
++    // 5. Return { [[Job]]: job, [[Realm]]: thenRealm }.
++    return new PromiseResolveThenableJobTask{
++      map: PromiseResolveThenableJobTaskMapConstant(),
++      context: nativeContext,
++      promise_to_resolve: promiseToResolve,
++      thenable,
++      then
++    };
++  }
+ }
+ 
+ struct InvokeThenOneArgFunctor {
+diff --git a/src/heap/factory.cc b/src/heap/factory.cc
+index 3eeecf24fd273b69b4897a37c68dc02048dc1339..9abb36e806a56c41e4c942b44cd623e783e20d23 100644
+--- a/src/heap/factory.cc
++++ b/src/heap/factory.cc
+@@ -1570,6 +1570,14 @@ Handle<PromiseResolveThenableJobTask> Factory::NewPromiseResolveThenableJobTask(
+   microtask->set_thenable(*thenable, SKIP_WRITE_BARRIER);
+   microtask->set_then(*then, SKIP_WRITE_BARRIER);
+   microtask->set_context(*context, SKIP_WRITE_BARRIER);
++#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
++  microtask->set_isolate_continuation_preserved_embedder_data(
++      isolate()->isolate_data()->continuation_preserved_embedder_data(),
++      SKIP_WRITE_BARRIER);
++  microtask->set_context_continuation_preserved_embedder_data(
++      isolate()->native_context()->continuation_preserved_embedder_data(),
++      SKIP_WRITE_BARRIER);
++#endif  // V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+   return handle(microtask, isolate());
+ }
+ 
+diff --git a/src/objects/promise.tq b/src/objects/promise.tq
+index 0633251781eb43657cb237b9d19200378569f743..47cf1350e3e436fc7bc56bac89aef60310b4a828 100644
+--- a/src/objects/promise.tq
++++ b/src/objects/promise.tq
+@@ -90,4 +90,8 @@ extern class PromiseResolveThenableJobTask extends Microtask {
+   promise_to_resolve: JSPromise;
+   thenable: JSReceiver;
+   then: JSReceiver;
++  @if(V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA)
++  isolate_continuation_preserved_embedder_data: Object|Undefined;
++  @if(V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA)
++  context_continuation_preserved_embedder_data: Object|Undefined;
+ }
