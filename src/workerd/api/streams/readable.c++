@@ -257,12 +257,14 @@ void ReadableStreamBYOBReader::lockToStream(jsg::Lock& js, ReadableStream& strea
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(
     jsg::Lock& js,
-    v8::Local<v8::ArrayBufferView> byobBuffer) {
+    v8::Local<v8::ArrayBufferView> byobBuffer,
+    jsg::Optional<ReadableStreamBYOBReaderReadOptions> maybeOptions) {
+  static const ReadableStreamBYOBReaderReadOptions defaultOptions {};
   auto options = ReadableStreamController::ByobOptions {
     .bufferView = js.v8Ref(byobBuffer),
     .byteOffset = byobBuffer->ByteOffset(),
     .byteLength = byobBuffer->ByteLength(),
-    .atLeast = 1,
+    .atLeast = maybeOptions.orDefault(defaultOptions).min.orDefault(1),
     .detachBuffer = FeatureFlags::get(js).getStreamsByobReaderDetachesBuffer(),
   };
   return impl.read(js, kj::mv(options));
