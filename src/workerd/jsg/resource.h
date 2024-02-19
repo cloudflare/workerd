@@ -673,7 +673,8 @@ struct ResourceTypeBuilder {
         signature(signature) {
     // Mark the prototype as belonging to a resource type. Calling `util.inspect()` will see this
     // symbol and trigger custom inspect handling. This value of this symbol property maps names
-    // names of internal pseudo-properties to symbol-keyed-getters for accessing them.
+    // names of internal pseudo-properties to symbol-keyed-getters for accessing them, or false if
+    // the property is unimplemented.
     // See `JSG_INSPECT_PROPERTY` for more details.
     auto symbol = v8::Symbol::ForApi(isolate, v8StrIntern(isolate, "kResourceTypeInspect"_kj));
     inspectProperties = v8::ObjectTemplate::New(isolate);
@@ -735,10 +736,17 @@ struct ResourceTypeBuilder {
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerInstanceProperty() {
+    auto v8Name = v8StrIntern(isolate, name);
+
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    if (!Gcb::enumerable) {
+      // Mark as unimplemented if `Gcb::enumerable` is `false`. This is only the case when `Getter`
+      // returns `Unimplemented`.
+      inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
+    }
 
     instance->SetNativeDataProperty(
-        v8StrIntern(isolate, name),
+        v8Name,
         Gcb::callback, &SetterCallback<TypeWrapper, name, Setter, setter, isContext>::callback,
         v8::Local<v8::Value>(),
         Gcb::enumerable ? v8::PropertyAttribute::None : v8::PropertyAttribute::DontEnum);
@@ -746,10 +754,15 @@ struct ResourceTypeBuilder {
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerPrototypeProperty() {
+    auto v8Name = v8StrIntern(isolate, name);
+
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    if (!Gcb::enumerable) {
+      inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
+    }
 
     prototype->SetAccessor(
-        v8StrIntern(isolate, name),
+        v8Name,
         Gcb::callback,
         &SetterCallback<TypeWrapper, name, Setter, setter, isContext>::callback,
         v8::Local<v8::Value>(),
@@ -761,10 +774,15 @@ struct ResourceTypeBuilder {
 
   template<const char* name, typename Getter, Getter getter>
   inline void registerReadonlyInstanceProperty() {
+    auto v8Name = v8StrIntern(isolate, name);
+
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    if (!Gcb::enumerable) {
+      inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
+    }
 
     instance->SetNativeDataProperty(
-        v8StrIntern(isolate, name),
+        v8Name,
         &Gcb::callback, nullptr, v8::Local<v8::Value>(),
         Gcb::enumerable ? v8::PropertyAttribute::ReadOnly
                         : static_cast<v8::PropertyAttribute>(
@@ -780,10 +798,15 @@ struct ResourceTypeBuilder {
 
   template<const char* name, typename Getter, Getter getter>
   inline void registerReadonlyPrototypeProperty() {
+    auto v8Name = v8StrIntern(isolate, name);
+
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    if (!Gcb::enumerable) {
+      inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
+    }
 
     prototype->SetAccessor(
-        v8StrIntern(isolate, name),
+        v8Name,
         &Gcb::callback,
         nullptr,
         v8::Local<v8::Value>(),
@@ -798,14 +821,20 @@ struct ResourceTypeBuilder {
 
   template<const char* name, typename Getter, Getter getter, bool readOnly>
   inline void registerLazyInstanceProperty() {
+    auto v8Name = v8StrIntern(isolate, name);
+
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    if (!Gcb::enumerable) {
+      inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
+    }
+
     v8::PropertyAttribute attributes =
         Gcb::enumerable ? v8::PropertyAttribute::None : v8::PropertyAttribute::DontEnum;
     if (readOnly) {
       attributes = static_cast<v8::PropertyAttribute>(attributes | v8::PropertyAttribute::ReadOnly);
     }
     instance->SetLazyDataProperty(
-        v8StrIntern(isolate, name),
+        v8Name,
         &Gcb::callback, v8::Local<v8::Value>(),
         attributes);
   }
@@ -819,7 +848,7 @@ struct ResourceTypeBuilder {
 
     auto v8Name = v8StrIntern(isolate, name);
 
-    // Create a new unique symbol so this property can only be access through `util.inspect()`
+    // Create a new unique symbol so this property can only be accessed through `util.inspect()`
     auto symbol = v8::Symbol::New(isolate, v8Name);
     inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
 

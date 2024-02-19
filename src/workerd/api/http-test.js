@@ -13,6 +13,17 @@ export default {
     if (pathname === "/body-length") {
       return Response.json(Object.fromEntries(request.headers));
     }
+    if (pathname === "/web-socket") {
+      const pair = new WebSocketPair();
+      pair[0].addEventListener("message", (event) => {
+        pair[0].send(util.inspect(event));
+      });
+      pair[0].accept();
+      return new Response(null, {
+        status: 101,
+        webSocket: pair[1],
+      });
+    }
     return new Response(null, { status: 404 });
   },
 
@@ -155,5 +166,42 @@ export const inspect = {
   }
 }`
     );
+
+    // Check `MessageEvent` with unimplemented properties
+    const webSocketResponse = await env.SERVICE.fetch("http://placeholder/web-socket", {
+      headers: { "Upgrade": "websocket" },
+    });
+    const webSocket = webSocketResponse.webSocket;
+    assert.notStrictEqual(webSocket, null);
+    const messagePromise = new Promise((resolve) => {
+      webSocket.addEventListener("message", (event) => {
+        assert.strictEqual(event.data,
+`MessageEvent {
+  data: 'data',
+  cancelBubble: false,
+  isTrusted: true,
+  timeStamp: 0,
+  srcElement: WebSocket { extensions: '', protocol: '', url: null, readyState: 1 },
+  currentTarget: WebSocket { extensions: '', protocol: '', url: null, readyState: 1 },
+  returnValue: true,
+  defaultPrevented: false,
+  cancelable: false,
+  bubbles: false,
+  composed: false,
+  eventPhase: 2,
+  type: 'message',
+  NONE: 0,
+  CAPTURING_PHASE: 1,
+  AT_TARGET: 2,
+  BUBBLING_PHASE: 3
+}`
+        );
+        resolve();
+      });
+    });
+    webSocket.accept();
+    webSocket.send("data");
+    webSocket.close();
+    await messagePromise;
   }
 };
