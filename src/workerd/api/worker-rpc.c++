@@ -181,10 +181,13 @@ public:
   JsRpcTargetImpl(
       IoContext& ctx,
       kj::Maybe<kj::StringPtr> entrypointName)
-      : ctx(ctx), entrypointName(entrypointName) {}
+      : weakIoContext(ctx.getWeakRef()), entrypointName(entrypointName) {}
 
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
+    IoContext& ctx = JSG_REQUIRE_NONNULL(weakIoContext->tryGet(), Error,
+        "The destination object for this RPC no longer exists.");
+
     auto params = callContext.getParams();
     auto methodName = kj::heapString(params.getMethodName());
     kj::Maybe<rpc::JsValue::Reader> args;
@@ -192,9 +195,20 @@ public:
       args = params.getArgs();
     }
 
+    // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the backing
+    // object's lifetime is that of the RPC call, but in reality they are refcounted under the
+    // hood. Since well be executing the call in the JS microtask queue, we have no ability to
+    // actually cancel execution if a cancellation arrives over RPC, and at the end of that
+    // execution we're going to accell the call context to write the results. We could invent some
+    // complicated way to skip initializing results in the case the call has been canceled, but
+    // it's easier and safer to just grap a refcount on the call context object itself, which
+    // fully protects us. So... do that.
+    auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
+
     // Try to execute the requested method.
-    co_return co_await ctx.run(
-        [this, methodName=kj::mv(methodName), args, callContext]
+    auto promise = ctx.run(
+        [this,&ctx,methodName=kj::mv(methodName), args, callContext,
+         ownCallContext = kj::mv(ownCallContext), ownThis = thisCap()]
         (Worker::Lock& lock) mutable -> kj::Promise<void> {
 
       jsg::Lock& js = lock;
@@ -236,20 +250,42 @@ public:
       // If the function returns a promise we will wait for the promise to finish so we can
       // serialize the result.
       return ctx.awaitJs(js, js.toPromise(invocationResult)
-          .then(js, ctx.addFunctor([callContext](jsg::Lock& js, jsg::Value value) mutable {
+          .then(js, ctx.addFunctor(
+              [callContext, ownCallContext = kj::mv(ownCallContext)]
+              (jsg::Lock& js, jsg::Value value) mutable {
         serializeJsValue(js, jsg::JsValue(value.getHandle(js)), [&](capnp::MessageSize hint) {
           hint.wordCount += capnp::sizeInWords<CallResults>();
           return callContext.initResults(hint).initResult();
         });
       })));
     });
+
+    // We need to make sure this RPC is canceled if the IoContext is destroyed. To accomplish that,
+    // we add the promise as a task on the context itself, and use a separate promise fulfiller to
+    // wait on the result.
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    promise = promise.then([&fulfiller=*paf.fulfiller]() {
+      fulfiller.fulfill();
+    }, [&fulfiller=*paf.fulfiller](kj::Exception&& e) {
+      fulfiller.reject(kj::mv(e));
+    });
+    promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
+      if (fulfiller->isWaiting()) {
+        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
+            "jsg.Error: The destination execution context for this RPC was canceled while the "
+            "call was still running."));
+      }
+    }));
+    ctx.addTask(kj::mv(promise));
+
+    return kj::mv(paf.promise);
   }
 
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetImpl);
 
 private:
   // The following names are reserved by the Workers Runtime and cannot be called over RPC.
-  bool isReservedName(kj::StringPtr name) {
+  static bool isReservedName(kj::StringPtr name) {
     if (name == "fetch" ||
         name == "connect" ||
         name == "alarm" ||
@@ -265,7 +301,7 @@ private:
   }
 
   // If the `methodName` is a known public method, we'll return it.
-  inline v8::Local<v8::Function> tryGetFn(
+  static inline v8::Local<v8::Function> tryGetFn(
       Worker::Lock& lock,
       IoContext& ctx,
       v8::Local<v8::Object> handle,
@@ -301,7 +337,7 @@ private:
   }
 
   // Deserializes the arguments and passes them to the given function.
-  v8::Local<v8::Value> invokeFn(
+  static v8::Local<v8::Value> invokeFn(
       jsg::Lock& js,
       v8::Local<v8::Function> fn,
       v8::Local<v8::Object> thisArg,
@@ -324,7 +360,7 @@ private:
 
   // Like `invokeFn`, but inject the `env` and `ctx` values between the first and second
   // parameters. Used for service bindings that use functional syntax.
-  v8::Local<v8::Value> invokeFnInsertingEnvCtx(
+  static v8::Local<v8::Value> invokeFnInsertingEnvCtx(
       jsg::Lock& js,
       kj::StringPtr methodName,
       v8::Local<v8::Function> fn,
@@ -403,7 +439,7 @@ private:
     return jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.begin()));
   };
 
-  IoContext& ctx;
+  kj::Own<IoContext::WeakRef> weakIoContext;
   kj::Maybe<kj::StringPtr> entrypointName;
 };
 
