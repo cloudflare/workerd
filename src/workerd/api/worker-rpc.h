@@ -75,6 +75,10 @@ public:
   static jsg::Ref<JsRpcTarget> constructor() { return jsg::alloc<JsRpcTarget>(); }
 
   JSG_RESOURCE_TYPE(JsRpcTarget) {}
+
+  // Serializes to JsRpcStub.
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::JS_RPC_STUB);
 };
 
 // A JsRpcStub object forwards JS method calls to the remote Worker/Durable Object over RPC.

@@ -64,8 +64,7 @@ export class MyService extends WorkerEntrypoint {
   }
 
   async makeCounter(i) {
-    // TODO(soon): Create `RpcStub` implicitly.
-    return new RpcStub(new MyCounter(i));
+    return new MyCounter(i);
   }
 
   async incrementCounter(counter, i) {

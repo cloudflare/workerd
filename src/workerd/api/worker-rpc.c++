@@ -539,6 +539,30 @@ jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> 
   return jsg::alloc<JsRpcStub>(ioctx.addObject(kj::heap(kj::mv(cap))));
 }
 
+void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
+  // Except we don't actually want to do _exactly_ that, because we do not want to actually create
+  // a `JsRpcStub` locally. So do the important parts of `JsRpcStub::constructor()` followed by
+  // `JsRpcStub::serialize()`.
+
+  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
+      "Remote RPC references can only be serialized for RPC.");
+  auto externalHandler = dynamic_cast<RpcSerializerExternalHander*>(&handler);
+  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
+      "Remote RPC references can only be serialized for RPC.");
+
+  // Handle can't possibly be missing during serialization, it's how we got here.
+  auto handle = jsg::JsRef<jsg::JsObject>(js,
+      jsg::JsObject(KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js))));
+
+  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(
+      IoContext::current(), kj::mv(handle));
+
+  externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
+    builder.setRpcTarget(kj::mv(cap));
+  });
+}
+
 // JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {

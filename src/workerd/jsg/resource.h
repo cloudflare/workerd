@@ -1107,23 +1107,26 @@ public:
         static_cast<T&>(instance).serialize(js, serializer);
       });
 
-      typename TypeWrapper::DeserializeFunc* deserializeFunc =
-          [](TypeWrapper& wrapper, Lock& js, uint tag, Deserializer& deserializer) {
-        // Cast the tag to the application's preferred tag type.
-        auto typedTag = static_cast<decltype(T::jsgSerializeTag)>(tag);
-        return wrapper.wrap(js.v8Context(), kj::none, T::deserialize(js, typedTag, deserializer));
-      };
+      if constexpr (!T::jsgSerializeOneway) {
+        typename TypeWrapper::DeserializeFunc* deserializeFunc =
+            [](TypeWrapper& wrapper, Lock& js, uint tag, Deserializer& deserializer) {
+          // Cast the tag to the application's preferred tag type.
+          auto typedTag = static_cast<decltype(T::jsgSerializeTag)>(tag);
+          return wrapper.wrap(js.v8Context(), kj::none, T::deserialize(js, typedTag, deserializer));
+        };
 
-      // We make duplicatse here fatal because it's really hard to debug exceptions thrown during
-      // isolate startup and frankly this is pretty fatal for the runtime anyway.
-      auto reportDuplicate = [](auto&, auto&&) noexcept {
-        KJ_FAIL_REQUIRE("JSG_SERIALIZABLE declaration tried to register a duplicate type tag");
-      };
+        // We make duplicatse here fatal because it's really hard to debug exceptions thrown during
+        // isolate startup and frankly this is pretty fatal for the runtime anyway.
+        auto reportDuplicate = [](auto&, auto&&) noexcept {
+          KJ_FAIL_REQUIRE("JSG_SERIALIZABLE declaration tried to register a duplicate type tag");
+        };
 
-      wrapper.deserializerMap.upsert(static_cast<uint>(T::jsgSerializeTag), deserializeFunc,
-          reportDuplicate);
-      for (auto& oldTag: T::jsgSerializeOldTags) {
-        wrapper.deserializerMap.upsert(static_cast<uint>(oldTag), deserializeFunc, reportDuplicate);
+        wrapper.deserializerMap.upsert(static_cast<uint>(T::jsgSerializeTag), deserializeFunc,
+            reportDuplicate);
+        for (auto& oldTag: T::jsgSerializeOldTags) {
+          wrapper.deserializerMap.upsert(
+              static_cast<uint>(oldTag), deserializeFunc, reportDuplicate);
+        }
       }
     }
   }
