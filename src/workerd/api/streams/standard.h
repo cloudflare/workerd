@@ -172,11 +172,6 @@ public:
   // queue is below the watermark and we actually need data right now.
   void pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self);
 
-  // True if any of the known consumers have pending reads waiting to be
-  // fulfilled. This is the case if a read is received that cannot be
-  // completely fulfilled by the current contents of the queue.
-  bool hasPendingReadRequests();
-
   // True if the queue is current below the highwatermark.
   bool shouldCallPull();
 
@@ -332,6 +327,8 @@ public:
   // True if the writable is in a state where new chunks can be written
   bool isWritable() const;
 
+  void cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason);
+
   void visitForGc(jsg::GcVisitor& visitor);
 
   kj::StringPtr jsgGetMemoryName() const;
@@ -411,7 +408,6 @@ public:
   bool canCloseOrEnqueue();
   bool hasBackpressure();
   kj::Maybe<int> getDesiredSize();
-  bool hasPendingReadRequests();
 
   void enqueue(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk);
 
@@ -540,7 +536,6 @@ public:
   bool canCloseOrEnqueue();
   bool hasBackpressure();
   kj::Maybe<int> getDesiredSize();
-  bool hasPendingReadRequests();
 
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> getByobRequest(jsg::Lock& js);
 
@@ -612,6 +607,8 @@ public:
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+  void cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason);
 
 private:
   kj::Maybe<IoContext&> ioContext;

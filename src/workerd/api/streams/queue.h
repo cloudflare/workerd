@@ -477,6 +477,19 @@ public:
     KJ_UNREACHABLE;
   }
 
+  void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(closed, Closed) {}
+      KJ_CASE_ONEOF(errored, Errored) {}
+      KJ_CASE_ONEOF(ready, Ready) {
+        for (auto& request : ready.readRequests) {
+          request.resolver.reject(js, reason);
+        }
+        ready.readRequests.clear();
+      }
+    }
+  }
+
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, Closed) {}
@@ -673,6 +686,7 @@ public:
                             kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
 
     bool hasReadRequests();
+    void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason);
 
     void visitForGc(jsg::GcVisitor& visitor);
 
@@ -896,6 +910,7 @@ public:
     kj::Own<Consumer> clone(jsg::Lock& js,
                             kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     bool hasReadRequests();
+    void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason);
 
     void visitForGc(jsg::GcVisitor& visitor);
 

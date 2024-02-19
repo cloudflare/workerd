@@ -70,6 +70,48 @@ export const byobMin = {
   }
 };
 
+export const cancelReadsOnReleaseLock = {
+  async test() {
+    const rs = new ReadableStream();
+    const reader = rs.getReader();
+    const read = reader.read();
+
+    const result = await Promise.allSettled([read, reader.releaseLock()]);
+    strictEqual(result[0].status, 'rejected');
+    strictEqual(result[0].reason.message, 'This ReadableStream reader has been released.');
+    strictEqual(result[1].status, 'fulfilled');
+
+    // Make sure we can still get another reader
+    const reader2 = rs.getReader();
+  }
+};
+
+export const cancelWriteOnReleaseLock = {
+  async test() {
+    const ws = new WritableStream({
+      write() {
+        return new Promise(() => {});
+      }
+    });
+    const writer = ws.getWriter();
+    // This first write is just to start the write queue so that the
+    // next write becomes pending in the queue. This first write will
+    // never be fulfilled since it is in-progress but the queue will
+    // be rejected.
+    writer.write('ignored');
+    const results = await Promise.allSettled([
+      writer.write('hello'),
+      writer.releaseLock(),
+    ]);
+    strictEqual(results[0].status, 'rejected');
+    strictEqual(results[0].reason.message, 'This WritableStream writer has been released.');
+    strictEqual(results[1].status, 'fulfilled');
+
+    // Make sure we can still get another writer
+    const writer2 = ws.getWriter();
+  }
+};
+
 export default {
   async fetch(request, env) {
     strictEqual(request.headers.get('content-length'), '10');

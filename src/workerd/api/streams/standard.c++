@@ -250,13 +250,18 @@ void ReadableLockImpl<Controller>::releaseReader(
     KJ_ASSERT(&locked.getReader() == &reader);
 
     KJ_IF_SOME(js, maybeJs) {
-      JSG_REQUIRE(!self.hasPendingReadRequests(),
-                  TypeError,
-                  "Cannot call releaseLock() on a reader with outstanding read promises.");
-
-      maybeRejectPromise<void>(js,
-          locked.getClosedFulfiller(),
-          js.v8TypeError("This ReadableStream reader has been released."_kj));
+      auto reason = js.typeError("This ReadableStream reader has been released."_kj);
+      KJ_SWITCH_ONEOF(self.state) {
+        KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+        KJ_CASE_ONEOF(errored, StreamStates::Errored) {}
+        KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+          consumer->cancelPendingReads(js, reason);
+        }
+        KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+          consumer->cancelPendingReads(js, reason);
+        }
+      }
+      maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     }
 
     // Keep the locked.clear() after the isolate and hasPendingReadRequests check above.
@@ -406,9 +411,18 @@ void WritableLockImpl<Controller>::releaseWriter(
   auto& locked = state.template get<WriterLocked>();
   KJ_ASSERT(&locked.getWriter() == &writer);
   KJ_IF_SOME(js, maybeJs) {
+    KJ_SWITCH_ONEOF(self.state) {
+      KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+      KJ_CASE_ONEOF(errored, StreamStates::Errored) {}
+      KJ_CASE_ONEOF(controller, jsg::Ref<WritableStreamDefaultController>) {
+        controller->cancelPendingWrites(js,
+            js.typeError("This WritableStream writer has been released."_kjc));
+      }
+    }
+
     maybeRejectPromise<void>(js,
         locked.getClosedFulfiller(),
-        js.v8TypeError("This WritableStream writer has been released."_kj));
+        js.v8TypeError("This WritableStream writer has been released."_kjc));
   }
   locked.clear();
 
@@ -735,8 +749,6 @@ public:
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override;
 
 private:
-  bool hasPendingReadRequests();
-
   // If the stream was created within the scope of a request, we want to treat it as I/O
   // and make sure it is not advanced from the scope of a different request.
   kj::Maybe<IoContext&> ioContext;
@@ -1161,14 +1173,6 @@ kj::Own<typename ReadableImpl<Self>::Consumer>
 ReadableImpl<Self>::getConsumer(kj::Maybe<ReadableImpl<Self>::StateListener&> listener) {
   auto& queue = state.template get<Queue>();
   return kj::heap<typename ReadableImpl<Self>::Consumer>(queue, listener);
-}
-
-template <typename Self>
-bool ReadableImpl<Self>::hasPendingReadRequests() {
-  KJ_IF_SOME(queue, state.template tryGet<Queue>()) {
-    return queue.wantsRead();
-  }
-  return false;
 }
 
 // ======================================================================================
@@ -1622,6 +1626,14 @@ bool WritableImpl<Self>::isWritable() const {
   return state.template is<Writable>();
 }
 
+template <typename Self>
+void WritableImpl<Self>::cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason) {
+  for (auto& write : writeRequests) {
+    write.resolver.reject(js, reason);
+  }
+  writeRequests.clear();
+}
+
 // ======================================================================================
 
 namespace {
@@ -1678,8 +1690,8 @@ struct ReadableState {
     owner = kj::mv(newOwner);
   }
 
-  bool hasPendingReadRequests() {
-    return consumer->hasReadRequests();
+  void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
+    consumer->cancelPendingReads(js, reason);
   }
 
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
@@ -1769,8 +1781,10 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
     visitor.visit(state);
   }
 
-  bool hasPendingReadRequests() {
-    return state.map([](State& state) { return state.hasPendingReadRequests(); }).orDefault(false);
+  void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
+    KJ_IF_SOME(s, state) {
+      s.cancelPendingReads(js, reason);
+    }
   }
 
   void setOwner(auto newOwner) {
@@ -1878,8 +1892,10 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
     visitor.visit(state);
   }
 
-  bool hasPendingReadRequests() {
-    return state.map([](State& state) { return state.hasPendingReadRequests(); }).orDefault(false);
+  void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
+    KJ_IF_SOME(s, state) {
+      s.cancelPendingReads(js, reason);
+    }
   }
 
   void setOwner(auto newOwner) {
@@ -2029,10 +2045,6 @@ bool ReadableStreamDefaultController::hasBackpressure() {
 
 kj::Maybe<int> ReadableStreamDefaultController::getDesiredSize() {
   return impl.getDesiredSize();
-}
-
-bool ReadableStreamDefaultController::hasPendingReadRequests() {
-  return impl.hasPendingReadRequests();
 }
 
 void ReadableStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
@@ -2253,10 +2265,6 @@ kj::Maybe<int> ReadableByteStreamController::getDesiredSize() {
   return impl.getDesiredSize();
 }
 
-bool ReadableByteStreamController::hasPendingReadRequests() {
-  return impl.hasPendingReadRequests();
-}
-
 void ReadableByteStreamController::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(maybeByobRequest, impl);
 }
@@ -2433,20 +2441,6 @@ void ReadableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
     state.init<StreamStates::Errored>(js.v8Ref(reason));
     lock.onError(js, reason);
   }
-}
-
-bool ReadableStreamJsController::hasPendingReadRequests() {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) { return false; }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) { return false; }
-    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
-      return consumer->hasPendingReadRequests();
-    }
-    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      return consumer->hasPendingReadRequests();
-    }
-  }
-  KJ_UNREACHABLE;
 }
 
 bool ReadableStreamJsController::isByteOriented() const {
@@ -3482,6 +3476,10 @@ jsg::Promise<void> WritableStreamDefaultController::write(
     jsg::Lock& js,
     v8::Local<v8::Value> value) {
   return impl.write(js, JSG_THIS, value);
+}
+
+void WritableStreamDefaultController::cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason) {
+  impl.cancelPendingWrites(js, reason);
 }
 
 // ======================================================================================
