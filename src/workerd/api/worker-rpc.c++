@@ -94,7 +94,7 @@ private:
 
 } // namespace
 
-jsg::Promise<jsg::Value> JsRpcCapability::sendJsRpc(
+jsg::Promise<jsg::Value> JsRpcStub::sendJsRpc(
     jsg::Lock& js,
     rpc::JsRpcTarget::Client client,
     kj::StringPtr name,
@@ -130,7 +130,7 @@ jsg::Promise<jsg::Value> JsRpcCapability::sendJsRpc(
   });
 }
 
-kj::Maybe<JsRpcCapability::RpcFunction> JsRpcCapability::getRpcMethod(
+kj::Maybe<JsRpcStub::RpcFunction> JsRpcStub::getRpcMethod(
     jsg::Lock& js, kj::StringPtr name) {
   return RpcFunction(JSG_VISITABLE_LAMBDA(
       (methodName = kj::str(name), self = JSG_THIS),
@@ -144,7 +144,7 @@ kj::Maybe<JsRpcCapability::RpcFunction> JsRpcCapability::getRpcMethod(
     // native function with the wrong `this`.)
     //
     // TODO(cleanup): Ideally, we'd actually obtain `self` by unwrapping `args.This()` to a
-    // `jsg::Ref<JsRpcCapability>` instead of capturing it, but there isn't a JSG-blessed way to do
+    // `jsg::Ref<JsRpcStub>` instead of capturing it, but there isn't a JSG-blessed way to do
     // that.
     JSG_REQUIRE(args.This() == KJ_ASSERT_NONNULL(self.tryGetHandle(js)), TypeError,
         "Illegal invocation");
@@ -454,7 +454,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   // only makes a difference in the case that some sort of an error occurred. We don't strictly
   // have to revoke the capabilities as they are probably already broken anyway, but revoking them
   // helps to ensure that the underlying transport isn't "held open" waiting for the JS garbage
-  // collector to actually collect the JsRpcCapability objects.
+  // collector to actually collect the JsRpcStub objects.
   auto revokePaf = kj::newPromiseAndFulfiller<void>();
 
   KJ_DEFER({

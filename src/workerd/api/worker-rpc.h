@@ -4,10 +4,10 @@
 
 #pragma once
 // Classes for calling a remote Worker/Durable Object's methods from the stub over RPC.
-// This file contains the generic stub object (JsRpcCapability), as well as classes for sending and
+// This file contains the generic stub object (JsRpcStub), as well as classes for sending and
 // delivering the RPC event.
 //
-// `JsRpcCapability` specifically represents a capability that was introduced as part of some
+// `JsRpcStub` specifically represents a capability that was introduced as part of some
 // broader RPC session. `Fetcher`, on the other hand, also supports RPC methods, where each method
 // call begins a new session (by dispatching a `jsRpcSession` custom event). Service bindings and
 // Durable Object stubs both extend from `Fetcher`, and so allow such calls.
@@ -28,29 +28,29 @@ namespace workerd::api {
 // separate calls.
 constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 
-// A JsRpcCapability object forwards JS method calls to the remote Worker/Durable Object over RPC.
-// Since methods are not known until runtime, JsRpcCapability doesn't define any JS methods.
+// A JsRpcStub object forwards JS method calls to the remote Worker/Durable Object over RPC.
+// Since methods are not known until runtime, JsRpcStub doesn't define any JS methods.
 // Instead, we use JSG_WILDCARD_PROPERTY to intercept property accesses of names that are not known
 // at compile time.
 //
-// JsRpcCapability only supports method calls. You cannot, for instance, access a property of a
+// JsRpcStub only supports method calls. You cannot, for instance, access a property of a
 // Durable Object over RPC.
 //
-// The `JsRpcCapability` type is used to represent capabilities passed across some previous JS RPC
+// The `JsRpcStub` type is used to represent capabilities passed across some previous JS RPC
 // call. It is NOT the type of a Durable Object stub nor a service binding. Those are instances of
 // `Fetcher`, which has a `getRpcMethod()` call of its own that mostly delegates to
-// `JsRpcCapability::sendJsRpc()`.
-class JsRpcCapability: public jsg::Object {
+// `JsRpcStub::sendJsRpc()`.
+class JsRpcStub: public jsg::Object {
 public:
-  JsRpcCapability(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
       : capnpClient(kj::mv(capnpClient)) {}
 
   // Serializes the method name and arguments, calls customEvent to get the capability, and uses
   // the capability to send our request to the remote Worker. This resolves once the RPC promise
   // resolves.
   //
-  // This is a static helper, no `JsRpcCapability` object is needed. This is the shared
-  // implementation between `JsRpcCapability::getRpcMethod()` and `Fetcher::getRpcMethod()`.
+  // This is a static helper, no `JsRpcStub` object is needed. This is the shared
+  // implementation between `JsRpcStub::getRpcMethod()` and `Fetcher::getRpcMethod()`.
   static jsg::Promise<jsg::Value> sendJsRpc(
       jsg::Lock& js,
       rpc::JsRpcTarget::Client client,
@@ -62,7 +62,7 @@ public:
 
   kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
 
-  JSG_RESOURCE_TYPE(JsRpcCapability) {
+  JSG_RESOURCE_TYPE(JsRpcStub) {
     JSG_WILDCARD_PROPERTY(getRpcMethod);
   }
 
@@ -167,7 +167,7 @@ public:
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES  \
-  api::JsRpcCapability,              \
+  api::JsRpcStub,                    \
   api::WorkerEntrypoint,             \
   api::DurableObjectBase,            \
   api::EntrypointsModule
