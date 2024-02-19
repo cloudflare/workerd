@@ -13,17 +13,37 @@ namespace workerd::api {
 
 namespace {
 
-kj::Array<kj::byte> serializeV8(jsg::Lock& js, jsg::JsValue value) {
+// Call to construct an `rpc::JsValue` from a JS value.
+//
+// `makeBuilder` is a function which takes a capnp::MessageSize hint and returns the
+// rpc::JsValue::Builder to fill in.
+template <typename Func>
+void serializeJsValue(jsg::Lock& js, jsg::JsValue value, Func makeBuilder) {
   jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
   });
   serializer.write(js, value);
-  return serializer.release().data;
+  kj::Array<const byte> data = serializer.release().data;
+  JSG_ASSERT(data.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
+      "Serialized RPC arguments or return values are limited to 1MiB, but the size of this value "
+      "was: ", data.size(), " bytes.");
+
+  capnp::MessageSize hint {0, 0};
+  hint.wordCount += (data.size() + sizeof(capnp::word) - 1) / sizeof(capnp::word);
+  hint.wordCount += capnp::sizeInWords<rpc::JsValue>();
+
+  auto builder = makeBuilder(hint);
+
+  // TODO(perf): It would be nice if we could serialize directly into the capnp message to avoid
+  // a redundant copy of the bytes here. Maybe we could even cancel serialization early if it
+  // goes over the size limit.
+  builder.setV8Serialized(data);
 }
 
-jsg::JsValue deserializeV8(jsg::Lock& js, kj::ArrayPtr<const kj::byte> ser) {
-  jsg::Deserializer deserializer(js, ser, kj::none, kj::none,
+// Call to construct a JS value from an `rpc::JsValue`.
+jsg::JsValue deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader) {
+  jsg::Deserializer deserializer(js, reader.getV8Serialized(), kj::none, kj::none,
       jsg::Deserializer::Options {
     .version = 15,
     .readHeader = true,
@@ -112,21 +132,17 @@ jsg::Promise<jsg::Value> JsRpcStub::sendJsRpc(
   // If we have arguments, serialize them.
   // Note that we may fail to serialize some element, in which case this will throw back to JS.
   if (argv.size() > 0) {
-    // TODO(perf): It would be nice if we could serialize directly into the capnp message to avoid
-    // a redundant copy of the bytes here. Maybe we could even cancel serialization early if it
-    // goes over the size limit.
-    auto ser = serializeV8(js, js.arr(argv.asPtr()));
-    JSG_ASSERT(ser.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
-        "Serialized RPC requests are limited to 1MiB, but the size of this request was: ",
-        ser.size(), " bytes.");
-    builder.initArgs().setV8Serialized(ser);
+    serializeJsValue(js, js.arr(argv.asPtr()), [&](capnp::MessageSize hint) {
+      // TODO(perf): Actually use the size hint.
+      return builder.initArgs();
+    });
   }
 
   auto callResult = builder.send();
 
   return ioContext.awaitIo(js, kj::mv(callResult),
       [](jsg::Lock& js, auto result) -> jsg::Value {
-    return jsg::Value(js.v8Isolate, deserializeV8(js, result.getResult().getV8Serialized()));
+    return jsg::Value(js.v8Isolate, deserializeJsValue(js, result.getResult()));
   });
 }
 
@@ -164,12 +180,16 @@ public:
 
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
-    auto methodName = kj::heapString(callContext.getParams().getMethodName());
-    auto serializedArgs = callContext.getParams().getArgs().getV8Serialized().asBytes();
+    auto params = callContext.getParams();
+    auto methodName = kj::heapString(params.getMethodName());
+    kj::Maybe<rpc::JsValue::Reader> args;
+    if (params.hasArgs()) {
+      args = params.getArgs();
+    }
 
     // Try to execute the requested method.
     co_return co_await ctx.run(
-        [this, methodName=kj::mv(methodName), serializedArgs=kj::mv(serializedArgs), callContext]
+        [this, methodName=kj::mv(methodName), args, callContext]
         (Worker::Lock& lock) mutable -> kj::Promise<void> {
 
       jsg::Lock& js = lock;
@@ -200,11 +220,11 @@ public:
 
       v8::Local<v8::Value> invocationResult;
       KJ_IF_SOME(execCtx, handler->ctx) {
-        invocationResult = invokeFnInsertingEnvCtx(js, methodName, fn, handle, serializedArgs,
+        invocationResult = invokeFnInsertingEnvCtx(js, methodName, fn, handle, args,
             handler->env.getHandle(js),
             lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()));
       } else {
-        invocationResult = invokeFn(js, fn, handle, serializedArgs);
+        invocationResult = invokeFn(js, fn, handle, args);
       }
 
       // We have a function, so let's call it and serialize the result for RPC.
@@ -212,12 +232,10 @@ public:
       // serialize the result.
       return ctx.awaitJs(js, js.toPromise(invocationResult)
           .then(js, ctx.addFunctor([callContext](jsg::Lock& js, jsg::Value value) mutable {
-        auto result = serializeV8(js, jsg::JsValue(value.getHandle(js)));
-        JSG_ASSERT(result.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
-            "Serialized RPC responses are limited to 1MiB, but the size of this response was: ",
-            result.size(), " bytes.");
-        auto builder = callContext.initResults(capnp::MessageSize { result.size() / 8 + 8, 0 });
-        builder.initResult().setV8Serialized(kj::mv(result));
+        serializeJsValue(js, jsg::JsValue(value.getHandle(js)), [&](capnp::MessageSize hint) {
+          hint.wordCount += capnp::sizeInWords<CallResults>();
+          return callContext.initResults(hint).initResult();
+        });
       })));
     });
   }
@@ -282,11 +300,11 @@ private:
       jsg::Lock& js,
       v8::Local<v8::Function> fn,
       v8::Local<v8::Object> thisArg,
-      kj::ArrayPtr<const kj::byte> serializedArgs) {
+      kj::Maybe<rpc::JsValue::Reader> args) {
     // We received arguments from the client, deserialize them back to JS.
-    if (serializedArgs.size() > 0) {
+    KJ_IF_SOME(a, args) {
       auto args = KJ_REQUIRE_NONNULL(
-          deserializeV8(js, serializedArgs).tryCast<jsg::JsArray>(),
+          deserializeJsValue(js, a).tryCast<jsg::JsArray>(),
           "expected JsArray when deserializing arguments.");
       // Call() expects a `Local<Value> []`... so we populate an array.
       KJ_STACK_ARRAY(v8::Local<v8::Value>, arguments, args.size(), 8, 8);
@@ -306,7 +324,7 @@ private:
       kj::StringPtr methodName,
       v8::Local<v8::Function> fn,
       v8::Local<v8::Object> thisArg,
-      kj::ArrayPtr<const kj::byte> serializedArgs,
+      kj::Maybe<rpc::JsValue::Reader> args,
       v8::Local<v8::Value> env,
       jsg::JsObject ctx) {
     // Determine the function arity (how many parameters it was declared to accept) by reading the
@@ -332,9 +350,9 @@ private:
     // `env` and `ctx`, so we can determine where to insert them based on the function's arity.
     kj::Maybe<jsg::JsArray> argsArrayFromClient;
     size_t argCountFromClient = 0;
-    if (serializedArgs.size() > 0) {
+    KJ_IF_SOME(a, args) {
       auto array = KJ_REQUIRE_NONNULL(
-          deserializeV8(js, serializedArgs).tryCast<jsg::JsArray>(),
+          deserializeJsValue(js, a).tryCast<jsg::JsArray>(),
           "expected JsArray when deserializing arguments.");
       argCountFromClient = array.size();
       argsArrayFromClient = kj::mv(array);
