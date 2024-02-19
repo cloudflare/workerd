@@ -11,6 +11,27 @@
 
 namespace workerd::api {
 
+capnp::Orphan<capnp::List<rpc::JsValue::External>>
+    RpcSerializerExternalHander::build(capnp::Orphanage orphanage) {
+  auto result = orphanage.newOrphan<capnp::List<rpc::JsValue::External>>(externals.size());
+  auto builder = result.get();
+  for (auto i: kj::indices(externals)) {
+    externals[i](builder[i]);
+  }
+  return result;
+}
+
+RpcDeserializerExternalHander::~RpcDeserializerExternalHander() noexcept(false) {
+  if (!unwindDetector.isUnwinding()) {
+    KJ_ASSERT(i == externals.size(), "deserialization did not consume all of the externals");
+  }
+}
+
+rpc::JsValue::External::Reader RpcDeserializerExternalHander::read() {
+  KJ_ASSERT(i < externals.size());
+  return externals[i++];
+}
+
 namespace {
 
 // Call to construct an `rpc::JsValue` from a JS value.
@@ -19,9 +40,12 @@ namespace {
 // rpc::JsValue::Builder to fill in.
 template <typename Func>
 void serializeJsValue(jsg::Lock& js, jsg::JsValue value, Func makeBuilder) {
+  RpcSerializerExternalHander externalHandler;
+
   jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
+    .externalHandler = externalHandler,
   });
   serializer.write(js, value);
   kj::Array<const byte> data = serializer.release().data;
@@ -32,21 +56,31 @@ void serializeJsValue(jsg::Lock& js, jsg::JsValue value, Func makeBuilder) {
   capnp::MessageSize hint {0, 0};
   hint.wordCount += (data.size() + sizeof(capnp::word) - 1) / sizeof(capnp::word);
   hint.wordCount += capnp::sizeInWords<rpc::JsValue>();
+  hint.wordCount += externalHandler.size() * capnp::sizeInWords<rpc::JsValue::External>();
+  hint.capCount += externalHandler.size();
 
-  auto builder = makeBuilder(hint);
+  rpc::JsValue::Builder builder = makeBuilder(hint);
 
   // TODO(perf): It would be nice if we could serialize directly into the capnp message to avoid
   // a redundant copy of the bytes here. Maybe we could even cancel serialization early if it
   // goes over the size limit.
   builder.setV8Serialized(data);
+
+  if (externalHandler.size() > 0) {
+    builder.adoptExternals(externalHandler.build(
+        capnp::Orphanage::getForMessageContaining(builder)));
+  }
 }
 
 // Call to construct a JS value from an `rpc::JsValue`.
 jsg::JsValue deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader) {
+  RpcDeserializerExternalHander externalHandler(reader.getExternals());
+
   jsg::Deserializer deserializer(js, reader.getV8Serialized(), kj::none, kj::none,
       jsg::Deserializer::Options {
     .version = 15,
     .readHeader = true,
+    .externalHandler = externalHandler,
   });
 
   return deserializer.readValue(js);
@@ -172,6 +206,32 @@ kj::Maybe<JsRpcStub::RpcFunction> JsRpcStub::getRpcMethod(
 
     return sendJsRpc(js, *self->capnpClient, methodName, args);
   }));
+}
+
+void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
+      "Remote RPC references can only be serialized for RPC.");
+  auto externalHandler = dynamic_cast<RpcSerializerExternalHander*>(&handler);
+  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
+      "Remote RPC references can only be serialized for RPC.");
+
+  externalHandler->write([cap = *capnpClient](rpc::JsValue::External::Builder builder) mutable {
+    builder.setRpcTarget(kj::mv(cap));
+  });
+}
+
+jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto& handler = KJ_REQUIRE_NONNULL(deserializer.getExternalHandler(),
+      "got JsRpcStub on non-RPC serialized object?");
+  auto externalHandler = dynamic_cast<RpcDeserializerExternalHander*>(&handler);
+  KJ_REQUIRE(externalHandler != nullptr, "got JsRpcStub on non-RPC serialized object?");
+
+  auto reader = externalHandler->read();
+  KJ_REQUIRE(reader.isRpcTarget(), "external table slot type doesn't match serialization tag");
+
+  auto& ioctx = IoContext::current();
+  return jsg::alloc<JsRpcStub>(ioctx.addObject(kj::heap(reader.getRpcTarget())));
 }
 
 // Callee-side implementation of JsRpcTarget.

@@ -63,6 +63,15 @@ export class MyService extends WorkerEntrypoint {
     return i * j + this.env.twelve;
   }
 
+  async makeCounter(i) {
+    // TODO(soon): Create `RpcStub` implicitly.
+    return new RpcStub(new MyCounter(i));
+  }
+
+  async incrementCounter(counter, i) {
+    return await counter.increment(i);
+  }
+
   async fetch(req, x) {
     assert.strictEqual(x, undefined);
     return new Response("method = " + req.method + ", url = " + req.url);
@@ -262,5 +271,21 @@ export let loopbackJsRpcTarget = {
     let stub = new RpcStub(new MyCounter(4));
     assert.strictEqual(await stub.increment(5), 9);
     assert.strictEqual(await stub.increment(7), 16);
+  },
+}
+
+export let sendStubOverRpc = {
+  async test(controller, env, ctx) {
+    let stub = new RpcStub(new MyCounter(4));
+    assert.strictEqual(await env.MyService.incrementCounter(stub, 5), 9);
+    assert.strictEqual(await stub.increment(7), 16);
+  },
+}
+
+export let receiveStubOverRpc = {
+  async test(controller, env, ctx) {
+    let stub = await env.MyService.makeCounter(17);
+    assert.strictEqual(await stub.increment(2), 19);
+    assert.strictEqual(await stub.increment(-10), 9);
   },
 }
