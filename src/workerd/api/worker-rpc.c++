@@ -174,14 +174,33 @@ kj::Maybe<JsRpcStub::RpcFunction> JsRpcStub::getRpcMethod(
   }));
 }
 
-// The capability that lets us call remote methods over RPC.
-// The client capability is dropped after each callRequest().
-class JsRpcTargetImpl final : public rpc::JsRpcTarget::Server {
+// Callee-side implementation of JsRpcTarget.
+//
+// Most of the implementation is in this base class. There are subclasses specializing for the case
+// of a top-level entrypoint vs. a transient object introduced by a previous RPC in the same
+// session.
+class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 public:
-  JsRpcTargetImpl(
-      IoContext& ctx,
-      kj::Maybe<kj::StringPtr> entrypointName)
-      : weakIoContext(ctx.getWeakRef()), entrypointName(entrypointName) {}
+  JsRpcTargetBase(IoContext& ctx)
+      : weakIoContext(ctx.getWeakRef()) {}
+
+  struct EnvCtx {
+    v8::Local<v8::Value> env;
+    jsg::JsObject ctx;
+  };
+
+  struct TargetInfo {
+    // The object on which the RPC method should be invoked.
+    v8::Local<v8::Object> target;
+
+    // If `env` and `ctx` need to be delivered as arguments to the method, these are the values
+    // to deliver.
+    kj::Maybe<EnvCtx> envCtx;
+  };
+
+  // Get the object on which the method is to be invoked. This is virtual so that we can have
+  // separate subclasses handling the case of an entrypoint vs. a transient RPC object.
+  virtual TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) = 0;
 
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
@@ -213,37 +232,25 @@ public:
 
       jsg::Lock& js = lock;
 
-      auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ctx.getActor()),
-                                        "Failed to get handler to worker.");
-      auto handle = handler->self.getHandle(lock);
+      auto targetInfo = getTargetInfo(lock, ctx);
 
-      if (handler->missingSuperclass) {
-        // JS RPC is not enabled on the server side, we cannot call any methods.
-        JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
-            "The receiving Durable Object does not support RPC, because its class was not declared "
-            "with `extends DurableObject`. In order to enable RPC, make sure your class "
-            "extends the special class `DurableObject`, which can be imported from the module "
-            "\"cloudflare:workers\".");
-      }
-
-      // `handler->ctx` is present when we're invoking a freestanding function, and therefore
+      // `targetInfo.envCtx` is present when we're invoking a freestanding function, and therefore
       // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup
       // should obviously permit instance properties, since we expect the export is a plain object.
       // Otherwise, though, the export is a class. In that case, we have set the rule that we will
       // only allow class properties (aka prototype properties) to be accessed, to avoid
       // programmers shooting themselves in the foot by forgetting to make their members private.
-      bool allowInstanceProperties = handler->ctx != kj::none;
+      bool allowInstanceProperties = targetInfo.envCtx != kj::none;
 
       // We will try to get the function, if we can't we'll throw an error to the client.
-      auto fn = tryGetFn(lock, ctx, handle, methodName, allowInstanceProperties);
+      auto fn = tryGetFn(lock, ctx, targetInfo.target, methodName, allowInstanceProperties);
 
       v8::Local<v8::Value> invocationResult;
-      KJ_IF_SOME(execCtx, handler->ctx) {
-        invocationResult = invokeFnInsertingEnvCtx(js, methodName, fn, handle, args,
-            handler->env.getHandle(js),
-            lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()));
+      KJ_IF_SOME(envCtx, targetInfo.envCtx) {
+        invocationResult = invokeFnInsertingEnvCtx(js, methodName, fn, targetInfo.target, args,
+            envCtx.env, envCtx.ctx);
       } else {
-        invocationResult = invokeFn(js, fn, handle, args);
+        invocationResult = invokeFn(js, fn, targetInfo.target, args);
       }
 
       // We have a function, so let's call it and serialize the result for RPC.
@@ -281,7 +288,7 @@ public:
     return kj::mv(paf.promise);
   }
 
-  KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetImpl);
+  KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
 
 private:
   // The following names are reserved by the Workers Runtime and cannot be called over RPC.
@@ -440,7 +447,47 @@ private:
   };
 
   kj::Own<IoContext::WeakRef> weakIoContext;
-  kj::Maybe<kj::StringPtr> entrypointName;
+};
+
+// JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level
+// call of an RPC session.
+class EntrypointJsRpcTarget final: public JsRpcTargetBase {
+public:
+  EntrypointJsRpcTarget(IoContext& ioCtx, kj::Maybe<kj::StringPtr> entrypointName)
+      : JsRpcTargetBase(ioCtx),
+        // Most of the time we don't really have to clone this but it's hard to fully prove, so
+        // let's be safe.
+        entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })) {}
+
+  TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) {
+    jsg::Lock& js = lock;
+
+    auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ioCtx.getActor()),
+                                      "Failed to get handler to worker.");
+
+    if (handler->missingSuperclass) {
+      // JS RPC is not enabled on the server side, we cannot call any methods.
+      JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
+          "The receiving Durable Object does not support RPC, because its class was not declared "
+          "with `extends DurableObject`. In order to enable RPC, make sure your class "
+          "extends the special class `DurableObject`, which can be imported from the module "
+          "\"cloudflare:workers\".");
+    }
+
+    return {
+      .target = handler->self.getHandle(lock),
+      .envCtx = handler->ctx.map([&](jsg::Ref<ExecutionContext>& execCtx) -> EnvCtx {
+        return {
+          .env = handler->env.getHandle(js),
+          .ctx = lock.getWorker().getIsolate().getApi()
+              .wrapExecutionContext(js, execCtx.addRef()),
+        };
+      })
+    };
+  }
+
+private:
+  kj::Maybe<kj::String> entrypointName;
 };
 
 // A membrane which wraps the top-level JsRpcTarget of an RPC session on the server side. The
@@ -490,7 +537,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(
       capnp::membrane(
-          kj::heap<JsRpcTargetImpl>(incomingRequest->getContext(), entrypointName),
+          kj::heap<EntrypointJsRpcTarget>(incomingRequest->getContext(), entrypointName),
           kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
   // `donePromise` resolves once there are no longer any capabilities pointing between the client
