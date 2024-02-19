@@ -10,6 +10,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/duration-exceeded-logger.h>
 
 namespace workerd {
 
@@ -26,7 +27,7 @@ ActorCache::Hooks ActorCache::Hooks::DEFAULT;
 
 ActorCache::ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru,
                        OutputGate& gate, Hooks& hooks)
-    : storage(kj::mv(storage)), lru(lru), gate(gate), hooks(hooks),
+    : storage(kj::mv(storage)), lru(lru), gate(gate), hooks(hooks), clock(kj::systemPreciseMonotonicClock()),
       currentValues(lru.cleanList.lockExclusive()) {}
 
 ActorCache::~ActorCache() noexcept(false) {
@@ -2581,7 +2582,10 @@ kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
   // See the comment in flushImplUsingTxn for why we need to construct our RPC and then wait on
   // reads before actually sending the write. The same exact logic applies here.
   co_await waitForPastReads();
-  co_await request.send().ignoreResult();
+  {
+    util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: single put");
+    co_await request.send().ignoreResult();
+  }
 }
 
 kj::Promise<void> ActorCache::flushImplUsingSingleMutedDelete(MutedDeleteFlush mutedFlush) {
@@ -2606,7 +2610,10 @@ kj::Promise<void> ActorCache::flushImplUsingSingleMutedDelete(MutedDeleteFlush m
   // See the comment in flushImplUsingTxn for why we need to construct our RPC and then wait on
   // reads before actually sending the write. The same exact logic applies here.
   co_await waitForPastReads();
-  co_await request.send().ignoreResult();
+  {
+    util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: muted delete");
+    co_await request.send().ignoreResult();
+  }
 }
 
 kj::Promise<void> ActorCache::flushImplUsingSingleCountedDelete(CountedDeleteFlush countedFlush) {
@@ -2634,6 +2641,7 @@ kj::Promise<void> ActorCache::flushImplUsingSingleCountedDelete(CountedDeleteFlu
   // reads before actually sending the write. The same exact logic applies here.
   co_await waitForPastReads();
   try {
+    util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: counted delete");
     auto response = co_await request.send();
     countedDelete->resultFulfiller->fulfill(response.getNumDeleted());
   } catch (kj::Exception& e) {
@@ -2885,9 +2893,12 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
   // if the promise is dropped but the pipeline stays alive.
   promises.add(txnProm.ignoreResult());
 
-  promises.add(txn.commitRequest(capnp::MessageSize { 4, 0 }).send().ignoreResult());
+  {
+    util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: commit flush transaction");
+    promises.add(txn.commitRequest(capnp::MessageSize { 4, 0 }).send().ignoreResult());
 
-  co_await kj::joinPromises(promises.finish());
+    co_await kj::joinPromises(promises.finish());
+  }
 }
 
 kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {

@@ -71,6 +71,7 @@ wd_cc_library(
         "//src/workerd/api:r2-api_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:sqlite",
+        "//src/workerd/util:duration-exceeded-logger",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj:kj-async",
