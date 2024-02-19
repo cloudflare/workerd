@@ -494,6 +494,11 @@ using HasGetTemplateOverload = decltype(
 // the object or its prototypes, the wildcard property getter will be given a chance to return the
 // property.
 //
+// WARNING: Be very careful about the property named "then". If it exists and is a function, V8
+//   will treat your type as a custom thenable, i.e. as a kind of Promise, which means among other
+//   things that any time a Promise would resolve to it, it will try to chain with it. You should
+//   probably return kj::none when "then" is requested.
+//
 // Example:
 //
 //   struct MyType {

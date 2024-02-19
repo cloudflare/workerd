@@ -1871,6 +1871,12 @@ jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(
 kj::Maybe<Fetcher::RpcFunction> Fetcher::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
   // This is like JsRpcStub::getRpcMethod(), but we also initiate a whole new JS RPC session
   // each time the method is called.
+
+  // Do not return a method for `then`, otherwise JavaScript decides this is a thenable, i.e. a
+  // custom Promise, which will mean a Promise that resolves to this object will attempt to chain
+  // with it, which is not what you want!
+  if (name == "then"_kj) return kj::none;
+
   return RpcFunction(JSG_VISITABLE_LAMBDA(
       (methodName = kj::str(name), self = JSG_THIS),
       (self),
