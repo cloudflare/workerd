@@ -911,20 +911,22 @@ kj::Own<WritableStreamController> newWritableStreamJsController() {
 
 template <typename Self, typename Queue>
 ReadableImpl<Self, Queue>::ReadableImpl(
+    Self& self,
     UnderlyingSource underlyingSource,
     StreamQueuingStrategy queuingStrategy)
-    : state(Queue(getHighWaterMark(underlyingSource, queuingStrategy))),
+    : self(self),
+      state(Queue(getHighWaterMark(underlyingSource, queuingStrategy))),
       algorithms(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
 
 template <typename Self, typename Queue>
-void ReadableImpl<Self, Queue>::start(jsg::Lock& js, jsg::Ref<Self> self) {
+void ReadableImpl<Self, Queue>::start(jsg::Lock& js) {
   KJ_ASSERT(!started && !starting);
   starting = true;
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     started = true;
     starting = false;
-    pullIfNeeded(js, kj::mv(self));
+    pullIfNeeded(js);
   });
 
   auto onFailure = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self),
@@ -934,7 +936,7 @@ void ReadableImpl<Self, Queue>::start(jsg::Lock& js, jsg::Ref<Self> self) {
     doError(js, kj::mv(reason));
   });
 
-  maybeRunAlgorithm(js, algorithms.start, kj::mv(onSuccess), kj::mv(onFailure), kj::mv(self));
+  maybeRunAlgorithm(js, algorithms.start, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
   algorithms.start = kj::none;
 }
 
@@ -953,7 +955,6 @@ size_t ReadableImpl<Self, Queue>::consumerCount() {
 template <typename Self, typename Queue>
 jsg::Promise<void> ReadableImpl<Self, Queue>::cancel(
     jsg::Lock& js,
-    jsg::Ref<Self> self,
     v8::Local<v8::Value> reason) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
@@ -992,7 +993,7 @@ jsg::Promise<void> ReadableImpl<Self, Queue>::cancel(
         .promise = kj::mv(prp.promise),
       };
       auto promise = KJ_ASSERT_NONNULL(maybePendingCancel).promise.whenResolved(js);
-      doCancel(js, kj::mv(self), reason);
+      doCancel(js, reason);
       return kj::mv(promise);
     }
   }
@@ -1012,7 +1013,6 @@ bool ReadableImpl<Self, Queue>::canCloseOrEnqueue() {
 template <typename Self, typename Queue>
 void ReadableImpl<Self, Queue>::doCancel(
     jsg::Lock& js,
-    jsg::Ref<Self> self,
     v8::Local<v8::Value> reason) {
   state.template init<StreamStates::Closed>();
 
@@ -1041,9 +1041,9 @@ void ReadableImpl<Self, Queue>::doCancel(
 }
 
 template <typename Self, typename Queue>
-void ReadableImpl<Self, Queue>::enqueue(jsg::Lock& js, kj::Own<Entry> entry, jsg::Ref<Self> self) {
+void ReadableImpl<Self, Queue>::enqueue(jsg::Lock& js, kj::Own<Entry> entry) {
   JSG_REQUIRE(canCloseOrEnqueue(), TypeError, "This ReadableStream is closed.");
-  KJ_DEFER(pullIfNeeded(js, kj::mv(self)));
+  KJ_DEFER(pullIfNeeded(js));
   auto& queue = state.template get<Queue>();
   queue.push(js, kj::mv(entry));
 }
@@ -1120,7 +1120,7 @@ bool ReadableImpl<Self, Queue>::shouldCallPull() {
 }
 
 template <typename Self, typename Queue>
-void ReadableImpl<Self, Queue>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
+void ReadableImpl<Self, Queue>::pullIfNeeded(jsg::Lock& js) {
   // Determining if we need to pull is fairly complicated. All of the following
   // must hold true:
   if (!shouldCallPull()) {
@@ -1138,7 +1138,7 @@ void ReadableImpl<Self, Queue>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self)
     pulling = false;
     if (pullAgain) {
       pullAgain = false;
-      pullIfNeeded(js, kj::mv(self));
+      pullIfNeeded(js);
     }
   });
 
@@ -2019,7 +2019,7 @@ ReadableStreamDefaultController::ReadableStreamDefaultController(
     UnderlyingSource underlyingSource,
     StreamQueuingStrategy queuingStrategy)
     : ioContext(tryGetIoContext()),
-      impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)),
+      impl(*this, kj::mv(underlyingSource), kj::mv(queuingStrategy)),
       weakRef(kj::refcounted<WeakRef<ReadableStreamDefaultController>>(
           kj::Badge<ReadableStreamDefaultController>(), *this)) {}
 
@@ -2033,7 +2033,7 @@ kj::Own<WeakRef<ReadableStreamDefaultController>> ReadableStreamDefaultControlle
 
 
 void ReadableStreamDefaultController::start(jsg::Lock& js) {
-  impl.start(js, JSG_THIS);
+  impl.start(js);
 }
 
 bool ReadableStreamDefaultController::canCloseOrEnqueue() {
@@ -2055,7 +2055,7 @@ void ReadableStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
 jsg::Promise<void> ReadableStreamDefaultController::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  return impl.cancel(js, JSG_THIS, maybeReason.orDefault([&] { return js.v8Undefined(); }));
+  return impl.cancel(js, maybeReason.orDefault([&] { return js.v8Undefined(); }));
 }
 
 void ReadableStreamDefaultController::close(jsg::Lock& js) {
@@ -2081,7 +2081,7 @@ void ReadableStreamDefaultController::enqueue(
   }
 
   if (!errored) {
-    impl.enqueue(js, kj::heap<ValueQueue::Entry>(js.v8Ref(value), size), JSG_THIS);
+    impl.enqueue(js, kj::heap<ValueQueue::Entry>(js.v8Ref(value), size));
   }
 }
 
@@ -2093,7 +2093,7 @@ void ReadableStreamDefaultController::error(jsg::Lock& js, v8::Local<v8::Value> 
 // fulfill the request, the consumer will call pull on the controller to pull that
 // data if needed.
 void ReadableStreamDefaultController::pull(jsg::Lock& js) {
-  impl.pullIfNeeded(js, JSG_THIS);
+  impl.pullIfNeeded(js);
 }
 
 kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
@@ -2173,7 +2173,7 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
       // other branches we can push the data to. Let's do so.
       jsg::BufferSource source(js, impl.view.getHandle(js));
       auto entry = kj::heap<ByteQueue::Entry>(source.detach(js));
-      impl.controller->impl.enqueue(js, kj::mv(entry), impl.controller.addRef());
+      impl.controller->impl.enqueue(js, kj::mv(entry));
     } else {
       JSG_REQUIRE(bytesWritten > 0,
                   TypeError,
@@ -2211,7 +2211,7 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
       // While this particular request may be invalidated, there are still
       // other branches we can push the data to. Let's do so.
       auto entry = kj::heap<ByteQueue::Entry>(view.detach(js));
-      impl.controller->impl.enqueue(js, kj::mv(entry), impl.controller.addRef());
+      impl.controller->impl.enqueue(js, kj::mv(entry));
     } else {
       JSG_REQUIRE(view.size() > 0,
                   TypeError,
@@ -2247,11 +2247,10 @@ ReadableByteStreamController::ReadableByteStreamController(
     UnderlyingSource underlyingSource,
     StreamQueuingStrategy queuingStrategy)
     : ioContext(tryGetIoContext()),
-      impl(kj::mv(underlyingSource),
-      kj::mv(queuingStrategy)) {}
+      impl(*this, kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
 
 void ReadableByteStreamController::start(jsg::Lock& js) {
-  impl.start(js, JSG_THIS);
+  impl.start(js);
 }
 
 bool ReadableByteStreamController::canCloseOrEnqueue() {
@@ -2278,7 +2277,7 @@ jsg::Promise<void> ReadableByteStreamController::cancel(
       byobRequest->invalidate(js);
     }
   }
-  return impl.cancel(js, JSG_THIS, maybeReason.orDefault(js.v8Undefined()));
+  return impl.cancel(js, maybeReason.orDefault(js.v8Undefined()));
 }
 
 void ReadableByteStreamController::close(jsg::Lock& js) {
@@ -2303,7 +2302,7 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chun
     byobRequest->invalidate(js);
   }
 
-  impl.enqueue(js, kj::heap<ByteQueue::Entry>(chunk.detach(js)), JSG_THIS);
+  impl.enqueue(js, kj::heap<ByteQueue::Entry>(chunk.detach(js)));
 }
 
 void ReadableByteStreamController::error(jsg::Lock& js, v8::Local<v8::Value> reason) {
@@ -2332,7 +2331,7 @@ ReadableByteStreamController::getByobRequest(jsg::Lock& js) {
 // fulfill the request, the consumer will call pull on the controller to pull that
 // data if needed.
 void ReadableByteStreamController::pull(jsg::Lock& js) {
-  impl.pullIfNeeded(js, JSG_THIS);
+  impl.pullIfNeeded(js);
 }
 
 kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
