@@ -145,6 +145,7 @@ struct Transformer {
   using StartAlgorithm = jsg::Promise<void>(Controller);
   using TransformAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
   using FlushAlgorithm = jsg::Promise<void>(Controller);
+  using CancelAlgorithm = jsg::Promise<void>(jsg::JsValue reason);
 
   jsg::Optional<kj::String> readableType;
   jsg::Optional<kj::String> writableType;
@@ -152,17 +153,20 @@ struct Transformer {
   jsg::Optional<jsg::Function<StartAlgorithm>> start;
   jsg::Optional<jsg::Function<TransformAlgorithm>> transform;
   jsg::Optional<jsg::Function<FlushAlgorithm>> flush;
+  jsg::Optional<jsg::Function<CancelAlgorithm>> cancel;
 
   // The expectedLength is a non-standard extension used to support specifying the
   // content-length when using a TransformStream readable side as the body of a
   // request or response.
   jsg::Optional<uint64_t> expectedLength;
 
-  JSG_STRUCT(readableType, writableType, start, transform, flush, expectedLength);
+  JSG_STRUCT(readableType, writableType, start, transform, flush, cancel, expectedLength);
   JSG_STRUCT_TS_OVERRIDE(<I = any, O = any> {
     start?: (controller: TransformStreamDefaultController<O>) => void | Promise<void>;
     transform?: (chunk: I, controller: TransformStreamDefaultController<O>) => void | Promise<void>;
     flush?: (controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+    cancel?: (reason: any) => void | Promise<void>;
+    expectedLength?: number | bigint;
   });
 };
 

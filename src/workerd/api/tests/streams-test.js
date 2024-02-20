@@ -112,6 +112,55 @@ export const cancelWriteOnReleaseLock = {
   }
 };
 
+export const tsCancel = {
+  async test() {
+    // Verify that a TransformStream's cancel function is called when the
+    // readable is canceled or the writable is aborted. Verify also that
+    // errors thrown by the cancel function are propagated.
+    {
+      let cancelCalled = false;
+      const { readable } = new TransformStream({
+        async cancel(reason) {
+          strictEqual(reason, 'boom');
+          await scheduler.wait(10);
+          cancelCalled = true;
+        }
+      });
+      ok(!cancelCalled);
+      await readable.cancel('boom');
+      ok(cancelCalled);
+    }
+
+    {
+      let cancelCalled = false;
+      const { writable } = new TransformStream({
+        async cancel(reason) {
+          strictEqual(reason, 'boom');
+          await scheduler.wait(10);
+          cancelCalled = true;
+        }
+      });
+      ok(!cancelCalled);
+      await writable.abort('boom');
+      ok(cancelCalled);
+    }
+
+    {
+      const { writable } = new TransformStream({
+        async cancel(reason) {
+          throw new Error('boomy');
+        }
+      });
+      try {
+        await writable.abort('boom');
+        throw new Error('expected to throw');
+      } catch (err) {
+        strictEqual(err.message, 'boomy');
+      }
+    }
+  }
+};
+
 export default {
   async fetch(request, env) {
     strictEqual(request.headers.get('content-length'), '10');

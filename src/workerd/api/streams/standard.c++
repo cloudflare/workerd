@@ -2044,6 +2044,13 @@ kj::Own<WeakRef<ReadableStreamDefaultController>> ReadableStreamDefaultControlle
   return kj::addRef(*weakRef);
 }
 
+kj::Maybe<StreamStates::Errored> ReadableStreamDefaultController::getMaybeErrorState(
+    jsg::Lock& js) {
+  KJ_IF_SOME(errored, impl.state.tryGet<StreamStates::Errored>()) {
+    return errored.addRef(js);
+  }
+  return kj::none;
+}
 
 void ReadableStreamDefaultController::start(jsg::Lock& js) {
   impl.start(js);
@@ -4007,8 +4014,32 @@ jsg::Promise<void> TransformStreamDefaultController::write(
 jsg::Promise<void> TransformStreamDefaultController::abort(
     jsg::Lock& js,
     v8::Local<v8::Value> reason) {
-  error(js, reason);
-  return js.resolvedPromise();
+  KJ_IF_SOME(finish, algorithms.maybeFinish) {
+    return finish.whenResolved(js);
+  }
+  auto& promise = algorithms.maybeFinish.emplace(maybeRunAlgorithm(js, algorithms.cancel,
+      JSG_VISITABLE_LAMBDA(
+          (this, ref=JSG_THIS, reason = jsg::JsRef(js, jsg::JsValue(reason))),
+          (ref, reason),
+          (jsg::Lock& js) -> jsg::Promise<void> {
+        // If the readable side is errored, return a rejected promise with the stored error
+        KJ_IF_SOME(controller, tryGetReadableController()) {
+          KJ_IF_SOME(error, controller.getMaybeErrorState(js)) {
+            return js.rejectedPromise<void>(kj::mv(error));
+          } else {}  // Else block to avert dangling else compiler warning.
+        } else {}  // Else block to avert dangling else compiler warning.
+
+        // Otherwise... error with the given reason and resolve the abort promise
+        error(js, reason.getHandle(js));
+        return js.resolvedPromise();
+      }), JSG_VISITABLE_LAMBDA(
+          (this, ref=JSG_THIS),
+          (ref),
+          (jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
+        error(js, reason.getHandle(js));
+        return js.rejectedPromise<void>(kj::mv(reason));
+      }), jsg::JsValue(reason)));
+  return promise.whenResolved(js);
 }
 
 jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
@@ -4044,9 +4075,25 @@ jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
 jsg::Promise<void> TransformStreamDefaultController::cancel(
     jsg::Lock& js,
     v8::Local<v8::Value> reason) {
-  maybeReadableController = kj::none;
-  errorWritableAndUnblockWrite(js, reason);
-  return js.resolvedPromise();
+  KJ_IF_SOME(finish, algorithms.maybeFinish) {
+    return finish.whenResolved(js);
+  }
+  auto& promise = algorithms.maybeFinish.emplace(maybeRunAlgorithm(js, algorithms.cancel, JSG_VISITABLE_LAMBDA(
+      (this, ref=JSG_THIS, reason = jsg::JsRef(js, jsg::JsValue(reason))),
+      (ref, reason),
+      (jsg::Lock& js) -> jsg::Promise<void> {
+    maybeReadableController = kj::none;
+    errorWritableAndUnblockWrite(js, reason.getHandle(js));
+    return js.resolvedPromise();
+  }), JSG_VISITABLE_LAMBDA(
+      (this, ref=JSG_THIS),
+      (ref),
+      (jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
+    maybeReadableController = kj::none;
+    errorWritableAndUnblockWrite(js, reason.getHandle(js));
+    return js.rejectedPromise<void>(kj::mv(reason));
+  }), jsg::JsValue(reason)));
+  return promise.whenResolved(js);
 }
 
 jsg::Promise<void> TransformStreamDefaultController::performTransform(
@@ -4144,6 +4191,10 @@ void TransformStreamDefaultController::init(
 
   KJ_IF_SOME(flush, transformer.flush) {
     algorithms.flush = kj::mv(flush);
+  }
+
+  KJ_IF_SOME(cancel, transformer.cancel) {
+    algorithms.cancel = kj::mv(cancel);
   }
 
   setBackpressure(js, true);
