@@ -118,7 +118,7 @@ public:
   virtual void jsgVisitForGc(GcVisitor& visitor);
 
   virtual kj::StringPtr jsgGetMemoryName() const {
-    KJ_UNIMPLEMENTED("jsgGetTypeName is not implemented. "
+    KJ_UNIMPLEMENTED("jsgGetMemoryName is not implemented. "
                      "It must be overridden by subclasses");
   }
 
