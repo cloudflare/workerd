@@ -1732,16 +1732,11 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
   } else if (name == kj::none) {
     // If the default export was requested, and we didn't find a handler for it, we'll fall back
     // to addEventListener().
-    // TODO(cleanup): The intention has always been that we only use addEventListener() for
+    //
+    // Note: The original intention was that we only use addEventListener() for
     //   service-worker-syntax scripts, but apparently the code has long allowed it for
-    //   modules-based script too, if they lacked an `export default`. Yikes! However, it looks
-    //   to me like the validator would have rejected modules-based scripts that lacked a default
-    //   export, so perhaps this is not a real problem in production. We'd better find out by
-    //   logging, though...
-    if (worker.impl->context == kj::none) {
-      LOG_ERROR_PERIODICALLY(
-          "modules-based script has no default export; falling back to addEventListener()");
-    }
+    //   modules-based script too, if they lacked an `export default`. Yikes! Sadly, there are
+    //   Workers in production relying on this so we are stuck with it.
     return kj::none;
   } else {
     if (worker.impl->actorClasses.find(n) != kj::none) {
