@@ -1,4 +1,4 @@
-From c793b007c8605fa8827ca80dac70aaef02908777 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Tue, 23 May 2023 09:24:11 -0500
 Subject: Add an API to capture and restore the cage base pointers.
@@ -6,10 +6,6 @@ Subject: Add an API to capture and restore the cage base pointers.
 This will be used in workerd to ensure that the cage pointers propagate to background thread tasks/jobs correctly.
 
 This is not the right solution. Instead, each background task/job implementation should be updated to propagate the pointers itself. However, that seems to require searching all of V8 for such implementations, with a potential crash if one is missed. Under the current time pressure I'd rather take the catch-all approach.
----
- include/v8-locker.h        | 30 ++++++++++++++++++++++++++++++
- src/execution/v8threads.cc | 32 ++++++++++++++++++++++++++++++++
- 2 files changed, 62 insertions(+)
 
 diff --git a/include/v8-locker.h b/include/v8-locker.h
 index 22b7a8767a83a702a2601bdfd4c0f71206df0ad5..fee48faffe82400595dca17197c5bbee680a6137 100644

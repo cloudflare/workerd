@@ -44,27 +44,28 @@ public:
     return inner.GetForegroundTaskRunner(isolate);
   }
 
-  void CallOnWorkerThread(std::unique_ptr<v8::Task> task) noexcept override {
-    return inner.CallOnWorkerThread(kj::mv(task));
+
+  void PostTaskOnWorkerThreadImpl(v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
+                                  const v8::SourceLocation& location) override {
+    inner.PostTaskOnWorkerThreadImpl(priority, kj::mv(task),
+                                     location);
   }
 
-  void CallDelayedOnWorkerThread(std::unique_ptr<v8::Task> task,
-                                 double delay_in_seconds) noexcept override {
-    return inner.CallDelayedOnWorkerThread(kj::mv(task), delay_in_seconds);
+  void PostDelayedTaskOnWorkerThreadImpl(v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
+                                         double delay_in_seconds,
+                                         const v8::SourceLocation& location) override {
+    inner.PostDelayedTaskOnWorkerThreadImpl(priority, kj::mv(task),
+                                            delay_in_seconds, location);
   }
 
   bool IdleTasksEnabled(v8::Isolate* isolate) noexcept override {
     return inner.IdleTasksEnabled(isolate);
   }
 
-  std::unique_ptr<v8::JobHandle> PostJob(
-      v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task) noexcept override {
-    return inner.PostJob(priority, kj::mv(job_task));
-  }
-
-  std::unique_ptr<v8::JobHandle> CreateJob(
-      v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task) noexcept override {
-    return inner.CreateJob(priority, kj::mv(job_task));
+  std::unique_ptr<v8::JobHandle> CreateJobImpl(v8::TaskPriority priority,
+                                               std::unique_ptr<v8::JobTask> job_task,
+                                               const v8::SourceLocation& location) override {
+    return inner.CreateJobImpl(priority, kj::mv(job_task), location);
   }
 
   double MonotonicallyIncreasingTime() noexcept override {

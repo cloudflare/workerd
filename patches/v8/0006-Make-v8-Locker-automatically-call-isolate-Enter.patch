@@ -1,4 +1,4 @@
-From 7ed177af0c5fa711cbd95e58e0161732ca601e6c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Tue, 23 May 2023 09:18:57 -0500
 Subject: Make v8::Locker automatically call isolate->Enter().
@@ -8,9 +8,6 @@ This makes it no longer necessary to create a v8::Isolate::Scope after taking th
 More importantly, without this change, the Locker consturctor will segfault when V8 is compiled with pointer compression enabled but shared pointer cages disabled, also known as multi-cage mode. This change ensures that the cage base pointers are set up immediately after taking the lock, before other code runs that depends on them.
 
 This is a major change in API semantics, however, which makes it unlikely to be upstreamable.
----
- src/execution/v8threads.cc | 2 ++
- 1 file changed, 2 insertions(+)
 
 diff --git a/src/execution/v8threads.cc b/src/execution/v8threads.cc
 index 4205817b73f3d954be4109d91721037b3aa2d4ee..91e1a43d305d06fdf07fccdf80eb07e86115619b 100644

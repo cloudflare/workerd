@@ -1,4 +1,4 @@
-From e7293ce5f06664b96c146bdb36d6377ff158769a Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg
@@ -10,13 +10,9 @@ This also changes torque generation to only run once by splitting up the
 output set instead of running it twice but only defining a part of the
 generated files as the output set. While unrelated to the build cfg change,
 this also improves build times.
----
- BUILD.bazel    | 18 ++++++++---------
- bazel/defs.bzl | 55 ++++++++++++++++++++++++++++++++++++++++++++------
- 2 files changed, 57 insertions(+), 16 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 14d0c35fd606afa89d870a4f0ecdb567c7b75cad..be82fc2e20a10ded7cd8a949af0533a74290d49d 100644
+index 47ceeacf9c5d34853f8d427b167381e396364656..2aea0158754058fd35c16ea4adcc2f9fd085e06f 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -27,7 +23,7 @@ index 14d0c35fd606afa89d870a4f0ecdb567c7b75cad..be82fc2e20a10ded7cd8a949af0533a7
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -3875,22 +3876,20 @@ filegroup(
+@@ -4043,22 +4044,20 @@ filegroup(
      }),
  )
  
@@ -56,7 +52,7 @@ index 14d0c35fd606afa89d870a4f0ecdb567c7b75cad..be82fc2e20a10ded7cd8a949af0533a7
  )
  
  v8_mksnapshot(
-@@ -4089,8 +4088,6 @@ v8_binary(
+@@ -4258,8 +4257,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -65,7 +61,7 @@ index 14d0c35fd606afa89d870a4f0ecdb567c7b75cad..be82fc2e20a10ded7cd8a949af0533a7
      ],
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
-@@ -4102,6 +4099,7 @@ v8_binary(
+@@ -4271,6 +4268,7 @@ v8_binary(
      ],
      deps = [
          "//external:absl_optional",
@@ -74,10 +70,10 @@ index 14d0c35fd606afa89d870a4f0ecdb567c7b75cad..be82fc2e20a10ded7cd8a949af0533a7
      ],
  )
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 0c59518819cb685fe9f68080d6bdbeb0b7ff5033..7053ca31b999ae7423e7485ee6392a09f9de4aa9 100644
+index f050b04f76b96fbc761671958126b62288f94fd5..e3f5a9b50341b2d083e0b4532b99f930d2f73b18 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -336,6 +336,15 @@ def v8_library(
+@@ -337,6 +337,15 @@ def v8_library(
              **kwargs
          )
  
@@ -93,7 +89,7 @@ index 0c59518819cb685fe9f68080d6bdbeb0b7ff5033..7053ca31b999ae7423e7485ee6392a09
  # Use a single generator target for torque definitions and initializers. We can
  # split the set of outputs by using OutputGroupInfo, that way we do not need to
  # run the torque generator twice.
-@@ -403,7 +412,7 @@ _v8_torque_files = rule(
+@@ -404,7 +413,7 @@ _v8_torque_files = rule(
          "tool": attr.label(
              allow_files = True,
              executable = True,
@@ -102,7 +98,7 @@ index 0c59518819cb685fe9f68080d6bdbeb0b7ff5033..7053ca31b999ae7423e7485ee6392a09
          ),
          "args": attr.string_list(),
      },
-@@ -504,16 +513,19 @@ _v8_mksnapshot = rule(
+@@ -505,16 +514,19 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
@@ -127,7 +123,7 @@ index 0c59518819cb685fe9f68080d6bdbeb0b7ff5033..7053ca31b999ae7423e7485ee6392a09
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -636,3 +648,34 @@ def v8_build_config(name):
+@@ -637,3 +649,34 @@ def v8_build_config(name):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )

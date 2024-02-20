@@ -1,17 +1,14 @@
-From 1552093829d95880cd253e45915f195e1602df56 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Thu, 18 Jan 2024 10:19:14 -0800
 Subject: Always enable continuation preserved data in the build
 
----
- BUILD.bazel | 1 +
- 1 file changed, 1 insertion(+)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index a3ee9a450a1aa3cc2a019d148af2efada41a3061..c3bb6b3a9f4b81ba49aa12b0ada2383957a199b3 100644
+index da3a7285ced73c3405da14e333c5e02020b2c280..bc288b95bf7e5c59efc127c02a2f6d81fb617f4f 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -366,6 +366,7 @@ v8_config(
+@@ -430,6 +430,7 @@ v8_config(
          "V8_ADVANCED_BIGINT_ALGORITHMS",
          "V8_CONCURRENT_MARKING",
          "V8_ENABLE_SPARKPLUG",
