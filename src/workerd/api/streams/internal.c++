@@ -636,7 +636,9 @@ void ReadableStreamInternalController::doCancel(
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
   auto exception = reasonToException(js, maybeReason);
   KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
-    KJ_ASSERT_NONNULL(locked.getCanceler())->cancel(kj::cp(exception));
+    KJ_IF_SOME(canceler, locked.getCanceler()) {
+      canceler->cancel(kj::cp(exception));
+    }
   }
   KJ_IF_SOME(readable, state.tryGet<Readable>()) {
     readable->cancel(kj::mv(exception));
@@ -794,8 +796,10 @@ void ReadableStreamInternalController::releaseReader(
   KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
     KJ_ASSERT(&locked.getReader() == &reader);
     KJ_IF_SOME(js, maybeJs) {
-      JSG_REQUIRE(KJ_ASSERT_NONNULL(locked.getCanceler())->isEmpty(), TypeError,
-                   "Cannot call releaseLock() on a reader with outstanding read promises.");
+      KJ_IF_SOME(canceler, locked.getCanceler()) {
+        JSG_REQUIRE(canceler->isEmpty(), TypeError,
+                    "Cannot call releaseLock() on a reader with outstanding read promises.");
+      }
       maybeRejectPromise<void>(js,
           locked.getClosedFulfiller(),
           js.v8TypeError("This ReadableStream reader has been released."_kj));
