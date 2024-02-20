@@ -909,15 +909,15 @@ kj::Own<WritableStreamController> newWritableStreamJsController() {
   return kj::heap<WritableStreamJsController>();
 }
 
-template <typename Self>
-ReadableImpl<Self>::ReadableImpl(
+template <typename Self, typename Queue>
+ReadableImpl<Self, Queue>::ReadableImpl(
     UnderlyingSource underlyingSource,
     StreamQueuingStrategy queuingStrategy)
     : state(Queue(getHighWaterMark(underlyingSource, queuingStrategy))),
       algorithms(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
 
-template <typename Self>
-void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
+template <typename Self, typename Queue>
+void ReadableImpl<Self, Queue>::start(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(!started && !starting);
   starting = true;
 
@@ -938,8 +938,8 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
   algorithms.start = kj::none;
 }
 
-template <typename Self>
-size_t ReadableImpl<Self>::consumerCount() {
+template <typename Self, typename Queue>
+size_t ReadableImpl<Self, Queue>::consumerCount() {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return 0; }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) { return 0; }
@@ -950,8 +950,8 @@ size_t ReadableImpl<Self>::consumerCount() {
   KJ_UNREACHABLE;
 }
 
-template <typename Self>
-jsg::Promise<void> ReadableImpl<Self>::cancel(
+template <typename Self, typename Queue>
+jsg::Promise<void> ReadableImpl<Self, Queue>::cancel(
     jsg::Lock& js,
     jsg::Ref<Self> self,
     v8::Local<v8::Value> reason) {
@@ -999,8 +999,8 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
   KJ_UNREACHABLE;
 }
 
-template <typename Self>
-bool ReadableImpl<Self>::canCloseOrEnqueue() {
+template <typename Self, typename Queue>
+bool ReadableImpl<Self, Queue>::canCloseOrEnqueue() {
   return state.template is<Queue>();
 }
 
@@ -1009,8 +1009,8 @@ bool ReadableImpl<Self>::canCloseOrEnqueue() {
 // more. We don't need to notify the consumers because we presume they already know
 // that they called cancel. What we do want to do here, tho, is close the implementation
 // and trigger the cancel algorithm.
-template <typename Self>
-void ReadableImpl<Self>::doCancel(
+template <typename Self, typename Queue>
+void ReadableImpl<Self, Queue>::doCancel(
     jsg::Lock& js,
     jsg::Ref<Self> self,
     v8::Local<v8::Value> reason) {
@@ -1040,16 +1040,16 @@ void ReadableImpl<Self>::doCancel(
   maybeRunAlgorithm(js, algorithms.cancel, kj::mv(onSuccess), kj::mv(onFailure), reason);
 }
 
-template <typename Self>
-void ReadableImpl<Self>::enqueue(jsg::Lock& js, kj::Own<Entry> entry, jsg::Ref<Self> self) {
+template <typename Self, typename Queue>
+void ReadableImpl<Self, Queue>::enqueue(jsg::Lock& js, kj::Own<Entry> entry, jsg::Ref<Self> self) {
   JSG_REQUIRE(canCloseOrEnqueue(), TypeError, "This ReadableStream is closed.");
   KJ_DEFER(pullIfNeeded(js, kj::mv(self)));
   auto& queue = state.template get<Queue>();
   queue.push(js, kj::mv(entry));
 }
 
-template <typename Self>
-void ReadableImpl<Self>::close(jsg::Lock& js) {
+template <typename Self, typename Queue>
+void ReadableImpl<Self, Queue>::close(jsg::Lock& js) {
   JSG_REQUIRE(canCloseOrEnqueue(), TypeError, "This ReadableStream is closed.");
   auto& queue = state.template get<Queue>();
 
@@ -1067,15 +1067,15 @@ void ReadableImpl<Self>::close(jsg::Lock& js) {
   doClose(js);
 }
 
-template <typename Self>
-void ReadableImpl<Self>::doClose(jsg::Lock& js) {
+template <typename Self, typename Queue>
+void ReadableImpl<Self, Queue>::doClose(jsg::Lock& js) {
   // The state should have already been set to closed.
   KJ_ASSERT(state.template is<StreamStates::Closed>());
   algorithms.clear();
 }
 
-template <typename Self>
-void ReadableImpl<Self>::doError(jsg::Lock& js, jsg::Value reason) {
+template <typename Self, typename Queue>
+void ReadableImpl<Self, Queue>::doError(jsg::Lock& js, jsg::Value reason) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       // We're already closed, so we really don't care if there was an error. Do nothing.
@@ -1095,8 +1095,8 @@ void ReadableImpl<Self>::doError(jsg::Lock& js, jsg::Value reason) {
   KJ_UNREACHABLE;
 }
 
-template <typename Self>
-kj::Maybe<int> ReadableImpl<Self>::getDesiredSize() {
+template <typename Self, typename Queue>
+kj::Maybe<int> ReadableImpl<Self, Queue>::getDesiredSize() {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       return 0;
@@ -1113,14 +1113,14 @@ kj::Maybe<int> ReadableImpl<Self>::getDesiredSize() {
 
 // We should call pull if any of the consumers known to the queue have read requests or
 // we haven't yet signalled backpressure.
-template <typename Self>
-bool ReadableImpl<Self>::shouldCallPull() {
+template <typename Self, typename Queue>
+bool ReadableImpl<Self, Queue>::shouldCallPull() {
   return canCloseOrEnqueue() &&
       (state.template get<Queue>().wantsRead() || getDesiredSize().orDefault(0) > 0);
 }
 
-template <typename Self>
-void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
+template <typename Self, typename Queue>
+void ReadableImpl<Self, Queue>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
   // Determining if we need to pull is fairly complicated. All of the following
   // must hold true:
   if (!shouldCallPull()) {
@@ -1151,8 +1151,8 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
   maybeRunAlgorithm(js, algorithms.pull, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
 
-template <typename Self>
-void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
+template <typename Self, typename Queue>
+void ReadableImpl<Self, Queue>::visitForGc(jsg::GcVisitor& visitor) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
@@ -1168,11 +1168,12 @@ void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(algorithms);
 }
 
-template <typename Self>
-kj::Own<typename ReadableImpl<Self>::Consumer>
-ReadableImpl<Self>::getConsumer(kj::Maybe<ReadableImpl<Self>::StateListener&> listener) {
+template <typename Self, typename Queue>
+kj::Own<typename ReadableImpl<Self, Queue>::Consumer>
+ReadableImpl<Self, Queue>::getConsumer(
+      kj::Maybe<ReadableImpl<Self, Queue>::StateListener&> listener) {
   auto& queue = state.template get<Queue>();
-  return kj::heap<typename ReadableImpl<Self>::Consumer>(queue, listener);
+  return kj::heap<typename ReadableImpl<Self, Queue>::Consumer>(queue, listener);
 }
 
 // ======================================================================================
@@ -4238,18 +4239,18 @@ void ReadableStreamJsController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) c
   }
 }
 
-template <class Self>
-kj::StringPtr ReadableImpl<Self>::jsgGetMemoryName() const {
+template <class Self, typename Queue>
+kj::StringPtr ReadableImpl<Self, Queue>::jsgGetMemoryName() const {
   return "ReadableImpl"_kjc;
 }
 
-template <class Self>
-size_t ReadableImpl<Self>::jsgGetMemorySelfSize() const {
+template <class Self, typename Queue>
+size_t ReadableImpl<Self, Queue>::jsgGetMemorySelfSize() const {
   return sizeof(ReadableImpl);
 }
 
-template <class Self>
-void ReadableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+template <class Self, typename Queue>
+void ReadableImpl<Self, Queue>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(error, StreamStates::Errored) {
