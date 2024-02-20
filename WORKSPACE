@@ -176,7 +176,7 @@ http_archive(
 #   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    commit = "0764ad493e54a79c7e3e02fc3412ef55b4835b9e",
+    commit = "ec903ccd87fb656084639f68e61516bf31d084cc",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
