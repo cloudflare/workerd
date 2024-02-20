@@ -155,7 +155,7 @@ filegroup(
 git_repository(
     name = "dawn",
     build_file = "//:build/BUILD.dawn",
-    commit = "c5169ef5b9982e17a8caddd1218aa0ad5e24a4e3",
+    commit = "8160db278a632d50b8b84de7e42c489086e50dbe",
     remote = "https://dawn.googlesource.com/dawn.git",
     patches = [
         "//:patches/dawn/0001-Add-iomanip.patch",
