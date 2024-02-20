@@ -15,7 +15,7 @@ common --noenable_bzlmod
 build --remote_download_all
 
 # Enable webgpu
-build --//src/workerd/io:enable_experimental_webgpu=True
+build --//src/workerd/io:enable_experimental_webgpu=False
 
 # Dawn tint build flags
 build --@dawn//src/tint:tint_build_glsl_writer=False
