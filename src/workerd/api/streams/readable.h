@@ -131,7 +131,7 @@ public:
   };
 
   jsg::Promise<ReadResult> read(jsg::Lock& js, v8::Local<v8::ArrayBufferView> byobBuffer,
-      jsg::Optional<ReadableStreamBYOBReaderReadOptions> options);
+      jsg::Optional<ReadableStreamBYOBReaderReadOptions> options = kj::none);
 
   // Non-standard extension so that reads can specify a minimum number of bytes to read. It's a
   // struct so that we could eventually add things like timeouts if we need to. Since there's no
