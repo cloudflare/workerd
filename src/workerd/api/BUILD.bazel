@@ -112,6 +112,7 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/server:workerd_capnp",
         "//src/workerd/util:autogate",
+        "//src/workerd/io",
     ],
 )
 

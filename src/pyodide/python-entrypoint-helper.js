@@ -151,14 +151,14 @@ async function setupPackages(pyodide) {
 }
 
 let mainModulePromise;
-function getPyodide() {
+function getPyodide(ctx) {
   if (mainModulePromise !== undefined) {
     return mainModulePromise;
   }
   mainModulePromise = (async function() {
     // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
     // When we do it in top level scope we seem to get a broken file system.
-    const pyodide = await loadPyodide();
+    const pyodide = await loadPyodide(ctx);
     const mainModule = await setupPackages(pyodide);
     return { mainModule };
   })();
@@ -167,12 +167,12 @@ function getPyodide() {
 
 export default {
   async fetch(request, env, ctx) {
-    const { mainModule } = await getPyodide();
+    const { mainModule } = await getPyodide(ctx);
     return await mainModule.fetch.callRelaxed(request, env, ctx);
   },
   async test(ctrl, env, ctx) {
     try {
-      const { mainModule } = await getPyodide();
+      const { mainModule } = await getPyodide(ctx);
       return await mainModule.test.callRelaxed(ctrl, env, ctx);
     } catch (e) {
       console.warn(e);
