@@ -371,4 +371,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("global_importscripts")
       $compatEnableDate("2024-03-04");
   # Removes the non-implemented importScripts() function from the global scope.
+
+  nodeJsAls @41 :Bool
+      $compatEnableFlag("nodejs_als")
+      $compatDisableFlag("no_nodejs_als");
+  # Enables the availability of the Node.js AsyncLocalStorage API independently of the full
+  # node.js compatibility option.
 }
