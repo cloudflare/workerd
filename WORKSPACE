@@ -74,7 +74,7 @@ http_archive(
     url = "https://github.com/bazelbuild/rules_python/releases/download/0.26.0/rules_python-0.26.0.tar.gz",
 )
 
-load("@rules_python//python:repositories.bzl", "py_repositories")
+load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
 
 py_repositories()
 
@@ -188,6 +188,11 @@ bind(
 bind(
     name = "absl_flat_hash_map",
     actual = "@com_google_absl//absl/container:flat_hash_map",
+)
+
+bind(
+    name = "absl_btree",
+    actual = "@com_google_absl//absl/container:btree",
 )
 
 # tcmalloc requires this "rules_fuzzing" package. Its build files fail analysis without it, even
@@ -422,24 +427,24 @@ http_archive(
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
         "//:patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch",
-        "//:patches/v8/0003-Make-icudata-target-public.patch",
-        "//:patches/v8/0004-Add-ArrayBuffer-MaybeNew.patch",
-        "//:patches/v8/0005-Allow-Windows-builds-under-Bazel.patch",
-        "//:patches/v8/0006-Disable-bazel-whole-archive-build.patch",
-        "//:patches/v8/0007-Make-v8-Locker-automatically-call-isolate-Enter.patch",
-        "//:patches/v8/0008-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
-        "//:patches/v8/0009-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
-        "//:patches/v8/0010-Implement-Promise-Context-Tagging.patch",
-        "//:patches/v8/0011-Enable-V8-shared-linkage.patch",
-        "//:patches/v8/0012-Fix-V8-ICU-build.patch",
-        "//:patches/v8/0013-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
-        "//:patches/v8/0014-Always-enable-continuation-preserved-data-in-the-bui.patch",
-        "//:patches/v8/0015-Attach-continuation-context-to-Promise-thenable-task.patch",
+        "//:patches/v8/0003-Add-ArrayBuffer-MaybeNew.patch",
+        "//:patches/v8/0004-Allow-Windows-builds-under-Bazel.patch",
+        "//:patches/v8/0005-Disable-bazel-whole-archive-build.patch",
+        "//:patches/v8/0006-Make-v8-Locker-automatically-call-isolate-Enter.patch",
+        "//:patches/v8/0007-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
+        "//:patches/v8/0008-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
+        "//:patches/v8/0009-Implement-Promise-Context-Tagging.patch",
+        "//:patches/v8/0010-Enable-V8-shared-linkage.patch",
+        "//:patches/v8/0011-Fix-V8-ICU-build.patch",
+        "//:patches/v8/0012-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
+        "//:patches/v8/0013-Always-enable-continuation-preserved-data-in-the-bui.patch",
+        "//:patches/v8/0014-Attach-continuation-context-to-Promise-thenable-task.patch",
+        "//:patches/v8/0015-increase-visibility-of-virtual-method.patch",
     ],
-    sha256 = "45e0ba667fb1a86f834d6a92b513c43fcfdc672525c8a5a60bfdb56eec137d4a",
-    strip_prefix = "v8-12.1.285.26",
+    integrity = "sha256-jcBk1hBhzrMHRL0EDTgHKBVrJPsP1SLZL6A5/l6arrs=",
+    strip_prefix = "v8-12.2.281.18",
     type = "tgz",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.1.285.26.tar.gz",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.2.281.18.tar.gz",
 )
 
 git_repository(
@@ -487,9 +492,6 @@ git_repository(
     commit = "29ac73db520575590c3aceb0a6f1f58dda8934f6",
     remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
 )
-
-# This sets up a hermetic python3, rather than depending on what is installed.
-load("@rules_python//python:repositories.bzl", "python_register_toolchains")
 
 python_register_toolchains(
     name = "python3_12",

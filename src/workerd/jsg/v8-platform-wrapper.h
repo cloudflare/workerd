@@ -4,15 +4,15 @@
 
 #pragma once
 
-#include <v8-platform.h>
-#include <v8-locker.h>
 #include <kj/common.h>
+#include <v8-locker.h>
+#include <v8-platform.h>
 
 namespace workerd::jsg {
 
-class V8PlatformWrapper: public v8::Platform {
+class V8PlatformWrapper : public v8::Platform {
 public:
-  explicit V8PlatformWrapper(v8::Platform& inner): inner(inner) {}
+  explicit V8PlatformWrapper(v8::Platform& inner) : inner(inner) {}
 
   v8::PageAllocator* GetPageAllocator() override {
     return inner.GetPageAllocator();
@@ -30,44 +30,36 @@ public:
     return inner.NumberOfWorkerThreads();
   }
 
-  std::shared_ptr<v8::TaskRunner> GetForegroundTaskRunner(
-      v8::Isolate* isolate) override {
+  std::shared_ptr<v8::TaskRunner> GetForegroundTaskRunner(v8::Isolate* isolate) override {
     return inner.GetForegroundTaskRunner(isolate);
   }
 
-  void CallOnWorkerThread(std::unique_ptr<v8::Task> task) override {
-    return inner.CallOnWorkerThread(std::make_unique<TaskWrapper>(kj::mv(task)));
+  void PostTaskOnWorkerThreadImpl(v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
+                                  const v8::SourceLocation& location) override {
+    inner.PostTaskOnWorkerThreadImpl(priority, std::make_unique<TaskWrapper>(kj::mv(task)),
+                                     location);
   }
 
-  void CallBlockingTaskOnWorkerThread(std::unique_ptr<v8::Task> task) override {
-    return inner.CallBlockingTaskOnWorkerThread(kj::mv(task));
+  void PostDelayedTaskOnWorkerThreadImpl(v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
+                                         double delay_in_seconds,
+                                         const v8::SourceLocation& location) override {
+    inner.PostDelayedTaskOnWorkerThreadImpl(priority, std::make_unique<TaskWrapper>(kj::mv(task)),
+                                            delay_in_seconds, location);
   }
 
-  void CallLowPriorityTaskOnWorkerThread(std::unique_ptr<v8::Task> task) override {
-    return inner.CallLowPriorityTaskOnWorkerThread(kj::mv(task));
-  }
-
-  void CallDelayedOnWorkerThread(std::unique_ptr<v8::Task> task,
-                                         double delay_in_seconds) override {
-    return inner.CallDelayedOnWorkerThread(kj::mv(task), delay_in_seconds);
+  std::unique_ptr<v8::JobHandle> CreateJobImpl(v8::TaskPriority priority,
+                                               std::unique_ptr<v8::JobTask> job_task,
+                                               const v8::SourceLocation& location) override {
+    return inner.CreateJobImpl(priority, std::make_unique<JobTaskWrapper>(kj::mv(job_task)),
+                               location);
   }
 
   bool IdleTasksEnabled(v8::Isolate* isolate) override {
     return inner.IdleTasksEnabled(isolate);
   }
 
-  std::unique_ptr<v8::JobHandle> PostJob(
-      v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task) override {
-    return inner.PostJob(priority, std::make_unique<JobTaskWrapper>(kj::mv(job_task)));
-  }
-
-  std::unique_ptr<v8::JobHandle> CreateJob(
-      v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task) override {
-    return inner.CreateJob(priority, std::make_unique<JobTaskWrapper>(kj::mv(job_task)));
-  }
-
-  std::unique_ptr<v8::ScopedBlockingCall> CreateBlockingScope(
-      v8::BlockingType blocking_type) override {
+  std::unique_ptr<v8::ScopedBlockingCall>
+  CreateBlockingScope(v8::BlockingType blocking_type) override {
     return inner.CreateBlockingScope(blocking_type);
   }
 
@@ -99,15 +91,14 @@ public:
     return inner.DumpWithoutCrashing();
   }
 
-  v8::HighAllocationThroughputObserver*
-  GetHighAllocationThroughputObserver() override {
+  v8::HighAllocationThroughputObserver* GetHighAllocationThroughputObserver() override {
     return inner.GetHighAllocationThroughputObserver();
   }
 
 private:
   v8::Platform& inner;
 
-  class TaskWrapper: public v8::Task {
+  class TaskWrapper : public v8::Task {
   public:
     TaskWrapper(std::unique_ptr<v8::Task> inner);
 
@@ -118,7 +109,7 @@ private:
     v8::PointerCageContext cageCtx;
   };
 
-  class JobTaskWrapper: public v8::JobTask {
+  class JobTaskWrapper : public v8::JobTask {
   public:
     JobTaskWrapper(std::unique_ptr<v8::JobTask> inner);
 
@@ -134,4 +125,4 @@ private:
   };
 };
 
-}  // namespace workerd::jsg
+} // namespace workerd::jsg

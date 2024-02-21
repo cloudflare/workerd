@@ -1,4 +1,4 @@
-From 8ec1bbc4c6c97e087ec33192d2230e377c6fc140 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 26 Jul 2023 18:40:13 +0200
 Subject: Fix V8/ICU build
@@ -10,16 +10,12 @@ Subject: Fix V8/ICU build
    do not include it for now. In a future version, we can use our
    existing absl dependency, we'll just need to keep it in sync with
    V8's version.
----
- BUILD.bazel     | 1 -
- bazel/BUILD.icu | 2 +-
- 2 files changed, 1 insertion(+), 2 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index fab5eb2419f1e6eee3d05c510bc2cb8637d19c83..a3ee9a450a1aa3cc2a019d148af2efada41a3061 100644
+index a1823f5e7a88dc0417083f3d0c14003028aaa235..da3a7285ced73c3405da14e333c5e02020b2c280 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4103,7 +4103,6 @@ v8_binary(
+@@ -4272,7 +4272,6 @@ v8_binary(
          "UNISTR_FROM_CHAR_EXPLICIT=",
      ],
      deps = [
@@ -28,10 +24,10 @@ index fab5eb2419f1e6eee3d05c510bc2cb8637d19c83..a3ee9a450a1aa3cc2a019d148af2efad
          "//external:icu",
      ],
 diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
-index 73a25df55abc380092a0177bb13364e6f216ce95..3b26219eb56f4e8247af8dad476ebced2ad763af 100644
+index 5127ceb7b783b11d5750c01977d7e34606c39667..c81f792bf642e4ab42626dbf709c8c012433ddca 100644
 --- a/bazel/BUILD.icu
 +++ b/bazel/BUILD.icu
-@@ -96,7 +96,7 @@ cc_library(
+@@ -90,7 +90,7 @@ cc_library(
      hdrs = glob([
          "source/common/unicode/*.h",
          "source/i18n/unicode/*.h",

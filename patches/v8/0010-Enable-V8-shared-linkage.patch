@@ -1,18 +1,14 @@
-From 1dcf856d0dbef118c3dc221d2820b2cbd4b16a7f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage
 
----
- BUILD.bazel    | 7 ++++++-
- bazel/defs.bzl | 3 ---
- 2 files changed, 6 insertions(+), 4 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index be82fc2e20a10ded7cd8a949af0533a74290d49d..fab5eb2419f1e6eee3d05c510bc2cb8637d19c83 100644
+index 2aea0158754058fd35c16ea4adcc2f9fd085e06f..a1823f5e7a88dc0417083f3d0c14003028aaa235 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1421,7 +1421,6 @@ filegroup(
+@@ -1496,7 +1496,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
@@ -20,7 +16,7 @@ index be82fc2e20a10ded7cd8a949af0533a74290d49d..fab5eb2419f1e6eee3d05c510bc2cb86
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3555,6 +3554,10 @@ filegroup(
+@@ -3723,6 +3722,10 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -31,7 +27,7 @@ index be82fc2e20a10ded7cd8a949af0533a74290d49d..fab5eb2419f1e6eee3d05c510bc2cb86
      ],
  )
  
-@@ -4009,6 +4012,8 @@ v8_library(
+@@ -4178,6 +4181,8 @@ v8_library(
      name = "v8",
      srcs = [
          ":v8_inspector_files",
@@ -41,10 +37,10 @@ index be82fc2e20a10ded7cd8a949af0533a74290d49d..fab5eb2419f1e6eee3d05c510bc2cb86
          ":is_not_v8_enable_turbofan": [
              # With Turbofan disabled, we only include the stubbed-out API.
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 7053ca31b999ae7423e7485ee6392a09f9de4aa9..8f47a6477e8e99fd330dac5338f3f1d5f536ec64 100644
+index e3f5a9b50341b2d083e0b4532b99f930d2f73b18..f982dcef1bea469820104e892790a4e3212f905b 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -293,7 +293,6 @@ def v8_library(
+@@ -294,7 +294,6 @@ def v8_library(
              copts = copts + default.copts,
              linkopts = linkopts + default.linkopts,
              alwayslink = 1,
@@ -52,7 +48,7 @@ index 7053ca31b999ae7423e7485ee6392a09f9de4aa9..8f47a6477e8e99fd330dac5338f3f1d5
              **kwargs
          )
  
-@@ -312,7 +311,6 @@ def v8_library(
+@@ -313,7 +312,6 @@ def v8_library(
              copts = copts + default.copts + ENABLE_I18N_SUPPORT_DEFINES,
              linkopts = linkopts + default.linkopts,
              alwayslink = 1,
@@ -60,7 +56,7 @@ index 7053ca31b999ae7423e7485ee6392a09f9de4aa9..8f47a6477e8e99fd330dac5338f3f1d5
              **kwargs
          )
  
-@@ -332,7 +330,6 @@ def v8_library(
+@@ -333,7 +331,6 @@ def v8_library(
              copts = copts + default.copts,
              linkopts = linkopts + default.linkopts,
              alwayslink = 1,

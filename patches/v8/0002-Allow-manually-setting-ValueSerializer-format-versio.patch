@@ -1,15 +1,9 @@
-From b05b76fd24b4277a9d6fcf6d6462aa5f583582ab Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
 
 Refs: https://bitbucket.cfdata.org/projects/MIRRORS/repos/v8/pull-requests/2/overview
----
- include/v8-value-serializer.h   |  5 +++++
- src/api/api.cc                  |  4 ++++
- src/objects/value-serializer.cc | 17 ++++++++++++++---
- src/objects/value-serializer.h  |  6 ++++++
- 4 files changed, 29 insertions(+), 3 deletions(-)
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
 index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347dec6c0c7d 100644
@@ -28,10 +22,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index d5e17d0b9927a89c12013c5b0d3075f47751f48a..f59eed43d782fe434e4dcbcd7fb7cb4c5f2590b4 100644
+index b5294331fa631d810c8e3a073a3358fc4d9260d7..70f922a1ee4a6ac8ca7c35fe1e758af6bed55e4e 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3546,6 +3546,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3545,6 +3545,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  

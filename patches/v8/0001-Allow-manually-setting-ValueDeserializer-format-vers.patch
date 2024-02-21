@@ -1,4 +1,4 @@
-From d529886e9db66ef38cd317d417c23bb7bdc964c0 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alex Robinson <arobinson@cloudflare.com>
 Date: Wed, 2 Mar 2022 15:58:04 -0600
 Subject: Allow manually setting ValueDeserializer format version
@@ -15,11 +15,6 @@ like:
     deserializer.SetWireFormatVersion(13);
   }
   auto maybeValue = deserializer.ReadValue(isolate->GetCurrentContext());
----
- include/v8-value-serializer.h  | 7 +++++++
- src/api/api.cc                 | 4 ++++
- src/objects/value-serializer.h | 7 +++++++
- 3 files changed, 18 insertions(+)
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
 index 0cb3e045bc46ec732956318b980e749d1847d06d..40ad805c7970cc9379e69f046205836dbd760373 100644
@@ -40,10 +35,10 @@ index 0cb3e045bc46ec732956318b980e749d1847d06d..40ad805c7970cc9379e69f046205836d
     * Reads raw data in various common formats to the buffer.
     * Note that integer types are read in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 84d7d170cd0a96ec4d9cf772b13f779a3bd5bbeb..d5e17d0b9927a89c12013c5b0d3075f47751f48a 100644
+index 8b709703b5fb51fed49832992f6c1dbeab933442..b5294331fa631d810c8e3a073a3358fc4d9260d7 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3678,6 +3678,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
+@@ -3677,6 +3677,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
    return private_->deserializer.GetWireFormatVersion();
  }
  

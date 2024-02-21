@@ -1,4 +1,4 @@
-From 7783257dadbc076574a7b0156a5f3c2b8d192956 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Tue, 11 Apr 2023 14:41:31 -0400
 Subject: Disable bazel whole-archive build
@@ -9,16 +9,13 @@ object files to be included even if they are not referenced. This is more
 aggressive than what's done in the GN build system and not needed for
 workerd - disabling alwayslink improves the binary size by ~ 1MB as it
 allows the linker to eliminate unused symbols.
----
- bazel/BUILD.icu | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
-index 4843ea09f99fa1b45bf66af8fd971adfd89efe45..73a25df55abc380092a0177bb13364e6f216ce95 100644
+index 5fda2f468492a7a69266dba40c0862b0e31fa7a1..5127ceb7b783b11d5750c01977d7e34606c39667 100644
 --- a/bazel/BUILD.icu
 +++ b/bazel/BUILD.icu
-@@ -56,7 +56,7 @@ cc_library(
-         "source/i18n",
+@@ -54,7 +54,7 @@ cc_library(
+         "U_ICUDATAENTRY_IN_COMMON",
      ],
      tags = ["requires-rtti"],
 -    alwayslink = 1,
@@ -26,9 +23,9 @@ index 4843ea09f99fa1b45bf66af8fd971adfd89efe45..73a25df55abc380092a0177bb13364e6
  )
  
  cc_library(
-@@ -85,7 +85,7 @@ cc_library(
-         "//conditions:default": [],
-     }),
+@@ -78,7 +78,7 @@ cc_library(
+         "U_I18N_IMPLEMENTATION",
+     ],
      deps = [":icuuc"],
 -    alwayslink = 1,
 +    alwayslink = 0,

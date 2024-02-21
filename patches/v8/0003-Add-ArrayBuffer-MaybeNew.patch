@@ -1,4 +1,4 @@
-From bd257320c7a70ec3a330086b58f85b02d178d534 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Fri, 16 Sep 2022 21:41:45 -0500
 Subject: Add `ArrayBuffer::MaybeNew()`.
@@ -6,9 +6,6 @@ Subject: Add `ArrayBuffer::MaybeNew()`.
 In Cloudflare's edge runtime, this is part of a larger patch that allows graceful handling of allocations that exceed memory limits. `workerd` currently doesn't enforce any limits, so to reduce complexity we just forward to `New()`.
 
 (We would like to upstream our internal patch, just need to find the time...)
----
- include/v8-array-buffer.h | 8 ++++++++
- 1 file changed, 8 insertions(+)
 
 diff --git a/include/v8-array-buffer.h b/include/v8-array-buffer.h
 index 804fc42c4b56dd9b79f0fdc49e94c0e101e510e8..369e770351b80c60cae43866139e3a5396de08bd 100644
