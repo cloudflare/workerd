@@ -106,6 +106,10 @@ bool ValueQueue::Consumer::hasReadRequests() {
   return impl.hasReadRequests();
 }
 
+void ValueQueue::Consumer::cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
+  impl.cancelPendingReads(js, reason);
+}
+
 void ValueQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(impl);
 }
@@ -376,6 +380,10 @@ kj::Own<ByteQueue::Consumer> ByteQueue::Consumer::clone(
 
 bool ByteQueue::Consumer::hasReadRequests() {
   return impl.hasReadRequests();
+}
+
+void ByteQueue::Consumer::cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
+  impl.cancelPendingReads(js, reason);
 }
 
 void ByteQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
