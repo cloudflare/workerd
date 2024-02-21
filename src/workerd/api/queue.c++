@@ -15,6 +15,13 @@
 namespace workerd::api {
 
 namespace {
+
+// Header for the message format.
+static constexpr kj::StringPtr HDR_MSG_FORMAT = "X-Msg-Fmt"_kj;
+
+// Header for the message delivery delay.
+static constexpr kj::StringPtr HDR_MSG_DELAY = "X-Msg-Delay-Secs"_kj;
+
 kj::StringPtr validateContentType(kj::StringPtr contentType) {
   auto lowerCase = toLower(contentType);
   if (lowerCase == IncomingQueueMessage::ContentType::TEXT) {
@@ -127,9 +134,10 @@ Serialized serialize(jsg::Lock& js,
   }
 }
 
-struct SerializedWithContentType {
+struct SerializedWithOptions {
   Serialized body;
   kj::Maybe<kj::StringPtr> contentType;
+  kj::Maybe<int> delaySeconds;
 };
 
 jsg::JsValue deserialize(jsg::Lock& js,
@@ -179,19 +187,23 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
 
   JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
 
-  kj::Maybe<kj::StringPtr> contentType;
-  KJ_IF_SOME(opts, options) {
-    KJ_IF_SOME(type, opts.contentType) {
-      contentType = validateContentType(type);
-    }
-  }
-
   auto headers = kj::HttpHeaders(context.getHeaderTable());
   headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::OCTET_STREAM.toString());
 
+  kj::Maybe<kj::StringPtr> contentType;
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(type, opts.contentType) {
+      auto validatedType = validateContentType(type);
+      headers.add(HDR_MSG_FORMAT, validatedType);
+      contentType = validatedType;
+    }
+    KJ_IF_SOME(secs, opts.delaySeconds) {
+      headers.add(HDR_MSG_DELAY, kj::str(secs));
+    }
+  }
+
   Serialized serialized;
   KJ_IF_SOME(type, contentType) {
-    headers.add("X-Msg-Fmt", type);
     serialized = serialize(js, body, type, SerializeArrayBufferBehavior::DEEP_COPY);
   } else {
     // TODO(cleanup) send message format header (v8) by default
@@ -223,7 +235,8 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
       .attach(context.registerPendingEvent());
 };
 
-kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch) {
+kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch,
+                                         jsg::Optional<SendBatchOptions> options) {
   auto& context = IoContext::current();
 
   JSG_REQUIRE(batch.size() > 0, TypeError, "sendBatch() requires at least one message");
@@ -231,13 +244,17 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
   size_t totalSize = 0;
   size_t largestMessage = 0;
   auto messageCount = batch.size();
-  auto builder = kj::heapArrayBuilder<SerializedWithContentType>(messageCount);
+  auto builder = kj::heapArrayBuilder<SerializedWithOptions>(messageCount);
   for (auto& message: batch) {
     auto body = message.body.getHandle(js);
     JSG_REQUIRE(!body.isUndefined(), TypeError,
                 "Message body cannot be undefined");
 
-    SerializedWithContentType item;
+    SerializedWithOptions item;
+    KJ_IF_SOME(secs, message.delaySeconds) {
+      item.delaySeconds = secs;
+    }
+
     KJ_IF_SOME(contentType, message.contentType) {
       item.contentType = validateContentType(contentType);
       item.body = serialize(js, body, contentType,
@@ -255,7 +272,7 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
   // Construct the request body by concatenating the messages together into a JSON message.
   // Done manually to minimize copies, although it'd be nice to make this safer.
   // (totalSize + 2) / 3 * 4 is equivalent to ceil(totalSize / 3) * 4 for base64 encoding overhead.
-  auto estimatedSize = (totalSize + 2) / 3 * 4 + messageCount * 32 + 32;
+  auto estimatedSize = (totalSize + 2) / 3 * 4 + messageCount * 64 + 32;
   kj::Vector<char> bodyBuilder(estimatedSize);
   bodyBuilder.addAll("{\"messages\":["_kj);
   for (size_t i = 0; i < messageCount; ++i) {
@@ -270,6 +287,11 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
       bodyBuilder.addAll(",\"contentType\":\""_kj);
       bodyBuilder.addAll(contentType);
       bodyBuilder.add('"');
+    }
+
+    KJ_IF_SOME(delaySecs, serializedBodies[i].delaySeconds) {
+      bodyBuilder.addAll(",\"delaySecs\": "_kj);
+      bodyBuilder.addAll(kj::str(delaySecs));
     }
 
     bodyBuilder.addAll("}"_kj);
@@ -293,6 +315,12 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
   headers.add("CF-Queue-Batch-Bytes"_kj, kj::str(totalSize));
   headers.add("CF-Queue-Largest-Msg"_kj, kj::str(largestMessage));
   headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
+
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(secs, opts.delaySeconds) {
+      headers.add(HDR_MSG_DELAY, kj::str(secs));
+    }
+  }
 
   // The stage that we're sending a subrequest to provides a base URL that includes a scheme, the
   // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
