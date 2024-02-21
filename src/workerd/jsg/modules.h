@@ -437,70 +437,70 @@ public:
     entries.insert(kj::heap<Entry>(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
+  void addBuiltinModule(Module::Reader module) {
+    if (module.which() != Module::SRC) {
+      using Key = typename Entry::Key;
+      auto specifier = module.getName();
+      auto path = kj::Path::parse(specifier);
+      if (module.getType() == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
+        return;
+      }
+      switch (module.which()) {
+      case Module::WASM:
+        // The body of this callback is copied from `compileWasmGlobal` in
+        // src/workerd/server/workerd-api.c++.
+        addBuiltinModule(
+            specifier,
+            [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+              lock.setAllowEval(true);
+              KJ_DEFER(lock.setAllowEval(false));
+
+              // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
+              // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
+              // is way too slow. Until tier-up finishes, requests will be handled using
+              // Liftoff-generated code, which compiles fast but runs slower.
+              AllowV8BackgroundThreadsScope scope;
+              auto wasmModule =
+                  jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
+              return jsg::ModuleRegistry::ModuleInfo(
+                  lock, specifier, kj::none,
+                  jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+            },
+            module.getType());
+        return;
+      case Module::DATA:
+        addBuiltinModule(
+            specifier,
+            [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+              v8::Local<v8::ArrayBuffer> data =
+                  lock.wrapBytes(kj::heapArray(module.getData().asBytes()));
+              return jsg::ModuleRegistry::ModuleInfo(
+                  lock, specifier, kj::none, jsg::ModuleRegistry::DataModuleInfo(lock, data));
+            },
+            module.getType());
+        return;
+      case Module::JSON:
+        addBuiltinModule(
+            specifier,
+            [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+              auto data = jsg::check(
+                  v8::JSON::Parse(lock.v8Context(), lock.wrapString(module.getJson())));
+              return jsg::ModuleRegistry::ModuleInfo(
+                  lock, specifier, kj::none, jsg::ModuleRegistry::JsonModuleInfo(lock, data));
+            },
+            module.getType());
+        return;
+      case Module::SRC:
+        KJ_UNREACHABLE
+      }
+    }
+    // TODO: asChars() might be wrong for wide characters
+    addBuiltinModule(module.getName(), module.getSrc().asChars(), module.getType());
+  }
+
   void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
     for (auto module: bundle.getModules()) {
-      auto type = module.getType();
-      auto filter = maybeFilter.orDefault(type);
-      if (type == filter) {
-        if (module.which() != Module::SRC) {
-          using Key = typename Entry::Key;
-          auto specifier = module.getName();
-          auto path = kj::Path::parse(specifier);
-          if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-            continue;
-          }
-          switch (module.which()) {
-          case Module::WASM:
-            // The body of this callback is copied from `compileWasmGlobal` in
-            // src/workerd/server/workerd-api.c++.
-            addBuiltinModule(
-                specifier,
-                [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-                  lock.setAllowEval(true);
-                  KJ_DEFER(lock.setAllowEval(false));
-
-                  // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
-                  // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
-                  // is way too slow. Until tier-up finishes, requests will be handled using
-                  // Liftoff-generated code, which compiles fast but runs slower.
-                  AllowV8BackgroundThreadsScope scope;
-                  auto wasmModule =
-                      jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
-                  return jsg::ModuleRegistry::ModuleInfo(
-                      lock, specifier, kj::none,
-                      jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
-                },
-                type);
-            continue;
-          case Module::DATA:
-            addBuiltinModule(
-                specifier,
-                [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-                  v8::Local<v8::ArrayBuffer> data =
-                      lock.wrapBytes(kj::heapArray(module.getData().asBytes()));
-                  return jsg::ModuleRegistry::ModuleInfo(
-                      lock, specifier, kj::none, jsg::ModuleRegistry::DataModuleInfo(lock, data));
-                },
-                type);
-            continue;
-          case Module::JSON:
-            addBuiltinModule(
-                specifier,
-                [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-                  auto data = jsg::check(
-                      v8::JSON::Parse(lock.v8Context(), lock.wrapString(module.getJson())));
-                  return jsg::ModuleRegistry::ModuleInfo(
-                      lock, specifier, kj::none, jsg::ModuleRegistry::JsonModuleInfo(lock, data));
-                },
-                type);
-            continue;
-          case Module::SRC:
-            KJ_UNREACHABLE
-          }
-        }
-        // TODO: asChars() might be wrong for wide characters
-        addBuiltinModule(module.getName(), module.getSrc().asChars(), type);
-      }
+      if (module.getType() == maybeFilter.orDefault(module.getType())) addBuiltinModule(module);
     }
   }
 

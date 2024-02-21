@@ -98,14 +98,14 @@ struct EncoderModuleRegistryImpl {
 
   void addBuiltinBundle(jsg::Bundle::Reader bundle, kj::Maybe<jsg::ModuleRegistry::Type> maybeFilter = kj::none) {
     for (auto module: bundle.getModules()) {
-      auto type = module.getType();
-      auto filter = maybeFilter.orDefault(type);
-      if (type == filter) {
-        TypeScriptModuleContents contents (module.getTsDeclaration());
-        ModuleInfo info (module.getName(), type, kj::mv(contents));
-        modules.add(kj::mv(info));
-      }
+      if (module.getType() == maybeFilter.orDefault(module.getType())) addBuiltinModule(module);
     }
+  }
+
+  void addBuiltinModule(jsg::Module::Reader module) {
+    TypeScriptModuleContents contents (module.getTsDeclaration());
+    ModuleInfo info (module.getName(), module.getType(), kj::mv(contents));
+    modules.add(kj::mv(info));
   }
 
   template <typename T>

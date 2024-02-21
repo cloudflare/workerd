@@ -66,6 +66,19 @@ void registerNodeJsCompatModules(
   if (!featureFlags.getNodeJsCompat()) maybeFilter = jsg::ModuleType::INTERNAL;
 
   registry.addBuiltinBundle(NODE_BUNDLE, maybeFilter);
+
+  // If the `nodejs_compat` flag is off, but the `nodejs_als` flag is on, we
+  // need to register the `node:async_hooks` module from the bundle.
+  if (!featureFlags.getNodeJsCompat() && featureFlags.getNodeJsAls()) {
+    jsg::Bundle::Reader reader = NODE_BUNDLE;
+    for (auto module : reader.getModules()) {
+      auto specifier = module.getName();
+      if (specifier == "node:async_hooks") {
+        KJ_DASSERT(module.getType() == jsg::ModuleType::BUILTIN);
+        registry.addBuiltinModule(module);
+      }
+    }
+  }
 }
 
 #define EW_NODE_ISOLATE_TYPES              \
