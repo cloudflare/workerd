@@ -552,7 +552,6 @@ private:
   void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = kj::none) {
     // If the state is already errored or closed then there is nothing to drain.
     KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
-      UpdateBackpressureScope scope(queue);
       KJ_IF_SOME(reason, maybeReason) {
         // If maybeReason != nullptr, then we are draining because of an error.
         // In that case, we want to reset/clear the buffer and reject any remaining
@@ -566,33 +565,33 @@ private:
           // After this point, we should not assume that this consumer can
           // be safely used at all. It's most likely the stateListener has
           // released it.
+          return;
         }
-      } else {
-        // Otherwise, if isClosing() is true...
-        if (isClosing()) {
-          if (!empty() && !Self::handleMaybeClose(js, ready, *this, queue)) {
-            // If the queue is not empty, we'll have the implementation see
-            // if it can drain the remaining data into pending reads. If handleMaybeClose
-            // returns false, then it could not and we can't yet close. If it returns true,
-            // yay! Our queue is empty and we can continue closing down.
-            KJ_ASSERT(!empty()); // We're still not empty
-            return;
-          }
+      } else if (isClosing()) {
+        if (!empty() && !Self::handleMaybeClose(js, ready, *this, queue)) {
+          // If the queue is not empty, we'll have the implementation see
+          // if it can drain the remaining data into pending reads. If handleMaybeClose
+          // returns false, then it could not and we can't yet close. If it returns true,
+          // yay! Our queue is empty and we can continue closing down.
+          KJ_ASSERT(!empty()); // We're still not empty
+          return;
+        }
 
-          KJ_ASSERT(empty());
-          KJ_REQUIRE(ready.buffer.size() == 1); // The close should be the only item remaining.
-          for (auto& request : ready.readRequests) {
-            request.resolveAsDone(js);
-          }
-          state.template init<Closed>();
-          KJ_IF_SOME(listener, stateListener) {
-            listener.onConsumerClose(js);
-            // After this point, we should not assume that this consumer can
-            // be safely used at all. It's most likely the stateListener has
-            // released it.
-          }
+        KJ_ASSERT(empty());
+        KJ_REQUIRE(ready.buffer.size() == 1); // The close should be the only item remaining.
+        for (auto& request : ready.readRequests) {
+          request.resolveAsDone(js);
+        }
+        state.template init<Closed>();
+        KJ_IF_SOME(listener, stateListener) {
+          listener.onConsumerClose(js);
+          // After this point, we should not assume that this consumer can
+          // be safely used at all. It's most likely the stateListener has
+          // released it.
+          return;
         }
       }
+      queue.maybeUpdateBackpressure();
     }
   }
 
