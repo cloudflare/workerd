@@ -32,10 +32,20 @@ public:
     // contentType determines the serialization format of the message.
     jsg::Optional<kj::String> contentType;
 
-    JSG_STRUCT(contentType);
-    JSG_STRUCT_TS_OVERRIDE(QueueSendOptions {
-      contentType?: QueueContentType;
-    });
+    // The number of seconds to delay the delivery of the message being sent.
+    jsg::Optional<int> delaySeconds;
+
+    JSG_STRUCT(contentType, delaySeconds);
+    JSG_STRUCT_TS_OVERRIDE(QueueSendOptions { contentType?: QueueContentType; });
+    // NOTE: Any new fields added here should also be added to MessageSendRequest below.
+  };
+
+  struct SendBatchOptions {
+    // The number of seconds to delay the delivery of the message being sent.
+    jsg::Optional<int> delaySeconds;
+
+    JSG_STRUCT(delaySeconds);
+    JSG_STRUCT_TS_OVERRIDE(QueueSendBatchOptions { delaySeconds ?: number; });
     // NOTE: Any new fields added here should also be added to MessageSendRequest below.
   };
 
@@ -45,17 +55,21 @@ public:
     // contentType determines the serialization format of the message.
     jsg::Optional<kj::String> contentType;
 
-    JSG_STRUCT(body, contentType);
+    // The number of seconds to delay the delivery of the message being sent.
+    jsg::Optional<int> delaySeconds;
+
+    JSG_STRUCT(body, contentType, delaySeconds);
     JSG_STRUCT_TS_OVERRIDE(MessageSendRequest<Body = unknown> {
       body: Body;
-      contentType?: QueueContentType;
+        contentType?: QueueContentType;
     });
     // NOTE: Any new fields added to SendOptions must also be added here.
   };
 
   kj::Promise<void> send(jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options);
 
-  kj::Promise<void> sendBatch(jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch);
+  kj::Promise<void> sendBatch(jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch,
+                              jsg::Optional<SendBatchOptions> options);
 
   JSG_RESOURCE_TYPE(WorkerQueue) {
     JSG_METHOD(send);
@@ -64,7 +78,9 @@ public:
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE(Queue<Body = unknown> {
       send(message: Body, options?: QueueSendOptions): Promise<void>;
-      sendBatch(messages: Iterable<MessageSendRequest<Body>>): Promise<void>;
+      sendBatch(messages
+                : Iterable<MessageSendRequest<Body>>, options ?: QueueSendBatchOptions)
+          : Promise<void>;
     });
     JSG_TS_DEFINE(type QueueContentType = "text" | "bytes" | "json" | "v8");
   }
@@ -304,6 +320,7 @@ private:
 #define EW_QUEUE_ISOLATE_TYPES \
   api::WorkerQueue,                     \
   api::WorkerQueue::SendOptions,        \
+  api::WorkerQueue::SendBatchOptions,   \
   api::WorkerQueue::MessageSendRequest, \
   api::IncomingQueueMessage,            \
   api::QueueResponse,                   \
