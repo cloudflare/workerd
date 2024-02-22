@@ -194,6 +194,9 @@ jobs:
       - name: Make workerd binary executable
         run: chmod +x /tmp/workerd
 
+      - name: Build Miniflare and dependencies
+        run: pnpm turbo build --filter miniflare
+
       - name: Run Miniflare tests
         id: miniflare-test
         continue-on-error: true
