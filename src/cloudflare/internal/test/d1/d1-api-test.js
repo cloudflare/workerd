@@ -69,10 +69,11 @@ export const test_d1_api = test(async (DB) => {
       DB.prepare(
         ` CREATE TABLE users
         (
-            user_id  INTEGER PRIMARY KEY,
-            name     TEXT,
-            home     TEXT,
-            features TEXT
+            user_id    INTEGER PRIMARY KEY,
+            name       TEXT,
+            home       TEXT,
+            features   TEXT,
+            land_based BOOLEAN
         );`
       ).run(),
     { success: true, meta: anything }
@@ -105,17 +106,29 @@ export const test_d1_api = test(async (DB) => {
     () =>
       DB.prepare(
         `
-        INSERT INTO users (name, home, features) VALUES
-          ('Albert Ross', 'sky', 'wingspan'),
-          ('Al Dente', 'bowl', 'mouthfeel')
+        INSERT INTO users (name, home, features, land_based) VALUES
+          ('Albert Ross', 'sky', 'wingspan', false),
+          ('Al Dente', 'bowl', 'mouthfeel', true)
         RETURNING *
     `
       ).all(),
     {
       success: true,
       results: [
-        { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
-        { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+        {
+          user_id: 1,
+          name: 'Albert Ross',
+          home: 'sky',
+          features: 'wingspan',
+          land_based: 0,
+        },
+        {
+          user_id: 2,
+          name: 'Al Dente',
+          home: 'bowl',
+          features: 'mouthfeel',
+          land_based: 1,
+        },
       ],
       meta: anything,
     }
@@ -133,9 +146,9 @@ export const test_d1_api = test(async (DB) => {
     () =>
       DB.prepare(
         `
-        INSERT INTO users (name, home, features) VALUES
-          ('Albert Ross', 'sky', 'wingspan'),
-          ('Al Dente', 'bowl', 'mouthfeel')
+        INSERT INTO users (name, home, features, land_based) VALUES
+          ('Albert Ross', 'sky', 'wingspan', false),
+          ('Al Dente', 'bowl', 'mouthfeel', true)
         RETURNING *
     `
       ).run(),
@@ -170,19 +183,37 @@ export const test_d1_api = test(async (DB) => {
     () => select_all.all(),
     {
       results: [
-        { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
-        { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+        {
+          user_id: 1,
+          name: 'Albert Ross',
+          home: 'sky',
+          features: 'wingspan',
+          land_based: 0,
+        },
+        {
+          user_id: 2,
+          name: 'Al Dente',
+          home: 'bowl',
+          features: 'mouthfeel',
+          land_based: 1,
+        },
       ],
       meta: anything,
       success: true,
     },
     () => select_all.raw(),
     [
-      [1, 'Albert Ross', 'sky', 'wingspan'],
-      [2, 'Al Dente', 'bowl', 'mouthfeel'],
+      [1, 'Albert Ross', 'sky', 'wingspan', 0],
+      [2, 'Al Dente', 'bowl', 'mouthfeel', 1],
     ],
     () => select_all.first(),
-    { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
+    {
+      user_id: 1,
+      name: 'Albert Ross',
+      home: 'sky',
+      features: 'wingspan',
+      land_based: 0,
+    },
     () => select_all.first('name'),
     'Albert Ross'
   )
@@ -194,15 +225,27 @@ export const test_d1_api = test(async (DB) => {
     () => select_one.bind(1).all(),
     {
       results: [
-        { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
+        {
+          user_id: 1,
+          name: 'Albert Ross',
+          home: 'sky',
+          features: 'wingspan',
+          land_based: 0,
+        },
       ],
       meta: anything,
       success: true,
     },
     () => select_one.bind(1).raw(),
-    [[1, 'Albert Ross', 'sky', 'wingspan']],
+    [[1, 'Albert Ross', 'sky', 'wingspan', 0]],
     () => select_one.bind(1).first(),
-    { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
+    {
+      user_id: 1,
+      name: 'Albert Ross',
+      home: 'sky',
+      features: 'wingspan',
+      land_based: 0,
+    },
     () => select_one.bind(1).first('name'),
     'Albert Ross'
   )
@@ -212,15 +255,27 @@ export const test_d1_api = test(async (DB) => {
     () => select_one.bind(2).all(),
     {
       results: [
-        { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+        {
+          user_id: 2,
+          name: 'Al Dente',
+          home: 'bowl',
+          features: 'mouthfeel',
+          land_based: 1,
+        },
       ],
       meta: anything,
       success: true,
     },
     () => select_one.bind(2).raw(),
-    [[2, 'Al Dente', 'bowl', 'mouthfeel']],
+    [[2, 'Al Dente', 'bowl', 'mouthfeel', 1]],
     () => select_one.bind(2).first(),
-    { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+    {
+      user_id: 2,
+      name: 'Al Dente',
+      home: 'bowl',
+      features: 'mouthfeel',
+      land_based: 1,
+    },
     () => select_one.bind(2).first('name'),
     'Al Dente'
   )
@@ -231,7 +286,13 @@ export const test_d1_api = test(async (DB) => {
     [
       {
         results: [
-          { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+          {
+            user_id: 2,
+            name: 'Al Dente',
+            home: 'bowl',
+            features: 'mouthfeel',
+            land_based: 1,
+          },
         ],
         meta: anything,
         success: true,
@@ -243,12 +304,42 @@ export const test_d1_api = test(async (DB) => {
             name: 'Albert Ross',
             home: 'sky',
             features: 'wingspan',
+            land_based: 0,
           },
         ],
         meta: anything,
         success: true,
       },
     ]
+  )
+
+  await itShould(
+    'allow binding all types of parameters',
+    () =>
+      DB.prepare(`SELECT count(1) as count FROM users WHERE land_based = ?`)
+        .bind(true)
+        .first('count'),
+    1,
+    () =>
+      DB.prepare(`SELECT count(1) as count FROM users WHERE land_based = ?`)
+        .bind(false)
+        .first('count'),
+    1,
+    () =>
+      DB.prepare(`SELECT count(1) as count FROM users WHERE land_based = ?`)
+        .bind(0)
+        .first('count'),
+    1,
+    () =>
+      DB.prepare(`SELECT count(1) as count FROM users WHERE land_based = ?`)
+        .bind(1)
+        .first('count'),
+    1,
+    () =>
+      DB.prepare(`SELECT count(1) as count FROM users WHERE land_based = ?`)
+        .bind(2)
+        .first('count'),
+    0,
   )
 
   await itShould(

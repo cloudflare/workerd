@@ -214,9 +214,12 @@ class D1PreparedStatement {
   public bind(...values: unknown[]): D1PreparedStatement {
     // Validate value types
     const transformedValues = values.map((r: unknown): unknown => {
-      if (typeof r === 'number' || typeof r === 'string') {
+      const rType = typeof r;
+      if (rType === 'number' || rType === 'string') {
         return r
-      } else if (typeof r === 'object') {
+      } else if (rType === 'boolean') {
+        return r ? 1 : 0;
+      } else if (rType === 'object') {
         // nulls are objects in javascript
         if (r == null) return r
         // arrays with uint8's are good
@@ -239,9 +242,9 @@ class D1PreparedStatement {
       }
 
       throw new Error(
-        `D1_TYPE_ERROR: Type '${typeof r}' not supported for value '${r}'`,
+        `D1_TYPE_ERROR: Type '${rType}' not supported for value '${r}'`,
         {
-          cause: new Error(`Type '${typeof r}' not supported for value '${r}'`),
+          cause: new Error(`Type '${rType}' not supported for value '${r}'`),
         }
       )
     })
