@@ -18,6 +18,7 @@
 #include "url-standard.h"
 #include "blob.h"
 #include <workerd/io/compatibility-date.capnp.h>
+#include "worker-rpc.h"
 
 namespace workerd::api {
 
@@ -419,7 +420,7 @@ typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
 //
 // TODO(cleanup): This probably doesn't belong in `http.h` anymore. And perhaps it should be
 //   renamed, though I haven't heard any great suggestions for what the name should be.
-class Fetcher: public jsg::Object {
+class Fetcher: public JsRpcClientProvider {
 public:
   // Should we use a fake https base url if we lack a scheme+authority?
   enum class RequiresHostAndProtocol {
@@ -556,13 +557,12 @@ public:
 
   jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
-  using RpcFunction = jsg::Function<jsg::Promise<jsg::Value>(
-      const v8::FunctionCallbackInfo<v8::Value>& info)>;
-
-  kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
-  kj::Maybe<RpcFunction> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
+  kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
+  kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
     return getRpcMethod(js, name);
   }
+
+  rpc::JsRpcTarget::Client getClientForOneCall(jsg::Lock& js) override;
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent

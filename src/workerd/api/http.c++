@@ -1866,40 +1866,35 @@ jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(
   return fetchImpl(js, JSG_THIS, kj::mv(requestOrUrl), kj::mv(requestInit));
 }
 
-kj::Maybe<Fetcher::RpcFunction> Fetcher::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
+kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
   // This is like JsRpcStub::getRpcMethod(), but we also initiate a whole new JS RPC session
-  // each time the method is called.
+  // each time the method is called (handled by `getClientForOneCall()`, below).
 
   // Do not return a method for `then`, otherwise JavaScript decides this is a thenable, i.e. a
   // custom Promise, which will mean a Promise that resolves to this object will attempt to chain
   // with it, which is not what you want!
   if (name == "then"_kj) return kj::none;
 
-  return RpcFunction(JSG_VISITABLE_LAMBDA(
-      (methodName = kj::str(name), self = JSG_THIS),
-      (self),
-      (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> jsg::Promise<jsg::Value> {
-    // Same as JsRpcStub::getRpcMethod(), we want to prevent calling on the wrong `this`.
-    JSG_REQUIRE(args.This() == KJ_ASSERT_NONNULL(self.tryGetHandle(js)), TypeError,
-        "Illegal invocation");
+  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::str(name));
+}
 
-    auto& ioContext = IoContext::current();
-    auto worker = self->getClient(ioContext, kj::none, "jsRpcSession"_kjc);
-    auto event = kj::heap<api::JsRpcSessionCustomEventImpl>(
-        JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
+rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(jsg::Lock& js) {
+  auto& ioContext = IoContext::current();
+  auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
+  auto event = kj::heap<api::JsRpcSessionCustomEventImpl>(
+      JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
 
-    auto result = JsRpcStub::sendJsRpc(js, event->getCap(), methodName, args);
+  auto result = event->getCap();
 
-    // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we don't
-    // actually care about the result of the event. If it throws, the membrane will already have
-    // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
-    // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
-    // caught elsewhere.
-    ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker))
-        .then([](auto&&) {}, [](kj::Exception&&) {}));
+  // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we don't
+  // actually care about the result of the event. If it throws, the membrane will already have
+  // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
+  // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
+  // caught elsewhere.
+  ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker))
+      .then([](auto&&) {}, [](kj::Exception&&) {}));
 
-    return result;
-  }));
+  return result;
 }
 
 static jsg::Promise<void> throwOnError(jsg::Lock& js,

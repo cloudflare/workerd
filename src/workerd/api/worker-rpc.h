@@ -81,6 +81,42 @@ public:
   JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::JS_RPC_STUB);
 };
 
+// Common superclass of JsRpcStub and Fetcher, the two types that may serve as the basis for
+// RPC calls.
+//
+// This class is NOT part of the JavaScript class heirarchy (it has no JSG_RESOURCE_TYPE block),
+// it's only a C++ class used to abstract how to get a capnp client out of the object.
+class JsRpcClientProvider: public jsg::Object {
+public:
+  // Get a capnp client that can be used to dispatch one call.
+  virtual rpc::JsRpcTarget::Client getClientForOneCall(jsg::Lock& js) = 0;
+};
+
+// Represents a property -- possibly, a method -- of a remote RPC object.
+class JsRpcProperty: public jsg::Object {
+public:
+  JsRpcProperty(jsg::Ref<JsRpcClientProvider> parent, kj::String name)
+      : parent(kj::mv(parent)), name(kj::mv(name)) {}
+
+  // Call the property as a method.
+  jsg::Promise<jsg::Value> call(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+  JSG_RESOURCE_TYPE(JsRpcProperty) {
+    JSG_CALLABLE(call);
+  }
+
+private:
+  // The parent object from which this property was obtained.
+  jsg::Ref<JsRpcClientProvider> parent;
+
+  // Name of this property within its immediate parent.
+  kj::String name;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(parent);
+  }
+};
+
 // A JsRpcStub object forwards JS method calls to the remote Worker/Durable Object over RPC.
 // Since methods are not known until runtime, JsRpcStub doesn't define any JS methods.
 // Instead, we use JSG_WILDCARD_PROPERTY to intercept property accesses of names that are not known
@@ -93,10 +129,12 @@ public:
 // call. It is NOT the type of a Durable Object stub nor a service binding. Those are instances of
 // `Fetcher`, which has a `getRpcMethod()` call of its own that mostly delegates to
 // `JsRpcStub::sendJsRpc()`.
-class JsRpcStub: public jsg::Object {
+class JsRpcStub: public JsRpcClientProvider {
 public:
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
       : capnpClient(kj::mv(capnpClient)) {}
+
+  rpc::JsRpcTarget::Client getClientForOneCall(jsg::Lock& js) override;
 
   // Given a JsRpcTarget, make an RPC stub from it.
   //
@@ -106,22 +144,7 @@ public:
   // for testing to be able to construct a loopback stub.
   static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
 
-  // Serializes the method name and arguments, calls customEvent to get the capability, and uses
-  // the capability to send our request to the remote Worker. This resolves once the RPC promise
-  // resolves.
-  //
-  // This is a static helper, no `JsRpcStub` object is needed. This is the shared
-  // implementation between `JsRpcStub::getRpcMethod()` and `Fetcher::getRpcMethod()`.
-  static jsg::Promise<jsg::Value> sendJsRpc(
-      jsg::Lock& js,
-      rpc::JsRpcTarget::Client client,
-      kj::StringPtr name,
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  using RpcFunction = jsg::Function<jsg::Promise<jsg::Value>(
-      const v8::FunctionCallbackInfo<v8::Value>& info)>;
-
-  kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
+  kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
 
   JSG_RESOURCE_TYPE(JsRpcStub) {
     JSG_WILDCARD_PROPERTY(getRpcMethod);
@@ -236,6 +259,7 @@ public:
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES  \
+  api::JsRpcProperty,                \
   api::JsRpcStub,                    \
   api::JsRpcTarget,                  \
   api::WorkerEntrypoint,             \

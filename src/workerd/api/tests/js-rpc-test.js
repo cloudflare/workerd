@@ -175,8 +175,7 @@ export let namedServiceBinding = {
     });
 
     let getByName = name => {
-      let func = env.MyService.getRpcMethodForTestOnly(name);
-      return func.bind(env.MyService);
+      return env.MyService.getRpcMethodForTestOnly(name);
     };
 
     // Check getRpcMethodForTestOnly() actually works.

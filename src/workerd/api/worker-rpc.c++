@@ -148,11 +148,28 @@ private:
 
 } // namespace
 
-jsg::Promise<jsg::Value> JsRpcStub::sendJsRpc(
-    jsg::Lock& js,
-    rpc::JsRpcTarget::Client client,
-    kj::StringPtr name,
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
+jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
+
+  // Note: We used to enforce that RPC methods had to be called with the correct `this`. That is,
+  // we prevented people from doing:
+  //
+  //   let obj = {foo: someRpcStub.foo};
+  //   obj.foo();
+  //
+  // This would throw "Illegal invocation", as is the norm when pulling methods of a native object.
+  // That worked as long as RPC methods were implemented as `jsg::Function`. However, when we
+  // switched to RPC methods being implemented as callable objects (JsRpcProperty), this became
+  // impossible, because V8's SetCallAsFunctionHandler() arranges that `this` is bound to the
+  // callable object itself, regardless of how it was invoked. So now we cannot detect the
+  // situation above, because V8 never tells us about `obj` at all.
+  //
+  // Oh well. It's not a big deal. Just annoying that we have to forever support tearing RPC
+  // methods off their source object, even if we change implementations to something where that's
+  // less convenient.
+
+  auto client = parent->getClientForOneCall(js);
+
   auto& ioContext = IoContext::current();
 
   auto builder = client.callRequest();
@@ -180,32 +197,18 @@ jsg::Promise<jsg::Value> JsRpcStub::sendJsRpc(
   });
 }
 
-kj::Maybe<JsRpcStub::RpcFunction> JsRpcStub::getRpcMethod(
+rpc::JsRpcTarget::Client JsRpcStub::getClientForOneCall(jsg::Lock& js) {
+  return *capnpClient;
+}
+
+kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcStub::getRpcMethod(
     jsg::Lock& js, kj::StringPtr name) {
   // Do not return a method for `then`, otherwise JavaScript decides this is a thenable, i.e. a
   // custom Promise, which will mean a Promise that resolves to this object will attempt to chain
   // with it, which is not what you want!
   if (name == "then"_kj) return kj::none;
 
-  return RpcFunction(JSG_VISITABLE_LAMBDA(
-      (methodName = kj::str(name), self = JSG_THIS),
-      (self),
-      (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) -> jsg::Promise<jsg::Value> {
-    // Let's make sure that the returned function wasn't invoked using a different `this` than the
-    // one intended. We don't really _have to_ check this, but if we don't, then we have to forever
-    // support tearing RPC methods off their owning objects and invoking them elsewhere. Enforcing
-    // it might allow future implementation flexibility. (We use the terrible error message
-    // "Illegal invocation" because this is the exact message V8 normally generates when invoking a
-    // native function with the wrong `this`.)
-    //
-    // TODO(cleanup): Ideally, we'd actually obtain `self` by unwrapping `args.This()` to a
-    // `jsg::Ref<JsRpcStub>` instead of capturing it, but there isn't a JSG-blessed way to do
-    // that.
-    JSG_REQUIRE(args.This() == KJ_ASSERT_NONNULL(self.tryGetHandle(js)), TypeError,
-        "Illegal invocation");
-
-    return sendJsRpc(js, *self->capnpClient, methodName, args);
-  }));
+  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::str(name));
 }
 
 void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
