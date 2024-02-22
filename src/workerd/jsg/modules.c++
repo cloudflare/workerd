@@ -65,9 +65,18 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     bool internalOnly = ref.type == ModuleRegistry::Type::BUILTIN ||
                         ref.type == ModuleRegistry::Type::INTERNAL;
 
-    kj::Path targetPath = !internalOnly ?
-        ref.specifier.parent().eval(spec) :
-        kj::Path::parse(spec);
+    kj::Path targetPath = ([&] {
+      // If the specifier begins with one of our known prefixes, let's not resolve
+      // it against the referrer.
+      auto spec = kj::str(specifier);
+      if (internalOnly ||
+          spec.startsWith("node:") ||
+          spec.startsWith("cloudflare:") ||
+          spec.startsWith("workerd:")) {
+        return kj::Path::parse(spec);
+      }
+      return ref.specifier.parent().eval(spec);
+    })();
 
     KJ_IF_SOME(resolved, registry->resolve(js, targetPath, ref.specifier,
         internalOnly ?
@@ -245,7 +254,16 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
   auto modulesForResolveCallback = getModulesForResolveCallback(js.v8Isolate);
   KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
 
-  kj::Path targetPath = path.parent().eval(specifier);
+  kj::Path targetPath = ([&] {
+    // If the specifier begins with one of our known prefixes, let's not resolve
+    // it against the referrer.
+    if (specifier.startsWith("node:") ||
+        specifier.startsWith("cloudflare:") ||
+        specifier.startsWith("workerd:")) {
+      return kj::Path::parse(specifier);
+    }
+    return path.parent().eval(specifier);
+  })();
 
   // require() is only exposed to worker bundle modules so the resolve here is only
   // permitted to require worker bundle or built-in modules. Internal modules are
@@ -587,7 +605,16 @@ v8::Local<v8::Value> NodeJsModuleContext::require(jsg::Lock& js, kj::String spec
   auto modulesForResolveCallback = jsg::getModulesForResolveCallback(js.v8Isolate);
   KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
 
-  kj::Path targetPath = path.parent().eval(specifier);
+  kj::Path targetPath = ([&] {
+    // If the specifier begins with one of our known prefixes, let's not resolve
+    // it against the referrer.
+    if (specifier.startsWith("node:") ||
+        specifier.startsWith("cloudflare:") ||
+        specifier.startsWith("workerd:")) {
+      return kj::Path::parse(specifier);
+    }
+    return path.parent().eval(specifier);
+  })();
 
   // require() is only exposed to worker bundle modules so the resolve here is only
   // permitted to require worker bundle or built-in modules. Internal modules are
