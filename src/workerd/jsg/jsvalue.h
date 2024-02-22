@@ -306,15 +306,12 @@ public:
   V(Number)
   V(Int32)
   V(Uint32)
-  V(Map)
   V(Set)
 
 #undef V
 
 class JsObject final : public JsBase<v8::Object, JsObject> {
 public:
-  operator JsMap() const;
-
   void set(Lock& js, const JsValue& name, const JsValue& value);
   void set(Lock& js, kj::StringPtr name, const JsValue& value);
   JsValue get(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
@@ -352,6 +349,24 @@ public:
 
   void recursivelyFreeze(Lock&);
   JsObject jsonClone(Lock&);
+};
+
+class JsMap final : public JsBase<v8::Map, JsMap> {
+public:
+  operator JsObject();
+
+  void set(Lock& js, const JsValue& name, const JsValue& value);
+  void set(Lock& js, kj::StringPtr name, const JsValue& value);
+  JsValue get(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
+  JsValue get(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
+  bool has(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
+  bool has(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
+  void delete_(Lock& js, const JsValue& name);
+  void delete_(Lock& js, kj::StringPtr name);
+
+  int hashCode() const;
+
+  using JsBase<v8::Map, JsMap>::JsBase;
 };
 
 template <typename T>
