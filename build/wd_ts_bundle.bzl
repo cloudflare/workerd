@@ -77,8 +77,8 @@ def wd_ts_bundle(
         eslint_bin.eslint_test(
             name = name + "@eslint",
             args = [
-                "--config $(execpath {})".format(eslintrc_json),
-                "--parser-options project:$(execpath {})".format(tsconfig_json),
+                "--config $(location {})".format(eslintrc_json),
+                "--parser-options project:$(location {})".format(tsconfig_json),
                 "-f stylish",
                 "--report-unused-disable-directives",
             ] + ["$(location " + src + ")" for src in ts_srcs],

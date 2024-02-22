@@ -9,14 +9,15 @@ wd_ts_bundle(
             "internal/*.ts",
             "internal/*.js",
         ],
-        exclude = [
-            "internal/test/*",
-        ],
+        allow_empty = True,
     ),
-    modules = glob([
-        "*.ts",
-        "*.js",
-    ]),
+    modules = glob(
+        [
+            "*.ts",
+            "*.js",
+        ],
+        allow_empty = True,
+    ),
     schema_id = "0xbcc8f57c63814006",
     tsconfig_json = "tsconfig.json",
 )

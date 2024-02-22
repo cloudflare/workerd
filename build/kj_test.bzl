@@ -17,4 +17,6 @@ def kj_test(
             "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
             "//conditions:default": [""],
         }),
+        data = data,
+        tags = tags,
     )
