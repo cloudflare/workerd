@@ -1,0 +1,19 @@
+diff --color -u5 -r sqlite-src-3440000-pristine/tool/mksqlite3c.tcl sqlite-src-3440000-modified/tool/mksqlite3c.tcl
+--- sqlite-src-3440000-pristine/tool/mksqlite3c.tcl	2023-11-01 07:31:37
++++ sqlite-src-3440000-modified/tool/mksqlite3c.tcl	2024-03-14 17:36:55
+@@ -84,11 +84,14 @@
+ set fname sqlite3.c
+ if {$enable_recover} { set fname sqlite3r.c }
+ set out [open $fname w]
+ # Force the output to use unix line endings, even on Windows.
+ fconfigure $out -translation lf
+-set today [clock format [clock seconds] -format "%Y-%m-%d %H:%M:%S UTC" -gmt 1]
++# The command below results in "couldn't find HOME environment variable to
++# expand path" errors on macOS CI runs. today is unused, so it is safe to
++# comment it out.
++# set today [clock format [clock seconds] -format "%Y-%m-%d %H:%M:%S UTC" -gmt 1]
+ puts $out [subst \
+ {/******************************************************************************
+ ** This file is an amalgamation of many separate C source files from SQLite
+ ** version $VERSION.  By combining all the individual C code files into this
+ ** single large file, the entire code can be compiled as a single translation
