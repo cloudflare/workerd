@@ -52,7 +52,7 @@ struct JsValueContext: public ContextGlobalObject {
   JsValue getStringIntern(Lock& js) {
     return js.strIntern("foo");
   }
-  JsObject getMap(Lock& js) {
+  JsMap getMap(Lock& js) {
     auto map = js.map();
     map.set(js, "foo", js.num(1));
     return map;
