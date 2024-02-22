@@ -1,5 +1,17 @@
 import assert from 'node:assert';
-import {WorkerEntrypoint,DurableObject} from 'cloudflare:workers';
+import {WorkerEntrypoint,DurableObject,RpcStub,RpcTarget} from 'cloudflare:workers';
+
+class MyCounter extends RpcTarget {
+  constructor(i = 0) {
+    super();
+    this.i = i;
+  }
+
+  async increment(j) {
+    this.i += j;
+    return this.i;
+  }
+}
 
 export let nonClass = {
   async noArgs(x, env, ctx) {
@@ -49,6 +61,14 @@ export class MyService extends WorkerEntrypoint {
 
   async twoArgsMethod(i, j) {
     return i * j + this.env.twelve;
+  }
+
+  async makeCounter(i) {
+    return new MyCounter(i);
+  }
+
+  async incrementCounter(counter, i) {
+    return await counter.increment(i);
   }
 
   async fetch(req, x) {
@@ -242,5 +262,29 @@ export let defaultExportClass = {
   async test(controller, env, ctx) {
     let resp = await env.defaultExport.fetch("http://foo");
     assert.strictEqual(await resp.text(), "default service 12");
+  },
+}
+
+export let loopbackJsRpcTarget = {
+  async test(controller, env, ctx) {
+    let stub = new RpcStub(new MyCounter(4));
+    assert.strictEqual(await stub.increment(5), 9);
+    assert.strictEqual(await stub.increment(7), 16);
+  },
+}
+
+export let sendStubOverRpc = {
+  async test(controller, env, ctx) {
+    let stub = new RpcStub(new MyCounter(4));
+    assert.strictEqual(await env.MyService.incrementCounter(stub, 5), 9);
+    assert.strictEqual(await stub.increment(7), 16);
+  },
+}
+
+export let receiveStubOverRpc = {
+  async test(controller, env, ctx) {
+    let stub = await env.MyService.makeCounter(17);
+    assert.strictEqual(await stub.increment(2), 19);
+    assert.strictEqual(await stub.increment(-10), 9);
   },
 }

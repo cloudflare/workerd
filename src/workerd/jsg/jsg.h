@@ -484,9 +484,32 @@ using HasGetTemplateOverload = decltype(
     wrapper.initReflection(this, __VA_ARGS__); \
   }
 
+// Declares the type serializable. See jsg::Serializer for usage.
+#define JSG_SERIALIZABLE(TAG, ...) \
+  static_assert(static_cast<uint>(jsgSuper::jsgSerializeTag) != static_cast<uint>(TAG)); \
+  static constexpr auto jsgSerializeTag = TAG; \
+  static constexpr decltype(jsgSerializeTag) jsgSerializeOldTags[] = {__VA_ARGS__}; \
+  static constexpr auto jsgSerializeOneway = false
+
+// Like JSG_SERIALIZABLE(), but the type has only a serialize() method and no deserialize(). It
+// is expected that the specified tag actually belongs to some other type, so a serialization
+// round trip will have the effect of replacing this type with that other type.
+//
+// Used e.g. for JsRpcTarget, which becomes JsRpcStub after serialization.
+#define JSG_ONEWAY_SERIALIZABLE(TAG) \
+  static_assert(static_cast<uint>(jsgSuper::jsgSerializeTag) != static_cast<uint>(TAG)); \
+  static constexpr auto jsgSerializeTag = TAG; \
+  static constexpr decltype(jsgSerializeTag) jsgSerializeOldTags[] = {}; \
+  static constexpr auto jsgSerializeOneway = true
+
 // Declares a wildcart property getter. If a property is requested that isn't already present on
 // the object or its prototypes, the wildcard property getter will be given a chance to return the
 // property.
+//
+// WARNING: Be very careful about the property named "then". If it exists and is a function, V8
+//   will treat your type as a custom thenable, i.e. as a kind of Promise, which means among other
+//   things that any time a Promise would resolve to it, it will try to chain with it. You should
+//   probably return kj::none when "then" is requested.
 //
 // Example:
 //
@@ -1065,6 +1088,10 @@ public:
   static constexpr bool jsgHasReflection = false;
   template <typename TypeWrapper>
   inline void jsgInitReflection(TypeWrapper& wrapper) {}
+
+  // Dummy invalid serialization tag. This is only used to detect when a subclass has defined their
+  // own tag.
+  static constexpr uint jsgSerializeTag = kj::maxValue;
 
 private:
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
