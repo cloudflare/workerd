@@ -144,7 +144,7 @@ public:
   // for testing to be able to construct a loopback stub.
   static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
 
-  kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
+  kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcStub) {
     JSG_WILDCARD_PROPERTY(getRpcMethod);

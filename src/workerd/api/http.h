@@ -557,9 +557,9 @@ public:
 
   jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
-  kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
+  kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
-    return getRpcMethod(js, name);
+    return getRpcMethod(js, kj::mv(name));
   }
 
   rpc::JsRpcTarget::Client getClientForOneCall(jsg::Lock& js) override;

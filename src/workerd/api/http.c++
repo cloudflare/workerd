@@ -1866,7 +1866,7 @@ jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(
   return fetchImpl(js, JSG_THIS, kj::mv(requestOrUrl), kj::mv(requestInit));
 }
 
-kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::StringPtr name) {
+kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::String name) {
   // This is like JsRpcStub::getRpcMethod(), but we also initiate a whole new JS RPC session
   // each time the method is called (handled by `getClientForOneCall()`, below).
 
@@ -1875,7 +1875,7 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::Stri
   // with it, which is not what you want!
   if (name == "then"_kj) return kj::none;
 
-  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::str(name));
+  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
 rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(jsg::Lock& js) {

@@ -202,13 +202,13 @@ rpc::JsRpcTarget::Client JsRpcStub::getClientForOneCall(jsg::Lock& js) {
 }
 
 kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcStub::getRpcMethod(
-    jsg::Lock& js, kj::StringPtr name) {
+    jsg::Lock& js, kj::String name) {
   // Do not return a method for `then`, otherwise JavaScript decides this is a thenable, i.e. a
   // custom Promise, which will mean a Promise that resolves to this object will attempt to chain
   // with it, which is not what you want!
   if (name == "then"_kj) return kj::none;
 
-  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::str(name));
+  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
 void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
