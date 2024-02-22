@@ -1,12 +1,10 @@
 * @cloudflare/workers-runtime-1 @cloudflare/workers-durable-objects
-.github/workflows/npm.yml @cloudflare/wrangler
-.github/workflows/npm-types.yml @cloudflare/wrangler
-.github/workflows/release.yml @cloudflare/wrangler
-npm/ @cloudflare/wrangler
-build-releases.sh @cloudflare/wrangler
-RELEASE.md @cloudflare/wrangler
-package.json @cloudflare/wrangler
-pnpm-lock.yaml @cloudflare/wrangler
-types/ @cloudflare/wrangler
-src/workerd/tools/ @cloudflare/wrangler
-src/workerd/io/supported-compatibility-date.txt @cloudflare/wrangler
+.github/workflows/ @cloudflare/wrangler @cloudflare/workers-runtime-1
+npm/ @cloudflare/wrangler @cloudflare/workers-runtime-1
+build-releases.sh @cloudflare/wrangler @cloudflare/workers-runtime-1
+RELEASE.md @cloudflare/wrangler @cloudflare/workers-runtime-1
+package.json @cloudflare/wrangler @cloudflare/workers-runtime-1
+pnpm-lock.yaml @cloudflare/wrangler @cloudflare/workers-runtime-1
+types/ @cloudflare/wrangler @cloudflare/workers-runtime-1
+src/workerd/tools/ @cloudflare/wrangler @cloudflare/workers-runtime-1 @cloudflare/workers-durable-objects
+src/workerd/io/supported-compatibility-date.txt @cloudflare/wrangler @cloudflare/workers-runtime-1
