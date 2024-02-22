@@ -220,11 +220,33 @@ struct JsValue {
 }
 
 interface JsRpcTarget {
-  call @0 (methodName :Text, args :JsValue) -> (result :JsValue);
+  struct CallParams {
+    union {
+      methodName @0 :Text;
+      # Equivalent to `methodPath` where the list has only one element equal to this.
+
+      methodPath @2 :List(Text);
+      # Path of properties to follow from the JsRpcTarget itself to find the method being called.
+      # E.g. if the application does:
+      #
+      #     myRpcTarget.foo.bar.baz()
+      #
+      # Then the path is ["foo", "bar", "baz"].
+      #
+      # The path can also be empty, which means that the JsRpcTarget itself is being invoked as a
+      # function.
+    }
+
+    args @1 :JsValue;
+    # Arguments to the function. This is a JsValue that always encodes a JavaScript Array
+    # containing the arguments to the call.
+    #
+    # If `args` is null (but is still the active member of the union), this indicates that the
+    # argument list is empty.
+  }
+
+  call @0 CallParams -> (result :JsValue);
   # Runs a Worker/DO's RPC method.
-  #
-  # `methodName` is the name of the method to run, and `args` is a JsValue that is always a
-  # JavaScript Array, containing the arguments to the call.
 }
 
 interface EventDispatcher @0xf20697475ec1752d {

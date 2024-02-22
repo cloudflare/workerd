@@ -13,6 +13,17 @@ class MyCounter extends RpcTarget {
   }
 }
 
+class NonRpcClass {
+  foo() {
+    return 123;
+  }
+  get bar() {
+    return {
+      baz() { return 456; }
+    }
+  }
+};
+
 export let nonClass = {
   async noArgs(x, env, ctx) {
     assert.strictEqual(typeof ctx.waitUntil, "function");
@@ -49,6 +60,10 @@ export class MyService extends WorkerEntrypoint {
     this.instanceMethod = () => {
       return "nope";
     }
+
+    this.instanceObject = {
+      func: (a) => a * 5,
+    };
   }
 
   async noArgsMethod(x) {
@@ -80,6 +95,17 @@ export class MyService extends WorkerEntrypoint {
   get nonFunctionProperty() { return {foo: 123}; }
 
   get functionProperty() { return (a, b) => a - b; }
+
+  get objectProperty() {
+    return {
+      func: (a, b) => a * b,
+      deeper: {
+        deepFunc: (a, b) => a / b,
+      },
+      counter5: new MyCounter(5),
+      nonRpc: new NonRpcClass(),
+    };
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -165,6 +191,11 @@ export let namedServiceBinding = {
     // Properties that return a function can actually be called.
     assert.strictEqual(await env.MyService.functionProperty(19, 6), 13);
 
+    // Members of an object-typed property can be invoked.
+    assert.strictEqual(await env.MyService.objectProperty.func(6, 4), 24);
+    assert.strictEqual(await env.MyService.objectProperty.deeper.deepFunc(6, 3), 2);
+    assert.strictEqual(await env.MyService.objectProperty.counter5.increment(3), 8);
+
     // `fetch()` is special, the params get converted into a Request.
     let resp = await env.MyService.fetch("http://foo", {method: "POST"});
     assert.strictEqual(await resp.text(), "method = POST, url = http://foo");
@@ -172,6 +203,11 @@ export let namedServiceBinding = {
     await assert.rejects(() => env.MyService.instanceMethod(), {
       name: "TypeError",
       message: "The RPC receiver does not implement the method \"instanceMethod\"."
+    });
+
+    await assert.rejects(() => env.MyService.instanceObject.func(3), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"instanceObject\"."
     });
 
     let getByName = name => {
@@ -214,11 +250,30 @@ export let namedServiceBinding = {
     // Check what happens if we access something that's actually declared as a property on the
     // class. The difference in error message proves to us that `env` and `ctx` weren't visible at
     // all, which is what we want.
-    // TODO(soon): When we add pipelining support, also make sure that functions inside `env` and
-    //   `ctx` can't be accessed.
     await assert.rejects(() => getByName("nonFunctionProperty")(), {
       name: "TypeError",
       message: "\"nonFunctionProperty\" is not a function."
+    });
+
+    // Check that we can't access contents of a property that is a class but not derived from
+    // RpcTarget.
+    await assert.rejects(() => env.MyService.objectProperty.nonRpc.foo(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"nonRpc\"."
+    });
+    await assert.rejects(() => env.MyService.objectProperty.nonRpc.bar.baz(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"nonRpc\"."
+    });
+
+    // Extra-paranoid check that we can't access methods on env or ctx.
+    await assert.rejects(() => env.MyService.objectProperty.env.MyService.noArgsMethod(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"env\"."
+    });
+    await assert.rejects(() => env.MyService.objectProperty.ctx.waitUntil(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"ctx\"."
     });
   },
 }

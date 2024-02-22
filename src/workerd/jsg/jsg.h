@@ -2392,6 +2392,9 @@ private:
   void* previousData;
 
   bool warningsLogged;
+
+  friend class JsObject;
+  virtual kj::Maybe<Object&> getInstance(v8::Local<v8::Object> obj, const std::type_info& type) = 0;
 };
 
 // Ensures that the given fn is run within both a handlescope and the context scope.

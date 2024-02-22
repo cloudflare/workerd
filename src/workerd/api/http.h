@@ -562,7 +562,8 @@ public:
     return getRpcMethod(js, kj::mv(name));
   }
 
-  rpc::JsRpcTarget::Client getClientForOneCall(jsg::Lock& js) override;
+  rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent

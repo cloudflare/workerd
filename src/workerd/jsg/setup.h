@@ -484,6 +484,18 @@ public:
 
   private:
     Isolate& jsgIsolate;
+
+    virtual kj::Maybe<Object&> getInstance(
+        v8::Local<v8::Object> obj, const std::type_info& type) override {
+      auto instance = v8::Local<v8::Object>(obj)->FindInstanceInPrototypeChain(
+          jsgIsolate.wrapper->getDynamicTypeInfo(v8Isolate, type).tmpl);
+      if (instance.IsEmpty()) {
+        return kj::none;
+      } else {
+        return *reinterpret_cast<Object*>(
+            instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+      }
+    }
   };
 
   // The func must be a callback with the signature: void(jsg::Lock&)

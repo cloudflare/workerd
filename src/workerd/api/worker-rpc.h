@@ -89,20 +89,31 @@ public:
 class JsRpcClientProvider: public jsg::Object {
 public:
   // Get a capnp client that can be used to dispatch one call.
-  virtual rpc::JsRpcTarget::Client getClientForOneCall(jsg::Lock& js) = 0;
+  //
+  // If this isn't the root object (i.e. this is a JsRpcProperty), the property path starting from
+  // the root object will be appended to `path`.
+  virtual rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
 };
 
 // Represents a property -- possibly, a method -- of a remote RPC object.
-class JsRpcProperty: public jsg::Object {
+class JsRpcProperty: public JsRpcClientProvider {
 public:
   JsRpcProperty(jsg::Ref<JsRpcClientProvider> parent, kj::String name)
       : parent(kj::mv(parent)), name(kj::mv(name)) {}
 
+  rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
   // Call the property as a method.
   jsg::Promise<jsg::Value> call(const v8::FunctionCallbackInfo<v8::Value>& args);
 
+  // Get a nested property, using pipelining.
+  kj::Maybe<jsg::Ref<JsRpcProperty>> getProperty(jsg::Lock& js, kj::String name);
+
   JSG_RESOURCE_TYPE(JsRpcProperty) {
     JSG_CALLABLE(call);
+    JSG_WILDCARD_PROPERTY(getProperty);
   }
 
 private:
@@ -134,7 +145,8 @@ public:
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
       : capnpClient(kj::mv(capnpClient)) {}
 
-  rpc::JsRpcTarget::Client getClientForOneCall(jsg::Lock& js) override;
+  rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
   // Given a JsRpcTarget, make an RPC stub from it.
   //

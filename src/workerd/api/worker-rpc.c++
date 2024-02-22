@@ -148,6 +148,13 @@ private:
 
 } // namespace
 
+rpc::JsRpcTarget::Client JsRpcProperty::getClientForOneCall(
+    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
+  auto result = parent->getClientForOneCall(js, path);
+  path.add(name);
+  return result;
+}
+
 jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
 
@@ -168,12 +175,24 @@ jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::
   // methods off their source object, even if we change implementations to something where that's
   // less convenient.
 
-  auto client = parent->getClientForOneCall(js);
+  // `path` will be filled in with the path of property names leading from the stub represented by
+  // `client` to the specific property / method that we're trying to invoke.
+  kj::Vector<kj::StringPtr> path;
+  auto client = parent->getClientForOneCall(js, path);
 
   auto& ioContext = IoContext::current();
 
   auto builder = client.callRequest();
-  builder.setMethodName(name);
+
+  if (path.empty()) {
+    builder.setMethodName(name);
+  } else {
+    auto pathBuilder = builder.initMethodPath(path.size() + 1);
+    for (auto i: kj::indices(path)) {
+      pathBuilder.set(i, path[i]);
+    }
+    pathBuilder.set(path.size(), name);
+  }
 
   kj::Vector<jsg::JsValue> argv(args.Length());
   for (int n = 0; n < args.Length(); n++) {
@@ -197,7 +216,13 @@ jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::
   });
 }
 
-rpc::JsRpcTarget::Client JsRpcStub::getClientForOneCall(jsg::Lock& js) {
+kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcProperty::getProperty(jsg::Lock& js, kj::String name) {
+  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
+}
+
+rpc::JsRpcTarget::Client JsRpcStub::getClientForOneCall(
+    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
+  // (Don't extend `path` because we're the root.)
   return *capnpClient;
 }
 
@@ -254,7 +279,7 @@ public:
 
   struct TargetInfo {
     // The object on which the RPC method should be invoked.
-    v8::Local<v8::Object> target;
+    jsg::JsObject target;
 
     // If `env` and `ctx` need to be delivered as arguments to the method, these are the values
     // to deliver.
@@ -270,13 +295,6 @@ public:
     IoContext& ctx = JSG_REQUIRE_NONNULL(weakIoContext->tryGet(), Error,
         "The destination object for this RPC no longer exists.");
 
-    auto params = callContext.getParams();
-    auto methodName = kj::heapString(params.getMethodName());
-    kj::Maybe<rpc::JsValue::Reader> args;
-    if (params.hasArgs()) {
-      args = params.getArgs();
-    }
-
     // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the backing
     // object's lifetime is that of the RPC call, but in reality they are refcounted under the
     // hood. Since well be executing the call in the JS microtask queue, we have no ability to
@@ -289,13 +307,19 @@ public:
 
     // Try to execute the requested method.
     auto promise = ctx.run(
-        [this,&ctx,methodName=kj::mv(methodName), args, callContext,
-         ownCallContext = kj::mv(ownCallContext), ownThis = thisCap()]
+        [this, &ctx, callContext, ownCallContext = kj::mv(ownCallContext), ownThis = thisCap()]
         (Worker::Lock& lock) mutable -> kj::Promise<void> {
 
       jsg::Lock& js = lock;
 
       auto targetInfo = getTargetInfo(lock, ctx);
+
+      auto params = callContext.getParams();
+
+      kj::Maybe<rpc::JsValue::Reader> args;
+      if (params.hasArgs()) {
+        args = params.getArgs();
+      }
 
       // `targetInfo.envCtx` is present when we're invoking a freestanding function, and therefore
       // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup
@@ -306,14 +330,15 @@ public:
       bool allowInstanceProperties = targetInfo.envCtx != kj::none;
 
       // We will try to get the function, if we can't we'll throw an error to the client.
-      auto fn = tryGetFn(lock, ctx, targetInfo.target, methodName, allowInstanceProperties);
+      auto [fn, thisArg, methodNameForErrors] = tryGetFn(
+          lock, targetInfo.target, params, allowInstanceProperties);
 
       v8::Local<v8::Value> invocationResult;
       KJ_IF_SOME(envCtx, targetInfo.envCtx) {
-        invocationResult = invokeFnInsertingEnvCtx(js, methodName, fn, targetInfo.target, args,
-            envCtx.env, envCtx.ctx);
+        invocationResult = invokeFnInsertingEnvCtx(js, methodNameForErrors, fn, thisArg,
+            args, envCtx.env, envCtx.ctx);
       } else {
-        invocationResult = invokeFn(js, fn, targetInfo.target, args);
+        invocationResult = invokeFn(js, fn, thisArg, args);
       }
 
       // We have a function, so let's call it and serialize the result for RPC.
@@ -370,40 +395,118 @@ private:
     return false;
   }
 
-  // If the `methodName` is a known public method, we'll return it.
-  static inline v8::Local<v8::Function> tryGetFn(
-      Worker::Lock& lock,
-      IoContext& ctx,
-      v8::Local<v8::Object> handle,
-      kj::StringPtr methodName,
-      bool allowInstanceProperties) {
-    jsg::Lock& js(lock);
+  struct GetFnResult {
+    v8::Local<v8::Function> fn;
+    v8::Local<v8::Object> thisArg;
 
-    if (!allowInstanceProperties) {
-      auto proto = handle->GetPrototype();
-      // This assert can't fail because we only take this branch when operating on a class
-      // instance.
-      KJ_ASSERT(proto->IsObject());
-      handle = proto.As<v8::Object>();
+    // Method name suitable for use in error messages.
+    kj::StringPtr methodNameForErrors;
+  };
+
+  [[noreturn]] static void failLookup(kj::StringPtr kjName) {
+    JSG_FAIL_REQUIRE(TypeError,
+        kj::str("The RPC receiver does not implement the method \"", kjName, "\"."));
+  }
+
+  static GetFnResult tryGetFn(
+      jsg::Lock& js,
+      jsg::JsObject object,
+      rpc::JsRpcTarget::CallParams::Reader callParams,
+      bool allowInstanceProperties) {
+    auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype().tryCast<jsg::JsObject>());
+
+    // Get the named property of `object`.
+    auto getProperty = [&](kj::StringPtr kjName) {
+      JSG_REQUIRE(!isReservedName(kjName), TypeError,
+          kj::str("'", kjName, "' is a reserved method and cannot be called over RPC."));
+
+      jsg::JsValue jsName = js.strIntern(kjName);
+
+      if (allowInstanceProperties) {
+        // This is a simple object. Its own properties are considered to be accessible over RPC, but
+        // inherited properties (i.e. from Object.prototype) are not.
+        if (!object.has(js, jsName, jsg::JsObject::HasOption::OWN)) {
+          failLookup(kjName);
+        }
+        return object.get(js, jsName);
+      } else {
+        // This is an instance of a valid RPC target class.
+        if (object.has(js, jsName, jsg::JsObject::HasOption::OWN)) {
+          // We do NOT allow own properties, only class properties.
+          failLookup(kjName);
+        }
+
+        auto value = object.get(js, jsName);
+        if (value == prototypeOfObject.get(js, jsName)) {
+          // This property is inherited from the prototype of `Object`. Don't allow.
+          failLookup(kjName);
+        }
+
+        return value;
+      }
+    };
+
+    kj::Maybe<jsg::JsValue> func;
+    kj::StringPtr methodNameForErrors;
+
+    switch (callParams.which()) {
+      case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
+        kj::StringPtr methodName = callParams.getMethodName();
+        func = getProperty(methodName);
+        methodNameForErrors = methodName;
+        break;
+      }
+
+      case rpc::JsRpcTarget::CallParams::METHOD_PATH: {
+        auto path = callParams.getMethodPath();
+        auto n = path.size();
+
+        if (n == 0) {
+          // Call the target itself as a function.
+          func = object;
+        } else {
+          for (auto i: kj::zeroTo(n - 1)) {
+            // For each property name except the last, look up the proprety and replace `object`
+            // with it.
+            kj::StringPtr name = path[i];
+            auto next = getProperty(name);
+
+            KJ_IF_SOME(o, next.tryCast<jsg::JsObject>()) {
+              object = o;
+            } else {
+              // Not an object, doesn't have further properties.
+              failLookup(name);
+            }
+
+            // Decide whether the new object is a suitable RPC target.
+            if (object.getPrototype() == prototypeOfObject) {
+              // Yes. It's a simple object.
+              allowInstanceProperties = true;
+            } else if (object.isInstanceOf<JsRpcTarget>(js)) {
+              // Yes. It's a JsRpcTarget.
+              allowInstanceProperties = false;
+            } else {
+              failLookup(name);
+            }
+          }
+
+          func = getProperty(path[n-1]);
+        }
+
+        break;
+      }
     }
 
-    auto methodStr = jsg::v8StrIntern(lock.getIsolate(), methodName);
-    auto fnHandle = jsg::check(handle->Get(lock.getContext(), methodStr));
+    v8::Local<v8::Value> fnHandle =
+        KJ_ASSERT_NONNULL(func, "unknown CallParams type", (uint)callParams.which());
 
-    v8::Local<v8::Object> obj = js.obj();
-    auto objProto = obj->GetPrototype().As<v8::Object>();
-
-    // Get() will check the Object and the prototype chain. We want to verify that the function
-    // we intend to call is not the one defined on the Object prototype.
-    bool isImplemented = fnHandle != jsg::check(objProto->Get(js.v8Context(), methodStr));
-
-    JSG_REQUIRE(isImplemented, TypeError,
-        kj::str("The RPC receiver does not implement the method \"", methodName, "\"."));
     JSG_REQUIRE(fnHandle->IsFunction(), TypeError,
-        kj::str("\"", methodName, "\" is not a function."));
-    JSG_REQUIRE(!isReservedName(methodName), TypeError,
-        kj::str("'", methodName, "' is a reserved method and cannot be called over RPC."));
-    return fnHandle.As<v8::Function>();
+        kj::str("\"", methodNameForErrors, "\" is not a function."));
+    return {
+      .fn = fnHandle.As<v8::Function>(),
+      .thisArg = object,
+      .methodNameForErrors = methodNameForErrors,
+    };
   }
 
   // Deserializes the arguments and passes them to the given function.
@@ -592,7 +695,7 @@ public:
     }
 
     return {
-      .target = handler->self.getHandle(lock),
+      .target = jsg::JsObject(handler->self.getHandle(lock)),
       .envCtx = handler->ctx.map([&](jsg::Ref<ExecutionContext>& execCtx) -> EnvCtx {
         return {
           .env = handler->env.getHandle(js),
