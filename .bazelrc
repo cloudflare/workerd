@@ -17,6 +17,12 @@ build --remote_download_all
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
 
+# Avoid generating duplicate runfile trees. This will become the default in a future bazel version.
+build --legacy_external_runfiles=false
+
+# Flip this early to avoid breaking compatibility once it becomes the default.
+build --incompatible_disallow_empty_glob
+
 # Dawn tint build flags
 build --@dawn//src/tint:tint_build_glsl_writer=False
 build --@dawn//src/tint:tint_build_glsl_validator=False
