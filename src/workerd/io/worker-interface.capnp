@@ -183,9 +183,40 @@ interface HibernatableWebSocketEventDispatcher {
   # Run a hibernatable websocket event
 }
 
+enum SerializationTag {
+  # Tag values for all serializable types supported by the Workers API.
+
+  invalid @0;
+  # Not assigned to anything. Reserved to make things less weird if a zero-valued tag gets written
+  # by accident.
+
+  jsRpcStub @1;
+}
+
 struct JsValue {
+  # A serialized JavaScript value being passed over RPC.
+
   v8Serialized @0 :Data;
   # JS value that has been serialized for network transport.
+
+  externals @1 :List(External);
+  # The serialized data may contain "externals" -- references to external resources that cannot
+  # simply be serialized. If so, they are placed in this separate list of externals.
+  #
+  # (We could also call these "capabilities", but that word is pretty overloaded already.)
+
+  struct External {
+    union {
+      invalid @0 :Void;
+      # Invalid default value to reduce confusion if an External wasn't initialized properly.
+      # This should never appear in a real JsValue.
+
+      rpcTarget @1 :JsRpcTarget;
+      # An object that can be called over RPC.
+
+      # TODO(soon): Streams, Request, Response, etc.
+    }
+  }
 }
 
 interface JsRpcTarget {

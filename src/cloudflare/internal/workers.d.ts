@@ -11,3 +11,10 @@ export class WorkerEntrypoint {
   public ctx: unknown;
   public env: unknown;
 }
+
+export class RpcStub {
+  public constructor(server: object);
+}
+
+export class RpcTarget {
+}

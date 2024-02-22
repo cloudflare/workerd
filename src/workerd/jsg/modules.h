@@ -825,9 +825,17 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   })();
 
   auto maybeSpecifierPath = ([&]() -> kj::Maybe<kj::Path> {
+    // If the specifier begins with one of our known prefixes, let's not resolve
+    // it against the referrer.
+    auto spec = kj::str(specifier);
+    if (spec.startsWith("node:") ||
+        spec.startsWith("cloudflare:") ||
+        spec.startsWith("workerd:")) {
+      return kj::Path::parse(spec);
+    }
     KJ_IF_SOME(referrerPath, maybeReferrerPath) {
       try {
-        return referrerPath.parent().eval(kj::str(specifier));
+        return referrerPath.parent().eval(spec);
       } catch (kj::Exception& ex) {
         return kj::none;
       }

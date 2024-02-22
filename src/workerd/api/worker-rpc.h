@@ -4,10 +4,10 @@
 
 #pragma once
 // Classes for calling a remote Worker/Durable Object's methods from the stub over RPC.
-// This file contains the generic stub object (JsRpcCapability), as well as classes for sending and
+// This file contains the generic stub object (JsRpcStub), as well as classes for sending and
 // delivering the RPC event.
 //
-// `JsRpcCapability` specifically represents a capability that was introduced as part of some
+// `JsRpcStub` specifically represents a capability that was introduced as part of some
 // broader RPC session. `Fetcher`, on the other hand, also supports RPC methods, where each method
 // call begins a new session (by dispatching a `jsRpcSession` custom event). Service bindings and
 // Durable Object stubs both extend from `Fetcher`, and so allow such calls.
@@ -15,6 +15,7 @@
 // See worker-interface.capnp for the underlying protocol.
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/jsg/function.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.capnp.h>
@@ -28,29 +29,89 @@ namespace workerd::api {
 // separate calls.
 constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 
-// A JsRpcCapability object forwards JS method calls to the remote Worker/Durable Object over RPC.
-// Since methods are not known until runtime, JsRpcCapability doesn't define any JS methods.
+// ExternalHandler used when serializing RPC messages. Serialization functions which whish to
+// handle RPC specially should use this.
+class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler {
+public:
+  using BuilderCallback = kj::Function<void(rpc::JsValue::External::Builder)>;
+
+  // Add an external. The value is a callback which will be invoked later to fill in the
+  // JsValue::External in the Cap'n Proto structure. The external array cannot be allocated until
+  // the number of externals are known, which is only after all calls to `add()` have completed,
+  // hence the need for a callback.
+  void write(BuilderCallback callback) { externals.add(kj::mv(callback)); }
+
+  // Build the final list.
+  capnp::Orphan<capnp::List<rpc::JsValue::External>> build(capnp::Orphanage orphanage);
+
+  size_t size() { return externals.size(); }
+
+private:
+  kj::Vector<BuilderCallback> externals;
+};
+
+// ExternalHandler used when deserializing RPC messages. Deserialization functions which whish to
+// handle RPC specially should use this.
+class RpcDeserializerExternalHander final: public jsg::Deserializer::ExternalHandler {
+public:
+  RpcDeserializerExternalHander(capnp::List<rpc::JsValue::External>::Reader externals)
+      : externals(externals) {}
+  ~RpcDeserializerExternalHander() noexcept(false);
+
+  // Read and return the next external.
+  rpc::JsValue::External::Reader read();
+
+private:
+  capnp::List<rpc::JsValue::External>::Reader externals;
+  uint i = 0;
+
+  kj::UnwindDetector unwindDetector;
+};
+
+// Base class for objects which can be sent over RPC, but doing so actually sends a stub which
+// makes RPCs back to the original object.
+class JsRpcTarget: public jsg::Object {
+public:
+  static jsg::Ref<JsRpcTarget> constructor() { return jsg::alloc<JsRpcTarget>(); }
+
+  JSG_RESOURCE_TYPE(JsRpcTarget) {}
+
+  // Serializes to JsRpcStub.
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::JS_RPC_STUB);
+};
+
+// A JsRpcStub object forwards JS method calls to the remote Worker/Durable Object over RPC.
+// Since methods are not known until runtime, JsRpcStub doesn't define any JS methods.
 // Instead, we use JSG_WILDCARD_PROPERTY to intercept property accesses of names that are not known
 // at compile time.
 //
-// JsRpcCapability only supports method calls. You cannot, for instance, access a property of a
+// JsRpcStub only supports method calls. You cannot, for instance, access a property of a
 // Durable Object over RPC.
 //
-// The `JsRpcCapability` type is used to represent capabilities passed across some previous JS RPC
+// The `JsRpcStub` type is used to represent capabilities passed across some previous JS RPC
 // call. It is NOT the type of a Durable Object stub nor a service binding. Those are instances of
 // `Fetcher`, which has a `getRpcMethod()` call of its own that mostly delegates to
-// `JsRpcCapability::sendJsRpc()`.
-class JsRpcCapability: public jsg::Object {
+// `JsRpcStub::sendJsRpc()`.
+class JsRpcStub: public jsg::Object {
 public:
-  JsRpcCapability(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
       : capnpClient(kj::mv(capnpClient)) {}
+
+  // Given a JsRpcTarget, make an RPC stub from it.
+  //
+  // Usually, applications won't use this constructor directly. Rather, they will define types
+  // that extend `JsRpcTarget` and then they will simply return those. The serializer will
+  // automatically handle `JsRpcTarget` by wrapping it in `JsRpcStub`. However, it can be useful
+  // for testing to be able to construct a loopback stub.
+  static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
 
   // Serializes the method name and arguments, calls customEvent to get the capability, and uses
   // the capability to send our request to the remote Worker. This resolves once the RPC promise
   // resolves.
   //
-  // This is a static helper, no `JsRpcCapability` object is needed. This is the shared
-  // implementation between `JsRpcCapability::getRpcMethod()` and `Fetcher::getRpcMethod()`.
+  // This is a static helper, no `JsRpcStub` object is needed. This is the shared
+  // implementation between `JsRpcStub::getRpcMethod()` and `Fetcher::getRpcMethod()`.
   static jsg::Promise<jsg::Value> sendJsRpc(
       jsg::Lock& js,
       rpc::JsRpcTarget::Client client,
@@ -62,9 +123,15 @@ public:
 
   kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
 
-  JSG_RESOURCE_TYPE(JsRpcCapability) {
+  JSG_RESOURCE_TYPE(JsRpcStub) {
     JSG_WILDCARD_PROPERTY(getRpcMethod);
   }
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<JsRpcStub> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::JS_RPC_STUB);
 
 private:
   IoOwn<rpc::JsRpcTarget::Client> capnpClient;
@@ -163,11 +230,14 @@ public:
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
+    JSG_NESTED_TYPE_NAMED(JsRpcStub, RpcStub);
+    JSG_NESTED_TYPE_NAMED(JsRpcTarget, RpcTarget);
   }
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES  \
-  api::JsRpcCapability,              \
+  api::JsRpcStub,                    \
+  api::JsRpcTarget,                  \
   api::WorkerEntrypoint,             \
   api::DurableObjectBase,            \
   api::EntrypointsModule

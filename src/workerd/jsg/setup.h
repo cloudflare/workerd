@@ -77,6 +77,13 @@ public:
   virtual v8::Local<v8::Value> wrapException(v8::Local<v8::Context> context,
                                              kj::Exception&& exception) = 0;
 
+  // Used by Serializer/Deserializer implementations, calls into DynamicResourceTypeMap
+  // serializerMap and deserializerMap.
+  virtual bool serialize(
+      Lock& js, std::type_index type, jsg::Object& instance, Serializer& serializer) = 0;
+  virtual kj::Maybe<v8::Local<v8::Object>> deserialize(
+      Lock& js, uint tag, Deserializer& deserializer) = 0;
+
   // Immediately cancels JavaScript execution in this isolate, causing an uncatchable exception to
   // be thrown. Safe to call across threads, without holding the lock.
   void terminateExecution() const;
@@ -343,6 +350,24 @@ public:
   v8::Local<v8::Value> wrapException(v8::Local<v8::Context> context,
                                      kj::Exception&& exception) override {
     return wrapper->wrap(context, kj::none, kj::fwd<kj::Exception>(exception));
+  }
+
+  bool serialize(
+      Lock& js, std::type_index type, jsg::Object& instance, Serializer& serializer) override {
+    KJ_IF_SOME(func, wrapper->serializerMap.find(type)) {
+      func(js, instance, serializer);
+      return true;
+    } else {
+      return false;
+    }
+  }
+  kj::Maybe<v8::Local<v8::Object>> deserialize(
+      Lock& js, uint tag, Deserializer& deserializer) override {
+    KJ_IF_SOME(func, wrapper->deserializerMap.find(tag)) {
+      return func(*wrapper, js, tag, deserializer);
+    } else {
+      return kj::none;
+    }
   }
 
   // Before you can execute code in your Isolate you must lock it to the current thread by
