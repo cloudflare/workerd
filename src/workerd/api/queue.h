@@ -196,12 +196,28 @@ public:
     tracker.trackFieldWithSize("IoPtr<QueueEventResult>", sizeof(IoPtr<QueueEventResult>));
   }
 
+  struct Incomplete {};
+  struct CompletedSuccessfully {};
+  struct CompletedWithError {
+    kj::Exception error;
+  };
+  typedef kj::OneOf<Incomplete, CompletedSuccessfully, CompletedWithError> CompletionStatus;
+
+  void setCompletionStatus(CompletionStatus status) {
+    completionStatus = status;
+  }
+
+  CompletionStatus getCompletionStatus() const {
+    return completionStatus;
+  }
+
 private:
   // TODO(perf): Should we store these in a v8 array directly rather than this intermediate kj
   // array to avoid one intermediate copy?
   kj::Array<jsg::Ref<QueueMessage>> messages;
   kj::String queueName;
   IoPtr<QueueEventResult> result;
+  CompletionStatus completionStatus = Incomplete{};
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visitAll(messages);
