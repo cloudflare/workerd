@@ -266,8 +266,17 @@ interface JsRpcTarget {
     }
   }
 
-  call @0 CallParams -> (result :JsValue);
+  call @0 CallParams -> (result :JsValue, callPipeline :JsRpcTarget);
   # Runs a Worker/DO's RPC method.
+  #
+  # `callPipeline` allows the caller to begin sending other stuff before the callee has actually
+  # returned from the call. In particular:
+  # * The caller can make pipelined calls on the anticipated return value of the call, invoking
+  #   methods on capabilities that it expects will be present in the return value. Since
+  #   `CallPipeline` extends `JsRpcTarget`, these calls are made using callPipeline.call().
+  #   Typically these calls would use `methodPath` to specify a path to a specific subobject of
+  #   the returned value.
+  # * TODO(soon): streams
 }
 
 interface EventDispatcher @0xf20697475ec1752d {

@@ -86,6 +86,10 @@ export class MyService extends WorkerEntrypoint {
     return await counter.increment(i);
   }
 
+  async getAnObject(i) {
+    return {foo: 123 + i, counter: new MyCounter(i)};
+  }
+
   async fetch(req, x) {
     assert.strictEqual(x, undefined);
     return new Response("method = " + req.method + ", url = " + req.url);
@@ -384,5 +388,14 @@ export let receiveStubOverRpc = {
     let stub = await env.MyService.makeCounter(17);
     assert.strictEqual(await stub.increment(2), 19);
     assert.strictEqual(await stub.increment(-10), 9);
+  },
+}
+
+export let promisePipelining = {
+  async test(controller, env, ctx) {
+    assert.strictEqual(await env.MyService.makeCounter(12).increment(3), 15);
+
+    assert.strictEqual(await env.MyService.getAnObject(5).foo, 128);
+    assert.strictEqual(await env.MyService.getAnObject(5).counter.increment(7), 12);
   },
 }

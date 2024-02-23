@@ -148,6 +148,12 @@ private:
 
 } // namespace
 
+rpc::JsRpcTarget::Client JsRpcPromise::getClientForOneCall(
+    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
+  // (Don't extend `path` because we're the root.)
+  return pipeline->getCallPipeline();
+}
+
 rpc::JsRpcTarget::Client JsRpcProperty::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto result = parent->getClientForOneCall(js, path);
@@ -156,7 +162,7 @@ rpc::JsRpcTarget::Client JsRpcProperty::getClientForOneCall(
 }
 
 template <typename FillOpFunc>
-jsg::Promise<jsg::Value> JsRpcProperty::callImpl(jsg::Lock& js, FillOpFunc&& fillOpFunc) {
+JsRpcProperty::PromiseAndPipleine JsRpcProperty::callImpl(jsg::Lock& js, FillOpFunc&& fillOpFunc) {
   // Note: We used to enforce that RPC methods had to be called with the correct `this`. That is,
   // we prevented people from doing:
   //
@@ -197,16 +203,19 @@ jsg::Promise<jsg::Value> JsRpcProperty::callImpl(jsg::Lock& js, FillOpFunc&& fil
 
   auto callResult = builder.send();
 
-  return ioContext.awaitIo(js, kj::mv(callResult),
-      [](jsg::Lock& js, auto result) -> jsg::Value {
-    return jsg::Value(js.v8Isolate, deserializeJsValue(js, result.getResult()));
-  });
+  return {
+    .promise = jsg::JsPromise(js.wrapSimplePromise(ioContext.awaitIo(js, kj::mv(callResult),
+        [](jsg::Lock& js, auto result) -> jsg::Value {
+      return jsg::Value(js.v8Isolate, deserializeJsValue(js, result.getResult()));
+    }))),
+    .pipeline = kj::mv(callResult),
+  };
 }
 
-jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
+jsg::Ref<JsRpcPromise> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
 
-  return callImpl(js, [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
+  auto [promise, pipeline] = callImpl(js, [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
     kj::Vector<jsg::JsValue> argv(args.Length());
     for (int n = 0; n < args.Length(); n++) {
       argv.add(jsg::JsValue(args[n]));
@@ -221,15 +230,16 @@ jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::
       });
     }
   });
+
+  return jsg::alloc<JsRpcPromise>(
+      jsg::JsRef<jsg::JsPromise>(js, promise),
+      IoContext::current().addObject(kj::heap(kj::mv(pipeline))));
 }
 
-jsg::JsValue JsRpcProperty::then(jsg::Lock& js, v8::Local<v8::Function> handler,
-      jsg::Optional<v8::Local<v8::Function>> errorHandler) {
-  auto promise = js.wrapSimplePromise(callImpl(js,
-      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
-    op.setGetProperty();
-  }));
+namespace {
 
+jsg::JsValue thenImpl(jsg::Lock& js, v8::Local<v8::Promise> promise,
+      v8::Local<v8::Function> handler, jsg::Optional<v8::Local<v8::Function>> errorHandler) {
   KJ_IF_SOME(e, errorHandler) {
     return jsg::JsPromise(jsg::check(promise->Then(js.v8Context(), handler, e)));
   } else {
@@ -237,21 +247,13 @@ jsg::JsValue JsRpcProperty::then(jsg::Lock& js, v8::Local<v8::Function> handler,
   }
 }
 
-jsg::JsValue JsRpcProperty::catch_(jsg::Lock& js, v8::Local<v8::Function> errorHandler) {
-  auto promise = js.wrapSimplePromise(callImpl(js,
-      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
-    op.setGetProperty();
-  }));
-
+jsg::JsValue catchImpl(jsg::Lock& js, v8::Local<v8::Promise> promise,
+    v8::Local<v8::Function> errorHandler) {
   return jsg::JsPromise(jsg::check(promise->Catch(js.v8Context(), errorHandler)));
 }
 
-jsg::JsValue JsRpcProperty::finally(jsg::Lock& js, v8::Local<v8::Function> onFinally) {
-  auto promise = js.wrapSimplePromise(callImpl(js,
-      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
-    op.setGetProperty();
-  }));
-
+jsg::JsValue finallyImpl(jsg::Lock& js, v8::Local<v8::Promise> promise,
+    v8::Local<v8::Function> onFinally) {
   // HACK: `finally()` is not exposed as a C++ API, so we have to manually read it from JS.
   jsg::JsObject obj(promise);
   auto func = obj.get(js, "finally");
@@ -261,7 +263,54 @@ jsg::JsValue JsRpcProperty::finally(jsg::Lock& js, v8::Local<v8::Function> onFin
       ->Call(js.v8Context(), obj, 1, &param)));
 }
 
+}  // namespace
+
+jsg::JsValue JsRpcProperty::then(jsg::Lock& js, v8::Local<v8::Function> handler,
+      jsg::Optional<v8::Local<v8::Function>> errorHandler) {
+  auto promise = callImpl(js,
+      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
+    op.setGetProperty();
+  }).promise;
+
+  return thenImpl(js, promise, handler, errorHandler);
+}
+
+jsg::JsValue JsRpcProperty::catch_(jsg::Lock& js, v8::Local<v8::Function> errorHandler) {
+  auto promise = callImpl(js,
+      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
+    op.setGetProperty();
+  }).promise;
+
+  return catchImpl(js, promise, errorHandler);
+}
+
+jsg::JsValue JsRpcProperty::finally(jsg::Lock& js, v8::Local<v8::Function> onFinally) {
+  auto promise = callImpl(js,
+      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
+    op.setGetProperty();
+  }).promise;
+
+  return finallyImpl(js, promise, onFinally);
+}
+
+jsg::JsValue JsRpcPromise::then(jsg::Lock& js, v8::Local<v8::Function> handler,
+      jsg::Optional<v8::Local<v8::Function>> errorHandler) {
+  return thenImpl(js, inner.getHandle(js), handler, errorHandler);
+}
+
+jsg::JsValue JsRpcPromise::catch_(jsg::Lock& js, v8::Local<v8::Function> errorHandler) {
+  return catchImpl(js, inner.getHandle(js), errorHandler);
+}
+
+jsg::JsValue JsRpcPromise::finally(jsg::Lock& js, v8::Local<v8::Function> onFinally) {
+  return finallyImpl(js, inner.getHandle(js), onFinally);
+}
+
 kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcProperty::getProperty(jsg::Lock& js, kj::String name) {
+  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
+}
+
+kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcPromise::getProperty(jsg::Lock& js, kj::String name) {
   return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
@@ -307,6 +356,13 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
   return jsg::alloc<JsRpcStub>(ioctx.addObject(kj::heap(reader.getRpcTarget())));
 }
 
+// Create a CallPipeline wrapping the given value.
+//
+// Returns none if the value is not an object and so isn't pipelineable.
+//
+// Defined later in this file.
+static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& lock, jsg::JsValue value);
+
 // Callee-side implementation of JsRpcTarget.
 //
 // Most of the implementation is in this base class. There are subclasses specializing for the case
@@ -329,6 +385,8 @@ public:
     // If `env` and `ctx` need to be delivered as arguments to the method, these are the values
     // to deliver.
     kj::Maybe<EnvCtx> envCtx;
+
+    bool allowInstanceProperties;
   };
 
   // Get the object on which the method is to be invoked. This is virtual so that we can have
@@ -361,17 +419,9 @@ public:
 
       auto params = callContext.getParams();
 
-      // `targetInfo.envCtx` is present when we're invoking a freestanding function, and therefore
-      // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup
-      // should obviously permit instance properties, since we expect the export is a plain object.
-      // Otherwise, though, the export is a class. In that case, we have set the rule that we will
-      // only allow class properties (aka prototype properties) to be accessed, to avoid
-      // programmers shooting themselves in the foot by forgetting to make their members private.
-      bool allowInstanceProperties = targetInfo.envCtx != kj::none;
-
       // We will try to get the function, if we can't we'll throw an error to the client.
       auto [propHandle, thisArg, methodNameForErrors] = tryGetProperty(
-          lock, targetInfo.target, params, allowInstanceProperties);
+          lock, targetInfo.target, params, targetInfo.allowInstanceProperties);
 
       auto op = params.getOperation();
 
@@ -382,9 +432,15 @@ public:
             .then(js, ctx.addFunctor(
                 [callContext, ownCallContext = kj::mv(ownCallContext)]
                 (jsg::Lock& js, jsg::Value value) mutable {
-          serializeJsValue(js, jsg::JsValue(value.getHandle(js)), [&](capnp::MessageSize hint) {
+          jsg::JsValue resultValue(value.getHandle(js));
+          serializeJsValue(js, resultValue, [&](capnp::MessageSize hint) {
             hint.wordCount += capnp::sizeInWords<CallResults>();
-            return callContext.initResults(hint).initResult();
+            hint.capCount += 1;
+            auto results = callContext.initResults(hint);
+            KJ_IF_SOME(p, makeCallPipeline(js, resultValue)) {
+              results.setCallPipeline(kj::mv(p));
+            }
+            return results.initResult();
           });
         })));
       };
@@ -678,19 +734,48 @@ private:
 
 class TransientJsRpcTarget final: public JsRpcTargetBase {
 public:
-  TransientJsRpcTarget(IoContext& ioCtx, jsg::JsRef<jsg::JsObject> object)
-      : JsRpcTargetBase(ioCtx), object(kj::mv(object)) {}
+  TransientJsRpcTarget(IoContext& ioCtx, jsg::JsRef<jsg::JsObject> object,
+                       bool allowInstanceProperties = false)
+      : JsRpcTargetBase(ioCtx), object(kj::mv(object)),
+        allowInstanceProperties(allowInstanceProperties) {}
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) {
     return {
       .target = object.getHandle(lock),
       .envCtx = kj::none,
+      .allowInstanceProperties = allowInstanceProperties,
     };
   }
 
 private:
   jsg::JsRef<jsg::JsObject> object;
+  bool allowInstanceProperties;
 };
+
+static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& js, jsg::JsValue value) {
+  return js.withinHandleScope([&]() -> kj::Maybe<rpc::JsRpcTarget::Client> {
+    jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), return kj::none);
+
+    bool allowInstanceProperties;
+    if (obj.getPrototype() == js.obj().getPrototype()) {
+      // It's a plain object. Permit instance properties.
+      allowInstanceProperties = true;
+    } else if (obj.isInstanceOf<JsRpcTarget>(js)) {
+      // It's an RPC target. Allow only class properties.
+      allowInstanceProperties = false;
+    } else KJ_IF_SOME(stub, obj.tryUnwrapAs<JsRpcStub>(js)) {
+      // Just grab the stub directly!
+      return stub->getClient();
+    } else {
+      // Not an RPC object. This is going to fail to serialize? We'll just say it doesn't support
+      // pipelining.
+      return kj::none;
+    }
+
+    return rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(IoContext::current(),
+        jsg::JsRef<jsg::JsObject>(js, obj), allowInstanceProperties));
+  });
+}
 
 jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object) {
   auto& ioctx = IoContext::current();
@@ -755,7 +840,7 @@ public:
           "\"cloudflare:workers\".");
     }
 
-    return {
+    TargetInfo targetInfo {
       .target = jsg::JsObject(handler->self.getHandle(lock)),
       .envCtx = handler->ctx.map([&](jsg::Ref<ExecutionContext>& execCtx) -> EnvCtx {
         return {
@@ -765,6 +850,16 @@ public:
         };
       })
     };
+
+    // `targetInfo.envCtx` is present when we're invoking a freestanding function, and therefore
+    // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup
+    // should obviously permit instance properties, since we expect the export is a plain object.
+    // Otherwise, though, the export is a class. In that case, we have set the rule that we will
+    // only allow class properties (aka prototype properties) to be accessed, to avoid
+    // programmers shooting themselves in the foot by forgetting to make their members private.
+    targetInfo.allowInstanceProperties = targetInfo.envCtx != kj::none;
+
+    return targetInfo;
   }
 
 private:
