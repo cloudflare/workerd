@@ -453,7 +453,12 @@ jsg::Ref<QueueEvent> startQueueEvent(
                           jsg::alloc<QueueController>(event.addRef()),
                           jsg::JsValue(h.env.getHandle(js)).addRef(js),
                           h.getCtx());
-      event->waitUntil(kj::mv(promise));
+      event->waitUntil(promise.then(
+        [event=event.addRef()]() mutable { event->setCompletionStatus(QueueEvent::CompletedSuccessfully{}); },
+        [event=event.addRef()](kj::Exception&& e) mutable {
+          event->setCompletionStatus(QueueEvent::CompletedWithError{ kj::cp(e) });
+          return kj::mv(e);
+        }));
     } else {
       lock.logWarningOnce(
           "Received a QueueEvent but we lack a handler for QueueEvents. "
@@ -468,6 +473,7 @@ jsg::Ref<QueueEvent> startQueueEvent(
       JSG_FAIL_REQUIRE(Error, "No event listener registered for queue messages.");
     }
     globalEventTarget.dispatchEventImpl(lock, event.addRef());
+    event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
   }
 
   return event.addRef();
@@ -522,6 +528,33 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   // than for scheduled workers, but it's not at all clear yet to me what it should be, so just
   // reuse the scheduled worker logic and timeout for now.
   auto completed = co_await incomingRequest->finishScheduled();
+
+  // Log some debug info if the request did not complete fully:
+  // In particular, detect whether or not the users queue() handler function completed
+  // and include info about other waitUntil tasks that may have caused the request to timeout.
+  if (!completed) {
+    kj::String status;
+    if (queueEventHolder->event.get() == nullptr) {
+      status = kj::str("Empty");
+    } else {
+      KJ_SWITCH_ONEOF(queueEventHolder->event->getCompletionStatus()) {
+        KJ_CASE_ONEOF(i, QueueEvent::Incomplete) {
+          status = kj::str("Incomplete");
+          break;
+        }
+        KJ_CASE_ONEOF(s, QueueEvent::CompletedSuccessfully) {
+          status = kj::str("Completed Succesfully");
+          break;
+        }
+        KJ_CASE_ONEOF(e, QueueEvent::CompletedWithError) {
+          status = kj::str("Completed with error:", e.error);
+          break;
+        }
+      }
+    }
+    auto tasks = incomingRequest->getContext().getWaitUntilTasks().trace();
+    KJ_LOG(WARNING, "NOSENTRY queue event timed out", status, tasks);
+  }
 
   co_return WorkerInterface::CustomEvent::Result {
     .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU,
