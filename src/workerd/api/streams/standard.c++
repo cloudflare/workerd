@@ -1789,7 +1789,9 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
   KJ_DISALLOW_COPY_AND_MOVE(ValueReadable);
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(state);
+    KJ_IF_SOME(s, state) {
+      visitor.visit(s);
+    };
   }
 
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
@@ -1900,7 +1902,9 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
   KJ_DISALLOW_COPY_AND_MOVE(ByteReadable);
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(state);
+    KJ_IF_SOME(s, state) {
+      visitor.visit(s);
+    }
   }
 
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
@@ -2631,16 +2635,14 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       KJ_DEFER(state.init<StreamStates::Closed>());
       return Tee {
         .branch1 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
-        .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(
-            kj::mv(consumer))),
+        .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
       };
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
       KJ_DEFER(state.init<StreamStates::Closed>());
       return Tee {
         .branch1 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
-        .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(
-            kj::mv(consumer))),
+        .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
       };
     }
   }
@@ -2858,6 +2860,18 @@ public:
     return pendingReadCount > 0;
   }
 
+  void visitForGc(jsg::GcVisitor& visitor) {
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(error, StreamStates::Errored) {
+        visitor.visit(error);
+      }
+      KJ_CASE_ONEOF(readable, Readable) {
+        visitor.visit(*readable);
+      }
+      KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+    }
+  }
+
 private:
   kj::Maybe<IoContext&> ioContext;
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable> state;
@@ -3017,8 +3031,22 @@ public:
         // that the PumpToReader, and the sink it owns, are always accessed from the right
         // IoContext. Thw WeakRef ensures that if the PumpToReader is freed while
         // the JS continuation is pending, there won't be a dangling reference.
+        // The readable here is either a ValueReadable or a ByteReadable, both of which
+        // are gc visitable. We want to make sure that continues to be visited while
+        // the loop is progressing, and we want it to stick around until the loop
+        // completes or fails. So, we pass ownership of the readable to a gc visitable
+        // continuation attached to this outer loop promise. This should ensure that
+        // v8 continues to see the readable as reachable while the loop is running.
         return ioContext.awaitJs(js,
-            pumpLoop(js, ioContext, kj::mv(readable), ioContext.addObject(addWeakRef())));
+            pumpLoop(js, ioContext, *readable, ioContext.addObject(addWeakRef()))
+                .then(js, JSG_VISITABLE_LAMBDA(
+                    (readable=kj::mv(readable)),
+                    (readable),
+                    (auto&) {
+          // This continuation exists solely to keep readable alive and ensure
+          // that it remains gc visitable throughout the lifetime of the pump
+          // loop.
+        })));
       }
       KJ_CASE_ONEOF(pumping, Pumping) {
         return KJ_EXCEPTION(FAILED, "pumping is already in progress");
@@ -3049,7 +3077,7 @@ private:
   jsg::Promise<void> pumpLoop(
       jsg::Lock& js,
       IoContext& ioContext,
-      Readable readable,
+      T& readable,
       IoOwn<WeakRef<AllReaderBase>> pumpToReader) {
     ioContext.requireCurrentOrThrowJs();
     KJ_SWITCH_ONEOF(state) {
@@ -3076,9 +3104,9 @@ private:
           // calls to doClose/doError will not impact the lifetime of the readable
           // state.
           if constexpr (kj::isSameType<T, ByteReadable>()) {
-            return readable->read(js, kj::none);
+            return readable.read(js, kj::none);
           } else {
-            return readable->read(js);
+            return readable.read(js);
           }
         };
 
@@ -3164,14 +3192,7 @@ private:
         }), [](auto& js, jsg::Value exception) mutable -> Result {
           return kj::mv(exception);
         }).then(js, ioContext.addFunctor(
-            // Note that readable is a gc visitable type. It holds a queue of gc
-            // visitable types. Wrapping in a visitable lambda ensures that if
-            // readable has already been gc visited, it will continue to be reachable
-            // once it is passed off to the read loop here.
-            JSG_VISITABLE_LAMBDA(
-                (readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)),
-                (readable),
-                (jsg::Lock& js, Result result) mutable {
+            [&readable,pumpToReader=kj::mv(pumpToReader)](jsg::Lock& js, Result result) mutable {
           KJ_IF_SOME(reader, tryGetAs<PumpToReader>(pumpToReader)) {
             // Oh good, if we got here it means we're in the right IoContext and
             // the PumpToReader is still alive. Let's process the result.
@@ -3199,9 +3220,7 @@ private:
                   // The write failed.
                   return kj::mv(exception);
                 }).then(js, ioContext.addFunctor(
-                    JSG_VISITABLE_LAMBDA(
-                      (readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)),
-                      (readable),
+                      [&readable,pumpToReader=kj::mv(pumpToReader)]
                       (jsg::Lock& js, kj::Maybe<jsg::Value> maybeException) mutable {
                   KJ_IF_SOME(reader, tryGetAs<PumpToReader>(pumpToReader)) {
                     auto& ioContext = reader.ioContext;
@@ -3213,15 +3232,15 @@ private:
                     } else {
                       // Else block to avert dangling else compiler warning.
                     }
-                    return reader.pumpLoop(js, ioContext, kj::mv(readable), kj::mv(pumpToReader));
+                    return reader.pumpLoop(js, ioContext, readable, kj::mv(pumpToReader));
                   } else {
                     // If we got here, we're in the right IoContext but the PumpToReader
                     // has been destroyed. Let's cancel the readable as the last step.
-                    return readable->cancel(js, maybeException.map([&](jsg::Value& ex) {
+                    return readable.cancel(js, maybeException.map([&](jsg::Value& ex) {
                       return ex.getHandle(js);
                     }));
                   }
-                })));
+                }));
               }
               KJ_CASE_ONEOF(pumping, Pumping) {
                 // If we got here, a zero-length buffer was provided by the read and we're
@@ -3239,16 +3258,16 @@ private:
                 reader.doError(js, exception.getHandle(js));
               }
             }
-            return reader.pumpLoop(js, ioContext, kj::mv(readable), kj::mv(pumpToReader));
+            return reader.pumpLoop(js, ioContext, readable, kj::mv(pumpToReader));
           } else {
             // If we got here, we're in the right IoContext but the PumpToReader has been
             // freed. There's nothing we can do except cleanup.
             KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
-                return readable->cancel(js, kj::none);
+                return readable.cancel(js, kj::none);
               }
               KJ_CASE_ONEOF(pumping, Pumping) {
-                return readable->cancel(js, kj::none);
+                return readable.cancel(js, kj::none);
               }
               KJ_CASE_ONEOF(closed, StreamStates::Closed) {
                 // We do not have to cancel the readable in this case because it has already
@@ -3256,12 +3275,12 @@ private:
                 return js.resolvedPromise();
               }
               KJ_CASE_ONEOF(exception, jsg::Value) {
-                return readable->cancel(js, exception.getHandle(js));
+                return readable.cancel(js, exception.getHandle(js));
               }
             }
           }
           KJ_UNREACHABLE;
-        })));
+        }));
       }
     }
     KJ_UNREACHABLE;
@@ -3289,30 +3308,30 @@ jsg::Promise<kj::Array<byte>> ReadableStreamJsController::readAllBytes(
       KJ_ASSERT(lock.lock());
       auto reader = kj::heap<AllReader<ValueReadable>>(kj::mv(valueReadable), limit);
       doClose(js);
+      auto promise = reader->allBytes(js);
+      auto done = JSG_VISITABLE_LAMBDA(
+          (reader=kj::mv(reader)),
+          (reader),
+          (auto& js, auto result) { return kj::mv(result); });
       if (IoContext::hasCurrent()) {
-        return reader->allBytes(js).then(js, IoContext::current().addFunctor(
-            [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        }));
+        return promise.then(js, IoContext::current().addFunctor(kj::mv(done)));
       } else {
-        return reader->allBytes(js).then(js, [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        });
+        return promise.then(js, kj::mv(done));
       }
     }
     KJ_CASE_ONEOF(byteReadable, kj::Own<ByteReadable>) {
       KJ_ASSERT(lock.lock());
       auto reader = kj::heap<AllReader<ByteReadable>>(kj::mv(byteReadable), limit);
       doClose(js);
+      auto promise = reader->allBytes(js);
+      auto done = JSG_VISITABLE_LAMBDA(
+          (reader=kj::mv(reader)),
+          (reader),
+          (auto& js, auto result) { return kj::mv(result); });
       if (IoContext::hasCurrent()) {
-        return reader->allBytes(js).then(js, IoContext::current().addFunctor(
-            [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        }));
+        return promise.then(js, IoContext::current().addFunctor(kj::mv(done)));
       } else {
-        return reader->allBytes(js).then(js, [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        });
+        return promise.then(js, kj::mv(done));
       }
     }
   }
@@ -3338,30 +3357,30 @@ jsg::Promise<kj::String> ReadableStreamJsController::readAllText(
       KJ_ASSERT(lock.lock());
       auto reader = kj::heap<AllReader<ValueReadable>>(kj::mv(valueReadable), limit);
       doClose(js);
+      auto promise = reader->allText(js);
+      auto done = JSG_VISITABLE_LAMBDA(
+          (reader=kj::mv(reader)),
+          (reader),
+          (auto& js, auto result) { return kj::mv(result); });
       if (IoContext::hasCurrent()) {
-        return reader->allText(js).then(js, IoContext::current().addFunctor(
-            [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        }));
+        return promise.then(js, IoContext::current().addFunctor(kj::mv(done)));
       } else {
-        return reader->allText(js).then(js, [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        });
+        return promise.then(js, kj::mv(done));
       }
     }
     KJ_CASE_ONEOF(byteReadable, kj::Own<ByteReadable>) {
       KJ_ASSERT(lock.lock());
       auto reader = kj::heap<AllReader<ByteReadable>>(kj::mv(byteReadable), limit);
       doClose(js);
+      auto promise = reader->allText(js);
+      auto done = JSG_VISITABLE_LAMBDA(
+          (reader=kj::mv(reader)),
+          (reader),
+          (auto& js, auto result) { return kj::mv(result); });
       if (IoContext::hasCurrent()) {
-        return reader->allText(js).then(js, IoContext::current().addFunctor(
-            [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        }));
+        return promise.then(js, IoContext::current().addFunctor(kj::mv(done)));
       } else {
-        return reader->allText(js).then(js, [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        });
+        return promise.then(js, kj::mv(done));
       }
     }
   }
@@ -3418,14 +3437,24 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
     }
     KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
       KJ_ASSERT(lock.lock());
+      // Note that readable here is a gc visitable type. Ownership transitions from the
+      // ReadableStream to the PumpToReader. When pumpTo is called, ownership of the
+      // readable transfers to a continuation attached to the JS promise that wraps the
+      // pump loop. This is, in turn, wrapped by a kj promise that is given to the noop
+      // deferred proxy below.
       auto reader = kj::heap<PumpToReader<ValueReadable>>(kj::mv(readable), kj::mv(sink), end);
-      doClose(js);
+      KJ_DEFER(doClose(js));
       return addNoopDeferredProxy(reader->pumpTo(js).attach(kj::mv(reader)));
     }
     KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
       KJ_ASSERT(lock.lock());
+      // Note that readable here is a gc visitable type. Ownership transitions from the
+      // ReadableStream to the PumpToReader. When pumpTo is called, ownership of the
+      // readable transfers to a continuation attached to the JS promise that wraps the
+      // pump loop. This is, in turn, wrapped by a kj promise that is given to the noop
+      // deferred proxy below.
       auto reader = kj::heap<PumpToReader<ByteReadable>>(kj::mv(readable), kj::mv(sink), end);
-      doClose(js);
+      KJ_DEFER(doClose(js));
       return addNoopDeferredProxy(reader->pumpTo(js).attach(kj::mv(reader)));
     }
   }
