@@ -155,9 +155,8 @@ rpc::JsRpcTarget::Client JsRpcProperty::getClientForOneCall(
   return result;
 }
 
-jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
-
+template <typename FillOpFunc>
+jsg::Promise<jsg::Value> JsRpcProperty::callImpl(jsg::Lock& js, FillOpFunc&& fillOpFunc) {
   // Note: We used to enforce that RPC methods had to be called with the correct `this`. That is,
   // we prevented people from doing:
   //
@@ -194,19 +193,7 @@ jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::
     pathBuilder.set(path.size(), name);
   }
 
-  kj::Vector<jsg::JsValue> argv(args.Length());
-  for (int n = 0; n < args.Length(); n++) {
-    argv.add(jsg::JsValue(args[n]));
-  }
-
-  // If we have arguments, serialize them.
-  // Note that we may fail to serialize some element, in which case this will throw back to JS.
-  if (argv.size() > 0) {
-    serializeJsValue(js, js.arr(argv.asPtr()), [&](capnp::MessageSize hint) {
-      // TODO(perf): Actually use the size hint.
-      return builder.initArgs();
-    });
-  }
+  fillOpFunc(builder.getOperation());
 
   auto callResult = builder.send();
 
@@ -214,6 +201,64 @@ jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::
       [](jsg::Lock& js, auto result) -> jsg::Value {
     return jsg::Value(js.v8Isolate, deserializeJsValue(js, result.getResult()));
   });
+}
+
+jsg::Promise<jsg::Value> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
+
+  return callImpl(js, [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
+    kj::Vector<jsg::JsValue> argv(args.Length());
+    for (int n = 0; n < args.Length(); n++) {
+      argv.add(jsg::JsValue(args[n]));
+    }
+
+    // If we have arguments, serialize them.
+    // Note that we may fail to serialize some element, in which case this will throw back to JS.
+    if (argv.size() > 0) {
+      serializeJsValue(js, js.arr(argv.asPtr()), [&](capnp::MessageSize hint) {
+        // TODO(perf): Actually use the size hint.
+        return op.initCallWithArgs();
+      });
+    }
+  });
+}
+
+jsg::JsValue JsRpcProperty::then(jsg::Lock& js, v8::Local<v8::Function> handler,
+      jsg::Optional<v8::Local<v8::Function>> errorHandler) {
+  auto promise = js.wrapSimplePromise(callImpl(js,
+      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
+    op.setGetProperty();
+  }));
+
+  KJ_IF_SOME(e, errorHandler) {
+    return jsg::JsPromise(jsg::check(promise->Then(js.v8Context(), handler, e)));
+  } else {
+    return jsg::JsPromise(jsg::check(promise->Then(js.v8Context(), handler)));
+  }
+}
+
+jsg::JsValue JsRpcProperty::catch_(jsg::Lock& js, v8::Local<v8::Function> errorHandler) {
+  auto promise = js.wrapSimplePromise(callImpl(js,
+      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
+    op.setGetProperty();
+  }));
+
+  return jsg::JsPromise(jsg::check(promise->Catch(js.v8Context(), errorHandler)));
+}
+
+jsg::JsValue JsRpcProperty::finally(jsg::Lock& js, v8::Local<v8::Function> onFinally) {
+  auto promise = js.wrapSimplePromise(callImpl(js,
+      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
+    op.setGetProperty();
+  }));
+
+  // HACK: `finally()` is not exposed as a C++ API, so we have to manually read it from JS.
+  jsg::JsObject obj(promise);
+  auto func = obj.get(js, "finally");
+  KJ_ASSERT(func.isFunction());
+  v8::Local<v8::Value> param = onFinally;
+  return jsg::JsValue(jsg::check(v8::Local<v8::Value>(func).As<v8::Function>()
+      ->Call(js.v8Context(), obj, 1, &param)));
 }
 
 kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcProperty::getProperty(jsg::Lock& js, kj::String name) {
@@ -316,11 +361,6 @@ public:
 
       auto params = callContext.getParams();
 
-      kj::Maybe<rpc::JsValue::Reader> args;
-      if (params.hasArgs()) {
-        args = params.getArgs();
-      }
-
       // `targetInfo.envCtx` is present when we're invoking a freestanding function, and therefore
       // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup
       // should obviously permit instance properties, since we expect the export is a plain object.
@@ -330,29 +370,55 @@ public:
       bool allowInstanceProperties = targetInfo.envCtx != kj::none;
 
       // We will try to get the function, if we can't we'll throw an error to the client.
-      auto [fn, thisArg, methodNameForErrors] = tryGetFn(
+      auto [propHandle, thisArg, methodNameForErrors] = tryGetProperty(
           lock, targetInfo.target, params, allowInstanceProperties);
 
-      v8::Local<v8::Value> invocationResult;
-      KJ_IF_SOME(envCtx, targetInfo.envCtx) {
-        invocationResult = invokeFnInsertingEnvCtx(js, methodNameForErrors, fn, thisArg,
-            args, envCtx.env, envCtx.ctx);
-      } else {
-        invocationResult = invokeFn(js, fn, thisArg, args);
+      auto op = params.getOperation();
+
+      auto handleResult = [&](v8::Local<v8::Value> invocationResult) {
+        // Given a handle for the result, if it's a promise, await the promise, then serialize the
+        // final result for return.
+        return ctx.awaitJs(js, js.toPromise(invocationResult)
+            .then(js, ctx.addFunctor(
+                [callContext, ownCallContext = kj::mv(ownCallContext)]
+                (jsg::Lock& js, jsg::Value value) mutable {
+          serializeJsValue(js, jsg::JsValue(value.getHandle(js)), [&](capnp::MessageSize hint) {
+            hint.wordCount += capnp::sizeInWords<CallResults>();
+            return callContext.initResults(hint).initResult();
+          });
+        })));
+      };
+
+      switch (op.which()) {
+        case rpc::JsRpcTarget::CallParams::Operation::CALL_WITH_ARGS: {
+          JSG_REQUIRE(propHandle->IsFunction(), TypeError,
+              kj::str("\"", methodNameForErrors, "\" is not a function."));
+          auto fn = propHandle.As<v8::Function>();
+
+          kj::Maybe<rpc::JsValue::Reader> args;
+          if (op.hasCallWithArgs()) {
+            args = op.getCallWithArgs();
+          }
+
+          v8::Local<v8::Value> invocationResult;
+          KJ_IF_SOME(envCtx, targetInfo.envCtx) {
+            invocationResult = invokeFnInsertingEnvCtx(js, methodNameForErrors, fn, thisArg,
+                args, envCtx.env, envCtx.ctx);
+          } else {
+            invocationResult = invokeFn(js, fn, thisArg, args);
+          }
+
+          // We have a function, so let's call it and serialize the result for RPC.
+          // If the function returns a promise we will wait for the promise to finish so we can
+          // serialize the result.
+          return handleResult(invocationResult);
+        }
+
+        case rpc::JsRpcTarget::CallParams::Operation::GET_PROPERTY:
+          return handleResult(propHandle);
       }
 
-      // We have a function, so let's call it and serialize the result for RPC.
-      // If the function returns a promise we will wait for the promise to finish so we can
-      // serialize the result.
-      return ctx.awaitJs(js, js.toPromise(invocationResult)
-          .then(js, ctx.addFunctor(
-              [callContext, ownCallContext = kj::mv(ownCallContext)]
-              (jsg::Lock& js, jsg::Value value) mutable {
-        serializeJsValue(js, jsg::JsValue(value.getHandle(js)), [&](capnp::MessageSize hint) {
-          hint.wordCount += capnp::sizeInWords<CallResults>();
-          return callContext.initResults(hint).initResult();
-        });
-      })));
+      KJ_FAIL_ASSERT("unknown JsRpcTarget::CallParams::Operation", (uint)op.which());
     });
 
     // We need to make sure this RPC is canceled if the IoContext is destroyed. To accomplish that,
@@ -395,8 +461,8 @@ private:
     return false;
   }
 
-  struct GetFnResult {
-    v8::Local<v8::Function> fn;
+  struct GetPropResult {
+    v8::Local<v8::Value> handle;
     v8::Local<v8::Object> thisArg;
 
     // Method name suitable for use in error messages.
@@ -408,7 +474,7 @@ private:
         kj::str("The RPC receiver does not implement the method \"", kjName, "\"."));
   }
 
-  static GetFnResult tryGetFn(
+  static GetPropResult tryGetProperty(
       jsg::Lock& js,
       jsg::JsObject object,
       rpc::JsRpcTarget::CallParams::Reader callParams,
@@ -446,13 +512,13 @@ private:
       }
     };
 
-    kj::Maybe<jsg::JsValue> func;
+    kj::Maybe<jsg::JsValue> result;
     kj::StringPtr methodNameForErrors;
 
     switch (callParams.which()) {
       case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
         kj::StringPtr methodName = callParams.getMethodName();
-        func = getProperty(methodName);
+        result = getProperty(methodName);
         methodNameForErrors = methodName;
         break;
       }
@@ -463,7 +529,7 @@ private:
 
         if (n == 0) {
           // Call the target itself as a function.
-          func = object;
+          result = object;
         } else {
           for (auto i: kj::zeroTo(n - 1)) {
             // For each property name except the last, look up the proprety and replace `object`
@@ -490,20 +556,15 @@ private:
             }
           }
 
-          func = getProperty(path[n-1]);
+          result = getProperty(path[n-1]);
         }
 
         break;
       }
     }
 
-    v8::Local<v8::Value> fnHandle =
-        KJ_ASSERT_NONNULL(func, "unknown CallParams type", (uint)callParams.which());
-
-    JSG_REQUIRE(fnHandle->IsFunction(), TypeError,
-        kj::str("\"", methodNameForErrors, "\" is not a function."));
     return {
-      .fn = fnHandle.As<v8::Function>(),
+      .handle = KJ_ASSERT_NONNULL(result, "unknown CallParams type", (uint)callParams.which()),
       .thisArg = object,
       .methodNameForErrors = methodNameForErrors,
     };

@@ -108,12 +108,27 @@ public:
   // Call the property as a method.
   jsg::Promise<jsg::Value> call(const v8::FunctionCallbackInfo<v8::Value>& args);
 
+  // Treat the property as a promise to obtain the value.
+  //
+  // Note that we intentionally return jsg::JsValue rather than jsg::JsPromise because we actually
+  // do not want the JSG glue to recognize we're returning a promise triggering behavior that pins
+  // the JsRpcProperty in memory until it resolves. It's actually fine if the JsRpcProperty is GC'd
+  // before the promise resolves, since the property is just an API stub. The underlying Cap'n Proto
+  // RPCs it starts will keep running; Cap'n Proto refcounts all the necessary resources internally.
+  jsg::JsValue then(jsg::Lock& js, v8::Local<v8::Function> handler,
+      jsg::Optional<v8::Local<v8::Function>> errorHandler);
+  jsg::JsValue catch_(jsg::Lock& js, v8::Local<v8::Function> errorHandler);
+  jsg::JsValue finally(jsg::Lock& js, v8::Local<v8::Function> onFinally);
+
   // Get a nested property, using pipelining.
   kj::Maybe<jsg::Ref<JsRpcProperty>> getProperty(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcProperty) {
     JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getProperty);
+    JSG_METHOD(then);
+    JSG_METHOD_NAMED(catch, catch_);
+    JSG_METHOD(finally);
   }
 
 private:
@@ -126,6 +141,9 @@ private:
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(parent);
   }
+
+  template <typename FillOpFunc>
+  jsg::Promise<jsg::Value> callImpl(jsg::Lock& js, FillOpFunc&& fillOpFunc);
 };
 
 // A JsRpcStub object forwards JS method calls to the remote Worker/Durable Object over RPC.

@@ -104,7 +104,16 @@ export class MyService extends WorkerEntrypoint {
       },
       counter5: new MyCounter(5),
       nonRpc: new NonRpcClass(),
+      someText: "hello",
     };
+  }
+
+  get promiseProperty() {
+    return scheduler.wait(10).then(() => 123);
+  }
+
+  get rejectingPromiseProperty() {
+    return Promise.reject(new Error("REJECTED"));
   }
 }
 
@@ -196,6 +205,23 @@ export let namedServiceBinding = {
     assert.strictEqual(await env.MyService.objectProperty.deeper.deepFunc(6, 3), 2);
     assert.strictEqual(await env.MyService.objectProperty.counter5.increment(3), 8);
 
+    // Awaiting a property itself gets the value.
+    assert.strictEqual(JSON.stringify(await env.MyService.nonFunctionProperty), '{"foo":123}');
+    assert.strictEqual(await env.MyService.objectProperty.someText, "hello");
+    {
+      let counter = await env.MyService.objectProperty.counter5;
+      assert.strictEqual(await counter.increment(3), 8);
+      assert.strictEqual(await counter.increment(7), 15);
+    }
+
+    // A property that returns a Promise will wait for the Promise.
+    assert.strictEqual(await env.MyService.promiseProperty, 123);
+
+    let sawFinally = false;
+    assert.strictEqual(await env.MyService.promiseProperty
+        .finally(() => {sawFinally = true;}), 123);
+    assert.strictEqual(sawFinally, true);
+
     // `fetch()` is special, the params get converted into a Request.
     let resp = await env.MyService.fetch("http://foo", {method: "POST"});
     assert.strictEqual(await resp.text(), "method = POST, url = http://foo");
@@ -209,6 +235,24 @@ export let namedServiceBinding = {
       name: "TypeError",
       message: "The RPC receiver does not implement the method \"instanceObject\"."
     });
+
+    await assert.rejects(() => Promise.resolve(env.MyService.instanceObject), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"instanceObject\"."
+    });
+
+    await assert.rejects(() => Promise.resolve(env.MyService.rejectingPromiseProperty), {
+      name: "Error",
+      message: "REJECTED"
+    });
+    assert.strictEqual(await env.MyService.rejectingPromiseProperty.catch(err => {
+      assert.strictEqual(err.message, "REJECTED");
+      return 234;
+    }), 234);
+    assert.strictEqual(await env.MyService.rejectingPromiseProperty.then(() => 432, err => {
+      assert.strictEqual(err.message, "REJECTED");
+      return 234;
+    }), 234);
 
     let getByName = name => {
       return env.MyService.getRpcMethodForTestOnly(name);

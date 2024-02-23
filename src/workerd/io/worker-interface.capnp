@@ -237,12 +237,33 @@ interface JsRpcTarget {
       # function.
     }
 
-    args @1 :JsValue;
-    # Arguments to the function. This is a JsValue that always encodes a JavaScript Array
-    # containing the arguments to the call.
-    #
-    # If `args` is null (but is still the active member of the union), this indicates that the
-    # argument list is empty.
+    operation :union {
+      callWithArgs @1 :JsValue;
+      # Call the property as a function. This is a JsValue that always encodes a JavaScript Array
+      # containing the arguments to the call.
+      #
+      # If `callWithArgs` is null (but is still the active member of the union), this indicates
+      # that the argument list is empty.
+
+      getProperty @3 :Void;
+      # This indicates that we are not actually calling a method at all, but rather retrieving the
+      # value of a property. RPC classes are allowed to define properties that can be fetched
+      # asynchronously, although more commonly properties will be RPC targets themselves and their
+      # methods will be invoked by sending a `methodPath` with more than one element. That is,
+      # imagine you have:
+      #
+      #     myRpcTarget.foo.bar();
+      #
+      # This code makes a single RPC call with a path of ["foo", "bar"]. However, you could also
+      # write:
+      #
+      #     let foo = await myRpcTarget.foo;
+      #     foo.bar();
+      #
+      # This will make two separate calls. The first call is to "foo" and `getProperty` is used.
+      # This returns a new JsRpcTarget. The second call is on that target, invoking the method
+      # "bar".
+    }
   }
 
   call @0 CallParams -> (result :JsValue);
