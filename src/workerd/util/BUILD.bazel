@@ -128,6 +128,12 @@ wd_cc_library(
     deps = [":sentry", "@capnp-cpp//src/kj", "@capnp-cpp//src/capnp"],
 )
 
+wd_cc_library(
+    name = "duration-exceeded-logger",
+    hdrs = ["duration-exceeded-logger.h"],
+    visibility = ["//visibility:public"],
+)
+
 exports_files(["autogate.h"])
 
 [kj_test(

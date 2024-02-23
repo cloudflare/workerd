@@ -511,6 +511,7 @@ private:
   const SharedLru& lru;
   OutputGate& gate;
   Hooks& hooks;
+  const kj::MonotonicClock& clock;
 
   // Wrapper around kj::List that keeps track of the total size of all elements.
   class DirtyList {

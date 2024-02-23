@@ -12,17 +12,42 @@ bool JsValue::operator==(const JsValue& other) const {
   return inner == other.inner;
 }
 
-JsObject::operator JsMap() const {
-  KJ_ASSERT(inner->IsMap());
-  return JsMap(inner.As<v8::Map>());
+JsMap::operator JsObject() { return JsObject(inner); }
+
+void JsMap::set(Lock& js, const JsValue& name, const JsValue& value) {
+  check(inner->Set(js.v8Context(), name.inner, value.inner));
+}
+
+void JsMap::set(Lock& js, kj::StringPtr name, const JsValue& value) {
+  set(js, js.strIntern(name), value);
+}
+
+JsValue JsMap::get(Lock& js, const JsValue& name) {
+  return JsValue(check(inner->Get(js.v8Context(), name.inner)));
+}
+
+JsValue JsMap::get(Lock& js, kj::StringPtr name) {
+  return get(js, js.strIntern(name));
+}
+
+bool JsMap::has(Lock& js, const JsValue& name) {
+  return check(inner->Has(js.v8Context(), name.inner));
+}
+
+bool JsMap::has(Lock& js, kj::StringPtr name) {
+  return has(js, js.strIntern(name));
+}
+
+void JsMap::delete_(Lock& js, const JsValue& name) {
+  check(inner->Delete(js.v8Context(), name.inner));
+}
+
+void JsMap::delete_(Lock& js, kj::StringPtr name) {
+  delete_(js, js.strIntern(name));
 }
 
 void JsObject::set(Lock& js, const JsValue& name, const JsValue& value) {
-  if (inner->IsMap()) {
-    check(inner.As<v8::Map>()->Set(js.v8Context(), name.inner, value.inner));
-  } else {
-    check(inner->Set(js.v8Context(), name.inner, value.inner));
-  }
+  check(inner->Set(js.v8Context(), name.inner, value.inner));
 }
 
 void JsObject::set(Lock& js, kj::StringPtr name, const JsValue& value) {
@@ -30,11 +55,7 @@ void JsObject::set(Lock& js, kj::StringPtr name, const JsValue& value) {
 }
 
 JsValue JsObject::get(Lock& js, const JsValue& name) {
-  if (inner->IsMap()) {
-    return JsValue(check(inner.As<v8::Map>()->Get(js.v8Context(), name.inner)));
-  } else {
-    return JsValue(check(inner->Get(js.v8Context(), name.inner)));
-  }
+  return JsValue(check(inner->Get(js.v8Context(), name.inner)));
 }
 
 JsValue JsObject::get(Lock& js, kj::StringPtr name) {
@@ -42,15 +63,11 @@ JsValue JsObject::get(Lock& js, kj::StringPtr name) {
 }
 
 bool JsObject::has(Lock& js, const JsValue& name, HasOption option) {
-  if (inner->IsMap()) {
-    return check(inner.As<v8::Map>()->Has(js.v8Context(), name.inner));
+  if (option == HasOption::OWN) {
+    KJ_ASSERT(name.inner->IsName());
+    return check(inner->HasOwnProperty(js.v8Context(), name.inner.As<v8::Name>()));
   } else {
-    if (option == HasOption::OWN) {
-      KJ_ASSERT(name.inner->IsName());
-      return check(inner->HasOwnProperty(js.v8Context(), name.inner.As<v8::Name>()));
-    } else {
-      return check(inner->Has(js.v8Context(), name.inner));
-    }
+    return check(inner->Has(js.v8Context(), name.inner));
   }
 }
 
@@ -59,11 +76,7 @@ bool JsObject::has(Lock& js, kj::StringPtr name, HasOption option) {
 }
 
 void JsObject::delete_(Lock& js, const JsValue& name) {
-  if (inner->IsMap()) {
-    check(inner.As<v8::Map>()->Delete(js.v8Context(), name.inner));
-  } else {
-    check(inner->Delete(js.v8Context(), name.inner));
-  }
+  check(inner->Delete(js.v8Context(), name.inner));
 }
 
 void JsObject::delete_(Lock& js, kj::StringPtr name) {
@@ -392,8 +405,8 @@ JsObject Lock::obj() {
   return JsObject(v8::Object::New(v8Isolate));
 }
 
-JsObject Lock::map() {
-  return JsObject(v8::Map::New(v8Isolate));
+JsMap Lock::map() {
+  return JsMap(v8::Map::New(v8Isolate));
 }
 
 JsValue Lock::external(void* ptr) {
