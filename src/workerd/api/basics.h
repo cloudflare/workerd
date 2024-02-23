@@ -393,17 +393,21 @@ private:
     // When once is true, the handler will be removed after it is invoked one time.
     bool once = false;
 
+    EventHandler(Handler handler, bool once)
+        : handler(kj::mv(handler)), once(once) {}
+    KJ_DISALLOW_COPY_AND_MOVE(EventHandler);
+
     kj::StringPtr jsgGetMemoryName() const { return "EventHandler"_kjc; }
     size_t jsgGetMemorySelfSize() const;
     void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
   };
 
   struct EventHandlerHashCallbacks {
-    const EventHandler::Handler& keyForRow(const EventHandler& row) const;
-    bool matches(const EventHandler& a, const jsg::HashableV8Ref<v8::Object>& b) const;
-    bool matches(const EventHandler& a, const NativeHandler& b) const;
-    bool matches(const EventHandler& a, const EventHandler::NativeHandlerRef& b) const;
-    bool matches(const EventHandler& a, const EventHandler::Handler& b) const;
+    const EventHandler::Handler& keyForRow(const kj::Own<EventHandler>& row) const;
+    bool matches(const kj::Own<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const;
+    bool matches(const kj::Own<EventHandler>& a, const NativeHandler& b) const;
+    bool matches(const kj::Own<EventHandler>& a, const EventHandler::NativeHandlerRef& b) const;
+    bool matches(const kj::Own<EventHandler>& a, const EventHandler::Handler& b) const;
     uint hashCode(const jsg::HashableV8Ref<v8::Object>& obj) const;
     uint hashCode(const NativeHandler& handler) const;
     uint hashCode(const EventHandler::NativeHandlerRef& handler) const;
@@ -412,7 +416,7 @@ private:
   };
 
   struct EventHandlerSet {
-    kj::Table<EventHandler,
+    kj::Table<kj::Own<EventHandler>,
               kj::HashIndex<EventHandlerHashCallbacks>,
               kj::InsertionOrderIndex> handlers;
 

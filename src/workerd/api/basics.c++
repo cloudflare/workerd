@@ -89,35 +89,39 @@ kj::Own<void> EventTarget::newNativeHandler(
 }
 
 const EventTarget::EventHandler::Handler& EventTarget::EventHandlerHashCallbacks::keyForRow(
-    const EventHandler& row) const {
+    const kj::Own<EventHandler>& row) const {
   // The key for each EventHandler struct is the handler, which is a kj::OneOf
   // of either a JavaScriptHandler or NativeHandler.
-  return row.handler;
+  return row->handler;
 }
 
-bool EventTarget::EventHandlerHashCallbacks::matches(const EventHandler& a, const jsg::HashableV8Ref<v8::Object>& b) const {
-  KJ_IF_SOME(jsA, a.handler.tryGet<EventHandler::JavaScriptHandler>()) {
+bool EventTarget::EventHandlerHashCallbacks::matches(
+    const kj::Own<EventHandler>& a,
+    const jsg::HashableV8Ref<v8::Object>& b) const {
+  KJ_IF_SOME(jsA, a->handler.tryGet<EventHandler::JavaScriptHandler>()) {
     return jsA.identity == b;
   }
   return false;
 }
 
-bool EventTarget::EventHandlerHashCallbacks::matches(const EventHandler& a,
-                                                     const NativeHandler& b) const {
-  KJ_IF_SOME(ref, a.handler.tryGet<EventHandler::NativeHandlerRef>()) {
+bool EventTarget::EventHandlerHashCallbacks::matches(
+    const kj::Own<EventHandler>& a,
+    const NativeHandler& b) const {
+  KJ_IF_SOME(ref, a->handler.tryGet<EventHandler::NativeHandlerRef>()) {
     return &ref.handler == &b;
   }
   return false;
 }
 
 bool EventTarget::EventHandlerHashCallbacks::matches(
-    const EventHandler& a,
+    const kj::Own<EventHandler>& a,
     const EventHandler::NativeHandlerRef& b) const {
   return matches(a, b.handler);
 }
 
-bool EventTarget::EventHandlerHashCallbacks::matches(const EventHandler& a,
-                                                     const EventHandler::Handler& b) const {
+bool EventTarget::EventHandlerHashCallbacks::matches(
+    const kj::Own<EventHandler>& a,
+    const EventHandler::Handler& b) const {
   KJ_SWITCH_ONEOF(b) {
     KJ_CASE_ONEOF(jsB, EventHandler::JavaScriptHandler) {
       return matches(a, jsB.identity);
@@ -193,7 +197,7 @@ jsg::Ref<EventTarget> EventTarget::constructor() {
 EventTarget::~EventTarget() noexcept(false) {
   for (auto& entry : typeMap) {
     for (auto& handler : entry.value.handlers) {
-      KJ_IF_SOME(native, handler.handler.tryGet<EventHandler::NativeHandlerRef>()) {
+      KJ_IF_SOME(native, handler->handler.tryGet<EventHandler::NativeHandlerRef>()) {
         // Note: Can't call `detach()` here because it would loop back and call
         // `removeNativeListener()` on us, invalidating the `typeMap` iterator. We'll directly
         // null out the state.
@@ -279,14 +283,12 @@ void EventTarget::addEventListener(jsg::Lock& js, kj::String type,
       return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true);
     });
 
-    EventHandler eventHandler {
-      .handler = EventHandler::JavaScriptHandler {
+    auto eventHandler = kj::heap<EventHandler>(
+      EventHandler::JavaScriptHandler {
         .identity = kj::mv(handler.identity),
         .callback = kj::mv(handlerFn),
         .abortHandler = kj::mv(maybeAbortHandler),
-      },
-      .once = once,
-    };
+      }, once);
 
     set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
   });
@@ -317,12 +319,10 @@ void EventTarget::removeEventListener(jsg::Lock& js, kj::String type,
 void EventTarget::addNativeListener(jsg::Lock& js, NativeHandler& handler) {
   auto& set = getOrCreate(handler.type);
 
-  EventHandler eventHandler {
-    .handler = EventHandler::NativeHandlerRef {
+  auto eventHandler = kj::heap<EventHandler>(
+    EventHandler::NativeHandlerRef {
       .handler = handler,
-    },
-    .once = handler.once,
-  };
+    }, handler.once);
 
   set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
 }
@@ -374,14 +374,14 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
     auto maybeHandlerSet = typeMap.find(event->getType());
     KJ_IF_SOME(handlerSet, maybeHandlerSet) {
       for (auto& handler: handlerSet.handlers.ordered<kj::InsertionOrderIndex>()) {
-        KJ_SWITCH_ONEOF(handler.handler) {
+        KJ_SWITCH_ONEOF(handler->handler) {
           KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
             callbacks.add(Callback {
               .handler = EventHandler::JavaScriptHandler {
                 .identity = jsh.identity.addRef(js),
                 .callback = jsh.callback.addRef(js)
               },
-              .once = handler.once,
+              .once = handler->once,
             });
           }
           KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
@@ -389,7 +389,7 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
               .handler = EventHandler::NativeHandlerRef {
                 .handler = native.handler,
               },
-              .once = handler.once,
+              .once = handler->once,
             });
           }
         }
@@ -661,7 +661,7 @@ void AbortController::abort(
 void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
   for (auto& entry : typeMap) {
     for (auto& handler : entry.value.handlers) {
-      KJ_SWITCH_ONEOF(handler.handler) {
+      KJ_SWITCH_ONEOF(handler->handler) {
         KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
           visitor.visit(js);
         }
@@ -804,7 +804,9 @@ size_t EventTarget::EventHandlerSet::jsgGetMemorySelfSize() const {
 }
 
 void EventTarget::EventHandlerSet::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackField("handlers", handlers, kj::none, kj::none, false);
+  for (const auto& handler : handlers) {
+    tracker.trackField("handler", handler);
+  }
 }
 
 void EventTarget::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
