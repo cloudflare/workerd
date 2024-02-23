@@ -5,7 +5,7 @@ Subject: Always enable continuation preserved data in the build
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index da3a7285ced73c3405da14e333c5e02020b2c280..bc288b95bf7e5c59efc127c02a2f6d81fb617f4f 100644
+index a1823f5e7a88dc0417083f3d0c14003028aaa235..d78132d07eddba8afa0084eeb0f06f6861417a0a 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -430,6 +430,7 @@ v8_config(

@@ -180,19 +180,22 @@ git_repository(
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
-bind(
-    name = "absl_flat_hash_set",
-    actual = "@com_google_absl//absl/container:flat_hash_set",
-)
+# Bindings for abseil libraries used by V8
+[
+    bind(
+        name = "absl_" + absl_component,
+        actual = "@com_google_absl//absl/container:" + absl_component,
+    )
+    for absl_component in [
+        "btree",
+        "flat_hash_map",
+        "flat_hash_set",
+    ]
+]
 
 bind(
-    name = "absl_flat_hash_map",
-    actual = "@com_google_absl//absl/container:flat_hash_map",
-)
-
-bind(
-    name = "absl_btree",
-    actual = "@com_google_absl//absl/container:btree",
+    name = "absl_optional",
+    actual = "@com_google_absl//absl/types:optional",
 )
 
 # tcmalloc requires this "rules_fuzzing" package. Its build files fail analysis without it, even
@@ -435,11 +438,10 @@ http_archive(
         "//:patches/v8/0008-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
         "//:patches/v8/0009-Implement-Promise-Context-Tagging.patch",
         "//:patches/v8/0010-Enable-V8-shared-linkage.patch",
-        "//:patches/v8/0011-Fix-V8-ICU-build.patch",
-        "//:patches/v8/0012-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
-        "//:patches/v8/0013-Always-enable-continuation-preserved-data-in-the-bui.patch",
-        "//:patches/v8/0014-Attach-continuation-context-to-Promise-thenable-task.patch",
-        "//:patches/v8/0015-increase-visibility-of-virtual-method.patch",
+        "//:patches/v8/0011-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
+        "//:patches/v8/0012-Always-enable-continuation-preserved-data-in-the-bui.patch",
+        "//:patches/v8/0013-Attach-continuation-context-to-Promise-thenable-task.patch",
+        "//:patches/v8/0014-increase-visibility-of-virtual-method.patch",
     ],
     integrity = "sha256-jcBk1hBhzrMHRL0EDTgHKBVrJPsP1SLZL6A5/l6arrs=",
     strip_prefix = "v8-12.2.281.18",
