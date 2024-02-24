@@ -12,8 +12,16 @@ namespace {
 V8System v8System;
 
 struct DOMExceptionContext: public Object, public ContextGlobal {
+
+  JsObject tryGetError(jsg::Lock& js) {
+    auto obj = js.obj();
+    v8::Exception::CaptureStackTrace(js.v8Context(), obj);
+    return obj;
+  }
+
   JSG_RESOURCE_TYPE(DOMExceptionContext) {
     JSG_NESTED_TYPE(DOMException);
+    JSG_METHOD(tryGetError);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(DOMExceptionIsolate, DOMExceptionContext);
@@ -67,6 +75,14 @@ KJ_TEST("DOMException has legacy code constants") {
   e.expectEval(
       "DOMException.DATA_CLONE_ERR === 25",
       "boolean", "true"
+  );
+}
+
+KJ_TEST("CaptureStackTrace test") {
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.expectEval(
+    "const m = tryGetError(); m.stack", "string",
+    "Error\n    at <anonymous>:1:11"
   );
 }
 

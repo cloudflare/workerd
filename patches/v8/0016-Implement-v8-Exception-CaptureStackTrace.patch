@@ -1,0 +1,65 @@
+From ae6cd1d7637e57bbcad9b113596bbcaf041e4d9e Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Fri, 23 Feb 2024 15:55:43 -0800
+Subject: [PATCH] Implement v8::Exception::CaptureStackTrace
+
+---
+ include/v8-exception.h |  3 +++
+ src/api/api.cc         | 20 ++++++++++++++++++++
+ 2 files changed, 23 insertions(+)
+
+diff --git a/include/v8-exception.h b/include/v8-exception.h
+index 86f8b3a4baf..7c329ac1468 100644
+--- a/include/v8-exception.h
++++ b/include/v8-exception.h
+@@ -8,6 +8,7 @@
+ #include <stddef.h>
+ 
+ #include "v8-local-handle.h"  // NOLINT(build/include_directory)
++#include "v8-object.h"        // NOLINT(build/include_directory)
+ #include "v8config.h"         // NOLINT(build/include_directory)
+ 
+ namespace v8 {
+@@ -58,6 +59,8 @@ class V8_EXPORT Exception {
+    * of a given exception, or an empty handle if not available.
+    */
+   static Local<StackTrace> GetStackTrace(Local<Value> exception);
++
++  static Maybe<bool> CaptureStackTrace(Local<Context> context, Local<Object> object);
+ };
+ 
+ /**
+diff --git a/src/api/api.cc b/src/api/api.cc
+index bcfb18d74a1..c0bfc7a16f8 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -10703,6 +10703,26 @@ Local<Message> Exception::CreateMessage(Isolate* v8_isolate,
+       scope.CloseAndEscape(i_isolate->CreateMessage(obj, nullptr)));
+ }
+ 
++Maybe<bool> Exception::CaptureStackTrace(Local<Context> context, Local<Object> object) {
++  auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
++  ENTER_V8_NO_SCRIPT(i_isolate, context, Exception, CaptureStackTrace,
++                     i::HandleScope);
++  auto obj = Utils::OpenHandle(*object);
++  if (!IsJSObject(*obj)) return Just(false);
++
++  auto js_obj = i::Handle<i::JSObject>::cast(obj);
++
++  i::FrameSkipMode mode = i::FrameSkipMode::SKIP_FIRST;
++
++  auto result = i::ErrorUtils::CaptureStackTrace(i_isolate, js_obj, mode,
++      i::Handle<i::Object>());
++
++  i::Handle<i::Object> handle;
++  has_exception = !result.ToHandle(&handle);
++  RETURN_ON_FAILED_EXECUTION_PRIMITIVE(bool);
++  return Just(true);
++}
++
+ Local<StackTrace> Exception::GetStackTrace(Local<Value> exception) {
+   auto obj = Utils::OpenHandle(*exception);
+   if (!IsJSObject(*obj)) return Local<StackTrace>();
+-- 
+2.40.1
+
