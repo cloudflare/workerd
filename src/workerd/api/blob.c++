@@ -246,7 +246,7 @@ jsg::Ref<File> File::deserialize(
     jsg::Lock& js,
     rpc::SerializationTag tag,
     jsg::Deserializer& deserializer) {
-  KJ_ASSERT(tag == rpc::SerializationTag::FILE, "Invalid tag for Blob");
+  KJ_ASSERT(tag == rpc::SerializationTag::FILE, "Invalid tag for File");
   size_t nameSize = deserializer.readRawUint64();
   auto name = deserializer.readRawBytes(nameSize).asChars();
   double lastModified = deserializer.readDouble();
