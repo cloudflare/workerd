@@ -49,24 +49,19 @@ namespace workerd::jsg {
 // "DOMException".
 class DOMException: public Object {
 public:
-  DOMException(kj::String message,
-               kj::String name,
-               V8Ref<v8::Object> errorForStack)
+  DOMException(kj::String message, kj::String name)
       : message(kj::mv(message)),
-        name(kj::mv(name)),
-        errorForStack(kj::mv(errorForStack)) {}
+        name(kj::mv(name)) {}
 
   // JS API
 
-  static Ref<DOMException> constructor(Lock& js,
+  static Ref<DOMException> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
                                        Optional<kj::String> message,
                                        Optional<kj::String> name);
 
   kj::StringPtr getName();
   kj::StringPtr getMessage();
   int getCode();
-
-  v8::Local<v8::Value> getStack(Lock& js);
 
 #define JSG_DOM_EXCEPTION_CONSTANT_CXX(name, code, friendlyName) \
     static constexpr int name = code;
@@ -88,17 +83,6 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
     JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
 
-    JSG_LAZY_READONLY_INSTANCE_PROPERTY(stack, getStack);
-    // V8 gives Error objects a non-standard (but widely known) `stack` property, and Web IDL
-    // requires that DOMException get any non-standard properties that Error gets. Chrome honors
-    // this requirement only for runtime-generated DOMExceptions -- script-generated DOMExceptions
-    // don't get `stack`, even though script-generated Errors do. It's more convenient and, IMO,
-    // more conformant to just give all DOMExceptions a `stack` property.
-    //
-    // Note that Chrome makes this a mutable property, presumably because Error properties are
-    // mutable in JavaScript. Maybe we should do that? It's easier to implement as a read-only
-    // property, though.
-
     // Declare static JS constants for every INDEX_SIZE_ERR, DOMSTRING_SIZE_ERR, etc.
     JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(JSG_DOM_EXCEPTION_CONSTANT_JS)
   }
@@ -109,16 +93,11 @@ public:
   void visitForMemoryInfo(MemoryTracker& tracker) const {
     tracker.trackField("message", message);
     tracker.trackField("name", name);
-    tracker.trackField("errorForStack", errorForStack);
   }
 
 private:
   kj::String message;
   kj::String name;
-
-  // We implement the `stack` property in a similarly hacky way as Chrome: store an Error object
-  // and use its `stack`.
-  V8Ref<v8::Object> errorForStack;
 
   void visitForGc(GcVisitor& visitor);
 };
