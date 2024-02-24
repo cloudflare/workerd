@@ -264,7 +264,11 @@ public:
     return typeId;
   }
 
-  rpc::JsRpcTarget::Client getCap() { return clientCap; }
+  rpc::JsRpcTarget::Client getCap() {
+    auto result = kj::mv(KJ_ASSERT_NONNULL(clientCap, "can only call getCap() once"));
+    clientCap = kj::none;
+    return result;
+  }
 
   // Event ID for jsRpcSession.
   //
@@ -278,7 +282,7 @@ private:
 
   // We need to set the client/server capability on the event itself to get around CustomEvent's
   // limited return type.
-  rpc::JsRpcTarget::Client clientCap;
+  kj::Maybe<rpc::JsRpcTarget::Client> clientCap;
   uint16_t typeId;
 
   class ServerTopLevelMembrane;

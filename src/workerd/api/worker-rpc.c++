@@ -948,13 +948,31 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   auto req = dispatcher.jsRpcSessionRequest();
   auto sent = req.send();
 
-  this->capFulfiller->fulfill(
-      capnp::membrane(
-          sent.getTopLevel(),
-          kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise))));
+  rpc::JsRpcTarget::Client cap = sent.getTopLevel();
+
+  cap = capnp::membrane(
+      sent.getTopLevel(),
+      kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
+
+  // When no more capabilities exist on the connection, we want to proactively cancel the RPC.
+  // This is needed in particular for the case where the client is dropped without making any calls
+  // at all, e.g. because serializing the arguments failed. Unfortunately, simply dropping the
+  // capability obtained through `sent.getTopLevel()` above will not be detected by the server,
+  // because this is a pipeline capability on a call that is still running. So, if we don't
+  // actually cancel the connection client-side, the server will hang open waiting for the initial
+  // top-level call to arrive, and the event will appear never to complete at our end.
+  //
+  // TODO(cleanup): It feels like there's something wrong with the design here. Can we make this
+  //   less ugly?
+  auto completionPaf = kj::newPromiseAndFulfiller<void>();
+  cap = capnp::membrane(
+      sent.getTopLevel(),
+      kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+
+  this->capFulfiller->fulfill(kj::mv(cap));
 
   try {
-    co_await sent;
+    co_await sent.ignoreResult().exclusiveJoin(kj::mv(completionPaf.promise));
   } catch (...) {
     auto e = kj::getCaughtExceptionAsKj();
     if (revokePaf.fulfiller->isWaiting()) {
