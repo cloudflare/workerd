@@ -74,6 +74,10 @@ struct JsValueContext: public ContextGlobalObject {
     return js.date(0);
   }
 
+  jsg::ByteString getDateUtc(Lock& js) {
+    return js.date("Sat, 24 Feb 2024 15:15:05 GMT"_kjc).toUTCString(js);
+  }
+
   JSG_RESOURCE_TYPE(JsValueContext) {
     JSG_METHOD(takeJsValue);
     JSG_METHOD(takeJsString);
@@ -88,6 +92,7 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(setRef);
     JSG_METHOD(getRef);
     JSG_METHOD(getDate);
+    JSG_METHOD(getDateUtc);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(JsValueIsolate, JsValueContext);
@@ -113,6 +118,7 @@ KJ_TEST("simple") {
                "TypeError: Failed to execute 'takeJsObject' on 'JsValueContext': parameter 1 "
                "is not of type 'JsObject'.");
   e.expectEval("getDate() instanceof Date", "boolean", "true");
+  e.expectEval("getDateUtc()", "string", "Sat, 24 Feb 2024 15:15:05 GMT");
 }
 
 }  // namespace

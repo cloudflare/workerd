@@ -1,0 +1,124 @@
+From 3525cbcde49dbf58e8ec68a957eb4f3ba5412715 Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Sat, 24 Feb 2024 06:12:13 -0800
+Subject: Add v8::Date::ToUTCString and v8::Date::Parse APIs
+
+---
+ include/v8-date.h |  5 +++-
+ src/api/api.cc    | 66 +++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 70 insertions(+), 1 deletion(-)
+
+diff --git a/include/v8-date.h b/include/v8-date.h
+index 8d82ccc9ea60bbeed6d1903dac3638a921a4a7e3..4f014927b0bf0c617879c46d451ecf5d67fde26f 100644
+--- a/include/v8-date.h
++++ b/include/v8-date.h
+@@ -20,7 +20,8 @@ class V8_EXPORT Date : public Object {
+  public:
+   static V8_WARN_UNUSED_RESULT MaybeLocal<Value> New(Local<Context> context,
+                                                      double time);
+-
++  static V8_WARN_UNUSED_RESULT MaybeLocal<Value> Parse(Local<Context> context,
++                                                       Local<String> date_string);
+   /**
+    * A specialization of Value::NumberValue that is more efficient
+    * because we know the structure of this object.
+@@ -32,6 +33,8 @@ class V8_EXPORT Date : public Object {
+    */
+   v8::Local<v8::String> ToISOString() const;
+ 
++  v8::Local<v8::String> ToUTCString() const;
++
+   V8_INLINE static Date* Cast(Value* value) {
+ #ifdef V8_ENABLE_CHECKS
+     CheckCast(value);
+diff --git a/src/api/api.cc b/src/api/api.cc
+index c0bfc7a16f8f5be37e8c64ec7d2016409fead2db..678aed75a25f73d7fb34afc0681dd9b6edee4a1f 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -46,6 +46,7 @@
+ #include "src/common/globals.h"
+ #include "src/compiler-dispatcher/lazy-compile-dispatcher.h"
+ #include "src/date/date.h"
++#include "src/date/dateparser.h"
+ #include "src/debug/debug.h"
+ #include "src/deoptimizer/deoptimizer.h"
+ #include "src/execution/embedder-state.h"
+@@ -7917,6 +7918,57 @@ MaybeLocal<v8::Value> v8::Date::New(Local<Context> context, double time) {
+   RETURN_ESCAPED(result);
+ }
+ 
++namespace {
++// This is copied from builtins-date.cc... a cleaner solution would be to make
++// that function public but for this patch, I want to keep the changes more contained.
++double ParseDateTimeString(i::Isolate* isolate, i::Handle<i::String> str) {
++  str = i::String::Flatten(isolate, str);
++  double out[i::DateParser::OUTPUT_SIZE];
++  i::DisallowGarbageCollection no_gc;
++  i::String::FlatContent str_content = str->GetFlatContent(no_gc);
++  bool result;
++  if (str_content.IsOneByte()) {
++    result = i::DateParser::Parse(isolate, str_content.ToOneByteVector(), out);
++  } else {
++    result = i::DateParser::Parse(isolate, str_content.ToUC16Vector(), out);
++  }
++  if (!result) return std::numeric_limits<double>::quiet_NaN();
++  double const day = i::MakeDay(out[i::DateParser::YEAR], out[i::DateParser::MONTH],
++                             out[i::DateParser::DAY]);
++  double const time =
++      i::MakeTime(out[i::DateParser::HOUR], out[i::DateParser::MINUTE],
++               out[i::DateParser::SECOND], out[i::DateParser::MILLISECOND]);
++  double date = i::MakeDate(day, time);
++  if (std::isnan(out[i::DateParser::UTC_OFFSET])) {
++    if (date >= -i::DateCache::kMaxTimeBeforeUTCInMs &&
++        date <= i::DateCache::kMaxTimeBeforeUTCInMs) {
++      date = isolate->date_cache()->ToUTC(static_cast<int64_t>(date));
++    } else {
++      return std::numeric_limits<double>::quiet_NaN();
++    }
++  } else {
++    date -= out[i::DateParser::UTC_OFFSET] * 1000.0;
++  }
++  return i::DateCache::TimeClip(date);
++}
++}  // namespace
++
++MaybeLocal<Value> v8::Date::Parse(Local<Context> context,
++                                  Local<String> value) {
++  PREPARE_FOR_EXECUTION(context, Date, Parse);
++  auto string = Utils::OpenHandle(*value);
++  double time = ParseDateTimeString(i_isolate, string);
++
++  Local<Value> result;
++  has_exception =
++      !ToLocal<Value>(i::JSDate::New(i_isolate->date_function(),
++                                     i_isolate->date_function(), time),
++                      &result);
++
++  RETURN_ON_FAILED_EXECUTION(Value)
++  RETURN_ESCAPED(result);
++}
++
+ double v8::Date::ValueOf() const {
+   auto obj = Utils::OpenDirectHandle(this);
+   auto jsdate = i::DirectHandle<i::JSDate>::cast(obj);
+@@ -7938,6 +7990,20 @@ v8::Local<v8::String> v8::Date::ToISOString() const {
+   return Utils::ToLocal(str);
+ }
+ 
++v8::Local<v8::String> v8::Date::ToUTCString() const {
++  auto obj = Utils::OpenDirectHandle(this);
++  auto jsdate = i::DirectHandle<i::JSDate>::cast(obj);
++  i::Isolate* i_isolate = jsdate->GetIsolate();
++  API_RCS_SCOPE(i_isolate, Date, NumberValue);
++  i::DateBuffer buffer = i::ToDateString(i::Object::Number(jsdate->value()),
++                                         i_isolate->date_cache(),
++                                         i::ToDateStringMode::kUTCDateAndTime);
++  i::Handle<i::String> str = i_isolate->factory()
++                                 ->NewStringFromUtf8(base::VectorOf(buffer))
++                                 .ToHandleChecked();
++  return Utils::ToLocal(str);
++}
++
+ // Assert that the static TimeZoneDetection cast in
+ // DateTimeConfigurationChangeNotification is valid.
+ #define TIME_ZONE_DETECTION_ASSERT_EQ(value)                     \
