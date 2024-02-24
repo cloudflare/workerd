@@ -191,6 +191,12 @@ enum SerializationTag {
   # by accident.
 
   jsRpcStub @1;
+
+  blob @2;
+  # workerd::api::Blob
+
+  file @3;
+  # workerd::api::File
 }
 
 struct JsValue {

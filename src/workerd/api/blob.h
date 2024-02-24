@@ -5,7 +5,9 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/worker-interface.capnp.h>
 
 namespace workerd::api {
 
@@ -60,6 +62,12 @@ public:
     JSG_METHOD(stream);
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Blob> deserialize(jsg::Lock& js,
+                                    rpc::SerializationTag tag,
+                                    jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::BLOB);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     KJ_SWITCH_ONEOF(ownData) {
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
@@ -84,6 +92,7 @@ private:
   }
 
   class BlobInputStream;
+  friend class File;
 };
 
 // An implementation of the Web Platform Standard File API
@@ -117,6 +126,12 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(lastModified, getLastModified);
     }
   }
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<File> deserialize(jsg::Lock& js,
+                                    rpc::SerializationTag tag,
+                                    jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::FILE);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("name", name);

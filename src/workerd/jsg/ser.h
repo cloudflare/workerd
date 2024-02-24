@@ -119,6 +119,7 @@ public:
 
   void writeRawUint32(uint32_t i) { ser.WriteUint32(i); }
   void writeRawUint64(uint64_t i) { ser.WriteUint64(i); }
+  void writeDouble(double d) { ser.WriteDouble(d); }
 
   void writeRawBytes(kj::ArrayPtr<const kj::byte> bytes) {
     ser.WriteRawBytes(bytes.begin(), bytes.size());
@@ -185,6 +186,7 @@ public:
 
   uint32_t readRawUint32();
   uint64_t readRawUint64();
+  double readDouble();
 
   // Returns a view directly into the original buffer for the number of bytes requested. Always
   // returns the exact amount; throws if not possible.

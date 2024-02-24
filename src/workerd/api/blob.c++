@@ -190,6 +190,25 @@ jsg::Ref<ReadableStream> Blob::stream() {
       kj::heap<BlobInputStream>(JSG_THIS));
 }
 
+void Blob::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  serializer.writeRawUint64(type.size());
+  serializer.writeRawBytes(type.asBytes());
+  serializer.writeRawUint64(data.size());
+  serializer.writeRawBytes(data);
+}
+
+jsg::Ref<Blob> Blob::deserialize(
+    jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer) {
+  KJ_ASSERT(tag == rpc::SerializationTag::BLOB, "Invalid tag for Blob");
+  size_t typeSize = deserializer.readRawUint64();
+  auto type = deserializer.readRawBytes(typeSize).asChars();
+  size_t dataSize = deserializer.readRawUint64();
+  auto data = deserializer.readRawBytes(dataSize);
+  return jsg::alloc<Blob>(kj::heapArray<byte>(data), kj::heapString(type));
+}
+
 // =======================================================================================
 
 jsg::Ref<File> File::constructor(jsg::Optional<Bits> bits,
@@ -211,6 +230,34 @@ jsg::Ref<File> File::constructor(jsg::Optional<Bits> bits,
   }
 
   return jsg::alloc<File>(concat(kj::mv(bits)), kj::mv(name), kj::mv(type), lastModified);
+}
+
+void File::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  serializer.writeRawUint64(name.size());
+  serializer.writeRawBytes(name.asBytes());
+  serializer.writeDouble(lastModified);
+  serializer.writeRawUint64(type.size());
+  serializer.writeRawBytes(type.asBytes());
+  serializer.writeRawUint64(data.size());
+  serializer.writeRawBytes(data);
+}
+
+jsg::Ref<File> File::deserialize(
+    jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer) {
+  KJ_ASSERT(tag == rpc::SerializationTag::FILE, "Invalid tag for Blob");
+  size_t nameSize = deserializer.readRawUint64();
+  auto name = deserializer.readRawBytes(nameSize).asChars();
+  double lastModified = deserializer.readDouble();
+  size_t typeSize = deserializer.readRawUint64();
+  auto type = deserializer.readRawBytes(typeSize).asChars();
+  size_t dataSize = deserializer.readRawUint64();
+  auto data = deserializer.readRawBytes(dataSize);
+  return jsg::alloc<File>(kj::heapArray<byte>(data),
+                          kj::heapString(name),
+                          kj::heapString(type),
+                          lastModified);
 }
 
 }  // namespace workerd::api

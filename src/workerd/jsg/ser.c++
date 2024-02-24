@@ -197,6 +197,12 @@ uint64_t Deserializer::readRawUint64() {
   return result;
 }
 
+double Deserializer::readDouble() {
+  double result;
+  KJ_ASSERT(deser.ReadDouble(&result), "deserialization failure, possible corruption");
+  return result;
+}
+
 kj::ArrayPtr<const kj::byte> Deserializer::readRawBytes(size_t size) {
   const void* data;
   KJ_ASSERT(deser.ReadRawBytes(size, &data), "deserialization failure, possible corruption");

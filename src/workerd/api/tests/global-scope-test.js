@@ -270,6 +270,26 @@ export const structuredClone = {
   }
 };
 
+export const structuredCloneBlob = {
+  async test() {
+    const blob1 = new Blob(['hello']);
+    const blob2 = globalThis.structuredClone(blob1);
+    notStrictEqual(blob1, blob2);
+    strictEqual(await blob1.text(), await blob2.text());
+    strictEqual(blob1.type, blob2.type);
+    strictEqual(blob1.size, blob2.size);
+
+    const file1 = new File(['hello'], 'hello.txt', { lastModified: 123, type: 'text/plain' });
+    const file2 = globalThis.structuredClone(file1);
+    notStrictEqual(file1, file2);
+    strictEqual(await file1.text(), await file2.text());
+    strictEqual(file1.name, file2.name);
+    strictEqual(file1.lastModified, file2.lastModified);
+    strictEqual(file1.type, file2.type);
+    strictEqual(file1.size, file2.size);
+  }
+};
+
 export const base64 = {
   test() {
     function format_value(elem) { return elem; }
