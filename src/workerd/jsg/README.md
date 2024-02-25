@@ -120,8 +120,8 @@ Take careful note of the differences there: `kj::Maybe<kj::String>` allows `null
 `undefined`, `jsg::Optional<kj::String>` only allows `undefined`.
 
 At the C++ layer, `kj::Maybe<T>` and `jsg::Optional<T>` are semantically equivalent.
-Their value is one of either `nullptr` or type `T`. When a null `kj::Maybe<T>` is
-passed out to JavaScript, it is mapped to `null`. When a null `jsg::Optional<T>` is
+Their value is one of either `kj::none` or type `T`. When an empty `kj::Maybe<T>` is
+passed out to JavaScript, it is mapped to `null`. When an empty `jsg::Optional<T>` is
 passed out to JavaScript, it is mapped to `undefined`.
 
 This mapping, for instance, means that JavaScript `undefined` can be translated to
@@ -133,11 +133,11 @@ translating from a JavaScript value of `undefined` or `null`.
 
 | Type                                 | JavaScript Value | C++ value   |
 | ------------------------------------ | ---------------- | ----------- |
-| `kj::Maybe<kj::String>`              | `undefined`      | `nullptr`   |
-| `kj::Maybe<kj::String>`              | `null`           | `nullptr`   |
-| `jsg::Optional<kj::String>`          | `undefined`      | `nullptr`   |
+| `kj::Maybe<kj::String>`              | `undefined`      | `kj::none`  |
+| `kj::Maybe<kj::String>`              | `null`           | `kj::none`  |
+| `jsg::Optional<kj::String>`          | `undefined`      | `kj::none`  |
 | `jsg::Optional<kj::String>`          | `null`           | `{throws}`  |
-| `jsg::LenientOptional<kj::String>`*  | `null`           | `nullptr`   |
+| `jsg::LenientOptional<kj::String>`*  | `null`           | `kj::none`  |
 
 `*` `jsg::LenientOptional` is discussed a bit later.
 
@@ -158,11 +158,11 @@ in the list?
 ### Array types (`kj::Array<T>` and `kj::ArrayPtr<T>`)
 
 The `kj::Array<T>` and `kj::ArrayPtr<T>` types map to JavaScript arrays. Here, `T` can
-be any value or resource type.
+be any value or resource type. The types `kj::Array<kj::byte>` and `kj::ArrayPtr<kj::byte>`
+are handled differently.
 
 ```cpp
-// jsg::Sequence is introduced below...
-void doSomething(jsg::Sequence<kj::String> strings) {
+void doSomething(kj::Array<kj::String> strings) {
   KJ_DBG(strings[0]);  // a
   KJ_DBG(strings[1]);  // b
   KJ_DBG(strings[2]);  // c
@@ -345,7 +345,7 @@ mappings for these structures.
 One choice is to map to and from a `kj::Array<kj::byte>`.
 
 When receiving a `kj::Array<kj::byte>` in C++ *from* a JavaScript `TypedArray` or `ArrayBuffer`,
-it is important to understand that the underlying data is not copied. Instead, the
+it is important to understand that the underlying data is not copied or transfered. Instead, the
 `kj::Array<kj::byte>` provides a *view* over the same underlying `v8::BackingStore` as the
 `TypedArray` or `ArrayBuffer`.
 
@@ -370,13 +370,38 @@ When a `kj::Array<kj::byte>` is passed back *out* to JavaScript, it is always ma
 memory is transferred to the `std::shared_ptr<v8::BackingStore>` instance that underlies the
 `ArrayBuffer`).
 
+Note that this mapping behavior can get a bit hairy if a single backing store is passed back and
+forth across the JS/C++ boundary multiple times. Specifically, if we pass an `ArrayBuffer` from
+JS to C++, the `std::shared_ptr<v8::BackingStore>` holding the underlying data will be extracted
+and will be attached to a `kj::Array<kj::byte>` in C++. If that `kj::Array<kj::byte>` is passed
+back out to JavaScript, a *new* `std::shared_ptr<v8::BackingStore>` will be created that has a
+disposer that wraps and owns the `kj::Array<kj::byte>`. That `v8::BackingStore` will be attached
+to a *new* `ArrayBuffer` passed out to JavaScript. If that `ArrayBuffer` is passed *back* into
+C++, then the wrapping process will repeat.
+
+```
+  std::shared_ptr<v8::BackingStore>
+                |
+        kj::Array<kj::byte>
+                |
+  std::shared_ptr<v8::BackingStore>
+                |
+        kj::Array<kj::byte>
+                |
+               ...
+```
+
+While the structures all point at the same underlying memory allocation, we end up with multiple
+nested levels of `v8::BackingStore` and `kj::Array<kj::byte>` instances.
+
 For many cases, this mapping behavior is just fine, but some APIs (such as Streams) require a
 more nuanced type of mapping. For those cases, we provide `jsg::BufferSource`.
 
 A `jsg::BufferSource` wraps the v8 handle of a given `TypedArray` or `ArrayBuffer` and remembers
 its type. When the `jsg::BufferSource` is passed back out to JavaScript, it will map to exactly
 the same kind of object that was passed in (e.g. `Uint16Array` passed to `jsg::BufferSource` will
-produce a `Uint16Array` when passed back out to JavaScript.)
+produce a `Uint16Array` when passed back out to JavaScript.) The same
+`std::shared_ptr<v8::BackingStore>` will be maintained across the JS/C++ boundary.
 
 The `jsg::BufferSource` also supports the ability to "detach" the backing store. What this does
 is separate the `v8::BackingStore` from the original `TypedArray`/`BufferSource` such that the
@@ -396,13 +421,13 @@ There are generally three ways of using `jsg::Function`:
 
 For the first item, imagine the following case:
 
-We have a C++ function that takes a callback argument. The callback argument takes a single `int`
+We have a C++ function that takes a callback argument. The callback argument takes an `int`
 as an argument (Ignore the `jsg::Lock& js` part for now, we'll explain that in a bit). As soon
 as we get the callback, we invoke it as a function.
 
 ```cpp
 void doSomething(jsg::Lock& js, jsg::Function<void(int)> callback) {
-  callback(1);
+  callback(js, 1);
 }
 ```
 
@@ -426,12 +451,6 @@ jsg::Function<void(int)> getFunction() {
 const func = getFunction();
 func(1);  // prints 1
 ```
-
-For the third case, because it is possible to create a `jsg::Function` from either a JS function
-or a C++ lambda, the `jsg::Function` can be used in APIs that might be called from either or
-both JS or C++.
-
-TODO(soon): Add an example here?
 
 ### Promises (`jsg::Promise<T>`)
 
@@ -722,12 +741,40 @@ everything to work. The `jsg::Object` class must be publicly inherited but it do
 any additional methods or properties that need to be directly used (it does add some but those
 are intended to be used via other JSG APIs).
 
+```cpp
+class Foo: public jsg::Object {
+public:
+  Foo(int value): value(value) {}
+
+  JSG_RESOURCE_TYPE(Foo) {}
+
+private:
+  int value;
+};
+```
+
 ### Constructors
 
 For a Resource Type to be constructible from JavaScript, it must have a static method named
 `constructor()` that returns a `jsg::Ref<T>` where `T` is the Resource Type. If this static
 method is not provided, attempts to create new instances using `new ...` will fail with an
 error.
+
+```cpp
+class Foo: public jsg::Object {
+public:
+  Foo(int value): value(value) {}
+
+  static jsg::Ref<Foo> constructor(jsg::Lock& js, int value) {
+    return jsg::alloc<Foo>(value);
+  }
+
+  JSG_RESOURCE_TYPE(Foo) {}
+
+private:
+  int value;
+};
+```
 
 ### `JSG_RESOURCE_TYPE(T)`
 
