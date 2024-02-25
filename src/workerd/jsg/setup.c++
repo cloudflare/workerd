@@ -281,8 +281,33 @@ bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
 }
 
 namespace {
-  static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params) {
+  static v8::Isolate* newIsolate(
+      V8PlatformWrapper* system,
+      v8::Isolate::CreateParams&& params) {
     return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
+      v8::CppHeapCreateParams heapParams {
+        {},
+        v8::WrapperDescriptor(
+            Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+            Wrappable::CPPGC_SHIM_FIELD_INDEX,
+            Wrappable::WRAPPABLE_TAG)
+      };
+      heapParams.marking_support = cppgc::Heap::MarkingType::kAtomic;
+      heapParams.sweeping_support = cppgc::Heap::SweepingType::kAtomic;
+      // We currently don't attempt to support incremental marking or sweeping. We probably could
+      // support them, but it will take some careful investigation and testing. It's not clear if
+      // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
+      // full atomic mark-sweep usually doesn't require much of a pause.
+      //
+      // We probably won't ever support concurrent marking or sweeping because concurrent GC is
+      // only expected to be a win if there are idle CPU cores available. Workers normally run on
+      // servers that are handling many requests at once, thus it's expected CPU cores will be
+      // fully utilized. This differs from browser environments, where a user is typically doing
+      // only one thing at a time and thus likely has CPU cores to spare.
+
+      // v8 takes ownership of the v8::CppHeap when passed this way.
+      params.cpp_heap = v8::CppHeap::Create(system, heapParams).release();
+
       if (params.array_buffer_allocator == nullptr &&
           params.array_buffer_allocator_shared == nullptr) {
         params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
@@ -296,40 +321,11 @@ namespace {
 IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams,
                          kj::Own<IsolateObserver> observer)
     : system(system),
-      ptr(newIsolate(kj::mv(createParams))),
+      ptr(newIsolate(const_cast<V8PlatformWrapper*>(&system.platformWrapper),
+                     kj::mv(createParams))),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    v8::CppHeapCreateParams params {
-      {},
-      v8::WrapperDescriptor(
-          Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-          Wrappable::CPPGC_SHIM_FIELD_INDEX,
-          Wrappable::WRAPPABLE_TAG)
-    };
-
-    params.marking_support = cppgc::Heap::MarkingType::kAtomic;
-    params.sweeping_support = cppgc::Heap::SweepingType::kAtomic;
-    // We currently don't attempt to support incremental marking or sweeping. We probably could
-    // support them, but it will take some careful investigation and testing. It's not clear if
-    // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
-    // full atomic mark-sweep usually doesn't require much of a pause.
-    //
-    // We probably won't ever support concurrent marking or sweeping because concurrent GC is only
-    // expected to be a win if there are idle CPU cores available. Workers normally run on servers
-    // that are handling many requests at once, thus it's expected CPU cores will be fully
-    // utilized. This differs from browser environments, where a user is typically doing only one
-    // thing at a time and thus likely has CPU cores to spare.
-
-    // const_cast here because V8's `Platform` interface doesn't use constness for thread-safety and
-    // V8 wants a non-const pointer here, but the object is in fact thread-safe.
-    cppgcHeap = v8::CppHeap::Create(const_cast<V8PlatformWrapper*>(&system.platformWrapper), params);
-
-    // TODO(soon): V8 has deprecated the AttachCppHeap/DetachCppHeap APIs in favor of setting
-    // the CppHeap via the CreateParams. Unfortunately there's a bug in V8 when using the new
-    // approach so we'll continue to use the deprecated APIs for now. Unfortunately this means
-    // that we'll have a deprecation warning in the builds for a while.
-    ptr->AttachCppHeap(cppgcHeap.get());
     ptr->SetEmbedderRootsHandler(&heapTracer);
 
     ptr->SetFatalErrorHandler(&fatalError);
@@ -384,16 +380,6 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
 IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    // TODO(soon): V8 has deprecated the AttachCppHeap/DetachCppHeap APIs in favor of setting
-    // the CppHeap via the CreateParams. Unfortunately there's a bug in V8 when using the new
-    // approach so we'll continue to use the deprecated APIs for now. Unfortunately this means
-    // that we'll have a deprecation warning in the builds for a while.
-    ptr->DetachCppHeap();
-
-    // It's not really clear CppHeap's destructor automatically destroys all heap-allocated objects.
-    // To be safe we call `Terminate()`.
-    cppgcHeap->Terminate();
-
     ptr->Dispose();
   });
 }
