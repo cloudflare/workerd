@@ -5,6 +5,7 @@
 #include "queue.h"
 #include "util.h"
 
+#include <workerd/io/features.h>
 #include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
@@ -205,6 +206,9 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
   Serialized serialized;
   KJ_IF_SOME(type, contentType) {
     serialized = serialize(js, body, type, SerializeArrayBufferBehavior::DEEP_COPY);
+  } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
+    headers.add("X-Msg-Fmt", IncomingQueueMessage::ContentType::JSON);
+    serialized = serialize(js, body, IncomingQueueMessage::ContentType::JSON, SerializeArrayBufferBehavior::DEEP_COPY);
   } else {
     // TODO(cleanup) send message format header (v8) by default
     serialized = serializeV8(js, body);
@@ -259,7 +263,11 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
       item.contentType = validateContentType(contentType);
       item.body = serialize(js, body, contentType,
           SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
-    } else {
+    } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
+      item.contentType = IncomingQueueMessage::ContentType::JSON;
+      item.body = serialize(js, body, IncomingQueueMessage::ContentType::JSON, SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
+    }
+    else {
       item.body = serializeV8(js, body);
     }
 
