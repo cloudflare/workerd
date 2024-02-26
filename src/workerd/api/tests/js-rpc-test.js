@@ -388,6 +388,12 @@ export let receiveStubOverRpc = {
     let stub = await env.MyService.makeCounter(17);
     assert.strictEqual(await stub.increment(2), 19);
     assert.strictEqual(await stub.increment(-10), 9);
+
+    // Do multiple concurrent calls, they should be delivered in the order in which they were made.
+    let promise1 = stub.increment(6);
+    let promise2 = stub.increment(4);
+    let promise3 = stub.increment(3);
+    assert.deepEqual(await Promise.all([promise1, promise2, promise3]), [15, 19, 22]);
   },
 }
 
