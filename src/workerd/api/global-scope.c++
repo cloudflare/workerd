@@ -402,8 +402,14 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
         auto& actor = KJ_ASSERT_NONNULL(context.getActor());
         auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
         persistent.cancelDeferredAlarmDeletion();
+
+        LOG_NOSENTRY(WARNING, "Alarm exceeded its allowed execution time");
+        // Report alarm handler failure and log it.
+        auto e = KJ_EXCEPTION(OVERLOADED, "broken.dropped; worker_do_not_log; jsg.Error: Alarm exceeded its allowed execution time");
+        context.getMetrics().reportFailure(e);
+
         // We don't want the handler to keep running after timeout.
-        context.abort(JSG_KJ_EXCEPTION(FAILED, Error, "Alarm exceeded its allowed execution time"));
+        context.abort(kj::mv(e));
         // We want timed out alarms to be treated as user errors. As such, we'll mark them as
         // retriable, and we'll count the retries against the alarm retries limit. This will ensure
         // that the handler will attempt to run for a number of times before giving up and deleting
