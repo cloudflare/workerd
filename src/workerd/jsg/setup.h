@@ -250,7 +250,6 @@ private:
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
   HeapTracer heapTracer;
-  std::unique_ptr<v8::CppHeap> cppgcHeap;
   kj::Own<IsolateObserver> observer;
 
   friend class Data;

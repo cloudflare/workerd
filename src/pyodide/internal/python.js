@@ -79,7 +79,7 @@ function prepareFileSystem(Module) {
   Module.FS.writeFile(
     `/lib/python${pymajor}${pyminor}.zip`,
     new Uint8Array(stdlib),
-    { canOwn: true }
+    { canOwn: true },
   );
   Module.FS.mkdir(Module.API.config.env.HOME);
 }
@@ -103,7 +103,7 @@ function instantiateWasm(wasmImports, successCallback) {
     // Instantiate pyodideWasmModule with wasmImports
     const instance = await WebAssembly.instantiate(
       pyodideWasmModule,
-      wasmImports
+      wasmImports,
     );
     successCallback(instance, pyodideWasmModule);
   })();
@@ -113,10 +113,21 @@ function instantiateWasm(wasmImports, successCallback) {
 
 /**
  * The Emscripten settings object
+ *
+ * This isn't public API of Pyodide so it's a bit fiddly.
  */
-function getEmscriptenSettings() {
-  const config = { jsglobals: globalThis, env: { HOME: "/session" } };
-  const API = { config };
+function getEmscriptenSettings(lockfile, indexURL) {
+  const config = {
+    // jsglobals is used for the js module.
+    jsglobals: globalThis,
+    // environment variables go here
+    env: { HOME: "/session" },
+    // This is the index that we use as the base URL to fetch the wheels.
+    indexURL,
+  };
+  // loadPackage initializes its state using lockFilePromise.
+  const lockFilePromise = lockfile ? Promise.resolve(lockfile) : undefined;
+  const API = { config, lockFilePromise };
   // Emscripten settings to control runtime instantiation.
   return {
     // preRun hook to set up the file system before running main
@@ -142,7 +153,7 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
     // Force Emscripten to feature detect the way we want
     // They used to have an `environment` setting that did this but it has been
     // removed =(
-    // TODO: consider patching this in patch_pyodide_js.bzl instead.
+    // If/when we link our own Pyodide we can remove this.
     globalThis.window = {}; // makes ENVIRONMENT_IS_WEB    = true
     globalThis.importScripts = 1; // makes ENVIRONMENT_IS_WORKER = false
     const p = _createPyodideModule(emscriptenSettings);
@@ -216,7 +227,7 @@ async function makeLinearMemorySnapshot(emscriptenModule) {
   // TODO: make memory snapshot with more than just these hardcoded imports, use real script imports.
   const toImport = SNAPSHOT_IMPORTS.join(",");
   const toDelete = Array.from(
-    new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".")[0]))
+    new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".")[0])),
   ).join(",");
   simpleRunPython(emscriptenModule, `import ${toImport}`);
   simpleRunPython(emscriptenModule, "sysconfig.get_config_vars()");
@@ -283,7 +294,7 @@ function mountLib(pyodide) {
   sys.destroy();
 }
 
-export async function loadPyodide(context) {
+export async function loadPyodide(context, lockfile, indexURL) {
   // Lookup memory snapshot from artifact store.
   const maybeMemorySnapshot = ArtifactBundler.getMemorySnapshot();
   if (maybeMemorySnapshot) {
@@ -296,21 +307,24 @@ export async function loadPyodide(context) {
     }
   }
 
-  const emscriptenSettings = getEmscriptenSettings();
-  const emscriptenModule = await instantiateEmscriptenModule(
-    emscriptenSettings
-  );
-  const usingExistingMemorySnapshot = await prepareWasmLinearMemory(emscriptenModule);
+  const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
+  const emscriptenModule =
+    await instantiateEmscriptenModule(emscriptenSettings);
+  const usingExistingMemorySnapshot =
+    await prepareWasmLinearMemory(emscriptenModule);
 
   // Upload `MEMORY` to artifact store so long as a new memory snapshot was generated.
-  const isTestMode = maybeMemorySnapshot && maybeMemorySnapshot.byteLength < 100;
+  const isTestMode =
+    maybeMemorySnapshot && maybeMemorySnapshot.byteLength < 100;
   if (ArtifactBundler.isEnabled() && !usingExistingMemorySnapshot) {
     const uploadCb = async () => {
-      const success = await ArtifactBundler.uploadMemorySnapshot(new Uint8Array(MEMORY).slice());
+      const success = await ArtifactBundler.uploadMemorySnapshot(
+        new Uint8Array(MEMORY).slice(),
+      );
       if (!success) {
         console.warn("Memory snapshot upload failed.");
       }
-    }
+    };
 
     // Await in test-mode as we have no easy way to verify waitUntil in ew-test-bin.
     if (isTestMode) {
@@ -328,8 +342,9 @@ export async function loadPyodide(context) {
   // This is just here for our test suite. Ugly but just about the only way to test this.
   if (isTestMode) {
     const snapshotString = new TextDecoder().decode(maybeMemorySnapshot);
-    pyodide.registerJsModule("cf_internal_test_utils", { snapshot: snapshotString });
+    pyodide.registerJsModule("cf_internal_test_utils", {
+      snapshot: snapshotString,
+    });
   }
-
   return pyodide;
 }
