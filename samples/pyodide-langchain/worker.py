@@ -1,16 +1,13 @@
 from js import Response
+from langchain_core.prompts import PromptTemplate
+from langchain_openai import OpenAI
 
+API_KEY = "sk-abcdefg"
 
-def fetch(request):
-    return Response.new("hello world")
+async def test(request):
+  prompt = PromptTemplate.from_template("Complete the following sentence: I am a {profession} and ")
+  llm = OpenAI(api_key=API_KEY)
+  chain = prompt | llm
 
-
-from langchain.chat_models import ChatOpenAI
-import openai
-
-API_KEY = "sk-abcdefgh"
-
-
-def test():
-    ChatOpenAI(openai_api_key=API_KEY)
-    print("OK?")
+  res = await chain.ainvoke({"profession": "electrician"})
+  print(res)
