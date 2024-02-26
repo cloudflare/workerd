@@ -119,6 +119,14 @@ export class MyService extends WorkerEntrypoint {
   get rejectingPromiseProperty() {
     return Promise.reject(new Error("REJECTED"));
   }
+
+  get throwingProperty() {
+    throw new Error("PROPERTY THREW");
+  }
+
+  throwingMethod() {
+    throw new Error("METHOD THREW");
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -243,6 +251,15 @@ export let namedServiceBinding = {
     await assert.rejects(() => Promise.resolve(env.MyService.instanceObject), {
       name: "TypeError",
       message: "The RPC receiver does not implement the method \"instanceObject\"."
+    });
+
+    await assert.rejects(() => Promise.resolve(env.MyService.throwingProperty), {
+      name: "Error",
+      message: "PROPERTY THREW"
+    });
+    await assert.rejects(() => Promise.resolve(env.MyService.throwingMethod()), {
+      name: "Error",
+      message: "METHOD THREW"
     });
 
     await assert.rejects(() => Promise.resolve(env.MyService.rejectingPromiseProperty), {
