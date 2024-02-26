@@ -1,7 +1,7 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { loadPyodide } from "pyodide-internal:python";
+import { loadPyodide, mountLib } from "pyodide-internal:python";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
 
@@ -61,10 +61,19 @@ function disabledLoadPackage() {
   throw new Error("We only use loadPackage in workerd");
 }
 
-async function setupPackages(pyodide) {
-  patchLoadPackage(pyodide);
+const canonicalizeNameRegex = /[-_.]+/g;
 
-  const requirements = MetadataReader.getRequirements();
+/**
+ * Normalize a package name. Port of Python's packaging.utils.canonicalize_name.
+ * @param name The package name to normalize.
+ * @returns The normalized package name.
+ * @private
+ */
+function canonicalizePackageName(name) {
+  return name.replace(canonicalizeNameRegex, "-").toLowerCase();
+}
+
+async function getTransitiveRequirements(pyodide, requirements) {
   // resolve transitive dependencies of requirements and if IN_WORKERD install them from the cdn.
   let packageDatas;
   if (IS_WORKERD) {
@@ -76,7 +85,11 @@ async function setupPackages(pyodide) {
       .values()
       .map(({ packageData }) => packageData);
   }
-  const transitiveRequirements = new Set(packageDatas.map(({ name }) => name));
+  return new Set(packageDatas.map(({ name }) => name));
+}
+
+async function setupPackages(pyodide, transitiveRequirements) {
+  patchLoadPackage(pyodide);
 
   // install any extra packages into the site-packages directory, so calculate where that is.
   const pymajor = pyodide._module._py_version_major();
@@ -113,7 +126,10 @@ function getPyodide(ctx) {
     // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
     // When we do it in top level scope we seem to get a broken file system.
     const pyodide = await loadPyodide(ctx, LOCKFILE, WORKERD_INDEX_URL);
-    await setupPackages(pyodide);
+    const requirements = MetadataReader.getRequirements().map(canonicalizePackageName);
+    const transitiveRequirements = await getTransitiveRequirements(pyodide, requirements);
+    mountLib(pyodide);
+    await setupPackages(pyodide, transitiveRequirements);
     const mainModule = pyimportMainModule(pyodide);
     return { mainModule };
   })();

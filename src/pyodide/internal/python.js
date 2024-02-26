@@ -277,8 +277,13 @@ function simpleRunPython(emscriptenModule, code) {
   }
 }
 
-function mountLib(pyodide) {
+function buildSitePackages(tarInfo, requirements) {
+
+}
+
+export function mountLib(pyodide, requirements) {
   const [info, _] = parseTarInfo();
+  console.log(info);
   const tarFS = createTarFS(pyodide._module);
   const mdFS = createMetadataFS(pyodide._module);
   const pymajor = pyodide._module._py_version_major();
@@ -334,7 +339,6 @@ export async function loadPyodide(context, lockfile, indexURL) {
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
   emscriptenModule.API.finalizeBootstrap();
   const pyodide = emscriptenModule.API.public_api;
-  mountLib(pyodide);
 
   // This is just here for our test suite. Ugly but just about the only way to test this.
   if (isTestMode) {

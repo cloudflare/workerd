@@ -6,7 +6,7 @@ load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 copy_file(
     name = "pyodide_packages_archive",
-    src = "@pyodide_packages//:pyodide_packages.tar",
+    src = "pyodide_packages.tar",
     out = "generated/pyodide_packages.tar",
 )
 
