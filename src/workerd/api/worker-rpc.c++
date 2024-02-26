@@ -180,36 +180,51 @@ JsRpcProperty::PromiseAndPipleine JsRpcProperty::callImpl(jsg::Lock& js, FillOpF
   // methods off their source object, even if we change implementations to something where that's
   // less convenient.
 
-  // `path` will be filled in with the path of property names leading from the stub represented by
-  // `client` to the specific property / method that we're trying to invoke.
-  kj::Vector<kj::StringPtr> path;
-  auto client = parent->getClientForOneCall(js, path);
+  try {
+    // `path` will be filled in with the path of property names leading from the stub represented by
+    // `client` to the specific property / method that we're trying to invoke.
+    kj::Vector<kj::StringPtr> path;
+    auto client = parent->getClientForOneCall(js, path);
 
-  auto& ioContext = IoContext::current();
+    auto& ioContext = IoContext::current();
 
-  auto builder = client.callRequest();
+    auto builder = client.callRequest();
 
-  if (path.empty()) {
-    builder.setMethodName(name);
-  } else {
-    auto pathBuilder = builder.initMethodPath(path.size() + 1);
-    for (auto i: kj::indices(path)) {
-      pathBuilder.set(i, path[i]);
+    if (path.empty()) {
+      builder.setMethodName(name);
+    } else {
+      auto pathBuilder = builder.initMethodPath(path.size() + 1);
+      for (auto i: kj::indices(path)) {
+        pathBuilder.set(i, path[i]);
+      }
+      pathBuilder.set(path.size(), name);
     }
-    pathBuilder.set(path.size(), name);
+
+    fillOpFunc(builder.getOperation());
+
+    auto callResult = builder.send();
+
+    return {
+      .promise = jsg::JsPromise(js.wrapSimplePromise(ioContext.awaitIo(js, kj::mv(callResult),
+          [](jsg::Lock& js, auto result) -> jsg::Value {
+        return jsg::Value(js.v8Isolate, deserializeJsValue(js, result.getResult()));
+      }))),
+      .pipeline = kj::mv(callResult),
+    };
+  } catch (jsg::JsExceptionThrown&) {
+    // This is almost certainly a termination exception, so we should let it flow through.
+    throw;
+  } catch (...) {
+    // Catch KJ exceptions and make them async, since we don't want async calls to throw
+    // synchronously.
+    auto e = kj::getCaughtExceptionAsKj();
+    auto pipeline = capnp::newBrokenPipeline(kj::cp(e));
+    return {
+      .promise = jsg::JsPromise(js.wrapSimplePromise(js.rejectedPromise<jsg::Value>(kj::mv(e)))),
+      .pipeline = rpc::JsRpcTarget::CallResults::Pipeline(
+          capnp::AnyPointer::Pipeline(kj::mv(pipeline)))
+    };
   }
-
-  fillOpFunc(builder.getOperation());
-
-  auto callResult = builder.send();
-
-  return {
-    .promise = jsg::JsPromise(js.wrapSimplePromise(ioContext.awaitIo(js, kj::mv(callResult),
-        [](jsg::Lock& js, auto result) -> jsg::Value {
-      return jsg::Value(js.v8Isolate, deserializeJsValue(js, result.getResult()));
-    }))),
-    .pipeline = kj::mv(callResult),
-  };
 }
 
 jsg::Ref<JsRpcPromise> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -241,6 +256,9 @@ namespace {
 jsg::JsValue thenImpl(jsg::Lock& js, v8::Local<v8::Promise> promise,
       v8::Local<v8::Function> handler, jsg::Optional<v8::Local<v8::Function>> errorHandler) {
   KJ_IF_SOME(e, errorHandler) {
+    // Note that we intentionally propagate any exception from promise->Then() sychronously since
+    // if V8's native Promise threw synchronously from `then()`, we might as well too. Anyway it's
+    // probably a termination exception.
     return jsg::JsPromise(jsg::check(promise->Then(js.v8Context(), handler, e)));
   } else {
     return jsg::JsPromise(jsg::check(promise->Then(js.v8Context(), handler)));
