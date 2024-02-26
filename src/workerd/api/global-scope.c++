@@ -488,8 +488,8 @@ kj::Promise<void> ServiceWorkerGlobalScope::eventTimeoutPromise(uint32_t timeout
   co_await IoContext::current().afterLimitTimeout(timeoutMs * kj::MILLISECONDS);
   // This is the ActorFlushReason for eviction in Cloudflare's internal implementation.
   auto evictionCode = 2;
-  actor.shutdown(evictionCode, JSG_KJ_EXCEPTION(DISCONNECTED, Error,
-    "broken.dropped; Actor exceeded event execution time and was disconnected."));
+  actor.shutdown(evictionCode, KJ_EXCEPTION(DISCONNECTED,
+    "broken.dropped; jsg.Error: Actor exceeded event execution time and was disconnected."));
 }
 
 kj::Promise<void> ServiceWorkerGlobalScope::setHibernatableEventTimeout(kj::Promise<void> event,
