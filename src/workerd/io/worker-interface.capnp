@@ -147,14 +147,31 @@ struct QueueMessage @0x944adb18c0352295 {
   contentType @3 :Text;
 }
 
+struct QueueRetryBatch {
+  retry @0 :Bool;
+  union {
+    undefined @1 :Void;
+    delaySeconds @2 :Int32;
+  }
+}
+
+struct QueueRetryMessage {
+  msgId @0 :Text;
+  union {
+    undefined @1 :Void;
+    delaySeconds @2 :Int32;
+  }
+}
+
 struct QueueResponse @0x90e98932c0bfc0de {
   outcome @0 :EventOutcome;
-  retryAll @1 :Bool;
-  ackAll @2 :Bool;
-  explicitRetries @3 :List(Text);
-  # List of Message IDs that were explicitly marked for retry
-  explicitAcks @4 :List(Text);
-  # List of Message IDs that were explicitly marked as acknowledged
+  ackAll @1 :Bool;
+  retryBatch @2 :QueueRetryBatch;
+  # Retry options for the batch.
+  explicitAcks @3 :List(Text);
+  # List of Message IDs that were explicitly marked as acknowledged.
+  retryMessages @4 :List(QueueRetryMessage);
+  # List of retry options for messages that were explicitly marked for retry.
 }
 
 struct HibernatableWebSocketEventMessage {

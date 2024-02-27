@@ -19,6 +19,7 @@
 #include "blob.h"
 #include <workerd/io/compatibility-date.capnp.h>
 #include "worker-rpc.h"
+#include "queue.h"
 
 namespace workerd::api {
 
@@ -530,16 +531,15 @@ public:
 
   struct QueueResult {
     kj::String outcome;
-    bool retryAll;
     bool ackAll;
-    kj::Array<kj::String> explicitRetries;
+    QueueRetryBatch retryBatch;
     kj::Array<kj::String> explicitAcks;
-
-    JSG_STRUCT(outcome, retryAll, ackAll, explicitRetries, explicitAcks);
+    kj::Array<QueueRetryMessage> retryMessages;
+    JSG_STRUCT(outcome, ackAll, retryBatch, explicitAcks, retryMessages);
   };
 
-  jsg::Promise<QueueResult> queue(
-      jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages);
+  jsg::Promise<QueueResult> queue(jsg::Lock& js, kj::String queueName,
+                                  kj::Array<ServiceBindingQueueMessage> messages);
 
   struct ScheduledOptions {
     jsg::Optional<kj::Date> scheduledTime;

@@ -108,22 +108,46 @@ struct IncomingQueueMessage {
   };
 };
 
+struct QueueRetryBatch {
+  bool retry;
+  jsg::Optional<int> delaySeconds;
+  JSG_STRUCT(retry, delaySeconds);
+};
+
+struct QueueRetryMessage {
+  kj::String msgId;
+  jsg::Optional<int> delaySeconds;
+  JSG_STRUCT(msgId, delaySeconds);
+};
+
 struct QueueResponse {
   uint16_t outcome;
-  bool retryAll;
   bool ackAll;
-  kj::Array<kj::String> explicitRetries;
+  QueueRetryBatch retryBatch;
   kj::Array<kj::String> explicitAcks;
-  JSG_STRUCT(outcome, retryAll, ackAll, explicitRetries, explicitAcks);
+  kj::Array<QueueRetryMessage> retryMessages;
+  JSG_STRUCT(outcome, ackAll, retryBatch, explicitAcks, retryMessages);
 };
 
 // Internal-only representation used to accumulate the results of a queue event.
 
 struct QueueEventResult {
-  bool retryAll = false;
+  struct RetryOptions {
+    jsg::Optional<int> delaySeconds;
+  };
+  struct RetryBatch {
+    bool retry;
+    jsg::Optional<int> delaySeconds;
+  };
+  RetryBatch retryBatch = {.retry = false};
   bool ackAll = false;
-  kj::HashSet<kj::String> explicitRetries;
+  kj::HashMap<kj::String, RetryOptions> retries;
   kj::HashSet<kj::String> explicitAcks;
+};
+
+struct QueueRetryOptions {
+  jsg::Optional<int> delaySeconds;
+  JSG_STRUCT(delaySeconds);
 };
 
 class QueueMessage final: public jsg::Object {
@@ -135,7 +159,7 @@ public:
   kj::Date getTimestamp() { return timestamp; }
   jsg::JsValue getBody(jsg::Lock& js);
 
-  void retry();
+  void retry(jsg::Optional<QueueRetryOptions> options);
   void ack();
 
   // TODO(soon): Add metadata support.
@@ -186,7 +210,7 @@ public:
   kj::ArrayPtr<jsg::Ref<QueueMessage>> getMessages() { return messages; }
   kj::StringPtr getQueueName() { return queueName; }
 
-  void retryAll();
+  void retryAll(jsg::Optional<QueueRetryOptions> options);
   void ackAll();
 
   JSG_RESOURCE_TYPE(QueueEvent) {
@@ -248,7 +272,9 @@ public:
 
   kj::ArrayPtr<jsg::Ref<QueueMessage>> getMessages() { return event->getMessages(); }
   kj::StringPtr getQueueName() { return event->getQueueName(); }
-  void retryAll() { event->retryAll(); }
+  void retryAll(jsg::Optional<QueueRetryOptions> options) {
+    event->retryAll(options);
+  }
   void ackAll() { event->ackAll(); }
 
   JSG_RESOURCE_TYPE(QueueController) {
@@ -307,9 +333,11 @@ public:
     return EVENT_TYPE;
   }
 
-  bool getRetryAll() const { return result.retryAll; }
+  QueueRetryBatch getRetryBatch() const {
+    return {.retry = result.retryBatch.retry, .delaySeconds = result.retryBatch.delaySeconds};
+  }
   bool getAckAll() const { return result.ackAll; }
-  kj::Array<kj::String> getExplicitRetries() const;
+  kj::Array<QueueRetryMessage> getRetryMessages() const;
   kj::Array<kj::String> getExplicitAcks() const;
 
 private:
@@ -323,7 +351,10 @@ private:
   api::WorkerQueue::SendBatchOptions,   \
   api::WorkerQueue::MessageSendRequest, \
   api::IncomingQueueMessage,            \
+  api::QueueRetryBatch,                 \
+  api::QueueRetryMessage,               \
   api::QueueResponse,                   \
+  api::QueueRetryOptions,               \
   api::QueueMessage,                    \
   api::QueueEvent,                      \
   api::QueueController,                 \
