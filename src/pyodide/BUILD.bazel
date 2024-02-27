@@ -85,31 +85,7 @@ function addEventListener(){}
 
 REPLACEMENTS = [
     [
-        # Convert pyodide.asm.js into an es6 module.
-        # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
-        # automatically.
-        "var _createPyodideModule",
-        PRELUDE + "export const _createPyodideModule",
-    ],
-    [
-        "globalThis._createPyodideModule = _createPyodideModule;",
-        "",
-    ],
-    [
-        "new WebAssembly.Module",
-        "newWasmModule",
-    ],
-    [
-        "WebAssembly.instantiate",
-        "wasmInstantiate",
-    ],
-    [
-        "Date.now",
-        "monotonicDateNow",
-    ],
-    [
         # Expose recursiveDependencies for use in setupPackages
-        # TODO: upstream this.
         'o(Ct,"recursiveDependencies");',
         'o(Ct,"recursiveDependencies");API.recursiveDependencies=Ct;'
     ]

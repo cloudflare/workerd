@@ -111,9 +111,9 @@ http_archive(
 http_archive(
     name = "pyodide",
     build_file = "//:build/BUILD.pyodide",
-    sha256 = "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
+    sha256 = "4ad4007ad57af903e0a3efa01d31e3c2455890317be21bfc0caa331c66f60aed",
     type = "tar.bz2",
-    urls = ["https://github.com/pyodide/pyodide/releases/download/0.26.0a2/pyodide-core-0.26.0a2.tar.bz2"],
+    urls = ["https://github.com/hoodmane/workerd-pyodide/releases/download/v3/pyodide-asm.tar.bz2"],
 )
 
 http_archive(

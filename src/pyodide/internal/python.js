@@ -12,10 +12,10 @@ import { default as ArtifactBundler } from "pyodide-internal:artifacts";
  */
 
 /**
- * _createPyodideModule and pyodideWasmModule together are produced by the
+ * createPyodideModule and pyodideWasmModule together are produced by the
  * Emscripten linker
  */
-import { _createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
+import { default as createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
 import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
 
 /**
@@ -101,11 +101,17 @@ function prepareFileSystem(Module) {
 function instantiateWasm(wasmImports, successCallback) {
   (async function () {
     // Instantiate pyodideWasmModule with wasmImports
-    const instance = await WebAssembly.instantiate(
-      pyodideWasmModule,
-      wasmImports,
-    );
-    successCallback(instance, pyodideWasmModule);
+    try {
+      const instance = await WebAssembly.instantiate(
+        pyodideWasmModule,
+        wasmImports,
+      );
+      successCallback(instance, pyodideWasmModule);
+    } catch(e) {
+      console.log("Wasm instantiation failed:");
+      e.stack.split("\n").forEach(console.log.bind(console));
+      throw e;
+    }
   })();
 
   return {};
@@ -135,13 +141,14 @@ function getEmscriptenSettings(lockfile, indexURL) {
     // important because the file system lives outside of linear memory.
     preRun: [prepareFileSystem],
     instantiateWasm,
+    locateFile: () => "???",
     noInitialRun: !!MEMORY, // skip running main() if we have a snapshot
     API, // Pyodide requires we pass this in.
   };
 }
 
 /**
- * Simple wrapper around _createPyodideModule that applies some monkey patches
+ * Simple wrapper around createPyodideModule that applies some monkey patches
  * to force the environment to be detected the way we want.
  *
  * In the long run we should fix this in `pyodide.asm.js` instead.
@@ -156,7 +163,7 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
     // If/when we link our own Pyodide we can remove this.
     globalThis.window = {}; // makes ENVIRONMENT_IS_WEB    = true
     globalThis.importScripts = 1; // makes ENVIRONMENT_IS_WORKER = false
-    const p = _createPyodideModule(emscriptenSettings);
+    const p = createPyodideModule(emscriptenSettings);
     delete globalThis.window;
     delete globalThis.importScripts;
     const emscriptenModule = await p;
