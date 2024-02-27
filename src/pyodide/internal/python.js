@@ -278,12 +278,36 @@ function simpleRunPython(emscriptenModule, code) {
 }
 
 function buildSitePackages(tarInfo, requirements) {
+  const res = {
+    children: new Map(),
+    mode: 0o777,
+    type: 5,
+    modtime: 0,
+    size: 0,
+    path: "",
+    name: "",
+    parts: [],
+  };
 
+  for(const req of ["stdlib", ...requirements]) {
+    const child = tarInfo.children.get(req);
+    if(!child) {
+      throw new Error(`Requirement ${req} not found in pyodide packages tar`);
+    }
+    child.children.forEach((val, key) => {
+      if(res.children.has(key)) {
+        throw new Error(`Folder ${key} being written by multiple packages`);
+      }
+      res.children.set(key, val);
+    });
+  }
+
+  return res;
 }
 
 export function mountLib(pyodide, requirements) {
   const [info, _] = parseTarInfo();
-  console.log(info);
+  const sitePackagesInfo = buildSitePackages(info, requirements);
   const tarFS = createTarFS(pyodide._module);
   const mdFS = createMetadataFS(pyodide._module);
   const pymajor = pyodide._module._py_version_major();
@@ -291,7 +315,7 @@ export function mountLib(pyodide, requirements) {
   const site_packages = `/session/lib/python${pymajor}.${pyminor}/site-packages`;
   pyodide.FS.mkdirTree(site_packages);
   pyodide.FS.mkdirTree("/session/metadata");
-  pyodide.FS.mount(tarFS, { info }, site_packages);
+  pyodide.FS.mount(tarFS, { info: sitePackagesInfo }, site_packages);
   pyodide.FS.mount(mdFS, {}, "/session/metadata");
   const sys = pyodide.pyimport("sys");
   sys.path.push(site_packages);

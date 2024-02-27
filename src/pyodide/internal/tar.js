@@ -98,8 +98,6 @@ export function parseTarInfo() {
     // go down to target (in many tar files this second loop body is evaluated 0
     // times)
     const parts = info.path.slice(0, -1).split("/");
-    console.log(parts);
-    console.log(directories);
     for (let i = directories.length; i < parts.length - 1; i++) {
       directories.push(directory);
       directory = directory.children.get(parts[i]);

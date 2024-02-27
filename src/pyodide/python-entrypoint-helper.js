@@ -127,8 +127,9 @@ function getPyodide(ctx) {
     // When we do it in top level scope we seem to get a broken file system.
     const pyodide = await loadPyodide(ctx, LOCKFILE, WORKERD_INDEX_URL);
     const requirements = MetadataReader.getRequirements().map(canonicalizePackageName);
-    const transitiveRequirements = await getTransitiveRequirements(pyodide, requirements);
-    mountLib(pyodide);
+    const transitiveRequirements = new Set(Array.from(await getTransitiveRequirements(pyodide, requirements))
+      .map(canonicalizePackageName));
+    mountLib(pyodide, transitiveRequirements);
     await setupPackages(pyodide, transitiveRequirements);
     const mainModule = pyimportMainModule(pyodide);
     return { mainModule };
