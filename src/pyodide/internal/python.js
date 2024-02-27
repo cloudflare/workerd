@@ -326,12 +326,9 @@ export async function loadPyodide(context, lockfile, indexURL) {
       }
     };
 
-    // Await in test-mode as we have no easy way to verify waitUntil in ew-test-bin.
-    if (isTestMode) {
-      await uploadCb();
-    } else {
-      context.waitUntil(uploadCb);
-    }
+    // TODO(later): This should ideally be a waitUntil() but testing it is difficult, so will
+    // leave that debugging journey for later.
+    await uploadCb();
   }
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
