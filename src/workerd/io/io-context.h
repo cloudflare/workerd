@@ -770,9 +770,14 @@ private:
 
   // Implementation detail of makeCachePutStream().
 
+  constexpr static size_t MB = 1 << 20;
   constexpr static size_t GB = 1 << 30;
-  constexpr static size_t MAX_TOTAL_PUT_SIZE = 5 * GB;
-  kj::Promise<size_t> cachePutQuota = MAX_TOTAL_PUT_SIZE;
+  constexpr static size_t DEFAULT_MAX_PUT_SIZE = 5 * GB;
+  // TODO(cleanup): Consider moving this into limitEnforcer if we can do so cleanly, i.e. without
+  // requiring every class inheriting from LimitEnforcer to define a limit. This can be explored
+  // when adding/streamlining limits in workerd.
+  size_t initialPutQuota;
+  kj::Promise<size_t> cachePutQuota;
 
   kj::TaskSet waitUntilTasks;
   EventOutcome waitUntilStatusValue = EventOutcome::OK;

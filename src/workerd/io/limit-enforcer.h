@@ -146,6 +146,9 @@ public:
 
   // Report resource usage metrics to the given request metrics object.
   virtual void reportMetrics(RequestObserver& requestMetrics) = 0;
+
+  // Quota for total PUTs to cache in MB, or kj::none for the default.
+  virtual kj::Maybe<uint64_t> getCachePUTLimitMB() = 0;
 };
 
 }  // namespace workerd
