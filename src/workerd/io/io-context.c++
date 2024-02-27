@@ -1231,8 +1231,10 @@ private:
 jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> IoContext::makeCachePutStream(
     jsg::Lock& js, kj::Own<kj::AsyncInputStream> stream) {
   KJ_IF_SOME(length, stream->tryGetLength()) {
-    if (length > MAX_INDIVIDUAL_PUT_SIZE) {
-      // This Cache API subrequest would exceed the individual PUT quota.
+    // This Cache API subrequest would exceed the total PUT quota. There used to be a limit on
+    // individual puts, but now this is only used as a fast path for rejecting PUTs going beyond the
+    // total quota early.
+    if (length > MAX_TOTAL_PUT_SIZE) {
       return js.resolvedPromise(kj::Maybe<IoOwn<kj::AsyncInputStream>>(kj::none));
     }
   }
@@ -1253,7 +1255,7 @@ jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> IoContext::makeCachePutStre
     KJ_IF_SOME(length, stream->tryGetLength()) {
       // PUT with Content-Length. We rely on kj-http to enforce that the expected length is
       // respected, and can just return the new quota immediately, allowing the next PUT to start.
-      KJ_DASSERT(length <= MAX_INDIVIDUAL_PUT_SIZE);
+      KJ_DASSERT(length <= MAX_TOTAL_PUT_SIZE);
       KJ_DEFER(fulfiller->fulfill(kj::cp(quota)));
       if (quota >= length) {
         quota -= length;
@@ -1268,7 +1270,7 @@ jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> IoContext::makeCachePutStre
       // unblocks the next PUT, only after this one is complete.
       //
       // Note that a single chunked PUT could still blow our quota by a long shot: a script could
-      // make a number of PUTs totalling 499MB, then send a chunked PUT with an infinite body. It's
+      // make a number of PUTs totalling 4.9GB, then send a chunked PUT with an infinite body. It's
       // up to the cache to stop reading from the stream in this case, but at the very least we
       // will refuse to allow the initiation of any further PUT requests.
       return kj::heap<CacheQuotaInputStream>(kj::mv(stream), quota, kj::mv(fulfiller));
