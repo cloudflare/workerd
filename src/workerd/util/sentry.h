@@ -48,28 +48,27 @@ inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
     KJ_LOG(severity, __VA_ARGS__); \
   }
 
-// Log this to Sentry once ever per process. Typically will be better to use LOG_ERROR_PERIODICALLY (or a future LOG_WARNING_PERIODICALLY level equivalent).
-#define LOG_WARNING_ONCE(...)                                                  \
+// Log this to Sentry once ever per process. Typically will be better to use LOG_PERIODICALLY.
+#define LOG_ONCE(severity, ...)                                                \
   do {                                                                         \
     static bool logOnce KJ_UNUSED = [&]() {                                    \
-      KJ_LOG(WARNING, __VA_ARGS__);                                            \
+      KJ_LOG(severity, __VA_ARGS__);                                           \
       return true;                                                             \
     }();                                                                       \
   } while (0)
+
+// Log this to Sentry once ever per process. Typically will be better to use LOG_WARNING_PERIODICALLY.
+#define LOG_WARNING_ONCE(...)                                                  \
+  LOG_ONCE(WARNING, __VA_ARGS__);
 
 // Log this to Sentry once ever per process. Typically will be better to use LOG_ERROR_PERIODICALLY.
 #define LOG_ERROR_ONCE(...)                                                    \
-  do {                                                                         \
-    static bool logOnce KJ_UNUSED = [&]() {                                    \
-      KJ_LOG(ERROR, __VA_ARGS__);                                              \
-      return true;                                                             \
-    }();                                                                       \
-  } while (0)
+  LOG_ONCE(ERROR, __VA_ARGS__);
 
-// Slightly more expensive than LOG_ERROR_ONCE. Avoid putting into a hot path (e.g. within a loop)
+// Slightly more expensive than LOG_ONCE. Avoid putting into a hot path (e.g. within a loop)
 // where an overhead of ~hundreds of nanoseconds per evaluation to retrieve the current time would
 // be prohibitive.
-#define LOG_ERROR_PERIODICALLY(...)                                            \
+#define LOG_PERIODICALLY(severity, ...)                                        \
   do {                                                                         \
     static kj::TimePoint KJ_UNIQUE_NAME(lastLogged) =                          \
         kj::origin<kj::TimePoint>() - 1 * kj::HOURS;                           \
@@ -77,9 +76,21 @@ inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
     const auto elapsed = now - KJ_UNIQUE_NAME(lastLogged);                     \
     if (KJ_UNLIKELY(elapsed >= 1 * kj::HOURS)) {                               \
       KJ_UNIQUE_NAME(lastLogged) = now;                                        \
-      KJ_LOG(ERROR, __VA_ARGS__);                                              \
+      KJ_LOG(severity, __VA_ARGS__);                                           \
     }                                                                          \
   } while (0)
+
+// Slightly more expensive than LOG_WARNING_ONCE. Avoid putting into a hot path (e.g. within a loop)
+// where an overhead of ~hundreds of nanoseconds per evaluation to retrieve the current time would
+// be prohibitive.
+#define LOG_WARNING_PERIODICALLY(...)                                            \
+  LOG_PERIODICALLY(WARNING, __VA_ARGS__);
+
+// Slightly more expensive than LOG_ERROR_ONCE. Avoid putting into a hot path (e.g. within a loop)
+// where an overhead of ~hundreds of nanoseconds per evaluation to retrieve the current time would
+// be prohibitive.
+#define LOG_ERROR_PERIODICALLY(...)                                            \
+  LOG_PERIODICALLY(ERROR, __VA_ARGS__);
 
 // The DEBUG_FATAL_RELEASE_LOG macros is for assertions that should definitely break in tests but
 // are not worth breaking production over. Instead, it logs the assertion message to sentry so that
