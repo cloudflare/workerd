@@ -47,6 +47,12 @@ build:windows --per_file_copt='external/v8/src/compiler/graph-visualizer.cc@/std
 build:windows --per_file_copt='external/dawn@-Wno-macro-redefined'
 build:windows --host_per_file_copt='external/dawn@-Wno-macro-redefined'
 
+# typescript configuration
+# do more correct type checking
+common --@aspect_rules_ts//ts:skipLibCheck=honor_tsconfig
+# Use "tsc" as the transpiler when ts_project has no `transpiler` set.
+common --@aspect_rules_ts//ts:default_to_tsc_transpiler
+
 # optimized LTO build. you'll need a fairly recent clang for this to work
 build:thin-lto -c opt
 build:thin-lto --cxxopt='-flto=thin'

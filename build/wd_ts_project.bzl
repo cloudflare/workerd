@@ -15,5 +15,5 @@ def wd_ts_project(name, srcs, deps, testonly = False):
         # Disable workers to avoid issue with multiple targets
         # (https://github.com/aspect-build/rules_ts/issues/128)
         # TODO: try re-enable these on next aspect_rules_ts update
-        supports_workers = False,
+        supports_workers = 0,
     )

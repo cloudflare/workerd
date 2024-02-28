@@ -360,23 +360,23 @@ rust_analyzer_dependencies()
 # Fetch rules_nodejs before aspect_rules_js, otherwise we'll get an outdated rules_nodejs version.
 http_archive(
     name = "rules_nodejs",
-    sha256 = "162f4adfd719ba42b8a6f16030a20f434dc110c65dc608660ef7b3411c9873f9",
-    strip_prefix = "rules_nodejs-6.0.2",
-    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.0.2/rules_nodejs-v6.0.2.tar.gz",
+    sha256 = "a50986c7d2f2dc43a5b9b81a6245fd89bdc4866f1d5e316d9cef2782dd859292",
+    strip_prefix = "rules_nodejs-6.0.5",
+    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.0.5/rules_nodejs-v6.0.5.tar.gz",
 )
 
 http_archive(
     name = "aspect_rules_js",
-    sha256 = "72e8b34ed850a5acc39b4c85a8d5a0a5063e519e4688200ee41076bb0c979207",
-    strip_prefix = "rules_js-1.33.1",
-    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.33.1.tar.gz",
+    sha256 = "46d63efa86b9f87670603022500f3f0a9893b914b401a40183cee59069249052",
+    strip_prefix = "rules_js-1.38.0",
+    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.38.0.tar.gz",
 )
 
 http_archive(
     name = "aspect_rules_ts",
-    sha256 = "4c3f34fff9f96ffc9c26635d8235a32a23a6797324486c7d23c1dfa477e8b451",
-    strip_prefix = "rules_ts-1.4.5",
-    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v1.4.5.tar.gz",
+    sha256 = "c77f0dfa78c407893806491223c1264c289074feefbf706721743a3556fa7cea",
+    strip_prefix = "rules_ts-2.2.0",
+    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v2.2.0.tar.gz",
 )
 
 load("@aspect_rules_js//js:repositories.bzl", "rules_js_dependencies")
@@ -392,10 +392,10 @@ nodejs_register_toolchains(
         # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
         "https://nodejs.org/dist/v{version}/{filename}",
     ],
-    node_version = "20.8.0",
+    node_version = "20.11.1",
 )
 
-load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies", TS_LATEST_VERSION = "LATEST_VERSION")
+load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies", TS_LATEST_VERSION = "LATEST_TYPESCRIPT_VERSION")
 
 rules_ts_dependencies(ts_version = TS_LATEST_VERSION)
 
