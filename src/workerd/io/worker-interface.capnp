@@ -245,9 +245,10 @@ interface EventDispatcher @0xf20697475ec1752d {
   # the outcome and whether the run should be retried. This does not complete immediately.
 
 
-  runAlarm @4 (scheduledTime :Int64) -> (result :AlarmRun);
+  runAlarm @4 (scheduledTime :Int64, retryCount :UInt32) -> (result :AlarmRun);
   # Runs a worker's alarm.
   # scheduledTime is a unix timestamp in milliseconds for when the alarm should be run
+  # retryCount indicates the retry count, if it's a retry. Else it'll be 0.
   # Returns an AlarmRun, detailing information about the run such as
   # the outcome and whether the run should be retried. This does not complete immediately.
   #

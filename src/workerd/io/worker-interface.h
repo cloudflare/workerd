@@ -80,7 +80,7 @@ public:
   virtual kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) = 0;
 
   // Trigger an alarm event with the given scheduled (unix timestamp) time.
-  virtual kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) = 0;
+  virtual kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) = 0;
 
   // Run the test handler. The returned promise resolves to true or false to indicate that the test
   // passed or failed. In the case of a failure, information should have already been written to
@@ -178,7 +178,7 @@ public:
 
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
-  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
 private:

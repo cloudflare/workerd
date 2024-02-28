@@ -3216,7 +3216,7 @@ void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> new
     for (auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
       co_await timerChannel.atTime(scheduledTime);
       auto result = co_await loopback->getWorker(IoChannelFactory::SubrequestMetadata{})
-          ->runAlarm(originalTime);
+          ->runAlarm(originalTime, i);
 
       if (result.outcome == EventOutcome::OK || !result.retry) {
         break;
@@ -3585,7 +3585,7 @@ public:
       kj::HttpConnectSettings settings) override;
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
-  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
 private:
@@ -3810,8 +3810,8 @@ kj::Promise<WorkerInterface::ScheduledResult> Worker::Isolate::SubrequestClient:
   return inner->runScheduled(scheduledTime, cron);
 }
 kj::Promise<WorkerInterface::AlarmResult> Worker::Isolate::SubrequestClient::runAlarm(
-    kj::Date scheduledTime) {
-  return inner->runAlarm(scheduledTime);
+    kj::Date scheduledTime, uint32_t retryCount) {
+  return inner->runAlarm(scheduledTime, retryCount);
 }
 kj::Promise<WorkerInterface::CustomEvent::Result>
     Worker::Isolate::SubrequestClient::customEvent(kj::Own<CustomEvent> event) {

@@ -211,3 +211,8 @@ jobs:
         env:
           MINIFLARE_TEST_WEBHOOK: ${{ secrets.MINIFLARE_TEST_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      
+      - name: Fail if errors detected
+        shell: bash
+        if: ${{ steps.miniflare-test.outcome == 'failure' }}
+        run: exit 1
