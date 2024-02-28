@@ -151,9 +151,9 @@ bool AlarmScheduler::deleteAlarm(ActorKey actor) {
 }
 
 kj::Promise<AlarmScheduler::RetryInfo> AlarmScheduler::runAlarm(
-    const ActorKey& actor, kj::Date scheduledTime) {
+    const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount) {
   KJ_IF_SOME(ns, namespaces.find(actor.uniqueKey)) {
-    auto result = co_await ns.getActor(kj::str(actor.actorId))->runAlarm(scheduledTime);
+    auto result = co_await ns.getActor(kj::str(actor.actorId))->runAlarm(scheduledTime, retryCount);
 
     co_return RetryInfo {
       .retry = result.outcome != EventOutcome::OK && result.retry,
@@ -189,15 +189,16 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(kj::Duration delay,
                                                 const ActorKey& actorRef,
                                                 kj::Date scheduledTime) {
   co_await checkTimestamp(delay, scheduledTime);
-
+  uint32_t retryCount = 0;
   {
     auto& entry = KJ_ASSERT_NONNULL(alarms.findEntry(actorRef));
     entry.value.status = AlarmStatus::STARTED;
+    retryCount = entry.value.countedRetry;
   }
 
   auto retryInfo = co_await ([&]() -> kj::Promise<RetryInfo> {
     try {
-      co_return co_await runAlarm(actorRef, scheduledTime);
+      co_return co_await runAlarm(actorRef, scheduledTime, retryCount);
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       KJ_LOG(WARNING, exception);

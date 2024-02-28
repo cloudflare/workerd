@@ -71,12 +71,12 @@ public:
     }
   }
 
-  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override {
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     KJ_IF_SOME(w, worker) {
-      co_return co_await w.get()->runAlarm(scheduledTime);
+      co_return co_await w.get()->runAlarm(scheduledTime, retryCount);
     } else {
       co_await promise;
-      co_return co_await KJ_ASSERT_NONNULL(worker)->runAlarm(scheduledTime);
+      co_return co_await KJ_ASSERT_NONNULL(worker)->runAlarm(scheduledTime, retryCount);
     }
   }
 
@@ -226,7 +226,7 @@ public:
       kj::HttpConnectSettings settings) override;
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
-  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
 private:
@@ -263,8 +263,8 @@ kj::Promise<WorkerInterface::ScheduledResult> RevocableWebSocketWorkerInterface:
   return worker.runScheduled(scheduledTime, cron);
 }
 
-kj::Promise<WorkerInterface::AlarmResult> RevocableWebSocketWorkerInterface::runAlarm(kj::Date scheduledTime) {
-  return worker.runAlarm(scheduledTime);
+kj::Promise<WorkerInterface::AlarmResult> RevocableWebSocketWorkerInterface::runAlarm(kj::Date scheduledTime, uint32_t retryCount) {
+  return worker.runAlarm(scheduledTime, retryCount);
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result>
@@ -309,7 +309,7 @@ public:
     kj::throwFatalException(kj::mv(exception));
   }
 
-  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override {
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     kj::throwFatalException(kj::mv(exception));
   }
 
@@ -377,9 +377,10 @@ kj::Promise<WorkerInterface::ScheduledResult> RpcWorkerInterface::runScheduled(
   });
 }
 
-kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(kj::Date scheduledTime) {
+kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(kj::Date scheduledTime, uint32_t retryCount) {
   auto req = dispatcher.runAlarmRequest();
   req.setScheduledTime((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+  req.setRetryCount(retryCount);
   return req.send().then([](auto resp) {
     auto respResult = resp.getResult();
     return WorkerInterface::AlarmResult {

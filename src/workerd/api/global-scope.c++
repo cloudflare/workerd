@@ -365,6 +365,7 @@ void ServiceWorkerGlobalScope::startScheduled(
 kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
     kj::Date scheduledTime,
     kj::Duration timeout,
+    uint32_t retryCount,
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
 
   auto& context = IoContext::current();
@@ -388,7 +389,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
     auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
 
     return context
-        .run([exportedHandler, &context, timeout, &alarm,
+        .run([exportedHandler, &context, timeout, retryCount, &alarm,
               maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)]
              (Worker::Lock& lock) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
       jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
@@ -396,7 +397,6 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
       // completes we want to cancel the alarm handler. If the alarm handler promise completes first
       // timeout will be canceled.
       auto timeoutPromise = context.afterLimitTimeout(timeout).then([&context]() -> kj::Promise<WorkerInterface::AlarmResult> {
-        LOG_NOSENTRY(WARNING, "Alarm exceeded its allowed execution time");
         // We don't want to delete the alarm since we have not successfully completed the alarm
         // execution.
         auto& actor = KJ_ASSERT_NONNULL(context.getActor());
@@ -421,7 +421,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
         };
       });
 
-      return alarm(lock).then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
+      return alarm(lock, jsg::alloc<AlarmInvocationInfo>(retryCount)).then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
         return WorkerInterface::AlarmResult {
           .retry = false,
           .outcome = EventOutcome::OK
