@@ -988,12 +988,11 @@ jsg::Promise<void> ReadableImpl<Self, Queue>::cancel(
       }
 
       auto prp = js.newPromiseAndResolver<void>();
-
-      auto promise = maybePendingCancel.emplace(PendingCancel {
+      maybePendingCancel = PendingCancel {
         .fulfiller = kj::mv(prp.resolver),
         .promise = kj::mv(prp.promise),
-      }).promise.whenResolved(js);
-
+      };
+      auto promise = KJ_ASSERT_NONNULL(maybePendingCancel).promise.whenResolved(js);
       doCancel(js, reason);
       return kj::mv(promise);
     }
@@ -1087,13 +1086,6 @@ void ReadableImpl<Self, Queue>::doError(jsg::Lock& js, jsg::Value reason) {
       return;
     }
     KJ_CASE_ONEOF(queue, Queue) {
-      // When we call queue.error, it will cause all of the consumers attached to
-      // be errored as well. This may cause the consumer to drop it's strong reference
-      // to the controller, which would cause this impl to be dropped. Let's make we we
-      // hold a strong reference at least until we're done with the call to doError here
-      // so that if the controller is to be freed, it will be after we're done with it.
-      auto tempRef = self.addRef();
-      KJ_DASSERT(&tempRef.get()->impl == this);
       queue.error(js, reason.addRef(js));
       state = kj::mv(reason);
       algorithms.clear();
@@ -1675,13 +1667,7 @@ private:
 template <typename Controller, typename Consumer>
 struct ReadableState {
   using AllReaderWeakRef = kj::Own<WeakRef<AllReaderBase>>;
-  // This is a strong reference to the ReadableStreamDefaultController or
-  // ReadableByteStreamController that owns the queue that our consumer
-  // is attached to.
   jsg::Ref<Controller> controller;
-
-  // This is a weak reference to the ReadableStreamJsController or AllReaderBase
-  // that strongly owns this readable state.
   kj::Maybe<kj::OneOf<ReadableStreamJsController*, AllReaderWeakRef>> owner;
   kj::Own<Consumer> consumer;
 
@@ -1727,7 +1713,9 @@ struct ReadableState {
           return controller->doClose(js);
         }
         KJ_CASE_ONEOF(reader, AllReaderWeakRef) {
-          reader->runIfAlive([&](auto& base) { base.doClose(js); });
+          KJ_IF_SOME(base, reader->tryGet()) {
+            base.doClose(js);
+          }
           return;
         }
       }
@@ -1742,7 +1730,9 @@ struct ReadableState {
           return controller->doError(js, reason.getHandle(js));
         }
         KJ_CASE_ONEOF(reader, AllReaderWeakRef) {
-          reader->runIfAlive([&](auto& base) { base.doError(js, reason.getHandle(js)); });
+          KJ_IF_SOME(base, reader->tryGet()) {
+            base.doError(js, reason.getHandle(js));
+          }
           return;
         }
       }
@@ -1755,7 +1745,7 @@ struct ReadableState {
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(*consumer, controller);
+    visitor.visit(*consumer);
   }
 
   ReadableState cloneWithNewOwner(jsg::Lock& js, auto owner, auto stateListener) {
@@ -1786,7 +1776,7 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
     }
   }
 
-  ValueReadable(DefaultController controller, auto owner)
+  ValueReadable(jsg::Ref<ReadableStreamDefaultController> controller, auto owner)
       : state(State(kj::mv(controller), owner, this)) {}
 
   ValueReadable(jsg::Lock& js, auto owner, ValueReadable& other)
@@ -1839,13 +1829,10 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
     // Here, we rely on the controller implementing the correct behavior since it owns
     // the queue that knows about all of the attached consumers.
     KJ_IF_SOME(s, state) {
-      auto promise = s.cancel(js, kj::mv(maybeReason));
-
-      // Clear the references to the controller, free the consumer, and the
-      // owner state once this scope exits. This ByteReadable will no longer
-      // be usable once this is done.
-      state = kj::none;
-      return kj::mv(promise);
+      KJ_DEFER({
+        state = kj::none;
+      });
+      return s.cancel(js, kj::mv(maybeReason));
     }
 
     return js.resolvedPromise();
@@ -1879,7 +1866,7 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
     return state.map([](State& state) { return state.canCloseOrEnqueue(); }).orDefault(false);
   }
 
-  kj::Maybe<DefaultController> getControllerRef() {
+  kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> getControllerRef() {
     return state.map([](State& state) { return state.getControllerRef(); });
   }
 };
@@ -1895,7 +1882,10 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
     }
   }
 
-  ByteReadable(ByobController controller, auto owner, int autoAllocateChunkSize)
+  ByteReadable(
+      jsg::Ref<ReadableByteStreamController> controller,
+      auto owner,
+      int autoAllocateChunkSize)
       : state(State(kj::mv(controller), owner, this)),
         autoAllocateChunkSize(autoAllocateChunkSize) {}
 
@@ -1987,13 +1977,14 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
   // the queue that knows about all of the attached consumers.
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
     KJ_IF_SOME(s, state) {
-      auto promise = s.cancel(js, kj::mv(maybeReason));
+      KJ_DEFER({
+        // Clear the references to the controller, free the consumer, and the
+        // owner state once this scope exits. This ByteReadable will no longer
+        // be usable once this is done.
+        state = kj::none;
+      });
 
-      // Clear the references to the controller, free the consumer, and the
-      // owner state once this scope exits. This ByteReadable will no longer
-      // be usable once this is done.
-      state = kj::none;
-      return kj::mv(promise);
+      return s.cancel(js, kj::mv(maybeReason));
     }
 
     return js.resolvedPromise();
@@ -2023,7 +2014,7 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
     return state.map([](State& state) { return state.canCloseOrEnqueue(); }).orDefault(false);
   }
 
-  kj::Maybe<ByobController> getControllerRef() {
+  kj::Maybe<jsg::Ref<ReadableByteStreamController>> getControllerRef() {
     return state.map([](State& state) { return state.getControllerRef(); });
   }
 };
@@ -2121,7 +2112,7 @@ kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
 ReadableStreamBYOBRequest::Impl::Impl(
     jsg::Lock& js,
     kj::Own<ByteQueue::ByobRequest> readRequest,
-    ByobController controller)
+    jsg::Ref<ReadableByteStreamController> controller)
     : readRequest(kj::mv(readRequest)),
       controller(kj::mv(controller)),
       view(js.v8Ref(this->readRequest->getView(js))) {}
@@ -2140,7 +2131,7 @@ void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) {
 ReadableStreamBYOBRequest::ReadableStreamBYOBRequest(
     jsg::Lock& js,
     kj::Own<ByteQueue::ByobRequest> readRequest,
-    ByobController controller)
+    jsg::Ref<ReadableByteStreamController> controller)
     : ioContext(tryGetIoContext()),
       maybeImpl(Impl(js, kj::mv(readRequest), kj::mv(controller))) {}
 
@@ -2394,10 +2385,9 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
   disturbed = true;
 
   const auto doCancel = [&](auto& consumer) {
-    auto promise = consumer->cancel(js, maybeReason.orDefault([&] { return js.v8Undefined(); }));
-    state.init<StreamStates::Closed>();
-    // consumer will no longer be valid after this point.
-    return kj::mv(promise);
+    auto reason = js.v8Ref(maybeReason.orDefault([&] { return js.v8Undefined(); }));
+    KJ_DEFER(state.init<StreamStates::Closed>());
+    return consumer->cancel(js, reason.getHandle(js));
   };
 
   KJ_IF_SOME(pendingState, maybePendingState) {
@@ -2778,7 +2768,8 @@ bool ReadableStreamJsController::hasBackpressure() {
   return false;
 }
 
-kj::Maybe<kj::OneOf<DefaultController, ByobController>>
+kj::Maybe<kj::OneOf<jsg::Ref<ReadableStreamDefaultController>,
+                    jsg::Ref<ReadableByteStreamController>>>
 ReadableStreamJsController::getController() {
   if (maybePendingState != kj::none) {
     return kj::none;
@@ -4105,7 +4096,7 @@ void TransformStreamDefaultController::init(
   auto& readableController = static_cast<ReadableStreamJsController&>(readable->getController());
   auto readableRef = KJ_ASSERT_NONNULL(readableController.getController());
   maybeReadableController = KJ_ASSERT_NONNULL(
-      readableRef.tryGet<DefaultController>())->getWeakRef();
+      readableRef.tryGet<jsg::Ref<ReadableStreamDefaultController>>())->getWeakRef();
 
   auto transformer = kj::mv(maybeTransformer).orDefault({});
 
