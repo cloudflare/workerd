@@ -1,7 +1,9 @@
+from asgi import env
+
 async def on_fetch(request):
     import asgi
 
-    return await asgi.fetch(app, request)
+    return await asgi.fetch(app, request, env)
 
 
 def test():
@@ -14,21 +16,20 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 
-my_awesome_api = FastAPI()
-app = my_awesome_api
+app = FastAPI()
 
 
-@my_awesome_api.get("/hello")
-async def root():
-    return {"message": "Hello World"}
+@app.get("/hello")
+async def root(env=env):
+    return {"message": "Hello World", "secret": env.secret}
 
 
-@my_awesome_api.get("/route")
+@app.get("/route")
 async def root():
     return {"message": "this is my custom route"}
 
 
-@my_awesome_api.get("/favicon.ico")
+@app.get("/favicon.ico")
 async def root():
     return {"message": "here's a favicon I guess?"}
 

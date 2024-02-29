@@ -1,9 +1,13 @@
-from asyncio import Future, ensure_future, Queue
+from asyncio import Future, ensure_future, Queue, sleep
 from inspect import isawaitable
 from contextlib import contextmanager
+from fastapi import Request, Depends
 
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 
+@Depends
+async def env(request: Request):
+    return request.scope["env"]
 
 @contextmanager
 def acquire_js_buffer(pybuffer):
@@ -46,6 +50,10 @@ def request_to_scope(req, env, ws=False):
 
 
 async def start_application(app):
+    shutdown_future = Future()
+    async def shutdown():
+        shutdown_future.set_result(None)
+        await sleep(0)
     it = iter([{"type": "lifespan.startup"}, Future()])
 
     async def receive():
@@ -57,9 +65,13 @@ async def start_application(app):
     ready = Future()
 
     async def send(got):
-        print("Application startup complete.")
-        print("Uvicorn running")
-        ready.set_result(None)
+        if got['type'] == 'lifespan.startup.complete':
+            print("Application startup complete.")
+            print("Uvicorn running")
+            ready.set_result(None)
+        if got['type'] == 'lifespan.shutdown.complete':
+            print("Application shutdown complete")
+        raise RuntimeError(f"Unexpected lifespan event {got['type']}")
 
     ensure_future(
         app(
@@ -73,6 +85,7 @@ async def start_application(app):
         )
     )
     await ready
+    return shutdown
 
 
 async def process_request(app, req, env):
@@ -171,8 +184,10 @@ async def process_websocket(app, req):
 
 
 async def fetch(app, req, env):
-    await start_application(app)
-    return await process_request(app, req, env)
+    shutdown = await start_application(app)
+    result = await process_request(app, req, env)
+    await shutdown()
+    return result
 
 
 async def websocket(app, req):
