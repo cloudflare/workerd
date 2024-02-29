@@ -49,6 +49,10 @@ export let nonClass = {
   },
 }
 
+// Globals used to test passing RPC promises or properties across I/O contexts (which is expected
+// to fail).
+let globalRpcPromise;
+
 export class MyService extends WorkerEntrypoint {
   constructor(ctx, env) {
     super(ctx, env);
@@ -126,6 +130,13 @@ export class MyService extends WorkerEntrypoint {
 
   throwingMethod() {
     throw new Error("METHOD THREW");
+  }
+
+  async tryUseGlobalRpcPromise() {
+    return await globalRpcPromise;
+  }
+  async tryUseGlobalRpcPromisePipeline() {
+    return await globalRpcPromise.increment(1);
   }
 }
 
@@ -420,5 +431,55 @@ export let promisePipelining = {
 
     assert.strictEqual(await env.MyService.getAnObject(5).foo, 128);
     assert.strictEqual(await env.MyService.getAnObject(5).counter.increment(7), 12);
+  },
+}
+
+export let crossContextSharingDoesntWork = {
+  async test(controller, env, ctx) {
+    // Test what happens if a JsRpcPromise or JsRpcProperty is shared cross-context. This is not
+    // intended to work in general, but there are specific cases where it does work, and we should
+    // avoid breaking those with future changes.
+
+    // Sharing an RPC promise between contexts works as long as the promise returns a simple value
+    // (with no I/O objects), since JsRpcPromise wraps a simple JS promise and we support sharing
+    // JS promises.
+    globalRpcPromise = env.MyService.oneArgMethod(2);
+    assert.strictEqual(await env.MyService.tryUseGlobalRpcPromise(), 24);
+
+    // Sharing a property of a service binding works, because the service  binding itself is not
+    // tied to an I/O context. Awaiting the property actually initiates a new RPC session from
+    // whatever context performed teh await.
+    globalRpcPromise = env.MyService.nonFunctionProperty;
+    assert.strictEqual(JSON.stringify(await env.MyService.tryUseGlobalRpcPromise()), '{"foo":123}');
+
+    // OK, now let's look at cases that do NOT work. These all produce the same error.
+    let expectedError = {
+      name: "Error",
+      message:
+          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, " +
+          "request/response bodies, and others) created in the context of one request handler " +
+          "cannot be accessed from a different request's handler. This is a limitation of " +
+          "Cloudflare Workers which allows us to improve overall performance."
+    };
+
+    // A promise which resolves to a value that contains a stub. The stub cannot be used from a
+    // different context.
+    //
+    // Note that the part that actually fails here is not awaiting the promise, but rather when
+    // tryUseGlobalRpcPromise() tries to return the result, it tries to serialize the stub, but
+    // it can't do that from the wrong context.
+    globalRpcPromise = env.MyService.makeCounter(12);
+    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), expectedError);
+
+    // Pipelining on someone else's promise straight-up doesn't work.
+    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), expectedError);
+
+    // Now let's try accessing a JsRpcProperty, where the property is NOT a direct property of a
+    // top-level service binding. This works even less than a JsRpcPromise, since there's no inner
+    // JS promise, it tries to create one on-demand, which fails because the parent object is
+    // tied to the original I/O context.
+    globalRpcPromise = env.MyService.getAnObject(5).counter;
+    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), expectedError);
+    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), expectedError);
   },
 }
