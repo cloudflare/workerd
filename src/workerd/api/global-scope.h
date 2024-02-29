@@ -237,10 +237,14 @@ struct ExportedHandler {
   typedef kj::Promise<void> HibernatableWebSocketErrorHandler(jsg::Ref<WebSocket>, jsg::Value);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketErrorHandler>> webSocketError;
 
+  typedef jsg::Promise<void> InitPythonHandler(
+      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<InitPythonHandler>> initPython;
+
   // Self-ref potentially allows extracting other custom handlers from the object.
   jsg::SelfRef self;
 
-  JSG_STRUCT(fetch, tail, trace, scheduled, alarm, test, webSocketMessage, webSocketClose, webSocketError, self);
+  JSG_STRUCT(fetch, tail, trace, scheduled, alarm, test, webSocketMessage, webSocketClose, webSocketError, initPython, self);
 
   JSG_STRUCT_TS_ROOT();
   // ExportedHandler isn't included in the global scope, but we still want to

@@ -121,6 +121,13 @@ function getPyodide(ctx) {
 }
 
 export default {
+  /**
+   * This does Python setup work with a more generous limit enforcer than runtime work (currently
+   * inside enterStartupJs). See `initPythonIfNeeded` in worker-entrypoint.c++.
+   */
+  async initPython(ctx) {
+    await getPyodide(ctx);
+  },
   async fetch(request, env, ctx) {
     try {
       const { mainModule } = await getPyodide(ctx);

@@ -213,6 +213,63 @@ void WorkerEntrypoint::init(
       .attach(kj::mv(actor));
 }
 
+/**
+ * Setup Python with a more generous limit enforcer, currently enterStartupJs.
+ *
+ * The Pythons setup is async so we hold the limitScope until the setup work is done. Whatever else
+ * happens between now and when we finish initPython will be done with the higher limit. User code
+ * cannot be entered with the higher limit because the first thing the main entrypoints do is wait
+ * on this initialization work being completed.
+ *
+ * Ideally we should be able to wrap a JS task so that only it is executed with a different limiter,
+ * which is switched on when entering the task and back off when exiting. But I don't know how to do
+ * that so maybe this works okay for now.
+ */
+void
+initPythonIfNeeded(kj::Maybe<kj::StringPtr>& entrypointName, kj::Own<workerd::IoContext_IncomingRequest>& incomingRequest) {
+  auto& context = incomingRequest->getContext();
+  auto& script = context.getWorker().getScript();
+  if (!script.isPython) {
+    return;
+  }
+  context.addWaitUntil(context.run(
+      [entrypointName=entrypointName, &context, &metrics = incomingRequest->getMetrics()]
+      (Worker::Lock& lock) mutable -> kj::Promise<void> {
+    kj::Maybe<kj::Exception> maybeLimitError;
+
+    // Raise limit
+    auto& isolate = Worker::Isolate::from(lock);
+    kj::Own<void> limitScope = isolate.getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
+
+    // call initPython
+    auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, context.getActor()), "Failed to get worker handler.");
+    jsg::Promise<void> res = nullptr;
+    KJ_IF_SOME(initPython, handler->initPython) {
+      res = initPython(lock, handler->getCtx());
+    } else {
+      KJ_ASSERT(false, "Internal error, expected to see initPython on handler.");
+    }
+
+    // Goal: attach a callback to the promise so that limitScope isn't dropped until the callback
+    // returns. We need the owner of limitScope to be an IoOwn since we seem to need the lock to
+    // drop limitScope.
+    //
+    // Unfortunately the type of limitScope is kj::Own<void> and IoContext::addObject does not work
+    // on a kj::Own<void>. Work around this by making a LimitScopeHolder class that holds the
+    // limitScope and then attach the limitScopeHolder to the IoContext.
+    class LimitScopeHolder {
+      public:
+      kj::Own<void> limitScope;
+      LimitScopeHolder(kj::Own<void> limitScope) : limitScope(kj::mv(limitScope)) {}
+    };
+    auto limitScopeHolder = IoContext::current().addObject(kj::heap<LimitScopeHolder>(kj::mv(limitScope)));
+    auto s = res.then<true>(lock, ([limitScopeHolder = kj::mv(limitScopeHolder)](jsg::Lock& js)  {
+      (void)limitScopeHolder;
+    }));
+    return context.awaitJs(lock, kj::mv(s));
+  }));
+}
+
 kj::Promise<void> WorkerEntrypoint::request(
     kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody, Response& response) {
@@ -222,6 +279,7 @@ kj::Promise<void> WorkerEntrypoint::request(
                                 "request() can only be called once"));
   this->incomingRequest = kj::none;
   incomingRequest->delivered();
+  initPythonIfNeeded(entrypointName, incomingRequest);
   auto& context = incomingRequest->getContext();
 
   auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
@@ -463,6 +521,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
                                 "runScheduled() can only be called once"));
   this->incomingRequest = kj::none;
   incomingRequest->delivered();
+  initPythonIfNeeded(entrypointName, incomingRequest);
   auto& context = incomingRequest->getContext();
 
   KJ_ASSERT(context.getActor() == kj::none);
@@ -605,6 +664,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "runAlarm() can only be called once"));
   this->incomingRequest = kj::none;
+  initPythonIfNeeded(entrypointName, incomingRequest);
 
   auto& context = incomingRequest->getContext();
   auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount);
@@ -617,6 +677,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
                                 "test() can only be called once"));
   this->incomingRequest = kj::none;
   incomingRequest->delivered();
+  initPythonIfNeeded(entrypointName, incomingRequest);
 
   auto& context = incomingRequest->getContext();
 
@@ -648,6 +709,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "customEvent() can only be called once"));
   this->incomingRequest = kj::none;
+  initPythonIfNeeded(entrypointName, incomingRequest);
 
   auto& context = incomingRequest->getContext();
   auto promise = event->run(kj::mv(incomingRequest), entrypointName).attach(kj::mv(event));
