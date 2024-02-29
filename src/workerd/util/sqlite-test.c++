@@ -432,7 +432,7 @@ KJ_TEST("SQLite read row counters (basic)") {
     KJ_EXPECT(stats.written == 0);
   }
 
-  // Selecting one row using an reads one row, even if that row is in the middle of the table.
+  // Selecting one row using an index reads one row, even if that row is in the middle of the table.
   {
     RowCounts stats = countRowsTouched(db, "SELECT * FROM things WHERE id=?", dbRowCount / 2);
     KJ_EXPECT(stats.found == 1);
