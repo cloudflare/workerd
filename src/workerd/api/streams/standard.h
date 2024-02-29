@@ -134,29 +134,29 @@ public:
   using Entry = typename Queue::Entry;
   using StateListener = typename Queue::ConsumerImpl::StateListener;
 
-  ReadableImpl(Self& self,
-               UnderlyingSource underlyingSource,
+  ReadableImpl(UnderlyingSource underlyingSource,
                StreamQueuingStrategy queuingStrategy);
-  KJ_DISALLOW_COPY_AND_MOVE(ReadableImpl);
 
   // Invokes the start algorithm to initialize the underlying source.
-  void start(jsg::Lock& js);
+  void start(jsg::Lock& js, jsg::Ref<Self> self);
 
   // If the readable is not already closed or errored, initiates a cancellation.
-  jsg::Promise<void> cancel(jsg::Lock& js, v8::Local<v8::Value> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js,
+                             jsg::Ref<Self> self,
+                             v8::Local<v8::Value> maybeReason);
 
   // True if the readable is not closed, not errored, and close has not already been requested.
   bool canCloseOrEnqueue();
 
   // Invokes the cancel algorithm to let the underlying source know that the
   // readable has been canceled.
-  void doCancel(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void doCancel(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
 
   // Close the queue if we are in a state where we can be closed.
   void close(jsg::Lock& js);
 
   // Push a chunk of data into the queue.
-  void enqueue(jsg::Lock& js, kj::Own<Entry> entry);
+  void enqueue(jsg::Lock& js, kj::Own<Entry> entry, jsg::Ref<Self> self);
 
   void doClose(jsg::Lock& js);
 
@@ -170,7 +170,7 @@ public:
 
   // Invokes the pull algorithm only if we're in a state where the queue the
   // queue is below the watermark and we actually need data right now.
-  void pullIfNeeded(jsg::Lock& js);
+  void pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self);
 
   // True if the queue is current below the highwatermark.
   bool shouldCallPull();
@@ -217,9 +217,6 @@ private:
     }
   };
 
-  // Self is a reference to the owning controller type. This reference will always be
-  // valid so long as the containing controller is alive.
-  Self& self;
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Queue> state;
   Algorithms algorithms;
 
@@ -440,11 +437,7 @@ private:
   ReadableImpl impl;
   kj::Own<WeakRef<ReadableStreamDefaultController>> weakRef;
 
-  inline jsg::Ref<ReadableStreamDefaultController> addRef() { return JSG_THIS; }
-
   void visitForGc(jsg::GcVisitor& visitor);
-
-  friend ReadableImpl;
 };
 
 // The ReadableStreamBYOBRequest is provided by the ReadableByteStreamController
@@ -565,13 +558,10 @@ private:
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
 
-  inline jsg::Ref<ReadableByteStreamController> addRef() { return JSG_THIS; }
-
   void visitForGc(jsg::GcVisitor& visitor);
 
   friend class ReadableStreamBYOBRequest;
   friend class ReadableStreamJsController;
-  friend ReadableImpl;
 };
 
 // =======================================================================================
