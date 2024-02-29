@@ -1703,6 +1703,12 @@ struct ReadableState {
 
   void setOwner(auto newOwner) {
     owner = kj::mv(newOwner);
+    // If the controller has already been traced, then if we don't reset the ref
+    // here, when the ownership changes, tracing the ref again will fail since the
+    // parent has changed. Let's reset the state of the controller ref.
+    // TODO(cleanup): The design here is a bit wonky and overly complicated. We should
+    // revisit and simplify this all a bit more.
+    controller = controller.addRef();
   }
 
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
@@ -3409,13 +3415,15 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(jsg::Lock& 
     KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
       lock.lock();
       disturbed = true;
-      controller->state = kj::mv(readable);
+      controller->state = kj::mv(readable)->clone(js, controller.get());
+      state.init<StreamStates::Closed>();
       doClose(js);
     }
     KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
       lock.lock();
       disturbed = true;
-      controller->state = kj::mv(readable);
+      controller->state = kj::mv(readable)->clone(js, controller.get());
+      state.init<StreamStates::Closed>();
       doClose(js);
     }
   }
