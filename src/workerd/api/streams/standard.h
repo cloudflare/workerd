@@ -435,8 +435,6 @@ public:
     tracker.trackField("impl", impl);
   }
 
-  kj::Maybe<StreamStates::Errored> getMaybeErrorState(jsg::Lock& js);
-
 private:
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
@@ -690,9 +688,6 @@ private:
   struct Algorithms {
     kj::Maybe<jsg::Function<Transformer::TransformAlgorithm>> transform;
     kj::Maybe<jsg::Function<Transformer::FlushAlgorithm>> flush;
-    kj::Maybe<jsg::Function<Transformer::CancelAlgorithm>> cancel;
-
-    kj::Maybe<jsg::Promise<void>> maybeFinish = kj::none;
 
     Algorithms() {};
     Algorithms(Algorithms&& other) = default;
@@ -701,11 +696,10 @@ private:
     inline void clear() {
       transform = kj::none;
       flush = kj::none;
-      cancel = kj::none;
     }
 
     inline void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(transform, flush, cancel, maybeFinish);
+      visitor.visit(transform, flush);
     }
   };
 
