@@ -381,6 +381,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   queuesJsonMessages @42 :Bool
       $compatEnableFlag("queues_json_messages")
       $compatDisableFlag("no_queues_json_messages")
-      $compatEnableDate("2024-03-04");
+      $compatEnableDate("2024-03-18");
   # Queues bindings serialize messages to JSON format by default (the previous default was v8 format)
 }
