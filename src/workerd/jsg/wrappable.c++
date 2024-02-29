@@ -306,13 +306,35 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   KJ_REQUIRE(wrapper == kj::none);
   KJ_REQUIRE(strongWrapper.IsEmpty());
 
-  auto& wrapperRef = wrapper.emplace(isolate, object);
+  // The C++ Wrappable object must hold a TracedReference to its own JavaScript wrapper, while
+  // such a wrapper exists. This way, if the object is reached through C++ again later, we can
+  // return the same object to JavaScript.
+  //
+  // This reference is special: it is marked as "droppable". This tells V8 that we know how to
+  // recreate this wrapper on-demand (from the C++ object). This is an optimization: If the
+  // application drops all of its direct references to the wrapper, such that object is only
+  // reachable implicitly through C++ objects, then V8 can drop the wrapper entirely and have us
+  // recreate it later, when JS needs it again.
+  //
+  // For example, consider a Request object that contains a Headers object. Say the application
+  // accesses the Headers briefly, like `request.headers.get("foo")` -- it doesn't keep around a
+  // direct reference to the Headers. But it DOES keep around a reference to the Request, and the
+  // C++ API object backing the Request keeps a `jsg::Ref<Headers>`. In this case, we do not really
+  // need the JavaScript wrapper for `Headers` to stick around. We know we can create a new one if
+  // and when it is needed. So we tell V8 that our internal reference is "droppable", so that it
+  // will go ahead and drop it in this scenario. (Specifically, v8 calls
+  // `EmbedderRootsHandler::ResetRoot()`, which is implemented by our `HeapTracer`, to tell us that
+  // it is dropping the wrapper.)
+  //
+  // Note that there are things that the application might do which actually make it unsafe for us
+  // to drop and recreate the wrapper. For example, the application could add a property to the
+  // wrapper object itself, like `request.headers.foo = 123`. Later on, when the app accesses
+  // `request.headers.foo` again, it expects the property will still be there. But if we dropped
+  // our wrapper and recreated it, the property would be gone. Luckily, V8 already handles this
+  // for us! V8 knows not to drop our wrapper if the application has done anything with it such
+  // that a recreated wrapper would no longer be equivalent.
+  wrapper.emplace(isolate, object, v8::TracedReference<v8::Object>::IsDroppable());
   this->isolate = isolate;
-
-  // Set a class ID so we can recognize this in HeapTracer::IsRoot(). We reuse WRAPPABLE_TAG for
-  // this for lack of a reason not to, though technically we could be using a different identifier
-  // here vs. in WRAPPABLE_TAG_FIELD_INDEX below.
-  wrapperRef.SetWrapperClassId(WRAPPABLE_TAG);
 
   // Add to list of objects to force-clean at isolate shutdown.
   tracer.addWrapper({}, *this);

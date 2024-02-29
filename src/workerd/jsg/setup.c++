@@ -195,7 +195,16 @@ void IsolateBase::clearDestructionQueue() {
   auto drop = queue.lockExclusive()->pop();
 }
 
-HeapTracer::HeapTracer(v8::Isolate* isolate): isolate(isolate) {
+HeapTracer::HeapTracer(v8::Isolate* isolate)
+    : v8::EmbedderRootsHandler(
+          // Historically V8 would call IsRoot() to scan references, and then call ResetRoot()
+          // on those where IsRoot() returned false. But later, V8 added the ability to mark a
+          // reference "droppable", and it assumes droppable references are not roots. We only
+          // want V8 to call ResetRoot() on droppable references, so we can tell it not to bother
+          // even calling `IsRoot()` on anything else. See comment about droppable references
+          // in Wrappable::attachWrapper() for details.
+          v8::EmbedderRootsHandler::RootHandling::kDontQueryEmbedderForAnyReference),
+      isolate(isolate) {
   isolate->AddGCPrologueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
     // We can expect that any freelisted shims will be collected during a major GC, because
@@ -234,29 +243,15 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
 }
 
 bool HeapTracer::IsRoot(const v8::TracedReference<v8::Value>& handle) {
-  // V8 will call this during minor GCs to decide if the given object is a "root" for minor GC
-  // purposes, meaning it cannot be collected. V8 only calls this if the pointed-to object is an
-  // object that it believes would be safe to destroy and recreate, i.e. a recreated object would
-  // be indistinguishable from the original. In particular, it checks that the object has not been
-  // modified by the application (e.g. the app has not added any properties of its own), is not a
-  // key in a WeakMap, and several other conditions. Objects which are safe to recreate are said
-  // to be "unmodified".
-  //
-  // Having decided that the object is unmodified, V8 calls `IsRoot()` to ask us, the embedder,
-  // whether we also agree the object is safe to drop and recreate. We return false if it is safe,
-  // true if it is not safe. Perhaps the method would be better named something like
-  // `IsSafeToDropIfUnmodified()`, but it is what it is.
-  //
-  // Our wrapper objects are indeed safe to discard and recreate (if they are unmodified). To be
-  // safe, though, let's verify that the handle V8 is giving us really does point to one of our
-  // wrappers. If it points to something else, assume it is not safe.
-  return handle.WrapperClassId() != Wrappable::WRAPPABLE_TAG;
+  // V8 doesn't actually call this because we passed kDontQueryEmbedderForAnyReference to the
+  // EmbedderRootsHandler constructor. V8 will potentially use ResetRoot() only on references that
+  // were marked droppable.
+  KJ_UNREACHABLE;
 }
 
 void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
-  // V8 only calls this if the wrapper object is not reachable from JavaScript *and* IsRoot()
-  // returned false earlier. It may still be reachable via C++, but we can recreate the wrapper
-  // as needed if the C++ object is exported to JavaScript again later.
+  // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
+  // references in Wrappable::attachWrapper() for details.
   auto& wrappable = *reinterpret_cast<Wrappable*>(
       handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
           Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
