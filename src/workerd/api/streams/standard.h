@@ -127,12 +127,12 @@ class WritableStreamJsController;
 // =======================================================================================
 // The ReadableImpl provides implementation that is common to both the
 // ReadableStreamDefaultController and the ReadableByteStreamController.
-template <class Self, typename Queue>
+template <class Self>
 class ReadableImpl {
 public:
-  using Consumer = typename Queue::Consumer;
-  using Entry = typename Queue::Entry;
-  using StateListener = typename Queue::ConsumerImpl::StateListener;
+  using Consumer = typename Self::QueueType::Consumer;
+  using Entry = typename Self::QueueType::Entry;
+  using StateListener = typename Self::QueueType::ConsumerImpl::StateListener;
 
   ReadableImpl(UnderlyingSource underlyingSource,
                StreamQueuingStrategy queuingStrategy);
@@ -216,6 +216,8 @@ private:
       visitor.visit(start, pull, cancel, size);
     }
   };
+
+  using Queue = typename Self::QueueType;
 
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Queue> state;
   Algorithms algorithms;
@@ -389,7 +391,8 @@ private:
 // array buffers, but treats all values as opaque. BYOB reads are not supported.
 class ReadableStreamDefaultController: public jsg::Object {
 public:
-  using ReadableImpl = ReadableImpl<ReadableStreamDefaultController, ValueQueue>;
+  using QueueType = ValueQueue;
+  using ReadableImpl = ReadableImpl<ReadableStreamDefaultController>;
 
   ReadableStreamDefaultController(UnderlyingSource underlyingSource,
                                   StreamQueuingStrategy queuingStrategy);
@@ -513,7 +516,8 @@ private:
 // BYOB reads are supported.
 class ReadableByteStreamController: public jsg::Object {
 public:
-  using ReadableImpl = ReadableImpl<ReadableByteStreamController, ByteQueue>;
+  using QueueType = ByteQueue;
+  using ReadableImpl = ReadableImpl<ReadableByteStreamController>;
 
   ReadableByteStreamController(UnderlyingSource underlyingSource,
                                StreamQueuingStrategy queuingStrategy);
