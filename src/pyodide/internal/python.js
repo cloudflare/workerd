@@ -326,9 +326,7 @@ export async function loadPyodide(context, lockfile, indexURL) {
       }
     };
 
-    // TODO(later): This should ideally be a waitUntil() but testing it is difficult, so will
-    // leave that debugging journey for later.
-    await uploadCb();
+    context.waitUntil(uploadCb());
   }
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
