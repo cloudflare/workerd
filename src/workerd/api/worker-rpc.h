@@ -166,8 +166,14 @@ public:
   kj::Maybe<jsg::Ref<JsRpcProperty>> getProperty(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcProperty) {
+    // You can call the property as a function. We'll assume it is a method in this case.
     JSG_CALLABLE(call);
+
+    // You can access further nested properties. We'll assume the property is an object in this
+    // case.
     JSG_WILDCARD_PROPERTY(getProperty);
+
+    // You can treat the property as a promise. This returns the value of the property.
     JSG_METHOD(then);
     JSG_METHOD_NAMED(catch, catch_);
     JSG_METHOD(finally);
