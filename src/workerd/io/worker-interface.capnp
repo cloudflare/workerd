@@ -219,7 +219,7 @@ struct JsValue {
   }
 }
 
-interface JsRpcTarget {
+interface JsRpcTarget $Cxx.allowCancellation {
   struct CallParams {
     union {
       methodName @0 :Text;
@@ -314,7 +314,7 @@ interface EventDispatcher @0xf20697475ec1752d {
   # the success of the batch, including which messages should be considered acknowledged and which
   # should be retried.
 
-  jsRpcSession @9 () -> (topLevel :JsRpcTarget);
+  jsRpcSession @9 () -> (topLevel :JsRpcTarget) $Cxx.allowCancellation;
   # Opens a JS rpc "session". The call does not return until the session is complete.
   #
   # `topLevel` is the top-level RPC target, on which exactly one method call can be made. This
