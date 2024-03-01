@@ -156,11 +156,12 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
   api::pyodide::ArtifactBundler
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
-  if (featureFlags.getWorkerdExperimental()) {
+  if (featureFlags.getPythonWorkers()) {
+    // We add `pyodide:` packages here including python-entrypoint-helper.js.
     registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
+    registry.template addBuiltinModule<PackagesTarReader>(
+        "pyodide-internal:packages_tar_reader", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   }
-  registry.template addBuiltinModule<PackagesTarReader>(
-      "pyodide-internal:packages_tar_reader", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 } // namespace workerd::api::pyodide

@@ -12,7 +12,7 @@ const unitTests :Workerd.Config = (
           (name = "openai==0.28.1", pythonRequirement = ""),
         ],
         compatibilityDate = "2024-01-15",
-        compatibilityFlags = ["experimental"],
+        compatibilityFlags = ["python_workers"],
       )
     ),
   ],
