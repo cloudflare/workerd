@@ -768,6 +768,9 @@ private:
   size_t pendingReadCount = 0;
   kj::Maybe<kj::OneOf<StreamStates::Closed, StreamStates::Errored>> maybePendingState = kj::none;
 
+  template <typename T>
+  jsg::Promise<T> readAll(jsg::Lock& js, uint64_t limit);
+
   void setPendingState(kj::OneOf<StreamStates::Closed, StreamStates::Errored> pending) {
     if (maybePendingState == kj::none) {
       maybePendingState = kj::mv(pending);
@@ -2790,92 +2793,51 @@ ReadableStreamJsController::getController() {
 namespace {
 // Consumes all bytes from a stream, buffering in memory, with the purpose
 // of producing either a single concatenated kj::Array<byte> or kj::String.
-template <typename T>
-class AllReader final: public AllReaderBase {
+class AllReader {
 public:
-  using Readable = kj::Own<T>;
   using PartList = kj::Array<kj::ArrayPtr<byte>>;
 
-  AllReader(Readable readable, uint64_t limit)
-      : ioContext(tryGetIoContext()),
-        state(kj::mv(readable)),
-        limit(limit) {
-    state.template get<Readable>()->setOwner(addWeakRef());
-  }
-
-  void doClose(jsg::Lock& js) override {
-    if (isReadPending()) {
-      setPendingState(StreamStates::Closed());
-    } else {
-      state.template init<StreamStates::Closed>();
-    }
-  }
-
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason) override {
-    if (isReadPending()) {
-      setPendingState(js.v8Ref(reason));
-    } else {
-      state.template init<StreamStates::Errored>(js.v8Ref(reason));
-    }
-  }
+  AllReader(jsg::Ref<ReadableStream> stream, uint64_t limit)
+      : state(kj::mv(stream)),
+        limit(limit) {}
+  KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
   jsg::Promise<kj::Array<byte>> allBytes(jsg::Lock& js) {
-    auto after = [this](auto& js, PartList&& partPtrs) {
+    return loop(js).then(js, [this](auto& js, PartList&& partPtrs) {
       auto out = kj::heapArray<byte>(runningTotal);
       copyInto(out, kj::mv(partPtrs));
       return kj::mv(out);
-    };
-    auto promise = loop(js);
-    if (IoContext::hasCurrent()) {
-      return promise.then(js, IoContext::current().addFunctor(kj::mv(after)));
-    } else {
-      return promise.then(js, kj::mv(after));
-    }
+    });
   }
 
   jsg::Promise<kj::String> allText(jsg::Lock& js) {
-    auto after = [this](auto& js, PartList&& partPtrs) {
+    return loop(js).then(js, [this](auto& js, PartList&& partPtrs) {
       auto out = kj::heapArray<char>(runningTotal + 1);
       copyInto(out.slice(0, out.size() - 1).asBytes(), kj::mv(partPtrs));
       out.back() = '\0';
       return kj::String(kj::mv(out));
-    };
-    auto promise = loop(js);
-    if (IoContext::hasCurrent()) {
-      return promise.then(js, IoContext::current().addFunctor(kj::mv(after)));
-    } else {
-      return promise.then(js, kj::mv(after));
+    });
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
+      KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+        visitor.visit(errored);
+      }
+      KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
+        visitor.visit(readable);
+      }
     }
   }
 
-  size_t pendingReadCount = 0;
-  kj::Maybe<kj::OneOf<StreamStates::Closed, StreamStates::Errored>> maybePendingState = kj::none;
-
-  bool isReadPending() const {
-    return pendingReadCount > 0;
-  }
-
 private:
-  kj::Maybe<IoContext&> ioContext;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable> state;
+  kj::OneOf<StreamStates::Closed, StreamStates::Errored, jsg::Ref<ReadableStream>> state;
   uint64_t limit;
   kj::Vector<jsg::BackingStore> parts;
   uint64_t runningTotal = 0;
 
   jsg::Promise<PartList> loop(jsg::Lock& js) {
-    // It really shouldn't be possible for this to be called here given how we are sequencing
-    // out reads, but let's handle it just to be safe.
-    KJ_IF_SOME(pendingState, maybePendingState) {
-      KJ_SWITCH_ONEOF(pendingState) {
-        KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-          return js.resolvedPromise(KJ_MAP(p, parts) { return p.asArrayPtr(); });
-        }
-        KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-          return js.template rejectedPromise<PartList>(errored.getHandle(js));
-        }
-      }
-    }
-
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         return js.resolvedPromise(KJ_MAP(p, parts) { return p.asArrayPtr(); });
@@ -2883,20 +2845,14 @@ private:
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
         return js.template rejectedPromise<PartList>(errored.getHandle(js));
       }
-      KJ_CASE_ONEOF(readable, Readable) {
-        const auto read = [&](auto& js) {
-          return deferControllerStateChange(js, *this, [&]() mutable {
-            if constexpr (kj::isSameType<T, ByteReadable>()) {
-              return readable->read(js, kj::none);
-            } else {
-              return readable->read(js);
-            }
-          });
-        };
-
-        auto onSuccess = [this](auto& js, ReadResult result) {
+      KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
+        // Note that these nested lambda retain references to `this` and `readable`
+        // and are passed into to promise returned by this method. It is the responsibility
+        // of the caller to ensure that the AllReader instance is kept alive until the
+        // promise is settled.
+        auto onSuccess = [this,&readable](jsg::Lock& js, ReadResult result) -> jsg::Promise<PartList>{
           if (result.done) {
-            doClose(js);
+            state.template init<StreamStates::Closed>();
             return loop(js);
           }
 
@@ -2905,8 +2861,11 @@ private:
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
           if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
             auto error = js.v8TypeError("This ReadableStream did not return bytes.");
-            doError(js, error);
-            return loop(js);
+            auto rs = kj::mv(readable);
+            state.template init<StreamStates::Errored>(js.v8Ref(error));
+            return rs->getController().cancel(js, error).then(js, [&](jsg::Lock& js) {
+              return loop(js);
+            });
           }
 
           jsg::BufferSource bufferSource(js, handle);
@@ -2919,28 +2878,28 @@ private:
 
           if ((runningTotal + backing.size()) > limit) {
             auto error = js.v8TypeError("Memory limit exceeded before EOF.");
-            doError(js, error);
-            return loop(js);
+            auto rs = kj::mv(readable);
+            state.template init<StreamStates::Errored>(js.v8Ref(error));
+            return rs->getController().cancel(js, error).then(js, [&](jsg::Lock& js) {
+              return loop(js);
+            });
           }
 
           runningTotal += backing.size();
-
           parts.add(kj::mv(backing));
           return loop(js);
         };
 
-        auto onFailure = [this](auto& js, jsg::Value exception) {
-          doError(js, exception.getHandle(js));
+        auto onFailure = [this](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
+          // In this case the stream should already be errored.
+          state.template init<StreamStates::Errored>(js.v8Ref(exception.getHandle(js)));
           return loop(js);
         };
 
-        // An important detail is that after calling read, the readable may be
-        // destroyed synchronously while read is being processed. Do not access
-        // it in either the onSuccess or onFailure callbacks above! Instead, call
-        // loop again to iterate to the next step which will check whether readable
-        // is still alive.
-
-        return maybeAddFunctor(js, read(js), kj::mv(onSuccess), kj::mv(onFailure));
+        return maybeAddFunctor(js,
+            KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none)),
+            kj::mv(onSuccess),
+            kj::mv(onFailure));
       }
     }
     KJ_UNREACHABLE;
@@ -2955,12 +2914,6 @@ private:
       std::copy(ptr, ptr + part.size(), dest);
       pos += part.size();
       dest += part.size();
-    }
-  }
-
-  void setPendingState(kj::OneOf<StreamStates::Closed, StreamStates::Errored> pending) {
-    if (maybePendingState == kj::none) {
-      maybePendingState = kj::mv(pending);
     }
   }
 };
@@ -3267,102 +3220,74 @@ private:
 };
 }  // namespace
 
-jsg::Promise<kj::Array<byte>> ReadableStreamJsController::readAllBytes(
+template <typename T>
+jsg::Promise<T> ReadableStreamJsController::readAll(
     jsg::Lock& js,
     uint64_t limit) {
   if (isLockedToReader()) {
-    return js.rejectedPromise<kj::Array<byte>>(KJ_EXCEPTION(FAILED,
+    return js.rejectedPromise<T>(KJ_EXCEPTION(FAILED,
         "jsg.TypeError: This ReadableStream is currently locked to a reader."));
   }
   disturbed = true;
+
+  // This operation leaves the stream locked and disturbed. The loop will read until
+  // the stream is closed or errored. If the limit is reached, the loop will error.
+
+  const auto readAll = [this, limit](auto& js) -> jsg::Promise<T> {
+    KJ_ASSERT(lock.lock());
+    // The AllReader will hold a traceable reference to the ReadableStream.
+    auto reader = kj::heap<AllReader>(addRef(), limit);
+    auto promise = ([&js, &reader] {
+      if constexpr (kj::isSameType<T, kj::Array<byte>>()) {
+        return reader->allBytes(js);
+      } else if constexpr (kj::isSameType<T, kj::String>()) {
+        return reader->allText(js);
+      }
+    })();
+
+    return maybeAddFunctor(js, kj::mv(promise),
+      // reader is a gc visitable type that holds a reference to either the stream
+      // or an error. Accordingly, we wrap it in a visitable lambda attached as a
+      // continuation on the promise to ensure that it is gc visited and kept alive until
+      // the promise settles.
+      JSG_VISITABLE_LAMBDA(
+          (reader=kj::mv(reader)),
+          (reader),
+          (jsg::Lock& js, T result) -> jsg::Promise<T> {
+        return js.resolvedPromise(kj::mv(result));
+      }),
+      [](jsg::Lock& js, jsg::Value exception) -> jsg::Promise<T> {
+        return js.rejectedPromise<T>(kj::mv(exception));
+      });
+  };
+
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return js.resolvedPromise(kj::Array<byte>());
+      return js.resolvedPromise(T());
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return js.rejectedPromise<kj::Array<byte>>(errored.addRef(js));
+      return js.rejectedPromise<T>(errored.addRef(js));
     }
     KJ_CASE_ONEOF(valueReadable, kj::Own<ValueReadable>) {
-      KJ_ASSERT(lock.lock());
-      auto reader = kj::heap<AllReader<ValueReadable>>(kj::mv(valueReadable), limit);
-      doClose(js);
-      if (IoContext::hasCurrent()) {
-        return reader->allBytes(js).then(js, IoContext::current().addFunctor(
-            [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        }));
-      } else {
-        return reader->allBytes(js).then(js, [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        });
-      }
+      return readAll(js);
     }
     KJ_CASE_ONEOF(byteReadable, kj::Own<ByteReadable>) {
-      KJ_ASSERT(lock.lock());
-      auto reader = kj::heap<AllReader<ByteReadable>>(kj::mv(byteReadable), limit);
-      doClose(js);
-      if (IoContext::hasCurrent()) {
-        return reader->allBytes(js).then(js, IoContext::current().addFunctor(
-            [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        }));
-      } else {
-        return reader->allBytes(js).then(js, [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        });
-      }
+      return readAll(js);
     }
   }
   KJ_UNREACHABLE;
 }
 
+jsg::Promise<kj::Array<byte>> ReadableStreamJsController::readAllBytes(
+    jsg::Lock& js,
+    uint64_t limit) {
+  return readAll<kj::Array<byte>>(js, limit);
+}
+
 jsg::Promise<kj::String> ReadableStreamJsController::readAllText(
     jsg::Lock& js,
     uint64_t limit) {
-  if (isLockedToReader()) {
-    return js.rejectedPromise<kj::String>(KJ_EXCEPTION(FAILED,
-        "jsg.TypeError: This ReadableStream is currently locked to a reader."));
-  }
-  disturbed = true;
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return js.resolvedPromise(kj::String());
-    }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return js.rejectedPromise<kj::String>(errored.addRef(js));
-    }
-    KJ_CASE_ONEOF(valueReadable, kj::Own<ValueReadable>) {
-      KJ_ASSERT(lock.lock());
-      auto reader = kj::heap<AllReader<ValueReadable>>(kj::mv(valueReadable), limit);
-      doClose(js);
-      if (IoContext::hasCurrent()) {
-        return reader->allText(js).then(js, IoContext::current().addFunctor(
-            [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        }));
-      } else {
-        return reader->allText(js).then(js, [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        });
-      }
-    }
-    KJ_CASE_ONEOF(byteReadable, kj::Own<ByteReadable>) {
-      KJ_ASSERT(lock.lock());
-      auto reader = kj::heap<AllReader<ByteReadable>>(kj::mv(byteReadable), limit);
-      doClose(js);
-      if (IoContext::hasCurrent()) {
-        return reader->allText(js).then(js, IoContext::current().addFunctor(
-            [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        }));
-      } else {
-        return reader->allText(js).then(js, [reader=kj::mv(reader)](auto& js, auto result) {
-          return kj::mv(result);
-        });
-      }
-    }
-  }
-  KJ_UNREACHABLE;
+  return readAll<kj::String>(js, limit);
 }
 
 kj::Own<ReadableStreamController> ReadableStreamJsController::detach(jsg::Lock& js, bool ignored) {
