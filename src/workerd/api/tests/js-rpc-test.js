@@ -138,6 +138,10 @@ export class MyService extends WorkerEntrypoint {
   async tryUseGlobalRpcPromisePipeline() {
     return await globalRpcPromise.increment(1);
   }
+
+  async getNonRpcClass() {
+    return {obj: new NonRpcClass()};
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -350,6 +354,13 @@ export let namedServiceBinding = {
     await assert.rejects(() => env.MyService.objectProperty.ctx.waitUntil(), {
       name: "TypeError",
       message: "The RPC receiver does not implement the method \"ctx\"."
+    });
+
+    // Can't serialize instances of classes that aren't derived from RpcTarget.
+    await assert.rejects(() => Promise.resolve(env.MyService.getNonRpcClass()), {
+      // TODO(bug): Why isn't this a DOMException?
+      name: "Error",
+      message: "#<NonRpcClass> could not be cloned."
     });
   },
 }

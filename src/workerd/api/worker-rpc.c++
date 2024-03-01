@@ -45,6 +45,7 @@ void serializeJsValue(jsg::Lock& js, jsg::JsValue value, Func makeBuilder) {
   jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
+    .treatClassInstancesAsPlainObjects = false,
     .externalHandler = externalHandler,
   });
   serializer.write(js, value);

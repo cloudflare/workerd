@@ -9,13 +9,16 @@ namespace workerd::jsg {
 
 Serializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
 
-Serializer::Serializer(Lock& js, kj::Maybe<Options> maybeOptions)
-    : ser(js.v8Isolate, this) {
+Serializer::Serializer(Lock& js, Options options)
+    : externalHandler(options.externalHandler),
+      treatClassInstancesAsPlainObjects(options.treatClassInstancesAsPlainObjects),
+      ser(js.v8Isolate, this) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Serializer must be allocated on the stack");
 #endif
-  auto options = kj::mv(maybeOptions).orDefault({});
-  externalHandler = options.externalHandler;
+  if (!treatClassInstancesAsPlainObjects) {
+    prototypeOfObject = js.obj().getPrototype();
+  }
   KJ_IF_SOME(version, options.version) {
     KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
     KJ_ASSERT(jsg::check(ser.SetWriteVersion(version)));
@@ -47,6 +50,25 @@ void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
   isolate->ThrowException(makeDOMException(isolate, message, "DataCloneError"));
 }
 
+bool Serializer::HasCustomHostObject(v8::Isolate* isolate) {
+  // V8 will always call WriteHostObject() for objects that have internal fields. We only need
+  // to override IsHostObject() if we want to treat pure-JS objects differently, which we do if
+  // treatClassInstancesAsPlainObjects is false.
+  return !treatClassInstancesAsPlainObjects;
+}
+
+v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  // This is only called if HasCustomHostObject() returned true.
+  KJ_ASSERT(!treatClassInstancesAsPlainObjects);
+  KJ_ASSERT(!prototypeOfObject.IsEmpty());
+
+  // If the object's prototype is Object.prototype, then it is a plain object, which we'll allow
+  // to be serialized normally. Otherwise, it is a class instance, which we should treat as a host
+  // object. Inside `WriteHostObject()` we will throw DataCloneError due to the object not having
+  // internal fields.
+  return v8::Just(object->GetPrototype() != prototypeOfObject);
+}
+
 v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
   try {
     if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
@@ -54,6 +76,9 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
             &Wrappable::WRAPPABLE_TAG) {
       // v8::ValueSerializer by default will send us anything that has internal fields, but this
       // object doesn't appear to match the internal fields expected on a JSG object.
+      //
+      // We also get here if treatClassInstancesAsPlainObjects is false, and the object is an
+      // application-defined class. We don't currently support serializing class instances.
 
       // Call the default implementation to get the default error message.
       return v8::ValueSerializer::Delegate::WriteHostObject(isolate, object);
@@ -243,7 +268,7 @@ JsValue structuredClone(
     Lock& js,
     const JsValue& value,
     kj::Maybe<kj::Array<JsValue>> maybeTransfer) {
-  Serializer ser(js, kj::none);
+  Serializer ser(js);
   KJ_IF_SOME(transfers, maybeTransfer) {
     for (auto& item : transfers) {
       ser.transfer(js, item);
