@@ -13,6 +13,17 @@ class MyCounter extends RpcTarget {
   }
 }
 
+class NonRpcClass {
+  foo() {
+    return 123;
+  }
+  get bar() {
+    return {
+      baz() { return 456; }
+    }
+  }
+};
+
 export let nonClass = {
   async noArgs(x, env, ctx) {
     assert.strictEqual(typeof ctx.waitUntil, "function");
@@ -38,6 +49,10 @@ export let nonClass = {
   },
 }
 
+// Globals used to test passing RPC promises or properties across I/O contexts (which is expected
+// to fail).
+let globalRpcPromise;
+
 export class MyService extends WorkerEntrypoint {
   constructor(ctx, env) {
     super(ctx, env);
@@ -49,6 +64,10 @@ export class MyService extends WorkerEntrypoint {
     this.instanceMethod = () => {
       return "nope";
     }
+
+    this.instanceObject = {
+      func: (a) => a * 5,
+    };
   }
 
   async noArgsMethod(x) {
@@ -71,6 +90,10 @@ export class MyService extends WorkerEntrypoint {
     return await counter.increment(i);
   }
 
+  async getAnObject(i) {
+    return {foo: 123 + i, counter: new MyCounter(i)};
+  }
+
   async fetch(req, x) {
     assert.strictEqual(x, undefined);
     return new Response("method = " + req.method + ", url = " + req.url);
@@ -80,6 +103,41 @@ export class MyService extends WorkerEntrypoint {
   get nonFunctionProperty() { return {foo: 123}; }
 
   get functionProperty() { return (a, b) => a - b; }
+
+  get objectProperty() {
+    return {
+      func: (a, b) => a * b,
+      deeper: {
+        deepFunc: (a, b) => a / b,
+      },
+      counter5: new MyCounter(5),
+      nonRpc: new NonRpcClass(),
+      someText: "hello",
+    };
+  }
+
+  get promiseProperty() {
+    return scheduler.wait(10).then(() => 123);
+  }
+
+  get rejectingPromiseProperty() {
+    return Promise.reject(new Error("REJECTED"));
+  }
+
+  get throwingProperty() {
+    throw new Error("PROPERTY THREW");
+  }
+
+  throwingMethod() {
+    throw new Error("METHOD THREW");
+  }
+
+  async tryUseGlobalRpcPromise() {
+    return await globalRpcPromise;
+  }
+  async tryUseGlobalRpcPromisePipeline() {
+    return await globalRpcPromise.increment(1);
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -165,6 +223,28 @@ export let namedServiceBinding = {
     // Properties that return a function can actually be called.
     assert.strictEqual(await env.MyService.functionProperty(19, 6), 13);
 
+    // Members of an object-typed property can be invoked.
+    assert.strictEqual(await env.MyService.objectProperty.func(6, 4), 24);
+    assert.strictEqual(await env.MyService.objectProperty.deeper.deepFunc(6, 3), 2);
+    assert.strictEqual(await env.MyService.objectProperty.counter5.increment(3), 8);
+
+    // Awaiting a property itself gets the value.
+    assert.strictEqual(JSON.stringify(await env.MyService.nonFunctionProperty), '{"foo":123}');
+    assert.strictEqual(await env.MyService.objectProperty.someText, "hello");
+    {
+      let counter = await env.MyService.objectProperty.counter5;
+      assert.strictEqual(await counter.increment(3), 8);
+      assert.strictEqual(await counter.increment(7), 15);
+    }
+
+    // A property that returns a Promise will wait for the Promise.
+    assert.strictEqual(await env.MyService.promiseProperty, 123);
+
+    let sawFinally = false;
+    assert.strictEqual(await env.MyService.promiseProperty
+        .finally(() => {sawFinally = true;}), 123);
+    assert.strictEqual(sawFinally, true);
+
     // `fetch()` is special, the params get converted into a Request.
     let resp = await env.MyService.fetch("http://foo", {method: "POST"});
     assert.strictEqual(await resp.text(), "method = POST, url = http://foo");
@@ -174,9 +254,40 @@ export let namedServiceBinding = {
       message: "The RPC receiver does not implement the method \"instanceMethod\"."
     });
 
+    await assert.rejects(() => env.MyService.instanceObject.func(3), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"instanceObject\"."
+    });
+
+    await assert.rejects(() => Promise.resolve(env.MyService.instanceObject), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"instanceObject\"."
+    });
+
+    await assert.rejects(() => Promise.resolve(env.MyService.throwingProperty), {
+      name: "Error",
+      message: "PROPERTY THREW"
+    });
+    await assert.rejects(() => Promise.resolve(env.MyService.throwingMethod()), {
+      name: "Error",
+      message: "METHOD THREW"
+    });
+
+    await assert.rejects(() => Promise.resolve(env.MyService.rejectingPromiseProperty), {
+      name: "Error",
+      message: "REJECTED"
+    });
+    assert.strictEqual(await env.MyService.rejectingPromiseProperty.catch(err => {
+      assert.strictEqual(err.message, "REJECTED");
+      return 234;
+    }), 234);
+    assert.strictEqual(await env.MyService.rejectingPromiseProperty.then(() => 432, err => {
+      assert.strictEqual(err.message, "REJECTED");
+      return 234;
+    }), 234);
+
     let getByName = name => {
-      let func = env.MyService.getRpcMethodForTestOnly(name);
-      return func.bind(env.MyService);
+      return env.MyService.getRpcMethodForTestOnly(name);
     };
 
     // Check getRpcMethodForTestOnly() actually works.
@@ -215,11 +326,30 @@ export let namedServiceBinding = {
     // Check what happens if we access something that's actually declared as a property on the
     // class. The difference in error message proves to us that `env` and `ctx` weren't visible at
     // all, which is what we want.
-    // TODO(soon): When we add pipelining support, also make sure that functions inside `env` and
-    //   `ctx` can't be accessed.
     await assert.rejects(() => getByName("nonFunctionProperty")(), {
       name: "TypeError",
       message: "\"nonFunctionProperty\" is not a function."
+    });
+
+    // Check that we can't access contents of a property that is a class but not derived from
+    // RpcTarget.
+    await assert.rejects(() => env.MyService.objectProperty.nonRpc.foo(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"nonRpc\"."
+    });
+    await assert.rejects(() => env.MyService.objectProperty.nonRpc.bar.baz(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"nonRpc\"."
+    });
+
+    // Extra-paranoid check that we can't access methods on env or ctx.
+    await assert.rejects(() => env.MyService.objectProperty.env.MyService.noArgsMethod(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"env\"."
+    });
+    await assert.rejects(() => env.MyService.objectProperty.ctx.waitUntil(), {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"ctx\"."
     });
   },
 }
@@ -286,5 +416,70 @@ export let receiveStubOverRpc = {
     let stub = await env.MyService.makeCounter(17);
     assert.strictEqual(await stub.increment(2), 19);
     assert.strictEqual(await stub.increment(-10), 9);
+
+    // Do multiple concurrent calls, they should be delivered in the order in which they were made.
+    let promise1 = stub.increment(6);
+    let promise2 = stub.increment(4);
+    let promise3 = stub.increment(3);
+    assert.deepEqual(await Promise.all([promise1, promise2, promise3]), [15, 19, 22]);
+  },
+}
+
+export let promisePipelining = {
+  async test(controller, env, ctx) {
+    assert.strictEqual(await env.MyService.makeCounter(12).increment(3), 15);
+
+    assert.strictEqual(await env.MyService.getAnObject(5).foo, 128);
+    assert.strictEqual(await env.MyService.getAnObject(5).counter.increment(7), 12);
+  },
+}
+
+export let crossContextSharingDoesntWork = {
+  async test(controller, env, ctx) {
+    // Test what happens if a JsRpcPromise or JsRpcProperty is shared cross-context. This is not
+    // intended to work in general, but there are specific cases where it does work, and we should
+    // avoid breaking those with future changes.
+
+    // Sharing an RPC promise between contexts works as long as the promise returns a simple value
+    // (with no I/O objects), since JsRpcPromise wraps a simple JS promise and we support sharing
+    // JS promises.
+    globalRpcPromise = env.MyService.oneArgMethod(2);
+    assert.strictEqual(await env.MyService.tryUseGlobalRpcPromise(), 24);
+
+    // Sharing a property of a service binding works, because the service  binding itself is not
+    // tied to an I/O context. Awaiting the property actually initiates a new RPC session from
+    // whatever context performed teh await.
+    globalRpcPromise = env.MyService.nonFunctionProperty;
+    assert.strictEqual(JSON.stringify(await env.MyService.tryUseGlobalRpcPromise()), '{"foo":123}');
+
+    // OK, now let's look at cases that do NOT work. These all produce the same error.
+    let expectedError = {
+      name: "Error",
+      message:
+          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, " +
+          "request/response bodies, and others) created in the context of one request handler " +
+          "cannot be accessed from a different request's handler. This is a limitation of " +
+          "Cloudflare Workers which allows us to improve overall performance."
+    };
+
+    // A promise which resolves to a value that contains a stub. The stub cannot be used from a
+    // different context.
+    //
+    // Note that the part that actually fails here is not awaiting the promise, but rather when
+    // tryUseGlobalRpcPromise() tries to return the result, it tries to serialize the stub, but
+    // it can't do that from the wrong context.
+    globalRpcPromise = env.MyService.makeCounter(12);
+    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), expectedError);
+
+    // Pipelining on someone else's promise straight-up doesn't work.
+    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), expectedError);
+
+    // Now let's try accessing a JsRpcProperty, where the property is NOT a direct property of a
+    // top-level service binding. This works even less than a JsRpcPromise, since there's no inner
+    // JS promise, it tries to create one on-demand, which fails because the parent object is
+    // tied to the original I/O context.
+    globalRpcPromise = env.MyService.getAnObject(5).counter;
+    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), expectedError);
+    await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), expectedError);
   },
 }

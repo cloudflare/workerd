@@ -81,6 +81,124 @@ public:
   JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::JS_RPC_STUB);
 };
 
+// Common superclass of JsRpcStub and Fetcher, the two types that may serve as the basis for
+// RPC calls.
+//
+// This class is NOT part of the JavaScript class heirarchy (it has no JSG_RESOURCE_TYPE block),
+// it's only a C++ class used to abstract how to get a capnp client out of the object.
+class JsRpcClientProvider: public jsg::Object {
+public:
+  // Get a capnp client that can be used to dispatch one call.
+  //
+  // If this isn't the root object (i.e. this is a JsRpcProperty), the property path starting from
+  // the root object will be appended to `path`.
+  virtual rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
+};
+
+class JsRpcProperty;
+
+// Represents the promise returned by calling an RPC method. We don't use a regular Promise object,
+// but rather our own custom thenable, so that we can support pipelining on it.
+class JsRpcPromise: public JsRpcClientProvider {
+public:
+  JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
+      IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline)
+      : inner(kj::mv(inner)), pipeline(kj::mv(pipeline)) {}
+
+  rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  // Implement standard Promise interface, especially `then()` so that this works as a custom
+  // thenable.
+  //
+  // Note that we intentionally return jsg::JsValue rather than jsg::JsPromise because we actually
+  // do not want the JSG glue to recognize we're returning a promise triggering behavior that pins
+  // the JsRpcPromise in memory until it resolves. It's actually fine if the JsRpcPromise is GC'd
+  // before the inner promise resolves, becaues it's just a thin wrapper that delegates to the
+  // inner promise. The inner promise will keep running until it completes, and will invoke all
+  // the continuations then.
+  jsg::JsValue then(jsg::Lock& js, v8::Local<v8::Function> handler,
+      jsg::Optional<v8::Local<v8::Function>> errorHandler);
+  jsg::JsValue catch_(jsg::Lock& js, v8::Local<v8::Function> errorHandler);
+  jsg::JsValue finally(jsg::Lock& js, v8::Local<v8::Function> onFinally);
+
+  // Get a nested property, using pipelining.
+  kj::Maybe<jsg::Ref<JsRpcProperty>> getProperty(jsg::Lock& js, kj::String name);
+
+  JSG_RESOURCE_TYPE(JsRpcPromise) {
+    JSG_WILDCARD_PROPERTY(getProperty);
+    JSG_METHOD(then);
+    JSG_METHOD_NAMED(catch, catch_);
+    JSG_METHOD(finally);
+  }
+
+private:
+  jsg::JsRef<jsg::JsPromise> inner;
+  IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
+};
+
+// Represents a property -- possibly, a method -- of a remote RPC object.
+class JsRpcProperty: public JsRpcClientProvider {
+public:
+  JsRpcProperty(jsg::Ref<JsRpcClientProvider> parent, kj::String name)
+      : parent(kj::mv(parent)), name(kj::mv(name)) {}
+
+  rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  // Call the property as a method.
+  jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+  // Treat the property as a promise to obtain the value.
+  //
+  // Note that we intentionally return jsg::JsValue rather than jsg::JsPromise because we actually
+  // do not want the JSG glue to recognize we're returning a promise triggering behavior that pins
+  // the JsRpcProperty in memory until it resolves. It's actually fine if the JsRpcProperty is GC'd
+  // before the promise resolves, since the property is just an API stub. The underlying Cap'n Proto
+  // RPCs it starts will keep running; Cap'n Proto refcounts all the necessary resources internally.
+  jsg::JsValue then(jsg::Lock& js, v8::Local<v8::Function> handler,
+      jsg::Optional<v8::Local<v8::Function>> errorHandler);
+  jsg::JsValue catch_(jsg::Lock& js, v8::Local<v8::Function> errorHandler);
+  jsg::JsValue finally(jsg::Lock& js, v8::Local<v8::Function> onFinally);
+
+  // Get a nested property, using pipelining.
+  kj::Maybe<jsg::Ref<JsRpcProperty>> getProperty(jsg::Lock& js, kj::String name);
+
+  JSG_RESOURCE_TYPE(JsRpcProperty) {
+    // You can call the property as a function. We'll assume it is a method in this case.
+    JSG_CALLABLE(call);
+
+    // You can access further nested properties. We'll assume the property is an object in this
+    // case.
+    JSG_WILDCARD_PROPERTY(getProperty);
+
+    // You can treat the property as a promise. This returns the value of the property.
+    JSG_METHOD(then);
+    JSG_METHOD_NAMED(catch, catch_);
+    JSG_METHOD(finally);
+  }
+
+private:
+  // The parent object from which this property was obtained.
+  jsg::Ref<JsRpcClientProvider> parent;
+
+  // Name of this property within its immediate parent.
+  kj::String name;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(parent);
+  }
+
+  struct PromiseAndPipleine {
+    jsg::JsPromise promise;
+    rpc::JsRpcTarget::CallResults::Pipeline pipeline;
+  };
+
+  template <typename FillOpFunc>
+  PromiseAndPipleine callImpl(jsg::Lock& js, FillOpFunc&& fillOpFunc);
+};
+
 // A JsRpcStub object forwards JS method calls to the remote Worker/Durable Object over RPC.
 // Since methods are not known until runtime, JsRpcStub doesn't define any JS methods.
 // Instead, we use JSG_WILDCARD_PROPERTY to intercept property accesses of names that are not known
@@ -93,10 +211,15 @@ public:
 // call. It is NOT the type of a Durable Object stub nor a service binding. Those are instances of
 // `Fetcher`, which has a `getRpcMethod()` call of its own that mostly delegates to
 // `JsRpcStub::sendJsRpc()`.
-class JsRpcStub: public jsg::Object {
+class JsRpcStub: public JsRpcClientProvider {
 public:
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
       : capnpClient(kj::mv(capnpClient)) {}
+
+  rpc::JsRpcTarget::Client getClient() { return *capnpClient; }
+
+  rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
   // Given a JsRpcTarget, make an RPC stub from it.
   //
@@ -106,22 +229,7 @@ public:
   // for testing to be able to construct a loopback stub.
   static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
 
-  // Serializes the method name and arguments, calls customEvent to get the capability, and uses
-  // the capability to send our request to the remote Worker. This resolves once the RPC promise
-  // resolves.
-  //
-  // This is a static helper, no `JsRpcStub` object is needed. This is the shared
-  // implementation between `JsRpcStub::getRpcMethod()` and `Fetcher::getRpcMethod()`.
-  static jsg::Promise<jsg::Value> sendJsRpc(
-      jsg::Lock& js,
-      rpc::JsRpcTarget::Client client,
-      kj::StringPtr name,
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  using RpcFunction = jsg::Function<jsg::Promise<jsg::Value>(
-      const v8::FunctionCallbackInfo<v8::Value>& info)>;
-
-  kj::Maybe<RpcFunction> getRpcMethod(jsg::Lock& js, kj::StringPtr name);
+  kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcStub) {
     JSG_WILDCARD_PROPERTY(getRpcMethod);
@@ -162,7 +270,11 @@ public:
     return typeId;
   }
 
-  rpc::JsRpcTarget::Client getCap() { return clientCap; }
+  rpc::JsRpcTarget::Client getCap() {
+    auto result = kj::mv(KJ_ASSERT_NONNULL(clientCap, "can only call getCap() once"));
+    clientCap = kj::none;
+    return result;
+  }
 
   // Event ID for jsRpcSession.
   //
@@ -176,7 +288,7 @@ private:
 
   // We need to set the client/server capability on the event itself to get around CustomEvent's
   // limited return type.
-  rpc::JsRpcTarget::Client clientCap;
+  kj::Maybe<rpc::JsRpcTarget::Client> clientCap;
   uint16_t typeId;
 
   class ServerTopLevelMembrane;
@@ -236,6 +348,8 @@ public:
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES  \
+  api::JsRpcPromise,                 \
+  api::JsRpcProperty,                \
   api::JsRpcStub,                    \
   api::JsRpcTarget,                  \
   api::WorkerEntrypoint,             \

@@ -312,6 +312,20 @@ public:
 
 class JsObject final : public JsBase<v8::Object, JsObject> {
 public:
+  template <typename T>
+  bool isInstanceOf(Lock& js) {
+    return js.getInstance(inner, typeid(T)) != kj::none;
+  }
+
+  template <typename T>
+  kj::Maybe<jsg::Ref<T>> tryUnwrapAs(Lock& js) {
+    KJ_IF_SOME(ins, js.getInstance(inner, typeid(T))) {
+      return _jsgThis(static_cast<T*>(&ins));
+    } else {
+      return kj::none;
+    }
+  }
+
   void set(Lock& js, const JsValue& name, const JsValue& value);
   void set(Lock& js, kj::StringPtr name, const JsValue& value);
   JsValue get(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;

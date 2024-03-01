@@ -645,9 +645,9 @@ template <typename TypeWrapper, typename T, typename GetNamedMethod, GetNamedMet
 struct WildcardPropertyCallbacks;
 
 template <typename TypeWrapper, typename T, typename U, typename Ret,
-          kj::Maybe<Ret> (U::*getNamedMethod)(jsg::Lock&, kj::StringPtr)>
+          kj::Maybe<Ret> (U::*getNamedMethod)(jsg::Lock&, kj::String)>
 struct WildcardPropertyCallbacks<
-    TypeWrapper, T, kj::Maybe<Ret> (U::*)(jsg::Lock&, kj::StringPtr), getNamedMethod>
+    TypeWrapper, T, kj::Maybe<Ret> (U::*)(jsg::Lock&, kj::String), getNamedMethod>
     : public v8::NamedPropertyHandlerConfiguration {
   WildcardPropertyCallbacks() : v8::NamedPropertyHandlerConfiguration(
     getter,

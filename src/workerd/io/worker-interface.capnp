@@ -219,12 +219,64 @@ struct JsValue {
   }
 }
 
-interface JsRpcTarget {
-  call @0 (methodName :Text, args :JsValue) -> (result :JsValue);
+interface JsRpcTarget $Cxx.allowCancellation {
+  struct CallParams {
+    union {
+      methodName @0 :Text;
+      # Equivalent to `methodPath` where the list has only one element equal to this.
+
+      methodPath @2 :List(Text);
+      # Path of properties to follow from the JsRpcTarget itself to find the method being called.
+      # E.g. if the application does:
+      #
+      #     myRpcTarget.foo.bar.baz()
+      #
+      # Then the path is ["foo", "bar", "baz"].
+      #
+      # The path can also be empty, which means that the JsRpcTarget itself is being invoked as a
+      # function.
+    }
+
+    operation :union {
+      callWithArgs @1 :JsValue;
+      # Call the property as a function. This is a JsValue that always encodes a JavaScript Array
+      # containing the arguments to the call.
+      #
+      # If `callWithArgs` is null (but is still the active member of the union), this indicates
+      # that the argument list is empty.
+
+      getProperty @3 :Void;
+      # This indicates that we are not actually calling a method at all, but rather retrieving the
+      # value of a property. RPC classes are allowed to define properties that can be fetched
+      # asynchronously, although more commonly properties will be RPC targets themselves and their
+      # methods will be invoked by sending a `methodPath` with more than one element. That is,
+      # imagine you have:
+      #
+      #     myRpcTarget.foo.bar();
+      #
+      # This code makes a single RPC call with a path of ["foo", "bar"]. However, you could also
+      # write:
+      #
+      #     let foo = await myRpcTarget.foo;
+      #     foo.bar();
+      #
+      # This will make two separate calls. The first call is to "foo" and `getProperty` is used.
+      # This returns a new JsRpcTarget. The second call is on that target, invoking the method
+      # "bar".
+    }
+  }
+
+  call @0 CallParams -> (result :JsValue, callPipeline :JsRpcTarget);
   # Runs a Worker/DO's RPC method.
   #
-  # `methodName` is the name of the method to run, and `args` is a JsValue that is always a
-  # JavaScript Array, containing the arguments to the call.
+  # `callPipeline` allows the caller to begin sending other stuff before the callee has actually
+  # returned from the call. In particular:
+  # * The caller can make pipelined calls on the anticipated return value of the call, invoking
+  #   methods on capabilities that it expects will be present in the return value. Since
+  #   `CallPipeline` extends `JsRpcTarget`, these calls are made using callPipeline.call().
+  #   Typically these calls would use `methodPath` to specify a path to a specific subobject of
+  #   the returned value.
+  # * TODO(soon): streams
 }
 
 interface EventDispatcher @0xf20697475ec1752d {
@@ -262,7 +314,7 @@ interface EventDispatcher @0xf20697475ec1752d {
   # the success of the batch, including which messages should be considered acknowledged and which
   # should be retried.
 
-  jsRpcSession @9 () -> (topLevel :JsRpcTarget);
+  jsRpcSession @9 () -> (topLevel :JsRpcTarget) $Cxx.allowCancellation;
   # Opens a JS rpc "session". The call does not return until the session is complete.
   #
   # `topLevel` is the top-level RPC target, on which exactly one method call can be made. This
