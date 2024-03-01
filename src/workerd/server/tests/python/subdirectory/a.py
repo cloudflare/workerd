@@ -2,7 +2,7 @@ from js import Response
 from subdir.a import x
 
 
-def fetch(request):
+def on_fetch(request):
     return Response.new("hello world")
 
 

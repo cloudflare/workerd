@@ -1,4 +1,4 @@
-async def fetch(request):
+async def on_fetch(request):
     import asgi
 
     return await asgi.fetch(app, request)
