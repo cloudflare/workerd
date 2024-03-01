@@ -383,4 +383,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("no_queues_json_messages")
       $compatEnableDate("2024-03-18");
   # Queues bindings serialize messages to JSON format by default (the previous default was v8 format)
+
+  pythonWorkers @43 :Bool
+      $compatEnableFlag("python_workers");
+  # Enables Python Workers. Access to this flag is not restricted, instead bundles containing
+  # Python modules are restricted in EWC.
+  #
+  # WARNING: Python Workers are still an experimental feature and thus subject to change.
 }

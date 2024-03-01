@@ -382,8 +382,8 @@ void WorkerdApi::compileModules(
     using namespace workerd::api::pyodide;
     auto featureFlags = getFeatureFlags();
     if (hasPythonModules(confModules)) {
-      KJ_REQUIRE(featureFlags.getWorkerdExperimental(),
-          "The experimental compatibility flag is required to use Python.");
+      KJ_REQUIRE(featureFlags.getPythonWorkers(),
+          "The python_workers compatibility flag is required to use Python.");
       // Inject pyodide bootstrap module.
       {
         auto mainModule = confModules.begin();
