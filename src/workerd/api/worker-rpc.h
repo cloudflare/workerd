@@ -141,6 +141,10 @@ public:
     JSG_METHOD(finally);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("inner", inner);
+  }
+
 private:
   jsg::JsRef<jsg::JsPromise> inner;
   IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
@@ -189,6 +193,11 @@ public:
     JSG_METHOD(then);
     JSG_METHOD_NAMED(catch, catch_);
     JSG_METHOD(finally);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("parent", parent);
+    tracker.trackField("name", name);
   }
 
 private:
