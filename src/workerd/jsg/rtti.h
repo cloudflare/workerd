@@ -228,8 +228,6 @@ struct BuildRtti<Configuration, T> { \
   F(kj::StringPtr) \
   F(v8::String) \
   F(ByteString) \
-  F(UsvString) \
-  F(UsvStringPtr) \
   F(jsg::JsString)
 
 FOR_EACH_STRING_TYPE(DECLARE_STRING_TYPE)

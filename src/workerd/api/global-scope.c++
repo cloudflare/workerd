@@ -759,13 +759,13 @@ jsg::Ref<api::gpu::GPU> Navigator::getGPU(CompatibilityFlags::Reader flags) {
 }
 #endif
 
-bool Navigator::sendBeacon(jsg::Lock& js, jsg::UsvString url,
+bool Navigator::sendBeacon(jsg::Lock& js, kj::String url,
                            jsg::Optional<Body::Initializer> body) {
   if (IoContext::hasCurrent()) {
     auto v8Context = js.v8Context();
     auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
         v8Context, v8Context->Global());
-    auto promise = global.fetch(js, url.toStr(), Request::InitializerDict {
+    auto promise = global.fetch(js, kj::mv(url), Request::InitializerDict {
       .method = kj::str("POST"),
       .body = kj::mv(body),
     });

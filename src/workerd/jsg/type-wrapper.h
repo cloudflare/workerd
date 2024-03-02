@@ -13,7 +13,6 @@
 #include "struct.h"
 #include "resource.h"
 #include "function.h"
-#include "string.h"
 #include "buffersource.h"
 #include "jsvalue.h"
 #include "web-idl.h"
@@ -389,7 +388,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public BufferSourceWrapper<Self>,
                    public FunctionWrapper<Self>,
                    public PromiseWrapper<Self>,
-                   public UsvStringWrapper<Self>,
                    public NonCoercibleWrapper<Self>,
                    public MemoizedIdentityWrapper<Self>,
                    public IdentifiedWrapper<Self>,
@@ -446,7 +444,6 @@ public:
   USING_WRAPPER(BufferSourceWrapper<Self>);
   USING_WRAPPER(FunctionWrapper<Self>);
   USING_WRAPPER(PromiseWrapper<Self>);
-  USING_WRAPPER(UsvStringWrapper<Self>);
   USING_WRAPPER(NonCoercibleWrapper<Self>);
   USING_WRAPPER(MemoizedIdentityWrapper<Self>);
   USING_WRAPPER(IdentifiedWrapper<Self>);

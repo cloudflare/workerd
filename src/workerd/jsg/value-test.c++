@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jsg-test.h"
-#include "string.h"
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -945,24 +945,6 @@ struct SequenceContext: public ContextGlobalObject {
     return kj::mv(sequence);
   }
 
-  Sequence<UsvString> testUsv(Sequence<UsvString> sequence) {
-    KJ_ASSERT(sequence.size() == 2);
-    KJ_ASSERT(sequence[0] == usv("a"));
-    KJ_ASSERT(sequence[1] == usv("b"));
-    return kj::mv(sequence);
-  }
-
-  Sequence<UsvString> testUsv2(Sequence<Sequence<UsvString>> sequence) {
-    KJ_ASSERT(sequence.size() == 2);
-    kj::Vector<UsvString> flat;
-    for (auto& s : sequence) {
-      for (auto& p : s) {
-        flat.add(kj::mv(p));
-      }
-    }
-    return Sequence<UsvString>(flat.releaseAsArray());
-  }
-
   Sequence<int> testInt(Sequence<int> sequence) {
     KJ_ASSERT(sequence.size(), 2);
     return kj::mv(sequence);
@@ -981,7 +963,7 @@ struct SequenceContext: public ContextGlobalObject {
   // Because the kj::OneOf lists kj::String separately, and because JavaScript
   // strings are technically iterable, we want to make sure that the Sequence
   // ignores strings.
-  bool oneof1(kj::OneOf<kj::String, Sequence<kj::String>> input) {
+  bool oneof(kj::OneOf<kj::String, Sequence<kj::String>> input) {
     KJ_SWITCH_ONEOF(input) {
       KJ_CASE_ONEOF(str, kj::String) {
         KJ_ASSERT(str == "aa");
@@ -996,29 +978,11 @@ struct SequenceContext: public ContextGlobalObject {
     KJ_UNREACHABLE;
   }
 
-  bool oneof2(kj::OneOf<UsvString, Sequence<UsvString>> input) {
-    KJ_SWITCH_ONEOF(input) {
-      KJ_CASE_ONEOF(str, UsvString) {
-        KJ_ASSERT(str == usv("aa"));
-        return true;
-      }
-      KJ_CASE_ONEOF(seq, Sequence<UsvString>) {
-        KJ_ASSERT(seq[0] == usv("b"));
-        KJ_ASSERT(seq[1] == usv("b"));
-        return true;
-      }
-    }
-    KJ_UNREACHABLE;
-  }
-
   JSG_RESOURCE_TYPE(SequenceContext) {
     JSG_METHOD(testSequence);
-    JSG_METHOD(testUsv);
-    JSG_METHOD(testUsv2);
     JSG_METHOD(testInt);
     JSG_METHOD(testFoo);
-    JSG_METHOD(oneof1);
-    JSG_METHOD(oneof2);
+    JSG_METHOD(oneof);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(SequenceIsolate, SequenceContext, SequenceContext::Foo);
@@ -1029,22 +993,14 @@ KJ_TEST("Sequence Values") {
   e.expectEval(
     "const val = {*[Symbol.iterator]() { yield 'a'; yield 'b'; }};"
     "testSequence(val).join('')", "string", "ab");
-  e.expectEval("testUsv(['a', 'b']).join('')", "string", "ab");
-  e.expectEval(
-    "const val = {*[Symbol.iterator]() { yield 'a'; yield 'b'; }};"
-    "testUsv(val).join('')", "string", "ab");
-  e.expectEval(
-    "const val = {*[Symbol.iterator]() { yield 'c', yield 'd'; }};"
-    "testUsv2([['a','b'],val]).join('')", "string", "abcd");
   e.expectEval("testInt([1,2]).join('')", "string", "12");
   e.expectEval("testInt([1,'2']).join('')", "string", "12");
   e.expectEval("testInt([1,'a']).join('')", "string", "10");
   e.expectEval("testInt([1,null]).join('')", "string", "10");
   e.expectEval("testInt([1,NaN]).join('')", "string", "10");
   e.expectEval("testFoo([{a:'a'}])[0].a", "string", "a");
-  e.expectEval("oneof1('aa')", "boolean", "true");
-  e.expectEval("oneof1(['b', 'b'])", "boolean", "true");
-  e.expectEval("oneof2('aa')", "boolean", "true");
+  e.expectEval("oneof('aa')", "boolean", "true");
+  e.expectEval("oneof(['b', 'b'])", "boolean", "true");
   e.expectEval("testFoo({a:'a'})", "throws", "TypeError: Failed to execute 'testFoo' on 'SequenceContext': parameter 1 is not of type 'Sequence'.");
 }
 
