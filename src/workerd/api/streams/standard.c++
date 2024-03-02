@@ -1638,102 +1638,64 @@ void WritableImpl<Self>::cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason)
 // ======================================================================================
 
 namespace {
-template <typename Controller, typename Consumer>
+template <typename Controller, typename Queue>
 struct ReadableState {
-  jsg::Ref<Controller> controller;
+  Controller controller;
+  kj::Own<typename Queue::Consumer> consumer;
   ReadableStreamJsController& owner;
-  kj::Own<Consumer> consumer;
 
-  JSG_MEMORY_INFO(ReadableState) {
-    tracker.trackField("controller", controller);
-    tracker.trackField("consumer", consumer);
-  }
-
-  ReadableState(jsg::Ref<Controller> controller,
-                ReadableStreamJsController& owner,
-                auto stateListener)
+  ReadableState(Controller controller,
+                kj::Own<typename Queue::Consumer> consumer,
+                ReadableStreamJsController& owner)
       : controller(kj::mv(controller)),
-        owner(owner),
-        consumer(this->controller->getConsumer(stateListener)) {}
+        consumer(kj::mv(consumer)),
+        owner(owner) {}
 
-  ReadableState(jsg::Ref<Controller> controller,
-                ReadableStreamJsController& owner,
-                kj::Own<Consumer> consumer)
-      : controller(kj::mv(controller)),
-        owner(owner),
-        consumer(kj::mv(consumer)) {}
+  ReadableState(Controller controller,
+                typename Queue::ConsumerImpl::StateListener& listener,
+                ReadableStreamJsController& owner)
+      : ReadableState(controller.addRef(),
+              controller->getConsumer(listener),
+              owner) {}
 
-  void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
-    consumer->cancelPendingReads(js, reason);
-  }
-
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-    consumer->cancel(js, maybeReason);
-    return controller->cancel(js, kj::mv(maybeReason));
-  }
-
-  void consumerClose(jsg::Lock& js) {
-    owner.doClose(js);
-  }
-
-  void consumerError(jsg::Lock& js, jsg::Value reason) {
-    owner.doError(js, reason.getHandle(js));
-  }
-
-  void consumerWantsData(jsg::Lock& js) {
-    controller->pull(js);
-  }
-
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(*consumer);
-  }
-
-  ReadableState cloneWithNewOwner(jsg::Lock& js,
-                                  ReadableStreamJsController& owner,
-                                  auto stateListener) {
-    return ReadableState(controller.addRef(), owner, consumer->clone(js, stateListener));
-  }
-
-  kj::Maybe<int> getDesiredSize() {
-    return controller->getDesiredSize();
-  }
-
-  bool canCloseOrEnqueue() {
-    return controller->canCloseOrEnqueue();
-  }
-
-  jsg::Ref<Controller> getControllerRef() {
-    return controller.addRef();
+  ReadableState clone(jsg::Lock& js,
+              typename Queue::ConsumerImpl::StateListener& listener,
+              ReadableStreamJsController& owner) {
+    return ReadableState(controller.addRef(), consumer->clone(js, listener), owner);
   }
 };
 }  // namespace
 
-struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener {
-  using State = ReadableState<ReadableStreamDefaultController, api::ValueQueue::Consumer>;
+struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener {
+
+  using State = ReadableState<DefaultController, ValueQueue>;
   kj::Maybe<State> state;
 
   JSG_MEMORY_INFO(ValueReadable) {
     KJ_IF_SOME(s, state) {
-      tracker.trackField("state", s);
+      tracker.trackField("controller", s.controller);
+      tracker.trackField("consumer", s.consumer);
+    }
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    KJ_IF_SOME(s, state) {
+      visitor.visit(s.controller, *s.consumer);
     }
   }
 
   ValueReadable(jsg::Ref<ReadableStreamDefaultController> controller,
                 ReadableStreamJsController& owner)
-      : state(State(kj::mv(controller), owner, this)) {}
+      : state(State(kj::mv(controller), *this, owner)) {}
 
   ValueReadable(jsg::Lock& js, ReadableStreamJsController& owner, ValueReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).cloneWithNewOwner(js, owner, this)) {}
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, *this, owner)) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ValueReadable);
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(state);
-  }
-
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
     KJ_IF_SOME(s, state) {
-      s.cancelPendingReads(js, reason);
+      s.consumer->cancelPendingReads(js, reason);
     }
   }
 
@@ -1768,10 +1730,10 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
     // Here, we rely on the controller implementing the correct behavior since it owns
     // the queue that knows about all of the attached consumers.
     KJ_IF_SOME(s, state) {
-      KJ_DEFER({
-        state = kj::none;
-      });
-      return s.cancel(js, kj::mv(maybeReason));
+      s.consumer->cancel(js, maybeReason);
+      auto promise = s.controller->cancel(js, kj::mv(maybeReason));
+      state = kj::none;
+      return kj::mv(promise);
     }
 
     return js.resolvedPromise();
@@ -1779,45 +1741,63 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
 
   void onConsumerClose(jsg::Lock& js) override {
     // Called by the consumer when a state change to closed happens.
-    // We need to notify the owner
-    KJ_IF_SOME(s, state) { s.consumerClose(js); }
+    // We need to notify the owner. Note that the owner may drop this
+    // readable in doClose so it is not safe to access anything on this
+    // after calling doClose.
+    KJ_IF_SOME(s, state) {
+      s.owner.doClose(js);
+    }
   }
 
   void onConsumerError(jsg::Lock& js, jsg::Value reason) override {
     // Called by the consumer when a state change to errored happens.
-    // We need to noify the owner
-    KJ_IF_SOME(s, state) { s.consumerError(js, kj::mv(reason)); }
+    // We need to noify the owner. Note that the owner may drop this
+    // readable in doClose so it is not safe to access anything on this
+    // after calling doError.
+    KJ_IF_SOME(s, state) {
+      s.owner.doError(js, reason.getHandle(js));
+    }
   }
 
   void onConsumerWantsData(jsg::Lock& js) override {
     // Called by the consumer when it has a queued pending read and needs
     // data to be provided to fulfill it. We need to notify the controller
     // to initiate pulling to provide the data.
-    KJ_IF_SOME(s, state) { s.consumerWantsData(js); }
+    KJ_IF_SOME(s, state) { s.controller->pull(js); }
   }
 
   kj::Maybe<int> getDesiredSize() {
-    KJ_IF_SOME(s, state) { return s.getDesiredSize(); }
+    KJ_IF_SOME(s, state) {
+      return s.controller->getDesiredSize();
+    }
     return kj::none;
   }
 
   bool canCloseOrEnqueue() {
-    return state.map([](State& state) { return state.canCloseOrEnqueue(); }).orDefault(false);
+    return state.map([](State& s) { return s.controller->canCloseOrEnqueue(); }).orDefault(false);
   }
 
   kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> getControllerRef() {
-    return state.map([](State& state) { return state.getControllerRef(); });
+    return state.map([](State& s) { return s.controller.addRef(); });
   }
 };
 
-struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
-  using State = ReadableState<ReadableByteStreamController, api::ByteQueue::Consumer>;
+struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
+
+  using State = ReadableState<ByobController, ByteQueue>;
   kj::Maybe<State> state;
   int autoAllocateChunkSize;
 
   JSG_MEMORY_INFO(ByteReadable) {
     KJ_IF_SOME(s, state) {
-      tracker.trackField("state", s);
+      tracker.trackField("controller", s.controller);
+      tracker.trackField("consumer", s.consumer);
+    }
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    KJ_IF_SOME(s, state) {
+      visitor.visit(s.controller, *s.consumer);
     }
   }
 
@@ -1825,24 +1805,18 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
       jsg::Ref<ReadableByteStreamController> controller,
       ReadableStreamJsController& owner,
       int autoAllocateChunkSize)
-      : state(State(kj::mv(controller), owner, this)),
+      : state(State(kj::mv(controller), *this, owner)),
         autoAllocateChunkSize(autoAllocateChunkSize) {}
 
-  ByteReadable(jsg::Lock& js,
-               ReadableStreamJsController& owner,
-               ByteReadable& other)
-      : state(KJ_ASSERT_NONNULL(other.state).cloneWithNewOwner(js, owner, this)),
+  ByteReadable(jsg::Lock& js, ReadableStreamJsController& owner, ByteReadable& other)
+      : state(KJ_ASSERT_NONNULL(other.state).clone(js, *this, owner)),
         autoAllocateChunkSize(other.autoAllocateChunkSize) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ByteReadable);
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(state);
-  }
-
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
     KJ_IF_SOME(s, state) {
-      s.cancelPendingReads(js, reason);
+      s.consumer->cancelPendingReads(js, reason);
     }
   }
 
@@ -1914,45 +1888,47 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
   // the queue that knows about all of the attached consumers.
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
     KJ_IF_SOME(s, state) {
-      KJ_DEFER({
-        // Clear the references to the controller, free the consumer, and the
-        // owner state once this scope exits. This ByteReadable will no longer
-        // be usable once this is done.
-        state = kj::none;
-      });
-
-      return s.cancel(js, kj::mv(maybeReason));
+      s.consumer->cancel(js, maybeReason);
+      auto promise = s.controller->cancel(js, kj::mv(maybeReason));
+      state = kj::none;
+      return kj::mv(promise);
     }
 
     return js.resolvedPromise();
   }
 
   void onConsumerClose(jsg::Lock& js) override {
-    KJ_IF_SOME(s, state) { s.consumerClose(js); }
+    // Note that the owner may drop this readable in doClose so it
+    // is not safe to access anything on this after calling doClose.
+    KJ_IF_SOME(s, state) { s.owner.doClose(js); }
   }
 
   void onConsumerError(jsg::Lock& js, jsg::Value reason) override {
-    KJ_IF_SOME(s, state) { s.consumerError(js, kj::mv(reason)); };
+    // Note that the owner may drop this readable in doClose so it
+    // is not safe to access anything on this after calling doError.
+    KJ_IF_SOME(s, state) { s.owner.doError(js, reason.getHandle(js)); };
   }
 
   // Called by the consumer when it has a queued pending read and needs
   // data to be provided to fulfill it. We need to notify the controller
   // to initiate pulling to provide the data.
   void onConsumerWantsData(jsg::Lock& js) override {
-    KJ_IF_SOME(s, state) { s.consumerWantsData(js); }
+    KJ_IF_SOME(s, state) { s.controller->pull(js); }
   }
 
   kj::Maybe<int> getDesiredSize() {
-    KJ_IF_SOME(s, state) { return s.getDesiredSize(); }
+    KJ_IF_SOME(s, state) {
+      return s.controller->getDesiredSize();
+    }
     return kj::none;
   }
 
   bool canCloseOrEnqueue() {
-    return state.map([](State& state) { return state.canCloseOrEnqueue(); }).orDefault(false);
+    return state.map([](State& s) { return s.controller->canCloseOrEnqueue(); }).orDefault(false);
   }
 
   kj::Maybe<jsg::Ref<ReadableByteStreamController>> getControllerRef() {
-    return state.map([](State& state) { return state.getControllerRef(); });
+    return state.map([](State& state) { return state.controller.addRef(); });
   }
 };
 
