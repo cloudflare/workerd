@@ -1684,7 +1684,7 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     }
   }
 
-  ValueReadable(jsg::Ref<ReadableStreamDefaultController> controller,
+  ValueReadable(DefaultController controller,
                 ReadableStreamJsController& owner)
       : state(State(kj::mv(controller), *this, owner)) {}
 
@@ -1777,7 +1777,7 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     return state.map([](State& s) { return s.controller->canCloseOrEnqueue(); }).orDefault(false);
   }
 
-  kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> getControllerRef() {
+  kj::Maybe<DefaultController> getControllerRef() {
     return state.map([](State& s) { return s.controller.addRef(); });
   }
 };
@@ -1801,10 +1801,9 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     }
   }
 
-  ByteReadable(
-      jsg::Ref<ReadableByteStreamController> controller,
-      ReadableStreamJsController& owner,
-      int autoAllocateChunkSize)
+  ByteReadable(ByobController controller,
+               ReadableStreamJsController& owner,
+               int autoAllocateChunkSize)
       : state(State(kj::mv(controller), *this, owner)),
         autoAllocateChunkSize(autoAllocateChunkSize) {}
 
@@ -1927,7 +1926,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     return state.map([](State& s) { return s.controller->canCloseOrEnqueue(); }).orDefault(false);
   }
 
-  kj::Maybe<jsg::Ref<ReadableByteStreamController>> getControllerRef() {
+  kj::Maybe<ByobController> getControllerRef() {
     return state.map([](State& state) { return state.controller.addRef(); });
   }
 };
@@ -2025,7 +2024,7 @@ kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
 ReadableStreamBYOBRequest::Impl::Impl(
     jsg::Lock& js,
     kj::Own<ByteQueue::ByobRequest> readRequest,
-    jsg::Ref<ReadableByteStreamController> controller)
+    ByobController controller)
     : readRequest(kj::mv(readRequest)),
       controller(kj::mv(controller)),
       view(js.v8Ref(this->readRequest->getView(js))) {}
@@ -2044,7 +2043,7 @@ void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) {
 ReadableStreamBYOBRequest::ReadableStreamBYOBRequest(
     jsg::Lock& js,
     kj::Own<ByteQueue::ByobRequest> readRequest,
-    jsg::Ref<ReadableByteStreamController> controller)
+    ByobController controller)
     : ioContext(tryGetIoContext()),
       maybeImpl(Impl(js, kj::mv(readRequest), kj::mv(controller))) {}
 
@@ -2676,8 +2675,7 @@ bool ReadableStreamJsController::hasBackpressure() {
   return false;
 }
 
-kj::Maybe<kj::OneOf<jsg::Ref<ReadableStreamDefaultController>,
-                    jsg::Ref<ReadableByteStreamController>>>
+kj::Maybe<kj::OneOf<DefaultController, ByobController>>
 ReadableStreamJsController::getController() {
   if (maybePendingState != kj::none) {
     return kj::none;
@@ -3906,7 +3904,7 @@ void TransformStreamDefaultController::init(
   auto& readableController = static_cast<ReadableStreamJsController&>(readable->getController());
   auto readableRef = KJ_ASSERT_NONNULL(readableController.getController());
   maybeReadableController = KJ_ASSERT_NONNULL(
-      readableRef.tryGet<jsg::Ref<ReadableStreamDefaultController>>())->getWeakRef();
+      readableRef.tryGet<DefaultController>())->getWeakRef();
 
   auto transformer = kj::mv(maybeTransformer).orDefault({});
 
