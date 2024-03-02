@@ -167,6 +167,12 @@ namespace {
 struct JsRpcPromiseAndPipleine {
   jsg::JsPromise promise;
   rpc::JsRpcTarget::CallResults::Pipeline pipeline;
+
+  jsg::Ref<JsRpcPromise> asJsRpcPromise(jsg::Lock& js) && {
+    return jsg::alloc<JsRpcPromise>(
+        jsg::JsRef<jsg::JsPromise>(js, promise),
+        IoContext::current().addObject(kj::heap(kj::mv(pipeline))));
+  }
 };
 
 // Core implementation of making an RPC call, reusable for many cases below.
@@ -263,11 +269,7 @@ JsRpcPromiseAndPipleine callImpl(
 jsg::Ref<JsRpcPromise> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
 
-  auto [promise, pipeline] = callImpl(js, *parent, name, args);
-
-  return jsg::alloc<JsRpcPromise>(
-      jsg::JsRef<jsg::JsPromise>(js, promise),
-      IoContext::current().addObject(kj::heap(kj::mv(pipeline))));
+  return callImpl(js, *parent, name, args).asJsRpcPromise(js);
 }
 
 namespace {
