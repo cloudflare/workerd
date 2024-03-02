@@ -16,8 +16,6 @@ using ByobController = jsg::Ref<ReadableByteStreamController>;
 
 struct ValueReadable;
 struct ByteReadable;
-KJ_DECLARE_NON_POLYMORPHIC(ValueReadable);
-KJ_DECLARE_NON_POLYMORPHIC(ByteReadable);
 
 // =======================================================================================
 // The Unlocked, Locked, ReaderLocked, and WriterLocked structs
