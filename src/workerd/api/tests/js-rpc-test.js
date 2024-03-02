@@ -1,6 +1,17 @@
 import assert from 'node:assert';
 import {WorkerEntrypoint,DurableObject,RpcStub,RpcTarget} from 'cloudflare:workers';
 
+// Monkey-patch assert.rejects so that it automatically converts the return value of the function
+// to a Promise. Otherwise it gets confused when the callback returns a thenable that happens to
+// be callable; it thinks it has received a function rather than a promise.
+// TODO(cleanup): This is needed because `isValidThenable()` in internal_asserts.ts explicitly
+//   refuses to accept functions, even if the function has `then` and `catch` methods. Can we
+//   change that? If so we could remove this hack here.
+let originalRejects = assert.rejects.bind(assert);
+assert.rejects = (func, err) => {
+  return originalRejects(() => Promise.resolve(func()), err);
+}
+
 class MyCounter extends RpcTarget {
   constructor(i = 0) {
     super();
@@ -263,21 +274,21 @@ export let namedServiceBinding = {
       message: "The RPC receiver does not implement the method \"instanceObject\"."
     });
 
-    await assert.rejects(() => Promise.resolve(env.MyService.instanceObject), {
+    await assert.rejects(() => env.MyService.instanceObject, {
       name: "TypeError",
       message: "The RPC receiver does not implement the method \"instanceObject\"."
     });
 
-    await assert.rejects(() => Promise.resolve(env.MyService.throwingProperty), {
+    await assert.rejects(() => env.MyService.throwingProperty, {
       name: "Error",
       message: "PROPERTY THREW"
     });
-    await assert.rejects(() => Promise.resolve(env.MyService.throwingMethod()), {
+    await assert.rejects(() => env.MyService.throwingMethod(), {
       name: "Error",
       message: "METHOD THREW"
     });
 
-    await assert.rejects(() => Promise.resolve(env.MyService.rejectingPromiseProperty), {
+    await assert.rejects(() => env.MyService.rejectingPromiseProperty, {
       name: "Error",
       message: "REJECTED"
     });
@@ -357,7 +368,7 @@ export let namedServiceBinding = {
     });
 
     // Can't serialize instances of classes that aren't derived from RpcTarget.
-    await assert.rejects(() => Promise.resolve(env.MyService.getNonRpcClass()), {
+    await assert.rejects(() => env.MyService.getNonRpcClass(), {
       name: "DataCloneError",
       message: 'Could not serialize object of type "NonRpcClass". This type does not support ' +
                'serialization.'
