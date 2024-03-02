@@ -130,6 +130,10 @@ bool isTunneledException(kj::StringPtr internalMessage) {
   return !tunneledErrorType(internalMessage).isInternal;
 }
 
+bool isInternalException(kj::StringPtr internalMessage) {
+  return tunneledErrorType(internalMessage).isInternal;
+}
+
 bool isDoNotLogException(kj::StringPtr internalMessage) {
   return internalMessage.contains("worker_do_not_log"_kjc);
 }

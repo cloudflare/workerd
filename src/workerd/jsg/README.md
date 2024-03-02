@@ -76,20 +76,17 @@ At the time of writing this, the primitive value types currently supported by th
 | uint64_t             |  v8::BigInt    |     bigint      |                         |
 | kj::String(Ptr)      |  v8::String    |     string      |                         |
 | jsg::ByteString      |  v8::String    |     string      | See [ByteString][] spec |
-| jsg::UsvString(Ptr)  |  v8::String    |     string      | See [USVString][] spec  |
 | kj::Date             |  v8::Date      |     Date        |                         |
 | nullptr              |  v8::Null      |     null        | See kj::Maybe&lt;T>     |
 | nullptr              |  v8::Undefined |     undefined   | See jsg::Optional&lt;T> |
 
 Specifically, for example, when mapping from JavaScript into C++, when JSG encounters a
-string value, it can convert that into either a `kj::String`, `jsg::ByteString`,
-or a `jsg::UsvString`, depending on what is needed by the C++ layer. Likewise, when
-translating from C++ to JavaScript, JSG will generate a JavaScript `string` whenever it
-encounters a `kj::String`, `kj::StringPtr`, `jsg::ByteString`, `jsg::UsvString`, or
-`jsg::UsvStringPtr`.
+string value, it can convert that into either a `kj::String`, or `jsg::ByteString`,
+depending on what is needed by the C++ layer. Likewise, when translating from C++ to
+JavaScript, JSG will generate a JavaScript `string` whenever it encounters a `kj::String`,
+`kj::StringPtr`, or `jsg::ByteString`.
 
-JSG will *not* translate JavaScript `string` to `kj::StringPtr` or `jsg::UsvStringPtr`
-types.
+JSG will *not* translate JavaScript `string` to `kj::StringPtr`.
 
 In addition to these primitives, JSG provides a range of additional structured value
 types that serve a number of different purposes. We'll explain each individually.
@@ -1357,7 +1354,6 @@ TODO(soon): TBD
 [ByteString]: https://webidl.spec.whatwg.org/#idl-ByteString
 [Record]: https://webidl.spec.whatwg.org/#idl-record
 [Sequence]: https://webidl.spec.whatwg.org/#idl-sequence
-[USVString]: https://webidl.spec.whatwg.org/#idl-USVString
 
 ## TypeScript
 

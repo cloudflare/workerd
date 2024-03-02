@@ -69,7 +69,7 @@ public:
   jsg::Ref<api::gpu::GPU> getGPU(CompatibilityFlags::Reader flags);
 #endif
 
-  bool sendBeacon(jsg::Lock& js, jsg::UsvString url, jsg::Optional<Body::Initializer> body);
+  bool sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body);
 
   JSG_RESOURCE_TYPE(Navigator) {
     JSG_METHOD(sendBeacon);
