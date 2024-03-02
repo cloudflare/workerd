@@ -12,11 +12,6 @@
 #include <kj/array.h>
 #include <kj/one-of.h>
 
-namespace workerd::jsg {
-class UsvString;
-class UsvStringPtr;
-}  // namespace workerd::jsg
-
 namespace workerd::jsg::webidl {
 
 template <typename T>
@@ -129,8 +124,6 @@ constexpr bool isNumericType = isIntegerType<T> ||
 template <typename T>
 constexpr bool isStringType = kj::isSameType<T, kj::String>() ||
                               kj::isSameType<T, ByteString>() ||
-                              kj::isSameType<T, jsg::UsvString>() ||
-                              kj::isSameType<T, jsg::UsvStringPtr>() ||
                               kj::isSameType<T, v8::Local<v8::String>>() ||
                               kj::isSameType<T, jsg::V8Ref<v8::String>>() ||
                               kj::isSameType<T, NonCoercible<kj::String>>() ||

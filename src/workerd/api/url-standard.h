@@ -7,7 +7,6 @@
 #include <kj/hash.h>
 #include "form-data.h"
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/string.h>
 #include <workerd/jsg/url.h>
 #include <workerd/io/compatibility-date.capnp.h>
 
