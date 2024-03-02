@@ -179,7 +179,7 @@ struct JsRpcPromiseAndPipleine {
 JsRpcPromiseAndPipleine callImpl(
     jsg::Lock& js,
     JsRpcClientProvider& parent,
-    kj::StringPtr name,
+    kj::Maybe<const kj::String&> name,
     // If `maybeArgs` is provided, this is a call, otherwise it is a property access.
     kj::Maybe<const v8::FunctionCallbackInfo<v8::Value>&> maybeArgs) {
   // Note: We used to enforce that RPC methods had to be called with the correct `this`. That is,
@@ -209,14 +209,24 @@ JsRpcPromiseAndPipleine callImpl(
 
     auto builder = client.callRequest();
 
+    // This code here is slightly overcomplicated in order to avoid pushing anything to the
+    // kj::Vector in the common case that the parent path is empty. I'm probably trying too hard
+    // but oh well.
     if (path.empty()) {
-      builder.setMethodName(name);
+      KJ_IF_SOME(n, name) {
+        builder.setMethodName(n);
+      } else {
+        // No name and no path, must be directly calling a stub.
+        builder.initMethodPath(0);
+      }
     } else {
-      auto pathBuilder = builder.initMethodPath(path.size() + 1);
+      auto pathBuilder = builder.initMethodPath(path.size() + (name != kj::none));
       for (auto i: kj::indices(path)) {
         pathBuilder.set(i, path[i]);
       }
-      pathBuilder.set(path.size(), name);
+      KJ_IF_SOME(n, name) {
+        pathBuilder.set(path.size(), n);
+      }
     }
 
     KJ_IF_SOME(args, maybeArgs) {
@@ -270,6 +280,18 @@ jsg::Ref<JsRpcPromise> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Va
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
 
   return callImpl(js, *parent, name, args).asJsRpcPromise(js);
+}
+
+jsg::Ref<JsRpcPromise> JsRpcStub::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
+
+  return callImpl(js, *this, kj::none, args).asJsRpcPromise(js);
+}
+
+jsg::Ref<JsRpcPromise> JsRpcPromise::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
+
+  return callImpl(js, *this, kj::none, args).asJsRpcPromise(js);
 }
 
 namespace {
@@ -796,6 +818,10 @@ static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& js, jsg::
     } else KJ_IF_SOME(stub, obj.tryUnwrapAs<JsRpcStub>(js)) {
       // Just grab the stub directly!
       return stub->getClient();
+    } else if (value.isFunction()) {
+      // It's a plain function. We'll allow its instance properties to be accessed, like with a
+      // plain object. It will also be callable.
+      allowInstanceProperties = true;
     } else {
       // Not an RPC object. This is going to fail to serialize? We'll just say it doesn't support
       // pipelining.

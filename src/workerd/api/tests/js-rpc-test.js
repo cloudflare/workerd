@@ -142,6 +142,10 @@ export class MyService extends WorkerEntrypoint {
   async getNonRpcClass() {
     return {obj: new NonRpcClass()};
   }
+
+  async getFunction() {
+    return (a, b) => a ^ b;
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -239,6 +243,20 @@ export let namedServiceBinding = {
       let counter = await env.MyService.objectProperty.counter5;
       assert.strictEqual(await counter.increment(3), 8);
       assert.strictEqual(await counter.increment(7), 15);
+    }
+
+    {
+      let func = await env.MyService.objectProperty.func;
+      assert.strictEqual(await func(3, 7), 21);
+    }
+    {
+      let func = await env.MyService.getFunction();
+      assert.strictEqual(await func(3, 6), 5);
+    }
+    {
+      // Pipeline the function call.
+      let func = env.MyService.getFunction();
+      assert.strictEqual(await func(3, 6), 5);
     }
 
     // A property that returns a Promise will wait for the Promise.

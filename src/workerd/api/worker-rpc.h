@@ -113,6 +113,9 @@ public:
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
+  // Expect that the call is itself going to return a function... and call that.
+  jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
+
   // Implement standard Promise interface, especially `then()` so that this works as a custom
   // thenable.
   //
@@ -131,6 +134,7 @@ public:
   kj::Maybe<jsg::Ref<JsRpcProperty>> getProperty(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcPromise) {
+    JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getProperty);
     JSG_METHOD(then);
     JSG_METHOD_NAMED(catch, catch_);
@@ -225,9 +229,13 @@ public:
   // for testing to be able to construct a loopback stub.
   static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
 
+  // Call the stub itself as a function.
+  jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
+
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcStub) {
+    JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getRpcMethod);
   }
 
