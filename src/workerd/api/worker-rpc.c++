@@ -170,12 +170,12 @@ struct JsRpcPromiseAndPipleine {
 };
 
 // Core implementation of making an RPC call, reusable for many cases below.
-template <typename FillOpFunc>
 JsRpcPromiseAndPipleine callImpl(
     jsg::Lock& js,
     JsRpcClientProvider& parent,
     kj::StringPtr name,
-    FillOpFunc&& fillOpFunc) {
+    // If `maybeArgs` is provided, this is a call, otherwise it is a property access.
+    kj::Maybe<const v8::FunctionCallbackInfo<v8::Value>&> maybeArgs) {
   // Note: We used to enforce that RPC methods had to be called with the correct `this`. That is,
   // we prevented people from doing:
   //
@@ -213,7 +213,25 @@ JsRpcPromiseAndPipleine callImpl(
       pathBuilder.set(path.size(), name);
     }
 
-    fillOpFunc(builder.getOperation());
+    KJ_IF_SOME(args, maybeArgs) {
+      // This is a function call with arguments.
+      kj::Vector<jsg::JsValue> argv(args.Length());
+      for (int n = 0; n < args.Length(); n++) {
+        argv.add(jsg::JsValue(args[n]));
+      }
+
+      // If we have arguments, serialize them.
+      // Note that we may fail to serialize some element, in which case this will throw back to JS.
+      if (argv.size() > 0) {
+        serializeJsValue(js, js.arr(argv.asPtr()), [&](capnp::MessageSize hint) {
+          // TODO(perf): Actually use the size hint.
+          return builder.getOperation().initCallWithArgs();
+        });
+      }
+    } else {
+      // This is a property access.
+      builder.getOperation().setGetProperty();
+    }
 
     auto callResult = builder.send();
 
@@ -245,22 +263,7 @@ JsRpcPromiseAndPipleine callImpl(
 jsg::Ref<JsRpcPromise> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
 
-  auto [promise, pipeline] = callImpl(js, *parent, name,
-      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
-    kj::Vector<jsg::JsValue> argv(args.Length());
-    for (int n = 0; n < args.Length(); n++) {
-      argv.add(jsg::JsValue(args[n]));
-    }
-
-    // If we have arguments, serialize them.
-    // Note that we may fail to serialize some element, in which case this will throw back to JS.
-    if (argv.size() > 0) {
-      serializeJsValue(js, js.arr(argv.asPtr()), [&](capnp::MessageSize hint) {
-        // TODO(perf): Actually use the size hint.
-        return op.initCallWithArgs();
-      });
-    }
-  });
+  auto [promise, pipeline] = callImpl(js, *parent, name, args);
 
   return jsg::alloc<JsRpcPromise>(
       jsg::JsRef<jsg::JsPromise>(js, promise),
@@ -301,28 +304,19 @@ jsg::JsValue finallyImpl(jsg::Lock& js, v8::Local<v8::Promise> promise,
 
 jsg::JsValue JsRpcProperty::then(jsg::Lock& js, v8::Local<v8::Function> handler,
       jsg::Optional<v8::Local<v8::Function>> errorHandler) {
-  auto promise = callImpl(js, *parent, name,
-      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
-    op.setGetProperty();
-  }).promise;
+  auto promise = callImpl(js, *parent, name, kj::none).promise;
 
   return thenImpl(js, promise, handler, errorHandler);
 }
 
 jsg::JsValue JsRpcProperty::catch_(jsg::Lock& js, v8::Local<v8::Function> errorHandler) {
-  auto promise = callImpl(js, *parent, name,
-      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
-    op.setGetProperty();
-  }).promise;
+  auto promise = callImpl(js, *parent, name, kj::none).promise;
 
   return catchImpl(js, promise, errorHandler);
 }
 
 jsg::JsValue JsRpcProperty::finally(jsg::Lock& js, v8::Local<v8::Function> onFinally) {
-  auto promise = callImpl(js, *parent, name,
-      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
-    op.setGetProperty();
-  }).promise;
+  auto promise = callImpl(js, *parent, name, kj::none).promise;
 
   return finallyImpl(js, promise, onFinally);
 }
