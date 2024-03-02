@@ -193,14 +193,6 @@ private:
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(parent);
   }
-
-  struct PromiseAndPipleine {
-    jsg::JsPromise promise;
-    rpc::JsRpcTarget::CallResults::Pipeline pipeline;
-  };
-
-  template <typename FillOpFunc>
-  PromiseAndPipleine callImpl(jsg::Lock& js, FillOpFunc&& fillOpFunc);
 };
 
 // A JsRpcStub object forwards JS method calls to the remote Worker/Durable Object over RPC.

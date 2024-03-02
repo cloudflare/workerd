@@ -162,8 +162,20 @@ rpc::JsRpcTarget::Client JsRpcProperty::getClientForOneCall(
   return result;
 }
 
+namespace {
+
+struct JsRpcPromiseAndPipleine {
+  jsg::JsPromise promise;
+  rpc::JsRpcTarget::CallResults::Pipeline pipeline;
+};
+
+// Core implementation of making an RPC call, reusable for many cases below.
 template <typename FillOpFunc>
-JsRpcProperty::PromiseAndPipleine JsRpcProperty::callImpl(jsg::Lock& js, FillOpFunc&& fillOpFunc) {
+JsRpcPromiseAndPipleine callImpl(
+    jsg::Lock& js,
+    JsRpcClientProvider& parent,
+    kj::StringPtr name,
+    FillOpFunc&& fillOpFunc) {
   // Note: We used to enforce that RPC methods had to be called with the correct `this`. That is,
   // we prevented people from doing:
   //
@@ -185,7 +197,7 @@ JsRpcProperty::PromiseAndPipleine JsRpcProperty::callImpl(jsg::Lock& js, FillOpF
     // `path` will be filled in with the path of property names leading from the stub represented by
     // `client` to the specific property / method that we're trying to invoke.
     kj::Vector<kj::StringPtr> path;
-    auto client = parent->getClientForOneCall(js, path);
+    auto client = parent.getClientForOneCall(js, path);
 
     auto& ioContext = IoContext::current();
 
@@ -228,10 +240,13 @@ JsRpcProperty::PromiseAndPipleine JsRpcProperty::callImpl(jsg::Lock& js, FillOpF
   }
 }
 
+}  // namespace
+
 jsg::Ref<JsRpcPromise> JsRpcProperty::call(const v8::FunctionCallbackInfo<v8::Value>& args) {
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
 
-  auto [promise, pipeline] = callImpl(js, [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
+  auto [promise, pipeline] = callImpl(js, *parent, name,
+      [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
     kj::Vector<jsg::JsValue> argv(args.Length());
     for (int n = 0; n < args.Length(); n++) {
       argv.add(jsg::JsValue(args[n]));
@@ -286,7 +301,7 @@ jsg::JsValue finallyImpl(jsg::Lock& js, v8::Local<v8::Promise> promise,
 
 jsg::JsValue JsRpcProperty::then(jsg::Lock& js, v8::Local<v8::Function> handler,
       jsg::Optional<v8::Local<v8::Function>> errorHandler) {
-  auto promise = callImpl(js,
+  auto promise = callImpl(js, *parent, name,
       [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
     op.setGetProperty();
   }).promise;
@@ -295,7 +310,7 @@ jsg::JsValue JsRpcProperty::then(jsg::Lock& js, v8::Local<v8::Function> handler,
 }
 
 jsg::JsValue JsRpcProperty::catch_(jsg::Lock& js, v8::Local<v8::Function> errorHandler) {
-  auto promise = callImpl(js,
+  auto promise = callImpl(js, *parent, name,
       [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
     op.setGetProperty();
   }).promise;
@@ -304,7 +319,7 @@ jsg::JsValue JsRpcProperty::catch_(jsg::Lock& js, v8::Local<v8::Function> errorH
 }
 
 jsg::JsValue JsRpcProperty::finally(jsg::Lock& js, v8::Local<v8::Function> onFinally) {
-  auto promise = callImpl(js,
+  auto promise = callImpl(js, *parent, name,
       [&](rpc::JsRpcTarget::CallParams::Operation::Builder op) {
     op.setGetProperty();
   }).promise;
