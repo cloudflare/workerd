@@ -44,10 +44,29 @@ v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
   return v8::Just(n);
 }
 
+void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Object> obj) {
+  // The default error that V8 would generate is "#<TypeName> could not be cloned." -- for some
+  // reason, it surrounds the type name in "#<>", which seems bizarre? Let's generate a better
+  // error.
+  v8::Local<v8::String> message = js.str(kj::str(
+      "Could not serialize object of type \"", obj->GetConstructorName(), "\". This type does "
+      "not support serialization."));
+  js.throwException(jsg::JsValue(makeDOMException(js.v8Isolate, message, "DataCloneError")));
+}
+
 void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
-  // makeDOMException could throw an exception. If it does, we'll end up crashing but that's ok?
   auto isolate = v8::Isolate::GetCurrent();
-  isolate->ThrowException(makeDOMException(isolate, message, "DataCloneError"));
+  try {
+    isolate->ThrowException(makeDOMException(isolate, message, "DataCloneError"));
+  } catch (JsExceptionThrown&) {
+    // Apparently an exception was thrown during the construction of the DOMException. Most likely
+    // we were terminated. In any case, we'll let that exception stay scheduled and propagate back
+    // to V8.
+  } catch (...) {
+    // A KJ exception was thrown, we'll have to convert it to JavaScript and propagate that
+    // exception instead.
+    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+  }
 }
 
 bool Serializer::HasCustomHostObject(v8::Isolate* isolate) {
@@ -71,6 +90,8 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
 
 v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
   try {
+    jsg::Lock& js = jsg::Lock::from(isolate);
+
     if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
         object->GetAlignedPointerFromInternalField(Wrappable::WRAPPABLE_TAG_FIELD_INDEX) !=
             &Wrappable::WRAPPABLE_TAG) {
@@ -79,9 +100,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
       //
       // We also get here if treatClassInstancesAsPlainObjects is false, and the object is an
       // application-defined class. We don't currently support serializing class instances.
-
-      // Call the default implementation to get the default error message.
-      return v8::ValueSerializer::Delegate::WriteHostObject(isolate, object);
+      throwDataCloneErrorForObject(js, object);
     }
 
     Wrappable* wrappable = reinterpret_cast<Wrappable*>(
@@ -99,9 +118,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     if (!IsolateBase::from(isolate).serialize(
           Lock::from(isolate), typeid(*wrappable), *obj, *this)) {
       // This type is not serializable.
-
-      // Call the default implementation to get the default error message.
-      return v8::ValueSerializer::Delegate::WriteHostObject(isolate, object);
+      throwDataCloneErrorForObject(js, object);
     }
 
     return v8::Just(true);

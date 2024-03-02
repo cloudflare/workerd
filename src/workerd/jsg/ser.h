@@ -146,6 +146,12 @@ public:
   }
 
 private:
+  // Throw a DataCloneError, complaining that the given object cannot be serialized. (This is
+  // similar to ThrowDataCloneError() except that it formats the error message itself, and it
+  // is expected to be called from KJ-ish code so it throws JsExceptionThrown rather than
+  // returning.)
+  [[noreturn]] void throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Object> obj);
+
   // v8::ValueSerializer::Delegate implementation
   void ThrowDataCloneError(v8::Local<v8::String> message) override;
   bool HasCustomHostObject(v8::Isolate* isolate) override;

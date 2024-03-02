@@ -358,9 +358,9 @@ export let namedServiceBinding = {
 
     // Can't serialize instances of classes that aren't derived from RpcTarget.
     await assert.rejects(() => Promise.resolve(env.MyService.getNonRpcClass()), {
-      // TODO(bug): Why isn't this a DOMException?
-      name: "Error",
-      message: "#<NonRpcClass> could not be cloned."
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "NonRpcClass". This type does not support ' +
+               'serialization.'
     });
   },
 }
