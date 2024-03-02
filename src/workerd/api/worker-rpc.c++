@@ -408,6 +408,29 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
   return jsg::alloc<JsRpcStub>(ioctx.addObject(kj::heap(reader.getRpcTarget())));
 }
 
+static bool isFunctionForRpc(jsg::Lock& js, v8::Local<v8::Function> func) {
+  jsg::JsObject obj(func);
+  if (obj.isInstanceOf<JsRpcProperty>(js) || obj.isInstanceOf<JsRpcPromise>(js)) {
+    // Don't allow JsRpcProperty or JsRpcPromise to be treated as plain functions, even though they
+    // are technically callable. These types need to be treated specially (if we decide to let
+    // them be passed over RPC at all).
+    return false;
+  }
+  return true;
+}
+
+static bool isFunctionForRpc(jsg::Lock& js, jsg::JsValue value) {
+  if (!value.isFunction()) return false;
+  return isFunctionForRpc(js, v8::Local<v8::Value>(value).As<v8::Function>());
+}
+
+static inline bool isFunctionForRpc(jsg::Lock& js, v8::Local<v8::Value> val) {
+  return isFunctionForRpc(js, jsg::JsValue(val));
+}
+static inline bool isFunctionForRpc(jsg::Lock& js, jsg::JsObject val) {
+  return isFunctionForRpc(js, jsg::JsValue(val));
+}
+
 // Create a CallPipeline wrapping the given value.
 //
 // Returns none if the value is not an object and so isn't pipelineable.
@@ -499,7 +522,7 @@ public:
 
       switch (op.which()) {
         case rpc::JsRpcTarget::CallParams::Operation::CALL_WITH_ARGS: {
-          JSG_REQUIRE(propHandle->IsFunction(), TypeError,
+          JSG_REQUIRE(isFunctionForRpc(js, propHandle), TypeError,
               kj::str("\"", methodNameForErrors, "\" is not a function."));
           auto fn = propHandle.As<v8::Function>();
 
@@ -659,7 +682,7 @@ private:
             } else if (object.isInstanceOf<JsRpcTarget>(js)) {
               // Yes. It's a JsRpcTarget.
               allowInstanceProperties = false;
-            } else if (jsg::JsValue(object).isFunction()) {
+            } else if (isFunctionForRpc(js, object)) {
               // Yes. It's a function.
               allowInstanceProperties = true;
             } else {
@@ -821,7 +844,7 @@ static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& js, jsg::
     } else KJ_IF_SOME(stub, obj.tryUnwrapAs<JsRpcStub>(js)) {
       // Just grab the stub directly!
       return stub->getClient();
-    } else if (value.isFunction()) {
+    } else if (isFunctionForRpc(js, obj)) {
       // It's a plain function. We'll allow its instance properties to be accessed, like with a
       // plain object. It will also be callable.
       allowInstanceProperties = true;

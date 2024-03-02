@@ -148,6 +148,33 @@ export class MyService extends WorkerEntrypoint {
     func.someProperty = 123;
     return func;
   }
+
+  getRpcPromise(callback) {
+    return callback();
+  }
+  getNestedRpcPromise(callback) {
+    return {value: callback()};
+  }
+  getRemoteNestedRpcPromise(callback) {
+    // Use a function as a cheap way to return a JsRpcStub that has a remote property `value` which
+    // itself is initialized as a JsRpcPromise.
+    let result = () => {};
+    result.value = callback();
+    return result;
+  }
+  getRpcProperty(callback) {
+    return callback.foo;
+  }
+  getNestedRpcProperty(callback) {
+    return {value: callback.foo};
+  }
+  getRemoteNestedRpcProperty(callback) {
+    // Use a function as a cheap way to return a JsRpcStub that has a remote property `value` which
+    // itself is initialized as a JsRpcProperty.
+    let result = () => {};
+    result.value = callback.foo;
+    return result;
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -514,6 +541,80 @@ export let crossContextSharingDoesntWork = {
     globalRpcPromise = env.MyService.getAnObject(5).counter;
     await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), expectedError);
     await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), expectedError);
+  },
+}
+
+export let serializeRpcPromiseOrProprety = {
+  async test(controller, env, ctx) {
+    // What happens if we actually try to serialize a JsRpcPromise or JsRpcProperty? Let's make
+    // sure these aren't, for instance, treated as functions because they are callable.
+
+    let func = () => {return {x: 123};};
+    func.foo = {x: 456};
+
+    // If we directly return returning a JsRpcPromise, the system automatically awaits it on the
+    // server side because it's a thenable.
+    assert.deepEqual(await env.MyService.getRpcPromise(func), {x: 123})
+
+    // Pipelining also works.
+    assert.strictEqual(await env.MyService.getRpcPromise(func).x, 123)
+
+    // If a JsRpcPromise appears somewhere in the serialization tree, it'll just fail serialization.
+    // NOTE: We could choose to make this work later.
+    await assert.rejects(() => env.MyService.getNestedRpcPromise(func), {
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "JsRpcPromise". This type does not support ' +
+               'serialization.'
+    });
+    await assert.rejects(() => env.MyService.getNestedRpcPromise(func).value, {
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "JsRpcPromise". This type does not support ' +
+               'serialization.'
+    });
+    await assert.rejects(() => env.MyService.getNestedRpcPromise(func).value.x, {
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "JsRpcPromise". This type does not support ' +
+               'serialization.'
+    });
+
+    // Things get a little weird when we return a stub which itself has properties that reflect
+    // our RPC promise. If we await fetch the JsRpcPromise itself, this works, again because
+    // somewhere along the line V8 says "oh look a thenable" and awaits it, before it can be
+    // subject to serialization. That's fine.
+    assert.deepEqual(await env.MyService.getRemoteNestedRpcPromise(func).value, {x: 123});
+    await assert.rejects(() => env.MyService.getRemoteNestedRpcPromise(func).value.x, {
+      name: "TypeError",
+      message: 'The RPC receiver does not implement the method "value".'
+    });
+
+    // The story is similar for a JsRpcProperty -- though the implementation details differ.
+    assert.deepEqual(await env.MyService.getRpcProperty(func), {x: 456})
+    assert.strictEqual(await env.MyService.getRpcProperty(func).x, 456)
+    await assert.rejects(() => env.MyService.getNestedRpcProperty(func), {
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "JsRpcProperty". This type does not support ' +
+               'serialization.'
+    });
+    await assert.rejects(() => env.MyService.getNestedRpcProperty(func).value, {
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "JsRpcProperty". This type does not support ' +
+               'serialization.'
+    });
+    await assert.rejects(() => env.MyService.getNestedRpcProperty(func).value.x, {
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "JsRpcProperty". This type does not support ' +
+               'serialization.'
+    });
+
+    assert.deepEqual(await env.MyService.getRemoteNestedRpcProperty(func).value, {x: 456});
+    await assert.rejects(() => env.MyService.getRemoteNestedRpcProperty(func).value.x, {
+      name: "TypeError",
+      message: 'The RPC receiver does not implement the method "value".'
+    });
+    await assert.rejects(() => env.MyService.getRemoteNestedRpcProperty(func).value(), {
+      name: "TypeError",
+      message: '"value" is not a function.'
+    });
   },
 }
 
