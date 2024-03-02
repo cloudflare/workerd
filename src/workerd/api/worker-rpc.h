@@ -144,6 +144,10 @@ public:
 private:
   jsg::JsRef<jsg::JsPromise> inner;
   IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(inner);
+  }
 };
 
 // Represents a property -- possibly, a method -- of a remote RPC object.
