@@ -450,6 +450,7 @@ http_archive(
         "//:patches/v8/0012-Always-enable-continuation-preserved-data-in-the-bui.patch",
         "//:patches/v8/0013-Attach-continuation-context-to-Promise-thenable-task.patch",
         "//:patches/v8/0014-increase-visibility-of-virtual-method.patch",
+        "//:patches/v8/0015-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
     ],
     integrity = "sha256-jcBk1hBhzrMHRL0EDTgHKBVrJPsP1SLZL6A5/l6arrs=",
     strip_prefix = "v8-12.2.281.18",

@@ -66,10 +66,10 @@ public:
   // appropriate exception should be thrown.
   class ExternalHandler {
   public:
-    // We declare the destructor just so that this class has a virtual method, which ensures it is
-    // polymorphic (has a vtable) so that dynamic_cast can be used on it. We mark this method pure
-    // (`= 0`) so that `ExternalHandler` itself cannot be instantiated.
-    virtual ~ExternalHandler() noexcept(false) = 0;
+    // Tries to serialize a function as an external. The default implementation throws
+    // DataCloneError.
+    virtual void serializeFunction(
+        jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func);
   };
 
   struct Options {

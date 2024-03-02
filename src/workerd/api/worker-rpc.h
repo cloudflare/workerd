@@ -46,6 +46,10 @@ public:
 
   size_t size() { return externals.size(); }
 
+  // We serialize functions by turning them into RPC stubs.
+  void serializeFunction(
+      jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) override;
+
 private:
   kj::Vector<BuilderCallback> externals;
 };

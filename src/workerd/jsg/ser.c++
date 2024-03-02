@@ -7,7 +7,10 @@
 
 namespace workerd::jsg {
 
-Serializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
+void Serializer::ExternalHandler::serializeFunction(
+    jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
+  JSG_FAIL_REQUIRE(DOMDataCloneError, func, " could not be cloned.");
+}
 
 Serializer::Serializer(Lock& js, Options options)
     : externalHandler(options.externalHandler),
@@ -18,6 +21,10 @@ Serializer::Serializer(Lock& js, Options options)
 #endif
   if (!treatClassInstancesAsPlainObjects) {
     prototypeOfObject = js.obj().getPrototype();
+  }
+  if (externalHandler != kj::none) {
+    // If we have an ExternalHandler, we'll ask it to serialize host objects.
+    ser.SetTreatFunctionsAsHostObjects(true);
   }
   KJ_IF_SOME(version, options.version) {
     KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
@@ -95,6 +102,13 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
         object->GetAlignedPointerFromInternalField(Wrappable::WRAPPABLE_TAG_FIELD_INDEX) !=
             &Wrappable::WRAPPABLE_TAG) {
+      KJ_IF_SOME(eh, externalHandler) {
+        if (object->IsFunction()) {
+          eh.serializeFunction(js, *this, object.As<v8::Function>());
+          return v8::Just(true);
+        }
+      }
+
       // v8::ValueSerializer by default will send us anything that has internal fields, but this
       // object doesn't appear to match the internal fields expected on a JSG object.
       //

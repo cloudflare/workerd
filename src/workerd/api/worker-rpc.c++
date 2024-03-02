@@ -834,6 +834,18 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   });
 }
 
+void RpcSerializerExternalHander::serializeFunction(
+    jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
+  serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
+
+  auto handle = jsg::JsRef<jsg::JsObject>(js, jsg::JsObject(func));
+  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(
+      IoContext::current(), kj::mv(handle), true);
+  write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
+    builder.setRpcTarget(kj::mv(cap));
+  });
+}
+
 // JsRpcTarget implementation specific to entrypoints. This is used to deliver the first, top-level
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
