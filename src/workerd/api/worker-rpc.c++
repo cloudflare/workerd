@@ -659,6 +659,9 @@ private:
             } else if (object.isInstanceOf<JsRpcTarget>(js)) {
               // Yes. It's a JsRpcTarget.
               allowInstanceProperties = false;
+            } else if (jsg::JsValue(object).isFunction()) {
+              // Yes. It's a function.
+              allowInstanceProperties = true;
             } else {
               failLookup(name);
             }

@@ -144,7 +144,9 @@ export class MyService extends WorkerEntrypoint {
   }
 
   async getFunction() {
-    return (a, b) => a ^ b;
+    let func = (a, b) => a ^ b;
+    func.someProperty = 123;
+    return func;
   }
 }
 
@@ -252,11 +254,13 @@ export let namedServiceBinding = {
     {
       let func = await env.MyService.getFunction();
       assert.strictEqual(await func(3, 6), 5);
+      assert.strictEqual(await func.someProperty, 123);
     }
     {
       // Pipeline the function call.
       let func = env.MyService.getFunction();
       assert.strictEqual(await func(3, 6), 5);
+      assert.strictEqual(await func.someProperty, 123);
     }
 
     // A property that returns a Promise will wait for the Promise.
