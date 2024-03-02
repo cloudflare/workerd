@@ -1,17 +1,6 @@
 import assert from 'node:assert';
 import {WorkerEntrypoint,DurableObject,RpcStub,RpcTarget} from 'cloudflare:workers';
 
-// Monkey-patch assert.rejects so that it automatically converts the return value of the function
-// to a Promise. Otherwise it gets confused when the callback returns a thenable that happens to
-// be callable; it thinks it has received a function rather than a promise.
-// TODO(cleanup): This is needed because `isValidThenable()` in internal_asserts.ts explicitly
-//   refuses to accept functions, even if the function has `then` and `catch` methods. Can we
-//   change that? If so we could remove this hack here.
-let originalRejects = assert.rejects.bind(assert);
-assert.rejects = (func, err) => {
-  return originalRejects(() => Promise.resolve(func()), err);
-}
-
 class MyCounter extends RpcTarget {
   constructor(i = 0) {
     super();
