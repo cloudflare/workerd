@@ -815,7 +815,8 @@ public:
   TransientJsRpcTarget(IoContext& ioCtx, jsg::JsRef<jsg::JsObject> object,
                        bool allowInstanceProperties = false)
       : JsRpcTargetBase(ioCtx), object(kj::mv(object)),
-        allowInstanceProperties(allowInstanceProperties) {}
+        allowInstanceProperties(allowInstanceProperties),
+        pendingEvent(ioCtx.registerPendingEvent()) {}
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) {
     return {
@@ -828,6 +829,15 @@ public:
 private:
   jsg::JsRef<jsg::JsObject> object;
   bool allowInstanceProperties;
+
+  // An RpcTarget could receive a new call (in the existing IoContext) at any time, therefore
+  // its existence counts as a PendingEvent. If we don't hold a PendingEvent, then the IoContext
+  // may decide that there's nothing more than can possibly happen in this context, and cancel
+  // itself.
+  //
+  // Note that it's OK if we hold this past the lifetime of the IoContext itself; the PendingEvent
+  // becomes detached in that case and has no effect.
+  kj::Own<void> pendingEvent;
 };
 
 static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& js, jsg::JsValue value) {
