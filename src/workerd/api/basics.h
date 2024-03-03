@@ -218,6 +218,10 @@ public:
   JSG_RESOURCE_TYPE(CustomEvent) {
     JSG_INHERIT(Event);
     JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
+    JSG_TS_OVERRIDE(<T = any> extends Event {
+      constructor(type: string, init?: CustomEventCustomEventInit);
+      get detail(): T;
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
