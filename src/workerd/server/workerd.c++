@@ -6,6 +6,7 @@
 #include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/map.h>
+#include <kj/async-queue.h>
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 #include <capnp/schema-parser.h>
@@ -486,11 +487,128 @@ kj::Maybe<kj::Own<capnp::SchemaFile>> tryImportBulitin(kj::StringPtr name) {
 
 // =======================================================================================
 
+// A kj::Network implementation which wraps some other network and optionally (if enabled)
+// implements "loopback:" network addresses, which are expected to be serviced within the same
+// process. Loopback addresses are enabled only when running `workerd test`. The purpose is to
+// allow end-to-end testing of the network stack without creating a real external-facing socket.
+//
+// There is no use for loopback sockets in production since direct service bindings are more
+// efficient while solving the same problems.
+class NetworkWithLoopback final: public kj::Network {
+public:
+  NetworkWithLoopback(kj::Network& inner, kj::AsyncIoProvider& ioProvider)
+      : inner(inner), ioProvider(ioProvider), loopbackEnabled(rootLoopbackEnabled) {}
+
+  NetworkWithLoopback(kj::Own<kj::Network> inner, kj::AsyncIoProvider& ioProvider,
+                      bool& loopbackEnabled)
+      : inner(*inner), ownInner(kj::mv(inner)), ioProvider(ioProvider),
+        loopbackEnabled(loopbackEnabled) {}
+
+  // Call once to enable loopback addresses.
+  void enableLoopback() { loopbackEnabled = true; }
+
+  kj::Promise<kj::Own<kj::NetworkAddress>> parseAddress(
+      kj::StringPtr addr, uint portHint = 0) override {
+    if (loopbackEnabled && addr.startsWith(PREFIX)) {
+      return kj::Own<kj::NetworkAddress>(kj::heap<LoopbackAddr>(*this, addr.slice(PREFIX.size())));
+    } else {
+      return inner.parseAddress(addr, portHint);
+    }
+  }
+
+  kj::Own<kj::NetworkAddress> getSockaddr(const void* sockaddr, uint len) override {
+    return inner.getSockaddr(sockaddr, len);
+  }
+
+  kj::Own<kj::Network> restrictPeers(
+      kj::ArrayPtr<const kj::StringPtr> allow,
+      kj::ArrayPtr<const kj::StringPtr> deny = nullptr) override {
+    return kj::heap<NetworkWithLoopback>(
+        inner.restrictPeers(allow, deny), ioProvider, loopbackEnabled);
+  }
+
+private:
+  kj::Network& inner;
+  kj::Own<kj::Network> ownInner;
+  kj::AsyncIoProvider& ioProvider KJ_UNUSED;
+  bool rootLoopbackEnabled = false;
+
+  // Reference to `rootLoopbackEnabled` of the root NetworkWithLoopback. All descendants
+  // (created using `restrictPeers()` will share the same flag value.
+  bool& loopbackEnabled;
+
+  using ConnectionQueue = kj::ProducerConsumerQueue<kj::Own<kj::AsyncIoStream>>;
+  kj::HashMap<kj::String, kj::Own<ConnectionQueue>> loopbackQueues;
+
+  ConnectionQueue& getLoopbackQueue(kj::StringPtr name) {
+    return *loopbackQueues.findOrCreate(name, [&]() {
+      return decltype(loopbackQueues)::Entry {
+        .key = kj::str(name),
+        .value = kj::heap<ConnectionQueue>(),
+      };
+    });
+  }
+
+  static constexpr kj::StringPtr PREFIX = "loopback:"_kj;
+
+  class LoopbackAddr final: public kj::NetworkAddress {
+  public:
+    LoopbackAddr(NetworkWithLoopback& parent, kj::StringPtr name)
+        : parent(parent), name(kj::str(name)) {}
+
+    kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
+      // The purpose of loopback sockets is to actually test the network stack end-to-end. If
+      // people don't want to test the full stack, then they can create a direct service binding
+      // without going through a loopback socket.
+      //
+      // So, we create a real loopback socket here.
+      auto pipe = parent.ioProvider.newTwoWayPipe();
+
+      parent.getLoopbackQueue(name).push(kj::mv(pipe.ends[0]));
+      return kj::mv(pipe.ends[1]);
+    }
+
+    kj::Own<kj::ConnectionReceiver> listen() override {
+      return kj::heap<LoopbackReceiver>(parent.getLoopbackQueue(name));
+    }
+
+    kj::Own<kj::NetworkAddress> clone() override {
+      return kj::heap<LoopbackAddr>(parent, name);
+    }
+
+    kj::String toString() override {
+      return kj::str(PREFIX, name);
+    }
+
+  private:
+    NetworkWithLoopback& parent;
+    kj::String name;
+  };
+
+  class LoopbackReceiver final: public kj::ConnectionReceiver {
+  public:
+    LoopbackReceiver(ConnectionQueue& queue): queue(queue) {}
+
+    kj::Promise<kj::Own<kj::AsyncIoStream>> accept() override {
+      return queue.pop();
+    }
+
+    uint getPort() override {
+      return 0;
+    }
+
+  private:
+    ConnectionQueue& queue;
+  };
+};
+
+// =======================================================================================
+
 class CliMain: public SchemaFileImpl::ErrorReporter {
 public:
   CliMain(kj::ProcessContext& context, char** argv)
       : context(context), argv(argv),
-        server(*fs, io.provider->getTimer(), io.provider->getNetwork(), entropySource,
+        server(*fs, io.provider->getTimer(), network, entropySource,
             Worker::ConsoleMode::STDOUT, [&](kj::String error) {
           if (watcher == kj::none) {
             // TODO(someday): Don't just fail on the first error, keep going in order to report
@@ -1092,6 +1210,9 @@ public:
     // TODO(beta): This can be removed once we improve our error logging story.
     kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
 
+    // Enable loopback sockets in tests only.
+    network.enableLoopback();
+
     serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
       return server.test(v8System, config,
           testServicePattern.map([](auto& s) -> kj::StringPtr { return s; }).orDefault("*"_kj),
@@ -1155,6 +1276,7 @@ private:
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
   kj::AsyncIoContext io = kj::setupAsyncIo();
+  NetworkWithLoopback network { io.provider->getNetwork(), *io.provider };
   EntropySourceImpl entropySource;
 
   kj::Vector<kj::Path> importPath;

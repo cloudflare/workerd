@@ -3515,7 +3515,8 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
 
 kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
                                           kj::HttpHeaderTable::Builder& headerTableBuilder,
-                                          kj::ForkedPromise<void>& forkedDrainWhen) {
+                                          kj::ForkedPromise<void>& forkedDrainWhen,
+                                          bool forTest) {
   // ---------------------------------------------------------------------------
   // Start sockets
   TRACE_EVENT("workerd", "listenOnSockets");
@@ -3629,6 +3630,15 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
   }
 
   for (auto& unmatched: directoryOverrides) {
+    if (forTest && unmatched.key == "TEST_TMPDIR") {
+      // Due to a historical bug, `workerd test` didn't check for the existence of unmatched
+      // overrides, and our own tests became dependent on the ability to override TEST_TMPDIR
+      // even if it was not used in the config. For now, we ignore this problem.
+      //
+      // TODO(cleanup): Figure out the right solution here.
+      continue;
+    }
+
     reportConfigError(kj::str(
         "Config did not define any disk service named \"", unmatched.key, "\" to match the "
         "override provided on the command line."));
@@ -3660,9 +3670,17 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
   auto [ fatalPromise, fatalFulfiller ] = kj::newPromiseAndFulfiller<void>();
   this->fatalFulfiller = kj::mv(fatalFulfiller);
 
-  auto forkedDrainWhen = kj::Promise<void>(kj::READY_NOW).fork();
+  auto forkedDrainWhen = kj::Promise<void>(kj::NEVER_DONE).fork();
 
   startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+
+  // Tests usually do not configure sockets, but they can, especially loopback sockets. Arrange
+  // to wait on them. Crash if listening fails.
+  auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen,
+                                       /* forTest = */ true)
+      .eagerlyEvaluate([](kj::Exception&& e) noexcept {
+    kj::throwFatalException(kj::mv(e));
+  });
 
   auto ownHeaderTable = headerTableBuilder.build();
 
