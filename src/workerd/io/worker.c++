@@ -1813,7 +1813,22 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
   }
 
   // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
-  KJ_LOG(INFO, "uncaught exception", source, exception);
+  if (kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
+    JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
+      // Try to log `error.stack` if it exists.
+      KJ_IF_SOME(obj, exception.tryCast<jsg::JsObject>()) {
+        auto stack = obj.get(js, "stack");
+        if (!stack.isUndefined()) {
+          KJ_LOG(INFO, "uncaught exception", source, stack);
+          return;
+        }
+      } else {
+        // Compiler gives a spurious warning if this `else` isn't here.
+      }
+
+      KJ_LOG(INFO, "uncaught exception", source, exception);
+    });
+  }
 }
 
 void Worker::Lock::reportPromiseRejectEvent(v8::PromiseRejectMessage& message) {
