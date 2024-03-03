@@ -334,3 +334,13 @@ interface EventDispatcher @0xf20697475ec1752d {
   # Other methods might be added to handle other kinds of events, e.g. TCP connections, or maybe
   # even native Cap'n Proto RPC eventually.
 }
+
+interface WorkerdBootstrap {
+  # Bootstrap interface exposed by workerd when serving Cap'n Proto RPC.
+
+  startEvent @0 () -> (dispatcher :EventDispatcher);
+  # Start a new event. Exactly one event should be delivered to the returned EventDispatcher.
+  #
+  # TODO(someday): Pass cfBlobJson? Currently doesn't matter since the cf blob is only present for
+  #   HTTP requests which can be delivered over regular HTTP instead of capnp.
+}

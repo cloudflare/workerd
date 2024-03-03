@@ -804,6 +804,12 @@ struct HttpOptions {
     # If null, the header will be removed.
   }
 
+  capnpConnectHost @5 :Text;
+  # A CONNECT request for this host+port will be treated as a request to form a Cap'n Proto RPC
+  # connection. The server will expose a WorkerdBootstrap as the bootstrap interface, allowing
+  # events to be delivered to the target worker via capnp. Clients will use capnp for non-HTTP
+  # event types (especially JSRPC).
+
   # TODO(someday): When we support TCP, include an option to deliver CONNECT requests to the
   #   TCP handler.
 }

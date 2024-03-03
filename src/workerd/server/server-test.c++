@@ -463,6 +463,11 @@ private:
         : test(test), peerFilter(peerFilter), address(kj::mv(address)) {}
 
     kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
+      KJ_IF_SOME(addr, test.sockets.find(address)) {
+        // If someone is listening on this address, connect directly to them.
+        return addr->connect();
+      }
+
       auto [promise, fulfiller] = kj::newPromiseAndFulfiller<kj::Own<kj::AsyncIoStream>>();
 
       test.getSubrequestQueue(address).push({
@@ -3520,6 +3525,52 @@ KJ_TEST("Server: cache name is passed through to service") {
     KJ_EXPECT_LOG(INFO, "[ PASS ] another");
     KJ_EXPECT(!test.server.test(v8System, *test.config, "*", "*").wait(test.ws));
   }
+}
+
+// =======================================================================================
+
+KJ_TEST("Server: JS RPC over HTTP connections") {
+  // Test that we can send RPC over an ExternalServer pointing back to our own loopback socket,
+  // as long as both are configured with a `capnpConnectHost`.
+
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-02-23",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env) {
+                `    return new Response("got: " + await env.OUT.frob(3, 11));
+                `  }
+                `}
+                `export class MyRpc extends WorkerEntrypoint {
+                `  async frob(a, b) { return a * b + 2; }
+                `}
+            )
+          ],
+          bindings = [( name = "OUT", service = "outbound")]
+        )
+      ),
+      (name = "outbound", external = (address = "loopback", http = (capnpConnectHost = "cappy")))
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+      ( name = "alt1", address = "loopback",
+        service = (name = "hello", entrypoint = "MyRpc"),
+        http = (capnpConnectHost = "cappy")),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "got: 35");
 }
 
 // =======================================================================================
