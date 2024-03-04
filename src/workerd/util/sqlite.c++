@@ -655,7 +655,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       // Virtual tables are tables backed by some native-code callbacks. We don't support these except for FTS5 (Full Text Search) https://www.sqlite.org/fts5.html
       {
         KJ_IF_SOME (moduleName, param2) {
-          if (moduleName == "fts5") {
+          if (strncasecmp(moduleName.begin(), "fts5", 4) == 0) {
             return true;
           }
         }
