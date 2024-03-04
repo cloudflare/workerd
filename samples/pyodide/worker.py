@@ -1,7 +1,7 @@
 from js import Response
 
 
-def fetch(request):
+def on_fetch(request):
     return Response.new("hello world")
 
 

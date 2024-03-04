@@ -124,7 +124,10 @@ export default {
   async fetch(request, env, ctx) {
     try {
       const { mainModule } = await getPyodide(ctx);
-      return await mainModule.fetch.callRelaxed(request, env, ctx);
+      if (mainModule.on_fetch === undefined) {
+        throw new Error("Python Worker should define an on_fetch method");
+      }
+      return await mainModule.on_fetch.callRelaxed(request, env, ctx);
     } catch(e) {
       console.warn(e.stack);
       throw e;
