@@ -25,6 +25,7 @@
 
 #if _WIN32
 #define strncasecmp _strnicmp
+#define strcasecmp _stricmp
 #endif
 
 namespace workerd {
