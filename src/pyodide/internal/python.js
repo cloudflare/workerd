@@ -313,7 +313,7 @@ function buildSitePackages(tarInfo, requirements) {
     }
     child.children.forEach((val, key) => {
       if(res.children.has(key)) {
-        throw new Error(`Folder ${key} being written by multiple packages`);
+        throw new Error(`File/folder ${key} being written by multiple packages`);
       }
       res.children.set(key, val);
     });
@@ -323,8 +323,8 @@ function buildSitePackages(tarInfo, requirements) {
 }
 
 export function mountLib(pyodide, requirements) {
-  const [info, _] = parseTarInfo();
-  const sitePackagesInfo = buildSitePackages(info, requirements);
+  const [origTarInfo, _] = parseTarInfo();
+  const info = buildSitePackages(origTarInfo, requirements);
   const tarFS = createTarFS(pyodide._module);
   const mdFS = createMetadataFS(pyodide._module);
   const pymajor = pyodide._module._py_version_major();
@@ -332,7 +332,7 @@ export function mountLib(pyodide, requirements) {
   const site_packages = `/session/lib/python${pymajor}.${pyminor}/site-packages`;
   pyodide.FS.mkdirTree(site_packages);
   pyodide.FS.mkdirTree("/session/metadata");
-  pyodide.FS.mount(tarFS, { info: sitePackagesInfo }, site_packages);
+  pyodide.FS.mount(tarFS, { info }, site_packages);
   pyodide.FS.mount(mdFS, {}, "/session/metadata");
   const sys = pyodide.pyimport("sys");
   sys.path.push(site_packages);
