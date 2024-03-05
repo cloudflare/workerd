@@ -95,7 +95,7 @@ public:
 private:
   wgpu::ShaderModule shader_;
   kj::Own<AsyncRunner> async_;
-  jsg::Promise<jsg::Ref<GPUCompilationInfo>> getCompilationInfo();
+  jsg::Promise<jsg::Ref<GPUCompilationInfo>> getCompilationInfo(jsg::Lock& js);
 };
 
 struct GPUShaderModuleDescriptor {

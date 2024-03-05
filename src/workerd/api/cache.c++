@@ -467,7 +467,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
         }
       };
 
-      return context.awaitDeferredProxy(handleSerialize(
+      return context.awaitDeferredProxy(js, handleSerialize(
           kj::mv(serializePromise),
           kj::mv(httpClient),
           kj::mv(nativeRequest.response),

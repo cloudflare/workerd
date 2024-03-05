@@ -557,7 +557,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       // no need to drop the isolate lock and take it again every time some data is read/written.
       // That's a larger refactor, though.
       auto& ioContext = IoContext::current();
-      return ioContext.awaitIoLegacy(kj::mv(promise)).then(js,
+      return ioContext.awaitIoLegacy(js, kj::mv(promise)).then(js,
           ioContext.addFunctor([this,store = kj::mv(store), byteOffset, byteLength]
           (jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
         readPending = false;
@@ -1453,7 +1453,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // jsg::Promises and not kj::Promises, so that it doesn't look like I/O at all, and there's
       // no need to drop the isolate lock and take it again every time some data is read/written.
       // That's a larger refactor, though.
-      return ioContext.awaitIoLegacy(kj::mv(promise)).then(js,
+      return ioContext.awaitIoLegacy(js, kj::mv(promise)).then(js,
           ioContext.addFunctor(
             [this, check, maybeAbort, amountToWrite](jsg::Lock& js) -> jsg::Promise<void> {
         auto& request = check();
@@ -1949,7 +1949,7 @@ jsg::Promise<kj::Array<byte>> ReadableStreamInternalController::readAllBytes(
     KJ_CASE_ONEOF(readable, Readable) {
       auto source = KJ_ASSERT_NONNULL(removeSource(js));
       auto& context = IoContext::current();
-      return context.awaitIoLegacy(source->readAllBytes(limit).attach(kj::mv(source)));
+      return context.awaitIoLegacy(js, source->readAllBytes(limit).attach(kj::mv(source)));
     }
   }
   KJ_UNREACHABLE;
@@ -1976,7 +1976,7 @@ jsg::Promise<kj::String> ReadableStreamInternalController::readAllText(
     KJ_CASE_ONEOF(readable, Readable) {
       auto source = KJ_ASSERT_NONNULL(removeSource(js));
       auto& context = IoContext::current();
-      return context.awaitIoLegacy(source->readAllText(limit).attach(kj::mv(source)));
+      return context.awaitIoLegacy(js, source->readAllText(limit).attach(kj::mv(source)));
     }
   }
   KJ_UNREACHABLE;

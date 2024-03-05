@@ -100,7 +100,8 @@ void GPUBuffer::unmap(jsg::Lock& js) {
   }
 }
 
-jsg::Promise<void> GPUBuffer::mapAsync(GPUFlagsConstant mode, jsg::Optional<GPUSize64> offset,
+jsg::Promise<void> GPUBuffer::mapAsync(jsg::Lock& js, GPUFlagsConstant mode,
+                                       jsg::Optional<GPUSize64> offset,
                                        jsg::Optional<GPUSize64> size) {
   wgpu::MapMode md = static_cast<wgpu::MapMode>(mode);
 
@@ -166,7 +167,7 @@ jsg::Promise<void> GPUBuffer::mapAsync(GPUFlagsConstant mode, jsg::Optional<GPUS
       ctx);
 
   auto& context = IoContext::current();
-  return context.awaitIo(kj::mv(paf.promise));
+  return context.awaitIo(js, kj::mv(paf.promise));
 }
 
 } // namespace workerd::api::gpu

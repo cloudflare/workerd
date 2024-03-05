@@ -123,7 +123,7 @@ jsg::Ref<Socket> setupSocket(
   auto closedPrPair = js.newPromiseAndResolver<void>();
   closedPrPair.promise.markAsHandled(js);
 
-  ioContext.awaitIo(js, kj::mv(disconnectedPaf.promise),
+  ioContext.awaitIo(js, kj::mv(disconnectedPaf.promise)).then(js,
       [resolver = closedPrPair.resolver.addRef(js)](jsg::Lock& js, bool canceled) mutable {
     // We want to silently ignore the canceled case, without ever resolving anything. Note that
     // if the application actually fetches the `closed` promise, then the JSG glue will prevent

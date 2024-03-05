@@ -742,7 +742,7 @@ DigestStream::DigestStream(
 jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algorithm) {
   auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::byte>>();
 
-  auto jsPromise = IoContext::current().awaitIoLegacy(kj::mv(paf.promise));
+  auto jsPromise = IoContext::current().awaitIoLegacy(js, kj::mv(paf.promise));
   jsPromise.markAsHandled(js);
 
   return jsg::alloc<DigestStream>(

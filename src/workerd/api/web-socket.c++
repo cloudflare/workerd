@@ -481,7 +481,7 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
   //   accepted locally is implemented completely in JavaScript space, using jsg::Promise instead
   //   of kj::Promise, and then only use awaitIo() on truely remote WebSockets.
   // TODO(cleanup): Should addWaitUntil() take jsg::Promise instead of kj::Promise?
-  context.addWaitUntil(context.awaitJs(js, context.awaitIoLegacy(kj::mv(promise))
+  context.addWaitUntil(context.awaitJs(js, context.awaitIoLegacy(js, kj::mv(promise))
       .then(js, [this, thisHandle = JSG_THIS]
                 (jsg::Lock& js, kj::Maybe<kj::Exception>&& maybeError) mutable {
     auto& native = *farNative;
@@ -724,7 +724,8 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
     //   In that case, the pump can hang if accept() is never called on the other end. Ideally,
     //   this scenario would be handled in-isolate using jsg::Promise, but that would take some
     //   refactoring.
-    context.awaitIoLegacy(kj::mv(promise)).then(js, [this, thisHandle = JSG_THIS](jsg::Lock& js) {
+    context.awaitIoLegacy(js, kj::mv(promise))
+        .then(js, [this, thisHandle = JSG_THIS](jsg::Lock& js) {
       auto& native = *farNative;
       if (native.outgoingAborted) {
         if (awaitingHibernatableRelease()) {

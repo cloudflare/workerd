@@ -114,7 +114,7 @@ public:
     auto& cb = KJ_REQUIRE_NONNULL(uploadMemorySnapshotCb);
     hasUploaded = true;
     auto& context = IoContext::current();
-    return context.awaitIo(cb(kj::mv(snapshot)));
+    return context.awaitIo(js, cb(kj::mv(snapshot)));
   };
 
   jsg::Optional<kj::Array<kj::byte>> getMemorySnapshot(jsg::Lock& js) {
