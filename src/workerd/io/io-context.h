@@ -757,12 +757,6 @@ private:
 
   void runFinalizers(Worker::AsyncLock& asyncLock);
 
-  template <bool addIoOwn, typename T> struct MaybeIoOwn_;
-  template <typename T> struct MaybeIoOwn_<false, T> { typedef T Type; };
-  template <typename T> struct MaybeIoOwn_<true, T> { typedef IoOwn<T> Type; };
-  template <bool addIoOwn, typename T>
-  using MaybeIoOwn = typename MaybeIoOwn_<addIoOwn, T>::Type;
-
   template <typename T>
   struct IdentityFunc {
     inline T operator()(jsg::Lock&, T&& value) const {
@@ -788,15 +782,6 @@ private:
   template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIoImpl(
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
-
-  // Same as addFunctor() but expects that the returned function will receive a IoOwn<T> as the
-  // parameter, and instead passes the underlying `T` as the parameter to `func`. This is needed
-  // in the implementation of awaitIo().
-  //
-  // If `passLock` is true, then `func()`'s first parameter is `jsg::Lock&`, and it's the second
-  // parameter that needs to be wrapped.
-  template <typename T, bool passLock, typename Func>
-  auto addFunctorIoOwnParam(Func&& func);
 
   // The IncomingRequest that is currently considered "current". This is always the
   // latest-starting request that hasn't yet completed.
@@ -1184,19 +1169,6 @@ auto IoContext::addFunctor(Func&& func) {
   } else {
     return [func = addObject(kj::heap(kj::mv(func)))](auto&&... params) mutable {
       return (*func)(kj::fwd<decltype(params)>(params)...);
-    };
-  }
-}
-
-template <typename T, bool passLock, typename Func>
-auto IoContext::addFunctorIoOwnParam(Func&& func) {
-  if constexpr (passLock) {
-    return [func = addObject(kj::heap(kj::mv(func)))](jsg::Lock& js, IoOwn<T> param) mutable {
-      return (*func)(js, kj::mv(*param));
-    };
-  } else {
-    return [func = addObject(kj::heap(kj::mv(func)))](IoOwn<T> param) mutable {
-      return (*func)(kj::mv(*param));
     };
   }
 }
