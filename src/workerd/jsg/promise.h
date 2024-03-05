@@ -710,6 +710,25 @@ public:
       return Promise<T>(context->GetIsolate(), promise);
     } else {
       // Input is a resolved value (not a promise). Try to unwrap it now.
+
+      // TODO(temporary): We want to update the code to allow use of custom thenables
+      // as well as Promises. However, we'd like to be able to do so without introducing
+      // a compat flag for it. To do that, we need to have a reasonable idea about whether
+      // anyone is actually passing objects through that could be interpreted as thenables.
+      //
+      // We use LOG_WARNING_PERIODICALLY here to avoid spamming the logs with warnings. We
+      // don't really need to know how often this happens, just whether it happens at all.
+      //
+      // This logging will be removed once we determine if it's happening in the wild
+      if (handle->IsObject()) {
+        auto obj = handle.As<v8::Object>();
+        auto then = check(obj->Get(context, v8StrIntern(context->GetIsolate(), "then")));
+        if (then->IsFunction()) {
+          LOG_WARNING_PERIODICALLY("NOSENTRY jsg::Promise::tryUnwrap() found a non-Promise "
+              "object with a `then` method.");
+        }
+      }
+
       if constexpr (isVoid<T>()) {
         // When expecting Promise<void>, we treat absolutely any non-promise value as being
         // an immediately-resolved promise. This is consistent with JavaScript where you'd
