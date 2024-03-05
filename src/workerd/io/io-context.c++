@@ -262,11 +262,6 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   metrics->jsDone();
 }
 
-IoContext::~IoContext() noexcept(false) {
-  // Kill the sentinel so that no weak references can refer to this IoContext anymore.
-  selfRef->invalidate();
-}
-
 InputGate::Lock IoContext::getInputLock() {
   return KJ_ASSERT_NONNULL(currentInputLock,
       "no input lock available in this context").addRef();
@@ -492,14 +487,29 @@ kj::Promise<bool> IoContext::IncomingRequest::finishScheduled() {
 
 class IoContext::PendingEvent: public kj::Refcounted {
 public:
-  explicit PendingEvent(IoContext& context): context(context) {}
+  explicit PendingEvent(IoContext& context): maybeContext(context) {}
   ~PendingEvent() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PendingEvent);
 
-  IoContext& context;
+  kj::Maybe<IoContext&> maybeContext;
 };
 
+IoContext::~IoContext() noexcept(false) {
+  // Detach the PendingEvent if it still exists.
+  KJ_IF_SOME(pe, pendingEvent) {
+    pe.maybeContext = kj::none;
+  }
+
+  // Kill the sentinel so that no weak references can refer to this IoContext anymore.
+  selfRef->invalidate();
+}
+
 IoContext::PendingEvent::~PendingEvent() noexcept(false) {
+  IoContext& context = KJ_UNWRAP_OR(maybeContext, {
+    // IoContext must have been destroyed before the PendingEvent was.
+    return;
+  });
+
   context.pendingEvent = nullptr;
 
   // We can't execute finalizers just yet. We need to run the event loop to see if any queued

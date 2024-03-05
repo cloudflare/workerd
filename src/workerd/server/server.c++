@@ -11,6 +11,7 @@
 #include <kj/encoding.h>
 #include <kj/map.h>
 #include <capnp/message.h>
+#include <capnp/rpc-twoparty.h>
 #include <capnp/compat/json.h>
 #include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/io/actor-id.h>
@@ -29,6 +30,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/use-perfetto-categories.h>
+#include <workerd/api/worker-rpc.h>
 #include "workerd-api.h"
 #include "workerd/io/hibernation-manager.h"
 #include <stdlib.h>
@@ -260,6 +262,9 @@ public:
     if (httpOptions.hasCfBlobHeader()) {
       cfBlobHeader = headerTableBuilder.add(httpOptions.getCfBlobHeader());
     }
+    if (httpOptions.hasCapnpConnectHost()) {
+      capnpConnectHost = httpOptions.getCapnpConnectHost();
+    }
   }
 
   bool hasCfBlobHeader() {
@@ -348,10 +353,15 @@ public:
     responseInjector.apply(headers);
   }
 
+  kj::Maybe<kj::StringPtr> getCapnpConnectHost() {
+    return capnpConnectHost;
+  }
+
 private:
   config::HttpOptions::Style style;
   kj::Maybe<kj::HttpHeaderId> forwardedProtoHeader;
   kj::Maybe<kj::HttpHeaderId> cfBlobHeader;
+  kj::Maybe<kj::StringPtr> capnpConnectHost;
 
   class HeaderInjector {
   public:
@@ -518,18 +528,24 @@ private:
 };
 
 // Service used when the service is configured as external HTTP service.
-class Server::ExternalHttpService final: public Service {
+class Server::ExternalHttpService final: public Service, private kj::TaskSet::ErrorHandler {
 public:
   ExternalHttpService(kj::Own<kj::NetworkAddress> addrParam,
                       kj::Own<HttpRewriter> rewriter, kj::HttpHeaderTable& headerTable,
-                      kj::Timer& timer, kj::EntropySource& entropySource)
+                      kj::Timer& timer, kj::EntropySource& entropySource,
+                      capnp::ByteStreamFactory& byteStreamFactory,
+                      capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
       : addr(kj::mv(addrParam)),
         inner(kj::newHttpClient(timer, headerTable, *addr, {
           .entropySource = entropySource,
           .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION
         })),
         serviceAdapter(kj::newHttpService(*inner)),
-        rewriter(kj::mv(rewriter)) {}
+        rewriter(kj::mv(rewriter)),
+        headerTable(headerTable),
+        byteStreamFactory(byteStreamFactory),
+        httpOverCapnpFactory(httpOverCapnpFactory),
+        waitUntilTasks(*this) {}
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     return kj::heap<WorkerInterfaceImpl>(*this, kj::mv(metadata));
@@ -546,6 +562,55 @@ private:
   kj::Own<kj::HttpService> serviceAdapter;
 
   kj::Own<HttpRewriter> rewriter;
+
+  kj::HttpHeaderTable& headerTable;
+  capnp::ByteStreamFactory& byteStreamFactory;
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  kj::TaskSet waitUntilTasks;
+
+  void taskFailed(kj::Exception&& exception) override {
+    LOG_EXCEPTION("externalServiceWaitUntilTasks", exception);
+  }
+
+  struct CapnpClient {
+    kj::Own<kj::AsyncIoStream> connection;
+    capnp::TwoPartyClient rpcSystem;
+
+    CapnpClient(kj::Own<kj::AsyncIoStream> connectionParam)
+        : connection(kj::mv(connectionParam)), rpcSystem(*connection) {}
+  };
+
+  // capnpClient is created on-demand when RPC is needed.
+  kj::Maybe<CapnpClient> capnpClient;
+
+  // This task nulls out `capnpClient` when the connection is lost.
+  kj::Promise<void> clearCapnpClientTask = nullptr;
+
+  // Get an WorkerdBootstrap representing the service on the other end of an HTTP connection. May
+  // reuse an existing connection, or form a new one over `client`.
+  rpc::WorkerdBootstrap::Client getOutgoingCapnp(kj::HttpClient& client) {
+    KJ_IF_SOME(c, capnpClient) {
+      return c.rpcSystem.bootstrap().castAs<rpc::WorkerdBootstrap>();
+    }
+
+    // No existing client, need to create a new one.
+    kj::StringPtr host = KJ_UNWRAP_OR(rewriter->getCapnpConnectHost(), {
+      return JSG_KJ_EXCEPTION(FAILED, Error, "This ExternalServer not configured for RPC.");
+    });
+
+    auto req = client.connect(host, kj::HttpHeaders(headerTable), {});
+    auto& c = capnpClient.emplace(kj::mv(req.connection));
+
+    // Arrange that when the connection is lost, we'll null out `capnpClient`. This ensures that
+    // on the next event, we'll attempt to reconnect.
+    //
+    // TODO(perf): Time out idle connections?
+    clearCapnpClientTask = c.rpcSystem.onDisconnect()
+        .attach(kj::defer([this]() { capnpClient = kj::none; }))
+        .eagerlyEvaluate(nullptr);
+
+    return c.rpcSystem.bootstrap().castAs<rpc::WorkerdBootstrap>();
+  }
 
   class WorkerInterfaceImpl final: public WorkerInterface, private kj::HttpService::Response {
   public:
@@ -581,8 +646,15 @@ private:
     kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
       throwUnsupported();
     }
+
     kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
-      throwUnsupported();
+      // We'll use capnp RPC for custom events.
+      auto bootstrap = parent.getOutgoingCapnp(*parent.inner);
+      auto dispatcher =
+          bootstrap.startEventRequest(capnp::MessageSize {4, 0}).send().getDispatcher();
+      return event->sendRpc(parent.httpOverCapnpFactory, parent.byteStreamFactory,
+                            parent.waitUntilTasks, kj::mv(dispatcher))
+          .attach(kj::mv(event));
     }
 
   private:
@@ -649,7 +721,8 @@ kj::Own<Server::Service> Server::makeExternalService(
       auto addr = kj::heap<PromisedNetworkAddress>(network.parseAddress(addrStr, 80));
       return kj::heap<ExternalHttpService>(
           kj::mv(addr), kj::mv(rewriter), headerTableBuilder.getFutureTable(),
-          timer, entropySource);
+          timer, entropySource, globalContext->byteStreamFactory,
+          globalContext->httpOverCapnpFactory);
     }
     case config::ExternalServer::HTTPS: {
       auto httpsConf = conf.getHttps();
@@ -662,7 +735,8 @@ kj::Own<Server::Service> Server::makeExternalService(
           makeTlsNetworkAddress(httpsConf.getTlsOptions(), addrStr, certificateHost, 443));
       return kj::heap<ExternalHttpService>(
           kj::mv(addr), kj::mv(rewriter), headerTableBuilder.getFutureTable(),
-          timer, entropySource);
+          timer, entropySource, globalContext->byteStreamFactory,
+          globalContext->httpOverCapnpFactory);
     }
     case config::ExternalServer::TCP: {
       auto tcpConf = conf.getTcp();
@@ -2935,9 +3009,11 @@ class Server::HttpListener final: public kj::Refcounted {
 public:
   HttpListener(Server& owner, kj::Own<kj::ConnectionReceiver> listener, Service& service,
                kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter,
-               kj::HttpHeaderTable& headerTable, kj::Timer& timer)
+               kj::HttpHeaderTable& headerTable, kj::Timer& timer,
+               capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
       : owner(owner), listener(kj::mv(listener)), service(service),
         headerTable(headerTable), timer(timer),
+        httpOverCapnpFactory(httpOverCapnpFactory),
         physicalProtocol(physicalProtocol),
         rewriter(kj::mv(rewriter)) {}
 
@@ -3008,8 +3084,101 @@ private:
   Service& service;
   kj::HttpHeaderTable& headerTable;
   kj::Timer& timer;
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   kj::StringPtr physicalProtocol;
   kj::Own<HttpRewriter> rewriter;
+
+  kj::Maybe<capnp::TwoPartyServer> capnpServer;
+
+  kj::Promise<void> acceptCapnpConnection(kj::AsyncIoStream& conn) {
+    KJ_IF_SOME(s, capnpServer) {
+      return s.accept(conn);
+    }
+
+    // Capnp server not initialized. Create in now.
+    auto& s = capnpServer.emplace(kj::heap<WorkerdBootstrapImpl>(*this));
+    return s.accept(conn);
+  }
+
+  class WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
+  public:
+    WorkerdBootstrapImpl(HttpListener& parent): parent(parent) {}
+
+    kj::Promise<void> startEvent(StartEventContext context) {
+      // TODO(someday): Use cfBlobJson from the connection if there is one, or from RPC params
+      //   if we add that? (Note that if a connection-level cf blob exists, it should take
+      //   priority; we should only accept a cf blob from the client if we have a cfBlobHeader
+      //   configrued, which hints that this service trusts the client to provide the cf blob.)
+
+      context.initResults(capnp::MessageSize {4, 1}).setDispatcher(
+          kj::heap<EventDispatcherImpl>(parent, parent.service.startRequest({})));
+      return kj::READY_NOW;
+    }
+
+  private:
+    HttpListener& parent;
+  };
+
+  class EventDispatcherImpl final: public rpc::EventDispatcher::Server {
+  public:
+    EventDispatcherImpl(HttpListener& parent, kj::Own<WorkerInterface> worker)
+        : parent(parent), worker(kj::mv(worker)) {}
+
+    kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
+      context.initResults(capnp::MessageSize{4, 1})
+          .setHttp(parent.httpOverCapnpFactory.kjToCapnp(getWorker()));
+      return kj::READY_NOW;
+    }
+
+    kj::Promise<void> sendTraces(SendTracesContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> prewarm(PrewarmContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> runScheduled(RunScheduledContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> runAlarm(RunAlarmContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> queue(QueueContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
+      auto customEvent = kj::heap<api::JsRpcSessionCustomEventImpl>(
+          api::JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
+
+      auto cap = customEvent->getCap();
+      capnp::PipelineBuilder<JsRpcSessionResults> pipelineBuilder;
+      pipelineBuilder.setTopLevel(cap);
+      context.setPipeline(pipelineBuilder.build());
+      context.getResults().setTopLevel(kj::mv(cap));
+
+      auto worker = getWorker();
+      return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
+    }
+
+  private:
+    HttpListener& parent;
+    kj::Maybe<kj::Own<WorkerInterface>> worker;
+
+    kj::Own<WorkerInterface> getWorker() {
+      auto result = kj::mv(KJ_ASSERT_NONNULL(worker,
+          "EventDispatcher can only be used for one request"));
+      worker = kj::none;
+      return result;
+    }
+
+    [[noreturn]] void throwUnsupported() {
+      JSG_FAIL_REQUIRE(Error, "RPC connections don't yet support this event type.");
+    }
+  };
 
   struct Connection final: public kj::HttpService, public kj::HttpServerErrorHandler {
     Connection(HttpListener& parent, kj::Maybe<kj::String> cfBlobJson)
@@ -3080,6 +3249,24 @@ private:
       }
     }
 
+    kj::Promise<void> connect(kj::StringPtr host,
+                              const kj::HttpHeaders& headers,
+                              kj::AsyncIoStream& connection,
+                              ConnectResponse& response,
+                              kj::HttpConnectSettings settings) override {
+      KJ_IF_SOME(h, parent.rewriter->getCapnpConnectHost()) {
+        if (h == host) {
+          // Client is requesting to open a capnp session!
+          response.accept(200, "OK", kj::HttpHeaders(parent.headerTable));
+          return parent.acceptCapnpConnection(connection);
+        }
+      }
+
+      // TODO(someday): Deliver connect() event to to worker? For now we call the default
+      //   implementation which throws an exception.
+      return kj::HttpService::connect(host, headers, connection, response, kj::mv(settings));
+    }
+
     // ---------------------------------------------------------------------------
     // implements kj::HttpServerErrorHandler
 
@@ -3098,7 +3285,8 @@ kj::Promise<void> Server::listenHttp(
     kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter) {
   auto obj = kj::refcounted<HttpListener>(*this, kj::mv(listener), service,
                                           physicalProtocol, kj::mv(rewriter),
-                                          globalContext->headerTable, timer);
+                                          globalContext->headerTable, timer,
+                                          globalContext->httpOverCapnpFactory);
   co_return co_await obj->run();
 }
 
@@ -3327,7 +3515,8 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
 
 kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
                                           kj::HttpHeaderTable::Builder& headerTableBuilder,
-                                          kj::ForkedPromise<void>& forkedDrainWhen) {
+                                          kj::ForkedPromise<void>& forkedDrainWhen,
+                                          bool forTest) {
   // ---------------------------------------------------------------------------
   // Start sockets
   TRACE_EVENT("workerd", "listenOnSockets");
@@ -3441,6 +3630,15 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
   }
 
   for (auto& unmatched: directoryOverrides) {
+    if (forTest && unmatched.key == "TEST_TMPDIR") {
+      // Due to a historical bug, `workerd test` didn't check for the existence of unmatched
+      // overrides, and our own tests became dependent on the ability to override TEST_TMPDIR
+      // even if it was not used in the config. For now, we ignore this problem.
+      //
+      // TODO(cleanup): Figure out the right solution here.
+      continue;
+    }
+
     reportConfigError(kj::str(
         "Config did not define any disk service named \"", unmatched.key, "\" to match the "
         "override provided on the command line."));
@@ -3472,9 +3670,17 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
   auto [ fatalPromise, fatalFulfiller ] = kj::newPromiseAndFulfiller<void>();
   this->fatalFulfiller = kj::mv(fatalFulfiller);
 
-  auto forkedDrainWhen = kj::Promise<void>(kj::READY_NOW).fork();
+  auto forkedDrainWhen = kj::Promise<void>(kj::NEVER_DONE).fork();
 
   startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+
+  // Tests usually do not configure sockets, but they can, especially loopback sockets. Arrange
+  // to wait on them. Crash if listening fails.
+  auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen,
+                                       /* forTest = */ true)
+      .eagerlyEvaluate([](kj::Exception&& e) noexcept {
+    kj::throwFatalException(kj::mv(e));
+  });
 
   auto ownHeaderTable = headerTableBuilder.build();
 

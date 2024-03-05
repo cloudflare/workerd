@@ -309,8 +309,8 @@ export let namedServiceBinding = {
     assert.strictEqual(sawFinally, true);
 
     // `fetch()` is special, the params get converted into a Request.
-    let resp = await env.MyService.fetch("http://foo", {method: "POST"});
-    assert.strictEqual(await resp.text(), "method = POST, url = http://foo");
+    let resp = await env.MyService.fetch("http://foo/", {method: "POST"});
+    assert.strictEqual(await resp.text(), "method = POST, url = http://foo/");
 
     await assert.rejects(() => env.MyService.instanceMethod(), {
       name: "TypeError",
@@ -653,3 +653,23 @@ export let testAsyncStackTrace = {
     }
   }
 }
+
+function withRealSocket(inner) {
+  return {
+    async test(controller, env, ctx) {
+      let subEnv = {...env};
+      subEnv.MyService = subEnv.MyServiceOverRealSocket;
+      await inner.test(controller, subEnv, ctx);
+    }
+  }
+}
+
+// Export versions of various tests above using MyService over a real socket. We only bother
+// with thests that use MyService. The `z_` prefix makes these tests run last.
+export let z_namedServiceBinding_realSocket = withRealSocket(namedServiceBinding);
+export let z_sendStubOverRpc_realSocket = withRealSocket(sendStubOverRpc);
+export let z_receiveStubOverRpc_realSocket = withRealSocket(receiveStubOverRpc);
+export let z_promisePipelining_realSocket = withRealSocket(promisePipelining);
+export let z_crossContextSharingDoesntWork_realSocket = withRealSocket(crossContextSharingDoesntWork);
+export let z_serializeRpcPromiseOrProprety_realSocket = withRealSocket(serializeRpcPromiseOrProprety);
+export let z_testAsyncStackTrace_realSocket = withRealSocket(testAsyncStackTrace);

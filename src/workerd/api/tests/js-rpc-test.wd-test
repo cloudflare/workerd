@@ -12,6 +12,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "self", service = (name = "js-rpc-test", entrypoint = "nonClass")),
           (name = "MyService", service = (name = "js-rpc-test", entrypoint = "MyService")),
+          (name = "MyServiceOverRealSocket", service = "loop"),
           (name = "MyActor", durableObjectNamespace = "MyActor"),
           (name = "ActorNoExtends", durableObjectNamespace = "ActorNoExtends"),
           (name = "defaultExport", service = "js-rpc-test"),
@@ -26,5 +27,18 @@ const unitTests :Workerd.Config = (
         durableObjectStorage = (inMemory = void),
       )
     ),
+    ( name = "loop",
+      external = (
+        address = "loopback:loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    )
+  ],
+  sockets = [
+    ( name = "loop",
+      address = "loopback:loop",
+      service = (name = "js-rpc-test", entrypoint = "MyService"),
+      http = (capnpConnectHost = "cappy")
+    )
   ],
 );
