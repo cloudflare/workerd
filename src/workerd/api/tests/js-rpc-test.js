@@ -185,6 +185,16 @@ export class MyService extends WorkerEntrypoint {
     result.value = callback.foo;
     return result;
   }
+
+  get(a) {
+    return a + 1;
+  }
+  put(a, b) {
+    return a + b;
+  }
+  delete(a) {
+    return a - 1;
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -654,6 +664,15 @@ export let testAsyncStackTrace = {
   }
 }
 
+// Test that get(), put(), and delete() are valid RPC method names, not hijacked by Fetcher.
+export let canUseGetPutDelete = {
+  async test(controller, env, ctx) {
+    assert.strictEqual(await env.MyService.get(12), 13);
+    assert.strictEqual(await env.MyService.put(5, 7), 12);
+    assert.strictEqual(await env.MyService.delete(3), 2);
+  }
+}
+
 function withRealSocket(inner) {
   return {
     async test(controller, env, ctx) {
@@ -673,3 +692,4 @@ export let z_promisePipelining_realSocket = withRealSocket(promisePipelining);
 export let z_crossContextSharingDoesntWork_realSocket = withRealSocket(crossContextSharingDoesntWork);
 export let z_serializeRpcPromiseOrProprety_realSocket = withRealSocket(serializeRpcPromiseOrProprety);
 export let z_testAsyncStackTrace_realSocket = withRealSocket(testAsyncStackTrace);
+export let z_canUseGetPutDelete_realSocket = withRealSocket(canUseGetPutDelete);
