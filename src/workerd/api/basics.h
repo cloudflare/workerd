@@ -218,8 +218,7 @@ public:
   JSG_RESOURCE_TYPE(CustomEvent) {
     JSG_INHERIT(Event);
     JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
-    JSG_TS_OVERRIDE(<T = any> extends Event {
-      constructor(type: string, init?: CustomEventCustomEventInit);
+    JSG_TS_OVERRIDE(<T = any> {
       get detail(): T;
     });
   }
