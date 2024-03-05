@@ -322,9 +322,16 @@ function buildSitePackages(tarInfo, requirements) {
   return res;
 }
 
-export function mountLib(pyodide, requirements) {
+export function mountLib(pyodide, requirements, isWorkerd) {
   const [origTarInfo, _] = parseTarInfo();
-  const info = buildSitePackages(origTarInfo, requirements);
+  let info;
+  // in workerd, the tar file is the /site-packages directory
+  // in edgeworker, we need to build the right /site-packages directory using the tar file and our requirements
+  if (isWorkerd) {
+    info = origTarInfo;
+  } else {
+    info = buildSitePackages(origTarInfo, requirements);
+  }
   const tarFS = createTarFS(pyodide._module);
   const mdFS = createMetadataFS(pyodide._module);
   const pymajor = pyodide._module._py_version_major();

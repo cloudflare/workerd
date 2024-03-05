@@ -77,6 +77,7 @@ async function getTransitiveRequirements(pyodide, requirements) {
 }
 
 async function setupPackages(pyodide, transitiveRequirements) {
+  mountLib(pyodide, transitiveRequirements, IS_WORKERD);
   patchLoadPackage(pyodide);
 
   // install any extra packages into the site-packages directory, so calculate where that is.
@@ -117,7 +118,6 @@ function getPyodide(ctx) {
     const requirements = MetadataReader.getRequirements().map(canonicalizePackageName);
     const transitiveRequirements = new Set(Array.from(await getTransitiveRequirements(pyodide, requirements))
       .map(canonicalizePackageName));
-    mountLib(pyodide, transitiveRequirements);
     await setupPackages(pyodide, transitiveRequirements);
     const mainModule = pyimportMainModule(pyodide);
     return { mainModule };
