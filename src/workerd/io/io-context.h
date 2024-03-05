@@ -329,10 +329,6 @@ public:
   jsg::PromiseForResult<Func, T, true> awaitIo(
       jsg::Lock& js, kj::Promise<T> promise, Func&& func);
 
-  template <typename T, typename Func, typename ErrorFunc>
-  jsg::PromiseForResult<Func, T, true> awaitIo(
-      jsg::Lock& js, kj::Promise<T> promise, Func&& func, ErrorFunc&& errorFunc);
-
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
   // JavaScript promise for the result of that. If no `func` is provided, no transformation is
   // applied.
@@ -901,23 +897,6 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIo(
     // might be left there to be GC'd later.
     return awaitIoImpl<true>(js, promise.attach(registerPendingEvent()), getCriticalSection())
         .then(js, addFunctorIoOwnParam<T, true>(kj::fwd<Func>(func)));
-  }
-}
-
-template <typename T, typename Func, typename ErrorFunc>
-jsg::PromiseForResult<Func, T, true> IoContext::awaitIo(
-    jsg::Lock& js, kj::Promise<T> promise, Func&& func, ErrorFunc&& errorFunc) {
-  if constexpr (jsg::isVoid<T>()) {
-    return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getCriticalSection())
-        .then(js, addFunctor(kj::fwd<Func>(func)), addFunctor(kj::fwd<ErrorFunc>(errorFunc)));
-  } else {
-    // If T holds KJ I/O types, then it's important that it get wrapped in a IoOwn before passing
-    // through the V8 promise system. This is even though the result only exists on the heap
-    // briefly before the continuation runs -- if we receive a termination in that time, then it
-    // might be left there to be GC'd later.
-    return awaitIoImpl<true>(js, promise.attach(registerPendingEvent()), getCriticalSection())
-        .then(js, addFunctorIoOwnParam<T, true>(kj::fwd<Func>(func)),
-                  addFunctor(kj::fwd<ErrorFunc>(errorFunc)));
   }
 }
 

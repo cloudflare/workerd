@@ -3188,7 +3188,7 @@ private:
                 // dropped causing the hold on the sink to be released. If that is
                 // released while the write is still pending we can end up with an
                 // error further up the destruct chain.
-                return ioContext.awaitIo(js, reader.canceler.wrap(kj::mv(promise)),
+                return ioContext.awaitIo(js, reader.canceler.wrap(kj::mv(promise))).then(js,
                     [](jsg::Lock& js) -> kj::Maybe<jsg::Value> {
                   // The write completed successfully.
                   return kj::Maybe<jsg::Value>(kj::none);
