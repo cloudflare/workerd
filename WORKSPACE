@@ -124,12 +124,12 @@ http_archive(
     urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-micropip/pyodide_packages.tar.zip"],
 )
 
-pyodide_package_bucket_url = "https://pub-45d734c4145d4285b343833ee450ef38.r2.dev/v1/"
+load("//:build/pyodide_bucket.bzl", "pyodide_package_bucket_url")
 
 http_file(
     name = "pyodide-lock.json",
     url = pyodide_package_bucket_url + "pyodide-lock.json",
-    sha256 = "0678eda79c16f9f7271743ecbe531e59ca2e40d2d4e0dfd3f78191302b989520",
+    sha256 = "d543e764cb7a180fb57c5689cca5a66742cbef3ecc64d356801dabcf86e8ef0a",
 )
 
 # ========================================================================================
