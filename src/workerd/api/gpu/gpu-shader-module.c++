@@ -7,7 +7,7 @@
 
 namespace workerd::api::gpu {
 
-jsg::Promise<jsg::Ref<GPUCompilationInfo>> GPUShaderModule::getCompilationInfo() {
+jsg::Promise<jsg::Ref<GPUCompilationInfo>> GPUShaderModule::getCompilationInfo(jsg::Lock& js) {
 
   struct Context {
     kj::Own<kj::PromiseFulfiller<jsg::Ref<GPUCompilationInfo>>> fulfiller;
@@ -35,7 +35,7 @@ jsg::Promise<jsg::Ref<GPUCompilationInfo>> GPUShaderModule::getCompilationInfo()
       ctx);
 
   auto& context = IoContext::current();
-  return context.awaitIo(kj::mv(paf.promise));
+  return context.awaitIo(js, kj::mv(paf.promise));
 }
 
 } // namespace workerd::api::gpu

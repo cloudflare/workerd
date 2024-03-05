@@ -92,7 +92,7 @@ private:
 
   void unmap(jsg::Lock& js);
   void destroy(jsg::Lock& js);
-  jsg::Promise<void> mapAsync(GPUFlagsConstant mode, jsg::Optional<GPUSize64> offset,
+  jsg::Promise<void> mapAsync(jsg::Lock&, GPUFlagsConstant mode, jsg::Optional<GPUSize64> offset,
                               jsg::Optional<GPUSize64> size);
   void DetachMappings(jsg::Lock& js);
 };

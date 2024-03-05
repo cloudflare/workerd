@@ -325,10 +325,6 @@ public:
   // request is canceled.
   void addTask(kj::Promise<void> promise);
 
-  // DEPRECATED: Use version which passes a Lock.
-  template <typename T, typename Func>
-  jsg::PromiseForResult<Func, T, false> awaitIo(kj::Promise<T> promise, Func&& func);
-
   template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIo(
       jsg::Lock& js, kj::Promise<T> promise, Func&& func);
@@ -336,10 +332,6 @@ public:
   template <typename T, typename Func, typename ErrorFunc>
   jsg::PromiseForResult<Func, T, true> awaitIo(
       jsg::Lock& js, kj::Promise<T> promise, Func&& func, ErrorFunc&& errorFunc);
-
-  // DEPRECATED: Use version which passes a Lock.
-  template <typename T>
-  jsg::Promise<T> awaitIo(kj::Promise<T> promise);
 
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
   // JavaScript promise for the result of that. If no `func` is provided, no transformation is
@@ -377,13 +369,8 @@ public:
 
   // Waits for the given I/O while holding the input lock, so that all other I/O is blocked from
   // completing in the meantime (unless it is also holding the same input lock).
-  template <typename T, typename Func>
-  jsg::PromiseForResult<Func, T, false> awaitIoWithInputLock(kj::Promise<T> promise, Func&& func);
-
-  // Waits for the given I/O while holding the input lock, so that all other I/O is blocked from
-  // completing in the meantime (unless it is also holding the same input lock).
   template <typename T>
-  jsg::Promise<T> awaitIoWithInputLock(kj::Promise<T> promise);
+  jsg::Promise<T> awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> promise);
 
   template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIoWithInputLock(jsg::Lock& js,
@@ -399,7 +386,7 @@ public:
   // new `awaitIo()` implementation. This should go away once all API implementations are
   // refactored to use `awaitIo()`.
   template <typename T>
-  jsg::Promise<T> awaitIoLegacy(kj::Promise<T> promise);
+  jsg::Promise<T> awaitIoLegacy(jsg::Lock& js, kj::Promise<T> promise);
 
   // DEPRECATED: Like awaitIo() but:
   // - Does not have a continuation function, so suffers from the problems described in
@@ -410,7 +397,7 @@ public:
   // new `awaitIo()` implementation. This should go away once all API implementations are
   // refactored to use `awaitIo()`.
   template <typename T>
-  jsg::Promise<T> awaitIoLegacyWithInputLock(kj::Promise<T> promise);
+  jsg::Promise<T> awaitIoLegacyWithInputLock(jsg::Lock& js, kj::Promise<T> promise);
 
   // Returns a KJ promise that resolves when a particular JavaScript promise completes.
   //
@@ -489,8 +476,8 @@ public:
   // may actually be waiting for something to happen in JavaScript land. Once the outer promise
   // resolves, the inner promise (the DeferredProxy<T>) is treated as external I/O.
   template <typename T>
-  jsg::Promise<T> awaitDeferredProxy(kj::Promise<api::DeferredProxy<T>>&& promise) {
-    return awaitIoImpl<false>(waitForDeferredProxy(kj::mv(promise)), getCriticalSection());
+  jsg::Promise<T> awaitDeferredProxy(jsg::Lock& js, kj::Promise<api::DeferredProxy<T>>&& promise) {
+    return awaitIoImpl<false>(js, waitForDeferredProxy(kj::mv(promise)), getCriticalSection());
   }
 
   bool isFinalized() {
@@ -781,7 +768,7 @@ private:
 
   template <bool addIoOwn, typename T, typename InputLockOrMaybeCriticalSection>
   jsg::Promise<MaybeIoOwn<addIoOwn, T>> awaitIoImpl(
-      kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs);
+      jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs);
 
   // Same as addFunctor() but expects that the returned function will receive a IoOwn<T> as the
   // parameter, and instead passes the underlying `T` as the parameter to `func`. This is needed
@@ -902,33 +889,17 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 }
 
 template <typename T, typename Func>
-jsg::PromiseForResult<Func, T, false> IoContext::awaitIo(
-    kj::Promise<T> promise, Func&& func) {
-  if constexpr (jsg::isVoid<T>()) {
-    return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getCriticalSection())
-        .then(addFunctor(kj::fwd<Func>(func)));
-  } else {
-    // If T holds KJ I/O types, then it's important that it get wrapped in a IoOwn before passing
-    // through the V8 promise system. This is even though the result only exists on the heap
-    // briefly before the continuation runs -- if we receive a termination in that time, then it
-    // might be left there to be GC'd later.
-    return awaitIoImpl<true>(promise.attach(registerPendingEvent()), getCriticalSection())
-        .then(addFunctorIoOwnParam<T, false>(kj::fwd<Func>(func)));
-  }
-}
-
-template <typename T, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIo(
     jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
   if constexpr (jsg::isVoid<T>()) {
-    return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getCriticalSection())
+    return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getCriticalSection())
         .then(js, addFunctor(kj::fwd<Func>(func)));
   } else {
     // If T holds KJ I/O types, then it's important that it get wrapped in a IoOwn before passing
     // through the V8 promise system. This is even though the result only exists on the heap
     // briefly before the continuation runs -- if we receive a termination in that time, then it
     // might be left there to be GC'd later.
-    return awaitIoImpl<true>(promise.attach(registerPendingEvent()), getCriticalSection())
+    return awaitIoImpl<true>(js, promise.attach(registerPendingEvent()), getCriticalSection())
         .then(js, addFunctorIoOwnParam<T, true>(kj::fwd<Func>(func)));
   }
 }
@@ -937,77 +908,57 @@ template <typename T, typename Func, typename ErrorFunc>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIo(
     jsg::Lock& js, kj::Promise<T> promise, Func&& func, ErrorFunc&& errorFunc) {
   if constexpr (jsg::isVoid<T>()) {
-    return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getCriticalSection())
+    return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getCriticalSection())
         .then(js, addFunctor(kj::fwd<Func>(func)), addFunctor(kj::fwd<ErrorFunc>(errorFunc)));
   } else {
     // If T holds KJ I/O types, then it's important that it get wrapped in a IoOwn before passing
     // through the V8 promise system. This is even though the result only exists on the heap
     // briefly before the continuation runs -- if we receive a termination in that time, then it
     // might be left there to be GC'd later.
-    return awaitIoImpl<true>(promise.attach(registerPendingEvent()), getCriticalSection())
+    return awaitIoImpl<true>(js, promise.attach(registerPendingEvent()), getCriticalSection())
         .then(js, addFunctorIoOwnParam<T, true>(kj::fwd<Func>(func)),
                   addFunctor(kj::fwd<ErrorFunc>(errorFunc)));
   }
 }
 
 template <typename T>
-jsg::Promise<T> IoContext::awaitIo(kj::Promise<T> promise) {
-  return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getCriticalSection());
-}
-
-template <typename T>
 jsg::Promise<T> IoContext::awaitIo(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getCriticalSection());
-}
-
-template <typename T, typename Func>
-jsg::PromiseForResult<Func, T, false> IoContext::awaitIoWithInputLock(
-    kj::Promise<T> promise, Func&& func) {
-  if constexpr (jsg::isVoid<T>()) {
-    return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getInputLock())
-        .then(addFunctor(kj::fwd<Func>(func)));
-  } else {
-    return awaitIoImpl<true>(promise.attach(registerPendingEvent()), getInputLock())
-        .then(addFunctorIoOwnParam<T, false>(kj::fwd<Func>(func)));
-  }
+  return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getCriticalSection());
 }
 
 template <typename T, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIoWithInputLock(
     jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
   if constexpr (jsg::isVoid<T>()) {
-    return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getInputLock())
+    return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getInputLock())
         .then(js, addFunctor(kj::fwd<Func>(func)));
   } else {
-    return awaitIoImpl<true>(promise.attach(registerPendingEvent()), getInputLock())
+    return awaitIoImpl<true>(js, promise.attach(registerPendingEvent()), getInputLock())
         .then(js, addFunctorIoOwnParam<T, true>(kj::fwd<Func>(func)));
   }
 }
 
 template <typename T>
-jsg::Promise<T> IoContext::awaitIoWithInputLock(kj::Promise<T> promise) {
-  return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getInputLock());
+jsg::Promise<T> IoContext::awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> promise) {
+  return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getInputLock());
 }
 
 template <typename T>
-jsg::Promise<T> IoContext::awaitIoLegacy(kj::Promise<T> promise) {
-  return awaitIoImpl<false>(kj::mv(promise), getCriticalSection());
+jsg::Promise<T> IoContext::awaitIoLegacy(jsg::Lock& js, kj::Promise<T> promise) {
+  return awaitIoImpl<false>(js, kj::mv(promise), getCriticalSection());
 }
 
 template <typename T>
-jsg::Promise<T> IoContext::awaitIoLegacyWithInputLock(kj::Promise<T> promise) {
-  return awaitIoImpl<false>(kj::mv(promise), getInputLock());
+jsg::Promise<T> IoContext::awaitIoLegacyWithInputLock(jsg::Lock& js, kj::Promise<T> promise) {
+  return awaitIoImpl<false>(js, kj::mv(promise), getInputLock());
 }
 
 template <bool addIoOwn, typename T, typename InputLockOrMaybeCriticalSection>
 jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
-    kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs) {
+    jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs) {
   requireCurrent();
 
   typedef MaybeIoOwn<addIoOwn, T> Result;
-
-  auto& lock = getCurrentLock();
-  jsg::Lock& js = lock;
 
   // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
   // and pass it into the then(). If the promise is rejected, and there is no rejection
@@ -1022,7 +973,7 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
     }, [](kj::Exception&& exception) -> kj::Maybe<kj::Exception> {
       return kj::mv(exception);
     }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
-             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)]
+             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)]
             (kj::Maybe<kj::Exception>&& maybeException) mutable {
       return run([resolver = kj::mv(resolver),
                   maybeException = kj::mv(maybeException),
@@ -1054,7 +1005,7 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
     }, [](kj::Exception&& exception) -> ResultOrException {
       return kj::mv(exception);
     }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
-             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)]
+             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)]
             (ResultOrException&& resultOrException) mutable {
       return run([this, resolver = kj::mv(resolver),
                   resultOrException = kj::mv(resultOrException),

@@ -74,14 +74,14 @@ private:
   jsg::Ref<GPUComputePipeline> createComputePipeline(GPUComputePipelineDescriptor descriptor);
   jsg::Ref<GPURenderPipeline> createRenderPipeline(GPURenderPipelineDescriptor descriptor);
   jsg::Promise<jsg::Ref<GPUComputePipeline>>
-  createComputePipelineAsync(GPUComputePipelineDescriptor descriptor);
+  createComputePipelineAsync(jsg::Lock& js, GPUComputePipelineDescriptor descriptor);
   jsg::Ref<GPUCommandEncoder>
   createCommandEncoder(jsg::Optional<GPUCommandEncoderDescriptor> descriptor);
   jsg::Ref<GPUQueue> getQueue();
   void destroy();
   jsg::Ref<GPUQuerySet> createQuerySet(GPUQuerySetDescriptor descriptor);
   void pushErrorScope(GPUErrorFilter filter);
-  jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> popErrorScope();
+  jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> popErrorScope(jsg::Lock& js);
   jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>& getLost();
   jsg::Ref<GPUSupportedFeatures> getFeatures();
   jsg::Ref<GPUSupportedLimits> getLimits();

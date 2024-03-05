@@ -579,7 +579,7 @@ GPUDevice::createComputePipeline(GPUComputePipelineDescriptor descriptor) {
   return jsg::alloc<GPUComputePipeline>(kj::mv(pipeline));
 }
 
-jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope() {
+jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope(jsg::Lock& js) {
   struct Context {
     kj::Own<kj::PromiseFulfiller<kj::Maybe<jsg::Ref<GPUError>>>> fulfiller;
     AsyncTask task;
@@ -621,11 +621,11 @@ jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope() {
       ctx);
 
   auto& context = IoContext::current();
-  return context.awaitIo(kj::mv(paf.promise));
+  return context.awaitIo(js, kj::mv(paf.promise));
 }
 
 jsg::Promise<jsg::Ref<GPUComputePipeline>>
-GPUDevice::createComputePipelineAsync(GPUComputePipelineDescriptor descriptor) {
+GPUDevice::createComputePipelineAsync(jsg::Lock& js, GPUComputePipelineDescriptor descriptor) {
   wgpu::ComputePipelineDescriptor desc = parseComputePipelineDescriptor(descriptor);
 
   struct Context {
@@ -658,7 +658,7 @@ GPUDevice::createComputePipelineAsync(GPUComputePipelineDescriptor descriptor) {
       ctx);
 
   auto& context = IoContext::current();
-  return context.awaitIo(kj::mv(paf.promise));
+  return context.awaitIo(js, kj::mv(paf.promise));
 }
 
 jsg::Ref<GPUQueue> GPUDevice::getQueue() {

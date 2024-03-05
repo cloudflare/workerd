@@ -3055,7 +3055,7 @@ private:
       }
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         return end ?
-            ioContext.awaitIoLegacy(sink->end().attach(kj::mv(sink))) :
+            ioContext.awaitIoLegacy(js, sink->end().attach(kj::mv(sink))) :
             js.resolvedPromise();
       }
       KJ_CASE_ONEOF(errored, kj::Exception) {
