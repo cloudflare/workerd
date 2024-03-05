@@ -1606,18 +1606,13 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
     } else {
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, uint64_t(0));
     }
-
-    auto responsePromise = KJ_ASSERT_NONNULL(nativeRequest).response
-        .then([client = kj::mv(client)](kj::HttpClient::Response&& response) mutable {
-      response.body = response.body.attach(kj::mv(client));
-      return kj::mv(response);
-    });
-
     return ioContext.awaitIo(js,
-        AbortSignal::maybeCancelWrap(signal, kj::mv(responsePromise)),
-        [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList)]
+        AbortSignal::maybeCancelWrap(signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response)),
+        [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
+         urlList = kj::mv(urlList), client = kj::mv(client)]
         (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
             -> jsg::Promise<jsg::Ref<Response>> {
+      response.body = response.body.attach(kj::mv(client));
       return handleHttpResponse(
           js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response));
     });
