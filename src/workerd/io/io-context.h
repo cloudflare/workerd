@@ -473,7 +473,8 @@ public:
   // resolves, the inner promise (the DeferredProxy<T>) is treated as external I/O.
   template <typename T>
   jsg::Promise<T> awaitDeferredProxy(jsg::Lock& js, kj::Promise<api::DeferredProxy<T>>&& promise) {
-    return awaitIoImpl<false>(js, waitForDeferredProxy(kj::mv(promise)), getCriticalSection());
+    return awaitIoImpl(js, waitForDeferredProxy(kj::mv(promise)), getCriticalSection(),
+                       IdentityFunc<T>());
   }
 
   bool isFinalized() {
@@ -762,9 +763,31 @@ private:
   template <bool addIoOwn, typename T>
   using MaybeIoOwn = typename MaybeIoOwn_<addIoOwn, T>::Type;
 
-  template <bool addIoOwn, typename T, typename InputLockOrMaybeCriticalSection>
-  jsg::Promise<MaybeIoOwn<addIoOwn, T>> awaitIoImpl(
-      jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs);
+  template <typename T>
+  struct IdentityFunc {
+    inline T operator()(jsg::Lock&, T&& value) const {
+      return kj::mv(value);
+    }
+  };
+  template <>
+  struct IdentityFunc<void> {
+    inline void operator()(jsg::Lock&) const {}
+  };
+
+  template <typename T>
+  struct ExceptionOr_ {
+    using Type = kj::OneOf<T, kj::Exception>;
+  };
+  template <>
+  struct ExceptionOr_<void> {
+    using Type = kj::Maybe<kj::Exception>;
+  };
+  template <typename T>
+  using ExceptionOr = typename ExceptionOr_<T>::Type;
+
+  template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
+  jsg::PromiseForResult<Func, T, true> awaitIoImpl(
+      jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
 
   // Same as addFunctor() but expects that the returned function will receive a IoOwn<T> as the
   // parameter, and instead passes the underlying `T` as the parameter to `func`. This is needed
@@ -887,144 +910,176 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 template <typename T, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIo(
     jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
-  if constexpr (jsg::isVoid<T>()) {
-    return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getCriticalSection())
-        .then(js, addFunctor(kj::fwd<Func>(func)));
-  } else {
-    // If T holds KJ I/O types, then it's important that it get wrapped in a IoOwn before passing
-    // through the V8 promise system. This is even though the result only exists on the heap
-    // briefly before the continuation runs -- if we receive a termination in that time, then it
-    // might be left there to be GC'd later.
-    return awaitIoImpl<true>(js, promise.attach(registerPendingEvent()), getCriticalSection())
-        .then(js, addFunctorIoOwnParam<T, true>(kj::fwd<Func>(func)));
-  }
+  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getCriticalSection(),
+                     kj::fwd<Func>(func));
 }
 
 template <typename T>
 jsg::Promise<T> IoContext::awaitIo(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getCriticalSection());
+  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getCriticalSection(),
+                     IdentityFunc<T>());
 }
 
 template <typename T, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIoWithInputLock(
     jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
-  if constexpr (jsg::isVoid<T>()) {
-    return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getInputLock())
-        .then(js, addFunctor(kj::fwd<Func>(func)));
-  } else {
-    return awaitIoImpl<true>(js, promise.attach(registerPendingEvent()), getInputLock())
-        .then(js, addFunctorIoOwnParam<T, true>(kj::fwd<Func>(func)));
-  }
+  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getInputLock(),
+                     kj::fwd<Func>(func));
 }
 
 template <typename T>
 jsg::Promise<T> IoContext::awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl<false>(js, promise.attach(registerPendingEvent()), getInputLock());
+  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getInputLock(),
+                     IdentityFunc<T>());
 }
 
 template <typename T>
 jsg::Promise<T> IoContext::awaitIoLegacy(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl<false>(js, kj::mv(promise), getCriticalSection());
+  return awaitIoImpl(js, kj::mv(promise), getCriticalSection(), IdentityFunc<T>());
 }
 
 template <typename T>
 jsg::Promise<T> IoContext::awaitIoLegacyWithInputLock(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl<false>(js, kj::mv(promise), getInputLock());
+  return awaitIoImpl(js, kj::mv(promise), getInputLock(), IdentityFunc<T>());
 }
 
-template <bool addIoOwn, typename T, typename InputLockOrMaybeCriticalSection>
-jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
-    jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs) {
+template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
+jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
+    jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func) {
+  // WARNING: The fact that `promise` has been passed by value whereas `func` is by reference is
+  // actually important, because this means that if we throw an exception here in the function
+  // body, `promise` will be destroyed first, before `func`. That's important as often `func`
+  // holds ownership of objects that `promise` depends on.
+
   requireCurrent();
 
-  typedef MaybeIoOwn<addIoOwn, T> Result;
+  // `T` is the type produced by the input promise. `Result` is the type of the final output
+  // promise. `Func` transforms from `T` to `Result`.
+  typedef jsg::ReturnType<Func, T, true> Result;
 
   // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
   // and pass it into the then(). If the promise is rejected, and there is no rejection
   // handler attached to it, an unhandledrejection event will be scheduled, and scheduling
   // that event needs to be done within the appropriate frame to propagate the correct context.
 
-  if constexpr (jsg::isVoid<T>()) {
-    auto [ jsPromise, resolver ] = js.newPromiseAndResolver<kj::Maybe<kj::Exception>>();
+  // We need to catch exceptions from KJ and merge them into the result, so that they can propagate
+  // to JavaScript.
+  kj::Promise<ExceptionOr<T>> promiseForExceptionOrT = [&]() {
+    if constexpr (jsg::isVoid<T>()) {
+      return promise.then([]() -> ExceptionOr<T> {
+        return kj::none;
+      }, [](kj::Exception&& exception) -> ExceptionOr<T> {
+        return kj::mv(exception);
+      });
+    } else {
+      return promise.then([](T&& result) -> ExceptionOr<T> {
+        return kj::mv(result);
+      }, [](kj::Exception&& exception) -> ExceptionOr<T> {
+        return kj::mv(exception);
+      });
+    }
+  }();
 
-    addTask(promise.then([]() -> kj::Maybe<kj::Exception> {
-      return kj::none;
-    }, [](kj::Exception&& exception) -> kj::Maybe<kj::Exception> {
-      return kj::mv(exception);
-    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
-             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)]
-            (kj::Maybe<kj::Exception>&& maybeException) mutable {
-      return run([resolver = kj::mv(resolver),
-                  maybeException = kj::mv(maybeException),
-                  maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
-        jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
-        // We don't use `resolver.reject()` for exceptions here because if we convert the
-        // kj::Exception into a JS Error here, it won't have a useful stack trace. V8 can generate
-        // a good stack trace as long as we construct the Error inside of a promise continuation,
-        // so we use a `.then()` below that acutally checks for the kj::Exception and turn it into
-        // a JS Error.
-        resolver.resolve(kj::mv(maybeException));
-      }, kj::mv(ilOrCs));
-    }));
+  // Reminder: This can throw JsExceptionThrown if the execution context has been termintaed.
+  // it's important in that case that `promiseForExceptionOrT` will be destroyed before `func`.
+  auto [ jsPromise, resolver ] = js.newPromiseAndResolver<ExceptionOr<Result>>();
 
-    return jsPromise.then(js, [](jsg::Lock& js, kj::Maybe<kj::Exception>&& maybeEx) -> Result {
-      KJ_IF_SOME(e, maybeEx) {
+  addTask(promiseForExceptionOrT
+      .then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
+            maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js),
+            // Reminder: It's important that `func` gets attached to the promise before the whole
+            // thing is passed to `addTask()`, so that it's impossible for `func` to be destroyed
+            // before the inner promise.
+            func = kj::fwd<Func>(func)]
+            (ExceptionOr<T>&& exceptionOrT) mutable {
+    return run([resolver = kj::mv(resolver),
+                exceptionOrT = kj::mv(exceptionOrT),
+                maybeAsyncContext = kj::mv(maybeAsyncContext),
+                func = kj::fwd<Func>(func)](Worker::Lock& lock) mutable {
+      jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
+      jsg::Lock& js = lock;
+
+      if constexpr (jsg::isVoid<T>()) {
+        KJ_IF_SOME(e, exceptionOrT) {
+          // We don't use `resolver.reject()` here because if we convert the kj::Exception into
+          // a JS Error here, it won't have a useful stack trace. V8 can generate a good stack
+          // trace as long as we construct the Error inside of a promise continuation, so we use
+          // a `.then()` below that acutally extracts the kj::Exception and turn it into a JS
+          // Error.
+          resolver.resolve(kj::mv(e));
+        } else {
+          try {
+            js.tryCatch([&]() {
+              if constexpr (jsg::isVoid<Result>()) {
+                func(js);
+                resolver.resolve(js, kj::none);
+              } else {
+                resolver.resolve(js, func(js));
+              }
+            }, [&](jsg::Value error) {
+              // Here we can just `resolver.reject` because we already have a JS exception.
+              resolver.reject(js, error.getHandle(js));
+            });
+          } catch (...) {
+            // Again, pass along the KJ exception so we can convert it later in the right context.
+            resolver.resolve(js, kj::getCaughtExceptionAsKj());
+          }
+        }
+      } else {
+        // T is not void.
+        KJ_SWITCH_ONEOF(exceptionOrT) {
+          KJ_CASE_ONEOF(exception, kj::Exception) {
+            // Again, pass along the KJ exception so we can convert it later in the right context.
+            resolver.resolve(js, kj::mv(exception));
+          }
+          KJ_CASE_ONEOF(result, T) {
+            try {
+              js.tryCatch([&]() {
+                if constexpr (jsg::isVoid<Result>()) {
+                  func(js, kj::mv(result));
+                  resolver.resolve(js, kj::none);
+                } else {
+                  // Here we can just `resolver.reject` because we already have a JS exception.
+                  resolver.resolve(js, func(js, kj::mv(result)));
+                }
+              }, [&](jsg::Value error) {
+                resolver.reject(js, error.getHandle(js));
+              });
+            } catch (...) {
+              // Again, pass along the KJ exception so we can convert it later in the right context.
+              resolver.resolve(js, kj::getCaughtExceptionAsKj());
+            }
+          }
+        }
+      }
+    }, kj::mv(ilOrCs));
+  }));
+
+  // Reminder: This can throw JsExceptionThrown if the execution context has been termintaed. We
+  // have already disowned `promise` and `func` by this point, though, so teardown order is no
+  // longer our concern.
+  return jsPromise.then(js, [](jsg::Lock& js, ExceptionOr<Result>&& exceptionOrResult) -> Result {
+    if constexpr (jsg::isVoid<Result>()) {
+      KJ_IF_SOME(e, exceptionOrResult) {
         // Now that we're in a promise continuation, we can convert the error and get a good stack
         // trace.
         js.throwException(kj::mv(e));
       }
-    });
-  } else {
-    typedef kj::OneOf<T, kj::Exception> ResultOrException;
-    typedef kj::OneOf<Result, kj::Exception> IoResultOrException;
-    auto [ jsPromise, resolver ] = js.newPromiseAndResolver<IoResultOrException>();
-
-    addTask(promise.then([](T&& result) -> ResultOrException {
-      return kj::mv(result);
-    }, [](kj::Exception&& exception) -> ResultOrException {
-      return kj::mv(exception);
-    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
-             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)]
-            (ResultOrException&& resultOrException) mutable {
-      return run([this, resolver = kj::mv(resolver),
-                  resultOrException = kj::mv(resultOrException),
-                  maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
-        jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
-        KJ_SWITCH_ONEOF(resultOrException) {
-          KJ_CASE_ONEOF(result, T) {
-            if constexpr (addIoOwn) {
-              resolver.resolve(addObject(kj::heap(kj::mv(result))));
-            } else {
-              (void)this; // used only in one branch of constexpr expression
-              resolver.resolve(kj::mv(result));
-            }
-          }
-          KJ_CASE_ONEOF(exception, kj::Exception) {
-            // We don't use `resolver.reject()` here because if we convert the kj::Exception into
-            // a JS Error here, it won't have a useful stack trace. V8 can generate a good stack
-            // trace as long as we construct the Error inside of a promise continuation, so we use
-            // a `.then()` below that acutally extracts the kj::Exception and turn it into a JS
-            // Error.
-            resolver.resolve(kj::mv(exception));
-          }
+      return;
+    } else {
+      KJ_SWITCH_ONEOF(exceptionOrResult) {
+        KJ_CASE_ONEOF(e, kj::Exception) {
+          // Now that we're in a promise continuation, we can convert the error and get a good stack
+          // trace.
+          js.throwException(kj::mv(e));
         }
-      }, kj::mv(ilOrCs));
-    }));
-
-    return jsPromise.then(js, [](jsg::Lock& js, IoResultOrException&& resultOrException) -> Result {
-      KJ_SWITCH_ONEOF(resultOrException) {
         KJ_CASE_ONEOF(result, Result) {
           return kj::mv(result);
         }
-        KJ_CASE_ONEOF(exception, kj::Exception) {
-          // Now that we're in a promise continuation, we can convert the error and get a good
-          // stack trace.
-          js.throwException(kj::mv(exception));
-        }
       }
       KJ_UNREACHABLE;
-    });
-  }
+    }
+  });
 }
 
 template <typename T>
