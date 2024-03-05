@@ -46,6 +46,10 @@ public:
 
   size_t size() { return externals.size(); }
 
+  // We serialize functions by turning them into RPC stubs.
+  void serializeFunction(
+      jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) override;
+
 private:
   kj::Vector<BuilderCallback> externals;
 };
@@ -109,6 +113,9 @@ public:
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
+  // Expect that the call is itself going to return a function... and call that.
+  jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
+
   // Implement standard Promise interface, especially `then()` so that this works as a custom
   // thenable.
   //
@@ -127,15 +134,24 @@ public:
   kj::Maybe<jsg::Ref<JsRpcProperty>> getProperty(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcPromise) {
+    JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getProperty);
     JSG_METHOD(then);
     JSG_METHOD_NAMED(catch, catch_);
     JSG_METHOD(finally);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("inner", inner);
+  }
+
 private:
   jsg::JsRef<jsg::JsPromise> inner;
   IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(inner);
+  }
 };
 
 // Represents a property -- possibly, a method -- of a remote RPC object.
@@ -179,6 +195,11 @@ public:
     JSG_METHOD(finally);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("parent", parent);
+    tracker.trackField("name", name);
+  }
+
 private:
   // The parent object from which this property was obtained.
   jsg::Ref<JsRpcClientProvider> parent;
@@ -189,14 +210,6 @@ private:
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(parent);
   }
-
-  struct PromiseAndPipleine {
-    jsg::JsPromise promise;
-    rpc::JsRpcTarget::CallResults::Pipeline pipeline;
-  };
-
-  template <typename FillOpFunc>
-  PromiseAndPipleine callImpl(jsg::Lock& js, FillOpFunc&& fillOpFunc);
 };
 
 // A JsRpcStub object forwards JS method calls to the remote Worker/Durable Object over RPC.
@@ -229,9 +242,13 @@ public:
   // for testing to be able to construct a loopback stub.
   static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
 
+  // Call the stub itself as a function.
+  jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
+
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcStub) {
+    JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getRpcMethod);
   }
 

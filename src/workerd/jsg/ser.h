@@ -66,10 +66,10 @@ public:
   // appropriate exception should be thrown.
   class ExternalHandler {
   public:
-    // We declare the destructor just so that this class has a virtual method, which ensures it is
-    // polymorphic (has a vtable) so that dynamic_cast can be used on it. We mark this method pure
-    // (`= 0`) so that `ExternalHandler` itself cannot be instantiated.
-    virtual ~ExternalHandler() noexcept(false) = 0;
+    // Tries to serialize a function as an external. The default implementation throws
+    // DataCloneError.
+    virtual void serializeFunction(
+        jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func);
   };
 
   struct Options {
@@ -77,6 +77,26 @@ public:
     kj::Maybe<uint32_t> version;
     // When set to true, the serialization header is not written to the output buffer.
     bool omitHeader = false;
+
+    // The structured clone spec states that instances of classes are serialized as if they were
+    // plain objects: their "own" properties are serialized, but the prototype is completely
+    // ignored. Upon deserialization, the value is no longer class instance, it's just a plain
+    // object. This is probably not useful behavior in any real use case, but that's what the spec
+    // says.
+    //
+    // If this flag is true, we'll follow the spec. If it's false, then instances of classes
+    // (i.e. objects which have a prototype which is not Object.prototype) will not be serializable
+    // (they throw DataCloneError).
+    //
+    // TODO(someday): Perhaps we could create a framework for application-defined classes to define
+    //   their own serializers. However, we would need to be extremely careful about this when
+    //   deserializing data from a possibly-malicious source. Such serialization frameworks have
+    //   a history of creating security bugs as people declare various classes serializable without
+    //   fully thinking through what an attacker could do by sending them an instance of that class
+    //   when it isn't expected. Probably, we just shouldn't support this over RPC at all. For DO
+    //   storage, it could be OK since the application would only be deserializing objects it wrote
+    //   itself, but it may not be worth it to support for only that use case.
+    bool treatClassInstancesAsPlainObjects = true;
 
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
     // Serializer.
@@ -95,7 +115,8 @@ public:
     kj::Array<std::shared_ptr<v8::BackingStore>> transferredArrayBuffers;
   };
 
-  explicit Serializer(Lock& js, kj::Maybe<Options> maybeOptions = kj::none);
+  explicit Serializer(Lock& js): Serializer(js, {}) {}
+  explicit Serializer(Lock& js, Options options);
   inline ~Serializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
   KJ_DISALLOW_COPY_AND_MOVE(Serializer);
@@ -125,8 +146,16 @@ public:
   }
 
 private:
+  // Throw a DataCloneError, complaining that the given object cannot be serialized. (This is
+  // similar to ThrowDataCloneError() except that it formats the error message itself, and it
+  // is expected to be called from KJ-ish code so it throws JsExceptionThrown rather than
+  // returning.)
+  [[noreturn]] void throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Object> obj);
+
   // v8::ValueSerializer::Delegate implementation
   void ThrowDataCloneError(v8::Local<v8::String> message) override;
+  bool HasCustomHostObject(v8::Isolate* isolate) override;
+  v8::Maybe<bool> IsHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) override;
   v8::Maybe<bool> WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) override;
 
   v8::Maybe<uint32_t> GetSharedArrayBufferId(
@@ -139,8 +168,18 @@ private:
   kj::Vector<JsValue> arrayBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
-  v8::ValueSerializer ser;
   bool released = false;
+  bool treatClassInstancesAsPlainObjects;
+
+  // Initialized to point at the prototype of `Object` if and only if
+  // `treatClassInstancesAsPlainObjects` is false (in which case we will need to check against this
+  // prototype in IsHostObject()).
+  v8::Local<v8::Value> prototypeOfObject;
+
+  // The actual ValueSerializer. Note that it's important to define this last because its
+  // constructor will call back to the Delegate, which is this object, so we hope that this object
+  // is fully initialized before that point!
+  v8::ValueSerializer ser;
 };
 
 // Wraps the v8::ValueDeserializer and v8::ValueDeserializer::Delegate implementation.

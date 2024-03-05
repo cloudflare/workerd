@@ -846,10 +846,7 @@ function isValidThenable(maybeThennable: any): boolean {
     return true;
   }
 
-  const isThenable = typeof maybeThennable.then === "function" &&
-    typeof maybeThennable.catch === "function";
-
-  return isThenable && typeof maybeThennable !== "function";
+  return typeof maybeThennable.then === "function";
 }
 
 export { AssertionError };
