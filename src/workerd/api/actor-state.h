@@ -159,6 +159,97 @@ protected:
     return kj::mv(options);
   }
 
+  // Were we able to get a result entirely from the cache? This is mostly used for billing/reporting
+  // purposes.
+  enum class WasCached {
+    CACHED,
+    UNCACHED,
+  };
+
+  // Log the exception when relevant and rewrite its message as a jsg exception.
+  static kj::Exception coerceToTunneledException(kj::Exception e);
+
+  static ActorObserver& currentActorMetrics() {
+    return IoContext::current().getActorOrThrow().getMetrics();
+  }
+
+  // Wrap a synchronous function so that we coerce thrown exceptions appropriately.
+  template <typename Func> [[nodiscard]] auto enforceStorageApiBoundary(Func&& func) {
+    auto& metrics = currentActorMetrics();
+    try {
+      metrics.startStorageOperation();
+      KJ_DEFER({
+        // If we're returning a promise from this function, then it's not really the end of a
+        // storage operation. Perhaps there is some way this could interact better with
+        // handleCachePromise to that end? It tends to work out since handleCachePromise still calls
+        // failStorageOperation().
+        metrics.resolveStorageOperation();
+      });
+      return kj::fwd<Func>(func)();
+    } catch (jsg::JsExceptionThrown&) {
+      // Rethrow any exceptions that originate from v8/js without coercing, it will be handled
+      // downstream.
+      metrics.failStorageOperation();
+      throw;
+    } catch (...) {
+      metrics.failStorageOperation();
+      kj::throwFatalException(coerceToTunneledException(kj::getCaughtExceptionAsKj()));
+    }
+  }
+
+  // Await a given io promise, optionally with the input lock, and run the given function upon
+  // success. Note that this will coerce any failures to be tunnelled exceptions to enforce a
+  // boundary around the storage api. This should be the only place where we call awaitIo* functions
+  // for the storage api.
+  template <typename T, typename ...Funcs>
+  auto handleCachePromise(
+      jsg::Lock& js, bool allowConcurrency, kj::Promise<T> promise, Funcs&&... funcs) {
+    auto& context = IoContext::current();
+    auto metrics = kj::addRef(context.getActorOrThrow().getMetrics());
+    promise = promise.catch_(
+        [metrics = kj::mv(metrics)](kj::Exception e) mutable -> kj::Promise<T> {
+      metrics->failStorageOperation();
+      return coerceToTunneledException(kj::mv(e));
+    });
+
+    if (allowConcurrency) {
+      return context.awaitIo(js, kj::mv(promise), kj::fwd<Funcs>(funcs)...);
+    } else {
+      return context.awaitIoWithInputLock(js, kj::mv(promise), kj::fwd<Funcs>(funcs)...);
+    }
+  }
+
+  // Await the result if it was not cached and convert it to a jsg result with the given function.
+  template <typename T, typename Options, typename Func>
+  auto handleCacheResult(jsg::Lock& js, kj::OneOf<T, kj::Promise<T>> result, const Options& options,
+                         Func&& func) {
+    KJ_SWITCH_ONEOF(result) {
+      KJ_CASE_ONEOF(value, T) {
+        return js.resolvedPromise(func(js, kj::mv(value), WasCached::CACHED));
+      }
+      KJ_CASE_ONEOF(promise, kj::Promise<T>) {
+        return handleCachePromise(
+            js, options.allowConcurrency.orDefault(false), kj::mv(promise),
+            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
+          return func(js, kj::mv(value), WasCached::UNCACHED);
+        });
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  // Await backpressure if we have it and return a resolved promise.
+  template <typename Options>
+  auto handleCacheBackpressure(
+      jsg::Lock& js, kj::Maybe<kj::Promise<void>> maybeBackpressure, const Options& options) {
+    KJ_IF_SOME(backpressure, maybeBackpressure) {
+      return handleCachePromise(
+          js, options.allowConcurrency.orDefault(false), kj::mv(backpressure));
+    } else {
+      return js.resolvedPromise();
+    }
+  }
+
 private:
   jsg::Promise<jsg::JsRef<jsg::JsValue>> getOne(jsg::Lock& js,
                                                 kj::String key,
@@ -178,6 +269,12 @@ private:
   jsg::Promise<int> deleteMultiple(jsg::Lock& js,
                                    kj::Array<kj::String> keys,
                                    const PutOptions& options);
+
+  static jsg::JsRef<jsg::JsValue> listResultsToMap(
+    jsg::Lock& js, ActorCacheOps::GetResultList value, WasCached completelyCached);
+
+  static jsg::JsRef<workerd::jsg::JsValue> getMultipleResultsToMap(
+    jsg::Lock& js, ActorCacheOps::GetResultList value, size_t numInputKeys);
 };
 
 class DurableObjectTransaction;
@@ -235,6 +332,8 @@ public:
   kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::String bookmark);
 
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
+    // If you add new methods, don't forget to use enforceStorageApiBoundary() to handle kj
+    // exceptions.
     JSG_METHOD(get);
     JSG_METHOD(list);
     JSG_METHOD(put);
@@ -289,20 +388,14 @@ public:
   DurableObjectTransaction(IoOwn<ActorCacheInterface::Transaction> cacheTxn)
     : cacheTxn(kj::mv(cacheTxn)) {}
 
-  // Called from C++, not JS, after the transaction callback has completed (successfully or not).
-  // These methods do nothing if the transaction is already committed / rolled back.
-  kj::Promise<void> maybeCommit();
-
-  // Called from C++, not JS, after the transaction callback has completed (successfully or not).
-  // These methods do nothing if the transaction is already committed / rolled back.
-  void maybeRollback();
-
   void rollback();  // called from JS
 
   // Just throws an exception saying this isn't supported.
   void deleteAll();
 
   JSG_RESOURCE_TYPE(DurableObjectTransaction) {
+    // If you add new methods, don't forget to use enforceStorageApiBoundary() to handle kj
+    // exceptions.
     JSG_METHOD(get);
     JSG_METHOD(list);
     JSG_METHOD(put);
@@ -341,6 +434,11 @@ private:
   kj::Maybe<IoOwn<ActorCacheInterface::Transaction>> cacheTxn;
 
   bool rolledBack = false;
+
+  // Called from C++ after the transaction callback has completed (successfully or not). These
+  // methods do nothing if the transaction is already committed / rolled back.
+  kj::Promise<void> maybeCommit();
+  void maybeRollback();
 
   friend DurableObjectStorage;
 };

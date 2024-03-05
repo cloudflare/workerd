@@ -31,6 +31,8 @@ namespace workerd::jsg {
 
 #define JSG_ERROR_InternalDOMOperationError JSG_INTERNAL_DOM_EXCEPTION("OperationError")
 
+#define JSG_EXCEPTION_STRING(jsErrorType, ...) kj::str(JSG_EXCEPTION(jsErrorType) ": ", __VA_ARGS__)
+
 #define JSG_KJ_EXCEPTION(type, jsErrorType, ...)                                        \
   kj::Exception(kj::Exception::Type::type, __FILE__, __LINE__,                           \
                 kj::str(JSG_EXCEPTION(jsErrorType) ": ", __VA_ARGS__))

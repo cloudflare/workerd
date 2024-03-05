@@ -43,91 +43,31 @@ jsg::JsValue deserializeMaybeV8Value(
   }
 }
 
-template <typename T, typename Options, typename Func>
-auto transformCacheResult(jsg::Lock& js,
-    kj::OneOf<T, kj::Promise<T>> input, const Options& options, Func&& func)
-    -> jsg::Promise<decltype(func(js, kj::instance<T>()))> {
-  KJ_SWITCH_ONEOF(input) {
-    KJ_CASE_ONEOF(value, T) {
-      return js.resolvedPromise(func(js, kj::mv(value)));
-    }
-    KJ_CASE_ONEOF(promise, kj::Promise<T>) {
-      auto& context = IoContext::current();
-      if (options.allowConcurrency.orDefault(false)) {
-        return context.awaitIo(js, kj::mv(promise),
-            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
-          return func(js, kj::mv(value));
-        });
-      } else {
-        return context.awaitIoWithInputLock(js, kj::mv(promise),
-            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
-          return func(js, kj::mv(value));
-        });
-      }
-    }
-  }
-  KJ_UNREACHABLE;
-}
+}  // namespace
 
-template <typename T, typename Options, typename Func>
-auto transformCacheResultWithCacheStatus(
-    jsg::Lock& js, kj::OneOf<T, kj::Promise<T>> input, const Options& options, Func&& func)
-    -> jsg::Promise<decltype(func(js, kj::instance<T>(), kj::instance<bool>()))> {
-  KJ_SWITCH_ONEOF(input) {
-    KJ_CASE_ONEOF(value, T) {
-      return js.resolvedPromise(func(js, kj::mv(value), true));
-    }
-    KJ_CASE_ONEOF(promise, kj::Promise<T>) {
-      auto& context = IoContext::current();
-      if (options.allowConcurrency.orDefault(false)) {
-        return context.awaitIo(js, kj::mv(promise),
-            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
-          return func(js, kj::mv(value), false);
-        });
-      } else {
-        return context.awaitIoWithInputLock(js, kj::mv(promise),
-            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
-          return func(js, kj::mv(value), false);
-        });
-      }
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-template <typename Options>
-jsg::Promise<void> transformMaybeBackpressure(
-    jsg::Lock& js, const Options& options,
-    kj::Maybe<kj::Promise<void>> maybeBackpressure) {
-  KJ_IF_SOME(backpressure, maybeBackpressure) {
-    // Note: In practice `allowConcurrency` will have no effect on a backpressure promise since
-    //   backpressure blocks everything anyway, but we pass the option through for consistency in
-    //   case of future changes.
-    auto& context = IoContext::current();
-    if (options.allowConcurrency.orDefault(false)) {
-      return context.awaitIo(js, kj::mv(backpressure));
+kj::Exception DurableObjectStorageOperations::coerceToTunneledException(kj::Exception e) {
+  if (!jsg::isTunneledException(e.getDescription())) {
+    if (isInterestingException(e)) {
+      LOG_EXCEPTION("durableObjectStorageApi", e);
     } else {
-      return context.awaitIoWithInputLock(js, kj::mv(backpressure), [](jsg::Lock&) {});
+      LOG_ERROR_PERIODICALLY("NOSENTRY durable object storage api failed", e);
     }
-  } else {
-    return js.resolvedPromise();
+    // Replace the description instead of making a new error so that we preserve our info.
+    e.setDescription(
+        JSG_EXCEPTION_STRING(Error, "Durable Object Storage API operation failed"));
   }
+  return e;
 }
 
-ActorObserver& currentActorMetrics() {
-  return IoContext::current().getActorOrThrow().getMetrics();
-}
-
-jsg::JsRef<jsg::JsValue> listResultsToMap(jsg::Lock& js,
-                                          ActorCacheOps::GetResultList value,
-                                          bool completelyCached) {
+jsg::JsRef<jsg::JsValue> DurableObjectStorageOperations::listResultsToMap(
+    jsg::Lock& js, ActorCacheOps::GetResultList value, WasCached completelyCached) {
   return js.withinHandleScope([&] {
     auto map = js.map();
     size_t cachedReadBytes = 0;
     size_t uncachedReadBytes = 0;
-    for (auto entry: value) {
-      auto& bytesRef = entry.status == ActorCacheOps::CacheStatus::CACHED
-                    ? cachedReadBytes : uncachedReadBytes;
+    for (auto entry : value) {
+      auto& bytesRef =
+          entry.status == ActorCacheOps::CacheStatus::CACHED ? cachedReadBytes : uncachedReadBytes;
       bytesRef += entry.key.size() + entry.value.size();
       map.set(js, entry.key, deserializeV8Value(js, entry.key, entry.value));
     }
@@ -139,7 +79,8 @@ jsg::JsRef<jsg::JsValue> listResultsToMap(jsg::Lock& js,
       // If we went to disk, we want to ensure we bill at least 1 uncached unit.
       // Otherwise, we disable this behavior, to ensure a fully cached list will have
       // uncachedUnits == 0.
-      auto billAtLeastOne = completelyCached ? BillAtLeastOne::NO : BillAtLeastOne::YES;
+      auto billAtLeastOne =
+          completelyCached == WasCached::CACHED ? BillAtLeastOne::NO : BillAtLeastOne::YES;
       uint32_t uncachedUnits = billingUnits(uncachedReadBytes, billAtLeastOne);
       uint32_t cachedUnits = totalUnits - uncachedUnits;
 
@@ -154,43 +95,42 @@ jsg::JsRef<jsg::JsValue> listResultsToMap(jsg::Lock& js,
   });
 }
 
-kj::Function<jsg::JsRef<jsg::JsValue>(jsg::Lock&, ActorCacheOps::GetResultList)>
-getMultipleResultsToMap(
-    size_t numInputKeys) {
-  return [numInputKeys](jsg::Lock& js, ActorCacheOps::GetResultList value) mutable {
-    return js.withinHandleScope([&] {
-      auto map = js.map();
-      uint32_t cachedUnits = 0;
-      uint32_t uncachedUnits = 0;
-      for (auto entry: value) {
-        auto& unitsRef = entry.status == ActorCacheOps::CacheStatus::CACHED
-                      ? cachedUnits : uncachedUnits;
-        unitsRef += billingUnits(entry.key.size() + entry.value.size());
-        map.set(js, entry.key, deserializeV8Value(js, entry.key, entry.value));
-      }
-      auto& actorMetrics = currentActorMetrics();
-      actorMetrics.addCachedStorageReadUnits(cachedUnits);
+jsg::JsRef<workerd::jsg::JsValue> DurableObjectStorageOperations::getMultipleResultsToMap(
+    jsg::Lock& js, ActorCacheOps::GetResultList value, size_t numInputKeys) {
+  return js.withinHandleScope([&] {
+    auto map = js.map();
+    uint32_t cachedUnits = 0;
+    uint32_t uncachedUnits = 0;
+    for (auto entry : value) {
+      auto& unitsRef =
+          entry.status == ActorCacheOps::CacheStatus::CACHED ? cachedUnits : uncachedUnits;
+      unitsRef += billingUnits(entry.key.size() + entry.value.size());
+      map.set(js, entry.key, deserializeV8Value(js, entry.key, entry.value));
+    }
+    auto& actorMetrics = currentActorMetrics();
+    actorMetrics.addCachedStorageReadUnits(cachedUnits);
 
-      size_t leftoverKeys = 0;
-      if (numInputKeys >= value.size()) {
-        leftoverKeys = numInputKeys - value.size();
-      } else {
-        KJ_LOG(ERROR, "More returned pairs than provided input keys in getMultipleResultsToMap",
-            numInputKeys, value.size());
-      }
+    size_t leftoverKeys = 0;
+    if (numInputKeys >= value.size()) {
+      leftoverKeys = numInputKeys - value.size();
+    } else {
+      KJ_LOG(ERROR, "More returned pairs than provided input keys in getMultipleResultsToMap",
+          numInputKeys, value.size());
+    }
 
-      // leftover keys weren't in the result set, but potentially still
-      // had to be queried for existence.
-      //
-      // TODO(someday): This isn't quite accurate -- we do cache negative entries.
-      // Billing will still be correct today, but if we do ever start billing
-      // only for uncached reads, we'll need to address this.
-      actorMetrics.addUncachedStorageReadUnits(leftoverKeys + uncachedUnits);
+    // leftover keys weren't in the result set, but potentially still
+    // had to be queried for existence.
+    //
+    // TODO(someday): This isn't quite accurate -- we do cache negative entries.
+    // Billing will still be correct today, but if we do ever start billing
+    // only for uncached reads, we'll need to address this.
+    actorMetrics.addUncachedStorageReadUnits(leftoverKeys + uncachedUnits);
 
-      return jsg::JsValue(map).addRef(js);
-    });
-  };
+    return jsg::JsValue(map).addRef(js);
+  });
 }
+
+namespace {
 
 kj::Promise<void> updateStorageWriteUnit(IoContext& context,
                                          ActorObserver& metrics,
@@ -236,16 +176,18 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::get(
     jsg::Lock& js,
     kj::OneOf<kj::String, kj::Array<kj::String>> keys,
     jsg::Optional<GetOptions> maybeOptions) {
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(GetOptions{}));
-  KJ_SWITCH_ONEOF(keys) {
-    KJ_CASE_ONEOF(s, kj::String) {
-      return getOne(js, kj::mv(s), options);
+  return enforceStorageApiBoundary([&](){
+    auto options = configureOptions(kj::mv(maybeOptions).orDefault(GetOptions{}));
+    KJ_SWITCH_ONEOF(keys) {
+      KJ_CASE_ONEOF(s, kj::String) {
+        return getOne(js, kj::mv(s), options);
+      }
+      KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
+        return getMultiple(js, kj::mv(a), options);
+      }
     }
-    KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
-      return getMultiple(js, kj::mv(a), options);
-    }
-  }
-  KJ_UNREACHABLE
+    KJ_UNREACHABLE
+  });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getOne(
@@ -253,17 +195,22 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getOne(
   ActorStorageLimits::checkMaxKeySize(key);
 
   auto result = getCache(OP_GET).get(kj::str(key), options);
-  return transformCacheResultWithCacheStatus(js, kj::mv(result), options,
-      [key = kj::mv(key)](jsg::Lock& js, kj::Maybe<ActorCacheOps::Value> value, bool cached) {
+  return handleCacheResult(js, kj::mv(result), options, [key = kj::mv(key)]
+      (jsg::Lock& js, kj::Maybe<ActorCacheOps::Value> value, WasCached cached) {
     uint32_t units = 1;
     KJ_IF_SOME(v, value) {
       units = billingUnits(v.size());
     }
     auto& actorMetrics = currentActorMetrics();
-    if (cached) {
-      actorMetrics.addCachedStorageReadUnits(units);
-    } else {
-      actorMetrics.addUncachedStorageReadUnits(units);
+    switch (cached) {
+      case WasCached::CACHED: {
+        actorMetrics.addCachedStorageReadUnits(units);
+        break;
+      }
+      case WasCached::UNCACHED: {
+        actorMetrics.addUncachedStorageReadUnits(units);
+        break;
+      }
     }
     return deserializeMaybeV8Value(js, key, value).addRef(js);
   });
@@ -271,132 +218,135 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getOne(
 
 jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
     jsg::Lock& js, jsg::Optional<GetAlarmOptions> maybeOptions) {
-  // Even if we do not have an alarm handler, we might once have had one. It's fine to return
-  // whatever a previous alarm setting or a falsy result.
-  auto options = configureOptions(maybeOptions.map([](auto& o) {
-    return GetOptions {
-      .allowConcurrency = o.allowConcurrency,
-      .noCache = false
-    };
-  }).orDefault(GetOptions{}));
-  auto result = getCache(OP_GET_ALARM).getAlarm(options);
+  return enforceStorageApiBoundary([&](){
+    // Even if we do not have an alarm handler, we might once have had one. It's fine to return
+    // whatever a previous alarm setting or a falsy result.
+    auto options = configureOptions(maybeOptions.map([](auto& o) {
+      return GetOptions {
+        .allowConcurrency = o.allowConcurrency,
+        .noCache = false
+      };
+    }).orDefault(GetOptions{}));
+    auto result = getCache(OP_GET_ALARM).getAlarm(options);
 
-  return transformCacheResult(js, kj::mv(result), options,
-      [](jsg::Lock&, kj::Maybe<kj::Date> date) {
-    return date.map([](auto& date) {
-      return static_cast<double>((date - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+    return handleCacheResult(js, kj::mv(result), options,
+        [](jsg::Lock&, kj::Maybe<kj::Date> date, WasCached) {
+      return date.map([](auto& date) {
+        return static_cast<double>((date - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+      });
     });
   });
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
     jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
-  kj::String start;
-  kj::Maybe<kj::String> end;
-  bool reverse = false;
-  kj::Maybe<uint> limit;
+  return enforceStorageApiBoundary([&](){
+    kj::String start;
+    kj::Maybe<kj::String> end;
+    bool reverse = false;
+    kj::Maybe<uint> limit;
 
-  auto makeEmptyResult = [&]() {
-    return js.resolvedPromise(jsg::JsValue(js.map()).addRef(js));
-  };
+    auto makeEmptyResult = [&]() {
+      return js.resolvedPromise(jsg::JsValue(js.map()).addRef(js));
+    };
 
-  KJ_IF_SOME(o, maybeOptions) {
-    KJ_IF_SOME(s, o.start) {
-      if (o.startAfter != kj::none) {
-        KJ_FAIL_REQUIRE("jsg.TypeError: list() cannot be called with both start and startAfter values.");
+    KJ_IF_SOME(o, maybeOptions) {
+      KJ_IF_SOME(s, o.start) {
+        if (o.startAfter != kj::none) {
+          KJ_FAIL_REQUIRE("jsg.TypeError: list() cannot be called with both start and startAfter values.");
+        }
+        start = kj::mv(s);
       }
-      start = kj::mv(s);
-    }
-    KJ_IF_SOME(sks, o.startAfter) {
-      // Convert an exclusive startAfter into an inclusive start key here so that the implementation
-      // doesn't need to handle both. This can be done simply by adding two NULL bytes. One to the end of
-      // the startAfter and another to set the start key after startAfter.
-      auto startAfterKey = kj::heapArray<char>(sks.size() + 2);
+      KJ_IF_SOME(sks, o.startAfter) {
+        // Convert an exclusive startAfter into an inclusive start key here so that the implementation
+        // doesn't need to handle both. This can be done simply by adding two NULL bytes. One to the end of
+        // the startAfter and another to set the start key after startAfter.
+        auto startAfterKey = kj::heapArray<char>(sks.size() + 2);
 
-      // Copy over the original string.
-      memcpy(startAfterKey.begin(), sks.begin(), sks.size());
-      // Add one additional null byte to set the new start as the key immediately
-      // after startAfter. This looks a little sketchy to be doing with strings rather
-      // than arrays, but kj::String explicitly allows for NULL bytes inside of strings.
-      startAfterKey[startAfterKey.size()-2] = '\0';
-      // kj::String automatically reads the last NULL as string termination, so we need to add it twice
-      // to make it stick in the final string.
-      startAfterKey[startAfterKey.size()-1] = '\0';
-      start = kj::String(kj::mv(startAfterKey));
-    }
-    KJ_IF_SOME(e, o.end) {
-      end = kj::mv(e);
-    }
-    KJ_IF_SOME(r, o.reverse) {
-      reverse = r;
-    }
-    KJ_IF_SOME(l, o.limit) {
-      JSG_REQUIRE(l > 0, TypeError, "List limit must be positive.");
-      limit = l;
-    }
-    KJ_IF_SOME(prefix, o.prefix) {
-      // Let's clamp `start` and `end` to include only keys with the given prefix.
-      if (prefix.size() > 0) {
-        if (start < prefix) {
-          // `start` is before `prefix`, so listing should actually start at `prefix`.
-          start = kj::str(prefix);
-        } else if (start.startsWith(prefix)) {
-          // `start` is within the prefix, so need not be modified.
-        } else {
-          // `start` comes after the last value with the prefix, so there's no overlap.
-          return makeEmptyResult();
-        }
+        // Copy over the original string.
+        memcpy(startAfterKey.begin(), sks.begin(), sks.size());
+        // Add one additional null byte to set the new start as the key immediately
+        // after startAfter. This looks a little sketchy to be doing with strings rather
+        // than arrays, but kj::String explicitly allows for NULL bytes inside of strings.
+        startAfterKey[startAfterKey.size()-2] = '\0';
+        // kj::String automatically reads the last NULL as string termination, so we need to add it twice
+        // to make it stick in the final string.
+        startAfterKey[startAfterKey.size()-1] = '\0';
+        start = kj::String(kj::mv(startAfterKey));
+      }
+      KJ_IF_SOME(e, o.end) {
+        end = kj::mv(e);
+      }
+      KJ_IF_SOME(r, o.reverse) {
+        reverse = r;
+      }
+      KJ_IF_SOME(l, o.limit) {
+        JSG_REQUIRE(l > 0, TypeError, "List limit must be positive.");
+        limit = l;
+      }
+      KJ_IF_SOME(prefix, o.prefix) {
+        // Let's clamp `start` and `end` to include only keys with the given prefix.
+        if (prefix.size() > 0) {
+          if (start < prefix) {
+            // `start` is before `prefix`, so listing should actually start at `prefix`.
+            start = kj::str(prefix);
+          } else if (start.startsWith(prefix)) {
+            // `start` is within the prefix, so need not be modified.
+          } else {
+            // `start` comes after the last value with the prefix, so there's no overlap.
+            return makeEmptyResult();
+          }
 
-        // Calculate the first key that sorts after all keys with the given prefix.
-        kj::Vector<char> keyAfterPrefix(prefix.size());
-        keyAfterPrefix.addAll(prefix);
-        while (!keyAfterPrefix.empty() && (byte)keyAfterPrefix.back() == 0xff) {
-          keyAfterPrefix.removeLast();
-        }
-        if (keyAfterPrefix.empty()) {
-          // The prefix is a string of some number of 0xff bytes, so includes the entire key space
-          // up through the last possible key. Hence, there is no end. (But if an end was specified
-          // earlier, that's still valid.)
-        } else {
-          keyAfterPrefix.back()++;
-          keyAfterPrefix.add('\0');
-          auto keyAfterPrefixStr = kj::String(keyAfterPrefix.releaseAsArray());
+          // Calculate the first key that sorts after all keys with the given prefix.
+          kj::Vector<char> keyAfterPrefix(prefix.size());
+          keyAfterPrefix.addAll(prefix);
+          while (!keyAfterPrefix.empty() && (byte)keyAfterPrefix.back() == 0xff) {
+            keyAfterPrefix.removeLast();
+          }
+          if (keyAfterPrefix.empty()) {
+            // The prefix is a string of some number of 0xff bytes, so includes the entire key space
+            // up through the last possible key. Hence, there is no end. (But if an end was specified
+            // earlier, that's still valid.)
+          } else {
+            keyAfterPrefix.back()++;
+            keyAfterPrefix.add('\0');
+            auto keyAfterPrefixStr = kj::String(keyAfterPrefix.releaseAsArray());
 
-          KJ_IF_SOME(e, end) {
-            if (e <= prefix) {
-              // No keys could possibly match both the end and the prefix.
-              return makeEmptyResult();
-            } else if (e.startsWith(prefix)) {
-              // `end` is within the prefix, so need not be modified.
+            KJ_IF_SOME(e, end) {
+              if (e <= prefix) {
+                // No keys could possibly match both the end and the prefix.
+                return makeEmptyResult();
+              } else if (e.startsWith(prefix)) {
+                // `end` is within the prefix, so need not be modified.
+              } else {
+                // `end` comes after all keys with the prefix, so we should stop at the end of the
+                // prefix.
+                end = kj::mv(keyAfterPrefixStr);
+              }
             } else {
-              // `end` comes after all keys with the prefix, so we should stop at the end of the
-              // prefix.
+              // We didn't have any end set, so use the end of the prefix range.
               end = kj::mv(keyAfterPrefixStr);
             }
-          } else {
-            // We didn't have any end set, so use the end of the prefix range.
-            end = kj::mv(keyAfterPrefixStr);
           }
         }
       }
     }
-  }
 
-  KJ_IF_SOME(e, end) {
-    if (e <= start) {
-      // Key range is empty.
-      return makeEmptyResult();
+    KJ_IF_SOME(e, end) {
+      if (e <= start) {
+        // Key range is empty.
+        return makeEmptyResult();
+      }
     }
-  }
 
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(ListOptions{}));
-  ActorCacheOps::ReadOptions readOptions = options;
+    auto options = configureOptions(kj::mv(maybeOptions).orDefault(ListOptions{}));
+    ActorCacheOps::ReadOptions readOptions = options;
 
-  auto result = reverse
-      ? getCache(OP_LIST).listReverse(kj::mv(start), kj::mv(end), limit, readOptions)
-      : getCache(OP_LIST).list(kj::mv(start), kj::mv(end), limit, readOptions);
-  return transformCacheResultWithCacheStatus(js, kj::mv(result),
-                                             options, &listResultsToMap);
+    auto result = reverse
+        ? getCache(OP_LIST).listReverse(kj::mv(start), kj::mv(end), limit, readOptions)
+        : getCache(OP_LIST).list(kj::mv(start), kj::mv(end), limit, readOptions);
+    return handleCacheResult(js, kj::mv(result), options, &listResultsToMap);
+  });
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::put(
@@ -405,73 +355,76 @@ jsg::Promise<void> DurableObjectStorageOperations::put(
     jsg::Optional<jsg::JsValue> value,
     jsg::Optional<PutOptions> maybeOptions,
     const jsg::TypeHandler<PutOptions>& optionsTypeHandler) {
-  // TODO(soon): Add tests of data generated at current versions to ensure we'll
-  // know before releasing any backwards-incompatible serializer changes,
-  // potentially checking the header in addition to the value.
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
-  KJ_SWITCH_ONEOF(keyOrEntries) {
-    KJ_CASE_ONEOF(k, kj::String) {
-      KJ_IF_SOME(v, value) {
-        return putOne(js, kj::mv(k), v, options);
-      } else {
-        JSG_FAIL_REQUIRE(TypeError, "put() called with undefined value.");
-      }
-    }
-    KJ_CASE_ONEOF(o, jsg::Dict<jsg::JsValue>) {
-      KJ_IF_SOME(v, value) {
-        KJ_IF_SOME(opt, optionsTypeHandler.tryUnwrap(js, v)) {
-          return putMultiple(js, kj::mv(o), configureOptions(kj::mv(opt)));
+  return enforceStorageApiBoundary([&]{
+    // TODO(soon): Add tests of data generated at current versions to ensure we'll
+    // know before releasing any backwards-incompatible serializer changes,
+    // potentially checking the header in addition to the value.
+    auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
+    KJ_SWITCH_ONEOF(keyOrEntries) {
+      KJ_CASE_ONEOF(k, kj::String) {
+        KJ_IF_SOME(v, value) {
+          return putOne(js, kj::mv(k), v, options);
         } else {
-          JSG_FAIL_REQUIRE(
-              TypeError,
-              "put() may only be called with a single key-value pair and optional options as put(key, value, options) or with multiple key-value pairs and optional options as put(entries, options)");
+          JSG_FAIL_REQUIRE(TypeError, "put() called with undefined value.");
         }
-      } else {
-        return putMultiple(js, kj::mv(o), options);
+      }
+      KJ_CASE_ONEOF(o, jsg::Dict<jsg::JsValue>) {
+        KJ_IF_SOME(v, value) {
+          KJ_IF_SOME(opt, optionsTypeHandler.tryUnwrap(js, v)) {
+            return putMultiple(js, kj::mv(o), configureOptions(kj::mv(opt)));
+          } else {
+            JSG_FAIL_REQUIRE(
+                TypeError,
+                "put() may only be called with a single key-value pair and optional options as put(key, value, options) or with multiple key-value pairs and optional options as put(entries, options)");
+          }
+        } else {
+          return putMultiple(js, kj::mv(o), options);
+        }
       }
     }
-  }
-  KJ_UNREACHABLE;
+    KJ_UNREACHABLE;
+  });
 }
-
 
 jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
     jsg::Lock& js,
     kj::Date scheduledTime,
     jsg::Optional<SetAlarmOptions> maybeOptions) {
-  JSG_REQUIRE(scheduledTime > kj::origin<kj::Date>(), TypeError,
-    "setAlarm() cannot be called with an alarm time <= 0");
+  return enforceStorageApiBoundary([&](){
+    JSG_REQUIRE(scheduledTime > kj::origin<kj::Date>(), TypeError,
+      "setAlarm() cannot be called with an alarm time <= 0");
 
-  auto& context = IoContext::current();
-  // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
-  // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
-  // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler. This
-  // is better than throwing even if we do have an alarm handler.
-  context.getActorOrThrow().assertCanSetAlarm();
+    auto& context = IoContext::current();
+    // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
+    // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
+    // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler.
+    // This is better than throwing even if we do have an alarm handler.
+    context.getActorOrThrow().assertCanSetAlarm();
 
-  auto options = configureOptions(maybeOptions.map([](auto& o) {
-    return PutOptions {
-      .allowConcurrency = o.allowConcurrency,
-      .allowUnconfirmed = o.allowUnconfirmed,
-      .noCache = false
-    };
-  }).orDefault(PutOptions{}));
+    auto options = configureOptions(maybeOptions.map([](auto& o) {
+      return PutOptions {
+        .allowConcurrency = o.allowConcurrency,
+        .allowUnconfirmed = o.allowUnconfirmed,
+        .noCache = false
+      };
+    }).orDefault(PutOptions{}));
 
-  // We fudge times set in the past to Date.now() to ensure that any one user can't DDOS the alarm
-  // polling system by putting dates far in the past and therefore getting sorted earlier by the index.
-  // This also ensures uniqueness of alarm times (which is required for correctness),
-  // in the situation where customers use a constant date in the past to indicate
-  // they want immediate execution.
-  kj::Date dateNowKjDate =
-      static_cast<int64_t>(dateNow()) * kj::MILLISECONDS + kj::UNIX_EPOCH;
+    // We fudge times set in the past to Date.now() to ensure that any one user can't DDOS the alarm
+    // polling system by putting dates far in the past and therefore getting sorted earlier by the
+    // index. This also ensures uniqueness of alarm times (which is required for correctness), in
+    // the situation where customers use a constant date in the past to indicate they want immediate
+    // execution.
+    kj::Date dateNowKjDate =
+        static_cast<int64_t>(dateNow()) * kj::MILLISECONDS + kj::UNIX_EPOCH;
 
-  auto maybeBackpressure = transformMaybeBackpressure(js, options,
-      getCache(OP_PUT_ALARM).setAlarm(kj::max(scheduledTime, dateNowKjDate), options));
+    auto result = getCache(OP_PUT_ALARM).setAlarm(kj::max(scheduledTime, dateNowKjDate), options);
+    auto maybeBackpressure = handleCacheBackpressure(js, kj::mv(result), options);
 
-  // setAlarm() is billed as a single write unit.
-  context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), 1));
+    // setAlarm() is billed as a single write unit.
+    context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), 1));
 
-  return kj::mv(maybeBackpressure);
+    return kj::mv(maybeBackpressure);
+  });
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::putOne(
@@ -486,8 +439,8 @@ jsg::Promise<void> DurableObjectStorageOperations::putOne(
 
   auto units = billingUnits(key.size() + buffer.size());
 
-  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(js, options,
-      getCache(OP_PUT).put(kj::mv(key), kj::mv(buffer), options));
+  auto result = getCache(OP_PUT).put(kj::mv(key), kj::mv(buffer), options);
+  auto maybeBackpressure = handleCacheBackpressure(js, kj::mv(result), options);
 
   auto& context = IoContext::current();
   context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), units));
@@ -499,44 +452,50 @@ kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> DurableObjectStorageOperations:
     jsg::Lock& js,
     kj::OneOf<kj::String, kj::Array<kj::String>> keys,
     jsg::Optional<PutOptions> maybeOptions) {
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
-  KJ_SWITCH_ONEOF(keys) {
-    KJ_CASE_ONEOF(s, kj::String) {
-      return deleteOne(js, kj::mv(s), options);
+  return enforceStorageApiBoundary([&]() -> kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> {
+    auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
+    KJ_SWITCH_ONEOF(keys) {
+      KJ_CASE_ONEOF(s, kj::String) {
+        return deleteOne(js, kj::mv(s), options);
+      }
+      KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
+        return deleteMultiple(js, kj::mv(a), options);
+      }
     }
-    KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
-      return deleteMultiple(js, kj::mv(a), options);
-    }
-  }
-  KJ_UNREACHABLE
+    KJ_UNREACHABLE
+  });
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
     jsg::Lock& js, jsg::Optional<SetAlarmOptions> maybeOptions) {
-  // Even if we do not have an alarm handler, we might once have had one. It's fine to remove that
-  // alarm or noop on the absence of one.
-  auto options = configureOptions(maybeOptions.map([](auto& o) {
-    return PutOptions {
-      .allowConcurrency = o.allowConcurrency,
-      .allowUnconfirmed = o.allowUnconfirmed,
-      .noCache = false
-    };
-  }).orDefault(PutOptions{}));
+  return enforceStorageApiBoundary([&]() {
+    // Even if we do not have an alarm handler, we might once have had one. It's fine to remove that
+    // alarm or noop on the absence of one.
+    auto options = configureOptions(maybeOptions.map([](auto& o) {
+      return PutOptions {
+        .allowConcurrency = o.allowConcurrency,
+        .allowUnconfirmed = o.allowUnconfirmed,
+        .noCache = false
+      };
+    }).orDefault(PutOptions{}));
 
-  return transformMaybeBackpressure(js, options,
-      getCache(OP_DELETE_ALARM).setAlarm(kj::none, options));
+    auto result = getCache(OP_DELETE_ALARM).setAlarm(kj::none, options);
+    return handleCacheBackpressure(js, kj::mv(result), options);
+  });
 }
 
 jsg::Promise<void> DurableObjectStorage::deleteAll(
     jsg::Lock& js, jsg::Optional<PutOptions> maybeOptions) {
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
+  return enforceStorageApiBoundary([&]() {
+    auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
 
-  auto deleteAll = cache->deleteAll(options);
+    auto deleteAll = cache->deleteAll(options);
 
-  auto& context = IoContext::current();
-  context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
+    auto& context = IoContext::current();
+    context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 
-  return transformMaybeBackpressure(js, options, kj::mv(deleteAll.backpressure));
+    return handleCacheBackpressure(js, kj::mv(deleteAll.backpressure), options);
+  });
 }
 
 void DurableObjectTransaction::deleteAll() {
@@ -547,8 +506,8 @@ jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
     jsg::Lock& js, kj::String key, const PutOptions& options) {
   ActorStorageLimits::checkMaxKeySize(key);
 
-  return transformCacheResult(js, getCache(OP_DELETE).delete_(kj::mv(key), options), options,
-      [](jsg::Lock&, bool value) {
+  auto result = getCache(OP_DELETE).delete_(kj::mv(key), options);
+  return handleCacheResult(js, kj::mv(result), options, [](jsg::Lock&, bool value, WasCached) {
     currentActorMetrics().addStorageDeletes(1);
     return value;
   });
@@ -562,8 +521,11 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getMultip
 
   auto numKeys = keys.size();
 
-  return transformCacheResult(js, getCache(OP_GET).get(kj::mv(keys), options),
-                              options, getMultipleResultsToMap(numKeys));
+  auto result = getCache(OP_GET).get(kj::mv(keys), options);
+  return handleCacheResult(js, kj::mv(result), options, [numKeys](
+      jsg::Lock& js, auto value, WasCached){
+    return getMultipleResultsToMap(js, kj::mv(value), numKeys);
+  });
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
@@ -575,9 +537,9 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
   uint32_t units = 0;
   for (auto& field : entries.fields) {
     if (field.value.isUndefined()) continue;
-    // We silently drop fields with value=undefined in putMultiple. There aren't many good options here, as
-    // deleting an undefined field is confusing, throwing could break otherwise working code, and
-    // a stray undefined here or there is probably closer to what the user desires.
+    // We silently drop fields with value=undefined in putMultiple. There aren't many good options
+    // here, as deleting an undefined field is confusing, throwing could break otherwise working
+    // code, and a stray undefined here or there is probably closer to what the user desires.
 
     ActorStorageLimits::checkMaxKeySize(field.name);
 
@@ -589,8 +551,8 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     kvs.add(ActorCacheOps::KeyValuePair { kj::mv(field.name), kj::mv(buffer) });
   }
 
-  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(js, options,
-      getCache(OP_PUT).put(kvs.releaseAsArray(), options));
+  auto result = getCache(OP_PUT).put(kvs.releaseAsArray(), options);
+  auto maybeBackpressure = handleCacheBackpressure(js, kj::mv(result), options);
 
   auto& context = IoContext::current();
   context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), units));
@@ -606,8 +568,8 @@ jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
 
   auto numKeys = keys.size();
 
-  return transformCacheResult(js, getCache(OP_DELETE).delete_(kj::mv(keys), options), options,
-      [numKeys](jsg::Lock&, uint count) -> int {
+  return handleCacheResult(js, getCache(OP_DELETE).delete_(kj::mv(keys), options), options,
+      [numKeys](jsg::Lock&, uint count, WasCached) -> int {
     currentActorMetrics().addStorageDeletes(numKeys);
     return count;
   });
@@ -628,8 +590,12 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
     bool isError;
   };
 
+  // HACK: Normally, we'd want to catch all non-tunneled exceptions thrown in this function to
+  // enforce a boundary around the storage api. However, any exceptions thrown in a
+  // `blockConcurrencyWhile()` callback will reset the durable object and emit a different sort of
+  // tunneled exception anyway, so we just wrap our synchronous calls to the actor cache instead.
   return context.blockConcurrencyWhile(js,
-      [callback = kj::mv(callback), &context, &cache = *cache]
+      [this, callback = kj::mv(callback), &context, &cache = *cache]
       (jsg::Lock& js) mutable -> jsg::Promise<TxnResult> {
     // Note that the call to `startTransaction()` is when the SQLite-backed implementation will
     // actually invoke `BEGIN TRANSACTION`, so it's important that we're inside the
@@ -638,33 +604,42 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
     //
     // For the ActorCache-based implementation, it doesn't matter when we call `startTransaction()`
     // as the method merely allocates an object and returns it with no side effects.
-    auto txn = jsg::alloc<DurableObjectTransaction>(context.addObject(cache.startTransaction()));
+    auto txn = enforceStorageApiBoundary([&](){
+      return jsg::alloc<DurableObjectTransaction>(context.addObject(cache.startTransaction()));
+    });
+    auto commit =
+        [this, txn = txn.addRef()](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) mutable {
+      auto result = TxnResult{
+        .value = kj::mv(value),
+        .isError = false,
+      };
+      if (txn->rolledBack) {
+        return js.resolvedPromise(kj::mv(result));
+      }
 
-    return js.resolvedPromise(txn.addRef())
-        .then(js, kj::mv(callback))
-        .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) mutable {
-      // In correct usage, `context` should not have changed here, particularly because we're in
-      // a critical section so it should have been impossible for any other context to receive
-      // control. However, depending on all that is a bit precarious. jsg::Promise::then() itself
-      // does NOT guarantee it runs in the same context (the application could have returned a
-      // custom Promise and then resolved in from some other context). So let's be safe and grab
-      // IoContext::current() again here, rather than capture it in the lambda.
-      auto& context = IoContext::current();
-      return context.awaitIoWithInputLock(js, txn->maybeCommit(),
-          [value = kj::mv(value)](jsg::Lock&) mutable {
-        return TxnResult { kj::mv(value), false };
-      });
-    }, [txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
+      bool allowConcurrency = false;
+      return handleCachePromise(js, allowConcurrency,
+          enforceStorageApiBoundary([&](){ return txn->maybeCommit(); }),
+          [result = kj::mv(result)](jsg::Lock&) mutable {return kj::mv(result); });
+    };
+    auto rollback = [this, txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
       // The transaction callback threw an exception. We don't actually want to reset the object,
       // we only want to roll back the transaction and propagate the exception. So, we carefully
       // pack the exception away into a value.
-      txn->maybeRollback();
+      if (!txn->rolledBack) {
+        enforceStorageApiBoundary([&](){
+          txn->maybeRollback();
+        });
+      }
       return js.resolvedPromise(TxnResult {
         // TODO(cleanup): Simplify this once exception is passed using jsg::JsRef instead
         // of jsg::V8Ref
         jsg::JsValue(exception.getHandle(js)).addRef(js), true
       });
-    });
+    };
+    return js.resolvedPromise(txn.addRef())
+        .then(js, kj::mv(callback))
+        .then(js, kj::mv(commit), kj::mv(rollback));
   }).then(js, [](jsg::Lock& js, TxnResult result) -> jsg::JsRef<jsg::JsValue> {
     if (result.isError) {
       js.throwException(result.value.getHandle(js));
@@ -677,61 +652,74 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
 jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     jsg::Lock& js,
     jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
-  KJ_IF_SOME(sqlite, cache->getSqliteDatabase()) {
-    // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
-    sqlite.notifyWrite();
+  return enforceStorageApiBoundary([&]() {
+    KJ_IF_SOME(sqlite, cache->getSqliteDatabase()) {
+      // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
+      sqlite.notifyWrite();
 
-    uint depth = transactionSyncDepth++;
-    KJ_DEFER(--transactionSyncDepth);
+      uint depth = transactionSyncDepth++;
+      KJ_DEFER(--transactionSyncDepth);
 
-    sqlite.run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
-    return js.tryCatch([&]() {
-      auto result = callback(js);
-      sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
-      return kj::mv(result);
-    }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
-      sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
-      js.throwException(kj::mv(exception));
-    });
-  } else {
-    JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
-  }
+      sqlite.run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
+      return js.tryCatch([&]() {
+        auto result = callback(js);
+        sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+        return kj::mv(result);
+      }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
+        sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
+        js.throwException(kj::mv(exception));
+      });
+    } else {
+      JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
+    }
+  });
 }
 
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
-  KJ_IF_SOME(p, cache->onNoPendingFlush()) {
-    // Note that we're not actually flushing since that will happen anyway once we go async. We're
-    // merely checking if we have any pending or in-flight operations, and providing a promise that
-    // resolves when they succeed. This promise only covers operations that were scheduled before
-    // this method was invoked. If the cache has to flush again later from future operations, this
-    // promise will resolve before they complete. If this promise were to reject, then the actor's
-    // output gate will be broken first and the isolate will not resume synchronous execution.
+  return enforceStorageApiBoundary([&]() {
+    KJ_IF_SOME(p, cache->onNoPendingFlush()) {
+      // Note that we're not actually flushing since that will happen anyway once we go async. We're
+      // merely checking if we have any pending or in-flight operations, and providing a promise
+      // that resolves when they succeed. This promise only covers operations that were scheduled
+      // before this method was invoked. If the cache has to flush again later from future
+      // operations, this promise will resolve before they complete. If this promise were to reject,
+      // then the actor's output gate will be broken first and the isolate will not resume
+      // synchronous execution.
 
-    auto& context = IoContext::current();
-    return context.awaitIo(js, kj::mv(p));
-  } else {
-    return js.resolvedPromise();
-  }
+      bool allowConcurrency = true;
+      return handleCachePromise(js, allowConcurrency, kj::mv(p));
+    } else {
+      return js.resolvedPromise();
+    }
+  });
 }
 
 jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
-  KJ_IF_SOME(db, cache->getSqliteDatabase()) {
-    return jsg::alloc<SqlStorage>(db, JSG_THIS);
-  } else {
-    JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
-  }
+  return enforceStorageApiBoundary([&]() {
+    KJ_IF_SOME(db, cache->getSqliteDatabase()) {
+      return jsg::alloc<SqlStorage>(db, JSG_THIS);
+    } else {
+      JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
+    }
+  });
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {
-  return cache->getCurrentBookmark();
+  return enforceStorageApiBoundary([&]() {
+    return cache->getCurrentBookmark();
+  });
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getBookmarkForTime(kj::Date timestamp) {
-  return cache->getBookmarkForTime(timestamp);
+  return enforceStorageApiBoundary([&]() {
+    return cache->getBookmarkForTime(timestamp);
+  });
 }
 
 kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestoreBookmark(kj::String bookmark) {
-  return cache->onNextSessionRestoreBookmark(bookmark);
+  return enforceStorageApiBoundary([&]() {
+    return cache->onNextSessionRestoreBookmark(bookmark);
+  });
 }
 
 ActorCacheOps& DurableObjectTransaction::getCache(OpName op) {
@@ -744,13 +732,15 @@ ActorCacheOps& DurableObjectTransaction::getCache(OpName op) {
 
 void DurableObjectTransaction::rollback() {
   if (rolledBack) return;  // allow multiple calls to rollback()
-  getCache(OP_ROLLBACK);  // just for the checks
-  KJ_IF_SOME(t, cacheTxn) {
-    auto prom = t->rollback();
-    IoContext::current().addWaitUntil(kj::mv(prom).attach(kj::mv(cacheTxn)));
-    cacheTxn = kj::none;
-  }
-  rolledBack = true;
+  return enforceStorageApiBoundary([&]() {
+    getCache(OP_ROLLBACK);  // just for the checks
+    KJ_IF_SOME(t, cacheTxn) {
+      auto prom = t->rollback();
+      IoContext::current().addWaitUntil(kj::mv(prom).attach(kj::mv(cacheTxn)));
+      cacheTxn = kj::none;
+    }
+    rolledBack = true;
+  });
 }
 
 kj::Promise<void> DurableObjectTransaction::maybeCommit() {
