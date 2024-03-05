@@ -105,6 +105,9 @@ export class MyService extends WorkerEntrypoint {
   get functionProperty() { return (a, b) => a - b; }
 
   get objectProperty() {
+    let nullPrototype = {foo: 123};
+    nullPrototype.__proto__ = null;
+
     return {
       func: (a, b) => a * b,
       deeper: {
@@ -112,6 +115,7 @@ export class MyService extends WorkerEntrypoint {
       },
       counter5: new MyCounter(5),
       nonRpc: new NonRpcClass(),
+      nullPrototype,
       someText: "hello",
     };
   }
@@ -141,6 +145,12 @@ export class MyService extends WorkerEntrypoint {
 
   async getNonRpcClass() {
     return {obj: new NonRpcClass()};
+  }
+
+  async getNullPrototypeObject() {
+    let obj = {foo: 123};
+    obj.__proto__ = null;
+    return obj;
   }
 
   async getFunction() {
@@ -394,6 +404,10 @@ export let namedServiceBinding = {
       name: "TypeError",
       message: "The RPC receiver does not implement the method \"nonRpc\"."
     });
+    await assert.rejects(() => env.MyService.objectProperty.nullPrototype.foo, {
+      name: "TypeError",
+      message: "The RPC receiver does not implement the method \"nullPrototype\"."
+    });
 
     // Extra-paranoid check that we can't access methods on env or ctx.
     await assert.rejects(() => env.MyService.objectProperty.env.MyService.noArgsMethod(), {
@@ -409,6 +423,11 @@ export let namedServiceBinding = {
     await assert.rejects(() => env.MyService.getNonRpcClass(), {
       name: "DataCloneError",
       message: 'Could not serialize object of type "NonRpcClass". This type does not support ' +
+               'serialization.'
+    });
+    await assert.rejects(() => env.MyService.getNullPrototypeObject(), {
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "Object". This type does not support ' +
                'serialization.'
     });
   },
