@@ -89,6 +89,11 @@ public:
         uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
         hasUploaded(false) {};
 
+  ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
+      : existingSnapshot(kj::mv(existingSnapshot)),
+        uploadMemorySnapshotCb(kj::none),
+        hasUploaded(false) {};
+
   ArtifactBundler()
       : existingSnapshot(kj::none),
         uploadMemorySnapshotCb(kj::none),

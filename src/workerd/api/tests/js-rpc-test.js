@@ -483,3 +483,20 @@ export let crossContextSharingDoesntWork = {
     await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), expectedError);
   },
 }
+
+// Test that exceptions thrown from async native functions have a proper stack trace. (This is
+// not specific to RPC but RPC is a convenient place to test it since we can easily define the
+// callee to throw an exception.)
+//
+// Note that it's only a *local* stack trace of the client-side stack leading up to the call. The
+// stack on the server side is not, at present, transmitted to the client.
+export let testAsyncStackTrace = {
+  async test(controller, env, ctx) {
+    try {
+      await env.MyService.throwingMethod();
+    } catch (e) {
+      // verify stack trace was produced
+      assert.strictEqual(e.stack.includes("at async Object.test"), true);
+    }
+  }
+}

@@ -1009,14 +1009,14 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
   auto& lock = getCurrentLock();
   jsg::Lock& js = lock;
 
-  auto [ jsPromise, resolver ] = js.newPromiseAndResolver<Result>();
-
   // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
   // and pass it into the then(). If the promise is rejected, and there is no rejection
   // handler attached to it, an unhandledrejection event will be scheduled, and scheduling
   // that event needs to be done within the appropriate frame to propagate the correct context.
 
   if constexpr (jsg::isVoid<T>()) {
+    auto [ jsPromise, resolver ] = js.newPromiseAndResolver<kj::Maybe<kj::Exception>>();
+
     addTask(promise.then([]() -> kj::Maybe<kj::Exception> {
       return kj::none;
     }, [](kj::Exception&& exception) -> kj::Maybe<kj::Exception> {
@@ -1028,15 +1028,27 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
                   maybeException = kj::mv(maybeException),
                   maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
-        KJ_IF_SOME(exception, maybeException) {
-          resolver.reject(lock, kj::mv(exception));
-        } else {
-          resolver.resolve(lock);
-        }
+        // We don't use `resolver.reject()` for exceptions here because if we convert the
+        // kj::Exception into a JS Error here, it won't have a useful stack trace. V8 can generate
+        // a good stack trace as long as we construct the Error inside of a promise continuation,
+        // so we use a `.then()` below that acutally checks for the kj::Exception and turn it into
+        // a JS Error.
+        resolver.resolve(kj::mv(maybeException));
       }, kj::mv(ilOrCs));
     }));
+
+    return jsPromise.then(js, [](jsg::Lock& js, kj::Maybe<kj::Exception>&& maybeEx) -> Result {
+      KJ_IF_SOME(e, maybeEx) {
+        // Now that we're in a promise continuation, we can convert the error and get a good stack
+        // trace.
+        js.throwException(kj::mv(e));
+      }
+    });
   } else {
     typedef kj::OneOf<T, kj::Exception> ResultOrException;
+    typedef kj::OneOf<Result, kj::Exception> IoResultOrException;
+    auto [ jsPromise, resolver ] = js.newPromiseAndResolver<IoResultOrException>();
+
     addTask(promise.then([](T&& result) -> ResultOrException {
       return kj::mv(result);
     }, [](kj::Exception&& exception) -> ResultOrException {
@@ -1058,14 +1070,31 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
             }
           }
           KJ_CASE_ONEOF(exception, kj::Exception) {
-            resolver.reject(lock, kj::mv(exception));
+            // We don't use `resolver.reject()` here because if we convert the kj::Exception into
+            // a JS Error here, it won't have a useful stack trace. V8 can generate a good stack
+            // trace as long as we construct the Error inside of a promise continuation, so we use
+            // a `.then()` below that acutally extracts the kj::Exception and turn it into a JS
+            // Error.
+            resolver.resolve(kj::mv(exception));
           }
         }
       }, kj::mv(ilOrCs));
     }));
-  }
 
-  return kj::mv(jsPromise);
+    return jsPromise.then(js, [](jsg::Lock& js, IoResultOrException&& resultOrException) -> Result {
+      KJ_SWITCH_ONEOF(resultOrException) {
+        KJ_CASE_ONEOF(result, Result) {
+          return kj::mv(result);
+        }
+        KJ_CASE_ONEOF(exception, kj::Exception) {
+          // Now that we're in a promise continuation, we can convert the error and get a good
+          // stack trace.
+          js.throwException(kj::mv(exception));
+        }
+      }
+      KJ_UNREACHABLE;
+    });
+  }
 }
 
 template <typename T>
