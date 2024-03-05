@@ -2,6 +2,23 @@ import { parseTarInfo } from "pyodide-internal:tar";
 import { createTarFS } from "pyodide-internal:tarfs";
 import { createMetadataFS } from "pyodide-internal:metadatafs";
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
+import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
+
+const canonicalizeNameRegex = /[-_.]+/g;
+
+/**
+ * Normalize a package name. Port of Python's packaging.utils.canonicalize_name.
+ * @param name The package name to normalize.
+ * @returns The normalized package name.
+ * @private
+ */
+export function canonicalizePackageName(name) {
+  return name.replace(canonicalizeNameRegex, "-").toLowerCase();
+}
+
+const STDLIB_PACKAGES = Object.values(LOCKFILE.packages)
+  .filter(({install_dir}) => install_dir === "stdlib")
+  .map(({name}) => canonicalizePackageName(name));
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -289,7 +306,7 @@ function buildSitePackages(tarInfo, requirements) {
     parts: [],
   };
 
-  for(const req of ["stdlib", ...requirements]) {
+  for(const req of new Set([...STDLIB_PACKAGES, ...requirements])) {
     const child = tarInfo.children.get(req);
     if(!child) {
       throw new Error(`Requirement ${req} not found in pyodide packages tar`);

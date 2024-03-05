@@ -1,7 +1,7 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { loadPyodide, mountLib } from "pyodide-internal:python";
+import { loadPyodide, mountLib, canonicalizePackageName } from "pyodide-internal:python";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
 
@@ -59,18 +59,6 @@ function patchLoadPackage(pyodide) {
 
 function disabledLoadPackage() {
   throw new Error("We only use loadPackage in workerd");
-}
-
-const canonicalizeNameRegex = /[-_.]+/g;
-
-/**
- * Normalize a package name. Port of Python's packaging.utils.canonicalize_name.
- * @param name The package name to normalize.
- * @returns The normalized package name.
- * @private
- */
-function canonicalizePackageName(name) {
-  return name.replace(canonicalizeNameRegex, "-").toLowerCase();
 }
 
 async function getTransitiveRequirements(pyodide, requirements) {
