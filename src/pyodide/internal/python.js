@@ -2,6 +2,24 @@ import { parseTarInfo } from "pyodide-internal:tar";
 import { createTarFS } from "pyodide-internal:tarfs";
 import { createMetadataFS } from "pyodide-internal:metadatafs";
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
+import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
+
+const canonicalizeNameRegex = /[-_.]+/g;
+
+/**
+ * Normalize a package name. Port of Python's packaging.utils.canonicalize_name.
+ * @param name The package name to normalize.
+ * @returns The normalized package name.
+ * @private
+ */
+export function canonicalizePackageName(name) {
+  return name.replace(canonicalizeNameRegex, "-").toLowerCase();
+}
+
+// The "name" field in the lockfile is not normalized, so we need to normalize here
+const STDLIB_PACKAGES = Object.values(LOCKFILE.packages)
+  .filter(({ install_dir }) => install_dir === "stdlib")
+  .map(({ name }) => canonicalizePackageName(name));
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -277,8 +295,46 @@ function simpleRunPython(emscriptenModule, code) {
   }
 }
 
-function mountLib(pyodide) {
-  const [info, _] = parseTarInfo();
+function buildSitePackages(tarInfo, requirements) {
+  const res = {
+    children: new Map(),
+    mode: 0o777,
+    type: 5,
+    modtime: 0,
+    size: 0,
+    path: "",
+    name: "",
+    parts: [],
+  };
+
+  for (const req of new Set([...STDLIB_PACKAGES, ...requirements])) {
+    const child = tarInfo.children.get(req);
+    if (!child) {
+      throw new Error(`Requirement ${req} not found in pyodide packages tar`);
+    }
+    child.children.forEach((val, key) => {
+      if (res.children.has(key)) {
+        throw new Error(
+          `File/folder ${key} being written by multiple packages`,
+        );
+      }
+      res.children.set(key, val);
+    });
+  }
+
+  return res;
+}
+
+export function mountLib(pyodide, requirements, isWorkerd) {
+  const [origTarInfo, _] = parseTarInfo();
+  let info;
+  // in workerd, the tar file is the /site-packages directory
+  // in edgeworker, we need to build the right /site-packages directory using the tar file and our requirements
+  if (isWorkerd) {
+    info = origTarInfo;
+  } else {
+    info = buildSitePackages(origTarInfo, requirements);
+  }
   const tarFS = createTarFS(pyodide._module);
   const mdFS = createMetadataFS(pyodide._module);
   const pymajor = pyodide._module._py_version_major();
@@ -334,7 +390,6 @@ export async function loadPyodide(context, lockfile, indexURL) {
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
   emscriptenModule.API.finalizeBootstrap();
   const pyodide = emscriptenModule.API.public_api;
-  mountLib(pyodide);
 
   // This is just here for our test suite. Ugly but just about the only way to test this.
   if (isTestMode) {

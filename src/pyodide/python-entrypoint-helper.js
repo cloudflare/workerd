@@ -1,13 +1,17 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { loadPyodide } from "pyodide-internal:python";
+import {
+  loadPyodide,
+  mountLib,
+  canonicalizePackageName,
+} from "pyodide-internal:python";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
+import { default as PYODIDE_BUCKET } from "pyodide-internal:generated/pyodide-bucket.json";
 
 const IS_WORKERD = MetadataReader.isWorkerd();
-const WORKERD_INDEX_URL =
-  "https://pub-45d734c4145d4285b343833ee450ef38.r2.dev/v1/";
+const WORKERD_INDEX_URL = PYODIDE_BUCKET.PYODIDE_PACKAGE_BUCKET_URL;
 
 /**
  * Import the data from the data module es6 import called jsModName.py into a module called
@@ -61,10 +65,7 @@ function disabledLoadPackage() {
   throw new Error("We only use loadPackage in workerd");
 }
 
-async function setupPackages(pyodide) {
-  patchLoadPackage(pyodide);
-
-  const requirements = MetadataReader.getRequirements();
+async function getTransitiveRequirements(pyodide, requirements) {
   // resolve transitive dependencies of requirements and if IN_WORKERD install them from the cdn.
   let packageDatas;
   if (IS_WORKERD) {
@@ -76,7 +77,11 @@ async function setupPackages(pyodide) {
       .values()
       .map(({ packageData }) => packageData);
   }
-  const transitiveRequirements = new Set(packageDatas.map(({ name }) => name));
+  return new Set(packageDatas.map(({ name }) => name));
+}
+
+async function setupPackages(pyodide, transitiveRequirements) {
+  mountLib(pyodide, transitiveRequirements, IS_WORKERD);
 
   // install any extra packages into the site-packages directory, so calculate where that is.
   const pymajor = pyodide._module._py_version_major();
@@ -113,7 +118,16 @@ function getPyodide(ctx) {
     // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
     // When we do it in top level scope we seem to get a broken file system.
     const pyodide = await loadPyodide(ctx, LOCKFILE, WORKERD_INDEX_URL);
-    await setupPackages(pyodide);
+    patchLoadPackage(pyodide);
+    const requirements = MetadataReader.getRequirements().map(
+      canonicalizePackageName,
+    );
+    const transitiveRequirements = new Set(
+      Array.from(await getTransitiveRequirements(pyodide, requirements)).map(
+        canonicalizePackageName,
+      ),
+    );
+    await setupPackages(pyodide, transitiveRequirements);
     const mainModule = pyimportMainModule(pyodide);
     return { mainModule };
   })();
@@ -128,7 +142,7 @@ export default {
         throw new Error("Python Worker should define an on_fetch method");
       }
       return await mainModule.on_fetch.callRelaxed(request, env, ctx);
-    } catch(e) {
+    } catch (e) {
       console.warn(e.stack);
       throw e;
     }
