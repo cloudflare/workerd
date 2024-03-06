@@ -462,7 +462,7 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
       .exclusiveJoin(context->abortPromise.addBranch().then([]{}, [](kj::Exception&&){}));
 }
 
-kj::Promise<bool> IoContext::IncomingRequest::finishScheduled() {
+kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::IncomingRequest::finishScheduled() {
   // TODO(someday): In principle we should be able to support delivering the "scheduled" event type
   //   to an actor, and this may be important if we open up the whole of WorkerInterface to be
   //   callable from any stub. However, the logic around async tasks would have to be different. We
@@ -476,12 +476,17 @@ kj::Promise<bool> IoContext::IncomingRequest::finishScheduled() {
   KJ_ASSERT(context->incomingRequests.size() == 1);
   context->incomingRequests.front().waitedForWaitUntil = true;
 
-  auto timeoutPromise = context->limitEnforcer->limitScheduled().then([] { return false; });
+  auto timeoutPromise = context->limitEnforcer->limitScheduled().then([] {
+    return IoContext_IncomingRequest::FinishScheduledResult::TIMEOUT;
+  });
   return context->waitUntilTasks.onEmpty()
-      .then([]() { return true; })
+      .then([]() { return IoContext_IncomingRequest::FinishScheduledResult::COMPLETED; })
       .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->abortPromise.addBranch()
-          .then([] { return false; }, [](kj::Exception&&) { return false; }));
+      .exclusiveJoin(context->abortPromise.addBranch().then([] {
+        return IoContext_IncomingRequest::FinishScheduledResult::ABORTED;
+      }, [](kj::Exception&&) {
+        return IoContext_IncomingRequest::FinishScheduledResult::ABORTED;
+      }));
 }
 
 class IoContext::PendingEvent: public kj::Refcounted {

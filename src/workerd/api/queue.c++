@@ -574,12 +574,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   // TODO(soon): There's a good chance we'll want a different wall-clock timeout for queue handlers
   // than for scheduled workers, but it's not at all clear yet to me what it should be, so just
   // reuse the scheduled worker logic and timeout for now.
-  auto completed = co_await incomingRequest->finishScheduled();
+  auto result = co_await incomingRequest->finishScheduled();
+  bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
 
-  // Log some debug info if the request did not complete fully:
+  // Log some debug info if the request timed out.
   // In particular, detect whether or not the users queue() handler function completed
   // and include info about other waitUntil tasks that may have caused the request to timeout.
-  if (!completed) {
+  if (result == IoContext_IncomingRequest::FinishScheduledResult::TIMEOUT) {
     kj::String status;
     if (queueEventHolder->event.get() == nullptr) {
       status = kj::str("Empty");
@@ -599,8 +600,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
         }
       }
     }
+    auto scriptId = incomingRequest->getContext().getWorker().getScript().getId();
     auto tasks = incomingRequest->getContext().getWaitUntilTasks().trace();
-    KJ_LOG(WARNING, "NOSENTRY queue event timed out", status, tasks);
+    KJ_LOG(WARNING, "NOSENTRY queue event hit timeout", scriptId, status, tasks);
   }
 
   co_return WorkerInterface::CustomEvent::Result {
