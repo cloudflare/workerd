@@ -258,7 +258,7 @@ initPythonIfNeeded(kj::Maybe<kj::StringPtr>& entrypointName, kj::Own<workerd::Io
     // on a kj::Own<void>. Work around this by making a LimitScopeHolder class that holds the
     // limitScope and then attach the limitScopeHolder to the IoContext.
     class LimitScopeHolder {
-      public:
+    public:
       kj::Own<void> limitScope;
       LimitScopeHolder(kj::Own<void> limitScope) : limitScope(kj::mv(limitScope)) {}
     };
