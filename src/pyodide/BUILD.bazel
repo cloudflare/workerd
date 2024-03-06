@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
@@ -115,6 +116,18 @@ REPLACEMENTS = [
     ]
 ]
 
+load("//:build/pyodide_bucket.bzl", "PYODIDE_PACKAGE_BUCKET_URL")
+
+PYODIDE_BUCKET_MODULE = json.encode({
+    "PYODIDE_PACKAGE_BUCKET_URL": PYODIDE_PACKAGE_BUCKET_URL,
+})
+
+write_file(
+    name = "pyodide-bucket.json@rule",
+    out = "generated/pyodide-bucket.json",
+    content = [PYODIDE_BUCKET_MODULE],
+)
+
 expand_template(
     name = "pyodide.asm.js@rule",
     out = "generated/pyodide.asm.js",
@@ -130,7 +143,7 @@ wd_js_bundle(
         "internal/*.py",
         "internal/patches/*.py",
     ]),
-    internal_json_modules = ["generated/pyodide-lock.json"],
+    internal_json_modules = ["generated/pyodide-lock.json", "generated/pyodide-bucket.json"],
     internal_modules = [
         "generated/pyodide.asm.js",
     ] + glob([
@@ -143,5 +156,6 @@ wd_js_bundle(
         "pyodide.asm.wasm@rule",
         "pyodide-lock.js@rule",
         "python_stdlib.zip@rule",
+        "pyodide-bucket.json@rule",
     ],
 )

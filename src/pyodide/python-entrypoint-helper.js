@@ -4,10 +4,10 @@
 import { loadPyodide, mountLib, canonicalizePackageName } from "pyodide-internal:python";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
+import { default as PYODIDE_BUCKET } from "pyodide-internal:generated/pyodide-bucket.json";
 
 const IS_WORKERD = MetadataReader.isWorkerd();
-const WORKERD_INDEX_URL =
-  "https://pub-45d734c4145d4285b343833ee450ef38.r2.dev/v1/";
+const WORKERD_INDEX_URL = PYODIDE_BUCKET.PYODIDE_PACKAGE_BUCKET_URL;
 
 /**
  * Import the data from the data module es6 import called jsModName.py into a module called
