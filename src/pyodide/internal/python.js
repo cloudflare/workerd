@@ -16,9 +16,10 @@ export function canonicalizePackageName(name) {
   return name.replace(canonicalizeNameRegex, "-").toLowerCase();
 }
 
+// The "name" field in the lockfile is not normalized, so we need to normalize here
 const STDLIB_PACKAGES = Object.values(LOCKFILE.packages)
-  .filter(({install_dir}) => install_dir === "stdlib")
-  .map(({name}) => canonicalizePackageName(name));
+  .filter(({ install_dir }) => install_dir === "stdlib")
+  .map(({ name }) => canonicalizePackageName(name));
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -306,14 +307,16 @@ function buildSitePackages(tarInfo, requirements) {
     parts: [],
   };
 
-  for(const req of new Set([...STDLIB_PACKAGES, ...requirements])) {
+  for (const req of new Set([...STDLIB_PACKAGES, ...requirements])) {
     const child = tarInfo.children.get(req);
-    if(!child) {
+    if (!child) {
       throw new Error(`Requirement ${req} not found in pyodide packages tar`);
     }
     child.children.forEach((val, key) => {
-      if(res.children.has(key)) {
-        throw new Error(`File/folder ${key} being written by multiple packages`);
+      if (res.children.has(key)) {
+        throw new Error(
+          `File/folder ${key} being written by multiple packages`,
+        );
       }
       res.children.set(key, val);
     });

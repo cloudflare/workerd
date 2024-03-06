@@ -1,7 +1,11 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { loadPyodide, mountLib, canonicalizePackageName } from "pyodide-internal:python";
+import {
+  loadPyodide,
+  mountLib,
+  canonicalizePackageName,
+} from "pyodide-internal:python";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
 import { default as PYODIDE_BUCKET } from "pyodide-internal:generated/pyodide-bucket.json";
@@ -115,9 +119,14 @@ function getPyodide(ctx) {
     // When we do it in top level scope we seem to get a broken file system.
     const pyodide = await loadPyodide(ctx, LOCKFILE, WORKERD_INDEX_URL);
     patchLoadPackage(pyodide);
-    const requirements = MetadataReader.getRequirements().map(canonicalizePackageName);
-    const transitiveRequirements = new Set(Array.from(await getTransitiveRequirements(pyodide, requirements))
-      .map(canonicalizePackageName));
+    const requirements = MetadataReader.getRequirements().map(
+      canonicalizePackageName,
+    );
+    const transitiveRequirements = new Set(
+      Array.from(await getTransitiveRequirements(pyodide, requirements)).map(
+        canonicalizePackageName,
+      ),
+    );
     await setupPackages(pyodide, transitiveRequirements);
     const mainModule = pyimportMainModule(pyodide);
     return { mainModule };
@@ -133,7 +142,7 @@ export default {
         throw new Error("Python Worker should define an on_fetch method");
       }
       return await mainModule.on_fetch.callRelaxed(request, env, ctx);
-    } catch(e) {
+    } catch (e) {
       console.warn(e.stack);
       throw e;
     }
