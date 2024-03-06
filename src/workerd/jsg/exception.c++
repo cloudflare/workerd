@@ -19,9 +19,7 @@ kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage) {
 namespace {
   constexpr auto ERROR_PREFIX_DELIM = "; "_kj;
   constexpr auto ERROR_REMOTE_PREFIX = "remote."_kj;
-  constexpr auto ERROR_TUNNELED_PREFIX_CFJS = "cfjs."_kj;
   constexpr auto ERROR_TUNNELED_PREFIX_JSG = "jsg."_kj;
-  constexpr auto ERROR_INTERNAL_SOURCE_PREFIX_CFJS = "cfjs-internal."_kj;
   constexpr auto ERROR_INTERNAL_SOURCE_PREFIX_JSG = "jsg-internal."_kj;
 }
 
@@ -65,29 +63,11 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
 
   auto tryExtractError = [](kj::StringPtr msg, Properties properties)
       -> kj::Maybe<TunneledErrorType> {
-    if (msg.startsWith(ERROR_TUNNELED_PREFIX_CFJS)) {
-      return TunneledErrorType{
-        .message = msg.slice(ERROR_TUNNELED_PREFIX_CFJS.size()),
-        .isJsgError = true,
-        .isInternal = false,
-        .isFromRemote = properties.isFromRemote,
-        .isDurableObjectReset = properties.isDurableObjectReset,
-      };
-    }
     if (msg.startsWith(ERROR_TUNNELED_PREFIX_JSG)) {
       return TunneledErrorType{
         .message = msg.slice(ERROR_TUNNELED_PREFIX_JSG.size()),
         .isJsgError = true,
         .isInternal = false,
-        .isFromRemote = properties.isFromRemote,
-        .isDurableObjectReset = properties.isDurableObjectReset,
-      };
-    }
-    if (msg.startsWith(ERROR_INTERNAL_SOURCE_PREFIX_CFJS)) {
-      return TunneledErrorType{
-        .message = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_CFJS.size()),
-        .isJsgError = true,
-        .isInternal = true,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
       };
