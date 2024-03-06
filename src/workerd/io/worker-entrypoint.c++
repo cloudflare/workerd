@@ -247,7 +247,7 @@ initPythonIfNeeded(kj::Maybe<kj::StringPtr>& entrypointName, kj::Own<workerd::Io
     KJ_IF_SOME(initPython, handler->initPython) {
       res = initPython(lock, handler->getCtx());
     } else {
-      KJ_ASSERT(false, "Internal error, expected to see initPython on handler.");
+      KJ_FAIL_REQUIRE("Internal error, expected to see initPython on handler.");
     }
 
     // Goal: attach a callback to the promise so that limitScope isn't dropped until the callback
