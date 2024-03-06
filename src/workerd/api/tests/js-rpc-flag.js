@@ -12,6 +12,10 @@ export class DurableObjectExample {
   foo() {
     return 123;
   }
+
+  fetch(req) {
+    return new Response(req.method + " " + req.url);
+  }
 }
 
 export default {
@@ -19,6 +23,10 @@ export default {
     let id = env.ns.idFromName("foo");
     let obj = env.ns.get(id);
     assert.strictEqual(await obj.foo(), 123);
+
+    // Test that the object has the old helper get() method that wraps fetch(). This is deprecated,
+    // but enabled because this test's compat date is before the date when these went away.
+    assert.strictEqual(await obj.get("http://foo"), "GET http://foo");
   }
 }
 

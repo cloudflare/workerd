@@ -581,13 +581,14 @@ public:
       JSG_METHOD(scheduled);
     }
 
-    // TODO(soon): Deprecate get/put/delete convenience methods, remove via compat flag. These were
-    // never documented for service bindings. Extremely old KV bindings relied on them, before
-    // KV had its own separate API implementation -- anyone with such old KV bindings may have to
-    // recreate them when updating their compat flags for this removal.
-    JSG_METHOD(get);
-    JSG_METHOD(put);
-    JSG_METHOD_NAMED(delete, delete_);
+    if (!flags.getFetcherNoGetPutDelete()) {
+      // These helpers just map to `fetch()` with the corresponding HTTP method. They were never
+      // documented and probably never should have been defined. We are removing them to make room
+      // for RPC.
+      JSG_METHOD(get);
+      JSG_METHOD(put);
+      JSG_METHOD_NAMED(delete, delete_);
+    }
 
     if (flags.getWorkerdExperimental()) {
       JSG_WILDCARD_PROPERTY(getRpcMethod);

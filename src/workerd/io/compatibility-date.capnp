@@ -390,4 +390,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Python modules are restricted in EWC.
   #
   # WARNING: Python Workers are still an experimental feature and thus subject to change.
+
+  fetcherNoGetPutDelete @44 :Bool
+      $compatEnableFlag("fetcher_no_get_put_delete")
+      $compatDisableFlag("fetcher_has_get_put_delete")
+      $compatEnableDate("2024-03-26");
+  # Historically, the `Fetcher` type -- which is the type of Service Bindings, and also the parent
+  # type of Durable Object stubs -- had special methods `get()`, `put()`, and `delete()`, which
+  # were shortcuts for calling `fetch()` with the corresponding HTTP method. These methods were
+  # never documented.
+  #
+  # To make room for people to define their own RPC methods with these names, this compat flag
+  # makes them no longer defined.
 }
