@@ -78,7 +78,6 @@ async function getTransitiveRequirements(pyodide, requirements) {
 
 async function setupPackages(pyodide, transitiveRequirements) {
   mountLib(pyodide, transitiveRequirements, IS_WORKERD);
-  patchLoadPackage(pyodide);
 
   // install any extra packages into the site-packages directory, so calculate where that is.
   const pymajor = pyodide._module._py_version_major();
@@ -115,6 +114,7 @@ function getPyodide(ctx) {
     // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
     // When we do it in top level scope we seem to get a broken file system.
     const pyodide = await loadPyodide(ctx, LOCKFILE, WORKERD_INDEX_URL);
+    patchLoadPackage(pyodide);
     const requirements = MetadataReader.getRequirements().map(canonicalizePackageName);
     const transitiveRequirements = new Set(Array.from(await getTransitiveRequirements(pyodide, requirements))
       .map(canonicalizePackageName));
