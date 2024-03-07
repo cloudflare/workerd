@@ -619,11 +619,15 @@ public:
                  paramDisposalGroup = kj::mv(invocationResult.paramDisposalGroup)]
                 (jsg::Lock& js, jsg::Value value) mutable {
           jsg::JsValue resultValue(value.getHandle(js));
+
+          // Call makeCallPipeline before serializing becaues it may need to extract the disposer.
+          auto maybePipeline = makeCallPipeline(js, resultValue);
+
           serializeJsValue(js, resultValue, [&](capnp::MessageSize hint) {
             hint.wordCount += capnp::sizeInWords<CallResults>();
             hint.capCount += 1;
             auto results = callContext.initResults(hint);
-            KJ_IF_SOME(p, makeCallPipeline(js, resultValue)) {
+            KJ_IF_SOME(p, maybePipeline) {
               results.setCallPipeline(kj::mv(p));
             }
             return results.initResult();
@@ -972,6 +976,17 @@ public:
     }
   }
 
+  // Use this version of the constructor to pass the dispose function separately.
+  TransientJsRpcTarget(jsg::Lock& js, IoContext& ioCtx, jsg::JsObject object,
+                       kj::Maybe<v8::Local<v8::Function>> dispose,
+                       bool allowInstanceProperties = false)
+      : JsRpcTargetBase(ioCtx), object(js, object),
+        dispose(dispose.map([&](v8::Local<v8::Function> func) {
+          return jsg::V8Ref<v8::Function>(js.v8Isolate, func);
+        })),
+        allowInstanceProperties(allowInstanceProperties),
+        pendingEvent(ioCtx.registerPendingEvent()) {}
+
   ~TransientJsRpcTarget() noexcept(false) {
     // If we have a disposer, and the I/O context is not already destroyed, arrange to call the
     // disposer.
@@ -1014,16 +1029,33 @@ static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& js, jsg::
   return js.withinHandleScope([&]() -> kj::Maybe<rpc::JsRpcTarget::Client> {
     jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), return kj::none);
 
+    KJ_IF_SOME(stub, obj.tryUnwrapAs<JsRpcStub>(js)) {
+      // Just grab the stub directly!
+      return stub->getClient();
+    }
+
+    kj::Maybe<v8::Local<v8::Function>> maybeDispose;
+
+    {
+      jsg::JsValue disposeProperty = obj.get(js, "dispose");
+      if (disposeProperty.isFunction()) {
+        maybeDispose = v8::Local<v8::Value>(disposeProperty).As<v8::Function>();
+      }
+    }
+
     bool allowInstanceProperties;
     if (obj.getPrototype() == js.obj().getPrototype()) {
       // It's a plain object. Permit instance properties.
       allowInstanceProperties = true;
+
+      if (maybeDispose != kj::none) {
+        // We don't want the disposer to be serialized, so delete it from the object. (Remember
+        // that a new `dispose()` method will always be added on the client side).
+        obj.delete_(js, "dispose");
+      }
     } else if (obj.isInstanceOf<JsRpcTarget>(js)) {
       // It's an RPC target. Allow only class properties.
       allowInstanceProperties = false;
-    } else KJ_IF_SOME(stub, obj.tryUnwrapAs<JsRpcStub>(js)) {
-      // Just grab the stub directly!
-      return stub->getClient();
     } else if (isFunctionForRpc(js, obj)) {
       // It's a plain function. We'll allow its instance properties to be accessed, like with a
       // plain object. It will also be callable.
@@ -1035,7 +1067,7 @@ static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& js, jsg::
     }
 
     return rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(
-        js, IoContext::current(), obj, allowInstanceProperties));
+        js, IoContext::current(), obj, maybeDispose, allowInstanceProperties));
   });
 }
 
