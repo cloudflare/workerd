@@ -2442,6 +2442,10 @@ auto runInV8Stack(auto callback) {
   return V8StackScope::runInV8StackImpl(__builtin_frame_address(0), kj::mv(callback));
 };
 
+// Returns true if we are currently executing C++ destructors as a result of garbage collection
+// occurring.
+bool isInGcDestructor();
+
 // =======================================================================================
 // inline implementation details
 

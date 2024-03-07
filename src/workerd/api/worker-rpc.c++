@@ -73,9 +73,16 @@ void serializeJsValue(jsg::Lock& js, jsg::JsValue value, Func makeBuilder) {
   }
 }
 
+struct DeserializeResult {
+  jsg::JsValue value;
+  kj::Own<RpcStubDisposalGroup> disposalGroup;
+};
+
 // Call to construct a JS value from an `rpc::JsValue`.
-jsg::JsValue deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader) {
-  RpcDeserializerExternalHander externalHandler(reader.getExternals());
+DeserializeResult deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader) {
+  auto disposalGroup = kj::heap<RpcStubDisposalGroup>();
+
+  RpcDeserializerExternalHander externalHandler(reader.getExternals(), *disposalGroup);
 
   jsg::Deserializer deserializer(js, reader.getV8Serialized(), kj::none, kj::none,
       jsg::Deserializer::Options {
@@ -84,7 +91,33 @@ jsg::JsValue deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader) {
     .externalHandler = externalHandler,
   });
 
-  return deserializer.readValue(js);
+  return { deserializer.readValue(js), kj::mv(disposalGroup) };
+}
+
+// Does deserializeJsValue() and then adds a `dispose()` method to the returned object (if it is
+// an object) which disposes all stubs therein.
+jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js, rpc::JsValue::Reader reader) {
+  auto [ value, disposalGroup ] = deserializeJsValue(js, reader);
+
+  KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
+    if (obj.isInstanceOf<JsRpcStub>(js)) {
+      // We're returning a plain stub. We don't need to override its `dispoose` method.
+      disposalGroup->disownAll();
+    } else {
+      // Add a dispose method to the return object that disposes the DisposalGroup.
+      v8::Local<v8::Value> func = js.wrapSimpleFunction(js.v8Context(),
+          [disposalGroup = kj::mv(disposalGroup)]
+          (jsg::Lock&, const v8::FunctionCallbackInfo<v8::Value>&) mutable {
+        disposalGroup->disposeAll();
+      });
+      obj.set(js, "dispose", jsg::JsValue(func));
+    }
+  } else {
+    // Result wasn't an object, so it must not contain any stubs.
+    KJ_ASSERT(disposalGroup->empty());
+  }
+
+  return value;
 }
 
 // A membrane applied which detects when no capabilities are held any longer, at which point it
@@ -254,7 +287,7 @@ JsRpcPromiseAndPipleine callImpl(
     return {
       .promise = jsg::JsPromise(js.wrapSimplePromise(ioContext.awaitIo(js, kj::mv(callResult),
           [](jsg::Lock& js, auto result) -> jsg::Value {
-        return jsg::Value(js.v8Isolate, deserializeJsValue(js, result.getResult()));
+        return jsg::Value(js.v8Isolate, deserializeRpcReturnValue(js, result.getResult()));
       }))),
       .pipeline = kj::mv(callResult),
     };
@@ -366,10 +399,85 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcPromise::getProperty(jsg::Lock& js, kj::
   return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
+JsRpcStub::JsRpcStub(
+    IoOwn<rpc::JsRpcTarget::Client> capnpClient, RpcStubDisposalGroup& disposalGroup)
+    : capnpClient(kj::mv(capnpClient)),
+      disposalGroup(disposalGroup) {
+  disposalGroup.list.add(*this);
+}
+
+JsRpcStub::~JsRpcStub() noexcept(false) {
+  KJ_IF_SOME(d, disposalGroup) {
+    d.list.remove(*this);
+  }
+}
+
+RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
+  if (jsg::isInGcDestructor()) {
+    // If the disposal group was dropped as a result of garbage collection, we should NOT actually
+    // dispose any stubs. In particular:
+    // * If an application never invokes dispose() on an RPC result and the result is GC'd, the
+    //   app could still be holding onto stubs that came from that result. We don't want to
+    //   dispose those unexpectedly.
+    // * If an incoming RPC call does something like `await new Promise(() => {})` to hang
+    //   forever, the promise reaction can be GC'd even though the call didn't really complete.
+    //   We don't want to dispose param stubs in this case.
+    disownAll();
+  } else {
+    // However, if we're destroying the RpcStubDisposalGroup NOT as a result of GC, this probably
+    // means one of:
+    // * This is the disposal group for an incoming RPC call, and that call completed. The group
+    //   was attached to the completion continuation, which executed, and is now being destroyed.
+    //   This is the normal completion case, and we should dispose all the param stubs.
+    // * An exception was thrown in the RPC implementation before stubs could be passed to
+    //   JavaScript in the first place, resulting in the disposal group being destroyed during
+    //   exception unwind. The stubs should be disposed proactively since they were never
+    //   received.
+    disposeAll();
+  }
+}
+
+rpc::JsRpcTarget::Client JsRpcStub::getClient() {
+  KJ_IF_SOME(c, capnpClient) {
+    return *c;
+  } else {
+    // TODO(now): Improve the error message to describe why it was disposed.
+    return JSG_KJ_EXCEPTION(FAILED, Error, "RPC stub used after being disposed.");
+  }
+}
+
 rpc::JsRpcTarget::Client JsRpcStub::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   // (Don't extend `path` because we're the root.)
-  return *capnpClient;
+  return getClient();
+}
+
+jsg::Ref<JsRpcStub> JsRpcStub::dup() {
+  return jsg::alloc<JsRpcStub>(IoContext::current().addObject(kj::heap(getClient())));
+}
+
+void JsRpcStub::dispose() {
+  capnpClient = kj::none;
+  KJ_IF_SOME(d, disposalGroup) {
+    d.list.remove(*this);
+    disposalGroup = kj::none;
+  }
+}
+
+void RpcStubDisposalGroup::disownAll() {
+  for (auto& stub: list) {
+    stub.disposalGroup = kj::none;
+    list.remove(stub);
+  }
+}
+
+void RpcStubDisposalGroup::disposeAll() {
+  for (auto& stub: list) {
+    stub.dispose();
+  }
+
+  // Each stub should have removed itself.
+  KJ_ASSERT(list.empty());
 }
 
 kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcStub::getRpcMethod(
@@ -389,7 +497,7 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
       "Remote RPC references can only be serialized for RPC.");
 
-  externalHandler->write([cap = *capnpClient](rpc::JsValue::External::Builder builder) mutable {
+  externalHandler->write([cap = getClient()](rpc::JsValue::External::Builder builder) mutable {
     builder.setRpcTarget(kj::mv(cap));
   });
 }
@@ -405,7 +513,8 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
   KJ_REQUIRE(reader.isRpcTarget(), "external table slot type doesn't match serialization tag");
 
   auto& ioctx = IoContext::current();
-  return jsg::alloc<JsRpcStub>(ioctx.addObject(kj::heap(reader.getRpcTarget())));
+  return jsg::alloc<JsRpcStub>(ioctx.addObject(kj::heap(reader.getRpcTarget())),
+      externalHandler->getDisposalGroup());
 }
 
 static bool isFunctionForRpc(jsg::Lock& js, v8::Local<v8::Function> func) {
@@ -500,12 +609,14 @@ public:
 
       auto op = params.getOperation();
 
-      auto handleResult = [&](v8::Local<v8::Value> invocationResult) {
+      auto handleResult = [&](InvocationResult&& invocationResult) {
         // Given a handle for the result, if it's a promise, await the promise, then serialize the
         // final result for return.
-        return ctx.awaitJs(js, js.toPromise(invocationResult)
+
+        auto result = ctx.awaitJs(js, js.toPromise(invocationResult.returnValue)
             .then(js, ctx.addFunctor(
-                [callContext, ownCallContext = kj::mv(ownCallContext)]
+                [callContext, ownCallContext = kj::mv(ownCallContext),
+                 paramDisposalGroup = kj::mv(invocationResult.paramDisposalGroup)]
                 (jsg::Lock& js, jsg::Value value) mutable {
           jsg::JsValue resultValue(value.getHandle(js));
           serializeJsValue(js, resultValue, [&](capnp::MessageSize hint) {
@@ -517,7 +628,13 @@ public:
             }
             return results.initResult();
           });
+
+          // paramDisposalGroup will be destroyed when we return (or when this lambda is destroyed
+          // as a result of the promise being rejected). This will implicitly dispose the param
+          // stubs.
         })));
+
+        return result;
       };
 
       switch (op.which()) {
@@ -531,7 +648,7 @@ public:
             args = op.getCallWithArgs();
           }
 
-          v8::Local<v8::Value> invocationResult;
+          InvocationResult invocationResult;
           KJ_IF_SOME(envCtx, targetInfo.envCtx) {
             invocationResult = invokeFnInsertingEnvCtx(js, methodNameForErrors, fn, thisArg,
                 args, envCtx.env, envCtx.ctx);
@@ -542,11 +659,11 @@ public:
           // We have a function, so let's call it and serialize the result for RPC.
           // If the function returns a promise we will wait for the promise to finish so we can
           // serialize the result.
-          return handleResult(invocationResult);
+          return handleResult(kj::mv(invocationResult));
         }
 
         case rpc::JsRpcTarget::CallParams::Operation::GET_PROPERTY:
-          return handleResult(propHandle);
+          return handleResult({.returnValue = propHandle});
       }
 
       KJ_FAIL_ASSERT("unknown JsRpcTarget::CallParams::Operation", (uint)op.which());
@@ -584,6 +701,8 @@ private:
         name == "webSocketMessage" ||
         name == "webSocketClose" ||
         name == "webSocketError" ||
+        name == "dispose" ||
+        name == "dup" ||
         // All JS classes define a method `constructor` on the prototype, but we don't actually
         // want this to be callable over RPC!
         name == "constructor") {
@@ -704,31 +823,47 @@ private:
     };
   }
 
+  struct InvocationResult {
+    v8::Local<v8::Value> returnValue;
+    kj::Maybe<kj::Own<RpcStubDisposalGroup>> paramDisposalGroup;
+  };
+
   // Deserializes the arguments and passes them to the given function.
-  static v8::Local<v8::Value> invokeFn(
+  static InvocationResult invokeFn(
       jsg::Lock& js,
       v8::Local<v8::Function> fn,
       v8::Local<v8::Object> thisArg,
       kj::Maybe<rpc::JsValue::Reader> args) {
     // We received arguments from the client, deserialize them back to JS.
     KJ_IF_SOME(a, args) {
+      auto [value, disposalGroup] = deserializeJsValue(js, a);
       auto args = KJ_REQUIRE_NONNULL(
-          deserializeJsValue(js, a).tryCast<jsg::JsArray>(),
+          value.tryCast<jsg::JsArray>(),
           "expected JsArray when deserializing arguments.");
       // Call() expects a `Local<Value> []`... so we populate an array.
       KJ_STACK_ARRAY(v8::Local<v8::Value>, arguments, args.size(), 8, 8);
       for (size_t i = 0; i < args.size(); ++i) {
         arguments[i] = args.get(js, i);
       }
-      return jsg::check(fn->Call(js.v8Context(), thisArg, args.size(), arguments.begin()));
+
+      InvocationResult result {
+        .returnValue = jsg::check(fn->Call(
+            js.v8Context(), thisArg, args.size(), arguments.begin())),
+      };
+      if (!disposalGroup->empty()) {
+        result.paramDisposalGroup = kj::mv(disposalGroup);
+      }
+      return result;
     } else {
-      return jsg::check(fn->Call(js.v8Context(), thisArg, 0, nullptr));
+      return {
+        .returnValue = jsg::check(fn->Call(js.v8Context(), thisArg, 0, nullptr))
+      };
     }
   };
 
   // Like `invokeFn`, but inject the `env` and `ctx` values between the first and second
   // parameters. Used for service bindings that use functional syntax.
-  static v8::Local<v8::Value> invokeFnInsertingEnvCtx(
+  static InvocationResult invokeFnInsertingEnvCtx(
       jsg::Lock& js,
       kj::StringPtr methodName,
       v8::Local<v8::Function> fn,
@@ -754,17 +889,24 @@ private:
       arity = 3;
     }
 
+    kj::Maybe<kj::Own<RpcStubDisposalGroup>> paramDisposalGroup;
+
     // We're going to pass all the arguments from the client to the function, but we are going to
     // insert `env` and `ctx`. We assume the last two arguments that the function declared are
     // `env` and `ctx`, so we can determine where to insert them based on the function's arity.
     kj::Maybe<jsg::JsArray> argsArrayFromClient;
     size_t argCountFromClient = 0;
     KJ_IF_SOME(a, args) {
+      auto [value, disposalGroup] = deserializeJsValue(js, a);
       auto array = KJ_REQUIRE_NONNULL(
-          deserializeJsValue(js, a).tryCast<jsg::JsArray>(),
+          value.tryCast<jsg::JsArray>(),
           "expected JsArray when deserializing arguments.");
       argCountFromClient = array.size();
       argsArrayFromClient = kj::mv(array);
+
+      if (!disposalGroup->empty()) {
+        paramDisposalGroup = kj::mv(disposalGroup);
+      }
     }
 
     // For now, we are disallowing multiple arguments with bare function syntax, due to a footgun:
@@ -804,7 +946,11 @@ private:
       }
     }
 
-    return jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.begin()));
+    return {
+      .returnValue = jsg::check(fn->Call(
+          js.v8Context(), thisArg, arguments.size(), arguments.begin())),
+      .paramDisposalGroup = kj::mv(paramDisposalGroup),
+    };
   };
 
   kj::Own<IoContext::WeakRef> weakIoContext;

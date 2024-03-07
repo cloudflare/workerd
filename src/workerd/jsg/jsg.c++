@@ -320,4 +320,8 @@ kj::String Name::toString(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
+bool isInGcDestructor() {
+  return HeapTracer::isInCppgcDestructor();
+}
+
 }  // namespace workerd::jsg

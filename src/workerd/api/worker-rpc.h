@@ -54,22 +54,30 @@ private:
   kj::Vector<BuilderCallback> externals;
 };
 
+class RpcStubDisposalGroup;
+
 // ExternalHandler used when deserializing RPC messages. Deserialization functions which whish to
 // handle RPC specially should use this.
 class RpcDeserializerExternalHander final: public jsg::Deserializer::ExternalHandler {
 public:
-  RpcDeserializerExternalHander(capnp::List<rpc::JsValue::External>::Reader externals)
-      : externals(externals) {}
+  RpcDeserializerExternalHander(capnp::List<rpc::JsValue::External>::Reader externals,
+                                RpcStubDisposalGroup& disposalGroup)
+      : externals(externals), disposalGroup(disposalGroup) {}
   ~RpcDeserializerExternalHander() noexcept(false);
 
   // Read and return the next external.
   rpc::JsValue::External::Reader read();
+
+  // All stubs deserialized as part of a particular parameter or result set are placed in a
+  // common disposal group so that they can be disposed together.
+  RpcStubDisposalGroup& getDisposalGroup() { return disposalGroup; }
 
 private:
   capnp::List<rpc::JsValue::External>::Reader externals;
   uint i = 0;
 
   kj::UnwindDetector unwindDetector;
+  RpcStubDisposalGroup& disposalGroup;
 };
 
 // Base class for objects which can be sent over RPC, but doing so actually sends a stub which
@@ -228,11 +236,16 @@ class JsRpcStub: public JsRpcClientProvider {
 public:
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient)
       : capnpClient(kj::mv(capnpClient)) {}
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient, RpcStubDisposalGroup& disposalGroup);
+  ~JsRpcStub() noexcept(false);
 
-  rpc::JsRpcTarget::Client getClient() { return *capnpClient; }
+  rpc::JsRpcTarget::Client getClient();
 
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  jsg::Ref<JsRpcStub> dup();
+  void dispose();
 
   // Given a JsRpcTarget, make an RPC stub from it.
   //
@@ -248,6 +261,8 @@ public:
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethod(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcStub) {
+    JSG_METHOD(dup);
+    JSG_METHOD(dispose);
     JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getRpcMethod);
   }
@@ -259,7 +274,31 @@ public:
   JSG_SERIALIZABLE(rpc::SerializationTag::JS_RPC_STUB);
 
 private:
-  IoOwn<rpc::JsRpcTarget::Client> capnpClient;
+  // Nulled out upon dispose().
+  kj::Maybe<IoOwn<rpc::JsRpcTarget::Client>> capnpClient;
+
+  kj::Maybe<RpcStubDisposalGroup&> disposalGroup;
+  kj::ListLink<JsRpcStub> disposalGroupLink;
+
+  friend class RpcStubDisposalGroup;
+};
+
+class RpcStubDisposalGroup {
+public:
+  ~RpcStubDisposalGroup() noexcept(false);
+
+  // Release all the stubs in the group without disposing them. They will have to be disposed
+  // individually by calling their disposers directly.
+  void disownAll();
+
+  // Call dispose() on every stub in the group.
+  void disposeAll();
+
+  bool empty() { return list.empty(); }
+
+private:
+  kj::List<JsRpcStub, &JsRpcStub::disposalGroupLink> list;
+  friend class JsRpcStub;
 };
 
 // `jsRpcSession` returns a capability that provides the client a way to call remote methods
