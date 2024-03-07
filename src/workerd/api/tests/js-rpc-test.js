@@ -11,6 +11,25 @@ class MyCounter extends RpcTarget {
     this.i += j;
     return this.i;
   }
+
+  disposed = false;
+
+  #disposedResolver;
+  #onDisposedPromise = new Promise(resolve => this.#disposedResolver = resolve);
+
+  dispose() {
+    this.disposed = true;
+    this.#disposedResolver();
+  }
+
+  onDisposed() {
+    return Promise.race([
+      this.#onDisposedPromise,
+      scheduler.wait(1000).then(() => {
+        throw new Error("timed out waiting for disposal");
+      })
+    ]);
+  }
 }
 
 class NonRpcClass {
@@ -518,15 +537,21 @@ export let defaultExportClass = {
 
 export let loopbackJsRpcTarget = {
   async test(controller, env, ctx) {
-    let stub = new RpcStub(new MyCounter(4));
+    let counter = new MyCounter(4);
+    let stub = new RpcStub(counter);
     assert.strictEqual(await stub.increment(5), 9);
     assert.strictEqual(await stub.increment(7), 16);
 
+    assert.strictEqual(counter.disposed, false);
     stub.dispose();
+
     await assert.rejects(stub.increment(2), {
       name: "Error",
       message: "RPC stub used after being disposed."
     });
+
+    await counter.onDisposed();
+    assert.strictEqual(counter.disposed, true);
   },
 }
 
@@ -587,6 +612,15 @@ export let disposal = {
       });
     }
 
+    // Verify a capability passed as an RPC param receives the disposal callback.
+    {
+      let counter = new MyCounter(3);
+      assert.strictEqual(await env.MyService.incrementCounter(counter, 5), 8);
+      await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+    }
+
+    // A more complex case with testDispose().
     {
       let obj = await env.MyService.testDispose(new MyCounter(3));
 
@@ -615,6 +649,9 @@ export let disposal = {
         name: "Error",
         message: "RPC stub used after being disposed."
       });
+
+      // TODO(now): Check counter is disposed. However, this doesn't work yet because the pipeline
+      // is not disposed.
     }
   },
 }

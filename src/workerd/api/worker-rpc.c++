@@ -692,6 +692,9 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
 
+protected:
+  kj::Own<IoContext::WeakRef> weakIoContext;
+
 private:
   // The following names are reserved by the Workers Runtime and cannot be called over RPC.
   static bool isReservedName(kj::StringPtr name) {
@@ -952,17 +955,37 @@ private:
       .paramDisposalGroup = kj::mv(paramDisposalGroup),
     };
   };
-
-  kj::Own<IoContext::WeakRef> weakIoContext;
 };
 
 class TransientJsRpcTarget final: public JsRpcTargetBase {
 public:
-  TransientJsRpcTarget(IoContext& ioCtx, jsg::JsRef<jsg::JsObject> object,
+  TransientJsRpcTarget(jsg::Lock& js, IoContext& ioCtx, jsg::JsObject object,
                        bool allowInstanceProperties = false)
-      : JsRpcTargetBase(ioCtx), object(kj::mv(object)),
+      : JsRpcTargetBase(ioCtx), object(js, object),
         allowInstanceProperties(allowInstanceProperties),
-        pendingEvent(ioCtx.registerPendingEvent()) {}
+        pendingEvent(ioCtx.registerPendingEvent()) {
+    // Check for the existence of a dispose function now so that the destructor doesn't have to
+    // take an isolate lock if there isn't one.
+    auto getResult = object.get(js, "dispose");
+    if (getResult.isFunction()) {
+      dispose.emplace(js.v8Isolate, v8::Local<v8::Value>(getResult).As<v8::Function>());
+    }
+  }
+
+  ~TransientJsRpcTarget() noexcept(false) {
+    // If we have a disposer, and the I/O context is not already destroyed, arrange to call the
+    // disposer.
+    KJ_IF_SOME(d, dispose) {
+      KJ_IF_SOME(ctx, weakIoContext->tryGet()) {
+        ctx.addTask(ctx.run(
+            [dispose = kj::mv(d), object = kj::mv(object)](Worker::Lock& lock) mutable {
+          jsg::Lock& js = lock;
+          jsg::check(dispose.getHandle(js)->Call(
+              js.v8Context(), object.getHandle(js), 0, nullptr));
+        }));
+      }
+    }
+  }
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) {
     return {
@@ -974,6 +997,7 @@ public:
 
 private:
   jsg::JsRef<jsg::JsObject> object;
+  kj::Maybe<jsg::V8Ref<v8::Function>> dispose;
   bool allowInstanceProperties;
 
   // An RpcTarget could receive a new call (in the existing IoContext) at any time, therefore
@@ -1010,8 +1034,8 @@ static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& js, jsg::
       return kj::none;
     }
 
-    return rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(IoContext::current(),
-        jsg::JsRef<jsg::JsObject>(js, obj), allowInstanceProperties));
+    return rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(
+        js, IoContext::current(), obj, allowInstanceProperties));
   });
 }
 
@@ -1021,10 +1045,9 @@ jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> 
   // We really only took `jsg::Ref<JsRpcTarget>` as the input type for type-checking reasons, but
   // we'd prefer to store the JS handle. There definitely must be one since we just received this
   // object from JS.
-  auto handle = jsg::JsRef<jsg::JsObject>(js,
-      jsg::JsObject(KJ_ASSERT_NONNULL(object.tryGetHandle(js))));
+  auto handle = jsg::JsObject(KJ_ASSERT_NONNULL(object.tryGetHandle(js)));
 
-  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(ioctx, kj::mv(handle));
+  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, ioctx, handle);
 
   return jsg::alloc<JsRpcStub>(ioctx.addObject(kj::heap(kj::mv(cap))));
 }
@@ -1042,11 +1065,9 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       "Remote RPC references can only be serialized for RPC.");
 
   // Handle can't possibly be missing during serialization, it's how we got here.
-  auto handle = jsg::JsRef<jsg::JsObject>(js,
-      jsg::JsObject(KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js))));
+  auto handle = jsg::JsObject(KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js)));
 
-  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(
-      IoContext::current(), kj::mv(handle));
+  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle);
 
   externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.setRpcTarget(kj::mv(cap));
@@ -1057,9 +1078,8 @@ void RpcSerializerExternalHander::serializeFunction(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
   serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
 
-  auto handle = jsg::JsRef<jsg::JsObject>(js, jsg::JsObject(func));
   rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(
-      IoContext::current(), kj::mv(handle), true);
+      js, IoContext::current(), jsg::JsObject(func), true);
   write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.setRpcTarget(kj::mv(cap));
   });
