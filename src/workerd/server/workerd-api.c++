@@ -17,6 +17,7 @@
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
+#include <workerd/api/eventsource.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/hyperdrive.h>
@@ -100,6 +101,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_NODE_ISOLATE_TYPES,
   EW_RTTI_ISOLATE_TYPES,
   EW_HYPERDRIVE_ISOLATE_TYPES,
+  EW_EVENTSOURCE_ISOLATE_TYPES,
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
   EW_WEBGPU_ISOLATE_TYPES,
 #endif
