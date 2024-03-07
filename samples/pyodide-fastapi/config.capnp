@@ -19,7 +19,13 @@ const mainWorker :Workerd.Worker = (
   modules = [
     (name = "worker.py", pythonModule = embed "./worker.py"),
     (name = "fastapi", pythonRequirement = ""),
-    (name = "ssl", pythonRequirement = ""),
+    (name = "anyio", pythonRequirement = ""),
+  ],
+  bindings = [
+    (
+      name = "secret",
+      text = "thisisasecret"
+    ),
   ],
   compatibilityDate = "2023-12-18",
   compatibilityFlags = ["python_workers"],
