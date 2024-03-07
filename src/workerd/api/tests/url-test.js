@@ -8833,6 +8833,17 @@ export const wptTestURLSearchParamsConstructor = {
       throws(() => new URLSearchParams([[1,2,3]]));
     }
 
+    {
+      let params = new URLSearchParams('a=a/b~');
+      strictEqual(params.toString(), 'a=a%2Fb%7E');
+
+      let url = new URL('https://example.org?a=a/b~');
+      strictEqual(url.search, '?a=a/b~');
+      strictEqual(url.searchParams.toString(), 'a=a%2Fb%7E');
+      console.log(url.search);
+      console.log(url.searchParams.toString());
+    }
+
     [
       { "input": {"+": "%C2"}, "output": [["+", "%C2"]], "name": "object with +" },
       { "input": {c: "x", a: "?"}, "output": [["c", "x"], ["a", "?"]], "name": "object with two keys" },
