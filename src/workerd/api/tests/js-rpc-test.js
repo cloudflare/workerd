@@ -622,7 +622,8 @@ export let disposal = {
 
     // A more complex case with testDispose().
     {
-      let obj = await env.MyService.testDispose(new MyCounter(3));
+      let counter = new MyCounter(3);
+      let obj = await env.MyService.testDispose(counter);
 
       // The counter was able to be incremented during the call.
       assert.strictEqual(obj.count, 8);
@@ -650,8 +651,8 @@ export let disposal = {
         message: "RPC stub used after being disposed."
       });
 
-      // TODO(now): Check counter is disposed. However, this doesn't work yet because the pipeline
-      // is not disposed.
+      await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
     }
   },
 }

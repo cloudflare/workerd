@@ -958,19 +958,8 @@ void IoContext::checkFarGet(const DeleteQueue* expectedQueue) {
 
   if (expectedQueue == deleteQueue.get()) {
     // same request or same actor, success
-  } else if (actor != kj::none) {
-    JSG_FAIL_REQUIRE(
-        Error, "Cannot perform I/O on behalf of a different Durable Object. I/O objects "
-        "(such as streams, request/response bodies, and others) created in the context of one "
-        "Durable Object cannot be accessed from a different Durable Object in the same isolate. "
-        "This is a limitation of Cloudflare Workers which allows us to improve overall "
-        "performance.");
   } else {
-    JSG_FAIL_REQUIRE(
-        Error, "Cannot perform I/O on behalf of a different request. I/O objects (such as "
-        "streams, request/response bodies, and others) created in the context of one request "
-        "handler cannot be accessed from a different request's handler. This is a limitation "
-        "of Cloudflare Workers which allows us to improve overall performance.");
+    throwNotCurrentJsError();
   }
 }
 
@@ -1298,12 +1287,35 @@ void IoContext::writeLogfwdr(uint channel,
 }
 
 void IoContext::requireCurrentOrThrowJs() {
-  JSG_REQUIRE(isCurrent(),
-      Error,
-      "Cannot perform I/O on behalf of a different request. I/O objects (such as "
-      "streams, request/response bodies, and others) created in the context of one request "
-      "handler cannot be accessed from a different request's handler. This is a limitation "
-      "of Cloudflare Workers which allows us to improve overall performance.");
+  if (!isCurrent()) {
+    throwNotCurrentJsError();
+  }
+}
+
+void IoContext::requireCurrentOrThrowJs(WeakRef& weak) {
+  KJ_IF_SOME(ctx, weak.tryGet()) {
+    if (ctx.isCurrent()) {
+      return;
+    }
+  }
+  throwNotCurrentJsError();
+}
+
+void IoContext::throwNotCurrentJsError() {
+  if (threadLocalRequest != nullptr && threadLocalRequest->actor != kj::none) {
+    JSG_FAIL_REQUIRE(Error,
+        "Cannot perform I/O on behalf of a different Durable Object. I/O objects "
+        "(such as streams, request/response bodies, and others) created in the context of one "
+        "Durable Object cannot be accessed from a different Durable Object in the same isolate. "
+        "This is a limitation of Cloudflare Workers which allows us to improve overall "
+        "performance.");
+  } else {
+    JSG_FAIL_REQUIRE(Error,
+        "Cannot perform I/O on behalf of a different request. I/O objects (such as "
+        "streams, request/response bodies, and others) created in the context of one request "
+        "handler cannot be accessed from a different request's handler. This is a limitation "
+        "of Cloudflare Workers which allows us to improve overall performance.");
+  }
 }
 
 jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {

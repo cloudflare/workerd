@@ -114,9 +114,27 @@ class JsRpcProperty;
 // but rather our own custom thenable, so that we can support pipelining on it.
 class JsRpcPromise: public JsRpcClientProvider {
 public:
-  JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
-      IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline)
-      : inner(kj::mv(inner)), pipeline(kj::mv(pipeline)) {}
+  // A weak reference to this JsRpcPromise. Unlike the usual WeakRef pattern, though, this ref is
+  // allocated before the promise itself is actually created, and filled in later. This is needed
+  // to solve cyclic initialization challenges in `callImpl()`.
+  struct WeakRef: public kj::AtomicRefcounted {
+    // Note: The contents of `WeakRef` can only be accessed under isolate lock, but `WeakRef`'s
+    // refcount is not protected by any lock, hence why it is AtomicRefcounted. This also implies
+    // that it can be destroyed without a lock.
+
+    kj::Maybe<JsRpcPromise&> ref;
+
+    // This is set true if the JsRpcPromise's dispose() method was explicitly called, in which
+    // case the final result should be considered pre-disposed.
+    bool disposed = false;
+  };
+
+  JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner, kj::Own<WeakRef> weakRef,
+      IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline);
+  ~JsRpcPromise() noexcept(false);
+
+  void resolve(jsg::Lock& js, jsg::JsValue result);
+  void dispose(jsg::Lock& js);
 
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
@@ -142,6 +160,7 @@ public:
   kj::Maybe<jsg::Ref<JsRpcProperty>> getProperty(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcPromise) {
+    JSG_METHOD(dispose);
     JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getProperty);
     JSG_METHOD(then);
@@ -155,10 +174,33 @@ public:
 
 private:
   jsg::JsRef<jsg::JsPromise> inner;
-  IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
+  kj::Own<WeakRef> weakRef;
+
+  struct Pending {
+    IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
+  };
+  struct Resolved {
+    jsg::Value result;
+
+    // We only use this to prohibit use from the wrong context.
+    kj::Own<IoContext::WeakRef> ioCtx;
+  };
+  struct Disposed {};
+
+  // Note we don't have a "rejected" state because it works fine to just leave the state as
+  // "Pending" -- calls to `pipeline` will rethrow the same exception, and holding the pipeline
+  // open won't actually hold anything open on the server.
+  kj::OneOf<Pending, Resolved, Disposed> state;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(inner);
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(pending, Pending) {}
+      KJ_CASE_ONEOF(resolved, Resolved) {
+        visitor.visit(resolved.result);
+      }
+      KJ_CASE_ONEOF(disposed, Disposed) {}
+    }
   }
 };
 
@@ -296,8 +338,16 @@ public:
 
   bool empty() { return list.empty(); }
 
+  // When creating a disposal group representing an RPC response, we may also attach the
+  // `callPipeline` from the response, to control when the server-side `dispose()` method is
+  // invoked. This isn't part of any stub, it's just discarded upon disposal.
+  void setCallPipeline(IoOwn<rpc::JsRpcTarget::Client> value) {
+    callPipeline = kj::mv(value);
+  }
+
 private:
   kj::List<JsRpcStub, &JsRpcStub::disposalGroupLink> list;
+  kj::Maybe<IoOwn<rpc::JsRpcTarget::Client>> callPipeline;
   friend class JsRpcStub;
 };
 

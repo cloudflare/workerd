@@ -96,8 +96,14 @@ DeserializeResult deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader)
 
 // Does deserializeJsValue() and then adds a `dispose()` method to the returned object (if it is
 // an object) which disposes all stubs therein.
-jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js, rpc::JsValue::Reader reader) {
-  auto [ value, disposalGroup ] = deserializeJsValue(js, reader);
+jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
+                                       rpc::JsRpcTarget::CallResults::Reader callResults) {
+  auto [ value, disposalGroup ] = deserializeJsValue(js, callResults.getResult());
+
+  if (callResults.hasCallPipeline()) {
+    disposalGroup->setCallPipeline(IoContext::current().addObject(
+        kj::heap(callResults.getCallPipeline())));
+  }
 
   KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
     if (obj.isInstanceOf<JsRpcStub>(js)) {
@@ -180,12 +186,107 @@ private:
   kj::ForkedPromise<void> promise;
 };
 
+// Given a value, check if it has a dispose method and, if so, invoke it.
+void tryCallDisposeMethod(jsg::Lock& js, jsg::JsValue value) {
+  js.withinHandleScope([&]() {
+    KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
+      auto dispose = obj.get(js, "dispose");
+      if (dispose.isFunction()) {
+        jsg::check(v8::Local<v8::Value>(dispose).As<v8::Function>()->Call(
+            js.v8Context(), value, 0, nullptr));
+      }
+    }
+  });
+}
+
 } // namespace
+
+JsRpcPromise::JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner, kj::Own<WeakRef> weakRefParam,
+                           IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline)
+    : inner(kj::mv(inner)), weakRef(kj::mv(weakRefParam)), state(Pending { kj::mv(pipeline) }) {
+  KJ_REQUIRE(weakRef->ref == kj::none);
+  weakRef->ref = *this;
+}
+JsRpcPromise::~JsRpcPromise() noexcept(false) {
+  weakRef->ref = kj::none;
+}
+
+void JsRpcPromise::resolve(jsg::Lock& js, jsg::JsValue result) {
+  if (state.is<Pending>()) {
+    state = Resolved {
+      .result = jsg::Value(js.v8Isolate, result),
+      .ioCtx = IoContext::current().getWeakRef()
+    };
+  } else {
+    // We'd better dispose this.
+    tryCallDisposeMethod(js, result);
+  }
+}
+
+void JsRpcPromise::dispose(jsg::Lock& js) {
+  KJ_IF_SOME(resolved, state.tryGet<Resolved>()) {
+    // Disposing the promise implies disposing the final result.
+    tryCallDisposeMethod(js, jsg::JsValue(resolved.result.getHandle(js)));
+  }
+
+  state = Disposed();
+  weakRef->disposed = true;
+}
+
+// See comment at call site for explanation.
+static rpc::JsRpcTarget::Client makeJsRpcTargetForSingleLoopbackCall(
+    jsg::Lock& js, jsg::JsObject obj);
 
 rpc::JsRpcTarget::Client JsRpcPromise::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   // (Don't extend `path` because we're the root.)
-  return pipeline->getCallPipeline();
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(pending, Pending) {
+      return pending.pipeline->getCallPipeline();
+    }
+    KJ_CASE_ONEOF(resolved, Resolved) {
+      IoContext::requireCurrentOrThrowJs(*resolved.ioCtx);
+
+      // A value was already returned, and we closed the original RPC pipeline. But the application
+      // kept the promise around and is still trying to pipeline on it. What do we do?
+      //
+      // A naive answer would be: We just return the actual value that was returned originally.
+      // Like if someone asked for `promise.foo.bar`, we just give them `returnValue.foo.bar`.
+      //
+      // That doesn't quite work, for a couple reasons:
+      // * If the caller is awaiting a property, they expect the result will have a `dispose()`
+      //   method added to it, and that any stubs in the result will be independently disposable.
+      //   This essentially means we need to clone the value so that we can dup() all the stubs and
+      //   modify the result.
+      // * If the caller is trying to make a pipelined RPC call, they expect this call to go
+      //   through all the usual RPC machinery. They do NOT expect that this is going to be a local
+      //   call.
+      //
+      // The easiest way to make this all just work is... to actually wrap the value in a one-off
+      // RPC stub, and make a real RPC on it.
+
+      return js.withinHandleScope([&]() -> rpc::JsRpcTarget::Client {
+        auto value = jsg::JsValue(resolved.result.getHandle(js));
+
+        KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
+          KJ_IF_SOME(stub, obj.tryUnwrapAs<JsRpcStub>(js)) {
+            // Oh, the return value is actually a stub itself. Just use it.
+            return stub->getClient();
+          } else {
+            // Must be a plain object.
+            return makeJsRpcTargetForSingleLoopbackCall(js, obj);
+          }
+        } else {
+          JSG_FAIL_REQUIRE(TypeError, "Can't pipeline on RPC that did not return an object.");
+        }
+      });
+    }
+    KJ_CASE_ONEOF(disposed, Disposed) {
+      return JSG_KJ_EXCEPTION(FAILED, Error, "RPC promise used after being disposed.");
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 rpc::JsRpcTarget::Client JsRpcProperty::getClientForOneCall(
@@ -199,11 +300,12 @@ namespace {
 
 struct JsRpcPromiseAndPipleine {
   jsg::JsPromise promise;
+  kj::Own<JsRpcPromise::WeakRef> weakRef;
   rpc::JsRpcTarget::CallResults::Pipeline pipeline;
 
   jsg::Ref<JsRpcPromise> asJsRpcPromise(jsg::Lock& js) && {
     return jsg::alloc<JsRpcPromise>(
-        jsg::JsRef<jsg::JsPromise>(js, promise),
+        jsg::JsRef<jsg::JsPromise>(js, promise), kj::mv(weakRef),
         IoContext::current().addObject(kj::heap(kj::mv(pipeline))));
   }
 };
@@ -284,11 +386,34 @@ JsRpcPromiseAndPipleine callImpl(
 
     auto callResult = builder.send();
 
+    // We need to arrange that our JsRpcPromise will updated in-place with the final settlement
+    // of this RPC promise. However, we can't actually construct the JsRpcPromise until we have
+    // the final promise to give it. To resolve the cycle, we only create a JsRpcPromise::WeakRef
+    // here, which is filled in later on to point at the JsRpcPromise, if and when one is created.
+    auto weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>();
+
+    auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
+          [weakRef = kj::atomicAddRef(*weakRef)]
+          (jsg::Lock& js, capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable
+          -> jsg::Value {
+      auto jsResult = deserializeRpcReturnValue(js, response);
+
+      if (weakRef->disposed) {
+        // The promise was explicitly disposed before it even resolved. This means we must dispose
+        // the returned object as well.
+        tryCallDisposeMethod(js, jsResult);
+      } else {
+        KJ_IF_SOME(r, weakRef->ref) {
+          r.resolve(js, jsResult);
+        }
+      }
+
+      return jsg::Value(js.v8Isolate, jsResult);
+    });
+
     return {
-      .promise = jsg::JsPromise(js.wrapSimplePromise(ioContext.awaitIo(js, kj::mv(callResult),
-          [](jsg::Lock& js, auto result) -> jsg::Value {
-        return jsg::Value(js.v8Isolate, deserializeRpcReturnValue(js, result.getResult()));
-      }))),
+      .promise = jsg::JsPromise(js.wrapSimplePromise(kj::mv(jsPromise))),
+      .weakRef = kj::mv(weakRef),
       .pipeline = kj::mv(callResult),
     };
   } catch (jsg::JsExceptionThrown&) {
@@ -301,6 +426,7 @@ JsRpcPromiseAndPipleine callImpl(
     auto pipeline = capnp::newBrokenPipeline(kj::cp(e));
     return {
       .promise = jsg::JsPromise(js.wrapSimplePromise(js.rejectedPromise<jsg::Value>(kj::mv(e)))),
+      .weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>(),
       .pipeline = rpc::JsRpcTarget::CallResults::Pipeline(
           capnp::AnyPointer::Pipeline(kj::mv(pipeline)))
     };
@@ -475,6 +601,7 @@ void RpcStubDisposalGroup::disposeAll() {
   for (auto& stub: list) {
     stub.dispose();
   }
+  callPipeline = kj::none;
 
   // Each stub should have removed itself.
   KJ_ASSERT(list.empty());
@@ -540,12 +667,31 @@ static inline bool isFunctionForRpc(jsg::Lock& js, jsg::JsObject val) {
   return isFunctionForRpc(js, jsg::JsValue(val));
 }
 
-// Create a CallPipeline wrapping the given value.
-//
-// Returns none if the value is not an object and so isn't pipelineable.
+// `makeCallPipeline()` has a bit of a complicated result type..
+namespace MakeCallPipeline {
+  // The value is an object, which may have stubs inside it.
+  struct Object {
+    rpc::JsRpcTarget::Client cap;
+
+    // Was the value a plain JavaScript object which had a custom dispose() method?
+    bool hasDispose;
+  };
+
+  // The value was something that should serialize to a single stub (e.g. it was an RpcTarget, a
+  // plain function, or already a stub). The callPipeline should simply be a copy of that stub.
+  struct SingleStub {};
+
+  // The value is not a type that supports pipelining. It may still be serializable, and it could
+  // even contain stubs (e.g. in a Map).
+  struct NonPipelinable {};
+
+  using Result = kj::OneOf<Object, SingleStub, NonPipelinable>;
+};
+
+// Create the callPipeline for a call result.
 //
 // Defined later in this file.
-static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& lock, jsg::JsValue value);
+static MakeCallPipeline::Result makeCallPipeline(jsg::Lock& js, jsg::JsValue value);
 
 // Callee-side implementation of JsRpcTarget.
 //
@@ -623,15 +769,32 @@ public:
           // Call makeCallPipeline before serializing becaues it may need to extract the disposer.
           auto maybePipeline = makeCallPipeline(js, resultValue);
 
+          rpc::JsRpcTarget::CallResults::Builder results = nullptr;
           serializeJsValue(js, resultValue, [&](capnp::MessageSize hint) {
             hint.wordCount += capnp::sizeInWords<CallResults>();
-            hint.capCount += 1;
-            auto results = callContext.initResults(hint);
-            KJ_IF_SOME(p, maybePipeline) {
-              results.setCallPipeline(kj::mv(p));
-            }
+            hint.capCount += 1;  // for callPipeline
+            results = callContext.initResults(hint);
             return results.initResult();
           });
+
+          KJ_SWITCH_ONEOF(maybePipeline) {
+            KJ_CASE_ONEOF(obj, MakeCallPipeline::Object) {
+              results.setCallPipeline(kj::mv(obj.cap));
+              results.setHasDisposer(obj.hasDispose);
+            }
+            KJ_CASE_ONEOF(obj, MakeCallPipeline::SingleStub) {
+              // Serialization should have produced a single stub. We can use that same stub as
+              // the callPipeline.
+              auto externals = results.asReader().getResult().getExternals();
+              KJ_ASSERT(externals.size() == 1);
+              auto external = externals[0];
+              KJ_ASSERT(external.isRpcTarget());
+              results.setCallPipeline(external.getRpcTarget());
+            }
+            KJ_CASE_ONEOF(obj, MakeCallPipeline::NonPipelinable) {
+              // No callPipeline is needed.
+            }
+          }
 
           // paramDisposalGroup will be destroyed when we return (or when this lambda is destroyed
           // as a result of the promise being rejected). This will implicitly dispose the param
@@ -1025,49 +1188,53 @@ private:
   kj::Own<void> pendingEvent;
 };
 
-static kj::Maybe<rpc::JsRpcTarget::Client> makeCallPipeline(jsg::Lock& js, jsg::JsValue value) {
-  return js.withinHandleScope([&]() -> kj::Maybe<rpc::JsRpcTarget::Client> {
-    jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), return kj::none);
+// See comment at call site for explanation.
+static rpc::JsRpcTarget::Client makeJsRpcTargetForSingleLoopbackCall(
+    jsg::Lock& js, jsg::JsObject obj) {
+  // We intentionally do not want to hook up the disposer here since we're not taking ownership
+  // of the object.
+  return rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(
+      js, IoContext::current(), obj, kj::none, true));
+}
 
-    KJ_IF_SOME(stub, obj.tryUnwrapAs<JsRpcStub>(js)) {
-      // Just grab the stub directly!
-      return stub->getClient();
-    }
+static MakeCallPipeline::Result makeCallPipeline(jsg::Lock& js, jsg::JsValue value) {
+  return js.withinHandleScope([&]() -> MakeCallPipeline::Result {
+    jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), {
+      return MakeCallPipeline::NonPipelinable();
+    });
 
-    kj::Maybe<v8::Local<v8::Function>> maybeDispose;
-
-    {
+    if (obj.getPrototype() == js.obj().getPrototype()) {
+      // It's a plain object.
+      kj::Maybe<v8::Local<v8::Function>> maybeDispose;
       jsg::JsValue disposeProperty = obj.get(js, "dispose");
       if (disposeProperty.isFunction()) {
         maybeDispose = v8::Local<v8::Value>(disposeProperty).As<v8::Function>();
       }
-    }
 
-    bool allowInstanceProperties;
-    if (obj.getPrototype() == js.obj().getPrototype()) {
-      // It's a plain object. Permit instance properties.
-      allowInstanceProperties = true;
+      // We don't want the disposer to be serialized, so delete it from the object. (Remember
+      // that a new `dispose()` method will always be added on the client side).
+      obj.delete_(js, "dispose");
 
-      if (maybeDispose != kj::none) {
-        // We don't want the disposer to be serialized, so delete it from the object. (Remember
-        // that a new `dispose()` method will always be added on the client side).
-        obj.delete_(js, "dispose");
-      }
+      return MakeCallPipeline::Object {
+        .cap = rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(
+            js, IoContext::current(), obj, maybeDispose, true)),
+        .hasDispose = maybeDispose != kj::none
+      };
+    } else if (obj.isInstanceOf<JsRpcStub>(js)) {
+      // It's just a stub. It'll serialize as a single stub, obviously.
+      return MakeCallPipeline::SingleStub();
     } else if (obj.isInstanceOf<JsRpcTarget>(js)) {
-      // It's an RPC target. Allow only class properties.
-      allowInstanceProperties = false;
+      // It's an RPC target. It will be serialized as a single stub.
+      return MakeCallPipeline::SingleStub();
     } else if (isFunctionForRpc(js, obj)) {
-      // It's a plain function. We'll allow its instance properties to be accessed, like with a
-      // plain object. It will also be callable.
-      allowInstanceProperties = true;
+      // It's a plain function. It will be serialized as a single stub.
+      return MakeCallPipeline::SingleStub();
     } else {
-      // Not an RPC object. This is going to fail to serialize? We'll just say it doesn't support
-      // pipelining.
-      return kj::none;
+      // Not an RPC object. Could be a String or other serializable types that derive from Object.
+      // TODO(soon): What if someone returns e.g. a Map with a disposer on it? Should we honor that
+      //   disposer?
+      return MakeCallPipeline::NonPipelinable();
     }
-
-    return rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(
-        js, IoContext::current(), obj, maybeDispose, allowInstanceProperties));
   });
 }
 
