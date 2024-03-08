@@ -448,7 +448,7 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     // For actors, all promises are canceled on actor shutdown, not on a fixed timeout,
     // because work doesn't necessarily happen on a per-request basis in actors and we don't want
     // work being unexpectedly canceled based on which request initiated it.
-    timeoutPromise = a.onShutdown();
+    timeoutPromise = a.onShutdown().ignoreResult();
 
     // Also arrange to cancel the drain if a new request arrives, since it will take over
     // responsibility for background tasks.

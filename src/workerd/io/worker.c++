@@ -2902,6 +2902,10 @@ struct Worker::Actor::Impl {
   // `ioContext` is initialized upon delivery of the first request.
   kj::Maybe<kj::Own<IoContext>> ioContext;
 
+  // Task which is performed when the actor is shut down. Must be destroyed/cancelled before
+  // ioContext is destroyed.
+  kj::Maybe<kj::Promise<void>> onShutdownTask;
+
   // If onBroken() is called while `ioContext` is still null, this is initialized. When
   // `ioContext` is constructed, this will be fulfilled with `ioContext.onAbort()`.
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Promise<void>>>> abortFulfiller;
@@ -2915,8 +2919,8 @@ struct Worker::Actor::Impl {
 
   TimerChannel& timerChannel;
 
-  kj::ForkedPromise<void> shutdownPromise;
-  kj::Own<kj::PromiseFulfiller<void>> shutdownFulfiller;
+  kj::ForkedPromise<ShutdownContext> shutdownPromise;
+  kj::Own<kj::PromiseFulfiller<ShutdownContext>> shutdownFulfiller;
 
   // If this Actor has a HibernationManager, it means the Actor has recently accepted a Hibernatable
   // websocket. We eventually move the HibernationManager into the DeferredProxy task
@@ -2965,7 +2969,7 @@ struct Worker::Actor::Impl {
        MakeStorageFunc makeStorage, kj::Own<Loopback> loopback,
        TimerChannel& timerChannel, kj::Own<ActorObserver> metricsParam,
        kj::Maybe<kj::Own<HibernationManager>> manager, kj::Maybe<uint16_t>& hibernationEventType,
-       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
+       kj::PromiseFulfillerPair<ShutdownContext> paf = kj::newPromiseAndFulfiller<ShutdownContext>())
       : actorId(kj::mv(actorId)), makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
         hooks(loopback->addRef(), timerChannel, *metrics),
@@ -3096,7 +3100,8 @@ Worker::Actor::~Actor() noexcept(false) {
   });
 }
 
-void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
+void Worker::Actor::shutdown(ShutdownMode mode, uint16_t reasonCode,
+                             kj::Maybe<const kj::Exception&> error) {
   // We're officially canceling all background work and we're going to destruct the Actor as soon
   // as all IoContexts that reference it go out of scope. We might still log additional
   // periodic messages, and that's good because we might care about that information. That said,
@@ -3111,7 +3116,7 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
 
   shutdownActorCache(error);
 
-  impl->shutdownFulfiller->fulfill();
+  impl->shutdownFulfiller->fulfill(ShutdownContext{.mode = mode, .error = error});
 }
 
 void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
@@ -3122,7 +3127,7 @@ void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
   }
 }
 
-kj::Promise<void> Worker::Actor::onShutdown() {
+kj::Promise<Worker::Actor::ShutdownContext> Worker::Actor::onShutdown() {
   return impl->shutdownPromise.addBranch();
 }
 
@@ -3380,10 +3385,19 @@ void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
   }
   auto& limitEnforcer = context->getLimitEnforcer();
   impl->ioContext = kj::mv(context);
-  impl->metricsFlushLoopTask = impl->metrics->flushLoop(impl->timerChannel, limitEnforcer)
-      .eagerlyEvaluate([](kj::Exception&& e) {
-    LOG_EXCEPTION("actorMetricsFlushLoop", e);
+  impl->onShutdownTask = onShutdown().then(
+      [&context = KJ_ASSERT_NONNULL(this->impl->ioContext)](ShutdownContext shutdown) mutable {
+    if (shutdown.mode == ShutdownMode::HARD) {
+      context->abort(kj::mv(shutdown.error).orDefault(KJ_EXCEPTION(
+          FAILED, "broken.ignored; jsg.internal-error; actor was "
+              "forcefully shut down for an unspecified reason")));
+    }
+  }).eagerlyEvaluate([](kj::Exception&& e) {
+    LOG_EXCEPTION("actor IO context shutdown hook", e);
   });
+  impl->metricsFlushLoopTask =
+      impl->metrics->flushLoop(impl->timerChannel, limitEnforcer)
+          .eagerlyEvaluate([](kj::Exception&& e) { LOG_EXCEPTION("actorMetricsFlushLoop", e); });
 }
 
 kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManager() {

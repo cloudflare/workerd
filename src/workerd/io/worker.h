@@ -673,12 +673,27 @@ public:
   // support publicly).
   void ensureConstructed(IoContext&);
 
-  // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
-  // happening on behalf of an active request. Note that this is not a part of the dtor because
-  // IoContext objects prolong the lifetime of their Actor.
+
+  // Revokes access to storage and forces cancellation of all "background work" this actor is
+  // executing, i.e. work that is not happening on behalf of an active request.
+  //
+  // To also stop execution of in-flight requests ("foreground work"), specify `mode` to be
+  // `ShutdownMode::HARD`.
   //
   // `reasonCode` is passed back to the WorkerObserver.
-  void shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error = kj::none);
+  //
+  // Shutdown should only be called once.
+  //
+  // Note that this is not a part of the dtor because IoContext objects prolong the lifetime of
+  // their Actor.
+  enum class ShutdownMode {
+    // Allow in-flight requests to continue executing. They may succeed so long as they don't
+    // interact with storage, access to which is always revoked on shutdown.
+    SOFT = 0,
+    // Abort the IO context, immediately stopping execution of all in-flight requests.
+    HARD = 1
+  };
+  void shutdown(ShutdownMode mode, uint16_t reasonCode, kj::Maybe<const kj::Exception&> error = kj::none);
 
   // Stops new work on behalf of the ActorCache. This does not cancel any ongoing flushes.
   // TODO(soon) This should probably be folded into shutdown(). We'd need a piece that converts
@@ -686,8 +701,14 @@ public:
   // interactions between `onAbort` and `onShutdown` promises.
   void shutdownActorCache(kj::Maybe<const kj::Exception&> error);
 
+  struct ShutdownContext {
+    // The mode passed to `shutdown()`.
+    ShutdownMode mode;
+    // The error passed to `shutdown()`.
+    kj::Maybe<kj::Exception> error;
+  };
   // Get a promise that resolves when `shutdown()` has been called.
-  kj::Promise<void> onShutdown();
+  kj::Promise<ShutdownContext> onShutdown();
 
   // Get a promise that rejects when this actor becomes broken in some way. See doc comments for
   // WorkerRuntime.makeActor() in worker.capnp for a discussion of actor brokenness.

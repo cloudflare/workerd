@@ -1530,7 +1530,7 @@ public:
         KJ_IF_SOME(a, actor) {
           // Unknown broken reason.
           auto reason = 0;
-          a->shutdown(reason);
+          a->shutdown(Worker::Actor::ShutdownMode::SOFT, reason);
         }
 
         KJ_IF_SOME(ref, containerRef) {
@@ -1614,7 +1614,7 @@ public:
               m->hibernateWebSockets(lock);
             });
           }
-          a->shutdown(0, KJ_EXCEPTION(DISCONNECTED,
+          a->shutdown(Worker::Actor::ShutdownMode::SOFT, 0, KJ_EXCEPTION(DISCONNECTED,
               "broken.dropped; Actor freed due to inactivity"));
         }
         // Destory the last strong Worker::Actor reference.
