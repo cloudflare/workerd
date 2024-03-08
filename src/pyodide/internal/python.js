@@ -208,6 +208,9 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
  */
 async function prepareWasmLinearMemory(emscriptenModule) {
   if (MEMORY) {
+    if (!(MEMORY instanceof Uint8Array)) {
+      throw new TypeError("Expected MEMORY to be a Uint8Array");
+    }
     // resize linear memory to fit our snapshot. I think `growMemory` only
     // exists if `-sALLOW_MEMORY_GROWTH` is passed to the linker but we'll
     // probably always do that.
@@ -370,8 +373,8 @@ export async function loadPyodide(lockfile, indexURL) {
     //
     // TODO(later): we need better detection when this is corrupted. Right now the isolate will
     // just die.
-    if (maybeMemorySnapshot.length > 100) {
-      MEMORY = maybeMemorySnapshot;
+    if (maybeMemorySnapshot.byteLength > 100) {
+      MEMORY = new Uint8Array(maybeMemorySnapshot);
     }
   }
 
