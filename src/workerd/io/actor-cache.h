@@ -847,7 +847,7 @@ public:
   size_t currentSize() const { return size.load(std::memory_order_relaxed); }
 
 private:
-  Options options;
+  const Options options;
 
   // List of clean values, across all caches, ordered from least-recently-used to
   // most-recently-used.
