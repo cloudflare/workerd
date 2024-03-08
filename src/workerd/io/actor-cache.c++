@@ -106,7 +106,7 @@ ActorCache::Entry::~Entry() noexcept(false) {
   }
 }
 
-ActorCache::SharedLru::SharedLru(Options options): options(options) {}
+ActorCache::SharedLru::SharedLru(const Options options): options(options) {}
 
 ActorCache::SharedLru::~SharedLru() noexcept(false) {
   KJ_REQUIRE(cleanList.getWithoutLock().empty(),

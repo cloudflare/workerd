@@ -805,40 +805,40 @@ private:
 // forward-declared elsewhere.
 struct ActorCacheSharedLruOptions {
   // Memory usage that the LRU will try to stay under by evicting clean values.
-  size_t softLimit;
+  const size_t softLimit;
 
   // Memory usage at which operations should start failing and actors should be killed for
   // exceeding memory limits.
-  size_t hardLimit;
+  const size_t hardLimit;
 
   // Time period after which a value that hasn't been accessed at all should be evicted even if
   // the total cache size is below `softLimit`.
-  kj::Duration staleTimeout;
+  const kj::Duration staleTimeout;
 
   // How many bytes in a particular ActorCache can be dirty before backpressure is applied on the
   // app.
-  size_t dirtyListByteLimit;
+  const size_t dirtyListByteLimit;
 
   // Maximum number of keys in a single RPC message during a flush. If a message would be larger
   // than this, it'll be split into multiple calls.
   //
   // This should typically be set to ActorStorageClientImpl::MAX_KEYS from
   // supervisor/actor-storage.h.
-  size_t maxKeysPerRpc;
+  const size_t maxKeysPerRpc;
 
   // If true, assume `noCache` for all operations.
-  bool noCache = false;
+  const bool noCache = false;
 
   // If true, don't actually flush anything. This is used in preview sessions, since they keep
   // state strictly in memory.
-  bool neverFlush = false;
+  const bool neverFlush = false;
 };
 
 class ActorCache::SharedLru {
 public:
   using Options = ActorCacheSharedLruOptions;
 
-  explicit SharedLru(Options options);
+  explicit SharedLru(const Options options);
 
   ~SharedLru() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SharedLru);
@@ -847,7 +847,7 @@ public:
   size_t currentSize() const { return size.load(std::memory_order_relaxed); }
 
 private:
-  Options options;
+  const Options options;
 
   // List of clean values, across all caches, ordered from least-recently-used to
   // most-recently-used.
