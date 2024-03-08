@@ -160,7 +160,7 @@ public:
   kj::Maybe<jsg::Ref<JsRpcProperty>> getProperty(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(JsRpcPromise) {
-    JSG_METHOD(dispose);
+    JSG_DISPOSE(dispose);
     JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getProperty);
     JSG_METHOD(then);
@@ -304,7 +304,7 @@ public:
 
   JSG_RESOURCE_TYPE(JsRpcStub) {
     JSG_METHOD(dup);
-    JSG_METHOD(dispose);
+    JSG_DISPOSE(dispose);
     JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getRpcMethod);
   }

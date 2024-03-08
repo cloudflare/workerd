@@ -138,6 +138,13 @@ public:
   size_t jsgGetMemorySelfSize() const { return sizeof(IsolateBase); }
   bool jsgGetMemoryInfoIsRootNode() const { return true; }
 
+  JsSymbol getSymbolDispose() {
+    return JsSymbol(symbolDispose.Get(ptr));
+  }
+  JsSymbol getSymbolAsyncDispose() {
+    return JsSymbol(symbolAsyncDispose.Get(ptr));
+  }
+
 private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -188,6 +195,10 @@ private:
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
+
+  // Polyfilled Symbol.dispose and Symbol.asyncDispose.
+  v8::Global<v8::Symbol> symbolDispose;
+  v8::Global<v8::Symbol> symbolAsyncDispose;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.

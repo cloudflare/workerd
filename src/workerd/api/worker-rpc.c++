@@ -116,7 +116,7 @@ jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
           (jsg::Lock&, const v8::FunctionCallbackInfo<v8::Value>&) mutable {
         disposalGroup->disposeAll();
       });
-      obj.set(js, "dispose", jsg::JsValue(func));
+      obj.set(js, js.symbolDispose(), jsg::JsValue(func));
     }
   } else {
     // Result wasn't an object, so it must not contain any stubs.
@@ -190,7 +190,7 @@ private:
 void tryCallDisposeMethod(jsg::Lock& js, jsg::JsValue value) {
   js.withinHandleScope([&]() {
     KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
-      auto dispose = obj.get(js, "dispose");
+      auto dispose = obj.get(js, js.symbolDispose());
       if (dispose.isFunction()) {
         jsg::check(v8::Local<v8::Value>(dispose).As<v8::Function>()->Call(
             js.v8Context(), value, 0, nullptr));
@@ -915,7 +915,6 @@ private:
         name == "webSocketMessage" ||
         name == "webSocketClose" ||
         name == "webSocketError" ||
-        name == "dispose" ||
         name == "dup" ||
         // All JS classes define a method `constructor` on the prototype, but we don't actually
         // want this to be callable over RPC!
@@ -1177,7 +1176,7 @@ public:
         pendingEvent(ioCtx.registerPendingEvent()) {
     // Check for the existence of a dispose function now so that the destructor doesn't have to
     // take an isolate lock if there isn't one.
-    auto getResult = object.get(js, "dispose");
+    auto getResult = object.get(js, js.symbolDispose());
     if (getResult.isFunction()) {
       dispose.emplace(js.v8Isolate, v8::Local<v8::Value>(getResult).As<v8::Function>());
     }
@@ -1250,14 +1249,14 @@ static MakeCallPipeline::Result makeCallPipeline(jsg::Lock& js, jsg::JsValue val
     if (obj.getPrototype() == js.obj().getPrototype()) {
       // It's a plain object.
       kj::Maybe<v8::Local<v8::Function>> maybeDispose;
-      jsg::JsValue disposeProperty = obj.get(js, "dispose");
+      jsg::JsValue disposeProperty = obj.get(js, js.symbolDispose());
       if (disposeProperty.isFunction()) {
         maybeDispose = v8::Local<v8::Value>(disposeProperty).As<v8::Function>();
       }
 
       // We don't want the disposer to be serialized, so delete it from the object. (Remember
       // that a new `dispose()` method will always be added on the client side).
-      obj.delete_(js, "dispose");
+      obj.delete_(js, js.symbolDispose());
 
       return MakeCallPipeline::Object {
         .cap = rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(

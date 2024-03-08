@@ -360,15 +360,24 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
     ptr->GetHeapProfiler()->AddBuildEmbedderGraphCallback(buildEmbedderGraph, this);
 
-    // Create opaqueTemplate
     {
       // We don't need a v8::Locker here since there's no way another thread could be using the
       // isolate yet, but we do need v8::Isolate::Scope.
       v8::Isolate::Scope isolateScope(ptr);
       v8::HandleScope scope(ptr);
+
+      // Create opaqueTemplate
       auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
+
+      // Create Symbol.dispose and Symbol.asyncDispose.
+      symbolDispose.Reset(ptr, v8::Symbol::New(ptr,
+          v8::String::NewFromUtf8(ptr, "dispose",
+              v8::NewStringType::kInternalized).ToLocalChecked()));
+      symbolAsyncDispose.Reset(ptr, v8::Symbol::New(ptr,
+          v8::String::NewFromUtf8(ptr, "asyncDispose",
+              v8::NewStringType::kInternalized).ToLocalChecked()));
     }
   });
 }
@@ -395,7 +404,9 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
     // may call into the heap tracer.
     KJ_DEFER(heapTracer.destroy());
 
-    // Make sure opaqueTemplate is destroyed under lock (but not until later).
+    // Make sure v8::Globals are destroyed under lock (but not until later).
+    KJ_DEFER(symbolAsyncDispose.Reset());
+    KJ_DEFER(symbolDispose.Reset());
     KJ_DEFER(opaqueTemplate.Reset());
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable

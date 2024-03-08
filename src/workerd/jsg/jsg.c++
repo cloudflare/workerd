@@ -263,6 +263,13 @@ Name Lock::newApiSymbol(kj::StringPtr symbol) {
   return Name(*this, v8::Symbol::ForApi(v8Isolate, v8StrIntern(v8Isolate, symbol)));
 }
 
+JsSymbol Lock::symbolDispose() {
+  return IsolateBase::from(v8Isolate).getSymbolDispose();
+}
+JsSymbol Lock::symbolAsyncDispose() {
+  return IsolateBase::from(v8Isolate).getSymbolAsyncDispose();
+}
+
 Name::Name(kj::String string)
     : hash(kj::hashCode(string)),
       inner(kj::mv(string)) {}

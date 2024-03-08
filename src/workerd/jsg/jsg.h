@@ -251,6 +251,17 @@ namespace workerd::jsg {
     registry.template registerAsyncIterable<NAME, decltype(&Self::method), &Self::method>(); \
   } while (false)
 
+#define JSG_DISPOSE(method) \
+  do { \
+    static const char NAME[] = #method; \
+    registry.template registerDispose<NAME, decltype(&Self::method), &Self::method>(); \
+  } while (false)
+#define JSG_ASYNC_DISPOSE(method) \
+  do { \
+    static const char NAME[] = #method; \
+    registry.template registerAsyncDispose<NAME, decltype(&Self::method), &Self::method>(); \
+  } while (false)
+
 // Use inside a JSG_RESOURCE_TYPE block to declare a property on this object that should be
 // accessible to JavaScript. `name` is the JavaScript member name, while `getter` and `setter` are
 // the names of C++ methods that get and set this property.
@@ -2367,6 +2378,8 @@ public:
 #define V(Name) JsSymbol symbol##Name() KJ_WARN_UNUSED_RESULT;
   JS_V8_SYMBOLS(V)
 #undef V
+  JsSymbol symbolDispose() KJ_WARN_UNUSED_RESULT;
+  JsSymbol symbolAsyncDispose() KJ_WARN_UNUSED_RESULT;
 
   void runMicrotasks();
   void terminateExecution();

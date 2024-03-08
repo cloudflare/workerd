@@ -17,7 +17,7 @@ class MyCounter extends RpcTarget {
   #disposedResolver;
   #onDisposedPromise = new Promise(resolve => this.#disposedResolver = resolve);
 
-  dispose() {
+  [Symbol.dispose]() {
     this.disposed = true;
     this.#disposedResolver();
   }
@@ -209,7 +209,7 @@ export class MyService extends WorkerEntrypoint {
     result.value = dupCallback.foo;
 
     // Not really
-    result.dispose = () => dupCallback.dispose();
+    result[Symbol.dispose] = () => dupCallback[Symbol.dispose]();
 
     return result;
   }
@@ -241,8 +241,8 @@ export class MyService extends WorkerEntrypoint {
         // This will succeed since we kept a dup.
         return await counterDup.increment(n);
       },
-      dispose() {
-        counterDup.dispose();
+      [Symbol.dispose]() {
+        counterDup[Symbol.dispose]();
       }
     };
   }
@@ -556,7 +556,7 @@ export let loopbackJsRpcTarget = {
     assert.strictEqual(await stub.increment(7), 16);
 
     assert.strictEqual(counter.disposed, false);
-    stub.dispose();
+    stub[Symbol.dispose]();
 
     await assert.rejects(stub.increment(2), {
       name: "Error",
@@ -605,7 +605,7 @@ export let disposal = {
     {
       let counter = await env.MyService.makeCounter(12)
       assert.strictEqual(await counter.increment(3), 15);
-      counter.dispose();
+      counter[Symbol.dispose]();
       await assert.rejects(counter.increment(2), {
         name: "Error",
         message: "RPC stub used after being disposed."
@@ -618,7 +618,7 @@ export let disposal = {
       let obj = await env.MyService.getAnObject(5);
       assert.strictEqual(await obj.counter.increment(7), 12);
 
-      obj.dispose();
+      obj[Symbol.dispose]();
       await assert.rejects(obj.counter.increment(2), {
         name: "Error",
         message: "RPC stub used after being disposed."
@@ -654,7 +654,7 @@ export let disposal = {
       assert.strictEqual(await obj.counter.increment(4), 19);
 
       // But of course, disposing the return value overall breaks everything.
-      obj.dispose();
+      obj[Symbol.dispose]();
       await assert.rejects(obj.counter.increment(2), {
         name: "Error",
         message: "RPC stub used after being disposed."
@@ -751,8 +751,8 @@ export let crossContextSharingDoesntWork = {
 }
 
 function stripDispose(obj) {
-  assert.deepEqual(!!obj.dispose, true);
-  delete obj.dispose;
+  assert.deepEqual(!!obj[Symbol.dispose], true);
+  delete obj[Symbol.dispose];
   return obj;
 }
 
