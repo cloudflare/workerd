@@ -595,7 +595,7 @@ private:
           // cache.
           if (entry->getSyncStatus() == EntrySyncStatus::DIRTY) {
             // We're still in the dirty list too, let's remove it and try to skip the get.
-            cache.dirtyList.remove(*entry);
+            cache.removeEntry(kj::none, *entry);
           }
         }
       }
@@ -759,7 +759,9 @@ private:
   // `removeEntry()` has to do with the shared clean list but `evictEntry()` has to do with
   // the non-shared map. It is like this for now because generalizing the SharedLru into an
   // IsolateCache is bigger work.
-  void removeEntry(Lock& lock, Entry& entry);
+  //
+  // If no lock is provided, we must be removing from the dirtyList.
+  void removeEntry(kj::Maybe<Lock&> lock, Entry& entry);
 
   // Look for a key in cache, returning a strong reference on the matching entry.
   //

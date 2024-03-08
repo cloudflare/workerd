@@ -104,7 +104,7 @@ ActorCache::Entry::~Entry() noexcept(false) {
           // Ah, we don't need a lock so we can just unlink ourselves. This is safe because we will
           // only destruct a DIRTY entry on the actor's event loop. (We can destruct a CLEAN entry
           // as part of evicting entries from the shared lru on a different event loop.)
-          c.dirtyList.remove(*this);
+          c.removeEntry(kj::none, *this);
           break;
         }
         case EntrySyncStatus::NOT_IN_CACHE: {
@@ -306,7 +306,7 @@ bool ActorCache::SharedLru::evictIfNeeded(Lock& lock) const {
 void ActorCache::touchEntry(Lock& lock, Entry& entry) {
   if (entry.getSyncStatus() == EntrySyncStatus::CLEAN) {
     entry.isStale = false;
-    lock->remove(entry);
+    removeEntry(lock, entry);
     addToCleanList(lock, entry);
   }
 
@@ -318,7 +318,7 @@ void ActorCache::touchEntry(Lock& lock, Entry& entry) {
   entry.noCache = false;
 }
 
-void ActorCache::removeEntry(Lock& lock, Entry& entry) {
+void ActorCache::removeEntry(kj::Maybe<Lock&> lock, Entry& entry) {
   switch (entry.getSyncStatus()) {
     case EntrySyncStatus::DIRTY: {
       KJ_DASSERT(entry.size() <= dirtyList.sizeInBytes(),
@@ -327,7 +327,7 @@ void ActorCache::removeEntry(Lock& lock, Entry& entry) {
       break;
     }
     case EntrySyncStatus::CLEAN: {
-      lock->remove(entry);
+      KJ_REQUIRE_NONNULL(lock)->remove(entry);
       break;
     }
     case EntrySyncStatus::NOT_IN_CACHE: {
@@ -525,6 +525,12 @@ public:
           entry.setAbsentValue();
         }
 
+        // TODO(now): Not sure I understand this. We seem to remove ourselves from the
+        // cleanList, although I suspect we already wouldn't be there? Then, if we're still
+        // in currentValues (which we would be...), we set our status to clean.
+        //
+        // All of this would happen in flushImpl() anyways as part of cleaning up after the
+        // flushPromise completes, no?
         finishEntry(lock, entry);
       }
       KJ_REQUIRE(entryIsFound);
@@ -567,6 +573,8 @@ private:
       cache.addToCleanList(lock, entry);
     } else {
       // Someone replaced us! We just need to not be dirty anymore.
+      //
+      // TODO(now): So, we're no longer in currentValues. Do we need to modify our syncStatus?
     }
   }
 };
