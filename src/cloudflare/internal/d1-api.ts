@@ -196,6 +196,9 @@ class D1Database {
   }
 }
 
+export type D1ScalarTypes = boolean | number | string | null | Uint8Array;
+export type D1ScalarCompatibleTypes = D1ScalarTypes | ArrayBuffer | ArrayLike<unknown>;
+
 class D1PreparedStatement {
   private readonly database: D1Database
   public readonly statement: string
@@ -211,9 +214,9 @@ class D1PreparedStatement {
     this.params = values || []
   }
 
-  public bind(...values: unknown[]): D1PreparedStatement {
+  public bind(...values: D1ScalarCompatibleTypes[]): D1PreparedStatement {
     // Validate value types
-    const transformedValues = values.map((r: unknown): unknown => {
+    const transformedValues = values.map((r): unknown => {
       const rType = typeof r;
       if (rType === 'number' || rType === 'string') {
         return r
