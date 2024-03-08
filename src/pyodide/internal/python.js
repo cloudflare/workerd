@@ -196,12 +196,15 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
  */
 async function prepareWasmLinearMemory(emscriptenModule) {
   if (MEMORY) {
+    console.log("Using MEMORY snapshot");
     // resize linear memory to fit our snapshot. I think `growMemory` only
     // exists if `-sALLOW_MEMORY_GROWTH` is passed to the linker but we'll
     // probably always do that.
     emscriptenModule.growMemory(MEMORY.byteLength);
+    console.log("growMemory");
     // restore memory from snapshot
     emscriptenModule.HEAP8.set(MEMORY);
+    console.log("set");
     return true;
   } else {
     await makeLinearMemorySnapshot(emscriptenModule);
@@ -243,11 +246,13 @@ const SNAPSHOT_IMPORTS = [
  */
 async function makeLinearMemorySnapshot(emscriptenModule) {
   // TODO: make memory snapshot with more than just these hardcoded imports, use real script imports.
-  const toImport = SNAPSHOT_IMPORTS.join(",");
+  const toImport = SNAPSHOT_IMPORTS.join(","); // ~0.1s
   const toDelete = Array.from(
     new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".")[0])),
-  ).join(",");
-  simpleRunPython(emscriptenModule, `import ${toImport}`);
+    ).join(","); // ~negligible
+
+  simpleRunPython(emscriptenModule, `import ${toImport}`); // ~14s!!!!
+
   simpleRunPython(emscriptenModule, "sysconfig.get_config_vars()");
   // Delete to avoid polluting globals
   simpleRunPython(emscriptenModule, `del ${toDelete}`);
@@ -353,21 +358,26 @@ export function mountLib(pyodide, requirements, isWorkerd) {
 export async function loadPyodide(context, lockfile, indexURL) {
   // Lookup memory snapshot from artifact store.
   const maybeMemorySnapshot = ArtifactBundler.getMemorySnapshot();
+  console.log(maybeMemorySnapshot, maybeMemorySnapshot.byteLength);
   if (maybeMemorySnapshot) {
     // Simple sanity check to ensure this snapshot isn't corrupted.
     //
     // TODO(later): we need better detection when this is corrupted. Right now the isolate will
     // just die.
-    if (maybeMemorySnapshot.length > 100) {
+    if (maybeMemorySnapshot.byteLength > 100) {
       MEMORY = maybeMemorySnapshot;
     }
   }
 
-  const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
+  const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL); // ~Neglibible
   const emscriptenModule =
-    await instantiateEmscriptenModule(emscriptenSettings);
-  const usingExistingMemorySnapshot =
-    await prepareWasmLinearMemory(emscriptenModule);
+    await instantiateEmscriptenModule(emscriptenSettings); // ~4secs
+
+  const usingExistingMemorySnapshot = //false;
+    await prepareWasmLinearMemory(emscriptenModule); // ~10secs (this is front-loading a lot of processing)
+
+  // Up from here is ~14secs exec time
+
 
   // Upload `MEMORY` to artifact store so long as a new memory snapshot was generated.
   const isTestMode =
@@ -384,13 +394,14 @@ export async function loadPyodide(context, lockfile, indexURL) {
 
     // TODO(later): This should ideally be a waitUntil() but testing it is difficult, so will
     // leave that debugging journey for later.
-    await uploadCb();
+    // await uploadCb();
   }
-
+  console.log("Here");
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
-  emscriptenModule.API.finalizeBootstrap();
+  emscriptenModule.API.finalizeBootstrap(); // ~9secs (processing skipped above in prepWasmLinear... moves here)
+  // throw new Error("fail fast for me plz");
   const pyodide = emscriptenModule.API.public_api;
-
+  console.log("Here");
   // This is just here for our test suite. Ugly but just about the only way to test this.
   if (isTestMode) {
     const snapshotString = new TextDecoder().decode(maybeMemorySnapshot);

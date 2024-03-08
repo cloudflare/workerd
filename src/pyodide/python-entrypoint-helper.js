@@ -118,6 +118,7 @@ function getPyodide(ctx) {
     // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
     // When we do it in top level scope we seem to get a broken file system.
     const pyodide = await loadPyodide(ctx, LOCKFILE, WORKERD_INDEX_URL);
+
     patchLoadPackage(pyodide);
     const requirements = MetadataReader.getRequirements().map(
       canonicalizePackageName,
@@ -136,6 +137,7 @@ function getPyodide(ctx) {
 
 export default {
   async fetch(request, env, ctx) {
+
     try {
       const { mainModule } = await getPyodide(ctx);
       if (mainModule.on_fetch === undefined) {
@@ -143,8 +145,8 @@ export default {
       }
       return await mainModule.on_fetch.callRelaxed(request, env, ctx);
     } catch (e) {
-      console.warn(e.stack);
       throw e;
+      // return new Response("hello world");
     }
   },
   async test(ctrl, env, ctx) {
