@@ -144,7 +144,7 @@ struct MockLimitEnforcer final: public LimitEnforcer {
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
    v8::Isolate::CreateParams getCreateParams() override { return {}; }
     void customizeIsolate(v8::Isolate* isolate) override {}
-    ActorCacheSharedLruOptions getActorCacheLruOptions() override {
+    const ActorCacheSharedLruOptions getActorCacheLruOptions() override {
       return {
         .softLimit = 16 * (1ull << 20), // 16 MiB
         .hardLimit = 128 * (1ull << 20), // 128 MiB

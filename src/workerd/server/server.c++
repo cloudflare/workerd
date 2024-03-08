@@ -2606,7 +2606,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   public:
     v8::Isolate::CreateParams getCreateParams() override { return {}; }
     void customizeIsolate(v8::Isolate* isolate) override {}
-    ActorCacheSharedLruOptions getActorCacheLruOptions() override {
+    const ActorCacheSharedLruOptions getActorCacheLruOptions() override {
       // TODO(someday): Make this configurable?
       return {
         .softLimit = 16 * (1ull << 20), // 16 MiB
