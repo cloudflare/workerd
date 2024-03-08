@@ -196,7 +196,7 @@ class D1Database {
   }
 }
 
-export type D1ScalarTypes = boolean | number | string | null | Uint8Array;
+export type D1ScalarTypes = boolean | number | number[] | string | null | Uint8Array;
 export type D1ScalarCompatibleTypes = D1ScalarTypes | ArrayBuffer | ArrayLike<unknown>;
 
 class D1PreparedStatement {
