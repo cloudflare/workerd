@@ -568,6 +568,12 @@ struct MemberCounter {
   template<const char* name, typename Method, Method method>
   inline void registerAsyncIterable() { /* not a member */ }
 
+  template<const char* name, typename Method, Method method>
+  inline void registerDispose() { /* not a member */ }
+
+  template<const char* name, typename Method, Method method>
+  inline void registerAsyncDispose() { /* not a member */ }
+
   template<typename Type, const char* name>
   inline void registerNestedType() { ++members; }
 
@@ -786,6 +792,30 @@ struct MembersBuilder {
     structure.setAsyncIterable(true);
 
     auto method = structure.initAsyncIterator();
+    method.setName(name);
+    using Traits = FunctionTraits<Method>;
+    BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
+    using Args = typename Traits::ArgsTuple;
+    TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
+  }
+
+  template<const char* name, typename Method, Method>
+  inline void registerDispose() {
+    structure.setDisposable(true);
+
+    auto method = structure.initDispose();
+    method.setName(name);
+    using Traits = FunctionTraits<Method>;
+    BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
+    using Args = typename Traits::ArgsTuple;
+    TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
+  }
+
+  template<const char* name, typename Method, Method>
+  inline void registerAsyncDispose() {
+    structure.setAsyncDisposable(true);
+
+    auto method = structure.initAsyncDispose();
     method.setName(name);
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);

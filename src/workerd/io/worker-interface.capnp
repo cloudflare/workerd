@@ -283,7 +283,7 @@ interface JsRpcTarget $Cxx.allowCancellation {
     }
   }
 
-  call @0 CallParams -> (result :JsValue, callPipeline :JsRpcTarget);
+  call @0 CallParams -> (result :JsValue, callPipeline :JsRpcTarget, hasDisposer :Bool);
   # Runs a Worker/DO's RPC method.
   #
   # `callPipeline` allows the caller to begin sending other stuff before the callee has actually
@@ -294,6 +294,10 @@ interface JsRpcTarget $Cxx.allowCancellation {
   #   Typically these calls would use `methodPath` to specify a path to a specific subobject of
   #   the returned value.
   # * TODO(soon): streams
+  #
+  # If `hasDisposer` is true, the server side returned an object (not a stub) with a dispose()
+  # method. Dropping the `callPipeline` will invoke this method. The client should take care that
+  # this is not done until `dispose()` is invoked on the client side.
 }
 
 interface EventDispatcher @0xf20697475ec1752d {

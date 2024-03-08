@@ -41,4 +41,5 @@ const unitTests :Workerd.Config = (
       http = (capnpConnectHost = "cappy")
     )
   ],
+  v8Flags = [ "--expose-gc" ],
 );

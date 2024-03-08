@@ -318,6 +318,12 @@ public:
   // If there is a current IoContext, return its WeakRef.
   static kj::Maybe<kj::Own<WeakRef>> tryGetWeakRefForCurrent();
 
+  // Like requireCurrentOrThrowJs() but works on a WeakRef.
+  static void requireCurrentOrThrowJs(WeakRef& weak);
+
+  // Just throw the error that requireCurrentOrThrowJs() would throw on failure.
+  [[noreturn]] static void throwNotCurrentJsError();
+
   // -----------------------------------------------------------------
   // Task scheduling and object storage
 

@@ -11,6 +11,25 @@ class MyCounter extends RpcTarget {
     this.i += j;
     return this.i;
   }
+
+  disposed = false;
+
+  #disposedResolver;
+  #onDisposedPromise = new Promise(resolve => this.#disposedResolver = resolve);
+
+  [Symbol.dispose]() {
+    this.disposed = true;
+    this.#disposedResolver();
+  }
+
+  onDisposed() {
+    return Promise.race([
+      this.#onDisposedPromise,
+      scheduler.wait(1000).then(() => {
+        throw new Error("timed out waiting for disposal");
+      })
+    ]);
+  }
 }
 
 class NonRpcClass {
@@ -182,7 +201,16 @@ export class MyService extends WorkerEntrypoint {
     // Use a function as a cheap way to return a JsRpcStub that has a remote property `value` which
     // itself is initialized as a JsRpcProperty.
     let result = () => {};
-    result.value = callback.foo;
+
+    // We have to dup() the callback because otherwise it will be implicitly disposed when this
+    // function returns, but we want it to remain accessible as a property of the returned
+    // function.
+    let dupCallback = callback.dup();
+    result.value = dupCallback.foo;
+
+    // Not really
+    result[Symbol.dispose] = () => dupCallback[Symbol.dispose]();
+
     return result;
   }
 
@@ -194,6 +222,42 @@ export class MyService extends WorkerEntrypoint {
   }
   delete(a) {
     return a - 1;
+  }
+
+  async testDispose(counter) {
+    // Prove that the counter works at this point.
+    let count = await counter.increment(5);
+
+    let counterDup = counter.dup();
+
+    return {
+      count,
+      counter,
+      async incrementOriginal(n) {
+        // This will fail because after the call ends, the counter stub is disposed.
+        return await counter.increment(n);
+      },
+      async incrementDup(n) {
+        // This will succeed since we kept a dup.
+        return await counterDup.increment(n);
+      },
+      [Symbol.dispose]() {
+        counterDup[Symbol.dispose]();
+      }
+    };
+  }
+
+  async leak(stub) {
+    // Leak the input stub
+    stub.dup();
+
+    let ctx = this.ctx;
+
+    // Return something that contains stubs, holding the context open.
+    return {
+      noop() {},
+      abort() { ctx.abort(new RangeError("foo bar abort reason")); }
+    };
   }
 }
 
@@ -486,9 +550,21 @@ export let defaultExportClass = {
 
 export let loopbackJsRpcTarget = {
   async test(controller, env, ctx) {
-    let stub = new RpcStub(new MyCounter(4));
+    let counter = new MyCounter(4);
+    let stub = new RpcStub(counter);
     assert.strictEqual(await stub.increment(5), 9);
     assert.strictEqual(await stub.increment(7), 16);
+
+    assert.strictEqual(counter.disposed, false);
+    stub[Symbol.dispose]();
+
+    await assert.rejects(stub.increment(2), {
+      name: "Error",
+      message: "RPC stub used after being disposed."
+    });
+
+    await counter.onDisposed();
+    assert.strictEqual(counter.disposed, true);
   },
 }
 
@@ -520,6 +596,107 @@ export let promisePipelining = {
 
     assert.strictEqual(await env.MyService.getAnObject(5).foo, 128);
     assert.strictEqual(await env.MyService.getAnObject(5).counter.increment(7), 12);
+  },
+}
+
+export let disposal = {
+  async test(controller, env, ctx) {
+    // Call function that returns plain stub. Dispose it.
+    {
+      let counter = await env.MyService.makeCounter(12)
+      assert.strictEqual(await counter.increment(3), 15);
+      counter[Symbol.dispose]();
+      await assert.rejects(counter.increment(2), {
+        name: "Error",
+        message: "RPC stub used after being disposed."
+      });
+    }
+
+    // Call function that returns an object containing a stub. The object has a dispose() method
+    // added that disposes everything inside.
+    {
+      let obj = await env.MyService.getAnObject(5);
+      assert.strictEqual(await obj.counter.increment(7), 12);
+
+      obj[Symbol.dispose]();
+      await assert.rejects(obj.counter.increment(2), {
+        name: "Error",
+        message: "RPC stub used after being disposed."
+      });
+    }
+
+    // Verify a capability passed as an RPC param receives the disposal callback.
+    {
+      let counter = new MyCounter(3);
+      assert.strictEqual(await env.MyService.incrementCounter(counter, 5), 8);
+      await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+    }
+
+    // A more complex case with testDispose().
+    {
+      let counter = new MyCounter(3);
+      let obj = await env.MyService.testDispose(counter);
+
+      // The counter was able to be incremented during the call.
+      assert.strictEqual(obj.count, 8);
+
+      // But after the call, the stub is disposed.
+      await assert.rejects(obj.incrementOriginal(), {
+        name: "Error",
+        message: "RPC stub used after being disposed."
+      });
+
+      // The duplicate we created in the call still works though.
+      assert.strictEqual(await obj.incrementDup(7), 15);
+
+      // Also, the returned copy works.
+      assert.strictEqual(await obj.counter.increment(4), 19);
+
+      // But of course, disposing the return value overall breaks everything.
+      obj[Symbol.dispose]();
+      await assert.rejects(obj.counter.increment(2), {
+        name: "Error",
+        message: "RPC stub used after being disposed."
+      });
+      await assert.rejects(obj.incrementDup(7), {
+        name: "Error",
+        message: "RPC stub used after being disposed."
+      });
+
+      await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+    }
+
+    // Test a leak situation.
+    {
+      let counter = new MyCounter(3);
+      let obj = await env.MyService.leak(counter);
+
+      // Give a chance for disposal to happen.
+      await obj.noop();
+      await scheduler.wait(10);
+
+      // It should not have happened.
+      assert.strictEqual(counter.disposed, false);
+
+      // Even if we GC the leaked stub, still no disposal!
+      gc();
+      await scheduler.wait(10);
+      assert.strictEqual(counter.disposed, false);
+
+      // If we abort the server's I/O context, though, then the counter is disposed.
+      await assert.rejects(obj.abort(), {
+        // TODO(someday): This ought to propagate the abort exception, but that requires a bunch
+        //   more work...
+        name: "Error",
+        message: "The destination execution context for this RPC was canceled while the " +
+                 "call was still running."
+      });
+
+      await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+    }
   },
 }
 
@@ -573,6 +750,12 @@ export let crossContextSharingDoesntWork = {
   },
 }
 
+function stripDispose(obj) {
+  assert.deepEqual(!!obj[Symbol.dispose], true);
+  delete obj[Symbol.dispose];
+  return obj;
+}
+
 export let serializeRpcPromiseOrProprety = {
   async test(controller, env, ctx) {
     // What happens if we actually try to serialize a JsRpcPromise or JsRpcProperty? Let's make
@@ -583,7 +766,7 @@ export let serializeRpcPromiseOrProprety = {
 
     // If we directly return returning a JsRpcPromise, the system automatically awaits it on the
     // server side because it's a thenable.
-    assert.deepEqual(await env.MyService.getRpcPromise(func), {x: 123})
+    assert.deepEqual(stripDispose(await env.MyService.getRpcPromise(func)), {x: 123})
 
     // Pipelining also works.
     assert.strictEqual(await env.MyService.getRpcPromise(func).x, 123)
@@ -610,14 +793,15 @@ export let serializeRpcPromiseOrProprety = {
     // our RPC promise. If we await fetch the JsRpcPromise itself, this works, again because
     // somewhere along the line V8 says "oh look a thenable" and awaits it, before it can be
     // subject to serialization. That's fine.
-    assert.deepEqual(await env.MyService.getRemoteNestedRpcPromise(func).value, {x: 123});
+    assert.deepEqual(stripDispose(await env.MyService.getRemoteNestedRpcPromise(func).value),
+                     {x: 123});
     await assert.rejects(() => env.MyService.getRemoteNestedRpcPromise(func).value.x, {
       name: "TypeError",
       message: 'The RPC receiver does not implement the method "value".'
     });
 
     // The story is similar for a JsRpcProperty -- though the implementation details differ.
-    assert.deepEqual(await env.MyService.getRpcProperty(func), {x: 456})
+    assert.deepEqual(stripDispose(await env.MyService.getRpcProperty(func)), {x: 456})
     assert.strictEqual(await env.MyService.getRpcProperty(func).x, 456)
     await assert.rejects(() => env.MyService.getNestedRpcProperty(func), {
       name: "DataCloneError",
@@ -635,7 +819,8 @@ export let serializeRpcPromiseOrProprety = {
                'serialization.'
     });
 
-    assert.deepEqual(await env.MyService.getRemoteNestedRpcProperty(func).value, {x: 456});
+    assert.deepEqual(stripDispose(await env.MyService.getRemoteNestedRpcProperty(func).value),
+                     {x: 456});
     await assert.rejects(() => env.MyService.getRemoteNestedRpcProperty(func).value.x, {
       name: "TypeError",
       message: 'The RPC receiver does not implement the method "value".'
@@ -689,6 +874,7 @@ export let z_namedServiceBinding_realSocket = withRealSocket(namedServiceBinding
 export let z_sendStubOverRpc_realSocket = withRealSocket(sendStubOverRpc);
 export let z_receiveStubOverRpc_realSocket = withRealSocket(receiveStubOverRpc);
 export let z_promisePipelining_realSocket = withRealSocket(promisePipelining);
+export let z_disposal_realSocket = withRealSocket(disposal);
 export let z_crossContextSharingDoesntWork_realSocket = withRealSocket(crossContextSharingDoesntWork);
 export let z_serializeRpcPromiseOrProprety_realSocket = withRealSocket(serializeRpcPromiseOrProprety);
 export let z_testAsyncStackTrace_realSocket = withRealSocket(testAsyncStackTrace);

@@ -212,6 +212,16 @@ struct Structure {
   asyncIterator @7 :Method;
   # Method returning async iterator if the structure is async iterable
 
+  disposable @13 :Bool;
+  # true if the structure is disposable
+  dispose @14 :Method;
+  # dispose method
+
+  asyncDisposable @15 :Bool;
+  # true if the structure is async disposable
+  asyncDispose @16 :Method;
+  # asyncDispose method
+
   tsRoot @8 :Bool;
   # See `JSG_TS_ROOT`'s documentation in the `## TypeScript` section of the JSG README.md.
   # If `JSG_(STRUCT_)TS_ROOT` is declared for a type, this value will be `true`.

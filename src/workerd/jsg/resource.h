@@ -566,6 +566,12 @@ constexpr bool hasConstructorMethod(...) { return false; }
 //     };
 void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
+// Polyfill Symbol.dispose and Symbol.asyncDispose.
+void polyfillSymbols(jsg::Lock& js, v8::Local<v8::Context> context);
+
+v8::Local<v8::Symbol> getSymbolDispose(v8::Isolate* isolate);
+v8::Local<v8::Symbol> getSymbolAsyncDispose(v8::Isolate* isolate);
+
 // A configuration type that can be derived from any input type, because it contains nothing.
 class NullConfiguration {
 public:
@@ -926,6 +932,24 @@ struct ResourceTypeBuilder {
         v8::PropertyAttribute::DontEnum);
   }
 
+  template<const char* name, typename Method, Method method>
+  inline void registerDispose() {
+    prototype->Set(getSymbolDispose(isolate), v8::FunctionTemplate::New(isolate,
+        &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
+                        ArgumentIndexes<Method>>::callback,
+        v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::PropertyAttribute::DontEnum);
+  }
+
+  template<const char* name, typename Method, Method method>
+  inline void registerAsyncDispose() {
+    prototype->Set(getSymbolAsyncDispose(isolate), v8::FunctionTemplate::New(isolate,
+        &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
+                        ArgumentIndexes<Method>>::callback,
+        v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow),
+        v8::PropertyAttribute::DontEnum);
+  }
+
   template<typename Type, const char* name>
   inline void registerNestedType() {
     static_assert(Type::JSG_KIND == ::workerd::jsg::JsgKind::RESOURCE,
@@ -1225,6 +1249,7 @@ public:
     ptr->setModuleRegistry(kj::mv(moduleRegistry));
 
     return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+      polyfillSymbols(js, context);
       setupJavascript(js);
       return JsContext<T>(context, kj::mv(ptr));
     });

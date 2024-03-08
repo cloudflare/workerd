@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jsg.h"
+#include "setup.h"
 
 namespace workerd::jsg {
 
@@ -22,6 +23,28 @@ void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context)
   auto name = getInterned(toObject(constructor), "name");
 
   KJ_ASSERT(check(global->Set(context, name, constructor)));
+}
+
+void polyfillSymbols(jsg::Lock& js, v8::Local<v8::Context> context) {
+  js.withinHandleScope([&]() {
+    JsObject obj(context->Global());
+
+    auto symbol = KJ_ASSERT_NONNULL(obj.get(js, "Symbol").tryCast<JsObject>());
+
+    KJ_DASSERT(!symbol.has(js, "dispose") && !symbol.has(js, "asyncDispose"),
+        "It looks like V8 has been updated to support the explicit resource management spec! "
+        "We should now remove our polyfill and depend on V8's version of these symbols.");
+
+    symbol.set(js, "dispose", js.symbolDispose());
+    symbol.set(js, "asyncDispose", js.symbolAsyncDispose());
+  });
+}
+
+v8::Local<v8::Symbol> getSymbolDispose(v8::Isolate* isolate) {
+  return IsolateBase::from(isolate).getSymbolDispose();
+}
+v8::Local<v8::Symbol> getSymbolAsyncDispose(v8::Isolate* isolate) {
+  return IsolateBase::from(isolate).getSymbolAsyncDispose();
 }
 
 void throwIfConstructorCalledAsFunction(
