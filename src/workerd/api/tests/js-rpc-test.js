@@ -246,6 +246,19 @@ export class MyService extends WorkerEntrypoint {
       }
     };
   }
+
+  async leak(stub) {
+    // Leak the input stub
+    stub.dup();
+
+    let ctx = this.ctx;
+
+    // Return something that contains stubs, holding the context open.
+    return {
+      noop() {},
+      abort() { ctx.abort(new RangeError("foo bar abort reason")); }
+    };
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -649,6 +662,36 @@ export let disposal = {
       await assert.rejects(obj.incrementDup(7), {
         name: "Error",
         message: "RPC stub used after being disposed."
+      });
+
+      await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+    }
+
+    // Test a leak situation.
+    {
+      let counter = new MyCounter(3);
+      let obj = await env.MyService.leak(counter);
+
+      // Give a chance for disposal to happen.
+      await obj.noop();
+      await scheduler.wait(10);
+
+      // It should not have happened.
+      assert.strictEqual(counter.disposed, false);
+
+      // Even if we GC the leaked stub, still no disposal!
+      gc();
+      await scheduler.wait(10);
+      assert.strictEqual(counter.disposed, false);
+
+      // If we abort the server's I/O context, though, then the counter is disposed.
+      await assert.rejects(obj.abort(), {
+        // TODO(someday): This ought to propagate the abort exception, but that requires a bunch
+        //   more work...
+        name: "Error",
+        message: "The destination execution context for this RPC was canceled while the " +
+                 "call was still running."
       });
 
       await counter.onDisposed();

@@ -536,6 +536,29 @@ JsRpcStub::~JsRpcStub() noexcept(false) {
   KJ_IF_SOME(d, disposalGroup) {
     d.list.remove(*this);
   }
+
+  KJ_IF_SOME(c, capnpClient) {
+    // The app failed to dispose the stub; it leaked. We'd rather not make GC observable, so we
+    // must pass the capnp capability off to the I/O context to be dropped when the I/O context
+    // itself shuts down.
+    kj::mv(c).deferGcToContext();
+
+    // In preview, let's try to warn the developer about the problem.
+    //
+    // TODO(cleanup): Instead of logging this warning at GC time, it would be better if we logged
+    //   it at the time that the client is destroyed, i.e. when the IoContext is torn down,
+    //   which is usually sooner (and more deterministic). But logging a warning during
+    //   IoContext tear-down is problematic since logWarningOnce() is a method on
+    //   IoContext...
+    if (IoContext::hasCurrent()) {
+      IoContext::current().logWarningOnce(kj::str(
+          "An RPC stub was not disposed properly. You must call dispose() on all stubs in order to "
+          "let the other side know that you are no longer using them. You cannot rely on "
+          "the garbage collector for this because it may take arbitrarily long before actually "
+          "collecting unreachable objects. As a shortcut, calling dispose() on the result of "
+          "an RPC call disposes all stubs within it."));
+    }
+  }
 }
 
 RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
@@ -549,6 +572,27 @@ RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
     //   forever, the promise reaction can be GC'd even though the call didn't really complete.
     //   We don't want to dispose param stubs in this case.
     disownAll();
+
+    // If we have a `callPipeline`, it means we called an RPC that returned an object, and that
+    // object had a dispose method defined on the server side. We don't want it to observe GC,
+    // so we'll defer dropping the pipeline until the IoContext is destroyed.
+    //
+    // (We don't do this as part of disownAll() because the one other call site of disownAll()
+    // is only invoked in cases where there shouldn't be a `callPipeline` anyway...)
+    KJ_IF_SOME(c, callPipeline) {
+      kj::mv(c).deferGcToContext();
+
+      // In preview, let's try to warn the developer about the problem.
+      //
+      // TODO(cleanup): Same comment as in ~JsRpcStub().
+      if (IoContext::hasCurrent()) {
+        IoContext::current().logWarningOnce(kj::str(
+            "An RPC result was not disposed properly. One of the RPC calls you made expects you "
+            "to call dispose() on the return value, but you didn't do so. You cannot rely on "
+            "the garbage collector for this because it may take arbitrarily long before actually "
+            "collecting unreachable objects."));
+      }
+    }
   } else {
     // However, if we're destroying the RpcStubDisposalGroup NOT as a result of GC, this probably
     // means one of:
@@ -848,7 +892,7 @@ public:
     promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
       if (fulfiller->isWaiting()) {
         fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
-            "jsg.Error: The destination execution context for this RPC was canceled while the "
+            "The destination execution context for this RPC was canceled while the "
             "call was still running."));
       }
     }));
