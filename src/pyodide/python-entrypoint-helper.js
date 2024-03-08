@@ -173,7 +173,6 @@ async function preparePython() {
   return await getMainModule();
 }
 
-// Error.stackTraceLimit = Infinity;
 
 export default {
   async fetch(request, env, ctx) {
