@@ -80,7 +80,17 @@ async function getTransitiveRequirements(pyodide, requirements) {
   return new Set(packageDatas.map(({ name }) => name));
 }
 
-async function setupPackages(pyodide, transitiveRequirements) {
+async function setupPackages(pyodide) {
+  patchLoadPackage(pyodide);
+  const requirements = MetadataReader.getRequirements().map(
+    canonicalizePackageName,
+  );
+  const transitiveRequirements = new Set(
+    Array.from(await getTransitiveRequirements(pyodide, requirements)).map(
+      canonicalizePackageName,
+    ),
+  );
+
   mountLib(pyodide, transitiveRequirements, IS_WORKERD);
 
   // install any extra packages into the site-packages directory, so calculate where that is.
@@ -109,35 +119,65 @@ function pyimportMainModule(pyodide) {
   return pyodide.pyimport(mainModuleName);
 }
 
+let pyodidePromise;
+function getPyodide() {
+  if (pyodidePromise) {
+    return pyodidePromise;
+  }
+  pyodidePromise = loadPyodide(LOCKFILE, WORKERD_INDEX_URL);
+  return pyodidePromise;
+}
+
 let mainModulePromise;
-function getPyodide(ctx) {
-  if (mainModulePromise !== undefined) {
+function getMainModule() {
+  if (mainModulePromise) {
     return mainModulePromise;
   }
   mainModulePromise = (async function () {
-    // TODO: investigate whether it is possible to run part of loadPyodide in top level scope
-    // When we do it in top level scope we seem to get a broken file system.
-    const pyodide = await loadPyodide(ctx, LOCKFILE, WORKERD_INDEX_URL);
-    patchLoadPackage(pyodide);
-    const requirements = MetadataReader.getRequirements().map(
-      canonicalizePackageName,
-    );
-    const transitiveRequirements = new Set(
-      Array.from(await getTransitiveRequirements(pyodide, requirements)).map(
-        canonicalizePackageName,
-      ),
-    );
-    await setupPackages(pyodide, transitiveRequirements);
-    const mainModule = pyimportMainModule(pyodide);
-    return { mainModule };
+    const pyodide = await getPyodide();
+    await setupPackages(pyodide);
+    return pyimportMainModule(pyodide);
   })();
   return mainModulePromise;
 }
 
+if (IS_WORKERD) {
+  // If we're in workerd, we have to do setupPackages in the IoContext, so don't start it yet.
+  // TODO: fix this.
+  await getPyodide();
+} else {
+  // If we're not in workerd, setupPackages doesn't require IO so we can do it all here.
+  await getMainModule();
+}
+
+/**
+ * Have to reseed randomness in the IoContext of the first request since we gave a low quality seed
+ * when it was seeded at top level.
+ */
+let isSeeded = false;
+function reseedRandom(pyodide) {
+  if (isSeeded) {
+    return;
+  }
+  isSeeded = true;
+  pyodide.runPython(`
+    from random import seed
+    seed()
+    del seed
+  `);
+}
+
+async function preparePython() {
+  const pyodide = await getPyodide();
+  reseedRandom(pyodide);
+  return await getMainModule();
+}
+
+
 export default {
   async fetch(request, env, ctx) {
     try {
-      const { mainModule } = await getPyodide(ctx);
+      const mainModule = await preparePython();
       if (mainModule.on_fetch === undefined) {
         throw new Error("Python Worker should define an on_fetch method");
       }
@@ -149,7 +189,7 @@ export default {
   },
   async test(ctrl, env, ctx) {
     try {
-      const { mainModule } = await getPyodide(ctx);
+      const mainModule = await preparePython();
       return await mainModule.test.callRelaxed(ctrl, env, ctx);
     } catch (e) {
       console.warn(e.stack);
