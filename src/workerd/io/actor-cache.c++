@@ -116,17 +116,22 @@ ActorCache::Entry::~Entry() noexcept(false) {
   }
 }
 
-void ActorCache::Entry::setPresentValue(Value newValue) {
+size_t ActorCache::Entry::setPresentValue(Value newValue) {
   KJ_ASSERT(valueStatus == EntryValueStatus::UNKNOWN);
   valueStatus = EntryValueStatus::PRESENT;
+
+  auto oldSize = value.size();
+  // TODO(now): Ben didn't add this subtract, I did. I'm not sure if the value is always empty!
+  // If we know the value is always empty if it's UNKNOWN (ex. for a List()) then we can remove it.
+  KJ_ASSERT_NONNULL(maybeCache).lru.size.fetch_sub(value.size());
   value = kj::mv(newValue);
   KJ_ASSERT_NONNULL(maybeCache).lru.size.fetch_add(value.size());
-  KJ_DBG("Set present", key, value);
+
+  return oldSize;
 }
 void ActorCache::Entry::setAbsentValue() {
   KJ_ASSERT(valueStatus == EntryValueStatus::UNKNOWN);
   valueStatus = EntryValueStatus::ABSENT;
-  KJ_DBG("Set absent", key);
 }
 
 ActorCache::SharedLru::SharedLru(const Options options): options(options) {}
@@ -319,6 +324,8 @@ void ActorCache::touchEntry(Lock& lock, Entry& entry) {
 void ActorCache::removeEntry(kj::Maybe<Lock&> lock, Entry& entry) {
   switch (entry.getSyncStatus()) {
     case EntrySyncStatus::DIRTY: {
+      KJ_DASSERT(entry.size() <= dirtyList.sizeInBytes(),
+          "We have an underflow when removing from the dirtyList in removeEntry()!");
       dirtyList.remove(entry);
       break;
     }
@@ -433,7 +440,11 @@ kj::Promise<void> ActorCache::syncGet(
 
   if (response.hasValue()) {
     auto value = kj::heapArray(response.getValue());
-    entry->setPresentValue(kj::mv(value));
+    auto newSize = value.size();
+    auto oldSize = entry->setPresentValue(kj::mv(value));
+    // We need to modify our dirtyList size because we've changed the Value in the Entry.
+    dirtyList.decreaseSize(oldSize);
+    dirtyList.increaseSize(newSize);
   } else {
     entry->setAbsentValue();
   }
@@ -479,7 +490,12 @@ public:
         }
 
         if (entryIsFound) {
-          entry.setPresentValue(kj::heapArray(kv.getValue()));
+          auto newSize = kv.getValue().size();
+          auto oldSize = entry.setPresentValue(kj::heapArray(kv.getValue()));
+
+          // We need to modify our dirtyList size because we've overwritten the Value in the Entry.
+          cache.dirtyList.decreaseSize(oldSize);
+          cache.dirtyList.increaseSize(newSize);
         } else {
           // This entry was next in the list but the key doesn't match. It must have been absent.
           entry.setAbsentValue();
@@ -1538,6 +1554,8 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
         // Ah, it's an unknown value, let's just update it and move it to the clean list. It might
         // be part of an ongoing get but that's fine, we check for value status there too.
         KJ_IF_SOME(reader, maybeReader) {
+          // We don't need to use the return value of `setPresentValue` here since our Entry isn't
+          // in the `dirtyList`.
           slot->setPresentValue(kj::heapArray(reader));
         } else {
           slot->setAbsentValue();

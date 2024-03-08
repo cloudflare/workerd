@@ -429,7 +429,8 @@ private:
       return value.size();
     }
 
-    void setPresentValue(Value newValue);
+    // Sets `value` to `newValue`, and returns the size of the value that was replaced.
+    size_t setPresentValue(Value newValue);
     void setAbsentValue();
 
     void setNotInCache() {
@@ -630,6 +631,18 @@ private:
 
     auto begin() { return inner.begin(); }
     auto end() { return inner.end(); }
+
+    // The way we coalesce reads means we update `Entry`s while they're still in the `dirtyList`.
+    // This means the size of the list may change, without us adding or removing an Entry.
+    // To ensure proper accounting, we have to modify the size when we modify an Entry.
+    void decreaseSize(size_t bytes) {
+      innerSize -= bytes;
+    }
+
+    // See comment above `decreaseSize()`.
+    void increaseSize(size_t bytes) {
+      innerSize += bytes;
+    }
 
   private:
     kj::List<Entry, &Entry::link> inner;
