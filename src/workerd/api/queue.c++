@@ -374,11 +374,7 @@ jsg::JsValue QueueMessage::getBody(jsg::Lock& js) {
   return body.getHandle(js);
 }
 
-void QueueMessage::retry() {
-  if (result->retryAll) {
-    return;
-  }
-
+void QueueMessage::retry(jsg::Optional<QueueRetryOptions> options) {
   if (result->ackAll) {
     auto msg = kj::str(
         "Received a call to retry() on message ", id, " after ackAll() was already called. "
@@ -394,7 +390,13 @@ void QueueMessage::retry() {
     IoContext::current().logWarning(msg);
     return;
   }
-  result->explicitRetries.findOrCreate(id, [this]() { return kj::heapString(id); } );
+
+  auto& entry = result->retries.upsert(kj::heapString(id), {});
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(secs, opts.delaySeconds) {
+      entry.value.delaySeconds = secs;
+    }
+  }
 }
 
 void QueueMessage::ack() {
@@ -402,7 +404,7 @@ void QueueMessage::ack() {
     return;
   }
 
-  if (result->retryAll) {
+  if (result->retryBatch.retry) {
     auto msg = kj::str(
         "Received a call to ack() on message ", id, " after retryAll() was already called. "
         "Calling ack() on a message after calling retryAll() has no effect.");
@@ -410,7 +412,7 @@ void QueueMessage::ack() {
     return;
   }
 
-  if (result->explicitRetries.contains(id)) {
+  if (result->retries.find(id) != kj::none) {
     auto msg = kj::str(
         "Received a call to ack() on message ", id, " after retry() was already called. "
         "Calling ack() on a message after calling retry() has no effect.");
@@ -441,18 +443,24 @@ QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> res
   messages = messagesBuilder.finish();
 }
 
-void QueueEvent::retryAll() {
+void QueueEvent::retryAll(jsg::Optional<QueueRetryOptions> options) {
   if (result->ackAll) {
     IoContext::current().logWarning(
         "Received a call to retryAll() after ackAll() was already called. "
         "Calling retryAll() after calling ackAll() has no effect.");
     return;
   }
-  result->retryAll = true;
+
+  result->retryBatch.retry = true;
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(secs, opts.delaySeconds) {
+      result->retryBatch.delaySeconds = secs;
+    }
+  }
 }
 
 void QueueEvent::ackAll() {
-  if (result->retryAll) {
+  if (result->retryBatch.retry) {
     IoContext::current().logWarning(
         "Received a call to ackAll() after retryAll() was already called. "
         "Calling ackAll() after calling retryAll() has no effect.");
@@ -624,28 +632,38 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
 
   return req.send().then([this](auto resp) {
     auto respResult = resp.getResult();
-    this->result.retryAll = respResult.getRetryAll();
     this->result.ackAll = respResult.getAckAll();
-    this->result.explicitRetries.clear();
-    for (const auto& msgId : respResult.getExplicitRetries()) {
-      this->result.explicitRetries.insert(kj::heapString(msgId));
+    auto retryBatch = respResult.getRetryBatch();
+    this->result.retryBatch.retry = retryBatch.getRetry();
+    if (retryBatch.isDelaySeconds()) {
+      this->result.retryBatch.delaySeconds = retryBatch.getDelaySeconds();
     }
+
     this->result.explicitAcks.clear();
     for (const auto& msgId : respResult.getExplicitAcks()) {
       this->result.explicitAcks.insert(kj::heapString(msgId));
     }
+    this->result.retries.clear();
+    for (const auto& retry : respResult.getRetryMessages()) {
+      auto& entry = this->result.retries.upsert(kj::heapString(retry.getMsgId()), {});
+      if (retry.isDelaySeconds()) {
+        entry.value.delaySeconds = retry.getDelaySeconds();
+      }
+    }
+
     return WorkerInterface::CustomEvent::Result {
       .outcome = respResult.getOutcome(),
     };
   });
 }
 
-kj::Array<kj::String> QueueCustomEventImpl::getExplicitRetries() const {
-  auto retryArray = kj::heapArrayBuilder<kj::String>(result.explicitRetries.size());
-  for (const auto& msgId : result.explicitRetries) {
-    retryArray.add(kj::heapString(msgId));
+kj::Array<QueueRetryMessage> QueueCustomEventImpl::getRetryMessages() const {
+  auto retryMsgs = kj::heapArrayBuilder<QueueRetryMessage>(result.retries.size());
+  for (const auto& entry : result.retries) {
+    retryMsgs.add(QueueRetryMessage{.msgId = kj::heapString(entry.key),
+                                    .delaySeconds = entry.value.delaySeconds});
   }
-  return retryArray.finish();
+  return retryMsgs.finish();
 }
 
 kj::Array<kj::String> QueueCustomEventImpl::getExplicitAcks() const {
@@ -656,4 +674,4 @@ kj::Array<kj::String> QueueCustomEventImpl::getExplicitAcks() const {
   return ackArray.finish();
 }
 
-}  // namespace workerd::api
+} // namespace workerd::api

@@ -15,12 +15,13 @@ export default {
     if (pathname === "/message") {
       const format = request.headers.get("X-Msg-Fmt") ?? "v8";
       if (format === "text") {
+        assert.strictEqual(request.headers.get("X-Msg-Delay-Secs"), "2")
         assert.strictEqual(await request.text(), "abc");
       } else if (format === "bytes") {
         const array = new Uint16Array(await request.arrayBuffer());
         assert.deepStrictEqual(array, new Uint16Array([1, 2, 3]));
       } else if (format === "json") {
-        assert.deepStrictEqual(await request.json(), {a: 1});
+        assert.deepStrictEqual(await request.json(), { a: 1 });
       } else if (format === "v8") {
         // workerd doesn't provide V8 deserialization APIs, so just look for expected strings
         const buffer = Buffer.from(await request.arrayBuffer());
@@ -31,6 +32,8 @@ export default {
         assert.fail(`Unexpected format: ${JSON.stringify(format)}`);
       }
     } else if (pathname === "/batch") {
+      assert.strictEqual(request.headers.get("X-Msg-Delay-Secs"), "2")
+
       const body = await request.json();
 
       assert.strictEqual(typeof body, "object");
@@ -44,10 +47,11 @@ export default {
       assert.deepStrictEqual(Buffer.from(body.messages[1].body, "base64"), Buffer.from([4, 5, 6]));
 
       assert.strictEqual(body.messages[2].contentType, "json");
-      assert.deepStrictEqual(JSON.parse(Buffer.from(body.messages[2].body, "base64")), [7, 8, {b: 9}]);
+      assert.deepStrictEqual(JSON.parse(Buffer.from(body.messages[2].body, "base64")), [7, 8, { b: 9 }]);
 
       assert.strictEqual(body.messages[3].contentType, "v8");
       assert(Buffer.from(body.messages[3].body, "base64").includes("value"));
+      assert.strictEqual(body.messages[3].delaySecs, 1);
     } else {
       assert.fail(`Unexpected pathname: ${JSON.stringify(pathname)}`);
     }
@@ -66,11 +70,12 @@ export default {
     assert.deepStrictEqual(batch.messages[1].body, new Uint8Array([7, 8, 9]));
 
     assert.strictEqual(batch.messages[2].id, "#2");
-    assert.deepStrictEqual(batch.messages[2].body, { c: {d: 10 } });
+    assert.deepStrictEqual(batch.messages[2].body, { c: { d: 10 } });
     batch.messages[2].retry();
 
     assert.strictEqual(batch.messages[3].id, "#3");
     assert.deepStrictEqual(batch.messages[3].body, batch.messages[3].timestamp);
+    batch.messages[3].retry({ delaySeconds: 2 });
 
     assert.strictEqual(batch.messages[4].id, "#4");
     assert.deepStrictEqual(batch.messages[4].body, new Map([["key", "value"]]));
@@ -79,17 +84,17 @@ export default {
   },
 
   async test(ctrl, env, ctx) {
-    await env.QUEUE.send("abc", { contentType: "text" });
+    await env.QUEUE.send("abc", { contentType: "text", delaySeconds: 2 });
     await env.QUEUE.send(new Uint16Array([1, 2, 3]), { contentType: "bytes" });
-    await env.QUEUE.send({a: 1}, { contentType: "json" });
+    await env.QUEUE.send({ a: 1 }, { contentType: "json" });
     await env.QUEUE.send(new Map([["key", "value"]]), { contentType: "v8" });
 
     await env.QUEUE.sendBatch([
       { body: "def", contentType: "text" },
-      { body: new Uint8Array([4,5,6]), contentType: "bytes" },
-      { body: [7, 8, {b: 9}], contentType: "json" },
-      { body: new Set(["value"]), contentType: "v8" },
-    ]);
+      { body: new Uint8Array([4, 5, 6]), contentType: "bytes" },
+      { body: [7, 8, { b: 9 }], contentType: "json" },
+      { body: new Set(["value"]), contentType: "v8", delaySeconds: 1 },
+    ], { delaySeconds: 2 });
 
     const timestamp = new Date();
     const response = await env.SERVICE.queue("test-queue", [
@@ -100,9 +105,9 @@ export default {
       { id: "#4", timestamp, serializedBody },
     ]);
     assert.strictEqual(response.outcome, "ok");
-    assert(!response.retryAll);
+    assert(!response.retryBatch.retry);
     assert(response.ackAll);
-    assert.deepStrictEqual(response.explicitRetries, ["#2"]);
+    assert.deepStrictEqual(response.retryMessages, [{ msgId: '#2' }, { msgId: '#3', delaySeconds: 2 }]);
     assert.deepStrictEqual(response.explicitAcks, []);
 
     await assert.rejects(env.SERVICE.queue("test-queue", [

@@ -2054,10 +2054,10 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
       [event=kj::mv(event)](jsg::Lock& js, WorkerInterface::CustomEvent::Result result) {
     return Fetcher::QueueResult{
         .outcome=kj::str(result.outcome),
-        .retryAll=event->getRetryAll(),
         .ackAll=event->getAckAll(),
-        .explicitRetries=event->getExplicitRetries(),
+        .retryBatch=event->getRetryBatch(),
         .explicitAcks=event->getExplicitAcks(),
+        .retryMessages=event->getRetryMessages(),
     };
   });
 }
