@@ -765,6 +765,15 @@ private:
   // if it is in storage or `EntryValueStatus::ABSENT` which means we know it is not in storage.
   kj::Own<Entry> findInCache(Lock& lock, KeyPtr key, const ReadOptions& options);
 
+  // We skip flushing in preview sessions (we don't write to storage), so we use getForPreview()
+  // for reads instead.
+  kj::Promise<kj::Maybe<Value>> getForPreview(kj::Own<Entry> entry, ReadOptions options);
+
+  // TODO(now): Need to implement getMultiple for preview sessions.
+  kj::Promise<kj::Maybe<Value>> getMultipleForPreview(
+      kj::Vector<kj::Own<Entry>> entriesToFetch,
+      ReadOptions options);
+
   // Add an entry to the cache, where the entry was the result of reading from storage. If another
   // entry with the same key has been inserted in the meantime, then the new entry will not be
   // inserted and will instead immediately have state NOT_IN_CACHE.

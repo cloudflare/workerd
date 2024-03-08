@@ -396,6 +396,27 @@ void ActorCache::verifyConsistencyForTest() {
 // =======================================================================================
 // read operations
 
+kj::Promise<kj::Maybe<ActorCache::Value>> ActorCache::getForPreview(
+    kj::Own<Entry> entry,
+    ReadOptions options) {
+  auto response = co_await scheduleStorageRead(
+      [key = entry->key.asBytes()](rpc::ActorStorage::Operations::Client client) {
+    auto req = client.getRequest(
+        capnp::MessageSize { 4 + key.size() / sizeof(capnp::word), 0 });
+    req.setKey(key);
+    return req.send().dropPipeline();
+  });
+
+  kj::Maybe<capnp::Data::Reader> value;
+  if (response.hasValue()) {
+    value = response.getValue();
+  }
+  auto lock = lru.cleanList.lockExclusive();
+  auto newEntry = addReadResultToCache(lock, cloneKey(entry->key), value, options);
+  evictOrOomIfNeeded(lock);
+  co_return newEntry->getValue();
+}
+
 kj::OneOf<kj::Maybe<ActorCache::Value>, kj::Promise<kj::Maybe<ActorCache::Value>>>
     ActorCache::get(Key key, ReadOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
@@ -412,6 +433,12 @@ kj::OneOf<kj::Maybe<ActorCache::Value>, kj::Promise<kj::Maybe<ActorCache::Value>
       return entry->getValue();
     }
     case EntryValueStatus::UNKNOWN: {
+      if (lru.options.neverFlush) {
+        // This is a preview session -- findInCache() did not schedule a storage
+        // get() because we skip flushes during preview sessions. Instead, we'll
+        // just directly construct the get request.
+        return getForPreview(kj::mv(entry), options);
+      }
       auto waiter = kj::heap<GetWaiter>(*this, kj::arr(kj::mv(entry)));
       return lastFlush.addBranch().then([waiter = kj::mv(waiter)]() mutable {
         auto entries = waiter->getEntries();
@@ -588,6 +615,16 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
   if (entriesToFetch.empty()) {
     // All satisfied, return early.
     return GetResultList(kj::mv(cachedEntries), {}, GetResultList::FORWARD);
+  }
+
+  if (lru.options.neverFlush) {
+    // This is a preview session -- findInCache() did not schedule any storage
+    // get()s because we skip flushes during preview sessions. Instead, we'll
+    // just directly construct the getMultiple request.
+    //
+    // TODO(now): We should do getForPreview with multiple keys.
+    KJ_DBG("MARKER");
+    KJ_FAIL_REQUIRE("NEED TO IMPLEMENT getMultiple() for preview sessions!");
   }
 
   auto waiter = kj::heap<GetWaiter>(*this, entriesToFetch.releaseAsArray());
@@ -1437,6 +1474,10 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
 // -----------------------------------------------------------------------------
 // Helpers for read operations
 
+// NOTE: If our Entry is UNKNOWN because it was the end of a list, or it's not in cache,
+// then we will NOT schedule a get here if it's a preview session.
+// Instead, we will just return the Entry (with UNKNOWN status) so we can do the get operation
+// in the caller.
 kj::Own<ActorCache::Entry> ActorCache::findInCache(
     Lock& lock, KeyPtr key, const ReadOptions& options) {
   auto& map = currentValues.get(lock);
@@ -1463,7 +1504,10 @@ kj::Own<ActorCache::Entry> ActorCache::findInCache(
     if (entry.getValueStatus() == EntryValueStatus::UNKNOWN
         && entry.getSyncStatus() == EntrySyncStatus::CLEAN) {
       // Ah, this was probably a marker for the end of a list, go ahead and schedule a read.
-      scheduleGet(entry);
+      if (!lru.options.neverFlush) {
+        // Only ensure a flush is scheduled if we are not a preview session.
+        scheduleGet(entry);
+      }
     }
     return kj::atomicAddRef(entry);
   } else {
@@ -1484,7 +1528,11 @@ kj::Own<ActorCache::Entry> ActorCache::findInCache(
         kj::atomicRefcounted<ActorCache::Entry>(*this, cloneKey(key), EntryValueStatus::UNKNOWN);
     entry->noCache = options.noCache;
     map.insert(kj::atomicAddRef(*entry));
-    scheduleGet(*entry);
+
+    if (!lru.options.neverFlush) {
+      // Only ensure a flush is scheduled if we are not a preview session.
+      scheduleGet(*entry);
+    }
     return entry;
   }
 }
