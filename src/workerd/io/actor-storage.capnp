@@ -36,6 +36,11 @@ interface ActorStorage @0xd7759d7fc87c08e4 {
     getAlarm @6 () -> (scheduledTimeMs :Int64);
     setAlarm @7 (scheduledTimeMs :Int64);
     deleteAlarm @8 (timeToDeleteMs :Int64) -> (deleted :Bool);
+    
+    updateExpiration @10 (ExpirationNsSinceUnixEpoch :UInt64);
+    # This method can be used to set a timeout after which the storage operations
+    # issued through a capability should no longer be executed,
+    # and an exception should be thrown instead.
   }
 
   struct DbSettings {
