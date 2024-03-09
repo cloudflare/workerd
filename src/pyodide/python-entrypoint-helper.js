@@ -173,27 +173,38 @@ async function preparePython() {
   return await getMainModule();
 }
 
+function makeHandler(pyHandlerName) {
+  return async function (...args) {
+    try {
+      const mainModule = await preparePython();
+      return await mainModule[pyHandlerName].callRelaxed(...args);
+    } catch (e) {
+      console.warn(e.stack);
+      throw e;
+    }
+  };
+}
 
-export default {
-  async fetch(request, env, ctx) {
-    try {
-      const mainModule = await preparePython();
-      if (mainModule.on_fetch === undefined) {
-        throw new Error("Python Worker should define an on_fetch method");
-      }
-      return await mainModule.on_fetch.callRelaxed(request, env, ctx);
-    } catch (e) {
-      console.warn(e.stack);
-      throw e;
+const handlers = {};
+
+if (IS_WORKERD) {
+  handlers.fetch = makeHandler("on_fetch");
+  handlers.test = makeHandler("test");
+} else {
+  const mainModule = await getMainModule();
+  for (const handlerName of [
+    "fetch",
+    "alarm",
+    "scheduled",
+    "trace",
+    "queue",
+    "pubsub",
+  ]) {
+    const pyHandlerName = "on_" + handlerName;
+    if (typeof mainModule[pyHandlerName] === "function") {
+      handlers[handlerName] = makeHandler(pyHandlerName);
     }
-  },
-  async test(ctrl, env, ctx) {
-    try {
-      const mainModule = await preparePython();
-      return await mainModule.test.callRelaxed(ctrl, env, ctx);
-    } catch (e) {
-      console.warn(e.stack);
-      throw e;
-    }
-  },
-};
+  }
+}
+
+export default handlers;
