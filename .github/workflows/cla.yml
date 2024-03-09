@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: "CLA Assistant"
         if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
-        uses: contributor-assistant/github-action@v2.3.0
+        uses: contributor-assistant/github-action@v2.3.1
         env:
           # CLA Action uses this in-built GitHub token to make the API calls for interacting with GitHub.
           # It is built into Github Actions and does not need to be manually specified in your secrets store.
