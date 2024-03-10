@@ -815,7 +815,7 @@ public:
 
           rpc::JsRpcTarget::CallResults::Builder results = nullptr;
           serializeJsValue(js, resultValue, [&](capnp::MessageSize hint) {
-            hint.wordCount += capnp::sizeInWords<CallResults>();
+            hint.wordCount += capnp::sizeInWords<rpc::JsRpcTarget::CallResults>();
             hint.capCount += 1;  // for callPipeline
             results = callContext.initResults(hint);
             return results.initResult();

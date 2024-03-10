@@ -283,21 +283,30 @@ interface JsRpcTarget $Cxx.allowCancellation {
     }
   }
 
-  call @0 CallParams -> (result :JsValue, callPipeline :JsRpcTarget, hasDisposer :Bool);
+  struct CallResults {
+    result @0 :JsValue;
+    # The returned value.
+
+    callPipeline @1 :JsRpcTarget;
+    # Enables promise pipelining on the eventual call result. This is a JsRpcTarget wrapping the
+    # result of the call, even if the result itself is a serializable object that would not
+    # normally be treated as an RPC target. The caller may use this to initiate speculative calls
+    # on this result without waiting for the initial call to complete (using promise pipelining).
+
+    hasDisposer @2 :Bool;
+    # If `hasDisposer` is true, the server side returned a serializable object (not a stub) with a
+    # disposer (Symbol.dispose). The disposer itself is not included in the object's serialization,
+    # but dropping the `callPipeline` will invoke it.
+    #
+    # On the client side, when an RPC returns a plain object, a disposer is added to it. In order
+    # to avoid confusion, we want the server-side disposer to be invoked only after the client-side
+    # disposer is invoked. To that end, when `hasDisposer` is true, the client should hold on to
+    # `callPipeline` until the disposer is invoked. If `hasDisposer` is false, `callPipeline` can
+    # safely be dropped immediately.
+  }
+
+  call @0 CallParams -> CallResults;
   # Runs a Worker/DO's RPC method.
-  #
-  # `callPipeline` allows the caller to begin sending other stuff before the callee has actually
-  # returned from the call. In particular:
-  # * The caller can make pipelined calls on the anticipated return value of the call, invoking
-  #   methods on capabilities that it expects will be present in the return value. Since
-  #   `CallPipeline` extends `JsRpcTarget`, these calls are made using callPipeline.call().
-  #   Typically these calls would use `methodPath` to specify a path to a specific subobject of
-  #   the returned value.
-  # * TODO(soon): streams
-  #
-  # If `hasDisposer` is true, the server side returned an object (not a stub) with a dispose()
-  # method. Dropping the `callPipeline` will invoke this method. The client should take care that
-  # this is not done until `dispose()` is invoked on the client side.
 }
 
 interface EventDispatcher @0xf20697475ec1752d {
