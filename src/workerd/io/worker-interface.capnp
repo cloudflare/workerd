@@ -210,6 +210,18 @@ enum SerializationTag {
   jsRpcStub @1;
 }
 
+enum StreamEncoding {
+  # Specifies the internal content-encoding of a ReadableStream or WritableStream. This serves an
+  # optimization which is not visible to the app: if we end up hooking up streams so that a source
+  # is pumped to a sink that has the same encoding, we can avoid a decompression/recompression
+  # round trip. However, if the application reads/writes raw bytes, then we must decode/encode
+  # them under the hood.
+
+  identity @0;
+  gzip @1;
+  brotli @2;
+}
+
 struct JsValue {
   # A serialized JavaScript value being passed over RPC.
 

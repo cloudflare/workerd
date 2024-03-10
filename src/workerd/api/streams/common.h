@@ -7,6 +7,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-context.h>
 #include "../basics.h"
+#include <workerd/io/worker-interface.capnp.h>
 
 #if _MSC_VER
 typedef long long ssize_t;
@@ -27,11 +28,7 @@ class WritableStreamDefaultController;
 
 class TransformStreamDefaultController;
 
-enum class StreamEncoding {
-  IDENTITY,
-  GZIP,
-  BROTLI
-};
+using rpc::StreamEncoding;
 
 struct ReadResult {
   jsg::Optional<jsg::Value> value;
