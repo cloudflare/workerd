@@ -34,7 +34,9 @@ rust_library(
     proc_macro_deps = [
         "@crates_vendor__cssparser-macros-0.6.1//:cssparser_macros",
     ],
-    rustc_flags = ["--cap-lints=allow"],
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
         "crate-name=cssparser",
@@ -49,7 +51,7 @@ rust_library(
         "@crates_vendor__itoa-0.4.8//:itoa",
         "@crates_vendor__matches-0.1.10//:matches",
         "@crates_vendor__phf-0.8.0//:phf",
-        "@crates_vendor__smallvec-1.11.2//:smallvec",
+        "@crates_vendor__smallvec-1.13.1//:smallvec",
     ],
 )
 
@@ -83,8 +85,8 @@ cargo_build_script(
     version = "0.27.2",
     visibility = ["//visibility:private"],
     deps = [
-        "@crates_vendor__proc-macro2-1.0.70//:proc_macro2",
-        "@crates_vendor__quote-1.0.33//:quote",
+        "@crates_vendor__proc-macro2-1.0.78//:proc_macro2",
+        "@crates_vendor__quote-1.0.35//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )

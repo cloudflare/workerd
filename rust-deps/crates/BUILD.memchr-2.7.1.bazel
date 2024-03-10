@@ -6,16 +6,16 @@
 #     bazel run @//rust-deps:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Apache-2.0
+#     "TODO",  # Unlicense OR MIT
 # ])
 
-rust_proc_macro(
-    name = "thiserror_impl",
+rust_library(
+    name = "memchr",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -28,20 +28,22 @@ rust_proc_macro(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "alloc",
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    rustc_flags = ["--cap-lints=allow"],
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror-impl",
+        "crate-name=memchr",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.50",
-    deps = [
-        "@crates_vendor__proc-macro2-1.0.70//:proc_macro2",
-        "@crates_vendor__quote-1.0.33//:quote",
-        "@crates_vendor__syn-2.0.39//:syn",
-    ],
+    version = "2.7.1",
 )

@@ -6,7 +6,6 @@
 #     bazel run @//rust-deps:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
@@ -16,7 +15,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "semver",
+    name = "quote",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -31,61 +30,22 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "std",
+        "proc-macro",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
-    rustc_flags = ["--cap-lints=allow"],
-    tags = [
-        "cargo-bazel",
-        "crate-name=semver",
-        "manual",
-        "noclippy",
-        "norustfmt",
-    ],
-    version = "1.0.20",
-    deps = [
-        "@crates_vendor__semver-1.0.20//:build_script_build",
-    ],
-)
-
-cargo_build_script(
-    name = "semver_build_script",
-    srcs = glob(["**/*.rs"]),
-    crate_features = [
-        "default",
-        "std",
-    ],
-    crate_name = "build_script_build",
-    crate_root = "build.rs",
-    data = glob(
-        include = ["**"],
-        exclude = [
-            "**/* *",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
     edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=semver",
+        "crate-name=quote",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.20",
-    visibility = ["//visibility:private"],
-)
-
-alias(
-    name = "build_script_build",
-    actual = "semver_build_script",
-    tags = ["manual"],
+    version = "1.0.35",
+    deps = [
+        "@crates_vendor__proc-macro2-1.0.78//:proc_macro2",
+    ],
 )

@@ -11,11 +11,11 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Apache-2.0
+#     "TODO",  # BSD-2-Clause OR Apache-2.0 OR MIT
 # ])
 
 rust_library(
-    name = "bitflags",
+    name = "zerocopy",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -28,15 +28,20 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "simd",
+    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
-    rustc_flags = ["--cap-lints=allow"],
+    edition = "2018",
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
-        "crate-name=bitflags",
+        "crate-name=zerocopy",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.4.1",
+    version = "0.7.32",
 )

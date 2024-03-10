@@ -281,36 +281,36 @@ http_archive(
 http_file(
     name = "cargo_bazel_linux_x64",
     executable = True,
-    sha256 = "cd19f960cb97b1ee7f31c9297f8e6f7f08a229e28ab4bb1c2c776a7aba2e211d",
+    sha256 = "890c1d631ec39ccdccc4f383e9083a44781f529eb6281a84c209874d5449758f",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-x86_64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-x86_64-unknown-linux-gnu",
     ],
 )
 
 http_file(
     name = "cargo_bazel_linux_arm64",
     executable = True,
-    sha256 = "0d9c9b089737b3d3dea5cc5ce2c42ea5cbcfd0e103c47a00ab29953d65dc0b2d",
+    sha256 = "7e2e9ee08d6e1b33b1f76f2b521a4c7c295db50cda8679afaebe588113d54859",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-aarch64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-aarch64-unknown-linux-gnu",
     ],
 )
 
 http_file(
     name = "cargo_bazel_macos_x64",
     executable = True,
-    sha256 = "b3f02c5691ceeac06869ce1a7aff06094879b51941fadd57393a55ee0598448f",
+    sha256 = "a1b2484838291835b65fef49ec373df0579955ef20603836ecd79bf7e903c603",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-x86_64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-x86_64-apple-darwin",
     ],
 )
 
 http_file(
     name = "cargo_bazel_macos_arm64",
     executable = True,
-    sha256 = "f9968243c677349a8cbbea360e39e3f9bb696cf853c031ece57e887ecd1bf523",
+    sha256 = "308984faa357f94b0ac85c6d9f20b6bf4319cdceca9af301b3d73d77a2d16299",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-aarch64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-aarch64-apple-darwin",
     ],
 )
 
@@ -318,17 +318,17 @@ http_file(
     name = "cargo_bazel_win_x64",
     downloaded_file_path = "downloaded.exe",  # .exe extension required for Windows to recognise as executable
     executable = True,
-    sha256 = "6da386d85533ce38d7501a41bd072fb5cd27c7f9d801d2336150eeb9f8cf3849",
+    sha256 = "8c97381a7f20033104563c808e5530cd76d70c88281b4708ca4c3b834f769246",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-x86_64-pc-windows-msvc.exe",
     ],
 )
 
 http_archive(
     name = "rules_rust",
-    sha256 = "1e7114ea2af800c6987ca38daeee13e3ae6e934875b4f7ca24b798857f95431e",
+    sha256 = "a761d54e49db06f863468e6bba4a13252b1bd499e8f706da65e279b3bcbc5c52",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/rules_rust-v0.32.0.tar.gz",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/rules_rust-v0.36.2.tar.gz",
     ],
 )
 

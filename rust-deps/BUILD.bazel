@@ -1,5 +1,5 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
-load("@rules_rust//crate_universe:defs.bzl", "crate", "crates_vendor")
+load("@rules_rust//crate_universe:defs.bzl", "crates_vendor", "render_config")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
 load("packages.bzl", "PACKAGES")
 
@@ -62,7 +62,7 @@ crates_vendor(
         "x86_64-pc-windows-msvc",
     ],
     # Not needed, we have a well-defined set of supported platforms
-    generate_target_compatible_with = False,
+   render_config = render_config(generate_target_compatible_with = False),
 )
 
 rust_static_library(

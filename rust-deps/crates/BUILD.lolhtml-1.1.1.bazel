@@ -26,7 +26,9 @@ rust_library(
     ),
     crate_root = "src/lib.rs",
     edition = "2021",
-    rustc_flags = ["--cap-lints=allow"],
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
         "crate-name=lolhtml",
@@ -37,8 +39,8 @@ rust_library(
     version = "1.1.1",
     deps = [
         "@crates_vendor__encoding_rs-0.8.33//:encoding_rs",
-        "@crates_vendor__libc-0.2.150//:libc",
+        "@crates_vendor__libc-0.2.153//:libc",
         "@crates_vendor__lol_html-1.1.1//:lol_html",
-        "@crates_vendor__thiserror-1.0.50//:thiserror",
+        "@crates_vendor__thiserror-1.0.57//:thiserror",
     ],
 )
