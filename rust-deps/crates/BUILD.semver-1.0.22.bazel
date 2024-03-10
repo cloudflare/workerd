@@ -16,7 +16,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "serde",
+    name = "semver",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -31,36 +31,31 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "derive",
-        "serde_derive",
         "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
-    proc_macro_deps = [
-        "@crates_vendor__serde_derive-1.0.193//:serde_derive",
+    rustc_flags = [
+        "--cap-lints=allow",
     ],
-    rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=semver",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.193",
+    version = "1.0.22",
     deps = [
-        "@crates_vendor__serde-1.0.193//:build_script_build",
+        "@crates_vendor__semver-1.0.22//:build_script_build",
     ],
 )
 
 cargo_build_script(
-    name = "serde_build_script",
+    name = "semver_build_script",
     srcs = glob(["**/*.rs"]),
     crate_features = [
         "default",
-        "derive",
-        "serde_derive",
         "std",
     ],
     crate_name = "build_script_build",
@@ -82,17 +77,17 @@ cargo_build_script(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=semver",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.193",
+    version = "1.0.22",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = "serde_build_script",
+    actual = "semver_build_script",
     tags = ["manual"],
 )

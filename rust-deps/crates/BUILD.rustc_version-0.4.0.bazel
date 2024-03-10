@@ -30,7 +30,9 @@ rust_library(
     ),
     crate_root = "src/lib.rs",
     edition = "2018",
-    rustc_flags = ["--cap-lints=allow"],
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
         "crate-name=rustc_version",
@@ -40,6 +42,6 @@ rust_library(
     ],
     version = "0.4.0",
     deps = [
-        "@crates_vendor__semver-1.0.20//:semver",
+        "@crates_vendor__semver-1.0.22//:semver",
     ],
 )

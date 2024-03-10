@@ -36,7 +36,9 @@ rust_library(
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
-    rustc_flags = ["--cap-lints=allow"],
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
         "crate-name=flate2",
@@ -46,7 +48,7 @@ rust_library(
     ],
     version = "1.0.28",
     deps = [
-        "@crates_vendor__crc32fast-1.3.2//:crc32fast",
-        "@crates_vendor__miniz_oxide-0.7.1//:miniz_oxide",
+        "@crates_vendor__crc32fast-1.4.0//:crc32fast",
+        "@crates_vendor__miniz_oxide-0.7.2//:miniz_oxide",
     ],
 )

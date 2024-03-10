@@ -43,7 +43,9 @@ rust_library(
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
-    rustc_flags = ["--cap-lints=allow"],
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
         "crate-name=rand",
@@ -58,22 +60,22 @@ rust_library(
         "@crates_vendor__rand_pcg-0.2.1//:rand_pcg",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.150//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.153//:libc",  # cfg(unix)
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.150//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.153//:libc",  # cfg(unix)
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.150//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.153//:libc",  # cfg(unix)
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.150//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.153//:libc",  # cfg(unix)
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "//conditions:default": [],

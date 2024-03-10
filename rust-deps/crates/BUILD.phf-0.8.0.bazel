@@ -41,7 +41,9 @@ rust_library(
         "@crates_vendor__phf_macros-0.8.0//:phf_macros",
         "@crates_vendor__proc-macro-hack-0.5.19//:proc_macro_hack",
     ],
-    rustc_flags = ["--cap-lints=allow"],
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
         "crate-name=phf",

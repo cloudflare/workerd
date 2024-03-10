@@ -16,7 +16,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "libc",
+    name = "thiserror",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -29,33 +29,30 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2015",
-    rustc_flags = ["--cap-lints=allow"],
+    edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__thiserror-impl-1.0.57//:thiserror_impl",
+    ],
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=thiserror",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.150",
+    version = "1.0.57",
     deps = [
-        "@crates_vendor__libc-0.2.150//:build_script_build",
+        "@crates_vendor__thiserror-1.0.57//:build_script_build",
     ],
 )
 
 cargo_build_script(
-    name = "libc_build_script",
+    name = "thiserror_build_script",
     srcs = glob(["**/*.rs"]),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -69,23 +66,23 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2015",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=thiserror",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.150",
+    version = "1.0.57",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = "libc_build_script",
+    actual = "thiserror_build_script",
     tags = ["manual"],
 )

@@ -33,7 +33,9 @@ rust_proc_macro(
     proc_macro_deps = [
         "@crates_vendor__proc-macro-hack-0.5.19//:proc_macro_hack",
     ],
-    rustc_flags = ["--cap-lints=allow"],
+    rustc_flags = [
+        "--cap-lints=allow",
+    ],
     tags = [
         "cargo-bazel",
         "crate-name=phf_macros",
@@ -45,8 +47,8 @@ rust_proc_macro(
     deps = [
         "@crates_vendor__phf_generator-0.8.0//:phf_generator",
         "@crates_vendor__phf_shared-0.8.0//:phf_shared",
-        "@crates_vendor__proc-macro2-1.0.70//:proc_macro2",
-        "@crates_vendor__quote-1.0.33//:quote",
+        "@crates_vendor__proc-macro2-1.0.78//:proc_macro2",
+        "@crates_vendor__quote-1.0.35//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )
