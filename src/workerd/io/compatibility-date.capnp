@@ -402,4 +402,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #
   # To make room for people to define their own RPC methods with these names, this compat flag
   # makes them no longer defined.
+
+  unwrapCustomThenables @45 :Bool
+      $compatEnableFlag("unwrap_custom_thenables")
+      $compatDisableFlag("no_unwrap_custom_thenables")
+      $compatEnableDate("2024-04-01");
 }
