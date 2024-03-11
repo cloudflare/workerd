@@ -983,15 +983,22 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
             // before the inner promise.
             func = kj::fwd<Func>(func)]
             (ExceptionOr<T>&& exceptionOrT) mutable {
+    struct FuncResultPair {
+      // It's important that `exceptionOrT` is destroyed before `Func`. Lambda captures are
+      // destroyed in unspecified order, so we wrap them in a struct to make it explicit.
+      Func func;
+      ExceptionOr<T> exceptionOrT;
+    };
+
     return run([resolver = kj::mv(resolver),
-                exceptionOrT = kj::mv(exceptionOrT),
-                maybeAsyncContext = kj::mv(maybeAsyncContext),
-                func = kj::fwd<Func>(func)](Worker::Lock& lock) mutable {
+                funcResultPair = FuncResultPair { kj::fwd<Func>(func), kj::mv(exceptionOrT) },
+                maybeAsyncContext = kj::mv(maybeAsyncContext)]
+                (Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
       jsg::Lock& js = lock;
 
       if constexpr (jsg::isVoid<T>()) {
-        KJ_IF_SOME(e, exceptionOrT) {
+        KJ_IF_SOME(e, funcResultPair.exceptionOrT) {
           // We don't use `resolver.reject()` here because if we convert the kj::Exception into
           // a JS Error here, it won't have a useful stack trace. V8 can generate a good stack
           // trace as long as we construct the Error inside of a promise continuation, so we use
@@ -1002,10 +1009,10 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
           try {
             js.tryCatch([&]() {
               if constexpr (jsg::isVoid<Result>()) {
-                func(js);
+                funcResultPair.func(js);
                 resolver.resolve(js, kj::none);
               } else {
-                resolver.resolve(js, func(js));
+                resolver.resolve(js, funcResultPair.func(js));
               }
             }, [&](jsg::Value error) {
               // Here we can just `resolver.reject` because we already have a JS exception.
@@ -1018,7 +1025,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
         }
       } else {
         // T is not void.
-        KJ_SWITCH_ONEOF(exceptionOrT) {
+        KJ_SWITCH_ONEOF(funcResultPair.exceptionOrT) {
           KJ_CASE_ONEOF(exception, kj::Exception) {
             // Again, pass along the KJ exception so we can convert it later in the right context.
             resolver.resolve(js, kj::mv(exception));
@@ -1027,11 +1034,11 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
             try {
               js.tryCatch([&]() {
                 if constexpr (jsg::isVoid<Result>()) {
-                  func(js, kj::mv(result));
+                  funcResultPair.func(js, kj::mv(result));
                   resolver.resolve(js, kj::none);
                 } else {
                   // Here we can just `resolver.reject` because we already have a JS exception.
-                  resolver.resolve(js, func(js, kj::mv(result)));
+                  resolver.resolve(js, funcResultPair.func(js, kj::mv(result)));
                 }
               }, [&](jsg::Value error) {
                 resolver.reject(js, error.getHandle(js));
