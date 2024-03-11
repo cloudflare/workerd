@@ -116,6 +116,7 @@ struct WorkerdApi::Impl {
         : features(*impl.features),
           jsgConfig(jsg::JsgConfig {
             .noSubstituteNull = features.getNoSubstituteNull(),
+            .unwrapCustomThenables = features.getUnwrapCustomThenables(),
           }) {}
     operator const CompatibilityFlags::Reader() const { return features; }
     operator const jsg::JsgConfig&() const { return jsgConfig; }
