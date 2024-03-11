@@ -403,7 +403,8 @@ public:
   template <typename MetaConfiguration>
   TypeWrapper(v8::Isolate* isolate, MetaConfiguration&& configuration)
       : TypeWrapperBase<Self, T>(configuration)...,
-        MaybeWrapper<Self>(configuration) {
+        MaybeWrapper<Self>(configuration),
+        PromiseWrapper<Self>(configuration) {
     isolate->SetData(1, this);
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
