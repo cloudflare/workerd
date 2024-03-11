@@ -316,43 +316,38 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
 
 SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
 
-SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path) {
-  KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
-    // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
-    // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-    SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath.toString().cStr(), &db,
-                                    SQLITE_OPEN_READONLY, nullptr));
-  } else {
-    SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
-                                    SQLITE_OPEN_READONLY, vfs.getName().cStr()));
-  }
+SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::Maybe<kj::WriteMode> maybeMode) {
+  KJ_IF_SOME(mode, maybeMode) {
+    int flags = SQLITE_OPEN_READWRITE;
+    if (kj::has(mode, kj::WriteMode::CREATE)) {
+      flags |= SQLITE_OPEN_CREATE;
 
-  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
-
-  setupSecurity();
-}
-
-SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
-  int flags = SQLITE_OPEN_READWRITE;
-  if (kj::has(mode, kj::WriteMode::CREATE)) {
-    flags |= SQLITE_OPEN_CREATE;
-
-    if (kj::has(mode, kj::WriteMode::CREATE_PARENT) && path.size() > 1) {
-      // SQLite isn't going to try to create the parent directory so let's try to create it now.
-      vfs.directory.openSubdir(path.parent(),
-          kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
+      if (kj::has(mode, kj::WriteMode::CREATE_PARENT) && path.size() > 1) {
+        // SQLite isn't going to try to create the parent directory so let's try to create it now.
+        vfs.directory.openSubdir(path.parent(), kj::WriteMode::CREATE | kj::WriteMode::MODIFY |
+                                                    kj::WriteMode::CREATE_PARENT);
+      }
     }
-  }
-  KJ_REQUIRE(kj::has(mode, kj::WriteMode::MODIFY), "SQLite doesn't support create-exclusive mode");
+    KJ_REQUIRE(kj::has(mode, kj::WriteMode::MODIFY),
+               "SQLite doesn't support create-exclusive mode");
 
-  KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
-    // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
-    // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-    SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath.toString().cStr(), &db,
-                                    flags, nullptr));
+    KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
+      // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
+      // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
+      SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath.toString().cStr(), &db, flags, nullptr));
+    } else {
+      SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db, flags, vfs.getName().cStr()));
+    }
   } else {
-    SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
-                                    flags, vfs.getName().cStr()));
+    KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
+      // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
+      // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
+      SQLITE_CALL_NODB(
+          sqlite3_open_v2(rootedPath.toString().cStr(), &db, SQLITE_OPEN_READONLY, nullptr));
+    } else {
+      SQLITE_CALL_NODB(
+          sqlite3_open_v2(path.toString().cStr(), &db, SQLITE_OPEN_READONLY, vfs.getName().cStr()));
+    }
   }
 
   KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
