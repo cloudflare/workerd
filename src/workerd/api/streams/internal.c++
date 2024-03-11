@@ -362,7 +362,7 @@ public:
     kj::String toString(jsg::Lock& js) override {
       auto handle = exception.getHandle(js);
       auto obj = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsObject>());
-      obj.set(js, "name"_kjc, js.str("Unused stream created at:"_kjc));
+      obj.set(js, "name"_kjc, js.str("Unused stream created:"_kjc));
       return obj.get(js, "stack"_kjc).toString(js);
     }
 
