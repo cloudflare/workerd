@@ -2858,14 +2858,10 @@ struct Worker::Actor::Impl {
     // Implements InputGate::Hooks.
 
     kj::Promise<void> makeTimeoutPromise() override {
-#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
-      // Give more time under ASAN.
-      //
-      // TODO(cleanup): Should this be configurable?
-      auto timeout = 20 * kj::SECONDS;
-#else
-      auto timeout = 10 * kj::SECONDS;
-#endif
+      // This really only protects against total hangs. Lowering the timeout drastically is risky,
+      // since low timeouts can spuriously fire when under heavy CPU load, failing requests that
+      // would otherwise succeed.
+      auto timeout = 30 * kj::SECONDS;
       co_await timerChannel.afterLimitTimeout(timeout);
       kj::throwFatalException(KJ_EXCEPTION(FAILED,
             "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
