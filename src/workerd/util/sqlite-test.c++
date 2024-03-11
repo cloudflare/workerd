@@ -271,6 +271,37 @@ KJ_TEST("Read-only database picks up on changes from mutable database (on-disk)"
   doReadOnlyUpdateTest(*dir);
 }
 
+KJ_TEST("In-memory read-only crash regression") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+
+  {
+    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+    setupSql(db);
+    checkSql(db);
+  }
+
+  // When using the in-memory file system, if we first create a read-only database
+  kj::Maybe<SqliteDatabase> rodb;
+  rodb.emplace(vfs, kj::Path({"foo"}));
+  checkSql(KJ_ASSERT_NONNULL(rodb));
+
+  // then create a read/write database
+  kj::Maybe<SqliteDatabase> db;
+  db.emplace(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  checkSql(KJ_ASSERT_NONNULL(db));
+
+  // then write into the read/write database:
+  KJ_ASSERT_NONNULL(db).run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234,
+                            "Carol"_kj, "carol@example.com");
+
+  // we can destroy the read/write database with no problems,
+  db = kj::none;
+
+  // but we would crash when destroying the read-only database:
+  rodb = kj::none;
+}
+
 // Tests that concurrent database clients don't clobber each other. This verifies that the
 // LockManager interface is able to protect concurrent access and that our default implementation
 // works.
