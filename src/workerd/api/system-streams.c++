@@ -159,6 +159,8 @@ public:
 
   void abort(kj::Exception reason) override;
 
+  StreamEncoding disownEncodingResponsibility() override;
+
 private:
   void ensureIdentityEncoding();
 

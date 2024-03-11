@@ -199,6 +199,13 @@ public:
   virtual void abort(kj::Exception reason) = 0;
   // TODO(conform): abort() should return a promise after which closed fulfillers should be
   //   rejected. This may necessitate an "erroring" state.
+
+  // Tells the sink that it is no longer to be responsible for encoding in the correct format.
+  // Instead, the caller takes responsibility. The expected encoding is returned; the caller
+  // promises that all future writes will use this encoding. The default implementation returns
+  // IDENTITY, which is always correct since that's the encoding write()s should have used if
+  // this weren't called at all.
+  virtual StreamEncoding disownEncodingResponsibility() { return StreamEncoding::IDENTITY; }
 };
 
 class ReadableStreamSource {

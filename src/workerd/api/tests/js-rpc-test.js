@@ -259,6 +259,15 @@ export class MyService extends WorkerEntrypoint {
       abort() { ctx.abort(new RangeError("foo bar abort reason")); }
     };
   }
+
+  async writeToStream(stream) {
+    let writer = stream.getWriter();
+    let enc = new TextEncoder();
+    await writer.write(enc.encode("foo, "));
+    await writer.write(enc.encode("bar, "));
+    await writer.write(enc.encode("baz!"));
+    await writer.close();
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -832,6 +841,16 @@ export let serializeRpcPromiseOrProprety = {
   },
 }
 
+export let streams = {
+  async test(controller, env, ctx) {
+    let { readable, writable } = new IdentityTransformStream();
+    let promise = env.MyService.writeToStream(writable);
+    let text = await new Response(readable).text();
+    assert.strictEqual(text, "foo, bar, baz!");
+    await promise;
+  }
+}
+
 // Test that exceptions thrown from async native functions have a proper stack trace. (This is
 // not specific to RPC but RPC is a convenient place to test it since we can easily define the
 // callee to throw an exception.)
@@ -877,5 +896,6 @@ export let z_promisePipelining_realSocket = withRealSocket(promisePipelining);
 export let z_disposal_realSocket = withRealSocket(disposal);
 export let z_crossContextSharingDoesntWork_realSocket = withRealSocket(crossContextSharingDoesntWork);
 export let z_serializeRpcPromiseOrProprety_realSocket = withRealSocket(serializeRpcPromiseOrProprety);
+export let z_streams_realSocket = withRealSocket(streams);
 export let z_testAsyncStackTrace_realSocket = withRealSocket(testAsyncStackTrace);
 export let z_canUseGetPutDelete_realSocket = withRealSocket(canUseGetPutDelete);

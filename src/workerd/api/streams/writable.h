@@ -158,6 +158,12 @@ public:
     });
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<WritableStream> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::WRITABLE_STREAM);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:

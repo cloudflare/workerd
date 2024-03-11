@@ -11,6 +11,7 @@ $Cxx.namespace("workerd::rpc");
 
 using import "/capnp/compat/http-over-capnp.capnp".HttpMethod;
 using import "/capnp/compat/http-over-capnp.capnp".HttpService;
+using import "/capnp/compat/byte-stream.capnp".ByteStream;
 using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 
@@ -208,6 +209,8 @@ enum SerializationTag {
   # by accident.
 
   jsRpcStub @1;
+
+  writableStream @2;
 }
 
 enum StreamEncoding {
@@ -243,7 +246,16 @@ struct JsValue {
       rpcTarget @1 :JsRpcTarget;
       # An object that can be called over RPC.
 
-      # TODO(soon): Streams, Request, Response, etc.
+      writableStream :group {
+        # A WritableStream. This is much easier to represent that ReadableStream because the bytes
+        # flow from the receiver to the sender, and therefore a round trip is obviously necessary
+        # before the bytes can begin flowing.
+
+        byteStream @2 :ByteStream;
+        encoding @3 :StreamEncoding;
+      }
+
+      # TODO(now): ReadableStream, WebSocket, Request, Response
     }
   }
 }
