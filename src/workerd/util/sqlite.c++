@@ -1312,8 +1312,12 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
 
   .xTruncate = [](sqlite3_file* file, sqlite3_int64 size) noexcept -> int {
     WRAP_METHOD(SQLITE_IOERR_TRUNCATE, {
-      KJ_REQUIRE_NONNULL(self.writableFile).truncate(size);
-      return SQLITE_OK;
+      KJ_IF_SOME(writableFile, self.writableFile) {
+        writableFile.truncate(size);
+        return SQLITE_OK;
+      } else {
+        return SQLITE_READONLY;
+      }
     });
   },
 
