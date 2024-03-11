@@ -1937,7 +1937,19 @@ class GeneratorContext;
 
 struct JsgConfig {
   bool noSubstituteNull = false;
+  bool unwrapCustomThenables = false;
 };
+
+static JsgConfig DEFAULT_JSG_CONFIG = {};
+
+template <typename Config>
+static const JsgConfig& getConfig(const Config& config) {
+  if constexpr (kj::isSameType<Config, JsgConfig>() || kj::canConvert<Config, JsgConfig>()) {
+    return config;
+  } else {
+    return DEFAULT_JSG_CONFIG;
+  }
+}
 
 // -----------------------------------------------------------------------------
 
