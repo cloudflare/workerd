@@ -91,6 +91,13 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     }
   }
 
+  int thenable(jsg::Lock& js, jsg::Promise<int> promise) {
+    int result = 0;
+    promise.then(js, [&result](jsg::Lock& js, int val) { result = val; });
+    js.runMicrotasks();
+    return result;
+  }
+
   JSG_RESOURCE_TYPE(PromiseContext) {
     JSG_READONLY_PROTOTYPE_PROPERTY(promise, makePromise);
     JSG_METHOD(resolvePromise);
@@ -102,6 +109,8 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
 
     JSG_METHOD(testConsumeResolved);
     JSG_METHOD(whenResolved);
+
+    JSG_METHOD(thenable);
   }
 
   kj::Maybe<Promise<int>::Resolver> resolver;
@@ -170,6 +179,20 @@ KJ_TEST("whenResolved") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
 
   e.expectEval("whenResolved(Promise.resolve(1))", "undefined", "undefined");
+}
+
+KJ_TEST("thenable") {
+  static const auto config = JsgConfig {
+    .unwrapCustomThenables = true,
+  };
+
+  struct ThenableConfig {
+    operator const JsgConfig&() const { return config; }
+  };
+
+  Evaluator<PromiseContext, PromiseIsolate, ThenableConfig> e(v8System);
+
+  e.expectEval("thenable({ then(res) { res(123) } })", "number", "123");
 }
 
 }  // namespace

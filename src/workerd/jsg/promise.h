@@ -659,6 +659,12 @@ void thenUnwrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
 template <typename TypeWrapper>
 class PromiseWrapper {
 public:
+  // The constructor here is a bit of a hack. The config is optional and might not be a JsgConfig
+  // object (or convertible to a JsgConfig) if is provided. However, because of the way TypeWrapper
+  // inherits PromiseWrapper, we always end up passing a config option (which might be
+  // std::nullptr_t). The getConfig allows us to handle any case using reasonable defaults.
+  PromiseWrapper(const auto& config) : config(getConfig(config)) {}
+
   template <typename T>
   static constexpr const char* getName(Promise<T>*) { return "Promise"; }
 
@@ -710,6 +716,20 @@ public:
       return Promise<T>(context->GetIsolate(), promise);
     } else {
       // Input is a resolved value (not a promise). Try to unwrap it now.
+
+      // If the input is an object that is not a promise, there's a chance it is a custom
+      // thenable (and object with a then method intended to be used as a promise). If that
+      // is the case, then we can handle the thenable by resolving it to a promise then
+      // unwrapping that promise.
+      // Unfortunately this needs to be gated by a compatibility flag because there are
+      // existing workers that appear to rely on the old behavior -- although it's not clear
+      // if those workers actually work the way they were intended to.
+      if (config.unwrapCustomThenables && isThenable(context, handle)) {
+        auto paf = check(v8::Promise::Resolver::New(context));
+        check(paf->Resolve(context, handle));
+        return tryUnwrap(context, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
+      }
+
       if constexpr (isVoid<T>()) {
         // When expecting Promise<void>, we treat absolutely any non-promise value as being
         // an immediately-resolved promise. This is consistent with JavaScript where you'd
@@ -735,6 +755,17 @@ public:
         }
       }
     }
+  }
+
+private:
+  const JsgConfig config;
+
+  static bool isThenable(v8::Local<v8::Context> context, v8::Local<v8::Value> handle) {
+    if (handle->IsObject()) {
+      auto obj = handle.As<v8::Object>();
+      return check(obj->Has(context, v8StrIntern(context->GetIsolate(), "then")));
+    }
+    return false;
   }
 };
 
