@@ -122,6 +122,15 @@ KJ_TEST("SQLite backed by in-memory directory") {
 
     checkSql(db);
   }
+
+  // Check read-only-mode.
+  {
+    SqliteDatabase db(vfs, kj::Path({"foo"}));
+    checkSql(db);
+    KJ_EXPECT_THROW_MESSAGE("attempt to write a readonly database",
+                            db.run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234,
+                                   "Carol"_kj, "carol@example.com"));
+  }
 }
 
 class TempDirOnDisk {
@@ -200,6 +209,66 @@ KJ_TEST("SQLite backed by real disk") {
 
     checkSql(db);
   }
+
+  // Check read-only-mode.
+  {
+    SqliteDatabase db(vfs, kj::Path({"foo"}));
+
+    checkSql(db);
+    KJ_EXPECT_THROW_MESSAGE("attempt to write a readonly database",
+                            db.run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234,
+                                   "Carol"_kj, "carol@example.com"));
+  }
+}
+
+// Tests that a read-only database client picks up changes made to the database by a read/write
+// client.
+void doReadOnlyUpdateTest(const kj::Directory& dir) {
+  SqliteDatabase::Vfs vfs(dir);
+
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  setupSql(db);
+  checkSql(db);
+
+  SqliteDatabase rodb(vfs, kj::Path({"foo"}));
+  checkSql(rodb);
+
+  uint64_t startWalSize = 0;
+  {
+    auto file = KJ_ASSERT_NONNULL(dir.tryOpenFile(kj::Path({"foo-wal"})));
+    startWalSize = file->stat().size;
+  }
+
+  db.run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234, "Carol"_kj,
+         "carol@example.com");
+
+  {
+    // Make sure there's we added some WAL, since that's where the read-only database will have to
+    // read new rows from.
+    auto file = KJ_ASSERT_NONNULL(dir.tryOpenFile(kj::Path({"foo-wal"})));
+    KJ_EXPECT(file->stat().size > startWalSize);
+  }
+
+  {
+    auto query = db.run("SELECT COUNT(*) FROM people");
+    KJ_EXPECT(query.getInt(0) == 3);
+  }
+
+  {
+    auto query = rodb.run("SELECT COUNT(*) FROM people");
+    KJ_EXPECT(query.getInt(0) == 3);
+  }
+}
+
+KJ_TEST("Read-only database picks up on changes from mutable database (in-memory)") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  doReadOnlyUpdateTest(*dir);
+}
+
+KJ_TEST("Read-only database picks up on changes from mutable database (on-disk)") {
+  TempDirOnDisk dir;
+  doReadOnlyUpdateTest(*dir);
 }
 
 // Tests that concurrent database clients don't clobber each other. This verifies that the
