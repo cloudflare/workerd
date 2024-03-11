@@ -232,11 +232,23 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
 
     auto promise = nativeInput.inner->pumpTo(getInner()).ignoreResult();
     if (end) {
-      KJ_IF_SOME(gz, inner.tryGet<kj::Own<kj::GzipAsyncOutputStream>>()) {
-        promise = promise.then([&gz = gz]() { return gz->end(); });
-      }
-      KJ_IF_SOME(br, inner.tryGet<kj::Own<kj::BrotliAsyncOutputStream>>()) {
-        promise = promise.then([&br = br]() { return br->end(); });
+      // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
+      //   can go away.
+      KJ_SWITCH_ONEOF(inner) {
+        KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
+          KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
+            promise = promise.then([&ee = ee]() { return ee.end(); });
+          } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
+            promise = promise.then([&aio = aio]() { aio.shutdownWrite(); });
+          }
+        }
+        KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+          promise = promise.then([&gz = gz]() { return gz->end(); });
+        }
+        KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+          promise = promise.then([&br = br]() { return br->end(); });
+        }
+        KJ_CASE_ONEOF(e, Ended) {}
       }
     }
 
@@ -248,23 +260,35 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
   return kj::none;
 }
 
+StreamEncoding EncodedAsyncOutputStream::disownEncodingResponsibility() {
+  StreamEncoding result = encoding;
+  encoding = StreamEncoding::IDENTITY;
+  return result;
+}
+
 kj::Promise<void> EncodedAsyncOutputStream::end() {
   if (inner.is<Ended>()) return kj::READY_NOW;
 
   kj::Promise<void> promise = kj::READY_NOW;
 
-  KJ_IF_SOME(gz, inner.tryGet<kj::Own<kj::GzipAsyncOutputStream>>()) {
-    promise = gz->end().attach(kj::mv(gz));
-  }
-  KJ_IF_SOME(br, inner.tryGet<kj::Own<kj::BrotliAsyncOutputStream>>()) {
-    promise = br->end().attach(kj::mv(br));
-  }
-
-  KJ_IF_SOME(stream, inner.tryGet<kj::Own<kj::AsyncOutputStream>>()) {
-    if (auto casted = dynamic_cast<kj::AsyncIoStream*>(stream.get())) {
-      casted->shutdownWrite();
+  // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
+  //   can go away.
+  KJ_SWITCH_ONEOF(inner) {
+    KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
+      KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
+        promise = ee.end().attach(kj::mv(stream));
+      } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
+        aio.shutdownWrite();
+        promise = promise.attach(kj::mv(stream));
+      }
     }
-    promise = promise.attach(kj::mv(stream));
+    KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+      promise = gz->end().attach(kj::mv(gz));
+    }
+    KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+      promise = br->end().attach(kj::mv(br));
+    }
+    KJ_CASE_ONEOF(e, Ended) {}
   }
 
   inner.init<Ended>();
