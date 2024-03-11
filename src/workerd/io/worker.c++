@@ -1080,6 +1080,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
       id(kj::str(id)),
       modular(source.is<ModulesSource>()),
       impl(kj::heap<Impl>()) {
+  this->isPython = false;
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
@@ -1178,6 +1179,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
               }
 
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
+                this->isPython = modulesSource.isPython;
                 auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
                 auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
                 impl->configureDynamicImports(lock, modules);
@@ -1392,8 +1394,14 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   auto module = entry.module.getHandle(lock);
 
                   {
-                    auto limitScope = script->isolate->getLimitEnforcer()
-                        .enterStartupJs(lock, maybeLimitError);
+                    kj::Own<void> limitScope;
+                    if (script->isPython) {
+                      limitScope = script->isolate->getLimitEnforcer().enterStartupPython(
+                          lock, maybeLimitError);
+                    } else {
+                      limitScope =
+                          script->isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
+                    }
 
                     jsg::instantiateModule(lock, module);
                   }

@@ -2619,6 +2619,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
         jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
       return {};
     }
+    kj::Own<void> enterStartupPython(
+        jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+      return {};
+    }
     kj::Own<void> enterDynamicImportJs(
         jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
       return {};
