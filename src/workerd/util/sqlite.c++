@@ -1300,9 +1300,13 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
   .xWrite = [](sqlite3_file* file, const void* buffer, int iAmt,
                sqlite3_int64 iOfst) noexcept -> int {
     WRAP_METHOD(SQLITE_IOERR_WRITE, {
-      auto bytes = kj::arrayPtr(reinterpret_cast<const byte*>(buffer), iAmt);
-      KJ_REQUIRE_NONNULL(self.writableFile).write(iOfst, bytes);
-      return SQLITE_OK;
+      KJ_IF_SOME(writableFile, self.writableFile) {
+        auto bytes = kj::arrayPtr(reinterpret_cast<const byte*>(buffer), iAmt);
+        writableFile.write(iOfst, bytes);
+        return SQLITE_OK;
+      } else {
+        return SQLITE_READONLY;
+      }
     });
   },
 
