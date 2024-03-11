@@ -563,22 +563,11 @@ public:
   }
 };
 
-static JsgConfig DEFAULT_JSG_CONFIG = {};
-
 // TypeWrapper mixin for maybes.
 template <typename TypeWrapper>
 class MaybeWrapper {
 
 public:
-  template <typename Config>
-  static const JsgConfig& getConfig(const Config& config) {
-    if constexpr (kj::isSameType<Config, JsgConfig>() || kj::canConvert<Config, JsgConfig>()) {
-      return config;
-    } else {
-      return DEFAULT_JSG_CONFIG;
-    }
-  }
-
   // The constructor here is a bit of a hack. The config is optional and might not be a JsgConfig
   // object (or convertible to a JsgConfig) if is provided. However, because of the way TypeWrapper
   // inherits MaybeWrapper, we always end up passing a config option (which might be std::nullptr_t)
