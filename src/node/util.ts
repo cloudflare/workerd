@@ -171,6 +171,9 @@ export function _extend(target: Object, source: Object) {
   return target;
 }
 
+export const TextDecoder = globalThis.TextDecoder;
+export const TextEncoder = globalThis.TextEncoder;
+
 export default {
   types,
   callbackify,
@@ -183,6 +186,10 @@ export default {
   _extend,
   MIMEParams,
   MIMEType,
+  // Node.js originally exposed TextEncoder and TextDecoder off the util
+  // module originally, so let's just go ahead and do the same.
+  TextEncoder,
+  TextDecoder,
 };
 
 // Node.js util APIs we're currently not supporting
@@ -198,3 +205,18 @@ export default {
 //                also this is soon to be obsoleted by toWellFormed in the language.
 // transferableAbortSignal/transferableAbortController -- postMessage and worker threads
 //      are not implemented in workerd. No use case for these.
+
+// util.TextDecoder
+// util.TextEncoder                  util._errnoException              util._exceptionWithHostPort
+// util._extend                      util.aborted                      util.callbackify
+// util.debug                        util.debuglog                     util.deprecate
+// util.format                       util.formatWithOptions            util.getSystemErrorMap
+// util.getSystemErrorName           util.inherits                     util.inspect
+// util.isArray                      util.isBoolean                    util.isBuffer
+// util.isDate                       util.isDeepStrictEqual            util.isError
+// util.isFunction                   util.isNull                       util.isNullOrUndefined
+// util.isNumber                     util.isObject                     util.isPrimitive
+// util.isRegExp                     util.isString                     util.isSymbol
+// util.isUndefined                  util.log                          util.parseArgs
+// util.promisify                    util.stripVTControlCharacters     util.toUSVString
+// util.transferableAbortController  util.transferableAbortSignal      util.types
