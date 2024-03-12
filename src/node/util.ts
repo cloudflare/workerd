@@ -278,38 +278,23 @@ export default {
 };
 
 // Node.js util APIs we're currently not supporting
-// TODO(soon): Revisit these
-//
-// debug/debuglog -- The semantics of these depend on configuration through environment
-//                   variables to enable specific debug categories. We have no notion
-//                   of that in the runtime currently and it's not yet clear if we should.
-// deprecate -- Not clear how broadly this is used in the ecosystem outside of node.js
-// getSystemErrorMap/getSystemErrorName -- libuv specific. No use in workerd?
-// is{Type} variants -- these are deprecated in Node. Use util.types
-// toUSVString -- Not clear how broadly this is used in the ecosystem outside of node.js.
-//                also this is soon to be obsoleted by toWellFormed in the language.
-// transferableAbortSignal/transferableAbortController -- postMessage and worker threads
-//      are not implemented in workerd. No use case for these.
-
-// util._errnoException
-// util._exceptionWithHostPort
-// util.deprecate
-// util.getSystemErrorMap
-// util.getSystemErrorName
-// util.isArray
-// util.isBoolean
-// util.isBuffer
-// util.isDate
-// util.isDeepStrictEqual
-// util.isError
-// util.isFunction
-// util.isNull
-// util.isNullOrUndefined
-// util.isNumber
-// util.isObject
-// util.isPrimitive
-// util.isRegExp
-// util.isString
-// util.isSymbol
-// util.isUndefined
-// util.stripVTControlCharacters
+//   * util._errnoException
+//   * util._exceptionWithHostPort
+//   * util.getSystemErrorMap
+//   * util.getSystemErrorName
+//   * util.isArray
+//   * util.isBoolean
+//   * util.isBuffer
+//   * util.isDate
+//   * util.isDeepStrictEqual
+//   * util.isError
+//   * util.isFunction
+//   * util.isNull
+//   * util.isNullOrUndefined
+//   * util.isNumber
+//   * util.isObject
+//   * util.isPrimitive
+//   * util.isRegExp
+//   * util.isString
+//   * util.isSymbol
+//   * util.isUndefined
