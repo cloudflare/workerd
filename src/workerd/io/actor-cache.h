@@ -779,6 +779,18 @@ private:
 
   ReadFulfiller readFulfiller;
 
+  // syncGets() creates a GetMultiStreamImpl for each batch that we read, and each
+  // GetMultiStreamImpl has an array of strong references to `Entry`s. Although we may be holding
+  // strong references, these `Entry`s are really sitting in the dirtyList, and GetMultiStreamImpl
+  // is filling the Entry with its value from storage. However, upon the destruction of the
+  // ActorCache, we need to make sure that all `Entry`s are dropped before we try to destroy our
+  // SharedLru, otherwise we may see use-after-frees.
+  //
+  // To ensure this destruction ordering is met, we store the joint get promises in ActorCache,
+  // and set up a kj::defer task that clears out the entries in each GetMultiStreamImpl upon the
+  // completion/cancellation of the joint get promise. See `syncGets()` for more details.
+  kj::Promise<void> multiReadTask = kj::READY_NOW;
+
   // Did we hit a problem that makes the ActorCache unusable? If so this is the exception that
   // describes the problem.
   kj::Maybe<kj::Exception> maybeTerminalException;
