@@ -179,6 +179,27 @@ export function toUSVString(input : any) {
   return (`${input}` as any).toWellFormed();
 }
 
+function pad(n: any) : string {
+  return `${n}`.padStart(2, '0');
+}
+
+const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
+                'Oct', 'Nov', 'Dec'];
+
+function timestamp() : string {
+  const d = new Date();
+  const t = [
+    pad(d.getHours()),
+    pad(d.getMinutes()),
+    pad(d.getSeconds()),
+  ].join(':');
+  return `${d.getDate()} ${months[d.getMonth()]} ${t}`;
+}
+
+export function log(...args : any[]) {
+  console.log('%s - %s', timestamp(), format(...args));
+}
+
 export default {
   types,
   callbackify,
@@ -192,6 +213,7 @@ export default {
   MIMEParams,
   MIMEType,
   toUSVString,
+  log,
   // Node.js originally exposed TextEncoder and TextDecoder off the util
   // module originally, so let's just go ahead and do the same.
   TextEncoder,
@@ -236,10 +258,7 @@ export default {
 // util.isString
 // util.isSymbol
 // util.isUndefined
-// util.log
 // util.parseArgs
 // util.stripVTControlCharacters
-// util.toUSVString
 // util.transferableAbortController
 // util.transferableAbortSignal
-// util.types
