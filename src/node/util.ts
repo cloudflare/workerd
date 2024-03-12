@@ -15,6 +15,12 @@ import {
 } from 'node-internal:validators';
 
 import {
+  debuglog,
+} from 'node-internal:debuglog';
+export const debug = debuglog;
+export { debuglog };
+
+import {
   ERR_FALSY_VALUE_REJECTION,
   ERR_INVALID_ARG_TYPE,
 } from 'node-internal:internal_errors';
@@ -249,6 +255,8 @@ export default {
   toUSVString,
   log,
   aborted,
+  debuglog,
+  debug,
   // Node.js originally exposed TextEncoder and TextDecoder off the util
   // module originally, so let's just go ahead and do the same.
   TextEncoder,
@@ -277,7 +285,6 @@ export default {
 
 // util._errnoException
 // util._exceptionWithHostPort
-// util.aborted
 // util.debug
 // util.debuglog
 // util.deprecate
