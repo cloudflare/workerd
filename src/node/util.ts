@@ -174,6 +174,11 @@ export function _extend(target: Object, source: Object) {
 export const TextDecoder = globalThis.TextDecoder;
 export const TextEncoder = globalThis.TextEncoder;
 
+export function toUSVString(input : any) {
+  // TODO(cleanup): Apparently the typescript types for this aren't available yet?
+  return (`${input}` as any).toWellFormed();
+}
+
 export default {
   types,
   callbackify,
@@ -186,6 +191,7 @@ export default {
   _extend,
   MIMEParams,
   MIMEType,
+  toUSVString,
   // Node.js originally exposed TextEncoder and TextDecoder off the util
   // module originally, so let's just go ahead and do the same.
   TextEncoder,
@@ -206,17 +212,34 @@ export default {
 // transferableAbortSignal/transferableAbortController -- postMessage and worker threads
 //      are not implemented in workerd. No use case for these.
 
-// util.TextDecoder
-// util.TextEncoder                  util._errnoException              util._exceptionWithHostPort
-// util._extend                      util.aborted                      util.callbackify
-// util.debug                        util.debuglog                     util.deprecate
-// util.format                       util.formatWithOptions            util.getSystemErrorMap
-// util.getSystemErrorName           util.inherits                     util.inspect
-// util.isArray                      util.isBoolean                    util.isBuffer
-// util.isDate                       util.isDeepStrictEqual            util.isError
-// util.isFunction                   util.isNull                       util.isNullOrUndefined
-// util.isNumber                     util.isObject                     util.isPrimitive
-// util.isRegExp                     util.isString                     util.isSymbol
-// util.isUndefined                  util.log                          util.parseArgs
-// util.promisify                    util.stripVTControlCharacters     util.toUSVString
-// util.transferableAbortController  util.transferableAbortSignal      util.types
+// util._errnoException
+// util._exceptionWithHostPort
+// util.aborted
+// util.debug
+// util.debuglog
+// util.deprecate
+// util.getSystemErrorMap
+// util.getSystemErrorName
+// util.isArray
+// util.isBoolean
+// util.isBuffer
+// util.isDate
+// util.isDeepStrictEqual
+// util.isError
+// util.isFunction
+// util.isNull
+// util.isNullOrUndefined
+// util.isNumber
+// util.isObject
+// util.isPrimitive
+// util.isRegExp
+// util.isString
+// util.isSymbol
+// util.isUndefined
+// util.log
+// util.parseArgs
+// util.stripVTControlCharacters
+// util.toUSVString
+// util.transferableAbortController
+// util.transferableAbortSignal
+// util.types
