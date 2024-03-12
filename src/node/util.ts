@@ -240,6 +240,13 @@ export async function aborted(signal: AbortSignal, resource: object) {
   return promise;
 }
 
+export function deprecate(fn: Function, _1?: string, _2?: string, _3? : boolean) {
+  // TODO(soon): Node.js's implementation wraps the given function in a new function that
+  // logs a warning to the console if the function is called. Do we want to support that?
+  // For now, we're just going to silently return the input method unmodified.
+  return fn;
+}
+
 export default {
   types,
   callbackify,
@@ -257,6 +264,7 @@ export default {
   aborted,
   debuglog,
   debug,
+  deprecate,
   // Node.js originally exposed TextEncoder and TextDecoder off the util
   // module originally, so let's just go ahead and do the same.
   TextEncoder,
@@ -285,8 +293,6 @@ export default {
 
 // util._errnoException
 // util._exceptionWithHostPort
-// util.debug
-// util.debuglog
 // util.deprecate
 // util.getSystemErrorMap
 // util.getSystemErrorName
