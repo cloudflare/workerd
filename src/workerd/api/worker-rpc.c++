@@ -11,6 +11,32 @@
 
 namespace workerd::api {
 
+namespace {
+
+using StreamSinkFulfiller = kj::Own<kj::PromiseFulfiller<rpc::JsValue::StreamSink::Client>>;
+
+}  // namespace
+
+capnp::Capability::Client RpcSerializerExternalHander::writeStream(BuilderCallback callback) {
+  rpc::JsValue::StreamSink::Client* streamSinkPtr;
+  KJ_IF_SOME(ss, streamSink) {
+    streamSinkPtr = &ss;
+  } else {
+    // First stream written, set up the StreamSink.
+    streamSinkPtr = &streamSink.emplace(getStreamSinkFunc());
+  }
+
+  auto result = ({
+    auto req = streamSinkPtr->startStreamRequest(capnp::MessageSize {4, 0});
+    req.setExternalIndex(externals.size());
+    req.send().getStream();
+  });
+
+  write(kj::mv(callback));
+
+  return result;
+}
+
 capnp::Orphan<capnp::List<rpc::JsValue::External>>
     RpcSerializerExternalHander::build(capnp::Orphanage orphanage) {
   auto result = orphanage.newOrphan<capnp::List<rpc::JsValue::External>>(externals.size());
@@ -32,6 +58,41 @@ rpc::JsValue::External::Reader RpcDeserializerExternalHander::read() {
   return externals[i++];
 }
 
+void RpcDeserializerExternalHander::setLastStream(capnp::Capability::Client stream) {
+  uint i = externals.size() - 1;
+  KJ_IF_SOME(ss, streamSink) {
+    ss->setSlot(i, kj::mv(stream));
+  } else {
+    streamSink.emplace(kj::heap<StreamSinkImpl>())->setSlot(i, kj::mv(stream));
+  }
+}
+
+kj::Maybe<rpc::JsValue::StreamSink::Client> RpcDeserializerExternalHander::getStreamSink() {
+  return kj::mv(streamSink).map(
+      [](auto obj) -> rpc::JsValue::StreamSink::Client { return kj::mv(obj); });
+}
+
+void RpcDeserializerExternalHander::StreamSinkImpl::setSlot(
+    uint i, capnp::Capability::Client stream) {
+  if (table.size() <= i) {
+    table.resize(i + 1);
+  }
+  table[i] = kj::mv(stream);
+}
+
+kj::Promise<void> RpcDeserializerExternalHander::StreamSinkImpl::startStream(
+    StartStreamContext context) {
+  uint i = context.getParams().getExternalIndex();
+  KJ_REQUIRE(i < table.size());
+  context.getResults(capnp::MessageSize {4, 1}).setStream(kj::mv(KJ_REQUIRE_NONNULL(table[i])));
+
+  // We have to drop the table entry here so that we can properly detect when the caller drops the
+  // stream.
+  table[i] = kj::none;
+
+  return kj::READY_NOW;
+}
+
 namespace {
 
 // Call to construct an `rpc::JsValue` from a JS value.
@@ -39,8 +100,9 @@ namespace {
 // `makeBuilder` is a function which takes a capnp::MessageSize hint and returns the
 // rpc::JsValue::Builder to fill in.
 template <typename Func>
-void serializeJsValue(jsg::Lock& js, jsg::JsValue value, Func makeBuilder) {
-  RpcSerializerExternalHander externalHandler;
+void serializeJsValue(jsg::Lock& js, jsg::JsValue value, Func makeBuilder,
+    RpcSerializerExternalHander::GetStreamSinkFunc getStreamSinkFunc) {
+  RpcSerializerExternalHander externalHandler(kj::mv(getStreamSinkFunc));
 
   jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
@@ -76,6 +138,7 @@ void serializeJsValue(jsg::Lock& js, jsg::JsValue value, Func makeBuilder) {
 struct DeserializeResult {
   jsg::JsValue value;
   kj::Own<RpcStubDisposalGroup> disposalGroup;
+  kj::Maybe<rpc::JsValue::StreamSink::Client> streamSink;
 };
 
 // Call to construct a JS value from an `rpc::JsValue`.
@@ -91,14 +154,19 @@ DeserializeResult deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader)
     .externalHandler = externalHandler,
   });
 
-  return { deserializer.readValue(js), kj::mv(disposalGroup) };
+  return {
+    .value = deserializer.readValue(js),
+    .disposalGroup = kj::mv(disposalGroup),
+    .streamSink = externalHandler.getStreamSink(),
+  };
 }
 
 // Does deserializeJsValue() and then adds a `dispose()` method to the returned object (if it is
 // an object) which disposes all stubs therein.
 jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
-                                       rpc::JsRpcTarget::CallResults::Reader callResults) {
-  auto [ value, disposalGroup ] = deserializeJsValue(js, callResults.getResult());
+                                       rpc::JsRpcTarget::CallResults::Reader callResults,
+                                       StreamSinkFulfiller streamSinkFulfiller) {
+  auto [ value, disposalGroup, streamSink ] = deserializeJsValue(js, callResults.getResult());
 
   if (callResults.hasCallPipeline()) {
     disposalGroup->setCallPipeline(IoContext::current().addObject(
@@ -121,6 +189,18 @@ jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
   } else {
     // Result wasn't an object, so it must not contain any stubs.
     KJ_ASSERT(disposalGroup->empty());
+  }
+
+  KJ_IF_SOME(ss, streamSink) {
+    streamSinkFulfiller->fulfill(kj::mv(ss));
+  } else {
+    // Since the callee did not return any streams, it should never have attempted to access the
+    // StreamSink, so it should already have been dropped by now, so `isWaiting()` should be false.
+    // Otherwise we'll reject it.
+    if (streamSinkFulfiller->isWaiting()) {
+      streamSinkFulfiller->reject(KJ_EXCEPTION(FAILED,
+          "the results did not contain any streams, so no StreamSink was created"));
+    }
   }
 
   return value;
@@ -364,6 +444,8 @@ JsRpcPromiseAndPipleine callImpl(
       }
     }
 
+    kj::Maybe<StreamSinkFulfiller> paramsStreamSinkFulfiller;
+
     KJ_IF_SOME(args, maybeArgs) {
       // This is a function call with arguments.
       kj::Vector<jsg::JsValue> argv(args.Length());
@@ -377,6 +459,13 @@ JsRpcPromiseAndPipleine callImpl(
         serializeJsValue(js, js.arr(argv.asPtr()), [&](capnp::MessageSize hint) {
           // TODO(perf): Actually use the size hint.
           return builder.getOperation().initCallWithArgs();
+        }, [&]() -> rpc::JsValue::StreamSink::Client {
+          // A stream was encountered in the params, so we must expect the response to contain
+          // paramsStreamSink. But we don't have the response yet. So, we need to set up a
+          // temporary promise client, which we hook to the response a little bit later.
+          auto paf = kj::newPromiseAndFulfiller<rpc::JsValue::StreamSink::Client>();
+          paramsStreamSinkFulfiller = kj::mv(paf.fulfiller);
+          return kj::mv(paf.promise);
         });
       }
     } else {
@@ -384,7 +473,23 @@ JsRpcPromiseAndPipleine callImpl(
       builder.getOperation().setGetProperty();
     }
 
+    StreamSinkFulfiller resultsStreamSinkFulfiller;
+
+    {
+      // Unfortunately, we always have to send a `resultsStreamSink` because we don't know until
+      // after the call completes whether or not it will return any streams. However, we will
+      // set this up as a promise capability, and only hook it up to an actual implementation if
+      // and when we discover streams in the results.
+      auto paf = kj::newPromiseAndFulfiller<rpc::JsValue::StreamSink::Client>();
+      resultsStreamSinkFulfiller = kj::mv(paf.fulfiller);
+      builder.setResultsStreamSink(kj::mv(paf.promise));
+    }
+
     auto callResult = builder.send();
+
+    KJ_IF_SOME(ssf, paramsStreamSinkFulfiller) {
+      ssf->fulfill(callResult.getParamsStreamSink());
+    }
 
     // We need to arrange that our JsRpcPromise will updated in-place with the final settlement
     // of this RPC promise. However, we can't actually construct the JsRpcPromise until we have
@@ -393,10 +498,11 @@ JsRpcPromiseAndPipleine callImpl(
     auto weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>();
 
     auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
-          [weakRef = kj::atomicAddRef(*weakRef)]
+          [weakRef = kj::atomicAddRef(*weakRef),
+           resultsStreamSinkFulfiller = kj::mv(resultsStreamSinkFulfiller)]
           (jsg::Lock& js, capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable
           -> jsg::Value {
-      auto jsResult = deserializeRpcReturnValue(js, response);
+      auto jsResult = deserializeRpcReturnValue(js, response, kj::mv(resultsStreamSinkFulfiller));
 
       if (weakRef->disposed) {
         // The promise was explicitly disposed before it even resolved. This means we must dispose
@@ -803,10 +909,34 @@ public:
         // Given a handle for the result, if it's a promise, await the promise, then serialize the
         // final result for return.
 
+        kj::Maybe<kj::Own<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>>> callPipelineFulfiller;
+
+        // We need another ref to this fulfiller for the error callback. It can rely on being
+        // destroyed at the same time as the success callback.
+        kj::Maybe<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>&> callPipelineFulfillerRef;
+
+        KJ_IF_SOME(ss, invocationResult.streamSink) {
+          // Since we have a StreamSink, it's important that we hook up the pipeline for that
+          // immediately. Annoyingly, that also means we need to hook up a pipeline for
+          // callPipeline, which we don't actually have yet, so we need to promise-ify it.
+
+          auto paf = kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>();
+          callPipelineFulfillerRef = *paf.fulfiller;
+          callPipelineFulfiller = kj::mv(paf.fulfiller);
+
+          capnp::PipelineBuilder<rpc::JsRpcTarget::CallResults> builder(16);
+          builder.setCallPipeline(kj::mv(paf.promise));
+          builder.setParamsStreamSink(ss);
+          callContext.setPipeline(builder.build());
+        }
+
         auto result = ctx.awaitJs(js, js.toPromise(invocationResult.returnValue)
             .then(js, ctx.addFunctor(
                 [callContext, ownCallContext = kj::mv(ownCallContext),
-                 paramDisposalGroup = kj::mv(invocationResult.paramDisposalGroup)]
+                 paramDisposalGroup = kj::mv(invocationResult.paramDisposalGroup),
+                 paramsStreamSink = kj::mv(invocationResult.streamSink),
+                 resultStreamSink = params.getResultsStreamSink(),
+                 callPipelineFulfiller = kj::mv(callPipelineFulfiller)]
                 (jsg::Lock& js, jsg::Value value) mutable {
           jsg::JsValue resultValue(value.getHandle(js));
 
@@ -819,6 +949,9 @@ public:
             hint.capCount += 1;  // for callPipeline
             results = callContext.initResults(hint);
             return results.initResult();
+          }, [&]() -> rpc::JsValue::StreamSink::Client {
+            // The results contain streams. We return the resultsStreamSink passed in the request.
+            return kj::mv(resultStreamSink);
           });
 
           KJ_SWITCH_ONEOF(maybePipeline) {
@@ -840,9 +973,24 @@ public:
             }
           }
 
+          KJ_IF_SOME(cpf, callPipelineFulfiller) {
+            cpf->fulfill(results.getCallPipeline());
+          }
+
+          KJ_IF_SOME(ss, paramsStreamSink) {
+            results.setParamsStreamSink(kj::mv(ss));
+          }
+
           // paramDisposalGroup will be destroyed when we return (or when this lambda is destroyed
           // as a result of the promise being rejected). This will implicitly dispose the param
           // stubs.
+        }), ctx.addFunctor([callPipelineFulfillerRef](jsg::Lock& js, jsg::Value&& error) {
+          // If we set up a `callPipeline` early, we have to make sure it propagates the error.
+          // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
+          KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
+            cpf.reject(js.exceptionToKj(error.addRef(js)));
+          }
+          js.throwException(kj::mv(error));
         })));
 
         return result;
@@ -1039,6 +1187,7 @@ private:
   struct InvocationResult {
     v8::Local<v8::Value> returnValue;
     kj::Maybe<kj::Own<RpcStubDisposalGroup>> paramDisposalGroup;
+    kj::Maybe<rpc::JsValue::StreamSink::Client> streamSink;
   };
 
   // Deserializes the arguments and passes them to the given function.
@@ -1049,7 +1198,7 @@ private:
       kj::Maybe<rpc::JsValue::Reader> args) {
     // We received arguments from the client, deserialize them back to JS.
     KJ_IF_SOME(a, args) {
-      auto [value, disposalGroup] = deserializeJsValue(js, a);
+      auto [value, disposalGroup, streamSink] = deserializeJsValue(js, a);
       auto args = KJ_REQUIRE_NONNULL(
           value.tryCast<jsg::JsArray>(),
           "expected JsArray when deserializing arguments.");
@@ -1062,6 +1211,7 @@ private:
       InvocationResult result {
         .returnValue = jsg::check(fn->Call(
             js.v8Context(), thisArg, args.size(), arguments.begin())),
+        .streamSink = kj::mv(streamSink),
       };
       if (!disposalGroup->empty()) {
         result.paramDisposalGroup = kj::mv(disposalGroup);
@@ -1103,6 +1253,7 @@ private:
     }
 
     kj::Maybe<kj::Own<RpcStubDisposalGroup>> paramDisposalGroup;
+    kj::Maybe<rpc::JsValue::StreamSink::Client> streamSink;
 
     // We're going to pass all the arguments from the client to the function, but we are going to
     // insert `env` and `ctx`. We assume the last two arguments that the function declared are
@@ -1110,7 +1261,9 @@ private:
     kj::Maybe<jsg::JsArray> argsArrayFromClient;
     size_t argCountFromClient = 0;
     KJ_IF_SOME(a, args) {
-      auto [value, disposalGroup] = deserializeJsValue(js, a);
+      auto [value, disposalGroup, ss] = deserializeJsValue(js, a);
+      streamSink = kj::mv(ss);
+
       auto array = KJ_REQUIRE_NONNULL(
           value.tryCast<jsg::JsArray>(),
           "expected JsArray when deserializing arguments.");
@@ -1163,6 +1316,7 @@ private:
       .returnValue = jsg::check(fn->Call(
           js.v8Context(), thisArg, arguments.size(), arguments.begin())),
       .paramDisposalGroup = kj::mv(paramDisposalGroup),
+      .streamSink = kj::mv(streamSink),
     };
   };
 };

@@ -33,6 +33,13 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 // handle RPC specially should use this.
 class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler {
 public:
+  using GetStreamSinkFunc = kj::Function<rpc::JsValue::StreamSink::Client()>;
+
+  // `getStreamSinkFunc` will be called at most once, the first time a stream is encountered in
+  // serialization, to get the StreamSink that should be used.
+  RpcSerializerExternalHander(GetStreamSinkFunc getStreamSinkFunc)
+      : getStreamSinkFunc(kj::mv(getStreamSinkFunc)) {}
+
   using BuilderCallback = kj::Function<void(rpc::JsValue::External::Builder)>;
 
   // Add an external. The value is a callback which will be invoked later to fill in the
@@ -40,6 +47,10 @@ public:
   // the number of externals are known, which is only after all calls to `add()` have completed,
   // hence the need for a callback.
   void write(BuilderCallback callback) { externals.add(kj::mv(callback)); }
+
+  // Like write(), but use this when there is also a stream associated with the external, i.e.
+  // using StreamSink. This returns a capability which will eventually resolve to the stream.
+  capnp::Capability::Client writeStream(BuilderCallback callback);
 
   // Build the final list.
   capnp::Orphan<capnp::List<rpc::JsValue::External>> build(capnp::Orphanage orphanage);
@@ -51,7 +62,11 @@ public:
       jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) override;
 
 private:
+  GetStreamSinkFunc getStreamSinkFunc;
+
   kj::Vector<BuilderCallback> externals;
+
+  kj::Maybe<rpc::JsValue::StreamSink::Client> streamSink;
 };
 
 class RpcStubDisposalGroup;
@@ -68,9 +83,17 @@ public:
   // Read and return the next external.
   rpc::JsValue::External::Reader read();
 
+  // Call immediately after `read()` when reading an external that is associated with a stream.
+  // `stream` is published back to the sender via StreamSink.
+  void setLastStream(capnp::Capability::Client stream);
+
   // All stubs deserialized as part of a particular parameter or result set are placed in a
   // common disposal group so that they can be disposed together.
   RpcStubDisposalGroup& getDisposalGroup() { return disposalGroup; }
+
+  // Call after serialization is complete to get the StreamSink that should handle streams found
+  // while deserializing. Returns none if there were no streams.
+  kj::Maybe<rpc::JsValue::StreamSink::Client> getStreamSink();
 
 private:
   capnp::List<rpc::JsValue::External>::Reader externals;
@@ -78,6 +101,18 @@ private:
 
   kj::UnwindDetector unwindDetector;
   RpcStubDisposalGroup& disposalGroup;
+
+  class StreamSinkImpl final
+      : public rpc::JsValue::StreamSink::Server {
+  public:
+    void setSlot(uint i, capnp::Capability::Client stream);
+    kj::Promise<void> startStream(StartStreamContext context) override;
+
+  private:
+    kj::Vector<kj::Maybe<capnp::Capability::Client>> table;
+  };
+
+  kj::Maybe<kj::Own<StreamSinkImpl>> streamSink;
 };
 
 // Base class for objects which can be sent over RPC, but doing so actually sends a stub which

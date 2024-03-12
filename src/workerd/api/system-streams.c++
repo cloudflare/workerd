@@ -26,6 +26,8 @@ public:
   // converted to identity encoding via an appropriate stream wrapper.
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
 
+  StreamEncoding getPreferredEncoding() override { return encoding; }
+
   // Return the number of bytes, if known, which this input stream will produce if the sink is known
   // to be of a particular encoding.
   //

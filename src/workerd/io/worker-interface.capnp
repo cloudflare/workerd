@@ -211,6 +211,7 @@ enum SerializationTag {
   jsRpcStub @1;
 
   writableStream @2;
+  readableStream @3;
 }
 
 enum StreamEncoding {
@@ -223,6 +224,10 @@ enum StreamEncoding {
   identity @0;
   gzip @1;
   brotli @2;
+}
+
+interface Handle {
+  # Type with no methods, but something happens when you drop it.
 }
 
 struct JsValue {
@@ -255,8 +260,38 @@ struct JsValue {
         encoding @3 :StreamEncoding;
       }
 
-      # TODO(now): ReadableStream, WebSocket, Request, Response
+      readableStream :group {
+        # A ReadableStream. The sender of the JsValue will use the associated StreamSink to open a
+        # stream of type `ByteStream`.
+
+        encoding @4 :StreamEncoding;
+        # Bytes read from the stream have this encoding.
+
+        expectedLength :union {
+          unknown @5 :Void;
+          known @6 :UInt64;
+        }
+      }
+
+      # TODO(soon): WebSocket, Request, Response
     }
+  }
+
+  interface StreamSink {
+    # A JsValue may contain streams that flow from the sender to the receiver. We don't want such
+    # streams to require a network round trip before the stream can begin pumping. So, we need a
+    # place to start sending bytes right away.
+    #
+    # To that end, JsRpcTarget::call() returns a `paramsStreamSink`. Immediately upon sending the
+    # request, the client can use promise pipelining to begin pushing bytes to this object.
+    #
+    # Similarly, the caller passes a `resultsStreamSink` to the callee. If the response contains
+    # any streams, it can start pushing to this immediately after responding.
+
+    startStream @0 (externalIndex :UInt32) -> (stream :Capability);
+    # Opens a stream corresponding to the given index in the JsValue's `externals` array. The type
+    # of capability returned depends on the type of external. E.g. for `readableStream`, it is a
+    # `ByteStream`.
   }
 }
 
@@ -305,6 +340,9 @@ interface JsRpcTarget $Cxx.allowCancellation {
       # This returns a new JsRpcTarget. The second call is on that target, invoking the method
       # "bar".
     }
+
+    resultsStreamSink @4 :JsValue.StreamSink;
+    # StreamSink used for ReadableStreams found in the results.
   }
 
   struct CallResults {
@@ -327,6 +365,10 @@ interface JsRpcTarget $Cxx.allowCancellation {
     # disposer is invoked. To that end, when `hasDisposer` is true, the client should hold on to
     # `callPipeline` until the disposer is invoked. If `hasDisposer` is false, `callPipeline` can
     # safely be dropped immediately.
+
+    paramsStreamSink @3 :JsValue.StreamSink;
+    # StreamSink used for ReadableStreams found in the params. The caller begins sending bytes for
+    # these streams immediately using promise pipelining.
   }
 
   call @0 CallParams -> CallResults;

@@ -66,6 +66,15 @@ export let nonClass = {
     assert.strictEqual(typeof ctx.waitUntil, "function");
     return i * j + env.twelve;
   },
+
+  async fetch(req, env, ctx) {
+    // This is used in the stream test to fetch some gziped data.
+    return new Response("this text was gzipped", {
+      headers: {
+        "Content-Encoding": "gzip"
+      }
+    });
+  }
 }
 
 // Globals used to test passing RPC promises or properties across I/O contexts (which is expected
@@ -267,6 +276,16 @@ export class MyService extends WorkerEntrypoint {
     await writer.write(enc.encode("bar, "));
     await writer.write(enc.encode("baz!"));
     await writer.close();
+  }
+
+  async readFromStream(stream) {
+    return await new Response(stream).text();
+  }
+
+  async returnReadableStream() {
+    let { readable, writable } = new IdentityTransformStream();
+    this.ctx.waitUntil(this.writeToStream(writable));
+    return readable;
   }
 }
 
@@ -843,11 +862,101 @@ export let serializeRpcPromiseOrProprety = {
 
 export let streams = {
   async test(controller, env, ctx) {
-    let { readable, writable } = new IdentityTransformStream();
-    let promise = env.MyService.writeToStream(writable);
-    let text = await new Response(readable).text();
-    assert.strictEqual(text, "foo, bar, baz!");
-    await promise;
+    // Send WritableStream.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+      let promise = env.MyService.writeToStream(writable);
+      let text = await new Response(readable).text();
+      assert.strictEqual(text, "foo, bar, baz!");
+      await promise;
+    }
+
+    // TODO(someday): Test JS-backed WritableStream, when it actually works.
+
+    // TODO(someday): Is there any way to construct an encoded WritableStream? Only system
+    //   streams can be encoded, but there's no API that returns an encoded WritableStream I think.
+
+    // Send ReadableStream.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+      let promise = env.MyService.readFromStream(readable);
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      await writer.write(enc.encode("foo, "));
+      await writer.write(enc.encode("bar, "));
+      await writer.write(enc.encode("baz!"));
+      await writer.close();
+
+      assert.strictEqual(await promise, "foo, bar, baz!");
+    }
+
+    // Send a JS-backed ReadableStream.
+    {
+      let controller;
+      let readable = new ReadableStream({
+        start(c) { controller = c; }
+      });
+      let promise = env.MyService.readFromStream(readable);
+
+      let enc = new TextEncoder();
+      controller.enqueue(enc.encode("foo, "));
+      controller.enqueue(enc.encode("bar, "));
+      controller.enqueue(enc.encode("baz!"));
+      controller.close();
+
+      assert.strictEqual(await promise, "foo, bar, baz!");
+    }
+
+    // Receive ReadableStream.
+    {
+      let readable = await env.MyService.returnReadableStream();
+      let text = await new Response(readable).text();
+      assert.strictEqual(text, "foo, bar, baz!");
+    }
+
+    // Send ReadableStream, but fail to fully write it.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+      let promise = env.MyService.readFromStream(readable);
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      await writer.write(enc.encode("foo, "));
+      await writer.write(enc.encode("bar, "));
+      await writer.write(enc.encode("baz!"));
+      await writer.abort("foo");
+
+      await assert.rejects(promise, {
+        name: "Error",
+        // TODO(someday): Propagate the actual error.
+        message: "ReadableStream received over RPC disconnected prematurely."
+      });
+    }
+
+    // Send fixed-length ReadableStream.
+    {
+      let { readable, writable } = new FixedLengthStream("foo, bar, baz!".length);
+      let promise = env.MyService.readFromStream(readable);
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      await writer.write(enc.encode("foo, "));
+      await writer.write(enc.encode("bar, "));
+      await writer.write(enc.encode("baz!"));
+      await writer.close();
+
+      assert.strictEqual(await promise, "foo, bar, baz!");
+    }
+
+    // Send an encoded ReadableStream
+    {
+      let gzippedResp = await env.self.fetch("http://foo");
+
+      let text = await env.MyService.readFromStream(gzippedResp.body);
+
+      assert.strictEqual(text, "this text was gzipped");
+    }
   }
 }
 
@@ -899,3 +1008,4 @@ export let z_serializeRpcPromiseOrProprety_realSocket = withRealSocket(serialize
 export let z_streams_realSocket = withRealSocket(streams);
 export let z_testAsyncStackTrace_realSocket = withRealSocket(testAsyncStackTrace);
 export let z_canUseGetPutDelete_realSocket = withRealSocket(canUseGetPutDelete);
+

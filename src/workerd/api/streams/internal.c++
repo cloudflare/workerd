@@ -2034,6 +2034,21 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
   }).attach(kj::mv(holder));
 }
 
+StreamEncoding ReadableStreamInternalController::getPreferredEncoding() {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return StreamEncoding::IDENTITY;
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return StreamEncoding::IDENTITY;
+    }
+    KJ_CASE_ONEOF(readable, Readable) {
+      return readable->getPreferredEncoding();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 kj::Promise<size_t> IdentityTransformStreamImpl::tryRead(
     void* buffer,
     size_t minBytes,

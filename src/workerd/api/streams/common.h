@@ -220,6 +220,10 @@ public:
   // directly might attempt to use the `IoContext` to call `registerPendingEvent()`.
   virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end);
 
+  // If pumpTo() pumps to a system stream, what is the best encoding for that system steram to
+  // use? This is just a hint.
+  virtual StreamEncoding getPreferredEncoding() { return StreamEncoding::IDENTITY; };
+
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
   kj::Promise<kj::Array<byte>> readAllBytes(uint64_t limit);
@@ -521,6 +525,10 @@ public:
 
   virtual kj::Promise<DeferredProxy<void>> pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
+
+  // If pumpTo() pumps to a system stream, what is the best encoding for that system steram to
+  // use? This is just a hint.
+  virtual StreamEncoding getPreferredEncoding() { return StreamEncoding::IDENTITY; }
 
   virtual kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) = 0;
 
