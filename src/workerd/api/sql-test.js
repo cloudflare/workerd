@@ -995,6 +995,29 @@ async function testForeignKeys(storage) {
   }
 }
 
+async function testStreamingIngestion(request, storage) {
+  const { sql } = storage
+
+  sql.exec(`CREATE TABLE streaming(val TEXT);`)
+
+  await storage.transaction(async () => {
+    const stream = request.body.pipeThrough(new TextDecoderStream())
+    let buffer = ''
+
+    for await (const chunk of stream) {
+      // Append the new chunk to the existing buffer
+      buffer += chunk
+
+      // Ingest any complete statements and snip those chars off the buffer
+      buffer = sql.ingest(buffer)
+    }
+  })
+  // Verify exactly 36 rows were added
+  assert.deepEqual(Array.from(sql.exec(`SELECT count(*) FROM streaming`)), [
+    { 'count(*)': 36 },
+  ])
+}
+
 export class DurableObjectExample {
   constructor(state, env) {
     this.state = state
@@ -1024,6 +1047,9 @@ export class DurableObjectExample {
     } else if (req.url.endsWith('/sql-test-io-stats')) {
       await testIoStats(this.state.storage)
       return Response.json({ ok: true })
+    } else if (req.url.endsWith('/streaming-ingestion')) {
+      await testStreamingIngestion(req, this.state.storage)
+      return Response.json({ ok: true })
     }
 
     throw new Error('unknown url: ' + req.url)
@@ -1036,8 +1062,8 @@ export default {
     let obj = env.ns.get(id)
 
     // Now let's test persistence through breakage and atomic write coalescing.
-    let doReq = async (path) => {
-      let resp = await obj.fetch('http://foo/' + path)
+    let doReq = async (path, init = {}) => {
+      let resp = await obj.fetch('http://foo/' + path, init)
       return await resp.json()
     }
 
@@ -1046,6 +1072,27 @@ export default {
 
     // Test SQL IO stats
     assert.deepEqual(await doReq('sql-test-io-stats'), { ok: true })
+
+    // Test SQL streaming ingestion
+    assert.deepEqual(
+      await doReq('streaming-ingestion', {
+        method: 'POST',
+        body: new ReadableStream({
+          async start(controller) {
+            const data = INSERT_36_ROWS.match(new RegExp('.{1,100}', 'g')) // splits into 5 chunks
+
+            // Send each chunk with a wait of 1ms in between
+            for (const chunk of data) {
+              controller.enqueue(new TextEncoder().encode(chunk))
+              await scheduler.wait(1)
+            }
+
+            controller.close()
+          },
+        }),
+      }),
+      { ok: true }
+    )
 
     // Test defer_foreign_keys (explodes the DO)
     await assert.rejects(async () => {
