@@ -1421,17 +1421,20 @@ private:
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName) {
+  IoContext& ioctx = incomingRequest->getContext();
+
   incomingRequest->delivered();
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(
       capnp::membrane(
-          kj::heap<EntrypointJsRpcTarget>(incomingRequest->getContext(), entrypointName),
+          kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName),
           kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
   // `donePromise` resolves once there are no longer any capabilities pointing between the client
   // and server as part of this session.
-  co_await donePromise;
-  co_await incomingRequest->drain();
+  co_await donePromise
+      .then([&ir = *incomingRequest]() { return ir.drain(); })
+      .exclusiveJoin(ioctx.onAbort());
   co_return WorkerInterface::CustomEvent::Result {
     .outcome = EventOutcome::OK
   };
