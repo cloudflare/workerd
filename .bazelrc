@@ -14,6 +14,10 @@ common --noenable_bzlmod
 # also explore --remote_download_minimal.
 build --remote_download_all
 
+# disable creating duplicate runfile trees for external repositories which slows down the build,
+# especially on Windows where creating runfiles is slow.
+build --legacy_external_runfiles=false
+
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
 
