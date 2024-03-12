@@ -171,27 +171,32 @@ public:
     jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha256;
     jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha384;
     jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha512;
+    jsg::Optional<kj::String> storageClass;
 
-    JSG_STRUCT(onlyIf, httpMetadata, customMetadata, md5, sha1, sha256, sha384, sha512);
+    JSG_STRUCT(onlyIf, httpMetadata, customMetadata, md5, sha1, sha256, sha384, sha512, storageClass);
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
   struct MultipartOptions {
     jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
+    jsg::Optional<kj::String> storageClass;
 
-    JSG_STRUCT(httpMetadata, customMetadata);
+    JSG_STRUCT(httpMetadata, customMetadata, storageClass);
     JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
   };
 
   class HeadResult: public jsg::Object {
   public:
     HeadResult(kj::String name, kj::String version, double size,
-               kj::String etag, jsg::Ref<Checksums> checksums, kj::Date uploaded, jsg::Optional<HttpMetadata> httpMetadata,
-               jsg::Optional<jsg::Dict<kj::String>> customMetadata, jsg::Optional<Range> range):
+               kj::String etag, jsg::Ref<Checksums> checksums, kj::Date uploaded,
+               jsg::Optional<HttpMetadata> httpMetadata,
+               jsg::Optional<jsg::Dict<kj::String>> customMetadata, jsg::Optional<Range> range,
+               kj::String storageClass):
         name(kj::mv(name)), version(kj::mv(version)), size(size), etag(kj::mv(etag)),
         checksums(kj::mv(checksums)), uploaded(uploaded), httpMetadata(kj::mv(httpMetadata)),
-        customMetadata(kj::mv(customMetadata)), range(kj::mv(range)) {}
+        customMetadata(kj::mv(customMetadata)), range(kj::mv(range)),
+        storageClass(kj::mv(storageClass)) {}
 
     kj::String getName() const { return kj::str(name); }
     kj::String getVersion() const { return kj::str(version); }
@@ -200,6 +205,7 @@ public:
     kj::String getHttpEtag() const { return kj::str('"', etag, '"'); }
     jsg::Ref<Checksums> getChecksums() { return checksums.addRef();}
     kj::Date getUploaded() const { return uploaded; }
+    kj::StringPtr getStorageClass() const { return storageClass; }
 
     jsg::Optional<HttpMetadata> getHttpMetadata() const {
       return httpMetadata.map([](const HttpMetadata& m) { return m.clone(); });
@@ -233,6 +239,7 @@ public:
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(httpMetadata, getHttpMetadata);
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(customMetadata, getCustomMetadata);
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(range, getRange);
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(storageClass, getStorageClass);
       JSG_METHOD(writeHttpMetadata);
       JSG_TS_OVERRIDE(R2Object);
     }
@@ -257,6 +264,7 @@ public:
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
 
     jsg::Optional<Range> range;
+    kj::String storageClass;
     friend class R2Bucket;
   };
 
@@ -264,11 +272,11 @@ public:
   public:
     GetResult(kj::String name, kj::String version, double size,
               kj::String etag, jsg::Ref<Checksums> checksums, kj::Date uploaded, jsg::Optional<HttpMetadata> httpMetadata,
-              jsg::Optional<jsg::Dict<kj::String>> customMetadata, jsg::Optional<Range> range,
+              jsg::Optional<jsg::Dict<kj::String>> customMetadata, jsg::Optional<Range> range, kj::String storageClass,
               jsg::Ref<ReadableStream> body)
       : HeadResult(
           kj::mv(name), kj::mv(version), size, kj::mv(etag), kj::mv(checksums), uploaded,
-          kj::mv(KJ_ASSERT_NONNULL(httpMetadata)), kj::mv(KJ_ASSERT_NONNULL(customMetadata)), range),
+          kj::mv(KJ_ASSERT_NONNULL(httpMetadata)), kj::mv(KJ_ASSERT_NONNULL(customMetadata)), range, kj::mv(storageClass)),
           body(kj::mv(body)) {}
 
     jsg::Ref<ReadableStream> getBody() {

@@ -105,12 +105,14 @@ struct R2PutRequest {
   sha256 @6 :Data $Json.hex;
   sha384 @7 :Data $Json.hex;
   sha512 @8 :Data $Json.hex;
+  storageClass @9 :Text;
 }
 
 struct R2CreateMultipartUploadRequest {
   object @0 :Text;
   customFields @1 :List(Record);
   httpFields @2 :R2HttpFields;
+  storageClass @3 :Text;
 }
 
 struct R2UploadPartRequest {
@@ -214,6 +216,10 @@ struct R2HeadResponse {
 
   checksums @8 :R2Checksums;
   # If set, the available checksums for this object
+
+  storageClass @9 :Text;
+  # The storage class of the object. Standard or Infrequent Access.
+  # Provided on object creation to specify which storage tier R2 should use for this object.
 }
 
 using R2GetResponse = R2HeadResponse;

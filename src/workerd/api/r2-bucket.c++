@@ -132,7 +132,7 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
   return jsg::alloc<T>(kj::str(responseReader.getName()),
       kj::str(responseReader.getVersion()), responseReader.getSize(),
       kj::str(responseReader.getEtag()), kj::mv(checksums), uploaded, kj::mv(httpMetadata),
-      kj::mv(customMetadata), range, kj::fwd<Args>(args)...);
+      kj::mv(customMetadata), range, kj::str(responseReader.getStorageClass()), kj::fwd<Args>(args)...);
 }
 
 template <HeadResultT T, typename... Args>
@@ -525,6 +525,9 @@ R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
           }
         }
       }
+      KJ_IF_SOME(s, o.storageClass) {
+        putBuilder.setStorageClass(s);
+      }
     }
 
     auto requestJson = json.encode(requestBuilder);
@@ -612,6 +615,9 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
         KJ_IF_SOME(ce, httpMetadata.cacheExpiry) {
           fields.setCacheExpiry((ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
         }
+      }
+      KJ_IF_SOME(s, o.storageClass) {
+        createMultipartUploadBuilder.setStorageClass(s);
       }
     }
 
