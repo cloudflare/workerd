@@ -200,6 +200,19 @@ export function log(...args : any[]) {
   console.log('%s - %s', timestamp(), format(...args));
 }
 
+export function parseArgs(..._ : any[]) : any {
+  // We currently have no plans to implement the util.parseArgs API.
+  throw new Error('node:util parseArgs is not implemented');
+}
+
+export function transferableAbortController(..._ : any[]) : any {
+  throw new Error('node:util transferableAbortController is not implemented');
+}
+
+export function transferableAbortSignal(..._ : any[]) : any {
+  throw new Error('node:util transferableAbortSignal is not implemented');
+}
+
 export default {
   types,
   callbackify,
@@ -218,6 +231,12 @@ export default {
   // module originally, so let's just go ahead and do the same.
   TextEncoder,
   TextDecoder,
+  // We currently have no plans to implement the following APIs but we want
+  // to provide throwing placeholders for them. We may eventually come back
+  // around and implement these later.
+  parseArgs,
+  transferableAbortController,
+  transferableAbortSignal,
 };
 
 // Node.js util APIs we're currently not supporting
@@ -258,7 +277,4 @@ export default {
 // util.isString
 // util.isSymbol
 // util.isUndefined
-// util.parseArgs
 // util.stripVTControlCharacters
-// util.transferableAbortController
-// util.transferableAbortSignal
