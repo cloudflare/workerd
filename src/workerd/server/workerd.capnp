@@ -618,6 +618,50 @@ struct Worker {
 
   moduleFallback @13 :Text;
 
+  struct Limits {
+    # ** EXPERIMENTAL; SUBJECT TO BACKWARDS-INCOMPATIBLE CHANGE **
+
+    # Limits optionally applied to the worker. If not specified, no limits are applied.
+
+    heapSoftLimitMb @0 : UInt64 = 128;
+    # When set, if the isolate heap size exceeds this limit, a warning will be emitted
+    # to the console.
+    # If heapSnapshotNearHeapLimit is set to a value > 0, and the maximum number of snapshots
+    # has not yet been taken, a snapshot will be taken when this limit is exceeded.
+    # Whenever this limit is hit, we will either attempt to raise the limit by a given
+    # multiplier or will terminate the process if the new limit exceeds the hard limit or
+    # we've reached the maximum number of times the limit can be exceeded.
+
+    heapSnapshotNearHeapLimit @1 :UInt32 = 0;
+    # When specified with a value > 0, instructs the memory limit enforcer to generate a
+    # heapsnapshot when the v8 heap approaches the memory limits. The value indicates the
+    # maximum number of heapsnapshots to generate.
+
+    heapLimitMultiplier @2 :UInt32 = 2;
+    # When specified, specifies the multiplier to apply to the heapSoftLimitMb when hit.
+    # Generally you should never really have reason to modifiy this value, and there's no
+    # guarantee that it will be respected. If the v8 garbage collector changes in the future,
+    # this field may be obsoleted. It is provided largely for debugging purposes to provide
+    # finer grained control over how the heap limit is increased.
+
+    heapLimitExceedsMax @3 :UInt32 = 1;
+    # The maximum number of times the near heap limit can be exceeded before the process
+    # is terminated.
+
+    heapHardLimitMb @4 :UInt64 = 0;
+    # The absolute maximum heap size in MB, if any. If the value is less than or equal
+    # to the heapSoftLimitMb, the hard limit is ignored.
+
+    heapInitialYoungGenSizeMb @5 : UInt32 = 2;
+    # The initial size of the young generation heap in MB.
+    # Generally you should never really have reason to modify this value, and there's no
+    # guarantee that it will be respected. If the v8 garbage collector changes in the future,
+    # this field may be obsoleted. It is provided largely for debugging purposes to provide
+    # finer grained control over the initial configuration of the v8 heap.
+  }
+
+  experimentalLimits @14 :Limits;
+
 }
 
 struct ExternalServer {

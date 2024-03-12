@@ -82,11 +82,13 @@ wd_cc_library(
         "server.c++",
         "v8-platform-impl.c++",
         "workerd-api.c++",
+        "isolate-limit-enforcer.c++",
     ],
     hdrs = [
         "server.h",
         "v8-platform-impl.h",
         "workerd-api.h",
+        "isolate-limit-enforcer.h",
     ],
     defines = select({
         "//src/workerd/io:set_enable_experimental_webgpu": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU"],
