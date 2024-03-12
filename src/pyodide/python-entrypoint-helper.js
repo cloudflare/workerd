@@ -141,6 +141,7 @@ function getMainModule() {
   }
   mainModulePromise = (async function () {
     const pyodide = await getPyodide();
+    pyodide._module.jspiSupported = false;
     await setupPackages(pyodide);
     return pyimportMainModule(pyodide);
   })();
@@ -187,9 +188,11 @@ function makeHandler(pyHandlerName) {
   return async function (...args) {
     try {
       const mainModule = await enterJaegerSpan("prep_python", async () => await preparePython());
-      return await enterJaegerSpan("python_code", () => {
+      const res = await enterJaegerSpan("python_code", () => {
         return mainModule[pyHandlerName].callRelaxed(...args);
       });
+      pyodide._module.jspiSupported = true;
+      return res;
     } catch (e) {
       console.warn(e.stack);
       throw e;

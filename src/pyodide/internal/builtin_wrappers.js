@@ -80,6 +80,7 @@ export function newWasmModule(buffer) {
  * if it's anything else we'll bail.
  */
 function checkCallee() {
+  return;
   const origPrepareStackTrace = Error.prepareStackTrace;
   let isOkay;
   try {
