@@ -7,7 +7,6 @@ body:
       label: Package Name
       description: "Name of the Python package you want to work on Workers"
       value:
-      render: markdown
     validations:
       required: true
   - type: input
@@ -16,7 +15,6 @@ body:
       label: Package Version
       description: "Optional — specify a particular version of the package"
       value:
-      render: bash
     validations:
       required: false
   - type: markdown
