@@ -90,6 +90,40 @@ async function test(storage) {
     sql.ingest(`SELECT 123; SELECT 456; -- trailing comment`),
     ' -- trailing comment'
   )
+
+  // Test execution of ingested queries by taking an input of 6 INSERT statements, that all
+  // add 6 rows of data, then splitting that into a bunch of chunks, then ingesting them all
+  {
+    sql.exec(`CREATE TABLE streaming(val TEXT);`)
+
+    // Use a chunk size 1, 2, 4, 8, 16, ... characters
+    for (let length = 1; length < INSERT_36_ROWS.length; length = length * 2) {
+      let buffer = ''
+      for (let offset = 0; offset < INSERT_36_ROWS.length; offset += length) {
+        // Simulate a single "chunk" arriving
+        const chunk = INSERT_36_ROWS.substring(offset, offset + length)
+
+        // Append the new chunk to the existing buffer
+        buffer += chunk
+
+        // Ingest any complete statements and snip those chars off the buffer
+        buffer = sql.ingest(buffer)
+
+        // Simulate awaiting next chunk
+        await scheduler.wait(1)
+      }
+
+      // Verify exactly 36 rows were added
+      assert.deepEqual(Array.from(sql.exec(`SELECT count(*) FROM streaming`)), [
+        { 'count(*)': 36 },
+      ])
+
+      sql.exec(`DELETE FROM streaming`)
+      await scheduler.wait(1)
+    }
+    sql.exec(`DROP TABLE streaming;`)
+  }
+
   // Test count
   {
     const result = [
@@ -1037,3 +1071,12 @@ export default {
     assert.equal(await doReq('increment'), 3)
   },
 }
+
+const INSERT_36_ROWS = ['a', 'b', 'c', 'd', 'e', 'f']
+  .map(
+    (prefix) =>
+      `INSERT INTO streaming VALUES ${['u', 'v', 'w', 'x', 'y', 'z']
+        .map((suffix) => `('${prefix}: ${suffix}')`)
+        .join(',')};`
+  )
+  .join(' ')
