@@ -36,8 +36,7 @@ public:
   class Regulator;
   struct VfsOptions;
 
-  SqliteDatabase(const Vfs& vfs, kj::PathPtr path);
-  SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode);
+  SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::Maybe<kj::WriteMode> maybeMode = kj::none);
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
