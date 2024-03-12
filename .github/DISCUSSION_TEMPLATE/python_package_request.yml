@@ -2,22 +2,25 @@ title: "Python Package Request"
 labels: ["Python Package Request"]
 body:
   - type: input
-    id: improvements
+    id: package
     attributes:
       label: Package Name
       description: "Name of the Python package you want to work on Workers"
-      value: ...
+      value:
       render: markdown
     validations:
       required: true
+  - type: input
+    id: version
     attributes:
       label: Package Version
       description: "Optional — specify a particular version of the package"
-      value: ...
+      value:
       render: bash
     validations:
       required: false
   - type: markdown
+    id: context
     attributes:
       value: |
         ## Context
