@@ -96,15 +96,19 @@ async function test(storage) {
   {
     sql.exec(`CREATE TABLE streaming(val TEXT);`)
 
-    // Use a chunk size 1, 2, 4, 8, 16, ... characters
-    for (let length = 1; length < INSERT_36_ROWS.length; length = length * 2) {
+    // Convert to binary otherwise .split can cause corruption for multi-byte chars
+    const inputBytes = new TextEncoder().encode(INSERT_36_ROWS)
+    const decoder = new TextDecoder()
+
+    // Use a chunk size 1, 3, 9, 27, 81, ... bytes
+    for (let length = 1; length < inputBytes.length; length = length * 3) {
       let buffer = ''
-      for (let offset = 0; offset < INSERT_36_ROWS.length; offset += length) {
+      for (let offset = 0; offset < inputBytes.length; offset += length) {
         // Simulate a single "chunk" arriving
-        const chunk = INSERT_36_ROWS.substring(offset, offset + length)
+        const chunk = inputBytes.slice(offset, offset + length)
 
         // Append the new chunk to the existing buffer
-        buffer += chunk
+        buffer += decoder.decode(chunk, { stream: true })
 
         // Ingest any complete statements and snip those chars off the buffer
         buffer = sql.ingest(buffer)
@@ -118,6 +122,18 @@ async function test(storage) {
         { 'count(*)': 36 },
       ])
 
+      // Ensure our precious emoji were preserved, even if their bytes occur across split points
+      assert.deepEqual(
+        Array.from(sql.exec(`SELECT * FROM streaming WHERE val LIKE 'f%'`)),
+        [
+          { val: 'f: 😳' },
+          { val: 'f: 🫠' },
+          { val: 'f: 🙃' },
+          { val: 'f: 🤡' },
+          { val: 'f: 🥺' },
+          { val: 'f: 🔥😎🔥' },
+        ]
+      )
       sql.exec(`DELETE FROM streaming`)
       await scheduler.wait(1)
     }
@@ -1016,6 +1032,17 @@ async function testStreamingIngestion(request, storage) {
   assert.deepEqual(Array.from(sql.exec(`SELECT count(*) FROM streaming`)), [
     { 'count(*)': 36 },
   ])
+  assert.deepEqual(
+    Array.from(sql.exec(`SELECT * FROM streaming WHERE val LIKE 'f%'`)),
+    [
+      { val: 'f: 😳' },
+      { val: 'f: 🫠' },
+      { val: 'f: 🙃' },
+      { val: 'f: 🤡' },
+      { val: 'f: 🥺' },
+      { val: 'f: 🔥😎🔥' },
+    ]
+  )
 }
 
 export class DurableObjectExample {
@@ -1079,11 +1106,19 @@ export default {
         method: 'POST',
         body: new ReadableStream({
           async start(controller) {
-            const data = INSERT_36_ROWS.match(new RegExp('.{1,100}', 'g')) // splits into 5 chunks
+            const data = new TextEncoder().encode(INSERT_36_ROWS)
+
+            // Pick a value for chunkSize that splits the first emoji in half
+            const chunkSize = INSERT_36_ROWS.indexOf('😳') + 1
+            assert.equal(chunkSize, 35) // Validate we're getting the value we expect
 
             // Send each chunk with a wait of 1ms in between
-            for (const chunk of data) {
-              controller.enqueue(new TextEncoder().encode(chunk))
+            for (
+              let offset = 0;
+              offset < data.length - 1;
+              offset += chunkSize
+            ) {
+              controller.enqueue(data.slice(offset, offset + chunkSize))
               await scheduler.wait(1)
             }
 
@@ -1122,7 +1157,7 @@ export default {
 const INSERT_36_ROWS = ['a', 'b', 'c', 'd', 'e', 'f']
   .map(
     (prefix) =>
-      `INSERT INTO streaming VALUES ${['u', 'v', 'w', 'x', 'y', 'z']
+      `INSERT INTO streaming VALUES ${['😳', '🫠', '🙃', '🤡', '🥺', '🔥😎🔥']
         .map((suffix) => `('${prefix}: ${suffix}')`)
         .join(',')};`
   )
