@@ -35,11 +35,12 @@ private:
 
 public:
   enum class Guard {
-    IMMUTABLE,
-    REQUEST,
+    // WARNING: This type is serialized, do not change the numeric values.
+    IMMUTABLE = 0,
+    REQUEST = 1,
     // REQUEST_NO_CORS,  // CORS not relevant on server side
-    RESPONSE,
-    NONE
+    RESPONSE = 2,
+    NONE = 3
   };
 
   struct DisplayedHeader {
@@ -164,6 +165,12 @@ public:
       forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: Headers) => void, thisArg?: This): void;
     });
   }
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Headers> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::HEADERS);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     for (const auto& entry : headers) {

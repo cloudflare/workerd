@@ -145,6 +145,15 @@ public:
     ser.WriteRawBytes(bytes.begin(), bytes.size());
   }
 
+  // Write a size followed by bytes.
+  void writeLengthDelimited(kj::ArrayPtr<const kj::byte> bytes) {
+    writeRawUint32(bytes.size());
+    writeRawBytes(bytes);
+  }
+  void writeLengthDelimited(kj::StringPtr text) {
+    writeLengthDelimited(text.asBytes());
+  }
+
 private:
   // Throw a DataCloneError, complaining that the given object cannot be serialized. (This is
   // similar to ThrowDataCloneError() except that it formats the error message itself, and it
@@ -229,6 +238,14 @@ public:
   // returns the exact amount; throws if not possible.
   kj::ArrayPtr<const kj::byte> readRawBytes(size_t size);
 
+  // Reads a size (readRawUint64) followed by that many bytes.
+  kj::ArrayPtr<const kj::byte> readLengthDelimitedBytes();
+
+  // Read a string and make a copy. The copy is necessary since the text is not NUL-terminated on
+  // the wire. If you don't need NUL termination, read bytes and use `.asChars()`.
+  kj::String readRawString(size_t size);
+  kj::String readLengthDelimitedString();
+
   inline uint32_t getVersion() const { return deser.GetWireFormatVersion(); }
 
 private:
@@ -244,6 +261,7 @@ private:
 
   kj::Maybe<ExternalHandler&> externalHandler;
 
+  size_t totalInputSize;
   v8::ValueDeserializer deser;
   kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedBackingStores;
 };

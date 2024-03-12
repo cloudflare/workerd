@@ -21,6 +21,7 @@
 #include <workerd/jsg/url.h>
 #include <workerd/io/io-context.h>
 #include <set>
+#include <capnp/compat/http-over-capnp.capnp.h>
 
 namespace workerd::api {
 
@@ -415,6 +416,153 @@ void Headers::forEach(
 
 bool Headers::inspectImmutable() {
   return guard != Guard::NONE;
+}
+
+// -----------------------------------------------------------------------------
+// serialization of headers
+//
+// http-over-capnp.capnp has a nice list of common header names, taken from the HTTP/2 standard.
+// We'll use it as an optimization.
+//
+// Note that using numeric IDs for headers implies we lose the original capitalization. However,
+// the JS Headers API doesn't actually give the application any way to observe the capitalization
+// of header names -- it only becomes relevant when serializing over HTTP/1.1. And at that point,
+// we are actually free to change the capitalization anyway, and we commonly do (KJ itself will
+// normalize capitalization of all registered headers, and http-over-capnp also loses
+// capitalization). So, it's certainly not worth it to try to keep the original capitalization
+// across serialization.
+
+// If any more headers are added to the CommonHeaderName enum later, we should be careful about
+// introducing them into serialization. We need to roll out a change that recognizes the new IDs
+// before rolling out a change that sends them. MAX_COMMON_HEADER_ID is the max value we're willing
+// to send.
+static constexpr uint MAX_COMMON_HEADER_ID =
+    static_cast<uint>(capnp::CommonHeaderName::WWW_AUTHENTICATE);
+
+// ID for the `$commonText` annotation declared in http-over-capnp.capnp.
+// TODO(cleanup): Cap'n Proto should really codegen constants for annotation IDs so we don't have
+//   to copy them.
+static constexpr uint64_t COMMON_TEXT_ANNOTATION_ID = 0x857745131db6fc83;
+
+static kj::Array<kj::StringPtr> makeCommonHeaderList() {
+  auto enums = capnp::Schema::from<capnp::CommonHeaderName>().getEnumerants();
+  auto builder = kj::heapArrayBuilder<kj::StringPtr>(enums.size());
+  bool first = true;
+  for (auto e: enums) {
+    if (first) {
+      // Value zero is invalid, skip it.
+      static_assert(static_cast<uint>(capnp::CommonHeaderName::INVALID) == 0);
+
+      // Add `nullptr` to the array so that our array indexes aren't off-by-one from the enum
+      // values. We could in theory skip this and use +1 and -1 in a bunch of places but that seems
+      // error-prone.
+      builder.add(nullptr);
+
+      first = false;
+      continue;
+    }
+
+    kj::Maybe<kj::StringPtr> name;
+
+    // Look for $commonText annotation.
+    for (auto ann: e.getProto().getAnnotations()) {
+      if (ann.getId() == COMMON_TEXT_ANNOTATION_ID) {
+        name = ann.getValue().getText();
+        break;
+      }
+    }
+
+    builder.add(KJ_ASSERT_NONNULL(name));
+  }
+
+  return builder.finish();
+}
+
+static kj::ArrayPtr<const kj::StringPtr> getCommonHeaderList() {
+  static const kj::Array<kj::StringPtr> LIST = makeCommonHeaderList();
+  return LIST;
+}
+
+static kj::HashMap<kj::String, uint> makeCommonHeaderMap() {
+  kj::HashMap<kj::String, uint> result;
+  auto list = getCommonHeaderList();
+  KJ_ASSERT(MAX_COMMON_HEADER_ID < list.size());
+  for (auto i: kj::range(1, MAX_COMMON_HEADER_ID + 1)) {
+    auto key = kj::str(list[i]);
+    for (auto& c: key) {
+      if ('A' <= c && c <= 'Z') {
+        c = c - 'A' + 'a';
+      }
+    }
+    result.insert(kj::mv(key), i);
+  }
+  return result;
+}
+
+static const kj::HashMap<kj::String, uint>& getCommonHeaderMap() {
+  static const kj::HashMap<kj::String, uint> MAP = makeCommonHeaderMap();
+  return MAP;
+}
+
+void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // We serialize as a series of key-value pairs. Each value is a length-delimited string. Each key
+  // is a common header ID, or the value zero to indicate an uncommon header, which is then
+  // followed by a length-delimited name.
+
+  serializer.writeRawUint32(static_cast<uint>(guard));
+
+  // Write the count of headers.
+  uint count = 0;
+  for (auto& entry: headers) {
+    count += entry.second.values.size();
+  }
+  serializer.writeRawUint32(count);
+
+  // Now write key/values.
+  auto& commonHeaders = getCommonHeaderMap();
+  for (auto& entry: headers) {
+    auto& header = entry.second;
+    auto commonId = commonHeaders.find(header.key);
+    for (auto& value: header.values) {
+      KJ_IF_SOME(c, commonId) {
+        serializer.writeRawUint32(c);
+      } else {
+        serializer.writeRawUint32(0);
+        serializer.writeLengthDelimited(header.name);
+      }
+      serializer.writeLengthDelimited(value);
+    }
+  }
+}
+
+jsg::Ref<Headers> Headers::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto result = jsg::alloc<Headers>();
+  uint guard = deserializer.readRawUint32();
+  KJ_REQUIRE(guard <= static_cast<uint>(Guard::NONE), "unknown guard value");
+
+  uint count = deserializer.readRawUint32();
+
+  auto commonHeaders = getCommonHeaderList();
+  for (auto i KJ_UNUSED: kj::zeroTo(count)) {
+    uint commonId = deserializer.readRawUint32();
+    kj::String name;
+    if (commonId == 0) {
+      name = deserializer.readLengthDelimitedString();
+    } else {
+      KJ_ASSERT(commonId < commonHeaders.size());
+      name = kj::str(commonHeaders[commonId]);
+    }
+
+    auto value = deserializer.readLengthDelimitedString();
+
+    result->append(jsg::ByteString(kj::mv(name)), jsg::ByteString(kj::mv(value)));
+  }
+
+  // Don't actually set the guard until here because it may block the ability to call `append()`.
+  result->guard = static_cast<Guard>(guard);
+
+  return result;
 }
 
 // =======================================================================================

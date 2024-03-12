@@ -302,6 +302,20 @@ export class MyService extends WorkerEntrypoint {
   async roundTrip(value) {
     return value;
   }
+
+  async returnEmptyHeaders() {
+    return new Headers();
+  }
+
+  async returnHeaders() {
+    let result = new Headers();
+    result.append("foo", "bar");
+    result.append("Set-Cookie", "abc");
+    result.append("set-cookie", "def");
+    result.append("corge", "!@#");
+    result.append("Content-Length", "123");
+    return result;
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -1027,6 +1041,31 @@ export let streams = {
       await writer.close();
 
       assert.strictEqual(await readPromise, "foo, bar, baz!");
+    }
+  }
+}
+
+export let serializeHttpTypes = {
+  async test(controller, env, ctx) {
+    {
+      let headers = await env.MyService.returnEmptyHeaders();
+      assert.deepEqual([...headers], []);
+    }
+
+    {
+      let headers = await env.MyService.returnHeaders();
+      assert.strictEqual(headers instanceof Headers, true);
+
+      // Awkwardly, there's actually no API to get the non-lowercased header names.
+      assert.deepEqual([...headers], [
+        ["content-length", "123"],
+        ["corge", "!@#"],
+        ["foo", "bar"],
+        ["set-cookie", "abc"],
+        ["set-cookie", "def"],
+      ]);
+
+      assert.deepEqual(headers.getSetCookie(), ["abc", "def"]);
     }
   }
 }
