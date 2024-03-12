@@ -60,6 +60,36 @@ async function test(storage) {
     assert.equal(result[2]['value'], 3)
   }
 
+
+  // Test partial query ingestion
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;    `), '    ')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;`), '')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456`), ' SELECT 456')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 45`), ' SELECT 45')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 4`), ' SELECT 4')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT `), ' SELECT ')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT`), ' SELECT')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELEC`), ' SELEC')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELE`), ' SELE')
+  assert.deepEqual(sql.ingest(`SELECT 123; SEL`), ' SEL')
+  assert.deepEqual(sql.ingest(`SELECT 123; SE`), ' SE')
+  assert.deepEqual(sql.ingest(`SELECT 123; S`), ' S')
+  assert.deepEqual(sql.ingest(`SELECT 123; `), ' ')
+  assert.deepEqual(sql.ingest(`SELECT 123;`), '')
+  assert.deepEqual(sql.ingest(`SELECT 123`), 'SELECT 123')
+  assert.deepEqual(sql.ingest(`SELECT 12`), 'SELECT 12')
+  assert.deepEqual(sql.ingest(`SELECT 1`), 'SELECT 1')
+
+  // Exec throws with trailing comments
+  assert.throws(
+    () => sql.exec('SELECT 123; SELECT 456; -- trailing comment'),
+    /SQL code did not contain a statement/
+  )
+  // Ingest does not
+  assert.deepEqual(
+    sql.ingest(`SELECT 123; SELECT 456; -- trailing comment`),
+    ' -- trailing comment'
+  )
   // Test count
   {
     const result = [

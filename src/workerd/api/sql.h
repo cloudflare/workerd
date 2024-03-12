@@ -24,6 +24,7 @@ public:
   class Statement;
 
   jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
+  kj::String ingest(jsg::Lock& js, kj::String query);
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
@@ -31,6 +32,7 @@ public:
 
   JSG_RESOURCE_TYPE(SqlStorage) {
     JSG_METHOD(exec);
+    JSG_METHOD(ingest);
     JSG_METHOD(prepare);
 
     JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);

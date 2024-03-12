@@ -89,6 +89,11 @@ public:
   // debug logs.
   kj::StringPtr getCurrentQueryForDebug();
 
+  // Helper to execute a chunk of SQL that may not be complete.
+  // Executes every valid statement provided, and returns the remaining portion of the input
+  // that was not processed. This is used for streaming SQL ingestion.
+  kj::StringPtr ingestSql(Regulator& regulator, kj::StringPtr sqlCode);
+
 private:
   sqlite3* db;
 

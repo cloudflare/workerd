@@ -446,6 +446,43 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
   }
 }
 
+kj::StringPtr SqliteDatabase::ingestSql(Regulator& regulator, kj::StringPtr sqlCode) {
+  // While there's still some input SQL to process
+  while (sqlCode.begin() != sqlCode.end()) {
+    // And there are still valid statements:
+    auto statementLength = sqlite3_complete_length(sqlCode.begin(), 1);
+    if (!statementLength) break;
+
+    // Slice off the next valid statement and prepare it
+    auto nextStatement = kj::str(sqlCode.slice(0, statementLength));
+    auto result = prepareSql(regulator, nextStatement, 0, SINGLE);
+
+    // Execute the prepared statement, since we're only sending one
+
+    // Ensure we're in an implicit transaction for writes
+    KJ_IF_SOME(cb, onWriteCallback) {
+      if (!sqlite3_stmt_readonly(result)) {
+        cb();
+      }
+    }
+
+    // A single 'sqlite3_step' is enough to execute the statement, since we're ignoring results
+    int err = sqlite3_step(result);
+    if (err == SQLITE_DONE) {
+      // good
+    } else if (err == SQLITE_ROW) {
+      // Intermediate statement returned results. We will discard.
+    } else {
+      SQLITE_CALL_FAILED("sqlite3_step()", err);
+    }
+
+    sqlCode = sqlCode.slice(statementLength);
+  }
+
+  // Return the leftover buffer
+  return sqlCode;
+}
+
 bool SqliteDatabase::isAuthorized(int actionCode,
     kj::Maybe<kj::StringPtr> param1, kj::Maybe<kj::StringPtr> param2,
     kj::Maybe<kj::StringPtr> dbName, kj::Maybe<kj::StringPtr> triggerName) {
