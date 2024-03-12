@@ -230,11 +230,13 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
         goto invalid;
       }
 
+      bool isPython = api::pyodide::hasPythonModules(modules);
       return Worker::Script::ModulesSource {
         modules[0].getName(),
         [conf,&errorReporter, extensions](jsg::Lock& lock, const Worker::Api& api) {
           return WorkerdApi::from(api).compileModules(lock, conf, errorReporter, extensions);
-        }
+        },
+        isPython
       };
     }
     case config::Worker::SERVICE_WORKER_SCRIPT:

@@ -200,7 +200,9 @@ public:
 
     // Callback which will construct the module registry and load all the modules into it.
     kj::Function<void(jsg::Lock& lock, const Api& api)> compileModules;
+    bool isPython;
   };
+  bool isPython;
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
 private:

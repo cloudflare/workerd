@@ -157,6 +157,10 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
         jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
       return {};
     }
+    kj::Own<void> enterStartupPython(
+        jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+      return {};
+    }
     kj::Own<void> enterDynamicImportJs(
         jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
       return {};

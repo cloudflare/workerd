@@ -34,6 +34,10 @@ public:
   virtual kj::Own<void> enterStartupJs(
       jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const = 0;
 
+  // used to enforce limits on Python script startup.
+  virtual kj::Own<void> enterStartupPython(
+      jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const = 0;
+
   // Like enterStartupJs(), but used when compiling a dynamically-imported module.
   virtual kj::Own<void> enterDynamicImportJs(
       jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const = 0;
