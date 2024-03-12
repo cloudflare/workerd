@@ -265,7 +265,8 @@ public:
       "Durable Object storage is no longer accessible."_kj;
 
   ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru, OutputGate& gate,
-      Hooks& hooks = Hooks::DEFAULT);
+      Hooks& hooks = Hooks::DEFAULT,
+      kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>());
   ~ActorCache() noexcept(false);
 
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return kj::none; }
@@ -727,6 +728,20 @@ private:
   //   writes and not have to worry about this. However, at present, ActorStorage has automatic
   //   reconnect behavior at the supervisor layer which violates e-order.
 
+  // syncGets() creates a GetMultiStreamImpl for each batch that we read, and each
+  // GetMultiStreamImpl has an array of strong references to `Entry`s. Although we may be holding
+  // strong references, these `Entry`s are really sitting in the dirtyList, and GetMultiStreamImpl
+  // is filling the Entry with its value from storage. However, upon the destruction of the
+  // ActorCache, we need to make sure that all `Entry`s are dropped before we try to destroy our
+  // SharedLru, otherwise we may see use-after-frees.
+  //
+  // To ensure this destruction ordering is met, we give syncGets() a promise, which is just
+  // a branch of this `readCancellation` task. When we use the cancelReadFlush fulfiller, it signals
+  // to all syncGets() promises to drop their GetMultiStreamImpls, thereby dropping the strong
+  // Entry references.
+  kj::ForkedPromise<void> readCancellation;
+  kj::Own<kj::PromiseFulfiller<void>> cancelReadFlush;
+
   // Did we hit a problem that makes the ActorCache unusable? If so this is the exception that
   // describes the problem.
   kj::Maybe<kj::Exception> maybeTerminalException;
@@ -834,6 +849,8 @@ private:
     kj::Vector<kj::Own<Entry>> entries;
     // Metadata on each of the batches we will flush.
     kj::Vector<FlushBatch> batches;
+    // Resolves if this get should be cancelled.
+    kj::Promise<void> canceler = kj::READY_NOW;
   };
 
   // All the `Entry`s we want to put next flush.
