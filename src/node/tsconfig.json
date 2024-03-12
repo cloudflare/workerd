@@ -28,6 +28,7 @@
     "paths": {
       "node:*": ["./*"],
       "node:stream/*": ["./*"],
+      "node:fs/*": ["./fs/*"],
       "node-internal:*": ["./internal/*"],
       "cloudflare-internal:workers": ["./internal/workers.d.ts"],
       "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"],
@@ -35,8 +36,10 @@
   },
   "include": [
     "*.ts",
+    "*.js",
     "stream/*.ts",
     "stream/*.js",
+    "fs/*.js",
     "internal/*.ts"
   ],
 }
