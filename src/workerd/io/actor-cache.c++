@@ -41,14 +41,20 @@ auto recordStorageWrite(ActorCache::Hooks& hooks, const kj::MonotonicClock& cloc
 
 
 ActorCache::ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru,
-                       OutputGate& gate, Hooks& hooks)
+                       OutputGate& gate, Hooks& hooks, kj::PromiseFulfillerPair<void> paf)
     : storage(kj::mv(storage)), lru(lru), gate(gate), hooks(hooks), clock(kj::systemPreciseMonotonicClock()),
-      currentValues(lru.cleanList.lockExclusive()) {}
+      currentValues(lru.cleanList.lockExclusive()),
+      readCancellation(paf.promise.fork()),
+      cancelReadFlush(kj::mv(paf.fulfiller)) {}
 
 ActorCache::~ActorCache() noexcept(false) {
   // Need to remove all entries from any lists they might be in.
   auto lock = lru.cleanList.lockExclusive();
   clear(lock);
+
+  // Also cancel any pending syncGets(), since they create capabilities that have strong references
+  // to `Entry`s, and if they don't get dropped our LRU size accounting will break.
+  cancelReadFlush->fulfill();
 }
 
 void ActorCache::clear(Lock& lock) {
@@ -132,6 +138,8 @@ size_t ActorCache::Entry::setPresentValue(Value newValue) {
 void ActorCache::Entry::setAbsentValue() {
   KJ_ASSERT(valueStatus == EntryValueStatus::UNKNOWN);
   valueStatus = EntryValueStatus::ABSENT;
+  KJ_ASSERT_NONNULL(maybeCache).lru.size.fetch_sub(value.size());
+  value = {};
 }
 
 ActorCache::SharedLru::SharedLru(const Options options): options(options) {}
@@ -672,10 +680,19 @@ kj::Promise<void> ActorCache::syncGets(
   }
   KJ_DASSERT(entryIt == getFlush.entries.end());
 
+  // After this point, the only strong references to `Entry`s should be in the individual
+  // GetMultiStreamImpl objects.
   getFlush.batches.clear();
   getFlush.entries.clear();
 
-  co_await kj::joinPromises(promises.releaseAsArray());
+  // TODO(now): This doesn't seem to be firing...
+  auto cancellationPromise = kj::mv(getFlush.canceler).then([](){
+    KJ_DBG("[PENDING GET MULTIPLE READ CANCELED]");
+  });
+  auto joinedGetPromise = kj::joinPromises(promises.releaseAsArray());
+
+  // Exclusive join will cancel the promise that doesn't finish first.
+  co_await cancellationPromise.exclusiveJoin(kj::mv(joinedGetPromise));
 }
 
 kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::getAlarm(
@@ -2551,6 +2568,8 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
     getFlush.entries.clear();
     co_await syncGet(storage, kj::mv(entry));
   } else if (getFlush.entries.size() > 1) {
+    // Set our canceler to ensure we destroy any strong refs to `Entry`s upon ~ActorCache().
+    getFlush.canceler = readCancellation.addBranch();
     co_await syncGets(storage, kj::mv(getFlush));
   } else {
     // We had no gets!
