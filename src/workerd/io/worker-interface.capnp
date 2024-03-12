@@ -42,6 +42,8 @@ struct Trace @0x8e8d911203762d34 {
   outcome @2 :EventOutcome;
   scriptName @4 :Text;
   scriptVersion @19 :ScriptVersion;
+  scriptId @21 :Text;
+  sourcemapsAvailable @22 :Bool;
 
   eventTimestampNs @5 :Int64;
 

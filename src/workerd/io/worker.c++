@@ -162,7 +162,10 @@ void addExceptionToTrace(jsg::Lock& js,
     message = kj::str(m);
   }
   // TODO(someday): Limit size of exception content?
-  tracer.addException(timestamp, kj::mv(name), kj::mv(message));
+  tracer.addException(
+    timestamp, kj::mv(name), kj::mv(message),
+    ioContext.getWorker().getScript().hasSourcemapsAvailable()
+  );
 }
 
 void reportStartupError(
@@ -1075,10 +1078,11 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
 
 Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
                        Script::Source source, IsolateObserver::StartType startType,
-                       bool logNewScript, kj::Maybe<ValidationErrorReporter&> errorReporter)
+                       bool logNewScript, kj::Maybe<ValidationErrorReporter&> errorReporter, bool sourcemapsAvailable)
     : isolate(kj::mv(isolateParam)),
       id(kj::str(id)),
       modular(source.is<ModulesSource>()),
+      sourcemapsAvailable(sourcemapsAvailable),
       impl(kj::heap<Impl>()) {
   this->isPython = false;
   auto parseMetrics = isolate->metrics->parse(startType);
@@ -3434,11 +3438,11 @@ uint Worker::Isolate::getLockSuccessCount() const {
 
 kj::Own<const Worker::Script> Worker::Isolate::newScript(
     kj::StringPtr scriptId, Script::Source source,
-    IsolateObserver::StartType startType, bool logNewScript,
+    IsolateObserver::StartType startType, bool logNewScript, bool sourcemapAvailable,
     kj::Maybe<ValidationErrorReporter&> errorReporter) const {
   // Script doesn't already exist, so compile it.
   return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, kj::mv(source),
-                                      startType, logNewScript, errorReporter);
+                                      startType, logNewScript, errorReporter, sourcemapAvailable);
 }
 
 void Worker::Isolate::completedRequest() const {
