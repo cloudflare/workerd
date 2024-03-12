@@ -9,7 +9,9 @@ import { default as internalTypes } from 'node-internal:internal_types';
 import { default as utilImpl } from 'node-internal:util';
 
 import {
-  validateFunction
+  validateFunction,
+  validateAbortSignal,
+  validateObject,
 } from 'node-internal:validators';
 
 import {
@@ -213,6 +215,25 @@ export function transferableAbortSignal(..._ : any[]) : any {
   throw new Error('node:util transferableAbortSignal is not implemented');
 }
 
+export async function aborted(signal: AbortSignal, resource: object) {
+  if (signal === undefined) {
+    throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
+  }
+  // Node.js defines that the resource is held weakly such that if it is gc'd, we
+  // will drop the event handler on the signal and the promise will remain pending
+  // forever. We don't want gc to be observable in the same way so we won't support
+  // this additional option. Unfortunately Node.js does not make this argument optional.
+  // We'll just ignore it.
+  validateAbortSignal(signal, 'signal');
+  validateObject(resource, 'resource', { allowArray: true, allowFunction: true });
+  if (signal.aborted) return Promise.resolve();
+  // TODO(cleanup): Apparently withResolvers isn't part of type defs we use yet
+  const { promise, resolve } = (Promise as any).withResolvers();
+  const opts = { __proto__: null, once: true };
+  signal.addEventListener('abort', resolve, opts);
+  return promise;
+}
+
 export default {
   types,
   callbackify,
@@ -227,6 +248,7 @@ export default {
   MIMEType,
   toUSVString,
   log,
+  aborted,
   // Node.js originally exposed TextEncoder and TextDecoder off the util
   // module originally, so let's just go ahead and do the same.
   TextEncoder,
