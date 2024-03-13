@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 644bb085d45a180ba0d31dcdf1b13b434305907e Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
@@ -22,10 +22,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index b5294331fa631d810c8e3a073a3358fc4d9260d7..70f922a1ee4a6ac8ca7c35fe1e758af6bed55e4e 100644
+index f3c446b7fe82158dab17c103062ababfb368e50e..8418ea61dfcaa87dc68834b2254cdce8e55186ad 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3545,6 +3545,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3559,6 +3559,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  

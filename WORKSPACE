@@ -453,10 +453,10 @@ http_archive(
         "//:patches/v8/0014-increase-visibility-of-virtual-method.patch",
         "//:patches/v8/0015-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
     ],
-    integrity = "sha256-jcBk1hBhzrMHRL0EDTgHKBVrJPsP1SLZL6A5/l6arrs=",
-    strip_prefix = "v8-12.2.281.18",
+    integrity = "sha256-QphdaJn35eZeo+qoayNFIgm02hX5WHjKf+pr3WXCiEs=",
+    strip_prefix = "v8-12.3.219.10",
     type = "tgz",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.2.281.18.tar.gz",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.3.219.10.tar.gz",
 )
 
 git_repository(

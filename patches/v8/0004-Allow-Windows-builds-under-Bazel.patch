@@ -1,11 +1,11 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 651a05cb9182c40ed5faba671f07468db83bce77 Mon Sep 17 00:00:00 2001
 From: Brendan Coll <bcoll@cloudflare.com>
 Date: Thu, 16 Mar 2023 11:56:10 +0000
 Subject: Allow Windows builds under Bazel
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 03ff0d8b3b0aca28d87e9612d8c83d8e7614c1d6..47ceeacf9c5d34853f8d427b167381e396364656 100644
+index 2351c1e3300e0b1d258c558e6c333086238eba4a..fcfc5aa3ad57722c4b4d11783cf5ae704c8c859f 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -777,6 +777,7 @@ filegroup(
@@ -40,7 +40,7 @@ index 03ff0d8b3b0aca28d87e9612d8c83d8e7614c1d6..47ceeacf9c5d34853f8d427b167381e3
          "src/api/api-arguments.cc",
          "src/api/api-arguments.h",
          "src/api/api-arguments-inl.h",
-@@ -2669,6 +2671,11 @@ filegroup(
+@@ -2671,6 +2673,11 @@ filegroup(
              "src/trap-handler/handler-inside-posix.cc",
              "src/trap-handler/handler-outside-posix.cc",
          ],
@@ -52,7 +52,7 @@ index 03ff0d8b3b0aca28d87e9612d8c83d8e7614c1d6..47ceeacf9c5d34853f8d427b167381e3
          "//conditions:default": [],
      }) + select({
          "@v8//bazel/config:v8_arm64_simulator": [
-@@ -2676,13 +2683,6 @@ filegroup(
+@@ -2678,13 +2685,6 @@ filegroup(
              "src/trap-handler/trap-handler-simulator.h",
          ],
          "//conditions:default": [],
@@ -66,7 +66,7 @@ index 03ff0d8b3b0aca28d87e9612d8c83d8e7614c1d6..47ceeacf9c5d34853f8d427b167381e3
      }) + select({
          "@v8//bazel/config:is_windows_64bit": [
              "src/diagnostics/unwinding-info-win64.cc",
-@@ -3670,6 +3670,9 @@ filegroup(
+@@ -3675,6 +3675,9 @@ filegroup(
          "@v8//bazel/config:is_msvc_asm_ia32": ["src/heap/base/asm/ia32/push_registers_masm.asm"],
          "@v8//bazel/config:is_msvc_asm_x64": ["src/heap/base/asm/x64/push_registers_masm.asm"],
          "@v8//bazel/config:is_msvc_asm_arm64": ["src/heap/base/asm/arm64/push_registers_masm.S"],
@@ -76,7 +76,7 @@ index 03ff0d8b3b0aca28d87e9612d8c83d8e7614c1d6..47ceeacf9c5d34853f8d427b167381e3
      }),
  )
  
-@@ -4033,9 +4036,11 @@ filegroup(
+@@ -4038,9 +4041,11 @@ filegroup(
          "src/d8/d8-js.cc",
          "src/d8/d8-platforms.cc",
          "src/d8/d8-platforms.h",
@@ -90,7 +90,7 @@ index 03ff0d8b3b0aca28d87e9612d8c83d8e7614c1d6..47ceeacf9c5d34853f8d427b167381e3
  )
  
  genrule(
-@@ -4371,7 +4376,7 @@ py_test(
+@@ -4376,7 +4381,7 @@ py_test(
          ":noicu/d8",
          ":noicu/v8_build_config",
          "//testing/pybase",
@@ -99,7 +99,7 @@ index 03ff0d8b3b0aca28d87e9612d8c83d8e7614c1d6..47ceeacf9c5d34853f8d427b167381e3
      main = "tools/run-tests.py",
      python_version = "PY3",
      tags = [
-@@ -4401,7 +4406,7 @@ py_test(
+@@ -4406,7 +4411,7 @@ py_test(
          ":icu/d8",
          ":icu/v8_build_config",
          "//testing/pybase",
