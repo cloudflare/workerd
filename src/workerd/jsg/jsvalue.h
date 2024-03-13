@@ -133,6 +133,7 @@ public:
   operator v8::Local<v8::Value>() const { return inner; }
 
   bool operator==(const JsValue& other) const;
+  bool strictEquals(const JsValue& other) const;
 
   bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
