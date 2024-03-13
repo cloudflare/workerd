@@ -288,6 +288,17 @@ export class MyService extends WorkerEntrypoint {
     return readable;
   }
 
+  async returnMultipleReadableStreams() {
+    let { readable, writable } = new IdentityTransformStream();
+    this.ctx.waitUntil(this.writeToStream(writable));
+
+    let pair2 = new IdentityTransformStream();
+    this.ctx.waitUntil(this.writeToStream(pair2.writable));
+    let readable2 = pair2.readable;
+
+    return [readable, readable2];
+  }
+
   async roundTrip(value) {
     return value;
   }
@@ -947,6 +958,13 @@ export let streams = {
       let readable = await env.MyService.returnReadableStream();
       let text = await new Response(readable).text();
       assert.strictEqual(text, "foo, bar, baz!");
+    }
+
+    // Receive multiple ReadableStreams.
+    {
+      let readables = await env.MyService.returnMultipleReadableStreams();
+      assert.strictEqual(await new Response(readables[0]).text(), "foo, bar, baz!");
+      assert.strictEqual(await new Response(readables[1]).text(), "foo, bar, baz!");
     }
 
     // Send ReadableStream, but fail to fully write it.

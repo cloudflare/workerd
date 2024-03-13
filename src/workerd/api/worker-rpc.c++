@@ -59,11 +59,10 @@ rpc::JsValue::External::Reader RpcDeserializerExternalHander::read() {
 }
 
 void RpcDeserializerExternalHander::setLastStream(capnp::Capability::Client stream) {
-  uint i = externals.size() - 1;
   KJ_IF_SOME(ss, streamSink) {
-    ss->setSlot(i, kj::mv(stream));
+    ss->setSlot(i - 1, kj::mv(stream));
   } else {
-    streamSink.emplace(kj::heap<StreamSinkImpl>())->setSlot(i, kj::mv(stream));
+    streamSink.emplace(kj::heap<StreamSinkImpl>())->setSlot(i - 1, kj::mv(stream));
   }
 }
 
