@@ -537,6 +537,34 @@ struct SetterCallback<TypeWrapper, methodName,
   }
 };
 
+template <typename T>
+class TypeHandler;
+
+// Helper to call T::serialize() and pass along any TypeHandlers it needs.
+template <typename TypeWrapper, typename T, typename Method = decltype(&T::serialize)>
+struct SerializeInvoker;
+template <typename TypeWrapper, typename T, typename... Types>
+struct SerializeInvoker<TypeWrapper, T,
+                        void (T::*)(Lock&, Serializer&, const TypeHandler<Types>&...)> {
+  static void call(TypeWrapper& wrapper, T& target, Lock& js, Serializer& serializer) {
+    target.serialize(js, serializer, TypeWrapper::template TYPE_HANDLER_INSTANCE<Types>...);
+  }
+};
+
+// Helper to call T::deserialize() and pass along any TypeHandlers it needs, as well as wrap
+// the result.
+template <typename TypeWrapper, typename T, typename Method = decltype(T::deserialize)>
+struct DeserializeInvoker;
+template <typename TypeWrapper, typename T, typename Ret, typename Tag, typename... Types>
+struct DeserializeInvoker<TypeWrapper, T,
+                          Ret(Lock&, Tag, Deserializer&, const TypeHandler<Types>&...)> {
+  static v8::Local<v8::Object> call(
+      TypeWrapper& wrapper, Lock& js, Tag tag, Deserializer& deserializer) {
+    return wrapper.wrap(js.v8Context(), kj::none,
+        T::deserialize(js, tag, deserializer,
+            TypeWrapper::template TYPE_HANDLER_INSTANCE<Types>...));
+  }
+};
 
 // SFINAE to detect if a type has a static method called `constructor`.
 template <typename T, typename Constructor = decltype(&T::constructor)>
@@ -626,7 +654,7 @@ private:
   // It also just provides nice symmetry with `deserializerMap`.
   //
   // The SerializeFunc() must always start by writing a tag.
-  typedef void SerializeFunc(Lock& js, jsg::Object& instance, Serializer& serializer);
+  typedef void SerializeFunc(TypeWrapper&, Lock& js, jsg::Object& instance, Serializer& serializer);
   kj::HashMap<std::type_index, SerializeFunc*> serializerMap;
 
   // Map tag numbers to deserializer functions.
@@ -1126,9 +1154,9 @@ public:
       //   included -- *even if* T doesn't declare itself serializable and therefore this branch
       //   should not be compiled at all! Unsure if this is a compiler bug.
       wrapper.serializerMap.insert(typeid(T),
-          [](Lock& js, jsg::Object& instance, auto& serializer) {
+          [](TypeWrapper& wrapper, Lock& js, jsg::Object& instance, auto& serializer) {
         serializer.writeRawUint32(static_cast<uint>(T::jsgSerializeTag));
-        static_cast<T&>(instance).serialize(js, serializer);
+        SerializeInvoker<TypeWrapper, T>::call(wrapper, static_cast<T&>(instance), js, serializer);
       });
 
       if constexpr (!T::jsgSerializeOneway) {
@@ -1136,7 +1164,7 @@ public:
             [](TypeWrapper& wrapper, Lock& js, uint tag, Deserializer& deserializer) {
           // Cast the tag to the application's preferred tag type.
           auto typedTag = static_cast<decltype(T::jsgSerializeTag)>(tag);
-          return wrapper.wrap(js.v8Context(), kj::none, T::deserialize(js, typedTag, deserializer));
+          return DeserializeInvoker<TypeWrapper, T>::call(wrapper, js, typedTag, deserializer);
         };
 
         // We make duplicatse here fatal because it's really hard to debug exceptions thrown during

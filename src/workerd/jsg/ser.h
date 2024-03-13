@@ -51,6 +51,10 @@ namespace workerd::jsg {
 //   the object. These must be the exact corresponding calls in the same order as serialize()
 //   would have made them. The sequence can never change once data has been written for a given
 //   tag version; the only way to change is to define a new version.
+// * Both `serialize()` and `deserialize()` can take additional arguments of the form
+//   `const jsg::TypeHandler<SomeType>&`, which will automatically be filled in with the
+//   corresponding type handler. This is useful if the serializer wants to, say, assemble a
+//   JSG_STRUCT, convert it into an actual JS object, and serialize that.
 class Serializer final: v8::ValueSerializer::Delegate {
 public:
   // "Externals" are values which can be serialized, but refer to some external resource, rather

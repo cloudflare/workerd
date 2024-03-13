@@ -18,6 +18,7 @@ struct SerTestContext: public ContextGlobalObject {
     FOO,
     BAR,
     BAZ,
+    QUX,
   };
 
   struct Foo: public jsg::Object {
@@ -97,6 +98,38 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_SERIALIZABLE(SerializationTag::BAZ);
   };
 
+  // Qux is like Bar but serializes its string by converting it to a JS value first.
+  struct Qux: public jsg::Object {
+    kj::String text;
+    Qux(kj::String text): text(kj::mv(text)) {}
+
+    static jsg::Ref<Qux> constructor(kj::String text) {
+      return jsg::alloc<Qux>(kj::mv(text));
+    }
+
+    kj::String getText() {
+      return kj::str(text);
+    }
+
+    JSG_RESOURCE_TYPE(Qux) {
+      JSG_READONLY_PROTOTYPE_PROPERTY(text, getText);
+    }
+
+    void serialize(jsg::Lock& js, jsg::Serializer& serializer,
+                   const TypeHandler<kj::String>& stringHandler) {
+      // V2 prefers to serialize the string as a JS value.
+      serializer.write(js, JsValue(stringHandler.wrap(js, kj::str(text, '?'))));
+    }
+    static jsg::Ref<Qux> deserialize(Lock& js, SerializationTag tag, Deserializer& deserializer,
+                                     const TypeHandler<kj::String>& stringHandler) {
+      KJ_ASSERT(tag == SerializationTag::QUX);
+
+      return jsg::alloc<Qux>(KJ_ASSERT_NONNULL(
+          stringHandler.tryUnwrap(js, deserializer.readValue(js))));
+    }
+    JSG_SERIALIZABLE(SerializationTag::QUX);
+  };
+
   JsValue roundTrip(Lock& js, JsValue in) {
     auto content = ({
       Serializer ser(js);
@@ -119,11 +152,13 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_NESTED_TYPE(Foo);
     JSG_NESTED_TYPE(Bar);
     JSG_NESTED_TYPE(Baz);
+    JSG_NESTED_TYPE(Qux);
     JSG_METHOD(roundTrip);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(
-    SerTestIsolate, SerTestContext, SerTestContext::Foo, SerTestContext::Bar, SerTestContext::Baz);
+    SerTestIsolate, SerTestContext, SerTestContext::Foo, SerTestContext::Bar, SerTestContext::Baz,
+    SerTestContext::Qux);
 
 // Define a whole second JSG isolate type that contains "updated" code where Bar no longer wraps
 // a string, it wraps an arbitrary value.
@@ -132,6 +167,7 @@ struct SerTestContextV2: public ContextGlobalObject {
     FOO,
     BAR_OLD,
     BAZ,
+    QUX,
     BAR_V2
   };
 
@@ -211,6 +247,7 @@ KJ_TEST("serialization") {
 
   // Test serializing host objects.
   e.expectEval("roundTrip(new Foo(123)).i", "number", "125");
+  e.expectEval("roundTrip(new Qux(\"hello\")).text", "string", "hello?");
   e.expectEval("roundTrip(new Bar(\"hello\")).text", "string", "hello!");
 
   // Test throwing from serialize/deserialize
