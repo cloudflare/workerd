@@ -109,10 +109,10 @@ wd_cc_library(
     deps = [
         "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
+        "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/server:workerd_capnp",
         "//src/workerd/util:autogate",
-        "//src/workerd/io",
     ],
 )
 

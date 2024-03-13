@@ -73,7 +73,7 @@ wd_cc_benchmark(
     name = "bench-regex",
     srcs = ["bench-regex.c++"],
     deps = [
-        "//src/workerd/util",
         ":test-fixture",
+        "//src/workerd/util",
     ],
 )

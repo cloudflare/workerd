@@ -43,7 +43,6 @@ PERFETTO_CONFIG = struct(
         # Target exposing platform-specific functionality for base. This is
         # overridden in Google internal builds.
         base_platform = ["//:perfetto_base_default_platform"],
-
         zlib = ["@perfetto_dep_zlib//:zlib"],
         jsoncpp = ["@perfetto_dep_jsoncpp//:jsoncpp"],
         linenoise = ["@perfetto_dep_linenoise//:linenoise"],
@@ -73,7 +72,7 @@ PERFETTO_CONFIG = struct(
         #     Windows, where it becomes a nop).
         # (3) You can override the whole demangle_wrapper below, and provide
         #     your own demangling implementation.
-        demangle_wrapper = [ "//:src_trace_processor_demangle" ],
+        demangle_wrapper = ["//:src_trace_processor_demangle"],
         llvm_demangle = ["@perfetto_dep_llvm_demangle//:llvm_demangle"],
     ),
 
@@ -113,7 +112,6 @@ PERFETTO_CONFIG = struct(
     # actions here just for documentation purposes.
     rule_overrides = struct(
         proto_library = None,
-
         cc_binary = None,
         cc_library = None,
         cc_proto_library = None,
@@ -122,13 +120,10 @@ PERFETTO_CONFIG = struct(
         # we need for most embedders.
         java_proto_library = _noop_override,
         java_lite_proto_library = _noop_override,
-
         py_binary = None,
         py_library = None,
         py_proto_library = None,
-
         go_proto_library = None,
-
         jspb_proto_library = None,
     ),
 

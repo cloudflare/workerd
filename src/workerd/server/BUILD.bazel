@@ -33,11 +33,11 @@ selects.config_setting_group(
 # current malloc in use
 wd_cc_library(
     name = "malloc",
+    visibility = ["//visibility:public"],
     deps = select({
         ":really_use_tcmalloc": ["@com_google_tcmalloc//tcmalloc"],
         "//conditions:default": ["@bazel_tools//tools/cpp:malloc"],
     }),
-    visibility = ["//visibility:public"],
 )
 
 wd_cc_binary(
@@ -47,10 +47,10 @@ wd_cc_binary(
     tags = ["no-arm64"],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/workerd/util:autogate",
         ":server",
         ":workerd-meta_capnp",
         ":workerd_capnp",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/capnp:capnpc",
         "//src/pyodide:pyodide_extra_capnp",
@@ -98,8 +98,8 @@ wd_cc_library(
         ":alarm-scheduler",
         ":workerd_capnp",
         "//src/workerd/api:html-rewriter",
-        "//src/workerd/api:rtti",
         "//src/workerd/api:pyodide",
+        "//src/workerd/api:rtti",
         "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
