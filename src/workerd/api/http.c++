@@ -1214,6 +1214,9 @@ Response::Response(
       hasEnabledWebSocketCompression(FeatureFlags::get(js).getWebSocketCompression()),
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
+// Defined later in this file.
+static kj::StringPtr defaultStatusText(uint statusCode);
+
 jsg::Ref<Response> Response::constructor(
     jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,
@@ -1302,23 +1305,7 @@ jsg::Ref<Response> Response::constructor(
       }
     }
   } else {
-    KJ_IF_SOME(st, defaultStatusText(statusCode)) {
-      statusText = kj::str(st);
-    } else {
-      // If we don't recognize the status code, check which range it falls into and use the status
-      // code class defined by RFC 7231, section 6, as the status text.
-      if (statusCode >= 200 && statusCode < 300) {
-        statusText = kj::str("Successful");
-      } else if (statusCode >= 300 && statusCode < 400) {
-        statusText = kj::str("Redirection");
-      } else if (statusCode >= 400 && statusCode < 500) {
-        statusText = kj::str("Client Error");
-      } else if (statusCode >= 500 && statusCode < 600) {
-        statusText = kj::str("Server Error");
-      } else {
-        KJ_UNREACHABLE;
-      }
-    }
+    statusText = kj::str(defaultStatusText(statusCode));
   }
 
   KJ_IF_SOME(bi, bodyInit) {
@@ -1393,7 +1380,7 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
   kjHeaders.set(kj::HttpHeaderId::LOCATION, kj::mv(parsedUrl));
   auto headers = jsg::alloc<Headers>(kjHeaders, Headers::Guard::IMMUTABLE);
 
-  auto statusText = KJ_ASSERT_NONNULL(defaultStatusText(statusCode));
+  auto statusText = defaultStatusText(statusCode);
 
   return jsg::alloc<Response>(js, statusCode, kj::str(statusText), kj::mv(headers), nullptr,
                               nullptr);
@@ -2377,10 +2364,10 @@ kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
   }
 }
 
-kj::Maybe<kj::StringPtr> defaultStatusText(uint statusCode) {
+static kj::StringPtr defaultStatusText(uint statusCode) {
   // RFC 7231 recommendations, unless otherwise specified.
   // https://tools.ietf.org/html/rfc7231#section-6.1
-#define STATUS(code, text) case code: return kj::StringPtr(text)
+#define STATUS(code, text) case code: return text##_kj
   switch (statusCode) {
     STATUS(100, "Continue");
     STATUS(101, "Switching Protocols");
@@ -2443,7 +2430,20 @@ kj::Maybe<kj::StringPtr> defaultStatusText(uint statusCode) {
     STATUS(508, "Loop Detected");                   // RFC 5842, WebDAV
     STATUS(510, "Not Extended");                    // RFC 2774
     STATUS(511, "Network Authentication Required"); // RFC 6585
-    default:  return kj::none;
+    default:
+      // If we don't recognize the status code, check which range it falls into and use the status
+      // code class defined by RFC 7231, section 6, as the status text.
+      if (statusCode >= 200 && statusCode < 300) {
+        return "Successful"_kj;
+      } else if (statusCode >= 300 && statusCode < 400) {
+        return "Redirection"_kj;
+      } else if (statusCode >= 400 && statusCode < 500) {
+        return "Client Error"_kj;
+      } else if (statusCode >= 500 && statusCode < 600) {
+        return "Server Error"_kj;
+      } else {
+        KJ_UNREACHABLE;
+      }
   }
 #undef STATUS
 }

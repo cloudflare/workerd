@@ -1226,9 +1226,6 @@ jsg::Ref<Response> makeHttpResponse(
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     kj::Maybe<jsg::Ref<AbortSignal>> signal = kj::none);
 
-kj::Maybe<kj::StringPtr> defaultStatusText(uint statusCode);
-// Return the RFC-recommended default status text for `statusCode`.
-
 bool isNullBodyStatusCode(uint statusCode);
 bool isRedirectStatusCode(uint statusCode);
 
