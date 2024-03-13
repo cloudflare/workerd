@@ -332,6 +332,16 @@ export class MyService extends WorkerEntrypoint {
       }
     });
   }
+
+  async returnResponse() {
+    return new Response("Response body!", {
+      status: 404,
+      headers: {
+        "Content-Type": "abc"
+      },
+      cf: {foo: 123, bar: "def"},
+    });
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -1109,6 +1119,17 @@ export let serializeHttpTypes = {
       message: 'Could not serialize object of type "AbortSignal". This type does not support ' +
                'serialization.'
     });
+
+    {
+      let req = await env.MyService.returnResponse();
+
+      assert.strictEqual(req.status, 404);
+      assert.strictEqual(req.statusText, "Not Found");
+      assert.strictEqual(req.headers.get("Content-Type"), "abc");
+      assert.deepEqual(req.cf, {foo: 123, bar: "def"});
+
+      assert.strictEqual(await req.text(), "Response body!");
+    }
   }
 }
 

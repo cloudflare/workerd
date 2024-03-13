@@ -1113,6 +1113,17 @@ public:
     // Use `BodyInit` and `ResponseInit` type aliases in constructor instead of inlining
   }
 
+  void serialize(
+      jsg::Lock& js, jsg::Serializer& serializer,
+      const jsg::TypeHandler<InitializerDict>& initDictHandler,
+      const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
+  static jsg::Ref<Response> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+      const jsg::TypeHandler<InitializerDict>& initDictHandler,
+      const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::RESPONSE);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("statusText", statusText);
     tracker.trackField("headers", headers);

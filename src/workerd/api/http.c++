@@ -1583,6 +1583,43 @@ jsg::Optional<jsg::JsObject> Response::getCf(jsg::Lock& js) {
   return cf.get(js);
 }
 
+void Response::serialize(
+    jsg::Lock& js, jsg::Serializer& serializer,
+    const jsg::TypeHandler<InitializerDict>& initDictHandler,
+    const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
+  serializer.write(js, jsg::JsValue(streamHandler.wrap(js, getBody())));
+
+  // As with Request, we serialize the initializer dict as a JS object.
+  serializer.write(js, jsg::JsValue(initDictHandler.wrap(js, InitializerDict {
+    .status = statusCode == 200 ? jsg::Optional<int>() : statusCode,
+    .statusText = statusText == defaultStatusText(statusCode)
+        ? jsg::Optional<kj::String>() : kj::str(statusText),
+    .headers = headers.addRef(),
+    .cf = cf.getRef(js),
+
+    // If a WebSocket is present, we'll try to serialize it. As of this writing, WebSocket
+    // is not serializable, but we could add support for sending it over RPC in the future.
+    //
+    // Note we have to double-Maybe this, so that if no signal is present, the property is absent
+    // instead of `null`.
+    .webSocket = webSocket.map([](jsg::Ref<WebSocket>& s) -> kj::Maybe<jsg::Ref<WebSocket>> {
+      return s.addRef();
+    }),
+
+    .encodeBody = bodyEncoding == BodyEncoding::AUTO
+        ? jsg::Optional<kj::String>() : kj::str("manual"),
+  })));
+}
+
+jsg::Ref<Response> Response::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<InitializerDict>& initDictHandler,
+    const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
+  auto body = KJ_ASSERT_NONNULL(streamHandler.tryUnwrap(js, deserializer.readValue(js)));
+  auto init = KJ_ASSERT_NONNULL(initDictHandler.tryUnwrap(js, deserializer.readValue(js)));
+  return Response::constructor(js, kj::mv(body), kj::mv(init));
+}
+
 // =======================================================================================
 
 jsg::Ref<Request> FetchEvent::getRequest() {

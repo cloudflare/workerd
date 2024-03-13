@@ -215,6 +215,7 @@ enum SerializationTag {
 
   headers @4;
   request @5;
+  response @6;
 }
 
 enum StreamEncoding {
