@@ -908,6 +908,36 @@ export let streams = {
       assert.strictEqual(await promise, "foo, bar, baz!");
     }
 
+    // Send streams that are locked.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      writer.write(enc.encode("foo"));
+
+      let reader = readable.getReader();
+
+      assert.rejects(env.MyService.writeToStream(writable), {
+        name: "TypeError",
+        message: "The WritableStream has been locked to a writer."
+      });
+      assert.rejects(env.MyService.readFromStream(readable), {
+        name: "TypeError",
+        message: "The ReadableStream has been locked to a reader."
+      });
+
+      // Verify the streams still work.
+      let dec = new TextDecoder();
+      assert.strictEqual(dec.decode((await reader.read()).value), "foo");
+
+      writer.write(enc.encode("bar"));
+      assert.strictEqual(dec.decode((await reader.read()).value), "bar");
+
+      writer.close();
+      assert.strictEqual((await reader.read()).done, true);
+    }
+
     // Receive ReadableStream.
     {
       let readable = await env.MyService.returnReadableStream();

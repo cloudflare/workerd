@@ -478,6 +478,18 @@ JsDate Lock::date(kj::StringPtr date) {
   return JsDate(converted.As<v8::Date>());
 }
 
+JsPromise Lock::rejectedJsPromise(jsg::JsValue exception) {
+  v8::EscapableHandleScope handleScope(v8Isolate);
+  auto context = v8Context();
+  auto resolver = check(v8::Promise::Resolver::New(context));
+  check(resolver->Reject(context, exception));
+  return JsPromise(handleScope.Escape(resolver->GetPromise()));
+}
+
+JsPromise Lock::rejectedJsPromise(kj::Exception&& exception) {
+  return rejectedJsPromise(exceptionToJsValue(kj::mv(exception)).getHandle(*this));
+}
+
 PromiseState JsPromise::state() {
   switch (inner->State()) {
     case v8::Promise::PromiseState::kPending:

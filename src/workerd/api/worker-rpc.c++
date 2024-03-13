@@ -415,115 +415,129 @@ JsRpcPromiseAndPipleine callImpl(
   // less convenient.
 
   try {
-    // `path` will be filled in with the path of property names leading from the stub represented by
-    // `client` to the specific property / method that we're trying to invoke.
-    kj::Vector<kj::StringPtr> path;
-    auto client = parent.getClientForOneCall(js, path);
+    return js.tryCatch([&]() -> JsRpcPromiseAndPipleine {
+      // `path` will be filled in with the path of property names leading from the stub represented by
+      // `client` to the specific property / method that we're trying to invoke.
+      kj::Vector<kj::StringPtr> path;
+      auto client = parent.getClientForOneCall(js, path);
 
-    auto& ioContext = IoContext::current();
+      auto& ioContext = IoContext::current();
 
-    auto builder = client.callRequest();
+      auto builder = client.callRequest();
 
-    // This code here is slightly overcomplicated in order to avoid pushing anything to the
-    // kj::Vector in the common case that the parent path is empty. I'm probably trying too hard
-    // but oh well.
-    if (path.empty()) {
-      KJ_IF_SOME(n, name) {
-        builder.setMethodName(n);
+      // This code here is slightly overcomplicated in order to avoid pushing anything to the
+      // kj::Vector in the common case that the parent path is empty. I'm probably trying too hard
+      // but oh well.
+      if (path.empty()) {
+        KJ_IF_SOME(n, name) {
+          builder.setMethodName(n);
+        } else {
+          // No name and no path, must be directly calling a stub.
+          builder.initMethodPath(0);
+        }
       } else {
-        // No name and no path, must be directly calling a stub.
-        builder.initMethodPath(0);
-      }
-    } else {
-      auto pathBuilder = builder.initMethodPath(path.size() + (name != kj::none));
-      for (auto i: kj::indices(path)) {
-        pathBuilder.set(i, path[i]);
-      }
-      KJ_IF_SOME(n, name) {
-        pathBuilder.set(path.size(), n);
-      }
-    }
-
-    kj::Maybe<StreamSinkFulfiller> paramsStreamSinkFulfiller;
-
-    KJ_IF_SOME(args, maybeArgs) {
-      // This is a function call with arguments.
-      kj::Vector<jsg::JsValue> argv(args.Length());
-      for (int n = 0; n < args.Length(); n++) {
-        argv.add(jsg::JsValue(args[n]));
-      }
-
-      // If we have arguments, serialize them.
-      // Note that we may fail to serialize some element, in which case this will throw back to JS.
-      if (argv.size() > 0) {
-        serializeJsValue(js, js.arr(argv.asPtr()), [&](capnp::MessageSize hint) {
-          // TODO(perf): Actually use the size hint.
-          return builder.getOperation().initCallWithArgs();
-        }, [&]() -> rpc::JsValue::StreamSink::Client {
-          // A stream was encountered in the params, so we must expect the response to contain
-          // paramsStreamSink. But we don't have the response yet. So, we need to set up a
-          // temporary promise client, which we hook to the response a little bit later.
-          auto paf = kj::newPromiseAndFulfiller<rpc::JsValue::StreamSink::Client>();
-          paramsStreamSinkFulfiller = kj::mv(paf.fulfiller);
-          return kj::mv(paf.promise);
-        });
-      }
-    } else {
-      // This is a property access.
-      builder.getOperation().setGetProperty();
-    }
-
-    StreamSinkFulfiller resultsStreamSinkFulfiller;
-
-    {
-      // Unfortunately, we always have to send a `resultsStreamSink` because we don't know until
-      // after the call completes whether or not it will return any streams. However, we will
-      // set this up as a promise capability, and only hook it up to an actual implementation if
-      // and when we discover streams in the results.
-      auto paf = kj::newPromiseAndFulfiller<rpc::JsValue::StreamSink::Client>();
-      resultsStreamSinkFulfiller = kj::mv(paf.fulfiller);
-      builder.setResultsStreamSink(kj::mv(paf.promise));
-    }
-
-    auto callResult = builder.send();
-
-    KJ_IF_SOME(ssf, paramsStreamSinkFulfiller) {
-      ssf->fulfill(callResult.getParamsStreamSink());
-    }
-
-    // We need to arrange that our JsRpcPromise will updated in-place with the final settlement
-    // of this RPC promise. However, we can't actually construct the JsRpcPromise until we have
-    // the final promise to give it. To resolve the cycle, we only create a JsRpcPromise::WeakRef
-    // here, which is filled in later on to point at the JsRpcPromise, if and when one is created.
-    auto weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>();
-
-    auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
-          [weakRef = kj::atomicAddRef(*weakRef),
-           resultsStreamSinkFulfiller = kj::mv(resultsStreamSinkFulfiller)]
-          (jsg::Lock& js, capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable
-          -> jsg::Value {
-      auto jsResult = deserializeRpcReturnValue(js, response, kj::mv(resultsStreamSinkFulfiller));
-
-      if (weakRef->disposed) {
-        // The promise was explicitly disposed before it even resolved. This means we must dispose
-        // the returned object as well.
-        tryCallDisposeMethod(js, jsResult);
-      } else {
-        KJ_IF_SOME(r, weakRef->ref) {
-          r.resolve(js, jsResult);
+        auto pathBuilder = builder.initMethodPath(path.size() + (name != kj::none));
+        for (auto i: kj::indices(path)) {
+          pathBuilder.set(i, path[i]);
+        }
+        KJ_IF_SOME(n, name) {
+          pathBuilder.set(path.size(), n);
         }
       }
 
-      return jsg::Value(js.v8Isolate, jsResult);
-    });
+      kj::Maybe<StreamSinkFulfiller> paramsStreamSinkFulfiller;
 
-    return {
-      .promise = jsg::JsPromise(js.wrapSimplePromise(kj::mv(jsPromise))),
-      .weakRef = kj::mv(weakRef),
-      .pipeline = kj::mv(callResult),
-    };
+      KJ_IF_SOME(args, maybeArgs) {
+        // This is a function call with arguments.
+        kj::Vector<jsg::JsValue> argv(args.Length());
+        for (int n = 0; n < args.Length(); n++) {
+          argv.add(jsg::JsValue(args[n]));
+        }
+
+        // If we have arguments, serialize them.
+        // Note that we may fail to serialize some element, in which case this will throw back to
+        // JS.
+        if (argv.size() > 0) {
+          serializeJsValue(js, js.arr(argv.asPtr()), [&](capnp::MessageSize hint) {
+            // TODO(perf): Actually use the size hint.
+            return builder.getOperation().initCallWithArgs();
+          }, [&]() -> rpc::JsValue::StreamSink::Client {
+            // A stream was encountered in the params, so we must expect the response to contain
+            // paramsStreamSink. But we don't have the response yet. So, we need to set up a
+            // temporary promise client, which we hook to the response a little bit later.
+            auto paf = kj::newPromiseAndFulfiller<rpc::JsValue::StreamSink::Client>();
+            paramsStreamSinkFulfiller = kj::mv(paf.fulfiller);
+            return kj::mv(paf.promise);
+          });
+        }
+      } else {
+        // This is a property access.
+        builder.getOperation().setGetProperty();
+      }
+
+      StreamSinkFulfiller resultsStreamSinkFulfiller;
+
+      {
+        // Unfortunately, we always have to send a `resultsStreamSink` because we don't know until
+        // after the call completes whether or not it will return any streams. However, we will
+        // set this up as a promise capability, and only hook it up to an actual implementation if
+        // and when we discover streams in the results.
+        auto paf = kj::newPromiseAndFulfiller<rpc::JsValue::StreamSink::Client>();
+        resultsStreamSinkFulfiller = kj::mv(paf.fulfiller);
+        builder.setResultsStreamSink(kj::mv(paf.promise));
+      }
+
+      auto callResult = builder.send();
+
+      KJ_IF_SOME(ssf, paramsStreamSinkFulfiller) {
+        ssf->fulfill(callResult.getParamsStreamSink());
+      }
+
+      // We need to arrange that our JsRpcPromise will updated in-place with the final settlement
+      // of this RPC promise. However, we can't actually construct the JsRpcPromise until we have
+      // the final promise to give it. To resolve the cycle, we only create a JsRpcPromise::WeakRef
+      // here, which is filled in later on to point at the JsRpcPromise, if and when one is created.
+      auto weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>();
+
+      auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
+            [weakRef = kj::atomicAddRef(*weakRef),
+            resultsStreamSinkFulfiller = kj::mv(resultsStreamSinkFulfiller)]
+            (jsg::Lock& js, capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable
+            -> jsg::Value {
+        auto jsResult = deserializeRpcReturnValue(js, response, kj::mv(resultsStreamSinkFulfiller));
+
+        if (weakRef->disposed) {
+          // The promise was explicitly disposed before it even resolved. This means we must dispose
+          // the returned object as well.
+          tryCallDisposeMethod(js, jsResult);
+        } else {
+          KJ_IF_SOME(r, weakRef->ref) {
+            r.resolve(js, jsResult);
+          }
+        }
+
+        return jsg::Value(js.v8Isolate, jsResult);
+      });
+
+      return {
+        .promise = jsg::JsPromise(js.wrapSimplePromise(kj::mv(jsPromise))),
+        .weakRef = kj::mv(weakRef),
+        .pipeline = kj::mv(callResult),
+      };
+    }, [&](jsg::Value error) -> JsRpcPromiseAndPipleine {
+      // Probably a serialization error. Need to convert to an async error since we never throw
+      // synchronously from async functions.
+      auto jsError = jsg::JsValue(error.getHandle(js));
+      auto pipeline = capnp::newBrokenPipeline(js.exceptionToKj(jsError));
+      return {
+        .promise = js.rejectedJsPromise(jsError),
+        .weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>(),
+        .pipeline = rpc::JsRpcTarget::CallResults::Pipeline(
+            capnp::AnyPointer::Pipeline(kj::mv(pipeline)))
+      };
+    });
   } catch (jsg::JsExceptionThrown&) {
-    // This is almost certainly a termination exception, so we should let it flow through.
+    // This must be a termination exception, or we would have caught it above.
     throw;
   } catch (...) {
     // Catch KJ exceptions and make them async, since we don't want async calls to throw
