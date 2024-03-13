@@ -7,6 +7,7 @@
 #include "readable.h"
 #include "writable.h"
 #include <workerd/jsg/buffersource.h>
+#include <workerd/util/weak-refs.h>
 #include <kj/vector.h>
 
 namespace workerd::api {
@@ -808,10 +809,6 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(WritableStreamJsController);
 
-  ~WritableStreamJsController() noexcept(false) override {
-    weakRef->invalidate();
-  }
-
   jsg::Promise<void> abort(jsg::Lock& js,
                             jsg::Optional<v8::Local<v8::Value>> reason) override;
 
@@ -870,10 +867,6 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
-  kj::Own<WeakRef<WritableStreamJsController>> getWeakRef() {
-    return kj::addRef(*weakRef);
-  }
-
   bool isClosedOrClosing() override;
   bool isErrored() override;
 
@@ -895,7 +888,6 @@ private:
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Controller> state = StreamStates::Closed();
   WritableLockImpl lock;
   kj::Maybe<jsg::Promise<void>> maybeAbortPromise;
-  kj::Own<WeakRef<WritableStreamJsController>> weakRef;
 
   friend WritableLockImpl;
 };
@@ -1177,7 +1169,7 @@ ReadableImpl<Self>::getConsumer(kj::Maybe<ReadableImpl<Self>::StateListener&> li
 // ======================================================================================
 
 template <typename Self>
-WritableImpl<Self>::WritableImpl(kj::Own<WeakRef<WritableStreamJsController>> owner)
+WritableImpl<Self>::WritableImpl(jsg::Ref<WritableStream> owner)
     : owner(kj::mv(owner)),
       signal(jsg::alloc<AbortSignal>()) {}
 
@@ -1217,7 +1209,9 @@ jsg::Promise<void> WritableImpl<Self>::abort(
 
 template <typename Self>
 kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
-  return owner->tryGet();
+  return owner.map([](jsg::Ref<WritableStream>& owner) -> WritableStreamJsController& {
+    return static_cast<WritableStreamJsController&>(owner->getController());
+  });
 }
 
 template <typename Self>
@@ -1611,7 +1605,8 @@ void WritableImpl<Self>::visitForGc(jsg::GcVisitor &visitor) {
       visitor.visit(erroring.reason);
     }
   }
-  visitor.visit(inFlightWrite,
+  visitor.visit(owner,
+                inFlightWrite,
                 inFlightClose,
                 closeRequest,
                 algorithms,
@@ -1935,18 +1930,7 @@ ReadableStreamDefaultController::ReadableStreamDefaultController(
     UnderlyingSource underlyingSource,
     StreamQueuingStrategy queuingStrategy)
     : ioContext(tryGetIoContext()),
-      impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)),
-      weakRef(kj::refcounted<WeakRef<ReadableStreamDefaultController>>(
-          kj::Badge<ReadableStreamDefaultController>(), *this)) {}
-
-ReadableStreamDefaultController::~ReadableStreamDefaultController() noexcept(false) {
-  weakRef->invalidate();
-}
-
-kj::Own<WeakRef<ReadableStreamDefaultController>> ReadableStreamDefaultController::getWeakRef() {
-  return kj::addRef(*weakRef);
-}
-
+      impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
 
 void ReadableStreamDefaultController::start(jsg::Lock& js) {
   impl.start(js, JSG_THIS);
@@ -3241,7 +3225,7 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 // ======================================================================================
 
 WritableStreamDefaultController::WritableStreamDefaultController(
-    kj::Own<WeakRef<WritableStreamJsController>> owner)
+    jsg::Ref<WritableStream> owner)
     : ioContext(tryGetIoContext()), impl(kj::mv(owner)) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(
@@ -3252,7 +3236,7 @@ jsg::Promise<void> WritableStreamDefaultController::abort(
 
 void WritableStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(impl);
-  }
+}
 
 jsg::Promise<void> WritableStreamDefaultController::close(jsg::Lock& js) {
   return impl.close(js, JSG_THIS);
@@ -3298,19 +3282,13 @@ void WritableStreamDefaultController::cancelPendingWrites(jsg::Lock& js, jsg::Js
 
 // ======================================================================================
 WritableStreamJsController::WritableStreamJsController()
-    : ioContext(tryGetIoContext()),
-      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(
-          kj::Badge<WritableStreamJsController>(), *this)) {}
+    : ioContext(tryGetIoContext()) {}
 
 WritableStreamJsController::WritableStreamJsController(StreamStates::Closed closed)
-    : ioContext(tryGetIoContext()), state(closed),
-      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(
-          kj::Badge<WritableStreamJsController>(), *this)) {}
+    : ioContext(tryGetIoContext()), state(closed) {}
 
 WritableStreamJsController::WritableStreamJsController(StreamStates::Errored errored)
-    : ioContext(tryGetIoContext()), state(kj::mv(errored)),
-      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(
-          kj::Badge<WritableStreamJsController>(), *this)) {}
+    : ioContext(tryGetIoContext()), state(kj::mv(errored)) {}
 
 jsg::Promise<void> WritableStreamJsController::abort(
     jsg::Lock& js,
@@ -3485,7 +3463,7 @@ void WritableStreamJsController::setup(
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  state = jsg::alloc<WritableStreamDefaultController>(kj::addRef(*weakRef));
+  state = jsg::alloc<WritableStreamDefaultController>(addRef());
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 
@@ -3604,8 +3582,9 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   // source (again, depending on options). If the write operation is successful,
   // we call pipeLoop again to move on to the next iteration.
 
-  auto onSuccess = [this,ref=addRef(),preventCancel,pipeThrough,&source]
-          (jsg::Lock& js, ReadResult result) -> jsg::Promise<void> {
+  auto onSuccess = JSG_VISITABLE_LAMBDA(
+     (this,ref=addRef(), preventCancel,pipeThrough,&source),
+     (ref),(jsg::Lock& js, ReadResult result) -> jsg::Promise<void> {
     auto maybePipeLock = lock.tryGetPipe();
     if (maybePipeLock == kj::none) return js.resolvedPromise();
     auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
@@ -3613,17 +3592,21 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     KJ_IF_SOME(promise, pipeLock.checkSignal(js, *this)) {
       lock.releasePipeLock();
       return kj::mv(promise);
-    }
+    } else {}  // Trailing else() is squash compiler warning
 
     if (result.done) {
       // We'll handle the close at the start of the next iteration.
       return pipeLoop(js);
     }
 
-    auto onSuccess = [this,ref=addRef()](jsg::Lock& js) { return pipeLoop(js); };
+    auto onSuccess = JSG_VISITABLE_LAMBDA(
+        (this, ref=addRef()), (ref), (jsg::Lock& js) {
+      return pipeLoop(js);
+    });
 
-    auto onFailure = [ref=addRef(),&source, preventCancel, pipeThrough]
-                     (jsg::Lock& js, jsg::Value value) {
+    auto onFailure = JSG_VISITABLE_LAMBDA(
+        (ref=addRef(),&source, preventCancel, pipeThrough),
+        (ref), (jsg::Lock& js, jsg::Value value) {
       // The write failed. We handle it here because the pipe lock will have been released.
       auto reason = value.getHandle(js);
       if (!preventCancel) {
@@ -3632,19 +3615,22 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
         source.release(js);
       }
       return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
-    };
+    });
 
     auto promise = write(js, result.value.map([&](jsg::Value& value) {
       return value.getHandle(js);
     }));
 
     return maybeAddFunctor(js, kj::mv(promise), kj::mv(onSuccess), kj::mv(onFailure));
-  };
+  });
 
-  auto onFailure = [this,ref=addRef()] (jsg::Lock& js, jsg::Value value) {
+  auto onFailure = JSG_VISITABLE_LAMBDA(
+      (this, ref=addRef()),
+      (ref),
+      (jsg::Lock& js, jsg::Value value) {
     // The read failed. We will handle the error at the start of the next iteration.
     return pipeLoop(js);
-  };
+  });
 
   return maybeAddFunctor(js, pipeLock.source.read(js), kj::mv(onSuccess), kj::mv(onFailure));
 }
@@ -3733,7 +3719,7 @@ void TransformStreamDefaultController::enqueue(
 void TransformStreamDefaultController::error(jsg::Lock& js, v8::Local<v8::Value> reason) {
   KJ_IF_SOME(readableController, tryGetReadableController()) {
     readableController.error(js, reason);
-    maybeReadableController = kj::none;
+    readable = kj::none;
   }
   errorWritableAndUnblockWrite(js, reason);
 }
@@ -3741,7 +3727,7 @@ void TransformStreamDefaultController::error(jsg::Lock& js, v8::Local<v8::Value>
 void TransformStreamDefaultController::terminate(jsg::Lock& js) {
   KJ_IF_SOME(readableController, tryGetReadableController()) {
     readableController.close(js);
-    maybeReadableController = kj::none;
+    readable = kj::none;
   }
   errorWritableAndUnblockWrite(js, js.v8TypeError("The transform stream has been terminated"_kj));
 }
@@ -3820,7 +3806,7 @@ jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
 jsg::Promise<void> TransformStreamDefaultController::cancel(
     jsg::Lock& js,
     v8::Local<v8::Value> reason) {
-  maybeReadableController = kj::none;
+  readable = kj::none;
   errorWritableAndUnblockWrite(js, reason);
   return js.resolvedPromise();
 }
@@ -3871,7 +3857,7 @@ void TransformStreamDefaultController::errorWritableAndUnblockWrite(
     if (writableController.isWritable()) {
       writableController.doError(js, reason);
     }
-    maybeWritableController = kj::none;
+    writable = kj::none;
   }
   if (backpressure) {
     setBackpressure(js, false);
@@ -3882,7 +3868,7 @@ void TransformStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(backpressureChange, maybeBackpressureChange) {
     visitor.visit(backpressureChange.promise, backpressureChange.resolver);
   }
-  visitor.visit(startPromise.resolver, startPromise.promise, algorithms);
+  visitor.visit(writable, readable, startPromise.resolver, startPromise.promise, algorithms);
 }
 
 void TransformStreamDefaultController::init(
@@ -3890,10 +3876,10 @@ void TransformStreamDefaultController::init(
     jsg::Ref<ReadableStream>& readable,
     jsg::Ref<WritableStream>& writable,
     jsg::Optional<Transformer> maybeTransformer) {
-  KJ_ASSERT(maybeReadableController == kj::none);
-  KJ_ASSERT(maybeWritableController == kj::none);
-  maybeWritableController =
-      static_cast<WritableStreamJsController&>(writable->getController()).getWeakRef();
+  KJ_ASSERT(this->readable == kj::none);
+  KJ_ASSERT(this->writable == kj::none);
+
+  this->writable = writable.addRef();
 
   // The TransformStreamDefaultController needs to have a reference to the underlying controller
   // and not just the readable because if the readable is teed, or passed off to source, etc,
@@ -3901,8 +3887,7 @@ void TransformStreamDefaultController::init(
   // to push data into it.
   auto& readableController = static_cast<ReadableStreamJsController&>(readable->getController());
   auto readableRef = KJ_ASSERT_NONNULL(readableController.getController());
-  maybeReadableController = KJ_ASSERT_NONNULL(
-      readableRef.tryGet<DefaultController>())->getWeakRef();
+  this->readable = KJ_ASSERT_NONNULL(readableRef.tryGet<DefaultController>()).addRef();
 
   auto transformer = kj::mv(maybeTransformer).orDefault({});
 
@@ -3938,16 +3923,16 @@ void TransformStreamDefaultController::init(
 
 kj::Maybe<ReadableStreamDefaultController&>
 TransformStreamDefaultController::tryGetReadableController() {
-  KJ_IF_SOME(controller, maybeReadableController) {
-    return controller->tryGet();
+  KJ_IF_SOME(controller, readable) {
+    return *controller;
   }
   return kj::none;
 }
 
 kj::Maybe<WritableStreamJsController&>
 TransformStreamDefaultController::tryGetWritableController() {
-  KJ_IF_SOME(controller, maybeWritableController) {
-    return controller->tryGet();
+  KJ_IF_SOME(w, writable) {
+    return static_cast<WritableStreamJsController&>(w->getController());
   }
   return kj::none;
 }
@@ -3990,6 +3975,7 @@ void WritableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("inFlightClose", inFlightClose);
   tracker.trackField("closeRequest", closeRequest);
   tracker.trackField("maybePendingAbort", maybePendingAbort);
+  tracker.trackField("owner", owner);
 }
 
 kj::StringPtr WritableStreamJsController::jsgGetMemoryName() const {
@@ -4094,6 +4080,8 @@ void TransformStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tr
   tracker.trackField("maybeBackpressureChange", maybeBackpressureChange);
   tracker.trackField("transformAlgorithm", algorithms.transform);
   tracker.trackField("flushAlgorithm", algorithms.flush);
+  tracker.trackField("writable", writable);
+  tracker.trackField("readable", readable);
 }
 
 }  // namespace workerd::api
