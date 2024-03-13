@@ -12,6 +12,10 @@ bool JsValue::operator==(const JsValue& other) const {
   return inner == other.inner;
 }
 
+bool JsValue::strictEquals(const JsValue& other) const {
+  return inner->StrictEquals(other.inner);
+}
+
 JsMap::operator JsObject() { return JsObject(inner); }
 
 void JsMap::set(Lock& js, const JsValue& name, const JsValue& value) {
