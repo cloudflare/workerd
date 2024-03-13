@@ -2,9 +2,9 @@ load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
     src = "unsafe-module-test.wd-test",
+    args = ["--experimental"],
     data = glob([
         "*.js",
         "*.capnp",
     ]),
-    args = ["--experimental"],
 )

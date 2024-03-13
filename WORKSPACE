@@ -126,13 +126,12 @@ http_archive(
     urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-micropip/pyodide_packages.tar.zip"],
 )
 
-load("//:build/pyodide_bucket.bzl", "PYODIDE_GITHUB_RELEASE_URL")
-load("//:build/pyodide_bucket.bzl", "PYODIDE_LOCK_SHA256")
+load("//:build/pyodide_bucket.bzl", "PYODIDE_LOCK_SHA256", "PYODIDE_GITHUB_RELEASE_URL")
 
 http_file(
     name = "pyodide-lock.json",
-    url = PYODIDE_GITHUB_RELEASE_URL + "pyodide-lock.json",
     sha256 = PYODIDE_LOCK_SHA256,
+    url = PYODIDE_GITHUB_RELEASE_URL + "pyodide-lock.json",
 )
 
 # ========================================================================================
@@ -217,7 +216,6 @@ http_archive(
     strip_prefix = "bazelbuild-rules_fuzzing-1dbcd91",
     type = "tgz",
     url = "https://github.com/bazelbuild/rules_fuzzing/tarball/1dbcd9167300ad226d29972f5f9c925d6d81f441",
-
 )
 
 load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
