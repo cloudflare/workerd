@@ -71,9 +71,9 @@ http_archive(
 
 http_archive(
     name = "rules_python",
-    sha256 = "9d04041ac92a0985e344235f5d946f71ac543f1b1565f2cdbc9a2aaee8adf55b",
-    strip_prefix = "rules_python-0.26.0",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.26.0/rules_python-0.26.0.tar.gz",
+    sha256 = "c68bdc4fbec25de5b5493b8819cfc877c4ea299c0dcb15c244c5a00208cde311",
+    strip_prefix = "rules_python-0.31.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.31.0/rules_python-0.31.0.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
@@ -213,9 +213,11 @@ bind(
 # though it is unused for our purposes.
 http_archive(
     name = "rules_fuzzing",
-    sha256 = "f6f3f42c48576acd5653bf07637deee2ae4ebb77ccdb0dacc67c184508bedc8c",
-    strip_prefix = "rules_fuzzing-0.4.1",
-    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.4.1.tar.gz"],
+    sha256 = "4c69bcf4573888be1f676e1ebeb9e4258b8fe19924a5a8f50a57df5cbe3f6d63",
+    strip_prefix = "bazelbuild-rules_fuzzing-1dbcd91",
+    type = "tgz",
+    url = "https://github.com/bazelbuild/rules_fuzzing/tarball/1dbcd9167300ad226d29972f5f9c925d6d81f441",
+
 )
 
 load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
@@ -517,7 +519,7 @@ pip_parse(
     name = "v8_python_deps",
     extra_pip_args = ["--require-hashes"],
     python_interpreter_target = interpreter,
-    requirements = "@v8//:bazel/requirements.txt",
+    requirements_lock = "@v8//:bazel/requirements.txt",
 )
 
 load("@v8_python_deps//:requirements.bzl", v8_python_deps_install = "install_deps")
@@ -527,7 +529,7 @@ v8_python_deps_install()
 pip_parse(
     name = "py_deps",
     python_interpreter_target = interpreter,
-    requirements = "//build/deps:requirements.txt",
+    requirements_lock = "//build/deps:requirements.txt",
 )
 
 load("@py_deps//:requirements.bzl", py_deps_install = "install_deps")
