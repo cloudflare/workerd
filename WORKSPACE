@@ -232,14 +232,10 @@ rules_fuzzing_init()
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
-    patch_args = ["-p1"],
-    patches = [
-        "//:patches/tcmalloc/0001-Replace-ANNOTATE_MEMORY_IS_INITIALIZED-with-ABSL_ANN.patch",
-    ],
-    sha256 = "10b1217154c2b432241ded580d6b0e0b01f5d2566b4eeacf2edf937b87683274",
-    strip_prefix = "google-tcmalloc-ca82471",
+    sha256 = "22b168aefb066b53e940c25503cfa2a840c635763bc86fae90ed98a641978852",
+    strip_prefix = "google-tcmalloc-9b7cd13",
     type = "tgz",
-    url = "https://github.com/google/tcmalloc/tarball/ca82471188f4832e82d2e77078ecad66f4c425d5",
+    url = "https://github.com/google/tcmalloc/tarball/9b7cd1327fee6f191ee21b46c014a3a5b17f11ce",
 )
 
 # ========================================================================================

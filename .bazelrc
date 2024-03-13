@@ -37,6 +37,8 @@ build --per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-interna
 build --host_per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration'
 build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
+# for some reason tcmalloc uses internal msan-enabled annotation in the code, rather than public one
+build --per_file_copt=external/com_google_tcmalloc@-DANNOTATE_MEMORY_IS_INITIALIZED=ABSL_ANNOTATE_MEMORY_IS_INITIALIZED
 
 # Enable C++20 to support std::unordered_map::contains(). Not sure why this is needed here, V8
 # is supposed to work with C++14.
