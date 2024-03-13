@@ -47,6 +47,8 @@ wd_cc_library(
         #
         # TODO(soon): Fix this
         exclude = [
+            "actor-id.h",
+            "io-channels.h",
             "observer.h",
             "worker-interface.h",
         ],
@@ -61,7 +63,10 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":actor-id",
+        ":actor-storage_capnp",
         ":capnp",
+        ":io-channels",
         ":observer",
         ":trace",
         ":worker-interface",
@@ -88,6 +93,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":capnp",
+        ":worker-interface_capnp",
         "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util:own-util",
         "//src/workerd/util:perfetto",
@@ -124,6 +130,22 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "actor-id",
+    hdrs = ["actor-id.h"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "io-channels",
+    hdrs = ["io-channels.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":actor-id",
+        ":trace",
+    ],
+)
+
 genrule(
     name = "trimmed-supported-compatibility-date-gen",
     srcs = ["supported-compatibility-date.txt"],
@@ -137,17 +159,15 @@ capnp_embed(
     src = ":trimmed-supported-compatibility-date-gen",
 )
 
-# TODO(cleanup): Split this target up further, as many depnedents don't need all the files here.
+# TODO(cleanup): Split this target up further, as many dependents don't need all the files here.
 #   Avoiding the dependency on supported-compatibility-date.capnp is often helpful due to the
 #   transitive dependency on `trimmed-supported-compatibility-date.txt` which is dynamically
 #   generated.
 wd_cc_capnp_library(
     name = "capnp",
     srcs = [
-        "actor-storage.capnp",
         "cdp.capnp",
         "supported-compatibility-date.capnp",
-        "worker-interface.capnp",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -157,6 +177,27 @@ wd_cc_capnp_library(
         ":trimmed-supported-compatibility-date",
         "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
     ],
+)
+
+wd_cc_capnp_library(
+    name = "worker-interface_capnp",
+    srcs = [
+        "worker-interface.capnp",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":outcome_capnp",
+        ":script_version_capnp",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
+    ],
+)
+
+wd_cc_capnp_library(
+    name = "actor-storage_capnp",
+    srcs = [
+        "actor-storage.capnp",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_capnp_library(
