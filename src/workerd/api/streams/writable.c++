@@ -379,7 +379,7 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto wrapper = kj::heap<WritableStreamRpcAdapter>(kj::mv(sink));
 
   // Make sure this stream will be revoked if the IoContext ends.
-  ioctx.addTask(wrapper->waitForCompletionOrRevoke());
+  ioctx.addTask(wrapper->waitForCompletionOrRevoke().attach(ioctx.registerPendingEvent()));
 
   auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper));
 

@@ -287,6 +287,10 @@ export class MyService extends WorkerEntrypoint {
     this.ctx.waitUntil(this.writeToStream(writable));
     return readable;
   }
+
+  async roundTrip(value) {
+    return value;
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -986,6 +990,25 @@ export let streams = {
       let text = await env.MyService.readFromStream(gzippedResp.body);
 
       assert.strictEqual(text, "this text was gzipped");
+    }
+
+    // Round trip streams.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+
+      readable = await env.MyService.roundTrip(readable);
+      writable = await env.MyService.roundTrip(writable);
+
+      let readPromise = new Response(readable).text();
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      await writer.write(enc.encode("foo, "));
+      await writer.write(enc.encode("bar, "));
+      await writer.write(enc.encode("baz!"));
+      await writer.close();
+
+      assert.strictEqual(await readPromise, "foo, bar, baz!");
     }
   }
 }
