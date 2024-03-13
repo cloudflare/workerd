@@ -7,7 +7,6 @@
 #include "common.h"
 #include "queue.h"
 #include <workerd/jsg/function.h>
-#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
 
@@ -266,7 +265,7 @@ public:
     }
   };
 
-  WritableImpl(kj::Own<WeakRef<WritableStreamJsController>> owner);
+  WritableImpl(jsg::Ref<WritableStream> owner);
 
   jsg::Promise<void> abort(jsg::Lock& js,
                             jsg::Ref<Self> self,
@@ -361,7 +360,7 @@ private:
 
   struct Writable {};
 
-  kj::Own<WeakRef<WritableStreamJsController>> owner;
+  kj::Maybe<jsg::Ref<WritableStream>> owner;
   jsg::Ref<AbortSignal> signal;
   kj::OneOf<StreamStates::Closed,
             StreamStates::Errored,
@@ -396,7 +395,6 @@ public:
 
   ReadableStreamDefaultController(UnderlyingSource underlyingSource,
                                   StreamQueuingStrategy queuingStrategy);
-  ~ReadableStreamDefaultController() noexcept(false);
 
   void start(jsg::Lock& js);
 
@@ -429,8 +427,6 @@ public:
     });
   }
 
-  kj::Own<WeakRef<ReadableStreamDefaultController>> getWeakRef();
-
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("impl", impl);
   }
@@ -438,7 +434,6 @@ public:
 private:
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
-  kj::Own<WeakRef<ReadableStreamDefaultController>> weakRef;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
@@ -578,7 +573,7 @@ class WritableStreamDefaultController: public jsg::Object {
 public:
   using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
-  explicit WritableStreamDefaultController(kj::Own<WeakRef<WritableStreamJsController>> owner);
+  explicit WritableStreamDefaultController(jsg::Ref<WritableStream> owner);
 
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 
@@ -627,14 +622,6 @@ private:
 // references holding the TransformStreamDefaultController are freed.
 // However, user code can do silly things like hold the Transform controller
 // long after both the readable and writable sides have been gc'd.
-//
-// We do not want to create a strong reference cycle between the various
-// controllers so we use weak refs within the transform controller to
-// safely reference the readable and writable sides. If either side goes
-// away cleanly (using the algorithms) the weak references are cleared.
-// If either side goes away due to garbage collection while the transform
-// controller is still alive, the weak references are cleared. The transform
-// controller then safely handles the disappearance of either side.
 class TransformStreamDefaultController: public jsg::Object {
 public:
   TransformStreamDefaultController(jsg::Lock& js);
@@ -709,8 +696,11 @@ private:
   kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();
   kj::Maybe<WritableStreamJsController&> tryGetWritableController();
 
-  kj::Maybe<kj::Own<WeakRef<ReadableStreamDefaultController>>> maybeReadableController;
-  kj::Maybe<kj::Own<WeakRef<WritableStreamJsController>>> maybeWritableController;
+  // Currently, JS-backed transform streams only support value-oriented streams.
+  // In the future, that may change and this will need to become a kj::OneOf
+  // that includes a ReadableByteStreamController.
+  kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> readable;
+  kj::Maybe<jsg::Ref<WritableStream>> writable;
   Algorithms algorithms;
   bool backpressure = false;
   kj::Maybe<jsg::PromiseResolverPair<void>> maybeBackpressureChange;
