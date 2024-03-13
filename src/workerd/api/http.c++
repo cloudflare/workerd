@@ -1137,6 +1137,64 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   return cf.serialize(js);
 }
 
+void Request::serialize(
+    jsg::Lock& js, jsg::Serializer& serializer,
+    const jsg::TypeHandler<RequestInitializerDict>& initDictHandler) {
+  serializer.writeLengthDelimited(url);
+
+  // Our strategy is to construct an initializer dict object and serialize that as a JS object.
+  // This makes the deserialization end really simple (just call the constructor), and it also
+  // gives us extensibility: we can add new fields without having to bump the serialization tag.
+  serializer.write(js, jsg::JsValue(initDictHandler.wrap(js, RequestInitializerDict {
+    // GET is the default, so only serialize the method if it's something else.
+    .method = method == kj::HttpMethod::GET ? jsg::Optional<kj::String>() : kj::str(method),
+
+    .headers = headers.addRef(),
+
+    .body = getBody().map([](jsg::Ref<ReadableStream> stream) -> Body::Initializer {
+      // jsg::Ref<ReadableStream> is one of the possible variants of Body::Initializer.
+      return kj::mv(stream);
+    }),
+
+    // "manual" is the default for `redirect`, so only encode if it's not that.
+    .redirect = redirect == Redirect::MANUAL
+        ? kj::str(getRedirect()) : kj::Maybe<kj::String>(kj::none),
+
+    // We have to ignore .fetcher for serialization. We can't simply fail if a fetcher is present
+    // because requests received by the top-level fetch handler actually have .fetcher set to
+    // the hidden "next" binding, which historically could be different from null (although in
+    // practice these days it is always the same). We obviously want to be able to serialize
+    // requests received by the top-level fetch handler so... we have to ignore this. This
+    // property should probably go away in any case.
+
+    .cf = cf.getRef(js),
+
+    // .mode is unimplemented
+    // .credentials is unimplemented
+    // .cache is unimplemented
+    // .referrer is unimplemented
+    // .referrerPolicy is unimplemented
+    // .integrity is required to be empty
+
+    // If an AbortSignal is present, we'll try to serialize it. As of this writing, AbortSignal
+    // is not serializable, but we could add support for sending it over RPC in the future.
+    //
+    // Note we have to double-Maybe this, so that if no signal is present, the property is absent
+    // instead of `null`.
+    .signal = signal.map([](jsg::Ref<AbortSignal>& s) -> kj::Maybe<jsg::Ref<AbortSignal>> {
+      return s.addRef();
+    })
+  })));
+}
+
+jsg::Ref<Request> Request::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<RequestInitializerDict>& initDictHandler) {
+  auto url = deserializer.readLengthDelimitedString();
+  auto init = KJ_ASSERT_NONNULL(initDictHandler.tryUnwrap(js, deserializer.readValue(js)));
+  return Request::constructor(js, kj::mv(url), kj::mv(init));
+}
+
 // =======================================================================================
 
 Response::Response(

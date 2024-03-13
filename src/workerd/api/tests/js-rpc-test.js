@@ -316,6 +316,22 @@ export class MyService extends WorkerEntrypoint {
     result.append("Content-Length", "123");
     return result;
   }
+
+  async returnRequest() {
+    return new Request("http://my-url.com", {
+      method: "PUT",
+      headers: {
+        "Accept-Encoding": "bazzip",
+        "Foo": "Bar"
+      },
+      redirect: "manual",
+      body: "Hello every body!",
+      cf: {
+        abc: 123,
+        hello: "goodbye",
+      }
+    });
+  }
 }
 
 export class MyActor extends DurableObject {
@@ -1067,6 +1083,32 @@ export let serializeHttpTypes = {
 
       assert.deepEqual(headers.getSetCookie(), ["abc", "def"]);
     }
+
+    {
+      let req = await env.MyService.returnRequest();
+
+      assert.strictEqual(req.url, "http://my-url.com");
+      assert.strictEqual(req.method, "PUT");
+      assert.strictEqual(req.headers.get("Accept-Encoding"), "bazzip");
+      assert.strictEqual(req.headers.get("Foo"), "Bar");
+      assert.strictEqual(req.redirect, "manual");
+
+      assert.strictEqual(await req.text(), "Hello every body!");
+
+      assert.deepEqual(req.cf, {
+        abc: 123,
+        hello: "goodbye",
+      });
+    }
+
+    // Check that a Request with an AbortSignal can't be sent. (We should fix this someday, by
+    // making AbortSignal itself RPC-compatible.)
+    await assert.rejects(env.MyService.roundTrip(
+        new Request("http://foo", {signal: AbortSignal.timeout(100)})), {
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "AbortSignal". This type does not support ' +
+               'serialization.'
+    });
   }
 }
 

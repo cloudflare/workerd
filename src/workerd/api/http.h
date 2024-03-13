@@ -623,6 +623,8 @@ private:
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter
 // to fetch().
+//
+// When adding new properties to this struct, don't forget to update Request::serialize().
 struct RequestInitializerDict {
   jsg::Optional<kj::String> method;
   jsg::Optional<Headers::Initializer> headers;
@@ -915,6 +917,15 @@ public:
       });
     }
   }
+
+  void serialize(
+      jsg::Lock& js, jsg::Serializer& serializer,
+      const jsg::TypeHandler<RequestInitializerDict>& initDictHandler);
+  static jsg::Ref<Request> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+      const jsg::TypeHandler<RequestInitializerDict>& initDictHandler);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::REQUEST);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("url", url);
