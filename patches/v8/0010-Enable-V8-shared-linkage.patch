@@ -1,11 +1,11 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 0dbfed74e3c1a3ab5103eaa7361542a3329571c1 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 2aea0158754058fd35c16ea4adcc2f9fd085e06f..a1823f5e7a88dc0417083f3d0c14003028aaa235 100644
+index 6a1a43db67d607b23f7319f296f03dc67905d970..b9c58851d0e1dc879888da3cc5edd9fd5bcb0fae 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -1496,7 +1496,6 @@ filegroup(
@@ -16,7 +16,7 @@ index 2aea0158754058fd35c16ea4adcc2f9fd085e06f..a1823f5e7a88dc0417083f3d0c140030
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3723,6 +3722,10 @@ filegroup(
+@@ -3728,6 +3727,10 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -27,7 +27,7 @@ index 2aea0158754058fd35c16ea4adcc2f9fd085e06f..a1823f5e7a88dc0417083f3d0c140030
      ],
  )
  
-@@ -4178,6 +4181,8 @@ v8_library(
+@@ -4183,6 +4186,8 @@ v8_library(
      name = "v8",
      srcs = [
          ":v8_inspector_files",

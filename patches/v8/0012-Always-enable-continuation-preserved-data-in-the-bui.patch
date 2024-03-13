@@ -1,11 +1,11 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 17f4495249eff3c12e172d100147cf3564adc45f Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Thu, 18 Jan 2024 10:19:14 -0800
 Subject: Always enable continuation preserved data in the build
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index a1823f5e7a88dc0417083f3d0c14003028aaa235..d78132d07eddba8afa0084eeb0f06f6861417a0a 100644
+index b9c58851d0e1dc879888da3cc5edd9fd5bcb0fae..2576134d57c089ebaebd0d0567388d3ae26ea336 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -430,6 +430,7 @@ v8_config(

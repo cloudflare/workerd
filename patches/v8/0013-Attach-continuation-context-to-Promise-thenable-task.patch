@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From fe5056bb463e7809f57aa46319e3585175543c58 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Tue, 6 Feb 2024 17:21:53 -0800
 Subject: Attach continuation context to Promise thenable task
@@ -126,10 +126,10 @@ index 0abec7c6d2faa13a7b193ff66a53619d2d00fb64..3e36fe3123c158d727bfc5ad94942b84
  
  struct InvokeThenOneArgFunctor {
 diff --git a/src/heap/factory.cc b/src/heap/factory.cc
-index 1326887475b2936def6621dffd752b80bc14f17b..aed0b4c9f2eb621350765255e3048032d998451b 100644
+index d7ce932280772d5eb5454c362cdc6e4368041e56..38092203c0d87f2d9b5786aba63d2a44042c10b3 100644
 --- a/src/heap/factory.cc
 +++ b/src/heap/factory.cc
-@@ -1574,6 +1574,14 @@ Handle<PromiseResolveThenableJobTask> Factory::NewPromiseResolveThenableJobTask(
+@@ -1580,6 +1580,14 @@ Handle<PromiseResolveThenableJobTask> Factory::NewPromiseResolveThenableJobTask(
    microtask->set_thenable(*thenable, SKIP_WRITE_BARRIER);
    microtask->set_then(*then, SKIP_WRITE_BARRIER);
    microtask->set_context(*context, SKIP_WRITE_BARRIER);
