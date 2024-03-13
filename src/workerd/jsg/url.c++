@@ -5,6 +5,9 @@
 extern "C" {
   #include "ada_c.h"
 }
+#include "ada.h"
+#include <string>
+#include <vector>
 
 #include <kj/debug.h>
 #include <kj/string-tree.h>
@@ -44,6 +47,57 @@ T getInner(const kj::Own<void>& inner) {
   return const_cast<T>(value);
 }
 
+kj::Array<const char> normalizePathEncoding(kj::ArrayPtr<const char> pathname) {
+  // Sadly, this is a bit tricky because we do not want to decode %2f as a slash.
+  // we want to keep those as is. So we'll split the input around those bits.
+  // Unfortunately we need to split on either %2f or %2F, so we'll need to search
+  // through ourselves. This is simple enough, tho. We'll percent decode as we go,
+  // re-encode the pieces and then join them back together with %2F.
+
+  static constexpr auto findNext = [](std::string_view input)
+      -> kj::Maybe<size_t> {
+    size_t pos = input.find("%2", 0);
+    if (pos != std::string_view::npos) {
+      if (input[pos+2] == 'f' || input[pos+2] == 'F') {
+        return pos;
+      }
+    }
+    return kj::none;
+  };
+
+  std::string_view input(pathname.begin(), pathname.end());
+  std::vector<std::string> parts;
+
+  while (true) {
+    if (input.size() == 0) {
+      parts.push_back("");
+      break;
+    }
+    KJ_IF_SOME(pos, findNext(input)) {
+      parts.push_back(ada::unicode::percent_decode(input.substr(0, pos), 0));
+      input = input.substr(pos + 3);
+      continue;
+    } else {
+      // No more %2f or %2F found. Add input to parts
+      parts.push_back(ada::unicode::percent_decode(input, 0));
+      break;
+    }
+  }
+
+  std::string res;
+  bool first = true;
+  for (auto& part : parts) {
+    auto encoded = ada::unicode::percent_encode(part, ada::character_sets::PATH_PERCENT_ENCODE);
+    if (!first) res += "%2F";
+    else first = false;
+    res += encoded;
+  }
+
+  kj::Array<const char> ret = kj::heapArray<const char>(res.length());
+  memcpy(const_cast<char*>(ret.begin()), res.data(), res.length());
+  return kj::mv(ret);
+}
+
 }  // namespace
 
 Url::Url(kj::Own<void> inner) : inner(kj::mv(inner)) {}
@@ -57,13 +111,28 @@ bool Url::equal(const Url& other, EquivalenceOption option) const {
     return *this == other;
   }
 
+  auto otherPathname = other.getPathname();
+  auto thisPathname = getPathname();
+  kj::Array<const char> otherPathnameStore = nullptr;
+  kj::Array<const char> thisPathnameStore = nullptr;
+
+  if ((option & EquivalenceOption::NORMALIZE_PATH) == EquivalenceOption::NORMALIZE_PATH) {
+    otherPathnameStore = normalizePathEncoding(otherPathname);
+    otherPathname = otherPathnameStore;
+    thisPathnameStore = normalizePathEncoding(thisPathname);
+    thisPathname = thisPathnameStore;
+  }
+
   // If we are ignoring fragments, we'll compare each component separately:
-  return other.getProtocol() == getProtocol() &&
-         other.getHost() == getHost() &&
-         other.getUsername() == getUsername() &&
-         other.getPassword() == getPassword() &&
-         other.getPathname() == getPathname() &&
-         other.getSearch() == getSearch();
+  return (other.getProtocol() == getProtocol()) &&
+         (other.getHost() == getHost()) &&
+         (other.getUsername() == getUsername()) &&
+         (other.getPassword() == getPassword()) &&
+         (otherPathname == thisPathname) &&
+         (((option & EquivalenceOption::IGNORE_SEARCH) == EquivalenceOption::IGNORE_SEARCH) ?
+           true :  other.getSearch() == getSearch()) &&
+         (((option & EquivalenceOption::IGNORE_FRAGMENTS) == EquivalenceOption::IGNORE_FRAGMENTS) ?
+            true : other.getHash() == getHash());
  }
 
 bool Url::canParse(kj::StringPtr input, kj::Maybe<kj::StringPtr> base) {
@@ -221,10 +290,17 @@ Url::HostType Url::getHostType() const {
   return static_cast<HostType>(value);
 }
 
-Url Url::clone(EquivalenceOption option) {
+Url Url::clone(EquivalenceOption option) const {
   ada_url copy = ada_copy(getInner<ada_url>(inner));
-  if (option == EquivalenceOption::IGNORE_FRAGMENTS) {
+  if ((option & EquivalenceOption::IGNORE_FRAGMENTS) == EquivalenceOption::IGNORE_FRAGMENTS) {
     ada_clear_hash(copy);
+  }
+  if ((option & EquivalenceOption::IGNORE_SEARCH) == EquivalenceOption::IGNORE_SEARCH) {
+    ada_clear_search(copy);
+  }
+  if ((option & EquivalenceOption::NORMALIZE_PATH) == EquivalenceOption::NORMALIZE_PATH) {
+    auto normalized = normalizePathEncoding(getPathname());
+    ada_set_pathname(copy, normalized.begin(), normalized.size());
   }
   return Url(wrap(copy));
 }
@@ -245,8 +321,16 @@ kj::Array<const char> Url::idnToAscii(kj::ArrayPtr<const char> value) {
       AdaOwnedStringDisposer::INSTANCE);
 }
 
+kj::Maybe<Url> Url::tryResolve(kj::ArrayPtr<const char> input) const {
+  return tryParse(input, getHref());
+}
+
 kj::uint Url::hashCode() const {
   return kj::hashCode(getHref());
+}
+
+const Url operator "" _url(const char* str, size_t size) {
+  return KJ_ASSERT_NONNULL(Url::tryParse(kj::ArrayPtr<const char>(str, size)));
 }
 
 // ======================================================================================

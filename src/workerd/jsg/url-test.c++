@@ -3145,6 +3145,47 @@ KJ_TEST("Can parse") {
   }
 }
 
+KJ_TEST("Normalize path for comparison and cloning") {
+  // The URL parser does not percent-decode characters in the result.
+  // For instance, even tho `f` does not need to be percent encoded,
+  // the value `%66oo` will be returned as is. In some cases we want
+  // to be able to treat `%66oo` and `foo` as equivalent for the sake
+  // of comparison and cloning. This is what the NORMALIZE_PATH option
+  // is for. It will percent-decode the path, then re-encode it.
+  // Note that there is a definite performance cost to this, so it
+  // should only be used when necessary.
+
+  auto url1 = "file:///%66oo/boo%fe"_url;
+  auto url2 = "file:///foo/boo%fe"_url;
+  auto url3 = "file:///foo/boo%FE"_url;
+
+  auto url4 = url1.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+
+  KJ_ASSERT(url1.equal(url2, Url::EquivalenceOption::NORMALIZE_PATH));
+  KJ_ASSERT(url2.equal(url1, Url::EquivalenceOption::NORMALIZE_PATH));
+  KJ_ASSERT(url3 == url4);
+
+  // This one will not be equivalent because the %2f is not decoded
+  auto url5 = KJ_ASSERT_NONNULL(Url::tryParse("file:///foo%2fboo%fe"_kj));
+
+  KJ_ASSERT(!url5.equal(url2, Url::EquivalenceOption::NORMALIZE_PATH));
+
+  auto url6 = url5.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  KJ_ASSERT(url6.getHref() == "file:///foo%2Fboo%FE"_kj);
+
+  auto url7 = "file:///foo%2Fboo%2F"_url;
+  url7 = url7.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  KJ_ASSERT(url7.getHref() == "file:///foo%2Fboo%2F"_kj);
+
+  auto url8 = "file:///foo%2F%2f/bar"_url;
+  url8 = url8.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  KJ_ASSERT(url8.getHref() == "file:///foo%2F%2F/bar"_kj);
+
+  auto url9 = "file:///foo%2f%2F/bar"_url;
+  url9 = url9.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  KJ_ASSERT(url9.getHref() == "file:///foo%2F%2F/bar"_kj);
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test
 
