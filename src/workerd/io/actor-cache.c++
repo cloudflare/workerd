@@ -25,6 +25,21 @@ static constexpr size_t MAX_ACTOR_STORAGE_RPC_WORDS = (16u << 20) / sizeof(capnp
 
 ActorCache::Hooks ActorCache::Hooks::DEFAULT;
 
+namespace {
+
+// Utility functions for recording latency metrics via a one-liner in the callers below.
+auto recordStorageRead(ActorCache::Hooks& hooks, const kj::MonotonicClock& clock) {
+  auto start = clock.now();
+  return kj::defer([start, &hooks, &clock]() { hooks.storageReadCompleted(clock.now() - start); });
+}
+auto recordStorageWrite(ActorCache::Hooks& hooks, const kj::MonotonicClock& clock) {
+  auto start = clock.now();
+  return kj::defer([start, &hooks, &clock]() { hooks.storageWriteCompleted(clock.now() - start); });
+}
+
+}  // namespace
+
+
 ActorCache::ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru,
                        OutputGate& gate, Hooks& hooks)
     : storage(kj::mv(storage)), lru(lru), gate(gate), hooks(hooks), clock(kj::systemPreciseMonotonicClock()),
@@ -1734,13 +1749,13 @@ kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> ActorCache::sc
   // For our use case, this is safe, and I wanted to make sure reads get sent concurrently with
   // futher JavaScript execution if possible.
   auto promise = kj::evalNow([&]() mutable {
-    return function(storage);
+    return function(storage).attach(recordStorageRead(hooks, clock));
   });
   return oomCanceler.wrap(promise.catch_(
       [this, function = kj::mv(function)](kj::Exception&& e) mutable
       -> kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> {
     if (e.getType() == kj::Exception::Type::DISCONNECTED) {
-      return function(storage);
+      return function(storage).attach(recordStorageRead(hooks, clock));
     } else {
       return kj::mv(e);
     }
@@ -2583,6 +2598,7 @@ kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
   // reads before actually sending the write. The same exact logic applies here.
   co_await waitForPastReads();
   {
+    auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: single put");
     co_await request.send().ignoreResult();
   }
@@ -2611,6 +2627,7 @@ kj::Promise<void> ActorCache::flushImplUsingSingleMutedDelete(MutedDeleteFlush m
   // reads before actually sending the write. The same exact logic applies here.
   co_await waitForPastReads();
   {
+    auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: muted delete");
     co_await request.send().ignoreResult();
   }
@@ -2641,6 +2658,7 @@ kj::Promise<void> ActorCache::flushImplUsingSingleCountedDelete(CountedDeleteFlu
   // reads before actually sending the write. The same exact logic applies here.
   co_await waitForPastReads();
   try {
+    auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: counted delete");
     auto response = co_await request.send();
     countedDelete->resultFulfiller->fulfill(response.getNumDeleted());
@@ -2656,6 +2674,9 @@ kj::Promise<void> ActorCache::flushImplUsingSingleCountedDelete(CountedDeleteFlu
 
 kj::Promise<void> ActorCache::flushImplAlarmOnly(DirtyAlarm dirty) {
   co_await waitForPastReads();
+
+  auto writeObserver = recordStorageWrite(hooks, clock);
+  util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: set/delete alarm");
 
   // TODO(someday) This could be templated to reuse the same code for this and the transaction case.
   // Handle alarm writes first, since they're simplest.
@@ -2894,6 +2915,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
   promises.add(txnProm.ignoreResult());
 
   {
+    auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: commit flush transaction");
     promises.add(txn.commitRequest(capnp::MessageSize { 4, 0 }).send().ignoreResult());
 
@@ -2904,6 +2926,10 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
 kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
   // By this point, we've completed any writes that had originally been performed before
   // deleteAll() was called, and we're ready to perform the deleteAll() itself.
+  //
+  // Note that we intentionally don't time deleteAll() with hooks.startStorageWrite() because it's
+  // expected to be much slower than all other storage operations, taking linear time with respect
+  // to how much data is stored in the actor.
 
   KJ_ASSERT(requestedDeleteAll != kj::none);
 

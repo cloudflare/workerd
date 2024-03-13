@@ -218,6 +218,9 @@ public:
   virtual void addStorageWriteUnits(uint32_t units) {}
   virtual void addStorageDeletes(uint32_t count) {}
 
+  virtual void storageReadCompleted(kj::Duration latency) {}
+  virtual void storageWriteCompleted(kj::Duration latency) {}
+
   virtual void inputGateLocked() {}
   virtual void inputGateReleased() {}
   virtual void inputGateWaiterAdded() {}
