@@ -260,8 +260,14 @@ async function test(storage) {
   assert.throws(() => sql.exec('BEGIN TRANSACTION'), /not authorized/)
   assert.throws(() => sql.exec('SAVEPOINT foo'), /not authorized/)
 
-  // Full text search extension
+  // Virtual tables
+  // Only fts5 module is allowed
+  assert.throws(
+    () => sql.exec(`CREATE VIRTUAL TABLE test_fts USING fts5abcd(id);`),
+    /not authorized/
+  )
 
+  // Full text search extension
   sql.exec(`
     CREATE TABLE documents (
       id INTEGER PRIMARY KEY,
@@ -269,9 +275,12 @@ async function test(storage) {
       content TEXT NOT NULL
     );
   `)
+
+  // Module name is case-insensitive
   sql.exec(`
-    CREATE VIRTUAL TABLE documents_fts USING fts5(id, title, content, tokenize = porter);
+    CREATE VIRTUAL TABLE documents_fts USING FtS5(id, title, content, tokenize = porter);
   `)
+
   sql.exec(`
     CREATE TRIGGER documents_fts_insert
     AFTER INSERT ON documents
