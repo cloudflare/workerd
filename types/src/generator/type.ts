@@ -51,11 +51,18 @@ function isNullMaybe(maybe: MaybeType) {
   return maybe.getName() === "kj::Maybe";
 }
 
+// Returns `true` iff this number type represents a character
+function isCharNumber(number: NumberType) {
+  // https://github.com/cloudflare/workerd/blob/33e692f2216704b7226c8c59b1455eefedf79068/src/workerd/jsg/rtti.h#L158
+  const name = number.getName();
+  return name === "char";
+}
+
 // Returns `true` iff this number type represents a byte
 function isByteNumber(number: NumberType) {
   // https://github.com/cloudflare/workerd/blob/33e692f2216704b7226c8c59b1455eefedf79068/src/workerd/jsg/rtti.h#L160
   const name = number.getName();
-  return name === "char" || name === "unsigned char";
+  return name === "unsigned char";
 }
 
 // Returns `true` iff this number type represents `number | bigint`
@@ -245,7 +252,9 @@ export function createTypeNode(
     case Type_Which.ARRAY:
       const array = type.getArray();
       const element = array.getElement();
-      if (element.isNumber() && isByteNumber(element.getNumber())) {
+      if (element.isNumber() && isCharNumber(element.getNumber())) {
+        return f.createTypeReferenceNode("string");
+      } else if (element.isNumber() && isByteNumber(element.getNumber())) {
         // If the array element is a `byte`...
         if (allowCoercion) {
           // When coercion is enabled (e.g. method param), `kj::Array<byte>` and
