@@ -32,16 +32,21 @@ private:
   kj::Array<kj::Array<kj::byte>> contents;
   kj::Array<kj::String> requirements;
   bool isWorkerdFlag;
+  bool isTracingFlag;
 
 public:
   PyodideMetadataReader(kj::String mainModule, kj::Array<kj::String> names,
                         kj::Array<kj::Array<kj::byte>> contents, kj::Array<kj::String> requirements,
-                        bool isWorkerd)
+                        bool isWorkerd, bool isTracing)
       : mainModule(kj::mv(mainModule)), names(kj::mv(names)), contents(kj::mv(contents)),
-        requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd) {}
+        requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd), isTracingFlag(isTracing) {}
 
   bool isWorkerd() {
     return this->isWorkerdFlag;
+  }
+
+  bool isTracing() {
+    return this->isTracingFlag;
   }
 
   kj::String getMainModule() {
@@ -58,6 +63,7 @@ public:
 
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
+    JSG_METHOD(isTracing);
     JSG_METHOD(getMainModule);
     JSG_METHOD(getRequirements);
     JSG_METHOD(getNames);
@@ -151,6 +157,16 @@ private:
   bool hasUploaded;
 };
 
+
+class DisabledInternalJaeger : public jsg::Object {
+public:
+  static jsg::Ref<DisabledInternalJaeger> create() {
+    return jsg::alloc<DisabledInternalJaeger>();
+  }
+  JSG_RESOURCE_TYPE(DisabledInternalJaeger) {
+  }
+};
+
 using Worker = server::config::Worker;
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
@@ -158,7 +174,8 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
 #define EW_PYODIDE_ISOLATE_TYPES       \
   api::pyodide::PackagesTarReader,     \
   api::pyodide::PyodideMetadataReader, \
-  api::pyodide::ArtifactBundler
+  api::pyodide::ArtifactBundler,       \
+  api::pyodide::DisabledInternalJaeger
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
   if (featureFlags.getPythonWorkers()) {

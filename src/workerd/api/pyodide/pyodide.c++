@@ -104,7 +104,8 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
     names.add(kj::str(module.getName()));
   }
   return jsg::alloc<PyodideMetadataReader>(kj::mv(mainModule), names.finish(), contents.finish(),
-                                           requirements.finish(), true);
+                                           requirements.finish(), true /* isWorkerd */,
+                                           false /* isTracing */);
 }
 
 } // namespace workerd::api::pyodide
