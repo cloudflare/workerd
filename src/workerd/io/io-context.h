@@ -82,6 +82,35 @@ private:
   kj::MutexGuarded<kj::Vector<kj::Own<WarningContext>>> warnings;
 };
 
+// In some scopes, there may be an active IoContext but we want to surpress the ability
+// to perform I/O (or otherwise access the IoContext) without having to wait to drop out
+// of and reacquire the Isolate lock without an active IoContext. This is a simple RAII guard
+// that can be used to temporarily disable the ability to acquire the current IoContext using
+// IoContext::current(), or determine if the current thread is in an IoContext (it causes
+// IoContext::hasCurrent() and ioContext.isCurrent() both to return false).
+//
+//  PreventIoScope preventIo;
+//  IoContext::hasCurrent();  // false
+//  IoContext::current();  // throws
+//  ioContext.isCurrent();  // false
+//
+// It's important to note that the PreventIoScope is a stack-allocated synchronous guard. If
+// JS promises are created while the guard is active, any continuations that are scheduled will
+// escape the guard unless the microtask queue is drained synchronously while the guard is active.
+class PreventIoScope final {
+public:
+  PreventIoScope();
+  ~PreventIoScope();
+  KJ_DISALLOW_COPY_AND_MOVE(PreventIoScope);
+
+private:
+  // When PreventIoScope is created, it will grab the pointer to the current IoContext
+  // (if any) and store it here, then set the thread local pointer to nullptr.
+  // When PreventIoScope is destroyed, it will restore the thread local pointer.
+  // If there is no current IoContext, this ends up being a non-op.
+  IoContext* current;
+};
+
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
 // there is only ever one IncomingRequest per IoContext, but with actors there could be many.
 //

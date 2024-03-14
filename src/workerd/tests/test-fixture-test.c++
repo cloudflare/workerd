@@ -174,6 +174,62 @@ KJ_TEST("module import failure") {
   }
 }
 
+KJ_TEST("PreventIoScope works") {
+  TestFixture fixture;
+  uint runCount = 0;
+
+  // TODO(cleanup): This probably is not the best location for this test but since it
+  // requires use of fixture.runInIoContext(...), this is just a convenient location
+  // for now.
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    runCount++;
+    // First, verify that we're in the IoContext with no problem...
+    KJ_ASSERT(IoContext::hasCurrent());
+    auto& context = IoContext::current();
+    KJ_ASSERT(context.isCurrent());
+    {
+      // Second, verify that putting PreventIoScope on the stack will prevent
+      // access to the IoContext...
+      PreventIoScope scope;
+      PreventIoScope scope2; // The scope is re-entrant
+      KJ_ASSERT(!IoContext::hasCurrent());
+      KJ_ASSERT(!context.isCurrent());
+
+      // If we have an IoContext already, it's still possible to perform some
+      // actions with it... at least for now
+      KJ_ASSERT(&env.lock == &context.getCurrentLock());
+
+      env.js.tryCatch([&] {
+        IoContext::current();
+        KJ_FAIL_REQUIRE("IoContext::current() should have thrown");
+      }, [&](jsg::Value exception) {
+        auto ex = kj::str(exception.getHandle(env.js));
+        KJ_ASSERT(ex == "Error: Disallowed operation called within global scope. Asynchronous "
+                        "I/O (ex: fetch() or connect()), setting a timeout, and generating "
+                        "random values are not allowed within global scope. To fix this error, "
+                        "perform this operation within a handler. "
+                        "https://developers.cloudflare.com/workers/runtime-apis/handlers/");
+      });
+
+      // Let's make sure that JS promise continuations drained while inside the guard are
+      // prevented from accessing the IoContext also.
+      env.js.resolvedPromise().then(env.js, [&](jsg::Lock& js) {
+        KJ_ASSERT(!IoContext::hasCurrent());
+        KJ_ASSERT(!context.isCurrent());
+        runCount++;
+      });
+      env.js.runMicrotasks();
+    }
+
+    // Once we leave the PreventIoScope, we can access the IoContext again.
+    KJ_ASSERT(IoContext::hasCurrent());
+    KJ_ASSERT(context.isCurrent());
+    KJ_ASSERT(&context == &IoContext::current());
+  });
+
+  KJ_EXPECT(runCount == 2);
+}
 
 } // namespace
 } // namespace workerd

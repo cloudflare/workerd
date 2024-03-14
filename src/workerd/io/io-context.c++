@@ -16,6 +16,13 @@ namespace workerd {
 static thread_local IoContext* threadLocalRequest = nullptr;
 static thread_local void* threadId = nullptr;
 
+PreventIoScope::PreventIoScope() : current(threadLocalRequest) {
+  threadLocalRequest = nullptr;
+}
+PreventIoScope::~PreventIoScope() {
+  threadLocalRequest = current;
+}
+
 static void* getThreadId() {
   if (threadId == nullptr) threadId = new int;
   return threadId;
@@ -1117,22 +1124,18 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
   });
 }
 
-static constexpr auto kAsyncIoErrorMessage =
-    "Disallowed operation called within global scope. Asynchronous I/O "
-    "(ex: fetch() or connect()), setting a timeout, and generating random "
-    "values are not allowed within global scope. To fix this error, perform this "
-    "operation within a handler. "
-    "https://developers.cloudflare.com/workers/runtime-apis/handlers/";
-
 IoContext& IoContext::current() {
   if (threadLocalRequest == nullptr) {
     v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
-    if (isolate == nullptr) {
-      KJ_FAIL_REQUIRE("there is no current request on this thread");
-    } else {
-      isolate->ThrowError(jsg::v8StrIntern(isolate, kAsyncIoErrorMessage));
-      throw jsg::JsExceptionThrown();
-    }
+    KJ_REQUIRE(isolate != nullptr, "there is no current request on this thread");
+    jsg::Lock& js = jsg::Lock::from(isolate);
+    js.throwException(js.error(
+        "Disallowed operation called within global scope. Asynchronous I/O "
+        "(ex: fetch() or connect()), setting a timeout, and generating random "
+        "values are not allowed within global scope. To fix this error, perform this "
+        "operation within a handler. "
+        "https://developers.cloudflare.com/workers/runtime-apis/handlers/"_kj
+    ));
   } else {
     return *threadLocalRequest;
   }
