@@ -2886,6 +2886,12 @@ struct Worker::Actor::Impl {
     // Implements ActorCache::Hooks
 
     void updateAlarmInMemory(kj::Maybe<kj::Date> newAlarmTime) override;
+    void storageReadCompleted(kj::Duration latency) override {
+      metrics.storageReadCompleted(latency);
+    }
+    void storageWriteCompleted(kj::Duration latency) override {
+      metrics.storageWriteCompleted(latency);
+    }
 
   private:
     kj::Own<Loopback> loopback;    // only for updateAlarmInMemory()

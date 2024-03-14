@@ -247,11 +247,15 @@ public:
   // Shared LRU for a whole isolate.
   class SharedLru;
 
-  // Hooks that can be used to customize ActorCache behavior
+  // Hooks that can be used to customize ActorCache behavior or report statistics.
   class Hooks {
   public:
     // Called when the alarm time is dirty when neverFlush is set and ensureFlushScheduled is called.
     virtual void updateAlarmInMemory(kj::Maybe<kj::Date> newAlarmTime) {};
+
+    // Used to track metrics of read and write operation latencies from the isolate's perspective.
+    virtual void storageReadCompleted(kj::Duration latency) {}
+    virtual void storageWriteCompleted(kj::Duration latency) {}
 
     static Hooks DEFAULT;
   };
@@ -604,7 +608,6 @@ private:
   };
 
   kj::Maybe<DeleteAllState> requestedDeleteAll;
-
 
   // Promise for the completion of the previous flush. We can only execute one flushImpl() at a time
   // because we can't allow out-of-order writes.
