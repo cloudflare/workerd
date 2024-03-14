@@ -3,6 +3,7 @@ import { createTarFS } from "pyodide-internal:tarfs";
 import { createMetadataFS } from "pyodide-internal:metadatafs";
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
+import { default as internalJaeger } from "pyodide-internal:jaeger";
 
 const canonicalizeNameRegex = /[-_.]+/g;
 
@@ -68,6 +69,19 @@ import stdlib from "pyodide-internal:generated/python_stdlib.zip";
  * decent performance/memory usage tradeoff.
  */
 let MEMORY = undefined;
+
+/**
+ * Used for tracing via Jaeger.
+ */
+
+export async function enterJaegerSpan(span, callback) {
+  if (!internalJaeger.traceId) {
+    // Jaeger tracing not enabled or traceId is not present in request.
+    return callback();
+  }
+
+  return internalJaeger.enterSpan(span, callback);
+}
 
 /**
  * A hook that the Emscripten runtime calls to perform the WebAssembly
@@ -380,9 +394,11 @@ export async function loadPyodide(lockfile, indexURL) {
 
   const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
   const emscriptenModule =
-    await instantiateEmscriptenModule(emscriptenSettings);
+    await enterJaegerSpan("instantiate_emscripten",
+      () => instantiateEmscriptenModule(emscriptenSettings));
   const usingExistingMemorySnapshot =
-    await prepareWasmLinearMemory(emscriptenModule);
+    await enterJaegerSpan("prepare_wasm_linear_memory",
+      () => prepareWasmLinearMemory(emscriptenModule));
 
   // Upload `MEMORY` to artifact store so long as a new memory snapshot was generated.
   const isTestMode =
@@ -403,7 +419,7 @@ export async function loadPyodide(lockfile, indexURL) {
   }
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
-  emscriptenModule.API.finalizeBootstrap();
+  enterJaegerSpan("finalize_bootstrap", emscriptenModule.API.finalizeBootstrap);
   const pyodide = emscriptenModule.API.public_api;
 
   // This is just here for our test suite. Ugly but just about the only way to test this.

@@ -5,12 +5,14 @@ import {
   loadPyodide,
   mountLib,
   canonicalizePackageName,
+  enterJaegerSpan,
 } from "pyodide-internal:python";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
 import { default as PYODIDE_BUCKET } from "pyodide-internal:generated/pyodide-bucket.json";
 
 const IS_WORKERD = MetadataReader.isWorkerd();
+const IS_TRACING = MetadataReader.isTracing();
 const WORKERD_INDEX_URL = PYODIDE_BUCKET.PYODIDE_PACKAGE_BUCKET_URL;
 
 /**
@@ -81,33 +83,35 @@ async function getTransitiveRequirements(pyodide, requirements) {
 }
 
 async function setupPackages(pyodide) {
-  patchLoadPackage(pyodide);
-  const requirements = MetadataReader.getRequirements().map(
-    canonicalizePackageName,
-  );
-  const transitiveRequirements = new Set(
-    Array.from(await getTransitiveRequirements(pyodide, requirements)).map(
+  return await enterJaegerSpan("setup_packages", async () => {
+    patchLoadPackage(pyodide);
+    const requirements = MetadataReader.getRequirements().map(
       canonicalizePackageName,
-    ),
-  );
+    );
+    const transitiveRequirements = new Set(
+      Array.from(await getTransitiveRequirements(pyodide, requirements)).map(
+        canonicalizePackageName,
+      ),
+    );
 
-  mountLib(pyodide, transitiveRequirements, IS_WORKERD);
+    mountLib(pyodide, transitiveRequirements, IS_WORKERD);
 
-  // install any extra packages into the site-packages directory, so calculate where that is.
-  const pymajor = pyodide._module._py_version_major();
-  const pyminor = pyodide._module._py_version_minor();
-  pyodide.site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
+    // install any extra packages into the site-packages directory, so calculate where that is.
+    const pymajor = pyodide._module._py_version_major();
+    const pyminor = pyodide._module._py_version_minor();
+    pyodide.site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
 
-  // Install patches as needed
-  if (transitiveRequirements.has("aiohttp")) {
-    await applyPatch(pyodide, "aiohttp");
-  }
-  if (transitiveRequirements.has("httpx")) {
-    await applyPatch(pyodide, "httpx");
-  }
-  if (transitiveRequirements.has("fastapi")) {
-    await injectSitePackagesModule(pyodide, "asgi", "asgi");
-  }
+    // Install patches as needed
+    if (transitiveRequirements.has("aiohttp")) {
+      await applyPatch(pyodide, "aiohttp");
+    }
+    if (transitiveRequirements.has("httpx")) {
+      await applyPatch(pyodide, "httpx");
+    }
+    if (transitiveRequirements.has("fastapi")) {
+      await injectSitePackagesModule(pyodide, "asgi", "asgi");
+    }
+  });
 }
 
 function pyimportMainModule(pyodide) {
@@ -121,11 +125,13 @@ function pyimportMainModule(pyodide) {
 
 let pyodidePromise;
 function getPyodide() {
-  if (pyodidePromise) {
+  return enterJaegerSpan("get_pyodide", () => {
+    if (pyodidePromise) {
+      return pyodidePromise;
+    }
+    pyodidePromise = loadPyodide(LOCKFILE, WORKERD_INDEX_URL);
     return pyodidePromise;
-  }
-  pyodidePromise = loadPyodide(LOCKFILE, WORKERD_INDEX_URL);
-  return pyodidePromise;
+  });
 }
 
 let mainModulePromise;
@@ -141,13 +147,17 @@ function getMainModule() {
   return mainModulePromise;
 }
 
-if (IS_WORKERD) {
-  // If we're in workerd, we have to do setupPackages in the IoContext, so don't start it yet.
-  // TODO: fix this.
-  await getPyodide();
-} else {
-  // If we're not in workerd, setupPackages doesn't require IO so we can do it all here.
-  await getMainModule();
+// Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
+// needs to be called inside an IO context.
+if (!IS_TRACING) {
+  if (IS_WORKERD) {
+    // If we're in workerd, we have to do setupPackages in the IoContext, so don't start it yet.
+    // TODO: fix this.
+    await getPyodide();
+  } else {
+    // If we're not in workerd, setupPackages doesn't require IO so we can do it all here.
+    await getMainModule();
+  }
 }
 
 /**
@@ -176,8 +186,10 @@ async function preparePython() {
 function makeHandler(pyHandlerName) {
   return async function (...args) {
     try {
-      const mainModule = await preparePython();
-      return await mainModule[pyHandlerName].callRelaxed(...args);
+      const mainModule = await enterJaegerSpan("prep_python", async () => await preparePython());
+      return await enterJaegerSpan("python_code", () => {
+        return mainModule[pyHandlerName].callRelaxed(...args);
+      });
     } catch (e) {
       console.warn(e.stack);
       throw e;
@@ -187,7 +199,7 @@ function makeHandler(pyHandlerName) {
 
 const handlers = {};
 
-if (IS_WORKERD) {
+if (IS_WORKERD || IS_TRACING) {
   handlers.fetch = makeHandler("on_fetch");
   handlers.test = makeHandler("test");
 } else {
