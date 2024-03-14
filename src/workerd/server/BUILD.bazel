@@ -53,6 +53,7 @@ wd_cc_binary(
         ":workerd_capnp",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/capnp:capnpc",
+        "//src/pyodide:pyodide_extra_capnp",
     ] + select({
         "@platforms//os:windows": [],
         "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
