@@ -453,28 +453,10 @@ kj::StringPtr SqliteDatabase::ingestSql(Regulator& regulator, kj::StringPtr sqlC
     auto statementLength = sqlite3_complete_length(sqlCode.begin(), 1);
     if (!statementLength) break;
 
-    // Slice off the next valid statement and prepare it
+    // Slice off the next valid statement SQL
     auto nextStatement = kj::str(sqlCode.slice(0, statementLength));
-    auto result = prepareSql(regulator, nextStatement, 0, SINGLE);
-
-    // Execute the prepared statement, since we're only sending one
-
-    // Ensure we're in an implicit transaction for writes
-    KJ_IF_SOME(cb, onWriteCallback) {
-      if (!sqlite3_stmt_readonly(result)) {
-        cb();
-      }
-    }
-
-    // A single 'sqlite3_step' is enough to execute the statement, since we're ignoring results
-    int err = sqlite3_step(result);
-    if (err == SQLITE_DONE) {
-      // good
-    } else if (err == SQLITE_ROW) {
-      // Intermediate statement returned results. We will discard.
-    } else {
-      SQLITE_CALL_FAILED("sqlite3_step()", err);
-    }
+    // Create a Query object, which will prepare & execute it
+    Query(*this, regulator, nextStatement);
 
     sqlCode = sqlCode.slice(statementLength);
   }

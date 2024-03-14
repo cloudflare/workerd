@@ -91,6 +91,11 @@ async function test(storage) {
     ' -- trailing comment'
   )
 
+  // Ingest throws if statement looks "complete" but is actually a syntax error:
+  assert.throws(() => sql.ingest(`SELECT * bunk;`), /Error: near "bunk": syntax error at offset/)
+  assert.throws(() => sql.ingest(`INSER INTO xyz VALUES ('a'),('b');`), /Error: near "INSER": syntax error/)
+  assert.throws(() => sql.ingest(`INSERT INTO xyz VALUES ('a')('b');`), /Error: near "\(": syntax error/)
+
   // Test execution of ingested queries by taking an input of 6 INSERT statements, that all
   // add 6 rows of data, then splitting that into a bunch of chunks, then ingesting them all
   {
