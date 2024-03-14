@@ -437,5 +437,12 @@ export async function loadPyodide(lockfile, indexURL) {
       snapshot: snapshotString,
     });
   }
+
+  // Sanitize `globalThis`. This is not strictly doing much right now, but may be necessary in
+  // the future if we enable one or more of these.
+  globalThis.eval = undefined;
+  globalThis.import = undefined;
+  globalThis.require = undefined;
+
   return pyodide;
 }
