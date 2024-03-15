@@ -11,6 +11,7 @@ $Cxx.namespace("workerd::rpc");
 
 using import "/capnp/compat/http-over-capnp.capnp".HttpMethod;
 using import "/capnp/compat/http-over-capnp.capnp".HttpService;
+using import "/capnp/compat/byte-stream.capnp".ByteStream;
 using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 
@@ -208,6 +209,25 @@ enum SerializationTag {
   # by accident.
 
   jsRpcStub @1;
+
+  writableStream @2;
+  readableStream @3;
+}
+
+enum StreamEncoding {
+  # Specifies the internal content-encoding of a ReadableStream or WritableStream. This serves an
+  # optimization which is not visible to the app: if we end up hooking up streams so that a source
+  # is pumped to a sink that has the same encoding, we can avoid a decompression/recompression
+  # round trip. However, if the application reads/writes raw bytes, then we must decode/encode
+  # them under the hood.
+
+  identity @0;
+  gzip @1;
+  brotli @2;
+}
+
+interface Handle {
+  # Type with no methods, but something happens when you drop it.
 }
 
 struct JsValue {
@@ -231,8 +251,47 @@ struct JsValue {
       rpcTarget @1 :JsRpcTarget;
       # An object that can be called over RPC.
 
-      # TODO(soon): Streams, Request, Response, etc.
+      writableStream :group {
+        # A WritableStream. This is much easier to represent that ReadableStream because the bytes
+        # flow from the receiver to the sender, and therefore a round trip is obviously necessary
+        # before the bytes can begin flowing.
+
+        byteStream @2 :ByteStream;
+        encoding @3 :StreamEncoding;
+      }
+
+      readableStream :group {
+        # A ReadableStream. The sender of the JsValue will use the associated StreamSink to open a
+        # stream of type `ByteStream`.
+
+        encoding @4 :StreamEncoding;
+        # Bytes read from the stream have this encoding.
+
+        expectedLength :union {
+          unknown @5 :Void;
+          known @6 :UInt64;
+        }
+      }
+
+      # TODO(soon): WebSocket, Request, Response
     }
+  }
+
+  interface StreamSink {
+    # A JsValue may contain streams that flow from the sender to the receiver. We don't want such
+    # streams to require a network round trip before the stream can begin pumping. So, we need a
+    # place to start sending bytes right away.
+    #
+    # To that end, JsRpcTarget::call() returns a `paramsStreamSink`. Immediately upon sending the
+    # request, the client can use promise pipelining to begin pushing bytes to this object.
+    #
+    # Similarly, the caller passes a `resultsStreamSink` to the callee. If the response contains
+    # any streams, it can start pushing to this immediately after responding.
+
+    startStream @0 (externalIndex :UInt32) -> (stream :Capability);
+    # Opens a stream corresponding to the given index in the JsValue's `externals` array. The type
+    # of capability returned depends on the type of external. E.g. for `readableStream`, it is a
+    # `ByteStream`.
   }
 }
 
@@ -281,23 +340,39 @@ interface JsRpcTarget $Cxx.allowCancellation {
       # This returns a new JsRpcTarget. The second call is on that target, invoking the method
       # "bar".
     }
+
+    resultsStreamSink @4 :JsValue.StreamSink;
+    # StreamSink used for ReadableStreams found in the results.
   }
 
-  call @0 CallParams -> (result :JsValue, callPipeline :JsRpcTarget, hasDisposer :Bool);
+  struct CallResults {
+    result @0 :JsValue;
+    # The returned value.
+
+    callPipeline @1 :JsRpcTarget;
+    # Enables promise pipelining on the eventual call result. This is a JsRpcTarget wrapping the
+    # result of the call, even if the result itself is a serializable object that would not
+    # normally be treated as an RPC target. The caller may use this to initiate speculative calls
+    # on this result without waiting for the initial call to complete (using promise pipelining).
+
+    hasDisposer @2 :Bool;
+    # If `hasDisposer` is true, the server side returned a serializable object (not a stub) with a
+    # disposer (Symbol.dispose). The disposer itself is not included in the object's serialization,
+    # but dropping the `callPipeline` will invoke it.
+    #
+    # On the client side, when an RPC returns a plain object, a disposer is added to it. In order
+    # to avoid confusion, we want the server-side disposer to be invoked only after the client-side
+    # disposer is invoked. To that end, when `hasDisposer` is true, the client should hold on to
+    # `callPipeline` until the disposer is invoked. If `hasDisposer` is false, `callPipeline` can
+    # safely be dropped immediately.
+
+    paramsStreamSink @3 :JsValue.StreamSink;
+    # StreamSink used for ReadableStreams found in the params. The caller begins sending bytes for
+    # these streams immediately using promise pipelining.
+  }
+
+  call @0 CallParams -> CallResults;
   # Runs a Worker/DO's RPC method.
-  #
-  # `callPipeline` allows the caller to begin sending other stuff before the callee has actually
-  # returned from the call. In particular:
-  # * The caller can make pipelined calls on the anticipated return value of the call, invoking
-  #   methods on capabilities that it expects will be present in the return value. Since
-  #   `CallPipeline` extends `JsRpcTarget`, these calls are made using callPipeline.call().
-  #   Typically these calls would use `methodPath` to specify a path to a specific subobject of
-  #   the returned value.
-  # * TODO(soon): streams
-  #
-  # If `hasDisposer` is true, the server side returned an object (not a stub) with a dispose()
-  # method. Dropping the `callPipeline` will invoke this method. The client should take care that
-  # this is not done until `dispose()` is invoked on the client side.
 }
 
 interface EventDispatcher @0xf20697475ec1752d {

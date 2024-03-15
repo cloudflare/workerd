@@ -99,6 +99,8 @@ public:
                                           kj::Own<WritableStreamSink> sink,
                                           bool end) override;
 
+  StreamEncoding getPreferredEncoding() override;
+
   kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) override;
 
   void setPendingClosure() override {

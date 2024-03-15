@@ -3735,7 +3735,10 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
     // TODO(soon): Better way of reporting test results, KJ_LOG is ugly. We should probably have
     //   some sort of callback interface. It would be nice to report the exceptions thrown through
     //   that interface too... can we? Use a tracer maybe?
-    KJ_LOG(INFO, kj::str("[ TEST ] "_kj, name));
+    // HACK: We use DBG log level because INFO logging is optional, and warning/error would confuse
+    //   people. Note that server-test.c++ actually tests for this logging, so simply writing to
+    //   stderr wouldn't work.
+    KJ_LOG(DBG, kj::str("[ TEST ] "_kj, name));
     auto req = service.startRequest({});
     bool result = co_await req->test();
     if (result) {
@@ -3743,7 +3746,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
     } else {
       ++failCount;
     }
-    KJ_LOG(INFO, kj::str(result ? "[ PASS ] "_kj : "[ FAIL ] "_kj, name));
+    KJ_LOG(DBG, kj::str(result ? "[ PASS ] "_kj : "[ FAIL ] "_kj, name));
   };
 
   for (auto& service: services) {

@@ -7,6 +7,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-context.h>
 #include "../basics.h"
+#include <workerd/io/worker-interface.capnp.h>
 
 #if _MSC_VER
 typedef long long ssize_t;
@@ -27,11 +28,7 @@ class WritableStreamDefaultController;
 
 class TransformStreamDefaultController;
 
-enum class StreamEncoding {
-  IDENTITY,
-  GZIP,
-  BROTLI
-};
+using rpc::StreamEncoding;
 
 struct ReadResult {
   jsg::Optional<jsg::Value> value;
@@ -202,6 +199,13 @@ public:
   virtual void abort(kj::Exception reason) = 0;
   // TODO(conform): abort() should return a promise after which closed fulfillers should be
   //   rejected. This may necessitate an "erroring" state.
+
+  // Tells the sink that it is no longer to be responsible for encoding in the correct format.
+  // Instead, the caller takes responsibility. The expected encoding is returned; the caller
+  // promises that all future writes will use this encoding. The default implementation returns
+  // IDENTITY, which is always correct since that's the encoding write()s should have used if
+  // this weren't called at all.
+  virtual StreamEncoding disownEncodingResponsibility() { return StreamEncoding::IDENTITY; }
 };
 
 class ReadableStreamSource {
@@ -215,6 +219,10 @@ public:
   // important to take advantage of this when using deferred proxying since calling `end()`
   // directly might attempt to use the `IoContext` to call `registerPendingEvent()`.
   virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end);
+
+  // If pumpTo() pumps to a system stream, what is the best encoding for that system steram to
+  // use? This is just a hint.
+  virtual StreamEncoding getPreferredEncoding() { return StreamEncoding::IDENTITY; };
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
@@ -517,6 +525,10 @@ public:
 
   virtual kj::Promise<DeferredProxy<void>> pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
+
+  // If pumpTo() pumps to a system stream, what is the best encoding for that system steram to
+  // use? This is just a hint.
+  virtual StreamEncoding getPreferredEncoding() { return StreamEncoding::IDENTITY; }
 
   virtual kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) = 0;
 

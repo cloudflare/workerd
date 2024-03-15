@@ -4,8 +4,11 @@
 
 #include "readable.h"
 #include "writable.h"
+#include "internal.h"
 #include <workerd/io/features.h>
 #include <workerd/jsg/buffersource.h>
+#include <workerd/api/worker-rpc.h>
+#include <workerd/api/system-streams.h>
 
 namespace workerd::api {
 
@@ -524,6 +527,173 @@ jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
     }
   }
   return kj::none;
+}
+
+namespace {
+
+// HACK: We need as async pipe, like kj::newOneWayPipe(), except supporting explicit end(). So we
+//   wrap the two ends of the pipe in special adapters that track whether end() was called.
+class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream {
+public:
+  ExplicitEndOutputPipeAdapter(kj::Own<kj::AsyncOutputStream> inner,
+                               kj::Own<kj::RefcountedWrapper<bool>> ended)
+      : inner(kj::mv(inner)), ended(kj::mv(ended)) {}
+
+  kj::Promise<void> write(const void* buffer, size_t size) override {
+    return KJ_REQUIRE_NONNULL(inner)->write(buffer, size);
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    return KJ_REQUIRE_NONNULL(inner)->write(pieces);
+  }
+
+  kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
+      kj::AsyncInputStream& input, uint64_t amount) override {
+    return KJ_REQUIRE_NONNULL(inner)->tryPumpFrom(input, amount);
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return KJ_REQUIRE_NONNULL(inner)->whenWriteDisconnected();
+  }
+
+  kj::Promise<void> end() override {
+    // Signal to the other side that end() was actually called.
+    ended->getWrapped() = true;
+    inner = kj::none;
+    return kj::READY_NOW;
+  }
+
+private:
+  kj::Maybe<kj::Own<kj::AsyncOutputStream>> inner;
+  kj::Own<kj::RefcountedWrapper<bool>> ended;
+};
+
+class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
+public:
+  ExplicitEndInputPipeAdapter(kj::Own<kj::AsyncInputStream> inner,
+                              kj::Own<kj::RefcountedWrapper<bool>> ended,
+                              kj::Maybe<uint64_t> expectedLength)
+      : inner(kj::mv(inner)), ended(kj::mv(ended)), expectedLength(expectedLength) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    size_t result = co_await inner->tryRead(buffer, minBytes, maxBytes);
+
+    KJ_IF_SOME(l, expectedLength) {
+      KJ_ASSERT(result <= l);
+      l -= result;
+      if (l == 0) {
+        // If we got all the bytes we expected, we treat this as a successful end, because the
+        // underlying KJ pipe is not actually going to wait for the other side to drop. This is
+        // consistent with the behavior of Content-Length in HTTP anyway.
+        ended->getWrapped() = true;
+      }
+    }
+
+    if (result < minBytes) {
+      // Verify that end() was called.
+      if (!ended->getWrapped()) {
+        JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
+      }
+    }
+    co_return result;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    return inner->tryGetLength();
+  }
+
+  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
+    return inner->pumpTo(output, amount);
+  }
+
+private:
+  kj::Own<kj::AsyncInputStream> inner;
+  kj::Own<kj::RefcountedWrapper<bool>> ended;
+  kj::Maybe<uint64_t> expectedLength;
+};
+
+}  // namespace
+
+void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
+  // Except we don't actually want to do _exactly_ that, because we do not want to actually create
+  // a `JsRpcStub` locally. So do the important parts of `JsRpcStub::constructor()` followed by
+  // `JsRpcStub::serialize()`.
+
+  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
+      "ReadableStream can only be serialized for RPC.");
+  auto externalHandler = dynamic_cast<RpcSerializerExternalHander*>(&handler);
+  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
+      "ReadableStream can only be serialized for RPC.");
+
+  // NOTE: We're counting on `pumpTo()`, below, to check that the stream is not locked or disturbed
+  //   and other common checks. It's important that we don't modify the stream in any way before
+  //   that call.
+
+  IoContext& ioctx = IoContext::current();
+
+  auto& controller = getController();
+  StreamEncoding encoding = controller.getPreferredEncoding();
+  auto expectedLength = controller.tryGetLength(encoding);
+
+  auto streamCap = externalHandler->writeStream(
+      [encoding, expectedLength](rpc::JsValue::External::Builder builder) mutable {
+    auto rs = builder.initReadableStream();
+    rs.setEncoding(encoding);
+    KJ_IF_SOME(l, expectedLength) {
+      rs.getExpectedLength().setKnown(l);
+    }
+  });
+
+  kj::Own<capnp::ExplicitEndOutputStream> kjStream =
+      ioctx.getByteStreamFactory().capnpToKjExplicitEnd(
+          kj::mv(streamCap).castAs<capnp::ByteStream>());
+
+  auto sink = newSystemStream(kj::mv(kjStream), encoding, ioctx);
+
+  ioctx.addTask(ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), true))
+      .catch_([](kj::Exception&& e) {
+    // Errors in pumpTo() are automatically propagated to the source and destination. We don't
+    // want to throw them from here since it'll cause an uncaught exception to be reported, even
+    // if the application actually does handle it!
+  }));
+}
+
+jsg::Ref<ReadableStream> ReadableStream::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto& handler = KJ_REQUIRE_NONNULL(deserializer.getExternalHandler(),
+      "got ReadableStream on non-RPC serialized object?");
+  auto externalHandler = dynamic_cast<RpcDeserializerExternalHander*>(&handler);
+  KJ_REQUIRE(externalHandler != nullptr, "got ReadableStream on non-RPC serialized object?");
+
+  auto reader = externalHandler->read();
+  KJ_REQUIRE(reader.isReadableStream(), "external table slot type doesn't match serialization tag");
+
+  auto rs = reader.getReadableStream();
+  auto encoding = rs.getEncoding();
+
+  KJ_REQUIRE(static_cast<uint>(encoding) <
+      capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
+      "unknown StreamEncoding received from peer");
+
+  auto& ioctx = IoContext::current();
+
+  kj::Maybe<uint64_t> expectedLength;
+  auto el = rs.getExpectedLength();
+  if (el.isKnown()) {
+    expectedLength = el.getKnown();
+  }
+
+  auto pipe = kj::newOneWayPipe(expectedLength);
+
+  auto endedFlag = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
+
+  auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), kj::addRef(*endedFlag));
+  auto in = kj::heap<ExplicitEndInputPipeAdapter>(
+      kj::mv(pipe.in), kj::mv(endedFlag), expectedLength);
+
+  externalHandler->setLastStream(ioctx.getByteStreamFactory().kjToCapnp(kj::mv(out)));
+
+  return jsg::alloc<ReadableStream>(ioctx, newSystemStream(kj::mv(in), encoding, ioctx));
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const { return "ReaderImpl"_kjc; }

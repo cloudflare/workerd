@@ -176,7 +176,16 @@ kj_test(
     data = [f.removesuffix(".wd-test") + ".js"],
 ) for f in glob(
     ["**/*.wd-test"],
+    exclude = [
+        "tests/js-rpc-socket-test.wd-test",
+    ],
 )]
+
+wd_test(
+    src = "tests/js-rpc-socket-test.wd-test",
+    args = ["--experimental", "--no-verbose"],
+    data = ["tests/js-rpc-test.js"],
+)
 
 # Enable GPU tests if experimental GPU support is enabled. Unfortunately, this depends on the right
 # drivers being available on Linux and macOS, so turn it off by default. Run GPU tests with

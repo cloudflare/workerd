@@ -66,6 +66,15 @@ export let nonClass = {
     assert.strictEqual(typeof ctx.waitUntil, "function");
     return i * j + env.twelve;
   },
+
+  async fetch(req, env, ctx) {
+    // This is used in the stream test to fetch some gziped data.
+    return new Response("this text was gzipped", {
+      headers: {
+        "Content-Encoding": "gzip"
+      }
+    });
+  }
 }
 
 // Globals used to test passing RPC promises or properties across I/O contexts (which is expected
@@ -258,6 +267,40 @@ export class MyService extends WorkerEntrypoint {
       noop() {},
       abort() { ctx.abort(new RangeError("foo bar abort reason")); }
     };
+  }
+
+  async writeToStream(stream) {
+    let writer = stream.getWriter();
+    let enc = new TextEncoder();
+    await writer.write(enc.encode("foo, "));
+    await writer.write(enc.encode("bar, "));
+    await writer.write(enc.encode("baz!"));
+    await writer.close();
+  }
+
+  async readFromStream(stream) {
+    return await new Response(stream).text();
+  }
+
+  async returnReadableStream() {
+    let { readable, writable } = new IdentityTransformStream();
+    this.ctx.waitUntil(this.writeToStream(writable));
+    return readable;
+  }
+
+  async returnMultipleReadableStreams() {
+    let { readable, writable } = new IdentityTransformStream();
+    this.ctx.waitUntil(this.writeToStream(writable));
+
+    let pair2 = new IdentityTransformStream();
+    this.ctx.waitUntil(this.writeToStream(pair2.writable));
+    let readable2 = pair2.readable;
+
+    return [readable, readable2];
+  }
+
+  async roundTrip(value) {
+    return value;
   }
 }
 
@@ -832,6 +875,162 @@ export let serializeRpcPromiseOrProprety = {
   },
 }
 
+export let streams = {
+  async test(controller, env, ctx) {
+    // Send WritableStream.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+      let promise = env.MyService.writeToStream(writable);
+      let text = await new Response(readable).text();
+      assert.strictEqual(text, "foo, bar, baz!");
+      await promise;
+    }
+
+    // TODO(someday): Test JS-backed WritableStream, when it actually works.
+
+    // TODO(someday): Is there any way to construct an encoded WritableStream? Only system
+    //   streams can be encoded, but there's no API that returns an encoded WritableStream I think.
+
+    // Send ReadableStream.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+      let promise = env.MyService.readFromStream(readable);
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      await writer.write(enc.encode("foo, "));
+      await writer.write(enc.encode("bar, "));
+      await writer.write(enc.encode("baz!"));
+      await writer.close();
+
+      assert.strictEqual(await promise, "foo, bar, baz!");
+    }
+
+    // Send a JS-backed ReadableStream.
+    {
+      let controller;
+      let readable = new ReadableStream({
+        start(c) { controller = c; }
+      });
+      let promise = env.MyService.readFromStream(readable);
+
+      let enc = new TextEncoder();
+      controller.enqueue(enc.encode("foo, "));
+      controller.enqueue(enc.encode("bar, "));
+      controller.enqueue(enc.encode("baz!"));
+      controller.close();
+
+      assert.strictEqual(await promise, "foo, bar, baz!");
+    }
+
+    // Send streams that are locked.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      writer.write(enc.encode("foo"));
+
+      let reader = readable.getReader();
+
+      assert.rejects(env.MyService.writeToStream(writable), {
+        name: "TypeError",
+        message: "The WritableStream has been locked to a writer."
+      });
+      assert.rejects(env.MyService.readFromStream(readable), {
+        name: "TypeError",
+        message: "The ReadableStream has been locked to a reader."
+      });
+
+      // Verify the streams still work.
+      let dec = new TextDecoder();
+      assert.strictEqual(dec.decode((await reader.read()).value), "foo");
+
+      writer.write(enc.encode("bar"));
+      assert.strictEqual(dec.decode((await reader.read()).value), "bar");
+
+      writer.close();
+      assert.strictEqual((await reader.read()).done, true);
+    }
+
+    // Receive ReadableStream.
+    {
+      let readable = await env.MyService.returnReadableStream();
+      let text = await new Response(readable).text();
+      assert.strictEqual(text, "foo, bar, baz!");
+    }
+
+    // Receive multiple ReadableStreams.
+    {
+      let readables = await env.MyService.returnMultipleReadableStreams();
+      assert.strictEqual(await new Response(readables[0]).text(), "foo, bar, baz!");
+      assert.strictEqual(await new Response(readables[1]).text(), "foo, bar, baz!");
+    }
+
+    // Send ReadableStream, but fail to fully write it.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+      let promise = env.MyService.readFromStream(readable);
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      await writer.write(enc.encode("foo, "));
+      await writer.write(enc.encode("bar, "));
+      await writer.write(enc.encode("baz!"));
+      await writer.abort("foo");
+
+      await assert.rejects(promise, {
+        name: "Error",
+        // TODO(someday): Propagate the actual error.
+        message: "ReadableStream received over RPC disconnected prematurely."
+      });
+    }
+
+    // Send fixed-length ReadableStream.
+    {
+      let { readable, writable } = new FixedLengthStream("foo, bar, baz!".length);
+      let promise = env.MyService.readFromStream(readable);
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      await writer.write(enc.encode("foo, "));
+      await writer.write(enc.encode("bar, "));
+      await writer.write(enc.encode("baz!"));
+      await writer.close();
+
+      assert.strictEqual(await promise, "foo, bar, baz!");
+    }
+
+    // Send an encoded ReadableStream
+    {
+      let gzippedResp = await env.self.fetch("http://foo");
+
+      let text = await env.MyService.readFromStream(gzippedResp.body);
+
+      assert.strictEqual(text, "this text was gzipped");
+    }
+
+    // Round trip streams.
+    {
+      let { readable, writable } = new IdentityTransformStream();
+
+      readable = await env.MyService.roundTrip(readable);
+      writable = await env.MyService.roundTrip(writable);
+
+      let readPromise = new Response(readable).text();
+
+      let writer = writable.getWriter();
+      let enc = new TextEncoder();
+      await writer.write(enc.encode("foo, "));
+      await writer.write(enc.encode("bar, "));
+      await writer.write(enc.encode("baz!"));
+      await writer.close();
+
+      assert.strictEqual(await readPromise, "foo, bar, baz!");
+    }
+  }
+}
+
 // Test that exceptions thrown from async native functions have a proper stack trace. (This is
 // not specific to RPC but RPC is a convenient place to test it since we can easily define the
 // callee to throw an exception.)
@@ -857,25 +1056,3 @@ export let canUseGetPutDelete = {
     assert.strictEqual(await env.MyService.delete(3), 2);
   }
 }
-
-function withRealSocket(inner) {
-  return {
-    async test(controller, env, ctx) {
-      let subEnv = {...env};
-      subEnv.MyService = subEnv.MyServiceOverRealSocket;
-      await inner.test(controller, subEnv, ctx);
-    }
-  }
-}
-
-// Export versions of various tests above using MyService over a real socket. We only bother
-// with thests that use MyService. The `z_` prefix makes these tests run last.
-export let z_namedServiceBinding_realSocket = withRealSocket(namedServiceBinding);
-export let z_sendStubOverRpc_realSocket = withRealSocket(sendStubOverRpc);
-export let z_receiveStubOverRpc_realSocket = withRealSocket(receiveStubOverRpc);
-export let z_promisePipelining_realSocket = withRealSocket(promisePipelining);
-export let z_disposal_realSocket = withRealSocket(disposal);
-export let z_crossContextSharingDoesntWork_realSocket = withRealSocket(crossContextSharingDoesntWork);
-export let z_serializeRpcPromiseOrProprety_realSocket = withRealSocket(serializeRpcPromiseOrProprety);
-export let z_testAsyncStackTrace_realSocket = withRealSocket(testAsyncStackTrace);
-export let z_canUseGetPutDelete_realSocket = withRealSocket(canUseGetPutDelete);
