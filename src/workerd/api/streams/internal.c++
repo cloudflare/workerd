@@ -431,7 +431,17 @@ public:
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
     return inner->tryGetLength(encoding);
   }
-  kj::Maybe<Tee> tryTee(uint64_t limit) override { return inner->tryTee(limit); }
+
+  kj::Maybe<Tee> tryTee(uint64_t limit) override {
+    KJ_IF_SOME(tee, inner->tryTee(limit)) {
+      // If creating the tee this way is successful, we have to make sure we mark
+      // this particular stream as read so we don't warn about it.
+      // Refs: https://github.com/cloudflare/workerd/issues/983
+      wasRead = true;
+      return kj::mv(tee);
+    }
+    return kj::none;
+  }
 
   ~WarnIfUnusedStream() {
     if (!wasRead) { warningAggregator->add(kj::mv(warningContext)); }
