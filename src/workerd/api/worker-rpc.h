@@ -495,10 +495,8 @@ public:
 
 template <class Registry>
 void registerRpcModules(Registry& registry, CompatibilityFlags::Reader flags) {
-  if (flags.getWorkerdExperimental()) {
-    registry.template addBuiltinModule<EntrypointsModule>(
-        "cloudflare-internal:workers", workerd::jsg::ModuleRegistry::Type::INTERNAL);
-  }
+  registry.template addBuiltinModule<EntrypointsModule>(
+      "cloudflare-internal:workers", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 }; // namespace workerd::api
