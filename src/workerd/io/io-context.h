@@ -726,6 +726,15 @@ public:
       const WarningAggregator::Key& key,
       kj::Function<kj::Own<WarningAggregator>(IoContext&)> load);
 
+  // The IoChannelFactory must be accessed through the
+  // currentIncomingRequest because it has some tracing context built in.
+  //
+  // TODO(later): this is made public for Python Workers. It should be possible to make this private
+  // again later.
+  IoChannelFactory& getIoChannelFactory() {
+    return *getCurrentIncomingRequest().ioChannelFactory;
+  }
+
 private:
   ThreadContext& thread;
 
@@ -865,9 +874,6 @@ private:
   IncomingRequest& getCurrentIncomingRequest() {
     KJ_REQUIRE(!incomingRequests.empty(), "the IoContext has no current IncomingRequest");
     return incomingRequests.front();
-  }
-  IoChannelFactory& getIoChannelFactory() {
-    return *getCurrentIncomingRequest().ioChannelFactory;
   }
 
   // Run the given callback within the scope of this IoContext. This encapsultes the

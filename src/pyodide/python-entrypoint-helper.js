@@ -6,6 +6,7 @@ import {
   mountLib,
   canonicalizePackageName,
   enterJaegerSpan,
+  uploadArtifacts,
 } from "pyodide-internal:python";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
@@ -193,6 +194,8 @@ function makeHandler(pyHandlerName) {
     } catch (e) {
       console.warn(e.stack);
       throw e;
+    } finally {
+      args[2].waitUntil(uploadArtifacts());
     }
   };
 }

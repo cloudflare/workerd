@@ -71,6 +71,18 @@ import stdlib from "pyodide-internal:generated/python_stdlib.zip";
 let MEMORY = undefined;
 
 /**
+ * Used to defer artifact upload. This is set during initialisation, but is executed during a
+ * request because an IO context is needed for the upload.
+ */
+let DEFERRED_UPLOAD_FUNCTION = undefined;
+
+export async function uploadArtifacts() {
+  if (DEFERRED_UPLOAD_FUNCTION) {
+    return await DEFERRED_UPLOAD_FUNCTION();
+  }
+}
+
+/**
  * Used for tracing via Jaeger.
  */
 
@@ -404,7 +416,7 @@ export async function loadPyodide(lockfile, indexURL) {
   const isTestMode =
     maybeMemorySnapshot && maybeMemorySnapshot.byteLength < 100;
   if (ArtifactBundler.isEnabled() && !usingExistingMemorySnapshot) {
-    const uploadCb = async () => {
+    DEFERRED_UPLOAD_FUNCTION = async () => {
       const success = await ArtifactBundler.uploadMemorySnapshot(
         new Uint8Array(MEMORY).slice(),
       );
@@ -412,10 +424,6 @@ export async function loadPyodide(lockfile, indexURL) {
         console.warn("Memory snapshot upload failed.");
       }
     };
-
-    // TODO(later): This should ideally be a waitUntil() but testing it is difficult, so will
-    // leave that debugging journey for later.
-    await uploadCb();
   }
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
