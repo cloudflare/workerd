@@ -35,11 +35,12 @@ private:
 
 public:
   enum class Guard {
-    IMMUTABLE,
-    REQUEST,
+    // WARNING: This type is serialized, do not change the numeric values.
+    IMMUTABLE = 0,
+    REQUEST = 1,
     // REQUEST_NO_CORS,  // CORS not relevant on server side
-    RESPONSE,
-    NONE
+    RESPONSE = 2,
+    NONE = 3
   };
 
   struct DisplayedHeader {
@@ -164,6 +165,12 @@ public:
       forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: Headers) => void, thisArg?: This): void;
     });
   }
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Headers> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::HEADERS);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     for (const auto& entry : headers) {
@@ -616,6 +623,8 @@ private:
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter
 // to fetch().
+//
+// When adding new properties to this struct, don't forget to update Request::serialize().
 struct RequestInitializerDict {
   jsg::Optional<kj::String> method;
   jsg::Optional<Headers::Initializer> headers;
@@ -909,6 +918,15 @@ public:
     }
   }
 
+  void serialize(
+      jsg::Lock& js, jsg::Serializer& serializer,
+      const jsg::TypeHandler<RequestInitializerDict>& initDictHandler);
+  static jsg::Ref<Request> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+      const jsg::TypeHandler<RequestInitializerDict>& initDictHandler);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::REQUEST);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("url", url);
     tracker.trackField("headers", headers);
@@ -1095,6 +1113,17 @@ public:
     // Use `BodyInit` and `ResponseInit` type aliases in constructor instead of inlining
   }
 
+  void serialize(
+      jsg::Lock& js, jsg::Serializer& serializer,
+      const jsg::TypeHandler<InitializerDict>& initDictHandler,
+      const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
+  static jsg::Ref<Response> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+      const jsg::TypeHandler<InitializerDict>& initDictHandler,
+      const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::RESPONSE);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("statusText", statusText);
     tracker.trackField("headers", headers);
@@ -1207,9 +1236,6 @@ jsg::Ref<Response> makeHttpResponse(
     kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     kj::Maybe<jsg::Ref<AbortSignal>> signal = kj::none);
-
-kj::Maybe<kj::StringPtr> defaultStatusText(uint statusCode);
-// Return the RFC-recommended default status text for `statusCode`.
 
 bool isNullBodyStatusCode(uint statusCode);
 bool isRedirectStatusCode(uint statusCode);

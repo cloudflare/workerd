@@ -365,7 +365,7 @@ public:
   bool serialize(
       Lock& js, std::type_index type, jsg::Object& instance, Serializer& serializer) override {
     KJ_IF_SOME(func, wrapper->serializerMap.find(type)) {
-      func(js, instance, serializer);
+      func(*wrapper, js, instance, serializer);
       return true;
     } else {
       return false;

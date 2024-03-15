@@ -197,7 +197,8 @@ Deserializer::Deserializer(
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers,
     kj::Maybe<Options> maybeOptions)
-    : deser(js.v8Isolate, data.begin(), data.size(), this),
+    : totalInputSize(data.size()),
+      deser(js.v8Isolate, data.begin(), data.size(), this),
       sharedBackingStores(kj::mv(sharedArrayBuffers)) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Deserializer must be allocated on the stack");
@@ -257,6 +258,18 @@ kj::ArrayPtr<const kj::byte> Deserializer::readRawBytes(size_t size) {
   const void* data;
   KJ_ASSERT(deser.ReadRawBytes(size, &data), "deserialization failure, possible corruption");
   return kj::arrayPtr(reinterpret_cast<const kj::byte*>(data), size);
+}
+
+kj::ArrayPtr<const kj::byte> Deserializer::readLengthDelimitedBytes() {
+  return readRawBytes(readRawUint64());
+}
+
+kj::String Deserializer::readRawString(size_t size) {
+  return kj::str(readRawBytes(size).asChars());
+}
+
+kj::String Deserializer::readLengthDelimitedString() {
+  return kj::str(readLengthDelimitedBytes().asChars());
 }
 
 v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(

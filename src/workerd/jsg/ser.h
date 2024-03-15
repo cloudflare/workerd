@@ -51,6 +51,10 @@ namespace workerd::jsg {
 //   the object. These must be the exact corresponding calls in the same order as serialize()
 //   would have made them. The sequence can never change once data has been written for a given
 //   tag version; the only way to change is to define a new version.
+// * Both `serialize()` and `deserialize()` can take additional arguments of the form
+//   `const jsg::TypeHandler<SomeType>&`, which will automatically be filled in with the
+//   corresponding type handler. This is useful if the serializer wants to, say, assemble a
+//   JSG_STRUCT, convert it into an actual JS object, and serialize that.
 class Serializer final: v8::ValueSerializer::Delegate {
 public:
   // "Externals" are values which can be serialized, but refer to some external resource, rather
@@ -145,6 +149,15 @@ public:
     ser.WriteRawBytes(bytes.begin(), bytes.size());
   }
 
+  // Write a size followed by bytes.
+  void writeLengthDelimited(kj::ArrayPtr<const kj::byte> bytes) {
+    writeRawUint32(bytes.size());
+    writeRawBytes(bytes);
+  }
+  void writeLengthDelimited(kj::StringPtr text) {
+    writeLengthDelimited(text.asBytes());
+  }
+
 private:
   // Throw a DataCloneError, complaining that the given object cannot be serialized. (This is
   // similar to ThrowDataCloneError() except that it formats the error message itself, and it
@@ -229,6 +242,14 @@ public:
   // returns the exact amount; throws if not possible.
   kj::ArrayPtr<const kj::byte> readRawBytes(size_t size);
 
+  // Reads a size (readRawUint64) followed by that many bytes.
+  kj::ArrayPtr<const kj::byte> readLengthDelimitedBytes();
+
+  // Read a string and make a copy. The copy is necessary since the text is not NUL-terminated on
+  // the wire. If you don't need NUL termination, read bytes and use `.asChars()`.
+  kj::String readRawString(size_t size);
+  kj::String readLengthDelimitedString();
+
   inline uint32_t getVersion() const { return deser.GetWireFormatVersion(); }
 
 private:
@@ -244,6 +265,7 @@ private:
 
   kj::Maybe<ExternalHandler&> externalHandler;
 
+  size_t totalInputSize;
   v8::ValueDeserializer deser;
   kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedBackingStores;
 };

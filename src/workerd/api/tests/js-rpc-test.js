@@ -30,6 +30,11 @@ class MyCounter extends RpcTarget {
       })
     ]);
   }
+
+  // Tests that `fetch()` is not special for RpcTargets.
+  async fetch(a, b, c) {
+    return `${this.i} ${a} ${b} ${c}`;
+  }
 }
 
 class NonRpcClass {
@@ -241,7 +246,7 @@ export class MyService extends WorkerEntrypoint {
 
     return {
       count,
-      counter,
+      counter: counter.dup(),  // need to dup() for return
       async incrementOriginal(n) {
         // This will fail because after the call ends, the counter stub is disposed.
         return await counter.increment(n);
@@ -301,6 +306,46 @@ export class MyService extends WorkerEntrypoint {
 
   async roundTrip(value) {
     return value;
+  }
+
+  async returnEmptyHeaders() {
+    return new Headers();
+  }
+
+  async returnHeaders() {
+    let result = new Headers();
+    result.append("foo", "bar");
+    result.append("Set-Cookie", "abc");
+    result.append("set-cookie", "def");
+    result.append("corge", "!@#");
+    result.append("Content-Length", "123");
+    return result;
+  }
+
+  async returnRequest() {
+    return new Request("http://my-url.com", {
+      method: "PUT",
+      headers: {
+        "Accept-Encoding": "bazzip",
+        "Foo": "Bar"
+      },
+      redirect: "manual",
+      body: "Hello every body!",
+      cf: {
+        abc: 123,
+        hello: "goodbye",
+      }
+    });
+  }
+
+  async returnResponse() {
+    return new Response("Response body!", {
+      status: 404,
+      headers: {
+        "Content-Type": "abc"
+      },
+      cf: {foo: 123, bar: "def"},
+    });
   }
 }
 
@@ -598,6 +643,8 @@ export let loopbackJsRpcTarget = {
     assert.strictEqual(await stub.increment(5), 9);
     assert.strictEqual(await stub.increment(7), 16);
 
+    assert.strictEqual(await stub.fetch(true, 123, "baz"), "16 true 123 baz");
+
     assert.strictEqual(counter.disposed, false);
     stub[Symbol.dispose]();
 
@@ -614,8 +661,16 @@ export let loopbackJsRpcTarget = {
 export let sendStubOverRpc = {
   async test(controller, env, ctx) {
     let stub = new RpcStub(new MyCounter(4));
+    let stubDup = stub.dup();
+
     assert.strictEqual(await env.MyService.incrementCounter(stub, 5), 9);
-    assert.strictEqual(await stub.increment(7), 16);
+
+    await assert.rejects(() => stub.increment(7), {
+      name: "Error",
+      message: "RPC stub used after being disposed."
+    });
+
+    assert.strictEqual(await stubDup.increment(7), 16);
   },
 }
 
@@ -1027,6 +1082,68 @@ export let streams = {
       await writer.close();
 
       assert.strictEqual(await readPromise, "foo, bar, baz!");
+    }
+  }
+}
+
+export let serializeHttpTypes = {
+  async test(controller, env, ctx) {
+    {
+      let headers = await env.MyService.returnEmptyHeaders();
+      assert.deepEqual([...headers], []);
+    }
+
+    {
+      let headers = await env.MyService.returnHeaders();
+      assert.strictEqual(headers instanceof Headers, true);
+
+      // Awkwardly, there's actually no API to get the non-lowercased header names.
+      assert.deepEqual([...headers], [
+        ["content-length", "123"],
+        ["corge", "!@#"],
+        ["foo", "bar"],
+        ["set-cookie", "abc"],
+        ["set-cookie", "def"],
+      ]);
+
+      assert.deepEqual(headers.getSetCookie(), ["abc", "def"]);
+    }
+
+    {
+      let req = await env.MyService.returnRequest();
+
+      assert.strictEqual(req.url, "http://my-url.com");
+      assert.strictEqual(req.method, "PUT");
+      assert.strictEqual(req.headers.get("Accept-Encoding"), "bazzip");
+      assert.strictEqual(req.headers.get("Foo"), "Bar");
+      assert.strictEqual(req.redirect, "manual");
+
+      assert.strictEqual(await req.text(), "Hello every body!");
+
+      assert.deepEqual(req.cf, {
+        abc: 123,
+        hello: "goodbye",
+      });
+    }
+
+    // Check that a Request with an AbortSignal can't be sent. (We should fix this someday, by
+    // making AbortSignal itself RPC-compatible.)
+    await assert.rejects(env.MyService.roundTrip(
+        new Request("http://foo", {signal: AbortSignal.timeout(100)})), {
+      name: "DataCloneError",
+      message: 'Could not serialize object of type "AbortSignal". This type does not support ' +
+               'serialization.'
+    });
+
+    {
+      let req = await env.MyService.returnResponse();
+
+      assert.strictEqual(req.status, 404);
+      assert.strictEqual(req.statusText, "Not Found");
+      assert.strictEqual(req.headers.get("Content-Type"), "abc");
+      assert.deepEqual(req.cf, {foo: 123, bar: "def"});
+
+      assert.strictEqual(await req.text(), "Response body!");
     }
   }
 }

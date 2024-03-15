@@ -28,6 +28,8 @@ public:
             kj::Maybe<v8::Local<v8::Object>> creator, Struct& in, v8::Local<v8::Object> out) {
     if constexpr (kj::isSameType<T, SelfRef>()) {
       // Ignore SelfRef when converting to JS.
+    } else if constexpr (kj::isSameType<T, Unimplemented>() || kj::isSameType<T, WontImplement>()) {
+      // Fields with these types are required NOT to be present, so don't try to convert them.
     } else {
       if constexpr (webidl::isOptional<Type>) {
         // Don't even set optional fields that aren't present.

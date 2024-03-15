@@ -770,7 +770,7 @@ rpc::JsRpcTarget::Client JsRpcStub::getClient() {
   KJ_IF_SOME(c, capnpClient) {
     return *c;
   } else {
-    // TODO(now): Improve the error message to describe why it was disposed.
+    // TODO(soon): Improve the error message to describe why it was disposed.
     return JSG_KJ_EXCEPTION(FAILED, Error, "RPC stub used after being disposed.");
   }
 }
@@ -830,6 +830,10 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   externalHandler->write([cap = getClient()](rpc::JsValue::External::Builder builder) mutable {
     builder.setRpcTarget(kj::mv(cap));
   });
+
+  // Sending a stub over RPC implicitly disposes the stub. The application can explicitly .dup() it
+  // if this is undesired.
+  dispose();
 }
 
 jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
@@ -1108,22 +1112,8 @@ protected:
   kj::Own<IoContext::WeakRef> weakIoContext;
 
 private:
-  // The following names are reserved by the Workers Runtime and cannot be called over RPC.
-  static bool isReservedName(kj::StringPtr name) {
-    if (name == "fetch" ||
-        name == "connect" ||
-        name == "alarm" ||
-        name == "webSocketMessage" ||
-        name == "webSocketClose" ||
-        name == "webSocketError" ||
-        name == "dup" ||
-        // All JS classes define a method `constructor` on the prototype, but we don't actually
-        // want this to be callable over RPC!
-        name == "constructor") {
-      return true;
-    }
-    return false;
-  }
+  // Returns true if the given name cannot be used as a method on this type.
+  virtual bool isReservedName(kj::StringPtr name) = 0;
 
   struct GetPropResult {
     v8::Local<v8::Value> handle;
@@ -1138,7 +1128,7 @@ private:
         kj::str("The RPC receiver does not implement the method \"", kjName, "\"."));
   }
 
-  static GetPropResult tryGetProperty(
+  GetPropResult tryGetProperty(
       jsg::Lock& js,
       jsg::JsObject object,
       rpc::JsRpcTarget::CallParams::Reader callParams,
@@ -1415,7 +1405,7 @@ public:
     }
   }
 
-  TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) {
+  TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
     return {
       .target = object.getHandle(lock),
       .envCtx = kj::none,
@@ -1436,6 +1426,18 @@ private:
   // Note that it's OK if we hold this past the lifetime of the IoContext itself; the PendingEvent
   // becomes detached in that case and has no effect.
   kj::Own<void> pendingEvent;
+
+  bool isReservedName(kj::StringPtr name) override {
+    if (// dup() is reserved to duplicate the stub itself, pointing to the same object.
+        name == "dup" ||
+
+        // All JS classes define a method `constructor` on the prototype, but we don't actually
+        // want this to be callable over RPC!
+        name == "constructor") {
+      return true;
+    }
+    return false;
+  }
 };
 
 // See comment at call site for explanation.
@@ -1544,7 +1546,7 @@ public:
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })) {}
 
-  TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) {
+  TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
     jsg::Lock& js = lock;
 
     auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ioCtx.getActor()),
@@ -1583,6 +1585,29 @@ public:
 
 private:
   kj::Maybe<kj::String> entrypointName;
+
+  bool isReservedName(kj::StringPtr name) override {
+    if (// "fetch" and "connect" are treated specially on entrypoints.
+        name == "fetch" ||
+        name == "connect" ||
+
+        // These methods are reserved by the Durable Objects implementation.
+        // TODO(someday): Should they be reserved only for Durable Objects, not WorkerEntrypoint?
+        name == "alarm" ||
+        name == "webSocketMessage" ||
+        name == "webSocketClose" ||
+        name == "webSocketError" ||
+
+        // dup() is reserved to duplicate the stub itself, pointing to the same object.
+        name == "dup" ||
+
+        // All JS classes define a method `constructor` on the prototype, but we don't actually
+        // want this to be callable over RPC!
+        name == "constructor") {
+      return true;
+    }
+    return false;
+  }
 };
 
 // A membrane which wraps the top-level JsRpcTarget of an RPC session on the server side. The

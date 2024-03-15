@@ -21,6 +21,7 @@
 #include <workerd/jsg/url.h>
 #include <workerd/io/io-context.h>
 #include <set>
+#include <capnp/compat/http-over-capnp.capnp.h>
 
 namespace workerd::api {
 
@@ -415,6 +416,153 @@ void Headers::forEach(
 
 bool Headers::inspectImmutable() {
   return guard != Guard::NONE;
+}
+
+// -----------------------------------------------------------------------------
+// serialization of headers
+//
+// http-over-capnp.capnp has a nice list of common header names, taken from the HTTP/2 standard.
+// We'll use it as an optimization.
+//
+// Note that using numeric IDs for headers implies we lose the original capitalization. However,
+// the JS Headers API doesn't actually give the application any way to observe the capitalization
+// of header names -- it only becomes relevant when serializing over HTTP/1.1. And at that point,
+// we are actually free to change the capitalization anyway, and we commonly do (KJ itself will
+// normalize capitalization of all registered headers, and http-over-capnp also loses
+// capitalization). So, it's certainly not worth it to try to keep the original capitalization
+// across serialization.
+
+// If any more headers are added to the CommonHeaderName enum later, we should be careful about
+// introducing them into serialization. We need to roll out a change that recognizes the new IDs
+// before rolling out a change that sends them. MAX_COMMON_HEADER_ID is the max value we're willing
+// to send.
+static constexpr uint MAX_COMMON_HEADER_ID =
+    static_cast<uint>(capnp::CommonHeaderName::WWW_AUTHENTICATE);
+
+// ID for the `$commonText` annotation declared in http-over-capnp.capnp.
+// TODO(cleanup): Cap'n Proto should really codegen constants for annotation IDs so we don't have
+//   to copy them.
+static constexpr uint64_t COMMON_TEXT_ANNOTATION_ID = 0x857745131db6fc83;
+
+static kj::Array<kj::StringPtr> makeCommonHeaderList() {
+  auto enums = capnp::Schema::from<capnp::CommonHeaderName>().getEnumerants();
+  auto builder = kj::heapArrayBuilder<kj::StringPtr>(enums.size());
+  bool first = true;
+  for (auto e: enums) {
+    if (first) {
+      // Value zero is invalid, skip it.
+      static_assert(static_cast<uint>(capnp::CommonHeaderName::INVALID) == 0);
+
+      // Add `nullptr` to the array so that our array indexes aren't off-by-one from the enum
+      // values. We could in theory skip this and use +1 and -1 in a bunch of places but that seems
+      // error-prone.
+      builder.add(nullptr);
+
+      first = false;
+      continue;
+    }
+
+    kj::Maybe<kj::StringPtr> name;
+
+    // Look for $commonText annotation.
+    for (auto ann: e.getProto().getAnnotations()) {
+      if (ann.getId() == COMMON_TEXT_ANNOTATION_ID) {
+        name = ann.getValue().getText();
+        break;
+      }
+    }
+
+    builder.add(KJ_ASSERT_NONNULL(name));
+  }
+
+  return builder.finish();
+}
+
+static kj::ArrayPtr<const kj::StringPtr> getCommonHeaderList() {
+  static const kj::Array<kj::StringPtr> LIST = makeCommonHeaderList();
+  return LIST;
+}
+
+static kj::HashMap<kj::String, uint> makeCommonHeaderMap() {
+  kj::HashMap<kj::String, uint> result;
+  auto list = getCommonHeaderList();
+  KJ_ASSERT(MAX_COMMON_HEADER_ID < list.size());
+  for (auto i: kj::range(1, MAX_COMMON_HEADER_ID + 1)) {
+    auto key = kj::str(list[i]);
+    for (auto& c: key) {
+      if ('A' <= c && c <= 'Z') {
+        c = c - 'A' + 'a';
+      }
+    }
+    result.insert(kj::mv(key), i);
+  }
+  return result;
+}
+
+static const kj::HashMap<kj::String, uint>& getCommonHeaderMap() {
+  static const kj::HashMap<kj::String, uint> MAP = makeCommonHeaderMap();
+  return MAP;
+}
+
+void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // We serialize as a series of key-value pairs. Each value is a length-delimited string. Each key
+  // is a common header ID, or the value zero to indicate an uncommon header, which is then
+  // followed by a length-delimited name.
+
+  serializer.writeRawUint32(static_cast<uint>(guard));
+
+  // Write the count of headers.
+  uint count = 0;
+  for (auto& entry: headers) {
+    count += entry.second.values.size();
+  }
+  serializer.writeRawUint32(count);
+
+  // Now write key/values.
+  auto& commonHeaders = getCommonHeaderMap();
+  for (auto& entry: headers) {
+    auto& header = entry.second;
+    auto commonId = commonHeaders.find(header.key);
+    for (auto& value: header.values) {
+      KJ_IF_SOME(c, commonId) {
+        serializer.writeRawUint32(c);
+      } else {
+        serializer.writeRawUint32(0);
+        serializer.writeLengthDelimited(header.name);
+      }
+      serializer.writeLengthDelimited(value);
+    }
+  }
+}
+
+jsg::Ref<Headers> Headers::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto result = jsg::alloc<Headers>();
+  uint guard = deserializer.readRawUint32();
+  KJ_REQUIRE(guard <= static_cast<uint>(Guard::NONE), "unknown guard value");
+
+  uint count = deserializer.readRawUint32();
+
+  auto commonHeaders = getCommonHeaderList();
+  for (auto i KJ_UNUSED: kj::zeroTo(count)) {
+    uint commonId = deserializer.readRawUint32();
+    kj::String name;
+    if (commonId == 0) {
+      name = deserializer.readLengthDelimitedString();
+    } else {
+      KJ_ASSERT(commonId < commonHeaders.size());
+      name = kj::str(commonHeaders[commonId]);
+    }
+
+    auto value = deserializer.readLengthDelimitedString();
+
+    result->append(jsg::ByteString(kj::mv(name)), jsg::ByteString(kj::mv(value)));
+  }
+
+  // Don't actually set the guard until here because it may block the ability to call `append()`.
+  result->guard = static_cast<Guard>(guard);
+
+  return result;
 }
 
 // =======================================================================================
@@ -989,6 +1137,64 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   return cf.serialize(js);
 }
 
+void Request::serialize(
+    jsg::Lock& js, jsg::Serializer& serializer,
+    const jsg::TypeHandler<RequestInitializerDict>& initDictHandler) {
+  serializer.writeLengthDelimited(url);
+
+  // Our strategy is to construct an initializer dict object and serialize that as a JS object.
+  // This makes the deserialization end really simple (just call the constructor), and it also
+  // gives us extensibility: we can add new fields without having to bump the serialization tag.
+  serializer.write(js, jsg::JsValue(initDictHandler.wrap(js, RequestInitializerDict {
+    // GET is the default, so only serialize the method if it's something else.
+    .method = method == kj::HttpMethod::GET ? jsg::Optional<kj::String>() : kj::str(method),
+
+    .headers = headers.addRef(),
+
+    .body = getBody().map([](jsg::Ref<ReadableStream> stream) -> Body::Initializer {
+      // jsg::Ref<ReadableStream> is one of the possible variants of Body::Initializer.
+      return kj::mv(stream);
+    }),
+
+    // "manual" is the default for `redirect`, so only encode if it's not that.
+    .redirect = redirect == Redirect::MANUAL
+        ? kj::str(getRedirect()) : kj::Maybe<kj::String>(kj::none),
+
+    // We have to ignore .fetcher for serialization. We can't simply fail if a fetcher is present
+    // because requests received by the top-level fetch handler actually have .fetcher set to
+    // the hidden "next" binding, which historically could be different from null (although in
+    // practice these days it is always the same). We obviously want to be able to serialize
+    // requests received by the top-level fetch handler so... we have to ignore this. This
+    // property should probably go away in any case.
+
+    .cf = cf.getRef(js),
+
+    // .mode is unimplemented
+    // .credentials is unimplemented
+    // .cache is unimplemented
+    // .referrer is unimplemented
+    // .referrerPolicy is unimplemented
+    // .integrity is required to be empty
+
+    // If an AbortSignal is present, we'll try to serialize it. As of this writing, AbortSignal
+    // is not serializable, but we could add support for sending it over RPC in the future.
+    //
+    // Note we have to double-Maybe this, so that if no signal is present, the property is absent
+    // instead of `null`.
+    .signal = signal.map([](jsg::Ref<AbortSignal>& s) -> kj::Maybe<jsg::Ref<AbortSignal>> {
+      return s.addRef();
+    })
+  })));
+}
+
+jsg::Ref<Request> Request::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<RequestInitializerDict>& initDictHandler) {
+  auto url = deserializer.readLengthDelimitedString();
+  auto init = KJ_ASSERT_NONNULL(initDictHandler.tryUnwrap(js, deserializer.readValue(js)));
+  return Request::constructor(js, kj::mv(url), kj::mv(init));
+}
+
 // =======================================================================================
 
 Response::Response(
@@ -1007,6 +1213,9 @@ Response::Response(
       bodyEncoding(bodyEncoding),
       hasEnabledWebSocketCompression(FeatureFlags::get(js).getWebSocketCompression()),
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
+
+// Defined later in this file.
+static kj::StringPtr defaultStatusText(uint statusCode);
 
 jsg::Ref<Response> Response::constructor(
     jsg::Lock& js,
@@ -1096,23 +1305,7 @@ jsg::Ref<Response> Response::constructor(
       }
     }
   } else {
-    KJ_IF_SOME(st, defaultStatusText(statusCode)) {
-      statusText = kj::str(st);
-    } else {
-      // If we don't recognize the status code, check which range it falls into and use the status
-      // code class defined by RFC 7231, section 6, as the status text.
-      if (statusCode >= 200 && statusCode < 300) {
-        statusText = kj::str("Successful");
-      } else if (statusCode >= 300 && statusCode < 400) {
-        statusText = kj::str("Redirection");
-      } else if (statusCode >= 400 && statusCode < 500) {
-        statusText = kj::str("Client Error");
-      } else if (statusCode >= 500 && statusCode < 600) {
-        statusText = kj::str("Server Error");
-      } else {
-        KJ_UNREACHABLE;
-      }
-    }
+    statusText = kj::str(defaultStatusText(statusCode));
   }
 
   KJ_IF_SOME(bi, bodyInit) {
@@ -1187,7 +1380,7 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
   kjHeaders.set(kj::HttpHeaderId::LOCATION, kj::mv(parsedUrl));
   auto headers = jsg::alloc<Headers>(kjHeaders, Headers::Guard::IMMUTABLE);
 
-  auto statusText = KJ_ASSERT_NONNULL(defaultStatusText(statusCode));
+  auto statusText = defaultStatusText(statusCode);
 
   return jsg::alloc<Response>(js, statusCode, kj::str(statusText), kj::mv(headers), nullptr,
                               nullptr);
@@ -1388,6 +1581,43 @@ kj::Maybe<jsg::Ref<WebSocket>> Response::getWebSocket(jsg::Lock& js) {
 
 jsg::Optional<jsg::JsObject> Response::getCf(jsg::Lock& js) {
   return cf.get(js);
+}
+
+void Response::serialize(
+    jsg::Lock& js, jsg::Serializer& serializer,
+    const jsg::TypeHandler<InitializerDict>& initDictHandler,
+    const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
+  serializer.write(js, jsg::JsValue(streamHandler.wrap(js, getBody())));
+
+  // As with Request, we serialize the initializer dict as a JS object.
+  serializer.write(js, jsg::JsValue(initDictHandler.wrap(js, InitializerDict {
+    .status = statusCode == 200 ? jsg::Optional<int>() : statusCode,
+    .statusText = statusText == defaultStatusText(statusCode)
+        ? jsg::Optional<kj::String>() : kj::str(statusText),
+    .headers = headers.addRef(),
+    .cf = cf.getRef(js),
+
+    // If a WebSocket is present, we'll try to serialize it. As of this writing, WebSocket
+    // is not serializable, but we could add support for sending it over RPC in the future.
+    //
+    // Note we have to double-Maybe this, so that if no signal is present, the property is absent
+    // instead of `null`.
+    .webSocket = webSocket.map([](jsg::Ref<WebSocket>& s) -> kj::Maybe<jsg::Ref<WebSocket>> {
+      return s.addRef();
+    }),
+
+    .encodeBody = bodyEncoding == BodyEncoding::AUTO
+        ? jsg::Optional<kj::String>() : kj::str("manual"),
+  })));
+}
+
+jsg::Ref<Response> Response::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<InitializerDict>& initDictHandler,
+    const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
+  auto body = KJ_ASSERT_NONNULL(streamHandler.tryUnwrap(js, deserializer.readValue(js)));
+  auto init = KJ_ASSERT_NONNULL(initDictHandler.tryUnwrap(js, deserializer.readValue(js)));
+  return Response::constructor(js, kj::mv(body), kj::mv(init));
 }
 
 // =======================================================================================
@@ -2171,10 +2401,10 @@ kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
   }
 }
 
-kj::Maybe<kj::StringPtr> defaultStatusText(uint statusCode) {
+static kj::StringPtr defaultStatusText(uint statusCode) {
   // RFC 7231 recommendations, unless otherwise specified.
   // https://tools.ietf.org/html/rfc7231#section-6.1
-#define STATUS(code, text) case code: return kj::StringPtr(text)
+#define STATUS(code, text) case code: return text##_kj
   switch (statusCode) {
     STATUS(100, "Continue");
     STATUS(101, "Switching Protocols");
@@ -2237,7 +2467,20 @@ kj::Maybe<kj::StringPtr> defaultStatusText(uint statusCode) {
     STATUS(508, "Loop Detected");                   // RFC 5842, WebDAV
     STATUS(510, "Not Extended");                    // RFC 2774
     STATUS(511, "Network Authentication Required"); // RFC 6585
-    default:  return kj::none;
+    default:
+      // If we don't recognize the status code, check which range it falls into and use the status
+      // code class defined by RFC 7231, section 6, as the status text.
+      if (statusCode >= 200 && statusCode < 300) {
+        return "Successful"_kj;
+      } else if (statusCode >= 300 && statusCode < 400) {
+        return "Redirection"_kj;
+      } else if (statusCode >= 400 && statusCode < 500) {
+        return "Client Error"_kj;
+      } else if (statusCode >= 500 && statusCode < 600) {
+        return "Server Error"_kj;
+      } else {
+        KJ_UNREACHABLE;
+      }
   }
 #undef STATUS
 }
