@@ -41,6 +41,12 @@ capnp_embed(
     deps = ["pyodide_extra_capnp_file"],
 )
 
+capnp_embed(
+    name = "pyodide_lock_file_embed",
+    src = "generated/pyodide-lock.json",
+    deps = ["pyodide-lock.js@rule"],
+)
+
 cc_capnp_library(
     name = "pyodide_extra_capnp",
     srcs = ["generated/pyodide_extra.capnp"],
@@ -48,7 +54,8 @@ cc_capnp_library(
     deps = [
         ":pyodide_extra_file_embed",
         ":pyodide_packages_archive_embed",
-        ":python_entrypoint_file_embed"
+        ":python_entrypoint_file_embed",
+        ":pyodide_lock_file_embed"
     ],
 )
 

@@ -22,6 +22,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/supported-compatibility-date.capnp.h>
 #include <workerd/util/autogate.h>
+#include <pyodide/generated/pyodide_extra.capnp.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
@@ -669,6 +670,8 @@ public:
               "create a self-contained binary")
           .addSubCommand("test", KJ_BIND_METHOD(*this, getTest),
               "run unit tests")
+          .addSubCommand("pyodide-lock", KJ_BIND_METHOD(*this, getPyodideLock),
+              "outputs the package lock file used by Pyodide")
           .build();
       // TODO(someday):
       // "validate": Loads the config and parses all the code to report errors, but then exits
@@ -746,6 +749,16 @@ public:
           "Serve requests based on a config.",
           "Serves requests based on the configuration specified in <config-file>.");
     return addServeOptions(addConfigParsingOptions(builder));
+  }
+
+  kj::MainFunc getPyodideLock() {
+    auto builder = kj::MainBuilder(context, getVersionString(),
+      "Outputs the package lock file used by Pyodide.");
+    return builder.callAfterParsing([] () -> kj::MainBuilder::Validity {
+      printf("%s\n", PYODIDE_LOCK->cStr());
+      fflush(stdout);
+      return true;
+    }).build();
   }
 
   kj::MainFunc getTest() {
