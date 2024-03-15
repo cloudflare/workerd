@@ -61,6 +61,7 @@ http_archive(
     patches = [
         "//:patches/sqlite/0001-row-counts-plain.patch",
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
+        "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
     ],
     sha256 = "ab9aae38a11b931f35d8d1c6d62826d215579892e6ffbf89f20bdce106a9c8c5",
     strip_prefix = "sqlite-src-3440000",

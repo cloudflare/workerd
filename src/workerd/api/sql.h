@@ -24,14 +24,21 @@ public:
   class Statement;
 
   jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
+  kj::String ingest(jsg::Lock& js, kj::String query);
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
   double getDatabaseSize();
 
-  JSG_RESOURCE_TYPE(SqlStorage) {
+  JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
     JSG_METHOD(prepare);
+
+    // Make sure that the 'ingest' function is still experimental-only if and when
+    // the SQL API becomes publicly available.
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(ingest);
+    }
 
     JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);
 

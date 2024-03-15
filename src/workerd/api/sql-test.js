@@ -60,6 +60,91 @@ async function test(storage) {
     assert.equal(result[2]['value'], 3)
   }
 
+
+  // Test partial query ingestion
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;    `), '    ')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;`), '')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456`), ' SELECT 456')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 45`), ' SELECT 45')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 4`), ' SELECT 4')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT `), ' SELECT ')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT`), ' SELECT')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELEC`), ' SELEC')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELE`), ' SELE')
+  assert.deepEqual(sql.ingest(`SELECT 123; SEL`), ' SEL')
+  assert.deepEqual(sql.ingest(`SELECT 123; SE`), ' SE')
+  assert.deepEqual(sql.ingest(`SELECT 123; S`), ' S')
+  assert.deepEqual(sql.ingest(`SELECT 123; `), ' ')
+  assert.deepEqual(sql.ingest(`SELECT 123;`), '')
+  assert.deepEqual(sql.ingest(`SELECT 123`), 'SELECT 123')
+  assert.deepEqual(sql.ingest(`SELECT 12`), 'SELECT 12')
+  assert.deepEqual(sql.ingest(`SELECT 1`), 'SELECT 1')
+
+  // Exec throws with trailing comments
+  assert.throws(
+    () => sql.exec('SELECT 123; SELECT 456; -- trailing comment'),
+    /SQL code did not contain a statement/
+  )
+  // Ingest does not
+  assert.deepEqual(
+    sql.ingest(`SELECT 123; SELECT 456; -- trailing comment`),
+    ' -- trailing comment'
+  )
+
+  // Ingest throws if statement looks "complete" but is actually a syntax error:
+  assert.throws(() => sql.ingest(`SELECT * bunk;`), /Error: near "bunk": syntax error at offset/)
+  assert.throws(() => sql.ingest(`INSER INTO xyz VALUES ('a'),('b');`), /Error: near "INSER": syntax error/)
+  assert.throws(() => sql.ingest(`INSERT INTO xyz VALUES ('a')('b');`), /Error: near "\(": syntax error/)
+
+  // Test execution of ingested queries by taking an input of 6 INSERT statements, that all
+  // add 6 rows of data, then splitting that into a bunch of chunks, then ingesting them all
+  {
+    sql.exec(`CREATE TABLE streaming(val TEXT);`)
+
+    // Convert to binary otherwise .split can cause corruption for multi-byte chars
+    const inputBytes = new TextEncoder().encode(INSERT_36_ROWS)
+    const decoder = new TextDecoder()
+
+    // Use a chunk size 1, 3, 9, 27, 81, ... bytes
+    for (let length = 1; length < inputBytes.length; length = length * 3) {
+      let buffer = ''
+      for (let offset = 0; offset < inputBytes.length; offset += length) {
+        // Simulate a single "chunk" arriving
+        const chunk = inputBytes.slice(offset, offset + length)
+
+        // Append the new chunk to the existing buffer
+        buffer += decoder.decode(chunk, { stream: true })
+
+        // Ingest any complete statements and snip those chars off the buffer
+        buffer = sql.ingest(buffer)
+
+        // Simulate awaiting next chunk
+        await scheduler.wait(1)
+      }
+
+      // Verify exactly 36 rows were added
+      assert.deepEqual(Array.from(sql.exec(`SELECT count(*) FROM streaming`)), [
+        { 'count(*)': 36 },
+      ])
+
+      // Ensure our precious emoji were preserved, even if their bytes occur across split points
+      assert.deepEqual(
+        Array.from(sql.exec(`SELECT * FROM streaming WHERE val LIKE 'f%'`)),
+        [
+          { val: 'f: 😳' },
+          { val: 'f: 🫠' },
+          { val: 'f: 🙃' },
+          { val: 'f: 🤡' },
+          { val: 'f: 🥺' },
+          { val: 'f: 🔥😎🔥' },
+        ]
+      )
+      sql.exec(`DELETE FROM streaming`)
+      await scheduler.wait(1)
+    }
+    sql.exec(`DROP TABLE streaming;`)
+  }
+
   // Test count
   {
     const result = [
@@ -931,6 +1016,40 @@ async function testForeignKeys(storage) {
   }
 }
 
+async function testStreamingIngestion(request, storage) {
+  const { sql } = storage
+
+  sql.exec(`CREATE TABLE streaming(val TEXT);`)
+
+  await storage.transaction(async () => {
+    const stream = request.body.pipeThrough(new TextDecoderStream())
+    let buffer = ''
+
+    for await (const chunk of stream) {
+      // Append the new chunk to the existing buffer
+      buffer += chunk
+
+      // Ingest any complete statements and snip those chars off the buffer
+      buffer = sql.ingest(buffer)
+    }
+  })
+  // Verify exactly 36 rows were added
+  assert.deepEqual(Array.from(sql.exec(`SELECT count(*) FROM streaming`)), [
+    { 'count(*)': 36 },
+  ])
+  assert.deepEqual(
+    Array.from(sql.exec(`SELECT * FROM streaming WHERE val LIKE 'f%'`)),
+    [
+      { val: 'f: 😳' },
+      { val: 'f: 🫠' },
+      { val: 'f: 🙃' },
+      { val: 'f: 🤡' },
+      { val: 'f: 🥺' },
+      { val: 'f: 🔥😎🔥' },
+    ]
+  )
+}
+
 export class DurableObjectExample {
   constructor(state, env) {
     this.state = state
@@ -960,6 +1079,9 @@ export class DurableObjectExample {
     } else if (req.url.endsWith('/sql-test-io-stats')) {
       await testIoStats(this.state.storage)
       return Response.json({ ok: true })
+    } else if (req.url.endsWith('/streaming-ingestion')) {
+      await testStreamingIngestion(req, this.state.storage)
+      return Response.json({ ok: true })
     }
 
     throw new Error('unknown url: ' + req.url)
@@ -972,8 +1094,8 @@ export default {
     let obj = env.ns.get(id)
 
     // Now let's test persistence through breakage and atomic write coalescing.
-    let doReq = async (path) => {
-      let resp = await obj.fetch('http://foo/' + path)
+    let doReq = async (path, init = {}) => {
+      let resp = await obj.fetch('http://foo/' + path, init)
       return await resp.json()
     }
 
@@ -982,6 +1104,35 @@ export default {
 
     // Test SQL IO stats
     assert.deepEqual(await doReq('sql-test-io-stats'), { ok: true })
+
+    // Test SQL streaming ingestion
+    assert.deepEqual(
+      await doReq('streaming-ingestion', {
+        method: 'POST',
+        body: new ReadableStream({
+          async start(controller) {
+            const data = new TextEncoder().encode(INSERT_36_ROWS)
+
+            // Pick a value for chunkSize that splits the first emoji in half
+            const chunkSize = INSERT_36_ROWS.indexOf('😳') + 1
+            assert.equal(chunkSize, 35) // Validate we're getting the value we expect
+
+            // Send each chunk with a wait of 1ms in between
+            for (
+              let offset = 0;
+              offset < data.length - 1;
+              offset += chunkSize
+            ) {
+              controller.enqueue(data.slice(offset, offset + chunkSize))
+              await scheduler.wait(1)
+            }
+
+            controller.close()
+          },
+        }),
+      }),
+      { ok: true }
+    )
 
     // Test defer_foreign_keys (explodes the DO)
     await assert.rejects(async () => {
@@ -1007,3 +1158,12 @@ export default {
     assert.equal(await doReq('increment'), 3)
   },
 }
+
+const INSERT_36_ROWS = ['a', 'b', 'c', 'd', 'e', 'f']
+  .map(
+    (prefix) =>
+      `INSERT INTO streaming VALUES ${['😳', '🫠', '🙃', '🤡', '🥺', '🔥😎🔥']
+        .map((suffix) => `('${prefix}: ${suffix}')`)
+        .join(',')};`
+  )
+  .join(' ')

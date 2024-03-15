@@ -446,6 +446,25 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
   }
 }
 
+kj::StringPtr SqliteDatabase::ingestSql(Regulator& regulator, kj::StringPtr sqlCode) {
+  // While there's still some input SQL to process
+  while (sqlCode.begin() != sqlCode.end()) {
+    // And there are still valid statements:
+    auto statementLength = sqlite3_complete_length(sqlCode.begin(), 1);
+    if (!statementLength) break;
+
+    // Slice off the next valid statement SQL
+    auto nextStatement = kj::str(sqlCode.slice(0, statementLength));
+    // Create a Query object, which will prepare & execute it
+    Query(*this, regulator, nextStatement);
+
+    sqlCode = sqlCode.slice(statementLength);
+  }
+
+  // Return the leftover buffer
+  return sqlCode;
+}
+
 bool SqliteDatabase::isAuthorized(int actionCode,
     kj::Maybe<kj::StringPtr> param1, kj::Maybe<kj::StringPtr> param2,
     kj::Maybe<kj::StringPtr> dbName, kj::Maybe<kj::StringPtr> triggerName) {

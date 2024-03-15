@@ -1,0 +1,61 @@
+--- sqlite-src-pristine/src/complete.c	2023-11-01 22:31:37
++++ sqlite-src-modified/src/complete.c	2024-03-14 12:51:32
+@@ -99,14 +99,21 @@
+ **
+ ** If we compile with SQLITE_OMIT_TRIGGER, all of the computation needed
+ ** to recognize the end of a trigger can be omitted.  All we have to do
+ ** is look for a semicolon that is not part of an string or comment.
+ */
+-int sqlite3_complete(const char *zSql){
++int sqlite3_complete(const char *zSql) {
++    return sqlite3_complete_length(zSql, 0) != 0;
++}
++
++int sqlite3_complete_length(const char *zSql, int firstOnly){
+   u8 state = 0;   /* Current state, using numbers defined in header comment */
+   u8 token;       /* Value of the next token */
+
++  /* Store the original pointer for later index calculations */
++  const char *initialZSql = zSql;
++
+ #ifndef SQLITE_OMIT_TRIGGER
+   /* A complex statement machine used to detect the end of a CREATE TRIGGER
+   ** statement.  This is the normal case.
+   */
+   static const u8 trans[8][8] = {
+@@ -254,12 +261,16 @@
+         break;
+       }
+     }
+     state = trans[state][token];
+     zSql++;
++
++    // Once we have found a single complete statement, return its length
++    if (firstOnly && state==1) return zSql - initialZSql;
+   }
+-  return state==1;
++  // Otherwise only return the length if the entire input is valid
++  return state==1 ? zSql - initialZSql : 0;
+ }
+
+ #ifndef SQLITE_OMIT_UTF16
+ /*
+ ** This routine is the same as the sqlite3_complete() routine described
+diff -u5 -r sqlite-src-pristine/src/sqlite.h.in sqlite-src-modified/src/sqlite.h.in
+--- sqlite-src-pristine/src/sqlite.h.in	2023-11-01 22:31:37
++++ sqlite-src-modified/src/sqlite.h.in	2024-03-12 12:48:37
+@@ -2775,10 +2775,14 @@
+ ** UTF-16 string in native byte order.
+ */
+ int sqlite3_complete(const char *sql);
+ int sqlite3_complete16(const void *sql);
+
++// workerd addition: measure the length of the first (or all) complete
++// statements in the input.
++int sqlite3_complete_length(const char *sql, int firstOnly);
++
+ /*
+ ** CAPI3REF: Register A Callback To Handle SQLITE_BUSY Errors
+ ** KEYWORDS: {busy-handler callback} {busy handler}
+ ** METHOD: sqlite3
+ **
