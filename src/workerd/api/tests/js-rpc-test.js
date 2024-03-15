@@ -30,6 +30,11 @@ class MyCounter extends RpcTarget {
       })
     ]);
   }
+
+  // Tests that `fetch()` is not special for RpcTargets.
+  async fetch(a, b, c) {
+    return `${this.i} ${a} ${b} ${c}`;
+  }
 }
 
 class NonRpcClass {
@@ -637,6 +642,8 @@ export let loopbackJsRpcTarget = {
     let stub = new RpcStub(counter);
     assert.strictEqual(await stub.increment(5), 9);
     assert.strictEqual(await stub.increment(7), 16);
+
+    assert.strictEqual(await stub.fetch(true, 123, "baz"), "16 true 123 baz");
 
     assert.strictEqual(counter.disposed, false);
     stub[Symbol.dispose]();
