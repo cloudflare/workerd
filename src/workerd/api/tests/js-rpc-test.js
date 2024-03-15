@@ -1056,27 +1056,3 @@ export let canUseGetPutDelete = {
     assert.strictEqual(await env.MyService.delete(3), 2);
   }
 }
-
-function withRealSocket(inner) {
-  return {
-    async test(controller, env, ctx) {
-      let subEnv = {...env};
-      subEnv.MyService = subEnv.MyServiceOverRealSocket;
-      await inner.test(controller, subEnv, ctx);
-    }
-  }
-}
-
-// Export versions of various tests above using MyService over a real socket. We only bother
-// with thests that use MyService. The `z_` prefix makes these tests run last.
-export let z_namedServiceBinding_realSocket = withRealSocket(namedServiceBinding);
-export let z_sendStubOverRpc_realSocket = withRealSocket(sendStubOverRpc);
-export let z_receiveStubOverRpc_realSocket = withRealSocket(receiveStubOverRpc);
-export let z_promisePipelining_realSocket = withRealSocket(promisePipelining);
-export let z_disposal_realSocket = withRealSocket(disposal);
-export let z_crossContextSharingDoesntWork_realSocket = withRealSocket(crossContextSharingDoesntWork);
-export let z_serializeRpcPromiseOrProprety_realSocket = withRealSocket(serializeRpcPromiseOrProprety);
-export let z_streams_realSocket = withRealSocket(streams);
-export let z_testAsyncStackTrace_realSocket = withRealSocket(testAsyncStackTrace);
-export let z_canUseGetPutDelete_realSocket = withRealSocket(canUseGetPutDelete);
-

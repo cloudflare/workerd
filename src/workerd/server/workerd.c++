@@ -784,6 +784,9 @@ public:
           "      }\n"
           "    }\n");
     return addServeOrTestOptions(addConfigParsingOptionsNoConstName(builder))
+        .addOption({"no-verbose"}, [this]() { noVerbose = true; return true; },
+            "Disable INFO-level logging for this test. Otherwise, INFO logging is enalbed by "
+            "default for tests in order to show uncaught exceptions, but it can be noisey.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
         .callAfterParsing(CLI_METHOD(test))
         .build();
@@ -1206,9 +1209,11 @@ public:
   }
 
   [[noreturn]] void test() noexcept {
-    // Always turn on info logging when running tests so that uncaught exceptions are displayed.
-    // TODO(beta): This can be removed once we improve our error logging story.
-    kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+    if (!noVerbose) {
+      // Always turn on info logging when running tests so that uncaught exceptions are displayed.
+      // TODO(beta): This can be removed once we improve our error logging story.
+      kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+    }
 
     // Enable loopback sockets in tests only.
     network.enableLoopback();
@@ -1272,6 +1277,7 @@ private:
 
   bool binaryConfig = false;
   bool configOnly = false;
+  bool noVerbose = false;
   kj::Maybe<FileWatcher> watcher;
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();

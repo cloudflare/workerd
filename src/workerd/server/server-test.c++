@@ -3480,49 +3480,49 @@ KJ_TEST("Server: cache name is passed through to service") {
 
   {
     TestServer test(config);
-    KJ_EXPECT_LOG(INFO, "[ TEST ] hello");
-    KJ_EXPECT_LOG(INFO, "[ PASS ] hello");
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello");
+    KJ_EXPECT_LOG(DBG, "[ PASS ] hello");
     KJ_EXPECT(test.server.test(v8System, *test.config, "hello", "default").wait(test.ws));
   }
 
   {
     TestServer test(config);
-    KJ_EXPECT_LOG(INFO, "[ TEST ] hello:fail");
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello:fail");
     KJ_EXPECT_LOG(INFO, "Error: ded");
-    KJ_EXPECT_LOG(INFO, "[ FAIL ] hello:fail");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:fail");
     KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "fail").wait(test.ws));
   }
 
   {
     TestServer test(config);
-    KJ_EXPECT_LOG(INFO, "[ TEST ] hello");
-    KJ_EXPECT_LOG(INFO, "[ PASS ] hello");
-    KJ_EXPECT_LOG(INFO, "[ TEST ] hello:fail");
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello");
+    KJ_EXPECT_LOG(DBG, "[ PASS ] hello");
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello:fail");
     KJ_EXPECT_LOG(INFO, "Error: ded");
-    KJ_EXPECT_LOG(INFO, "[ FAIL ] hello:fail");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:fail");
     KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "*").wait(test.ws));
   }
 
   {
     TestServer test(config);
-    KJ_EXPECT_LOG(INFO, "[ TEST ] hello");
-    KJ_EXPECT_LOG(INFO, "[ PASS ] hello");
-    KJ_EXPECT_LOG(INFO, "[ TEST ] another");
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello");
+    KJ_EXPECT_LOG(DBG, "[ PASS ] hello");
+    KJ_EXPECT_LOG(DBG, "[ TEST ] another");
     KJ_EXPECT_LOG(INFO, "other test");
-    KJ_EXPECT_LOG(INFO, "[ PASS ] another");
+    KJ_EXPECT_LOG(DBG, "[ PASS ] another");
     KJ_EXPECT(test.server.test(v8System, *test.config, "*", "default").wait(test.ws));
   }
 
   {
     TestServer test(config);
-    KJ_EXPECT_LOG(INFO, "[ TEST ] hello");
-    KJ_EXPECT_LOG(INFO, "[ PASS ] hello");
-    KJ_EXPECT_LOG(INFO, "[ TEST ] hello:fail");
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello");
+    KJ_EXPECT_LOG(DBG, "[ PASS ] hello");
+    KJ_EXPECT_LOG(DBG, "[ TEST ] hello:fail");
     KJ_EXPECT_LOG(INFO, "Error: ded");
-    KJ_EXPECT_LOG(INFO, "[ FAIL ] hello:fail");
-    KJ_EXPECT_LOG(INFO, "[ TEST ] another");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:fail");
+    KJ_EXPECT_LOG(DBG, "[ TEST ] another");
     KJ_EXPECT_LOG(INFO, "other test");
-    KJ_EXPECT_LOG(INFO, "[ PASS ] another");
+    KJ_EXPECT_LOG(DBG, "[ PASS ] another");
     KJ_EXPECT(!test.server.test(v8System, *test.config, "*", "*").wait(test.ws));
   }
 }
