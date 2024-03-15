@@ -163,3 +163,32 @@ export const anyAbort3 = {
     strictEqual(any.reason, 123);
   }
 };
+
+export const onabortPrototypeProperty = {
+  test() {
+    const ac = new AbortController();
+    ok('onabort' in AbortSignal.prototype);
+    strictEqual(ac.signal.onabort, null);
+    delete ac.signal.onabort;
+    ok('onabort' in AbortSignal.prototype);
+    strictEqual(ac.signal.onabort, null);
+    let called = false;
+    ac.signal.onabort = () => {
+      called = true;
+    };
+    ac.abort();
+    ok(called);
+
+    // Setting the value to something other than a function or object
+    // should cause the value to become null.
+    [123, null, 'foo'].forEach((v) => {
+      ac.signal.onabort = () => {};
+      ac.signal.onabort = v;
+      strictEqual(ac.signal.onabort, null);
+    });
+
+    const handler = {};
+    ac.signal.onabort = handler;
+    strictEqual(ac.signal.onabort, handler);
+  }
+};

@@ -496,6 +496,23 @@ AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
     flag(flag),
     reason(kj::mv(maybeReason)) {}
 
+kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
+  return onAbortHandler.map([&](jsg::JsRef<jsg::JsValue>& ref)
+      -> jsg::JsValue { return ref.getHandle(js); });
+}
+
+void AbortSignal::setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler) {
+  // We only want to accept the handler if it's a valid handler... For anything
+  // else, set it to null.
+  KJ_IF_SOME(h, handler) {
+    if (h.isFunction() || h.isObject()) {
+      onAbortHandler = jsg::JsRef(js, h);
+      return;
+    }
+  }
+  onAbortHandler = kj::none;
+}
+
 jsg::JsValue AbortSignal::getReason(jsg::Lock& js) {
   KJ_IF_SOME(r, reason) {
     return r.getHandle(js);
@@ -612,7 +629,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(
 }
 
 void AbortSignal::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(reason);
+  visitor.visit(reason, onAbortHandler);
 }
 
 RefcountedCanceler& AbortSignal::getCanceler() {

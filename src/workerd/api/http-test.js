@@ -129,7 +129,7 @@ export const inspect = {
   keepalive: false,
   integrity: '',
   cf: undefined,
-  signal: AbortSignal { reason: undefined, aborted: false },
+  signal: AbortSignal { onabort: null, reason: undefined, aborted: false },
   fetcher: null,
   redirect: 'follow',
   headers: Headers(1) { 'content-type' => 'text/plain', [immutable]: false },
