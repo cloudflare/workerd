@@ -70,14 +70,18 @@ private:
 };
 
 class RpcStubDisposalGroup;
+class StreamSinkImpl;
 
 // ExternalHandler used when deserializing RPC messages. Deserialization functions which whish to
 // handle RPC specially should use this.
 class RpcDeserializerExternalHander final: public jsg::Deserializer::ExternalHandler {
 public:
+  // The `streamSink` parameter should be provided if a StreamSink already exists, e.g. when
+  // deserializing results. If omitted, it will be constructed on-demand.
   RpcDeserializerExternalHander(capnp::List<rpc::JsValue::External>::Reader externals,
-                                RpcStubDisposalGroup& disposalGroup)
-      : externals(externals), disposalGroup(disposalGroup) {}
+                                RpcStubDisposalGroup& disposalGroup,
+                                kj::Maybe<StreamSinkImpl&> streamSink)
+      : externals(externals), disposalGroup(disposalGroup), streamSink(streamSink) {}
   ~RpcDeserializerExternalHander() noexcept(false);
 
   // Read and return the next external.
@@ -92,8 +96,9 @@ public:
   RpcStubDisposalGroup& getDisposalGroup() { return disposalGroup; }
 
   // Call after serialization is complete to get the StreamSink that should handle streams found
-  // while deserializing. Returns none if there were no streams.
-  kj::Maybe<rpc::JsValue::StreamSink::Client> getStreamSink();
+  // while deserializing. Returns none if there were no streams. This should only be called if
+  // a `streamSink` was NOT passed to the constructor.
+  kj::Maybe<rpc::JsValue::StreamSink::Client> getStreamSink() { return kj::mv(streamSinkCap); }
 
 private:
   capnp::List<rpc::JsValue::External>::Reader externals;
@@ -102,17 +107,8 @@ private:
   kj::UnwindDetector unwindDetector;
   RpcStubDisposalGroup& disposalGroup;
 
-  class StreamSinkImpl final
-      : public rpc::JsValue::StreamSink::Server {
-  public:
-    void setSlot(uint i, capnp::Capability::Client stream);
-    kj::Promise<void> startStream(StartStreamContext context) override;
-
-  private:
-    kj::Vector<kj::Maybe<capnp::Capability::Client>> table;
-  };
-
-  kj::Maybe<kj::Own<StreamSinkImpl>> streamSink;
+  kj::Maybe<StreamSinkImpl&> streamSink;
+  kj::Maybe<rpc::JsValue::StreamSink::Client> streamSinkCap;
 };
 
 // Base class for objects which can be sent over RPC, but doing so actually sends a stub which

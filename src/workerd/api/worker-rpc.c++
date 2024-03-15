@@ -17,6 +17,85 @@ using StreamSinkFulfiller = kj::Own<kj::PromiseFulfiller<rpc::JsValue::StreamSin
 
 }  // namespace
 
+// Implementation of StreamSink RPC interface. The stream sender calls `startStream()` when
+// serializing each stream, and the recipient calls `setSlot()` when deserializing streams to
+// provide the appropriate destination capability. This class is designed to allow these two
+// calls to happen in either order for each slot.
+class StreamSinkImpl final: public rpc::JsValue::StreamSink::Server, public kj::Refcounted {
+public:
+  ~StreamSinkImpl() noexcept(false) {
+    for (auto& slot: table) {
+      KJ_IF_SOME(f, slot.tryGet<StreamFulfiller>()) {
+        f->reject(KJ_EXCEPTION(FAILED, "expected startStream() was never received"));
+      }
+    }
+  }
+
+  void setSlot(uint i, capnp::Capability::Client stream) {
+    if (table.size() <= i) table.resize(i + 1);
+
+    if (table[i] == nullptr) {
+      table[i] = kj::mv(stream);
+    } else KJ_SWITCH_ONEOF(table[i]) {
+      KJ_CASE_ONEOF(stream, capnp::Capability::Client) {
+        KJ_FAIL_REQUIRE("setSlot() tried to set the same slot twice", i);
+      }
+      KJ_CASE_ONEOF(fulfiller, StreamFulfiller) {
+        fulfiller->fulfill(kj::mv(stream));
+        table[i] = Consumed();
+      }
+      KJ_CASE_ONEOF(_, Consumed) {
+        KJ_FAIL_REQUIRE("setSlot() tried to set the same slot twice", i);
+      }
+    }
+  }
+
+  kj::Promise<void> startStream(StartStreamContext context) override {
+    uint i = context.getParams().getExternalIndex();
+
+    if (table.size() <= i) {
+      // guard against ridiculous table allocation
+      JSG_REQUIRE(i < 1024, Error, "Too many streams in one message.");
+      table.resize(i + 1);
+    }
+
+    if (table[i] == nullptr) {
+      auto paf = kj::newPromiseAndFulfiller<capnp::Capability::Client>();
+      table[i] = kj::mv(paf.fulfiller);
+      context.getResults(capnp::MessageSize {4, 1}).setStream(kj::mv(paf.promise));
+    } else KJ_SWITCH_ONEOF(table[i]) {
+      KJ_CASE_ONEOF(stream, capnp::Capability::Client) {
+        context.getResults(capnp::MessageSize {4, 1}).setStream(kj::mv(stream));
+        table[i] = Consumed();
+      }
+      KJ_CASE_ONEOF(fulfiller, StreamFulfiller) {
+        KJ_FAIL_REQUIRE("startStream() tried to start the same stream twice", i);
+      }
+      KJ_CASE_ONEOF(_, Consumed) {
+        KJ_FAIL_REQUIRE("startStream() tried to start the same stream twice", i);
+      }
+    }
+
+    return kj::READY_NOW;
+  }
+
+private:
+  using StreamFulfiller = kj::Own<kj::PromiseFulfiller<capnp::Capability::Client>>;
+  struct Consumed {};
+
+  // Each slot starts out null (uninitialized). It becomes a Capability::Client if setSlot() is
+  // called first, or a StreamFulfiller if startStream() is called first. It becomse `Consumed`
+  // when the other method is called.
+  // HACK: Slots in the table take advantage of the little-known fact that OneOf has a "null"
+  //   value, which is the value a OneOf has when default-initialized. This is useful because we
+  //   don't want to explicitly initialize skipped slots. Maybe<OneOf> would be another option
+  //   here, but would add 8 bytes to every slot just to store a boolean... feels bloated. There
+  //   are only two methods in this class so I think it's OK.
+  using Slot = kj::OneOf<capnp::Capability::Client, StreamFulfiller, Consumed>;
+
+  kj::Vector<Slot> table;
+};
+
 capnp::Capability::Client RpcSerializerExternalHander::writeStream(BuilderCallback callback) {
   rpc::JsValue::StreamSink::Client* streamSinkPtr;
   KJ_IF_SOME(ss, streamSink) {
@@ -60,36 +139,13 @@ rpc::JsValue::External::Reader RpcDeserializerExternalHander::read() {
 
 void RpcDeserializerExternalHander::setLastStream(capnp::Capability::Client stream) {
   KJ_IF_SOME(ss, streamSink) {
-    ss->setSlot(i - 1, kj::mv(stream));
+    ss.setSlot(i - 1, kj::mv(stream));
   } else {
-    streamSink.emplace(kj::heap<StreamSinkImpl>())->setSlot(i - 1, kj::mv(stream));
+    auto ss = kj::refcounted<StreamSinkImpl>();
+    ss->setSlot(i - 1, kj::mv(stream));
+    streamSink = *ss;
+    streamSinkCap = rpc::JsValue::StreamSink::Client(kj::mv(ss));
   }
-}
-
-kj::Maybe<rpc::JsValue::StreamSink::Client> RpcDeserializerExternalHander::getStreamSink() {
-  return kj::mv(streamSink).map(
-      [](auto obj) -> rpc::JsValue::StreamSink::Client { return kj::mv(obj); });
-}
-
-void RpcDeserializerExternalHander::StreamSinkImpl::setSlot(
-    uint i, capnp::Capability::Client stream) {
-  if (table.size() <= i) {
-    table.resize(i + 1);
-  }
-  table[i] = kj::mv(stream);
-}
-
-kj::Promise<void> RpcDeserializerExternalHander::StreamSinkImpl::startStream(
-    StartStreamContext context) {
-  uint i = context.getParams().getExternalIndex();
-  KJ_REQUIRE(i < table.size());
-  context.getResults(capnp::MessageSize {4, 1}).setStream(kj::mv(KJ_REQUIRE_NONNULL(table[i])));
-
-  // We have to drop the table entry here so that we can properly detect when the caller drops the
-  // stream.
-  table[i] = kj::none;
-
-  return kj::READY_NOW;
 }
 
 namespace {
@@ -141,10 +197,11 @@ struct DeserializeResult {
 };
 
 // Call to construct a JS value from an `rpc::JsValue`.
-DeserializeResult deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader) {
+DeserializeResult deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader,
+                                     kj::Maybe<StreamSinkImpl&> streamSink = kj::none) {
   auto disposalGroup = kj::heap<RpcStubDisposalGroup>();
 
-  RpcDeserializerExternalHander externalHandler(reader.getExternals(), *disposalGroup);
+  RpcDeserializerExternalHander externalHandler(reader.getExternals(), *disposalGroup, streamSink);
 
   jsg::Deserializer deserializer(js, reader.getV8Serialized(), kj::none, kj::none,
       jsg::Deserializer::Options {
@@ -164,8 +221,8 @@ DeserializeResult deserializeJsValue(jsg::Lock& js, rpc::JsValue::Reader reader)
 // an object) which disposes all stubs therein.
 jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
                                        rpc::JsRpcTarget::CallResults::Reader callResults,
-                                       StreamSinkFulfiller streamSinkFulfiller) {
-  auto [ value, disposalGroup, streamSink ] = deserializeJsValue(js, callResults.getResult());
+                                       StreamSinkImpl& streamSink) {
+  auto [ value, disposalGroup, _ ] = deserializeJsValue(js, callResults.getResult(), streamSink);
 
   if (callResults.hasCallPipeline()) {
     disposalGroup->setCallPipeline(IoContext::current().addObject(
@@ -188,18 +245,6 @@ jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
   } else {
     // Result wasn't an object, so it must not contain any stubs.
     KJ_ASSERT(disposalGroup->empty());
-  }
-
-  KJ_IF_SOME(ss, streamSink) {
-    streamSinkFulfiller->fulfill(kj::mv(ss));
-  } else {
-    // Since the callee did not return any streams, it should never have attempted to access the
-    // StreamSink, so it should already have been dropped by now, so `isWaiting()` should be false.
-    // Otherwise we'll reject it.
-    if (streamSinkFulfiller->isWaiting()) {
-      streamSinkFulfiller->reject(KJ_EXCEPTION(FAILED,
-          "the results did not contain any streams, so no StreamSink was created"));
-    }
   }
 
   return value;
@@ -476,15 +521,11 @@ JsRpcPromiseAndPipleine callImpl(
 
       StreamSinkFulfiller resultsStreamSinkFulfiller;
 
-      {
-        // Unfortunately, we always have to send a `resultsStreamSink` because we don't know until
-        // after the call completes whether or not it will return any streams. However, we will
-        // set this up as a promise capability, and only hook it up to an actual implementation if
-        // and when we discover streams in the results.
-        auto paf = kj::newPromiseAndFulfiller<rpc::JsValue::StreamSink::Client>();
-        resultsStreamSinkFulfiller = kj::mv(paf.fulfiller);
-        builder.setResultsStreamSink(kj::mv(paf.promise));
-      }
+      // Unfortunately, we always have to send a `resultsStreamSink` because we don't know until
+      // after the call completes whether or not it will return any streams. If it's unused,
+      // though, it should only be a couple allocations.
+      auto resultStreamSink = kj::refcounted<StreamSinkImpl>();
+      builder.setResultsStreamSink(kj::addRef(*resultStreamSink));
 
       auto callResult = builder.send();
 
@@ -499,11 +540,10 @@ JsRpcPromiseAndPipleine callImpl(
       auto weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>();
 
       auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
-            [weakRef = kj::atomicAddRef(*weakRef),
-            resultsStreamSinkFulfiller = kj::mv(resultsStreamSinkFulfiller)]
+            [weakRef = kj::atomicAddRef(*weakRef), resultStreamSink = kj::mv(resultStreamSink)]
             (jsg::Lock& js, capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable
             -> jsg::Value {
-        auto jsResult = deserializeRpcReturnValue(js, response, kj::mv(resultsStreamSinkFulfiller));
+        auto jsResult = deserializeRpcReturnValue(js, response, *resultStreamSink);
 
         if (weakRef->disposed) {
           // The promise was explicitly disposed before it even resolved. This means we must dispose
