@@ -283,7 +283,6 @@ const SNAPSHOT_IMPORTS = [
  * linear memory into MEMORY.
  */
 async function makeLinearMemorySnapshot(emscriptenModule) {
-  // TODO: make memory snapshot with more than just these hardcoded imports, use real script imports.
   const toImport = SNAPSHOT_IMPORTS.join(",");
   const toDelete = Array.from(
     new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".")[0])),
@@ -412,13 +411,14 @@ export async function loadPyodide(lockfile, indexURL) {
     await enterJaegerSpan("prepare_wasm_linear_memory",
       () => prepareWasmLinearMemory(emscriptenModule));
 
-  // Upload `MEMORY` to artifact store so long as a new memory snapshot was generated.
+  // Upload emscripten heap memory to artifact store so long as we didn't load an existing
+  // snapshot.
   const isTestMode =
     maybeMemorySnapshot && maybeMemorySnapshot.byteLength < 100;
   if (ArtifactBundler.isEnabled() && !usingExistingMemorySnapshot) {
     DEFERRED_UPLOAD_FUNCTION = async () => {
       const success = await ArtifactBundler.uploadMemorySnapshot(
-        new Uint8Array(MEMORY).slice(),
+        new Uint8Array(emscriptenModule.HEAP8.slice()).slice(),
       );
       if (!success) {
         console.warn("Memory snapshot upload failed.");
@@ -427,8 +427,9 @@ export async function loadPyodide(lockfile, indexURL) {
   }
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
-  enterJaegerSpan("finalize_bootstrap", emscriptenModule.API.finalizeBootstrap);
+  await enterJaegerSpan("finalize_bootstrap", emscriptenModule.API.finalizeBootstrap);
   const pyodide = emscriptenModule.API.public_api;
+  console.log("Returning ", pyodide);
 
   // This is just here for our test suite. Ugly but just about the only way to test this.
   if (isTestMode) {
