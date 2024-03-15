@@ -94,11 +94,13 @@ public:
     JSG_STRUCT(code, reason, wasClean);
     JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
   };
-  static jsg::Ref<CloseEvent> constructor(kj::String type, Initializer initializer) {
+  static jsg::Ref<CloseEvent> constructor(kj::String type,
+                                          jsg::Optional<Initializer> initializer) {
+    Initializer init = kj::mv(initializer).orDefault({});
     return jsg::alloc<CloseEvent>(kj::mv(type),
-        initializer.code.orDefault(0),
-        kj::mv(initializer.reason).orDefault(nullptr),
-        initializer.wasClean.orDefault(false));
+        init.code.orDefault(0),
+        kj::mv(init.reason).orDefault(nullptr),
+        init.wasClean.orDefault(false));
   }
 
   int getCode() { return code; }

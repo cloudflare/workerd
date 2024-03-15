@@ -393,3 +393,12 @@ export const customEvent = {
     deepStrictEqual(event.detail, { a: 123 });
   }
 };
+
+export const closeEvent = {
+  test() {
+    // The CloseEvent constructor second argument is optional. Our implementation
+    // had it as required. Let's make sure we can create it without the second arg.
+    new CloseEvent('foo');
+    new CloseEvent('foo', { code: 1000, reason: 'bye' });
+  }
+};
