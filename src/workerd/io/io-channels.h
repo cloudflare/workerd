@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "actor-id.h"
+#include <workerd/io/actor-id.h>
 #include <kj/string.h>
 #include <kj/debug.h>
 #include <workerd/io/trace.h>

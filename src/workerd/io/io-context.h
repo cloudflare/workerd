@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "actor-id.h"
-#include "io-channels.h"
+#include <workerd/io/actor-id.h>
+#include <workerd/io/io-channels.h>
 #include "io-gate.h"
 #include "io-own.h"
 #include "io-timers.h"
