@@ -1169,8 +1169,8 @@ ReadableImpl<Self>::getConsumer(kj::Maybe<ReadableImpl<Self>::StateListener&> li
 // ======================================================================================
 
 template <typename Self>
-WritableImpl<Self>::WritableImpl(jsg::Ref<WritableStream> owner)
-    : owner(kj::mv(owner)),
+WritableImpl<Self>::WritableImpl(WritableStream& owner)
+    : owner(owner.addWeakRef()),
       signal(jsg::alloc<AbortSignal>()) {}
 
 template <typename Self>
@@ -1209,9 +1209,12 @@ jsg::Promise<void> WritableImpl<Self>::abort(
 
 template <typename Self>
 kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
-  return owner.map([](jsg::Ref<WritableStream>& owner) -> WritableStreamJsController& {
-    return static_cast<WritableStreamJsController&>(owner->getController());
-  });
+  KJ_IF_SOME(o, owner) {
+    return o->tryGet().map([](WritableStream& owner) -> WritableStreamJsController& {
+      return static_cast<WritableStreamJsController&>(owner.getController());
+    });
+  }
+  return kj::none;
 }
 
 template <typename Self>
@@ -1605,8 +1608,7 @@ void WritableImpl<Self>::visitForGc(jsg::GcVisitor &visitor) {
       visitor.visit(erroring.reason);
     }
   }
-  visitor.visit(owner,
-                inFlightWrite,
+  visitor.visit(inFlightWrite,
                 inFlightClose,
                 closeRequest,
                 algorithms,
@@ -3233,8 +3235,8 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 // ======================================================================================
 
 WritableStreamDefaultController::WritableStreamDefaultController(
-    jsg::Ref<WritableStream> owner)
-    : ioContext(tryGetIoContext()), impl(kj::mv(owner)) {}
+    WritableStream& owner)
+    : ioContext(tryGetIoContext()), impl(owner) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(
     jsg::Lock& js,
@@ -3471,7 +3473,7 @@ void WritableStreamJsController::setup(
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  state = jsg::alloc<WritableStreamDefaultController>(addRef());
+  state = jsg::alloc<WritableStreamDefaultController>(KJ_ASSERT_NONNULL(owner));
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 
@@ -4026,7 +4028,6 @@ void WritableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("inFlightClose", inFlightClose);
   tracker.trackField("closeRequest", closeRequest);
   tracker.trackField("maybePendingAbort", maybePendingAbort);
-  tracker.trackField("owner", owner);
 }
 
 kj::StringPtr WritableStreamJsController::jsgGetMemoryName() const {

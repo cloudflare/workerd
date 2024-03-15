@@ -7,6 +7,7 @@
 #include "common.h"
 #include "queue.h"
 #include <workerd/jsg/function.h>
+#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
 
@@ -265,7 +266,7 @@ public:
     }
   };
 
-  WritableImpl(jsg::Ref<WritableStream> owner);
+  WritableImpl(WritableStream& owner);
 
   jsg::Promise<void> abort(jsg::Lock& js,
                             jsg::Ref<Self> self,
@@ -360,7 +361,13 @@ private:
 
   struct Writable {};
 
-  kj::Maybe<jsg::Ref<WritableStream>> owner;
+  // Sadly, we have to use a weak ref here rather than jsg::Ref. This is because
+  // the jsg::Ref<WritableStream> (via it's internal WritableStreamJsController)
+  // holds a strong reference to the jsg::Ref<WritableStreamDefaultController> that
+  // uses this WritableImpl. This creates a strong circular reference between jsg::Refs
+  // that isn't allowed. GcTracing ends up with a stack overflow as the two jsg::Refs
+  // try tracing each other.
+  kj::Maybe<kj::Own<WeakRef<WritableStream>>> owner;
   jsg::Ref<AbortSignal> signal;
   kj::OneOf<StreamStates::Closed,
             StreamStates::Errored,
@@ -575,7 +582,7 @@ class WritableStreamDefaultController: public jsg::Object {
 public:
   using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
-  explicit WritableStreamDefaultController(jsg::Ref<WritableStream> owner);
+  explicit WritableStreamDefaultController(WritableStream& owner);
 
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 
