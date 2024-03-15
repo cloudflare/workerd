@@ -137,15 +137,17 @@ function getPyodide() {
 
 let mainModulePromise;
 function getMainModule() {
-  if (mainModulePromise) {
+  return enterJaegerSpan("get_main_module", async () => {
+    if (mainModulePromise) {
+      return mainModulePromise;
+    }
+    mainModulePromise = (async function () {
+      const pyodide = await getPyodide();
+      await setupPackages(pyodide);
+      return enterJaegerSpan("pyimport_main_module", () => pyimportMainModule(pyodide));
+    })();
     return mainModulePromise;
-  }
-  mainModulePromise = (async function () {
-    const pyodide = await getPyodide();
-    await setupPackages(pyodide);
-    return pyimportMainModule(pyodide);
-  })();
-  return mainModulePromise;
+  });
 }
 
 // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
