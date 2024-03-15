@@ -770,7 +770,7 @@ rpc::JsRpcTarget::Client JsRpcStub::getClient() {
   KJ_IF_SOME(c, capnpClient) {
     return *c;
   } else {
-    // TODO(now): Improve the error message to describe why it was disposed.
+    // TODO(soon): Improve the error message to describe why it was disposed.
     return JSG_KJ_EXCEPTION(FAILED, Error, "RPC stub used after being disposed.");
   }
 }
@@ -830,6 +830,10 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   externalHandler->write([cap = getClient()](rpc::JsValue::External::Builder builder) mutable {
     builder.setRpcTarget(kj::mv(cap));
   });
+
+  // Sending a stub over RPC implicitly disposes the stub. The application can explicitly .dup() it
+  // if this is undesired.
+  dispose();
 }
 
 jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
