@@ -5,6 +5,7 @@
 #pragma once
 
 #include "common.h"
+#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
 
@@ -106,6 +107,7 @@ public:
                           kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
   explicit WritableStream(kj::Own<WritableStreamController> controller);
+  ~WritableStream() noexcept(false) { weakRef->invalidate(); }
 
   WritableStreamController& getController();
 
@@ -169,8 +171,15 @@ public:
 private:
   kj::Maybe<IoContext&> ioContext;
   kj::Own<WritableStreamController> controller;
+  kj::Own<WeakRef<WritableStream>> weakRef =
+      kj::refcounted<WeakRef<WritableStream>>(kj::Badge<WritableStream>(), *this);
+
+  kj::Own<WeakRef<WritableStream>> addWeakRef() { return weakRef->addRef(); }
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  template <typename T>
+  friend class WritableImpl;
 };
 
 }  // namespace workerd::api

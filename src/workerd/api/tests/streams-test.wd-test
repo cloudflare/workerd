@@ -1,6 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
   services = [
     ( name = "streams-test",
       worker = (

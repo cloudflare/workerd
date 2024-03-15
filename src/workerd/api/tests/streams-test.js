@@ -308,6 +308,14 @@ export const tsCancel = {
   }
 };
 
+export const writableStreamGcTraceFinishes = {
+  test() {
+    // TODO(soon): We really need better testing for gc visitation.
+    const ws = new WritableStream();
+    gc();
+  }
+};
+
 export default {
   async fetch(request, env) {
     strictEqual(request.headers.get('content-length'), '10');
