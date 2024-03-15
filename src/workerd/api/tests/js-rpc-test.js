@@ -241,7 +241,7 @@ export class MyService extends WorkerEntrypoint {
 
     return {
       count,
-      counter,
+      counter: counter.dup(),  // need to dup() for return
       async incrementOriginal(n) {
         // This will fail because after the call ends, the counter stub is disposed.
         return await counter.increment(n);
@@ -654,8 +654,16 @@ export let loopbackJsRpcTarget = {
 export let sendStubOverRpc = {
   async test(controller, env, ctx) {
     let stub = new RpcStub(new MyCounter(4));
+    let stubDup = stub.dup();
+
     assert.strictEqual(await env.MyService.incrementCounter(stub, 5), 9);
-    assert.strictEqual(await stub.increment(7), 16);
+
+    await assert.rejects(() => stub.increment(7), {
+      name: "Error",
+      message: "RPC stub used after being disposed."
+    });
+
+    assert.strictEqual(await stubDup.increment(7), 16);
   },
 }
 
