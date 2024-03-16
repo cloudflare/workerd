@@ -1,4 +1,6 @@
 #include "pyodide.h"
+#include <kj/string.h>
+#include <workerd/util/string-buffer.h>
 
 namespace workerd::api::pyodide {
 
@@ -106,6 +108,36 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
   return jsg::alloc<PyodideMetadataReader>(kj::mv(mainModule), names.finish(), contents.finish(),
                                            requirements.finish(), true /* isWorkerd */,
                                            false /* isTracing */, kj::none /* memorySnapshot */);
+}
+
+jsg::Optional<kj::Array<kj::byte>> DiskCache::get(jsg::Lock& js, kj::String key) {
+  KJ_IF_SOME(root, cacheRoot) {
+    kj::Path path(key);
+    auto file = root->tryOpenFile(path);
+
+    KJ_IF_SOME(f, file) {
+      return f->readAllBytes();
+    } else {
+      return kj::none;
+    }
+  } else {
+    return kj::none;
+  }
+}
+
+void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
+  KJ_IF_SOME(root, cacheRoot) {
+    kj::Path path(key);
+    auto file = root->tryOpenFile(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+    KJ_IF_SOME(f, file) {
+      f->writeAll(data);
+    } else {
+      KJ_LOG(ERROR, "DiskCache: Failed to open file", key);
+    }
+  } else {
+    return;
+  }
 }
 
 } // namespace workerd::api::pyodide

@@ -109,6 +109,7 @@ struct WorkerdApi::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
+  kj::Maybe<kj::Own<const kj::Directory>> pyodideCacheRoot;
 
   class Configuration {
   public:
@@ -130,10 +131,11 @@ struct WorkerdApi::Impl {
        CompatibilityFlags::Reader featuresParam,
        IsolateLimitEnforcer& limitEnforcer,
        kj::Own<jsg::IsolateObserver> observer,
-       api::MemoryCacheProvider& memoryCacheProvider)
+       api::MemoryCacheProvider& memoryCacheProvider,
+       kj::Maybe<kj::Own<const kj::Directory>> pyodideCacheRoot)
       : features(capnp::clone(featuresParam)),
         jsgIsolate(v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
-        memoryCacheProvider(memoryCacheProvider) {}
+        memoryCacheProvider(memoryCacheProvider), pyodideCacheRoot(kj::mv(pyodideCacheRoot)) {}
 
   static v8::Local<v8::String> compileTextGlobal(JsgWorkerdIsolate::Lock& lock,
       capnp::Text::Reader reader) {
@@ -173,9 +175,10 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     CompatibilityFlags::Reader features,
     IsolateLimitEnforcer& limitEnforcer,
     kj::Own<jsg::IsolateObserver> observer,
-    api::MemoryCacheProvider& memoryCacheProvider)
+    api::MemoryCacheProvider& memoryCacheProvider,
+    kj::Maybe<kj::Own<const kj::Directory>> pyodideCacheRoot)
     : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer),
-                          memoryCacheProvider)) {}
+                          memoryCacheProvider, kj::mv(pyodideCacheRoot))) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -452,6 +455,24 @@ void WorkerdApi::compileModules(
               return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
             },
             jsg::ModuleRegistry::Type::INTERNAL);
+      }
+
+      // Inject disk cache module
+      KJ_IF_SOME(pcr, impl->pyodideCacheRoot) {
+        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+        using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
+        auto specifier = "pyodide-internal:disk_cache";
+        auto diskCache = jsg::alloc<DiskCache>(pcr->clone());
+        modules->addBuiltinModule(
+          specifier,
+          [specifier = kj::str(specifier), diskCache = kj::mv(diskCache)](
+              jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+            auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+            auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(diskCache));
+            return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+          },
+          jsg::ModuleRegistry::Type::INTERNAL);
       }
     }
 

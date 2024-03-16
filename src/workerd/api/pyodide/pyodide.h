@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kj/common.h>
+#include <kj/filesystem.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide.capnp.h>
 #include <workerd/jsg/jsg.h>
@@ -201,6 +202,21 @@ public:
   }
 };
 
+// This cache is used by Pyodide to store wheels fetched over the internet across workerd restarts in local dev only
+class DiskCache: public jsg::Object {
+  kj::Maybe<kj::Own<const kj::Directory>> cacheRoot;
+public:
+  DiskCache(kj::Maybe<kj::Own<const kj::Directory>> cacheRoot): cacheRoot(kj::mv(cacheRoot)) {};
+
+  jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
+  void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
+
+  JSG_RESOURCE_TYPE(DiskCache) {
+    JSG_METHOD(get);
+    JSG_METHOD(put);
+  }
+};
+
 using Worker = server::config::Worker;
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
@@ -209,6 +225,7 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
   api::pyodide::PackagesTarReader,     \
   api::pyodide::PyodideMetadataReader, \
   api::pyodide::ArtifactBundler,       \
+  api::pyodide::DiskCache,             \
   api::pyodide::DisabledInternalJaeger
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {

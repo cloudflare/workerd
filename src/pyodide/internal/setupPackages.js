@@ -2,7 +2,8 @@ import { parseTarInfo } from "pyodide-internal:tar";
 import { createTarFS } from "pyodide-internal:tarfs";
 import { createMetadataFS } from "pyodide-internal:metadatafs";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
-import { REQUIREMENTS } from "pyodide-internal:metadata";
+import { REQUIREMENTS, WORKERD_INDEX_URL } from "pyodide-internal:metadata";
+import { patchFetch } from "pyodide-internal:builtin_wrappers";
 
 const canonicalizeNameRegex = /[-_.]+/g;
 
@@ -92,6 +93,7 @@ export function patchLoadPackage(pyodide) {
     pyodide.loadPackage = disabledLoadPackage;
     return;
   }
+  patchFetch(new URL(WORKERD_INDEX_URL).origin);
   const origLoadPackage = pyodide.loadPackage;
   function loadPackage(packages, options) {
     return origLoadPackage(packages, {

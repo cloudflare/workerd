@@ -283,7 +283,7 @@ TestFixture::TestFixture(SetupParams&& params)
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
       *isolateLimitEnforcer,
       kj::atomicRefcounted<IsolateObserver>(),
-      *memoryCacheProvider)),
+      *memoryCacheProvider, kj::none)),
     workerIsolate(kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(api),
       kj::atomicRefcounted<IsolateObserver>(),
