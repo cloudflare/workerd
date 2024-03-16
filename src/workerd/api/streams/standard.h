@@ -424,7 +424,7 @@ public:
       kj::Maybe<ValueQueue::ConsumerImpl::StateListener&> stateListener);
 
   JSG_RESOURCE_TYPE(ReadableStreamDefaultController) {
-    JSG_READONLY_INSTANCE_PROPERTY(desiredSize, getDesiredSize);
+    JSG_READONLY_PROTOTYPE_PROPERTY(desiredSize, getDesiredSize);
     JSG_METHOD(close);
     JSG_METHOD(enqueue);
     JSG_METHOD(error);
@@ -483,13 +483,13 @@ public:
   void respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
 
   JSG_RESOURCE_TYPE(ReadableStreamBYOBRequest) {
-    JSG_READONLY_INSTANCE_PROPERTY(view, getView);
+    JSG_READONLY_PROTOTYPE_PROPERTY(view, getView);
     JSG_METHOD(respond);
     JSG_METHOD(respondWithNewView);
 
     // atLeast is an Workers-specific extension used to support the
     // readAtLeast API.
-    JSG_READONLY_INSTANCE_PROPERTY(atLeast, getAtLeast);
+    JSG_READONLY_PROTOTYPE_PROPERTY(atLeast, getAtLeast);
   }
 
   bool isPartiallyFulfilled();
@@ -549,8 +549,8 @@ public:
       kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener);
 
   JSG_RESOURCE_TYPE(ReadableByteStreamController) {
-    JSG_READONLY_INSTANCE_PROPERTY(byobRequest, getByobRequest);
-    JSG_READONLY_INSTANCE_PROPERTY(desiredSize, getDesiredSize);
+    JSG_READONLY_PROTOTYPE_PROPERTY(byobRequest, getByobRequest);
+    JSG_READONLY_PROTOTYPE_PROPERTY(desiredSize, getDesiredSize);
     JSG_METHOD(close);
     JSG_METHOD(enqueue);
     JSG_METHOD(error);
@@ -606,7 +606,7 @@ public:
   jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> value);
 
   JSG_RESOURCE_TYPE(WritableStreamDefaultController) {
-    JSG_READONLY_INSTANCE_PROPERTY(signal, getSignal);
+    JSG_READONLY_PROTOTYPE_PROPERTY(signal, getSignal);
     JSG_METHOD(error);
   }
 
