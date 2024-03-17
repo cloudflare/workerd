@@ -394,6 +394,11 @@ void WorkerdApi::compileModules(
     if (hasPythonModules(confModules)) {
       KJ_REQUIRE(featureFlags.getPythonWorkers(),
           "The python_workers compatibility flag is required to use Python.");
+      lockParam.v8Isolate->SetWasmJSPIEnabledCallback([](v8::Local<v8::Context> context) {
+        return true;
+      });
+      lockParam.v8Isolate->InstallConditionalFeatures(lockParam.v8Isolate->GetCurrentContext());
+
       // Inject pyodide bootstrap module.
       {
         auto mainModule = confModules.begin();

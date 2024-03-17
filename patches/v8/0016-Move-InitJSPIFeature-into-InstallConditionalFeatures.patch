@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hood Chatham <roberthoodchatham@gmail.com>
+Date: Fri, 16 Feb 2024 22:55:06 -0800
+Subject: Move InitJSPIFeature into InstallConditionalFeatures
+
+
+diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
+index 5ef83c6f9f1712aadf1aec0660ee1237e5bfe0e2..3882997fd16046213cd3a90738c559322ad331c6 100644
+--- a/src/execution/isolate.cc
++++ b/src/execution/isolate.cc
+@@ -4977,8 +4977,6 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+   }
+ 
+ #ifdef V8_ENABLE_WEBASSEMBLY
+-  // Set up for JSPI
+-  if (v8_flags.experimental_wasm_jspi) WasmInitJSPIFeature();
+ 
+ #if V8_STATIC_ROOTS_BOOL
+   // Protect the payload of wasm null.
+diff --git a/src/wasm/wasm-js.cc b/src/wasm/wasm-js.cc
+index 245f0c6a371794906bb029cf358a1bea3b331235..b486b17c9ec416c05edb8d1c0154ee608f2d9c91 100644
+--- a/src/wasm/wasm-js.cc
++++ b/src/wasm/wasm-js.cc
+@@ -3375,6 +3375,7 @@ void WasmJs::InstallConditionalFeatures(Isolate* isolate,
+              .FromMaybe(true)) {
+       InstallTypeReflection(isolate, context);
+     }
++    isolate->WasmInitJSPIFeature();
+   }
+ }
+ 
