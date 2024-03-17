@@ -30,14 +30,6 @@ inline bool isInterestingException(const kj::Exception& e) {
       && e.getType() != kj::Exception::Type::OVERLOADED;
 }
 
-inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
-  // Avoid logging about problems talking to DOG. It's not great to hard-code this, but it'll help
-  // avoid sentry spam and is only used in deciding whether to log to sentry, not to change behavior
-  // at all.
-  const uint32_t dogColoId = 131;
-  return coloId == dogColoId ? "NOSENTRY"_kj : ""_kj;
-}
-
 #define LOG_NOSENTRY(severity, ...) \
   KJ_LOG(severity, "NOSENTRY " __VA_ARGS__);
 
