@@ -442,7 +442,7 @@ void WorkerdApi::compileModules(
         using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
         using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
         using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
-        auto specifier = "pyodide-internal:jaeger";
+        auto specifier = "pyodide-internal:internalJaeger";
         modules->addBuiltinModule(
             specifier,
             [specifier = kj::str(specifier)](
