@@ -1,5 +1,15 @@
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
+import { default as UnsafeEval } from "internal:unsafe-eval";
+import {
+  SITE_PACKAGES_INFO,
+  SITE_PACKAGES_SO_FILES,
+  adjustSysPath,
+  getSitePackagesPath,
+  mountLib,
+} from "pyodide-internal:setupPackages";
+import { default as TarReader } from "pyodide-internal:packages_tar_reader";
+import processScriptImports from "pyodide-internal:process_script_imports.py";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -27,27 +37,20 @@ import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
  */
 import stdlib from "pyodide-internal:generated/python_stdlib.zip";
 
+const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled();
+const DEDICATED_SNAPSHOT = true;
+
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of
  * the linear memory here, on subsequent runs we can skip bootstrapping Python
  * which is quite slow. Startup with snapshot is 3-5 times faster than without
  * it.
- *
- * In the future we could consider creating a memory snapshot ahead of time so
- * that latency is more predictable.
- *
- * Unfortunately this memory snapshot can easily get to ~30mb depending on the
- * script. The peak memory usage for Python seems to be reached at startup when
- * compiling Python source code, so if we use pre-compiled Python code the wasm
- * linear memory is much smaller. Unfortunately, in recent versions of Python,
- * pyc has large inline caches which bloats the size of pyc files by a lot. A
- * special-built compressor should be able to drop the inline cache space and
- * then calculate how much space to insert from the opcode metadata.
- *
- * Possibly we could make many scripts share the same memory snapshot to get
- * decent performance/memory usage tradeoff.
  */
 let MEMORY = undefined;
+/**
+ * Record the dlopen handles that are needed by the MEMORY.
+ */
+let DSO_METADATA = {};
 
 /**
  * Used to defer artifact upload. This is set during initialisation, but is executed during a
@@ -124,8 +127,70 @@ function prepareFileSystem(Module) {
   }
 }
 
+/**
+ * A preRun hook. Make sure environment variables are visible at runtime.
+ */
 function setEnv(Module) {
   Object.assign(Module.ENV, Module.API.config.env);
+}
+
+/**
+ * Preload a dynamic library.
+ *
+ * Emscripten would usually figure out all of these details for us
+ * automatically. These defaults work for shared libs that are configured as
+ * standard Python extensions. This naive approach will not work for libraries
+ * like scipy, shapely, geos...
+ * TODO(someday) fix this.
+ */
+function loadDynlib(Module, path, wasmModuleData) {
+  const wasmModule = UnsafeEval.newWasmModule(wasmModuleData);
+  const dso = Module.newDSO(path, undefined, "loading");
+  // even though these are used via dlopen, we are allocating them in an arena
+  // outside the heap and the memory cannot be reclaimed. So I don't think it
+  // would help us to allow them to be dealloc'd.
+  dso.refcount = Infinity;
+  // Hopefully they are used with dlopen
+  dso.global = false;
+  dso.exports = Module.loadWebAssemblyModule(wasmModule, {}, path);
+  // "handles" are dlopen handles. There will be one entry in the `handles` list
+  // for each dlopen handle that has not been dlclosed. We need to keep track of
+  // these across
+  const { handles } = DSO_METADATA[path] || { handles: [] };
+  for (const handle of handles) {
+    Module.LDSO.loadedLibsByHandle[handle] = dso;
+  }
+}
+
+/**
+ * This loads all dynamic libraries visible in the site-packages directory. They
+ * are loaded before the runtime is initialized outside of the heap, using the
+ * same mechanism for DT_NEEDED libs (i.e., the libs that are loaded before the
+ * program starts because you passed them as linker args).
+ *
+ * Currently, we pessimistically preload all libs. It would be nice to only load
+ * the ones that are used. I am pretty sure we can manage this by reserving a
+ * separate shared lib metadata arena at startup and allocating shared libs
+ * there.
+ */
+function preloadDynamicLibs(Module) {
+  try {
+    const sitePackages = getSitePackagesPath(Module);
+    for (const soFile of SITE_PACKAGES_SO_FILES) {
+      let node = SITE_PACKAGES_INFO;
+      for (const part of soFile) {
+        node = node.children.get(part);
+      }
+      const { contentsOffset, size } = node;
+      const wasmModuleData = new Uint8Array(size);
+      TarReader.read(contentsOffset, wasmModuleData);
+      const path = sitePackages + "/" + soFile.join("/");
+      loadDynlib(Module, path, wasmModuleData);
+    }
+  } catch (e) {
+    console.log(e);
+    throw e;
+  }
 }
 
 /**
@@ -155,7 +220,7 @@ function getEmscriptenSettings(lockfile, indexURL) {
     // preRun hook to set up the file system before running main
     // The preRun hook gets run independently of noInitialRun, which is
     // important because the file system lives outside of linear memory.
-    preRun: [prepareFileSystem, setEnv],
+    preRun: [prepareFileSystem, setEnv, preloadDynamicLibs],
     instantiateWasm,
     noInitialRun: !!MEMORY, // skip running main() if we have a snapshot
     API, // Pyodide requires we pass this in.
@@ -198,7 +263,9 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
  *
  * Returns `true` when existing memory snapshot was loaded.
  */
-async function prepareWasmLinearMemory(emscriptenModule) {
+async function prepareWasmLinearMemory(Module) {
+  // Note: if we are restoring from a snapshot, runtime is not initialized yet.
+  mountLib(Module, SITE_PACKAGES_INFO);
   if (MEMORY) {
     if (!(MEMORY instanceof Uint8Array)) {
       throw new TypeError("Expected MEMORY to be a Uint8Array");
@@ -206,14 +273,38 @@ async function prepareWasmLinearMemory(emscriptenModule) {
     // resize linear memory to fit our snapshot. I think `growMemory` only
     // exists if `-sALLOW_MEMORY_GROWTH` is passed to the linker but we'll
     // probably always do that.
-    emscriptenModule.growMemory(MEMORY.byteLength);
+    Module.growMemory(MEMORY.byteLength);
     // restore memory from snapshot
-    emscriptenModule.HEAP8.set(MEMORY);
-    return true;
-  } else {
-    await makeLinearMemorySnapshot(emscriptenModule);
-    return false;
+    Module.HEAP8.set(MEMORY);
+    // Don't call adjustSysPath here: it was called in the other branch when we
+    // were creating the snapshot so the outcome of that is already baked in.
+    return;
   }
+  adjustSysPath(Module, simpleRunPython);
+  if (SHOULD_UPLOAD_SNAPSHOT) {
+    setUploadFunction(makeLinearMemorySnapshot(Module));
+  }
+}
+
+/**
+ * This records which dynamic libraries have open handles (handed out by dlopen,
+ * not yet dlclosed). We'll need to track this information so that we don't
+ * crash if we dlsym the handle after restoring from the snapshot
+ */
+function recordDsoHandles(Module) {
+  const dylinkInfo = {};
+  for (const [handle, { name }] of Object.entries(
+    Module.LDSO.loadedLibsByHandle,
+  )) {
+    if (handle === 0) {
+      continue;
+    }
+    if (!(name in dylinkInfo)) {
+      dylinkInfo[name] = { handles: [] };
+    }
+    dylinkInfo[name].handles.push(handle);
+  }
+  return dylinkInfo;
 }
 
 // This is the list of all packages imported by the Python bootstrap. We don't
@@ -244,31 +335,112 @@ const SNAPSHOT_IMPORTS = [
 ];
 
 /**
+ * Python modules do a lot of work the first time they are imported. The memory
+ * snapshot will save more time the more of this work is included. However, we
+ * can't snapshot the JS runtime state so we have no ffi. Thus some imports from
+ * user code will fail.
+ *
+ * If we are doing a baseline snapshot, just import everything from
+ * SNAPSHOT_IMPORTS. These will all succeed.
+ *
+ * If doing a script-specific "dedicated" snap shot, also try to import each
+ * user import.
+ *
+ * All of this is being done in the __main__ global scope, so be careful not to
+ * pollute it with extra included-by-default names (user code is executed in its
+ * own separate module scope though so it's not _that_ important).
+ */
+function memorySnapshotDoImports(Module) {
+  const toImport = SNAPSHOT_IMPORTS.join(",");
+  const toDelete = Array.from(
+    new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".", 1)[0])),
+  ).join(",");
+  simpleRunPython(Module, `import ${toImport}`);
+  simpleRunPython(Module, "sysconfig.get_config_vars()");
+  // Delete to avoid polluting globals
+  simpleRunPython(Module, `del ${toDelete}`);
+  if (!DEDICATED_SNAPSHOT) {
+    // We've done all the imports for the baseline snapshot.
+    return;
+  }
+  // Script-specific imports: collect all import nodes from user scripts and try
+  // to import them, catching and throwing away all failures.
+  // see process_script_imports.py.
+  const processScriptImportsString = new TextDecoder().decode(
+    new Uint8Array(processScriptImports),
+  );
+  simpleRunPython(Module, processScriptImportsString);
+}
+
+/**
  * Create memory snapshot by importing SNAPSHOT_IMPORTS to ensure these packages
  * are initialized in the linear memory snapshot and then saving a copy of the
  * linear memory into MEMORY.
  */
-async function makeLinearMemorySnapshot(emscriptenModule) {
-  const toImport = SNAPSHOT_IMPORTS.join(",");
-  const toDelete = Array.from(
-    new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".")[0])),
-  ).join(",");
-  simpleRunPython(emscriptenModule, `import ${toImport}`);
-  simpleRunPython(emscriptenModule, "sysconfig.get_config_vars()");
-  // Delete to avoid polluting globals
-  simpleRunPython(emscriptenModule, `del ${toDelete}`);
-  // store a copy of wasm linear memory into our MEMORY global variable.
-  MEMORY = emscriptenModule.HEAP8.slice();
+function makeLinearMemorySnapshot(Module) {
+  memorySnapshotDoImports(Module);
+  const dsoJSON = recordDsoHandles(Module);
+  return encodeSnapshot(Module.HEAP8, dsoJSON);
+}
+
+function setUploadFunction(toUpload) {
+  if (toUpload.constructor.name !== "Uint8Array") {
+    throw new TypeError("Expected TO_UPLOAD to be a Uint8Array");
+  }
+  DEFERRED_UPLOAD_FUNCTION = async () => {
+    try {
+      const success = await ArtifactBundler.uploadMemorySnapshot(toUpload);
+      // Free memory
+      toUpload = undefined;
+      if (!success) {
+        console.warn("Memory snapshot upload failed.");
+      }
+    } catch (e) {
+      console.warn("Memory snapshot upload failed.");
+      console.warn(e);
+      throw e;
+    }
+  };
 }
 
 /**
- *  Simple as possible runPython function which works with essentially no
- *  foreign function interface. We need to use this rather than the normal
- *  easier to use interface because the normal interface doesn't work until
- *  after `API.finalizeBootstrap`, but `API.finalizeBootstrap` makes changes
- *  inside and outside the linear memory which have to stay in sync. It's hard
- *  to keep track of the invariants that `finalizeBootstrap` introduces between
- *  JS land and the linear memory so we do this.
+ * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
+ */
+function encodeSnapshot(heap, dsoJSON) {
+  const dsoString = JSON.stringify(dsoJSON);
+  let sx = 8 + 2 * dsoString.length;
+  // align to 8 bytes
+  sx = Math.ceil(sx / 8) * 8;
+  const toUpload = new Uint8Array(sx + heap.length);
+  const encoder = new TextEncoder();
+  const { written } = encoder.encodeInto(dsoString, toUpload.subarray(8));
+  const uint32View = new Uint32Array(toUpload.buffer);
+  uint32View[0] = sx;
+  uint32View[1] = written;
+  toUpload.subarray(sx).set(heap);
+  return toUpload;
+}
+
+/**
+ * Decode heap and dsoJSON from the memory snapshot artifact we downloaded
+ */
+function decodeSnapshot(memorySnapshot) {
+  const uint32View = new Uint32Array(memorySnapshot);
+  const snapshotOffset = uint32View[0];
+  const jsonLength = uint32View[1];
+  const jsonView = new Uint8Array(memorySnapshot, 8, jsonLength);
+  DSO_METADATA = JSON.parse(new TextDecoder().decode(jsonView));
+  MEMORY = new Uint8Array(memorySnapshot, snapshotOffset);
+}
+
+/**
+ *  Simple as possible runPython function which works with no foreign function
+ *  interface. We need to use this rather than the normal easier to use
+ *  interface because the normal interface doesn't work until after
+ *  `API.finalizeBootstrap`, but `API.finalizeBootstrap` makes changes inside
+ *  and outside the linear memory which have to stay in sync. It's hard to keep
+ *  track of the invariants that `finalizeBootstrap` introduces between JS land
+ *  and the linear memory so we do this.
  *
  *  We wrap API.rawRun which does the following steps:
  *  1. use textEncoder.encode to convert `code` into UTF8 bytes
@@ -301,53 +473,45 @@ function simpleRunPython(emscriptenModule, code) {
   }
 }
 
-export async function loadPyodide(lockfile, indexURL) {
+let TEST_SNAPSHOT = undefined;
+(function () {
   // Lookup memory snapshot from artifact store.
-  const maybeMemorySnapshot = ArtifactBundler.getMemorySnapshot();
-  if (maybeMemorySnapshot) {
-    // Simple sanity check to ensure this snapshot isn't corrupted.
-    //
-    // TODO(later): we need better detection when this is corrupted. Right now the isolate will
-    // just die.
-    if (maybeMemorySnapshot.byteLength > 100) {
-      MEMORY = new Uint8Array(maybeMemorySnapshot);
-    }
+  const memorySnapshot = ArtifactBundler.getMemorySnapshot();
+  if (!memorySnapshot) {
+    // snapshots are disabled or there isn't one yet
+    return;
+  }
+  if (memorySnapshot.constructor.name !== "ArrayBuffer") {
+    throw new TypeError("Expected snapshot to be an ArrayBuffer");
   }
 
+  // Simple sanity check to ensure this snapshot isn't corrupted.
+  //
+  // TODO(later): we need better detection when this is corrupted. Right now the isolate will
+  // just die.
+  if (memorySnapshot.byteLength <= 100) {
+    TEST_SNAPSHOT = memorySnapshot;
+    return;
+  }
+  decodeSnapshot(memorySnapshot);
+})();
+
+export async function loadPyodide(lockfile, indexURL) {
   const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
-  const emscriptenModule = await enterJaegerSpan("instantiate_emscripten", () =>
+  const Module = await enterJaegerSpan("instantiate_emscripten", () =>
     instantiateEmscriptenModule(emscriptenSettings),
   );
-  const usingExistingMemorySnapshot = await enterJaegerSpan(
-    "prepare_wasm_linear_memory",
-    () => prepareWasmLinearMemory(emscriptenModule),
+  await enterJaegerSpan("prepare_wasm_linear_memory", () =>
+    prepareWasmLinearMemory(Module),
   );
-
-  // Upload emscripten heap memory to artifact store so long as we didn't load an existing
-  // snapshot.
-  const isTestMode =
-    maybeMemorySnapshot && maybeMemorySnapshot.byteLength < 100;
-  if (ArtifactBundler.isEnabled() && !usingExistingMemorySnapshot) {
-    DEFERRED_UPLOAD_FUNCTION = async () => {
-      const success = await ArtifactBundler.uploadMemorySnapshot(
-        new Uint8Array(MEMORY).slice(),
-      );
-      if (!success) {
-        console.warn("Memory snapshot upload failed.");
-      }
-    };
-  }
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
-  await enterJaegerSpan(
-    "finalize_bootstrap",
-    emscriptenModule.API.finalizeBootstrap,
-  );
-  const pyodide = emscriptenModule.API.public_api;
+  await enterJaegerSpan("finalize_bootstrap", Module.API.finalizeBootstrap);
+  const pyodide = Module.API.public_api;
 
   // This is just here for our test suite. Ugly but just about the only way to test this.
-  if (isTestMode) {
-    const snapshotString = new TextDecoder().decode(maybeMemorySnapshot);
+  if (TEST_SNAPSHOT) {
+    const snapshotString = new TextDecoder().decode(TEST_SNAPSHOT);
     pyodide.registerJsModule("cf_internal_test_utils", {
       snapshot: snapshotString,
     });
