@@ -86,7 +86,7 @@ export async function uploadArtifacts() {
  * Used for tracing via Jaeger.
  */
 
-export async function enterJaegerSpan(span, callback) {
+export function enterJaegerSpan(span, callback) {
   if (!internalJaeger.traceId) {
     // Jaeger tracing not enabled or traceId is not present in request.
     return callback();

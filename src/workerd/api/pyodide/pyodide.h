@@ -134,6 +134,10 @@ public:
     return uploadMemorySnapshotCb != kj::none;
   }
 
+  bool hasMemorySnapshot() {
+    return existingSnapshot != kj::none;
+  }
+
   static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
     return jsg::alloc<ArtifactBundler>();
   }
