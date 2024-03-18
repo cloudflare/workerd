@@ -8,6 +8,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsg-test.h>
 #include <openssl/rand.h>
+#include <workerd/tests/test-fixture.h>
 
 namespace workerd::api {
 namespace {
@@ -183,6 +184,76 @@ KJ_TEST("honest small stream") {
 
   KJ_ASSERT(stream.numreads() == 2);
   KJ_ASSERT(stream.maxMaxBytesSeen(), 100);
+}
+
+KJ_TEST("WritableStreamInternalController queue size assertion") {
+
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setNodeJsCompat(true);
+  flags.setWorkerdExperimental(true);
+  flags.setStreamsJavaScriptControllers(true);
+
+  TestFixture fixture({
+    .featureFlags = flags.asReader()});
+
+  class MySink final : public WritableStreamSink {
+  public:
+    kj::Promise<void> write(const void* buffer, size_t size) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> end() override { return kj::READY_NOW; }
+    void abort(kj::Exception reason) override {}
+  };
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+
+    // Make sure that while an internal sink is being piped into, no other writes are
+    // allowed to be queued.
+
+    jsg::Ref<ReadableStream> source = ReadableStream::constructor(env.js, kj::none, kj::none);
+    jsg::Ref<WritableStream> sink = jsg::alloc<WritableStream>(env.context, kj::heap<MySink>());
+
+    auto pipeTo = source->pipeTo(env.js, sink.addRef(), PipeToOptions { .preventClose = true });
+
+    KJ_ASSERT(sink->isLocked());
+    try {
+      sink->getWriter(env.js);
+      KJ_FAIL_ASSERT("Expected getWriter to throw");
+    } catch (...) {
+      auto ex = kj::getCaughtExceptionAsKj();
+      KJ_ASSERT(ex.getDescription() ==
+          "expected !stream->isLocked(); jsg.TypeError: This WritableStream "
+          "is currently locked to a writer.");
+    }
+
+    auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(10));
+
+    bool writeFailed = false;
+
+    auto write = sink->getController().write(env.js, buffersource.getHandle(env.js))
+        .catch_(env.js, [&](jsg::Lock& js, jsg::Value value) {
+      writeFailed = true;
+      auto ex = js.exceptionToKj(kj::mv(value));
+      KJ_ASSERT(ex.getDescription() ==
+                "jsg.TypeError: This WritableStream is currently being piped to.");
+    });
+
+    source->getController().cancel(env.js, kj::none);
+
+    env.js.runMicrotasks();
+
+    KJ_ASSERT(!sink->isLocked());
+    KJ_ASSERT(!sink->getController().isClosedOrClosing());
+    KJ_ASSERT(!sink->getController().isErrored());
+    KJ_ASSERT(sink->getController().isErroring(env.js) == kj::none);
+
+    // Getting a writer at this point does not throw...
+    sink->getWriter(env.js);
+  });
 }
 
 }  // namespace

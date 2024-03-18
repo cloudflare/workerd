@@ -227,6 +227,7 @@ public:
   void setHighWaterMark(uint64_t highWaterMark);
 
   bool isClosedOrClosing() override;
+  bool isPiping();
   bool isErrored() override;
 
   inline bool isByteOriented() const override { return true; }
