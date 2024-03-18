@@ -597,9 +597,9 @@ public:
       JSG_METHOD_NAMED(delete, delete_);
     }
 
-    if (flags.getWorkerdExperimental()) {
-      JSG_WILDCARD_PROPERTY(getRpcMethod);
+    JSG_WILDCARD_PROPERTY(getRpcMethod);
 
+    if (flags.getWorkerdExperimental()) {
       // We export a copy of getRpcMethod for use in tests only which allows the caller to provide
       // an arbitrary string as the method name. This allows invoking methods that would normally
       // be shadowed by non-wildcard methods.
