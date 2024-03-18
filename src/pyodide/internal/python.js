@@ -1,26 +1,5 @@
-import { parseTarInfo } from "pyodide-internal:tar";
-import { createTarFS } from "pyodide-internal:tarfs";
-import { createMetadataFS } from "pyodide-internal:metadatafs";
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
-import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
-import { default as internalJaeger } from "pyodide-internal:jaeger";
-
-const canonicalizeNameRegex = /[-_.]+/g;
-
-/**
- * Normalize a package name. Port of Python's packaging.utils.canonicalize_name.
- * @param name The package name to normalize.
- * @returns The normalized package name.
- * @private
- */
-export function canonicalizePackageName(name) {
-  return name.replace(canonicalizeNameRegex, "-").toLowerCase();
-}
-
-// The "name" field in the lockfile is not normalized, so we need to normalize here
-const STDLIB_PACKAGES = Object.values(LOCKFILE.packages)
-  .filter(({ install_dir }) => install_dir === "stdlib")
-  .map(({ name }) => canonicalizePackageName(name));
+import { enterJaegerSpan } from "pyodide-internal:jaeger";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -80,19 +59,6 @@ export async function uploadArtifacts() {
   if (DEFERRED_UPLOAD_FUNCTION) {
     return await DEFERRED_UPLOAD_FUNCTION();
   }
-}
-
-/**
- * Used for tracing via Jaeger.
- */
-
-export function enterJaegerSpan(span, callback) {
-  if (!internalJaeger.traceId) {
-    // Jaeger tracing not enabled or traceId is not present in request.
-    return callback();
-  }
-
-  return internalJaeger.enterSpan(span, callback);
 }
 
 /**
@@ -283,7 +249,6 @@ const SNAPSHOT_IMPORTS = [
  * linear memory into MEMORY.
  */
 async function makeLinearMemorySnapshot(emscriptenModule) {
-  // TODO: make memory snapshot with more than just these hardcoded imports, use real script imports.
   const toImport = SNAPSHOT_IMPORTS.join(",");
   const toDelete = Array.from(
     new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".")[0])),
@@ -336,61 +301,6 @@ function simpleRunPython(emscriptenModule, code) {
   }
 }
 
-function buildSitePackages(tarInfo, requirements) {
-  const res = {
-    children: new Map(),
-    mode: 0o777,
-    type: 5,
-    modtime: 0,
-    size: 0,
-    path: "",
-    name: "",
-    parts: [],
-  };
-
-  for (const req of new Set([...STDLIB_PACKAGES, ...requirements])) {
-    const child = tarInfo.children.get(req);
-    if (!child) {
-      throw new Error(`Requirement ${req} not found in pyodide packages tar`);
-    }
-    child.children.forEach((val, key) => {
-      if (res.children.has(key)) {
-        throw new Error(
-          `File/folder ${key} being written by multiple packages`,
-        );
-      }
-      res.children.set(key, val);
-    });
-  }
-
-  return res;
-}
-
-export function mountLib(pyodide, requirements, isWorkerd) {
-  const [origTarInfo, _] = parseTarInfo();
-  let info;
-  // in workerd, the tar file is the /site-packages directory
-  // in edgeworker, we need to build the right /site-packages directory using the tar file and our requirements
-  if (isWorkerd) {
-    info = origTarInfo;
-  } else {
-    info = buildSitePackages(origTarInfo, requirements);
-  }
-  const tarFS = createTarFS(pyodide._module);
-  const mdFS = createMetadataFS(pyodide._module);
-  const pymajor = pyodide._module._py_version_major();
-  const pyminor = pyodide._module._py_version_minor();
-  const site_packages = `/session/lib/python${pymajor}.${pyminor}/site-packages`;
-  pyodide.FS.mkdirTree(site_packages);
-  pyodide.FS.mkdirTree("/session/metadata");
-  pyodide.FS.mount(tarFS, { info }, site_packages);
-  pyodide.FS.mount(mdFS, {}, "/session/metadata");
-  const sys = pyodide.pyimport("sys");
-  sys.path.push(site_packages);
-  sys.path.push("/session/metadata");
-  sys.destroy();
-}
-
 export async function loadPyodide(lockfile, indexURL) {
   // Lookup memory snapshot from artifact store.
   const maybeMemorySnapshot = ArtifactBundler.getMemorySnapshot();
@@ -405,14 +315,16 @@ export async function loadPyodide(lockfile, indexURL) {
   }
 
   const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
-  const emscriptenModule =
-    await enterJaegerSpan("instantiate_emscripten",
-      () => instantiateEmscriptenModule(emscriptenSettings));
-  const usingExistingMemorySnapshot =
-    await enterJaegerSpan("prepare_wasm_linear_memory",
-      () => prepareWasmLinearMemory(emscriptenModule));
+  const emscriptenModule = await enterJaegerSpan("instantiate_emscripten", () =>
+    instantiateEmscriptenModule(emscriptenSettings),
+  );
+  const usingExistingMemorySnapshot = await enterJaegerSpan(
+    "prepare_wasm_linear_memory",
+    () => prepareWasmLinearMemory(emscriptenModule),
+  );
 
-  // Upload `MEMORY` to artifact store so long as a new memory snapshot was generated.
+  // Upload emscripten heap memory to artifact store so long as we didn't load an existing
+  // snapshot.
   const isTestMode =
     maybeMemorySnapshot && maybeMemorySnapshot.byteLength < 100;
   if (ArtifactBundler.isEnabled() && !usingExistingMemorySnapshot) {
@@ -427,7 +339,10 @@ export async function loadPyodide(lockfile, indexURL) {
   }
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
-  enterJaegerSpan("finalize_bootstrap", emscriptenModule.API.finalizeBootstrap);
+  await enterJaegerSpan(
+    "finalize_bootstrap",
+    emscriptenModule.API.finalizeBootstrap,
+  );
   const pyodide = emscriptenModule.API.public_api;
 
   // This is just here for our test suite. Ugly but just about the only way to test this.
