@@ -119,12 +119,6 @@ REPLACEMENTS = [
         "crypto.getRandomValues",
         "getRandomValues"
     ],
-    [
-        # Expose recursiveDependencies for use in setupPackages
-        # TODO: upstream this.
-        'o(Ct,"recursiveDependencies");',
-        'o(Ct,"recursiveDependencies");API.recursiveDependencies=Ct;'
-    ]
 ]
 
 load("//:build/pyodide_bucket.bzl", "PYODIDE_PACKAGE_BUCKET_URL")
