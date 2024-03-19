@@ -228,6 +228,8 @@ public:
       jsg::Optional<UnderlyingSource> underlyingSource,
       jsg::Optional<StreamQueuingStrategy> queuingStrategy);
 
+  static jsg::Ref<ReadableStream> from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator);
+
   bool isLocked();
 
   // Closes the stream. All present and future read requests are fulfilled with successful empty
@@ -305,6 +307,7 @@ public:
     JSG_METHOD(pipeTo);
     JSG_METHOD(tee);
     JSG_METHOD(values);
+    JSG_STATIC_METHOD(from);
 
     JSG_INSPECT_PROPERTY(state, inspectState);
     JSG_INSPECT_PROPERTY(supportsBYOB, inspectSupportsBYOB);
