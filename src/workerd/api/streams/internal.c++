@@ -862,6 +862,10 @@ jsg::Promise<void> WritableStreamInternalController::write(
     return js.rejectedPromise<void>(
         js.v8TypeError("This WritableStream has been closed."_kj));
   }
+  if (isPiping()) {
+    return js.rejectedPromise<void>(
+        js.v8TypeError("This WritableStream is currently being piped to."_kj));
+  }
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
@@ -919,6 +923,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
                                           byteLength),
         }
       });
+
       ensureWriting(js);
       return kj::mv(prp.promise);
     }
@@ -969,6 +974,10 @@ void WritableStreamInternalController::setHighWaterMark(uint64_t highWaterMark) 
 jsg::Promise<void> WritableStreamInternalController::closeImpl(jsg::Lock& js, bool markAsHandled) {
   if (isClosedOrClosing()) {
     auto reason = js.v8TypeError("This WritableStream has been closed."_kj);
+    return rejectedMaybeHandledPromise<void>(js, reason, markAsHandled);
+  }
+  if (isPiping()) {
+    auto reason = js.v8TypeError("This WritableStream is currently being piped to."_kj);
     return rejectedMaybeHandledPromise<void>(js, reason, markAsHandled);
   }
 
@@ -1028,6 +1037,10 @@ jsg::Promise<void> WritableStreamInternalController::flush(
     bool markAsHandled) {
   if (isClosedOrClosing()) {
     auto reason = js.v8TypeError("This WritableStream has been closed."_kj);
+    return rejectedMaybeHandledPromise<void>(js, reason, markAsHandled);
+  }
+  if (isPiping()) {
+    auto reason = js.v8TypeError("This WritableStream is currently being piped to."_kj);
     return rejectedMaybeHandledPromise<void>(js, reason, markAsHandled);
   }
 
@@ -1124,6 +1137,11 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   auto preventClose = options.preventClose.orDefault(false);
   auto preventCancel = options.preventCancel.orDefault(false);
   auto pipeThrough = options.pipeThrough;
+
+  if (isPiping()) {
+    auto reason = js.v8TypeError("This WritableStream is currently being piped to."_kj);
+    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+  }
 
   // If a signal is provided, we need to check that it is not already triggered. If it
   // is, we return a rejected promise using the signal's reason.
@@ -1334,6 +1352,10 @@ bool WritableStreamInternalController::isClosedOrClosing() {
   return state.is<StreamStates::Closed>() || isClosing || isFlushing;
 }
 
+bool WritableStreamInternalController::isPiping() {
+  return state.is<Writable>() && !queue.empty() && queue.back().event.is<Pipe>();
+}
+
 bool WritableStreamInternalController::isErrored() {
   return state.is<StreamStates::Errored>();
 }
@@ -1409,6 +1431,25 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
     jsg::Lock& js) {
   auto& ioContext = IoContext::current();
 
+  // This helper function is just used to enhance the assert logging when checking
+  // that the request in flight is the one we expect.
+  static constexpr auto inspectQueue = [](auto& queue, kj::StringPtr name) {
+    if (queue.size() > 1) {
+      kj::Vector<kj::String> events;
+      for (auto& event : queue) {
+        KJ_SWITCH_ONEOF(event.event) {
+          KJ_CASE_ONEOF(write, Write) { events.add(kj::str("Write")); }
+          KJ_CASE_ONEOF(flush, Flush) { events.add(kj::str("Flush")); }
+          KJ_CASE_ONEOF(close, Close) { events.add(kj::str("Close")); }
+          KJ_CASE_ONEOF(pipe, Pipe) { events.add(kj::str("Pipe")); }
+        }
+      }
+      return kj::str("Too many events in internal writablestream queue: ",
+                     kj::delimited(kj::mv(events), ", "));
+    }
+    return kj::String();
+  };
+
   const auto makeChecker = [this](auto& request) {
     // Make a helper function that asserts that the queue did not change state during a write/close
     // operation. We normally only pop/drain the queue after write/close completion. We drain the
@@ -1422,9 +1463,12 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       if constexpr (kj::isSameType<Request, Write>() || kj::isSameType<Request, Flush>()) {
         // Write and flush requests can have any number of requests backed up after them.
         KJ_ASSERT(!queue.empty());
-      } else {
+      } else if constexpr (kj::isSameType<Request, Close>()) {
         // Pipe and Close requests are always the last one in the queue.
-        KJ_ASSERT(queue.size() == 1, queue.size());
+        KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue, "Pipe"));
+      } else if constexpr (kj::isSameType<Request, Pipe>()) {
+        // Pipe and Close requests are always the last one in the queue.
+        KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue, "Pipe"));
       }
 
       // The front of the queue is what we expect it to be.
@@ -1520,14 +1564,12 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         request.source.release(js);
         // If the source is closed, the spec requires us to close the destination unless the
         // preventClose option is true.
-        if (!request.preventClose) {
-          if (!isClosedOrClosing()) {
-            doClose(js);
-          } else {
-            writeState.init<Unlocked>();
-          }
-          return js.resolvedPromise();
+        if (!request.preventClose && !isClosedOrClosing()) {
+          doClose(js);
+        } else {
+          writeState.init<Unlocked>();
         }
+        return js.resolvedPromise();
       }
 
       KJ_IF_SOME(errored, request.source.tryGetErrored(js)) {
