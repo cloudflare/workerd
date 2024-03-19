@@ -294,7 +294,9 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
 
     // Wait for output locks and cache put quota, trying to avoid returning to the KJ event loop
     // in the common case where no waits are needed.
-    jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> startStreamPromise = nullptr;
+    // TODO(later): With Cache streams no longer having a size limit enforced by the runtime,
+    // explore if we can clean up stream serialization too.
+    jsg::Promise<IoOwn<kj::AsyncInputStream>> startStreamPromise = nullptr;
     auto makeCachePutStream = [&context, stream = kj::mv(payload.stream)](jsg::Lock& js) mutable {
       return context.makeCachePutStream(js, kj::mv(stream));
     };
@@ -308,15 +310,8 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
         [this, &context, jsRequest = kj::mv(jsRequest),
          serializePromise = kj::mv(serializePromise),
          writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise)]
-        (jsg::Lock& js, kj::Maybe<IoOwn<kj::AsyncInputStream>> maybeStream) mutable
+        (jsg::Lock& js, IoOwn<kj::AsyncInputStream> payloadStream) mutable
         -> jsg::Promise<void> {
-      if (maybeStream == kj::none) {
-        // Cache API PUT quota must have been exceeded.
-        return js.resolvedPromise();
-      }
-
-      kj::Own<kj::AsyncInputStream> payloadStream = KJ_ASSERT_NONNULL(kj::mv(maybeStream));
-
       // Make the PUT request to cache.
       auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js),
                                       "cache_put"_kjc);

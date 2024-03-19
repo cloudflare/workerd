@@ -122,16 +122,9 @@ IoContext::IoContext(ThreadContext& thread,
       limitEnforcer(kj::mv(limitEnforcerParam)),
       threadId(getThreadId()),
       deleteQueue(kj::atomicRefcounted<DeleteQueue>()),
-      cachePutQuota(nullptr),
+      cachePutSerializer(kj::READY_NOW),
       waitUntilTasks(*this),
       timeoutManager(kj::heap<TimeoutManagerImpl>()) {
-  KJ_IF_SOME(putLimit, limitEnforcer->getCachePUTLimitMB()) {
-    initialPutQuota = putLimit * MB;
-  } else {
-    initialPutQuota = DEFAULT_MAX_PUT_SIZE;
-  }
-  cachePutQuota = initialPutQuota;
-
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
   auto localAbortPromise = kj::mv(paf.promise);
@@ -1199,21 +1192,19 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
 
 namespace {
 
-class CacheQuotaInputStream final: public kj::AsyncInputStream {
+class CacheSerializedInputStream final: public kj::AsyncInputStream {
 public:
-  CacheQuotaInputStream(
-      kj::Own<kj::AsyncInputStream> inner, size_t quota,
-      kj::Own<kj::PromiseFulfiller<size_t>> fulfiller)
-      : inner(kj::mv(inner)), quota(quota), fulfiller(kj::mv(fulfiller)) {}
+  CacheSerializedInputStream(
+      kj::Own<kj::AsyncInputStream> inner,
+      kj::Own<kj::PromiseFulfiller<void>> fulfiller)
+      : inner(kj::mv(inner)), fulfiller(kj::mv(fulfiller)) {}
 
-  ~CacheQuotaInputStream() noexcept(false) {
-    fulfiller->fulfill(kj::cp(quota));
+  ~CacheSerializedInputStream() noexcept(false) {
+    fulfiller->fulfill();
   }
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t amount = co_await inner->tryRead(buffer, minBytes, maxBytes);
-    quota -= amount > quota ? quota : amount;
-    co_return amount;
+    return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
@@ -1222,68 +1213,38 @@ public:
 
   kj::Promise<uint64_t> pumpTo(
       kj::AsyncOutputStream& output, uint64_t amount) override {
-    amount = co_await inner->pumpTo(output, amount);
-    quota -= amount > quota ? quota : amount;
-    co_return amount;
+    return inner->pumpTo(output, amount);
   }
 
 private:
   kj::Own<kj::AsyncInputStream> inner;
-  size_t quota;
-  kj::Own<kj::PromiseFulfiller<size_t>> fulfiller;
+  kj::Own<kj::PromiseFulfiller<void>> fulfiller;
 };
 
 }  // namespace
 
-jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> IoContext::makeCachePutStream(
+jsg::Promise<IoOwn<kj::AsyncInputStream>> IoContext::makeCachePutStream(
     jsg::Lock& js, kj::Own<kj::AsyncInputStream> stream) {
-  KJ_IF_SOME(length, stream->tryGetLength()) {
-    // This Cache API subrequest would exceed the total PUT quota. There used to be a limit on
-    // individual puts, but now this is only used as a fast path for rejecting PUTs going beyond the
-    // total quota early.
-    if (length > initialPutQuota) {
-      return js.resolvedPromise(kj::Maybe<IoOwn<kj::AsyncInputStream>>(kj::none));
-    }
-  }
+  auto paf = kj::newPromiseAndFulfiller<void>();
 
-  auto paf = kj::newPromiseAndFulfiller<size_t>();
+  KJ_DEFER(cachePutSerializer = kj::mv(paf.promise));
 
-  KJ_DEFER(cachePutQuota = kj::mv(paf.promise));
-
-  return awaitIo(js, cachePutQuota.then(
-      [fulfiller = kj::mv(paf.fulfiller), stream = kj::mv(stream)](size_t quota) mutable
-          -> kj::Maybe<kj::Own<kj::AsyncInputStream>> {
-    if (quota == 0) {
-      fulfiller->fulfill(kj::cp(quota));
-      // Total PUT quota already exceeded.
-      return kj::none;
-    }
-
-    KJ_IF_SOME(length, stream->tryGetLength()) {
-      // PUT with Content-Length. We rely on kj-http to enforce that the expected length is
-      // respected, and can just return the new quota immediately, allowing the next PUT to start.
-      KJ_DEFER(fulfiller->fulfill(kj::cp(quota)));
-      if (quota >= length) {
-        quota -= length;
-        return kj::mv(stream);
-      } else {
-        // This Cache API subrequest would exceed the total PUT quota.
-        return kj::none;
-      }
+  return awaitIo(js, cachePutSerializer.then(
+      [fulfiller = kj::mv(paf.fulfiller), stream = kj::mv(stream)]() mutable
+          -> kj::Own<kj::AsyncInputStream> {
+    if (stream->tryGetLength() != kj::none) {
+      // PUT with Content-Length. We can just return immediately, allowing the next PUT to start.
+      KJ_DEFER(fulfiller->fulfill());
+      return kj::mv(stream);
     } else {
+      // TODO(later): With Cache streams no longer having a size limit enforced by the runtime,
+      // explore if we can clean up stream serialization too.
       // PUT with Transfer-Encoding: chunked. We have no idea how big this request body is going to
-      // be, so wrap the stream in a byte counter which deducts the total amount from the quota, and
-      // unblocks the next PUT, only after this one is complete.
-      //
-      // Note that a single chunked PUT could still blow our quota by a long shot: a script could
-      // make a number of PUTs totalling 4.9GB, then send a chunked PUT with an infinite body. It's
-      // up to the cache to stop reading from the stream in this case, but at the very least we
-      // will refuse to allow the initiation of any further PUT requests.
-      return kj::heap<CacheQuotaInputStream>(kj::mv(stream), quota, kj::mv(fulfiller));
+      // be, so wrap the stream that only unblocks the next PUT after this one is complete.
+      return kj::heap<CacheSerializedInputStream>(kj::mv(stream), kj::mv(fulfiller));
     }
-  }), [this](jsg::Lock&, kj::Maybe<kj::Own<kj::AsyncInputStream>> result) {
-    return kj::mv(result).map(
-        [&](kj::Own<kj::AsyncInputStream>&& obj) { return addObject(kj::mv(obj)); });
+  }), [this](jsg::Lock&, kj::Own<kj::AsyncInputStream> result) {
+    return addObject(kj::mv(result));
   });
 }
 
