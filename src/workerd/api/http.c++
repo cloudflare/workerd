@@ -2100,6 +2100,31 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::Stri
   // This is like JsRpcStub::getRpcMethod(), but we also initiate a whole new JS RPC session
   // each time the method is called (handled by `getClientForOneCall()`, below).
 
+  auto flags = FeatureFlags::get(js);
+  if (!flags.getFetcherRpc() && !flags.getWorkerdExperimental()) {
+    // We need to pretend that we haven't implemented a wildcard property, as unfortunately it
+    // breaks some workers in the wild. We would, however, like to warn users who are trying to use
+    // RPC so they understand why it isn't working.
+
+    if (name == "idFromName") {
+      // HACK specifically for itty-durable: We will not write any warning here, since itty-durable
+      // automatically checks for this property on all bindings in an effort to discover Durable
+      // Object namespaces. The warning would be confusing.
+      //
+      // Reported here: https://github.com/kwhitley/itty-durable/issues/48
+    } else {
+      IoContext::current().logWarningOnce(kj::str(
+          "WARNING: Tried to access method or property '", name, "' on a Service Binding or "
+          "Durable Object stub. Are you trying to use RPC? If so, please enable the 'rpc' compat "
+          "flag or update your compat date to 2024-04-03 or later (see "
+          "https://developers.cloudflare.com/workers/configuration/compatibility-dates/ ). If you "
+          "are not trying to use RPC, please note that in the future, this property (and all other "
+          "property names) will appear to be present as an RPC method."));
+    }
+
+    return kj::none;
+  }
+
   // Do not return a method for `then`, otherwise JavaScript decides this is a thenable, i.e. a
   // custom Promise, which will mean a Promise that resolves to this object will attempt to chain
   // with it, which is not what you want!

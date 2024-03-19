@@ -407,4 +407,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("unwrap_custom_thenables")
       $compatDisableFlag("no_unwrap_custom_thenables")
       $compatEnableDate("2024-04-01");
+
+  fetcherRpc @46 :Bool
+      $compatEnableFlag("rpc")
+      $compatDisableFlag("no_rpc")
+      $compatEnableDate("2024-04-03");
+  # Whether the type `Fetcher` type -- which is the type of Service Bindings, and also the parent
+  # type of Durable Object stubs -- support RPC. If so, this type will have a wildcard method, so
+  # it will appear that all possible property names are present on any fetcher instance. This could
+  # break code that tries to infer types based on the presence or absence of methods.
 }
