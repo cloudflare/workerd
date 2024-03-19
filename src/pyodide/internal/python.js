@@ -37,7 +37,7 @@ import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
  */
 import stdlib from "pyodide-internal:generated/python_stdlib.zip";
 
-const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled();
+const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
 const DEDICATED_SNAPSHOT = true;
 
 /**
@@ -62,6 +62,17 @@ export async function uploadArtifacts() {
   if (DEFERRED_UPLOAD_FUNCTION) {
     return await DEFERRED_UPLOAD_FUNCTION();
   }
+}
+
+/**
+ * Used to hold the memory that needs to be uploaded for the validator.
+ */
+let MEMORY_TO_UPLOAD = undefined;
+export function getMemoryToUpload() {
+  if (!MEMORY_TO_UPLOAD) {
+    throw new TypeError("Expected MEMORY_TO_UPLOAD to be set");
+  }
+  return MEMORY_TO_UPLOAD;
 }
 
 /**
@@ -281,6 +292,7 @@ async function prepareWasmLinearMemory(Module) {
     return;
   }
   adjustSysPath(Module, simpleRunPython);
+
   if (SHOULD_UPLOAD_SNAPSHOT) {
     setUploadFunction(makeLinearMemorySnapshot(Module));
   }
@@ -386,6 +398,9 @@ function makeLinearMemorySnapshot(Module) {
 function setUploadFunction(toUpload) {
   if (toUpload.constructor.name !== "Uint8Array") {
     throw new TypeError("Expected TO_UPLOAD to be a Uint8Array");
+  }
+  if (ArtifactBundler.isEwValidating()) {
+    MEMORY_TO_UPLOAD = toUpload;
   }
   DEFERRED_UPLOAD_FUNCTION = async () => {
     try {

@@ -89,21 +89,29 @@ public:
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler : public jsg::Object {
 public:
+  kj::Maybe<kj::Array<kj::byte>> storedSnapshot;
+
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot,
       kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)> uploadMemorySnapshotCb)
-      : existingSnapshot(kj::mv(existingSnapshot)),
+      : storedSnapshot(kj::none),
+        existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
-        hasUploaded(false) {};
+        hasUploaded(false),
+        isValidating(false) {};
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
-      : existingSnapshot(kj::mv(existingSnapshot)),
+      : storedSnapshot(kj::none),
+        existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false) {};
+        hasUploaded(false),
+        isValidating(false) {};
 
-  ArtifactBundler()
-      : existingSnapshot(kj::none),
+  ArtifactBundler(bool isValidating = false)
+      : storedSnapshot(kj::none),
+        existingSnapshot(kj::none),
         uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false) {};
+        hasUploaded(false),
+        isValidating(isValidating) {};
 
   jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
     // Prevent multiple uploads.
@@ -123,6 +131,11 @@ public:
     return context.awaitIo(js, cb(kj::mv(snapshot)));
   };
 
+  void storeMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
+    KJ_REQUIRE(isValidating);
+    storedSnapshot = kj::mv(snapshot);
+  }
+
   jsg::Optional<kj::Array<kj::byte>> getMemorySnapshot(jsg::Lock& js) {
     KJ_IF_SOME(val, existingSnapshot) {
       return kj::mv(val);
@@ -136,6 +149,11 @@ public:
 
   bool hasMemorySnapshot() {
     return existingSnapshot != kj::none;
+  }
+
+  // Determines whether this ArtifactBundler was created inside the validator.
+  bool isEwValidating() {
+    return isValidating;
   }
 
   static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
@@ -152,13 +170,17 @@ public:
     JSG_METHOD(uploadMemorySnapshot);
     JSG_METHOD(getMemorySnapshot);
     JSG_METHOD(isEnabled);
+    JSG_METHOD(isEwValidating);
+    JSG_METHOD(storeMemorySnapshot);
   }
+
 private:
   // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
   // up cold starts.
   kj::Maybe<kj::Array<kj::byte>> existingSnapshot;
   kj::Maybe<kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)>> uploadMemorySnapshotCb;
   bool hasUploaded;
+  bool isValidating;
 };
 
 

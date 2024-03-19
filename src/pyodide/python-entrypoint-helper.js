@@ -1,7 +1,7 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { loadPyodide, uploadArtifacts } from "pyodide-internal:python";
+import { loadPyodide, uploadArtifacts, getMemoryToUpload } from "pyodide-internal:python";
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
   REQUIREMENTS,
@@ -16,6 +16,7 @@ import {
   MAIN_MODULE_NAME,
   WORKERD_INDEX_URL,
 } from "pyodide-internal:metadata";
+import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 
 function pyimportMainModule(pyodide) {
   if (!MAIN_MODULE_NAME.endsWith(".py")) {
@@ -189,6 +190,12 @@ if (IS_WORKERD || IS_TRACING) {
       handlers[handlerName] = makeHandler(pyHandlerName);
     }
   }
+}
+
+// Store the memory snapshot in the ArtifactBundler so that the validator can read it out.
+// Needs to happen at the top level because the validator does not perform requests.
+if (ArtifactBundler.isEwValidating()) {
+  ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
 }
 
 export default handlers;
