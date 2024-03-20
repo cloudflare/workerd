@@ -3,7 +3,7 @@
 The primary distribution channel for `workerd` right now is through `npm`. We use a (mostly) automatic CI setup to release and publish both `workerd` and `workers-types`.
 
 The release is a 3-step process:
-1. Cut release
+1. Cut release, wait for all binaries to be published (5 platforms total, can take few hours)
 2. Publish workerd
 3. Publish workers-types
 
@@ -17,7 +17,7 @@ This is pretty simple, and completely automatic—every time the compatibility d
 
 ## Publishing `workerd`
 
-Once all binaries have been automatically added to the release (few hours):
+Once all binaries (5 platforms) have been automatically added to the release (few hours):
 
 - navigate to "Actions" github tab
 - pick "Publish to NPM" workflow
@@ -27,7 +27,7 @@ Once all binaries have been automatically added to the release (few hours):
 
 ## Publishing `workers-types`
 
-Once all binaries have been automatically added to the release (few hours):
+Once all binaries (5 platforms) have been automatically added to the release (few hours):
 
 - navigate to "Actions" github tab
 - pick "Publish types to NPM" workflow
