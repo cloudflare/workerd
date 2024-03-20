@@ -586,6 +586,32 @@ public:
     if (flags.getServiceBindingExtraHandlers()) {
       JSG_METHOD(queue);
       JSG_METHOD(scheduled);
+
+      JSG_TS_OVERRIDE(type Fetcher<
+        T extends Rpc.EntrypointBranded | undefined = undefined,
+        Reserved extends string = never
+      > = (
+        T extends Rpc.EntrypointBranded
+          ? Rpc.Provider<T, Reserved | "fetch" | "connect" | "queue" | "scheduled">
+          : unknown
+      ) & {
+        fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+        connect(address: SocketAddress | string, options?: SocketOptions): Socket;
+        queue(queueName: string, messages: ServiceBindingQueueMessage[]): Promise<FetcherQueueResult>;
+        scheduled(options?: FetcherScheduledOptions): Promise<FetcherScheduledResult>;
+      });
+    } else {
+      JSG_TS_OVERRIDE(type Fetcher<
+        T extends Rpc.EntrypointBranded | undefined = undefined,
+        Reserved extends string = never
+      > = (
+        T extends Rpc.EntrypointBranded
+          ? Rpc.Provider<T, Reserved | "fetch" | "connect">
+          : unknown
+      ) & {
+        fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+        connect(address: SocketAddress | string, options?: SocketOptions): Socket;
+      });
     }
 
     if (!flags.getFetcherNoGetPutDelete()) {
@@ -605,14 +631,6 @@ public:
       // be shadowed by non-wildcard methods.
       JSG_METHOD(getRpcMethodForTestOnly);
     }
-
-    JSG_TS_OVERRIDE({
-      fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
-      get: never;
-      put: never;
-      delete: never;
-    });
-    // Add URL to `fetch` input, and omit method helpers from definition
   }
 
 private:

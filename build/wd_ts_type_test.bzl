@@ -15,6 +15,7 @@ def wd_ts_type_test(src, **kwargs):
         data = [
             "//types:types",
             "//types:test/types/tsconfig.json",
+            "//:node_modules/expect-type",
             src,
         ],
     )

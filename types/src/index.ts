@@ -262,6 +262,12 @@ export async function main(args?: string[]) {
     const root = message.getRoot(StructureGroups);
     let { ambient, importable } = printDefinitions(root, standards, extra);
     if (options.format) {
+      // Strip `// prettier-ignore` comments. TypeScript will reformat all
+      // defines anyway, and Prettier's formatting is nicer.
+      const prettierIgnoreRegexp = /^\s*\/\/\s*prettier-ignore\s*\n/gm;
+      ambient = ambient.replaceAll(prettierIgnoreRegexp, "");
+      importable = importable.replaceAll(prettierIgnoreRegexp, "");
+
       ambient = await prettier.format(ambient, { parser: "typescript" });
       importable = await prettier.format(importable, { parser: "typescript" });
     }

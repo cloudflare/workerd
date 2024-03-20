@@ -55,6 +55,9 @@ devDependencies:
   eslint-plugin-prettier:
     specifier: ^5.1.3
     version: 5.1.3(eslint-config-prettier@9.1.0)(eslint@8.57.0)(prettier@3.2.5)
+  expect-type:
+    specifier: ^0.18.0
+    version: 0.18.0
 
 packages:
 
@@ -1216,6 +1219,11 @@ packages:
   /esutils@2.0.3:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
+    dev: true
+
+  /expect-type@0.18.0:
+    resolution: {integrity: sha512-xjKoyyDLoia2h1WF+vwV8AmEpQ0drGW0InRgyywAHyOC+XSPYMxGoMXSwPjXs46D8FgLmp32sHMd1KrVingDuQ==}
+    engines: {node: '>=12.0.0'}
     dev: true
 
   /fast-deep-equal@3.1.3:
