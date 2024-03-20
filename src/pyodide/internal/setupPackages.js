@@ -21,6 +21,7 @@ const STDLIB_PACKAGES = Object.values(LOCKFILE.packages)
   .filter(({ install_dir }) => install_dir === "stdlib")
   .map(({ name }) => canonicalizePackageName(name));
 
+
 /**
  * This stitches together the view of the site packages directory. Each
  * requirement corresponds to a folder in the original tar file. For each
@@ -38,9 +39,10 @@ export function buildSitePackages(requirements) {
   // larger, but there are a lot of differences...
   const USE_LOAD_PACKAGE = origTarInfo.children.size < 10;
   if (USE_LOAD_PACKAGE) {
-    return [origTarInfo, [], USE_LOAD_PACKAGE];
+    requirements = new Set([...STDLIB_PACKAGES]);
+  } else {
+    requirements = new Set([...STDLIB_PACKAGES, ...requirements]);
   }
-  requirements = new Set([...STDLIB_PACKAGES, ...requirements]);
   const soFiles = [];
   for (const soFile of origSoFiles) {
     // If folder is in list of requirements include .so file in list to preload.

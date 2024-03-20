@@ -89,6 +89,8 @@ import { newWasmModule, monotonicDateNow, wasmInstantiate, getRandomValues } fro
 const location = undefined;
 
 function addEventListener(){}
+
+function reportUndefinedSymbolsNoOp() {}
 """
 
 REPLACEMENTS = [
@@ -119,6 +121,10 @@ REPLACEMENTS = [
         "crypto.getRandomValues",
         "getRandomValues"
     ],
+    [
+        "reportUndefinedSymbols()",
+        "reportUndefinedSymbolsNoOp()"
+    ]
 ]
 
 load("//:build/pyodide_bucket.bzl", "PYODIDE_PACKAGE_BUCKET_URL")
