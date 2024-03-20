@@ -33,13 +33,16 @@ private:
   kj::Array<kj::String> requirements;
   bool isWorkerdFlag;
   bool isTracingFlag;
+  kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
 public:
   PyodideMetadataReader(kj::String mainModule, kj::Array<kj::String> names,
                         kj::Array<kj::Array<kj::byte>> contents, kj::Array<kj::String> requirements,
-                        bool isWorkerd, bool isTracing)
+                        bool isWorkerd, bool isTracing,
+                        kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
       : mainModule(kj::mv(mainModule)), names(kj::mv(names)), contents(kj::mv(contents)),
-        requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd), isTracingFlag(isTracing) {}
+        requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd), isTracingFlag(isTracing),
+        memorySnapshot(kj::mv(memorySnapshot)) {}
 
   bool isWorkerd() {
     return this->isWorkerdFlag;
@@ -51,6 +54,10 @@ public:
 
   kj::String getMainModule() {
     return kj::str(this->mainModule);
+  }
+
+  kj::Maybe<kj::Array<kj::byte>> getMemorySnapshot() {
+    return kj::mv(memorySnapshot);
   }
 
   kj::Array<jsg::JsRef<jsg::JsString>> getNames(jsg::Lock& js);
@@ -69,6 +76,7 @@ public:
     JSG_METHOD(getNames);
     JSG_METHOD(getSizes);
     JSG_METHOD(read);
+    JSG_METHOD(getMemorySnapshot);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
