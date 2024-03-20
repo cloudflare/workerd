@@ -50,11 +50,11 @@ export function createGlobalScopeTransformer(
 function createInlineVisitor(
   ctx: ts.TransformationContext,
   inlines: Map<string, ts.TypeNode>
-): ts.Visitor {
+): ts.Visitor<ts.Node, ts.Node> {
   // If there's nothing to inline, just return identity visitor
   if (inlines.size === 0) return (node) => node;
 
-  const visitor: ts.Visitor = (node) => {
+  const visitor: ts.Visitor<ts.Node, ts.Node> = (node) => {
     // Recursively visit all nodes
     node = ts.visitEachChild(node, visitor, ctx);
 
@@ -85,7 +85,6 @@ export function createGlobalScopeVisitor(
         ctx.factory.createToken(ts.SyntaxKind.DeclareKeyword),
       ];
       return ctx.factory.createFunctionDeclaration(
-        /* decorators */ undefined,
         modifiers,
         /* asteriskToken */ undefined,
         node.name,
@@ -156,7 +155,7 @@ export function createGlobalScopeVisitor(
         // class B<T> extends A<T> {}
         // class C extends B<string> {}
         // ```
-        clause = ts.visitNode(clause, inlineVisitor);
+        clause = ts.visitNode(clause, inlineVisitor, ts.isHeritageClause);
 
         for (const superType of clause.types) {
           const superTypeSymbol = checker.getSymbolAtLocation(

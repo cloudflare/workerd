@@ -77,7 +77,7 @@ class D1Database {
         throw new Error(`D1_DUMP_ERROR: ${err.error}`, {
           cause: new Error(err.error),
         })
-      } catch (e) {
+      } catch {
         throw new Error(`D1_DUMP_ERROR: Status + ${response.status}`, {
           cause: new Error(`Status ${response.status}`),
         })
@@ -394,7 +394,7 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
   const body = await response.text()
   try {
     return JSON.parse(body) as T
-  } catch (e) {
+  } catch {
     throw new Error(`Failed to parse body as JSON, got: ${body}`)
   }
 }

@@ -262,8 +262,8 @@ export async function main(args?: string[]) {
     const root = message.getRoot(StructureGroups);
     let { ambient, importable } = printDefinitions(root, standards, extra);
     if (options.format) {
-      ambient = prettier.format(ambient, { parser: "typescript" });
-      importable = prettier.format(importable, { parser: "typescript" });
+      ambient = await prettier.format(ambient, { parser: "typescript" });
+      importable = await prettier.format(importable, { parser: "typescript" });
     }
     if (outputDir !== undefined) {
       const output = path.resolve(outputDir);

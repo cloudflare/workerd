@@ -30,3 +30,5 @@ package-lock.json
 /workerd-*
 
 /docs/api
+
+*.tsbuildinfo

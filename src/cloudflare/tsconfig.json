@@ -33,8 +33,5 @@
   "include": [
     "*.ts",
     "internal/*.ts"
-  ],
-  "files": [
-    "./internal/vectorize.d.ts"
   ]
 }
