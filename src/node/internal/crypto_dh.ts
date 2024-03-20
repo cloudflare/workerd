@@ -37,17 +37,25 @@ type ArrayLike = cryptoImpl.ArrayLike;
 
 import {
   ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY,
+  ERR_CRYPTO_INCOMPATIBLE_KEY,
+  ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE,
   ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 
 import {
   validateInt32,
+  validateObject,
 } from 'node-internal:validators';
 
 import {
   isArrayBufferView,
   isAnyArrayBuffer
 } from 'node-internal:internal_types';
+
+import {
+    KeyObject,
+} from 'node-internal:crypto_keys';
 
 import {
   getArrayBufferOrView,
@@ -224,4 +232,46 @@ export function createDiffieHellmanGroup(name: string): DiffieHellmanGroup {
 
 export function getDiffieHellman(name: string): DiffieHellmanGroup {
   return createDiffieHellmanGroup(name);
+}
+
+///////////////////////////////////////
+
+// Ed448 is not supported.
+// const dhEnabledKeyTypes = new Set(['dh', 'ec', 'x25519']);
+const dhEnabledKeyAlgorithms = new Set(['ECDH', 'Ed25519']);
+
+export function diffieHellman(options: { privateKey: KeyObject; publicKey: KeyObject }): Buffer {
+  validateObject(options, 'options');
+
+  const { privateKey, publicKey } = options;
+  if (!(privateKey instanceof KeyObject))
+    throw new ERR_INVALID_ARG_VALUE('options.privateKey', privateKey);
+
+  if (!(publicKey instanceof KeyObject))
+    throw new ERR_INVALID_ARG_VALUE('options.publicKey', publicKey);
+
+  if (privateKey.type !== 'private')
+    throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(privateKey.type, 'private');
+
+  if (publicKey.type !== 'public' && publicKey.type !== 'private') {
+    throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(publicKey.type,
+                                                 'private or public');
+  }
+
+  // TODO: KeyObject member variables are not supported, this should be fixed.
+  // For now, access the CryptoKey type.
+  // const privateType = privateKey.asymmetricKeyType;
+  // const publicType = publicKey.asymmetricKeyType;
+  // if (privateType !== publicType || !dhEnabledKeyTypes.has(privateType)) {
+  //   throw new ERR_CRYPTO_INCOMPATIBLE_KEY('key types for Diffie-Hellman',
+  //                                         `${privateType} and ${publicType}`);
+  // }
+  const privateType = privateKey[kHandle].algorithm.name;
+  const publicType = publicKey[kHandle].algorithm.name;
+  if (privateType !== publicType || !dhEnabledKeyAlgorithms.has(privateType)) {
+    throw new ERR_CRYPTO_INCOMPATIBLE_KEY('key types for Diffie-Hellman',
+                                          `${privateType} and ${publicType}`);
+  }
+
+  return cryptoImpl.statelessDH(privateKey[kHandle], publicKey[kHandle]);
 }
