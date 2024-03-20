@@ -121,9 +121,9 @@ http_archive(
 http_archive(
     name = "pyodide_packages",
     build_file = "//:build/BUILD.pyodide_packages",
-    sha256 = "f9aa1e044567f1f3e36c3516d066481093dbc116032c45294eee400628d8b4a2",
+    sha256 = "c4a4e0c1cb658a39abc0435cc07df902e5a2ecffc091e0528b96b0c295e309ea",
     type = "zip",
-    urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-micropip/pyodide_packages.tar.zip"],
+    urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-stdlib/pyodide_packages.tar.zip"],
 )
 
 load("//:build/pyodide_bucket.bzl", "PYODIDE_LOCK_SHA256", "PYODIDE_GITHUB_RELEASE_URL")
