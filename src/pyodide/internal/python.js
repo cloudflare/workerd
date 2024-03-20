@@ -10,6 +10,7 @@ import {
 } from "pyodide-internal:setupPackages";
 import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 import processScriptImports from "pyodide-internal:process_script_imports.py";
+import { BUNDLE_MEMORY_SNAPSHOT } from "pyodide-internal:metadata";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -491,7 +492,7 @@ function simpleRunPython(emscriptenModule, code) {
 let TEST_SNAPSHOT = undefined;
 (function () {
   // Lookup memory snapshot from artifact store.
-  const memorySnapshot = ArtifactBundler.getMemorySnapshot();
+  const memorySnapshot = BUNDLE_MEMORY_SNAPSHOT || ArtifactBundler.getMemorySnapshot();
   if (!memorySnapshot) {
     // snapshots are disabled or there isn't one yet
     return;
