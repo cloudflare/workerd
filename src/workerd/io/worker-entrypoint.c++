@@ -491,7 +491,8 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
                                              kj::Own<IoContext::IncomingRequest> request)
       -> kj::Promise<WorkerInterface::ScheduledResult> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() waitForFinished()");
-    bool completed = co_await request->finishScheduled();
+    auto result = co_await request->finishScheduled();
+    bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
     co_return WorkerInterface::ScheduledResult {
       .retry = context.shouldRetryScheduled(),
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU
@@ -634,7 +635,8 @@ kj::Promise<bool> WorkerEntrypoint::test() {
                                              kj::Own<IoContext::IncomingRequest> request)
       -> kj::Promise<bool> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() waitForFinished()");
-    bool completed = co_await request->finishScheduled();
+    auto result = co_await request->finishScheduled();
+    bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
     auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
     co_return outcome == EventOutcome::OK;
   };
