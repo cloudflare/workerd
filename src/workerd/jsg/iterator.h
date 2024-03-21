@@ -455,7 +455,7 @@ template <typename T>
 Promise<kj::Maybe<T>> AsyncGenerator<T>::next(Lock& js) {
   KJ_IF_SOME(i, impl) {
     KJ_SWITCH_ONEOF(i->state) {
-      KJ_CASE_ONEOF(finsihed, typename Impl::Finished) {
+      KJ_CASE_ONEOF(finished, typename Impl::Finished) {
         return js.resolvedPromise(kj::Maybe<T>(kj::none));
       }
       KJ_CASE_ONEOF(active, typename Impl::Active) {
