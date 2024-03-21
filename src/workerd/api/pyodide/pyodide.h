@@ -1,5 +1,7 @@
 #pragma once
 
+#include "kj/array.h"
+#include "kj/debug.h"
 #include <kj/common.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide.capnp.h>
@@ -22,6 +24,7 @@ public:
     JSG_METHOD(read);
   }
 };
+
 
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
@@ -56,10 +59,6 @@ public:
     return kj::str(this->mainModule);
   }
 
-  kj::Maybe<kj::Array<kj::byte>> getMemorySnapshot() {
-    return kj::mv(memorySnapshot);
-  }
-
   kj::Array<jsg::JsRef<jsg::JsString>> getNames(jsg::Lock& js);
 
   kj::Array<jsg::JsRef<jsg::JsString>> getRequirements(jsg::Lock& js);
@@ -67,6 +66,21 @@ public:
   kj::Array<int> getSizes(jsg::Lock& js);
 
   int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
+
+  bool hasMemorySnapshot() {
+    return memorySnapshot != kj::none;
+  }
+  int getMemorySnapshotSize() {
+    if (memorySnapshot == kj::none) {
+      return 0;
+    }
+    return KJ_REQUIRE_NONNULL(memorySnapshot).size();
+  }
+
+  void disposeMemorySnapshot() {
+    memorySnapshot = kj::none;
+  }
+  int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
 
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
@@ -76,7 +90,10 @@ public:
     JSG_METHOD(getNames);
     JSG_METHOD(getSizes);
     JSG_METHOD(read);
-    JSG_METHOD(getMemorySnapshot);
+    JSG_METHOD(hasMemorySnapshot);
+    JSG_METHOD(getMemorySnapshotSize);
+    JSG_METHOD(readMemorySnapshot);
+    JSG_METHOD(disposeMemorySnapshot);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -101,11 +118,13 @@ public:
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot,
       kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)> uploadMemorySnapshotCb)
-      : storedSnapshot(kj::none),
+      :
+        storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
         hasUploaded(false),
-        isValidating(false) {};
+        isValidating(false)
+        {};
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
       : storedSnapshot(kj::none),
@@ -116,7 +135,7 @@ public:
 
   ArtifactBundler(bool isValidating = false)
       : storedSnapshot(kj::none),
-        existingSnapshot(kj::none),
+        existingSnapshot(kj::heapArray<kj::byte>(0)),
         uploadMemorySnapshotCb(kj::none),
         hasUploaded(false),
         isValidating(isValidating) {};
@@ -144,13 +163,6 @@ public:
     storedSnapshot = kj::mv(snapshot);
   }
 
-  jsg::Optional<kj::Array<kj::byte>> getMemorySnapshot(jsg::Lock& js) {
-    KJ_IF_SOME(val, existingSnapshot) {
-      return kj::mv(val);
-    }
-    return kj::none;
-  }
-
   bool isEnabled() {
     return uploadMemorySnapshotCb != kj::none;
   }
@@ -158,6 +170,19 @@ public:
   bool hasMemorySnapshot() {
     return existingSnapshot != kj::none;
   }
+
+  int getMemorySnapshotSize() {
+    if (existingSnapshot == kj::none) {
+      return 0;
+    }
+    return KJ_REQUIRE_NONNULL(existingSnapshot).size();
+  }
+
+  int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
+  void disposeMemorySnapshot() {
+    existingSnapshot = kj::none;
+  }
+
 
   // Determines whether this ArtifactBundler was created inside the validator.
   bool isEwValidating() {
@@ -169,14 +194,18 @@ public:
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    KJ_IF_SOME(snapshot, existingSnapshot) {
-      tracker.trackFieldWithSize("snapshot", snapshot.size());
+    if (existingSnapshot == kj::none) {
+      return;
     }
+    tracker.trackFieldWithSize("snapshot", KJ_REQUIRE_NONNULL(existingSnapshot).size());
   }
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(uploadMemorySnapshot);
-    JSG_METHOD(getMemorySnapshot);
+    JSG_METHOD(hasMemorySnapshot);
+    JSG_METHOD(getMemorySnapshotSize);
+    JSG_METHOD(readMemorySnapshot);
+    JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(isEnabled);
     JSG_METHOD(isEwValidating);
     JSG_METHOD(storeMemorySnapshot);
