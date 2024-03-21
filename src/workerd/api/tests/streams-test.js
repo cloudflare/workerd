@@ -1,7 +1,7 @@
 import {
   strictEqual,
   ok,
-  throws
+  deepStrictEqual,
 } from 'node:assert';
 
 const enc = new TextEncoder();
@@ -313,6 +313,104 @@ export const writableStreamGcTraceFinishes = {
     // TODO(soon): We really need better testing for gc visitation.
     const ws = new WritableStream();
     gc();
+  }
+};
+
+export const readableStreamFromAsyncGenerator = {
+  async test() {
+    async function* gen() {
+      await scheduler.wait(10);
+      yield 'hello';
+      await scheduler.wait(10);
+      yield 'world';
+    };
+    const rs = ReadableStream.from(gen());
+    const chunks = [];
+    for await (const chunk of rs) {
+      chunks.push(chunk);
+    }
+    deepStrictEqual(chunks, ['hello', 'world']);
+  }
+};
+
+export const readableStreamFromSyncGenerator = {
+  async test() {
+    const rs = ReadableStream.from(['hello', 'world']);
+    const chunks = [];
+    for await (const chunk of rs) {
+      chunks.push(chunk);
+    }
+    deepStrictEqual(chunks, ['hello', 'world']);
+  }
+};
+
+export const readableStreamFromSyncGenerator2 = {
+  async test() {
+    function* gen() {
+      yield 'hello';
+      yield 'world';
+    }
+    const rs = ReadableStream.from(gen());
+    const chunks = [];
+    for await (const chunk of rs) {
+      chunks.push(chunk);
+    }
+    deepStrictEqual(chunks, ['hello', 'world']);
+  }
+};
+
+export const readableStreamFromAsyncCanceled = {
+  async test() {
+    async function* gen() {
+      let count = 0;
+      try {
+        count++;
+        yield 'hello';
+        count++;
+        yield 'world';
+      } finally {
+        strictEqual(count, 1);
+      }
+    };
+    const rs = ReadableStream.from(gen());
+    const chunks = [];
+    for await (const chunk of rs) {
+      chunks.push(chunk);
+      return;
+    }
+    deepStrictEqual(chunks, ['hello']);
+  }
+};
+
+export const readableStreamFromThrowingAsyncGen = {
+  async test() {
+    async function* gen() {
+        yield 'hello';
+        throw new Error('boom');
+    };
+    const rs = ReadableStream.from(gen());
+    const chunks = [];
+    try {
+      for await (const chunk of rs) {
+        chunks.push(chunk);
+      }
+      throw new Error('should have failed');
+    } catch (err) {
+      strictEqual(err.message, 'boom');
+    }
+    deepStrictEqual(chunks, ['hello']);
+  }
+};
+
+export const readableStreamFromNoopAsyncGen = {
+  async test() {
+    async function* gen() {};
+    const rs = ReadableStream.from(gen());
+    const chunks = [];
+    for await (const chunk of rs) {
+      chunks.push(chunk);
+    }
+    deepStrictEqual(chunks, []);
   }
 };
 

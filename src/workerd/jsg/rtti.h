@@ -354,7 +354,8 @@ struct BuildRtti<Configuration, T<V>> { \
 #define FOR_EACH_ARRAY_TYPE(F) \
   F(kj::Array) \
   F(kj::ArrayPtr) \
-  F(jsg::Sequence)
+  F(jsg::Sequence) \
+  F(jsg::AsyncGenerator)
 
 template<typename Configuration> \
 struct BuildRtti<Configuration, jsg::JsArray> { \

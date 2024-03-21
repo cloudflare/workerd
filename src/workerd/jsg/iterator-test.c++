@@ -103,6 +103,74 @@ struct GeneratorContext: public Object, public ContextGlobal {
     return count;
   }
 
+  void manualAsyncGeneratorTest(Lock& js, AsyncGenerator<kj::String> generator) {
+    uint calls = 0;
+    generator.next(js).then(js, [&calls](auto& js, auto value) {
+      calls++;
+      KJ_ASSERT(KJ_ASSERT_NONNULL(value) == "a");
+      return js.resolvedPromise();
+    });
+
+    generator.next(js).then(js, [&calls](auto& js, auto value) {
+      calls++;
+      KJ_ASSERT(KJ_ASSERT_NONNULL(value) == "b");
+      return js.resolvedPromise();
+    });
+
+    generator.next(js).then(js, [&calls](auto& js, auto value) {
+      calls++;
+      KJ_ASSERT(value == kj::none);
+    });
+
+    js.runMicrotasks();
+    KJ_ASSERT(calls == 3);
+  }
+
+  void manualAsyncGeneratorTestEarlyReturn(Lock& js, AsyncGenerator<kj::String> generator) {
+    uint calls = 0;
+    generator.next(js).then(js, [&calls](auto& js, auto value) {
+      calls++;
+      KJ_ASSERT(KJ_ASSERT_NONNULL(value) == "a");
+      return js.resolvedPromise();
+    });
+
+    generator.return_(js, kj::str("foo")).then(js, [&calls](auto& js) {
+      calls++;
+    });
+
+    generator.next(js).then(js, [&calls](auto& js, auto value) {
+      calls++;
+      KJ_ASSERT(value == kj::none);
+    });
+
+    js.runMicrotasks();
+    KJ_ASSERT(calls == 3);
+  }
+
+  void manualAsyncGeneratorTestThrow(Lock& js, AsyncGenerator<kj::String> generator) {
+    uint calls = 0;
+    generator.next(js).then(js, [&calls](auto& js, auto value) {
+      calls++;
+      KJ_ASSERT(KJ_ASSERT_NONNULL(value) == "a");
+      return js.resolvedPromise();
+    });
+
+    // The default implementation of throw on the Async generator will result in a
+    // rejected promise being returned by generator.throw_(...)
+    generator.throw_(js, js.v8Ref<v8::Value>(js.str("boom"_kj))).catch_(js,
+        [&calls](jsg::Lock& js, jsg::Value exception) {
+      calls++;
+    });
+
+    generator.next(js).then(js, [&calls](auto& js, auto value) {
+      calls++;
+      KJ_ASSERT(value == kj::none);
+    });
+
+    js.runMicrotasks();
+    KJ_ASSERT(calls == 3);
+  }
+
   struct Test {
     int foo;
     JSG_STRUCT(foo);
@@ -119,6 +187,9 @@ struct GeneratorContext: public Object, public ContextGlobal {
     JSG_METHOD(generatorWrongType);
     JSG_METHOD(asyncGeneratorTest);
     JSG_METHOD(asyncGeneratorErrorTest);
+    JSG_METHOD(manualAsyncGeneratorTest);
+    JSG_METHOD(manualAsyncGeneratorTestEarlyReturn);
+    JSG_METHOD(manualAsyncGeneratorTestThrow);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(GeneratorIsolate, GeneratorContext, GeneratorContext::Test);
@@ -159,6 +230,14 @@ KJ_TEST("AsyncGenerator works") {
     "asyncGeneratorErrorTest(gen())",
     "number", "2"
   );
+
+  e.expectEval("manualAsyncGeneratorTest(async function* foo() { yield 'a'; yield 'b'; }())",
+               "undefined", "undefined");
+  e.expectEval("manualAsyncGeneratorTestEarlyReturn(async function* foo() "
+               "{ yield 'a'; yield 'b'; }())",
+               "undefined", "undefined");
+  e.expectEval("manualAsyncGeneratorTestThrow(async function* foo() { yield 'a'; yield 'b'; }())",
+                "undefined", "undefined");
 }
 
 }  // namespace

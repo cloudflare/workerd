@@ -325,6 +325,12 @@ public:
     return js.template resolvedPromise<kj::Maybe<T>>(kj::none);
   }
 
+  // Returns a promise for the next item, or a promise that resolves to kj::none if
+  // the generator is finished.
+  Promise<kj::Maybe<T>> next(Lock& js);
+  Promise<void> return_(Lock& js, kj::Maybe<T> maybeValue = kj::none);
+  Promise<void> throw_(Lock& js, Value exception);
+
   void visitForGc(GcVisitor& visitor) {
     KJ_IF_SOME(i, impl) {
       i.visitForGc(visitor);
@@ -445,6 +451,92 @@ private:
   friend class GeneratorWrapper;
 };
 
+template <typename T>
+Promise<kj::Maybe<T>> AsyncGenerator<T>::next(Lock& js) {
+  KJ_IF_SOME(i, impl) {
+    KJ_SWITCH_ONEOF(i->state) {
+      KJ_CASE_ONEOF(finished, typename Impl::Finished) {
+        return js.resolvedPromise(kj::Maybe<T>(kj::none));
+      }
+      KJ_CASE_ONEOF(active, typename Impl::Active) {
+        KJ_IF_SOME(next, active.maybeNext) {
+          return next(js).then(js, [&i=*i](auto& js, auto result)
+              -> Promise<kj::Maybe<T>> {
+            // If result.done is true, we set the impl.returnValue, set impl to finished,
+            // and return a resolved promise.
+             if (result.done) {
+               i.setFinished(kj::mv(result.value));
+               return js.resolvedPromise(kj::Maybe<T>(kj::none));
+             }
+
+            // And we resolve the promise with the value.
+            return js.resolvedPromise(kj::mv(result.value));
+          });
+        } else {
+          // There is no next? weird. I guess we're done then.
+         return js.resolvedPromise(kj::Maybe<T>(kj::none));
+        }
+      }
+    }
+    KJ_UNREACHABLE;
+  } else {
+    return js.resolvedPromise(kj::Maybe<T>(kj::none));
+  }
+}
+
+template <typename T>
+Promise<void> AsyncGenerator<T>::return_(Lock& js, kj::Maybe<T> maybeValue) {
+  KJ_IF_SOME(i, impl) {
+    KJ_SWITCH_ONEOF(i->state) {
+      KJ_CASE_ONEOF(finished, typename Impl::Finished) {
+        return js.resolvedPromise();
+      }
+      KJ_CASE_ONEOF(active, typename Impl::Active) {
+        KJ_IF_SOME(return_, active.maybeReturn) {
+          return js.tryCatch([&] {
+            return return_(js, kj::mv(maybeValue)).then(js,
+                [&i=*i](jsg::Lock& js, auto result) -> void {
+              if (i.isFinished()) return;
+              if (result.done) {
+                i.setFinished(kj::mv(result.value));
+              }
+            });
+          }, [&](jsg::Value exception) {
+            return throw_(js, kj::mv(exception));
+          });
+        }
+        i->setFinished(kj::mv(maybeValue));
+        return js.resolvedPromise();
+      }
+    }
+  }
+  return js.resolvedPromise();
+}
+
+template <typename T>
+Promise<void> AsyncGenerator<T>::throw_(Lock& js, jsg::Value exception) {
+  KJ_IF_SOME(i, impl) {
+    KJ_SWITCH_ONEOF(i->state) {
+      KJ_CASE_ONEOF(finished, typename Impl::Finished) {
+        return js.resolvedPromise();
+      }
+      KJ_CASE_ONEOF(active, typename Impl::Active) {
+        KJ_IF_SOME(throw_, active.maybeThrow) {
+          return throw_(js, kj::mv(exception)).then(js,
+              [&i=*i](jsg::Lock& js, auto result) {
+            if (!i.isFinished() && result.done) {
+              i.setFinished(kj::mv(result.value));
+            }
+          });
+        }
+        i->setFinished();
+        return js.resolvedPromise();
+      }
+    }
+  }
+  return js.resolvedPromise();
+}
+
 template <typename TypeWrapper>
 class GeneratorWrapper {
 public:
@@ -563,6 +655,8 @@ public:
       auto isolate = context->GetIsolate();
       auto object = handle.As<v8::Object>();
       auto iter = check(object->Get(context, v8::Symbol::GetAsyncIterator(isolate)));
+      // If there is no async iterator, let's try a sync iterator
+      if (iter->IsUndefined()) iter = check(object->Get(context, v8::Symbol::GetIterator(isolate)));
       if (iter->IsFunction()) {
         auto func = iter.As<v8::Function>();
         auto iterObj = check(func->Call(context, object, 0, nullptr));
