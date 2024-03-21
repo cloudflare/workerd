@@ -1,20 +1,41 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
+import { loadPyodide, uploadArtifacts, getMemoryToUpload } from "pyodide-internal:python";
+import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
-  loadPyodide,
-  mountLib,
-  canonicalizePackageName,
-  enterJaegerSpan,
-  uploadArtifacts,
-} from "pyodide-internal:python";
-import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
-import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
-import { default as PYODIDE_BUCKET } from "pyodide-internal:generated/pyodide-bucket.json";
+  REQUIREMENTS,
+  TRANSITIVE_REQUIREMENTS,
+  USE_LOAD_PACKAGE,
+  patchLoadPackage,
+} from "pyodide-internal:setupPackages";
+import {
+  IS_TRACING,
+  IS_WORKERD,
+  LOCKFILE,
+  MAIN_MODULE_NAME,
+  WORKERD_INDEX_URL,
+} from "pyodide-internal:metadata";
+import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 
-const IS_WORKERD = MetadataReader.isWorkerd();
-const IS_TRACING = MetadataReader.isTracing();
-const WORKERD_INDEX_URL = PYODIDE_BUCKET.PYODIDE_PACKAGE_BUCKET_URL;
+function pyimportMainModule(pyodide) {
+  if (!MAIN_MODULE_NAME.endsWith(".py")) {
+    throw new Error("Main module needs to end with a .py file extension");
+  }
+  const mainModuleName = MAIN_MODULE_NAME.slice(0, -3);
+  return pyodide.pyimport(mainModuleName);
+}
+
+let pyodidePromise;
+function getPyodide() {
+  return enterJaegerSpan("get_pyodide", () => {
+    if (pyodidePromise) {
+      return pyodidePromise;
+    }
+    pyodidePromise = loadPyodide(LOCKFILE, WORKERD_INDEX_URL);
+    return pyodidePromise;
+  });
+}
 
 /**
  * Import the data from the data module es6 import called jsModName.py into a module called
@@ -45,93 +66,37 @@ async function applyPatch(pyodide, patchName) {
 }
 
 /**
- * Patch loadPackage:
- *  - in workerd, disable integrity checks
- *  - otherwise, disable it entirely
+ * Set up Python packages:
+ *  - patch loadPackage to ignore integrity
+ *  - get requirements
+ *  - Use tar file + requirements to mount site packages directory
+ *  - if in workerd use loadPackage to load packages
+ *  - install patches to make various requests packages work
+ *
+ * TODO: move this into setupPackages.js. Can't now because the patch imports
+ * fail from there for some reason.
  */
-function patchLoadPackage(pyodide) {
-  if (!IS_WORKERD) {
-    pyodide.loadPackage = disabledLoadPackage;
-    return;
-  }
-  const origLoadPackage = pyodide.loadPackage;
-  function loadPackage(packages, options) {
-    return origLoadPackage(packages, {
-      checkIntegrity: false,
-      ...options,
-    });
-  }
-  pyodide.loadPackage = loadPackage;
-}
-
-function disabledLoadPackage() {
-  throw new Error("We only use loadPackage in workerd");
-}
-
-async function getTransitiveRequirements(pyodide, requirements) {
-  // resolve transitive dependencies of requirements and if IN_WORKERD install them from the cdn.
-  let packageDatas;
-  if (IS_WORKERD) {
-    packageDatas = await pyodide.loadPackage(requirements);
-  } else {
-    // TODO: if not IS_WORKERD, use packageDatas to control package visibility.
-    packageDatas = pyodide._api
-      .recursiveDependencies(requirements)
-      .values()
-      .map(({ packageData }) => packageData);
-  }
-  return new Set(packageDatas.map(({ name }) => name));
-}
-
-async function setupPackages(pyodide) {
+export async function setupPackages(pyodide) {
   return await enterJaegerSpan("setup_packages", async () => {
     patchLoadPackage(pyodide);
-    const requirements = MetadataReader.getRequirements().map(
-      canonicalizePackageName,
-    );
-    const transitiveRequirements = new Set(
-      Array.from(await getTransitiveRequirements(pyodide, requirements)).map(
-        canonicalizePackageName,
-      ),
-    );
-
-    mountLib(pyodide, transitiveRequirements, IS_WORKERD);
-
+    if (USE_LOAD_PACKAGE) {
+      await pyodide.loadPackage(REQUIREMENTS);
+    }
     // install any extra packages into the site-packages directory, so calculate where that is.
     const pymajor = pyodide._module._py_version_major();
     const pyminor = pyodide._module._py_version_minor();
     pyodide.site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
 
     // Install patches as needed
-    if (transitiveRequirements.has("aiohttp")) {
+    if (TRANSITIVE_REQUIREMENTS.has("aiohttp")) {
       await applyPatch(pyodide, "aiohttp");
     }
-    if (transitiveRequirements.has("httpx")) {
+    if (TRANSITIVE_REQUIREMENTS.has("httpx")) {
       await applyPatch(pyodide, "httpx");
     }
-    if (transitiveRequirements.has("fastapi")) {
+    if (TRANSITIVE_REQUIREMENTS.has("fastapi")) {
       await injectSitePackagesModule(pyodide, "asgi", "asgi");
     }
-  });
-}
-
-function pyimportMainModule(pyodide) {
-  let mainModuleName = MetadataReader.getMainModule();
-  if (!mainModuleName.endsWith(".py")) {
-    throw new Error("Main module needs to end with a .py file extension");
-  }
-  mainModuleName = mainModuleName.slice(0, -3);
-  return pyodide.pyimport(mainModuleName);
-}
-
-let pyodidePromise;
-function getPyodide() {
-  return enterJaegerSpan("get_pyodide", () => {
-    if (pyodidePromise) {
-      return pyodidePromise;
-    }
-    pyodidePromise = loadPyodide(LOCKFILE, WORKERD_INDEX_URL);
-    return pyodidePromise;
   });
 }
 
@@ -189,7 +154,10 @@ async function preparePython() {
 function makeHandler(pyHandlerName) {
   return async function (...args) {
     try {
-      const mainModule = await enterJaegerSpan("prep_python", async () => await preparePython());
+      const mainModule = await enterJaegerSpan(
+        "prep_python",
+        async () => await preparePython(),
+      );
       return await enterJaegerSpan("python_code", () => {
         return mainModule[pyHandlerName].callRelaxed(...args);
       });
@@ -222,6 +190,12 @@ if (IS_WORKERD || IS_TRACING) {
       handlers[handlerName] = makeHandler(pyHandlerName);
     }
   }
+}
+
+// Store the memory snapshot in the ArtifactBundler so that the validator can read it out.
+// Needs to happen at the top level because the validator does not perform requests.
+if (ArtifactBundler.isEwValidating()) {
+  ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
 }
 
 export default handlers;

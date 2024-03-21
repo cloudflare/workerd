@@ -33,13 +33,16 @@ private:
   kj::Array<kj::String> requirements;
   bool isWorkerdFlag;
   bool isTracingFlag;
+  kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
 public:
   PyodideMetadataReader(kj::String mainModule, kj::Array<kj::String> names,
                         kj::Array<kj::Array<kj::byte>> contents, kj::Array<kj::String> requirements,
-                        bool isWorkerd, bool isTracing)
+                        bool isWorkerd, bool isTracing,
+                        kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
       : mainModule(kj::mv(mainModule)), names(kj::mv(names)), contents(kj::mv(contents)),
-        requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd), isTracingFlag(isTracing) {}
+        requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd), isTracingFlag(isTracing),
+        memorySnapshot(kj::mv(memorySnapshot)) {}
 
   bool isWorkerd() {
     return this->isWorkerdFlag;
@@ -51,6 +54,10 @@ public:
 
   kj::String getMainModule() {
     return kj::str(this->mainModule);
+  }
+
+  kj::Maybe<kj::Array<kj::byte>> getMemorySnapshot() {
+    return kj::mv(memorySnapshot);
   }
 
   kj::Array<jsg::JsRef<jsg::JsString>> getNames(jsg::Lock& js);
@@ -69,6 +76,7 @@ public:
     JSG_METHOD(getNames);
     JSG_METHOD(getSizes);
     JSG_METHOD(read);
+    JSG_METHOD(getMemorySnapshot);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -89,21 +97,29 @@ public:
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler : public jsg::Object {
 public:
+  kj::Maybe<kj::Array<kj::byte>> storedSnapshot;
+
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot,
       kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)> uploadMemorySnapshotCb)
-      : existingSnapshot(kj::mv(existingSnapshot)),
+      : storedSnapshot(kj::none),
+        existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
-        hasUploaded(false) {};
+        hasUploaded(false),
+        isValidating(false) {};
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
-      : existingSnapshot(kj::mv(existingSnapshot)),
+      : storedSnapshot(kj::none),
+        existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false) {};
+        hasUploaded(false),
+        isValidating(false) {};
 
-  ArtifactBundler()
-      : existingSnapshot(kj::none),
+  ArtifactBundler(bool isValidating = false)
+      : storedSnapshot(kj::none),
+        existingSnapshot(kj::none),
         uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false) {};
+        hasUploaded(false),
+        isValidating(isValidating) {};
 
   jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
     // Prevent multiple uploads.
@@ -123,6 +139,11 @@ public:
     return context.awaitIo(js, cb(kj::mv(snapshot)));
   };
 
+  void storeMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
+    KJ_REQUIRE(isValidating);
+    storedSnapshot = kj::mv(snapshot);
+  }
+
   jsg::Optional<kj::Array<kj::byte>> getMemorySnapshot(jsg::Lock& js) {
     KJ_IF_SOME(val, existingSnapshot) {
       return kj::mv(val);
@@ -136,6 +157,11 @@ public:
 
   bool hasMemorySnapshot() {
     return existingSnapshot != kj::none;
+  }
+
+  // Determines whether this ArtifactBundler was created inside the validator.
+  bool isEwValidating() {
+    return isValidating;
   }
 
   static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
@@ -152,13 +178,17 @@ public:
     JSG_METHOD(uploadMemorySnapshot);
     JSG_METHOD(getMemorySnapshot);
     JSG_METHOD(isEnabled);
+    JSG_METHOD(isEwValidating);
+    JSG_METHOD(storeMemorySnapshot);
   }
+
 private:
   // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
   // up cold starts.
   kj::Maybe<kj::Array<kj::byte>> existingSnapshot;
   kj::Maybe<kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)>> uploadMemorySnapshotCb;
   bool hasUploaded;
+  bool isValidating;
 };
 
 

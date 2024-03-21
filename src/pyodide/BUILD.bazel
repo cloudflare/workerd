@@ -89,6 +89,8 @@ import { newWasmModule, monotonicDateNow, wasmInstantiate, getRandomValues } fro
 const location = undefined;
 
 function addEventListener(){}
+
+function reportUndefinedSymbolsNoOp() {}
 """
 
 REPLACEMENTS = [
@@ -120,10 +122,8 @@ REPLACEMENTS = [
         "getRandomValues"
     ],
     [
-        # Expose recursiveDependencies for use in setupPackages
-        # TODO: upstream this.
-        'o(Ct,"recursiveDependencies");',
-        'o(Ct,"recursiveDependencies");API.recursiveDependencies=Ct;'
+        "reportUndefinedSymbols()",
+        "reportUndefinedSymbolsNoOp()"
     ]
 ]
 
