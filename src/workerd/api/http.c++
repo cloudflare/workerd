@@ -2287,12 +2287,14 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
           .id=kj::mv(msg.id),
           .timestamp=msg.timestamp,
           .body=serializer.release().data,
+          .attempts=msg.attempts
       });
     } else KJ_IF_SOME(b, msg.serializedBody) {
       encodedMessages.add(IncomingQueueMessage{
           .id=kj::mv(msg.id),
           .timestamp=msg.timestamp,
           .body=kj::mv(b),
+          .attempts=msg.attempts
       });
     } else {
       JSG_FAIL_REQUIRE(TypeError, "Expected one of body or serializedBody for each message");

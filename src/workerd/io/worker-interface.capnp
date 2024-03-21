@@ -146,6 +146,7 @@ struct QueueMessage @0x944adb18c0352295 {
   timestampNs @1 :Int64;
   data @2 :Data;
   contentType @3 :Text;
+  attempts @4 :UInt16;
 }
 
 struct QueueRetryBatch {

@@ -65,20 +65,25 @@ export default {
 
     assert.strictEqual(batch.messages[0].id, "#0");
     assert.strictEqual(batch.messages[0].body, "ghi");
+    assert.strictEqual(batch.messages[0].attempts, 1);
 
     assert.strictEqual(batch.messages[1].id, "#1");
     assert.deepStrictEqual(batch.messages[1].body, new Uint8Array([7, 8, 9]));
+    assert.strictEqual(batch.messages[1].attempts, 2);
 
     assert.strictEqual(batch.messages[2].id, "#2");
     assert.deepStrictEqual(batch.messages[2].body, { c: { d: 10 } });
+    assert.strictEqual(batch.messages[2].attempts, 3);
     batch.messages[2].retry();
 
     assert.strictEqual(batch.messages[3].id, "#3");
     assert.deepStrictEqual(batch.messages[3].body, batch.messages[3].timestamp);
+    assert.strictEqual(batch.messages[3].attempts, 4);
     batch.messages[3].retry({ delaySeconds: 2 });
 
     assert.strictEqual(batch.messages[4].id, "#4");
     assert.deepStrictEqual(batch.messages[4].body, new Map([["key", "value"]]));
+    assert.strictEqual(batch.messages[4].attempts, 5);
 
     batch.ackAll();
   },
@@ -98,11 +103,11 @@ export default {
 
     const timestamp = new Date();
     const response = await env.SERVICE.queue("test-queue", [
-      { id: "#0", timestamp, body: "ghi" },
-      { id: "#1", timestamp, body: new Uint8Array([7, 8, 9]) },
-      { id: "#2", timestamp, body: { c: { d: 10 } } },
-      { id: "#3", timestamp, body: timestamp },
-      { id: "#4", timestamp, serializedBody },
+      { id: "#0", timestamp, body: "ghi", attempts: 1 },
+      { id: "#1", timestamp, body: new Uint8Array([7, 8, 9]), attempts: 2 },
+      { id: "#2", timestamp, body: { c: { d: 10 } }, attempts: 3 },
+      { id: "#3", timestamp, body: timestamp, attempts: 4 },
+      { id: "#4", timestamp, serializedBody, attempts: 5 },
     ]);
     assert.strictEqual(response.outcome, "ok");
     assert(!response.retryBatch.retry);
@@ -111,13 +116,13 @@ export default {
     assert.deepStrictEqual(response.explicitAcks, []);
 
     await assert.rejects(env.SERVICE.queue("test-queue", [
-      { id: "#0", timestamp }
+      { id: "#0", timestamp, attempts: 1 }
     ]), {
       name: "TypeError",
       message: "Expected one of body or serializedBody for each message"
     });
     await assert.rejects(env.SERVICE.queue("test-queue", [
-      { id: "#0", timestamp, body: "", serializedBody }
+      { id: "#0", timestamp, body: "", serializedBody, attempts: 1 }
     ]), {
       name: "TypeError",
       message: "Expected one of body or serializedBody for each message"
