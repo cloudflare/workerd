@@ -225,6 +225,11 @@ enum SerializationTag {
   headers @4;
   request @5;
   response @6;
+
+  domException @7;
+  # Keep this value in sync with the DOMException::SERIALIZATION_TAG in
+  # /src/workerd/jsg/dom-exception (but we can't actually change this value
+  # without breaking things).
 }
 
 enum StreamEncoding {

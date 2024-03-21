@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "dom-exception.h"
+#include "ser.h"
 #include <workerd/jsg/memory.h>
 #include <kj/string.h>
 #include <map>
@@ -47,6 +48,31 @@ v8::Local<v8::Value> DOMException::getStack(Lock& js) {
 
 void DOMException::visitForGc(GcVisitor& visitor) {
   visitor.visit(errorForStack);
+}
+
+void DOMException::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // TODO(cleanup): The `errorForStack` field is a bit unfortunate. It is an extraneous
+  // error object that we have to create currently in order to get the stack field because
+  // v8 currently does not provide a way to attach the stack to the JS wrapper object
+  // from C++. Sadly, the `errorForStack` ends up duplicating both the `name` and `message`
+  // properties. Ideally in the future, however, we can do away with errorForStack and
+  // instead just attach the stack property to the JS wrapper object directly. Doing so,
+  // we may be able to optimize things a bit more but for now, we'll just serialize the
+  // name and errorForStack and pull the message off the deserialized error on the other
+  // side.
+  serializer.writeLengthDelimited(name);
+  serializer.write(js, JsValue(errorForStack.getHandle(js)));
+}
+
+jsg::Ref<DOMException> DOMException::deserialize(
+    jsg::Lock& js, uint tag, jsg::Deserializer& deserializer) {
+  kj::String name = deserializer.readLengthDelimitedString();
+  auto errorForStack = KJ_ASSERT_NONNULL(deserializer.readValue(js).tryCast<JsObject>());
+  kj::String message = KJ_ASSERT_NONNULL(errorForStack.get(js, "message"_kj)
+      .tryCast<JsString>()).toString(js);
+  return jsg::alloc<DOMException>(kj::mv(message),
+                                  kj::mv(name),
+                                  js.v8Ref<v8::Object>(errorForStack));
 }
 
 }  // namespace workerd::jsg
