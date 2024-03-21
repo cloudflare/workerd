@@ -1,18 +1,25 @@
 #include "pyodide.h"
+#include "kj/array.h"
+#include "kj/common.h"
+#include "kj/debug.h"
 
 namespace workerd::api::pyodide {
 
-int PackagesTarReader::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
-  int tarSize = PYODIDE_PACKAGES_TAR->size();
-  if (offset >= tarSize || offset < 0) {
+static int readToTarget(kj::ArrayPtr<const kj::byte> source, int offset, kj::ArrayPtr<kj::byte> buf) {
+  int size = source.size();
+  if (offset >= size || offset < 0) {
     return 0;
   }
   int toCopy = buf.size();
-  if (tarSize - offset < toCopy) {
-    toCopy = tarSize - offset;
+  if (size - offset < toCopy) {
+    toCopy = size - offset;
   }
-  memcpy(buf.begin(), &((*PYODIDE_PACKAGES_TAR)[0]) + offset, toCopy);
+  memcpy(buf.begin(), source.begin() + offset, toCopy);
   return toCopy;
+}
+
+int PackagesTarReader::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
+  return readToTarget(PYODIDE_PACKAGES_TAR.get(), offset, buf);
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(jsg::Lock& js) {
@@ -44,16 +51,21 @@ int PyodideMetadataReader::read(jsg::Lock& js, int index, int offset, kj::Array<
     return 0;
   }
   auto& data = contents[index];
-  int dataSize = data.size();
-  if (offset >= dataSize || offset < 0) {
+  return readToTarget(data, offset, buf);
+}
+
+int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
+  if (memorySnapshot == kj::none) {
     return 0;
   }
-  int toCopy = buf.size();
-  if (dataSize - offset < toCopy) {
-    toCopy = dataSize - offset;
+  return readToTarget(KJ_REQUIRE_NONNULL(memorySnapshot), offset, buf);
+}
+
+int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
+  if (existingSnapshot == kj::none) {
+    return 0;
   }
-  memcpy(buf.begin(), &data[0] + offset, toCopy);
-  return toCopy;
+  return readToTarget(KJ_REQUIRE_NONNULL(existingSnapshot), offset, buf);
 }
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {

@@ -10,7 +10,7 @@ import {
 } from "pyodide-internal:setupPackages";
 import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 import processScriptImports from "pyodide-internal:process_script_imports.py";
-import { BUNDLE_MEMORY_SNAPSHOT } from "pyodide-internal:metadata";
+import { MEMORY_SNAPSHOT_READER } from "pyodide-internal:metadata";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -38,7 +38,8 @@ import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
  */
 import stdlib from "pyodide-internal:generated/python_stdlib.zip";
 
-const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
+const SHOULD_UPLOAD_SNAPSHOT =
+  ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
 const DEDICATED_SNAPSHOT = true;
 
 /**
@@ -47,7 +48,9 @@ const DEDICATED_SNAPSHOT = true;
  * which is quite slow. Startup with snapshot is 3-5 times faster than without
  * it.
  */
-let MEMORY = undefined;
+let READ_MEMORY = undefined;
+let SNAPSHOT_SIZE = undefined;
+
 /**
  * Record the dlopen handles that are needed by the MEMORY.
  */
@@ -234,7 +237,10 @@ function getEmscriptenSettings(lockfile, indexURL) {
     // important because the file system lives outside of linear memory.
     preRun: [prepareFileSystem, setEnv, preloadDynamicLibs],
     instantiateWasm,
-    noInitialRun: !!MEMORY, // skip running main() if we have a snapshot
+    // if SNAPSHOT_SIZE is defined, start with the linear memory big enough to
+    // fit the snapshot. If it's not defined, this falls back to the default.
+    INITIAL_MEMORY: SNAPSHOT_SIZE,
+    noInitialRun: !!READ_MEMORY, // skip running main() if we have a snapshot
     API, // Pyodide requires we pass this in.
   };
 }
@@ -278,16 +284,8 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
 async function prepareWasmLinearMemory(Module) {
   // Note: if we are restoring from a snapshot, runtime is not initialized yet.
   mountLib(Module, SITE_PACKAGES_INFO);
-  if (MEMORY) {
-    if (!(MEMORY instanceof Uint8Array)) {
-      throw new TypeError("Expected MEMORY to be a Uint8Array");
-    }
-    // resize linear memory to fit our snapshot. I think `growMemory` only
-    // exists if `-sALLOW_MEMORY_GROWTH` is passed to the linker but we'll
-    // probably always do that.
-    Module.growMemory(MEMORY.byteLength);
-    // restore memory from snapshot
-    Module.HEAP8.set(MEMORY);
+  if (READ_MEMORY) {
+    READ_MEMORY(Module);
     // Don't call adjustSysPath here: it was called in the other branch when we
     // were creating the snapshot so the outcome of that is already baked in.
     return;
@@ -440,13 +438,20 @@ function encodeSnapshot(heap, dsoJSON) {
 /**
  * Decode heap and dsoJSON from the memory snapshot artifact we downloaded
  */
-function decodeSnapshot(memorySnapshot) {
-  const uint32View = new Uint32Array(memorySnapshot);
-  const snapshotOffset = uint32View[0];
-  const jsonLength = uint32View[1];
-  const jsonView = new Uint8Array(memorySnapshot, 8, jsonLength);
-  DSO_METADATA = JSON.parse(new TextDecoder().decode(jsonView));
-  MEMORY = new Uint8Array(memorySnapshot, snapshotOffset);
+function decodeSnapshot() {
+  const buf = new Uint32Array(2);
+  MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, buf);
+  const snapshotOffset = buf[0];
+  SNAPSHOT_SIZE = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize() - snapshotOffset;
+  const jsonLength = buf[1];
+  const jsonBuf = new Uint8Array(jsonLength);
+  MEMORY_SNAPSHOT_READER.readMemorySnapshot(8, jsonBuf);
+  DSO_METADATA = JSON.parse(new TextDecoder().decode(jsonBuf));
+  READ_MEMORY = function(Module) {
+    // restore memory from snapshot
+    MEMORY_SNAPSHOT_READER.readMemorySnapshot(snapshotOffset, Module.HEAP8);
+    MEMORY_SNAPSHOT_READER.disposeMemorySnapshot();
+  }
 }
 
 /**
@@ -492,24 +497,22 @@ function simpleRunPython(emscriptenModule, code) {
 let TEST_SNAPSHOT = undefined;
 (function () {
   // Lookup memory snapshot from artifact store.
-  const memorySnapshot = BUNDLE_MEMORY_SNAPSHOT || ArtifactBundler.getMemorySnapshot();
-  if (!memorySnapshot) {
+  if (!MEMORY_SNAPSHOT_READER) {
     // snapshots are disabled or there isn't one yet
     return;
-  }
-  if (memorySnapshot.constructor.name !== "ArrayBuffer") {
-    throw new TypeError("Expected snapshot to be an ArrayBuffer");
   }
 
   // Simple sanity check to ensure this snapshot isn't corrupted.
   //
   // TODO(later): we need better detection when this is corrupted. Right now the isolate will
   // just die.
-  if (memorySnapshot.byteLength <= 100) {
-    TEST_SNAPSHOT = memorySnapshot;
+  const snapshotSize = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize();
+  if (snapshotSize <= 100) {
+    TEST_SNAPSHOT = new Uint8Array(snapshotSize);
+    MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, TEST_SNAPSHOT);
     return;
   }
-  decodeSnapshot(memorySnapshot);
+  decodeSnapshot();
 })();
 
 export async function loadPyodide(lockfile, indexURL) {
