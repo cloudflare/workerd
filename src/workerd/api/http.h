@@ -613,6 +613,9 @@ public:
         connect(address: SocketAddress | string, options?: SocketOptions): Socket;
       });
     }
+    JSG_TS_DEFINE(
+      type Service<T extends Rpc.WorkerEntrypointBranded | undefined = undefined> = Fetcher<T>;
+    );
 
     if (!flags.getFetcherNoGetPutDelete()) {
       // These helpers just map to `fetch()` with the corresponding HTTP method. They were never

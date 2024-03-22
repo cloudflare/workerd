@@ -257,11 +257,13 @@ class TestNaughtyObject extends DurableObject {
 }
 
 interface Env {
-  REGULAR_SERVICE: Fetcher;
-  RPC_SERVICE: Fetcher<TestEntrypoint>;
-  NAUGHTY_SERVICE: Fetcher<TestNaughtyEntrypoint>;
+  REGULAR_SERVICE: Service;
+  RPC_SERVICE: Service<TestEntrypoint>;
+  NAUGHTY_SERVICE: Service<TestNaughtyEntrypoint>;
   // @ts-expect-error `BoringClass` isn't an RPC capable type
-  __INVALID_RPC_SERVICE: Fetcher<BoringClass>;
+  __INVALID_RPC_SERVICE_1: Service<BoringClass>;
+  // @ts-expect-error `TestEntrypoint` is a `DurableObject`, not a `WorkerEntrypoint`
+  __INVALID_RPC_SERVICE_2: Service<TestObject>;
 
   REGULAR_OBJECT: DurableObjectNamespace;
   RPC_OBJECT: DurableObjectNamespace<TestObject>;
