@@ -63,7 +63,7 @@ export class Ai {
       headers: {
         ...(this.options?.sessionOptions?.extraHeaders || {}),
         ...(this.options?.extraHeaders || {}),
-        "content-encoding": "application/json",
+        "content-type": "application/json",
         // 'content-encoding': 'gzip',
         "cf-consn-sdk-version": "2.0.0",
         "cf-consn-model-id": `${this.options.prefix ? `${this.options.prefix}:` : ""}${model}`,
@@ -100,17 +100,13 @@ export class Ai {
         throw new InferenceUpstreamError(await res.text(), res.status);
       }
 
-      // Non streaming responses are always in gzip
-      // eslint-disable-next-line
-      const decompressed = new Response(res.body.pipeThrough(new DecompressionStream("gzip")));
-
       const contentType = res.headers.get("content-type");
 
       if (contentType === "application/json") {
-        return (await decompressed.json() as object);
+        return (await res.json() as object);
       }
 
-      return decompressed.body;
+      return res.body;
     }
   }
 
