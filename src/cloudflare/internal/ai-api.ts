@@ -18,17 +18,14 @@ export type AiOptions = {
 };
 
 export class InferenceUpstreamError extends Error {
-  public httpCode: number;
-
-  public constructor(message: string, httpCode: number) {
+  public constructor(message: string) {
     super(message);
     this.name = "InferenceUpstreamError";
-    this.httpCode = httpCode;
   }
 }
 
 export class Ai {
-  private readonly fetcher: Fetcher
+  public readonly fetcher: Fetcher
 
   private options: AiOptions = {};
   private logs: Array<string> = [];
@@ -76,7 +73,7 @@ export class Ai {
 
     if (inputs['stream']) {
       if (!res.ok) {
-        throw new InferenceUpstreamError(await res.text(), res.status);
+        throw new InferenceUpstreamError(await res.text());
       }
 
       return res.body;
@@ -97,7 +94,7 @@ export class Ai {
       }
 
       if (!res.ok || !res.body) {
-        throw new InferenceUpstreamError(await res.text(), res.status);
+        throw new InferenceUpstreamError(await res.text());
       }
 
       const contentType = res.headers.get("content-type");
