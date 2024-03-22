@@ -9,8 +9,16 @@ import { default as internalTypes } from 'node-internal:internal_types';
 import { default as utilImpl } from 'node-internal:util';
 
 import {
-  validateFunction
+  validateFunction,
+  validateAbortSignal,
+  validateObject,
 } from 'node-internal:validators';
+
+import {
+  debuglog,
+} from 'node-internal:debuglog';
+export const debug = debuglog;
+export { debuglog };
 
 import {
   ERR_FALSY_VALUE_REJECTION,
@@ -171,6 +179,74 @@ export function _extend(target: Object, source: Object) {
   return target;
 }
 
+export const TextDecoder = globalThis.TextDecoder;
+export const TextEncoder = globalThis.TextEncoder;
+
+export function toUSVString(input : any) {
+  // TODO(cleanup): Apparently the typescript types for this aren't available yet?
+  return (`${input}` as any).toWellFormed();
+}
+
+function pad(n: any) : string {
+  return `${n}`.padStart(2, '0');
+}
+
+const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
+                'Oct', 'Nov', 'Dec'];
+
+function timestamp() : string {
+  const d = new Date();
+  const t = [
+    pad(d.getHours()),
+    pad(d.getMinutes()),
+    pad(d.getSeconds()),
+  ].join(':');
+  return `${d.getDate()} ${months[d.getMonth()]} ${t}`;
+}
+
+export function log(...args : any[]) {
+  console.log('%s - %s', timestamp(), format(...args));
+}
+
+export function parseArgs(..._ : any[]) : any {
+  // We currently have no plans to implement the util.parseArgs API.
+  throw new Error('node:util parseArgs is not implemented');
+}
+
+export function transferableAbortController(..._ : any[]) : any {
+  throw new Error('node:util transferableAbortController is not implemented');
+}
+
+export function transferableAbortSignal(..._ : any[]) : any {
+  throw new Error('node:util transferableAbortSignal is not implemented');
+}
+
+export async function aborted(signal: AbortSignal, resource: object) {
+  if (signal === undefined) {
+    throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
+  }
+  // Node.js defines that the resource is held weakly such that if it is gc'd, we
+  // will drop the event handler on the signal and the promise will remain pending
+  // forever. We don't want gc to be observable in the same way so we won't support
+  // this additional option. Unfortunately Node.js does not make this argument optional.
+  // We'll just ignore it.
+  validateAbortSignal(signal, 'signal');
+  validateObject(resource, 'resource', { allowArray: true, allowFunction: true });
+  if (signal.aborted) return Promise.resolve();
+  // TODO(cleanup): Apparently withResolvers isn't part of type defs we use yet
+  const { promise, resolve } = (Promise as any).withResolvers();
+  const opts = { __proto__: null, once: true };
+  signal.addEventListener('abort', resolve, opts);
+  return promise;
+}
+
+export function deprecate(fn: Function, _1?: string, _2?: string, _3? : boolean) {
+  // TODO(soon): Node.js's implementation wraps the given function in a new function that
+  // logs a warning to the console if the function is called. Do we want to support that?
+  // For now, we're just going to silently return the input method unmodified.
+  return fn;
+}
+
 export default {
   types,
   callbackify,
@@ -183,18 +259,42 @@ export default {
   _extend,
   MIMEParams,
   MIMEType,
+  toUSVString,
+  log,
+  aborted,
+  debuglog,
+  debug,
+  deprecate,
+  // Node.js originally exposed TextEncoder and TextDecoder off the util
+  // module originally, so let's just go ahead and do the same.
+  TextEncoder,
+  TextDecoder,
+  // We currently have no plans to implement the following APIs but we want
+  // to provide throwing placeholders for them. We may eventually come back
+  // around and implement these later.
+  parseArgs,
+  transferableAbortController,
+  transferableAbortSignal,
 };
 
 // Node.js util APIs we're currently not supporting
-// TODO(soon): Revisit these
-//
-// debug/debuglog -- The semantics of these depend on configuration through environment
-//                   variables to enable specific debug categories. We have no notion
-//                   of that in the runtime currently and it's not yet clear if we should.
-// deprecate -- Not clear how broadly this is used in the ecosystem outside of node.js
-// getSystemErrorMap/getSystemErrorName -- libuv specific. No use in workerd?
-// is{Type} variants -- these are deprecated in Node. Use util.types
-// toUSVString -- Not clear how broadly this is used in the ecosystem outside of node.js.
-//                also this is soon to be obsoleted by toWellFormed in the language.
-// transferableAbortSignal/transferableAbortController -- postMessage and worker threads
-//      are not implemented in workerd. No use case for these.
+//   * util._errnoException
+//   * util._exceptionWithHostPort
+//   * util.getSystemErrorMap
+//   * util.getSystemErrorName
+//   * util.isArray
+//   * util.isBoolean
+//   * util.isBuffer
+//   * util.isDate
+//   * util.isDeepStrictEqual
+//   * util.isError
+//   * util.isFunction
+//   * util.isNull
+//   * util.isNullOrUndefined
+//   * util.isNumber
+//   * util.isObject
+//   * util.isPrimitive
+//   * util.isRegExp
+//   * util.isString
+//   * util.isSymbol
+//   * util.isUndefined
