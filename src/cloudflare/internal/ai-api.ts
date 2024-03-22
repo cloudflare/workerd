@@ -6,16 +6,21 @@ interface Fetcher {
   fetch: typeof fetch
 }
 
+export type SessionOptions = {  // Deprecated, do not use this
+  extraHeaders?: object;
+};
+
 export type AiOptions = {
   debug?: boolean;
   prefix?: string;
   extraHeaders?: object;
+  sessionOptions?: SessionOptions;
 };
 
 export class InferenceUpstreamError extends Error {
   public httpCode: number;
 
-  constructor(message: string, httpCode: number) {
+  public constructor(message: string, httpCode: number) {
     super(message);
     this.name = "InferenceUpstreamError";
     this.httpCode = httpCode;
@@ -39,10 +44,9 @@ export class Ai {
 
   public async run(
     model: string,
-    // @ts-ignore
-    inputs: any,
+    inputs: Record<string, object>,
     options: AiOptions = {}
-  ): Promise<Response | ReadableStream<Uint8Array> | null> {
+  ): Promise<Response | ReadableStream<Uint8Array> | object | null> {
     this.options = options;
     this.lastRequestId = "";
 
@@ -57,7 +61,6 @@ export class Ai {
       method: "POST",
       body: body,
       headers: {
-        // @ts-ignore Backwards sessionOptions compatibility
         ...(this.options?.sessionOptions?.extraHeaders || {}),
         ...(this.options?.extraHeaders || {}),
         "content-encoding": "application/json",
@@ -71,7 +74,7 @@ export class Ai {
 
     this.lastRequestId = res.headers.get("cf-ai-req-id");
 
-    if ((inputs as any).stream) {
+    if (inputs['stream']) {
       if (!res.ok) {
         throw new InferenceUpstreamError(await res.text(), res.status);
       }
@@ -80,11 +83,11 @@ export class Ai {
     } else {
       // load logs
       if (this.options.debug) {
-        let parsedLogs = [];
+        let parsedLogs: string[] = [];
         try {
           const logHeader = res.headers.get("cf-ai-logs")
           if (logHeader) {
-            parsedLogs = JSON.parse(atob(logHeader));
+            parsedLogs = (JSON.parse(atob(logHeader)) as string[]);
           }
         } catch (e) {
           /* empty */
@@ -93,39 +96,25 @@ export class Ai {
         this.logs = parsedLogs;
       }
 
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         throw new InferenceUpstreamError(await res.text(), res.status);
       }
 
       // Non streaming responses are always in gzip
-      // @ts-ignore
-      const decompressed = await new Response(res.body.pipeThrough(new DecompressionStream("gzip")));
+      // eslint-disable-next-line
+      const decompressed = new Response(res.body.pipeThrough(new DecompressionStream("gzip")));
 
       const contentType = res.headers.get("content-type");
 
-      // This is a hack to handle local mode requests using wrangler@3.30.1 or bellow
-      // In this wrangler version, headers are not returning to customers worker, so it must try each
-      if (!contentType) {
-        console.log(
-          "Your current wrangler version has a known issue when using in local dev mode, please update to the latest.",
-        );
-
-        try {
-          return await decompressed.clone().json();
-        } catch (e) {
-          return decompressed.body;
-        }
-      }
-
-      if (res.headers.get("content-type") === "application/json") {
-        return await decompressed.json();
+      if (contentType === "application/json") {
+        return (await decompressed.json() as object);
       }
 
       return decompressed.body;
     }
   }
 
-  public getLogs() {
+  public getLogs(): Array<string> {
     return this.logs;
   }
 }
