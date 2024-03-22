@@ -525,11 +525,13 @@ public:
     kj::Date timestamp;
     jsg::Optional<jsg::Value> body;
     jsg::Optional<kj::Array<kj::byte>> serializedBody;
+    uint16_t attempts;
 
-    JSG_STRUCT(id, timestamp, body, serializedBody);
+    JSG_STRUCT(id, timestamp, body, serializedBody, attempts);
     JSG_STRUCT_TS_OVERRIDE(type ServiceBindingQueueMessage<Body = unknown> = {
       id: string;
       timestamp: Date;
+      attempts: number;
     } & (
       | { body: Body }
       | { serializedBody: ArrayBuffer | ArrayBufferView }

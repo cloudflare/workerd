@@ -1422,8 +1422,8 @@ KJ_TEST("Server: call queue handler on service binding") {
                 `export default {
                 `  async fetch(request, env) {
                 `    let result = await env.service2.queue("queueName1", [
-                `        {id: "1", timestamp: 12345, body: "my message"},
-                `        {id: "msg2", timestamp: 23456, body: 22},
+                `        {id: "1", timestamp: 12345, body: "my message", attempts: 1},
+                `        {id: "msg2", timestamp: 23456, body: 22, attempts: 2},
                 `    ]);
                 `    return new Response(`queue outcome: ${result.outcome}, ackAll: ${result.ackAll}`);
                 `  }
@@ -1449,9 +1449,11 @@ KJ_TEST("Server: call queue handler on service binding") {
                 `        event.messages[0].id == "1" &&
                 `        event.messages[0].timestamp.getTime() == 12345 &&
                 `        event.messages[0].body == "my message" &&
+                `        event.messages[0].attempts == 1 &&
                 `        event.messages[1].id == "msg2" &&
                 `        event.messages[1].timestamp.getTime() == 23456 &&
-                `        event.messages[1].body == 22) {
+                `        event.messages[1].body == 22 &&
+                `        event.messages[1].attempts == 2) {
                 `      event.ackAll();
                 `      return;
                 `    }
