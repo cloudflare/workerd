@@ -3,6 +3,7 @@ import { createTarFS } from "pyodide-internal:tarfs";
 import { createMetadataFS } from "pyodide-internal:metadatafs";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { REQUIREMENTS } from "pyodide-internal:metadata";
+import { simpleRunPython } from "pyodide-internal:simpleRunPython";
 
 const canonicalizeNameRegex = /[-_.]+/g;
 
@@ -143,7 +144,7 @@ export function mountLib(Module, info) {
  * Add the directories created by mountLib to sys.path.
  * Has to run after the runtime is initialized.
  */
-export function adjustSysPath(Module, simpleRunPython) {
+export function adjustSysPath(Module) {
   const site_packages = getSitePackagesPath(Module);
   simpleRunPython(
     Module,
