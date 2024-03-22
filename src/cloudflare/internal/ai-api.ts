@@ -13,7 +13,7 @@ export type AiOptions = {
 };
 
 export class InferenceUpstreamError extends Error {
-  httpCode: number;
+  public httpCode: number;
 
   constructor(message: string, httpCode: number) {
     super(message);
@@ -33,15 +33,16 @@ export class Ai {
     this.fetcher = fetcher
   }
 
-  async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  public async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     return this.fetcher.fetch(input, init)
   }
 
-  async run(
+  public async run(
     model: string,
+    // @ts-ignore
     inputs: any,
     options: AiOptions = {}
-  ): Promise<any> {
+  ): Promise<Response | ReadableStream<Uint8Array> | null> {
     this.options = options;
     this.lastRequestId = "";
 
@@ -124,7 +125,7 @@ export class Ai {
     }
   }
 
-  getLogs() {
+  public getLogs() {
     return this.logs;
   }
 }
