@@ -63,7 +63,7 @@ public:
   }
 
   // Used to record when a worker has a dynamic dispatch binding (Called on the dispatching side)
-  virtual void setHasDispatchBinding() {};
+  virtual void setHasDispatched() {};
 
   virtual SpanParent getSpan() { return nullptr; }
 
