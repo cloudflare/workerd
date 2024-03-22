@@ -3,6 +3,10 @@
 #include "kj/common.h"
 #include "kj/debug.h"
 
+#if !_WIN32
+#include <fcntl.h>
+#endif
+
 namespace workerd::api::pyodide {
 
 static int readToTarget(kj::ArrayPtr<const kj::byte> source, int offset, kj::ArrayPtr<kj::byte> buf) {
@@ -118,6 +122,128 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
   return jsg::alloc<PyodideMetadataReader>(kj::mv(mainModule), names.finish(), contents.finish(),
                                            requirements.finish(), true /* isWorkerd */,
                                            false /* isTracing */, kj::none /* memorySnapshot */);
+}
+
+using namespace util;
+
+bool
+shouldStoreSnapshotToDisk() {
+  if (!Autogate::isEnabled(AutogateKey::LOCAL_DEV_PYTHON_SNAPSHOT)) {
+    return false;
+  }
+#if _WIN32
+  return false;
+#else
+  int h = open("/tmp/snapshot.bin", O_RDONLY);
+  if (h >= 0) {
+    close(h);
+    return false;
+  }
+  if (errno == ENOENT) {
+    errno = 0;
+    return true;
+  }
+  KJ_LOG(WARNING, "Local dev Python snapshots enabled, but got unexpected error opening /tmp/snapshot.bin");
+  perror("open");
+  errno = 0;
+  return false;
+#endif
+}
+
+bool
+shouldLoadSnapshotFromDisk() {
+  if (!Autogate::isEnabled(AutogateKey::LOCAL_DEV_PYTHON_SNAPSHOT)) {
+    return false;
+  }
+#if _WIN32
+  return false;
+#else
+  int h = open("/tmp/snapshot.bin", O_RDONLY);
+  if (h >= 0) {
+    close(h);
+    return true;
+  }
+  if (errno != ENOENT) {
+    KJ_LOG(WARNING, "Error opening snapshot for reading:");
+    perror("open");
+  }
+  errno = 0;
+  return false;
+#endif
+}
+
+void
+maybeStoreSnapshotToDisk(kj::ArrayPtr<kj::byte> array) {
+  if (!Autogate::isEnabled(AutogateKey::LOCAL_DEV_PYTHON_SNAPSHOT)) {
+    return;
+  }
+#if _WIN32
+  return;
+#else
+  KJ_LOG(WARNING, "Local Dev Python Snapshot enabled");
+  KJ_LOG(WARNING, "Storing snapshot to /tmp/snapshot.bin");
+  int h = open("/tmp/snapshot.bin", O_CREAT | O_WRONLY);
+  if (h == -1) {
+    KJ_LOG(WARNING, "Failed to open /tmp/snapshot.bin for writing");
+    perror("open");
+    errno = 0;
+    return;
+  }
+  int res = write(h, array.begin(), array.size());
+  if (res == -1) {
+    KJ_LOG(WARNING, "Error writing snapshot");
+    perror("write");
+    errno = 0;
+    close(h);
+    return;
+  }
+  if (res < array.size()) {
+    KJ_LOG(WARNING, "Only wrote", res, "bytes expected to write", array.size());
+  }
+  KJ_LOG(WARNING, "Stored snapshot of size", res, "to /tmp/snapshot.bin");
+#endif
+}
+
+kj::Maybe<kj::Array<byte>>
+maybeLoadSnapshotFromDisk() {
+  if (!Autogate::isEnabled(AutogateKey::LOCAL_DEV_PYTHON_SNAPSHOT)) {
+    return kj::none;
+  }
+#if _WIN32
+  return kj::none;
+#else
+  KJ_LOG(WARNING, "Local Dev Python Snapshot enabled");
+  KJ_LOG(WARNING, "Checking for snapshot in /tmp/snapshot.bin");
+  int h = open("/tmp/snapshot.bin", O_RDONLY);
+  if (h == -1) {
+    if (errno == ENOENT) {
+      KJ_LOG(WARNING, "No snapshot found");
+    } else {
+      KJ_LOG(WARNING, "Error opening file for reading:");
+      perror("open");
+    }
+    errno = 0;
+    return kj::none;
+  }
+
+  // Find snapshot length
+  int len = lseek(h, 0L, SEEK_END);
+  lseek(h, 0L, SEEK_SET);
+  // allocate result
+  auto result = kj::heapArray<kj::byte>(len);
+  // read snapshot into result
+  int res = read(h, result.begin(), len);
+  if (res == -1) {
+    KJ_LOG(WARNING, "Error reading snapshot");
+    perror("read");
+    close(h);
+    errno = 0;
+    return kj::none;
+  }
+  KJ_LOG(WARNING, "Read snapshot of length", len);
+  close(h);
+  return result;
+#endif
 }
 
 } // namespace workerd::api::pyodide

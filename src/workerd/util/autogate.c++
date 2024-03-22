@@ -13,6 +13,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
     case AutogateKey::TEST_WORKERD:
       return "test-workerd"_kj;
+    case AutogateKey::LOCAL_DEV_PYTHON_SNAPSHOT:
+      return "local-dev-python-snapshot"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

@@ -12,6 +12,18 @@
 
 namespace workerd::api::pyodide {
 
+bool
+shouldLoadSnapshotFromDisk();
+
+bool
+shouldStoreSnapshotToDisk();
+
+kj::Maybe<kj::Array<byte>>
+maybeLoadSnapshotFromDisk();
+
+void
+maybeStoreSnapshotToDisk(kj::ArrayPtr<kj::byte> array);
+
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
 class PackagesTarReader : public jsg::Object {
@@ -52,6 +64,12 @@ public:
   }
 
   bool isTracing() {
+    if (this->isTracingFlag) {
+      return true;
+    }
+    // If we are loading the snapshot in local dev mode from disk, force
+    // isTracing to true in case we want to run the v8 profiler.
+    this->isTracingFlag = shouldLoadSnapshotFromDisk();
     return this->isTracingFlag;
   }
 
@@ -68,8 +86,13 @@ public:
   int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
 
   bool hasMemorySnapshot() {
+    if (memorySnapshot != kj::none) {
+      return true;
+    }
+    memorySnapshot = maybeLoadSnapshotFromDisk();
     return memorySnapshot != kj::none;
   }
+
   int getMemorySnapshotSize() {
     if (memorySnapshot == kj::none) {
       return 0;
@@ -80,6 +103,7 @@ public:
   void disposeMemorySnapshot() {
     memorySnapshot = kj::none;
   }
+
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
 
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
@@ -160,6 +184,7 @@ public:
 
   void storeMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
     KJ_REQUIRE(isValidating);
+    maybeStoreSnapshotToDisk(snapshot);
     storedSnapshot = kj::mv(snapshot);
   }
 
@@ -186,6 +211,12 @@ public:
 
   // Determines whether this ArtifactBundler was created inside the validator.
   bool isEwValidating() {
+    if (isValidating) {
+      return true;
+    }
+    // If we are loading from disk, force validating mode on to get JS code to
+    // give us the memory snapshot
+    isValidating = shouldStoreSnapshotToDisk();
     return isValidating;
   }
 

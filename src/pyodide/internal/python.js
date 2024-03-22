@@ -76,7 +76,9 @@ export function getMemoryToUpload() {
   if (!MEMORY_TO_UPLOAD) {
     throw new TypeError("Expected MEMORY_TO_UPLOAD to be set");
   }
-  return MEMORY_TO_UPLOAD;
+  const tmp = MEMORY_TO_UPLOAD;
+  MEMORY_TO_UPLOAD = undefined;
+  return tmp;
 }
 
 /**

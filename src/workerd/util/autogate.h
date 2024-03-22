@@ -13,6 +13,7 @@ namespace workerd::util {
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
+  LOCAL_DEV_PYTHON_SNAPSHOT,
   NumOfKeys // Reserved for iteration.
 };
 
