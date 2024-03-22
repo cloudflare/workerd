@@ -508,6 +508,16 @@ void AbortSignal::setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler)
     if (h.isFunction() || h.isObject()) {
       onAbortHandler = jsg::JsRef(js, h);
       return;
+    } else {
+      // TODO(soon): Per the spec we are supposed o set the handler to null if it is not
+      // a function or an object. However, there's an ever so slight change that would
+      // be breaking. So let's go ahead and set the value in this case and log a warning.
+      // If we do not see any instances of the warning in logs, we can remove this and
+      // go with the default behavior.
+      LOG_WARNING_PERIODICALLY(
+          "NOSENTRY AbortSignal::setOnAbort set to non-function/non-object value");
+      onAbortHandler = jsg::JsRef(js, h);
+      return;
     }
   }
   onAbortHandler = kj::none;
