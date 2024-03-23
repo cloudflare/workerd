@@ -153,6 +153,13 @@ public:
 
   static jsg::Ref<URL> constructor(kj::String url, jsg::Optional<kj::String> base);
 
+  static kj::Maybe<jsg::Ref<URL>> parse(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> base) {
+    // Method should not throw if the parse fails
+    return js.tryCatch([&]() -> kj::Maybe<jsg::Ref<URL>> {
+      return constructor(kj::mv(url), kj::mv(base));
+    }, [](auto) -> kj::Maybe<jsg::Ref<URL>> { return kj::none; });
+  }
+
   kj::ArrayPtr<const char> getHref();
   void setHref(kj::String value);
 
@@ -215,6 +222,7 @@ public:
     JSG_METHOD_NAMED(toJSON, getHref);
     JSG_METHOD_NAMED(toString, getHref);
     JSG_STATIC_METHOD(canParse);
+    JSG_STATIC_METHOD(parse);
 
     JSG_TS_OVERRIDE(URL {
       constructor(url: string | URL, base?: string | URL);
