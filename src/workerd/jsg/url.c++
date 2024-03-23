@@ -2223,7 +2223,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         result.hostname = kj::str(url.getHostname());
       }
       KJ_IF_SOME(port, chooseStr(kj::mv(init.port), options.port)) {
-        if (port.size() >= 5 || !std::all_of(port.begin(), port.end(), isAsciiDigit)) {
+        if (port.size() > 5 || !std::all_of(port.begin(), port.end(), isAsciiDigit)) {
           return kj::str("Invalid URL port component");
         }
         if (port.size() == 0) {
