@@ -215,6 +215,7 @@ public:
     JSG_METHOD_NAMED(toJSON, getHref);
     JSG_METHOD_NAMED(toString, getHref);
     JSG_STATIC_METHOD(canParse);
+    JSG_STATIC_METHOD_NAMED(parse, constructor);
 
     JSG_TS_OVERRIDE(URL {
       constructor(url: string | URL, base?: string | URL);
