@@ -9769,3 +9769,12 @@ export const urlPatternFun = {
     }
   }
 };
+
+export const urlPatternPortRegression = {
+  test() {
+    const pattern = new URLPattern({pathname: "/graphql"});
+    const url = new URL("http://localhost:53000/");
+    // Shouldn't match, but also shouldn't throw
+    ok(!pattern.test(url));
+  }
+};
