@@ -18,7 +18,7 @@ selects.config_setting_group(
     ],
 )
 selects.config_setting_group(
-    name = "macos_x64",
+    name = "macos_x64", 
     match_all = [
         "@platforms//os:macos",
         "@platforms//cpu:x86_64",
