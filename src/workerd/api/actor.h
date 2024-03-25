@@ -99,7 +99,14 @@ public:
       webSocketClose?(ws: WebSocket, code: number, reason: string, wasClean: boolean): void | Promise<void>;
       webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
     });
-    JSG_TS_OVERRIDE(DurableObjectStub);
+    JSG_TS_OVERRIDE(
+      type DurableObjectStub<T extends Rpc.DurableObjectBranded | undefined = undefined> =
+        Fetcher<T, "alarm" | "webSocketMessage" | "webSocketClose" | "webSocketError">
+        & {
+          readonly id: DurableObjectId;
+          readonly name?: string;
+        }
+    );
     // Rename this resource type to DurableObjectStub, and make DurableObject
     // the interface implemented by users' Durable Object classes.
   }
@@ -189,9 +196,18 @@ public:
     JSG_METHOD(jurisdiction);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
-      jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace;
-    });
+    if (flags.getDurableObjectGetExisting()) {
+      JSG_TS_OVERRIDE(<T extends Rpc.DurableObjectBranded | undefined = undefined> {
+        get(id: DurableObjectId): DurableObjectStub<T>;
+        getExisting(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
+        jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace<T>;
+      });
+    } else {
+      JSG_TS_OVERRIDE(<T extends Rpc.DurableObjectBranded | undefined = undefined> {
+        get(id: DurableObjectId): DurableObjectStub<T>;
+        jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace<T>;
+      });
+    }
   }
 
 private:

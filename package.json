@@ -6,21 +6,27 @@
   },
   "dependencies": {
     "capnp-ts": "^0.7.0",
-    "prettier": "^2.7.1",
-    "typescript": "~4.7.4"
+    "prettier": "^3.2.5",
+    "typescript": "~5.4.2"
   },
   "devDependencies": {
     "@bazel/bazelisk": "~1.12.1",
     "@types/debug": "^4.1.10",
     "@types/node": "^20.8.10",
     "@types/prettier": "^2.7.1",
-    "@typescript-eslint/eslint-plugin": "^5.40.0",
-    "@typescript-eslint/parser": "^5.40.0",
+    "@typescript-eslint/eslint-plugin": "^7.3.1",
+    "@typescript-eslint/parser": "^7.3.1",
     "capnpc-ts": "^0.7.0",
     "esbuild": "^0.15.10",
-    "eslint": "^8.25.0",
-    "eslint-config-prettier": "^8.5.0",
-    "eslint-plugin-import": "^2.26.0",
-    "eslint-plugin-prettier": "^4.2.1"
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-prettier": "^5.1.3",
+    "expect-type": "^0.18.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "capnpc-ts>typescript": "4.2.4"
+    }
   }
 }

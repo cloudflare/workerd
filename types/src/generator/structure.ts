@@ -90,7 +90,6 @@ function createPrototypeProperty(
   const value = createTypeNode(prop.getType());
 
   const getter = f.createGetAccessorDeclaration(
-    /* decorators */ undefined,
     /* modifiers */ undefined,
     name,
     /* params */ [],
@@ -102,7 +101,6 @@ function createPrototypeProperty(
     return getter;
   } else {
     const param = f.createParameterDeclaration(
-      /* decorators */ undefined,
       /* modifiers */ undefined,
       /* dotDotToken */ undefined,
       "value",
@@ -110,8 +108,7 @@ function createPrototypeProperty(
       value
     );
     const setter = f.createSetAccessorDeclaration(
-      undefined,
-      undefined,
+      /* modifiers */ undefined,
       name,
       [param],
       undefined
@@ -239,7 +236,6 @@ function createClassMemberNode(
         method
       );
       return f.createMethodDeclaration(
-        /* decorators */ undefined,
         modifiers,
         /* asteriskToken */ undefined,
         name,
@@ -257,7 +253,6 @@ function createClassMemberNode(
         [modifiers, name, questionToken, result] =
           createInstancePropertyPartial(prop);
         return f.createPropertyDeclaration(
-          /* decorators */ undefined,
           modifiers,
           name,
           questionToken,
@@ -269,7 +264,6 @@ function createClassMemberNode(
       const nested = member.getNested();
       [name, result] = createNestedPartial(nested);
       return f.createPropertyDeclaration(
-        /* decorators */ undefined,
         /* modifiers */ undefined,
         name,
         /* questionToken */ undefined,
@@ -280,7 +274,6 @@ function createClassMemberNode(
       const constant = member.getConstant();
       [modifiers, name, result] = createConstantPartial(constant);
       return f.createPropertyDeclaration(
-        /* decorators */ undefined,
         modifiers,
         name,
         /* questionToken */ undefined,
@@ -296,7 +289,6 @@ function createClassMemberNode(
         /* forMethod */ true
       );
       return f.createConstructorDeclaration(
-        /* decorators */ undefined,
         /* modifiers */ undefined,
         params,
         /* body */ undefined
@@ -317,7 +309,6 @@ function createIteratorClassMemberNode(
     isAsync
   );
   return f.createMethodDeclaration(
-    /* decorators */ undefined,
     modifiers,
     /* asteriskToken */ undefined,
     name,
@@ -331,7 +322,7 @@ function createIteratorClassMemberNode(
 
 // Remove all properties with type `never` and methods with return type `never`
 function filterUnimplementedProperties<
-  T extends ts.TypeElement | ts.ClassElement
+  T extends ts.TypeElement | ts.ClassElement,
 >(members: T[]): T[] {
   return members.filter((member) => {
     // Could collapse these `if` statements, but this is much clearer
@@ -406,7 +397,6 @@ export function createStructureNode(structure: Structure, asClass: boolean) {
     }
 
     return f.createClassDeclaration(
-      /* decorators */ undefined,
       modifiers,
       name,
       /* typeParams */ undefined,
@@ -434,7 +424,6 @@ export function createStructureNode(structure: Structure, asClass: boolean) {
     }
 
     return f.createInterfaceDeclaration(
-      /* decorators */ undefined,
       modifiers,
       name,
       /* typeParams */ undefined,

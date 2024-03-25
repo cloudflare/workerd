@@ -180,7 +180,7 @@ class VectorizeIndexImpl implements VectorizeIndex {
             cause: new Error(errResponse.error),
           }
         );
-      } catch (e) {}
+      } catch {}
 
       if (err) {
         throw err;
@@ -203,7 +203,7 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
   const body = await response.text();
   try {
     return JSON.parse(body) as T;
-  } catch (e) {
+  } catch {
     throw new Error(
       `Failed to parse body as JSON, got: ${
         body.length > maxBodyLogChars

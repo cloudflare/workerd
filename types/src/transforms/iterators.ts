@@ -224,7 +224,6 @@ function createIteratorUsagesVisitor(
       if (iteratorType !== undefined) {
         return ctx.factory.updateMethodDeclaration(
           node,
-          node.decorators,
           node.modifiers,
           node.asteriskToken,
           node.name,
@@ -253,7 +252,6 @@ function createIteratorUsagesVisitor(
       if (iteratorType !== undefined) {
         return ctx.factory.updatePropertyDeclaration(
           node,
-          node.decorators,
           node.modifiers,
           node.name,
           node.questionToken ?? node.exclamationToken,
@@ -267,7 +265,6 @@ function createIteratorUsagesVisitor(
       if (iteratorType !== undefined) {
         return ctx.factory.updateGetAccessorDeclaration(
           node,
-          node.decorators,
           node.modifiers,
           node.name,
           node.parameters,
