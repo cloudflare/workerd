@@ -14,6 +14,9 @@ export type AiOptions = {
   debug?: boolean;
   prefix?: string;
   extraHeaders?: object;
+  /*
+   * @deprecated this option is deprecated, do not use this
+   */
   sessionOptions?: SessionOptions;
 };
 
@@ -25,7 +28,7 @@ export class InferenceUpstreamError extends Error {
 }
 
 export class Ai {
-  public readonly fetcher: Fetcher
+  private readonly fetcher: Fetcher
 
   private options: AiOptions = {};
   private logs: Array<string> = [];
