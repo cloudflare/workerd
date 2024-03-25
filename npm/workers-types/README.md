@@ -1,8 +1,5 @@
 # Cloudflare Workers Types
 
-> :warning: If you're upgrading from version 2, make sure to remove `webworker` from the `lib` array in your
-> `tsconfig.json`. These types are now included in `@cloudflare/workers-types`.
-
 ## Install
 
 ```bash
