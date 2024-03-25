@@ -455,6 +455,13 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
       KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
         outcome = status;
       }
+
+      // We want to alert if we aren't going to count this alarm retry against limits
+      if (auto desc = e.getDescription();
+          !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)
+          && context.isOutputGateBroken()) {
+        LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", e);
+      }
       return WorkerInterface::AlarmResult {
         .retry = true,
         .retryCountsAgainstLimit = !context.isOutputGateBroken(),
