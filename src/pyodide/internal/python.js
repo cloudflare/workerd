@@ -417,21 +417,28 @@ function setUploadFunction(toUpload) {
   };
 }
 
+// "\x00snp"
+const SNAPSHOT_MAGIC = 0x706e7300;
+const SNAPSHOT_VERSION = 1;
+const HEADER_SIZE = 4 * 4;
+
 /**
  * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
  */
 function encodeSnapshot(heap, dsoJSON) {
   const dsoString = JSON.stringify(dsoJSON);
-  let sx = 8 + 2 * dsoString.length;
+  let snapshotOffset = HEADER_SIZE + 2 * dsoString.length;
   // align to 8 bytes
-  sx = Math.ceil(sx / 8) * 8;
-  const toUpload = new Uint8Array(sx + heap.length);
+  snapshotOffset = Math.ceil(snapshotOffset / 8) * 8;
+  const toUpload = new Uint8Array(snapshotOffset + heap.length);
   const encoder = new TextEncoder();
-  const { written } = encoder.encodeInto(dsoString, toUpload.subarray(8));
+  const { written: jsonLength } = encoder.encodeInto(dsoString, toUpload.subarray(HEADER_SIZE));
   const uint32View = new Uint32Array(toUpload.buffer);
-  uint32View[0] = sx;
-  uint32View[1] = written;
-  toUpload.subarray(sx).set(heap);
+  uint32View[0] = SNAPSHOT_MAGIC;
+  uint32View[1] = SNAPSHOT_VERSION;
+  uint32View[2] = snapshotOffset;
+  uint32View[3] = jsonLength;
+  toUpload.subarray(snapshotOffset).set(heap);
   return toUpload;
 }
 
