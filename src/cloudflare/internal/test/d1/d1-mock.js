@@ -43,9 +43,10 @@ export class D1MockDO {
     const rawResults = Array.from(stmt.raw())
 
     const results =
-      resultsFormat === 'NONE'
+      // TODO: restore 'NONE' behaviour behind compat flag
+      /*resultsFormat === 'NONE'
         ? undefined
-        : resultsFormat === 'ROWS_AND_COLUMNS'
+        : */resultsFormat === 'ROWS_AND_COLUMNS'
         ? { columns: columnNames, rows: rawResults }
         : rawResults.map((row) =>
             Object.fromEntries(columnNames.map((c, i) => [c, row[i]]))
