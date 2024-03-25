@@ -1173,3 +1173,22 @@ export let canUseGetPutDelete = {
     assert.strictEqual(await env.MyService.delete(3), 2);
   }
 }
+
+// DOMException is structured cloneable
+export let domExceptionClone = {
+  test() {
+    const de1 = new DOMException("hello", "NotAllowedError");
+
+    // custom own properties on the instance are not preserved...
+    de1.foo = "ignored";
+
+    const de2 = structuredClone(de1);
+    assert.strictEqual(de1.name, de2.name);
+    assert.strictEqual(de1.message, de2.message);
+    assert.strictEqual(de1.stack, de2.stack);
+    assert.strictEqual(de1.code, de2.code);
+    assert.notStrictEqual(de1, de2);
+    assert.notStrictEqual(de1.foo, de2.foo);
+    assert.strictEqual(de2.foo, undefined);
+  }
+}

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "dom-exception.h"
+#include "ser.h"
 #include <workerd/jsg/memory.h>
 #include <kj/string.h>
 #include <map>
@@ -47,6 +48,22 @@ v8::Local<v8::Value> DOMException::getStack(Lock& js) {
 
 void DOMException::visitForGc(GcVisitor& visitor) {
   visitor.visit(errorForStack);
+}
+
+void DOMException::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  serializer.writeLengthDelimited(message);
+  serializer.writeLengthDelimited(name);
+  serializer.write(js, JsValue(errorForStack.getHandle(js)));
+}
+
+jsg::Ref<DOMException> DOMException::deserialize(
+    jsg::Lock& js, uint tag, jsg::Deserializer& deserializer) {
+  kj::String message = deserializer.readLengthDelimitedString();
+  kj::String name = deserializer.readLengthDelimitedString();
+  auto errorForStack = KJ_ASSERT_NONNULL(deserializer.readValue(js).tryCast<JsObject>());
+  return jsg::alloc<DOMException>(kj::mv(message),
+                                  kj::mv(name),
+                                  js.v8Ref<v8::Object>(errorForStack));
 }
 
 }  // namespace workerd::jsg
