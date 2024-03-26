@@ -61,6 +61,16 @@ void Trace::FetchEventInfo::Header::copyTo(rpc::Trace::FetchEventInfo::Header::B
   builder.setValue(value);
 }
 
+Trace::JsRpcEventInfo::JsRpcEventInfo(kj::String methodName)
+    : methodName(kj::mv(methodName)) {}
+
+Trace::JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader)
+    : methodName(kj::str(reader.getMethodName())) {}
+
+void Trace::JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) {
+  builder.setMethodName(methodName);
+}
+
 Trace::ScheduledEventInfo::ScheduledEventInfo(double scheduledTime, kj::String cron)
     : scheduledTime(scheduledTime), cron(kj::mv(cron)) {}
 
@@ -287,6 +297,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
         auto fetchBuilder = eventInfoBuilder.initFetch();
         fetch.copyTo(fetchBuilder);
       }
+      KJ_CASE_ONEOF(jsRpc, JsRpcEventInfo) {
+        auto jsRpcBuilder = eventInfoBuilder.initJsRpc();
+        jsRpc.copyTo(jsRpcBuilder);
+      }
       KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
         auto scheduledBuilder = eventInfoBuilder.initScheduled();
         scheduled.copyTo(scheduledBuilder);
@@ -380,6 +394,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
     switch (e.which()) {
       case rpc::Trace::EventInfo::Which::FETCH:
         eventInfo = FetchEventInfo(e.getFetch());
+        break;
+      case rpc::Trace::EventInfo::Which::JS_RPC:
+        eventInfo = JsRpcEventInfo(e.getJsRpc());
         break;
       case rpc::Trace::EventInfo::Which::SCHEDULED:
         eventInfo = ScheduledEventInfo(e.getScheduled());
@@ -610,6 +627,7 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
         return;
       }
     }
+    KJ_CASE_ONEOF(_, Trace::JsRpcEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::ScheduledEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {}

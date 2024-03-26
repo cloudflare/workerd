@@ -90,6 +90,16 @@ public:
     void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
   };
 
+  class JsRpcEventInfo {
+  public:
+    explicit JsRpcEventInfo(kj::String methodName);
+    JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
+
+    kj::String methodName;
+
+    void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
+  };
+
   class ScheduledEventInfo {
   public:
     explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
@@ -251,8 +261,9 @@ public:
   // We treat the origin value as "unset".
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
 
-  typedef kj::OneOf<FetchEventInfo, ScheduledEventInfo, AlarmEventInfo, QueueEventInfo,
-          EmailEventInfo, TraceEventInfo, HibernatableWebSocketEventInfo, CustomEventInfo> EventInfo;
+  typedef kj::OneOf<FetchEventInfo, JsRpcEventInfo, ScheduledEventInfo, AlarmEventInfo,
+          QueueEventInfo, EmailEventInfo, TraceEventInfo, HibernatableWebSocketEventInfo,
+          CustomEventInfo> EventInfo;
   kj::Maybe<EventInfo> eventInfo;
   // TODO(someday): Support more event types.
   // TODO(someday): Work out what sort of information we may want to convey about the parent

@@ -147,6 +147,9 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
       KJ_CASE_ONEOF(fetch, Trace::FetchEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::FetchEventInfo>(js, trace, fetch, trace.fetchResponseInfo));
       }
+      KJ_CASE_ONEOF(jsRpc, Trace::JsRpcEventInfo) {
+        return kj::Maybe(jsg::alloc<TraceItem::JsRpcEventInfo>(trace, jsRpc));
+      }
       KJ_CASE_ONEOF(scheduled, Trace::ScheduledEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::ScheduledEventInfo>(trace, scheduled));
       }
@@ -203,6 +206,7 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
   return eventInfo.map([](auto& info) -> TraceItem::EventInfo {
     KJ_SWITCH_ONEOF(info) {
       KJ_CASE_ONEOF(info, jsg::Ref<FetchEventInfo>) { return info.addRef(); }
+      KJ_CASE_ONEOF(info, jsg::Ref<JsRpcEventInfo>) { return info.addRef(); }
       KJ_CASE_ONEOF(info, jsg::Ref<ScheduledEventInfo>) { return info.addRef(); }
       KJ_CASE_ONEOF(info, jsg::Ref<AlarmEventInfo>) { return info.addRef(); }
       KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) { return info.addRef(); }
@@ -341,6 +345,14 @@ TraceItem::FetchEventInfo::Response::Response(const Trace& trace,
 
 uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
   return status;
+}
+
+TraceItem::JsRpcEventInfo::JsRpcEventInfo(const Trace& trace,
+                                          const Trace::JsRpcEventInfo& eventInfo)
+    : rpcMethod(kj::str(eventInfo.methodName)) {}
+
+kj::StringPtr TraceItem::JsRpcEventInfo::getRpcMethod() {
+  return rpcMethod;
 }
 
 TraceItem::ScheduledEventInfo::ScheduledEventInfo(const Trace& trace,
@@ -633,6 +645,9 @@ void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_IF_SOME(event, eventInfo) {
     KJ_SWITCH_ONEOF(event) {
       KJ_CASE_ONEOF(info, jsg::Ref<FetchEventInfo>) {
+        tracker.trackField("eventInfo", info);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<JsRpcEventInfo>) {
         tracker.trackField("eventInfo", info);
       }
       KJ_CASE_ONEOF(info, jsg::Ref<ScheduledEventInfo>) {
