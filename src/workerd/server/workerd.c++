@@ -726,7 +726,9 @@ public:
                    "Useful for development, but not recommended in production.")
         .addOption({"experimental"}, [this]() { server.allowExperimental(); return true; },
                    "Permit the use of experimental features which may break backwards "
-                   "compatibility in a future release.");
+                   "compatibility in a future release.")
+        .addOptionWithArg({"disk-cache-dir"}, CLI_METHOD(diskCacheDir), "<path>",
+                  "Use <path> as a disk cache to avoid repeatedly fetching packages from the internet. ");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {
@@ -925,6 +927,12 @@ public:
     int fd = KJ_UNWRAP_OR(param.tryParseAs<uint>(),
         CLI_ERROR("Output value must be a file descriptor (non-negative integer)."));
     server.enableControl(fd);
+  }
+
+  void diskCacheDir(kj::StringPtr pathStr) {
+    kj::Path path = fs->getCurrentPath().eval(pathStr);
+    kj::Maybe<kj::Own<const kj::Directory>> dir = fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
+    server.setDiskCacheRoot(kj::mv(dir));
   }
 
   void watch() {

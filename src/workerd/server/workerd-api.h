@@ -22,7 +22,7 @@ public:
       IsolateLimitEnforcer& limitEnforcer,
       kj::Own<jsg::IsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
-      kj::Maybe<kj::Own<const kj::Directory>> pyodideCacheRoot);
+      kj::Maybe<kj::Own<const kj::Directory>>& pyodideCacheRoot);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);

@@ -2644,8 +2644,6 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     }
   };
 
-  // TODO: figure out where to get the cache directory from
-  kj::Maybe<kj::Own<const kj::Directory>> cacheRoot = fs.getRoot().openSubdir(kj::Path::parse("home/garrett/.cache"), kj::WriteMode::MODIFY);
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
   auto api = kj::heap<WorkerdApi>(globalContext->v8System,
@@ -2653,7 +2651,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
                                   *limitEnforcer,
                                   kj::atomicAddRef(*observer),
                                   *memoryCacheProvider,
-                                  kj::mv(cacheRoot));
+                                  diskCacheRoot);
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
