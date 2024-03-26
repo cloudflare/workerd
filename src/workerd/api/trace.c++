@@ -195,6 +195,7 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       exceptions(getTraceExceptions(trace)),
       diagnosticChannelEvents(getTraceDiagnosticChannelEvents(js, trace)),
       scriptName(trace.scriptName.map([](auto& name) { return kj::str(name); })),
+      entrypoint(trace.entrypoint.map([](auto& name) { return kj::str(name); })),
       scriptVersion(getTraceScriptVersion(trace)),
       dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
@@ -237,6 +238,10 @@ kj::ArrayPtr<jsg::Ref<TraceDiagnosticChannelEvent>> TraceItem::getDiagnosticChan
 
 kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
   return scriptName.map([](auto& name) -> kj::StringPtr { return name; });
+}
+
+jsg::Optional<kj::StringPtr> TraceItem::getEntrypoint() {
+  return entrypoint;
 }
 
 jsg::Optional<ScriptVersion> TraceItem::getScriptVersion() {

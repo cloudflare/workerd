@@ -94,6 +94,7 @@ public:
   kj::ArrayPtr<jsg::Ref<TraceException>> getExceptions();
   kj::ArrayPtr<jsg::Ref<TraceDiagnosticChannelEvent>> getDiagnosticChannelEvents();
   kj::Maybe<kj::StringPtr> getScriptName();
+  jsg::Optional<kj::StringPtr> getEntrypoint();
   jsg::Optional<ScriptVersion> getScriptVersion();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
@@ -109,6 +110,7 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(exceptions, getExceptions);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(diagnosticsChannelEvents, getDiagnosticChannelEvents);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptName, getScriptName);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(entrypoint, getEntrypoint);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptVersion, getScriptVersion);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(dispatchNamespace, getDispatchNamespace);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
@@ -124,6 +126,7 @@ private:
   kj::Array<jsg::Ref<TraceException>> exceptions;
   kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> diagnosticChannelEvents;
   kj::Maybe<kj::String> scriptName;
+  kj::Maybe<kj::String> entrypoint;
   kj::Maybe<ScriptVersion> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;

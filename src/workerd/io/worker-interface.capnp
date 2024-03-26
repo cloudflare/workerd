@@ -125,6 +125,8 @@ struct Trace @0x8e8d911203762d34 {
   dispatchNamespace @12 :Text;
   scriptTags @14 :List(Text);
 
+  entrypoint @22 :Text;
+
   diagnosticChannelEvents @17 :List(DiagnosticChannelEvent);
   struct DiagnosticChannelEvent {
     timestampNs @0 :Int64;

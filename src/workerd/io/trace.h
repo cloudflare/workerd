@@ -52,7 +52,8 @@ class Trace final : public kj::Refcounted {
 public:
   explicit Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName,
       kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-      kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags);
+      kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags,
+      kj::Maybe<kj::String> entrypoint);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -273,6 +274,7 @@ public:
   kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
   kj::Array<kj::String> scriptTags;
+  kj::Maybe<kj::String> entrypoint;
 
   kj::Vector<Log> logs;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
@@ -334,7 +336,8 @@ public:
                                          kj::Maybe<kj::String> scriptName,
                                          kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
                                          kj::Maybe<kj::String> dispatchNamespace,
-                                         kj::Array<kj::String> scriptTags);
+                                         kj::Array<kj::String> scriptTags,
+                                         kj::Maybe<kj::String> entrypoint);
   // Makes a tracer for a worker stage.
 
 private:
