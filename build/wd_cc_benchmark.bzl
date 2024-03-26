@@ -20,7 +20,7 @@ def wd_cc_benchmark(
           "//conditions:default": 1,
         }),
         linkopts = linkopts + select({
-          "@//:use_dead_strip": ["-Wl,-dead_strip"],
+          "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
           "//conditions:default": [""],
         }),
         visibility = visibility,

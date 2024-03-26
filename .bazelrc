@@ -105,10 +105,8 @@ build --@rules_rust//:extra_exec_rustc_flags=-C,panic=abort,-C,debug-assertions=
 build:fastdbg --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1,-C,embed-bitcode=n
 build:fastdbg --@rules_rust//:extra_exec_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1,-C,embed-bitcode=n
 
-# TODO(later): -C codegen-units=1 improves code size and quality, should be enabled in a future
-# release configuration even if lto is off. Similarly, adding -C lto=thin would improve binary size
-# significantly – disable it for now due to compile errors and wrong code generation when bazel and
-# rust use different LLVM versions.
+# Adding -C lto=thin here would improve binary size significantly – disable it for now due to
+# compile errors and wrong code generation when bazel and rust use different LLVM versions.
 build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1,-C,embed-bitcode=n
 
 # common sanitizers options
@@ -182,13 +180,6 @@ build:linux --linkopt="-Wl,--gc-sections" --linkopt="-Wl,-O2"
 build:linux --copt="-ffunction-sections" --host_copt="-ffunction-sections"
 build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
-# TODO(later): rustc's -C,codegen-units=1 and ld/lld's -Wl,-O2 on Linux/possibly Windows should
-# bring an additional binary size improvement. These should only be enabled in opt mode which won't
-# be possible in bazelrc without establishing a release configuration, but it can be done using the
-# extra_rustc_flags parameter in rust_register_toolchains() and by modifying linkopts in kj_test()
-# and wd_cc_binary() similar to how the use_dead_strip flag is used. The binary size improvement is
-# modest (~ 300kb), but if we encounter size concerns again this would be a good place to start.
-
 #
 # Windows
 #
@@ -219,19 +210,53 @@ build:windows --extra_execution_platforms=//:x64_windows-clang-cl
 build:windows_no_dbg -c opt
 build:windows_no_dbg --copt='-O0' --host_copt='-O0'
 build:windows_no_dbg --copt='/Od' --host_copt='/Od'
-build:windows_no_dbg --copt='/INCREMENTAL:NO' --host_copt='/INCREMENTAL:NO'
+build:windows_no_dbg --linkopt='/INCREMENTAL:NO' --host_linkopt='/INCREMENTAL:NO'
 build:windows_no_dbg --features=-smaller_binary --features=-disable_assertions_feature
 
 # Mitigate the large size impact of Windows debug binaries somewhat by applying string merging and
 # linker garbage collection.
 build:windows_dbg --config=debug
-build:windows_dbg --copt='/Gy' --copt='/Gw' --copt='/GF'
+build:windows_dbg --copt='/Gy' --copt='/Gw'
 build:windows_dbg --linkopt='/OPT:REF'
+build:windows_dbg --linkopt='/OPT:LLDTAILMERGE' --linkopt='/OPT:SAFEICF'
+
+# This hides inline symbols in classes that are marked to be exported, similar to
+# -fvisibility-inlines-hidden on Unix systems (https://blog.llvm.org/2018/11/30-faster-windows-builds-with-clang-cl_14.html)
+# Currently this only reduces object sizes slightly, larger gains are possible if we compile V8 as
+# a shared library.
+build:windows --copt='/Zc:dllexportInlines-'
+
+# Release configuration.
+build:release -c opt
+build:release --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1,-C,embed-bitcode=n
+
+# enable -O3 for the release configuration. Based on benchmarking there is little difference in
+# performance, but -O3 should generally be expected to be faster for at least parts of the workerd API.
+build:release_unix --copt='-O3'
+build:release_unix --config=release
+build:release_linux --config=release_unix
+
+build:release_macos --config=release_unix
+# Disable generating LC_DATA_IN_CODE and LC_FUNCTION_STARTS binary sections, two rarely used types
+# of macOS debug info. These sections are largely undocumented, but are used by LLDB to improve
+# debugging on binaries that are otherwise stripped. There should be no need to include this
+# data in releases.
+build:release_macos --linkopt="-Wl,-no_data_in_code_info"
+build:release_macos --linkopt="-Wl,-no_function_starts"
+
+build:release_windows --config=release
+# Windows uses /O2 as its preferred optimization setting and enabled by bazel in the opt
+# configuration, but for clang-cl this is equivalent to only -O2 and a few other things. -O3 is
+# not exposed directly in the clang-cl driver, but we can access regular clang
+# flags using the /clang prefix anyway. https://clang.llvm.org/docs/UsersManual.html#the-clang-option
+build:release_windows --copt="/clang:-O3"
+# clang-cl does not enable strict aliasing by default to match MSVC's approach, unlike clang on
+# Unix which turns it on for opt builds.
+build:release_windows --copt="-fstrict-aliasing"
 
 build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20'
-build:windows --cxxopt='/await' --host_cxxopt='/await'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
-build:windows --copt='/DWINDOWS_LEAN_AND_MEAN' --host_copt='/DWINDOWS_LEAN_AND_MEAN'
+build:windows --copt='/DWIN32_LEAN_AND_MEAN' --host_copt='/DWIN32_LEAN_AND_MEAN'
 # The `/std:c++20` argument is unused during boringssl compilation and we don't
 # want a warning when compiling each file.
 build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unused-command-line-argument'

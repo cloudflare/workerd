@@ -90,7 +90,7 @@ jobs:
         # Not enabled because symbolication does not work on workerd macOS builds yet and running
         # llvm-symbolizer in the currently broken state causes some tests to time out on the
         # runner.
-        # Use latest available Xcode version – runner still defaults to 14.3.1.
+        # Use latest available Xcode version – runner still defaults to 15.0.1.
         run: |
           sudo xcode-select -s "/Applications/Xcode_15.1.app"
           # export LLVM_SYMBOLIZER=$(brew --prefix llvm@15)/bin/llvm-symbolizer
@@ -115,12 +115,17 @@ jobs:
         # don't need to run within a debugger, so information needed for symbolication is
         # sufficient. The host configuration compiles in opt mode/without debug info by default, so
         # there's no need to set host_copt here.
+        # LLVM produces a bit more debug info on macOS by default to facilitate debugging with
+        # LLDB. This is not needed for this use case, so disable it using -fno-standalone-debug –
+        # this is already the default for Linux/Windows.
         if: contains(matrix.config.suffix, 'debug') || contains(matrix.config.suffix, 'asan')
         shell: bash
         run: |
           cat <<EOF >> .bazelrc
           build:limit-storage --build_tag_filters=-off-by-default,-benchmark
           build:limit-storage --copt="-g1"
+          build:limit-storage --copt="-fno-standalone-debug"
+          build:limit-storage --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=limited,-C,embed-bitcode=n
           build:asan --config=limit-storage
           build:debug --config=limit-storage
           EOF
