@@ -873,17 +873,17 @@ export let serializeRpcPromiseOrProprety = {
     // NOTE: We could choose to make this work later.
     await assert.rejects(() => env.MyService.getNestedRpcPromise(func), {
       name: "DataCloneError",
-      message: 'Could not serialize object of type "JsRpcPromise". This type does not support ' +
+      message: 'Could not serialize object of type "RpcPromise". This type does not support ' +
                'serialization.'
     });
     await assert.rejects(() => env.MyService.getNestedRpcPromise(func).value, {
       name: "DataCloneError",
-      message: 'Could not serialize object of type "JsRpcPromise". This type does not support ' +
+      message: 'Could not serialize object of type "RpcPromise". This type does not support ' +
                'serialization.'
     });
     await assert.rejects(() => env.MyService.getNestedRpcPromise(func).value.x, {
       name: "DataCloneError",
-      message: 'Could not serialize object of type "JsRpcPromise". This type does not support ' +
+      message: 'Could not serialize object of type "RpcPromise". This type does not support ' +
                'serialization.'
     });
 
@@ -903,17 +903,17 @@ export let serializeRpcPromiseOrProprety = {
     assert.strictEqual(await env.MyService.getRpcProperty(func).x, 456)
     await assert.rejects(() => env.MyService.getNestedRpcProperty(func), {
       name: "DataCloneError",
-      message: 'Could not serialize object of type "JsRpcProperty". This type does not support ' +
+      message: 'Could not serialize object of type "RpcProperty". This type does not support ' +
                'serialization.'
     });
     await assert.rejects(() => env.MyService.getNestedRpcProperty(func).value, {
       name: "DataCloneError",
-      message: 'Could not serialize object of type "JsRpcProperty". This type does not support ' +
+      message: 'Could not serialize object of type "RpcProperty". This type does not support ' +
                'serialization.'
     });
     await assert.rejects(() => env.MyService.getNestedRpcProperty(func).value.x, {
       name: "DataCloneError",
-      message: 'Could not serialize object of type "JsRpcProperty". This type does not support ' +
+      message: 'Could not serialize object of type "RpcProperty". This type does not support ' +
                'serialization.'
     });
 
@@ -1171,5 +1171,17 @@ export let canUseGetPutDelete = {
     assert.strictEqual(await env.MyService.get(12), 13);
     assert.strictEqual(await env.MyService.put(5, 7), 12);
     assert.strictEqual(await env.MyService.delete(3), 2);
+  }
+}
+
+// Test that stubs can still be used after logging them.
+export let logging = {
+  async test(controller, env, ctx) {
+    let counter = new MyCounter(0);
+    let stub = new RpcStub(counter);
+    assert.strictEqual(await stub.increment(1), 1);
+    assert.strictEqual(await stub.increment(1), 2);
+    console.log(stub);
+    assert.strictEqual(await stub.increment(1), 3);
   }
 }

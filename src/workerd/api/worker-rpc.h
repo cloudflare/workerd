@@ -479,6 +479,8 @@ public:
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
+    JSG_NESTED_TYPE_NAMED(JsRpcPromise, RpcPromise);
+    JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
     JSG_NESTED_TYPE_NAMED(JsRpcStub, RpcStub);
     JSG_NESTED_TYPE_NAMED(JsRpcTarget, RpcTarget);
   }

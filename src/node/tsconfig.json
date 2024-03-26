@@ -29,7 +29,8 @@
       "node:*": ["./*"],
       "node:stream/*": ["./*"],
       "node-internal:*": ["./internal/*"],
-      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
+      "cloudflare-internal:workers": ["./internal/workers.d.ts"],
+      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"],
     }
   },
   "include": [

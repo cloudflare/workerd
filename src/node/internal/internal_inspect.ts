@@ -29,6 +29,7 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
+import internalWorkers from "cloudflare-internal:workers";
 import internal from "node-internal:util";
 
 import { Buffer } from "node-internal:internal_buffer";
@@ -2414,10 +2415,23 @@ function isBuiltinPrototype(proto: unknown) {
   );
 }
 
+function isRpcWildcardType(value: unknown) {
+  return (
+    value instanceof internalWorkers.RpcStub ||
+    value instanceof internalWorkers.RpcPromise ||
+    value instanceof internalWorkers.RpcPromise
+  );
+}
+
 function isEntry(value: unknown): value is [unknown, unknown] {
   return Array.isArray(value) && value.length === 2;
 }
 function maybeGetEntries(value: Record<PropertyKey, unknown>): [unknown, unknown][] | undefined {
+  // If this value is an RPC type with a wildcard property handler (e.g. `RpcStub`), don't try to
+  // call `entries()` on it. This won't be an `entries()` function, and calling it with `.call()`
+  // would dispose the stub.
+  if (isRpcWildcardType(value)) return;
+
   const entriesFunction = value["entries"];
   if (typeof entriesFunction !== "function") return;
   const entriesIterator: unknown = entriesFunction.call(value);
