@@ -117,7 +117,7 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
   }
   return jsg::alloc<PyodideMetadataReader>(kj::mv(mainModule), names.finish(), contents.finish(),
                                            requirements.finish(), true /* isWorkerd */,
-                                           false /* isTracing */, kj::none /* memorySnapshot */);
+                                           false /* isTracing */, false /* createBaselineSnapshot */, kj::none /* memorySnapshot */);
 }
 
 } // namespace workerd::api::pyodide
