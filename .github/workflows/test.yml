@@ -90,7 +90,7 @@ jobs:
         # Not enabled because symbolication does not work on workerd macOS builds yet and running
         # llvm-symbolizer in the currently broken state causes some tests to time out on the
         # runner.
-        # Use latest available Xcode version – runner still defaults to 14.3.1.
+        # Use latest available Xcode version – runner still defaults to 15.0.1.
         run: |
           sudo xcode-select -s "/Applications/Xcode_15.1.app"
           # export LLVM_SYMBOLIZER=$(brew --prefix llvm@15)/bin/llvm-symbolizer
@@ -115,6 +115,11 @@ jobs:
         # don't need to run within a debugger, so information needed for symbolication is
         # sufficient. The host configuration compiles in opt mode/without debug info by default, so
         # there's no need to set host_copt here.
+        # Additional debug info is included by default on Darwin using -fstandalone-debug to
+        # improve debugging with LLDB, which is not needed for this case. This is off-by-default on
+        # Windows/Linux, so it's safe to pass the disable flag there too.
+        # TODO: Testing, re-enable
+        # build:limit-storage --copt="-fno-standalone-debug"
         if: contains(matrix.config.suffix, 'debug') || contains(matrix.config.suffix, 'asan')
         shell: bash
         run: |
@@ -142,11 +147,11 @@ jobs:
           BAZEL_OUTPUT_BASE=$(bazel info --ui_event_filters=-WARNING output_base)
           BAZEL_REPOSITORY_CACHE=$(bazel info --ui_event_filters=-WARNING repository_cache)
           echo "Bazel cache usage statistics"
-          du -hs -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
+          du -k -s -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
           echo "Bazel output usage statistics"
-          du -hs -t 1 $BAZEL_OUTPUT_BASE
+          du -k -s -t 1 $BAZEL_OUTPUT_BASE
           echo "Workspace usage statistics"
-          du -hs -t 1 $GITHUB_WORKSPACE
+          du -k -s -t 1 $GITHUB_WORKSPACE
       - name: Drop large Bazel cache files
         if: always()
         # Github has a nominal 10GB of storage for all cached builds associated with a project.
@@ -159,7 +164,7 @@ jobs:
           if [ -d ~/bazel-disk-cache ]; then
             find ~/bazel-disk-cache -size +100M -type f -exec rm {} \;
             echo "Trimmed Bazel cache usage statistics"
-            du -hs -t 1 ~/bazel-disk-cache/*
+            du -k -s -t 1 ~/bazel-disk-cache/*
           else
             echo "Disk cache does not exist: ~/bazel-disk-cache"
           fi
