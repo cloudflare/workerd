@@ -21,6 +21,7 @@ import {
   WORKERD_INDEX_URL,
 } from "pyodide-internal:metadata";
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
+import { reportError } from "pyodide-internal:reportError";
 
 function pyimportMainModule(pyodide) {
   if (!MAIN_MODULE_NAME.endsWith(".py")) {
@@ -155,8 +156,8 @@ function makeHandler(pyHandlerName) {
         return mainModule[pyHandlerName].callRelaxed(...args);
       });
     } catch (e) {
-      console.warn(e.stack);
-      throw e;
+      console.warn("Error in makeHandler");
+      reportError(e);
     } finally {
       args[2].waitUntil(uploadArtifacts());
     }
@@ -205,8 +206,8 @@ try {
     ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
   }
 } catch (e) {
-  console.warn(e);
-  throw e;
+  console.warn("Error in top level in python-entrypoint-helper.js");
+  reportError(e);
 }
 
 export default handlers;
