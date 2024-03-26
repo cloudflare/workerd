@@ -74,11 +74,18 @@ export let nonClass = {
 
   async fetch(req, env, ctx) {
     // This is used in the stream test to fetch some gziped data.
-    return new Response("this text was gzipped", {
-      headers: {
-        "Content-Encoding": "gzip"
-      }
-    });
+    if (req.url.endsWith("/gzip")) {
+      return new Response("this text was gzipped", {
+        headers: {
+          "Content-Encoding": "gzip"
+        }
+      });
+    } else if (req.url.endsWith("/stream-from-rpc")) {
+      let stream = await env.MyService.returnReadableStream();
+      return new Response(stream);
+    } else {
+      throw new Error("unknown route");
+    }
   }
 }
 
@@ -1062,7 +1069,7 @@ export let streams = {
 
     // Send an encoded ReadableStream
     {
-      let gzippedResp = await env.self.fetch("http://foo");
+      let gzippedResp = await env.self.fetch("http://foo/gzip");
 
       let text = await env.MyService.readFromStream(gzippedResp.body);
 
@@ -1086,6 +1093,13 @@ export let streams = {
       await writer.close();
 
       assert.strictEqual(await readPromise, "foo, bar, baz!");
+    }
+
+    // Perform an HTTP request whose response uses a ReadableStream obtained over RPC.
+    {
+      let resp = await env.self.fetch("http://foo/stream-from-rpc");
+
+      assert.strictEqual(await resp.text(), "foo, bar, baz!");
     }
   }
 }
