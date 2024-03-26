@@ -58,7 +58,8 @@ jsg::Ref<WebSocket> HibernatableWebSocketEvent::claimWebSocket(jsg::Lock& lock,
 
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEventImpl::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
-    kj::Maybe<kj::StringPtr> entrypointName) {
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::TaskSet& waitUntilTasks) {
   // Mark the request as delivered because we're about to run some JS.
   auto& context = incomingRequest->getContext();
   incomingRequest->delivered();

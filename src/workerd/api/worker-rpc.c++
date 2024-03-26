@@ -1673,7 +1673,8 @@ private:
 
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
-    kj::Maybe<kj::StringPtr> entrypointName) {
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::TaskSet& waitUntilTasks) {
   IoContext& ioctx = incomingRequest->getContext();
 
   incomingRequest->delivered();

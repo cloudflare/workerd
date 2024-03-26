@@ -528,7 +528,8 @@ jsg::Ref<QueueEvent> startQueueEvent(
 
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
-    kj::Maybe<kj::StringPtr> entrypointName) {
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::TaskSet& waitUntilTasks) {
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
