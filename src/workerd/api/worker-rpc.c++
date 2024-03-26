@@ -1686,11 +1686,16 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
               mapAddRef(incomingRequest->getWorkerTracer())),
           kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
+  KJ_DEFER({
+    // waitUntil() should allow extending execution on the server side even when the client
+    // disconnects.
+    waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+  });
+
   // `donePromise` resolves once there are no longer any capabilities pointing between the client
   // and server as part of this session.
-  co_await donePromise
-      .then([&ir = *incomingRequest]() { return ir.drain(); })
-      .exclusiveJoin(ioctx.onAbort());
+  co_await donePromise.exclusiveJoin(ioctx.onAbort());
+
   co_return WorkerInterface::CustomEvent::Result {
     .outcome = EventOutcome::OK
   };
