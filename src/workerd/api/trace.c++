@@ -610,7 +610,8 @@ kj::Promise<void> sendTracesToExportedHandler(
 }  // namespace
 
 auto TraceCustomEventImpl::run(
-    kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Maybe<kj::StringPtr> entrypointNamePtr)
+    kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Maybe<kj::StringPtr> entrypointNamePtr,
+    kj::TaskSet& waitUntilTasks)
     -> kj::Promise<Result> {
   // Don't bother to wait around for the handler to run, just hand it off to the waitUntil tasks.
   waitUntilTasks.add(

@@ -590,7 +590,8 @@ public:
 
   kj::Promise<Result> run(
       kj::Own<IoContext::IncomingRequest> incomingRequest,
-      kj::Maybe<kj::StringPtr> entrypointName) override;
+      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::TaskSet& waitUntilTasks) override;
 
   kj::Promise<Result> sendRpc(
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory,

@@ -650,7 +650,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   this->incomingRequest = kj::none;
 
   auto& context = incomingRequest->getContext();
-  auto promise = event->run(kj::mv(incomingRequest), entrypointName).attach(kj::mv(event));
+  auto promise = event->run(kj::mv(incomingRequest), entrypointName, waitUntilTasks)
+      .attach(kj::mv(event));
 
   // TODO(cleanup): In theory `context` may have been destroyed by now if `event->run()` dropped
   //   the `incomingRequest` synchronously. No current implementation does that, and

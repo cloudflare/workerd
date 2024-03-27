@@ -74,17 +74,27 @@ export let nonClass = {
 
   async fetch(req, env, ctx) {
     // This is used in the stream test to fetch some gziped data.
-    return new Response("this text was gzipped", {
-      headers: {
-        "Content-Encoding": "gzip"
-      }
-    });
+    if (req.url.endsWith("/gzip")) {
+      return new Response("this text was gzipped", {
+        headers: {
+          "Content-Encoding": "gzip"
+        }
+      });
+    } else if (req.url.endsWith("/stream-from-rpc")) {
+      let stream = await env.MyService.returnReadableStream();
+      return new Response(stream);
+    } else {
+      throw new Error("unknown route");
+    }
   }
 }
 
 // Globals used to test passing RPC promises or properties across I/O contexts (which is expected
 // to fail).
 let globalRpcPromise;
+
+// Promise initialized by testWaitUntil() and then resolved shortly later, in a waitUntil task.
+let globalWaitUntilPromise;
 
 export class MyService extends WorkerEntrypoint {
   constructor(ctx, env) {
@@ -346,6 +356,19 @@ export class MyService extends WorkerEntrypoint {
       },
       cf: {foo: 123, bar: "def"},
     });
+  }
+
+  testWaitUntil() {
+    // Initialize globalWaitUntilPromise to a promise that will be resolved in a waitUntil task
+    // later on. We'll perform a cross-context wait to verify that the waitUntil task actually
+    // completes and resolves the promise.
+    let resolve;
+    globalWaitUntilPromise = new Promise(r => { resolve = r; });
+
+    this.ctx.waitUntil((async () => {
+      await scheduler.wait(100);
+      resolve();
+    })());
   }
 }
 
@@ -789,11 +812,8 @@ export let disposal = {
 
       // If we abort the server's I/O context, though, then the counter is disposed.
       await assert.rejects(obj.abort(), {
-        // TODO(someday): This ought to propagate the abort exception, but that requires a bunch
-        //   more work...
-        name: "Error",
-        message: "The destination execution context for this RPC was canceled while the " +
-                 "call was still running."
+        name: "RangeError",
+        message: "foo bar abort reason"
       });
 
       await counter.onDisposed();
@@ -850,6 +870,16 @@ export let crossContextSharingDoesntWork = {
     await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), expectedError);
     await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), expectedError);
   },
+}
+
+export let waitUntilWorks = {
+  async test(controller, env, ctx) {
+    globalWaitUntilPromise = null;
+    await env.MyService.testWaitUntil();
+
+    assert.strictEqual(globalWaitUntilPromise instanceof Promise, true);
+    await globalWaitUntilPromise;
+  }
 }
 
 function stripDispose(obj) {
@@ -1062,7 +1092,7 @@ export let streams = {
 
     // Send an encoded ReadableStream
     {
-      let gzippedResp = await env.self.fetch("http://foo");
+      let gzippedResp = await env.self.fetch("http://foo/gzip");
 
       let text = await env.MyService.readFromStream(gzippedResp.body);
 
@@ -1086,6 +1116,13 @@ export let streams = {
       await writer.close();
 
       assert.strictEqual(await readPromise, "foo, bar, baz!");
+    }
+
+    // Perform an HTTP request whose response uses a ReadableStream obtained over RPC.
+    {
+      let resp = await env.self.fetch("http://foo/stream-from-rpc");
+
+      assert.strictEqual(await resp.text(), "foo, bar, baz!");
     }
   }
 }
