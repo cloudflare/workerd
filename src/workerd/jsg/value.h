@@ -1285,53 +1285,58 @@ public:
     // introduced, they'll need to be handled explicitly here also.
     auto& js = Lock::from(context->GetIsolate());
     auto& wrapper = TypeWrapper::from(js.v8Isolate);
-    KJ_IF_SOME(domException, wrapper.tryUnwrap(context, handle,
-                                                (DOMException*)nullptr,
-                                                parentObject)) {
-      return KJ_EXCEPTION(FAILED,
-          kj::str("jsg.DOMException(", domException.getName(), "): ",
-                  domException.getMessage()));
-    } else {
-
-      static const constexpr kj::StringPtr PREFIXES[] = {
-        // JavaScript intrinsic Error Types
-        "Error"_kj,
-        "RangeError"_kj,
-        "TypeError"_kj,
-        "SyntaxError"_kj,
-        "ReferenceError"_kj,
-        // WASM Error Types
-        "CompileError"_kj,
-        "LinkError"_kj,
-        "RuntimeError"_kj,
-        // JSG_RESOURCE_TYPE Error Types
-        "DOMException"_kj,
-      };
-
-      kj::String reason;
-      if (!handle->IsObject()) {
-        // if the argument isn't an object, it couldn't possibly be an Error.
-        reason = kj::str(JSG_EXCEPTION(Error) ": ", handle);
+    kj::Exception result = [&]() {
+      KJ_IF_SOME(domException, wrapper.tryUnwrap(context, handle,
+                                                  (DOMException*)nullptr,
+                                                  parentObject)) {
+        return KJ_EXCEPTION(FAILED,
+            kj::str("jsg.DOMException(", domException.getName(), "): ",
+                    domException.getMessage()));
       } else {
-        reason = kj::str(handle);
-        bool found = false;
-        // If the error message starts with a platform error type that we tunnel,
-        // prefix it with "jsg."
-        for (auto name: PREFIXES) {
-          if (reason.startsWith(name)) {
-            reason = kj::str("jsg.", reason);
-            found = true;
-            break;
+
+        static const constexpr kj::StringPtr PREFIXES[] = {
+          // JavaScript intrinsic Error Types
+          "Error"_kj,
+          "RangeError"_kj,
+          "TypeError"_kj,
+          "SyntaxError"_kj,
+          "ReferenceError"_kj,
+          // WASM Error Types
+          "CompileError"_kj,
+          "LinkError"_kj,
+          "RuntimeError"_kj,
+          // JSG_RESOURCE_TYPE Error Types
+          "DOMException"_kj,
+        };
+
+        kj::String reason;
+        if (!handle->IsObject()) {
+          // if the argument isn't an object, it couldn't possibly be an Error.
+          reason = kj::str(JSG_EXCEPTION(Error) ": ", handle);
+        } else {
+          reason = kj::str(handle);
+          bool found = false;
+          // If the error message starts with a platform error type that we tunnel,
+          // prefix it with "jsg."
+          for (auto name: PREFIXES) {
+            if (reason.startsWith(name)) {
+              reason = kj::str("jsg.", reason);
+              found = true;
+              break;
+            }
+          }
+          // Everything else should just come through as a normal error.
+          if (!found) {
+            reason = kj::str(JSG_EXCEPTION(Error) ": ", reason);
           }
         }
-        // Everything else should just come through as a normal error.
-        if (!found) {
-          reason = kj::str(JSG_EXCEPTION(Error) ": ", reason);
-        }
+        return kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+                            kj::mv(reason));
       }
-      return kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-                          kj::mv(reason));
-    }
+    }();
+
+    addExceptionDetail(js, result, handle);
+    return result;
   }
 };
 

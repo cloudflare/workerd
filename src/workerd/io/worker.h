@@ -447,7 +447,8 @@ public:
   struct ErrorInterface {
     jsg::Optional<kj::String> name;
     jsg::Optional<kj::String> message;
-    JSG_STRUCT(name, message);
+    jsg::Optional<kj::String> stack;
+    JSG_STRUCT(name, message, stack);
   };
   virtual const jsg::TypeHandler<ErrorInterface>&
       getErrorInterfaceTypeHandler(jsg::Lock& lock) const = 0;
@@ -529,9 +530,18 @@ public:
   void logUncaughtException(kj::StringPtr description);
 
   // Logs an exception to the debug console or trace, if active.
+  //
+  // If the caller already has a copy of the exception stack, it can pass this in as an
+  // optimization. This value will be passed along to the trace handler, if there is one, rather
+  // than querying the property from the exception itself. This is also useful in the case that
+  // the exception itself is not the original and the stack is missing.
   void logUncaughtException(UncaughtExceptionSource source,
                             const jsg::JsValue& exception,
                             const jsg::JsMessage& message = jsg::JsMessage());
+
+  // Version that takes a kj::Exception. If it has a serialized JS error attached as a detail, that
+  // error may be extracted and used.
+  void logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception);
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
