@@ -81,7 +81,7 @@ copy_file(
 # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
 
 PRELUDE = """
-import { newWasmModule, monotonicDateNow, wasmInstantiate, getRandomValues } from "pyodide-internal:builtin_wrappers";
+import { newWasmModule, monotonicDateNow, wasmInstantiate, getRandomValues, patchedGetMemory } from "pyodide-internal:builtin_wrappers";
 
 // Pyodide uses `new URL(some_url, location)` to resolve the path in `loadPackage`. Setting
 // `location = undefined` makes this throw an error if some_url is not an absolute url. Which is what
@@ -124,6 +124,10 @@ REPLACEMENTS = [
     [
         "reportUndefinedSymbols()",
         "reportUndefinedSymbolsNoOp()"
+    ],
+    [
+        "getMemory(",
+        "patchedGetMemory(libName,"
     ]
 ]
 

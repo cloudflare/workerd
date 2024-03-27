@@ -15,3 +15,12 @@ export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
   : ArtifactBundler.hasMemorySnapshot()
     ? ArtifactBundler
     : undefined;
+/**
+ * Record the dlopen handles that are needed by the MEMORY, where the dso metadata is preallocated,
+ * whether we are loading a baseline snapshot.
+ */
+export const DSO_METADATA = {
+  settings: {
+    loadedLibs: [],
+  },
+};

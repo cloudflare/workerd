@@ -1,4 +1,5 @@
 import { default as UnsafeEval } from "internal:unsafe-eval";
+import { DSO_METADATA } from "pyodide-internal:metadata";
 
 let lastTime;
 let lastDelta = 0;
@@ -128,4 +129,11 @@ export async function wasmInstantiate(module, imports) {
   }
   const instance = new WebAssembly.Instance(module, imports);
   return { module, instance };
+}
+
+export function patchedGetMemory(path) {
+  if (DSO_METADATA?.settings?.loadedLibs) {
+    DSO_METADATA.settings.loadedLibs.push(path);
+  }
+  return DSO_METADATA[path].metadataPtr;
 }

@@ -13,6 +13,7 @@ import processScriptImports from "pyodide-internal:process_script_imports.py";
 import {
   MEMORY_SNAPSHOT_READER,
   IS_CREATING_BASELINE_SNAPSHOT,
+  DSO_METADATA,
 } from "pyodide-internal:metadata";
 import { reportError, simpleRunPython } from "pyodide-internal:util";
 
@@ -53,11 +54,6 @@ const SHOULD_UPLOAD_SNAPSHOT =
  */
 let READ_MEMORY = undefined;
 let SNAPSHOT_SIZE = undefined;
-
-/**
- * Record the dlopen handles that are needed by the MEMORY.
- */
-let DSO_METADATA = {};
 
 /**
  * Used to defer artifact upload. This is set during initialisation, but is executed during a
@@ -174,10 +170,39 @@ function loadDynlib(Module, path, wasmModuleData) {
   // "handles" are dlopen handles. There will be one entry in the `handles` list
   // for each dlopen handle that has not been dlclosed. We need to keep track of
   // these across
-  const { handles } = DSO_METADATA[path] || { handles: [] };
+  const handles = DSO_METADATA[path]?.handles || [];
   for (const handle of handles) {
     Module.LDSO.loadedLibsByHandle[handle] = dso;
   }
+}
+
+function getLEB(binary) {
+  let offset = 0;
+  let ret = 0;
+  let mul = 1;
+  while (1) {
+    const byte = binary[offset++];
+    ret += (byte & 0x7f) * mul;
+    mul *= 0x80;
+    if (!(byte & 0x80)) break;
+  }
+  return [ret, offset];
+}
+
+function getDylinkMetadata(Module, contentsOffset) {
+  const view = new Uint8Array(12);
+  TarReader.read(contentsOffset, view);
+  if (new Uint32Array(view.buffer)[0] !== 0x6d736100) {
+    throw new Error("Invalid wasm magic number");
+  }
+  if (view[8] !== 0) {
+    throw new Error("First section should be the dylink section");
+  }
+  const [length, offset] = getLEB(view.subarray(9));
+  const totalSize = 9 + offset + length;
+  const metadataBuffer = new Uint8Array(totalSize);
+  TarReader.read(contentsOffset, metadataBuffer);
+  return Module.getDylinkMetadata(metadataBuffer);
 }
 
 /**
@@ -192,21 +217,47 @@ function loadDynlib(Module, path, wasmModuleData) {
  * there.
  */
 function preloadDynamicLibs(Module) {
-  let SO_FILES_TO_LOAD = SITE_PACKAGES_SO_FILES;
-  if (DSO_METADATA?.settings?.baselineSnapshot) {
-    SO_FILES_TO_LOAD = [["_lzma.so"]];
-  }
   try {
+    let SO_FILES_TO_LOAD = SITE_PACKAGES_SO_FILES;
+    if (DSO_METADATA?.settings?.baselineSnapshot) {
+      SO_FILES_TO_LOAD = [["_lzma.so"]];
+    }
     const sitePackages = getSitePackagesPath(Module);
+    const moduleNodes = {};
     for (const soFile of SO_FILES_TO_LOAD) {
       let node = SITE_PACKAGES_INFO;
       for (const part of soFile) {
         node = node.children.get(part);
       }
-      const { contentsOffset, size } = node;
+      const path = sitePackages + "/" + soFile.join("/");
+      moduleNodes[path] = node;
+      const { contentsOffset } = node;
+      const metadata = getDylinkMetadata(Module, contentsOffset);
+      const memAlign = Math.pow(2, metadata.memoryAlign);
+      const ptr = Module.alignMemory(
+        Module.getMemory(metadata.memorySize + memAlign),
+        memAlign,
+      );
+      if (!(path in DSO_METADATA)) {
+        DSO_METADATA[path] = {};
+      }
+      DSO_METADATA[path].metadataPtr = ptr;
+    }
+    let toLoad = [];
+    if (DSO_METADATA?.settings?.loadedLibs) {
+      // Make sure to copy list first b/c loadDynlib sticks another copy of the
+      // lib into the list causing an infinite loop if we're not careful.
+      toLoad = Array.from(DSO_METADATA.settings.loadedLibs);
+    } else {
+      // Snapshot is from prior to the load-as-needed change. Just load everything.
+      toLoad = SO_FILES_TO_LOAD.map(
+        (soFile) => sitePackages + "/" + soFile.join("/"),
+      );
+    }
+    for (const path of toLoad) {
+      const { contentsOffset, size } = moduleNodes[path];
       const wasmModuleData = new Uint8Array(size);
       TarReader.read(contentsOffset, wasmModuleData);
-      const path = sitePackages + "/" + soFile.join("/");
       loadDynlib(Module, path, wasmModuleData);
     }
   } catch (e) {
@@ -309,23 +360,23 @@ async function prepareWasmLinearMemory(Module) {
  * crash if we dlsym the handle after restoring from the snapshot
  */
 function recordDsoHandles(Module) {
-  const dylinkInfo = {};
   for (const [handle, { name }] of Object.entries(
     Module.LDSO.loadedLibsByHandle,
   )) {
     if (handle === 0) {
       continue;
     }
-    if (!(name in dylinkInfo)) {
-      dylinkInfo[name] = { handles: [] };
+    if (!(name in DSO_METADATA)) {
+      DSO_METADATA[name] = {};
     }
-    dylinkInfo[name].handles.push(handle);
+    if (!("handles" in DSO_METADATA[name])) {
+      DSO_METADATA[name].handles = [];
+    }
+    DSO_METADATA[name].handles.push(handle);
   }
-  dylinkInfo.settings = {};
   if (IS_CREATING_BASELINE_SNAPSHOT) {
-    dylinkInfo.settings.baselineSnapshot = true;
+    DSO_METADATA.settings.baselineSnapshot = true;
   }
-  return dylinkInfo;
 }
 
 // This is the list of all packages imported by the Python bootstrap. We don't
@@ -400,8 +451,8 @@ function memorySnapshotDoImports(Module) {
  */
 function makeLinearMemorySnapshot(Module) {
   memorySnapshotDoImports(Module);
-  const dsoJSON = recordDsoHandles(Module);
-  return encodeSnapshot(Module.HEAP8, dsoJSON);
+  recordDsoHandles(Module);
+  return encodeSnapshot(Module.HEAP8, DSO_METADATA);
 }
 
 function setUploadFunction(toUpload) {
@@ -475,7 +526,10 @@ function decodeSnapshot() {
   const jsonBuf = new Uint8Array(jsonLength);
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, jsonBuf);
   const jsonTxt = new TextDecoder().decode(jsonBuf);
-  DSO_METADATA = JSON.parse(jsonTxt);
+  for (const key in DSO_METADATA) {
+    delete DSO_METADATA[key];
+  }
+  Object.assign(DSO_METADATA, JSON.parse(jsonTxt));
   READ_MEMORY = function (Module) {
     // restore memory from snapshot
     MEMORY_SNAPSHOT_READER.readMemorySnapshot(snapshotOffset, Module.HEAP8);
@@ -524,7 +578,10 @@ export async function loadPyodide(lockfile, indexURL) {
   if (DSO_METADATA?.settings?.baselineSnapshot) {
     // Invalidate caches if we have a baseline snapshot because the contents of site-packages may
     // have changed.
-    simpleRunPython(Module, "from importlib import invalidate_caches as f; f(); del f");
+    simpleRunPython(
+      Module,
+      "from importlib import invalidate_caches as f; f(); del f",
+    );
   }
 
   // This is just here for our test suite. Ugly but just about the only way to test this.
