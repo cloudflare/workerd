@@ -10,7 +10,8 @@ import {
 } from "pyodide-internal:setupPackages";
 import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 import processScriptImports from "pyodide-internal:process_script_imports.py";
-import { MEMORY_SNAPSHOT_READER } from "pyodide-internal:metadata";
+import { MEMORY_SNAPSHOT_READER, IS_CREATING_BASELINE_SNAPSHOT } from "pyodide-internal:metadata";
+import { reportError } from "pyodide-internal:reportError";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -38,9 +39,7 @@ import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
  */
 import stdlib from "pyodide-internal:generated/python_stdlib.zip";
 
-const SHOULD_UPLOAD_SNAPSHOT =
-  ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
-const DEDICATED_SNAPSHOT = true;
+const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
 
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of
@@ -138,7 +137,7 @@ function prepareFileSystem(Module) {
     );
     Module.FS.mkdirTree(Module.API.config.env.HOME);
   } catch (e) {
-    console.warn(e);
+    reportError(e);
   }
 }
 
@@ -189,9 +188,13 @@ function loadDynlib(Module, path, wasmModuleData) {
  * there.
  */
 function preloadDynamicLibs(Module) {
+  let SO_FILES_TO_LOAD = SITE_PACKAGES_SO_FILES;
+  if (DSO_METADATA?.settings?.baselineSnapshot) {
+    SO_FILES_TO_LOAD = [[ '_lzma.so' ]];
+  }
   try {
     const sitePackages = getSitePackagesPath(Module);
-    for (const soFile of SITE_PACKAGES_SO_FILES) {
+    for (const soFile of SO_FILES_TO_LOAD) {
       let node = SITE_PACKAGES_INFO;
       for (const part of soFile) {
         node = node.children.get(part);
@@ -203,8 +206,8 @@ function preloadDynamicLibs(Module) {
       loadDynlib(Module, path, wasmModuleData);
     }
   } catch (e) {
-    console.log(e);
-    throw e;
+    console.warn("Error in preloadDynamicLibs");
+    reportError(e);
   }
 }
 
@@ -267,9 +270,8 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
     const emscriptenModule = await p;
     return emscriptenModule;
   } catch (e) {
-    // Wish workerd has better error logging...
-    e.stack.split("\n").forEach(console.log.bind(console));
-    throw e;
+    console.warn("Error in instantiateEmscriptenModule");
+    reportError(e);
   }
 }
 
@@ -314,6 +316,10 @@ function recordDsoHandles(Module) {
       dylinkInfo[name] = { handles: [] };
     }
     dylinkInfo[name].handles.push(handle);
+  }
+  dylinkInfo.settings = {};
+  if (IS_CREATING_BASELINE_SNAPSHOT) {
+    dylinkInfo.settings.baselineSnapshot = true;
   }
   return dylinkInfo;
 }
@@ -370,7 +376,7 @@ function memorySnapshotDoImports(Module) {
   simpleRunPython(Module, "sysconfig.get_config_vars()");
   // Delete to avoid polluting globals
   simpleRunPython(Module, `del ${toDelete}`);
-  if (!DEDICATED_SNAPSHOT) {
+  if (IS_CREATING_BASELINE_SNAPSHOT) {
     // We've done all the imports for the baseline snapshot.
     return;
   }
@@ -411,27 +417,33 @@ function setUploadFunction(toUpload) {
       }
     } catch (e) {
       console.warn("Memory snapshot upload failed.");
-      console.warn(e);
-      throw e;
+      reportError(e);
     }
   };
 }
+
+// "\x00snp"
+const SNAPSHOT_MAGIC = 0x706e7300;
+const SNAPSHOT_VERSION = 1;
+const HEADER_SIZE = 4 * 4;
 
 /**
  * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
  */
 function encodeSnapshot(heap, dsoJSON) {
   const dsoString = JSON.stringify(dsoJSON);
-  let sx = 8 + 2 * dsoString.length;
+  let snapshotOffset = HEADER_SIZE + 2 * dsoString.length;
   // align to 8 bytes
-  sx = Math.ceil(sx / 8) * 8;
-  const toUpload = new Uint8Array(sx + heap.length);
+  snapshotOffset = Math.ceil(snapshotOffset / 8) * 8;
+  const toUpload = new Uint8Array(snapshotOffset + heap.length);
   const encoder = new TextEncoder();
-  const { written } = encoder.encodeInto(dsoString, toUpload.subarray(8));
+  const { written: jsonLength } = encoder.encodeInto(dsoString, toUpload.subarray(HEADER_SIZE));
   const uint32View = new Uint32Array(toUpload.buffer);
-  uint32View[0] = sx;
-  uint32View[1] = written;
-  toUpload.subarray(sx).set(heap);
+  uint32View[0] = SNAPSHOT_MAGIC;
+  uint32View[1] = SNAPSHOT_VERSION;
+  uint32View[2] = snapshotOffset;
+  uint32View[3] = jsonLength;
+  toUpload.subarray(snapshotOffset).set(heap);
   return toUpload;
 }
 
@@ -439,14 +451,23 @@ function encodeSnapshot(heap, dsoJSON) {
  * Decode heap and dsoJSON from the memory snapshot artifact we downloaded
  */
 function decodeSnapshot() {
-  const buf = new Uint32Array(2);
-  MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, buf);
+  let buf = new Uint32Array(2);
+  let offset = 0;
+  MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, buf);
+  offset += 8;
+  let snapshotVersion = 0;
+  if (buf[0] == SNAPSHOT_MAGIC) {
+    snapshotVersion = buf[1];
+    MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, buf);
+    offset += 8;
+  }
   const snapshotOffset = buf[0];
   SNAPSHOT_SIZE = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize() - snapshotOffset;
   const jsonLength = buf[1];
   const jsonBuf = new Uint8Array(jsonLength);
-  MEMORY_SNAPSHOT_READER.readMemorySnapshot(8, jsonBuf);
-  DSO_METADATA = JSON.parse(new TextDecoder().decode(jsonBuf));
+  MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, jsonBuf);
+  const jsonTxt = new TextDecoder().decode(jsonBuf);
+  DSO_METADATA = JSON.parse(jsonTxt);
   READ_MEMORY = function(Module) {
     // restore memory from snapshot
     MEMORY_SNAPSHOT_READER.readMemorySnapshot(snapshotOffset, Module.HEAP8);
@@ -496,23 +517,28 @@ function simpleRunPython(emscriptenModule, code) {
 
 let TEST_SNAPSHOT = undefined;
 (function () {
-  // Lookup memory snapshot from artifact store.
-  if (!MEMORY_SNAPSHOT_READER) {
-    // snapshots are disabled or there isn't one yet
-    return;
-  }
+  try {
+    // Lookup memory snapshot from artifact store.
+    if (!MEMORY_SNAPSHOT_READER) {
+      // snapshots are disabled or there isn't one yet
+      return;
+    }
 
-  // Simple sanity check to ensure this snapshot isn't corrupted.
-  //
-  // TODO(later): we need better detection when this is corrupted. Right now the isolate will
-  // just die.
-  const snapshotSize = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize();
-  if (snapshotSize <= 100) {
-    TEST_SNAPSHOT = new Uint8Array(snapshotSize);
-    MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, TEST_SNAPSHOT);
-    return;
+    // Simple sanity check to ensure this snapshot isn't corrupted.
+    //
+    // TODO(later): we need better detection when this is corrupted. Right now the isolate will
+    // just die.
+    const snapshotSize = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize();
+    if (snapshotSize <= 100) {
+      TEST_SNAPSHOT = new Uint8Array(snapshotSize);
+      MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, TEST_SNAPSHOT);
+      return;
+    }
+    decodeSnapshot();
+  } catch (e) {
+    console.warn("Error in top level of python.js");
+    reportError(e);
   }
-  decodeSnapshot();
 })();
 
 export async function loadPyodide(lockfile, indexURL) {

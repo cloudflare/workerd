@@ -21,6 +21,7 @@ import {
   WORKERD_INDEX_URL,
 } from "pyodide-internal:metadata";
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
+import { reportError } from "pyodide-internal:reportError";
 
 function pyimportMainModule(pyodide) {
   if (!MAIN_MODULE_NAME.endsWith(".py")) {
@@ -121,19 +122,6 @@ function getMainModule() {
   });
 }
 
-// Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
-// needs to be called inside an IO context.
-if (!IS_TRACING) {
-  if (IS_WORKERD) {
-    // If we're in workerd, we have to do setupPackages in the IoContext, so don't start it yet.
-    // TODO: fix this.
-    await getPyodide();
-  } else {
-    // If we're not in workerd, setupPackages doesn't require IO so we can do it all here.
-    await getMainModule();
-  }
-}
-
 /**
  * Have to reseed randomness in the IoContext of the first request since we gave a low quality seed
  * when it was seeded at top level.
@@ -168,40 +156,58 @@ function makeHandler(pyHandlerName) {
         return mainModule[pyHandlerName].callRelaxed(...args);
       });
     } catch (e) {
-      console.warn(e.stack);
-      throw e;
+      console.warn("Error in makeHandler");
+      reportError(e);
     } finally {
       args[2].waitUntil(uploadArtifacts());
     }
   };
 }
-
 const handlers = {};
 
-if (IS_WORKERD || IS_TRACING) {
-  handlers.fetch = makeHandler("on_fetch");
-  handlers.test = makeHandler("test");
-} else {
-  const mainModule = await getMainModule();
-  for (const handlerName of [
-    "fetch",
-    "alarm",
-    "scheduled",
-    "trace",
-    "queue",
-    "pubsub",
-  ]) {
-    const pyHandlerName = "on_" + handlerName;
-    if (typeof mainModule[pyHandlerName] === "function") {
-      handlers[handlerName] = makeHandler(pyHandlerName);
+try {
+  // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
+  // needs to be called inside an IO context.
+  if (!IS_TRACING) {
+    if (IS_WORKERD) {
+      // If we're in workerd, we have to do setupPackages in the IoContext, so don't start it yet.
+      // TODO: fix this.
+      await getPyodide();
+    } else {
+      // If we're not in workerd, setupPackages doesn't require IO so we can do it all here.
+      await getMainModule();
     }
   }
-}
 
-// Store the memory snapshot in the ArtifactBundler so that the validator can read it out.
-// Needs to happen at the top level because the validator does not perform requests.
-if (ArtifactBundler.isEwValidating()) {
-  ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
+
+  if (IS_WORKERD || IS_TRACING) {
+    handlers.fetch = makeHandler("on_fetch");
+    handlers.test = makeHandler("test");
+  } else {
+    const mainModule = await getMainModule();
+    for (const handlerName of [
+      "fetch",
+      "alarm",
+      "scheduled",
+      "trace",
+      "queue",
+      "pubsub",
+    ]) {
+      const pyHandlerName = "on_" + handlerName;
+      if (typeof mainModule[pyHandlerName] === "function") {
+        handlers[handlerName] = makeHandler(pyHandlerName);
+      }
+    }
+  }
+
+  // Store the memory snapshot in the ArtifactBundler so that the validator can read it out.
+  // Needs to happen at the top level because the validator does not perform requests.
+  if (ArtifactBundler.isEwValidating()) {
+    ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
+  }
+} catch (e) {
+  console.warn("Error in top level in python-entrypoint-helper.js");
+  reportError(e);
 }
 
 export default handlers;

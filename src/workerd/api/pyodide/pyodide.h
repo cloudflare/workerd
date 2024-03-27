@@ -36,15 +36,18 @@ private:
   kj::Array<kj::String> requirements;
   bool isWorkerdFlag;
   bool isTracingFlag;
+  bool createBaselineSnapshot;
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
 public:
   PyodideMetadataReader(kj::String mainModule, kj::Array<kj::String> names,
                         kj::Array<kj::Array<kj::byte>> contents, kj::Array<kj::String> requirements,
                         bool isWorkerd, bool isTracing,
+                        bool createBaselineSnapshot,
                         kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
       : mainModule(kj::mv(mainModule)), names(kj::mv(names)), contents(kj::mv(contents)),
         requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd), isTracingFlag(isTracing),
+        createBaselineSnapshot(createBaselineSnapshot),
         memorySnapshot(kj::mv(memorySnapshot)) {}
 
   bool isWorkerd() {
@@ -53,6 +56,10 @@ public:
 
   bool isTracing() {
     return this->isTracingFlag;
+  }
+
+  bool isCreatingBaselineSnapshot() {
+    return createBaselineSnapshot;
   }
 
   kj::String getMainModule() {
@@ -94,6 +101,7 @@ public:
     JSG_METHOD(getMemorySnapshotSize);
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
+    JSG_METHOD(isCreatingBaselineSnapshot);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -123,22 +131,24 @@ public:
         existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
         hasUploaded(false),
-        isValidating(false)
-        {};
+        isValidating(false),
+        createBaselineSnapshot(false) {};
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::none),
         hasUploaded(false),
-        isValidating(false) {};
+        isValidating(false),
+        createBaselineSnapshot(false) {};
 
   ArtifactBundler(bool isValidating = false)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::none),
         uploadMemorySnapshotCb(kj::none),
         hasUploaded(false),
-        isValidating(isValidating) {};
+        isValidating(isValidating),
+        createBaselineSnapshot(false) {};
 
   jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
     // Prevent multiple uploads.
@@ -218,6 +228,7 @@ private:
   kj::Maybe<kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)>> uploadMemorySnapshotCb;
   bool hasUploaded;
   bool isValidating;
+  bool createBaselineSnapshot;
 };
 
 
