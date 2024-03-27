@@ -35,6 +35,7 @@
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/hyperdrive.h>
+#include <workerd/api/eventsource.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
@@ -74,7 +75,8 @@
   F("sql", EW_SQL_ISOLATE_TYPES)                                               \
   F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                       \
   F("node", EW_NODE_ISOLATE_TYPES)                                             \
-  F("webgpu", EW_WEBGPU_ISOLATE_TYPES)
+  F("webgpu", EW_WEBGPU_ISOLATE_TYPES)                                         \
+  F("eventsource", EW_EVENTSOURCE_ISOLATE_TYPES)
 
 namespace workerd::api {
 namespace {

@@ -24,6 +24,7 @@ namespace workerd::jsg {
 #define JSG_ERROR_DOMTypeMismatchError JSG_DOM_EXCEPTION("TypeMismatchError")
 #define JSG_ERROR_DOMQuotaExceededError JSG_DOM_EXCEPTION("QuotaExceededError")
 #define JSG_ERROR_DOMAbortError JSG_DOM_EXCEPTION("AbortError")
+#define JSG_ERROR_DOMSyntaxError JSG_DOM_EXCEPTION("SyntaxError")
 
 #define JSG_ERROR_TypeError "jsg.TypeError"
 #define JSG_ERROR_Error "jsg.Error"

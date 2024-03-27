@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "eventsource-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "eventsource-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "subrequest", service = "eventsource-test")
+        ]
+      )
+    ),
+  ],
+);
