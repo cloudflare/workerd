@@ -240,7 +240,8 @@ public:
 
   class Exception {
   public:
-    explicit Exception(kj::Date timestamp, kj::String name, kj::String message);
+    explicit Exception(kj::Date timestamp, kj::String name, kj::String message,
+                       kj::Maybe<kj::String> stack);
     Exception(rpc::Trace::Exception::Reader reader);
     Exception(Exception&&) = default;
     KJ_DISALLOW_COPY(Exception);
@@ -250,8 +251,9 @@ public:
     kj::Date timestamp;
 
     kj::String name;
-    // TODO(someday): record exception source, line/column number, stack trace?
     kj::String message;
+
+    kj::Maybe<kj::String> stack;
 
     void copyTo(rpc::Trace::Exception::Builder builder);
   };
@@ -366,7 +368,8 @@ public:
   // TODO(soon): Eventually:
   //void setMetrics(...) // Or get from MetricsCollector::Request directly?
 
-  void addException(kj::Date timestamp, kj::String name, kj::String message);
+  void addException(kj::Date timestamp, kj::String name, kj::String message,
+                    kj::Maybe<kj::String> stack);
 
   void addDiagnosticChannelEvent(kj::Date timestamp, kj::String channel,
                                  kj::Array<kj::byte> message);

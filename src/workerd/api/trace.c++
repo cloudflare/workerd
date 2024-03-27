@@ -543,7 +543,8 @@ jsg::V8Ref<v8::Object> TraceLog::getMessage(jsg::Lock& js) {
 TraceException::TraceException(const Trace& trace, const Trace::Exception& exception)
     : timestamp(getTraceExceptionTimestamp(exception)),
       name(kj::str(exception.name)),
-      message(kj::str(exception.message)) {}
+      message(kj::str(exception.message)),
+      stack(exception.stack.map([](kj::StringPtr s) { return kj::str(s); })) {}
 
 double TraceException::getTimestamp() {
   return timestamp;
@@ -555,6 +556,10 @@ kj::StringPtr TraceException::getMessage() {
 
 kj::StringPtr TraceException::getName() {
   return name;
+}
+
+jsg::Optional<kj::StringPtr> TraceException::getStack(jsg::Lock& js) {
+  return stack;
 }
 
 TraceMetrics::TraceMetrics(uint cpuTime, uint wallTime) : cpuTime(cpuTime), wallTime(wallTime) {}

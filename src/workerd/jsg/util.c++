@@ -4,6 +4,7 @@
 
 #include "jsg.h"  // can't include util.h directly due to weird cyclic dependency...
 #include "setup.h"
+#include "ser.h"
 #include <kj/debug.h>
 #include <stdlib.h>
 
@@ -265,6 +266,15 @@ kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message) {
 
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
   auto desc = exception.getDescription();
+
+  // TODO(someday): Deserialize encoded V8 exception from
+  //   exception.getDetail(TUNNELED_EXCEPTION_DETAIL_ID), if present. WARNING: We must think
+  //   carefully about security in the case that the exception has passed between workers that
+  //   don't trust each other. Perhaps we should explicitly remove the stack trace in this case.
+  //   REMINDER: Worker::logUncaughtException() currently deserializes TUNNELED_EXCEPTION_DETAIL_ID
+  //   in order to extract a full stack trace. Once we do it here, we can remove the code from
+  //   there.
+
   auto tunneledException = decodeTunneledException(isolate, desc);
 
   if (tunneledException.isInternal) {
@@ -339,6 +349,20 @@ void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
     KJ_LOG(ERROR, exception);
     throwInternalError(isolate, "error rendering exception");
   }
+}
+
+void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
+  js.tryCatch([&]() {
+    Serializer ser(js, {
+      // Make sure we don't break compatibility if V8 introduces a new version. This vaule can
+      // be bumped to match the new version once all of production is updated to understand it.
+      .version = 15,
+    });
+    ser.write(js, JsValue(handle));
+    exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
+  }, [](jsg::Value&& error) {
+    // Exception not serializable, ignore.
+  });
 }
 
 static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType) {

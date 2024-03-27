@@ -535,11 +535,13 @@ public:
   double getTimestamp();
   kj::StringPtr getName();
   kj::StringPtr getMessage();
+  jsg::Optional<kj::StringPtr> getStack(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(TraceException) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(name, getName);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(stack, getStack);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -551,6 +553,7 @@ private:
   double timestamp;
   kj::String name;
   kj::String message;
+  kj::Maybe<kj::String> stack;
 };
 
 class TraceMetrics final : public jsg::Object {

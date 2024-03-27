@@ -37,6 +37,7 @@ struct Trace @0x8e8d911203762d34 {
     timestampNs @0 :Int64;
     name @1 :Text;
     message @2 :Text;
+    stack @3 :Text;
   }
 
   outcome @2 :EventOutcome;
