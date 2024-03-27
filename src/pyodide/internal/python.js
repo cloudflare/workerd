@@ -553,6 +553,11 @@ export async function loadPyodide(lockfile, indexURL) {
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
   await enterJaegerSpan("finalize_bootstrap", Module.API.finalizeBootstrap);
   const pyodide = Module.API.public_api;
+  if (DSO_METADATA?.settings?.baselineSnapshot) {
+    // Invalidate caches if we have a baseline snapshot because the contents of site-packages may
+    // have changed.
+    simpleRunPython(Module, "from importlib import invalidate_caches as f; f(); del f");
+  }
 
   // This is just here for our test suite. Ugly but just about the only way to test this.
   if (TEST_SNAPSHOT) {
