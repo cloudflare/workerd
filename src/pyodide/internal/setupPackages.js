@@ -21,7 +21,6 @@ const STDLIB_PACKAGES = Object.values(LOCKFILE.packages)
   .filter(({ install_dir }) => install_dir === "stdlib")
   .map(({ name }) => canonicalizePackageName(name));
 
-
 /**
  * This stitches together the view of the site packages directory. Each
  * requirement corresponds to a folder in the original tar file. For each
@@ -186,6 +185,5 @@ function addPackageToLoad(lockfile, name, toLoad) {
 
 export { REQUIREMENTS };
 export const TRANSITIVE_REQUIREMENTS = getTransitiveRequirements();
-export const [SITE_PACKAGES_INFO, SITE_PACKAGES_SO_FILES, USE_LOAD_PACKAGE] = buildSitePackages(
-  TRANSITIVE_REQUIREMENTS,
-);
+export const [SITE_PACKAGES_INFO, SITE_PACKAGES_SO_FILES, USE_LOAD_PACKAGE] =
+  buildSitePackages(TRANSITIVE_REQUIREMENTS);
