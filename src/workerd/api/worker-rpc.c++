@@ -957,8 +957,10 @@ public:
       auto params = callContext.getParams();
 
       // We will try to get the function, if we can't we'll throw an error to the client.
-      auto [propHandle, thisArg, methodNameForErrors] = tryGetProperty(
+      auto [propHandle, thisArg, methodNameForTrace] = tryGetProperty(
           lock, targetInfo.target, params, targetInfo.allowInstanceProperties);
+
+      addTrace(js, ctx, methodNameForTrace);
 
       auto op = params.getOperation();
 
@@ -1056,7 +1058,7 @@ public:
       switch (op.which()) {
         case rpc::JsRpcTarget::CallParams::Operation::CALL_WITH_ARGS: {
           JSG_REQUIRE(isFunctionForRpc(js, propHandle), TypeError,
-              kj::str("\"", methodNameForErrors, "\" is not a function."));
+              kj::str("\"", methodNameForTrace, "\" is not a function."));
           auto fn = propHandle.As<v8::Function>();
 
           kj::Maybe<rpc::JsValue::Reader> args;
@@ -1066,7 +1068,7 @@ public:
 
           InvocationResult invocationResult;
           KJ_IF_SOME(envCtx, targetInfo.envCtx) {
-            invocationResult = invokeFnInsertingEnvCtx(js, methodNameForErrors, fn, thisArg,
+            invocationResult = invokeFnInsertingEnvCtx(js, methodNameForTrace, fn, thisArg,
                 args, envCtx.env, envCtx.ctx);
           } else {
             invocationResult = invokeFn(js, fn, thisArg, args);
@@ -1115,12 +1117,16 @@ private:
   // Returns true if the given name cannot be used as a method on this type.
   virtual bool isReservedName(kj::StringPtr name) = 0;
 
+  // Hook for recording trace information.
+  virtual void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) = 0;
+
   struct GetPropResult {
     v8::Local<v8::Value> handle;
     v8::Local<v8::Object> thisArg;
 
-    // Method name suitable for use in error messages.
-    kj::StringPtr methodNameForErrors;
+    // Method name suitable for use in trace and error messages. May be a pointer into the RPC
+    // params reader.
+    kj::ConstString methodNameForTrace;
   };
 
   [[noreturn]] static void failLookup(kj::StringPtr kjName) {
@@ -1167,13 +1173,13 @@ private:
     };
 
     kj::Maybe<jsg::JsValue> result;
-    kj::StringPtr methodNameForErrors;
+    kj::ConstString methodNameForTrace;
 
     switch (callParams.which()) {
       case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
         kj::StringPtr methodName = callParams.getMethodName();
         result = getProperty(methodName);
-        methodNameForErrors = methodName;
+        methodNameForTrace = methodName.attach();
         break;
       }
 
@@ -1184,6 +1190,7 @@ private:
         if (n == 0) {
           // Call the target itself as a function.
           result = object;
+          methodNameForTrace = "(this)"_kjc;
         } else {
           for (auto i: kj::zeroTo(n - 1)) {
             // For each property name except the last, look up the proprety and replace `object`
@@ -1214,6 +1221,7 @@ private:
           }
 
           result = getProperty(path[n-1]);
+          methodNameForTrace = kj::ConstString(kj::strArray(path, "."));
         }
 
         break;
@@ -1223,7 +1231,7 @@ private:
     return {
       .handle = KJ_ASSERT_NONNULL(result, "unknown CallParams type", (uint)callParams.which()),
       .thisArg = object,
-      .methodNameForErrors = methodNameForErrors,
+      .methodNameForTrace = kj::mv(methodNameForTrace),
     };
   }
 
@@ -1438,6 +1446,10 @@ private:
     }
     return false;
   }
+
+  void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
+    // TODO(someday): Trace non-top-level calls?
+  }
 };
 
 // See comment at call site for explanation.
@@ -1540,11 +1552,13 @@ void RpcSerializerExternalHander::serializeFunction(
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 public:
-  EntrypointJsRpcTarget(IoContext& ioCtx, kj::Maybe<kj::StringPtr> entrypointName)
+  EntrypointJsRpcTarget(IoContext& ioCtx, kj::Maybe<kj::StringPtr> entrypointName,
+                        kj::Maybe<kj::Own<WorkerTracer>> tracer)
       : JsRpcTargetBase(ioCtx),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
-        entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })) {}
+        entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
+        tracer(kj::mv(tracer)) {}
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
     jsg::Lock& js = lock;
@@ -1585,6 +1599,7 @@ public:
 
 private:
   kj::Maybe<kj::String> entrypointName;
+  kj::Maybe<kj::Own<WorkerTracer>> tracer;
 
   bool isReservedName(kj::StringPtr name) override {
     if (// "fetch" and "connect" are treated specially on entrypoints.
@@ -1607,6 +1622,12 @@ private:
       return true;
     }
     return false;
+  }
+
+  void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
+    KJ_IF_SOME(t, tracer) {
+      t->setEventInfo(ioctx.now(), Trace::JsRpcEventInfo(kj::str(methodName)));
+    }
   }
 };
 
@@ -1656,10 +1677,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
   IoContext& ioctx = incomingRequest->getContext();
 
   incomingRequest->delivered();
+
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(
       capnp::membrane(
-          kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName),
+          kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName,
+              mapAddRef(incomingRequest->getWorkerTracer())),
           kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
   // `donePromise` resolves once there are no longer any capabilities pointing between the client

@@ -52,7 +52,8 @@ class Trace final : public kj::Refcounted {
 public:
   explicit Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName,
       kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-      kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags);
+      kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags,
+      kj::Maybe<kj::String> entrypoint);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -88,6 +89,16 @@ public:
     kj::Array<Header> headers;
 
     void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
+  };
+
+  class JsRpcEventInfo {
+  public:
+    explicit JsRpcEventInfo(kj::String methodName);
+    JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
+
+    kj::String methodName;
+
+    void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
   };
 
   class ScheduledEventInfo {
@@ -251,8 +262,9 @@ public:
   // We treat the origin value as "unset".
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
 
-  typedef kj::OneOf<FetchEventInfo, ScheduledEventInfo, AlarmEventInfo, QueueEventInfo,
-          EmailEventInfo, TraceEventInfo, HibernatableWebSocketEventInfo, CustomEventInfo> EventInfo;
+  typedef kj::OneOf<FetchEventInfo, JsRpcEventInfo, ScheduledEventInfo, AlarmEventInfo,
+          QueueEventInfo, EmailEventInfo, TraceEventInfo, HibernatableWebSocketEventInfo,
+          CustomEventInfo> EventInfo;
   kj::Maybe<EventInfo> eventInfo;
   // TODO(someday): Support more event types.
   // TODO(someday): Work out what sort of information we may want to convey about the parent
@@ -262,6 +274,7 @@ public:
   kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
   kj::Array<kj::String> scriptTags;
+  kj::Maybe<kj::String> entrypoint;
 
   kj::Vector<Log> logs;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
@@ -323,7 +336,8 @@ public:
                                          kj::Maybe<kj::String> scriptName,
                                          kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
                                          kj::Maybe<kj::String> dispatchNamespace,
-                                         kj::Array<kj::String> scriptTags);
+                                         kj::Array<kj::String> scriptTags,
+                                         kj::Maybe<kj::String> entrypoint);
   // Makes a tracer for a worker stage.
 
 private:

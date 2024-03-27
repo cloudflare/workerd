@@ -61,6 +61,16 @@ void Trace::FetchEventInfo::Header::copyTo(rpc::Trace::FetchEventInfo::Header::B
   builder.setValue(value);
 }
 
+Trace::JsRpcEventInfo::JsRpcEventInfo(kj::String methodName)
+    : methodName(kj::mv(methodName)) {}
+
+Trace::JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader)
+    : methodName(kj::str(reader.getMethodName())) {}
+
+void Trace::JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) {
+  builder.setMethodName(methodName);
+}
+
 Trace::ScheduledEventInfo::ScheduledEventInfo(double scheduledTime, kj::String cron)
     : scheduledTime(scheduledTime), cron(kj::mv(cron)) {}
 
@@ -231,13 +241,15 @@ Trace::Exception::Exception(kj::Date timestamp, kj::String name, kj::String mess
     : timestamp(timestamp), name(kj::mv(name)), message(kj::mv(message)) {}
 
 Trace::Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName,
-  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,  kj::Maybe<kj::String> dispatchNamespace,
-  kj::Array<kj::String> scriptTags)
+    kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
+    kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags,
+    kj::Maybe<kj::String> entrypoint)
     : stableId(kj::mv(stableId)),
-    scriptName(kj::mv(scriptName)),
-    scriptVersion(kj::mv(scriptVersion)),
-    dispatchNamespace(kj::mv(dispatchNamespace)),
-    scriptTags(kj::mv(scriptTags)) {}
+      scriptName(kj::mv(scriptName)),
+      scriptVersion(kj::mv(scriptVersion)),
+      dispatchNamespace(kj::mv(dispatchNamespace)),
+      scriptTags(kj::mv(scriptTags)),
+      entrypoint(kj::mv(entrypoint)) {}
 Trace::Trace(rpc::Trace::Reader reader) {
   mergeFrom(reader, PipelineLogLevel::FULL);
 }
@@ -278,6 +290,11 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
       list.set(i, scriptTags[i]);
     }
   }
+
+  KJ_IF_SOME(e, entrypoint) {
+    builder.setEntrypoint(e);
+  }
+
   builder.setEventTimestampNs((eventTimestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
 
   auto eventInfoBuilder = builder.initEventInfo();
@@ -286,6 +303,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
       KJ_CASE_ONEOF(fetch, FetchEventInfo) {
         auto fetchBuilder = eventInfoBuilder.initFetch();
         fetch.copyTo(fetchBuilder);
+      }
+      KJ_CASE_ONEOF(jsRpc, JsRpcEventInfo) {
+        auto jsRpcBuilder = eventInfoBuilder.initJsRpc();
+        jsRpc.copyTo(jsRpcBuilder);
       }
       KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
         auto scheduledBuilder = eventInfoBuilder.initScheduled();
@@ -371,6 +392,10 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
     scriptTags = KJ_MAP(tag, tags) { return kj::str(tag); };
   }
 
+  if (reader.hasEntrypoint()) {
+    entrypoint = kj::str(reader.getEntrypoint());
+  }
+
   eventTimestamp = kj::UNIX_EPOCH + reader.getEventTimestampNs() * kj::NANOSECONDS;
 
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
@@ -380,6 +405,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
     switch (e.which()) {
       case rpc::Trace::EventInfo::Which::FETCH:
         eventInfo = FetchEventInfo(e.getFetch());
+        break;
+      case rpc::Trace::EventInfo::Which::JS_RPC:
+        eventInfo = JsRpcEventInfo(e.getJsRpc());
         break;
       case rpc::Trace::EventInfo::Which::SCHEDULED:
         eventInfo = ScheduledEventInfo(e.getScheduled());
@@ -502,9 +530,10 @@ kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
 kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(
     PipelineLogLevel pipelineLogLevel, kj::Maybe<kj::String> stableId,
     kj::Maybe<kj::String> scriptName, kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-    kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags) {
+    kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags,
+    kj::Maybe<kj::String> entrypoint) {
   auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
-      kj::mv(dispatchNamespace), kj::mv(scriptTags));
+      kj::mv(dispatchNamespace), kj::mv(scriptTags), kj::mv(entrypoint));
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
@@ -515,7 +544,7 @@ WorkerTracer::WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
       parentPipeline(kj::mv(parentPipeline)) {}
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel),
-      trace(kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, nullptr)) {}
+      trace(kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, nullptr, kj::none)) {}
 
 void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message) {
   if (trace->exceededLogLimit) {
@@ -610,6 +639,7 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
         return;
       }
     }
+    KJ_CASE_ONEOF(_, Trace::JsRpcEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::ScheduledEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {}

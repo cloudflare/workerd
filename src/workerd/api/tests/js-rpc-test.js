@@ -555,6 +555,10 @@ export let namedServiceBinding = {
       name: "TypeError",
       message: "\"nonFunctionProperty\" is not a function."
     });
+    await assert.rejects(() => getByName("nonFunctionProperty").foo(), {
+      name: "TypeError",
+      message: "\"nonFunctionProperty.foo\" is not a function."
+    });
 
     // Check that we can't access contents of a property that is a class but not derived from
     // RpcTarget.

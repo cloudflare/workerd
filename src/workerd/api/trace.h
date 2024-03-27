@@ -67,6 +67,7 @@ struct ScriptVersion {
 class TraceItem final: public jsg::Object {
 public:
   class FetchEventInfo;
+  class JsRpcEventInfo;
   class ScheduledEventInfo;
   class AlarmEventInfo;
   class QueueEventInfo;
@@ -78,6 +79,7 @@ public:
   explicit TraceItem(jsg::Lock& js, const Trace& trace);
 
   typedef kj::OneOf<jsg::Ref<FetchEventInfo>,
+                    jsg::Ref<JsRpcEventInfo>,
                     jsg::Ref<ScheduledEventInfo>,
                     jsg::Ref<AlarmEventInfo>,
                     jsg::Ref<QueueEventInfo>,
@@ -92,6 +94,7 @@ public:
   kj::ArrayPtr<jsg::Ref<TraceException>> getExceptions();
   kj::ArrayPtr<jsg::Ref<TraceDiagnosticChannelEvent>> getDiagnosticChannelEvents();
   kj::Maybe<kj::StringPtr> getScriptName();
+  jsg::Optional<kj::StringPtr> getEntrypoint();
   jsg::Optional<ScriptVersion> getScriptVersion();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
@@ -107,6 +110,7 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(exceptions, getExceptions);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(diagnosticsChannelEvents, getDiagnosticChannelEvents);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptName, getScriptName);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(entrypoint, getEntrypoint);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptVersion, getScriptVersion);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(dispatchNamespace, getDispatchNamespace);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
@@ -122,6 +126,7 @@ private:
   kj::Array<jsg::Ref<TraceException>> exceptions;
   kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> diagnosticChannelEvents;
   kj::Maybe<kj::String> scriptName;
+  kj::Maybe<kj::String> entrypoint;
   kj::Maybe<ScriptVersion> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
@@ -238,6 +243,29 @@ public:
 
 private:
   uint16_t status;
+};
+
+class TraceItem::JsRpcEventInfo final: public jsg::Object {
+public:
+  explicit JsRpcEventInfo(const Trace& trace, const Trace::JsRpcEventInfo& eventInfo);
+
+  // We call this `rpcMethod` to make clear this is an RPC event, since some tail workers rely
+  // on duck-typing EventInfo based on the properties present. (`methodName` might be ambiguous
+  // since HTTP also has methods.)
+  //
+  // TODO(someday): Clearly there should be a better way to distinguish event types?
+  kj::StringPtr getRpcMethod();
+
+  JSG_RESOURCE_TYPE(JsRpcEventInfo) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(rpcMethod, getRpcMethod);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("rpcMethod", rpcMethod);
+  }
+
+private:
+  kj::String rpcMethod;
 };
 
 class TraceItem::ScheduledEventInfo final: public jsg::Object {
@@ -594,6 +622,7 @@ private:
   api::TraceItem::FetchEventInfo,                                 \
   api::TraceItem::FetchEventInfo::Request,                        \
   api::TraceItem::FetchEventInfo::Response,                       \
+  api::TraceItem::JsRpcEventInfo,                                 \
   api::TraceItem::HibernatableWebSocketEventInfo,                 \
   api::TraceItem::HibernatableWebSocketEventInfo::Message,        \
   api::TraceItem::HibernatableWebSocketEventInfo::Close,          \
