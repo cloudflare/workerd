@@ -76,7 +76,7 @@ export const test_d1_api = test(async (DB) => {
             land_based BOOLEAN
         );`
       ).run(),
-    { success: true, meta: anything }
+    { success: true, results: [],meta: anything }
   )
 
   await itShould(
@@ -92,13 +92,13 @@ export const test_d1_api = test(async (DB) => {
   await itShould(
     'have no results for .run()',
     () => DB.prepare(`SELECT * FROM users;`).run(),
-    { success: true, meta: anything }
+    { success: true, results: [], meta: anything }
   )
 
   await itShould(
     'delete no rows ok',
     () => DB.prepare(`DELETE FROM users;`).run(),
-    { success: true, meta: anything }
+    { success: true, results: [], meta: anything }
   )
 
   await itShould(
@@ -137,7 +137,7 @@ export const test_d1_api = test(async (DB) => {
   await itShould(
     'delete two rows ok',
     () => DB.prepare(`DELETE FROM users;`).run(),
-    { success: true, meta: anything }
+    { success: true, results: [], meta: anything }
   )
 
   // In an earlier implementation, .run() called a different endpoint that threw on RETURNING clauses.
@@ -153,6 +153,22 @@ export const test_d1_api = test(async (DB) => {
     `
       ).run(),
     {
+      results: [
+        {
+          user_id: 1,
+          name: 'Albert Ross',
+          home: 'sky',
+          features: 'wingspan',
+          land_based: 0,
+        },
+        {
+          user_id: 2,
+          name: 'Al Dente',
+          home: 'bowl',
+          features: 'mouthfeel',
+          land_based: 1,
+        },
+      ],
       success: true,
       meta: anything,
     }
@@ -339,7 +355,7 @@ export const test_d1_api = test(async (DB) => {
       DB.prepare(`SELECT count(1) as count FROM users WHERE land_based = ?`)
         .bind(2)
         .first('count'),
-    0,
+    0
   )
 
   await itShould(
