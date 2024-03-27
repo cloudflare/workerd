@@ -43,6 +43,7 @@ struct Trace @0x8e8d911203762d34 {
   outcome @2 :EventOutcome;
   scriptName @4 :Text;
   scriptVersion @19 :ScriptVersion;
+  scriptId @23 :Text;
 
   eventTimestampNs @5 :Int64;
 
