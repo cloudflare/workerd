@@ -22,6 +22,7 @@ import {
 } from "pyodide-internal:metadata";
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 import { reportError } from "pyodide-internal:reportError";
+import { default as Limiter } from "pyodide-internal:limiter";
 
 function pyimportMainModule(pyodide) {
   if (!MAIN_MODULE_NAME.endsWith(".py")) {
@@ -114,9 +115,15 @@ function getMainModule() {
     mainModulePromise = (async function () {
       const pyodide = await getPyodide();
       await setupPackages(pyodide);
-      return enterJaegerSpan("pyimport_main_module", () =>
-        pyimportMainModule(pyodide),
-      );
+      Limiter.beginStartup();
+      try {
+        return enterJaegerSpan("pyimport_main_module", () =>
+          pyimportMainModule(pyodide),
+        );
+      } finally {
+        Limiter.finishStartup();
+      }
+
     })();
     return mainModulePromise;
   });
