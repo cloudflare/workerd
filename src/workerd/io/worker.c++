@@ -148,8 +148,12 @@ void addExceptionToTrace(jsg::Lock& js,
   }
 
   auto timestamp = ioContext.now();
-  auto error = KJ_REQUIRE_NONNULL(errorTypeHandler.tryUnwrap(js, exception),
-      "Should always be possible to unwrap error interface from an object.");
+  Worker::Api::ErrorInterface error;
+
+  if (exception.isObject()) {
+    error = KJ_REQUIRE_NONNULL(errorTypeHandler.tryUnwrap(js, exception),
+        "Should always be possible to unwrap error interface from an object.");
+  }
 
   kj::String name;
   KJ_IF_SOME(n, error.name) {
@@ -160,9 +164,49 @@ void addExceptionToTrace(jsg::Lock& js,
   kj::String message;
   KJ_IF_SOME(m, error.message) {
     message = kj::str(m);
+  } else {
+    // This doesn't appear to be an Error object. Fall back to stringifying the whole value as
+    // the message.
+    if (!js.v8Isolate->IsExecutionTerminating()) {
+      v8::TryCatch tryCatch(js.v8Isolate);
+      try {
+        message = exception.toString(js);
+      } catch (jsg::JsExceptionThrown&) {
+        // Failed to stringify.
+        //
+        // Note that we're intentionally not checking tryCatch.CanContinue() here, because we still
+        // want to continue even if the isolate has been terminated.
+      }
+    }
   }
+
+  kj::Maybe<kj::String> stack;
+  KJ_IF_SOME(s, error.stack) {
+    kj::StringPtr slice = s;
+
+    // Normally `error.stack` repeats the error type and message first. We don't want send two
+    // copies of that to the trace so we'll strip it off.
+    if (slice.startsWith(name)) {
+      slice = slice.slice(name.size());
+      if (slice.startsWith(": "_kj)) {
+        slice = slice.slice(2);
+      }
+    }
+
+    if (slice.startsWith(message)) {
+      slice = slice.slice(message.size());
+      if (slice.startsWith("\n")) {
+        slice = slice.slice(1);
+      }
+    }
+
+    if (slice.size() > 0) {
+      stack = kj::str(slice);
+    }
+  }
+
   // TODO(someday): Limit size of exception content?
-  tracer.addException(timestamp, kj::mv(name), kj::mv(message));
+  tracer.addException(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
 void reportStartupError(
@@ -1837,6 +1881,42 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
       KJ_LOG(INFO, "uncaught exception", source, exception);
     });
   }
+}
+
+void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
+                                        kj::Exception&& exception) {
+  jsg::Lock& js = *this;
+
+  // If we have an attached serialized exception, deserialize it and log that instead, rather
+  // than try to reconstruct based on the KJ exception description.
+  //
+  // TODO(cleanup): Eventually, js.exceptionToJsValue() should do this internally, and then we
+  //   should remove the code from here.
+  KJ_IF_SOME(serializedJsError, exception.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID)) {
+    if (!js.v8Isolate->IsExecutionTerminating()) {
+      kj::Maybe<jsg::JsValue> deserialized;
+
+      v8::TryCatch tryCatch(js.v8Isolate);
+      try {
+        jsg::Deserializer deser(js, serializedJsError);
+        deserialized = deser.readValue(js);
+      } catch (jsg::JsExceptionThrown&) {
+        // Failed to deserialize, we'll continue with exceptionToJsValue() instead.
+        //
+        // Note that we're intentionally not checking tryCatch.CanContinue() here, because we still
+        // want to log the exception even if the isolate has been terminated.
+      }
+
+      KJ_IF_SOME(d, deserialized) {
+        logUncaughtException(source, d);
+        return;
+      }
+    }
+  }
+
+  // Couldn't deserialize an attached exception, so use `exceptionToJsValue()`.
+  auto jsError = js.exceptionToJsValue(kj::mv(exception));
+  logUncaughtException(source, jsError.getHandle(js));
 }
 
 void Worker::Lock::reportPromiseRejectEvent(v8::PromiseRejectMessage& message) {
