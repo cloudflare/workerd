@@ -174,6 +174,7 @@ public:
   inline kj::StringPtr getId() const { return id; }
   inline const Isolate& getIsolate() const { return *isolate; }
   inline bool isModular() const { return modular; }
+  inline bool hasSourcemapsAvailable() const { return sourcemapsAvailable; }
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
@@ -209,6 +210,7 @@ private:
   kj::Own<const Isolate> isolate;
   kj::String id;
   bool modular;
+  bool sourcemapsAvailable;
 
   struct Impl;
   kj::Own<Impl> impl;
@@ -218,7 +220,7 @@ private:
 public:  // pretend this is private (needs to be public because allocated through template)
   explicit Script(kj::Own<const Isolate> isolate, kj::StringPtr id, Source source,
                   IsolateObserver::StartType startType, bool logNewScript,
-                  kj::Maybe<ValidationErrorReporter&> errorReporter);
+                  kj::Maybe<ValidationErrorReporter&> errorReporter, bool sourcemapsAvailable);
 };
 
 // Multiple zones may share the same script. We would like to compile each script only once,
@@ -267,7 +269,7 @@ public:
   // Parses the given code to create a new script object and returns it.
   kj::Own<const Worker::Script> newScript(
       kj::StringPtr id, Script::Source source,
-      IsolateObserver::StartType startType, bool logNewScript = false,
+      IsolateObserver::StartType startType, bool logNewScript = false, bool sourcemapsAvailable = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none) const;
 
   inline const IsolateLimitEnforcer& getLimitEnforcer() const { return *limitEnforcer; }

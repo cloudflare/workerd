@@ -51,7 +51,7 @@ enum class PipelineLogLevel {
 class Trace final : public kj::Refcounted {
 public:
   explicit Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName,
-      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
+      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion, kj::Maybe<kj::String> scriptId,
       kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
@@ -260,6 +260,7 @@ public:
 
   kj::Maybe<kj::String> scriptName;
   kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
+  kj::Maybe<kj::String> scriptId;
   kj::Maybe<kj::String> dispatchNamespace;
   kj::Array<kj::String> scriptTags;
 
@@ -276,6 +277,9 @@ public:
   kj::Duration cpuTime;
   kj::Duration wallTime;
 
+  // If we add an exception we do a check to see if the script has sourcemaps available so
+  // we can remap the stacktrace.
+  bool sourcemapsAvailable = false;
   bool exceededLogLimit = false;
   bool exceededExceptionLimit = false;
   bool exceededDiagnosticChannelEventLimit = false;
@@ -319,6 +323,7 @@ public:
   }
 
   kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
+                                         kj::Maybe<kj::String> scriptId,
                                          kj::Maybe<kj::String> stableId,
                                          kj::Maybe<kj::String> scriptName,
                                          kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
@@ -352,7 +357,8 @@ public:
   // TODO(soon): Eventually:
   //void setMetrics(...) // Or get from MetricsCollector::Request directly?
 
-  void addException(kj::Date timestamp, kj::String name, kj::String message);
+  void addException(kj::Date timestamp, kj::String name,
+      kj::String message, bool sourcemapsAvailable);
 
   void addDiagnosticChannelEvent(kj::Date timestamp, kj::String channel,
                                  kj::Array<kj::byte> message);

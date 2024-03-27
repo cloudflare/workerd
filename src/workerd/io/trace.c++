@@ -231,11 +231,12 @@ Trace::Exception::Exception(kj::Date timestamp, kj::String name, kj::String mess
     : timestamp(timestamp), name(kj::mv(name)), message(kj::mv(message)) {}
 
 Trace::Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName,
-  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,  kj::Maybe<kj::String> dispatchNamespace,
-  kj::Array<kj::String> scriptTags)
+  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion, kj::Maybe<kj::String> scriptId,
+  kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags)
     : stableId(kj::mv(stableId)),
     scriptName(kj::mv(scriptName)),
     scriptVersion(kj::mv(scriptVersion)),
+    scriptId(kj::mv(scriptId)),
     dispatchNamespace(kj::mv(dispatchNamespace)),
     scriptTags(kj::mv(scriptTags)) {}
 Trace::Trace(rpc::Trace::Reader reader) {
@@ -259,6 +260,7 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
     }
   }
 
+  builder.setSourcemapsAvailable(sourcemapsAvailable);
   builder.setOutcome(outcome);
   builder.setCpuTime(cpuTime / kj::MILLISECONDS);
   builder.setWallTime(wallTime / kj::MILLISECONDS);
@@ -267,6 +269,9 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   }
   KJ_IF_SOME(version, scriptVersion) {
     builder.setScriptVersion(*version);
+  }
+  KJ_IF_SOME(id, scriptId) {
+    builder.setScriptId(id);
   }
   KJ_IF_SOME(ns, dispatchNamespace) {
     builder.setDispatchNamespace(ns);
@@ -363,6 +368,10 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
     scriptVersion = capnp::clone(reader.getScriptVersion());
   }
 
+  if (reader.hasScriptId()) {
+    scriptId = kj::str(reader.getScriptId());
+  }
+
   if (reader.hasDispatchNamespace()) {
     dispatchNamespace = kj::str(reader.getDispatchNamespace());
   }
@@ -372,6 +381,8 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   }
 
   eventTimestamp = kj::UNIX_EPOCH + reader.getEventTimestampNs() * kj::NANOSECONDS;
+
+  sourcemapsAvailable = reader.getSourcemapsAvailable();
 
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     eventInfo = kj::none;
@@ -500,11 +511,11 @@ kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
 }
 
 kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(
-    PipelineLogLevel pipelineLogLevel, kj::Maybe<kj::String> stableId,
+    PipelineLogLevel pipelineLogLevel, kj::Maybe<kj::String> scriptId, kj::Maybe<kj::String> stableId,
     kj::Maybe<kj::String> scriptName, kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
     kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags) {
   auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
-      kj::mv(dispatchNamespace), kj::mv(scriptTags));
+      kj::mv(scriptId), kj::mv(dispatchNamespace), kj::mv(scriptTags));
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
@@ -515,7 +526,7 @@ WorkerTracer::WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
       parentPipeline(kj::mv(parentPipeline)) {}
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel),
-      trace(kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, nullptr)) {}
+      trace(kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none, nullptr)) {}
 
 void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message) {
   if (trace->exceededLogLimit) {
@@ -537,7 +548,7 @@ void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message
   trace->logs.add(timestamp, logLevel, kj::mv(message));
 }
 
-void WorkerTracer::addException(kj::Date timestamp, kj::String name, kj::String message) {
+void WorkerTracer::addException(kj::Date timestamp, kj::String name, kj::String message, bool sourcemapsAvailable) {
   if (trace->exceededExceptionLimit) {
     return;
   }
@@ -557,6 +568,7 @@ void WorkerTracer::addException(kj::Date timestamp, kj::String name, kj::String 
   }
   trace->bytesUsed = newSize;
   trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message));
+  trace->sourcemapsAvailable = sourcemapsAvailable;
 }
 
 void WorkerTracer::addDiagnosticChannelEvent(kj::Date timestamp,
