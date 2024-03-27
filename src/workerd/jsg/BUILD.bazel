@@ -128,6 +128,7 @@ wd_cc_library(
     hdrs = ["observer.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":url",
         "@capnp-cpp//src/kj",
     ],
 )

@@ -1561,6 +1561,9 @@ template <typename Func, typename Param, bool passLock>
 using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>>>;
 
 class ModuleRegistry;
+namespace modules {
+class ModuleRegistry;
+};
 
 // All types declared with JSG_RESOURCE_TYPE which are intended to be used as the global object
 // must inherit jsg::ContextGlobal, in addition to inheriting jsg::Object

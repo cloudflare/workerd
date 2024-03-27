@@ -485,12 +485,19 @@ public:
     // executing JavaScript code. T should be one of your API types which you want to use as the
     // global object. `args...` are passed to the type's constructor.
     template <typename T, typename... Args>
-    JsContext<T> newContext(Args&&... args) {
+    JsContext<T> newContext(NewContextOptions options, Args&&... args) {
       // TODO(soon): Requiring move semantics for the global object is awkward. This should instead
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
+      return jsgIsolate.wrapper->newContext(*this, options, jsgIsolate.getObserver(), (T*)nullptr, kj::fwd<Args>(args)...);
+    }
 
-      return jsgIsolate.wrapper->newContext(*this, jsgIsolate.getObserver(), (T*)nullptr, kj::fwd<Args>(args)...);
+    // Creates a new JavaScript "context", i.e. the global object. This is the first step to
+    // executing JavaScript code. T should be one of your API types which you want to use as the
+    // global object. `args...` are passed to the type's constructor.
+    template <typename T, typename... Args>
+    JsContext<T> newContext(Args&&... args) {
+      return newContext<T>(NewContextOptions {}, kj::fwd<Args>(args)...);
     }
 
   private:
