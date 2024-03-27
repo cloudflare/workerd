@@ -1,5 +1,7 @@
 #pragma once
 
+#include "kj/array.h"
+#include "kj/debug.h"
 #include <kj/common.h>
 #include <kj/filesystem.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
@@ -24,6 +26,7 @@ public:
   }
 };
 
+
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
 class PyodideMetadataReader : public jsg::Object {
@@ -34,15 +37,18 @@ private:
   kj::Array<kj::String> requirements;
   bool isWorkerdFlag;
   bool isTracingFlag;
+  bool createBaselineSnapshot;
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
 public:
   PyodideMetadataReader(kj::String mainModule, kj::Array<kj::String> names,
                         kj::Array<kj::Array<kj::byte>> contents, kj::Array<kj::String> requirements,
                         bool isWorkerd, bool isTracing,
+                        bool createBaselineSnapshot,
                         kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
       : mainModule(kj::mv(mainModule)), names(kj::mv(names)), contents(kj::mv(contents)),
         requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd), isTracingFlag(isTracing),
+        createBaselineSnapshot(createBaselineSnapshot),
         memorySnapshot(kj::mv(memorySnapshot)) {}
 
   bool isWorkerd() {
@@ -53,12 +59,12 @@ public:
     return this->isTracingFlag;
   }
 
-  kj::String getMainModule() {
-    return kj::str(this->mainModule);
+  bool isCreatingBaselineSnapshot() {
+    return createBaselineSnapshot;
   }
 
-  kj::Maybe<kj::Array<kj::byte>> getMemorySnapshot() {
-    return kj::mv(memorySnapshot);
+  kj::String getMainModule() {
+    return kj::str(this->mainModule);
   }
 
   kj::Array<jsg::JsRef<jsg::JsString>> getNames(jsg::Lock& js);
@@ -69,6 +75,21 @@ public:
 
   int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
 
+  bool hasMemorySnapshot() {
+    return memorySnapshot != kj::none;
+  }
+  int getMemorySnapshotSize() {
+    if (memorySnapshot == kj::none) {
+      return 0;
+    }
+    return KJ_REQUIRE_NONNULL(memorySnapshot).size();
+  }
+
+  void disposeMemorySnapshot() {
+    memorySnapshot = kj::none;
+  }
+  int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -77,7 +98,11 @@ public:
     JSG_METHOD(getNames);
     JSG_METHOD(getSizes);
     JSG_METHOD(read);
-    JSG_METHOD(getMemorySnapshot);
+    JSG_METHOD(hasMemorySnapshot);
+    JSG_METHOD(getMemorySnapshotSize);
+    JSG_METHOD(readMemorySnapshot);
+    JSG_METHOD(disposeMemorySnapshot);
+    JSG_METHOD(isCreatingBaselineSnapshot);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -102,25 +127,29 @@ public:
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot,
       kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)> uploadMemorySnapshotCb)
-      : storedSnapshot(kj::none),
+      :
+        storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
         hasUploaded(false),
-        isValidating(false) {};
+        isValidating(false),
+        createBaselineSnapshot(false) {};
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::none),
         hasUploaded(false),
-        isValidating(false) {};
+        isValidating(false),
+        createBaselineSnapshot(false) {};
 
   ArtifactBundler(bool isValidating = false)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::none),
         uploadMemorySnapshotCb(kj::none),
         hasUploaded(false),
-        isValidating(isValidating) {};
+        isValidating(isValidating),
+        createBaselineSnapshot(false) {};
 
   jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
     // Prevent multiple uploads.
@@ -145,13 +174,6 @@ public:
     storedSnapshot = kj::mv(snapshot);
   }
 
-  jsg::Optional<kj::Array<kj::byte>> getMemorySnapshot(jsg::Lock& js) {
-    KJ_IF_SOME(val, existingSnapshot) {
-      return kj::mv(val);
-    }
-    return kj::none;
-  }
-
   bool isEnabled() {
     return uploadMemorySnapshotCb != kj::none;
   }
@@ -159,6 +181,19 @@ public:
   bool hasMemorySnapshot() {
     return existingSnapshot != kj::none;
   }
+
+  int getMemorySnapshotSize() {
+    if (existingSnapshot == kj::none) {
+      return 0;
+    }
+    return KJ_REQUIRE_NONNULL(existingSnapshot).size();
+  }
+
+  int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
+  void disposeMemorySnapshot() {
+    existingSnapshot = kj::none;
+  }
+
 
   // Determines whether this ArtifactBundler was created inside the validator.
   bool isEwValidating() {
@@ -170,14 +205,18 @@ public:
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    KJ_IF_SOME(snapshot, existingSnapshot) {
-      tracker.trackFieldWithSize("snapshot", snapshot.size());
+    if (existingSnapshot == kj::none) {
+      return;
     }
+    tracker.trackFieldWithSize("snapshot", KJ_REQUIRE_NONNULL(existingSnapshot).size());
   }
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(uploadMemorySnapshot);
-    JSG_METHOD(getMemorySnapshot);
+    JSG_METHOD(hasMemorySnapshot);
+    JSG_METHOD(getMemorySnapshotSize);
+    JSG_METHOD(readMemorySnapshot);
+    JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(isEnabled);
     JSG_METHOD(isEwValidating);
     JSG_METHOD(storeMemorySnapshot);
@@ -190,6 +229,7 @@ private:
   kj::Maybe<kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)>> uploadMemorySnapshotCb;
   bool hasUploaded;
   bool isValidating;
+  bool createBaselineSnapshot;
 };
 
 
@@ -217,6 +257,58 @@ public:
   }
 };
 
+
+// A limiter which will throw if the startup is found to exceed limits. The script will still be
+// able to run for longer than the limit, but an error will be thrown as soon as the startup
+// finishes. This way we can enforce a Python-specific startup limit.
+//
+// TODO(later): stop execution as soon limit is reached, instead of doing so after the fact.
+class SimplePythonLimiter : public jsg::Object {
+private:
+  int startupLimitMs;
+  kj::Maybe<kj::Function<kj::TimePoint()>> getTimeCb;
+
+  kj::Maybe<kj::TimePoint> startTime;
+
+
+
+public:
+  SimplePythonLimiter(int startupLimitMs, kj::Function<kj::TimePoint()> getTimeCb) :
+      startupLimitMs(startupLimitMs),
+      getTimeCb(kj::mv(getTimeCb)) {}
+
+  SimplePythonLimiter() :
+      startupLimitMs(0),
+      getTimeCb(kj::none) {}
+
+  static jsg::Ref<SimplePythonLimiter> makeDisabled() {
+    return jsg::alloc<SimplePythonLimiter>();
+  }
+
+  void beginStartup() {
+    KJ_IF_SOME(cb, getTimeCb) {
+      JSG_REQUIRE(startTime == kj::none, TypeError, "Cannot call `beginStartup` multiple times.");
+      startTime = cb();
+    }
+  }
+
+  void finishStartup() {
+    KJ_IF_SOME(cb, getTimeCb) {
+      JSG_REQUIRE(startTime != kj::none, TypeError, "Need to call `beginStartup` first.");
+      auto endTime = cb();
+      kj::Duration diff = endTime - KJ_ASSERT_NONNULL(startTime);
+      auto diffMs = diff / kj::MILLISECONDS;
+
+      JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit");
+    }
+  }
+
+  JSG_RESOURCE_TYPE(SimplePythonLimiter) {
+    JSG_METHOD(beginStartup);
+    JSG_METHOD(finishStartup);
+  }
+};
+
 using Worker = server::config::Worker;
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
@@ -226,7 +318,8 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
   api::pyodide::PyodideMetadataReader, \
   api::pyodide::ArtifactBundler,       \
   api::pyodide::DiskCache,             \
-  api::pyodide::DisabledInternalJaeger
+  api::pyodide::DisabledInternalJaeger,\
+  api::pyodide::SimplePythonLimiter
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
   if (featureFlags.getPythonWorkers()) {
