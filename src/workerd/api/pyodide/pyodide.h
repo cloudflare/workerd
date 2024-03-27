@@ -244,9 +244,12 @@ public:
 
 // This cache is used by Pyodide to store wheels fetched over the internet across workerd restarts in local dev only
 class DiskCache: public jsg::Object {
-  kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot;
+  static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT; // always set to kj::none
+
+  const kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot;
 public:
-  DiskCache(kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot): cacheRoot(cacheRoot) {};
+  DiskCache(): cacheRoot(NULL_CACHE_ROOT) {}; // Disabled disk cache
+  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot): cacheRoot(cacheRoot) {};
 
   jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
   void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);

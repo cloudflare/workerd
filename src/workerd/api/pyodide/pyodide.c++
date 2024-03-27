@@ -122,6 +122,8 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
                                            false /* isTracing */, false /* createBaselineSnapshot */, kj::none /* memorySnapshot */);
 }
 
+const kj::Maybe<kj::Own<const kj::Directory>> DiskCache::NULL_CACHE_ROOT = kj::none;
+
 jsg::Optional<kj::Array<kj::byte>> DiskCache::get(jsg::Lock& js, kj::String key) {
   KJ_IF_SOME(root, cacheRoot) {
     kj::Path path(key);
