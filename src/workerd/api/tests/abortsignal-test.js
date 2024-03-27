@@ -163,3 +163,36 @@ export const anyAbort3 = {
     strictEqual(any.reason, 123);
   }
 };
+
+export const onabortPrototypeProperty = {
+  test() {
+    const ac = new AbortController();
+    ok('onabort' in AbortSignal.prototype);
+    strictEqual(ac.signal.onabort, null);
+    delete ac.signal.onabort;
+    ok('onabort' in AbortSignal.prototype);
+    strictEqual(ac.signal.onabort, null);
+    let called = false;
+    ac.signal.onabort = () => {
+      called = true;
+    };
+    ac.abort();
+    ok(called);
+
+    // Setting the value to something other than a function or object
+    // should cause the value to become null.
+    [123, null, 'foo'].forEach((v) => {
+      ac.signal.onabort = () => {};
+      ac.signal.onabort = v;
+      // TODO(soon): For now, we are relaxing this check and will log a warning
+      // if the value is not a function or object. If we get no hits on that warning,
+      // we can return to checking for null here.
+      //strictEqual(ac.signal.onabort, null);
+      strictEqual(ac.signal.onabort, v);
+    });
+
+    const handler = {};
+    ac.signal.onabort = handler;
+    strictEqual(ac.signal.onabort, handler);
+  }
+};
