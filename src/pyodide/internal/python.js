@@ -176,6 +176,9 @@ function loadDynlib(Module, path, wasmModuleData) {
   }
 }
 
+// used for checkLoadedSoFiles a snapshot sanity check
+const PRELOADED_SO_FILES = [];
+
 /**
  * This loads all dynamic libraries visible in the site-packages directory. They
  * are loaded before the runtime is initialized outside of the heap, using the
@@ -189,8 +192,12 @@ function loadDynlib(Module, path, wasmModuleData) {
  */
 function preloadDynamicLibs(Module) {
   let SO_FILES_TO_LOAD = SITE_PACKAGES_SO_FILES;
-  if (DSO_METADATA?.settings?.baselineSnapshot) {
-    SO_FILES_TO_LOAD = [[ '_lzma.so' ]];
+  if (IS_CREATING_BASELINE_SNAPSHOT || DSO_METADATA?.settings?.baselineSnapshot) {
+    // Ideally this should be just
+    // [[ '_lzma.so' ], [ '_ssl.so' ]]
+    // but we put a few more because we messed up the memory snapshot...
+    SO_FILES_TO_LOAD = [["_hashlib.so"],["_lzma.so"],["_sqlite3.so"],["_ssl.so"]];
+    // SO_FILES_TO_LOAD = [[ '_lzma.so' ], [ '_ssl.so' ]];
   }
   try {
     const sitePackages = getSitePackagesPath(Module);
@@ -203,6 +210,7 @@ function preloadDynamicLibs(Module) {
       const wasmModuleData = new Uint8Array(size);
       TarReader.read(contentsOffset, wasmModuleData);
       const path = sitePackages + "/" + soFile.join("/");
+      PRELOADED_SO_FILES.push(path);
       loadDynlib(Module, path, wasmModuleData);
     }
   } catch (e) {
@@ -389,6 +397,21 @@ function memorySnapshotDoImports(Module) {
   simpleRunPython(Module, processScriptImportsString);
 }
 
+function checkLoadedSoFiles(dsoJSON) {
+  PRELOADED_SO_FILES.sort();
+  const keys = Object.keys(dsoJSON).filter(k => k.startsWith("/"));
+  keys.sort();
+  const msg = `Internal error taking snapshot: mismatch: ${JSON.stringify(keys)} vs ${JSON.stringify(PRELOADED_SO_FILES)}`;
+  if (keys.length !== PRELOADED_SO_FILES.length) {
+    throw new Error(msg);
+  }
+  for(let i = 0; i < keys.length; i++) {
+    if (PRELOADED_SO_FILES[i] !== keys[i]) {
+      throw new Error(msg);
+    }
+  }
+}
+
 /**
  * Create memory snapshot by importing SNAPSHOT_IMPORTS to ensure these packages
  * are initialized in the linear memory snapshot and then saving a copy of the
@@ -397,6 +420,9 @@ function memorySnapshotDoImports(Module) {
 function makeLinearMemorySnapshot(Module) {
   memorySnapshotDoImports(Module);
   const dsoJSON = recordDsoHandles(Module);
+  if (IS_CREATING_BASELINE_SNAPSHOT) {
+    // checkLoadedSoFiles(dsoJSON);
+  }
   return encodeSnapshot(Module.HEAP8, dsoJSON);
 }
 
