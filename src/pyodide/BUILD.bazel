@@ -124,6 +124,10 @@ REPLACEMENTS = [
     [
         "reportUndefinedSymbols()",
         "reportUndefinedSymbolsNoOp()"
+    ],
+    [
+        "Module.reportUndefinedSymbolsNoOp()",
+        "Module.reportUndefinedSymbols()"
     ]
 ]
 
