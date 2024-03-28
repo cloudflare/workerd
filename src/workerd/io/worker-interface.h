@@ -106,7 +106,8 @@ public:
     // for this event.
     virtual kj::Promise<Result> run(
         kj::Own<IoContext_IncomingRequest> incomingRequest,
-        kj::Maybe<kj::StringPtr> entrypointName) = 0;
+        kj::Maybe<kj::StringPtr> entrypointName,
+        kj::TaskSet& waitUntilTasks) = 0;
 
     // Forward the event over RPC.
     virtual kj::Promise<Result> sendRpc(

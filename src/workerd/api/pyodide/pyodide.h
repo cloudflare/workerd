@@ -241,6 +241,57 @@ public:
   }
 };
 
+// A limiter which will throw if the startup is found to exceed limits. The script will still be
+// able to run for longer than the limit, but an error will be thrown as soon as the startup
+// finishes. This way we can enforce a Python-specific startup limit.
+//
+// TODO(later): stop execution as soon limit is reached, instead of doing so after the fact.
+class SimplePythonLimiter : public jsg::Object {
+private:
+  int startupLimitMs;
+  kj::Maybe<kj::Function<kj::TimePoint()>> getTimeCb;
+
+  kj::Maybe<kj::TimePoint> startTime;
+
+
+
+public:
+  SimplePythonLimiter(int startupLimitMs, kj::Function<kj::TimePoint()> getTimeCb) :
+      startupLimitMs(startupLimitMs),
+      getTimeCb(kj::mv(getTimeCb)) {}
+
+  SimplePythonLimiter() :
+      startupLimitMs(0),
+      getTimeCb(kj::none) {}
+
+  static jsg::Ref<SimplePythonLimiter> makeDisabled() {
+    return jsg::alloc<SimplePythonLimiter>();
+  }
+
+  void beginStartup() {
+    KJ_IF_SOME(cb, getTimeCb) {
+      JSG_REQUIRE(startTime == kj::none, TypeError, "Cannot call `beginStartup` multiple times.");
+      startTime = cb();
+    }
+  }
+
+  void finishStartup() {
+    KJ_IF_SOME(cb, getTimeCb) {
+      JSG_REQUIRE(startTime != kj::none, TypeError, "Need to call `beginStartup` first.");
+      auto endTime = cb();
+      kj::Duration diff = endTime - KJ_ASSERT_NONNULL(startTime);
+      auto diffMs = diff / kj::MILLISECONDS;
+
+      JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit");
+    }
+  }
+
+  JSG_RESOURCE_TYPE(SimplePythonLimiter) {
+    JSG_METHOD(beginStartup);
+    JSG_METHOD(finishStartup);
+  }
+};
+
 using Worker = server::config::Worker;
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
@@ -249,7 +300,8 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
   api::pyodide::PackagesTarReader,     \
   api::pyodide::PyodideMetadataReader, \
   api::pyodide::ArtifactBundler,       \
-  api::pyodide::DisabledInternalJaeger
+  api::pyodide::DisabledInternalJaeger,\
+  api::pyodide::SimplePythonLimiter
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
   if (featureFlags.getPythonWorkers()) {

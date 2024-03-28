@@ -17,6 +17,8 @@
 
 namespace workerd::jsg {
 
+class Lock;
+
 typedef unsigned int uint;
 
 // When a C++ callback wishes to throw a JavaScript exception, it should first call
@@ -60,6 +62,11 @@ void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
 
 // calls makeInternalError() and then tells the isolate to throw it.
 void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception);
+
+constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe8027292171b1646ull;
+
+// Add a serialized copy of the exception value to the KJ exception, as a "detail".
+void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
 struct TypeErrorContext {
   enum Kind: uint8_t {
