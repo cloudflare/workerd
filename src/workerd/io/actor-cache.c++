@@ -281,7 +281,7 @@ void ActorCache::touchEntry(Lock& lock, Entry& entry) {
   if (!entry.isDirty()) {
     entry.isStale = false;
     lock->remove(entry);
-    lock->add(entry);
+    addToCleanList(lock, entry);
   }
 
   // We only call `touchEntry` when the operation or the LRU has !noCache, so we want to cache this.
@@ -1489,8 +1489,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
     //    the caching logic.
     //
     // Because of this, we know it is correct to leave `gapIsKnownEmpty = false` on our new entry.
-    entry->syncStatus = EntrySyncStatus::CLEAN;
-    lock->add(*entry);
+    addToCleanList(lock, *entry);
     return kj::atomicAddRef(*entry);
   });
 
@@ -1503,8 +1502,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
         KJ_ASSERT(!slot->gapIsKnownEmpty);  // UNKNOWN entry should never have gapIsKnownEmpty.
         removeEntry(lock, *slot);
 
-        entry->syncStatus = EntrySyncStatus::CLEAN;
-        lock->add(*entry);
+        addToCleanList(lock, *entry);
         slot = kj::atomicAddRef(*entry);
         break;
       }
@@ -1597,8 +1595,7 @@ void ActorCache::markGapsEmpty(Lock& lock, KeyPtr beginKey, kj::Maybe<KeyPtr> en
         // We must insert an UNKNOWN entry to cap our range.
         KJ_IF_SOME(k, endKey) {
           auto entry = kj::atomicRefcounted<Entry>(*this, cloneKey(k), EntryValueStatus::UNKNOWN);
-          entry->syncStatus = EntrySyncStatus::CLEAN;
-          lock->add(*entry);
+          addToCleanList(lock, *entry);
           map.insert(kj::mv(entry));
         } else {
           // No UNKNOWN needed since the end is actually the end of the key space.
@@ -1981,8 +1978,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
     map.findOrCreate(Key{}, [&]() {
       Key key;
       auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), EntryValueStatus::ABSENT);
-      lock->add(*entry);
-      entry->syncStatus = EntrySyncStatus::CLEAN;
+      addToCleanList(lock, *entry);
       entry->gapIsKnownEmpty = true;
       return entry;
     });
@@ -2085,9 +2081,7 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     // Swap in the new entry.
     KJ_DASSERT(slot->key == newEntry->key);
     slot = kj::mv(newEntry);
-    slot->syncStatus = EntrySyncStatus::DIRTY;
-    dirtyList.add(*slot);
-
+    addToDirtyList(*slot);
   } else {
     // No exact matching entry exists, insert a new one.
 
@@ -2111,8 +2105,7 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     KJ_IF_SOME(c, countedDelete) {
       slot->countedDelete = kj::addRef(c);
     }
-    slot->syncStatus = EntrySyncStatus::DIRTY;
-    dirtyList.add(*slot);
+    addToDirtyList(*slot);
   }
 
   ensureFlushScheduled(options);
@@ -2547,8 +2540,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
             }
           }
 
-          entry.syncStatus = EntrySyncStatus::CLEAN;
-          lock->add(entry);
+          addToCleanList(lock, entry);
         }
       }
     }
