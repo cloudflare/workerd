@@ -66,6 +66,7 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   kj::Maybe<kj::Date> getAlarm(ActorKey actor);
   bool setAlarm(ActorKey actor, kj::Date scheduledTime);
   bool deleteAlarm(ActorKey actor);
+  void deleteAllAlarms();
 
   void registerNamespace(kj::StringPtr uniqueKey, GetActorFn getActor);
 
@@ -127,6 +128,9 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   )");
   SqliteDatabase::Statement stmtDeleteAlarm = db->prepare(R"(
     DELETE FROM _cf_ALARM WHERE actor_unique_key = ? AND actor_id = ?
+  )");
+  SqliteDatabase::Statement stmtDeleteAllAlarms = db->prepare(R"(
+    DELETE FROM _cf_ALARM
   )");
 
   void taskFailed(kj::Exception&& exception) override;

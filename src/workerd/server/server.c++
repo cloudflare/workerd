@@ -3896,6 +3896,8 @@ void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
       }
     }
   }
+
+  alarmScheduler->deleteAllAlarms();
 }
 
 // WorkerDef is an intermediate representation of everything from `config::Worker::Reader` that
