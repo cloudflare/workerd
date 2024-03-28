@@ -173,7 +173,7 @@ function addPackageToLoad(lockfile, name, toLoad) {
   }
   const pkgInfo = lockfile.packages[normalizedName];
   if (!pkgInfo) {
-    throw new Error("It appears that a package (" + normalizedName + ") you requested is not available yet on workerd. \n" +
+    throw new Error(`It appears that a package ("${name}") you requested is not available yet in workerd. \n` +
       "If you would like this package to be included, please open an issue at https://github.com/cloudflare/workerd/discussions/new?category=python-packages."
     );
   }
