@@ -630,6 +630,20 @@ private:
   // Type of a lock on `SharedLru::cleanList`. We use the same lock to protect `currentValues`.
   typedef kj::Locked<kj::List<Entry, &Entry::link>> Lock;
 
+  // Add this entry to the clean list and set its status to CLEAN.
+  // This doesn't do much, but it makes it easier to track what's going on.
+  void addToCleanList(Lock& listLock, Entry& entryRef) {
+    entryRef.syncStatus = EntrySyncStatus::CLEAN;
+    listLock->add(entryRef);
+  }
+
+  // Add this entry to the dirty list and set its status to DIRTY.
+  // This doesn't do much, but it makes it easier to track what's going on.
+  void addToDirtyList(Entry& entryRef) {
+    entryRef.syncStatus = EntrySyncStatus::DIRTY;
+    dirtyList.add(entryRef);
+  }
+
   // Indicate that an entry was observed by a read operation and so should be moved to the end of
   // the LRU queue.
   void touchEntry(Lock& lock, Entry& entry);
