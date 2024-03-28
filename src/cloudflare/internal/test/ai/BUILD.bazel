@@ -1,0 +1,7 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "ai-api-test.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]),
+)
