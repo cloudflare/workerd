@@ -407,9 +407,19 @@ private:
     // before the read completes.
     const Value value;
     EntryValueStatus valueStatus;
+
+    // This enum indicates how synchronized this entry is with storage.
+    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
   public:
     auto getValueStatus() const {
       return valueStatus;
+    }
+
+    // TODO(now): We have `isDirty()`, which tells me we might also want methods for other states,
+    // but the KJ_FAIL_ASSERT is throwing me off a bit. Either we should drop isDirty() and use this
+    // everywhere, or add isClean() and isNotInCache().
+    inline EntrySyncStatus getSyncStatus() const {
+      return syncStatus;
     }
 
     kj::Maybe<ValuePtr> getValuePtr() const {
@@ -427,11 +437,25 @@ private:
       }
     }
 
-    // This enum indicates how synchronized this entry is with storage.
-    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+    void setFlushing() {
+      syncStatus = EntrySyncStatus::FLUSHING;
+    }
+
+    void setNotInCache() {
+      syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+    }
+
+    // Avoid using this directly. If you want to set the status to CLEAN or DIRTY, consider using
+    // the addToCleanList() and addToDirtyList() methods. If you want to set to NOT_IN_CACHE, use
+    // setNotInCache(). This helps us keep the state transitions managable.
+    void setSyncStatus(EntrySyncStatus newStatus) {
+      // TODO(now): Do we need to worry about certain transitions?
+      // Ex. It seems like we shouldn't ever go from CLEAN -> DIRTY?
+      syncStatus = newStatus;
+    }
 
     bool isDirty() const {
-      switch(syncStatus) {
+      switch(getSyncStatus()) {
         case EntrySyncStatus::DIRTY:
         case EntrySyncStatus::FLUSHING: {
           return true;
@@ -633,14 +657,14 @@ private:
   // Add this entry to the clean list and set its status to CLEAN.
   // This doesn't do much, but it makes it easier to track what's going on.
   void addToCleanList(Lock& listLock, Entry& entryRef) {
-    entryRef.syncStatus = EntrySyncStatus::CLEAN;
+    entryRef.setSyncStatus(EntrySyncStatus::CLEAN);
     listLock->add(entryRef);
   }
 
   // Add this entry to the dirty list and set its status to DIRTY.
   // This doesn't do much, but it makes it easier to track what's going on.
   void addToDirtyList(Entry& entryRef) {
-    entryRef.syncStatus = EntrySyncStatus::DIRTY;
+    entryRef.setSyncStatus(EntrySyncStatus::DIRTY);
     dirtyList.add(entryRef);
   }
 

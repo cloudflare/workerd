@@ -56,7 +56,7 @@ void ActorCache::clear(Lock& lock) {
     if (entry->link.isLinked()) {
       if (entry->isDirty()) {
         dirtyList.remove(*entry);
-        entry->syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+        entry->setNotInCache();
       } else {
         removeEntry(lock, *entry);
       }
@@ -102,7 +102,7 @@ ActorCache::Entry::~Entry() noexcept(false) {
     }
 
     KJ_REQUIRE(!link.isLinked(),
-        "must remove Entry from lists before destroying", static_cast<int>(syncStatus));
+        "must remove Entry from lists before destroying", static_cast<int>(getSyncStatus()));
   }
 }
 
@@ -295,7 +295,7 @@ void ActorCache::touchEntry(Lock& lock, Entry& entry) {
 void ActorCache::removeEntry(Lock& lock, Entry& entry) {
   KJ_IASSERT(!entry.isDirty());
   lock->remove(entry);
-  entry.syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+  entry.setNotInCache();
 }
 
 void ActorCache::evictEntry(Lock& lock, Entry& entry) {
@@ -352,7 +352,7 @@ void ActorCache::verifyConsistencyForTest() {
       }
     }
 
-    KJ_ASSERT(entry->syncStatus != EntrySyncStatus::NOT_IN_CACHE,
+    KJ_ASSERT(entry->getSyncStatus() != EntrySyncStatus::NOT_IN_CACHE,
         "entry should not appear in map", entry->key);
     KJ_ASSERT(entry->link.isLinked());
 
@@ -2065,7 +2065,7 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
 
     if (slot->isDirty()) {
       dirtyList.remove(*slot);
-      slot->syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+      slot->setNotInCache();
 
       // Entry may have `countedDelete` indicating we're still waiting to get a count from a
       // previous delete operation. If so, we'll need to inherit it in case that delete operation
@@ -2318,7 +2318,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   auto countEntry = [&](Entry& entry) {
     // Counts up the number of operations and RPC message sizes we'll need to cover this entry.
 
-    entry.syncStatus = EntrySyncStatus::FLUSHING;
+    entry.setFlushing();
 
     auto keySizeInWords = bytesToWordsRoundUp(entry.key.size());
 
@@ -2491,7 +2491,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       // TODO(cleanup): kj::Vector<T>::filter() would be nice to have here.
       auto dst = r.deletedDirty.begin();
       for (auto src = r.deletedDirty.begin(); src != r.deletedDirty.end(); ++src) {
-        if (src->get()->syncStatus == EntrySyncStatus::DIRTY) {
+        if (src->get()->getSyncStatus() == EntrySyncStatus::DIRTY) {
           if (dst != src) *dst = kj::mv(*src);
           ++dst;
         }
@@ -2501,12 +2501,12 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       // Mark all `FLUSHING` entries as `CLEAN`. Note that we know that all `FLUSHING` must
       // form a prefix of `dirtyList` since any new entries would have been added to the end.
       for (auto& entry: dirtyList) {
-        if (entry.syncStatus == EntrySyncStatus::DIRTY) {
+        if (entry.getSyncStatus() == EntrySyncStatus::DIRTY) {
           // Completed all FLUSHING entries.
           break;
         }
 
-        KJ_ASSERT(entry.syncStatus == EntrySyncStatus::FLUSHING);
+        KJ_ASSERT(entry.getSyncStatus() == EntrySyncStatus::FLUSHING);
 
         // We know all `countedDelete` operations were satisfied so we can remove this if it's
         // present. Note that if, during the flush, the entry was overwritten, then the new entry
@@ -2517,7 +2517,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
         dirtyList.remove(entry);
         if (entry.noCache) {
-          entry.syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+          entry.setNotInCache();
           evictEntry(lock, entry);
         } else {
           if (entry.gapIsKnownEmpty && entry.getValueStatus() == EntryValueStatus::ABSENT) {
@@ -2532,7 +2532,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
               --prevIter;
               if (prevIter->get()->gapIsKnownEmpty) {
                 // Yep!
-                entry.syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+                entry.setNotInCache();
                 map.erase(*entryIter);
                 // WARNING: We might have just deleted `entry`.
                 continue;
