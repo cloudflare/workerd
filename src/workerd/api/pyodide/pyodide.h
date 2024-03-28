@@ -144,7 +144,7 @@ public:
 
   ArtifactBundler(bool isValidating = false)
       : storedSnapshot(kj::none),
-        existingSnapshot(kj::heapArray<kj::byte>(0)),
+        existingSnapshot(kj::none),
         uploadMemorySnapshotCb(kj::none),
         hasUploaded(false),
         isValidating(isValidating),
