@@ -142,11 +142,8 @@ export function patchFetch(origin) {
     const fileName = url.pathname.substring(url.pathname.lastIndexOf("/") + 1);
     const cached = DiskCache.get(fileName);
     if (cached) {
-      console.log("Serving from disk cache: " + fileName);
       return new Response(cached);
     }
-
-    console.log("Loading from web: " + fileName);
 
     // we didn't find it in the disk cache, continue with original fetch
     const response = await origFetch(url, options);
