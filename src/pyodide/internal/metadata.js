@@ -5,7 +5,8 @@ import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 
 export const IS_WORKERD = MetadataReader.isWorkerd();
 export const IS_TRACING = MetadataReader.isTracing();
-export const IS_CREATING_BASELINE_SNAPSHOT = MetadataReader.isCreatingBaselineSnapshot();
+export const IS_CREATING_BASELINE_SNAPSHOT =
+  MetadataReader.isCreatingBaselineSnapshot();
 export const WORKERD_INDEX_URL = PYODIDE_BUCKET.PYODIDE_PACKAGE_BUCKET_URL;
 export const REQUIREMENTS = MetadataReader.getRequirements();
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
@@ -14,3 +15,12 @@ export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
   : ArtifactBundler.hasMemorySnapshot()
     ? ArtifactBundler
     : undefined;
+/**
+ * Record the dlopen handles that are needed by the MEMORY, where the dso metadata is preallocated,
+ * whether we are loading a baseline snapshot.
+ */
+export const DSO_METADATA = {
+  settings: {
+    loadedLibs: [],
+  },
+};
