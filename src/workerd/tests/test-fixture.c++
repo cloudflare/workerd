@@ -278,12 +278,13 @@ TestFixture::TestFixture(SetupParams&& params)
     isolateLimitEnforcer(kj::heap<MockIsolateLimitEnforcer>()),
     errorReporter(kj::heap<MockErrorReporter>()),
     memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
+    diskCacheRoot(kj::none),
     api(kj::heap<server::WorkerdApi>(
       testV8System,
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
       *isolateLimitEnforcer,
       kj::atomicRefcounted<IsolateObserver>(),
-      *memoryCacheProvider)),
+      *memoryCacheProvider, diskCacheRoot)),
     workerIsolate(kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(api),
       kj::atomicRefcounted<IsolateObserver>(),

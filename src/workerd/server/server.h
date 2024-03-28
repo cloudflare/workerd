@@ -58,6 +58,9 @@ public:
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
   }
+  void setDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>> &&dkr) {
+    diskCacheRoot = kj::mv(dkr);
+  }
 
   // Runs the server using the given config.
   kj::Promise<void> run(jsg::V8System& v8System, config::Config::Reader conf,
@@ -90,6 +93,7 @@ private:
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
+  kj::Maybe<kj::Own<const kj::Directory>> diskCacheRoot;
 
   bool experimental = false;
 
