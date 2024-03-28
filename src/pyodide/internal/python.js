@@ -10,8 +10,12 @@ import {
 } from "pyodide-internal:setupPackages";
 import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 import processScriptImports from "pyodide-internal:process_script_imports.py";
-import { MEMORY_SNAPSHOT_READER, IS_CREATING_BASELINE_SNAPSHOT } from "pyodide-internal:metadata";
-import { reportError } from "pyodide-internal:reportError";
+import {
+  MEMORY_SNAPSHOT_READER,
+  IS_CREATING_BASELINE_SNAPSHOT,
+  DSO_METADATA,
+} from "pyodide-internal:metadata";
+import { reportError, simpleRunPython } from "pyodide-internal:util";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -39,7 +43,8 @@ import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
  */
 import stdlib from "pyodide-internal:generated/python_stdlib.zip";
 
-const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
+const SHOULD_UPLOAD_SNAPSHOT =
+  ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
 
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of
@@ -49,11 +54,6 @@ const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled() || ArtifactBundler.is
  */
 let READ_MEMORY = undefined;
 let SNAPSHOT_SIZE = undefined;
-
-/**
- * Record the dlopen handles that are needed by the MEMORY.
- */
-let DSO_METADATA = {};
 
 /**
  * Used to defer artifact upload. This is set during initialisation, but is executed during a
@@ -170,10 +170,39 @@ function loadDynlib(Module, path, wasmModuleData) {
   // "handles" are dlopen handles. There will be one entry in the `handles` list
   // for each dlopen handle that has not been dlclosed. We need to keep track of
   // these across
-  const { handles } = DSO_METADATA[path] || { handles: [] };
+  const handles = DSO_METADATA[path]?.handles || [];
   for (const handle of handles) {
     Module.LDSO.loadedLibsByHandle[handle] = dso;
   }
+}
+
+function getLEB(binary) {
+  let offset = 0;
+  let ret = 0;
+  let mul = 1;
+  while (1) {
+    const byte = binary[offset++];
+    ret += (byte & 0x7f) * mul;
+    mul *= 0x80;
+    if (!(byte & 0x80)) break;
+  }
+  return [ret, offset];
+}
+
+function getDylinkMetadata(Module, contentsOffset) {
+  const view = new Uint8Array(12);
+  TarReader.read(contentsOffset, view);
+  if (new Uint32Array(view.buffer)[0] !== 0x6d736100) {
+    throw new Error("Invalid wasm magic number");
+  }
+  if (view[8] !== 0) {
+    throw new Error("First section should be the dylink section");
+  }
+  const [length, offset] = getLEB(view.subarray(9));
+  const totalSize = 9 + offset + length;
+  const metadataBuffer = new Uint8Array(totalSize);
+  TarReader.read(contentsOffset, metadataBuffer);
+  return Module.getDylinkMetadata(metadataBuffer);
 }
 
 /**
@@ -188,21 +217,47 @@ function loadDynlib(Module, path, wasmModuleData) {
  * there.
  */
 function preloadDynamicLibs(Module) {
-  let SO_FILES_TO_LOAD = SITE_PACKAGES_SO_FILES;
-  if (DSO_METADATA?.settings?.baselineSnapshot) {
-    SO_FILES_TO_LOAD = [[ '_lzma.so' ]];
-  }
   try {
+    let SO_FILES_TO_LOAD = SITE_PACKAGES_SO_FILES;
+    if (DSO_METADATA?.settings?.baselineSnapshot) {
+      SO_FILES_TO_LOAD = [["_lzma.so"]];
+    }
     const sitePackages = getSitePackagesPath(Module);
+    const moduleNodes = {};
     for (const soFile of SO_FILES_TO_LOAD) {
       let node = SITE_PACKAGES_INFO;
       for (const part of soFile) {
         node = node.children.get(part);
       }
-      const { contentsOffset, size } = node;
+      const path = sitePackages + "/" + soFile.join("/");
+      moduleNodes[path] = node;
+      const { contentsOffset } = node;
+      const metadata = getDylinkMetadata(Module, contentsOffset);
+      const memAlign = Math.pow(2, metadata.memoryAlign);
+      const ptr = Module.alignMemory(
+        Module.getMemory(metadata.memorySize + memAlign),
+        memAlign,
+      );
+      if (!(path in DSO_METADATA)) {
+        DSO_METADATA[path] = {};
+      }
+      DSO_METADATA[path].metadataPtr = ptr;
+    }
+    let toLoad = [];
+    if (DSO_METADATA?.settings?.loadedLibs) {
+      // Make sure to copy list first b/c loadDynlib sticks another copy of the
+      // lib into the list causing an infinite loop if we're not careful.
+      toLoad = Array.from(DSO_METADATA.settings.loadedLibs);
+    } else {
+      // Snapshot is from prior to the load-as-needed change. Just load everything.
+      toLoad = SO_FILES_TO_LOAD.map(
+        (soFile) => sitePackages + "/" + soFile.join("/"),
+      );
+    }
+    for (const path of toLoad) {
+      const { contentsOffset, size } = moduleNodes[path];
       const wasmModuleData = new Uint8Array(size);
       TarReader.read(contentsOffset, wasmModuleData);
-      const path = sitePackages + "/" + soFile.join("/");
       loadDynlib(Module, path, wasmModuleData);
     }
   } catch (e) {
@@ -292,7 +347,7 @@ async function prepareWasmLinearMemory(Module) {
     // were creating the snapshot so the outcome of that is already baked in.
     return;
   }
-  adjustSysPath(Module, simpleRunPython);
+  adjustSysPath(Module);
 
   if (SHOULD_UPLOAD_SNAPSHOT) {
     setUploadFunction(makeLinearMemorySnapshot(Module));
@@ -305,23 +360,23 @@ async function prepareWasmLinearMemory(Module) {
  * crash if we dlsym the handle after restoring from the snapshot
  */
 function recordDsoHandles(Module) {
-  const dylinkInfo = {};
   for (const [handle, { name }] of Object.entries(
     Module.LDSO.loadedLibsByHandle,
   )) {
     if (handle === 0) {
       continue;
     }
-    if (!(name in dylinkInfo)) {
-      dylinkInfo[name] = { handles: [] };
+    if (!(name in DSO_METADATA)) {
+      DSO_METADATA[name] = {};
     }
-    dylinkInfo[name].handles.push(handle);
+    if (!("handles" in DSO_METADATA[name])) {
+      DSO_METADATA[name].handles = [];
+    }
+    DSO_METADATA[name].handles.push(handle);
   }
-  dylinkInfo.settings = {};
   if (IS_CREATING_BASELINE_SNAPSHOT) {
-    dylinkInfo.settings.baselineSnapshot = true;
+    DSO_METADATA.settings.baselineSnapshot = true;
   }
-  return dylinkInfo;
 }
 
 // This is the list of all packages imported by the Python bootstrap. We don't
@@ -396,8 +451,8 @@ function memorySnapshotDoImports(Module) {
  */
 function makeLinearMemorySnapshot(Module) {
   memorySnapshotDoImports(Module);
-  const dsoJSON = recordDsoHandles(Module);
-  return encodeSnapshot(Module.HEAP8, dsoJSON);
+  recordDsoHandles(Module);
+  return encodeSnapshot(Module.HEAP8, DSO_METADATA);
 }
 
 function setUploadFunction(toUpload) {
@@ -437,7 +492,10 @@ function encodeSnapshot(heap, dsoJSON) {
   snapshotOffset = Math.ceil(snapshotOffset / 8) * 8;
   const toUpload = new Uint8Array(snapshotOffset + heap.length);
   const encoder = new TextEncoder();
-  const { written: jsonLength } = encoder.encodeInto(dsoString, toUpload.subarray(HEADER_SIZE));
+  const { written: jsonLength } = encoder.encodeInto(
+    dsoString,
+    toUpload.subarray(HEADER_SIZE),
+  );
   const uint32View = new Uint32Array(toUpload.buffer);
   uint32View[0] = SNAPSHOT_MAGIC;
   uint32View[1] = SNAPSHOT_VERSION;
@@ -462,57 +520,21 @@ function decodeSnapshot() {
     offset += 8;
   }
   const snapshotOffset = buf[0];
-  SNAPSHOT_SIZE = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize() - snapshotOffset;
+  SNAPSHOT_SIZE =
+    MEMORY_SNAPSHOT_READER.getMemorySnapshotSize() - snapshotOffset;
   const jsonLength = buf[1];
   const jsonBuf = new Uint8Array(jsonLength);
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, jsonBuf);
   const jsonTxt = new TextDecoder().decode(jsonBuf);
-  DSO_METADATA = JSON.parse(jsonTxt);
-  READ_MEMORY = function(Module) {
+  for (const key in DSO_METADATA) {
+    delete DSO_METADATA[key];
+  }
+  Object.assign(DSO_METADATA, JSON.parse(jsonTxt));
+  READ_MEMORY = function (Module) {
     // restore memory from snapshot
     MEMORY_SNAPSHOT_READER.readMemorySnapshot(snapshotOffset, Module.HEAP8);
     MEMORY_SNAPSHOT_READER.disposeMemorySnapshot();
-  }
-}
-
-/**
- *  Simple as possible runPython function which works with no foreign function
- *  interface. We need to use this rather than the normal easier to use
- *  interface because the normal interface doesn't work until after
- *  `API.finalizeBootstrap`, but `API.finalizeBootstrap` makes changes inside
- *  and outside the linear memory which have to stay in sync. It's hard to keep
- *  track of the invariants that `finalizeBootstrap` introduces between JS land
- *  and the linear memory so we do this.
- *
- *  We wrap API.rawRun which does the following steps:
- *  1. use textEncoder.encode to convert `code` into UTF8 bytes
- *  2. malloc space for `code` in the wasm linear memory and copy the encoded
- *      `code` to this pointer
- *  3. redirect standard error to a temporary buffer
- *  4. call `PyRun_SimpleString`, which either works and returns 0 or formats a
- *      traceback to stderr and returns -1
- *      https://docs.python.org/3/c-api/veryhigh.html?highlight=simplestring#c.PyRun_SimpleString
- *  5. frees the `code` pointer
- *  6. Returns the return value from `PyRun_SimpleString` and whatever
- *      information went to stderr.
- *
- *  PyRun_SimpleString executes the code at top level in the `__main__` module,
- *  so all variables defined get leaked into the global namespace unless we
- *  clean them up explicitly.
- */
-function simpleRunPython(emscriptenModule, code) {
-  const [status, err] = emscriptenModule.API.rawRun(code);
-  // status 0: Ok
-  // status -1: Error
-  if (status) {
-    // PyRun_SimpleString will have written a Python traceback to stderr.
-    console.warn("Command failed:", code);
-    console.warn("Error was:");
-    for (const line of err.split("\n")) {
-      console.warn(line);
-    }
-    throw new Error("Failed");
-  }
+  };
 }
 
 let TEST_SNAPSHOT = undefined;
@@ -556,7 +578,10 @@ export async function loadPyodide(lockfile, indexURL) {
   if (DSO_METADATA?.settings?.baselineSnapshot) {
     // Invalidate caches if we have a baseline snapshot because the contents of site-packages may
     // have changed.
-    simpleRunPython(Module, "from importlib import invalidate_caches as f; f(); del f");
+    simpleRunPython(
+      Module,
+      "from importlib import invalidate_caches as f; f(); del f",
+    );
   }
 
   // This is just here for our test suite. Ugly but just about the only way to test this.
