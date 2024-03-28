@@ -25,7 +25,7 @@ public:
   // Further customize the isolate immediately after startup.
   virtual void customizeIsolate(v8::Isolate* isolate) = 0;
 
-  virtual ActorCacheSharedLruOptions getActorCacheLruOptions() = 0;
+  virtual const ActorCacheSharedLruOptions getActorCacheLruOptions() = 0;
 
   // Like LimitEnforcer::enterJs(), but used to enforce limits on script startup.
   //
