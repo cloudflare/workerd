@@ -406,8 +406,22 @@ private:
     // from cache and needs to remember the original cached values even if they are overwritten
     // before the read completes.
     const Value value;
-  public:
     EntryValueStatus valueStatus;
+
+    // This enum indicates how synchronized this entry is with storage.
+    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+  public:
+    auto getValueStatus() const {
+      return valueStatus;
+    }
+
+    // TODO(now): We have `isDirty()`, which tells me we might also want methods for other states,
+    // but the KJ_FAIL_ASSERT is throwing me off a bit. Either we should drop isDirty() and use this
+    // everywhere, or add isClean() and isNotInCache().
+    inline EntrySyncStatus getSyncStatus() const {
+      return syncStatus;
+    }
+
     kj::Maybe<ValuePtr> getValuePtr() const {
       if (valueStatus == EntryValueStatus::PRESENT) {
         return value.asPtr();
@@ -423,11 +437,25 @@ private:
       }
     }
 
-    // This enum indicates how synchronized this entry is with storage.
-    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+    void setFlushing() {
+      syncStatus = EntrySyncStatus::FLUSHING;
+    }
+
+    void setNotInCache() {
+      syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+    }
+
+    // Avoid using this directly. If you want to set the status to CLEAN or DIRTY, consider using
+    // the addToCleanList() and addToDirtyList() methods. If you want to set to NOT_IN_CACHE, use
+    // setNotInCache(). This helps us keep the state transitions managable.
+    void setSyncStatus(EntrySyncStatus newStatus) {
+      // TODO(now): Do we need to worry about certain transitions?
+      // Ex. It seems like we shouldn't ever go from CLEAN -> DIRTY?
+      syncStatus = newStatus;
+    }
 
     bool isDirty() const {
-      switch(syncStatus) {
+      switch(getSyncStatus()) {
         case EntrySyncStatus::DIRTY:
         case EntrySyncStatus::FLUSHING: {
           return true;
@@ -626,9 +654,23 @@ private:
   // Type of a lock on `SharedLru::cleanList`. We use the same lock to protect `currentValues`.
   typedef kj::Locked<kj::List<Entry, &Entry::link>> Lock;
 
+  // Add this entry to the clean list and set its status to CLEAN.
+  // This doesn't do much, but it makes it easier to track what's going on.
+  void addToCleanList(Lock& listLock, Entry& entryRef) {
+    entryRef.setSyncStatus(EntrySyncStatus::CLEAN);
+    listLock->add(entryRef);
+  }
+
+  // Add this entry to the dirty list and set its status to DIRTY.
+  // This doesn't do much, but it makes it easier to track what's going on.
+  void addToDirtyList(Entry& entryRef) {
+    entryRef.setSyncStatus(EntrySyncStatus::DIRTY);
+    dirtyList.add(entryRef);
+  }
+
   // Indicate that an entry was observed by a read operation and so should be moved to the end of
-  // the LRU queue (unless the options say otherwise).
-  void touchEntry(Lock& lock, Entry& entry, const ReadOptions& options);
+  // the LRU queue.
+  void touchEntry(Lock& lock, Entry& entry);
 
   // TODO(soon) This function mostly belongs on the SharedLru, not the ActorCache. Notably,
   // `removeEntry()` has to do with the shared clean list but `evictEntry()` has to do with
@@ -742,7 +784,7 @@ public:
   class Iterator {
   public:
     KeyValuePtrPairWithCache operator*() {
-      KJ_IREQUIRE(ptr->get()->valueStatus == ActorCache::EntryValueStatus::PRESENT);
+      KJ_IREQUIRE(ptr->get()->getValueStatus() == ActorCache::EntryValueStatus::PRESENT);
       return { ptr->get()->key, ptr->get()->getValuePtr().orDefault({}), *statusPtr };
     }
     Iterator& operator++() {
@@ -805,40 +847,40 @@ private:
 // forward-declared elsewhere.
 struct ActorCacheSharedLruOptions {
   // Memory usage that the LRU will try to stay under by evicting clean values.
-  size_t softLimit;
+  const size_t softLimit;
 
   // Memory usage at which operations should start failing and actors should be killed for
   // exceeding memory limits.
-  size_t hardLimit;
+  const size_t hardLimit;
 
   // Time period after which a value that hasn't been accessed at all should be evicted even if
   // the total cache size is below `softLimit`.
-  kj::Duration staleTimeout;
+  const kj::Duration staleTimeout;
 
   // How many bytes in a particular ActorCache can be dirty before backpressure is applied on the
   // app.
-  size_t dirtyListByteLimit;
+  const size_t dirtyListByteLimit;
 
   // Maximum number of keys in a single RPC message during a flush. If a message would be larger
   // than this, it'll be split into multiple calls.
   //
   // This should typically be set to ActorStorageClientImpl::MAX_KEYS from
   // supervisor/actor-storage.h.
-  size_t maxKeysPerRpc;
+  const size_t maxKeysPerRpc;
 
   // If true, assume `noCache` for all operations.
-  bool noCache = false;
+  const bool noCache = false;
 
   // If true, don't actually flush anything. This is used in preview sessions, since they keep
   // state strictly in memory.
-  bool neverFlush = false;
+  const bool neverFlush = false;
 };
 
 class ActorCache::SharedLru {
 public:
   using Options = ActorCacheSharedLruOptions;
 
-  explicit SharedLru(Options options);
+  explicit SharedLru(const Options options);
 
   ~SharedLru() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SharedLru);
@@ -847,13 +889,13 @@ public:
   size_t currentSize() const { return size.load(std::memory_order_relaxed); }
 
 private:
-  Options options;
+  const Options options;
 
   // List of clean values, across all caches, ordered from least-recently-used to
   // most-recently-used.
   kj::MutexGuarded<kj::List<Entry, &Entry::link>> cleanList;
 
-  // Total byte size of everything that is cached, including dirty values that are not in `list`.
+  // Total byte size of everything that is cached, including dirty values that aren't in `cleanList`.
   mutable std::atomic<size_t> size = 0;
 
   // TimePoint when we should next evict stale entries. Represented as an int64_t of nanoseconds
