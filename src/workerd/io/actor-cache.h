@@ -407,9 +407,16 @@ private:
     // before the read completes.
     const Value value;
     EntryValueStatus valueStatus;
+
+    // This enum indicates how synchronized this entry is with storage.
+    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
   public:
     EntryValueStatus getValueStatus() const {
       return valueStatus;
+    }
+
+    inline EntrySyncStatus getSyncStatus() const {
+      return syncStatus;
     }
 
     kj::Maybe<ValuePtr> getValuePtr() const {
@@ -427,11 +434,27 @@ private:
       }
     }
 
-    // This enum indicates how synchronized this entry is with storage.
-    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+    void setFlushing() {
+      syncStatus = EntrySyncStatus::FLUSHING;
+    }
+
+    void setNotInCache() {
+      syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+    }
+
+    // Avoid using setClean() and setDirty() directly. If you want to set the status to CLEAN or
+    // DIRTY, consider using the addToCleanList() and addToDirtyList() methods. This helps us keep
+    // the state transitions managable.
+    void setClean() {
+      syncStatus = EntrySyncStatus::CLEAN;
+    }
+
+    void setDirty() {
+      syncStatus = EntrySyncStatus::DIRTY;
+    }
 
     bool isDirty() const {
-      switch(syncStatus) {
+      switch(getSyncStatus()) {
         case EntrySyncStatus::DIRTY:
         case EntrySyncStatus::FLUSHING: {
           return true;
@@ -633,14 +656,14 @@ private:
   // Add this entry to the clean list and set its status to CLEAN.
   // This doesn't do much, but it makes it easier to track what's going on.
   void addToCleanList(Lock& listLock, Entry& entryRef) {
-    entryRef.syncStatus = EntrySyncStatus::CLEAN;
+    entryRef.setClean();
     listLock->add(entryRef);
   }
 
   // Add this entry to the dirty list and set its status to DIRTY.
   // This doesn't do much, but it makes it easier to track what's going on.
   void addToDirtyList(Entry& entryRef) {
-    entryRef.syncStatus = EntrySyncStatus::DIRTY;
+    entryRef.setDirty();
     dirtyList.add(entryRef);
   }
 
