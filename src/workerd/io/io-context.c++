@@ -364,10 +364,8 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
     RunnableImpl(UncaughtExceptionSource source, kj::Exception&& exception)
         : source(source), exception(kj::mv(exception)) {}
     void run(Worker::Lock& lock) override {
-      jsg::Lock& js = lock;
-      auto error = js.exceptionToJsValue(kj::mv(exception));
       // TODO(soon): Add logUncaughtException to jsg::Lock.
-      lock.logUncaughtException(source, error.getHandle(js));
+      lock.logUncaughtException(source, kj::mv(exception));
     }
   };
 
@@ -1086,7 +1084,8 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
       } else {
         if (tryCatch.Message().IsEmpty()) {
           // Should never happen, but check for it because otherwise V8 will crash.
-          KJ_LOG(ERROR, "tryCatch.Message() was empty even when not HasTerminated()??");
+          KJ_LOG(ERROR, "tryCatch.Message() was empty even when not HasTerminated()??",
+              kj::getStackTrace());
           JSG_FAIL_REQUIRE(Error, "(JavaScript exception with no message)");
         } else {
           auto jsException = tryCatch.Exception();
