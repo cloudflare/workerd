@@ -125,10 +125,6 @@ REPLACEMENTS = [
         "reportUndefinedSymbols()",
         "reportUndefinedSymbolsNoOp()"
     ],
-    [
-        "Module.reportUndefinedSymbolsNoOp()",
-        "Module.reportUndefinedSymbols()"
-    ]
 ]
 
 load("//:build/pyodide_bucket.bzl", "PYODIDE_PACKAGE_BUCKET_URL")
