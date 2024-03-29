@@ -21,7 +21,7 @@ Once all binaries (5 platforms) have been automatically added to the release (fe
 
 - navigate to "Actions" github tab
 - pick "Publish to NPM" workflow
-- *keep* main branch
+- select the tag created for the release. (Ex v1.20240327.0 where the middle version is the new compat date)
 - *keep* patch 0 unless there was a problem with release and you need to publish a patch version (increment in that case).
 - if this is a pre-release, check "Is Prerelease" box. If it _is_ a prerelease, the published NPM version will be tagged with `beta`, and have a version number starting with `0.`. Otherwise, the published NPM version will be tagged `latest`, and have a version number starting with `1.`.
 
@@ -31,6 +31,6 @@ Once all binaries (5 platforms) have been automatically added to the release (fe
 
 - navigate to "Actions" github tab
 - pick "Publish types to NPM" workflow
-- *keep* main branch
+- select the tag created for the release. (Ex v1.20240327.0 where the middle version is the new compat date)
 - *keep* patch 0 unless there was a problem with release and you need to publish a patch version (increment in that case).
 - if this is a pre-release, check "Is Prerelease" box. If it _is_ a prerelease, the published NPM version will be tagged with `beta`, and have a version number starting with `0.`.  Otherwise, the published NPM version will be tagged `latest`, and have a version number starting with `4.`.
