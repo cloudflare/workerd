@@ -1,4 +1,4 @@
-From af3147000e4c02116237c3d86d790570f3ec6947 Mon Sep 17 00:00:00 2001
+From 4a43a003fcba6d9a441a906a8c3f4360a2890806 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Tue, 23 May 2023 09:18:57 -0500
 Subject: Make v8::Locker automatically call isolate->Enter().
