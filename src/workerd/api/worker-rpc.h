@@ -395,7 +395,8 @@ public:
 
   kj::Promise<Result> run(
       kj::Own<IoContext::IncomingRequest> incomingRequest,
-      kj::Maybe<kj::StringPtr> entrypointName) override;
+      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::TaskSet& waitUntilTasks) override;
 
   kj::Promise<Result> sendRpc(
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
@@ -479,6 +480,8 @@ public:
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
+    JSG_NESTED_TYPE_NAMED(JsRpcPromise, RpcPromise);
+    JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
     JSG_NESTED_TYPE_NAMED(JsRpcStub, RpcStub);
     JSG_NESTED_TYPE_NAMED(JsRpcTarget, RpcTarget);
   }

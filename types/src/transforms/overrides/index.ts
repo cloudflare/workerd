@@ -6,12 +6,7 @@ import assert from "assert";
 import ts from "typescript";
 import { isUnsatisfiable } from "../../generator/type";
 import { printNode } from "../../print";
-import {
-  ensureExportDeclareModifiers,
-  ensureExportModifier,
-  ensureStatementModifiers,
-  hasModifier,
-} from "../helpers";
+import { ensureStatementModifiers, hasModifier } from "../helpers";
 import { maybeGetDefines, maybeGetOverride } from "./compiler";
 
 export { compileOverridesDefines } from "./compiler";
@@ -102,8 +97,8 @@ function getMemberKey(member: ts.ClassElement | ts.TypeElement): string {
   // allows instance methods to be overridden without affecting static methods
   // of the same name.
   const isStatic =
-    member.modifiers !== undefined &&
-    hasModifier(member.modifiers, ts.SyntaxKind.StaticKeyword);
+    ts.canHaveModifiers(member) &&
+    hasModifier(ts.getModifiers(member), ts.SyntaxKind.StaticKeyword);
   const keyNamespace = isStatic ? "static$" : "instance$";
 
   if (
@@ -227,7 +222,7 @@ function classToTypeElement(
 ): ts.TypeElement {
   if (ts.isMethodDeclaration(member)) {
     return ctx.factory.createMethodSignature(
-      member.modifiers,
+      ts.getModifiers(member),
       member.name,
       member.questionToken,
       member.typeParameters,
@@ -237,7 +232,7 @@ function classToTypeElement(
   }
   if (ts.isPropertyDeclaration(member)) {
     return ctx.factory.createPropertySignature(
-      member.modifiers,
+      ts.getModifiers(member),
       member.name,
       member.questionToken,
       member.type
@@ -259,7 +254,7 @@ You'll need to define a full-replacement override to a "class" if you wish to in
 // Finds and applies the override (if any) for a node, returning the new
 // potentially overridden node
 function applyOverride<
-  Node extends ts.ClassDeclaration | ts.InterfaceDeclaration
+  Node extends ts.ClassDeclaration | ts.InterfaceDeclaration,
 >(
   ctx: ts.TransformationContext,
   overrideCtx: OverrideTransformContext,
@@ -306,7 +301,7 @@ function createOverrideDefineVisitor(
   // inserted in locations of literals instead.
   // TODO(soon): work out why this happens, something to do with source ranges
   //  and invalid source files/programs maybe?
-  const copyLiteralsVisitor: ts.Visitor = (node) => {
+  const copyLiteralsVisitor: ts.Visitor<ts.Node, ts.Node> = (node) => {
     node = ts.visitEachChild(node, copyLiteralsVisitor, ctx);
     if (ts.isStringLiteral(node)) {
       return ctx.factory.createStringLiteral(node.text);
@@ -325,7 +320,6 @@ function createOverrideDefineVisitor(
       node = applyOverride(ctx, overrideCtx, node, (node, override) => {
         return ctx.factory.updateClassDeclaration(
           node,
-          node.decorators,
           node.modifiers,
           override.name,
           override.typeParameters ?? node.typeParameters,
@@ -339,7 +333,6 @@ function createOverrideDefineVisitor(
         assert(override.name !== undefined);
         return ctx.factory.updateInterfaceDeclaration(
           node,
-          node.decorators,
           node.modifiers,
           override.name,
           override.typeParameters ?? node.typeParameters,
@@ -353,9 +346,11 @@ function createOverrideDefineVisitor(
 
     // Process node and defines if defined
     node = ts.visitNode(node, copyLiteralsVisitor);
-    defines = ts.visitNodes(defines, copyLiteralsVisitor);
-    defines = ts.visitNodes(defines, (node) =>
-      ensureStatementModifiers(ctx, node)
+    defines = ts.visitNodes(defines, copyLiteralsVisitor, ts.isStatement);
+    defines = ts.visitNodes(
+      defines,
+      (node) => ensureStatementModifiers(ctx, node),
+      ts.isStatement
     );
 
     if (ts.isTypeAliasDeclaration(node) && isUnsatisfiable(node.type)) {

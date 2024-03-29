@@ -49,6 +49,7 @@ struct Trace @0x8e8d911203762d34 {
   eventInfo :union {
     none @3 :Void;
     fetch @6 :FetchEventInfo;
+    jsRpc @21 :JsRpcEventInfo;
     scheduled @7 :ScheduledEventInfo;
     alarm @9 :AlarmEventInfo;
     queue @15 :QueueEventInfo;
@@ -67,6 +68,10 @@ struct Trace @0x8e8d911203762d34 {
       name @0 :Text;
       value @1 :Text;
     }
+  }
+
+  struct JsRpcEventInfo {
+    methodName @0 :Text;
   }
 
   struct ScheduledEventInfo {
@@ -121,6 +126,8 @@ struct Trace @0x8e8d911203762d34 {
   dispatchNamespace @12 :Text;
   scriptTags @14 :List(Text);
 
+  entrypoint @22 :Text;
+
   diagnosticChannelEvents @17 :List(DiagnosticChannelEvent);
   struct DiagnosticChannelEvent {
     timestampNs @0 :Int64;
@@ -147,6 +154,7 @@ struct QueueMessage @0x944adb18c0352295 {
   timestampNs @1 :Int64;
   data @2 :Data;
   contentType @3 :Text;
+  attempts @4 :UInt16;
 }
 
 struct QueueRetryBatch {

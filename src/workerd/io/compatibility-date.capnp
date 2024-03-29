@@ -308,13 +308,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   brotliContentEncoding @32 :Bool
       $compatEnableFlag("brotli_content_encoding")
+      $compatEnableDate("2024-04-29")
       $compatDisableFlag("no_brotli_content_encoding")
       $neededByFl;
   # Enables compression/decompression support for the brotli compression algorithm.
   # With the flag enabled workerd will support the "br" content encoding in the Request and
   # Response APIs and compress or decompress data accordingly as with gzip.
-  # Note that brotli support also requires backend support from the production environment which
-  # may not be available at this time, limiting the functionality of the flag.
 
   strictCrypto @33 :Bool
       $compatEnableFlag("strict_crypto_checks")

@@ -28,7 +28,6 @@ test("printNode: prints interface", () => {
     f.createTypeReferenceNode("string")
   );
   const declaration = f.createInterfaceDeclaration(
-    /* decorators */ undefined,
     [f.createToken(ts.SyntaxKind.ExportKeyword)],
     "Test",
     [typeParam],
@@ -46,7 +45,6 @@ test("printNode: prints interface", () => {
 
 test("printNodeList: prints statements", () => {
   const interfaceDeclaration = f.createInterfaceDeclaration(
-    /* decorators */ undefined,
     /* modifiers */ undefined,
     "Interface",
     /* typeParams */ undefined,
@@ -54,7 +52,6 @@ test("printNodeList: prints statements", () => {
     []
   );
   const classDeclaration = f.createClassDeclaration(
-    /* decorators */ undefined,
     /* modifiers */ undefined,
     "Class",
     /* typeParams */ undefined,

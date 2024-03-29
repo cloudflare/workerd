@@ -701,11 +701,9 @@ public:
   // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
   // request and get a possibly wrapped stream back.
   //
-  // The returned promise is fulfilled with kj::none if the Cache API PUT quota is already exceeded,
-  // or if the passed stream would cause it to be exceeded. If the stream has an unknown length, you
-  // will get a wrapped stream back that tracks how many bytes are read/pumped out of the stream,
-  // then decrements the per-IoContext quota on destruction.
-  jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> makeCachePutStream(
+  // If the stream has an unknown length, you will get a wrapped stream back that is used to
+  // serialize PUT requests.
+  jsg::Promise<IoOwn<kj::AsyncInputStream>> makeCachePutStream(
       jsg::Lock& js, kj::Own<kj::AsyncInputStream> stream);
   // TODO(cleanup): Factor this into getCacheClient() somehow so it's not opt-in.
 
@@ -779,14 +777,8 @@ private:
 
   // Implementation detail of makeCachePutStream().
 
-  constexpr static size_t MB = 1 << 20;
-  constexpr static size_t GB = 1 << 30;
-  constexpr static size_t DEFAULT_MAX_PUT_SIZE = 5 * GB;
-  // TODO(cleanup): Consider moving this into limitEnforcer if we can do so cleanly, i.e. without
-  // requiring every class inheriting from LimitEnforcer to define a limit. This can be explored
-  // when adding/streamlining limits in workerd.
-  size_t initialPutQuota;
-  kj::Promise<size_t> cachePutQuota;
+  // TODO: Used for Cache PUT serialization.
+  kj::Promise<void> cachePutSerializer;
 
   kj::TaskSet waitUntilTasks;
   EventOutcome waitUntilStatusValue = EventOutcome::OK;

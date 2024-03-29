@@ -24,6 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import assert from 'node:assert';
+import { mock } from 'node:test';
 import util, { inspect } from 'node:util';
 
 const remainingMustCallErrors = new Set();
@@ -3775,5 +3776,51 @@ export const utilInspectError = {
       util.inspect(err, { compact: true, breakLength: 5 }),
       /{ Error: foo\nbar\n    at .+\n  foo: 'bar' }/
     );
+  }
+};
+
+export const logTest = {
+  test() {
+    const original = console.log;
+    console.log = mock.fn();
+
+    util.log('test');
+
+    assert.strictEqual(console.log.mock.callCount(), 1);
+    const args = console.log.mock.calls[0].arguments;
+    assert.strictEqual(args.length, 3);
+    assert.strictEqual(args[0], '%s - %s');
+    // skipping the check on args[1] since it'll be a timestamp that changes
+    assert.strictEqual(args[2], 'test');
+
+    console.log = original;
+  }
+};
+
+export const aborted = {
+  async test() {
+    const signal = AbortSignal.timeout(10);
+    await util.aborted(signal, {});
+
+    await assert.rejects(util.aborted({}, {}), {
+      message: 'The "signal" argument must be an instance of AbortSignal. ' +
+               'Received an instance of Object'
+    });
+  }
+};
+
+export const debuglog = {
+  test() {
+    const original = console.log;
+    console.log = mock.fn();
+
+    util.debuglog('test')('hello');
+
+    assert.strictEqual(console.log.mock.callCount(), 1);
+    const args = console.log.mock.calls[0].arguments;
+    assert.strictEqual(args.length, 1);
+    assert.strictEqual(args[0], 'TEST: hello\n');
+
+    console.log = original;
   }
 };

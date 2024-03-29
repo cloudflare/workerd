@@ -4136,4 +4136,47 @@ void TransformStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tr
   tracker.trackField("readable", readable);
 }
 
+// ======================================================================================
+
+jsg::Ref<ReadableStream> ReadableStream::from(jsg::Lock& js,
+    jsg::AsyncGenerator<jsg::Value> generator) {
+
+  // AsyncGenerator is not a refcounted type, so we need to wrap it in a refcounted
+  // struct so that we can keep it alive through the various promise branches below.
+  struct RefcountedGenerator : public kj::Refcounted {
+    jsg::AsyncGenerator<jsg::Value> generator;
+    RefcountedGenerator(jsg::AsyncGenerator<jsg::Value> generator)
+        : generator(kj::mv(generator)) {}
+  };
+  auto rcGenerator = kj::refcounted<RefcountedGenerator>(kj::mv(generator));
+
+  return constructor(js, UnderlyingSource {
+    .pull = [generator=kj::addRef(*rcGenerator)](jsg::Lock& js, auto controller) mutable {
+      auto& c = controller.template get<DefaultController>();
+      return generator->generator.next(js).then(js,
+          JSG_VISITABLE_LAMBDA(
+              (controller=c.addRef(), generator=kj::addRef(*generator)),
+              (controller),
+              (jsg::Lock& js, kj::Maybe<jsg::Value> value) {
+        KJ_IF_SOME(v, value) {
+          controller->enqueue(js, v.getHandle(js));
+        } else {
+          controller->close(js);
+        }
+        return js.resolvedPromise();
+      }), JSG_VISITABLE_LAMBDA(
+              (controller=c.addRef(), generator=kj::addRef(*generator)),
+              (controller),
+              (jsg::Lock& js, jsg::Value reason) {
+        controller->error(js, reason.getHandle(js));
+        return js.rejectedPromise<void>(kj::mv(reason));
+      }));
+    },
+    .cancel = [generator=kj::addRef(*rcGenerator)](jsg::Lock& js, auto reason) mutable {
+      return generator->generator.return_(js, kj::none)
+          .then(js, [genertor=kj::mv(generator)](auto& lock) {});
+    },
+  }, StreamQueuingStrategy { .highWaterMark = 0, });
+}
+
 }  // namespace workerd::api

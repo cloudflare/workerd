@@ -179,7 +179,6 @@ export function createParamDeclarationNodes(
     }
 
     const param = f.createParameterDeclaration(
-      /* decorators */ undefined,
       /* modifiers */ undefined,
       dotDotDotToken,
       getParameterName(fullyQualifiedParentName, name, i),

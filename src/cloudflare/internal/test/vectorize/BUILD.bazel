@@ -2,8 +2,5 @@ load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
     src = "vectorize-api-test.wd-test",
-    data = glob([
-        "*.js",
-        "*.capnp",
-    ]),
+    data = glob(["*.js"]),
 )

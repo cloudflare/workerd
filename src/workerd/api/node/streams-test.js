@@ -39,6 +39,11 @@ import {
 } from 'node:stream';
 
 import {
+  ByteLengthQueuingStrategy,
+} from 'node:stream/web';
+strictEqual(ByteLengthQueuingStrategy, globalThis.ByteLengthQueuingStrategy);
+
+import {
   EventEmitter,
 } from 'node:events';
 

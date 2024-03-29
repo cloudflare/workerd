@@ -9,7 +9,6 @@
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
     "exactOptionalPropertyTypes": true,
-    "moduleResolution": "node",
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "noImplicitReturns": true,
@@ -19,6 +18,7 @@
     "noUnusedParameters": true,
     "strictNullChecks": true,
     "esModuleInterop": true,
+    "moduleResolution": "node",
     "declaration": true,
     "types": [
       // todo: consume generated workerd types
@@ -29,7 +29,8 @@
       "node:*": ["./*"],
       "node:stream/*": ["./*"],
       "node-internal:*": ["./internal/*"],
-      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
+      "cloudflare-internal:workers": ["./internal/workers.d.ts"],
+      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"],
     }
   },
   "include": [

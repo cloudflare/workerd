@@ -525,11 +525,13 @@ public:
     kj::Date timestamp;
     jsg::Optional<jsg::Value> body;
     jsg::Optional<kj::Array<kj::byte>> serializedBody;
+    uint16_t attempts;
 
-    JSG_STRUCT(id, timestamp, body, serializedBody);
+    JSG_STRUCT(id, timestamp, body, serializedBody, attempts);
     JSG_STRUCT_TS_OVERRIDE(type ServiceBindingQueueMessage<Body = unknown> = {
       id: string;
       timestamp: Date;
+      attempts: number;
     } & (
       | { body: Body }
       | { serializedBody: ArrayBuffer | ArrayBufferView }
@@ -586,7 +588,36 @@ public:
     if (flags.getServiceBindingExtraHandlers()) {
       JSG_METHOD(queue);
       JSG_METHOD(scheduled);
+
+      JSG_TS_OVERRIDE(type Fetcher<
+        T extends Rpc.EntrypointBranded | undefined = undefined,
+        Reserved extends string = never
+      > = (
+        T extends Rpc.EntrypointBranded
+          ? Rpc.Provider<T, Reserved | "fetch" | "connect" | "queue" | "scheduled">
+          : unknown
+      ) & {
+        fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+        connect(address: SocketAddress | string, options?: SocketOptions): Socket;
+        queue(queueName: string, messages: ServiceBindingQueueMessage[]): Promise<FetcherQueueResult>;
+        scheduled(options?: FetcherScheduledOptions): Promise<FetcherScheduledResult>;
+      });
+    } else {
+      JSG_TS_OVERRIDE(type Fetcher<
+        T extends Rpc.EntrypointBranded | undefined = undefined,
+        Reserved extends string = never
+      > = (
+        T extends Rpc.EntrypointBranded
+          ? Rpc.Provider<T, Reserved | "fetch" | "connect">
+          : unknown
+      ) & {
+        fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+        connect(address: SocketAddress | string, options?: SocketOptions): Socket;
+      });
     }
+    JSG_TS_DEFINE(
+      type Service<T extends Rpc.WorkerEntrypointBranded | undefined = undefined> = Fetcher<T>;
+    );
 
     if (!flags.getFetcherNoGetPutDelete()) {
       // These helpers just map to `fetch()` with the corresponding HTTP method. They were never
@@ -605,14 +636,6 @@ public:
       // be shadowed by non-wildcard methods.
       JSG_METHOD(getRpcMethodForTestOnly);
     }
-
-    JSG_TS_OVERRIDE({
-      fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
-      get: never;
-      put: never;
-      delete: never;
-    });
-    // Add URL to `fetch` input, and omit method helpers from definition
   }
 
 private:

@@ -7,57 +7,48 @@ import * as ts from "typescript";
 import { printNode } from "../print";
 // Checks whether the modifiers array contains a modifier of the specified kind
 export function hasModifier(
-  modifiers: ts.ModifiersArray,
+  modifiers: ReadonlyArray<ts.Modifier> | undefined,
   kind: ts.Modifier["kind"]
 ) {
-  let hasModifier = false;
-  modifiers?.forEach((modifier) => {
-    hasModifier ||= modifier.kind === kind;
-  });
-  return hasModifier;
+  if (modifiers === undefined) return false;
+  return modifiers.some((modifier) => modifier.kind === kind);
 }
 
 // Ensure a modifiers array has the specified modifier, inserting it at the
 // start if it doesn't.
 export function ensureModifier(
   ctx: ts.TransformationContext,
-  modifiers: ts.ModifiersArray | undefined,
+  modifiers: ReadonlyArray<ts.Modifier> | undefined,
   ensure: ts.SyntaxKind.ExportKeyword | ts.SyntaxKind.DeclareKeyword
-): ts.ModifiersArray {
+): ReadonlyArray<ts.Modifier> {
   // If modifiers already contains the required modifier, return it as is...
   if (modifiers !== undefined && hasModifier(modifiers, ensure)) {
     return modifiers;
   }
   // ...otherwise, add the modifier to the start of the array
-  return ctx.factory.createNodeArray(
-    [ctx.factory.createToken(ensure), ...(modifiers ?? [])],
-    modifiers?.hasTrailingComma
-  );
+  return [ctx.factory.createToken(ensure), ...(modifiers ?? [])];
 }
 
 // Ensure a modifiers array doesn't have the specified modifier
 export function ensureNoModifier(
   ctx: ts.TransformationContext,
-  modifiers: ts.ModifiersArray | undefined,
+  modifiers: ReadonlyArray<ts.Modifier> | undefined,
   ensure: ts.SyntaxKind.ExportKeyword | ts.SyntaxKind.DeclareKeyword
-): ts.ModifiersArray {
+): ReadonlyArray<ts.Modifier> {
   // If modifiers already doesn't contain the required modifier, return it as is...
   if (modifiers !== undefined && !hasModifier(modifiers, ensure)) {
     return modifiers;
   }
   // ...otherwise, remove the modifier
-  return ctx.factory.createNodeArray(
-    modifiers?.filter((m) => m.kind !== ensure),
-    modifiers?.hasTrailingComma
-  );
+  return modifiers?.filter((m) => m.kind !== ensure) ?? [];
 }
 
 // Ensure a modifiers array includes the `export` modifier
 export function ensureExportModifier(
   ctx: ts.TransformationContext,
-  modifiers: ts.ModifiersArray | undefined,
+  modifiers: ReadonlyArray<ts.Modifier> | undefined,
   exported = true
-): ts.ModifiersArray {
+): ReadonlyArray<ts.Modifier> {
   return exported
     ? ensureModifier(ctx, modifiers, ts.SyntaxKind.ExportKeyword)
     : ensureNoModifier(ctx, modifiers, ts.SyntaxKind.ExportKeyword);
@@ -66,9 +57,9 @@ export function ensureExportModifier(
 // Ensures a modifiers array includes the `export declare` modifiers
 export function ensureExportDeclareModifiers(
   ctx: ts.TransformationContext,
-  modifiers: ts.ModifiersArray | undefined,
+  modifiers: ReadonlyArray<ts.Modifier> | undefined,
   exported = true
-): ts.ModifiersArray {
+): ReadonlyArray<ts.Modifier> {
   // Call in reverse, so we end up with `export declare` not `declare export`
   modifiers = ensureModifier(ctx, modifiers, ts.SyntaxKind.DeclareKeyword);
   return ensureExportModifier(ctx, modifiers, exported);
@@ -85,8 +76,7 @@ export function ensureStatementModifiers(
   if (ts.isClassDeclaration(node)) {
     return ctx.factory.updateClassDeclaration(
       node,
-      node.decorators,
-      ensureExportDeclareModifiers(ctx, node.modifiers, exported),
+      ensureExportDeclareModifiers(ctx, ts.getModifiers(node), exported),
       node.name,
       node.typeParameters,
       node.heritageClauses,
@@ -94,14 +84,14 @@ export function ensureStatementModifiers(
     );
   }
   if (ts.isInterfaceDeclaration(node)) {
+    const modifiers = ts.getModifiers(node);
     return ctx.factory.updateInterfaceDeclaration(
       node,
-      node.decorators,
       ensureExportModifier(
         ctx,
         exported
-          ? ensureNoModifier(ctx, node.modifiers, ts.SyntaxKind.DeclareKeyword)
-          : ensureModifier(ctx, node.modifiers, ts.SyntaxKind.DeclareKeyword),
+          ? ensureNoModifier(ctx, modifiers, ts.SyntaxKind.DeclareKeyword)
+          : ensureModifier(ctx, modifiers, ts.SyntaxKind.DeclareKeyword),
         exported
       ),
       node.name,
@@ -113,21 +103,20 @@ export function ensureStatementModifiers(
   if (ts.isEnumDeclaration(node)) {
     return ctx.factory.updateEnumDeclaration(
       node,
-      node.decorators,
-      ensureExportDeclareModifiers(ctx, node.modifiers, exported),
+      ensureExportDeclareModifiers(ctx, ts.getModifiers(node), exported),
       node.name,
       node.members
     );
   }
   if (ts.isTypeAliasDeclaration(node)) {
+    const modifiers = ts.getModifiers(node);
     return ctx.factory.updateTypeAliasDeclaration(
       node,
-      node.decorators,
       ensureExportModifier(
         ctx,
         exported
-          ? ensureNoModifier(ctx, node.modifiers, ts.SyntaxKind.DeclareKeyword)
-          : ensureModifier(ctx, node.modifiers, ts.SyntaxKind.DeclareKeyword),
+          ? ensureNoModifier(ctx, modifiers, ts.SyntaxKind.DeclareKeyword)
+          : ensureModifier(ctx, modifiers, ts.SyntaxKind.DeclareKeyword),
         exported
       ),
       node.name,
@@ -138,15 +127,14 @@ export function ensureStatementModifiers(
   if (ts.isVariableStatement(node)) {
     return ctx.factory.updateVariableStatement(
       node,
-      ensureExportDeclareModifiers(ctx, node.modifiers, exported),
+      ensureExportDeclareModifiers(ctx, ts.getModifiers(node), exported),
       node.declarationList
     );
   }
   if (ts.isFunctionDeclaration(node)) {
     return ctx.factory.updateFunctionDeclaration(
       node,
-      node.decorators,
-      ensureExportDeclareModifiers(ctx, node.modifiers, exported),
+      ensureExportDeclareModifiers(ctx, ts.getModifiers(node), exported),
       node.asteriskToken,
       node.name,
       node.typeParameters,
@@ -158,8 +146,7 @@ export function ensureStatementModifiers(
   if (ts.isModuleDeclaration(node)) {
     return ctx.factory.updateModuleDeclaration(
       node,
-      node.decorators,
-      ensureExportDeclareModifiers(ctx, node.modifiers, exported),
+      ensureExportDeclareModifiers(ctx, ts.getModifiers(node), exported),
       node.name,
       node.body
     );

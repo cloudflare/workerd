@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "esnext",
     "module": "esnext",
+    "moduleResolution": "bundler",
     "lib": ["esnext"],
     "strict": true,
     "types": ["../../../bazel-bin/types/definitions/experimental"],

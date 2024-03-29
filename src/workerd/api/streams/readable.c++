@@ -611,6 +611,57 @@ private:
   kj::Maybe<uint64_t> expectedLength;
 };
 
+// Wrapper around ReadableStreamSource that prevents deferred proxying. We need this for RPC
+// streams because although they are "system streams", they become disconnected when the IoContext
+// is destroyed, due to the JsRpcCustomEventImpl being canceled.
+//
+// TODO(someday): Devise a better way for RPC streams to extend the lifetime of the RPC session
+//   beyond the destruction of the IoContext, if it is being used for deferred proxying.
+class NoDeferredProxyReadableStream: public ReadableStreamSource {
+public:
+  NoDeferredProxyReadableStream(kj::Own<ReadableStreamSource> inner, IoContext& ioctx)
+      : inner(kj::mv(inner)), ioctx(ioctx) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+    // Move the deferred proxy part of the task over to the non-deferred part. To do this,
+    // we use `ioctx.waitForDeferredProxy()`, which returns a single promise covering both parts
+    // (and, importantly, registering pending events where needed). Then, we add a noop deferred
+    // proxy to the end of that.
+    return addNoopDeferredProxy(ioctx.waitForDeferredProxy(inner->pumpTo(output, end)));
+  }
+
+  StreamEncoding getPreferredEncoding() override {
+    return inner->getPreferredEncoding();
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    return inner->tryGetLength(encoding);
+  }
+
+  void cancel(kj::Exception reason) override {
+    return inner->cancel(kj::mv(reason));
+  }
+
+  kj::Maybe<Tee> tryTee(uint64_t limit) override {
+    return inner->tryTee(limit).map([&](Tee tee) {
+      return Tee {
+        .branches = {
+          kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[0]), ioctx),
+          kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[1]), ioctx),
+        }
+      };
+    });
+  }
+
+private:
+  kj::Own<ReadableStreamSource> inner;
+  IoContext& ioctx;
+};
+
 }  // namespace
 
 void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -693,7 +744,9 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
 
   externalHandler->setLastStream(ioctx.getByteStreamFactory().kjToCapnp(kj::mv(out)));
 
-  return jsg::alloc<ReadableStream>(ioctx, newSystemStream(kj::mv(in), encoding, ioctx));
+  return jsg::alloc<ReadableStream>(ioctx,
+      kj::heap<NoDeferredProxyReadableStream>(
+          newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
 }
 
 kj::StringPtr ReaderImpl::jsgGetMemoryName() const { return "ReaderImpl"_kjc; }

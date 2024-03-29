@@ -65,12 +65,10 @@ function createVisitor(standards: ParsedTypeDefinition) {
           if (!n && ts.isConstructorDeclaration(member)) return;
 
           assert(n !== undefined, `No name for child of ${name}`);
-          if (member.modifiers === undefined) return;
 
-          const isStatic = hasModifier(
-            member.modifiers,
-            ts.SyntaxKind.StaticKeyword
-          );
+          const isStatic =
+            ts.canHaveModifiers(member) &&
+            hasModifier(ts.getModifiers(member), ts.SyntaxKind.StaticKeyword);
           const target = isStatic ? type : standardsInterface;
           const standardsEquivalent = target.members.find(
             (member) => member.name?.getText() === n
