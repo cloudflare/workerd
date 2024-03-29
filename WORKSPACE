@@ -450,6 +450,7 @@ http_archive(
         "//:patches/v8/0013-Attach-continuation-context-to-Promise-thenable-task.patch",
         "//:patches/v8/0014-increase-visibility-of-virtual-method.patch",
         "//:patches/v8/0015-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
+        "//:patches/v8/0016-wasm-liftoff-arm64-Fix-LoadTaggedPointer.patch",
     ],
     integrity = "sha256-QphdaJn35eZeo+qoayNFIgm02hX5WHjKf+pr3WXCiEs=",
     strip_prefix = "v8-12.3.219.10",

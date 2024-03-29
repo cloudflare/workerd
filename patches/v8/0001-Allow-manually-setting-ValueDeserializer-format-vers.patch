@@ -1,4 +1,4 @@
-From ea3fcf4ecc3e6f5269f36409e061c5a501cd7bc1 Mon Sep 17 00:00:00 2001
+From c0e8edbdd404361db740316cd43bc347bfe4730f Mon Sep 17 00:00:00 2001
 From: Alex Robinson <arobinson@cloudflare.com>
 Date: Wed, 2 Mar 2022 15:58:04 -0600
 Subject: Allow manually setting ValueDeserializer format version
