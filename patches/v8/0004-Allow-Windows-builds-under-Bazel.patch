@@ -1,4 +1,4 @@
-From 651a05cb9182c40ed5faba671f07468db83bce77 Mon Sep 17 00:00:00 2001
+From 92cd581a93d31cb4f0f06e04a479bb35cc5bab13 Mon Sep 17 00:00:00 2001
 From: Brendan Coll <bcoll@cloudflare.com>
 Date: Thu, 16 Mar 2023 11:56:10 +0000
 Subject: Allow Windows builds under Bazel
