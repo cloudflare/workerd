@@ -98,8 +98,7 @@ struct IncomingQueueMessage {
   kj::Date timestamp;
   kj::Array<kj::byte> body;
   kj::Maybe<kj::String> contentType;
-  uint16_t attempts;
-  JSG_STRUCT(id, timestamp, body, contentType, attempts);
+  JSG_STRUCT(id, timestamp, body, contentType);
 
   struct ContentType {
     static constexpr kj::StringPtr TEXT = "text"_kj;
@@ -159,7 +158,6 @@ public:
   kj::StringPtr getId() { return id; }
   kj::Date getTimestamp() { return timestamp; }
   jsg::JsValue getBody(jsg::Lock& js);
-  uint16_t getAttempts() { return attempts; };
 
   void retry(jsg::Optional<QueueRetryOptions> options);
   void ack();
@@ -170,7 +168,6 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
     JSG_READONLY_INSTANCE_PROPERTY(body, getBody);
-    JSG_READONLY_INSTANCE_PROPERTY(attempts, getAttempts);
     JSG_METHOD(retry);
     JSG_METHOD(ack);
 
@@ -189,7 +186,6 @@ private:
   kj::String id;
   kj::Date timestamp;
   jsg::JsRef<jsg::JsValue> body;
-  uint16_t attempts;
   IoPtr<QueueEventResult> result;
 
   void visitForGc(jsg::GcVisitor& visitor) {

@@ -359,7 +359,6 @@ QueueMessage::QueueMessage(jsg::Lock& js,
     : id(kj::str(message.getId())),
       timestamp(message.getTimestampNs() * kj::NANOSECONDS + kj::UNIX_EPOCH),
       body(deserialize(js, message).addRef(js)),
-      attempts(message.getAttempts()),
       result(result) {}
 // Note that we must make deep copies of all data here since the incoming Reader may be
 // deallocated while JS's GC wrappers still exist.
@@ -369,7 +368,6 @@ QueueMessage::QueueMessage(
     : id(kj::mv(message.id)),
       timestamp(message.timestamp),
       body(deserialize(js, kj::mv(message.body), message.contentType).addRef(js)),
-      attempts(message.attempts),
       result(result) {}
 
 jsg::JsValue QueueMessage::getBody(jsg::Lock& js) {
@@ -629,7 +627,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
         KJ_IF_SOME(contentType, p.messages[i].contentType) {
           messages[i].setContentType(contentType);
         }
-        messages[i].setAttempts(p.messages[i].attempts);
       }
     }
   }
