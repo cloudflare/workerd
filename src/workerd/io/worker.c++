@@ -712,89 +712,89 @@ const CpuProfilerDisposer CpuProfilerDisposer::instance {};
 
 static constexpr kj::StringPtr PROFILE_NAME = "Default Profile"_kj;
 
-static void setSamplingInterval(v8::CpuProfiler& profiler, int interval) {
-  profiler.SetSamplingInterval(interval);
-}
+// static void setSamplingInterval(v8::CpuProfiler& profiler, int interval) {
+//   profiler.SetSamplingInterval(interval);
+// }
 
-static void startProfiling(jsg::Lock& js, v8::CpuProfiler& profiler) {
-  js.withinHandleScope([&] {
-    v8::CpuProfilingOptions options(
-      v8::kLeafNodeLineNumbers,
-      v8::CpuProfilingOptions::kNoSampleLimit
-    );
-    profiler.StartProfiling(jsg::v8StrIntern(js.v8Isolate, PROFILE_NAME), kj::mv(options));
-  });
-}
+// static void startProfiling(jsg::Lock& js, v8::CpuProfiler& profiler) {
+//   js.withinHandleScope([&] {
+//     v8::CpuProfilingOptions options(
+//       v8::kLeafNodeLineNumbers,
+//       v8::CpuProfilingOptions::kNoSampleLimit
+//     );
+//     profiler.StartProfiling(jsg::v8StrIntern(js.v8Isolate, PROFILE_NAME), kj::mv(options));
+//   });
+// }
 
-static void stopProfiling(jsg::Lock& js,
-                          v8::CpuProfiler& profiler,
-                          cdp::Command::Builder& cmd) {
-  js.withinHandleScope([&] {
-    auto cpuProfile = profiler.StopProfiling(jsg::v8StrIntern(js.v8Isolate, PROFILE_NAME));
-    if (cpuProfile == nullptr) return; // profiling never started
+// static void stopProfiling(jsg::Lock& js,
+//                           v8::CpuProfiler& profiler,
+//                           cdp::Command::Builder& cmd) {
+//   js.withinHandleScope([&] {
+//     auto cpuProfile = profiler.StopProfiling(jsg::v8StrIntern(js.v8Isolate, PROFILE_NAME));
+//     if (cpuProfile == nullptr) return; // profiling never started
 
-    kj::Vector<const v8::CpuProfileNode*> allNodes;
-    kj::Vector<const v8::CpuProfileNode*> unvisited;
+//     kj::Vector<const v8::CpuProfileNode*> allNodes;
+//     kj::Vector<const v8::CpuProfileNode*> unvisited;
 
-    unvisited.add(cpuProfile->GetTopDownRoot());
-    while (!unvisited.empty()) {
-      auto next = unvisited.back();
-      allNodes.add(next);
-      unvisited.removeLast();
-      for (int i=0; i < next->GetChildrenCount(); i++) {
-        unvisited.add(next->GetChild(i));
-      }
-    }
+//     unvisited.add(cpuProfile->GetTopDownRoot());
+//     while (!unvisited.empty()) {
+//       auto next = unvisited.back();
+//       allNodes.add(next);
+//       unvisited.removeLast();
+//       for (int i=0; i < next->GetChildrenCount(); i++) {
+//         unvisited.add(next->GetChild(i));
+//       }
+//     }
 
-    auto res = cmd.getProfilerStop().initResult();
-    auto profile = res.initProfile();
-    profile.setStartTime(cpuProfile->GetStartTime());
-    profile.setEndTime(cpuProfile->GetEndTime());
+//     auto res = cmd.getProfilerStop().initResult();
+//     auto profile = res.initProfile();
+//     profile.setStartTime(cpuProfile->GetStartTime());
+//     profile.setEndTime(cpuProfile->GetEndTime());
 
-    auto nodes = profile.initNodes(allNodes.size());
-    for (auto i : kj::indices(allNodes)) {
-      auto nodeBuilder = nodes[i];
-      nodeBuilder.setId(allNodes[i]->GetNodeId());
+//     auto nodes = profile.initNodes(allNodes.size());
+//     for (auto i : kj::indices(allNodes)) {
+//       auto nodeBuilder = nodes[i];
+//       nodeBuilder.setId(allNodes[i]->GetNodeId());
 
-      auto callFrame = nodeBuilder.initCallFrame();
-      callFrame.setFunctionName(allNodes[i]->GetFunctionNameStr());
-      callFrame.setScriptId(kj::str(allNodes[i]->GetScriptId()));
-      callFrame.setUrl(allNodes[i]->GetScriptResourceNameStr());
-      // V8 locations are 1-based, but CDP locations are 0-based...
-      callFrame.setLineNumber(allNodes[i]->GetLineNumber() - 1);
-      callFrame.setColumnNumber(allNodes[i]->GetColumnNumber() - 1);
+//       auto callFrame = nodeBuilder.initCallFrame();
+//       callFrame.setFunctionName(allNodes[i]->GetFunctionNameStr());
+//       callFrame.setScriptId(kj::str(allNodes[i]->GetScriptId()));
+//       callFrame.setUrl(allNodes[i]->GetScriptResourceNameStr());
+//       // V8 locations are 1-based, but CDP locations are 0-based...
+//       callFrame.setLineNumber(allNodes[i]->GetLineNumber() - 1);
+//       callFrame.setColumnNumber(allNodes[i]->GetColumnNumber() - 1);
 
-      nodeBuilder.setHitCount(allNodes[i]->GetHitCount());
+//       nodeBuilder.setHitCount(allNodes[i]->GetHitCount());
 
-      auto children = nodeBuilder.initChildren(allNodes[i]->GetChildrenCount());
-      for (int j=0; j < allNodes[i]->GetChildrenCount(); j++) {
-        children.set(j, allNodes[i]->GetChild(j)->GetNodeId());
-      }
+//       auto children = nodeBuilder.initChildren(allNodes[i]->GetChildrenCount());
+//       for (int j=0; j < allNodes[i]->GetChildrenCount(); j++) {
+//         children.set(j, allNodes[i]->GetChild(j)->GetNodeId());
+//       }
 
-      auto hitLineCount = allNodes[i]->GetHitLineCount();
-      auto lineBuffer = kj::heapArray<v8::CpuProfileNode::LineTick>(hitLineCount);
-      allNodes[i]->GetLineTicks(lineBuffer.begin(), lineBuffer.size());
+//       auto hitLineCount = allNodes[i]->GetHitLineCount();
+//       auto lineBuffer = kj::heapArray<v8::CpuProfileNode::LineTick>(hitLineCount);
+//       allNodes[i]->GetLineTicks(lineBuffer.begin(), lineBuffer.size());
 
-      auto positionTicks = nodeBuilder.initPositionTicks(hitLineCount);
-      for (uint j=0; j < hitLineCount; j++) {
-        auto positionTick = positionTicks[j];
-        positionTick.setLine(lineBuffer[j].line);
-        positionTick.setTicks(lineBuffer[j].hit_count);
-      }
-    }
+//       auto positionTicks = nodeBuilder.initPositionTicks(hitLineCount);
+//       for (uint j=0; j < hitLineCount; j++) {
+//         auto positionTick = positionTicks[j];
+//         positionTick.setLine(lineBuffer[j].line);
+//         positionTick.setTicks(lineBuffer[j].hit_count);
+//       }
+//     }
 
-    auto sampleCount = cpuProfile->GetSamplesCount();
-    auto samples = profile.initSamples(sampleCount);
-    auto timeDeltas = profile.initTimeDeltas(sampleCount);
-    auto lastTimestamp = cpuProfile->GetStartTime();
-    for (int i=0; i < sampleCount; i++) {
-      samples.set(i, cpuProfile->GetSample(i)->GetNodeId());
-      auto sampleTime = cpuProfile->GetSampleTimestamp(i);
-      timeDeltas.set(i, sampleTime - lastTimestamp);
-      lastTimestamp = sampleTime;
-    }
-  });
-}
+//     auto sampleCount = cpuProfile->GetSamplesCount();
+//     auto samples = profile.initSamples(sampleCount);
+//     auto timeDeltas = profile.initTimeDeltas(sampleCount);
+//     auto lastTimestamp = cpuProfile->GetStartTime();
+//     for (int i=0; i < sampleCount; i++) {
+//       samples.set(i, cpuProfile->GetSample(i)->GetNodeId());
+//       auto sampleTime = cpuProfile->GetSampleTimestamp(i);
+//       timeDeltas.set(i, sampleTime - lastTimestamp);
+//       lastTimestamp = sampleTime;
+//     }
+//   });
+// }
 
 } // anonymous namespace
 
@@ -2327,48 +2327,50 @@ public:
         err.setMessage("Network.getResponseBody is not supported in this fork");
         break;
       }
-      case cdp::Command::PROFILER_STOP: {
-        KJ_IF_SOME(p, isolate.impl->profiler) {
-          auto& lock = recordedLock.lock;
-          stopProfiling(*lock, *p, cmd);
-        }
-        break;
-      }
-      case cdp::Command::PROFILER_START: {
-        KJ_IF_SOME(p, isolate.impl->profiler) {
-          auto& lock = recordedLock.lock;
-          startProfiling(*lock, *p);
-        }
-        break;
-      }
-      case cdp::Command::PROFILER_SET_SAMPLING_INTERVAL: {
-        KJ_IF_SOME(p, isolate.impl->profiler) {
-          auto interval = cmd.getProfilerSetSamplingInterval().getParams().getInterval();
-          setSamplingInterval(*p, interval);
-        }
-        break;
-      }
-      case cdp::Command::PROFILER_ENABLE: {
-        auto& lock = recordedLock.lock;
-        isolate.impl->profiler = kj::Own<v8::CpuProfiler>(
-            v8::CpuProfiler::New(lock->v8Isolate, v8::kDebugNaming, v8::kLazyLogging),
-            CpuProfilerDisposer::instance);
-        break;
-      }
-      case cdp::Command::TAKE_HEAP_SNAPSHOT: {
-        auto& lock = recordedLock.lock;
-        auto params = cmd.getTakeHeapSnapshot().getParams();
-        takeHeapSnapshot(*lock,
-            params.getExposeInternals(),
-            params.getCaptureNumericValue());
-        break;
-      }
+      // case cdp::Command::PROFILER_STOP: {
+      //   KJ_IF_SOME(p, isolate.impl->profiler) {
+      //     auto& lock = recordedLock.lock;
+      //     stopProfiling(*lock, *p, cmd);
+      //   }
+      //   break;
+      // }
+      // case cdp::Command::PROFILER_START: {
+      //   KJ_IF_SOME(p, isolate.impl->profiler) {
+      //     auto& lock = recordedLock.lock;
+      //     startProfiling(*lock, *p);
+      //   }
+      //   break;
+      // }
+      // case cdp::Command::PROFILER_SET_SAMPLING_INTERVAL: {
+      //   KJ_IF_SOME(p, isolate.impl->profiler) {
+      //     auto interval = cmd.getProfilerSetSamplingInterval().getParams().getInterval();
+      //     setSamplingInterval(*p, interval);
+      //   }
+      //   break;
+      // }
+      // case cdp::Command::PROFILER_ENABLE: {
+      //   auto& lock = recordedLock.lock;
+      //   isolate.impl->profiler = kj::Own<v8::CpuProfiler>(
+      //       v8::CpuProfiler::New(lock->v8Isolate, v8::kDebugNaming, v8::kLazyLogging),
+      //       CpuProfilerDisposer::instance);
+      //   break;
+      // }
+      // case cdp::Command::TAKE_HEAP_SNAPSHOT: {
+      //   auto& lock = recordedLock.lock;
+      //   auto params = cmd.getTakeHeapSnapshot().getParams();
+      //   takeHeapSnapshot(*lock,
+      //       params.getExposeInternals(),
+      //       params.getCaptureNumericValue());
+      //   break;
+      // }
     }
 
     if (!cmd.isUnknown()) {
       sendNotification(cmd);
       return;
     }
+
+    // TODO: do we need to do the same thing for Profiler.start?
 
     auto& lock = recordedLock.lock;
 

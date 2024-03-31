@@ -379,11 +379,11 @@ struct Command $Json.discriminator(name = "method") {
     networkEnable @2 :Method(Network.Command.Enable.Params, Network.Command.Enable.Result) $Json.name("Network.enable") $Json.flatten();
     networkDisable @3 :Method(Network.Command.Disable.Params, Network.Command.Disable.Result) $Json.name("Network.disable") $Json.flatten();
     networkGetResponseBody @4 :Method(Network.Command.GetResponseBody.Params, Network.Command.GetResponseBody.Result) $Json.name("Network.getResponseBody") $Json.flatten();
-    profilerSetSamplingInterval @5 :Method(Profiler.Command.SetSamplingInterval.Params, Profiler.Command.SetSamplingInterval.Result) $Json.name("Profiler.setSamplingInterval") $Json.flatten();
-    profilerEnable @6 :Method(Profiler.Command.Enable.Params, Profiler.Command.Enable.Result) $Json.name("Profiler.enable") $Json.flatten();
-    profilerStart @7 :Method(Profiler.Command.Start.Params, Profiler.Command.Start.Result) $Json.name("Profiler.start") $Json.flatten();
-    profilerStop @8 :Method(Profiler.Command.Stop.Params, Profiler.Command.Stop.Result) $Json.name("Profiler.stop") $Json.flatten();
-    takeHeapSnapshot @9 : Method(HeapProfiler.Command.TakeHeapSnapshot.Params, HeapProfiler.Command.TakeHeapSnapshot.Result) $Json.name("HeapProfiler.takeHeapSnapshot") $Json.flatten();
+    # profilerSetSamplingInterval @5 :Method(Profiler.Command.SetSamplingInterval.Params, Profiler.Command.SetSamplingInterval.Result) $Json.name("Profiler.setSamplingInterval") $Json.flatten();
+    # profilerEnable @6 :Method(Profiler.Command.Enable.Params, Profiler.Command.Enable.Result) $Json.name("Profiler.enable") $Json.flatten();
+    # profilerStart @7 :Method(Profiler.Command.Start.Params, Profiler.Command.Start.Result) $Json.name("Profiler.start") $Json.flatten();
+    # profilerStop @8 :Method(Profiler.Command.Stop.Params, Profiler.Command.Stop.Result) $Json.name("Profiler.stop") $Json.flatten();
+    # takeHeapSnapshot @9 : Method(HeapProfiler.Command.TakeHeapSnapshot.Params, HeapProfiler.Command.TakeHeapSnapshot.Result) $Json.name("HeapProfiler.takeHeapSnapshot") $Json.flatten();
   }
 }
 
