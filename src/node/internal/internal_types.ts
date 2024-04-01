@@ -25,7 +25,7 @@
 
 import internal from "node-internal:util";
 
-export function isCryptoKey(value: unknown): boolean {
+export function isCryptoKey(value: unknown): value is CryptoKey {
   return value instanceof CryptoKey;
 }
 

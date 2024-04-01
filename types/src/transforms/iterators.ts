@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
+import assert from "node:assert";
 import ts from "typescript";
 import { printNode } from "../print";
 
@@ -73,7 +73,12 @@ function createIteratorDeclarationsVisitor(
   checker: ts.TypeChecker,
   iteratorCtx: IteratorTransformContext
 ): ts.Visitor {
-  return (node) => {
+  const visitor: ts.Visitor = (node) => {
+    // Visit interfaces inside module declarations too
+    if (ts.isModuleDeclaration(node) || ts.isModuleBody(node)) {
+      return ts.visitEachChild(node, visitor, ctx);
+    }
+
     if (ts.isInterfaceDeclaration(node)) {
       // Check if interface extends `Iterator`
       const extendsNode = node.heritageClauses?.[0];
@@ -97,17 +102,23 @@ function createIteratorDeclarationsVisitor(
         //   [Symbol.asyncIterator](): any;
         // }
         // ```
+        let nextTypeNode: ts.TypeNode | undefined;
+        for (const member of node.members) {
+          if (
+            ts.isMethodSignature(member) &&
+            ts.isIdentifier(member.name) &&
+            member.name.text === "next" &&
+            member.type !== undefined
+          ) {
+            nextTypeNode = member.type;
+          }
+        }
         assert(
-          node.members.length === (isAsync ? 3 : 2) &&
-            node.members[0].name !== undefined &&
-            ts.isMethodSignature(node.members[0]) &&
-            ts.isIdentifier(node.members[0].name) &&
-            node.members[0].name.text === "next" &&
-            node.members[0].type !== undefined,
+          nextTypeNode !== undefined,
           `Expected iterator-like interface, got "${printNode(node)}"`
         );
+
         // Extract `IteratorBase_ThingIterator_...Next` type
-        let nextTypeNode = node.members[0].type;
         if (isAsync) {
           // Unwrap Promise type
           assert(
@@ -163,6 +174,7 @@ function createIteratorDeclarationsVisitor(
 
     return node;
   };
+  return visitor;
 }
 
 // Replace uses of iterator interfaces with built-in iterator type.
@@ -198,8 +210,13 @@ function createIteratorUsagesVisitor(
       }
     }
 
-    // Visit all interface/class declaration children
-    if (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node)) {
+    // Visit all interface/class/module declaration children
+    if (
+      ts.isInterfaceDeclaration(node) ||
+      ts.isClassDeclaration(node) ||
+      ts.isModuleDeclaration(node) ||
+      ts.isModuleBody(node)
+    ) {
       return ts.visitEachChild(node, visitor, ctx);
     }
 

@@ -167,7 +167,7 @@ test("createTypeNode: function types", () => {
   let typeNode = createTypeNode(type);
   assert.strictEqual(
     printNode(typeNode),
-    "(param0: boolean, param1: number | undefined, param2: string, param3?: any) => void"
+    "(arg0: boolean, arg1: number | undefined, arg2: string, arg3?: any) => void"
   );
 
   // (a?: string, ...b: any[]) => Promise<void>
@@ -181,7 +181,7 @@ test("createTypeNode: function types", () => {
   typeNode = createTypeNode(type);
   assert.strictEqual(
     printNode(typeNode),
-    "(param1?: string, ...param2: any[]) => void | Promise<void>"
+    "(arg1?: string, ...arg2: any[]) => void | Promise<void>"
   );
 });
 

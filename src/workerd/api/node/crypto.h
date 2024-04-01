@@ -215,6 +215,17 @@ public:
     JSG_METHOD(createSecretKey);
     JSG_METHOD(createPrivateKey);
     JSG_METHOD(createPublicKey);
+
+    JSG_TS_DEFINE(
+      type ArrayLike = string | ArrayBuffer | ArrayBufferView;
+      type AsymmetricKeyType = 'rsa' | 'rsa-pss' | 'dsa' | 'ec' | 'x25519' | 'ed25519' | 'dh';
+    );
+    JSG_TS_OVERRIDE({
+      getHkdf(hash: string, key: ArrayLike, salt: ArrayLike, info: ArrayLike, length: number): ArrayBuffer;
+      getPbkdf(password: ArrayLike, salt: ArrayLike, numIteration: number, keylen: number, name: string): ArrayBuffer;
+      exportKey(key: CryptoKey, options?: CryptoImplKeyExportOptions): string | ArrayBuffer | JsonWebKey;
+      getAsymmetricKeyType(key: CryptoKey): AsymmetricKeyType;
+    });
   }
 };
 

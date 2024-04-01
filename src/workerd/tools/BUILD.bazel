@@ -14,8 +14,7 @@ load("//:build/wd_cc_library.bzl", "wd_cc_library")
 wd_cc_library(
     name = "api_encoder_lib",
     deps = [
-        "//src/workerd/api:html-rewriter",
-        "//src/workerd/io",
+        "//src/workerd/api:index",
         "//src/workerd/jsg",
         "//src/workerd/jsg:rtti",
         "@capnp-cpp//src/capnp",
@@ -47,68 +46,22 @@ wd_cc_binary(
     }),
 )
 
-# All compatibility dates that changed public facing types.
-# Remember to update `npm/workers-types/README.md` when adding new dates here.
-compat_dates = [
-    # Oldest compatibility date, with no flags enabled
-    ("2021-01-01", "oldest"),
-    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#formdata-parsing-supports-file
-    ("2021-11-03", "2021-11-03"),
-    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#settersgetters-on-api-object-prototypes
-    ("2022-01-31", "2022-01-31"),
-    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#global-navigator
-    ("2022-03-21", "2022-03-21"),
-    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#r2-bucket-list-respects-the-include-option
-    ("2022-08-04", "2022-08-04"),
-    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#new-url-parser-implementation
-    ("2022-10-31", "2022-10-31"),
-    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#streams-constructors
-    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#compliant-transformstream-constructor
-    ("2022-11-30", "2022-11-30"),
-    # https://github.com/cloudflare/workerd/blob/fcb6f33d10c71975cb2ce68dbf1924a1eeadbd8a/src/workerd/io/compatibility-date.capnp#L275-L280 (http_headers_getsetcookie)
-    ("2023-03-01", "2023-03-01"),
-    # https://github.com/cloudflare/workerd/blob/fcb6f33d10c71975cb2ce68dbf1924a1eeadbd8a/src/workerd/io/compatibility-date.capnp#L307-L312 (urlsearchparams_delete_has_value_arg)
-    ("2023-07-01", "2023-07-01"),
-    # Latest compatibility date (note these types should be the same as the previous entry)
-    (None, "experimental"),
-]
-
-filegroup(
+run_binary_target(
     name = "api_encoder",
-    srcs = [
-        "//src/workerd/tools:api_encoder_" + label
-        for (date, label) in compat_dates
+    outs = ["api.capnp.bin"],
+    args = [
+        "--output",
+        "$(location api.capnp.bin)",
     ],
+    # Cross-compiling is not supported as this runs in target cfg.
     tags = ["no-arm64"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+    tool = "api_encoder_bin",
     visibility = ["//visibility:public"],
 )
-
-[
-    run_binary_target(
-        name = "api_encoder_" + label,
-        outs = [label + ".api.capnp.bin"],
-        args = [
-            "--output",
-            "$(location " + label + ".api.capnp.bin)",
-        ] + ([
-            "--compatibility-date",
-            date,
-        ] if date else []),
-        # Cross-compiling is not supported as this runs in target cfg.
-        tags = ["no-arm64"],
-        target_compatible_with = select({
-            "@platforms//os:windows": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
-        tool = "api_encoder_bin",
-        visibility = ["//visibility:public"],
-    )
-    for (date, label) in compat_dates
-]
 
 # ========================================================================================
 # Parameter Name Extractor

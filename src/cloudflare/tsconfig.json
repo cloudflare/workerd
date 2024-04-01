@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "lib": [ "ESNext", "DOM" ],
+    "lib": ["ESNext"],
     "alwaysStrict": true,
     "strict": true,
     "allowJs": true,
@@ -20,18 +20,16 @@
     "esModuleInterop": true,
     "moduleResolution": "node",
     "declaration": true,
-    "types": [
-      // todo: consume generated workerd types
-      // "@cloudflare/workers-types"
-    ],
+    "types": ["@workerd/types-internal"],
     "paths": {
       "cloudflare:*": ["./*"],
       "cloudflare-internal:*": ["./internal/*"],
-      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
+      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"],
     }
   },
   "include": [
     "*.ts",
-    "internal/*.ts"
+    "internal/*.ts",
+    "../../bazel-bin/types/types_internal" // (for development)
   ]
 }

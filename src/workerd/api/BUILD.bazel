@@ -38,7 +38,8 @@ filegroup(
             ["**/*.h"],
             exclude = [
                 "html-rewriter.h",
-                "modules.h",
+                "index.h",
+                "index-bundles-rtti.h",
                 "rtti.h",
                 "**/*test*.h",
                 "pyodide.h",
@@ -48,7 +49,8 @@ filegroup(
             ["**/*.h"],
             exclude = [
                 "html-rewriter.h",
-                "modules.h",
+                "index.h",
+                "index-bundles-rtti.h",
                 "rtti.h",
                 "**/*test*.h",
                 "pyodide.h",
@@ -60,22 +62,35 @@ filegroup(
 )
 
 wd_cc_library(
-    name = "rtti",
-    srcs = ["rtti.c++"],
+    name = "index",
     hdrs = [
-        "modules.h",
-        "rtti.h",
+        "index.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
         "//src/workerd/server:workerd.capnp.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":html-rewriter",
-        "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/io",
-        "//src/workerd/jsg:rtti",
         "//src/workerd/server:workerd_capnp",
+    ],
+)
+
+wd_cc_library(
+    name = "index_bundles_rtti",
+    srcs = ["rtti.c++"],
+    hdrs = [
+        "index-bundles-rtti.h",
+        "rtti.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":index",
+        "//src/cloudflare",
+        "//src/node",
+        "//src/pyodide",
+        "//src/workerd/jsg:rtti",
     ],
 )
 

@@ -5,7 +5,7 @@
 // TODO: c++ built-ins do not yet support named exports
 import sockets from 'cloudflare-internal:sockets';
 export function connect(
-  address: string | sockets.SocketAddress, options: sockets.SocketOptions
-): sockets.Socket {
+  address: string | SocketAddress, options: SocketOptions
+): Socket {
   return sockets.connect(address, options);
 }

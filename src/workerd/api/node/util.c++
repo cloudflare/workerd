@@ -163,7 +163,7 @@ jsg::JsString UtilModule::getConstructorName(jsg::Lock& js, jsg::JsObject value)
   return js.str(value.getConstructorName());
 }
 
-#define V(Type) bool UtilModule::is##Type(jsg::JsValue value) { return value.is##Type(); };
+#define V(Type, ...) bool UtilModule::is##Type(jsg::JsValue value) { return value.is##Type(); };
   JS_UTIL_IS_TYPES(V)
 #undef V
 bool UtilModule::isAnyArrayBuffer(jsg::JsValue value) {

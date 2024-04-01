@@ -7,7 +7,7 @@
 
 import entrypoints from 'cloudflare-internal:workers';
 
-export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
-export const DurableObject = entrypoints.DurableObject;
-export const RpcStub = entrypoints.RpcStub;
-export const RpcTarget = entrypoints.RpcTarget;
+export import WorkerEntrypoint = entrypoints.WorkerEntrypoint;
+export import DurableObject = entrypoints.DurableObject;
+export import RpcStub = entrypoints.RpcStub;
+export import RpcTarget = entrypoints.RpcTarget;

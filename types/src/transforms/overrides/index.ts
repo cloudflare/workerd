@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
+import assert from "node:assert";
 import ts from "typescript";
 import { isUnsatisfiable } from "../../generator/type";
 import { printNode } from "../../print";
@@ -70,7 +70,7 @@ export function createOverrideDefineTransformer(
         renames: new Map<string, string>(),
       };
       const v1 = createOverrideDefineVisitor(ctx, overrideCtx);
-      const v2 = createRenameReferencesVisitor(ctx, overrideCtx.renames);
+      const v2 = createRenameVisitor(ctx, overrideCtx.renames);
       node = ts.visitEachChild(node, v1, ctx);
       return ts.visitEachChild(node, v2, ctx);
     };
@@ -278,7 +278,10 @@ function applyOverride<
 
   if (isReplacement) {
     assert(override !== undefined);
-    return ensureStatementModifiers(ctx, override);
+    return ensureStatementModifiers(ctx, override, {
+      declare: true,
+      export: false,
+    });
   } else if (override !== undefined) {
     // Merge override into declaration. Whilst we convert all non-replacement
     // overrides to classes, this type classification is ignored when merging.
@@ -312,7 +315,12 @@ function createOverrideDefineVisitor(
     return node;
   };
 
-  return (node) => {
+  const visitor: ts.Visitor = (node) => {
+    // Visit classes and interfaces inside module declarations too
+    if (ts.isModuleDeclaration(node) || ts.isModuleBody(node)) {
+      return ts.visitEachChild(node, visitor, ctx);
+    }
+
     let defines: ts.NodeArray<ts.Statement> | undefined;
 
     if (ts.isClassDeclaration(node) && node.name !== undefined) {
@@ -349,7 +357,8 @@ function createOverrideDefineVisitor(
     defines = ts.visitNodes(defines, copyLiteralsVisitor, ts.isStatement);
     defines = ts.visitNodes(
       defines,
-      (node) => ensureStatementModifiers(ctx, node),
+      (node) =>
+        ensureStatementModifiers(ctx, node, { declare: true, export: false }),
       ts.isStatement
     );
 
@@ -363,12 +372,14 @@ function createOverrideDefineVisitor(
       return defines == undefined ? node : [...defines, node];
     }
   };
+  return visitor;
 }
 
 // Apply previously-recorded type renames to all type references
-function createRenameReferencesVisitor(
+export function createRenameVisitor(
   ctx: ts.TransformationContext,
-  renames: Map</* from */ string, /* to */ string>
+  renames: Map</* from */ string, /* to */ string>,
+  renameClassesInterfaces = false
 ): ts.Visitor {
   const visitor: ts.Visitor = (node) => {
     // Recursively visit all nodes
@@ -410,6 +421,40 @@ function createRenameReferencesVisitor(
           ctx.factory.createIdentifier(rename),
           node.typeArguments
         );
+      }
+    }
+
+    // Rename all class and interface names
+    if (renameClassesInterfaces) {
+      if (
+        ts.isClassDeclaration(node) &&
+        node.name !== undefined &&
+        ts.isIdentifier(node.name)
+      ) {
+        const rename = renames.get(node.name.text);
+        if (rename !== undefined) {
+          return ctx.factory.updateClassDeclaration(
+            node,
+            node.modifiers,
+            ctx.factory.createIdentifier(rename),
+            node.typeParameters,
+            node.heritageClauses,
+            node.members
+          );
+        }
+      }
+      if (ts.isInterfaceDeclaration(node) && ts.isIdentifier(node.name)) {
+        const rename = renames.get(node.name.text);
+        if (rename !== undefined) {
+          return ctx.factory.updateInterfaceDeclaration(
+            node,
+            node.modifiers,
+            ctx.factory.createIdentifier(rename),
+            node.typeParameters,
+            node.heritageClauses,
+            node.members
+          );
+        }
       }
     }
 

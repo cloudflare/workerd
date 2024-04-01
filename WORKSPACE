@@ -410,6 +410,12 @@ npm_translate_lock(
         "capnp-ts@0.7.0": ["//:patches/capnp-ts@0.7.0.patch"],
     },
     pnpm_lock = "//:pnpm-lock.yaml",
+    lifecycle_hooks = {
+        # Skip `esbuild`'s `postinstall` script. Usually, this optimises the dependency by replacing
+        # the JavaScript bin with a direct symlink to the correct binary. Unfortunately, rules_js
+        # attempts to import binaries as JavaScript files.
+        "esbuild": []
+    }
 )
 
 load("@npm//:repositories.bzl", "npm_repositories")

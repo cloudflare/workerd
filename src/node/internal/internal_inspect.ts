@@ -78,8 +78,8 @@ function isError(e: unknown): e is Error {
 }
 
 const typedArrayPrototype = Object.getPrototypeOf(Uint8Array).prototype;
-const typedArrayPrototypeLength: (this: internal.TypedArray) => number = Object.getOwnPropertyDescriptor(typedArrayPrototype, "length")!.get!;
-const typedArrayPrototypeToStringTag: (this: internal.TypedArray) => string = Object.getOwnPropertyDescriptor(typedArrayPrototype, Symbol.toStringTag)!.get!;
+const typedArrayPrototypeLength: (this: TypedArray) => number = Object.getOwnPropertyDescriptor(typedArrayPrototype, "length")!.get!;
+const typedArrayPrototypeToStringTag: (this: TypedArray) => string = Object.getOwnPropertyDescriptor(typedArrayPrototype, Symbol.toStringTag)!.get!;
 
 const setPrototypeSize: (this: Set<unknown>) => number = Object.getOwnPropertyDescriptor(Set.prototype, "size")!.get!;
 const mapPrototypeSize: (this: Map<unknown, unknown>) => number = Object.getOwnPropertyDescriptor(Map.prototype, "size")!.get!;
@@ -794,7 +794,7 @@ function getCtxStyle(value: unknown, constructor: string | null, tag: string): s
   return getPrefix(constructor, tag, fallback);
 }
 
-function formatProxy(ctx: Context, proxy: internal.ProxyDetails, recurseTimes: number): string {
+function formatProxy(ctx: Context, proxy: internal.UtilModuleProxyDetails, recurseTimes: number): string {
   if (ctx.depth !== null && recurseTimes > ctx.depth) {
     return ctx.stylize('Proxy [Array]', 'special');
   }
@@ -993,7 +993,7 @@ function formatRaw(ctx: Context, value: unknown, recurseTimes: number, typedArra
       if (constructor === null) {
         fallback = typedArrayPrototypeToStringTag.call(value);
         // Reconstruct the array information.
-        bound = new (globalThis as unknown as Record<string, { new(value: NodeJS.TypedArray): NodeJS.TypedArray }>)[fallback]!(value);
+        bound = new (globalThis as unknown as Record<string, { new(value: TypedArray): TypedArray }>)[fallback]!(value);
       }
       const size = typedArrayPrototypeLength.call(value);
       const prefix = getPrefix(constructor, tag, fallback, `(${size})`);
@@ -1772,7 +1772,7 @@ function formatArray(ctx: Context, value: unknown[], recurseTimes: number): stri
   return output;
 }
 
-function formatTypedArray(value: internal.TypedArray, length: number, ctx: Context, _ignored: unknown, recurseTimes: number): string[] {
+function formatTypedArray(value: TypedArray, length: number, ctx: Context, _ignored: unknown, recurseTimes: number): string[] {
   const maxLength = Math.min(Math.max(0, ctx.maxArrayLength), length);
   const remaining = value.length - maxLength;
   const output = new Array<string>(maxLength);
@@ -2417,9 +2417,10 @@ function isBuiltinPrototype(proto: unknown) {
 
 function isRpcWildcardType(value: unknown) {
   return (
-    value instanceof internalWorkers.RpcStub ||
+    // `as Function` prevents `Type instantiation is excessively deep and possibly infinite` error
+    value instanceof (internalWorkers.RpcStub as Function) ||
     value instanceof internalWorkers.RpcPromise ||
-    value instanceof internalWorkers.RpcPromise
+    value instanceof internalWorkers.RpcProperty
   );
 }
 

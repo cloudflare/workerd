@@ -5,6 +5,7 @@
 #pragma once
 
 #include "common.h"
+#include "workerd/jsg/jsg.h"
 #include <kj/function.h>
 
 namespace workerd::api {
@@ -128,6 +129,7 @@ public:
   struct ReadableStreamBYOBReaderReadOptions {
     jsg::Optional<int> min;
     JSG_STRUCT(min);
+    JSG_STRUCT_TS_OVERRIDE(ReadableStreamBYOBReaderReadOptions);
   };
 
   jsg::Promise<ReadResult> read(jsg::Lock& js, v8::Local<v8::ArrayBufferView> byobBuffer,
@@ -160,7 +162,7 @@ public:
     JSG_METHOD(readAtLeast);
 
     JSG_TS_OVERRIDE(ReadableStreamBYOBReader {
-      read<T extends ArrayBufferView>(view: T): Promise<ReadableStreamReadResult<T>>;
+      read<T extends ArrayBufferView>(view: T, options?: ReadableStreamBYOBReaderReadOptions): Promise<ReadableStreamReadResult<T>>;
       readAtLeast<T extends ArrayBufferView>(minElements: number, view: T): Promise<ReadableStreamReadResult<T>>;
     });
   }

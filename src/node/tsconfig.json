@@ -20,11 +20,7 @@
     "esModuleInterop": true,
     "moduleResolution": "node",
     "declaration": true,
-    "types": [
-      // todo: consume generated workerd types
-      // "@cloudflare/workers-types"
-      "@types/node",
-    ],
+    "types": ["@workerd/types-internal"],
     "paths": {
       "node:*": ["./*"],
       "node:stream/*": ["./*"],
@@ -37,6 +33,7 @@
     "*.ts",
     "stream/*.ts",
     "stream/*.js",
-    "internal/*.ts"
+    "internal/*.ts",
+    "../../bazel-bin/types/types_internal" // (for development)
   ],
 }

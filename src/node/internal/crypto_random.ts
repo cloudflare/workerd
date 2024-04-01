@@ -92,7 +92,7 @@ export function randomFillSync(
     buffer = Buffer.from(buffer as ArrayBuffer);
   }
   buffer = (buffer as Buffer).subarray(offset, offset + size);
-  return crypto.getRandomValues(buffer as ArrayBufferView);
+  return crypto.getRandomValues(buffer as TypedArray);
 }
 
 export type RandomFillCallback = (err: any|null, buf?: ArrayBufferView|ArrayBuffer) => void;

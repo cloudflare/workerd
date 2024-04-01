@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
+import assert from "node:assert";
 import {
   Constant,
   Member,
@@ -22,7 +22,9 @@ import {
   maybeUnwrapOptional,
 } from "./type";
 
-function createMethodPartial(
+export const FULLY_QUALIFIED_NAME_PREFIX = "fqn$";
+
+export function createMethodPartial(
   fullyQualifiedParentName: string,
   method: Method
 ): [ts.Modifier[], string, ts.ParameterDeclaration[], ts.TypeNode] {
@@ -111,7 +113,7 @@ function createPrototypeProperty(
       /* modifiers */ undefined,
       name,
       [param],
-      undefined
+      /* body */ undefined
     );
     return [getter, setter];
   }
@@ -150,8 +152,9 @@ function createInterfaceMemberNode(
   let result: ts.TypeNode;
   let questionToken: ts.QuestionToken | undefined;
 
+  const which = member.which();
   // noinspection FallThroughInSwitchStatementJS
-  switch (member.which()) {
+  switch (which) {
     case Member_Which.METHOD:
       const method = member.getMethod();
       [modifiers, name, params, result] = createMethodPartial(
@@ -190,11 +193,18 @@ function createInterfaceMemberNode(
         result
       );
     case Member_Which.CONSTANT:
-      assert.fail("Unexpected constant inside interface");
+      const constant = member.getConstant();
+      [modifiers, name, result] = createConstantPartial(constant);
+      return f.createPropertySignature(
+        [f.createToken(ts.SyntaxKind.ReadonlyKeyword)],
+        name,
+        /* questionToken */ undefined,
+        result
+      );
     case Member_Which.CONSTRUCTOR:
       assert.fail("Unexpected constructor member inside interface");
     default:
-      assert.fail(`Unknown member: ${member.which()}`);
+      assert.fail(`Unknown member: ${which satisfies never}`);
   }
 }
 
@@ -228,7 +238,8 @@ function createClassMemberNode(
   let result: ts.TypeNode;
   let questionToken: ts.QuestionToken | undefined;
 
-  switch (member.which()) {
+  const which = member.which();
+  switch (which) {
     case Member_Which.METHOD:
       const method = member.getMethod();
       [modifiers, name, params, result] = createMethodPartial(
@@ -294,7 +305,7 @@ function createClassMemberNode(
         /* body */ undefined
       );
     default:
-      assert.fail(`Unknown member: ${member.which()}`);
+      assert.fail(`Unknown member: ${which satisfies never}`);
   }
 }
 
@@ -342,8 +353,16 @@ function filterUnimplementedProperties<
   });
 }
 
-export function createStructureNode(structure: Structure, asClass: boolean) {
-  const modifiers: ts.Modifier[] = [f.createToken(ts.SyntaxKind.ExportKeyword)];
+export interface CreateStructureNodeOptions {
+  asClass: boolean;
+  ambientContext?: boolean;
+}
+export function createStructureNode(
+  structure: Structure,
+  opts: CreateStructureNodeOptions
+) {
+  const { asClass, ambientContext = false } = opts;
+  const modifiers: ts.Modifier[] = [];
   const name = getTypeName(structure);
   const fullyQualifiedName = structure.getFullyQualifiedName();
 
@@ -363,7 +382,11 @@ export function createStructureNode(structure: Structure, asClass: boolean) {
 
   const members = structure.getMembers();
   if (asClass) {
-    modifiers.push(f.createToken(ts.SyntaxKind.DeclareKeyword));
+    // Should only add `declare` if we're not already in an ambient context
+    if (!ambientContext) {
+      modifiers.push(f.createToken(ts.SyntaxKind.DeclareKeyword));
+    }
+
     // Can't use `flatMap()` here as `members` is a `capnp.List`
     const classMembers = members
       .map((member) => createClassMemberNode(fullyQualifiedName, member))

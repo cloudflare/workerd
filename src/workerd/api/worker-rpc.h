@@ -117,7 +117,11 @@ class JsRpcTarget: public jsg::Object {
 public:
   static jsg::Ref<JsRpcTarget> constructor() { return jsg::alloc<JsRpcTarget>(); }
 
-  JSG_RESOURCE_TYPE(JsRpcTarget) {}
+  JSG_RESOURCE_TYPE(JsRpcTarget) {
+    JSG_TS_OVERRIDE(abstract class RpcTarget implements Rpc.RpcTargetBranded {
+      [Rpc.__RPC_TARGET_BRAND]: never;
+    });
+  }
 
   // Serializes to JsRpcStub.
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
@@ -338,6 +342,15 @@ public:
     JSG_DISPOSE(dispose);
     JSG_CALLABLE(call);
     JSG_WILDCARD_PROPERTY(getRpcMethod);
+
+    JSG_TS_DEFINE(
+      type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
+    );
+    JSG_TS_OVERRIDE(
+      const RpcStub: {
+        new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
+      };
+    );
   }
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
@@ -451,7 +464,23 @@ public:
       const v8::FunctionCallbackInfo<v8::Value>& args,
       jsg::Ref<ExecutionContext> ctx, jsg::JsObject env);
 
-  JSG_RESOURCE_TYPE(WorkerEntrypoint) {}
+  JSG_RESOURCE_TYPE(WorkerEntrypoint) {
+    JSG_TS_OVERRIDE(abstract class WorkerEntrypoint<Env = unknown> implements Rpc.WorkerEntrypointBranded {
+      [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
+
+      protected ctx: ExecutionContext;
+      protected env: Env;
+
+      constructor(ctx: ExecutionContext, env: Env);
+
+      fetch?(request: Request): Response | Promise<Response>;
+      tail?(events: TraceItem[]): void | Promise<void>;
+      trace?(traces: TraceItem[]): void | Promise<void>;
+      scheduled?(controller: ScheduledController): void | Promise<void>;
+      queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+      test?(controller: TestController): void | Promise<void>;
+    });
+  }
 };
 
 // Like WorkerEntrypoint, but this is the base class for Durable Object classes.
@@ -470,7 +499,22 @@ public:
       const v8::FunctionCallbackInfo<v8::Value>& args,
       jsg::Ref<DurableObjectState> ctx, jsg::JsObject env);
 
-  JSG_RESOURCE_TYPE(DurableObjectBase) {}
+  JSG_RESOURCE_TYPE(DurableObjectBase) {
+    JSG_TS_OVERRIDE(abstract class DurableObject<Env = unknown> implements Rpc.DurableObjectBranded {
+      [Rpc.__DURABLE_OBJECT_BRAND]: never;
+
+      protected ctx: DurableObjectState;
+      protected env: Env;
+
+      constructor(ctx: DurableObjectState, env: Env);
+
+      fetch?(request: Request): Response | Promise<Response>;
+      alarm?(): void | Promise<void>;
+      webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;
+      webSocketClose?(ws: WebSocket, code: number, reason: string, wasClean: boolean): void | Promise<void>;
+      webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
+    });
+  }
 };
 
 // The "cloudflare:workers" module, which exposes the WorkerEntrypoint and DurableObject types

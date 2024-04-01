@@ -2,42 +2,22 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import path from "path";
+import assert from "node:assert";
 import ts from "typescript";
 
-interface MemorySourceFile {
-  source: string;
-  sourceFile: ts.SourceFile;
-}
+export const SourcesMap = Map<string, string>;
+export type SourcesMap = InstanceType<typeof SourcesMap>;
 
-// Update compiler host to return in-memory source file
-function patchHostMethod<K extends "fileExists" | "readFile" | "getSourceFile">(
-  host: ts.CompilerHost,
-  sourceFiles: Map<string, MemorySourceFile>,
-  key: K,
-  placeholderResult: (f: MemorySourceFile) => ReturnType<ts.CompilerHost[K]>
-) {
-  const originalMethod: (...args: any[]) => any = host[key];
-  host[key] = (fileName: string, ...args: any[]) => {
-    const sourceFile = sourceFiles.get(path.resolve(fileName));
-    if (sourceFile !== undefined) {
-      return placeholderResult(sourceFile);
-    }
-    return originalMethod.call(host, fileName, ...args);
-  };
-}
+const defaultCompilerOpts = ts.getDefaultCompilerOptions();
 
 // Creates a TypeScript program from in-memory source files. Accepts a Map of
 // fully-resolved "virtual" paths to source code.
 export function createMemoryProgram(
-  sources: Map<string, string>,
+  sources: SourcesMap,
   host?: ts.CompilerHost,
-  options?: ts.CompilerOptions
+  compilerOpts = defaultCompilerOpts
 ): ts.Program {
-  options ??= ts.getDefaultCompilerOptions();
-  host ??= ts.createCompilerHost(options, true);
-
-  const sourceFiles = new Map<string, MemorySourceFile>();
+  const sourceFiles = new Map<string, ts.SourceFile>();
   for (const [sourcePath, source] of sources) {
     const sourceFile = ts.createSourceFile(
       sourcePath,
@@ -46,18 +26,48 @@ export function createMemoryProgram(
       false,
       ts.ScriptKind.TS
     );
-    sourceFiles.set(sourcePath, { source, sourceFile });
+    sourceFiles.set(sourcePath, sourceFile);
   }
 
-  patchHostMethod(host, sourceFiles, "fileExists", () => true);
-  patchHostMethod(host, sourceFiles, "readFile", ({ source }) => source);
-  patchHostMethod(
-    host,
-    sourceFiles,
-    "getSourceFile",
-    ({ sourceFile }) => sourceFile
-  );
+  host ??= {
+    getCurrentDirectory(): string {
+      return "/";
+    },
+    getCanonicalFileName(fileName: string): string {
+      return fileName;
+    },
+    getDefaultLibFileName(_options: ts.CompilerOptions): string {
+      return "";
+    },
+    getNewLine(): string {
+      return "\n";
+    },
+    useCaseSensitiveFileNames(): boolean {
+      return true;
+    },
+    fileExists(_fileName: string): boolean {
+      return true;
+    },
+    readFile(_path: string): string | undefined {
+      return undefined;
+    },
+    writeFile(
+      _path: string,
+      _data: string,
+      _writeByteOrderMark?: boolean
+    ): void {
+      assert.fail("writeFile() not implemented");
+    },
+    getSourceFile(
+      fileName: string,
+      _languageVersionOrOptions: ts.ScriptTarget | ts.CreateSourceFileOptions,
+      _onError?: (message: string) => void,
+      _shouldCreateNewSourceFile?: boolean
+    ): ts.SourceFile | undefined {
+      return sourceFiles.get(fileName);
+    },
+  };
 
-  const rootNames = [...sourceFiles.keys()];
-  return ts.createProgram(rootNames, options, host);
+  const rootNames = Array.from(sources.keys());
+  return ts.createProgram(rootNames, compilerOpts, host);
 }

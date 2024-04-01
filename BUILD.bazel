@@ -22,6 +22,12 @@ npm_link_package(
     package = "@workerd/jsg",
 )
 
+npm_link_package(
+    name = "node_modules/@workerd/types-internal",
+    src = "//types:types_internal",
+    package = "@workerd/types-internal",
+)
+
 capnpc_ts_bin.capnpc_ts_binary(
     name = "capnpc_ts",
     visibility = ["//visibility:public"],

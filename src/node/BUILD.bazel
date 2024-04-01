@@ -11,9 +11,12 @@ wd_ts_bundle(
     modules = glob([
         "*.ts",
         "*.js",
+        "stream/*.ts",
         "stream/*.js",
     ]),
     schema_id = "0xbcc8f57c63814005",
     tsconfig_json = "tsconfig.json",
-    deps = ["//:node_modules/@types/node"],
+    deps = [
+        "//:node_modules/@workerd/types-internal"
+    ],
 )

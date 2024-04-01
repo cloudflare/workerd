@@ -195,7 +195,7 @@ export function createHmac(hmac: string, key: ArrayLike | KeyObject | CryptoKey,
   return new Hmac(hmac, key, options);
 }
 
-let Hmac = function(this: Hmac, hmac: string, key: ArrayLike | KeyObject | cryptoImpl.CryptoKey,
+let Hmac = function(this: Hmac, hmac: string, key: ArrayLike | KeyObject | CryptoKey,
                     options?: TransformOptions): Hmac {
   if (!(this instanceof Hmac)) {
     return new Hmac(hmac, key, options);
@@ -209,8 +209,8 @@ let Hmac = function(this: Hmac, hmac: string, key: ArrayLike | KeyObject | crypt
     }
     this[kHandle] = new cryptoImpl.HmacHandle(hmac, key[kHandle]);
   } else if (isCryptoKey(key)) {
-    if ((key as cryptoImpl.CryptoKey).type !== 'secret') {
-      throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE((key as cryptoImpl.CryptoKey).type, 'secret');
+    if ((key as CryptoKey).type !== 'secret') {
+      throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE((key as CryptoKey).type, 'secret');
     }
     this[kHandle] = new cryptoImpl.HmacHandle(hmac, key);
   } else if (typeof key !== 'string' &&
