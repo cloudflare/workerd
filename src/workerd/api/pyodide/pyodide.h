@@ -3,6 +3,7 @@
 #include "kj/array.h"
 #include "kj/debug.h"
 #include <kj/common.h>
+#include <kj/filesystem.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide.capnp.h>
 #include <workerd/jsg/jsg.h>
@@ -241,6 +242,25 @@ public:
   }
 };
 
+// This cache is used by Pyodide to store wheels fetched over the internet across workerd restarts in local dev only
+class DiskCache: public jsg::Object {
+  static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT; // always set to kj::none
+
+  const kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot;
+public:
+  DiskCache(): cacheRoot(NULL_CACHE_ROOT) {}; // Disabled disk cache
+  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot): cacheRoot(cacheRoot) {};
+
+  jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
+  void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
+
+  JSG_RESOURCE_TYPE(DiskCache) {
+    JSG_METHOD(get);
+    JSG_METHOD(put);
+  }
+};
+
+
 // A limiter which will throw if the startup is found to exceed limits. The script will still be
 // able to run for longer than the limit, but an error will be thrown as soon as the startup
 // finishes. This way we can enforce a Python-specific startup limit.
@@ -300,6 +320,7 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
   api::pyodide::PackagesTarReader,     \
   api::pyodide::PyodideMetadataReader, \
   api::pyodide::ArtifactBundler,       \
+  api::pyodide::DiskCache,             \
   api::pyodide::DisabledInternalJaeger,\
   api::pyodide::SimplePythonLimiter
 
