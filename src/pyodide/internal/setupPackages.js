@@ -3,6 +3,7 @@ import { createTarFS } from "pyodide-internal:tarfs";
 import { createMetadataFS } from "pyodide-internal:metadatafs";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { REQUIREMENTS } from "pyodide-internal:metadata";
+import { simpleRunPython } from "pyodide-internal:util";
 
 const canonicalizeNameRegex = /[-_.]+/g;
 
@@ -143,7 +144,7 @@ export function mountLib(Module, info) {
  * Add the directories created by mountLib to sys.path.
  * Has to run after the runtime is initialized.
  */
-export function adjustSysPath(Module, simpleRunPython) {
+export function adjustSysPath(Module) {
   const site_packages = getSitePackagesPath(Module);
   simpleRunPython(
     Module,
@@ -173,8 +174,9 @@ function addPackageToLoad(lockfile, name, toLoad) {
   }
   const pkgInfo = lockfile.packages[normalizedName];
   if (!pkgInfo) {
-    throw new Error(`It appears that a package ("${name}") you requested is not available yet in workerd. \n` +
-      "If you would like this package to be included, please open an issue at https://github.com/cloudflare/workerd/discussions/new?category=python-packages."
+    throw new Error(
+      `It appears that a package ("${name}") you requested is not available yet in workerd. \n` +
+        "If you would like this package to be included, please open an issue at https://github.com/cloudflare/workerd/discussions/new?category=python-packages.",
     );
   }
 
