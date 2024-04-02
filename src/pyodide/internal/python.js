@@ -260,6 +260,7 @@ function getEmscriptenSettings(lockfile, indexURL) {
     // important because the file system lives outside of linear memory.
     preRun: [prepareFileSystem, setEnv, preloadDynamicLibs],
     instantiateWasm,
+    reportUndefinedSymbolsNoOp() {},
     // if SNAPSHOT_SIZE is defined, start with the linear memory big enough to
     // fit the snapshot. If it's not defined, this falls back to the default.
     INITIAL_MEMORY: SNAPSHOT_SIZE,
