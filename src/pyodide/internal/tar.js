@@ -59,12 +59,18 @@ export function parseTarInfo() {
   let directory = root;
   const buf = new Uint8Array(512);
   let offset = 0;
+  let longName = null; // if truthy, overwrites the filename of the next header
   while (true) {
     Reader.read(offset, buf);
     const info = decodeHeader(buf);
     if (isNaN(info.mode)) {
       // Invalid mode means we're done
       return [root, soFiles];
+    }
+    if(longName) {
+      info.path = longName;
+      info.name = longName;
+      longName = null;
     }
     const contentsOffset = offset + 512;
     offset += 512 * Math.ceil(info.size / 512 + 1);
@@ -77,6 +83,12 @@ export function parseTarInfo() {
       // These metadata directories don't actually have a directory entry which
       // is going to cause us to crash below.
       // Our tar files shouldn't have these anyways...
+      continue;
+    }
+    if (info.type === "L") {
+      const buf = new Uint8Array(info.size);
+      Reader.read(contentsOffset, buf);
+      longName = decodeString(buf);
       continue;
     }
 
