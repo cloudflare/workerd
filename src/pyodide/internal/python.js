@@ -10,8 +10,11 @@ import {
 } from "pyodide-internal:setupPackages";
 import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 import processScriptImports from "pyodide-internal:process_script_imports.py";
-import { MEMORY_SNAPSHOT_READER, IS_CREATING_BASELINE_SNAPSHOT } from "pyodide-internal:metadata";
-import { reportError } from "pyodide-internal:reportError";
+import {
+  MEMORY_SNAPSHOT_READER,
+  IS_CREATING_BASELINE_SNAPSHOT,
+} from "pyodide-internal:metadata";
+import { reportError, simpleRunPython } from "pyodide-internal:util";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -39,7 +42,8 @@ import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
  */
 import stdlib from "pyodide-internal:generated/python_stdlib.zip";
 
-const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
+const SHOULD_UPLOAD_SNAPSHOT =
+  ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
 
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of
@@ -176,6 +180,9 @@ function loadDynlib(Module, path, wasmModuleData) {
   }
 }
 
+// used for checkLoadedSoFiles a snapshot sanity check
+const PRELOADED_SO_FILES = [];
+
 /**
  * This loads all dynamic libraries visible in the site-packages directory. They
  * are loaded before the runtime is initialized outside of the heap, using the
@@ -189,8 +196,20 @@ function loadDynlib(Module, path, wasmModuleData) {
  */
 function preloadDynamicLibs(Module) {
   let SO_FILES_TO_LOAD = SITE_PACKAGES_SO_FILES;
-  if (DSO_METADATA?.settings?.baselineSnapshot) {
-    SO_FILES_TO_LOAD = [[ '_lzma.so' ]];
+  if (
+    IS_CREATING_BASELINE_SNAPSHOT ||
+    DSO_METADATA?.settings?.baselineSnapshot
+  ) {
+    // Ideally this should be just
+    // [[ '_lzma.so' ], [ '_ssl.so' ]]
+    // but we put a few more because we messed up the memory snapshot...
+    SO_FILES_TO_LOAD = [
+      ["_hashlib.so"],
+      ["_lzma.so"],
+      ["_sqlite3.so"],
+      ["_ssl.so"],
+    ];
+    // SO_FILES_TO_LOAD = [[ '_lzma.so' ], [ '_ssl.so' ]];
   }
   try {
     const sitePackages = getSitePackagesPath(Module);
@@ -203,6 +222,7 @@ function preloadDynamicLibs(Module) {
       const wasmModuleData = new Uint8Array(size);
       TarReader.read(contentsOffset, wasmModuleData);
       const path = sitePackages + "/" + soFile.join("/");
+      PRELOADED_SO_FILES.push(path);
       loadDynlib(Module, path, wasmModuleData);
     }
   } catch (e) {
@@ -292,7 +312,7 @@ async function prepareWasmLinearMemory(Module) {
     // were creating the snapshot so the outcome of that is already baked in.
     return;
   }
-  adjustSysPath(Module, simpleRunPython);
+  adjustSysPath(Module);
 
   if (SHOULD_UPLOAD_SNAPSHOT) {
     setUploadFunction(makeLinearMemorySnapshot(Module));
@@ -389,6 +409,21 @@ function memorySnapshotDoImports(Module) {
   simpleRunPython(Module, processScriptImportsString);
 }
 
+function checkLoadedSoFiles(dsoJSON) {
+  PRELOADED_SO_FILES.sort();
+  const keys = Object.keys(dsoJSON).filter((k) => k.startsWith("/"));
+  keys.sort();
+  const msg = `Internal error taking snapshot: mismatch: ${JSON.stringify(keys)} vs ${JSON.stringify(PRELOADED_SO_FILES)}`;
+  if (keys.length !== PRELOADED_SO_FILES.length) {
+    throw new Error(msg);
+  }
+  for (let i = 0; i < keys.length; i++) {
+    if (PRELOADED_SO_FILES[i] !== keys[i]) {
+      throw new Error(msg);
+    }
+  }
+}
+
 /**
  * Create memory snapshot by importing SNAPSHOT_IMPORTS to ensure these packages
  * are initialized in the linear memory snapshot and then saving a copy of the
@@ -397,6 +432,9 @@ function memorySnapshotDoImports(Module) {
 function makeLinearMemorySnapshot(Module) {
   memorySnapshotDoImports(Module);
   const dsoJSON = recordDsoHandles(Module);
+  if (IS_CREATING_BASELINE_SNAPSHOT) {
+    // checkLoadedSoFiles(dsoJSON);
+  }
   return encodeSnapshot(Module.HEAP8, dsoJSON);
 }
 
@@ -437,7 +475,10 @@ function encodeSnapshot(heap, dsoJSON) {
   snapshotOffset = Math.ceil(snapshotOffset / 8) * 8;
   const toUpload = new Uint8Array(snapshotOffset + heap.length);
   const encoder = new TextEncoder();
-  const { written: jsonLength } = encoder.encodeInto(dsoString, toUpload.subarray(HEADER_SIZE));
+  const { written: jsonLength } = encoder.encodeInto(
+    dsoString,
+    toUpload.subarray(HEADER_SIZE),
+  );
   const uint32View = new Uint32Array(toUpload.buffer);
   uint32View[0] = SNAPSHOT_MAGIC;
   uint32View[1] = SNAPSHOT_VERSION;
@@ -462,57 +503,18 @@ function decodeSnapshot() {
     offset += 8;
   }
   const snapshotOffset = buf[0];
-  SNAPSHOT_SIZE = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize() - snapshotOffset;
+  SNAPSHOT_SIZE =
+    MEMORY_SNAPSHOT_READER.getMemorySnapshotSize() - snapshotOffset;
   const jsonLength = buf[1];
   const jsonBuf = new Uint8Array(jsonLength);
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, jsonBuf);
   const jsonTxt = new TextDecoder().decode(jsonBuf);
   DSO_METADATA = JSON.parse(jsonTxt);
-  READ_MEMORY = function(Module) {
+  READ_MEMORY = function (Module) {
     // restore memory from snapshot
     MEMORY_SNAPSHOT_READER.readMemorySnapshot(snapshotOffset, Module.HEAP8);
     MEMORY_SNAPSHOT_READER.disposeMemorySnapshot();
-  }
-}
-
-/**
- *  Simple as possible runPython function which works with no foreign function
- *  interface. We need to use this rather than the normal easier to use
- *  interface because the normal interface doesn't work until after
- *  `API.finalizeBootstrap`, but `API.finalizeBootstrap` makes changes inside
- *  and outside the linear memory which have to stay in sync. It's hard to keep
- *  track of the invariants that `finalizeBootstrap` introduces between JS land
- *  and the linear memory so we do this.
- *
- *  We wrap API.rawRun which does the following steps:
- *  1. use textEncoder.encode to convert `code` into UTF8 bytes
- *  2. malloc space for `code` in the wasm linear memory and copy the encoded
- *      `code` to this pointer
- *  3. redirect standard error to a temporary buffer
- *  4. call `PyRun_SimpleString`, which either works and returns 0 or formats a
- *      traceback to stderr and returns -1
- *      https://docs.python.org/3/c-api/veryhigh.html?highlight=simplestring#c.PyRun_SimpleString
- *  5. frees the `code` pointer
- *  6. Returns the return value from `PyRun_SimpleString` and whatever
- *      information went to stderr.
- *
- *  PyRun_SimpleString executes the code at top level in the `__main__` module,
- *  so all variables defined get leaked into the global namespace unless we
- *  clean them up explicitly.
- */
-function simpleRunPython(emscriptenModule, code) {
-  const [status, err] = emscriptenModule.API.rawRun(code);
-  // status 0: Ok
-  // status -1: Error
-  if (status) {
-    // PyRun_SimpleString will have written a Python traceback to stderr.
-    console.warn("Command failed:", code);
-    console.warn("Error was:");
-    for (const line of err.split("\n")) {
-      console.warn(line);
-    }
-    throw new Error("Failed");
-  }
+  };
 }
 
 let TEST_SNAPSHOT = undefined;
@@ -556,7 +558,10 @@ export async function loadPyodide(lockfile, indexURL) {
   if (DSO_METADATA?.settings?.baselineSnapshot) {
     // Invalidate caches if we have a baseline snapshot because the contents of site-packages may
     // have changed.
-    simpleRunPython(Module, "from importlib import invalidate_caches as f; f(); del f");
+    simpleRunPython(
+      Module,
+      "from importlib import invalidate_caches as f; f(); del f",
+    );
   }
 
   // This is just here for our test suite. Ugly but just about the only way to test this.

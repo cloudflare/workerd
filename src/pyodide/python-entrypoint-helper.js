@@ -21,7 +21,7 @@ import {
   WORKERD_INDEX_URL,
 } from "pyodide-internal:metadata";
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
-import { reportError } from "pyodide-internal:reportError";
+import { reportError } from "pyodide-internal:util";
 import { default as Limiter } from "pyodide-internal:limiter";
 
 function pyimportMainModule(pyodide) {
@@ -123,7 +123,6 @@ function getMainModule() {
       } finally {
         Limiter.finishStartup();
       }
-
     })();
     return mainModulePromise;
   });
@@ -185,7 +184,6 @@ try {
       await getMainModule();
     }
   }
-
 
   if (IS_WORKERD || IS_TRACING) {
     handlers.fetch = makeHandler("on_fetch");
