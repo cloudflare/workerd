@@ -1,5 +1,6 @@
 import { default as UnsafeEval } from "internal:unsafe-eval";
 import { default as DiskCache } from "pyodide-internal:disk_cache";
+export { getRandomValues } from "pyodide-internal:topLevelEntropy/lib";
 
 let lastTime;
 let lastDelta = 0;
@@ -17,23 +18,6 @@ export function monotonicDateNow() {
     lastDelta = 0;
   }
   return now + lastDelta;
-}
-
-/**
- * We initialize Python at top level, but it tries to initialize the random seed with
- * crypto.getRandomValues which will fail at top level. So we don't produce any entropy the first
- * time around and we reseed the rng in the first request context before executing user code.
- */
-export function getRandomValues(arr) {
-  try {
-    return crypto.getRandomValues(arr);
-  } catch (e) {
-    if (e.message.includes("Disallowed operation called within global scope")) {
-      // random.seed() can't work at startup. We'll seed again under the request scope.
-      return arr;
-    }
-    throw e;
-  }
 }
 
 /**

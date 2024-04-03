@@ -1,3 +1,4 @@
+Error.stackTraceLimit = Infinity;
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
   SITE_PACKAGES_INFO,
@@ -12,6 +13,11 @@ import {
   maybeSetupSnapshotUpload,
   restoreSnapshot,
 } from "pyodide-internal:snapshot";
+import {
+  entropyMountFiles,
+  entropyAfterRuntimeInit,
+  entropyBeforeTopLevel,
+} from "pyodide-internal:topLevelEntropy/lib";
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -121,8 +127,9 @@ function getEmscriptenSettings(lockfile, indexURL) {
     // environment variables go here
     env: {
       HOME: "/session",
-      // We don't have access to cryptographic rng at startup so we cannot support hash
-      // randomization. Setting `PYTHONHASHSEED` disables it.
+      // We don't have access to entropy at startup so we cannot support hash
+      // randomization. Setting `PYTHONHASHSEED` disables it. See further
+      // discussion in topLevelEntropy/entropy_patches.py
       PYTHONHASHSEED: "111",
     },
     // This is the index that we use as the base URL to fetch the wheels.
@@ -177,20 +184,23 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
  * APIs, we call this function. If `MEMORY` is defined, then we will have passed
  * `noInitialRun: true` and so the C runtime is in an incoherent state until we
  * restore the linear memory from the snapshot.
- *
- * Returns `true` when existing memory snapshot was loaded.
  */
 async function prepareWasmLinearMemory(Module) {
   // Note: if we are restoring from a snapshot, runtime is not initialized yet.
   mountLib(Module, SITE_PACKAGES_INFO);
+  entropyMountFiles(Module);
   if (SHOULD_RESTORE_SNAPSHOT) {
     restoreSnapshot(Module);
-    // Don't call adjustSysPath here: it was called in the other branch when we
-    // were creating the snapshot so the outcome of that is already baked in.
+  }
+  // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
+  entropyAfterRuntimeInit(Module);
+  if (SHOULD_RESTORE_SNAPSHOT) {
     return;
   }
+  // The effects of these are purely in Python state so they only need to be run
+  // if we didn't restore a snapshot.
+  entropyBeforeTopLevel(Module);
   adjustSysPath(Module);
-  maybeSetupSnapshotUpload(Module);
 }
 
 export async function loadPyodide(lockfile, indexURL) {
@@ -201,6 +211,7 @@ export async function loadPyodide(lockfile, indexURL) {
   await enterJaegerSpan("prepare_wasm_linear_memory", () =>
     prepareWasmLinearMemory(Module),
   );
+  maybeSetupSnapshotUpload(Module);
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
   await enterJaegerSpan("finalize_bootstrap", Module.API.finalizeBootstrap);

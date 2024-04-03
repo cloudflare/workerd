@@ -41,4 +41,5 @@ export function simpleRunPython(emscriptenModule, code) {
     }
     throw new Error("Failed");
   }
+  return err;
 }
