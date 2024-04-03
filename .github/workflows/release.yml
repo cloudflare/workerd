@@ -198,21 +198,6 @@ jobs:
         run: pnpm turbo build --filter miniflare
 
       - name: Run Miniflare tests
-        id: miniflare-test
-        continue-on-error: true
         run: pnpm --filter miniflare test
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
-
-      - name: Report failure
-        if: steps.miniflare-test.outcome == 'failure'
-        run: |
-          curl $MINIFLARE_TEST_WEBHOOK -s -o /dev/null -H "Content-Type: application/json;charset=utf-8" -d "{\"text\":\"🚨 Miniflare tests failed with latest workerd binary: $RUN_URL\"}"
-        env:
-          MINIFLARE_TEST_WEBHOOK: ${{ secrets.MINIFLARE_TEST_WEBHOOK }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      
-      - name: Fail if errors detected
-        shell: bash
-        if: ${{ steps.miniflare-test.outcome == 'failure' }}
-        run: exit 1
