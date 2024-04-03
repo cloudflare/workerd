@@ -67,7 +67,7 @@ export function parseTarInfo() {
       // Invalid mode means we're done
       return [root, soFiles];
     }
-    if(longName) {
+    if (longName) {
       info.path = longName;
       info.name = longName;
       longName = null;
