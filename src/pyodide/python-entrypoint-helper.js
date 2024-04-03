@@ -1,11 +1,8 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import {
-  loadPyodide,
-  uploadArtifacts,
-  getMemoryToUpload,
-} from "pyodide-internal:python";
+import { loadPyodide } from "pyodide-internal:python";
+import { uploadArtifacts, getMemoryToUpload } from "pyodide-internal:snapshot";
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
   REQUIREMENTS,

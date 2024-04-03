@@ -135,7 +135,7 @@ export function patchFetch(origin) {
   // Patch fetch to first go through disk cache, but only when url points to origin
   const origFetch = globalThis.fetch;
   globalThis.fetch = async function (url, options) {
-    if(url.origin !== origin) {
+    if (url.origin !== origin) {
       return origFetch(url, options);
     }
 
