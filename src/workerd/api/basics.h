@@ -493,6 +493,13 @@ public:
       kj::Array<jsg::Ref<AbortSignal>> signals,
       const jsg::TypeHandler<EventTarget::HandlerFunction>& handler);
 
+  // While AbortSignal extends EventTarget, and our EventTarget implementation will
+  // automatically support onabort being set as an own property, the spec defines
+  // onabort as a prototype property on the AbortSignal prototype. Therefore, we
+  // need to explicitly set it as a prototype property here.
+  kj::Maybe<jsg::JsValue> getOnAbort(jsg::Lock& js);
+  void setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler);
+
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
     JSG_STATIC_METHOD(abort);
@@ -505,6 +512,7 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(aborted, getAborted);
       JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
     }
+    JSG_PROTOTYPE_PROPERTY(onabort, getOnAbort, setOnAbort);
     JSG_METHOD(throwIfAborted);
   }
 
@@ -543,6 +551,7 @@ private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
 
   void visitForGc(jsg::GcVisitor& visitor);
 
