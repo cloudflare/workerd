@@ -1957,14 +1957,20 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
           //   hence we will see it here. Rather than try to correct this inconsistency between
           //   struct and dict handling (which could have unintended consequences), let's just
           //   work around by ignoring arrays here.
+          errorReporter.addEmptyExport(name);
           return;
         }
 
         auto dict = js.toDict(handle);
+        bool empty = true;
         for (auto& field: dict.fields) {
           if (!ignoredHandlers.contains(field.name)) {
             errorReporter.addHandler(name, field.name);
+            empty = false;
           }
+        }
+        if (empty) {
+          errorReporter.addEmptyExport(name);
         }
       };
 

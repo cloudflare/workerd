@@ -1346,6 +1346,13 @@ KJ_TEST("Server: named entrypoints") {
                 `    return new Response("hello from bar entrypoint");
                 `  }
                 `}
+                `
+                `// Also exprot some symbols that aren't valid entrypoints, but we should still
+                `// be allowed to point sockets at them. (Sending any actual requests to them
+                `// will still fail.)
+                `export let invalidObj = {};  // no handlers
+                `export let invalidArray = [1, 2];
+                `export let invalidMap = new Map();
             )
           ]
         )
@@ -1354,7 +1361,14 @@ KJ_TEST("Server: named entrypoints") {
     sockets = [
       ( name = "main", address = "test-addr", service = "hello" ),
       ( name = "alt1", address = "foo-addr", service = (name = "hello", entrypoint = "foo")),
-      ( name = "alt2", address = "bar-addr", service = (name = "hello", entrypoint = "bar"))
+      ( name = "alt2", address = "bar-addr", service = (name = "hello", entrypoint = "bar")),
+
+      ( name = "invalid1", address = "invalid1-addr",
+        service = (name = "hello", entrypoint = "invalidObj")),
+      ( name = "invalid2", address = "invalid2-addr",
+        service = (name = "hello", entrypoint = "invalidArray")),
+      ( name = "invalid3", address = "invalid3-addr",
+        service = (name = "hello", entrypoint = "invalidMap")),
     ]
   ))"_kj);
 

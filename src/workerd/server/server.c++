@@ -2580,6 +2580,23 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       }
       set->insert(kj::str(type));
     }
+
+    void addEmptyExport(kj::Maybe<kj::StringPtr> exportName) override {
+      // Even though the export has no handlers, we want to add it to the namedEntrypoints map,
+      // so that other parts of the config are allowed to refer to this entrypoint. Otherwise,
+      // if anything in the config refers to it, we'll treat the config as invalid. Of course, if
+      // any actual requests are sent to an empty handler, they will fail at runtime.
+      //
+      // The reason we want the config to be considered valid even if it refers to empty
+      // entrypoints is so that it's safe to auto-generate a config that binds every exprot to
+      // a socket, without checking the types of all the exports. Miniflare does this.
+      KJ_IF_SOME(e, exportName) {
+        namedEntrypoints.findOrCreate(e,
+            [&]() -> decltype(namedEntrypoints)::Entry { return { kj::str(e), {} }; });
+      } else {
+        defaultEntrypoint.emplace();
+      }
+    }
   };
 
   ErrorReporter errorReporter(*this, name);
