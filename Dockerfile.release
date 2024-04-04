@@ -19,7 +19,7 @@ COPY .bazel-cache /bazel-disk-cache
 RUN npm install -g pnpm@latest-7
 RUN pnpm install
 
-RUN pnpm exec bazelisk build --disk_cache=/bazel-disk-cache --config=release_linux //src/workerd/server:workerd
+RUN pnpm exec bazelisk build --disk_cache=/bazel-disk-cache -c opt //src/workerd/server:workerd
 
 FROM scratch as artifact
 COPY --from=builder /workerd/bazel-bin/src/workerd/server/workerd /workerd-linux-arm64

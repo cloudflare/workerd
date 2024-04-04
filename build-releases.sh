@@ -15,7 +15,7 @@ TAG_NAME=$(curl -sL https://api.github.com/repos/cloudflare/workerd/releases/lat
 git checkout $TAG_NAME
 
 # Build macOS binary
-pnpm exec bazelisk build --disk_cache=./.bazel-cache --config=release_macos //src/workerd/server:workerd
+pnpm exec bazelisk build --disk_cache=./.bazel-cache -c opt //src/workerd/server:workerd
 
 cp bazel-bin/src/workerd/server/workerd ./workerd-darwin-arm64
 
