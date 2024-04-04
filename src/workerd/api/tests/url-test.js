@@ -9778,3 +9778,20 @@ export const urlPatternPortRegression = {
     ok(!pattern.test(url));
   }
 };
+
+export const urlParseStatic = {
+  test() {
+    const url = URL.parse('http://example.org');
+    strictEqual(url.protocol, 'http:');
+    strictEqual(url.host, 'example.org');
+
+    const url2 = URL.parse('foo', 'http://example.org');
+    strictEqual(url2.protocol, 'http:');
+    strictEqual(url2.host, 'example.org');
+    strictEqual(url2.pathname, '/foo');
+
+    // Unlike `new URL(...)` the `URL.parse(...)` function does not throw on invalid URLs
+    // (which is the key point)
+    strictEqual(URL.parse('not valid'), null);
+  }
+};

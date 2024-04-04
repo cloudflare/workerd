@@ -27,7 +27,7 @@
 namespace workerd::api::url {
 
 namespace {
-jsg::Url parse(kj::StringPtr url, kj::Maybe<kj::StringPtr> maybeBase) {
+jsg::Url parseImpl(kj::StringPtr url, kj::Maybe<kj::StringPtr> maybeBase) {
   return JSG_REQUIRE_NONNULL(jsg::Url::tryParse(url, maybeBase), TypeError, "Invalid URL string.");
 }
 }  // namespace
@@ -38,7 +38,7 @@ jsg::Ref<URL> URL::constructor(kj::String url, jsg::Optional<kj::String> base) {
       base.map([](kj::String& base) { return base.asPtr(); }));
 }
 
-URL::URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base) : inner(parse(url, base)) {}
+URL::URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base) : inner(parseImpl(url, base)) {}
 
 URL::~URL() noexcept(false) {
   KJ_IF_SOME(searchParams, maybeSearchParams) {
