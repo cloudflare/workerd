@@ -15,6 +15,8 @@ The release is a 3-step process:
 
 This is pretty simple, and completely automatic—every time the compatibility date in [supported-compatibility-date.txt](src/workerd/io/supported-compatibility-date.txt) changes, a new release is generated, along with the built binaries for `linux-64`, `darwin-64` and `windows-64`. This is governed by the [release.yml](.github/workflows/release.yml) GitHub Action. Binaries for `darwin-arm64` and `linux-arm64` are automatically built with internal runners. It may take a few hours for all binaries to appear on the release.
 
+When there is a build failure with the internal arm64 builders, those releases might not be automatically pushed to the release page. In this case, the binary can be built manually with the [build-releases.sh](build-releases.sh) script and uploaded to the release page. Note that this requires an Apple Silicon Mac. If only the Linux binary is missing, it can be built using [Dockerfile.release](Dockerfile.release) on arm64 Linux using the docker build command used in the build-releases script. Based on these limitations, building binaries manually is discouraged; fixing the CI configuration and restarting the release job should be preferred when possible.
+
 ## Publishing `workerd`
 
 Once all binaries (5 platforms) have been automatically added to the release (few hours):
