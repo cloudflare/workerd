@@ -74,6 +74,10 @@ public:
   public:
     virtual void addError(kj::String error) = 0;
     virtual void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) = 0;
+
+    // Called when an export is encountered that defines no handlers, thus isn't useful for
+    // anything.
+    virtual void addEmptyExport(kj::Maybe<kj::StringPtr> exportName) {}
   };
 
   class LockType;
