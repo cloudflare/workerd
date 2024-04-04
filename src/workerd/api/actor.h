@@ -198,13 +198,13 @@ public:
     JSG_TS_ROOT();
     if (flags.getDurableObjectGetExisting()) {
       JSG_TS_OVERRIDE(<T extends Rpc.DurableObjectBranded | undefined = undefined> {
-        get(id: DurableObjectId): DurableObjectStub<T>;
+        get(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
         getExisting(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
         jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace<T>;
       });
     } else {
       JSG_TS_OVERRIDE(<T extends Rpc.DurableObjectBranded | undefined = undefined> {
-        get(id: DurableObjectId): DurableObjectStub<T>;
+        get(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
         jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace<T>;
       });
     }
