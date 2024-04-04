@@ -229,6 +229,7 @@ build:release --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=
 # enable -O3 for the release configuration. Based on benchmarking there is little difference in
 # performance, but -O3 should generally be expected to be faster for at least parts of the workerd API.
 build:release_unix --copt='-O3'
+build:release_unix --config=release
 build:release_linux --config=release_unix
 
 build:release_macos --config=release_unix
