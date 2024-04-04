@@ -127,8 +127,8 @@ public:
   kj::Promise<void> drain();
 
   // Waits for all "waitUntil" tasks to finish, up to the time limit for scheduled events, as
-  // defined by `scheduledTimeoutMs` in `WorkerLimits`. Returns a bool indicating `true` if the
-  // event completed successfully, or `false`, if it was canceled early.
+  // defined by `scheduledTimeoutMs` in `WorkerLimits`. Returns an enum indicating if the
+  // event completed successfully, hit a timeout, or was aborted.
   //
   // Note that, while this is similar in some ways to `drain()`, `finishScheduled()` is intended
   // to be called synchronously during request handling, i.e. where a client is waiting for the
@@ -138,7 +138,8 @@ public:
   // This method is also used by some custom event handlers (see WorkerInterface::CustomEvent) that
   // need similar behavior, as well as the test handler. TODO(cleanup): Rename to something more
   // generic?
-  kj::Promise<bool> finishScheduled();
+  enum class FinishScheduledResult { COMPLETED, ABORTED, TIMEOUT };
+  kj::Promise<FinishScheduledResult> finishScheduled();
 
   RequestObserver& getMetrics() { return *metrics; }
 
