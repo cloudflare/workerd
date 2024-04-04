@@ -126,12 +126,26 @@ http_archive(
     urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-stdlib/pyodide_packages.tar.zip"],
 )
 
-load("//:build/pyodide_bucket.bzl", "PYODIDE_LOCK_SHA256", "PYODIDE_GITHUB_RELEASE_URL")
+load("//:build/pyodide_bucket.bzl", "PYODIDE_LOCK_SHA256", "PYODIDE_GITHUB_RELEASE_URL", "PYODIDE_ALL_WHEELS_ZIP_SHA256")
 
 http_file(
     name = "pyodide-lock.json",
     sha256 = PYODIDE_LOCK_SHA256,
     url = PYODIDE_GITHUB_RELEASE_URL + "pyodide-lock.json",
+)
+
+http_archive(
+    name = "all_pyodide_wheels",
+    sha256 = PYODIDE_ALL_WHEELS_ZIP_SHA256,
+    type="zip",
+    urls = [PYODIDE_GITHUB_RELEASE_URL + "all_wheels.zip"],
+    build_file_content = """
+filegroup(
+    name = "whls",
+    srcs = glob(["*"]),
+    visibility = ["//visibility:public"]
+)
+    """
 )
 
 # ========================================================================================
