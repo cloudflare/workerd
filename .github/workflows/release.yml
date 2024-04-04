@@ -60,13 +60,10 @@ jobs:
         include:
           - os-name: linux
             os: ubuntu-20.04
-            bazel-config: release_linux
           - os-name: macOS
             os: macos-13
-            bazel-config: release_macos
           - os-name: windows
             os: windows-2022
-            bazel-config: release_windows
     runs-on: ${{ matrix.os }}
     name: build (${{ matrix.os-name }})
     steps:
@@ -109,7 +106,7 @@ jobs:
           fi
       - name: Bazel build
         run: |
-          bazelisk build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=${{ matrix.bazel-config }} //src/workerd/server:workerd
+          bazelisk build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev -c opt //src/workerd/server:workerd
       - name: Strip debug symbols
         if: runner.os != 'Windows'
         run: |
