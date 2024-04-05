@@ -1,7 +1,6 @@
 from js import Response
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
-import requests
 
 API_KEY = "sk-abcdefg"
 
