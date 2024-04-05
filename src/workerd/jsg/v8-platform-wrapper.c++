@@ -20,8 +20,10 @@ V8PlatformWrapper::JobTaskWrapper::JobTaskWrapper(std::unique_ptr<v8::JobTask> i
     : inner(kj::mv(inner)), cageCtx(v8::PointerCageContext::GetCurrent()) {}
 
 void V8PlatformWrapper::JobTaskWrapper::Run(v8::JobDelegate* delegate) {
-  v8::PointerCageContext::Scope cageScope(cageCtx);
-  inner->Run(delegate);
+  runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    v8::PointerCageContext::Scope cageScope(cageCtx);
+    inner->Run(delegate);
+  });
 }
 
 }  // namespace workerd::jsg
