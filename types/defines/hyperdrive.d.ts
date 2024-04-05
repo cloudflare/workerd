@@ -29,7 +29,7 @@ interface Hyperdrive {
   /*
    * The port that must be paired the the host field when connecting.
    */
-  readonly port: string;
+  readonly port: number;
   /*
    * The username to use when authenticating to your database via Hyperdrive.
    * Unlike the host and password, this will be the same every time 
