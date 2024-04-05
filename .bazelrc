@@ -80,6 +80,10 @@ build:debug -c dbg
 
 # Using simple template names saves around 5% of binary size of workerd.
 build:unix --cxxopt='-gsimple-template-names' --host_cxxopt='-gsimple-template-names'
+# Enable hidden visibility for inline functions. This can cause problems when comparing pointers to
+# inline functions across shared library boundaries, but this is unlikely to be done anywhere
+# within workerd, V8 explicitly supports hidden visibility.
+build:unix --cxxopt='-fvisibility-inlines-hidden' --host_cxxopt='-fvisibility-inlines-hidden'
 
 # Define a config mode which is fastbuild but with basic debug info.
 build:fastdbg -c fastbuild
