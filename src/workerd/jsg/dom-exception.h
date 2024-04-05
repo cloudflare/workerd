@@ -5,6 +5,7 @@
 #pragma once
 
 #include "jsg.h"
+#include "ser.h"
 
 #define JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(f) \
     f(INDEX_SIZE_ERR, 1, "IndexSizeError") \
@@ -111,6 +112,17 @@ public:
     tracker.trackField("name", name);
     tracker.trackField("errorForStack", errorForStack);
   }
+
+  // TODO(cleanup): The value is taken from worker-interface.capnp, which we can't
+  // depend on directly here because we cannot introduce the dependency into JSG.
+  // Therefore we have to set it manually. A better solution long term is to actually
+  // move DOMException into workerd/api, but we'll do that separately.
+  static const uint SERIALIZATION_TAG = 7;
+  JSG_SERIALIZABLE(SERIALIZATION_TAG);
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<DOMException> deserialize(
+      jsg::Lock& js, uint tag, jsg::Deserializer& deserializer);
 
 private:
   kj::String message;
