@@ -595,3 +595,18 @@ export const allTheDecoders = {
     });
   }
 };
+
+export const textDecoderStream = {
+  test() {
+    const stream = new TextDecoderStream('utf-16', {
+      fatal: true,
+      ignoreBOM: true,
+    });
+    strictEqual(stream.encoding, 'utf-16le');
+    strictEqual(stream.fatal, true);
+    strictEqual(stream.ignoreBOM, true);
+
+    const enc = new TextEncoderStream();
+    strictEqual(enc.encoding, 'utf-8');
+  }
+};

@@ -49,13 +49,22 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
   return jsg::alloc<TextEncoderStream>(transformer->getReadable(), transformer->getWritable());
 }
 
+TextDecoderStream::TextDecoderStream(
+    jsg::Ref<TextDecoder> decoder,
+    jsg::Ref<ReadableStream> readable,
+    jsg::Ref<WritableStream> writable)
+    : TransformStream(kj::mv(readable), kj::mv(writable)),
+      decoder(kj::mv(decoder)) {}
+
 jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     jsg::Lock& js,
     jsg::Optional<kj::String> label,
     jsg::Optional<TextDecoderStreamInit> options) {
+
   auto decoder = TextDecoder::constructor(kj::mv(label), options.map([](auto& opts) {
     return TextDecoder::ConstructorOptions {
       .fatal = opts.fatal.orDefault(true),
+      .ignoreBOM = opts.ignoreBOM.orDefault(false),
     };
   }));
 
@@ -76,7 +85,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
         return js.resolvedPromise();
       })),
       .flush = jsg::Function<Transformer::FlushAlgorithm>(
-          JSG_VISITABLE_LAMBDA((decoder = kj::mv(decoder)),
+          JSG_VISITABLE_LAMBDA((decoder = decoder.addRef()),
                                 (decoder),
                                 (jsg::Lock& js, auto controller) {
         controller->enqueue(js, JSG_REQUIRE_NONNULL(
@@ -89,7 +98,30 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     StreamQueuingStrategy {},
     StreamQueuingStrategy {});
 
-  return jsg::alloc<TextDecoderStream>(transformer->getReadable(), transformer->getWritable());
+  return jsg::alloc<TextDecoderStream>(
+      kj::mv(decoder),
+      transformer->getReadable(),
+      transformer->getWritable());
+}
+
+kj::StringPtr TextDecoderStream::getEncoding() {
+  return decoder->getEncoding();
+}
+
+bool TextDecoderStream::getFatal() {
+  return decoder->getFatal();
+}
+
+bool TextDecoderStream::getIgnoreBOM() {
+  return decoder->getIgnoreBom();
+}
+
+void TextDecoderStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("decoder", decoder);
+}
+
+void TextDecoderStream::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(decoder);
 }
 
 }  // namespace workerd::api
