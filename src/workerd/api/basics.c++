@@ -458,19 +458,25 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
           //   consistency, we should probably trigger fallback behavior if any handler throws, so
           //   again it doesn't matter. For other types of handlers, e.g. WebSocket 'message', it's
           //   not clear why one would ever register multiple handlers.
-          if (warnOnHandlerReturn) KJ_IF_SOME(r, ret) {
-            warnOnHandlerReturn = false;
-            // To help make debugging easier, let's tailor the warning a bit if it was a promise.
+          KJ_IF_SOME(r, ret) {
             auto handle = r.getHandle(js);
-            if (handle->IsPromise()) {
-              js.logWarning(
-                  kj::str("An event handler returned a promise that will be ignored. Event handlers "
-                          "should not have a return value and should not be async functions."));
-            } else {
-              js.logWarning(
-                  kj::str("An event handler returned a value of type \"",
-                          handle->TypeOf(js.v8Isolate),
-                          "\" that will be ignored. Event handlers should not have a return value."));
+            // Returning true is the same as calling preventDefault() on the event.
+            if (handle->IsTrue()) {
+              event->preventDefault();
+            }
+            if (warnOnHandlerReturn && !handle->IsBoolean()) {
+              warnOnHandlerReturn = false;
+              // To help make debugging easier, let's tailor the warning a bit if it was a promise.
+              if (handle->IsPromise()) {
+                js.logWarning(
+                    kj::str("An event handler returned a promise that will be ignored. Event handlers "
+                            "should not have a return value and should not be async functions."));
+              } else {
+                js.logWarning(
+                    kj::str("An event handler returned a value of type \"",
+                            handle->TypeOf(js.v8Isolate),
+                            "\" that will be ignored. Event handlers should not have a return value."));
+              }
             }
           }
         }

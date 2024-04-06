@@ -128,47 +128,6 @@ private:
   bool clean;
 };
 
-class ErrorEvent: public Event {
-public:
-  ErrorEvent(jsg::Lock& js, kj::String&& message, jsg::JsRef<jsg::JsValue> error)
-      : Event("error"), message(kj::mv(message)), error(kj::mv(error)) {}
-
-  static jsg::Ref<ErrorEvent> constructor() = delete;
-
-  // Due to the context in which we use this ErrorEvent class (internal errors), the getters for
-  // filename, lineNo, and colNo are all falsy.
-  kj::String getFilename() { return nullptr; }
-  kj::StringPtr getMessage() { return message; }
-  int getLineno() { return 0; }
-  int getColno() { return 0; }
-  jsg::JsValue getError(jsg::Lock& js) { return error.getHandle(js); }
-
-
-  JSG_RESOURCE_TYPE(ErrorEvent) {
-    JSG_INHERIT(Event);
-
-    JSG_READONLY_INSTANCE_PROPERTY(filename, getFilename);
-    JSG_READONLY_INSTANCE_PROPERTY(message, getMessage);
-    JSG_READONLY_INSTANCE_PROPERTY(lineno, getLineno);
-    JSG_READONLY_INSTANCE_PROPERTY(colno, getColno);
-    JSG_READONLY_INSTANCE_PROPERTY(error, getError);
-
-    JSG_TS_ROOT();
-    // ErrorEvent will be referenced from the `WebSocketEventMap` define
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("message", message);
-    tracker.trackField("error", error);
-  }
-
-private:
-  kj::String message;
-  jsg::JsRef<jsg::JsValue> error;
-
-  void visitForGc(jsg::GcVisitor& visitor);
-};
-
 // The forward declaration is necessary so we can make some
 // WebSocket methods accessible to WebSocketPair via friend declaration.
 class WebSocket;
@@ -674,7 +633,6 @@ private:
   api::CloseEvent::Initializer,    \
   api::MessageEvent,               \
   api::MessageEvent::Initializer,  \
-  api::ErrorEvent,                 \
   api::WebSocket,                  \
   api::WebSocketPair
 // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE

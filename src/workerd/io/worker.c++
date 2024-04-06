@@ -1025,6 +1025,26 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
         }
         KJ_LOG(INFO, "console warning", message);
       });
+      lock->setErrorReporterCallback([this](jsg::Lock& js, kj::String desc,
+                                            const jsg::JsValue& error,
+                                            const jsg::JsMessage& message) {
+        // Only add exception to trace when running within an I/O context with a tracer.
+        if (IoContext::hasCurrent()) {
+          auto& ioContext = IoContext::current();
+          KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+            addExceptionToTrace(js, ioContext, tracer,
+                UncaughtExceptionSource::REQUEST_HANDLER, error,
+                api->getErrorInterfaceTypeHandler(js));
+          }
+        }
+
+        KJ_IF_SOME(i, impl->inspector) {
+          jsg::sendExceptionToInspector(js, *i.get(), kj::str(desc), error, message);
+        }
+
+        // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
+        KJ_LOG(INFO, "uncaught exception", desc);
+      });
     }
 
     // By default, V8's memory pressure level is "none". This tells V8 that no one else on the
