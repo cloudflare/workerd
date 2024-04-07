@@ -139,14 +139,14 @@ jobs:
         if: always()
         shell: bash
         run: |
-          BAZEL_OUTPUT_BASE=$(bazel info --ui_event_filters=-WARNING output_base)
-          BAZEL_REPOSITORY_CACHE=$(bazel info --ui_event_filters=-WARNING repository_cache)
+          BAZEL_OUTPUT_BASE=$(bazel info output_base)
+          BAZEL_REPOSITORY_CACHE=$(bazel info repository_cache)
           echo "Bazel cache usage statistics"
-          du -hs -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
+          du -ms -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
           echo "Bazel output usage statistics"
-          du -hs -t 1 $BAZEL_OUTPUT_BASE
+          du -ms -t 1 $BAZEL_OUTPUT_BASE
           echo "Workspace usage statistics"
-          du -hs -t 1 $GITHUB_WORKSPACE
+          du -ms -t 1 $GITHUB_WORKSPACE
       - name: Drop large Bazel cache files
         if: always()
         # Github has a nominal 10GB of storage for all cached builds associated with a project.
@@ -159,7 +159,7 @@ jobs:
           if [ -d ~/bazel-disk-cache ]; then
             find ~/bazel-disk-cache -size +100M -type f -exec rm {} \;
             echo "Trimmed Bazel cache usage statistics"
-            du -hs -t 1 ~/bazel-disk-cache/*
+            du -ms -t 1 ~/bazel-disk-cache/*
           else
             echo "Disk cache does not exist: ~/bazel-disk-cache"
           fi

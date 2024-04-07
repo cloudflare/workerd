@@ -69,7 +69,8 @@ build:thin-lto --linkopt='-flto=thin'
 # configuration used for performance profiling
 build:profile --config=thin-lto
 build:profile --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
-build:profile --copt='-g1' --linkopt='-g1' --strip=never
+build:profile --copt='-g1' --copt="-fdebug-info-for-profiling"
+build:profile --strip=never
 
 # configuration used for performance benchmarking is the same as profiling for consistency
 build:benchmark --config=profile
@@ -83,7 +84,6 @@ build:unix --cxxopt='-gsimple-template-names' --host_cxxopt='-gsimple-template-n
 # Define a config mode which is fastbuild but with basic debug info.
 build:fastdbg -c fastbuild
 build:fastdbg --cxxopt='-g1' --host_cxxopt='-g1'
-build:fastdbg --linkopt='-g1' --host_linkopt='-g1'
 build:fastdbg --strip=never
 build:fastdbg --//:dead_strip=False
 
