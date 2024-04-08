@@ -617,7 +617,7 @@ private:
 //
 // TODO(someday): Devise a better way for RPC streams to extend the lifetime of the RPC session
 //   beyond the destruction of the IoContext, if it is being used for deferred proxying.
-class NoDeferredProxyReadableStream: public ReadableStreamSource {
+class NoDeferredProxyReadableStream final: public ReadableStreamSource {
 public:
   NoDeferredProxyReadableStream(kj::Own<ReadableStreamSource> inner, IoContext& ioctx)
       : inner(kj::mv(inner)), ioctx(ioctx) {}
