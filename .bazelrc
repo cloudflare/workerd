@@ -179,8 +179,8 @@ build:linux --force_pic
 # On Linux, garbage collection sections and optimize binary size. These do not apply to the macOS
 # toolchain.
 build:linux --linkopt="-Wl,--gc-sections" --linkopt="-Wl,-O2"
-build:linux --cxxopt="-ffunction-sections" --host_cxxopt="-ffunction-sections"
-build:linux --cxxopt="-fdata-sections" --host_cxxopt="-fdata-sections"
+build:linux --copt="-ffunction-sections" --host_copt="-ffunction-sections"
+build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
 # TODO(later): rustc's -C,codegen-units=1 and ld/lld's -Wl,-O2 on Linux/possibly Windows should
 # bring an additional binary size improvement. These should only be enabled in opt mode which won't
