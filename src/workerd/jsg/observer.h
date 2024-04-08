@@ -120,7 +120,7 @@ struct CompilationObserver {
   // Variation that is called at the start of wasm compilation from cache.
   // Returned value will be destroyed when module compilation finishes.
   // It is guaranteed that isolate lock is held during invocation.
-  virtual kj::Own<void> onWasmCompilationStart(v8::Isolate* isolate) const {
+  virtual kj::Own<void> onWasmCompilationFromCacheStart(v8::Isolate* isolate) const {
     return kj::Own<void>();
   }
 
