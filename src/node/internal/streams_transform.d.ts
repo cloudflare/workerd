@@ -18,14 +18,51 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE. */
 
-// Derived from DefinitelyTyped https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/types/node/stream.d.ts#L1060
+// Derived from DefinitelyTyped https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/types/node/stream.d.ts
 
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import { EventEmitter } from 'node:events';
+import { EventEmitter, EventEmitterConstructor } from 'node:events';
+import type { default as bufferUtil } from 'node-internal:buffer';
+import type { Buffer } from 'node-internal:internal_buffer';
+type BufferEncoding = bufferUtil.BufferEncoding;
 
-interface WritableOptions {
+export namespace NodeJS {
+  interface ReadableStream extends EventEmitter {
+    readable: boolean;
+    read(size?: number): string | Buffer;
+    setEncoding(encoding: BufferEncoding): this;
+    pause(): this;
+    resume(): this;
+    isPaused(): boolean;
+    pipe<T extends WritableStream>(destination: T, options?: { end?: boolean | undefined }): T;
+    unpipe(destination?: WritableStream): this;
+    unshift(chunk: string | Uint8Array, encoding?: BufferEncoding): void;
+    wrap(oldStream: ReadableStream): this;
+    [Symbol.asyncIterator](): AsyncIterableIterator<string | Buffer>;
+  }
+
+  interface WritableStream extends EventEmitter {
+      writable: boolean;
+      write(buffer: Uint8Array | string, cb?: (err?: Error | null) => void): boolean;
+      write(str: string, encoding?: BufferEncoding, cb?: (err?: Error | null) => void): boolean;
+      end(cb?: () => void): void;
+      end(data: string | Uint8Array, cb?: () => void): void;
+      end(str: string, encoding?: BufferEncoding, cb?: () => void): void;
+  }
+
+  interface ReadWriteStream extends ReadableStream, WritableStream {}
+
+  interface ErrnoException extends Error {
+    errno?: number | undefined;
+    code?: string | undefined;
+    path?: string | undefined;
+    syscall?: string | undefined;
+  }
+}
+
+export interface WritableOptions {
   highWaterMark?: number | undefined;
   decodeStrings?: boolean | undefined;
   defaultEncoding?: BufferEncoding | undefined;
@@ -38,7 +75,7 @@ interface WritableOptions {
   autoDestroy?: boolean | undefined;
 }
 
-export class internal extends EventEmitter {
+export class internal extends (EventEmitter as unknown as EventEmitterConstructor) {
   pipe<T extends NodeJS.WritableStream>(destination: T, options?: { end?: boolean | undefined; }): T;
 }
 
@@ -367,3 +404,5 @@ export class Transform extends Duplex {
   _transform(chunk: any, encoding: BufferEncoding, callback: TransformCallback): void;
   _flush(callback: TransformCallback): void;
 }
+
+export class PassThrough extends Transform {}

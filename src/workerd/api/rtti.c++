@@ -4,70 +4,18 @@
 
 #include "rtti.h"
 
+#include <kj/array.h>
 #include <kj/map.h>
 #include <capnp/serialize-packed.h>
 
-#include <workerd/api/actor.h>
-#include <workerd/api/actor-state.h>
-#include <workerd/api/analytics-engine.h>
-#include <workerd/api/cache.h>
-#include <workerd/api/crypto.h>
-#include <workerd/api/encoding.h>
-#include <workerd/api/global-scope.h>
-#include <workerd/api/html-rewriter.h>
-#include <workerd/api/kv.h>
-#include <workerd/api/modules.h>
-#include <workerd/api/queue.h>
-#include <workerd/api/r2.h>
-#include <workerd/api/r2-admin.h>
-#include <workerd/api/sockets.h>
-#include <workerd/api/scheduled.h>
-#include <workerd/api/sql.h>
-#include <workerd/api/streams/standard.h>
-#include <workerd/api/trace.h>
-#include <workerd/api/urlpattern.h>
-#include <workerd/api/node/node.h>
+#include <workerd/api/index.h>
+#include <workerd/api/index-bundles-rtti.h>
 #include <workerd/jsg/modules.capnp.h>
 
-#include <cloudflare/cloudflare.capnp.h>
-
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#else
-#define EW_WEBGPU_ISOLATE_TYPES
-#endif
-
-#define EW_TYPE_GROUP_FOR_EACH(F)                                              \
+#define EW_RTTI_TYPE_GROUP_FOR_EACH(F)                                         \
   F("dom-exception", jsg::DOMException)                                        \
-  F("global-scope", EW_GLOBAL_SCOPE_ISOLATE_TYPES)                             \
-  F("durable-objects", EW_ACTOR_ISOLATE_TYPES)                                 \
-  F("durable-objects-state", EW_ACTOR_STATE_ISOLATE_TYPES)                     \
-  F("analytics-engine", EW_ANALYTICS_ENGINE_ISOLATE_TYPES)                     \
-  F("basics", EW_BASICS_ISOLATE_TYPES)                                         \
-  F("blob", EW_BLOB_ISOLATE_TYPES)                                             \
-  F("cache", EW_CACHE_ISOLATE_TYPES)                                           \
-  F("crypto", EW_CRYPTO_ISOLATE_TYPES)                                         \
-  F("encoding", EW_ENCODING_ISOLATE_TYPES)                                     \
-  F("form-data", EW_FORMDATA_ISOLATE_TYPES)                                    \
-  F("html-rewriter", EW_HTML_REWRITER_ISOLATE_TYPES)                           \
-  F("http", EW_HTTP_ISOLATE_TYPES)                                             \
-  F("kv", EW_KV_ISOLATE_TYPES)                                                 \
-  F("queue", EW_QUEUE_ISOLATE_TYPES)                                           \
-  F("r2-admin", EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES)                         \
-  F("r2", EW_R2_PUBLIC_BETA_ISOLATE_TYPES)                                     \
-  F("worker-rpc", EW_WORKER_RPC_ISOLATE_TYPES)                                 \
-  F("scheduled", EW_SCHEDULED_ISOLATE_TYPES)                                   \
-  F("streams", EW_STREAMS_ISOLATE_TYPES)                                       \
-  F("trace", EW_TRACE_ISOLATE_TYPES)                                           \
-  F("url", EW_URL_ISOLATE_TYPES)                                               \
-  F("url-standard", EW_URL_STANDARD_ISOLATE_TYPES)                             \
-  F("url-pattern", EW_URLPATTERN_ISOLATE_TYPES)                                \
-  F("websocket", EW_WEBSOCKET_ISOLATE_TYPES)                                   \
-  F("sql", EW_SQL_ISOLATE_TYPES)                                               \
-  F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                       \
-  F("node", EW_NODE_ISOLATE_TYPES)                                             \
   F("rtti", EW_RTTI_ISOLATE_TYPES)                                             \
-  F("webgpu", EW_WEBGPU_ISOLATE_TYPES)
+  EW_TYPE_GROUP_FOR_EACH(F)
 
 namespace workerd::api {
 
@@ -146,13 +94,28 @@ CompatibilityFlags::Reader compileFlags(capnp::MessageBuilder &message, kj::Stri
   return kj::mv(reader);
 }
 
+CompatibilityFlags::Reader compileAllFlags(capnp::MessageBuilder &message) {
+  auto output = message.initRoot<CompatibilityFlags>();
+  auto schema = capnp::Schema::from<CompatibilityFlags>();
+  auto dynamicOutput = capnp::toDynamic(output);
+  for (auto field: schema.getFields()) dynamicOutput.set(field, true);
+  auto reader = output.asReader();
+  return kj::mv(reader);
+}
+
 struct TypesEncoder {
 public:
+  TypesEncoder(): compatFlags(kj::heapArray<kj::String>(0)) {}
   TypesEncoder(kj::String compatDate, kj::Array<kj::String> compatFlags): compatDate(kj::mv(compatDate)), compatFlags(kj::mv(compatFlags)) {}
 
   kj::Array<byte> encode() {
     capnp::MallocMessageBuilder flagsMessage;
-    CompatibilityFlags::Reader flags = compileFlags(flagsMessage, compatDate, false, compatFlags);
+    CompatibilityFlags::Reader flags;
+    KJ_IF_SOME(date, compatDate) {
+      flags = compileFlags(flagsMessage, date, true, compatFlags);
+    } else {
+      flags = compileAllFlags(flagsMessage);
+    }
 
     capnp::MallocMessageBuilder message;
     auto root = message.initRoot<jsg::rtti::StructureGroups>();
@@ -164,10 +127,10 @@ public:
 #define EW_TYPE_GROUP_WRITE(Name, Types) writeGroup<Types>(groups, builder, Name);
 
     unsigned int groupsSize = 0;
-    EW_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_COUNT)
+    EW_RTTI_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_COUNT)
     auto groups = root.initGroups(groupsSize);
     groupsIndex = 0;
-    EW_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_WRITE)
+    EW_RTTI_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_WRITE)
     KJ_ASSERT(groupsIndex == groupsSize);
 
 #undef EW_TYPE_GROUP_COUNT
@@ -176,6 +139,7 @@ public:
     // Encode modules
     EncoderModuleRegistryImpl registry;
     registerModules(registry, flags);
+    registerModulesBundles(registry, flags);
 
     unsigned int i = 0;
     auto modulesBuilder = root.initModules(registry.modules.size());
@@ -219,7 +183,7 @@ private:
     KJ_ASSERT(structureIndex == structuresSize);
   }
 
-  kj::String compatDate;
+  kj::Maybe<kj::String> compatDate;
   kj::Array<kj::String> compatFlags;
 
   unsigned int groupsIndex = 0;
@@ -230,6 +194,11 @@ private:
 
 kj::Array<byte> RTTIModule::exportTypes(kj::String compatDate, kj::Array<kj::String> compatFlags) {
   TypesEncoder encoder(kj::mv(compatDate), kj::mv(compatFlags));
+  return encoder.encode();
+}
+
+kj::Array<byte> RTTIModule::exportExperimentalTypes() {
+  TypesEncoder encoder;
   return encoder.encode();
 }
 

@@ -70,8 +70,6 @@ wd_cc_library(
         ":observer",
         ":trace",
         ":worker-interface",
-        "//src/cloudflare",
-        "//src/node",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:r2-api_capnp",
         "//src/workerd/jsg",

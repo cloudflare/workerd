@@ -15,9 +15,11 @@ namespace workerd::api {
 class RTTIModule final: public jsg::Object {
 public:
   kj::Array<byte> exportTypes(kj::String compatDate, kj::Array<kj::String> compatFlags);
+  kj::Array<byte> exportExperimentalTypes();
 
   JSG_RESOURCE_TYPE(RTTIModule) {
     JSG_METHOD(exportTypes);
+    JSG_METHOD(exportExperimentalTypes);
   }
 };
 

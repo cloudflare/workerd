@@ -5,7 +5,6 @@
 #include <kj/common.h>
 #include <kj/filesystem.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
-#include <pyodide/pyodide.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
@@ -326,8 +325,6 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
   if (featureFlags.getPythonWorkers()) {
-    // We add `pyodide:` packages here including python-entrypoint-helper.js.
-    registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
     registry.template addBuiltinModule<PackagesTarReader>(
         "pyodide-internal:packages_tar_reader", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   }

@@ -15,71 +15,64 @@
 #include <workerd/jsg/rtti.h>
 #endif // !API_ENCODER_HDRS_ONLY
 
-#include <workerd/api/actor.h>
-#include <workerd/api/actor-state.h>
-#include <workerd/api/analytics-engine.h>
-#include <workerd/api/cache.h>
-#include <workerd/api/crypto.h>
-#include <workerd/api/encoding.h>
-#include <workerd/api/global-scope.h>
-#include <workerd/api/html-rewriter.h>
-#include <workerd/api/kv.h>
-#include <workerd/api/queue.h>
-#include <workerd/api/r2.h>
-#include <workerd/api/r2-admin.h>
-#include <workerd/api/sockets.h>
-#include <workerd/api/scheduled.h>
-#include <workerd/api/sql.h>
-#include <workerd/api/streams/standard.h>
-#include <workerd/api/trace.h>
-#include <workerd/api/urlpattern.h>
-#include <workerd/api/node/node.h>
-#include <workerd/api/hyperdrive.h>
-
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#else
-#define EW_WEBGPU_ISOLATE_TYPES
-#endif
+#include <workerd/api/index.h>
 
 #if !API_ENCODER_HDRS_ONLY
 
-#define EW_TYPE_GROUP_FOR_EACH(F)                                              \
+#define EW_API_ENCODER_TYPE_GROUP_FOR_EACH(F)                                  \
   F("dom-exception", jsg::DOMException)                                        \
-  F("global-scope", EW_GLOBAL_SCOPE_ISOLATE_TYPES)                             \
-  F("durable-objects", EW_ACTOR_ISOLATE_TYPES)                                 \
-  F("durable-objects-state", EW_ACTOR_STATE_ISOLATE_TYPES)                     \
-  F("analytics-engine", EW_ANALYTICS_ENGINE_ISOLATE_TYPES)                     \
-  F("basics", EW_BASICS_ISOLATE_TYPES)                                         \
-  F("blob", EW_BLOB_ISOLATE_TYPES)                                             \
-  F("cache", EW_CACHE_ISOLATE_TYPES)                                           \
-  F("crypto", EW_CRYPTO_ISOLATE_TYPES)                                         \
-  F("encoding", EW_ENCODING_ISOLATE_TYPES)                                     \
-  F("form-data", EW_FORMDATA_ISOLATE_TYPES)                                    \
-  F("html-rewriter", EW_HTML_REWRITER_ISOLATE_TYPES)                           \
-  F("http", EW_HTTP_ISOLATE_TYPES)                                             \
-  F("hyperdrive", EW_HYPERDRIVE_ISOLATE_TYPES)                                 \
-  F("kv", EW_KV_ISOLATE_TYPES)                                                 \
-  F("queue", EW_QUEUE_ISOLATE_TYPES)                                           \
-  F("r2-admin", EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES)                         \
-  F("r2", EW_R2_PUBLIC_BETA_ISOLATE_TYPES)                                     \
-  F("worker-rpc", EW_WORKER_RPC_ISOLATE_TYPES)                                 \
-  F("scheduled", EW_SCHEDULED_ISOLATE_TYPES)                                   \
-  F("streams", EW_STREAMS_ISOLATE_TYPES)                                       \
-  F("trace", EW_TRACE_ISOLATE_TYPES)                                           \
-  F("url", EW_URL_ISOLATE_TYPES)                                               \
-  F("url-standard", EW_URL_STANDARD_ISOLATE_TYPES)                             \
-  F("url-pattern", EW_URLPATTERN_ISOLATE_TYPES)                                \
-  F("websocket", EW_WEBSOCKET_ISOLATE_TYPES)                                   \
-  F("sql", EW_SQL_ISOLATE_TYPES)                                               \
-  F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                       \
-  F("node", EW_NODE_ISOLATE_TYPES)                                             \
-  F("webgpu", EW_WEBGPU_ISOLATE_TYPES)
+  EW_TYPE_GROUP_FOR_EACH(F)
 
 namespace workerd::api {
 namespace {
 
 using namespace jsg;
+
+struct EncoderModuleRegistryImpl {
+  struct CppModuleContents {
+    CppModuleContents(kj::String structureName) : structureName(kj::mv(structureName)) {}
+
+    kj::String structureName;
+  };
+  struct TypeScriptModuleContents {
+    TypeScriptModuleContents(kj::StringPtr tsDeclarations) : tsDeclarations(tsDeclarations) {}
+
+    kj::StringPtr tsDeclarations;
+  };
+  struct ModuleInfo {
+    ModuleInfo(kj::StringPtr specifier, jsg::ModuleType type, kj::OneOf<CppModuleContents,
+                TypeScriptModuleContents> contents)
+        : specifier(specifier),
+          type(type),
+          contents(kj::mv(contents)) {}
+
+    kj::StringPtr specifier;
+    jsg::ModuleType type;
+    kj::OneOf<CppModuleContents, TypeScriptModuleContents> contents;
+  };
+
+  void addBuiltinBundle(jsg::Bundle::Reader bundle, kj::Maybe<jsg::ModuleRegistry::Type> maybeFilter = kj::none) {
+    for (auto module: bundle.getModules()) {
+      if (module.getType() == maybeFilter.orDefault(module.getType())) addBuiltinModule(module);
+    }
+  }
+
+  void addBuiltinModule(jsg::Module::Reader module) {
+    TypeScriptModuleContents contents (module.getTsDeclaration());
+    ModuleInfo info (module.getName(), module.getType(), kj::mv(contents));
+    modules.add(kj::mv(info));
+  }
+
+  template <typename T>
+  void addBuiltinModule(kj::StringPtr specifier, jsg::ModuleRegistry::Type type = jsg::ModuleRegistry::Type::BUILTIN) {
+    auto structureName = jsg::fullyQualifiedTypeName(typeid(T));
+    CppModuleContents contents (kj::mv(structureName));
+    ModuleInfo info (specifier, type, kj::mv(contents));
+    modules.add(kj::mv(info));
+  }
+
+  kj::Vector<ModuleInfo> modules;
+};
 
 struct ApiEncoderMain {
   explicit ApiEncoderMain(kj::ProcessContext &context) : context(context) {}
@@ -106,13 +99,11 @@ struct ApiEncoderMain {
     return true;
   }
 
-  CompatibilityFlags::Reader
-  compileFlags(capnp::MessageBuilder &message, kj::StringPtr compatDate, bool experimental,
-               kj::ArrayPtr<const kj::StringPtr> compatFlags) {
+  CompatibilityFlags::Reader compileFlags(capnp::MessageBuilder &message, kj::StringPtr compatDate,
+                                          kj::ArrayPtr<const kj::StringPtr> compatFlags) {
     // Based on src/workerd/io/compatibility-date-test.c++
     auto orphanage = message.getOrphanage();
-    auto flagListOrphan =
-        orphanage.newOrphan<capnp::List<capnp::Text>>(compatFlags.size());
+    auto flagListOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(compatFlags.size());
     auto flagList = flagListOrphan.get();
     for (auto i : kj::indices(compatFlags)) {
       flagList.set(i, compatFlags.begin()[i]);
@@ -120,9 +111,8 @@ struct ApiEncoderMain {
 
     auto output = message.initRoot<CompatibilityFlags>();
     SimpleWorkerErrorReporter errorReporter;
-
-    compileCompatibilityFlags(compatDate, flagList.asReader(), output,
-                              errorReporter, experimental,
+    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter,
+                              /* experimental */ true,
                               CompatibilityDateValidation::FUTURE_FOR_TEST);
 
     if (!errorReporter.errors.empty()) {
@@ -133,50 +123,20 @@ struct ApiEncoderMain {
     return kj::mv(reader);
   }
 
-  void compileAllCompatibilityFlags(CompatibilityFlags::Builder output) {
-
+  CompatibilityFlags::Reader compileAllFlags(capnp::MessageBuilder &message) {
+    auto output = message.initRoot<CompatibilityFlags>();
     auto schema = capnp::Schema::from<CompatibilityFlags>();
     auto dynamicOutput = capnp::toDynamic(output);
-
-    for (auto field: schema.getFields()) {
-      bool isNode = false;
-
-      kj::StringPtr enableFlagName;
-
-      for (auto annotation: field.getProto().getAnnotations()) {
-        if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
-          enableFlagName = annotation.getValue().getText();
-          // Exclude nodejs_compat, since the type generation scripts don't support node:* imports
-          // TODO: Figure out typing for node compat
-          isNode = enableFlagName == "nodejs_compat";
-        }
-      }
-
-      dynamicOutput.set(field, !isNode);
-    }
-  }
-
-  CompatibilityFlags::Reader compileAllFlags(capnp::MessageBuilder &message) {
-
-    auto output = message.initRoot<CompatibilityFlags>();
-
-    compileAllCompatibilityFlags(output);
-
+    for (auto field: schema.getFields()) dynamicOutput.set(field, true);
     auto reader = output.asReader();
     return kj::mv(reader);
   }
 
   bool run() {
-    // Create RTTI builder with either:
-    //  * All (non-experimental) compatibility flags as of a specific compatibility date
-    //    (if one is specified)
-    //  * All (including experimental, but excluding nodejs_compat) compatibility flags
-    //    (if no compatibility date is provided)
-
     capnp::MallocMessageBuilder flagsMessage;
     CompatibilityFlags::Reader flags;
     KJ_IF_SOME (date, compatibilityDate) {
-      flags = compileFlags(flagsMessage, date, false, {});
+      flags = compileFlags(flagsMessage, date, {});
     } else {
       flags = compileAllFlags(flagsMessage);
     }
@@ -187,18 +147,36 @@ struct ApiEncoderMain {
     auto root = message.initRoot<rtti::StructureGroups>();
 
 #define EW_TYPE_GROUP_COUNT(Name, Types) groupsSize++;
-#define EW_TYPE_GROUP_WRITE(Name, Types)                                       \
-  writeGroup<Types>(groups, builder, Name);
+#define EW_TYPE_GROUP_WRITE(Name, Types) writeGroup<Types>(groups, builder, Name);
 
     unsigned int groupsSize = 0;
-    EW_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_COUNT)
+    EW_API_ENCODER_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_COUNT)
     auto groups = root.initGroups(groupsSize);
     groupsIndex = 0;
-    EW_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_WRITE)
+    EW_API_ENCODER_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_WRITE)
     KJ_ASSERT(groupsIndex == groupsSize);
 
 #undef EW_TYPE_GROUP_COUNT
 #undef EW_TYPE_GROUP_WRITE
+
+    // Encode modules
+    EncoderModuleRegistryImpl registry;
+    registerModules(registry, flags);
+
+    unsigned int i = 0;
+    auto modulesBuilder = root.initModules(registry.modules.size());
+    for (auto moduleBuilder: modulesBuilder) {
+      auto& module = registry.modules[i++];
+      moduleBuilder.setSpecifier(module.specifier);
+      KJ_SWITCH_ONEOF(module.contents) {
+        KJ_CASE_ONEOF(contents, EncoderModuleRegistryImpl::CppModuleContents) {
+          moduleBuilder.setStructureName(contents.structureName);
+        }
+        KJ_CASE_ONEOF(contents, EncoderModuleRegistryImpl::TypeScriptModuleContents) {
+          moduleBuilder.setTsDeclarations(contents.tsDeclarations);
+        }
+      }
+    }
 
     // Write structure groups to a file or stdout if none specifed
     KJ_IF_SOME (value, output) {

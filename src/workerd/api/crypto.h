@@ -699,17 +699,7 @@ public:
     JSG_NESTED_TYPE(DigestStream);
 
     JSG_TS_OVERRIDE({
-      getRandomValues<
-        T extends
-          | Int8Array
-          | Uint8Array
-          | Int16Array
-          | Uint16Array
-          | Int32Array
-          | Uint32Array
-          | BigInt64Array
-          | BigUint64Array
-      >(buffer: T): T;
+      getRandomValues<T extends TypedArray>(buffer: T): T;
     });
   }
 

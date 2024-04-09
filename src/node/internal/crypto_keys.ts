@@ -29,21 +29,6 @@
 import { Buffer } from 'node-internal:internal_buffer';
 
 import {
-  CryptoKey,
-  KeyData,
-  KeyObjectType,
-  KeyExportResult,
-  SecretKeyType,
-  SecretKeyExportOptions,
-  PublicKeyExportOptions,
-  PrivateKeyExportOptions,
-  ExportOptions,
-  AsymmetricKeyDetails,
-  AsymmetricKeyType,
-  CreateAsymmetricKeyOptions,
-  GenerateKeyOptions,
-  GenerateKeyPairOptions,
-  InnerExportOptions,
   // TODO(soon): Uncomment these once createPrivateKey/createPublicKey are implemented.
   // JsonWebKey,
   // InnerCreateAsymmetricKeyOptions,
@@ -75,6 +60,77 @@ import {
   validateObject,
   validateString,
 } from 'node-internal:validators';
+
+type KeyData = cryptoImpl.ArrayLike;
+
+type KeyObjectType = 'secret' | 'public' | 'private';
+
+type KeyExportResult = string | import("node:buffer").Buffer | JsonWebKey;
+
+type SecretKeyFormat = 'buffer' | 'jwk';
+type AsymmetricKeyFormat = 'pem' | 'der' | 'jwk';
+type PublicKeyEncoding = 'pkcs1' | 'spki';
+type PrivateKeyEncoding = 'pkcs1' | 'pkcs8' | 'sec1';
+type SecretKeyType = 'hmac' | 'aes';
+type ParamEncoding = 'named' | 'explicit';
+
+interface SecretKeyExportOptions {
+    format?: SecretKeyFormat;
+}
+
+interface PublicKeyExportOptions {
+    type?: PublicKeyEncoding;
+    format?: AsymmetricKeyFormat;
+}
+
+interface PrivateKeyExportOptions {
+    type?: PrivateKeyEncoding;
+    format?: AsymmetricKeyFormat;
+    cipher?: string;
+    passphrase?: string | Uint8Array;
+    encoding?: string;
+}
+
+interface InnerPrivateKeyExportOptions {
+    type?: PrivateKeyEncoding;
+    format?: AsymmetricKeyFormat;
+    cipher?: string;
+    passphrase?: Uint8Array;
+}
+
+type ExportOptions = SecretKeyExportOptions | PublicKeyExportOptions | PrivateKeyExportOptions;
+type InnerExportOptions = SecretKeyExportOptions | PublicKeyExportOptions | InnerPrivateKeyExportOptions;
+
+ interface AsymmetricKeyDetails {
+    modulusLength?: number;
+    publicExponent?: bigint;
+    hashAlgorithm?: string;
+    mgf1HashAlgorithm?: string;
+    saltLength?: number;
+    divisorLength?: number;
+    namedCurve?: string;
+}
+
+interface GenerateKeyOptions {
+    length: number;
+}
+
+interface GenerateKeyPairOptions {
+    modulusLength?: number;
+    publicExponent?: number|bigint;
+    hashAlgorithm?: string;
+    mgf1HashAlgorithm?: string;
+    saltLength?: number;
+    divisorLength?: number;
+    namedCurve?: string;
+    prime?: Uint8Array;
+    primeLength?: number;
+    generator?: number;
+    groupName?: string;
+    paramEncoding?: ParamEncoding;
+    publicKeyEncoding?: PublicKeyExportOptions;
+    privateKeyEncoding?: PrivateKeyExportOptions;
+}
 
 // In Node.js, the definition of KeyObject is a bit complicated because
 // KeyObject instances in Node.js can be transferred via postMessage() and
@@ -113,6 +169,7 @@ export abstract class KeyObject {
           this[kHandle] = key;
         }, [], PublicKeyObject);
     }
+    throw new RangeError(`Unknown key type ${key.type}`);
   }
 
   export(options: ExportOptions = {}) : KeyExportResult {
@@ -162,14 +219,14 @@ export abstract class KeyObject {
 
 abstract class AsymmetricKeyObject extends KeyObject {
   get asymmetricKeyDetails() : AsymmetricKeyDetails {
-    let detail = cryptoImpl.getAsymmetricKeyDetail(this[kHandle]);
+    let detail = cryptoImpl.getAsymmetricKeyDetail(this[kHandle]) as unknown as AsymmetricKeyDetails;
     if (isArrayBuffer(detail.publicExponent)) {
-      detail.publicExponent = arrayBufferToUnsignedBigInt(detail.publicExponent as any);
+      detail.publicExponent = arrayBufferToUnsignedBigInt(detail.publicExponent);
     }
     return detail;
   }
 
-  get asymmetricKeyType() : AsymmetricKeyType {
+  get asymmetricKeyType() : cryptoImpl.AsymmetricKeyType {
     return cryptoImpl.getAsymmetricKeyType(this[kHandle]);
   }
 }
@@ -326,8 +383,8 @@ export function createSecretKey(key: KeyData, encoding?: string) : SecretKeyObje
 
 export function createPrivateKey(key: string) : PrivateKeyObject;
 export function createPrivateKey(key: ArrayBuffer | ArrayBufferView) : PrivateKeyObject;
-export function createPrivateKey(key: CreateAsymmetricKeyOptions) : PrivateKeyObject;
-export function createPrivateKey(_key: CreateAsymmetricKeyOptions | KeyData) : PrivateKeyObject {
+export function createPrivateKey(key: cryptoImpl.CryptoImplCreateAsymmetricKeyOptions) : PrivateKeyObject;
+export function createPrivateKey(_key: cryptoImpl.CryptoImplCreateAsymmetricKeyOptions | KeyData) : PrivateKeyObject {
   // The options here are fairly complex. The key data can be a string,
   // ArrayBuffer, or ArrayBufferView. The first argument can be one of
   // these or an object with a key property that is one of these. If the
@@ -344,8 +401,8 @@ export function createPublicKey(key: ArrayBufferView) : PublicKeyObject;
 
 export function createPublicKey(key: KeyObject) : PublicKeyObject;
 export function createPublicKey(key: CryptoKey) : PublicKeyObject;
-export function createPublicKey(key: CreateAsymmetricKeyOptions) : PublicKeyObject;
-export function createPublicKey(_key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject)
+export function createPublicKey(key: cryptoImpl.CryptoImplCreateAsymmetricKeyOptions) : PublicKeyObject;
+export function createPublicKey(_key: cryptoImpl.CryptoImplCreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject)
     : PublicKeyObject {
   // The options here are a bit complicated. The key material itself can
   // either be a string, ArrayBuffer, or ArrayBufferView. It is also
@@ -393,7 +450,7 @@ throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync');
 }
 
 export function generateKeyPair(
-    _type : AsymmetricKeyType,
+    _type : cryptoImpl.AsymmetricKeyType,
     _options: GenerateKeyPairOptions,
     callback: GenerateKeyPairCallback) {
   // We intentionally have not implemented key generation up to this point.
@@ -404,7 +461,7 @@ export function generateKeyPair(
 }
 
 export function generateKeyPairSync(
-    _type : AsymmetricKeyType,
+    _type : cryptoImpl.AsymmetricKeyType,
     _options: GenerateKeyPairOptions) : KeyObjectPair {
   // We intentionally have not implemented key generation up to this point.
   // The reason is that generation of cryptographically safe keys is a CPU

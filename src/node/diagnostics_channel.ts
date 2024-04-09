@@ -25,12 +25,7 @@
 
 /* eslint-disable */
 import {
-  default as diagnosticsChannel,
-} from 'node-internal:diagnostics_channel';
-
-import type {
-  Channel as ChannelType,
-  MessageCallback,
+  default as internal,
 } from 'node-internal:diagnostics_channel';
 
 import {
@@ -41,22 +36,24 @@ import {
   validateObject,
 } from 'node-internal:validators';
 
-export const { Channel } = diagnosticsChannel;
+import Channel = internal.Channel;
+import MessageCallback = internal.MessageCallback;
+export { Channel };
 
 export function hasSubscribers(name: string|symbol): boolean {
-  return diagnosticsChannel.hasSubscribers(name);
+  return internal.hasSubscribers(name);
 }
 
-export function channel(name: string|symbol): ChannelType {
-  return diagnosticsChannel.channel(name);
+export function channel(name: string|symbol): Channel {
+  return internal.channel(name);
 }
 
 export function subscribe(name: string|symbol, callback: MessageCallback): void {
-  diagnosticsChannel.subscribe(name, callback);
+  internal.subscribe(name, callback);
 }
 
 export function unsubscribe(name: string|symbol, callback: MessageCallback): void {
-  diagnosticsChannel.unsubscribe(name, callback);
+  internal.unsubscribe(name, callback);
 }
 
 export interface TracingChannelSubscriptions {
@@ -68,11 +65,11 @@ export interface TracingChannelSubscriptions {
 }
 
 export interface TracingChannels {
-  start: ChannelType,
-  end: ChannelType,
-  asyncStart: ChannelType,
-  asyncEnd: ChannelType,
-  error: ChannelType,
+  start: Channel,
+  end: Channel,
+  asyncStart: Channel,
+  asyncEnd: Channel,
+  error: Channel,
 }
 
 const kStart = Symbol('kStart');
@@ -82,21 +79,21 @@ const kAsyncEnd = Symbol('kAsyncEnd');
 const kError = Symbol('kError');
 
 export class TracingChannel {
-  private [kStart]?: ChannelType;
-  private [kEnd]?: ChannelType;
-  private [kAsyncStart]?: ChannelType;
-  private [kAsyncEnd]?: ChannelType;
-  private [kError]?: ChannelType;
+  private [kStart]?: Channel;
+  private [kEnd]?: Channel;
+  private [kAsyncStart]?: Channel;
+  private [kAsyncEnd]?: Channel;
+  private [kError]?: Channel;
 
   public constructor() {
     throw new Error('Use diagnostic_channel.tracingChannels() to create TracingChannel');
   }
 
-  public get start(): ChannelType { return this[kStart]!; }
-  public get end(): ChannelType { return this[kEnd]!; }
-  public get asyncStart(): ChannelType { return this[kAsyncStart]!; }
-  public get asyncEnd(): ChannelType { return this[kAsyncEnd]!; }
-  public get error(): ChannelType { return this[kError]!; }
+  public get start(): Channel { return this[kStart]!; }
+  public get end(): Channel { return this[kEnd]!; }
+  public get asyncStart(): Channel { return this[kAsyncStart]!; }
+  public get asyncEnd(): Channel { return this[kAsyncEnd]!; }
+  public get error(): Channel { return this[kError]!; }
 
   public subscribe(subscriptions: TracingChannelSubscriptions) {
     if (subscriptions.start !== undefined)
@@ -231,11 +228,11 @@ export class TracingChannel {
   }
 }
 
-function validateChannel(channel: any, name: string) {
+function validateChannel(channel: unknown, name: string): Channel {
   if (!(channel instanceof Channel)) {
     throw new ERR_INVALID_ARG_TYPE(name, 'Channel', channel);
   }
-  return channel as ChannelType;
+  return channel;
 }
 
 export function tracingChannel(nameOrChannels : string|TracingChannels) : TracingChannel {

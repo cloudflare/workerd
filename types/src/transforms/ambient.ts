@@ -5,7 +5,25 @@
 import ts from "typescript";
 import { ensureStatementModifiers } from "./helpers";
 
-// This ensures that all nodes have the `declare` keyword
+// This ensures that all top-level nodes have the `declare` keyword, but no
+// nodes inside `declare modules` blocks do. It also ensures no top-level
+// nodes are `export`ed.
+//
+// ```ts
+// export class A { ... }
+// declare module "thing" {
+//   declare class B { ... }
+// }
+// ```
+//
+// --- transforms to --->
+//
+// ```ts
+// declare class A { ... }
+// declare module "thing" {
+//   class B { ... }
+// }
+// ```
 export function createAmbientTransformer(): ts.TransformerFactory<ts.SourceFile> {
   return (ctx) => {
     return (node) => {
@@ -16,7 +34,26 @@ export function createAmbientTransformer(): ts.TransformerFactory<ts.SourceFile>
 }
 
 function createVisitor(ctx: ts.TransformationContext) {
-  return (node: ts.Node) => {
-    return ensureStatementModifiers(ctx, node, false);
+  const moduleBlockChildVisitor: ts.Visitor = (node) => {
+    return ensureStatementModifiers(ctx, node, { declare: false });
   };
+  const moduleDeclarationVisitor: ts.Visitor = (node) => {
+    if (ts.isModuleBlock(node)) {
+      return ts.visitEachChild(node, moduleBlockChildVisitor, ctx);
+    }
+    return node;
+  };
+  const visitor: ts.Visitor = (node) => {
+    if (
+      ts.isModuleDeclaration(node) &&
+      (node.flags & ts.NodeFlags.Namespace) === 0
+    ) {
+      return ts.visitEachChild(node, moduleDeclarationVisitor, ctx);
+    }
+    return ensureStatementModifiers(ctx, node, {
+      export: false,
+      declare: true,
+    });
+  };
+  return visitor;
 }

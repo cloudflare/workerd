@@ -2,10 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-interface Fetcher {
-  fetch: typeof fetch
-}
-
 export type SessionOptions = {  // Deprecated, do not use this
   extraHeaders?: object;
 };
@@ -103,7 +99,7 @@ export class Ai {
       const contentType = res.headers.get("content-type");
 
       if (contentType === "application/json") {
-        return (await res.json() as object);
+        return await res.json();
       }
 
       return res.body;

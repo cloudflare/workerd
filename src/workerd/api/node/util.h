@@ -110,44 +110,47 @@ private:
   jsg::Ref<MIMEParams> params;
 };
 
+// The 2nd "argument" to `V` controls the TypeScript type:
+// `V(X, Y)` --> `function isX(value: unknown): value is Y`.
+// `Y` is variadic here to support commas in types.
 #define JS_UTIL_IS_TYPES(V) \
-  V(ArrayBufferView) \
-  V(ArgumentsObject) \
-  V(ArrayBuffer) \
-  V(AsyncFunction) \
-  V(BigInt64Array) \
-  V(BigIntObject) \
-  V(BigUint64Array) \
-  V(BooleanObject) \
-  V(DataView) \
-  V(Date) \
-  V(Float32Array) \
-  V(Float64Array) \
-  V(GeneratorFunction) \
-  V(GeneratorObject) \
-  V(Int8Array) \
-  V(Int16Array) \
-  V(Int32Array) \
-  V(Map) \
-  V(MapIterator) \
-  V(ModuleNamespaceObject) \
-  V(NativeError) \
-  V(NumberObject) \
-  V(Promise) \
-  V(Proxy) \
-  V(RegExp) \
-  V(Set) \
-  V(SetIterator) \
-  V(SharedArrayBuffer) \
-  V(StringObject) \
-  V(SymbolObject) \
-  V(TypedArray) \
-  V(Uint8Array) \
-  V(Uint8ClampedArray) \
-  V(Uint16Array) \
-  V(Uint32Array) \
-  V(WeakMap) \
-  V(WeakSet)
+  V(ArrayBufferView, ArrayBufferView) \
+  V(ArgumentsObject, IArguments) \
+  V(ArrayBuffer, ArrayBuffer) \
+  V(AsyncFunction, Function) \
+  V(BigInt64Array, BigInt64Array) \
+  V(BigIntObject, BigInt) \
+  V(BigUint64Array, BigUint64Array) \
+  V(BooleanObject, Boolean) \
+  V(DataView, DataView) \
+  V(Date, Date) \
+  V(Float32Array, Float32Array) \
+  V(Float64Array, Float64Array) \
+  V(GeneratorFunction, GeneratorFunction) \
+  V(GeneratorObject, Generator) \
+  V(Int8Array, Int8Array) \
+  V(Int16Array, Int16Array) \
+  V(Int32Array, Int32Array) \
+  V(Map, Map<unknown, unknown>) \
+  V(MapIterator, IterableIterator<unknown>) \
+  V(ModuleNamespaceObject, boolean) \
+  V(NativeError, Error) \
+  V(NumberObject, Number) \
+  V(Promise, Promise<unknown>) \
+  V(Proxy, boolean) \
+  V(RegExp, RegExp) \
+  V(Set, Set<unknown>) \
+  V(SetIterator, IterableIterator<unknown>) \
+  V(SharedArrayBuffer, SharedArrayBuffer) \
+  V(StringObject, String) \
+  V(SymbolObject, Symbol) \
+  V(TypedArray, TypedArray) \
+  V(Uint8Array, Uint8Array) \
+  V(Uint8ClampedArray, Uint8ClampedArray) \
+  V(Uint16Array, Uint16Array) \
+  V(Uint32Array, Uint32Array) \
+  V(WeakMap, WeakMap<WeakKey, unknown>) \
+  V(WeakSet, WeakSet<WeakKey>)
 
 class UtilModule final: public jsg::Object {
 public:
@@ -190,7 +193,7 @@ public:
 
   jsg::JsString getConstructorName(jsg::Lock& js, jsg::JsObject value);
 
-#define V(Type) bool is##Type(jsg::JsValue value);
+#define V(Type, ...) bool is##Type(jsg::JsValue value);
   JS_UTIL_IS_TYPES(V)
 #undef V
   bool isAnyArrayBuffer(jsg::JsValue value);
@@ -215,11 +218,19 @@ public:
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
 
-  #define V(Type) JSG_METHOD(is##Type);
+  #define V(Type, ...) JSG_METHOD(is##Type);
     JS_UTIL_IS_TYPES(V)
   #undef V
     JSG_METHOD(isAnyArrayBuffer);
     JSG_METHOD(isBoxedPrimitive);
+
+  #define V(Type, ...) is##Type(value: unknown): value is __VA_ARGS__;
+    JSG_TS_OVERRIDE({
+      JS_UTIL_IS_TYPES(V)
+      isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
+      isBoxedPrimitive(value: unknown): value is Number | String | Boolean | BigInt | Symbol;
+    });
+  #undef V
   }
 };
 

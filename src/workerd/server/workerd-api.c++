@@ -8,94 +8,23 @@
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/api/actor.h>
-#include <workerd/api/actor-state.h>
-#include <workerd/api/analytics-engine.h>
-#include <workerd/api/cache.h>
-#include <workerd/api/crypto-impl.h>
-#include <workerd/api/encoding.h>
-#include <workerd/api/global-scope.h>
-#include <workerd/api/html-rewriter.h>
-#include <workerd/api/hyperdrive.h>
-#include <workerd/api/kv.h>
-#include <workerd/api/modules.h>
+#include <workerd/api/index.h>
+#include <workerd/api/index-bundles-rtti.h>
 #include <workerd/api/pyodide.h>
-#include <workerd/api/queue.h>
-#include <workerd/api/scheduled.h>
-#include <workerd/api/sockets.h>
-#include <workerd/api/streams/standard.h>
-#include <workerd/api/sql.h>
-#include <workerd/api/r2.h>
-#include <workerd/api/r2-admin.h>
-#include <workerd/api/trace.h>
-#include <workerd/api/unsafe.h>
-#include <workerd/api/urlpattern.h>
-#include <workerd/api/memory-cache.h>
-#include <workerd/api/node/node.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#else
-#define EW_WEBGPU_ISOLATE_TYPES_LIST
-#endif
 
 namespace workerd::server {
 
-JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
-  // Declares the listing of host object types and structs that the jsg
-  // automatic type mapping will understand. Each of the various
-  // NNNN_ISOLATE_TYPES macros are defined in different header files
-  // (e.g. GLOBAL_SCOPE_ISOLATE_TYPES is defined in api/global-scope.h).
-  //
-  // Global scope types are defined first just by convention, the rest
-  // of the list is in alphabetical order for easier readability (the
-  // actual order of the items is unimportant), followed by additional
-  // types defined in worker.c++ or as part of jsg.
-  //
-  // When adding a new NNNN_ISOLATE_TYPES macro, remember to add it to
-  // src/workerd/api/rtti.c++ too (and tools/api-encoder.c++ for the
-  // time being), so it gets included in the TypeScript types.
-  EW_GLOBAL_SCOPE_ISOLATE_TYPES,
+#define EW_TYPE_GROUP_EXTRACT_TYPES(Name, Types) Types,
 
-  EW_ACTOR_ISOLATE_TYPES,
-  EW_ACTOR_STATE_ISOLATE_TYPES,
-  EW_ANALYTICS_ENGINE_ISOLATE_TYPES,
-  EW_BASICS_ISOLATE_TYPES,
-  EW_BLOB_ISOLATE_TYPES,
-  EW_CACHE_ISOLATE_TYPES,
-  EW_CRYPTO_ISOLATE_TYPES,
-  EW_ENCODING_ISOLATE_TYPES,
-  EW_FORMDATA_ISOLATE_TYPES,
-  EW_HTML_REWRITER_ISOLATE_TYPES,
-  EW_HTTP_ISOLATE_TYPES,
-  EW_SOCKETS_ISOLATE_TYPES,
-  EW_KV_ISOLATE_TYPES,
-  EW_PYODIDE_ISOLATE_TYPES,
-  EW_QUEUE_ISOLATE_TYPES,
-  EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES,
-  EW_R2_PUBLIC_BETA_ISOLATE_TYPES,
-  EW_WORKER_RPC_ISOLATE_TYPES,
-  EW_SCHEDULED_ISOLATE_TYPES,
-  EW_STREAMS_ISOLATE_TYPES,
-  EW_TRACE_ISOLATE_TYPES,
-  EW_UNSAFE_ISOLATE_TYPES,
-  EW_MEMORY_CACHE_ISOLATE_TYPES,
-  EW_URL_ISOLATE_TYPES,
-  EW_URL_STANDARD_ISOLATE_TYPES,
-  EW_URLPATTERN_ISOLATE_TYPES,
-  EW_WEBSOCKET_ISOLATE_TYPES,
-  EW_SQL_ISOLATE_TYPES,
-  EW_NODE_ISOLATE_TYPES,
+JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
+  EW_TYPE_GROUP_FOR_EACH(EW_TYPE_GROUP_EXTRACT_TYPES)
   EW_RTTI_ISOLATE_TYPES,
-  EW_HYPERDRIVE_ISOLATE_TYPES,
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  EW_WEBGPU_ISOLATE_TYPES,
-#endif
 
   jsg::TypeWrapperExtension<PromiseWrapper>,
   jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -104,6 +33,8 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   jsg::CommonJsModuleContext,
   jsg::NodeJsModuleObject,
   jsg::NodeJsModuleContext);
+
+#undef EW_TYPE_GROUP_EXTRACT_TYPES
 
 struct WorkerdApi::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
@@ -502,6 +433,7 @@ void WorkerdApi::compileModules(
     }
 
     api::registerModules(*modules, featureFlags);
+    api::registerModulesBundles(*modules, featureFlags);
 
     // todo(perf): we'd like to find a way to precompile these on server startup and use isolate
     // cloning for faster worker creation.

@@ -440,7 +440,7 @@ export function compare(a: Buffer|Uint8Array, b: Buffer|Uint8Array) {
 
 Buffer.compare = compare;
 
-export function isEncoding(encoding: unknown) {
+export function isEncoding(encoding: unknown): encoding is bufferUtil.BufferEncoding {
   return typeof encoding === "string" &&
     encoding.length !== 0 &&
     normalizeEncoding(encoding) !== undefined;

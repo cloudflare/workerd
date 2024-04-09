@@ -8,7 +8,6 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <capnp/dynamic.h>
-#include <node/node.capnp.h>
 
 namespace workerd::api::node {
 
@@ -59,26 +58,6 @@ void registerNodeJsCompatModules(
 
 #undef V
 #undef NODEJS_MODULES
-
-  // If the `nodejs_compat` flag isn't enabled, only register internal modules.
-  // We need these for `console.log()`ing when running `workerd` locally.
-  kj::Maybe<jsg::ModuleType> maybeFilter;
-  if (!featureFlags.getNodeJsCompat()) maybeFilter = jsg::ModuleType::INTERNAL;
-
-  registry.addBuiltinBundle(NODE_BUNDLE, maybeFilter);
-
-  // If the `nodejs_compat` flag is off, but the `nodejs_als` flag is on, we
-  // need to register the `node:async_hooks` module from the bundle.
-  if (!featureFlags.getNodeJsCompat() && featureFlags.getNodeJsAls()) {
-    jsg::Bundle::Reader reader = NODE_BUNDLE;
-    for (auto module : reader.getModules()) {
-      auto specifier = module.getName();
-      if (specifier == "node:async_hooks") {
-        KJ_DASSERT(module.getType() == jsg::ModuleType::BUILTIN);
-        registry.addBuiltinModule(module);
-      }
-    }
-  }
 }
 
 #define EW_NODE_ISOLATE_TYPES              \

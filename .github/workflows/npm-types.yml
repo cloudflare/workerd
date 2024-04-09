@@ -46,7 +46,7 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
       - name: build types
         run: |
-            bazel build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //types:types
+            bazel build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev -c opt //types:types
       - name: Build package
         run: node npm/scripts/build-types-package.mjs
         env:

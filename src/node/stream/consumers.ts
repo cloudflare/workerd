@@ -26,24 +26,26 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 import { Buffer } from 'node-internal:internal_buffer';
+import type { Readable } from 'node:stream';
+import type { NodeJS } from "node-internal:streams_transform";
 
-export async function blob(stream) {
+export async function blob(stream: NodeJS.ReadableStream | Readable | AsyncIterable<any>) {
   const chunks = [];
   for await (const chunk of stream)
     chunks.push(chunk);
   return new Blob(chunks);
 }
 
-export async function arrayBuffer(stream) {
+export async function arrayBuffer(stream: NodeJS.ReadableStream | Readable | AsyncIterable<any>) {
   const ret = await blob(stream);
   return ret.arrayBuffer();
 }
 
-export async function buffer(stream) {
+export async function buffer(stream: NodeJS.ReadableStream | Readable | AsyncIterable<any>) {
   return Buffer.from(await arrayBuffer(stream));
 }
 
-export async function text(stream) {
+export async function text(stream: NodeJS.ReadableStream | Readable | AsyncIterable<any>) {
   const dec = new TextDecoder();
   let str = '';
   for await (const chunk of stream) {
@@ -58,7 +60,7 @@ export async function text(stream) {
   return str;
 }
 
-export async function json(stream) {
+export async function json(stream: NodeJS.ReadableStream | Readable | AsyncIterable<any>): Promise<unknown> {
   const str = await text(stream);
   return JSON.parse(str);
 }

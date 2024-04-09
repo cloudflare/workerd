@@ -3,10 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 import { default as flags } from "workerd:compatibility-flags";
 
-interface Fetcher {
-  fetch: typeof fetch;
-}
-
 enum Operation {
   INDEX_GET = 0,
   VECTOR_QUERY = 1,
@@ -169,7 +165,7 @@ class VectorizeIndexImpl implements VectorizeIndex {
       let err: Error | null = null;
 
       try {
-        const errResponse = (await res.json()) as VectorizeError;
+        const errResponse = await res.json<VectorizeError>();
         err = new Error(
           `${Operation[operation]}_ERROR${
             typeof errResponse.code === "number"

@@ -46,7 +46,7 @@ def wd_ts_bundle(
 
     srcs = modules + internal_modules
     ts_srcs = [src for src in srcs if src.endswith(".ts")]
-    declarations = [_to_d_ts(src) for src in ts_srcs if not src.endswith(".d.ts")]
+    declarations = [_to_d_ts(src) for src in ts_srcs if not src.endswith(".d.ts")] + [src for src in ts_srcs if src.endswith(".d.ts")]
 
     ts_project(
         name = name + "@tsproject",
@@ -61,7 +61,7 @@ def wd_ts_bundle(
         name = name,
         import_name = import_name,
         # builtin modules are accessible under "<import_name>:<module_name>" name
-        builtin_modules = [_to_js(m) for m in modules],
+        builtin_modules = [_to_js(m) for m in modules if not m.endswith(".d.ts")],
         # internal modules are accessible under "<import_name>-internal:<module_name>" name
         # without "internal/" folder prefix.
         internal_modules = [_to_js(m) for m in internal_modules if not m.endswith(".d.ts")],
@@ -82,7 +82,7 @@ def wd_ts_bundle(
                 "-f stylish",
                 "--report-unused-disable-directives",
             ] + ["$(location " + src + ")" for src in ts_srcs],
-            data = srcs + [
+            data = srcs + deps + [
                 eslintrc_json,
                 tsconfig_json,
                 "//:node_modules/@typescript-eslint/eslint-plugin",

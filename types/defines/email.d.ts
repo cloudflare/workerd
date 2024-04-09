@@ -60,10 +60,16 @@ declare type EmailExportedHandler<Env = unknown> = (
   ctx: ExecutionContext
 ) => void | Promise<void>;
 
-declare module "cloudflare:email" {
-  let _EmailMessage: {
-    prototype: EmailMessage;
-    new (from: string, to: string, raw: ReadableStream | string): EmailMessage;
-  };
-  export { _EmailMessage as EmailMessage };
+declare module "cloudflare-internal:email" {
+  namespace _default {
+    const EmailMessage: {
+      prototype: EmailMessage;
+      new (
+        from: string,
+        to: string,
+        raw: ReadableStream | string
+      ): EmailMessage;
+    };
+  }
+  export default _default;
 }

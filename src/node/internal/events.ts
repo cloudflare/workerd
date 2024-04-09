@@ -91,6 +91,11 @@ export function EventEmitter(this : EventEmitter, opts? : EventEmitterOptions) {
   EventEmitter.init.call(this, opts);
 }
 
+export interface EventEmitterConstructor {
+  new (opts?: EventEmitterOptions): EventEmitter;
+  prototype: EventEmitter;
+}
+
 class EventEmitterReferencingAsyncResource extends AsyncResource {
   #eventEmitter : EventEmitter;
   constructor(emitter : EventEmitter) {
@@ -105,8 +110,7 @@ class EventEmitterReferencingAsyncResource extends AsyncResource {
   }
 }
 
-// @ts-ignore  -- TODO(soon) Properly handle the extends EventEmitter here
-export class EventEmitterAsyncResource extends EventEmitter {
+export class EventEmitterAsyncResource extends (EventEmitter as unknown as EventEmitterConstructor) {
   #asyncResource : EventEmitterReferencingAsyncResource;
 
   constructor(options? : EventEmitterOptions) {
@@ -122,7 +126,7 @@ export class EventEmitterAsyncResource extends EventEmitter {
     return this.#asyncResource;
   }
 
-  emit(event : string | symbol, ...args : any[]) : void {
+  override emit(event : string | symbol, ...args : any[]) : void {
     if (this.#asyncResource === undefined)
       throw new ERR_INVALID_THIS('EventEmitterAsyncResource');
     args.unshift(super.emit, this, event);

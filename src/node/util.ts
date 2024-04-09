@@ -179,8 +179,11 @@ export function _extend(target: Object, source: Object) {
   return target;
 }
 
-export const TextDecoder = globalThis.TextDecoder;
-export const TextEncoder = globalThis.TextEncoder;
+const _TextEncoder = TextEncoder;
+const _TextDecoder = TextDecoder;
+type _TextEncoder = TextEncoder;
+type _TextDecoder = TextDecoder;
+export { _TextEncoder as TextEncoder, _TextDecoder as TextDecoder };
 
 export function toUSVString(input : any) {
   // TODO(cleanup): Apparently the typescript types for this aren't available yet?

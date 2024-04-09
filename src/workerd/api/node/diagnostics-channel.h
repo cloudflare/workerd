@@ -38,6 +38,17 @@ public:
     JSG_METHOD(bindStore);
     JSG_METHOD(unbindStore);
     JSG_METHOD(runStores);
+
+    JSG_TS_DEFINE(
+      type MessageCallback = (message: unknown, name: PropertyKey) => void;
+      type TransformCallback = (value: unknown) => unknown;
+    );
+    JSG_TS_OVERRIDE({
+      subscribe(callback: MessageCallback): void;
+      unsubscribe(callback: MessageCallback): void;
+      bindStore(als: AsyncLocalStorage<unknown>, maybeTransform?: TransformCallback): void;
+      unbindStore(als: AsyncLocalStorage<unknown>): void;
+    });
   }
 
   const jsg::Name& getName() const;
@@ -89,6 +100,11 @@ public:
     JSG_METHOD(subscribe);
     JSG_METHOD(unsubscribe);
     JSG_NESTED_TYPE(Channel);
+
+    JSG_TS_OVERRIDE({
+      subscribe(name: PropertyKey, callback: MessageCallback): void;
+      unsubscribe(name: PropertyKey, callback: MessageCallback): void;
+    });
   }
 
   kj::Maybe<Channel&> tryGetChannel(jsg::Lock& js, jsg::Name& name);

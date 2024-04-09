@@ -2,10 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-interface Fetcher {
-  fetch: typeof fetch
-}
-
 type D1Response = {
   success: true
   meta: Record<string, unknown>
@@ -73,7 +69,7 @@ class D1Database {
     })
     if (response.status !== 200) {
       try {
-        const err = (await response.json()) as SQLError
+        const err = await response.json<SQLError>()
         throw new Error(`D1_DUMP_ERROR: ${err.error}`, {
           cause: new Error(err.error),
         })
