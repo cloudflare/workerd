@@ -154,4 +154,13 @@ void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   }
 }
 
+bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules) {
+  for (auto module: modules) {
+    if (module.isPythonModule()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace workerd::api::pyodide
