@@ -294,6 +294,9 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
             // short-circuit readLoop, store the current timestamp and and automatically respond
             // with the expected response.
             TimerChannel& timerChannel = KJ_REQUIRE_NONNULL(timer);
+            // This should count as a new IO event, hence we should call syncTime
+            // otherwise the autoResponseTimestamp wouldn't be accurate.
+            timerChannel.syncTime();
             // We should have set the timerChannel previously in the hibernation manager.
             // If we haven't, we aren't able to get the current time.
             hib.autoResponseTimestamp = timerChannel.now();
