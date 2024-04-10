@@ -41,7 +41,6 @@ filegroup(
                 "modules.h",
                 "rtti.h",
                 "**/*test*.h",
-                "pyodide.h",
             ],
         ),
         "//conditions:default": glob(
@@ -51,7 +50,6 @@ filegroup(
                 "modules.h",
                 "rtti.h",
                 "**/*test*.h",
-                "pyodide.h",
                 "gpu/*.h",
             ],
         ),
@@ -97,11 +95,9 @@ wd_cc_library(
 wd_cc_library(
     name = "pyodide",
     srcs = [
-        "pyodide.c++",
         "pyodide/pyodide.c++",
     ],
     hdrs = [
-        "pyodide.h",
         "pyodide/pyodide.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],

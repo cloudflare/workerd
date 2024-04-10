@@ -316,6 +316,8 @@ using Worker = server::config::Worker;
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
 
+bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
+
 #define EW_PYODIDE_ISOLATE_TYPES       \
   api::pyodide::PackagesTarReader,     \
   api::pyodide::PyodideMetadataReader, \
