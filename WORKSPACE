@@ -186,7 +186,7 @@ http_archive(
 #   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    commit = "0764ad493e54a79c7e3e02fc3412ef55b4835b9e",
+    commit = "b3ae305fd5dbc6ad41eed9add26768c29181219f",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
@@ -451,15 +451,13 @@ http_archive(
         "//:patches/v8/0010-Enable-V8-shared-linkage.patch",
         "//:patches/v8/0011-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
         "//:patches/v8/0012-Always-enable-continuation-preserved-data-in-the-bui.patch",
-        "//:patches/v8/0013-Attach-continuation-context-to-Promise-thenable-task.patch",
-        "//:patches/v8/0014-increase-visibility-of-virtual-method.patch",
-        "//:patches/v8/0015-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
-        "//:patches/v8/0016-wasm-liftoff-arm64-Fix-LoadTaggedPointer.patch",
+        "//:patches/v8/0013-increase-visibility-of-virtual-method.patch",
+        "//:patches/v8/0014-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
     ],
-    integrity = "sha256-QphdaJn35eZeo+qoayNFIgm02hX5WHjKf+pr3WXCiEs=",
-    strip_prefix = "v8-12.3.219.10",
+    integrity = "sha256-C6bsXXbKgeCxmG1VNO/LScaPq0HVlmofpVHJ5kswoLg=",
+    strip_prefix = "v8-12.4.254.11",
     type = "tgz",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.3.219.10.tar.gz",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.4.254.11.tar.gz",
 )
 
 git_repository(
