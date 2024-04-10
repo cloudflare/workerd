@@ -453,6 +453,7 @@ http_archive(
         "//:patches/v8/0012-Always-enable-continuation-preserved-data-in-the-bui.patch",
         "//:patches/v8/0013-increase-visibility-of-virtual-method.patch",
         "//:patches/v8/0014-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
+        "//:patches/v8/0015-Set-torque-generator-path-to-external-v8.-This-allow.patch"
     ],
     integrity = "sha256-C6bsXXbKgeCxmG1VNO/LScaPq0HVlmofpVHJ5kswoLg=",
     strip_prefix = "v8-12.4.254.11",
