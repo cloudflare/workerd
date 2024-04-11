@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "vectorize-api-test",
+      worker = (
+        modules = [
+          ( name = "worker.py", pythonModule = embed "vectorize-api-test.py" )
+        ],
+        compatibilityDate = "2023-11-21",
+        compatibilityFlags = ["nodejs_compat", "python_workers"],
+        bindings = [
+          ( name = "vectorSearch",
+            wrapped = (
+              moduleName = "cloudflare-internal:vectorize-api",
+              innerBindings = [(
+                name = "fetcher",
+                service = "vector-search-mock"
+              )],
+            )
+          )
+        ],
+      )
+    ),
+    ( name = "vector-search-mock",
+      worker = (
+        compatibilityDate = "2023-11-21",
+        modules = [
+          ( name = "worker", esModule = embed "vectorize-mock.js" )
+        ],
+      )
+    )
+  ]
+);
