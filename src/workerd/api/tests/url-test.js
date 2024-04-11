@@ -8840,8 +8840,6 @@ export const wptTestURLSearchParamsConstructor = {
       let url = new URL('https://example.org?a=a/b~');
       strictEqual(url.search, '?a=a/b~');
       strictEqual(url.searchParams.toString(), 'a=a%2Fb%7E');
-      console.log(url.search);
-      console.log(url.searchParams.toString());
     }
 
     [
@@ -9182,9 +9180,9 @@ export const w3cTestURLSearchParamsStringifier = {
     {
       const params = new URLSearchParams();
       params.append('=', 'a');
-      strictEqual(params + '', '==a');
+      strictEqual(params + '', '%3D=a');
       params.append('b', '=');
-      strictEqual(params + '', '==a&b==');
+      strictEqual(params + '', '%3D=a&b=%3D');
     }
 
     {
@@ -9793,5 +9791,13 @@ export const urlParseStatic = {
     // Unlike `new URL(...)` the `URL.parse(...)` function does not throw on invalid URLs
     // (which is the key point)
     strictEqual(URL.parse('not valid'), null);
+  }
+};
+
+export const urlSearchParamsPipe = {
+  test() {
+    const url = new URL('http://example.com/?a=b%7Cc');
+    strictEqual(url.search, '?a=b%7Cc');
+    strictEqual(url.searchParams.toString(), 'a=b%7Cc');
   }
 };
