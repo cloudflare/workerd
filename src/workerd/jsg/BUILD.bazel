@@ -30,8 +30,8 @@ wd_cc_library(
         "function.h",
         "inspector.h",
         "iterator.h",
-        "jsg-test.h",
         "jsg.h",
+        "jsg-test.h",
         "jsvalue.h",
         "macro-meta.h",
         "meta.h",
@@ -47,9 +47,6 @@ wd_cc_library(
         "value.h",
         "web-idl.h",
         "wrappable.h",
-    ] + [
-        # todo: why is autogate a part of JSG api???
-        "//src/workerd/util:autogate.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -59,7 +56,6 @@ wd_cc_library(
         ":observer",
         ":url",
         "//src/workerd/util",
-        "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
@@ -84,13 +80,13 @@ wd_cc_library(
     hdrs = [
         "url.h",
     ],
+    implementation_deps = [
+        "@ada-url",
+    ],
     visibility = ["//visibility:public"],
     deps = [
-        ":exception",
         ":memory-tracker",
-        "@ada-url",
         "@capnp-cpp//src/kj",
-        "@workerd-v8//:v8",
     ],
 )
 
@@ -156,6 +152,7 @@ wd_cc_library(
     hdrs = ["observer.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":url",
         "@capnp-cpp//src/kj",
     ],
 )

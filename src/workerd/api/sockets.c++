@@ -5,7 +5,6 @@
 #include "sockets.h"
 #include "system-streams.h"
 #include <workerd/io/worker-interface.h>
-#include <workerd/util/autogate.h>
 
 #include <workerd/jsg/url.h>
 

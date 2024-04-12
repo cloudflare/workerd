@@ -1,5 +1,4 @@
 #include "url.h"
-#include "exception.h"
 #include <kj/hash.h>
 
 extern "C" {

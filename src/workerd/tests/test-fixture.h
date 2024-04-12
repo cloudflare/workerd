@@ -5,12 +5,11 @@
 #pragma once
 
 #include <kj/function.h>
+#include <kj/test.h>
 
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/setup.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
-#include <workerd/jsg/jsg-test.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/api/memory-cache.h>
 
