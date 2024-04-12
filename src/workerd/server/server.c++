@@ -1901,6 +1901,18 @@ public:
             entry.value = onActorBroken(actorRef->onBroken(), *actorContainer)
                 .eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
 
+            KJ_IF_SOME(ref, actorContainer->getContainerRef()) {
+              // Although we didn't have a Worker::Actor, this ActorContainer _previously_ had one,
+              // and there's still at least one client with an open connection. We should continue
+              // to use our existing ActorContainerRef, otherwise we will have two or more separate
+              // refcounted ActorContainerRef's tracking the same ActorContainer. This would likely
+              // result in memory corruption because the ActorContainer's `containerRef` would
+              // lose access to one of the ActorContainerRef's.
+              return GetActorResult {
+                  .actor = actorRef->addRef(),
+                  .ref = ref.addRef() };
+            }
+
             // `hasClients()` will return true now, preventing cleanupLoop from evicting us.
             return GetActorResult {
                 .actor = actorRef->addRef(),
