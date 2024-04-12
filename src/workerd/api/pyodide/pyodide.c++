@@ -70,7 +70,7 @@ int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
   return readToTarget(KJ_REQUIRE_NONNULL(existingSnapshot), offset, buf);
 }
 
-jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
+jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf, const PythonConfig& pythonConfig) {
   auto modules = conf.getModules();
   auto mainModule = kj::str(modules.begin()->getName());
   int numFiles = 0;
@@ -117,9 +117,22 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf) {
     }
     names.add(kj::str(module.getName()));
   }
-  return jsg::alloc<PyodideMetadataReader>(kj::mv(mainModule), names.finish(), contents.finish(),
-                                           requirements.finish(), true /* isWorkerd */,
-                                           false /* isTracing */, false /* createBaselineSnapshot */, kj::none /* memorySnapshot */);
+  bool createSnapshot = pythonConfig.createSnapshot;
+  bool createBaselineSnapshot = pythonConfig.createBaselineSnapshot;
+  bool snapshotToDisk = createSnapshot || createBaselineSnapshot;
+  // clang-format off
+  return jsg::alloc<PyodideMetadataReader>(
+    kj::mv(mainModule),
+    names.finish(),
+    contents.finish(),
+    requirements.finish(),
+    true      /* isWorkerd */,
+    false     /* isTracing */,
+    snapshotToDisk,
+    createBaselineSnapshot,
+    kj::none  /* memorySnapshot */
+  );
+  // clang-format on
 }
 
 const kj::Maybe<kj::Own<const kj::Directory>> DiskCache::NULL_CACHE_ROOT = kj::none;

@@ -7,12 +7,15 @@
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/api/pyodide/pyodide.h>
 
 namespace workerd::api {
 class MemoryCacheProvider;
 }
 
 namespace workerd::server {
+
+using api::pyodide::PythonConfig;
 
 // A Worker::Api implementation with support for all the APIs supported by the OSS runtime.
 class WorkerdApi final: public Worker::Api {
@@ -22,7 +25,7 @@ public:
       IsolateLimitEnforcer& limitEnforcer,
       kj::Own<jsg::IsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
-      kj::Maybe<kj::Own<const kj::Directory>>& pyodideCacheRoot);
+      PythonConfig& pythonConfig);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);

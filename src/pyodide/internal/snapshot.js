@@ -1,5 +1,6 @@
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 import { default as UnsafeEval } from "internal:unsafe-eval";
+import { default as DiskCache } from "pyodide-internal:disk_cache";
 import {
   SITE_PACKAGES_INFO,
   SITE_PACKAGES_SO_FILES,
@@ -8,6 +9,7 @@ import {
 import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 import processScriptImports from "pyodide-internal:process_script_imports.py";
 import {
+  SHOULD_SNAPSHOT_TO_DISK,
   IS_CREATING_BASELINE_SNAPSHOT,
   MEMORY_SNAPSHOT_READER,
 } from "pyodide-internal:metadata";
@@ -27,8 +29,8 @@ import { reportError, simpleRunPython } from "pyodide-internal:util";
  */
 import { _createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
 
-const SHOULD_UPLOAD_SNAPSHOT =
-  ArtifactBundler.isEnabled() || ArtifactBundler.isEwValidating();
+const TOP_LEVEL_SNAPSHOT = ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
+const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled() || TOP_LEVEL_SNAPSHOT;
 
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of
@@ -61,11 +63,13 @@ export async function uploadArtifacts() {
  * Used to hold the memory that needs to be uploaded for the validator.
  */
 let MEMORY_TO_UPLOAD = undefined;
-export function getMemoryToUpload() {
+function getMemoryToUpload() {
   if (!MEMORY_TO_UPLOAD) {
     throw new TypeError("Expected MEMORY_TO_UPLOAD to be set");
   }
-  return MEMORY_TO_UPLOAD;
+  const tmp = MEMORY_TO_UPLOAD;
+  MEMORY_TO_UPLOAD = undefined;
+  return tmp;
 }
 
 /**
@@ -281,8 +285,9 @@ function setUploadFunction(toUpload) {
   if (toUpload.constructor.name !== "Uint8Array") {
     throw new TypeError("Expected TO_UPLOAD to be a Uint8Array");
   }
-  if (ArtifactBundler.isEwValidating()) {
+  if (TOP_LEVEL_SNAPSHOT) {
     MEMORY_TO_UPLOAD = toUpload;
+    return;
   }
   DEFERRED_UPLOAD_FUNCTION = async () => {
     try {
@@ -410,5 +415,13 @@ export function finishSnapshotSetup(pyodide) {
     pyodide.registerJsModule("cf_internal_test_utils", {
       snapshot: snapshotString,
     });
+  }
+}
+
+export function maybeStoreMemorySnapshot() {
+  if (ArtifactBundler.isEwValidating()) {
+    ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
+  } else if (SHOULD_SNAPSHOT_TO_DISK) {
+    DiskCache.put("snapshot.bin", getMemoryToUpload());
   }
 }

@@ -727,8 +727,12 @@ public:
         .addOption({"experimental"}, [this]() { server.allowExperimental(); return true; },
                    "Permit the use of experimental features which may break backwards "
                    "compatibility in a future release.")
-        .addOptionWithArg({"disk-cache-dir"}, CLI_METHOD(diskCacheDir), "<path>",
-                  "Use <path> as a disk cache to avoid repeatedly fetching packages from the internet. ");
+        .addOptionWithArg({"disk-cache-dir"}, CLI_METHOD(setPythonDiskCacheDir), "<path>",
+                  "Use <path> as a disk cache to avoid repeatedly fetching packages from the internet. ")
+        .addOption({"python-save-snapshot"}, [this]() { server.setPythonCreateSnapshot();  return true; },
+                  "Save a dedicated snapshot to the disk cache")
+        .addOption({"python-save-baseline-snapshot"}, [this]() { server.setPythonCreateBaselineSnapshot();  return true; },
+                  "Save a baseline snapshot to the disk cache");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {
@@ -929,10 +933,10 @@ public:
     server.enableControl(fd);
   }
 
-  void diskCacheDir(kj::StringPtr pathStr) {
+  void setPythonDiskCacheDir(kj::StringPtr pathStr) {
     kj::Path path = fs->getCurrentPath().eval(pathStr);
     kj::Maybe<kj::Own<const kj::Directory>> dir = fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
-    server.setDiskCacheRoot(kj::mv(dir));
+    server.setPythonDiskCacheRoot(kj::mv(dir));
   }
 
   void watch() {

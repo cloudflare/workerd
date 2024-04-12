@@ -2,7 +2,7 @@
 // python-entrypoint.js USER module.
 
 import { loadPyodide } from "pyodide-internal:python";
-import { uploadArtifacts, getMemoryToUpload } from "pyodide-internal:snapshot";
+import { uploadArtifacts, maybeStoreMemorySnapshot } from "pyodide-internal:snapshot";
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
   REQUIREMENTS,
@@ -17,7 +17,6 @@ import {
   MAIN_MODULE_NAME,
   WORKERD_INDEX_URL,
 } from "pyodide-internal:metadata";
-import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 import { reportError } from "pyodide-internal:util";
 import { default as Limiter } from "pyodide-internal:limiter";
 
@@ -201,12 +200,13 @@ try {
       }
     }
   }
-
-  // Store the memory snapshot in the ArtifactBundler so that the validator can read it out.
-  // Needs to happen at the top level because the validator does not perform requests.
-  if (ArtifactBundler.isEwValidating()) {
-    ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
-  }
+  /**
+   * Store the memory snapshot in the ArtifactBundler so that the validator can
+   * read it out. Needs to happen at the top level because the validator does
+   * not perform requests. In workerd, this will save a snapshot to disk if the
+   * `--python-save-snapshot` or `--python-save-baseline-snapshot` is passed.
+   */
+  maybeStoreMemorySnapshot();
 } catch (e) {
   console.warn("Error in top level in python-entrypoint-helper.js");
   reportError(e);

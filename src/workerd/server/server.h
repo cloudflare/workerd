@@ -10,6 +10,7 @@
 #include <kj/async-io.h>
 #include <workerd/io/worker.h>
 #include <workerd/api/memory-cache.h>
+#include <workerd/api/pyodide/pyodide.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/sqlite.h>
 #include <workerd/server/alarm-scheduler.h>
@@ -24,6 +25,8 @@ namespace workerd::jsg {
 }
 
 namespace workerd::server {
+
+using api::pyodide::PythonConfig;
 
 // Implements the single-tenant Workers Runtime server / CLI.
 //
@@ -58,8 +61,14 @@ public:
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
   }
-  void setDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>> &&dkr) {
-    diskCacheRoot = kj::mv(dkr);
+  void setPythonDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>> &&dkr) {
+    pythonConfig.diskCacheRoot = kj::mv(dkr);
+  }
+  void setPythonCreateSnapshot() {
+    pythonConfig.createSnapshot = true;
+  }
+  void setPythonCreateBaselineSnapshot() {
+    pythonConfig.createBaselineSnapshot = true;
   }
 
   // Runs the server using the given config.
@@ -93,7 +102,11 @@ private:
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
-  kj::Maybe<kj::Own<const kj::Directory>> diskCacheRoot;
+  PythonConfig pythonConfig = PythonConfig {
+    .diskCacheRoot = kj::none,
+    .createSnapshot = false,
+    .createBaselineSnapshot = false
+  };
 
   bool experimental = false;
 
