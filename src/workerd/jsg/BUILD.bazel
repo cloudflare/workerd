@@ -6,23 +6,51 @@ load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 wd_cc_library(
     name = "jsg",
-    srcs = glob(
-        ["*.c++"],
-        exclude = [
-            "exception.c++",
-            "memory.c++",
-            "*-test.c++",
-        ],
-    ),
-    hdrs = glob(
-        ["*.h"],
-        exclude = [
-            "exception.h",
-            "observer.h",
-            "memory.h",
-            "rtti.h",
-        ],
-    ) + ["//src/workerd/util:autogate.h"],
+    srcs = [
+        "async-context.c++",
+        "buffersource.c++",
+        "dom-exception.c++",
+        "inspector.c++",
+        "iterator.c++",
+        "jsg.c++",
+        "jsvalue.c++",
+        "modules.c++",
+        "promise.c++",
+        "resource.c++",
+        "ser.c++",
+        "setup.c++",
+        "util.c++",
+        "v8-platform-wrapper.c++",
+        "wrappable.c++",
+    ],
+    hdrs = [
+        "async-context.h",
+        "buffersource.h",
+        "dom-exception.h",
+        "function.h",
+        "inspector.h",
+        "iterator.h",
+        "jsg-test.h",
+        "jsg.h",
+        "jsvalue.h",
+        "macro-meta.h",
+        "meta.h",
+        "modules.h",
+        "promise.h",
+        "resource.h",
+        "ser.h",
+        "setup.h",
+        "struct.h",
+        "type-wrapper.h",
+        "util.h",
+        "v8-platform-wrapper.h",
+        "value.h",
+        "web-idl.h",
+        "wrappable.h",
+    ] + [
+        # todo: why is autogate a part of JSG api???
+        "//src/workerd/util:autogate.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":exception",
@@ -31,9 +59,9 @@ wd_cc_library(
         ":observer",
         ":url",
         "//src/workerd/util",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
-        "//src/workerd/util:autogate",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
     ],
@@ -41,8 +69,8 @@ wd_cc_library(
 
 wd_cc_library(
     name = "memory-tracker",
-    hdrs = ["memory.h"],
     srcs = ["memory.c++"],
+    hdrs = ["memory.h"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
@@ -58,11 +86,11 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@workerd-v8//:v8",
-        "@capnp-cpp//src/kj",
-        "@ada-url",
-        ":memory-tracker",
         ":exception",
+        ":memory-tracker",
+        "@ada-url",
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -106,8 +134,8 @@ wd_cc_library(
     hdrs = ["rtti.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":rtti_capnp",
         ":jsg",
+        ":rtti_capnp",
     ],
 )
 

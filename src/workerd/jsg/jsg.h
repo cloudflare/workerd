@@ -2560,4 +2560,4 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) {
 #include "function.h"
 #include "iterator.h"
 #include "jsvalue.h"
-#include "url.h"
+#include <workerd/jsg/url.h>
