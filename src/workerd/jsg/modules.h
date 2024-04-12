@@ -6,7 +6,6 @@
 
 #include <kj/filesystem.h>
 #include <kj/map.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>

@@ -2,9 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "jsg-test.h"
 #include "url.h"
 #include <kj/table.h>
+#include <kj/test.h>
 #include <regex>
 #include <openssl/rand.h>
 

@@ -8,7 +8,6 @@
 #include <pyodide/pyodide.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/workerd.capnp.h>
-#include <workerd/util/autogate.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api::pyodide {

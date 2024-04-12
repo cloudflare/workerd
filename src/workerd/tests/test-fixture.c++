@@ -15,6 +15,7 @@
 #include <workerd/jsg/modules.h>
 #include <workerd/server/server.h>
 #include <workerd/server/workerd-api.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
 
 #include "test-fixture.h"

@@ -2,10 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "jsg-test.h"
 #include <workerd/jsg/memory.h>
+#include <workerd/jsg/setup.h>
 #include <v8-profiler.h>
 #include <kj/map.h>
+#include <kj/test.h>
 
 namespace workerd::jsg::test {
 namespace {
