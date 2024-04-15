@@ -39,10 +39,10 @@ apple_support_dependencies()
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "21ae72a199a995b72e9bd359d4815539158d93a15cf36e284ef201fde7338c3c",
-    strip_prefix = "capnproto-capnproto-8ba7a6e/c++",
+    integrity = "sha256-I/jF25bRniNfmXR4KdeXTnwetKPKEm6fkYfibpZFYoU=",
+    strip_prefix = "capnproto-capnproto-24371b7/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/8ba7a6ef987eb56e8d41e7f11e080dabcbf2a04f"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/24371b79b467686641aa64afa340bdad03b05830"],
 )
 
 http_archive(
