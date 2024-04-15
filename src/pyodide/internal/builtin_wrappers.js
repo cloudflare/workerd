@@ -131,7 +131,10 @@ export function patchFetch(origin) {
 
     // we didn't find it in the disk cache, continue with original fetch
     const response = await origFetch(url, options);
-    const arrayBuffer = await response.arrayBuffer();
+
+    const arrayBuffer = await new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+
+    console.log("decompressed", fileName, arrayBuffer.byteLength, "bytes");
     DiskCache.put(fileName, arrayBuffer);
     return new Response(arrayBuffer);
   };
