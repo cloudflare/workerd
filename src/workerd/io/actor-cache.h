@@ -406,8 +406,19 @@ private:
     // from cache and needs to remember the original cached values even if they are overwritten
     // before the read completes.
     const Value value;
-  public:
     EntryValueStatus valueStatus;
+
+    // This enum indicates how synchronized this entry is with storage.
+    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+  public:
+    EntryValueStatus getValueStatus() const {
+      return valueStatus;
+    }
+
+    inline EntrySyncStatus getSyncStatus() const {
+      return syncStatus;
+    }
+
     kj::Maybe<ValuePtr> getValuePtr() const {
       if (valueStatus == EntryValueStatus::PRESENT) {
         return value.asPtr();
@@ -423,11 +434,27 @@ private:
       }
     }
 
-    // This enum indicates how synchronized this entry is with storage.
-    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+    void setFlushing() {
+      syncStatus = EntrySyncStatus::FLUSHING;
+    }
+
+    void setNotInCache() {
+      syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+    }
+
+    // Avoid using setClean() and setDirty() directly. If you want to set the status to CLEAN or
+    // DIRTY, consider using the addToCleanList() and addToDirtyList() methods. This helps us keep
+    // the state transitions managable.
+    void setClean() {
+      syncStatus = EntrySyncStatus::CLEAN;
+    }
+
+    void setDirty() {
+      syncStatus = EntrySyncStatus::DIRTY;
+    }
 
     bool isDirty() const {
-      switch(syncStatus) {
+      switch(getSyncStatus()) {
         case EntrySyncStatus::DIRTY:
         case EntrySyncStatus::FLUSHING: {
           return true;
@@ -626,9 +653,23 @@ private:
   // Type of a lock on `SharedLru::cleanList`. We use the same lock to protect `currentValues`.
   typedef kj::Locked<kj::List<Entry, &Entry::link>> Lock;
 
+  // Add this entry to the clean list and set its status to CLEAN.
+  // This doesn't do much, but it makes it easier to track what's going on.
+  void addToCleanList(Lock& listLock, Entry& entryRef) {
+    entryRef.setClean();
+    listLock->add(entryRef);
+  }
+
+  // Add this entry to the dirty list and set its status to DIRTY.
+  // This doesn't do much, but it makes it easier to track what's going on.
+  void addToDirtyList(Entry& entryRef) {
+    entryRef.setDirty();
+    dirtyList.add(entryRef);
+  }
+
   // Indicate that an entry was observed by a read operation and so should be moved to the end of
-  // the LRU queue (unless the options say otherwise).
-  void touchEntry(Lock& lock, Entry& entry, const ReadOptions& options);
+  // the LRU queue.
+  void touchEntry(Lock& lock, Entry& entry);
 
   // TODO(soon) This function mostly belongs on the SharedLru, not the ActorCache. Notably,
   // `removeEntry()` has to do with the shared clean list but `evictEntry()` has to do with
@@ -742,7 +783,7 @@ public:
   class Iterator {
   public:
     KeyValuePtrPairWithCache operator*() {
-      KJ_IREQUIRE(ptr->get()->valueStatus == ActorCache::EntryValueStatus::PRESENT);
+      KJ_IREQUIRE(ptr->get()->getValueStatus() == ActorCache::EntryValueStatus::PRESENT);
       return { ptr->get()->key, ptr->get()->getValuePtr().orDefault({}), *statusPtr };
     }
     Iterator& operator++() {
@@ -847,13 +888,13 @@ public:
   size_t currentSize() const { return size.load(std::memory_order_relaxed); }
 
 private:
-  Options options;
+  const Options options;
 
   // List of clean values, across all caches, ordered from least-recently-used to
   // most-recently-used.
   kj::MutexGuarded<kj::List<Entry, &Entry::link>> cleanList;
 
-  // Total byte size of everything that is cached, including dirty values that are not in `list`.
+  // Total byte size of everything that is cached, including dirty values that aren't in `cleanList`.
   mutable std::atomic<size_t> size = 0;
 
   // TimePoint when we should next evict stale entries. Represented as an int64_t of nanoseconds
