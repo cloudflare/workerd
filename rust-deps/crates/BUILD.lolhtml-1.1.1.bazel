@@ -12,9 +12,13 @@ package(default_visibility = ["//visibility:public"])
 
 rust_library(
     name = "lolhtml",
-    srcs = glob(["**/*.rs"]),
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -38,9 +42,9 @@ rust_library(
     ],
     version = "1.1.1",
     deps = [
-        "@crates_vendor__encoding_rs-0.8.33//:encoding_rs",
+        "@crates_vendor__encoding_rs-0.8.34//:encoding_rs",
         "@crates_vendor__libc-0.2.153//:libc",
-        "@crates_vendor__lol_html-1.1.1//:lol_html",
-        "@crates_vendor__thiserror-1.0.57//:thiserror",
+        "@crates_vendor__lol_html-1.2.1//:lol_html",
+        "@crates_vendor__thiserror-1.0.59//:thiserror",
     ],
 )

@@ -10,18 +10,18 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT OR Apache-2.0
-# ])
-
 rust_library(
     name = "rand",
-    srcs = glob(["**/*.rs"]),
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     aliases = {
         "@crates_vendor__getrandom-0.1.16//:getrandom": "getrandom_package",
     },
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",

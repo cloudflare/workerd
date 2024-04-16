@@ -23,8 +23,8 @@ bazel_skylib_workspace()
 
 http_archive(
     name = "build_bazel_apple_support",
-    sha256 = "cf4d63f39c7ba9059f70e995bf5fe1019267d3f77379c2028561a5d7645ef67c",
-    url = "https://github.com/bazelbuild/apple_support/releases/download/1.11.1/apple_support.1.11.1.tar.gz",
+    sha256 = "c4bb2b7367c484382300aee75be598b92f847896fb31bbd22f3a2346adf66a80",
+    url = "https://github.com/bazelbuild/apple_support/releases/download/1.15.1/apple_support.1.15.1.tar.gz",
 )
 
 load(
@@ -279,36 +279,36 @@ http_archive(
 http_file(
     name = "cargo_bazel_linux_x64",
     executable = True,
-    sha256 = "890c1d631ec39ccdccc4f383e9083a44781f529eb6281a84c209874d5449758f",
+    sha256 = "dffd5f2ceb91c5a6c0d0e8df5401160d6a5cf15511416b579c0c3936d22ccb8c",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-x86_64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-x86_64-unknown-linux-gnu",
     ],
 )
 
 http_file(
     name = "cargo_bazel_linux_arm64",
     executable = True,
-    sha256 = "7e2e9ee08d6e1b33b1f76f2b521a4c7c295db50cda8679afaebe588113d54859",
+    sha256 = "490b52bd8407613c3aa69b9e3f52635a2fe7631ccb5c5bea9d8d0bc0adfa6d0f",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-aarch64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-aarch64-unknown-linux-gnu",
     ],
 )
 
 http_file(
     name = "cargo_bazel_macos_x64",
     executable = True,
-    sha256 = "a1b2484838291835b65fef49ec373df0579955ef20603836ecd79bf7e903c603",
+    sha256 = "cf873df6f03c94b95af567f5b9a6ff3e1528052cc89cabbee5a330e7c94b75c9",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-x86_64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-x86_64-apple-darwin",
     ],
 )
 
 http_file(
     name = "cargo_bazel_macos_arm64",
     executable = True,
-    sha256 = "308984faa357f94b0ac85c6d9f20b6bf4319cdceca9af301b3d73d77a2d16299",
+    sha256 = "813d490b06e346e94c6cb34f4e9fda10bd85d23dc89711a170eb0fb68a19018c",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-aarch64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-aarch64-apple-darwin",
     ],
 )
 
@@ -316,17 +316,21 @@ http_file(
     name = "cargo_bazel_win_x64",
     downloaded_file_path = "downloaded.exe",  # .exe extension required for Windows to recognise as executable
     executable = True,
-    sha256 = "8c97381a7f20033104563c808e5530cd76d70c88281b4708ca4c3b834f769246",
+    sha256 = "dea1f912f7c432cd9f84bd2e7b4ad791e7ccfb0c01a6984ccc6498e0cc8be0a7",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/cargo-bazel-x86_64-pc-windows-msvc.exe",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-x86_64-pc-windows-msvc.exe",
     ],
 )
 
+# TODO(soon): rules_rust starts producing linker errors on Linux as of 0.39 through 0.42.1, try
+# upgrading it again later. This is likely due to https://github.com/bazelbuild/rules_rust/pull/2471.
+# The related cargo_bazel package has been updated already - some version mismatch between them is
+# generally acceptable.
 http_archive(
     name = "rules_rust",
-    sha256 = "a761d54e49db06f863468e6bba4a13252b1bd499e8f706da65e279b3bcbc5c52",
+    sha256 = "6501960c3e4da32495d1e1007ded0769a534cb195c30dea36aa54f9d8a3f0361",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.36.2/rules_rust-v0.36.2.tar.gz",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.38.0/rules_rust-v0.38.0.tar.gz",
     ],
 )
 
@@ -359,16 +363,16 @@ rust_analyzer_dependencies()
 # Fetch rules_nodejs before aspect_rules_js, otherwise we'll get an outdated rules_nodejs version.
 http_archive(
     name = "rules_nodejs",
-    sha256 = "a50986c7d2f2dc43a5b9b81a6245fd89bdc4866f1d5e316d9cef2782dd859292",
-    strip_prefix = "rules_nodejs-6.0.5",
-    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.0.5/rules_nodejs-v6.0.5.tar.gz",
+    sha256 = "dddd60acc3f2f30359bef502c9d788f67e33814b0ddd99aa27c5a15eb7a41b8c",
+    strip_prefix = "rules_nodejs-6.1.0",
+    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.1.0/rules_nodejs-v6.1.0.tar.gz",
 )
 
 http_archive(
     name = "aspect_rules_js",
-    sha256 = "46d63efa86b9f87670603022500f3f0a9893b914b401a40183cee59069249052",
-    strip_prefix = "rules_js-1.38.0",
-    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.38.0.tar.gz",
+    sha256 = "bfc7ab7895f8f08e950d54a9c7813a58da3f1a0587e53414d72e19b787535c20",
+    strip_prefix = "rules_js-1.41.2",
+    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.41.2.tar.gz",
 )
 
 http_archive(
@@ -391,7 +395,7 @@ nodejs_register_toolchains(
         # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
         "https://nodejs.org/dist/v{version}/{filename}",
     ],
-    node_version = "20.11.1",
+    node_version = "20.12.1",
 )
 
 load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies", TS_LATEST_VERSION = "LATEST_TYPESCRIPT_VERSION")
@@ -484,10 +488,10 @@ http_archive(
 # For use with perfetto
 http_archive(
     name = "com_google_protobuf",
-    sha256 = "2ee9dcec820352671eb83e081295ba43f7a4157181dad549024d7070d079cf65",
-    strip_prefix = "protobuf-3.9.0",
+    sha256 = "6adf73fd7f90409e479d6ac86529ade2d45f50494c5c10f539226693cb8fe4f7",
+    strip_prefix = "protobuf-3.10.1",
     type = "tgz",
-    url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.9.0.tar.gz",
+    url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.10.1.tar.gz",
 )
 
 # For use with perfetto

@@ -10,15 +10,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT/Apache-2.0
-# ])
-
 rust_library(
-    name = "safemem",
-    srcs = glob(["**/*.rs"]),
+    name = "cc",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -28,21 +28,17 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2015",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=safemem",
+        "crate-name=cc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.3",
+    version = "1.0.95",
 )

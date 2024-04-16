@@ -10,15 +10,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT OR Apache-2.0
-# ])
-
 rust_library(
-    name = "clang_ast",
-    srcs = glob(["**/*.rs"]),
+    name = "syn",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -28,6 +28,16 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "clone-impls",
+        "default",
+        "derive",
+        "extra-traits",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,14 +45,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clang-ast",
+        "crate-name=syn",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.22",
+    version = "2.0.60",
     deps = [
-        "@crates_vendor__rustc-hash-1.1.0//:rustc_hash",
-        "@crates_vendor__serde-1.0.197//:serde",
+        "@crates_vendor__proc-macro2-1.0.81//:proc_macro2",
+        "@crates_vendor__quote-1.0.36//:quote",
+        "@crates_vendor__unicode-ident-1.0.12//:unicode_ident",
     ],
 )

@@ -11,15 +11,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT OR Apache-2.0
-# ])
-
 rust_library(
-    name = "anyhow",
-    srcs = glob(["**/*.rs"]),
+    name = "proc_macro2",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -31,37 +31,42 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "std",
+        "proc-macro",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=anyhow",
+        "crate-name=proc-macro2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.80",
+    version = "1.0.81",
     deps = [
-        "@crates_vendor__anyhow-1.0.80//:build_script_build",
+        "@crates_vendor__proc-macro2-1.0.81//:build_script_build",
+        "@crates_vendor__unicode-ident-1.0.12//:unicode_ident",
     ],
 )
 
 cargo_build_script(
-    name = "anyhow_build_script",
-    srcs = glob(["**/*.rs"]),
+    name = "proc-macro2_bs",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     crate_features = [
         "default",
-        "std",
+        "proc-macro",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -71,23 +76,23 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=anyhow",
+        "crate-name=proc-macro2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.80",
+    version = "1.0.81",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = "anyhow_build_script",
+    actual = ":proc-macro2_bs",
     tags = ["manual"],
 )

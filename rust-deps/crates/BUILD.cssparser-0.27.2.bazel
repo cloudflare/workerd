@@ -11,15 +11,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MPL-2.0
-# ])
-
 rust_library(
     name = "cssparser",
-    srcs = glob(["**/*.rs"]),
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -51,17 +51,21 @@ rust_library(
         "@crates_vendor__itoa-0.4.8//:itoa",
         "@crates_vendor__matches-0.1.10//:matches",
         "@crates_vendor__phf-0.8.0//:phf",
-        "@crates_vendor__smallvec-1.13.1//:smallvec",
+        "@crates_vendor__smallvec-1.13.2//:smallvec",
     ],
 )
 
 cargo_build_script(
-    name = "cssparser_build_script",
-    srcs = glob(["**/*.rs"]),
+    name = "cssparser_bs",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -85,14 +89,14 @@ cargo_build_script(
     version = "0.27.2",
     visibility = ["//visibility:private"],
     deps = [
-        "@crates_vendor__proc-macro2-1.0.78//:proc_macro2",
-        "@crates_vendor__quote-1.0.35//:quote",
+        "@crates_vendor__proc-macro2-1.0.81//:proc_macro2",
+        "@crates_vendor__quote-1.0.36//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )
 
 alias(
     name = "build_script_build",
-    actual = "cssparser_build_script",
+    actual = ":cssparser_bs",
     tags = ["manual"],
 )
