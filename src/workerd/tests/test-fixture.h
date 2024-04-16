@@ -99,7 +99,6 @@ private:
   kj::Own<IsolateLimitEnforcer> isolateLimitEnforcer;
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
-  kj::Maybe<kj::Own<const kj::Directory>> diskCacheRoot;
   kj::Own<Worker::Api> api;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;

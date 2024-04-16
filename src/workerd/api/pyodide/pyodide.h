@@ -12,6 +12,12 @@
 
 namespace workerd::api::pyodide {
 
+struct PythonConfig {
+  kj::Maybe<kj::Own<const kj::Directory>> diskCacheRoot;
+  bool createSnapshot;
+  bool createBaselineSnapshot;
+};
+
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
 class PackagesTarReader : public jsg::Object {
@@ -36,6 +42,7 @@ private:
   kj::Array<kj::String> requirements;
   bool isWorkerdFlag;
   bool isTracingFlag;
+  bool snapshotToDisk;
   bool createBaselineSnapshot;
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
@@ -43,10 +50,12 @@ public:
   PyodideMetadataReader(kj::String mainModule, kj::Array<kj::String> names,
                         kj::Array<kj::Array<kj::byte>> contents, kj::Array<kj::String> requirements,
                         bool isWorkerd, bool isTracing,
+                        bool snapshotToDisk,
                         bool createBaselineSnapshot,
                         kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
       : mainModule(kj::mv(mainModule)), names(kj::mv(names)), contents(kj::mv(contents)),
         requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd), isTracingFlag(isTracing),
+        snapshotToDisk(snapshotToDisk),
         createBaselineSnapshot(createBaselineSnapshot),
         memorySnapshot(kj::mv(memorySnapshot)) {}
 
@@ -56,6 +65,10 @@ public:
 
   bool isTracing() {
     return this->isTracingFlag;
+  }
+
+  bool shouldSnapshotToDisk() {
+    return snapshotToDisk;
   }
 
   bool isCreatingBaselineSnapshot() {
@@ -101,6 +114,7 @@ public:
     JSG_METHOD(getMemorySnapshotSize);
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
+    JSG_METHOD(shouldSnapshotToDisk);
     JSG_METHOD(isCreatingBaselineSnapshot);
   }
 
@@ -131,24 +145,21 @@ public:
         existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
         hasUploaded(false),
-        isValidating(false),
-        createBaselineSnapshot(false) {};
+        isValidating(false) {};
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
         uploadMemorySnapshotCb(kj::none),
         hasUploaded(false),
-        isValidating(false),
-        createBaselineSnapshot(false) {};
+        isValidating(false){};
 
   ArtifactBundler(bool isValidating = false)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::none),
         uploadMemorySnapshotCb(kj::none),
         hasUploaded(false),
-        isValidating(isValidating),
-        createBaselineSnapshot(false) {};
+        isValidating(isValidating){};
 
   jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
     // Prevent multiple uploads.
@@ -228,7 +239,6 @@ private:
   kj::Maybe<kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)>> uploadMemorySnapshotCb;
   bool hasUploaded;
   bool isValidating;
-  bool createBaselineSnapshot;
 };
 
 
@@ -243,12 +253,18 @@ public:
 
 // This cache is used by Pyodide to store wheels fetched over the internet across workerd restarts in local dev only
 class DiskCache: public jsg::Object {
+private:
   static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT; // always set to kj::none
 
   const kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot;
+
 public:
   DiskCache(): cacheRoot(NULL_CACHE_ROOT) {}; // Disabled disk cache
   DiskCache(const kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot): cacheRoot(cacheRoot) {};
+
+  static jsg::Ref<DiskCache> makeDisabled() {
+    return jsg::alloc<DiskCache>();
+  }
 
   jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
   void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
@@ -275,13 +291,13 @@ private:
 
 
 public:
-  SimplePythonLimiter(int startupLimitMs, kj::Function<kj::TimePoint()> getTimeCb) :
-      startupLimitMs(startupLimitMs),
-      getTimeCb(kj::mv(getTimeCb)) {}
-
   SimplePythonLimiter() :
       startupLimitMs(0),
       getTimeCb(kj::none) {}
+
+  SimplePythonLimiter(int startupLimitMs, kj::Function<kj::TimePoint()> getTimeCb) :
+      startupLimitMs(startupLimitMs),
+      getTimeCb(kj::mv(getTimeCb)) {}
 
   static jsg::Ref<SimplePythonLimiter> makeDisabled() {
     return jsg::alloc<SimplePythonLimiter>();
@@ -313,7 +329,7 @@ public:
 
 using Worker = server::config::Worker;
 
-jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf);
+jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf, const PythonConfig& pythonConfig);
 
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
 

@@ -263,6 +263,9 @@ class MockActorLoopback : public Worker::Actor::Loopback, public kj::Refcounted 
 
 } // namespace
 
+using api::pyodide::PythonConfig;
+
+PythonConfig defaultPythonConfig { .diskCacheRoot = kj::none, .createSnapshot = false, .createBaselineSnapshot = false };
 
 TestFixture::TestFixture(SetupParams&& params)
   : waitScope(params.waitScope),
@@ -279,13 +282,13 @@ TestFixture::TestFixture(SetupParams&& params)
     isolateLimitEnforcer(kj::heap<MockIsolateLimitEnforcer>()),
     errorReporter(kj::heap<MockErrorReporter>()),
     memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
-    diskCacheRoot(kj::none),
     api(kj::heap<server::WorkerdApi>(
       testV8System,
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
       *isolateLimitEnforcer,
       kj::atomicRefcounted<IsolateObserver>(),
-      *memoryCacheProvider, diskCacheRoot)),
+      *memoryCacheProvider,
+      defaultPythonConfig)),
     workerIsolate(kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(api),
       kj::atomicRefcounted<IsolateObserver>(),

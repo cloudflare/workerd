@@ -46,6 +46,8 @@
 
 namespace workerd::server {
 
+using api::pyodide::PythonConfig;
+
 JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   // Declares the listing of host object types and structs that the jsg
   // automatic type mapping will understand. Each of the various
@@ -105,11 +107,18 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   jsg::NodeJsModuleObject,
   jsg::NodeJsModuleContext);
 
+
+static PythonConfig defaultConfig {
+  .diskCacheRoot = kj::none,
+  .createSnapshot = false,
+  .createBaselineSnapshot = false,
+};
+
 struct WorkerdApi::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
-  kj::Maybe<kj::Own<const kj::Directory>>& pyodideCacheRoot;
+  PythonConfig pythonConfig;
 
   class Configuration {
   public:
@@ -132,10 +141,10 @@ struct WorkerdApi::Impl {
        IsolateLimitEnforcer& limitEnforcer,
        kj::Own<jsg::IsolateObserver> observer,
        api::MemoryCacheProvider& memoryCacheProvider,
-       kj::Maybe<kj::Own<const kj::Directory>>& pyodideCacheRoot)
+       PythonConfig& pythonConfig = defaultConfig)
       : features(capnp::clone(featuresParam)),
         jsgIsolate(v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
-        memoryCacheProvider(memoryCacheProvider), pyodideCacheRoot(pyodideCacheRoot) {}
+        memoryCacheProvider(memoryCacheProvider), pythonConfig(kj::mv(pythonConfig)) {}
 
   static v8::Local<v8::String> compileTextGlobal(JsgWorkerdIsolate::Lock& lock,
       capnp::Text::Reader reader) {
@@ -176,9 +185,9 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     IsolateLimitEnforcer& limitEnforcer,
     kj::Own<jsg::IsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
-    kj::Maybe<kj::Own<const kj::Directory>> &pyodideCacheRoot)
+    PythonConfig &pythonConfig)
     : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer),
-                          memoryCacheProvider, pyodideCacheRoot)) {}
+                          memoryCacheProvider, pythonConfig)) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -413,7 +422,7 @@ void WorkerdApi::compileModules(
         using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
         using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
         auto specifier = "pyodide-internal:runtime-generated/metadata";
-        auto metadataReader = makePyodideMetadataReader(conf);
+        auto metadataReader = makePyodideMetadataReader(conf, impl->pythonConfig);
         modules->addBuiltinModule(
             specifier,
             [specifier = kj::str(specifier), metadataReader = kj::mv(metadataReader)](
@@ -463,7 +472,7 @@ void WorkerdApi::compileModules(
         using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
         using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
         auto specifier = "pyodide-internal:disk_cache";
-        auto diskCache = jsg::alloc<DiskCache>(impl->pyodideCacheRoot);
+        auto diskCache = jsg::alloc<DiskCache>(impl->pythonConfig.diskCacheRoot);
         modules->addBuiltinModule(
           specifier,
           [specifier = kj::str(specifier), diskCache = kj::mv(diskCache)](
