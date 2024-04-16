@@ -8,6 +8,7 @@
 #include <kj/string.h>
 #include <kj/debug.h>
 #include <workerd/io/trace.h>
+#include <workerd/api/util.h>
 
 namespace kj { class HttpClient; }
 
@@ -96,6 +97,9 @@ public:
     // or has been canceled. (In practice, this string's lifetime is that of the Isolate making
     // the request.)
     kj::Maybe<kj::StringPtr> featureFlagsForFl;
+
+    // Timestamp for when a subrequest is started. (ms since the Unix Epoch)
+    double startTime = api::dateNow();
   };
 
   virtual kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) = 0;
