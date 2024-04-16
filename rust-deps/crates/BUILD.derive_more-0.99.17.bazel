@@ -10,15 +10,15 @@ load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT
-# ])
-
 rust_proc_macro(
     name = "derive_more",
-    srcs = glob(["**/*.rs"]),
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -71,8 +71,8 @@ rust_proc_macro(
     version = "0.99.17",
     deps = [
         "@crates_vendor__convert_case-0.4.0//:convert_case",
-        "@crates_vendor__proc-macro2-1.0.78//:proc_macro2",
-        "@crates_vendor__quote-1.0.35//:quote",
+        "@crates_vendor__proc-macro2-1.0.81//:proc_macro2",
+        "@crates_vendor__quote-1.0.36//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )

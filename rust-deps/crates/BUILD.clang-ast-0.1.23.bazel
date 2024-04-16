@@ -10,15 +10,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT OR Apache-2.0
-# ])
-
 rust_library(
-    name = "bitflags",
-    srcs = glob(["**/*.rs"]),
+    name = "clang_ast",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -35,10 +35,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=bitflags",
+        "crate-name=clang-ast",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.4.2",
+    version = "0.1.23",
+    deps = [
+        "@crates_vendor__rustc-hash-1.1.0//:rustc_hash",
+        "@crates_vendor__serde-1.0.198//:serde",
+    ],
 )

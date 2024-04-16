@@ -10,15 +10,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT OR Apache-2.0
-# ])
-
 rust_library(
-    name = "cc",
-    srcs = glob(["**/*.rs"]),
+    name = "encoding_rs",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "alloc",
+        "default",
+    ],
     crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = [
@@ -35,10 +39,13 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cc",
+        "crate-name=encoding_rs",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.90",
+    version = "0.8.34",
+    deps = [
+        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
+    ],
 )

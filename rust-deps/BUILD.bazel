@@ -87,7 +87,7 @@ rust_static_library(
 # repository twice.
 alias(
     name = "lol_html_api",
-    actual = "@crates_vendor__lol_html-1.1.1//:c-api/include/lol_html.h",
+    actual = "@crates_vendor__lol_html-1.2.1//:c-api/include/lol_html.h",
     tags = ["manual"],
     visibility = ["//visibility:public"],
 )

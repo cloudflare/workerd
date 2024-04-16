@@ -11,15 +11,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT OR Apache-2.0
-# ])
-
 rust_library(
-    name = "proc_macro2",
-    srcs = glob(["**/*.rs"]),
+    name = "serde",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -31,38 +31,48 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "proc-macro",
+        "derive",
+        "serde_derive",
+        "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
+    proc_macro_deps = [
+        "@crates_vendor__serde_derive-1.0.198//:serde_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=serde",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.78",
+    version = "1.0.198",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.78//:build_script_build",
-        "@crates_vendor__unicode-ident-1.0.12//:unicode_ident",
+        "@crates_vendor__serde-1.0.198//:build_script_build",
     ],
 )
 
 cargo_build_script(
-    name = "proc-macro2_build_script",
-    srcs = glob(["**/*.rs"]),
+    name = "serde_bs",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     crate_features = [
         "default",
-        "proc-macro",
+        "derive",
+        "serde_derive",
+        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -72,23 +82,23 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2021",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=serde",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.78",
+    version = "1.0.198",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = "proc-macro2_build_script",
+    actual = ":serde_bs",
     tags = ["manual"],
 )

@@ -10,15 +10,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT OR Apache-2.0
-# ])
-
 rust_library(
-    name = "smallvec",
-    srcs = glob(["**/*.rs"]),
+    name = "quote",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "proc-macro",
+    ],
     crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = [
@@ -35,10 +39,13 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=smallvec",
+        "crate-name=quote",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.13.1",
+    version = "1.0.36",
+    deps = [
+        "@crates_vendor__proc-macro2-1.0.81//:proc_macro2",
+    ],
 )

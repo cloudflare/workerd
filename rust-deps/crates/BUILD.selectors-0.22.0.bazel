@@ -11,15 +11,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MPL-2.0
-# ])
-
 rust_library(
     name = "selectors",
-    srcs = glob(["**/*.rs"]),
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -55,18 +55,22 @@ rust_library(
         "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
         "@crates_vendor__selectors-0.22.0//:build_script_build",
         "@crates_vendor__servo_arc-0.1.1//:servo_arc",
-        "@crates_vendor__smallvec-1.13.1//:smallvec",
+        "@crates_vendor__smallvec-1.13.2//:smallvec",
         "@crates_vendor__thin-slice-0.1.1//:thin_slice",
     ],
 )
 
 cargo_build_script(
-    name = "selectors_build_script",
-    srcs = glob(["**/*.rs"]),
+    name = "selectors_bs",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -96,6 +100,6 @@ cargo_build_script(
 
 alias(
     name = "build_script_build",
-    actual = "selectors_build_script",
+    actual = ":selectors_bs",
     tags = ["manual"],
 )

@@ -10,15 +10,15 @@ load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT
-# ])
-
 rust_proc_macro(
     name = "phf_macros",
-    srcs = glob(["**/*.rs"]),
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = False,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -47,8 +47,8 @@ rust_proc_macro(
     deps = [
         "@crates_vendor__phf_generator-0.8.0//:phf_generator",
         "@crates_vendor__phf_shared-0.8.0//:phf_shared",
-        "@crates_vendor__proc-macro2-1.0.78//:proc_macro2",
-        "@crates_vendor__quote-1.0.35//:quote",
+        "@crates_vendor__proc-macro2-1.0.81//:proc_macro2",
+        "@crates_vendor__quote-1.0.36//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )
