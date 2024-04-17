@@ -32,8 +32,8 @@ void DeleteQueue::scheduleDeletion(OwnedObject* object) const {
   }
 }
 
-void DeleteQueue::checkFarGet(const DeleteQueue* deleteQueue) {
-  IoContext::current().checkFarGet(deleteQueue);
+void DeleteQueue::checkFarGet(const DeleteQueue* deleteQueue, kj::StringPtr type) {
+  IoContext::current().checkFarGet(deleteQueue, type);
 }
 
 OwnedObjectList::~OwnedObjectList() noexcept(false) {
