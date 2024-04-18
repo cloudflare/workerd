@@ -370,7 +370,8 @@ public:
   static void requireCurrentOrThrowJs(WeakRef& weak);
 
   // Just throw the error that requireCurrentOrThrowJs() would throw on failure.
-  [[noreturn]] static void throwNotCurrentJsError(kj::Maybe<kj::StringPtr> maybeType = kj::none);
+  [[noreturn]] static void throwNotCurrentJsError(
+      kj::Maybe<const std::type_info&> maybeType = kj::none);
 
   // -----------------------------------------------------------------
   // Task scheduling and object storage
@@ -811,7 +812,7 @@ private:
 
   void taskFailed(kj::Exception&& exception) override;
   void requireCurrent();
-  void checkFarGet(const DeleteQueue* expectedQueue, kj::StringPtr type);
+  void checkFarGet(const DeleteQueue* expectedQueue, const std::type_info& type);
 
   kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
 

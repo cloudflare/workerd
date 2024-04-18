@@ -956,7 +956,7 @@ void IoContext::requireCurrent() {
   KJ_REQUIRE(threadLocalRequest == this, "request is not current in this thread");
 }
 
-void IoContext::checkFarGet(const DeleteQueue* expectedQueue, kj::StringPtr type) {
+void IoContext::checkFarGet(const DeleteQueue* expectedQueue, const std::type_info& type) {
   KJ_ASSERT(expectedQueue);
   requireCurrent();
 
@@ -1273,9 +1273,9 @@ void IoContext::requireCurrentOrThrowJs(WeakRef& weak) {
   throwNotCurrentJsError();
 }
 
-void IoContext::throwNotCurrentJsError(kj::Maybe<kj::StringPtr> maybeType) {
-  auto type = maybeType.map([](kj::StringPtr type) {
-    return kj::str(" (I/O type: ", type, ")");
+void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeType) {
+  auto type = maybeType.map([](const std::type_info& type) {
+    return kj::str(" (I/O type: ", jsg::typeName(type), ")");
   }).orDefault(kj::String());
 
   if (threadLocalRequest != nullptr && threadLocalRequest->actor != kj::none) {
