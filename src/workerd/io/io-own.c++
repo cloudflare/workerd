@@ -32,7 +32,7 @@ void DeleteQueue::scheduleDeletion(OwnedObject* object) const {
   }
 }
 
-void DeleteQueue::checkFarGet(const DeleteQueue* deleteQueue, kj::StringPtr type) {
+void DeleteQueue::checkFarGet(const DeleteQueue* deleteQueue, const std::type_info& type) {
   IoContext::current().checkFarGet(deleteQueue, type);
 }
 

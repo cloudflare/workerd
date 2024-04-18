@@ -120,7 +120,7 @@ public:
   // Implements the corresponding methods of IoContext and ActorContext.
   template <typename T> IoOwn<T> addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects);
 
-  static void checkFarGet(const DeleteQueue* deleteQueue, kj::StringPtr type);
+  static void checkFarGet(const DeleteQueue* deleteQueue, const std::type_info& type);
 };
 
 template <typename T>
@@ -288,15 +288,13 @@ IoPtr<T>& IoPtr<T>::operator=(decltype(nullptr)) {
 
 template <typename T>
 inline T* IoOwn<T>::operator->() {
-  auto type = jsg::typeName(typeid(T));
-  DeleteQueue::checkFarGet(deleteQueue, type);
+  DeleteQueue::checkFarGet(deleteQueue, typeid(T));
   return item->ptr;
 }
 
 template <typename T>
 inline IoOwn<T>::operator kj::Own<T>() && {
-  auto type = jsg::typeName(typeid(T));
-  DeleteQueue::checkFarGet(deleteQueue, type);
+  DeleteQueue::checkFarGet(deleteQueue, typeid(T));
   auto result = kj::mv(item->ptr);
   OwnedObjectList::unlink(*item);
   item = nullptr;
@@ -306,8 +304,7 @@ inline IoOwn<T>::operator kj::Own<T>() && {
 
 template <typename T>
 inline T* IoPtr<T>::operator->() {
-  auto type = jsg::typeName(typeid(T));
-  DeleteQueue::checkFarGet(deleteQueue, type);
+  DeleteQueue::checkFarGet(deleteQueue, typeid(T));
   return ptr;
 }
 
