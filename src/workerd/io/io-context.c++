@@ -956,14 +956,14 @@ void IoContext::requireCurrent() {
   KJ_REQUIRE(threadLocalRequest == this, "request is not current in this thread");
 }
 
-void IoContext::checkFarGet(const DeleteQueue* expectedQueue) {
+void IoContext::checkFarGet(const DeleteQueue* expectedQueue, kj::StringPtr type) {
   KJ_ASSERT(expectedQueue);
   requireCurrent();
 
   if (expectedQueue == deleteQueue.get()) {
     // same request or same actor, success
   } else {
-    throwNotCurrentJsError();
+    throwNotCurrentJsError(type);
   }
 }
 
@@ -1273,20 +1273,24 @@ void IoContext::requireCurrentOrThrowJs(WeakRef& weak) {
   throwNotCurrentJsError();
 }
 
-void IoContext::throwNotCurrentJsError() {
+void IoContext::throwNotCurrentJsError(kj::Maybe<kj::StringPtr> maybeType) {
+  auto type = maybeType.map([](kj::StringPtr type) {
+    return kj::str(" (I/O type: ", type, ")");
+  }).orDefault(kj::String());
+
   if (threadLocalRequest != nullptr && threadLocalRequest->actor != kj::none) {
     JSG_FAIL_REQUIRE(Error,
-        "Cannot perform I/O on behalf of a different Durable Object. I/O objects "
+        kj::str("Cannot perform I/O on behalf of a different Durable Object. I/O objects "
         "(such as streams, request/response bodies, and others) created in the context of one "
         "Durable Object cannot be accessed from a different Durable Object in the same isolate. "
         "This is a limitation of Cloudflare Workers which allows us to improve overall "
-        "performance.");
+        "performance.", type));
   } else {
     JSG_FAIL_REQUIRE(Error,
-        "Cannot perform I/O on behalf of a different request. I/O objects (such as "
+        kj::str("Cannot perform I/O on behalf of a different request. I/O objects (such as "
         "streams, request/response bodies, and others) created in the context of one request "
         "handler cannot be accessed from a different request's handler. This is a limitation "
-        "of Cloudflare Workers which allows us to improve overall performance.");
+        "of Cloudflare Workers which allows us to improve overall performance.", type));
   }
 }
 
