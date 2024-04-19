@@ -637,12 +637,12 @@ struct JsBundleContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(JsBundleIsolate, JsBundleContext);
 
 KJ_TEST("expectEvalModule function works") {
-  Evaluator<JsBundleContext, JsBundleIsolate> e(v8System);
+  Evaluator<JsBundleContext, JsBundleIsolate, decltype(nullptr), JsBundleIsolate_TypeWrapper> e(v8System);
   e.expectEvalModule("export function run() { return 123; }", "number", "123");
 }
 
 KJ_TEST("bundle installed works") {
-  Evaluator<JsBundleContext, JsBundleIsolate> e(v8System);
+  Evaluator<JsBundleContext, JsBundleIsolate, decltype(nullptr), JsBundleIsolate_TypeWrapper> e(v8System);
   e.expectEvalModule(R"(
     import * as b from "test:resource-test-builtin";
     export function run() { return b.builtinFunction(); }
@@ -662,7 +662,7 @@ struct JsLazyReadonlyPropertyContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(JsLazyReadonlyPropertyIsolate, JsLazyReadonlyPropertyContext);
 
 KJ_TEST("lazy js global function works") {
-  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
+  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate, decltype(nullptr), JsLazyReadonlyPropertyIsolate_TypeWrapper> e(v8System);
   // both for module
   e.expectEvalModule(R"(
     export function run() { return bootstrapFunction(); }
@@ -672,7 +672,7 @@ KJ_TEST("lazy js global function works") {
 }
 
 KJ_TEST("lazy js global class works") {
-  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
+  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate, decltype(nullptr), JsLazyReadonlyPropertyIsolate_TypeWrapper> e(v8System);
   // for module syntax
   e.expectEvalModule(R"(
     export function run() { return new BootstrapClass().run(); }
@@ -701,7 +701,7 @@ struct JsLazyPropertyContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(JsLazyPropertyIsolate, JsLazyPropertyContext);
 
 KJ_TEST("lazy js global function works") {
-  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate, decltype(nullptr), JsLazyPropertyIsolate_TypeWrapper> e(v8System);
   // both for module
   e.expectEvalModule(R"(
     export function run() { return bootstrapFunction(); }
@@ -711,7 +711,7 @@ KJ_TEST("lazy js global function works") {
 }
 
 KJ_TEST("lazy js global class works") {
-  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate, decltype(nullptr), JsLazyPropertyIsolate_TypeWrapper> e(v8System);
   // for module syntax
   e.expectEvalModule(R"(
     export function run() { return new BootstrapClass().run(); }
@@ -721,7 +721,7 @@ KJ_TEST("lazy js global class works") {
 }
 
 KJ_TEST("lazy js property can be overriden") {
-  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate, decltype(nullptr), JsLazyPropertyIsolate_TypeWrapper> e(v8System);
   // for module syntax
   e.expectEvalModule(R"(
     globalThis.bootstrapFunction = function(){return 'boo'}
