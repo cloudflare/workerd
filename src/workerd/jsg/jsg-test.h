@@ -13,7 +13,14 @@ namespace workerd::jsg::test {
 
 // Checks the evaluation of a blob of JS code under the given context and isolate types.
 template <typename ContextType, typename IsolateType,
-          typename ConfigurationType = decltype(nullptr)>
+          typename ConfigurationType = decltype(nullptr),
+         // HACK: We allow passing another parameter here to set the template type of
+         // ModuleRegistryImpl correctly in expectEvalModule(). This type needs to be
+         // IsolateType##_TypeWrapper, but this is difficult to derive from the IsolateType
+         // typename and only a few tests use expectEvalModule(), so providing it is optional.
+         // Previously we always provided ContextType here, which causes a subtle UBSan/vptr
+         // violation.
+         typename IsolateType_TypeWrapper = ContextType>
 class Evaluator {
   // TODO(cleanup): `ConfigurationType` currently can optionally be specified to fix the build
   //   in cases that the isolate includes types that require configuration, but currently the
@@ -36,7 +43,7 @@ public:
           [&](jsg::Lock& js) {
         // Compile code as "main" module
         CompilationObserver observer;
-        auto modules = ModuleRegistryImpl<ContextType>::from(js);
+        auto modules = ModuleRegistryImpl<IsolateType_TypeWrapper>::from(js);
         auto p = kj::Path::parse("main");
         modules->add(p, jsg::ModuleRegistry::ModuleInfo(
             lock, "main", code, ModuleInfoCompileOption::BUNDLE, observer));
