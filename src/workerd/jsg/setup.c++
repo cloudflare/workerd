@@ -504,8 +504,9 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       } else {
         // TODO(someday): Figure out why this triggers. As of v8 10.3 it actually happens in one
         //   of our tests. This API is very undocumented, though, so I'm not sure what I should do.
-        //   Change this back to DEBUG_FAIL_PROD_LOG once debugged.
-        KJ_LOG(ERROR, "CODE_MOVED for unknown code block?");
+        //   Change this back to DEBUG_FAIL_PROD_LOG once debugged. (It was reduced to INFO logging
+        //   to avoid bothering users of workerd.)
+        KJ_LOG(INFO, "CODE_MOVED for unknown code block?");
       }
       break;
 
