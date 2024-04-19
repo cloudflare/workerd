@@ -771,7 +771,7 @@ TimeoutId IoContext::setTimeoutImpl(
   // do not indicate a clear maximum range for setTimeout/setInterval so the
   // limit here is fairly arbitrary. 100 years max should be plenty safe.
   int64_t delay =
-      msDelay <= 0 ? 0 :
+      msDelay <= 0 || std::isnan(msDelay) ? 0 :
       msDelay >= static_cast<double>(max) ? max : static_cast<int64_t>(msDelay);
   auto params = TimeoutManager::TimeoutParameters(repeat, delay, kj::mv(function));
   return timeoutManager->setTimeout(*this, generator, kj::mv(params));
