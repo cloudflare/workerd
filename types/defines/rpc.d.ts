@@ -111,6 +111,7 @@ declare namespace Rpc {
   type Result<R> =
     R extends Stubable ? Promise<Stub<R>> & Provider<R>
     : R extends Serializable ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
+    : R extends { [K in keyof R]: Serializable } ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
     : never;
 
   // Type for method or property on an RPC interface.
