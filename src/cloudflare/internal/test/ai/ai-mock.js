@@ -10,7 +10,7 @@ export default {
 
         const respHeaders = {
             'cf-ai-req-id': '3a1983d7-1ddd-453a-ab75-c4358c91b582',
-            'cf-ai-logs': (data.options.debug) ? btoa(JSON.stringify(["Model started", "Model run successfully"])) : null
+            'cf-ai-logs': (data.options.debug) ? btoa(encodeURIComponent(JSON.stringify(["Model started", "Model run successfully"]))) : null
         }
 
         if (modelName === 'blobResponseModel') {

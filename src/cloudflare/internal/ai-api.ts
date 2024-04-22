@@ -87,7 +87,7 @@ export class Ai {
         try {
           const logHeader = res.headers.get("cf-ai-logs")
           if (logHeader) {
-            parsedLogs = (JSON.parse(atob(logHeader)) as string[]);
+            parsedLogs = (JSON.parse(decodeURIComponent(atob(logHeader))) as string[]);
           }
         } catch {
           /* empty */
