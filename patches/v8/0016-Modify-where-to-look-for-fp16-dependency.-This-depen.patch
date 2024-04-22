@@ -1,0 +1,48 @@
+From b8c3575ff696eac20bd8d94f49407b52642087c1 Mon Sep 17 00:00:00 2001
+From: Garrett Gu <garrett@cloudflare.com>
+Date: Mon, 22 Apr 2024 10:10:21 -0500
+Subject: Modify where to look for fp16 dependency. This dependency is normally
+ downloaded by gn but we need to fetch it in Bazel. We do so in the workerd
+ repo in the WORKSPACE file.
+
+---
+ BUILD.bazel | 26 ++++++++++++++++----------
+ 1 file changed, 16 insertions(+), 10 deletions(-)
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index f3e7958b39e5b7e42b06fad83a0bf6f7352ffd3c..e1fed34c700e88cb7a54450d0f2c7cb34c6c921f 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -3689,16 +3689,22 @@ filegroup(
+     }),
+ )
+ 
+-v8_library(
+-  name = "lib_fp16",
+-  srcs = ["third_party/fp16/src/include/fp16.h"],
+-  hdrs = [
+-    "third_party/fp16/src/include/fp16/fp16.h",
+-    "third_party/fp16/src/include/fp16/bitcasts.h",
+-  ],
+-  includes = [
+-    "third_party/fp16/src/include",
+-  ],
++cc_library(
++    name = "lib_fp16",
++    hdrs = [
++        "@fp16//:include/fp16.h",
++    ],
++    include_prefix = "third_party/fp16/src",
++    deps = [":lib_fp16_includes"],
++)
++
++cc_library(
++    name = "lib_fp16_includes",
++    hdrs = [
++        "@fp16//:include/fp16/bitcasts.h",
++        "@fp16//:include/fp16/fp16.h",
++    ],
++    strip_include_prefix = "include",
+ )
+ 
+ filegroup(

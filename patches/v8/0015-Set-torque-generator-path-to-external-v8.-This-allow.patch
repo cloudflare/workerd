@@ -17,6 +17,6 @@ index e55defede9fed3eea9348bd7bd50d98f688a2a7b..faeef2b2ed71b4784050451a61a16feb
  def _torque_files_impl(ctx):
 -    v8root = "."
 +    v8root = "external/v8"
-
+ 
      # Arguments
      args = []

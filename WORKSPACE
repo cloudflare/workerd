@@ -190,6 +190,13 @@ git_repository(
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
+git_repository(
+    name = "fp16",
+    commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
+    build_file_content = "exports_files(glob([\"**\"]))",
+    remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git"
+)
+
 # Bindings for abseil libraries used by V8
 [
     bind(
@@ -453,7 +460,8 @@ http_archive(
         "//:patches/v8/0012-Always-enable-continuation-preserved-data-in-the-bui.patch",
         "//:patches/v8/0013-increase-visibility-of-virtual-method.patch",
         "//:patches/v8/0014-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
-        "//:patches/v8/0015-Set-torque-generator-path-to-external-v8.-This-allow.patch"
+        "//:patches/v8/0015-Set-torque-generator-path-to-external-v8.-This-allow.patch",
+        "//:patches/v8/0016-Modify-where-to-look-for-fp16-dependency.-This-depen.patch"
     ],
     integrity = "sha256-C6bsXXbKgeCxmG1VNO/LScaPq0HVlmofpVHJ5kswoLg=",
     strip_prefix = "v8-12.4.254.11",
