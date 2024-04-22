@@ -118,13 +118,13 @@ REPLACEMENTS = [
         "monotonicDateNow",
     ],
     [
-        "crypto.getRandomValues",
-        "getRandomValues"
-    ],
-    [
         "reportUndefinedSymbols()",
         "reportUndefinedSymbolsNoOp()"
     ],
+    [
+        "crypto.getRandomValues(",
+        "getRandomValues(Module, ",
+    ]
 ]
 
 load("//:build/pyodide_bucket.bzl", "PYODIDE_PACKAGE_BUCKET_URL")
@@ -153,12 +153,14 @@ wd_js_bundle(
     internal_data_modules = ["generated/python_stdlib.zip"] + glob([
         "internal/*.py",
         "internal/patches/*.py",
+        "internal/topLevelEntropy/*.py",
     ]),
     internal_json_modules = ["generated/pyodide-lock.json", "generated/pyodide-bucket.json"],
     internal_modules = [
         "generated/pyodide.asm.js",
     ] + glob([
         "internal/*.js",
+        "internal/topLevelEntropy/*.js",
     ]),
     internal_wasm_modules = ["generated/pyodide.asm.wasm"],
     schema_id = "0xbcc8f57c63814005",

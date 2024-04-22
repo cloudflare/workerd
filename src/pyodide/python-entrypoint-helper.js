@@ -2,7 +2,10 @@
 // python-entrypoint.js USER module.
 
 import { loadPyodide } from "pyodide-internal:python";
-import { uploadArtifacts, maybeStoreMemorySnapshot } from "pyodide-internal:snapshot";
+import {
+  uploadArtifacts,
+  maybeStoreMemorySnapshot,
+} from "pyodide-internal:snapshot";
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
   REQUIREMENTS,
@@ -19,6 +22,7 @@ import {
 } from "pyodide-internal:metadata";
 import { reportError } from "pyodide-internal:util";
 import { default as Limiter } from "pyodide-internal:limiter";
+import { entropyBeforeRequest } from "pyodide-internal:topLevelEntropy/lib";
 
 function pyimportMainModule(pyodide) {
   if (!MAIN_MODULE_NAME.endsWith(".py")) {
@@ -124,27 +128,11 @@ function getMainModule() {
   });
 }
 
-/**
- * Have to reseed randomness in the IoContext of the first request since we gave a low quality seed
- * when it was seeded at top level.
- */
-let isSeeded = false;
-function reseedRandom(pyodide) {
-  if (isSeeded) {
-    return;
-  }
-  isSeeded = true;
-  pyodide.runPython(`
-    from random import seed
-    seed()
-    del seed
-  `);
-}
-
 async function preparePython() {
   const pyodide = await getPyodide();
-  reseedRandom(pyodide);
-  return await getMainModule();
+  const mainModule = await getMainModule();
+  entropyBeforeRequest(pyodide._module);
+  return mainModule;
 }
 
 function makeHandler(pyHandlerName) {

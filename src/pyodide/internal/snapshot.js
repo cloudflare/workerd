@@ -15,6 +15,8 @@ import {
 } from "pyodide-internal:metadata";
 import { reportError, simpleRunPython } from "pyodide-internal:util";
 
+let LOADED_BASELINE_SNAPSHOT;
+
 /**
  * This file is a simplified version of the Pyodide loader:
  * https://github.com/pyodide/pyodide/blob/main/src/js/pyodide.ts
@@ -29,8 +31,10 @@ import { reportError, simpleRunPython } from "pyodide-internal:util";
  */
 import { _createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
 
-const TOP_LEVEL_SNAPSHOT = ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
-const SHOULD_UPLOAD_SNAPSHOT = ArtifactBundler.isEnabled() || TOP_LEVEL_SNAPSHOT;
+const TOP_LEVEL_SNAPSHOT =
+  ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
+const SHOULD_UPLOAD_SNAPSHOT =
+  ArtifactBundler.isEnabled() || TOP_LEVEL_SNAPSHOT;
 
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of
@@ -116,10 +120,7 @@ const PRELOADED_SO_FILES = [];
  */
 export function preloadDynamicLibs(Module) {
   let SO_FILES_TO_LOAD = SITE_PACKAGES_SO_FILES;
-  if (
-    IS_CREATING_BASELINE_SNAPSHOT ||
-    DSO_METADATA?.settings?.baselineSnapshot
-  ) {
+  if (LOADED_BASELINE_SNAPSHOT && LOADED_SNAPSHOT_VERSION === 1) {
     // Ideally this should be just
     // [[ '_lzma.so' ], [ '_ssl.so' ]]
     // but we put a few more because we messed up the memory snapshot...
@@ -129,7 +130,12 @@ export function preloadDynamicLibs(Module) {
       ["_sqlite3.so"],
       ["_ssl.so"],
     ];
-    // SO_FILES_TO_LOAD = [[ '_lzma.so' ], [ '_ssl.so' ]];
+  }
+  if (
+    IS_CREATING_BASELINE_SNAPSHOT ||
+    (LOADED_BASELINE_SNAPSHOT && LOADED_SNAPSHOT_VERSION === 2)
+  ) {
+    SO_FILES_TO_LOAD = [["_lzma.so"], ["_ssl.so"]];
   }
   try {
     const sitePackages = getSitePackagesPath(Module);
@@ -313,8 +319,9 @@ export function maybeSetupSnapshotUpload(Module) {
 
 // "\x00snp"
 const SNAPSHOT_MAGIC = 0x706e7300;
-const SNAPSHOT_VERSION = 1;
+const CREATE_SNAPSHOT_VERSION = 2;
 const HEADER_SIZE = 4 * 4;
+export let LOADED_SNAPSHOT_VERSION = undefined;
 
 /**
  * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
@@ -332,7 +339,7 @@ function encodeSnapshot(heap, dsoJSON) {
   );
   const uint32View = new Uint32Array(toUpload.buffer);
   uint32View[0] = SNAPSHOT_MAGIC;
-  uint32View[1] = SNAPSHOT_VERSION;
+  uint32View[1] = CREATE_SNAPSHOT_VERSION;
   uint32View[2] = snapshotOffset;
   uint32View[3] = jsonLength;
   toUpload.subarray(snapshotOffset).set(heap);
@@ -347,9 +354,9 @@ function decodeSnapshot() {
   let offset = 0;
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, buf);
   offset += 8;
-  let snapshotVersion = 0;
+  LOADED_SNAPSHOT_VERSION = 0;
   if (buf[0] == SNAPSHOT_MAGIC) {
-    snapshotVersion = buf[1];
+    LOADED_SNAPSHOT_VERSION = buf[1];
     MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, buf);
     offset += 8;
   }
@@ -361,6 +368,7 @@ function decodeSnapshot() {
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, jsonBuf);
   const jsonTxt = new TextDecoder().decode(jsonBuf);
   DSO_METADATA = JSON.parse(jsonTxt);
+  LOADED_BASELINE_SNAPSHOT = Number(DSO_METADATA?.settings?.baselineSnapshot);
   READ_MEMORY = function (Module) {
     // restore memory from snapshot
     MEMORY_SNAPSHOT_READER.readMemorySnapshot(snapshotOffset, Module.HEAP8);
@@ -423,5 +431,6 @@ export function maybeStoreMemorySnapshot() {
     ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
     DiskCache.put("snapshot.bin", getMemoryToUpload());
+    console.log("Saved snapshot to disk");
   }
 }

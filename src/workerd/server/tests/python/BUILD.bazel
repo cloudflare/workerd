@@ -22,6 +22,17 @@ wd_test(
     ),
 )
 
+wd_test(
+    src = "random/random.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        [
+            "random/*",
+        ],
+        exclude = ["**/*.wd-test"],
+    ),
+)
+
 # langchain test: disabled for now because it's flaky
 # TODO: reenable this?
 #
