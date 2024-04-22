@@ -392,6 +392,114 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
   KJ_UNREACHABLE;
 }
 
+void
+setupPythonModules(
+  jsg::Lock& lockParam,
+  config::Worker::Reader conf,
+  const PythonConfig& pythonConfig,
+  CompatibilityFlags::Reader featureFlags
+) {
+  using namespace workerd::api::pyodide;
+  auto confModules = conf.getModules();
+    auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
+  KJ_REQUIRE(featureFlags.getPythonWorkers(),
+      "The python_workers compatibility flag is required to use Python.");
+  // Inject pyodide bootstrap module.
+  {
+    auto mainModule = confModules.begin();
+    capnp::MallocMessageBuilder message;
+    auto module = message.getRoot<config::Worker::Module>();
+    module.setEsModule(PYTHON_ENTRYPOINT);
+    auto info = WorkerdApi::tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
+    auto path = kj::Path::parse(mainModule->getName());
+    modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
+  }
+  // Inject metadata that the entrypoint module will read.
+  {
+    using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+    using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+    using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
+    auto specifier = "pyodide-internal:runtime-generated/metadata";
+    auto metadataReader = makePyodideMetadataReader(conf, pythonConfig);
+    modules->addBuiltinModule(
+        specifier,
+        [specifier = kj::str(specifier), metadataReader = kj::mv(metadataReader)](
+            jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+          auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(metadataReader));
+          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+        },
+        jsg::ModuleRegistry::Type::INTERNAL);
+  }
+  // Inject artifact bundler.
+  {
+    using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+    using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+    using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
+    auto specifier = "pyodide-internal:artifacts";
+    modules->addBuiltinModule(specifier,
+        [specifier = kj::str(specifier)](
+            jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+      auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+      auto wrap = wrapper.wrap(js.v8Context(), kj::none, ArtifactBundler::makeDisabledBundler());
+      return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+    },
+        jsg::ModuleRegistry::Type::INTERNAL);
+  }
+
+  // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
+  {
+    using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+    using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+    using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
+    auto specifier = "pyodide-internal:internalJaeger";
+    modules->addBuiltinModule(
+        specifier,
+        [specifier = kj::str(specifier)](
+            jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+          auto wrap = wrapper.wrap(js.v8Context(), kj::none, DisabledInternalJaeger::create());
+          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+        },
+        jsg::ModuleRegistry::Type::INTERNAL);
+  }
+
+  // Inject disk cache module
+  {
+    using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+    using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+    using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
+    auto specifier = "pyodide-internal:disk_cache";
+    auto diskCache = jsg::alloc<DiskCache>(pythonConfig.diskCacheRoot);
+    modules->addBuiltinModule(
+      specifier,
+      [specifier = kj::str(specifier), diskCache = kj::mv(diskCache)](
+          jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+        auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+        auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(diskCache));
+        return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+      },
+      jsg::ModuleRegistry::Type::INTERNAL);
+  }
+
+  // Inject a (disabled) SimplePythonLimiter
+  {
+    using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+    using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+    using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
+    auto specifier = "pyodide-internal:limiter";
+    modules->addBuiltinModule(
+        specifier,
+        [specifier = kj::str(specifier)](
+            jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+          auto wrap = wrapper.wrap(js.v8Context(), kj::none, SimplePythonLimiter::makeDisabled());
+          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+        },
+        jsg::ModuleRegistry::Type::INTERNAL);
+  }
+}
+
 void WorkerdApi::compileModules(
     jsg::Lock& lockParam, config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
@@ -401,107 +509,10 @@ void WorkerdApi::compileModules(
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
 
     auto confModules = conf.getModules();
-    using namespace workerd::api::pyodide;
     auto featureFlags = getFeatureFlags();
-    if (hasPythonModules(confModules)) {
-      KJ_REQUIRE(featureFlags.getPythonWorkers(),
-          "The python_workers compatibility flag is required to use Python.");
-      // Inject pyodide bootstrap module.
-      {
-        auto mainModule = confModules.begin();
-        capnp::MallocMessageBuilder message;
-        auto module = message.getRoot<config::Worker::Module>();
-        module.setEsModule(PYTHON_ENTRYPOINT);
-        auto info = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
-        auto path = kj::Path::parse(mainModule->getName());
-        modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
-      }
-      // Inject metadata that the entrypoint module will read.
-      {
-        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
-        using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
-        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
-        auto specifier = "pyodide-internal:runtime-generated/metadata";
-        auto metadataReader = makePyodideMetadataReader(conf, impl->pythonConfig);
-        modules->addBuiltinModule(
-            specifier,
-            [specifier = kj::str(specifier), metadataReader = kj::mv(metadataReader)](
-                jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-              auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-              auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(metadataReader));
-              return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-            },
-            jsg::ModuleRegistry::Type::INTERNAL);
-      }
-      // Inject artifact bundler.
-      {
-        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
-        using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
-        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
-        auto specifier = "pyodide-internal:artifacts";
-        modules->addBuiltinModule(specifier,
-            [specifier = kj::str(specifier)](
-                jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-          auto wrap = wrapper.wrap(js.v8Context(), kj::none, ArtifactBundler::makeDisabledBundler());
-          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-        },
-            jsg::ModuleRegistry::Type::INTERNAL);
-      }
-
-      // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
-      {
-        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
-        using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
-        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
-        auto specifier = "pyodide-internal:internalJaeger";
-        modules->addBuiltinModule(
-            specifier,
-            [specifier = kj::str(specifier)](
-                jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-              auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-              auto wrap = wrapper.wrap(js.v8Context(), kj::none, DisabledInternalJaeger::create());
-              return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-            },
-            jsg::ModuleRegistry::Type::INTERNAL);
-      }
-
-      // Inject disk cache module
-      {
-        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
-        using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
-        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
-        auto specifier = "pyodide-internal:disk_cache";
-        auto diskCache = jsg::alloc<DiskCache>(impl->pythonConfig.diskCacheRoot);
-        modules->addBuiltinModule(
-          specifier,
-          [specifier = kj::str(specifier), diskCache = kj::mv(diskCache)](
-              jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-            auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-            auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(diskCache));
-            return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-          },
-          jsg::ModuleRegistry::Type::INTERNAL);
-      }
-
-      // Inject a (disabled) SimplePythonLimiter
-      {
-        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
-        using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
-        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
-        auto specifier = "pyodide-internal:limiter";
-        modules->addBuiltinModule(
-            specifier,
-            [specifier = kj::str(specifier)](
-                jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-              auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-              auto wrap = wrapper.wrap(js.v8Context(), kj::none, SimplePythonLimiter::makeDisabled());
-              return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-            },
-            jsg::ModuleRegistry::Type::INTERNAL);
-      }
+    if (api::pyodide::hasPythonModules(confModules)) {
+      setupPythonModules(lockParam, conf, impl->pythonConfig, featureFlags);
     }
-
     for (auto module: confModules) {
       auto path = kj::Path::parse(module.getName());
       auto maybeInfo = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
