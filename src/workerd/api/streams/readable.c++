@@ -18,9 +18,6 @@ ReaderImpl::ReaderImpl(ReadableStreamController::Reader& reader) :
 
 ReaderImpl::~ReaderImpl() noexcept(false) {
   KJ_IF_SOME(stream, state.tryGet<Attached>()) {
-    // There's a very good likelihood that this is called during GC or other
-    // cleanup so we have to make sure that releasing the reader does not also
-    // trigger resolution of the close promise.
     stream->getController().releaseReader(reader, kj::none);
   }
 }
@@ -61,6 +58,11 @@ jsg::Promise<void> ReaderImpl::cancel(
       KJ_FAIL_ASSERT("this reader was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
+      // In some edge cases, this reader is the last thing holding a strong
+      // reference to the stream. Calling cancel might cause the readers strong
+      // reference to be cleared, so let's make sure we keep a reference to
+      // the stream at least until the call to cancel completes.
+      auto ref = stream.addRef();
       return stream->getController().cancel(js, maybeReason);
     }
     KJ_CASE_ONEOF(r, Released) {
@@ -141,6 +143,11 @@ void ReaderImpl::releaseLock(jsg::Lock& js) {
       KJ_FAIL_ASSERT("this reader was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
+      // In some edge cases, this reader is the last thing holding a strong
+      // reference to the stream. Calling releaseLock might cause the readers strong
+      // reference to be cleared, so let's make sure we keep a reference to
+      // the stream at least until the call to releaseLock completes.
+      auto ref = stream.addRef();
       stream->getController().releaseReader(reader, js);
       state.init<Released>();
       return;

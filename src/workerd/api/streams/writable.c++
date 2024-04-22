@@ -14,9 +14,6 @@ WritableStreamDefaultWriter::WritableStreamDefaultWriter()
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
   KJ_IF_SOME(stream, state.tryGet<Attached>()) {
-    // Because this can be called during gc or other cleanup, it is important
-    // that releasing the writer does not cause the closed promise be resolved
-    // since that requires v8 heap allocations.
     stream->getController().releaseWriter(*this, kj::none);
   }
 }
@@ -39,6 +36,11 @@ jsg::Promise<void> WritableStreamDefaultWriter::abort(
       KJ_FAIL_ASSERT("this writer was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
+      // In some edge cases, this writer is the last thing holding a strong
+      // reference to the stream. Calling abort can cause the writers strong
+      // reference to be cleared, so let's make sure we keep a reference to
+      // the stream at least until the call to abort completes.
+      auto ref = stream.addRef();
       return stream->getController().abort(js, reason);
     }
     KJ_CASE_ONEOF(r, Released) {
@@ -68,6 +70,11 @@ jsg::Promise<void> WritableStreamDefaultWriter::close(jsg::Lock& js) {
       KJ_FAIL_ASSERT("this writer was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
+      // In some edge cases, this writer is the last thing holding a strong
+      // reference to the stream. Calling close can cause the writers strong
+      // reference to be cleared, so let's make sure we keep a reference to
+      // the stream at least until the call to close completes.
+      auto ref = stream.addRef();
       return stream->getController().close(js);
     }
     KJ_CASE_ONEOF(r, Released) {
@@ -142,6 +149,11 @@ void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
       KJ_FAIL_ASSERT("this writer was never attached");
     }
     KJ_CASE_ONEOF(stream, Attached) {
+      // In some edge cases, this writer is the last thing holding a strong
+      // reference to the stream. Calling releaseWriter can cause the writers
+      // strong reference to be cleared, so let's make sure we keep a reference
+      // to the stream at least until the call to releaseLock completes.
+      auto ref = stream.addRef();
       stream->getController().releaseWriter(*this, js);
       state.init<Released>();
       return;
