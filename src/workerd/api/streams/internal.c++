@@ -9,6 +9,7 @@
 #include <kj/vector.h>
 #include <workerd/api/util.h>
 #include <workerd/util/string-buffer.h>
+#include <workerd/io/features.h>
 
 namespace workerd::api {
 
@@ -543,6 +544,15 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      if (maybeByobOptions != kj::none && FeatureFlags::get(js).getInternalStreamByobReturn()) {
+        // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
+        // by the ArrayBuffer passed in the options.
+        auto u8 = v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, store), 0, 0);
+        return js.resolvedPromise(ReadResult {
+          .value = js.v8Ref(u8.As<v8::Value>()),
+          .done = true,
+        });
+      }
       return js.resolvedPromise(ReadResult { .done = true });
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
@@ -582,8 +592,10 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       // That's a larger refactor, though.
       auto& ioContext = IoContext::current();
       return ioContext.awaitIoLegacy(js, kj::mv(promise)).then(js,
-          ioContext.addFunctor([this,store = kj::mv(store), byteOffset, byteLength]
-          (jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
+          ioContext.addFunctor(
+              [this,store = kj::mv(store), byteOffset, byteLength,
+               isByob = maybeByobOptions != kj::none]
+              (jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
         readPending = false;
         KJ_ASSERT(amount <= byteLength);
         if (amount == 0) {
@@ -592,6 +604,15 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           }
           KJ_IF_SOME(o, owner) {
             o.signalEof(js);
+          }
+          if (isByob && FeatureFlags::get(js).getInternalStreamByobReturn()) {
+            // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
+            // by the ArrayBuffer passed in the options.
+            auto u8 = v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, store), 0, 0);
+            return js.resolvedPromise(ReadResult {
+              .value = js.v8Ref(u8.As<v8::Value>()),
+              .done = true,
+            });
           }
           return js.resolvedPromise(ReadResult { .done = true });
         }

@@ -415,4 +415,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # type of Durable Object stubs -- support RPC. If so, this type will have a wildcard method, so
   # it will appear that all possible property names are present on any fetcher instance. This could
   # break code that tries to infer types based on the presence or absence of methods.
+
+  internalStreamByobReturn @47 :Bool
+      $compatEnableFlag("internal_stream_byob_return_view")
+      $compatDisableFlag("internal_stream_byob_return_undefined")
+      $compatEnableDate("2024-05-13");
+  # Sadly, the original implementation of ReadableStream (now called "internal" streams), did not
+  # properly implement the result of ReadableStreamBYOBReader's read method. When done = true,
+  # per the spec, the result `value` must be an empty ArrayBufferView whose underlying ArrayBuffer
+  # is the same as the one passed to the read method. Our original implementation returned
+  # undefined instead. This flag changes the behavior to match the spec and to match the behavior
+  # implemented by the JS-backed ReadableStream implementation.
 }

@@ -427,6 +427,27 @@ export const abortWriterAfterGc = {
   }
 };
 
+export const finalReadOnInternalStreamReturnsBuffer = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    await writer.close();
+
+    const reader = readable.getReader({ mode: 'byob' });
+    let result = await reader.read(new Uint8Array(10));
+    strictEqual(result.done, true);
+    ok(result.value instanceof Uint8Array);
+    strictEqual(result.value.byteLength, 0);
+    strictEqual(result.value.buffer.byteLength, 10);
+
+    result = await reader.read(new Uint8Array(10));
+    strictEqual(result.done, true);
+    ok(result.value instanceof Uint8Array);
+    strictEqual(result.value.byteLength, 0);
+    strictEqual(result.value.buffer.byteLength, 10);
+  }
+};
+
 export default {
   async fetch(request, env) {
     strictEqual(request.headers.get('content-length'), '10');
