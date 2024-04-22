@@ -70,13 +70,12 @@ export async function loadPackages(Module, requirements) {
 
   console.log("Loading " + loading.join(", "));
 
-  await Promise.all(loadPromises).then((buffers) => {
-    for (const [requirement, buffer] of buffers) {
-      const reader = new ArrayBufferReader(buffer);
-      const [tarInfo, soFiles] = parseTarInfo(reader);
-      SITE_PACKAGES.addSmallBundle(tarInfo, soFiles, requirement);
-    }
-  });
+  const buffers = await Promise.all(loadPromises);
+  for (const [requirement, buffer] of buffers) {
+    const reader = new ArrayBufferReader(buffer);
+    const [tarInfo, soFiles] = parseTarInfo(reader);
+    SITE_PACKAGES.addSmallBundle(tarInfo, soFiles, requirement);
+  }
 
   console.log("Loaded " + loading.join(", "));
 

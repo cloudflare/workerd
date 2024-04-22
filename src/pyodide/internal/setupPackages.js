@@ -116,7 +116,7 @@ export function buildSitePackages(requirements) {
 
   let LOAD_WHEELS_FROM_R2 = true;
   let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
-  if(bigTarInfo.children.size > 10) {
+  if (bigTarInfo.children.size > 10) {
     LOAD_WHEELS_FROM_R2 = false;
     requirements.forEach(r => requirementsInBigBundle.add(r));
   }
@@ -140,7 +140,7 @@ export function patchLoadPackage(pyodide) {
 }
 
 function disabledLoadPackage() {
-  throw new Error("pyodide.loadPackage is disabled");
+  throw new Error("pyodide.loadPackage is disabled because packages are encoded in the binary");
 }
 
 /**

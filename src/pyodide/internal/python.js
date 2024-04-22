@@ -205,7 +205,6 @@ async function prepareWasmLinearMemory(Module) {
 }
 
 export async function loadPyodide(lockfile, indexURL) {
-  console.log("loading pyodide");
   const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
   const Module = await enterJaegerSpan("instantiate_emscripten", () =>
     instantiateEmscriptenModule(emscriptenSettings),
