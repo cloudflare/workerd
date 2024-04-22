@@ -32,7 +32,7 @@ declare namespace Rpc {
   export type Stubable = RpcTargetBranded | ((...args: any[]) => any);
 
   // Types that can be passed over RPC
-  type Serializable =
+  type Serializable<T> =
     // Structured cloneables
     | void
     | undefined
@@ -51,7 +51,13 @@ declare namespace Rpc {
     | Map<Serializable, Serializable>
     | Set<Serializable>
     | ReadonlyArray<Serializable>
-    | { [key: string | number]: Serializable }
+    | {
+        [K in keyof T]: K extends number | string
+          ? T[K] extends Function
+            ? never
+            : Serializable<T[K]>
+          : never;
+      }
     // Special types
     | ReadableStream<Uint8Array>
     | WritableStream<Uint8Array>
@@ -110,8 +116,7 @@ declare namespace Rpc {
   // prettier-ignore
   type Result<R> =
     R extends Stubable ? Promise<Stub<R>> & Provider<R>
-    : R extends Serializable ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
-    : R extends { [K in keyof R]: Serializable } ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
+    : R extends Serializable<R> ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
     : never;
 
   // Type for method or property on an RPC interface.
