@@ -11,9 +11,6 @@ export const tests = {
             const resp = await env.ai.run('testModel', {prompt: 'test'})
             assert.deepStrictEqual(resp, { response: 'model response' });
 
-            // Test logs is empty
-            assert.deepStrictEqual(env.ai.getLogs(), []);
-
             // Test request id is present
             assert.deepStrictEqual(env.ai.lastRequestId, '3a1983d7-1ddd-453a-ab75-c4358c91b582');
         }
@@ -22,12 +19,6 @@ export const tests = {
             // Test ai blob model run response is a blob/stream
             const resp = await env.ai.run('blobResponseModel', {prompt: 'test'})
             assert.deepStrictEqual(resp instanceof ReadableStream, true);
-        }
-
-        {
-            // Test logs
-            await env.ai.run('testModel', {prompt: 'test'}, {debug: true})
-            assert.deepStrictEqual(env.ai.getLogs(),  [ 'Model started', 'Model run successfully' ]);
         }
 
         {
