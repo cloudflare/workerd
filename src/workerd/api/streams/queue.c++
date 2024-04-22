@@ -13,12 +13,12 @@ namespace workerd::api {
 
 #pragma region ValueQueue::ReadRequest
 
-void ValueQueue::ReadRequest::resolveAsDone(jsg::Lock&) {
-  resolver.resolve(ReadResult { .done = true });
+void ValueQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
+  resolver.resolve(js, ReadResult { .done = true });
 }
 
-void ValueQueue::ReadRequest::resolve(jsg::Lock&, jsg::Value value) {
-  resolver.resolve(ReadResult { .value = kj::mv(value), .done = false });
+void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::Value value) {
+  resolver.resolve(js, ReadResult { .value = kj::mv(value), .done = false });
 }
 
 void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
@@ -265,7 +265,7 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
     // There's been at least some data written, we need to respond but not
     // set done to true since that's what the streams spec requires.
     pullInto.store.trim(pullInto.store.size() - pullInto.filled);
-    resolver.resolve(ReadResult {
+    resolver.resolve(js, ReadResult {
       .value = js.v8Ref(pullInto.store.createHandle(js)),
       .done = false
     });
@@ -273,7 +273,7 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
     // Otherwise, we set the length to zero
     pullInto.store.trim(pullInto.store.size());
     KJ_ASSERT(pullInto.store.size() == 0);
-    resolver.resolve(ReadResult {
+    resolver.resolve(js, ReadResult {
       .value = js.v8Ref(pullInto.store.createHandle(js)),
       .done = true
     });
@@ -283,7 +283,7 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   pullInto.store.trim(pullInto.store.size() - pullInto.filled);
-  resolver.resolve(ReadResult {
+  resolver.resolve(js, ReadResult {
     .value = js.v8Ref(pullInto.store.createHandle(js)),
     .done = false
   });
