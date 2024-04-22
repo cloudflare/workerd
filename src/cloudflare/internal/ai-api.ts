@@ -31,7 +31,6 @@ export class Ai {
   private readonly fetcher: Fetcher
 
   private options: AiOptions = {};
-  private logs: Array<string> = [];
   public lastRequestId: string | null = null;
 
   public constructor(fetcher: Fetcher) {
@@ -80,22 +79,8 @@ export class Ai {
       }
 
       return res.body;
+
     } else {
-      // load logs
-      if (this.options.debug) {
-        let parsedLogs: string[] = [];
-        try {
-          const logHeader = res.headers.get("cf-ai-logs")
-          if (logHeader) {
-            parsedLogs = (JSON.parse(atob(logHeader)) as string[]);
-          }
-        } catch {
-          /* empty */
-        }
-
-        this.logs = parsedLogs;
-      }
-
       if (!res.ok || !res.body) {
         throw new InferenceUpstreamError(await res.text());
       }
@@ -110,9 +95,12 @@ export class Ai {
     }
   }
 
-  public getLogs(): Array<string> {
-    return this.logs;
-  }
+    /*
+     * @deprecated this method is deprecated, do not use this
+     */
+    public getLogs(): Array<string> {
+      return []
+    }
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): Ai {
