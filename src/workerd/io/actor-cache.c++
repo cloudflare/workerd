@@ -53,14 +53,7 @@ ActorCache::~ActorCache() noexcept(false) {
 
 void ActorCache::clear(Lock& lock) {
   for (auto& entry: currentValues.get(lock)) {
-    if (entry->link.isLinked()) {
-      if (entry->isDirty()) {
-        dirtyList.remove(*entry);
-        entry->setNotInCache();
-      } else {
-        removeEntry(lock, *entry);
-      }
-    }
+    removeEntry(lock, *entry);
   }
   currentValues.get(lock).clear();
 }
@@ -101,8 +94,25 @@ ActorCache::Entry::~Entry() noexcept(false) {
       c.lru.size.store(0, std::memory_order_relaxed);
     }
 
-    KJ_REQUIRE(!link.isLinked(),
-        "must remove Entry from lists before destroying", static_cast<int>(getSyncStatus()));
+    if (link.isLinked()) {
+      switch(getSyncStatus()) {
+        case EntrySyncStatus::CLEAN: {
+          KJ_LOG(WARNING, "Entry destructed while still in the clean list");
+          break;
+        }
+        case EntrySyncStatus::DIRTY: {
+          // Ah, we don't need a lock so we can just unlink ourselves. This is safe because we will
+          // only destruct a DIRTY entry on the actor's event loop. (We can destruct a CLEAN entry
+          // as part of evicting entries from the shared lru on a different event loop.)
+          c.dirtyList.remove(*this);
+          break;
+        }
+        case EntrySyncStatus::NOT_IN_CACHE: {
+          KJ_LOG(WARNING, "Entry with sync status NOT_IN_CACHE still in a list");
+          break;
+        }
+      }
+    }
   }
 }
 
@@ -278,7 +288,7 @@ bool ActorCache::SharedLru::evictIfNeeded(Lock& lock) const {
 }
 
 void ActorCache::touchEntry(Lock& lock, Entry& entry) {
-  if (!entry.isDirty()) {
+  if (entry.getSyncStatus() == EntrySyncStatus::CLEAN) {
     entry.isStale = false;
     lock->remove(entry);
     addToCleanList(lock, entry);
@@ -293,8 +303,21 @@ void ActorCache::touchEntry(Lock& lock, Entry& entry) {
 }
 
 void ActorCache::removeEntry(Lock& lock, Entry& entry) {
-  KJ_IASSERT(!entry.isDirty());
-  lock->remove(entry);
+  switch (entry.getSyncStatus()) {
+    case EntrySyncStatus::DIRTY: {
+      dirtyList.remove(entry);
+      break;
+    }
+    case EntrySyncStatus::CLEAN: {
+      lock->remove(entry);
+      break;
+    }
+    case EntrySyncStatus::NOT_IN_CACHE: {
+      // Nothing to do!
+      break;
+    }
+  }
+
   entry.setNotInCache();
 }
 
@@ -1521,7 +1544,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
         //   process of building a transaction that wrote some other value to this specific key, but
         //   hasn't been committed yet, probably because it is waiting for this read operation to
         //   complete. Meanwhile, another put() or delete() could have just been performed
-        //   momentarily ago that changed the FLUSHING entry back to DIRTY and changed its value to
+        //   momentarily ago that changed the flushing entry back to DIRTY and changed its value to
         //   one that coincidentally matches what we pulled off disk. However, the open transaction
         //   is still going to be committed, writing the intermediate value, so we still need to plan
         //   to write this value again in the next transaction.
@@ -1858,6 +1881,18 @@ kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(kj::Maybe<kj::Date> newAlarmTi
   return getBackpressure();
 }
 
+namespace {
+template<typename F>
+kj::OneOf<std::invoke_result_t<F>, kj::PromiseForResult<F, void>> mapPromise(
+    kj::Maybe<kj::Promise<void>> maybePromise, F&& f) {
+  KJ_IF_SOME(promise, maybePromise) {
+    return promise.then(kj::fwd<F>(f));
+  } else {
+    return kj::fwd<F>(f)();
+  }
+}
+} // namespace
+
 kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
   requireNotTerminal();
@@ -1870,30 +1905,17 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
     evictOrOomIfNeeded(lock);
   }
 
-  if (countedDelete->isShared()) {
-    // The entry kept a reference to `countedDelete`, so it must be waiting on an RPC. Set up a
-    // fulfiller.
-    auto paf = kj::newPromiseAndFulfiller<uint>();
-    countedDelete->resultFulfiller = kj::mv(paf.fulfiller);
-    KJ_IF_SOME(p, getBackpressure()) {
-      return p.then([promise = kj::mv(paf.promise)]() mutable {
-        return promise.then([](uint i) { return i > 0; });
-      });
-    } else {
-      return paf.promise.then([](uint i) { return i > 0; });
-    }
-  } else {
-    // It looks like there was a pre-existing cache entry for this key, so we already know whether
-    // there was a value to delete.
-    bool result = countedDelete->countDeleted > 0;
-    KJ_IF_SOME(p, getBackpressure()) {
-      return p.then([result]() mutable {
-        return result;
-      });
-    } else {
-      return result;
-    }
+  auto waiter = kj::heap<CountedDeleteWaiter>(*this, kj::addRef(*countedDelete));
+  kj::Maybe<kj::Promise<void>> maybePromise;
+  KJ_IF_SOME(p, getBackpressure()) {
+    // This might be more than one flush but that's okay as long as our state gets taken care of.
+    maybePromise = countedDelete->forgiveIfFinished(kj::mv(p));
+  } else if (countedDelete->entries.size()) {
+    maybePromise = countedDelete->forgiveIfFinished(lastFlush.addBranch());
   }
+  return mapPromise(kj::mv(maybePromise), [waiter = kj::mv(waiter)]() {
+    return waiter->getCountedDelete().countDeleted > 0;
+  });
 }
 
 kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, WriteOptions options) {
@@ -1910,30 +1932,17 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
     evictOrOomIfNeeded(lock);
   }
 
-  if (countedDelete->isShared()) {
-    // At least one entry kept a reference to `countedDelete`, so it must be waiting on an RPC.
-    // Set up a fulfiller.
-    auto paf = kj::newPromiseAndFulfiller<uint>();
-    countedDelete->resultFulfiller = kj::mv(paf.fulfiller);
-    KJ_IF_SOME(p, getBackpressure()) {
-      return p.then([promise = kj::mv(paf.promise)]() mutable {
-        return kj::mv(promise);
-      });
-    } else {
-      return kj::mv(paf.promise);
-    }
-  } else {
-    // It looks like the count of deletes is fully known based on cache content, so we don't need
-    // to wait.
-    uint result = countedDelete->countDeleted;
-    KJ_IF_SOME(p, getBackpressure()) {
-      return p.then([result]() mutable {
-        return result;
-      });
-    } else {
-      return result;
-    }
+  auto waiter = kj::heap<CountedDeleteWaiter>(*this, kj::addRef(*countedDelete));
+  kj::Maybe<kj::Promise<void>> maybePromise;
+  KJ_IF_SOME(p, getBackpressure()) {
+    // This might be more than one flush but that's okay as long as our state gets taken care of.
+    maybePromise = countedDelete->forgiveIfFinished(kj::mv(p));
+  } else if (countedDelete->entries.size()) {
+    maybePromise = countedDelete->forgiveIfFinished(lastFlush.addBranch());
   }
+  return mapPromise(kj::mv(maybePromise), [waiter = kj::mv(waiter)]() {
+    return waiter->getCountedDelete().countDeleted;
+  });
 }
 
 kj::Own<ActorCacheInterface::Transaction> ActorCache::startTransaction() {
@@ -1959,17 +1968,15 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
     auto& map = currentValues.get(lock);
 
     kj::Vector<kj::Own<Entry>> deletedDirty;
+    for (auto& entry: dirtyList) {
+      // We will be removing all entries from their respective lists soon, so let's preserve the
+      // dirty list so we can run it before our delete all.
+      deletedDirty.add(kj::atomicAddRef(entry));
+    };
+
+    // Clear out the entire map.
     for (auto& entry: map) {
-      if (entry->isDirty()) {
-        // Note that we intentionally keep entry->state as-is because if an entry is currently
-        // flushing, we'll need the opportunity to remove it from `requestedDeleteAll` when that
-        // flush completes... it turns out it's not _really_ necessary to set an entry to
-        // NOT_IN_CACHE state when it's not in the cache.
-        dirtyList.remove(*entry);
-        deletedDirty.add(kj::mv(entry));
-      } else {
-        removeEntry(lock, *entry);
-      }
+      removeEntry(lock, *entry);
     }
     map.clear();
 
@@ -2010,8 +2017,9 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
   };
 }
 
-void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
-                         const WriteOptions& options, kj::Maybe<CountedDelete&> countedDelete) {
+void ActorCache::putImpl(
+    Lock& lock, kj::Own<Entry> newEntry, const WriteOptions& options,
+    kj::Maybe<CountedDelete&> maybeCountedDelete) {
   auto& map = currentValues.get(lock);
   auto ordered = map.ordered();
 
@@ -2032,8 +2040,10 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
           return;
         }
 
-        KJ_IF_SOME(c, countedDelete) {
-          // Overwrote an entry that was in cache, so we can count it now.
+        KJ_IF_SOME(c, maybeCountedDelete) {
+          // Overwrote an entry that was in cache, so we can count it now. Note that because we
+          // are PRESENT, we will not be added to the CountedDelete's `entries`, since we only
+          // do this for UNKNOWN entries! Instead, we'll be part of a regular delete.
           ++c.countDeleted;
         }
         break;
@@ -2045,41 +2055,45 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
           return;
         }
 
+        if (slot->isCountedDelete) {
+          // We are overwriting an entry that is slated for a counted delete operation.
+          // There may be a situation where all the entries associated with a counted delete are
+          // actually successfully deleted (and we get the count), but the transaction the deletes
+          // execute within fails.
+          //
+          // Since we are currently overwriting the Entry, we might as well inform the
+          // `CountedDelete` that this Entry has since been overwritten. Then, if we hit the case
+          // described above, we won't need to include this Entry in a subsequent counted delete
+          // retry, since we already have the count AND the Entry has been overwritten.
+          //
+          // For more details, see how we filter the entries to be deleted for a CountedDeleteFlush
+          // as part of a flush.
+          slot->overwritingCountedDelete = true;
+        }
         // We don't have to worry about the counted delete since we were already deleted.
         break;
       }
       case EntryValueStatus::UNKNOWN: {
         // This was a list end marker, we should just overwrite it.
 
-        KJ_IF_SOME(c, countedDelete) {
+        KJ_IF_SOME(c, maybeCountedDelete) {
           // Despite an entry being present, we don't know if the key exists, because it's just an
           // UNKNOWN entry. So we will still have to arrange to count the delete later.
-          newEntry->countedDelete = kj::addRef(c);
+          newEntry->isCountedDelete = true;
+          c.entries.add(kj::atomicAddRef(*newEntry));
         }
         break;
       }
     }
 
+    KJ_DASSERT(slot->key == newEntry->key);
+
     // Inherit gap state.
     newEntry->gapIsKnownEmpty = slot->gapIsKnownEmpty;
 
-    if (slot->isDirty()) {
-      dirtyList.remove(*slot);
-      slot->setNotInCache();
-
-      // Entry may have `countedDelete` indicating we're still waiting to get a count from a
-      // previous delete operation. If so, we'll need to inherit it in case that delete operation
-      // fails and we end up retrying. Note that the new entry could be a positive entry rather
-      // than a negative one (a `put()` rather than a `delete()`). That is OK -- in `flushImpl()`
-      // we will still see the presence of `countedDelete` and realize we have to issue a delete
-      // on the key before we issue a put, just for the sake of counting it.
-      newEntry->countedDelete = kj::mv(slot->countedDelete);
-    } else {
-      removeEntry(lock, *slot);
-    }
-
     // Swap in the new entry.
-    KJ_DASSERT(slot->key == newEntry->key);
+    removeEntry(lock, *slot);
+
     slot = kj::mv(newEntry);
     addToDirtyList(*slot);
   } else {
@@ -2102,8 +2116,9 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     //   inserting a new entry, to avoid repeating the lookup.
     auto& slot = map.insert(kj::mv(newEntry));
     slot->gapIsKnownEmpty = previousGapKnownEmpty;
-    KJ_IF_SOME(c, countedDelete) {
-      slot->countedDelete = kj::addRef(c);
+    KJ_IF_SOME(c, maybeCountedDelete) {
+      slot->isCountedDelete = true;
+      c.entries.add(kj::atomicAddRef(*slot));
     }
     addToDirtyList(*slot);
   }
@@ -2246,14 +2261,7 @@ using RpcDeleteRequest = capnp::Request<rpc::ActorStorage::Operations::DeletePar
     rpc::ActorStorage::Operations::DeleteResults>;
 }
 
-kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
-  KJ_IF_SOME(e, maybeTerminalException) {
-    // If we have a terminal exception, throw here to break the output gate and prevent any calls
-    // to storage. This does not use `requireNotTerminal()` so that we don't recursively schedule
-    // flushes.
-    kj::throwFatalException(kj::cp(e));
-  }
-
+kj::Promise<void> ActorCache::startFlushTransaction() {
   // Whenever we flush, we MUST write ALL dirty entries in a single transaction. This is necessary
   // because our cache design doesn't necessarily remember the order in which writes were
   // originally initiated, and thus it's not possible to choose a consistent prefix of writes
@@ -2313,59 +2321,87 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     batch.wordCount += words;
   };
 
-  kj::Vector<CountedDeleteFlush> countedDeleteFlushes;
+  kj::Vector<CountedDeleteFlush> countedDeleteFlushes(countedDeletes.size());
+  for (auto countedDelete : countedDeletes) {
+    if (countedDelete->isFinished) {
+      // This countedDelete has already be executed, but we haven't delivered the final count to
+      // the waiter yet. We'll skip it here since the destructor of CountedDeleteWaiter should
+      // eventually remove this entry from `countedDeletes`.
+      continue;
+    }
+
+    // We might have successfully deleted these entries, but had the broader transaction fail.
+    // In that case, we might have entries that have since been overwritten, and which no longer
+    // need to be scheduled for deletion.
+    kj::Vector<kj::Own<Entry>> entriesToDelete(countedDelete->entries.size());
+    for (auto& entry : countedDelete->entries) {
+      if (entry->overwritingCountedDelete && countedDelete->completedInTransaction) {
+        // Not only is this a retry, but we have since modified the entry with a put().
+        // Since we already have the delete count, we don't need to delete this entry again.
+        continue;
+      }
+      entriesToDelete.add(kj::mv(entry));
+    }
+
+    // We will skip this CountedDelete if there are no entries that need to be deleted.
+    // It will be removed from `countedDeletes` by the next flush.
+    if (entriesToDelete.size() == 0) {
+      continue;
+    }
+
+    auto& countedDeleteFlush = countedDeleteFlushes.add(CountedDeleteFlush{
+      .countedDelete = kj::addRef(*countedDelete),
+    });
+    // Now that we've filtered our entries down to only those that need to be deleted,
+    // we need to overwrite the CountedDelete's `entries`.
+    countedDelete->entries = kj::mv(entriesToDelete);
+    for (auto& entry : countedDelete->entries) {
+      // A delete() call on this key is waiting to find out if the key existed in storage. Since
+      // each delete() call needs to return the count of keys deleted, we must issue
+      // corresponding delete calls to storage with the same batching, so that storage returns
+      // the right counts to us. We can't batch all the deletes into a single delete operation
+      // since then we'd only get a single count back and we wouldn't know how to split that up
+      // to satisfy all the callers.
+      //
+      // Note that a subsequent put() call could have set entry.value to non-null, but we still
+      // have to perform the delete first in order to determine the count that the delete() call
+      // should return.
+      //
+      // There is a minor quirk here because the counted delete set does not distinguish between
+      // before and after a delete all. That's actually okay because we should be able to
+      // immediately resolve counted deletes requested after a delete all (either the values are
+      // absent or they have a dirty put). This might also be an issue if we respected noCache for
+      // delete all's dummy value, but we do not.
+      entry->flushStarted = true;
+
+      auto keySizeInWords = bytesToWordsRoundUp(entry->key.size());
+      auto words = keySizeInWords + 1;
+      includeInCurrentBatch(countedDeleteFlush.batches, words);
+    }
+  }
 
   auto countEntry = [&](Entry& entry) {
     // Counts up the number of operations and RPC message sizes we'll need to cover this entry.
 
-    entry.setFlushing();
+    if (entry.isCountedDelete) {
+      // We should have already put this entry into a batch, so just skip it.
+      KJ_ASSERT(entry.flushStarted);
+      return;
+    }
+
+    entry.flushStarted = true;
 
     auto keySizeInWords = bytesToWordsRoundUp(entry.key.size());
-
-    KJ_IF_SOME(c, entry.countedDelete) {
-      if (c->resultFulfiller->isWaiting()) {
-        // A delete() call on this key is waiting to find out if the key existed in storage. Since
-        // each delete() call needs to return the count of keys deleted, we must issue
-        // corresponding delete calls to storage with the same batching, so that storage returns
-        // the right counts to us. We can't batch all the deletes into a single delete operation
-        // since then we'd only get a single count back and we wouldn't know how to split that up
-        // to satisfy all the callers.
-        //
-        // Note that a subsequent put() call could have set entry.value to non-null, but we still
-        // have to perform the delete first in order to determine the count that the delete() call
-        // should return.
-        CountedDeleteFlush* countedDeleteFlush;
-        KJ_IF_SOME(i, c->flushIndex) {
-          countedDeleteFlush = &countedDeleteFlushes[i];
-        } else {
-          c->flushIndex = countedDeleteFlushes.size();
-          countedDeleteFlush = &countedDeleteFlushes.add(CountedDeleteFlush{
-            .countedDelete = kj::addRef(*c).attach(kj::defer([&cd = *c]() mutable {
-              // Note that this is attached to the `Own`, not the value. We actually want this,
-              // because it allows us to reset the `flushIndex` when *this flush* finishes,
-              // regardless of if we need to retry.
-              cd.flushIndex = kj::none;
-            })),
-          });
-        }
-        auto words = keySizeInWords + 1;
-        includeInCurrentBatch(countedDeleteFlush->batches, words);
-        countedDeleteFlush->entries.add(&entry);
-      } else {
-        // No one is waiting on this `CountedDelete` anymore so we can just drop it.
-        entry.countedDelete = kj::none;
-      }
-    }
 
     KJ_IF_SOME(v, entry.getValuePtr()) {
       auto words = keySizeInWords + bytesToWordsRoundUp(v.size()) +
           capnp::sizeInWords<rpc::ActorStorage::KeyValue>();
       includeInCurrentBatch(putFlush.batches, words);
-      putFlush.entries.add(&entry);
-    } else if (entry.countedDelete == kj::none) {
+      putFlush.entries.add(kj::atomicAddRef(entry));
+    } else {
       auto words = keySizeInWords + 1;
       includeInCurrentBatch(mutedDeleteFlush.batches, words);
-      mutedDeleteFlush.entries.add(&entry);
+      mutedDeleteFlush.entries.add(kj::atomicAddRef(entry));
     }
   };
 
@@ -2392,7 +2428,6 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   // flush. Otherwise, if it wasn't, but someone calls deleteAll() while we're flushing, then
   // `requestedDeleteAll` might be non-null afterwards, but that would not indicate that we were
   // ready to issue the delete-all.
-  bool deleteAllUpcoming = requestedDeleteAll != kj::none;
   KJ_IF_SOME(r, requestedDeleteAll) {
     for (auto& entry: r.deletedDirty) {
       countEntry(*entry);
@@ -2403,10 +2438,25 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     }
   }
 
+  // We don't want to write anything until we know that any past reads have completed, because one
+  // or more of those reads could have been on the previous value of a key that was then overwritten
+  // by a put() that we're about to flush, and we don't want it to be possible for that read to end
+  // up receiving a value that was written later (especially if the read retries due to a
+  // disconnect).
+  //
+  // In practice, most code probably will not have any reads in flight when a flush occurs.
+  //
+  // Note that we have cached strong references to all entries we intend to mutate above. This means
+  // that we can be confident that flushing the cached set will not conflict with future reads
+  // because:
+  // - All our cached entries are dirty.
+  // - Dirty entries can only be removed from the cache map if replaced by a new dirty entry.
+  // - Thus all new read requests for our cached entries keys will be served from cache.
+  co_await waitForPastReads();
+
   // Actually flush out the changes.
-  kj::Promise<void> flushProm = nullptr;
   auto useTransactionToFlush = [&]() {
-    flushProm = flushImplUsingTxn(kj::mv(putFlush), kj::mv(mutedDeleteFlush),
+    return flushImplUsingTxn(kj::mv(putFlush), kj::mv(mutedDeleteFlush),
         countedDeleteFlushes.releaseAsArray(), kj::mv(maybeAlarmChange));
   };
 
@@ -2416,40 +2466,48 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   if (countedDeleteFlushes.size() > 0) { ++typesOfDataToFlush; }
   if (maybeAlarmChange.is<DirtyAlarm>()) { ++typesOfDataToFlush; }
 
-  if (deleteAllUpcoming && KJ_ASSERT_NONNULL(requestedDeleteAll).deletedDirty.empty()) {
-    // There were no dirty entries before deleteAll() was called, so we can move on to invoking
-    // deleteAll() itself.
-    // NOTE: We put this as the first check to maintain legacy behavior even if there isn't a
-    // particularly compelling reason to do this before checking whether the alarm is dirty.
-    return flushImplDeleteAll();
-  } else if (typesOfDataToFlush == 0) {
+  if (typesOfDataToFlush == 0) {
     // Oh, nothing to do.
-    return kj::READY_NOW;
   } else if (typesOfDataToFlush > 1) {
     // We have multiple types of operations, so we have to use a transaction.
-    useTransactionToFlush();
+    co_await useTransactionToFlush();
   } else if (maybeAlarmChange.is<DirtyAlarm>()) {
     // We only had an alarm, we can skip the transaction.
-    flushProm = flushImplAlarmOnly(maybeAlarmChange.get<DirtyAlarm>());
+    co_await flushImplAlarmOnly(maybeAlarmChange.get<DirtyAlarm>());
   } else if (putFlush.batches.size() == 1) {
     // As an optimization for the common case where there are only puts and they all fit in a
     // single batch, just send a simple put rather than complicating things with a transaction.
-    flushProm = flushImplUsingSinglePut(kj::mv(putFlush));
+    co_await flushImplUsingSinglePut(kj::mv(putFlush));
   } else if (mutedDeleteFlush.batches.size() == 1) {
     // Same as for puts, but for muted deletes.
-    flushProm = flushImplUsingSingleMutedDelete(kj::mv(mutedDeleteFlush));
+    co_await flushImplUsingSingleMutedDelete(kj::mv(mutedDeleteFlush));
   } else if (countedDeleteFlushes.size() == 1 && countedDeleteFlushes[0].batches.size() == 1) {
     // Same as for puts, but for muted deletes.
-    flushProm = flushImplUsingSingleCountedDelete(kj::mv(countedDeleteFlushes[0]));
-    countedDeleteFlushes.clear();
+    co_await flushImplUsingSingleCountedDelete(kj::mv(countedDeleteFlushes[0]));
   } else {
     // None of the special cases above triggered. Default to using a transaction in all other cases,
     // such as when there are so many keys to be flushed that they don't fit into a single batch.
-    useTransactionToFlush();
+    co_await useTransactionToFlush();
+  }
+}
+
+kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
+  KJ_IF_SOME(e, maybeTerminalException) {
+    // If we have a terminal exception, throw here to break the output gate and prevent any calls
+    // to storage. This does not use `requireNotTerminal()` so that we don't recursively schedule
+    // flushes.
+    kj::throwFatalException(kj::cp(e));
   }
 
-  return oomCanceler.wrap(kj::mv(flushProm)).then([this, deleteAllUpcoming]() -> kj::Promise<void> {
-    // Success!
+  auto flushProm = startFlushTransaction();
+
+  bool flushingBeforeDeleteAll = requestedDeleteAll != kj::none;
+  return oomCanceler.wrap(kj::mv(flushProm)).then(
+      [this, flushingBeforeDeleteAll]() -> kj::Promise<void> {
+    // We need to process the alarm result before we (potentially) start the delete all because if
+    // we did not our alarm state can't know if it need to flush a new time or not after the delete
+    // all. This might be another reason why delete all should not be considered truly deleting the
+    // durable object: alarms are not cleared by a delete all.
     KJ_SWITCH_ONEOF(currentAlarmTime) {
       KJ_CASE_ONEOF(knownAlarmTime, ActorCache::KnownAlarmTime) {
         if (knownAlarmTime.status == KnownAlarmTime::Status::FLUSHING) {
@@ -2476,7 +2534,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       }
       KJ_CASE_ONEOF(_, ActorCache::UnknownAlarmTime) {}
     }
-    if (deleteAllUpcoming) {
+    if (flushingBeforeDeleteAll) {
       // The writes we flushed were writes that had occurred before a deleteAll. Now that they are
       // written, we must perform the deleteAll() itself.
       return flushImplDeleteAll();
@@ -2486,34 +2544,34 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
     KJ_IF_SOME(r, requestedDeleteAll) {
       // It would appear that all dirty entries were moved into `requestedDeleteAll` during the
-      // time that we were waiting for the flushImpl(). We want to remove the `FLUSHING` entries
+      // time that we were waiting for the flushImpl(). We want to remove the flushing entries
       // from that vector now.
       // TODO(cleanup): kj::Vector<T>::filter() would be nice to have here.
       auto dst = r.deletedDirty.begin();
       for (auto src = r.deletedDirty.begin(); src != r.deletedDirty.end(); ++src) {
-        if (src->get()->getSyncStatus() == EntrySyncStatus::DIRTY) {
+        if (!src->get()->flushStarted) {
           if (dst != src) *dst = kj::mv(*src);
           ++dst;
         }
       }
       r.deletedDirty.resize(dst - r.deletedDirty.begin());
     } else {
-      // Mark all `FLUSHING` entries as `CLEAN`. Note that we know that all `FLUSHING` must
+      // Mark all flushing entries as `CLEAN`. Note that we know that all flushing entries must
       // form a prefix of `dirtyList` since any new entries would have been added to the end.
       for (auto& entry: dirtyList) {
-        if (entry.getSyncStatus() == EntrySyncStatus::DIRTY) {
-          // Completed all FLUSHING entries.
+        if (!entry.flushStarted) {
+          // Completed all flushing entries.
           break;
         }
 
-        KJ_ASSERT(entry.getSyncStatus() == EntrySyncStatus::FLUSHING);
+        KJ_ASSERT(entry.flushStarted);
 
         // We know all `countedDelete` operations were satisfied so we can remove this if it's
-        // present. Note that if, during the flush, the entry was overwritten, then the new entry
-        // will have inherited the `countedDelete`, and will still be DIRTY at this point. That is
-        // OK, because the `countedDelete`'s fulfiller will have already been fulfilled, and
-        // therefore the next flushImpl() will see that it is obsolete and discard it.
-        entry.countedDelete = kj::none;
+        // present. The `CountedDeleteWaiters` will resolve once the flush is finished, and will
+        // remove the `CountedDelete`s from `countedDeletes`. Even if it doesn't happen by the
+        // next flush, each `CountedDelete` should have `isFinished` set so even if we encounter it
+        // next flush we won't attempt to delete again.
+        entry.isCountedDelete = false;
 
         dirtyList.remove(entry);
         if (entry.noCache) {
@@ -2595,10 +2653,6 @@ kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
   // We're done with the batching instructions, free them before we go async.
   putFlush.entries.clear();
   putFlush.batches.clear();
-
-  // See the comment in flushImplUsingTxn for why we need to construct our RPC and then wait on
-  // reads before actually sending the write. The same exact logic applies here.
-  co_await waitForPastReads();
   {
     auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: single put");
@@ -2625,9 +2679,6 @@ kj::Promise<void> ActorCache::flushImplUsingSingleMutedDelete(MutedDeleteFlush m
   mutedFlush.entries.clear();
   mutedFlush.batches.clear();
 
-  // See the comment in flushImplUsingTxn for why we need to construct our RPC and then wait on
-  // reads before actually sending the write. The same exact logic applies here.
-  co_await waitForPastReads();
   {
     auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: muted delete");
@@ -2639,44 +2690,29 @@ kj::Promise<void> ActorCache::flushImplUsingSingleCountedDelete(CountedDeleteFlu
   KJ_ASSERT(countedFlush.batches.size() == 1);
   auto& batch = countedFlush.batches[0];
 
+  auto countedDelete = kj::mv(countedFlush.countedDelete);
   KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
-  KJ_ASSERT(batch.pairCount == countedFlush.entries.size());
+  KJ_ASSERT(batch.pairCount == countedDelete->entries.size());
 
   auto request = storage.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
   auto listBuilder = request.initKeys(batch.pairCount);
-  auto entryIt = countedFlush.entries.begin();
+  auto entryIt = countedDelete->entries.begin();
   for (size_t i = 0; i < batch.pairCount; ++i) {
     auto& entry = **(entryIt++);
     listBuilder.set(i, entry.key.asBytes());
   }
 
   // We're done with the batching instructions, free them before we go async.
-  countedFlush.entries.clear();
   countedFlush.batches.clear();
 
-  auto countedDelete = kj::mv(countedFlush.countedDelete);
-
-  // See the comment in flushImplUsingTxn for why we need to construct our RPC and then wait on
-  // reads before actually sending the write. The same exact logic applies here.
-  co_await waitForPastReads();
-  try {
-    auto writeObserver = recordStorageWrite(hooks, clock);
-    util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: counted delete");
-    auto response = co_await request.send();
-    countedDelete->resultFulfiller->fulfill(response.getNumDeleted());
-  } catch (kj::Exception& e) {
-    if (e.getType() == kj::Exception::Type::DISCONNECTED) {
-      // This deletion will be retried, so don't touch the fulfiller.
-    } else {
-      countedDelete->resultFulfiller->reject(kj::cp(e));
-    }
-    throw kj::mv(e);
-  }
+  auto writeObserver = recordStorageWrite(hooks, clock);
+  util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: counted delete");
+  auto response = co_await request.send();
+  countedDelete->countDeleted += response.getNumDeleted();
+  countedDelete->isFinished = true;
 }
 
 kj::Promise<void> ActorCache::flushImplAlarmOnly(DirtyAlarm dirty) {
-  co_await waitForPastReads();
-
   auto writeObserver = recordStorageWrite(hooks, clock);
   util::DurationExceededLogger logger(clock, 1*kj::SECONDS, "storage operation took longer than expected: set/delete alarm");
 
@@ -2732,7 +2768,8 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
   auto rpcPuts = kj::heapArrayBuilder<RpcPutRequest>(putFlush.batches.size());
 
   for (auto& flush: countedDeleteFlushes) {
-    auto entryIt = flush.entries.begin();
+    auto countedDelete = kj::mv(flush.countedDelete);
+    auto entryIt = countedDelete->entries.begin();
     kj::Vector<RpcDeleteRequest> rpcDeletes;
     for (auto& batch: flush.batches) {
       KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
@@ -2740,19 +2777,20 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
       auto request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
       auto listBuilder = request.initKeys(batch.pairCount);
       for (size_t i = 0; i < batch.pairCount; ++i) {
-        KJ_ASSERT(entryIt != flush.entries.end());
+        KJ_ASSERT(entryIt != countedDelete->entries.end());
         auto& entry = **(entryIt++);
         listBuilder.set(i, entry.key.asBytes());
       }
 
       rpcDeletes.add(kj::mv(request));
     }
+    KJ_ASSERT(entryIt == countedDelete->entries.end());
     rpcCountedDeletes.add(RpcCountedDelete{
-      .countedDelete = kj::mv(flush.countedDelete),
+      .countedDelete = kj::mv(countedDelete),
       .rpcDeletes = rpcDeletes.releaseAsArray(),
     });
-    KJ_ASSERT(entryIt == flush.entries.end());
   }
+  countedDeleteFlushes = nullptr;
 
   {
     auto entryIt = mutedDeleteFlush.entries.begin();
@@ -2770,6 +2808,8 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
     }
     KJ_ASSERT(entryIt == mutedDeleteFlush.entries.end());
   }
+  mutedDeleteFlush.entries.clear();
+  mutedDeleteFlush.batches.clear();
 
   {
     auto entryIt = putFlush.entries.begin();
@@ -2789,33 +2829,8 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
     }
     KJ_ASSERT(entryIt == putFlush.entries.end());
   }
-
-  // We're done with the batching instructions, free them before we go async.
   putFlush.entries.clear();
   putFlush.batches.clear();
-  mutedDeleteFlush.entries.clear();
-  mutedDeleteFlush.batches.clear();
-  countedDeleteFlushes = nullptr;
-
-  // We don't want to write anything until we know that any past reads have completed, because one
-  // or more of those reads could have been on the previous value of a key that was then overwritten
-  // by a put() that we're about to flush, and we don't want it to be possible for that read to end
-  // up receiving a value that was written later (especially if the read retries due to a disconnect).
-  //
-  // In practice, most code probably will not have any reads in flight when a flush occurs.
-  //
-  // This used to only block the commit() of the flush transaction, but that allows for a deadlock
-  // race condition where a read gets stuck in the DB waiting on the transaction to finish but the
-  // commit() can't be sent until the read completes. Instead, we avoid sending any writes to
-  // avoid taking any internal DB latches that may block a read (which could in turn block
-  // waitForPastReads).
-  //
-  // But it is important that we created our put/delete batches prior to waiting on past reads,
-  // because if we were to wait before doing so then more new writes might sneak into the flush, and
-  // if we were to include those new writes we'd potentially have to wait on past reads again.
-  // Similarly, we have to copy the data into our RPC structs prior to waiting instead of after to
-  // avoid the data changing out from under us while we wait.
-  co_await waitForPastReads();
 
   // Send all the RPCs. It's important that counted deletes are sent first since they can overlap
   // with puts. Specifically this can happen if someone does a delete() immediately followed by a
@@ -2838,30 +2853,26 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
       });
     };
 
+    size_t recordsDeleted = 0;
     for (auto& promise : promises) {
-      // Reuse `countDeleted` since it's already in a state object anyway.
-      rpcCountedDelete.countedDelete->countDeleted += co_await promise;
+      recordsDeleted += co_await promise;
     }
+
+    // This may be a retry following a successful counted delete within a failed transaction.
+    // In that case, we don't want to update the count again, since we've already considered it.
+    if (!rpcCountedDelete.countedDelete->completedInTransaction) {
+      // We only increment our `countDeleted` if *ALL* the delete batches succeeded.
+      rpcCountedDelete.countedDelete->countDeleted += recordsDeleted;
+    }
+
+    // This delete succeeded, but we may need to retry it in some cases, ex. if the transaction fails.
+    // If we *do* retry after a successful counted delete, we won't want to update our
+    // `countDeleted` since we already got it.
+    rpcCountedDelete.countedDelete->completedInTransaction = true;
   };
+
   for (auto& rpcCountedDelete: rpcCountedDeletes) {
-    promises.add(joinCountedDelete(rpcCountedDelete).then(
-        [&countedDelete = *rpcCountedDelete.countedDelete]() mutable {
-      // Note that it's OK to trust the delete count even if the transaction ultimately gets rolled
-      // back, because:
-      // - We know that nothing else could be concurrently modifying our storage in a way that
-      //   makes the count different on a retry.
-      // - If retries fail and the flush never completes at all, the output gate will kick in and
-      //   make it impossible for anyone to observe the bogus result.
-      // HACK: This uses a `kj::mv()` because promise fulfillers require rvalues even for trivially
-      // copyable types.
-      countedDelete.resultFulfiller->fulfill(kj::mv(countedDelete.countDeleted));
-    }, [&countedDelete = *rpcCountedDelete.countedDelete](kj::Exception&& e) {
-      if (e.getType() == kj::Exception::Type::DISCONNECTED) {
-        // This deletion will be retried, so don't touch the fulfiller.
-      } else {
-        countedDelete.resultFulfiller->reject(kj::mv(e));
-      }
-    }));
+    promises.add(joinCountedDelete(rpcCountedDelete));
   }
 
   for (auto& request: rpcMutedDeletes) {
@@ -2922,6 +2933,11 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
     promises.add(txn.commitRequest(capnp::MessageSize { 4, 0 }).send().ignoreResult());
 
     co_await kj::joinPromises(promises.finish());
+    for (auto& rpcCountedDelete: rpcCountedDeletes) {
+      // Now that the transaction has successfully completed, we can mark all our CountedDeletes
+      // as having completed as well.
+      rpcCountedDelete.countedDelete->isFinished = true;
+    }
   }
 }
 
