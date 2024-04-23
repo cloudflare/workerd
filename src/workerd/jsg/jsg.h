@@ -1557,6 +1557,8 @@ using ReturnType = typename ReturnType_<Func, T, passLock>::Type;
 // Convenience template to produce a promise for the result of calling a function with the given
 // parameter type. This wraps the function's result type in `jsg::Promise` UNLESS the function
 // already returns a `jsg::Promise`, in which case the type is unchanged.
+// TODO(cleanup): The passLock = false variation is currently only used for js.evalNow().
+// It would be nice to refactor that a bit so we can clean up this template and simplify.
 template <typename Func, typename Param, bool passLock>
 using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>>>;
 
