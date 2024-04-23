@@ -414,6 +414,19 @@ export const readableStreamFromNoopAsyncGen = {
   }
 };
 
+export const abortWriterAfterGc = {
+  async test() {
+    function getWriter() {
+      const { writable } = new IdentityTransformStream();
+      return writable.getWriter();
+    }
+
+    const writer = getWriter();
+    gc();
+    await writer.abort();
+  }
+};
+
 export default {
   async fetch(request, env) {
     strictEqual(request.headers.get('content-length'), '10');
