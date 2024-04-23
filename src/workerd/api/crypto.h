@@ -600,54 +600,25 @@ public:
 };
 
 // =======================================================================================
-class DigestStreamSink: public WritableStreamSink {
-public:
-  using HashAlgorithm = SubtleCrypto::HashAlgorithm;
-  using DigestContextPtr = std::unique_ptr<EVP_MD_CTX, void(*)(EVP_MD_CTX*)>;
-
-  explicit DigestStreamSink(
-      HashAlgorithm algorithm,
-      kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller);
-
-  virtual ~DigestStreamSink();
-
-  kj::Promise<void> write(const void* buffer, size_t size) override;
-
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override;
-
-  kj::Promise<void> end() override;
-
-  void abort(kj::Exception reason) override;
-
-private:
-  struct Closed {};
-  using Errored = kj::Exception;
-
-  SubtleCrypto::HashAlgorithm algorithm;
-  kj::OneOf<DigestContextPtr, Closed, Errored> state;
-  kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller;
-};
-
 // DigestStream is a non-standard extension that provides a way of generating
 // a hash digest from streaming data. It combines Web Crypto concepts into a
 // WritableStream and is compatible with both APIs.
 class DigestStream: public WritableStream {
 public:
-  using HashAlgorithm = DigestStreamSink::HashAlgorithm;
-  using Algorithm = kj::OneOf<kj::String, HashAlgorithm>;
+  using DigestContextPtr = std::unique_ptr<EVP_MD_CTX, void(*)(EVP_MD_CTX*)>;
+  using Algorithm = kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>;
 
   explicit DigestStream(
-      HashAlgorithm algorithm,
-      kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller,
+      kj::Own<WritableStreamController> controller,
+      SubtleCrypto::HashAlgorithm algorithm,
+      jsg::Promise<kj::Array<kj::byte>>::Resolver resolver,
       jsg::Promise<kj::Array<kj::byte>> promise);
 
   static jsg::Ref<DigestStream> constructor(jsg::Lock& js, Algorithm algorithm);
 
   jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>>& getDigest() { return promise; }
-
-  kj::Own<WritableStreamSink> removeSink(jsg::Lock& js) override {
-    KJ_UNIMPLEMENTED("DigestStream::removeSink is not implemented");
-  }
+  void dispose(jsg::Lock& js);
+  uint64_t getBytesWritten() const { return bytesWritten; }
 
   JSG_RESOURCE_TYPE(DigestStream, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(WritableStream);
@@ -656,20 +627,36 @@ public:
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(digest, getDigest);
     }
+    JSG_READONLY_PROTOTYPE_PROPERTY(bytesWritten, getBytesWritten);
+    JSG_DISPOSE(dispose);
 
     JSG_TS_OVERRIDE(extends WritableStream<ArrayBuffer | ArrayBufferView>);
   }
 
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("promise", promise);
-  }
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-  jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>> promise;
+  static DigestContextPtr initContext(SubtleCrypto::HashAlgorithm& algorithm);
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(promise);
-  }
+  struct Ready {
+    SubtleCrypto::HashAlgorithm algorithm;
+    jsg::Promise<kj::Array<kj::byte>>::Resolver resolver;
+    DigestContextPtr context;
+    Ready(SubtleCrypto::HashAlgorithm algorithm,
+          jsg::Promise<kj::Array<kj::byte>>::Resolver resolver)
+        : algorithm(kj::mv(algorithm)),
+          resolver(kj::mv(resolver)),
+          context(initContext(this->algorithm)) {}
+  };
+  jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>> promise;
+  kj::OneOf<Ready, StreamStates::Closed, StreamStates::Errored> state;
+  uint64_t bytesWritten = 0;
+
+  kj::Maybe<StreamStates::Errored> write(jsg::Lock& js, kj::ArrayPtr<kj::byte> buffer);
+  kj::Maybe<StreamStates::Errored> close(jsg::Lock& js);
+  void abort(jsg::Lock& js, jsg::JsValue reason);
+
+  void visitForGc(jsg::GcVisitor& visitor);
 };
 
 // =======================================================================================
