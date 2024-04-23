@@ -22,8 +22,8 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
         .then(js, [](jsg::Lock& js, int i) { return kj::str(i); });
   }
 
-  void resolvePromise(int i) {
-    KJ_ASSERT_NONNULL(resolver).resolve(kj::mv(i));
+  void resolvePromise(Lock& js, int i) {
+    KJ_ASSERT_NONNULL(resolver).resolve(js, kj::mv(i));
   }
 
   void setResult(jsg::Lock& js, Promise<kj::String> promise) {
@@ -48,8 +48,8 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     });
   }
 
-  Promise<kj::String> makeRejected(jsg::Value exception, v8::Isolate* isolate) {
-    return rejectedPromise<kj::String>(isolate, kj::mv(exception));
+  Promise<kj::String> makeRejected(jsg::Lock& js, jsg::Value exception) {
+    return js.rejectedPromise<kj::String>(kj::mv(exception));
   }
 
   Promise<kj::String> makeRejectedKj(jsg::Lock& js) {
@@ -59,7 +59,7 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
   void testConsumeResolved(jsg::Lock& js) {
     auto [ promise, resolver ] = js.newPromiseAndResolver<int>();
     KJ_EXPECT(promise.tryConsumeResolved(js) == kj::none);
-    resolver.resolve(123);
+    resolver.resolve(js, 123);
     KJ_EXPECT(KJ_ASSERT_NONNULL(promise.tryConsumeResolved(js)) == 123);
 
     KJ_EXPECT(js.rejectedPromise<kj::String>(v8StrIntern(js.v8Isolate, "foo"))

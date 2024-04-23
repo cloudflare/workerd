@@ -1476,13 +1476,13 @@ class Constructor;
 // never resolve). This is a convenience so that method implementations that return promises do
 // not need to carefully capture a reference to `JSG_THIS`.
 //
-// You can construct an immediate Promise value using jsg::resolvedPromise() and
-// jsg::rejectedPromise() (see below).
+// You can construct an immediate Promise value using js.resolvedPromise() and
+// js.rejectedPromise() (see below).
 //
 // You can also create a promise/resolver pair:
 //
 //     auto [promise, resolver] = js.newPromiseAndResolver<kj::String>();
-//     resolver.resolve(kj::str(foo));
+//     resolver.resolve(js, kj::str(foo));
 //
 // The Promise exposes a markAsHandled() API that will mark JavaScript Promise such that rejections
 // are not reported to the isolate's unhandled rejection tracking mechanisms. Importantly, any then

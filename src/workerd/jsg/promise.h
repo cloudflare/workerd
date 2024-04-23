@@ -232,9 +232,9 @@ public:
       "jsg::Promise<jsg::V8Ref<T>> to represent a promise for a JavaScript heap object.");
 
   Promise(v8::Isolate* isolate, v8::Local<v8::Promise> v8Promise)
-      : deprecatedIsolate(isolate), v8Promise(V8Ref<v8::Promise>(isolate, v8Promise)) {}
+      : v8Promise(V8Ref<v8::Promise>(isolate, v8Promise)) {}
 
-  Promise(decltype(nullptr)): deprecatedIsolate(nullptr), v8Promise(kj::none) {}
+  Promise(decltype(nullptr)): v8Promise(kj::none) {}
   // For use when you're declaring a local variable that will be initialized later.
 
   void markAsHandled(Lock& js) {
@@ -328,7 +328,7 @@ public:
   class Resolver {
   public:
     Resolver(v8::Isolate* isolate, v8::Local<v8::Promise::Resolver> v8Resolver)
-        : deprecatedIsolate(isolate), v8Resolver(isolate, kj::mv(v8Resolver)) {}
+        : v8Resolver(isolate, kj::mv(v8Resolver)) {}
 
     template <typename U = T, typename = kj::EnableIf<!isVoid<U>()>>
     void resolve(Lock& js, kj::NoInfer<U>&& value) {
@@ -363,7 +363,7 @@ public:
     }
 
     void reject(Lock& js, kj::Exception exception) {
-      reject(js, makeInternalError(deprecatedIsolate, kj::mv(exception)));
+      reject(js, makeInternalError(js.v8Isolate, kj::mv(exception)));
     }
 
     Resolver addRef(Lock& js) {
@@ -373,60 +373,17 @@ public:
       visitor.visit(v8Resolver);
     }
 
-    // DEPRECATED: Versions that don't take `Lock`, same as with Promise.
-    template <typename U = T, typename = kj::EnableIf<!isVoid<U>()>>
-    void resolve(kj::NoInfer<U>&& value) {
-      resolve(Lock::from(deprecatedIsolate), kj::mv(value));
-    }
-    template <typename U = T, typename = kj::EnableIf<isVoid<U>()>>
-    void resolve() KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
-      resolve(Lock::from(deprecatedIsolate));
-    }
-    void resolve(Promise&& promise) KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
-      resolve(Lock::from(deprecatedIsolate), kj::mv(promise));
-    }
-    void reject(v8::Local<v8::Value> exception) KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
-      reject(Lock::from(deprecatedIsolate), kj::mv(exception));
-    }
-
-    Resolver addRef() KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
-      return addRef(Lock::from(deprecatedIsolate));
-    }
-
     JSG_MEMORY_INFO(Resolver) {
       tracker.trackField("resolver", v8Resolver);
     }
 
   private:
-    v8::Isolate* deprecatedIsolate;
     V8Ref<v8::Promise::Resolver> v8Resolver;
     friend class MemoryTracker;
   };
 
   void visitForGc(GcVisitor& visitor) {
     visitor.visit(v8Promise);
-  }
-
-  // DEPRECATED: The versions below do not take a `Lock` as the first param, but they do actually
-  //   require a lock. These versions also do not pass a `Lock` to the callback.
-  // TODO(cleanup): Update all call sites to the version that passes locks. Then, remove these and
-  //   also remove the `isolate` parameter from this class.
-
-  template <typename Func, typename ErrorFunc>
-  auto then(Func&& func, ErrorFunc&& errorFunc)
-      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
-    return then<false>(Lock::from(deprecatedIsolate),
-        kj::fwd<Func>(func), kj::fwd<ErrorFunc>(errorFunc));
-  }
-  template <typename Func>
-  auto then(Func&& func)
-      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
-    return then<false>(Lock::from(deprecatedIsolate), kj::fwd<Func>(func));
-  }
-  template <typename ErrorFunc>
-  auto catch_(ErrorFunc&& errorFunc)
-      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
-    return catch_<false>(Lock::from(deprecatedIsolate), kj::fwd<ErrorFunc>(errorFunc));
   }
 
   JSG_MEMORY_INFO(Promise) {
@@ -436,10 +393,6 @@ public:
   }
 
 private:
-  // We store a copy of the isolate pointer so that `.then()` can be called without passing in
-  // the isolate pointer every time.
-  v8::Isolate* deprecatedIsolate;
-
   kj::Maybe<V8Ref<v8::Promise>> v8Promise;
   bool markedAsHandled = false;
 
@@ -449,8 +402,7 @@ private:
   }
 
   template <typename U = T, typename = kj::EnableIf<!isVoid<U>()>()>
-  Promise(Lock& js, kj::NoInfer<U>&& value)
-      : deprecatedIsolate(js.v8Isolate) {
+  Promise(Lock& js, kj::NoInfer<U>&& value) {
     js.withinHandleScope([&] {
       auto context = js.v8Context();
       auto resolver = check(v8::Promise::Resolver::New(context));
@@ -466,8 +418,7 @@ private:
   }
 
   template <typename U = T, typename = kj::EnableIf<isVoid<U>()>()>
-  explicit Promise(Lock& js)
-      : deprecatedIsolate(js.v8Isolate) {
+  explicit Promise(Lock& js) {
     js.withinHandleScope([&] {
       auto context = js.v8Context();
       auto resolver = check(v8::Promise::Resolver::New(context));
@@ -595,31 +546,6 @@ PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
   }
 }
 
-// DEPRECATED: These global functions should be replaced with the equivalent methods of `Lock`.
-template <typename T>
-inline Promise<T> resolvedPromise(v8::Isolate* isolate, T&& value) {
-  return Lock::from(isolate).resolvedPromise(kj::fwd<T>(value));
-}
-inline Promise<void> resolvedPromise(v8::Isolate* isolate) {
-  return Lock::from(isolate).resolvedPromise();
-}
-template <typename T>
-inline Promise<T> rejectedPromise(v8::Isolate* isolate, v8::Local<v8::Value> exception) {
-  return Lock::from(isolate).rejectedPromise<T>(exception);
-}
-template <typename T>
-inline Promise<T> rejectedPromise(v8::Isolate* isolate, jsg::Value exception) {
-  return Lock::from(isolate).rejectedPromise<T>(kj::mv(exception));
-}
-template <typename T>
-inline Promise<T> rejectedPromise(v8::Isolate* isolate, kj::Exception&& exception) {
-  return Lock::from(isolate).rejectedPromise<T>(kj::mv(exception));
-}
-template <class Func>
-PromiseForResult<Func, void, false> evalNow(v8::Isolate* isolate, Func&& func) {
-  return Lock::from(isolate).evalNow(kj::fwd<Func>(func));
-}
-
 // -----------------------------------------------------------------------------
 
 // Continuation function that converts a promised C++ value into a JavaScript value.
@@ -730,6 +656,7 @@ public:
         return tryUnwrap(context, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
       }
 
+      auto& js = Lock::from(context->GetIsolate());
       if constexpr (isVoid<T>()) {
         // When expecting Promise<void>, we treat absolutely any non-promise value as being
         // an immediately-resolved promise. This is consistent with JavaScript where you'd
@@ -743,12 +670,12 @@ public:
         // optionally return Promise<void> -- it seems like the callback isn't actually intending
         // to return the result of `someExpression()` but does so by accident since the braces
         // are missing. This is probably common in user code, too.
-        return resolvedPromise(context->GetIsolate());
+        return js.resolvedPromise();
       } else {
         auto& wrapper = *static_cast<TypeWrapper*>(this);
         KJ_IF_SOME(value,
             wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
-          return resolvedPromise<T>(context->GetIsolate(), kj::mv(value));
+          return js.resolvedPromise(kj::mv(value));
         } else {
           // Wrong type.
           return kj::none;

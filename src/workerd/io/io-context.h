@@ -1063,7 +1063,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
           // trace as long as we construct the Error inside of a promise continuation, so we use
           // a `.then()` below that acutally extracts the kj::Exception and turn it into a JS
           // Error.
-          resolver.resolve(kj::mv(e));
+          resolver.resolve(js, kj::mv(e));
         } else {
           try {
             js.tryCatch([&]() {
@@ -1285,7 +1285,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
     return run([value = kj::mv(value),resolver = kj::mv(resolver),
                 maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::Scope scope(lock, maybeAsyncContext);
-      resolver.resolve(kj::mv(value));
+      resolver.resolve(lock, kj::mv(value));
     }, kj::mv(inputLock));
   }, [cs = kj::mv(cs2)]
      (kj::Exception&& e) mutable {
