@@ -2179,7 +2179,7 @@ private:
   void newAnalyticsEngineRequest() override {}
   kj::Promise<void> limitDrain() override { return kj::NEVER_DONE; }
   kj::Promise<void> limitScheduled() override { return kj::NEVER_DONE; }
-  kj::Duration getAlarmLimit() override { return 0 * kj::MILLISECONDS; }
+  kj::Duration getAlarmLimit() override { return 15 * kj::MINUTES; }
   size_t getBufferingLimit() override { return kj::maxValue; }
   kj::Maybe<EventOutcome> getLimitsExceeded() override { return kj::none; }
   kj::Promise<void> onLimitsExceeded() override { return kj::NEVER_DONE; }
