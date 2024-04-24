@@ -310,7 +310,7 @@ private:
       auto p = reinterpret_cast<ActorCache*>(pointer);
       KJ_IF_SOME(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
         d.status = DeferredAlarmDelete::Status::READY;
-        p->ensureFlushScheduled(WriteOptions { .noCache = d.noCache });
+        p->ensureFlushScheduled(WriteOptions { .noCache = d.noCache }, "alarm disposer"_kjc);
       }
     }
   };
@@ -702,7 +702,7 @@ private:
   kj::Promise<kj::Maybe<Value>> getImpl(kj::Own<Entry> entry, ReadOptions options);
 
   // Ensure that we will flush dirty entries soon.
-  void ensureFlushScheduled(const WriteOptions& options);
+  void ensureFlushScheduled(const WriteOptions& options, kj::LiteralStringConst operationInfo);
 
   // Schedule a read RPC. The given function will be invoked and provided with an
   // ActorStorage::Operations::Client on which the read operation should be performed. The function

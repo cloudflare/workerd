@@ -225,7 +225,8 @@ public:
     // Optionally make a promise which should be exclusiveJoin()ed with the lock promise to
     // implement a timeout. The returned promise should be something that throws an exception
     // after some timeout has expired.
-    virtual kj::Promise<void> makeTimeoutPromise() { return kj::NEVER_DONE; }
+    // The passed operationInfo will be logged separately to provide extra information.
+    virtual kj::Promise<void> makeTimeoutPromise(kj::LiteralStringConst operationInfo) { return kj::NEVER_DONE; }
 
     // Optionally track metrics. In practice these are implemented by MetricsCollector::Actor, but
     // we don't want to depend on that class from here.
@@ -245,7 +246,7 @@ public:
   // If `promise` rejects, the exception will propagate to all future `wait()`s. If the returned
   // promise is canceled before completion, all future `wait()`s will also throw.
   template <typename T>
-  kj::Promise<T> lockWhile(kj::Promise<T> promise);
+  kj::Promise<T> lockWhile(kj::Promise<T> promise, kj::LiteralStringConst operationInfo);
 
   // Wait until all preceding locks are released. The wait will not be affected by any future
   // call to `lockWhile()`.
@@ -277,13 +278,13 @@ private:
 // inline implementation details
 
 template <typename T>
-kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise) {
+kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise, kj::LiteralStringConst operationInfo) {
   auto fulfiller = lock();
 
   if constexpr (std::is_void_v<T>) {
-    promise = promise.exclusiveJoin(hooks.makeTimeoutPromise());
+    promise = promise.exclusiveJoin(hooks.makeTimeoutPromise(operationInfo));
   } else {
-    promise = promise.exclusiveJoin(hooks.makeTimeoutPromise()
+    promise = promise.exclusiveJoin(hooks.makeTimeoutPromise(operationInfo)
         .then([]() -> T { KJ_UNREACHABLE; }));
   }
 

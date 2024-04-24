@@ -215,7 +215,7 @@ void ActorCache::requireNotTerminal() {
       // we don't let the worker return stale state. This isn't strictly necessary but it does
       // mirror previous behavior wherein we would use disabled storage via `flushImpl()` and break
       // the output gate.
-      ensureFlushScheduled({});
+      ensureFlushScheduled({}, "requireNotTerminal intentionally breaking output gate"_kjc);
     }
 
     kj::throwFatalException(kj::cp(e));
@@ -249,7 +249,7 @@ void ActorCache::evictOrOomIfNeeded(Lock& lock) {
       // that returns a promise which we'd then have to put somewhere so that we don't immediately
       // cancel it. Instead, we can ensure that a flush has been scheduled. `flushImpl()`, when
       // called, will throw an exception which breaks the gate.
-      ensureFlushScheduled(WriteOptions());
+      ensureFlushScheduled(WriteOptions(), "evictOrOomIfNeeded intentionally breaking output gate"_kjc);
     }
 
     kj::throwFatalException(kj::mv(exception));
@@ -1853,7 +1853,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(kj::Maybe<kj::Date> newAlarmTi
     options.noCache
   };
 
-  ensureFlushScheduled(options);
+  ensureFlushScheduled(options, "setAlarm flush"_kjc);
 
   return getBackpressure();
 }
@@ -1990,7 +1990,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
         .deletedDirty = kj::mv(deletedDirty),
         .countFulfiller = kj::mv(paf.fulfiller)
       };
-      ensureFlushScheduled(options);
+      ensureFlushScheduled(options, "deleteAll flush"_kjc);
     } else {
       // A previous deleteAll() was scheduled and hasn't been committed yet. This means that we
       // can actually coalesce the two, and there's no need to commit any writes that happened
@@ -2108,10 +2108,10 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     addToDirtyList(*slot);
   }
 
-  ensureFlushScheduled(options);
+  ensureFlushScheduled(options, "putImpl flush"_kjc);
 }
 
-void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
+void ActorCache::ensureFlushScheduled(const WriteOptions& options, kj::LiteralStringConst operationInfo) {
   if (lru.options.neverFlush) {
     // Skip all flushes. Used for preview sessions where data is strictly kept in memory.
 
@@ -2156,11 +2156,11 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
     if (options.allowUnconfirmed) {
       // Don't apply output gate. But, if an exception is thrown, we still want to break the gate,
       // so arrange for that.
-      flushPromise = flushPromise.catch_([this](kj::Exception&& e) {
-        return gate.lockWhile(kj::Promise<void>(kj::mv(e)));
+      flushPromise = flushPromise.catch_([this, opInfo = kj::mv(operationInfo)](kj::Exception&& e) {
+        return gate.lockWhile(kj::Promise<void>(kj::mv(e)), kj::mv(opInfo));
       });
     } else {
-      flushPromise = gate.lockWhile(kj::mv(flushPromise));
+      flushPromise = gate.lockWhile(kj::mv(flushPromise), kj::mv(operationInfo));
       flushScheduledWithOutputGate = true;
     }
 
@@ -2168,7 +2168,7 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
   } else if (!flushScheduledWithOutputGate && !options.allowUnconfirmed) {
     // The flush has already been scheduled without the output gate, but we want to upgrade it to
     // use the output gate now.
-    lastFlush = gate.lockWhile(lastFlush.addBranch()).fork();
+    lastFlush = gate.lockWhile(lastFlush.addBranch(), kj::mv(operationInfo)).fork();
     flushScheduledWithOutputGate = true;
   }
 }

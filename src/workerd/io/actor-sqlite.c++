@@ -107,7 +107,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     // We committed the root transaction, so it's time to signal any replication layer and lock
     // the output gate in the meantime.
     actorSqlite.commitTasks.add(
-        actorSqlite.outputGate.lockWhile(actorSqlite.commitCallback()));
+        actorSqlite.outputGate.lockWhile(actorSqlite.commitCallback(), "explicit txn commit"_kjc));
   }
 
   // No backpressure for SQLite.
@@ -158,7 +158,7 @@ void ActorSqlite::onWrite() {
       { auto drop = kj::mv(txn); }
 
       return commitCallback();
-    })));
+    }), "committing write"_kjc));
   }
 }
 

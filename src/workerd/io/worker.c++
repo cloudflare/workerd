@@ -2951,12 +2951,13 @@ struct Worker::Actor::Impl {
     void inputGateWaiterRemoved() override { metrics.inputGateWaiterRemoved(); }
     // Implements InputGate::Hooks.
 
-    kj::Promise<void> makeTimeoutPromise() override {
+    kj::Promise<void> makeTimeoutPromise(kj::LiteralStringConst operationInfo) override {
       // This really only protects against total hangs. Lowering the timeout drastically is risky,
       // since low timeouts can spuriously fire when under heavy CPU load, failing requests that
       // would otherwise succeed.
       auto timeout = 30 * kj::SECONDS;
       co_await timerChannel.afterLimitTimeout(timeout);
+      KJ_LOG(ERROR, "Durable Object storage operation exceeded timeout", operationInfo);
       kj::throwFatalException(KJ_EXCEPTION(FAILED,
             "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
             "timeout which caused object to be reset."));
