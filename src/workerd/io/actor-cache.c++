@@ -2155,10 +2155,17 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
 
   if (!flushScheduled) {
     flushScheduled = true;
-    auto flushPromise = lastFlush.addBranch().attach(kj::defer([this]() {
-      flushScheduled = false;
-      flushScheduledWithOutputGate = false;
-    })).then([this]() {
+    auto flushPromise = lastFlush.addBranch().attach(
+      util::DurationExceededLogger(
+        clock,
+        5 * kj::SECONDS,
+        kj::str("waiting on previous flushes took longer than expected", flushesEnqueued)
+      ),
+      kj::defer([this]() {
+        flushScheduled = false;
+        flushScheduledWithOutputGate = false;
+      }))
+    .then([this]() {
       ++flushesEnqueued;
       return kj::evalNow([this](){
         // `flushImpl()` can throw, so we need to wrap it in `evalNow()` to observe all pathways.
@@ -2492,6 +2499,11 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
 }
 
 kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
+  auto durationAlert = util::DurationExceededLogger(
+    clock,
+    5 * kj::SECONDS,
+    "flushImpl took longer than expected"
+  );
   KJ_IF_SOME(e, maybeTerminalException) {
     // If we have a terminal exception, throw here to break the output gate and prevent any calls
     // to storage. This does not use `requireNotTerminal()` so that we don't recursively schedule
