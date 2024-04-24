@@ -1476,13 +1476,13 @@ class Constructor;
 // never resolve). This is a convenience so that method implementations that return promises do
 // not need to carefully capture a reference to `JSG_THIS`.
 //
-// You can construct an immediate Promise value using jsg::resolvedPromise() and
-// jsg::rejectedPromise() (see below).
+// You can construct an immediate Promise value using js.resolvedPromise() and
+// js.rejectedPromise() (see below).
 //
 // You can also create a promise/resolver pair:
 //
 //     auto [promise, resolver] = js.newPromiseAndResolver<kj::String>();
-//     resolver.resolve(kj::str(foo));
+//     resolver.resolve(js, kj::str(foo));
 //
 // The Promise exposes a markAsHandled() API that will mark JavaScript Promise such that rejections
 // are not reported to the isolate's unhandled rejection tracking mechanisms. Importantly, any then
@@ -1557,6 +1557,8 @@ using ReturnType = typename ReturnType_<Func, T, passLock>::Type;
 // Convenience template to produce a promise for the result of calling a function with the given
 // parameter type. This wraps the function's result type in `jsg::Promise` UNLESS the function
 // already returns a `jsg::Promise`, in which case the type is unchanged.
+// TODO(cleanup): The passLock = false variation is currently only used for js.evalNow().
+// It would be nice to refactor that a bit so we can clean up this template and simplify.
 template <typename Func, typename Param, bool passLock>
 using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>>>;
 
