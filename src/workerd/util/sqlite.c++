@@ -447,7 +447,10 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
   }
 }
 
-kj::StringPtr SqliteDatabase::ingestSql(Regulator& regulator, kj::StringPtr sqlCode) {
+SqliteDatabase::IngestResult SqliteDatabase::ingestSql(Regulator& regulator, kj::StringPtr sqlCode) {
+  uint64_t rowsRead = 0;
+  uint64_t rowsWritten = 0;
+
   // While there's still some input SQL to process
   while (sqlCode.begin() != sqlCode.end()) {
     // And there are still valid statements:
@@ -457,13 +460,15 @@ kj::StringPtr SqliteDatabase::ingestSql(Regulator& regulator, kj::StringPtr sqlC
     // Slice off the next valid statement SQL
     auto nextStatement = kj::str(sqlCode.slice(0, statementLength));
     // Create a Query object, which will prepare & execute it
-    Query(*this, regulator, nextStatement);
+    auto q = Query(*this, regulator, nextStatement);
 
+    rowsRead += q.getRowsRead();
+    rowsWritten += q.getRowsWritten();
     sqlCode = sqlCode.slice(statementLength);
   }
 
   // Return the leftover buffer
-  return sqlCode;
+  return {.remainder = sqlCode, .rowsRead = rowsRead, .rowsWritten = rowsWritten};
 }
 
 void SqliteDatabase::executeWithRegulator(Regulator& regulator, kj::FunctionParam<void()> func) {

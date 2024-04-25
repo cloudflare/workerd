@@ -62,23 +62,23 @@ async function test(storage) {
 
 
   // Test partial query ingestion
-  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;    `), '    ')
-  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;`), '')
-  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456`), ' SELECT 456')
-  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 45`), ' SELECT 45')
-  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 4`), ' SELECT 4')
-  assert.deepEqual(sql.ingest(`SELECT 123; SELECT `), ' SELECT ')
-  assert.deepEqual(sql.ingest(`SELECT 123; SELECT`), ' SELECT')
-  assert.deepEqual(sql.ingest(`SELECT 123; SELEC`), ' SELEC')
-  assert.deepEqual(sql.ingest(`SELECT 123; SELE`), ' SELE')
-  assert.deepEqual(sql.ingest(`SELECT 123; SEL`), ' SEL')
-  assert.deepEqual(sql.ingest(`SELECT 123; SE`), ' SE')
-  assert.deepEqual(sql.ingest(`SELECT 123; S`), ' S')
-  assert.deepEqual(sql.ingest(`SELECT 123; `), ' ')
-  assert.deepEqual(sql.ingest(`SELECT 123;`), '')
-  assert.deepEqual(sql.ingest(`SELECT 123`), 'SELECT 123')
-  assert.deepEqual(sql.ingest(`SELECT 12`), 'SELECT 12')
-  assert.deepEqual(sql.ingest(`SELECT 1`), 'SELECT 1')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;    `).remainder, '    ')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;`).remainder, '')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456`).remainder, ' SELECT 456')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 45`).remainder, ' SELECT 45')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT 4`).remainder, ' SELECT 4')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT `).remainder, ' SELECT ')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELECT`).remainder, ' SELECT')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELEC`).remainder, ' SELEC')
+  assert.deepEqual(sql.ingest(`SELECT 123; SELE`).remainder, ' SELE')
+  assert.deepEqual(sql.ingest(`SELECT 123; SEL`).remainder, ' SEL')
+  assert.deepEqual(sql.ingest(`SELECT 123; SE`).remainder, ' SE')
+  assert.deepEqual(sql.ingest(`SELECT 123; S`).remainder, ' S')
+  assert.deepEqual(sql.ingest(`SELECT 123; `).remainder, ' ')
+  assert.deepEqual(sql.ingest(`SELECT 123;`).remainder, '')
+  assert.deepEqual(sql.ingest(`SELECT 123`).remainder, 'SELECT 123')
+  assert.deepEqual(sql.ingest(`SELECT 12`).remainder, 'SELECT 12')
+  assert.deepEqual(sql.ingest(`SELECT 1`).remainder, 'SELECT 1')
 
   // Exec throws with trailing comments
   assert.throws(
@@ -87,7 +87,7 @@ async function test(storage) {
   )
   // Ingest does not
   assert.deepEqual(
-    sql.ingest(`SELECT 123; SELECT 456; -- trailing comment`),
+    sql.ingest(`SELECT 123; SELECT 456; -- trailing comment`).remainder,
     ' -- trailing comment'
   )
 
@@ -105,8 +105,10 @@ async function test(storage) {
     const inputBytes = new TextEncoder().encode(INSERT_36_ROWS)
     const decoder = new TextDecoder()
 
+
     // Use a chunk size 1, 3, 9, 27, 81, ... bytes
     for (let length = 1; length < inputBytes.length; length = length * 3) {
+      let totalRowsWritten = 0;
       let buffer = ''
       for (let offset = 0; offset < inputBytes.length; offset += length) {
         // Simulate a single "chunk" arriving
@@ -116,7 +118,9 @@ async function test(storage) {
         buffer += decoder.decode(chunk, { stream: true })
 
         // Ingest any complete statements and snip those chars off the buffer
-        buffer = sql.ingest(buffer)
+        let result = sql.ingest(buffer);
+        buffer = result.remainder;
+        totalRowsWritten += result.rowsWritten;
 
         // Simulate awaiting next chunk
         await scheduler.wait(1)
@@ -139,6 +143,10 @@ async function test(storage) {
           { val: 'f: 🔥😎🔥' },
         ]
       )
+
+      // Verify that all 36 rows we inserted were accounted for.
+      assert.equal(totalRowsWritten, 36);
+
       sql.exec(`DELETE FROM streaming`)
       await scheduler.wait(1)
     }
@@ -1030,9 +1038,10 @@ async function testStreamingIngestion(request, storage) {
       buffer += chunk
 
       // Ingest any complete statements and snip those chars off the buffer
-      buffer = sql.ingest(buffer)
+      buffer = sql.ingest(buffer).remainder
     }
   })
+
   // Verify exactly 36 rows were added
   assert.deepEqual(Array.from(sql.exec(`SELECT count(*) FROM streaming`)), [
     { 'count(*)': 36 },

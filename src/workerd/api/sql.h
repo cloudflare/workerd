@@ -22,9 +22,10 @@ public:
 
   class Cursor;
   class Statement;
+  class IngestResult;
 
   jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
-  kj::String ingest(jsg::Lock& js, kj::String query);
+  jsg::Ref<IngestResult> ingest(jsg::Lock& js, kj::String query);
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
@@ -249,10 +250,35 @@ private:
   friend class Cursor;
 };
 
+
+
+class SqlStorage::IngestResult final : public jsg::Object {
+public:
+
+  IngestResult(kj::String remainder, uint64_t rowsRead, uint64_t rowsWritten);
+
+  JSG_RESOURCE_TYPE(IngestResult) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(rowsRead, getRowsRead);
+    JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
+    JSG_READONLY_PROTOTYPE_PROPERTY(remainder, getRemainder);
+  }
+
+  kj::StringPtr getRemainder();
+  double getRowsRead();
+  double getRowsWritten();
+
+private:
+  kj::String remainder;
+  uint64_t rowsRead;
+  uint64_t rowsWritten;
+};
+
+
 #define EW_SQL_ISOLATE_TYPES                    \
   api::SqlStorage,                              \
   api::SqlStorage::Statement,                   \
   api::SqlStorage::Cursor,                      \
+  api::SqlStorage::IngestResult,                \
   api::SqlStorage::Cursor::RowIterator,         \
   api::SqlStorage::Cursor::RowIterator::Next,   \
   api::SqlStorage::Cursor::RawIterator,         \

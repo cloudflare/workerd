@@ -36,6 +36,12 @@ public:
   class Regulator;
   struct VfsOptions;
 
+  struct IngestResult {
+    kj::StringPtr remainder;
+    uint64_t rowsRead;
+    uint64_t rowsWritten;
+  };
+
   SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::Maybe<kj::WriteMode> maybeMode = kj::none);
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
@@ -92,7 +98,7 @@ public:
   // Helper to execute a chunk of SQL that may not be complete.
   // Executes every valid statement provided, and returns the remaining portion of the input
   // that was not processed. This is used for streaming SQL ingestion.
-  kj::StringPtr ingestSql(Regulator& regulator, kj::StringPtr sqlCode);
+  IngestResult ingestSql(Regulator& regulator, kj::StringPtr sqlCode);
 
   // Execute a function with the given regulator.
   void executeWithRegulator(Regulator& regulator, kj::FunctionParam<void()> func);
