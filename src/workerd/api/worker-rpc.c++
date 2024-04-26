@@ -467,6 +467,12 @@ JsRpcPromiseAndPipleine callImpl(
 
       auto& ioContext = IoContext::current();
 
+      KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
+        // Replace the client with a promise client that will delay thecall until the output gate
+        // is open.
+        client = lock.then([client = kj::mv(client)]() mutable { return kj::mv(client); });
+      }
+
       auto builder = client.callRequest();
 
       // This code here is slightly overcomplicated in order to avoid pushing anything to the
@@ -1052,7 +1058,13 @@ public:
           js.throwException(kj::mv(error));
         })));
 
-        return result;
+        if (ctx.hasOutputGate()) {
+          return result.then([this]() {
+            return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
+          });
+        } else {
+          return result;
+        }
       };
 
       switch (op.which()) {
