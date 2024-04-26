@@ -791,10 +791,6 @@ private:
 // The WritableStreamJsController provides the implementation of custom
 // WritableStream's backed by a user-code provided Underlying Sink. The implementation
 // is fairly complicated and defined entirely by the streams specification.
-//
-// Importantly, the controller is designed to operate entirely within the JavaScript
-// isolate lock. It is possible to call removeSink() to acquire a WritableStreamSink
-// implementation that delegates to the WritableStreamDefaultController.
 class WritableStreamJsController: public WritableStreamController {
 public:
   using WritableLockImpl = WritableLockImpl<WritableStreamJsController>;
@@ -847,6 +843,7 @@ public:
   void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
 
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
+  void detach(jsg::Lock& js) override;
 
   void setOwnerRef(WritableStream& stream) override;
 
@@ -3461,6 +3458,9 @@ void WritableStreamJsController::releaseWriter(
 
 kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamJsController::removeSink(jsg::Lock& js) {
   KJ_UNIMPLEMENTED("WritableStreamJsController::removeSink is not implemented");
+}
+void WritableStreamJsController::detach(jsg::Lock& js) {
+  KJ_UNIMPLEMENTED("WritableStreamJsController::detach is not implemented");
 }
 
 void WritableStreamJsController::setOwnerRef(WritableStream& stream) {

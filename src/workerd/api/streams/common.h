@@ -572,10 +572,6 @@ kj::Own<ReadableStreamController> newReadableStreamInternalController(
 //
 // As such, it exists within the V8 heap  (it's allocated directly as a member of the
 // WritableStream) and will always execute within the V8 isolate lock.
-// Both the WritableStreamDefaultController and WritableStreamInternalController will support
-// the removeSink() method that can be used to acquire a kj heap object that can be used to
-// write data from outside of the isolate lock, however, when using the
-// WritableStreamDefaultController, each write operation will require acquiring the isolate lock.
 //
 // The methods here return jsg::Promise rather than kj::Promise because the controller
 // operations here do not always require passing through the kj mechanisms or kj event loop.
@@ -689,7 +685,12 @@ public:
   // does not support removing the sink. After the WritableStreamSink has been released, all other
   // methods on the controller should fail with an exception as the WritableStreamSink should be
   // the only way to interact with the underlying sink.
-  virtual kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) = 0;
+  virtual kj::Maybe<kj::Own<WritableStreamSink>> removeSink(
+      jsg::Lock& js) = 0 ;
+
+  // Detaches the WritableStreamController from it's underlying implementation, leaving the
+  // writable stream locked and in a state where no further writes can be made.
+  virtual void detach(jsg::Lock& js) = 0;
 
   virtual kj::Maybe<int> getDesiredSize() = 0;
 

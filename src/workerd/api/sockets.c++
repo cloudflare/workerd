@@ -318,7 +318,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   auto secureStreamPromise = context.awaitJs(js, writable->flush(js).then(js,
       [this, domain = kj::heapString(domain), tlsOptions = kj::mv(tlsOptions),
       tlsStarter = kj::mv(tlsStarter)](jsg::Lock& js) mutable {
-    writable->removeSink(js);
+    writable->detach(js);
     readable = readable->detach(js, true);
     closedResolver.resolve(js);
 
