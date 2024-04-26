@@ -412,24 +412,33 @@ export let basicServiceBinding = {
     assert.strictEqual(await env.self.oneArg(3), 36);
     assert.strictEqual(await env.self.oneArgOmitCtx(3), 37);
     assert.strictEqual(await env.self.oneArgOmitEnvCtx(3), 6);
-    assert.rejects(() => env.self.twoArgs(123, 2),
+    await assert.rejects(() => env.self.twoArgs(123, 2), {
+      name: "TypeError",
+      message:
         "Cannot call handler function \"twoArgs\" over RPC because it has the wrong " +
         "number of arguments. A simple function handler can only be called over RPC if it has " +
         "exactly the arguments (arg, env, ctx), where only the first argument comes from the " +
         "client. To support multi-argument RPC functions, use class-based syntax (extending " +
-        "WorkerEntrypoint) instead.");
-    assert.rejects(() => env.self.noArgs(),
+        "WorkerEntrypoint) instead."
+    });
+    await assert.rejects(() => env.self.noArgs(), {
+      name: "TypeError",
+      message:
         "Attempted to call RPC function \"noArgs\" with the wrong number of arguments. " +
         "When calling a top-level handler function that is not declared as part of a class, you " +
         "must always send exactly one argument. In order to support variable numbers of " +
         "arguments, the server must use class-based syntax (extending WorkerEntrypoint) " +
-        "instead.");
-    assert.rejects(() => env.self.oneArg(1, 2),
+        "instead."
+    });
+    await assert.rejects(() => env.self.oneArg(1, 2), {
+      name: "TypeError",
+      message:
         "Attempted to call RPC function \"oneArg\" with the wrong number of arguments. " +
         "When calling a top-level handler function that is not declared as part of a class, you " +
         "must always send exactly one argument. In order to support variable numbers of " +
         "arguments, the server must use class-based syntax (extending WorkerEntrypoint) " +
-        "instead.");
+        "instead."
+    });
 
     // If we restore multi-arg support, remove the `rejects` checks above and un-comment these:
     // assert.strictEqual(await env.self.noArgs(), 13);

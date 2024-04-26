@@ -467,6 +467,12 @@ JsRpcPromiseAndPipleine callImpl(
 
       auto& ioContext = IoContext::current();
 
+      KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
+        // Replace the client with a promise client that will delay thecall until the output gate
+        // is open.
+        client = lock.then([client = kj::mv(client)]() mutable { return kj::mv(client); });
+      }
+
       auto builder = client.callRequest();
 
       // This code here is slightly overcomplicated in order to avoid pushing anything to the
@@ -939,9 +945,9 @@ public:
     // object's lifetime is that of the RPC call, but in reality they are refcounted under the
     // hood. Since well be executing the call in the JS microtask queue, we have no ability to
     // actually cancel execution if a cancellation arrives over RPC, and at the end of that
-    // execution we're going to accell the call context to write the results. We could invent some
+    // execution we're going to access the call context to write the results. We could invent some
     // complicated way to skip initializing results in the case the call has been canceled, but
-    // it's easier and safer to just grap a refcount on the call context object itself, which
+    // it's easier and safer to just grab a refcount on the call context object itself, which
     // fully protects us. So... do that.
     auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
 
@@ -1052,7 +1058,13 @@ public:
           js.throwException(kj::mv(error));
         })));
 
-        return result;
+        if (ctx.hasOutputGate()) {
+          return result.then([this]() {
+            return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
+          });
+        } else {
+          return result;
+        }
       };
 
       switch (op.which()) {
