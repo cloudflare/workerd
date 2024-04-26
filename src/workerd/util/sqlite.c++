@@ -297,6 +297,7 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
   { "foreign_keys"_kj, PragmaSignature::BOOLEAN },
   { "defer_foreign_keys"_kj, PragmaSignature::BOOLEAN },
   { "ignore_check_constraints"_kj, PragmaSignature::BOOLEAN },
+  { "legacy_alter_table"_kj, PragmaSignature::BOOLEAN },
   { "recursive_triggers"_kj, PragmaSignature::BOOLEAN },
   { "reverse_unordered_selects"_kj, PragmaSignature::BOOLEAN },
 
