@@ -94,6 +94,9 @@ public:
   // that was not processed. This is used for streaming SQL ingestion.
   kj::StringPtr ingestSql(Regulator& regulator, kj::StringPtr sqlCode);
 
+  // Execute a function with the given regulator.
+  void executeWithRegulator(Regulator& regulator, kj::FunctionParam<void()> func);
+
 private:
   sqlite3* db;
 

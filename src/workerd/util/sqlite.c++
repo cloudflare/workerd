@@ -465,6 +465,17 @@ kj::StringPtr SqliteDatabase::ingestSql(Regulator& regulator, kj::StringPtr sqlC
   return sqlCode;
 }
 
+void SqliteDatabase::executeWithRegulator(Regulator& regulator, kj::FunctionParam<void()> func) {
+  // currentRegulator would only be set if we're running this method while running something else
+  // with a regulator.  I'm not sure what the ramifications are, so for now, we'll just assume that
+  // we can only call executeWithRegulator when no regulator is currently set.
+  KJ_REQUIRE(currentRegulator == kj::none);
+
+  currentRegulator = regulator;
+  KJ_DEFER(currentRegulator = kj::none);
+  func();
+}
+
 bool SqliteDatabase::isAuthorized(int actionCode,
     kj::Maybe<kj::StringPtr> param1, kj::Maybe<kj::StringPtr> param2,
     kj::Maybe<kj::StringPtr> dbName, kj::Maybe<kj::StringPtr> triggerName) {
