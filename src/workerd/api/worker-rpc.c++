@@ -939,9 +939,9 @@ public:
     // object's lifetime is that of the RPC call, but in reality they are refcounted under the
     // hood. Since well be executing the call in the JS microtask queue, we have no ability to
     // actually cancel execution if a cancellation arrives over RPC, and at the end of that
-    // execution we're going to accell the call context to write the results. We could invent some
+    // execution we're going to access the call context to write the results. We could invent some
     // complicated way to skip initializing results in the case the call has been canceled, but
-    // it's easier and safer to just grap a refcount on the call context object itself, which
+    // it's easier and safer to just grab a refcount on the call context object itself, which
     // fully protects us. So... do that.
     auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
 
