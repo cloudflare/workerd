@@ -1063,11 +1063,10 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
 
   auto& ioContext = IoContext::current();
 
-  // lol-html writes to a pipe, the other end of which is our transformed response body.
-  auto ts = IdentityTransformStream::constructor(js);
-  response = Response::constructor(js, kj::Maybe(ts->getReadable()), kj::mv(response));
-
-  auto outputSink = ts->getWritable()->removeSink(js);
+  auto pipe = newIdentityPipe();
+  response = Response::constructor(js,
+      kj::Maybe(jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in))),
+      kj::mv(response));
 
   kj::String ownContentType;
   kj::String encoding = kj::str("utf-8");
@@ -1081,7 +1080,7 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
     }
   }
 
-  auto rewriter = kj::heap<Rewriter>(js, impl->unregisteredHandlers, encoding, kj::mv(outputSink));
+  auto rewriter = kj::heap<Rewriter>(js, impl->unregisteredHandlers, encoding, kj::mv(pipe.out));
 
   // NOTE: Avoid throwing any exceptions after initiating the pump below. This makes
   //   the input response object disturbed (response.bodyUsed === true), which should only happen
