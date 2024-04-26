@@ -369,6 +369,181 @@ private:
   }
 };
 
+// In order to support JavaScript-backed WritableStreams that do not have a backing
+// WritableStreamSink, we need an alternative version of the WritableStreamRpcAdapter
+// that will arrange to acquire the isolate lock when necessary to perform writes
+// directly on the WritableStreamController. Note that this approach is necessarily
+// a lot slower
+class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
+public:
+  WritableStreamJsRpcAdapter(IoContext& context, jsg::Ref<WritableStreamDefaultWriter> writer)
+      : context(context), writer(kj::mv(writer)) {}
+
+  ~WritableStreamJsRpcAdapter() noexcept(false) {
+    weakRef->invalidate();
+    doneFulfiller->fulfill();
+
+    // If the stream was not explicitly ended and the writer still exists at this point,
+    // then we should trigger calling the abort algorithm on the stream. Sadly, there's a
+    // bit of an incompetibility with kj::AsyncOutputStream and the standard definition of
+    // WritableStream in that AsyncOutputStream has no specific way to explicitly signal that
+    // the stream is being aborted due to a particular reason.
+    //
+    // On the remote side, because it is using a WritableStreamSink implementation, when that
+    // side is aborted, all it does is record the reason and drop the stream. It does not
+    // propagate the reason back to this side. So, we have to do the best we can here. Our
+    // assumption is that once the stream is dropped, if it has not been explicitly ended and
+    // the writer still exists, then the writer should be aborted. This is not perfect because
+    // we cannot propgate the actual reason why it was aborted.
+    //
+    // Note also that there is no guarantee that the abort will actually run if the context
+    // is being torn down. Some WritableStream implementations might use the abort algorithm
+    // to clean things up or perform logging in the case of an error. Care needs to be taken
+    // in this situation or the user code might end up with bugs. Need to see if there's a
+    // better solution.
+    //
+    // TODO(someday): If the remote end can be updated to propagate the abort, then we can
+    // hopefully improve the situation here.
+    if (!ended) {
+      KJ_IF_SOME(writer, this->writer) {
+        context.addTask(context.run(
+            [writer=kj::mv(writer), exception=cancellationException()]
+            (Worker::Lock& lock) mutable {
+          jsg::Lock& js = lock;
+          auto ex = js.exceptionToJs(kj::mv(exception));
+          return IoContext::current().awaitJs(lock,
+              writer->abort(lock, ex.getHandle(js)));
+        }));
+      }
+    }
+  }
+
+  // Returns a promise that resolves when the stream is dropped. If the promise is canceled before
+  // that, the stream is revoked.
+  kj::Promise<void> waitForCompletionOrRevoke() {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    doneFulfiller = kj::mv(paf.fulfiller);
+
+    return paf.promise.attach(kj::defer([weakRef = weakRef->addRef()]() mutable {
+      KJ_IF_SOME(obj, weakRef->tryGet()) {
+        // Stream is still alive, revoke it.
+        if (!obj.canceler.isEmpty()) {
+          obj.canceler.cancel(cancellationException());
+        }
+        auto w = kj::mv(obj.writer);
+        KJ_IF_SOME(writer, w) {
+          obj.context.addTask(obj.context.run(
+              [writer=kj::mv(writer), exception=cancellationException()]
+              (Worker::Lock& lock) mutable {
+            jsg::Lock& js = lock;
+            auto ex = js.exceptionToJs(kj::mv(exception));
+            return IoContext::current().awaitJs(lock,
+                writer->abort(lock, ex.getHandle(js)));
+          }));
+        }
+      }
+    }));
+  }
+
+  kj::Promise<void> write(const void* buffer, size_t size) override {
+    if (writer == kj::none) {
+      return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
+    }
+    if (size == 0) return kj::READY_NOW;
+    kj::ArrayPtr<const kj::byte> ptr(reinterpret_cast<const kj::byte*>(buffer), size);
+    return canceler.wrap(context.run([this, ptr](Worker::Lock& lock) mutable {
+      auto& writer = getInner();
+      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, ptr.size()));
+      source.asArrayPtr().copyFrom(ptr);
+      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+    }));
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    if (writer == kj::none) {
+      return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
+    }
+    auto amount = 0;
+    for (auto& piece : pieces) {
+      amount += piece.size();
+    }
+    if (amount == 0) return kj::READY_NOW;
+    return canceler.wrap(context.run([this, amount, pieces](Worker::Lock& lock) mutable {
+      auto& writer = getInner();
+      // Sadly, we have to allocate and copy here. Our received set of buffers are only
+      // guaranteed to live until the returned promise is resolved, but the application code
+      // may hold onto the ArrayBuffer for longer. We need to make sure that the backing store
+      // for the ArrayBuffer remains valid.
+      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, amount));
+      auto ptr = source.asArrayPtr();
+      for (auto& piece : pieces) {
+        KJ_DASSERT(ptr.size() > 0);
+        KJ_DASSERT(piece.size() <= ptr.size());
+        if (piece.size() == 0) continue;
+        ptr.slice(0, piece.size()).copyFrom(piece);
+        ptr = ptr.slice(piece.size());
+      }
+
+      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+    }));
+  }
+
+  // TODO(perf): We can't properly implement tryPumpFrom(), which means that Cap'n Proto will
+  //   be unable to perform path shortening if the underlying stream turns out to be another capnp
+  //   stream. This isn't a huge deal, but might be nice to enable someday. It may require
+  //   significant refactoring of streams.
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    // TODO(soon): We might be able to support this by following the writer.closed promise,
+    // which becomes resolved when the writer is used to close the stream, or rejects when
+    // the stream has errored. However, currently, we don't have an easy way to do this.
+    //
+    // The Writer's getClosed() method returns a jsg::MemoizedIdentity<jsg::Promise<void>>.
+    // jsg::MemoizedIdentity lazily converts the jsg::Promise into a v8::Promise once it
+    // passes through the type wrapper. It does not give us any way to consistently get
+    // at the underlying jsg::Promise<void> or the mapped v8::Promise. We would need to
+    // capture a TypeHandler in here and convert each time to one or the other, then
+    // attach our continuation. It's doable but a bit of a pain.
+    //
+    // For now, let's handle this the same as WritableStreamRpcAdapter and just return a
+    // never done.
+    return kj::NEVER_DONE;
+  }
+
+  kj::Promise<void> end() override {
+    if (writer == kj::none) {
+      return KJ_EXCEPTION(FAILED, "End after stream has been closed.");
+    }
+    ended = true;
+    return canceler.wrap(context.run([this](Worker::Lock& lock) mutable {
+      return context.awaitJs(lock, getInner().close(lock));
+    }));
+  }
+
+private:
+  IoContext& context;
+  kj::Maybe<jsg::Ref<WritableStreamDefaultWriter>> writer;
+  kj::Canceler canceler;
+  kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
+  kj::Own<WeakRef<WritableStreamJsRpcAdapter>> weakRef =
+      kj::refcounted<WeakRef<WritableStreamJsRpcAdapter>>(
+          kj::Badge<WritableStreamJsRpcAdapter>(), *this);
+  bool ended = false;
+
+  WritableStreamDefaultWriter& getInner() {
+    KJ_IF_SOME(inner, writer) {
+      return *inner;
+    }
+    kj::throwFatalException(cancellationException());
+  }
+
+  static kj::Exception cancellationException() {
+    return JSG_KJ_EXCEPTION(DISCONNECTED, Error,
+        "WritableStream received over RPC was disconnected because the remote execution context "
+        "has endeded.");
+  }
+};
+
 }  // namespace
 
 void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -388,24 +563,44 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // TODO(soon): Support JS-backed WritableStreams. Currently this only supports native streams
   //   and IdentityTransformStream, since only they are backed by WritableStreamSink.
 
-  // NOTE: We're counting on `removeSink()`, to check that the stream is not locked and other
-  //   common checks. It's important we don't modify the WritableStream before this call.
-  auto sink = removeSink(js);
-  auto encoding = sink->disownEncodingResponsibility();
-  auto wrapper = kj::heap<WritableStreamRpcAdapter>(kj::mv(sink));
+  KJ_IF_SOME(sink, getController().removeSink(js)) {
+    // NOTE: We're counting on `removeSink()`, to check that the stream is not locked and other
+    //   common checks. It's important we don't modify the WritableStream before this call.
+    auto encoding = sink->disownEncodingResponsibility();
+    auto wrapper = kj::heap<WritableStreamRpcAdapter>(kj::mv(sink));
 
-  // Make sure this stream will be revoked if the IoContext ends.
-  ioctx.addTask(wrapper->waitForCompletionOrRevoke().attach(ioctx.registerPendingEvent()));
+    // Make sure this stream will be revoked if the IoContext ends.
+    ioctx.addTask(wrapper->waitForCompletionOrRevoke().attach(ioctx.registerPendingEvent()));
 
-  auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper));
+    auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper));
 
-  externalHandler->write(
-      [capnpStream = kj::mv(capnpStream), encoding]
-      (rpc::JsValue::External::Builder builder) mutable {
-    auto ws = builder.initWritableStream();
-    ws.setByteStream(kj::mv(capnpStream));
-    ws.setEncoding(encoding);
-  });
+    externalHandler->write(
+        [capnpStream = kj::mv(capnpStream), encoding]
+        (rpc::JsValue::External::Builder builder) mutable {
+      auto ws = builder.initWritableStream();
+      ws.setByteStream(kj::mv(capnpStream));
+      ws.setEncoding(encoding);
+    });
+  } else {
+    // TODO(soon): Support disownEncodingResponsibility with JS-backed streams
+
+    // NOTE: We're counting on `getWriter()` to check that the stream is not locked and other
+    // common checks. It's important we don't modify the WritableStream before this call.
+    auto wrapper = kj::heap<WritableStreamJsRpcAdapter>(ioctx, getWriter(js));
+
+    // Make sure this stream will be revoked if the IoContext ends.
+    ioctx.addTask(wrapper->waitForCompletionOrRevoke().attach(ioctx.registerPendingEvent()));
+
+    auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper));
+
+    externalHandler->write(
+        [capnpStream = kj::mv(capnpStream)]
+        (rpc::JsValue::External::Builder builder) mutable {
+      auto ws = builder.initWritableStream();
+      ws.setByteStream(kj::mv(capnpStream));
+      ws.setEncoding(StreamEncoding::IDENTITY);
+    });
+  }
 }
 
 jsg::Ref<WritableStream> WritableStream::deserialize(

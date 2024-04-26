@@ -293,6 +293,30 @@ export class MyService extends WorkerEntrypoint {
     await writer.close();
   }
 
+  async writeToStreamExpectingError(stream) {
+    // We expect the writes to fail on the remote end. However, that won't happen
+    // right away. Due to backpressure and flow control, write does not wait until
+    // the remote end has received the data. It resolves as soon as there is space
+    // in the buffer to perform another write. Here we'll just keep writing until
+    // we get the expected error.
+    let writer = stream.getWriter();
+    let enc = new TextEncoder();
+    for (;;) {
+      await writer.write(enc.encode("foo, "));
+    }
+  }
+
+  async writeToStreamAbort(stream) {
+    // In this test, aborting the stream should propagate back to the remote
+    // side, causing the stream to be errored and the abort algorithm to be
+    // called with the provided error. Unfortunately the current implementation
+    // does not allow for that. The reason passed to abort is cached locally and
+    // is never communicated to the remote. Instead, the remote side will end up
+    // with a generic disconnect error. Sad face.
+    let writer = stream.getWriter();
+    writer.abort(new Error('boom'));
+  }
+
   async readFromStream(stream) {
     return await new Response(stream).text();
   }
@@ -1017,7 +1041,76 @@ export let streams = {
       await promise;
     }
 
-    // TODO(someday): Test JS-backed WritableStream, when it actually works.
+    {
+      const dec = new TextDecoder();
+      let result = '';
+      const { promise, resolve } = Promise.withResolvers();
+      const writable = new WritableStream({
+        write(chunk) {
+          result += dec.decode(chunk, {stream: true});
+        },
+        close() {
+          result += dec.decode();
+          resolve();
+        },
+      });
+      const p1 = env.MyService.writeToStream(writable);
+      await promise;
+      assert.strictEqual(result, "foo, bar, baz!");
+      await p1;
+    }
+
+    {
+      // In this test, the remote side writes a chunk to the stream below, which throws
+      // an error. Ideally the error would propagate back to the calling side so that the
+      // remote knows the stream failed and can no longer be written to. The call to
+      // writeToStreamExpectingError should throw because the error should be propagated
+      // through the round trip.
+      const dec = new TextDecoder();
+      let result = '';
+      let writeCalled = 0;
+      const writable = new WritableStream({
+        write(chunk) {
+          writeCalled++;
+          throw new Error('boom');
+        },
+      });
+
+      try {
+        await env.MyService.writeToStreamExpectingError(writable);
+        throw new Error('should have thrown');
+      } catch (err) {
+        assert.strictEqual(err.message, 'boom');
+        // The write method should have been called once.
+        assert.strictEqual(writeCalled, 1);
+      }
+    }
+
+    {
+      // In this test, the remote side aborts the writable stream it receives.
+      // The abort should propagate such that the abort algorithm is called and the
+      // writeToStreamAbort call should succeed. The error passed on to abort(reason)
+      // should be the error that was given on the remote side when abort is called,
+      // but we currently do not propagate the abort reason through. What ends up
+      // happening is that the local stream is dropped with a generic cancelation
+      // error.
+      const dec = new TextDecoder();
+      const { promise, resolve } = Promise.withResolvers();
+      const writable = new WritableStream({
+        write(chunk) {},
+        abort(reason) {
+          resolve(reason);
+        }
+      });
+      await env.MyService.writeToStreamAbort(writable);
+      const reason = await promise;
+      // TODO(someday): The reason should be the error that was passed to abort on the
+      // remote side, but we currently do not propagate this. We end up with a generic
+      // disconnection error instead, which certainly not ideal.
+      assert.strictEqual(reason.message,
+          'WritableStream received over RPC was disconnected because the remote execution ' +
+          'context has endeded.');
+    }
 
     // TODO(someday): Is there any way to construct an encoded WritableStream? Only system
     //   streams can be encoded, but there's no API that returns an encoded WritableStream I think.
