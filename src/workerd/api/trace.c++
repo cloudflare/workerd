@@ -568,11 +568,10 @@ jsg::Ref<TraceMetrics> UnsafeTraceMetrics::fromTrace(jsg::Ref<TraceItem> item) {
   return jsg::alloc<TraceMetrics>(item->getCpuTime(), item->getWallTime());
 }
 
-namespace {
-kj::Promise<void> sendTracesToExportedHandler(
+auto TraceCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Maybe<kj::StringPtr> entrypointNamePtr,
-    kj::ArrayPtr<kj::Own<Trace>> traces) {
-  // Mark the request as delivered because we're about to run some JS.
+    kj::TaskSet& waitUntilTasks)
+    -> kj::Promise<Result> {
   incomingRequest->delivered();
 
   auto& context = incomingRequest->getContext();
@@ -586,6 +585,7 @@ kj::Promise<void> sendTracesToExportedHandler(
   // wait around for async resolution. We're relying on `drain()` below to persist `incomingRequest`
   // and its members until this task completes.
   auto entrypointName = entrypointNamePtr.map([](auto s) { return kj::str(s); });
+  auto outcome = EventOutcome::OK;
   try {
     co_await context.run(
         [&context, traces=mapAddRef(traces), entrypointName=kj::mv(entrypointName)]
@@ -596,11 +596,7 @@ kj::Promise<void> sendTracesToExportedHandler(
       lock.getGlobalScope().sendTraces(traces, lock, handler);
     });
   } catch (kj::Exception e) {
-    // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
-    //   event handler throws an exception; we do not consider waitUntil(). But all async work done
-    //   in a trace handler has to be done using waitUntil(). So, this seems wrong. Should we
-    //   change it so any waitUntil() failure counts as an error? For that matter, arguably *all*
-    //   event types should report failure if a waitUntil() throws?
+    // Report the failure for metrics/logging if the initial event handler throws an exception.
     metrics.reportFailure(e);
 
     // Log JS exceptions (from the initial sendTraces() call) to the JS console, if fiddle is
@@ -608,22 +604,12 @@ kj::Promise<void> sendTracesToExportedHandler(
     // exceptions that occur asynchronously while waiting for the context to drain will be
     // logged elsewhere.)
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
-  };
+    outcome = EventOutcome::EXCEPTION;
+  }
 
   co_await incomingRequest->drain();
-}
-}  // namespace
-
-auto TraceCustomEventImpl::run(
-    kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Maybe<kj::StringPtr> entrypointNamePtr,
-    kj::TaskSet& waitUntilTasks)
-    -> kj::Promise<Result> {
-  // Don't bother to wait around for the handler to run, just hand it off to the waitUntil tasks.
-  waitUntilTasks.add(
-      sendTracesToExportedHandler(kj::mv(incomingRequest), entrypointNamePtr, traces));
-
-  return Result {
-    .outcome = EventOutcome::OK,
+  co_return Result {
+    .outcome = outcome,
   };
 }
 
@@ -638,11 +624,18 @@ auto TraceCustomEventImpl::sendRpc(
     traces[i]->copyTo(out[i]);
   }
 
-  waitUntilTasks.add(req.send().ignoreResult());
+  EventOutcome outcome;
+  try {
+    auto resp = co_await req.send();
+    outcome = resp.getResult();
+  } catch (kj::Exception e) {
+    // Log the exception
+    KJ_LOG(ERROR, "Failed to send traces RPC request", e);
+    outcome = EventOutcome::EXCEPTION;
+  }
 
-  // As long as we sent it, we consider the result to be okay.
   co_return Result {
-    .outcome = workerd::EventOutcome::OK,
+    .outcome = outcome,
   };
 }
 

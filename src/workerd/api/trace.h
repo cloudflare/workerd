@@ -588,8 +588,8 @@ public:
 class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
 public:
   TraceCustomEventImpl(
-      uint16_t typeId, kj::TaskSet& waitUntilTasks, kj::Array<kj::Own<Trace>> traces)
-    : typeId(typeId), waitUntilTasks(waitUntilTasks), traces(kj::mv(traces)) {}
+      uint16_t typeId, kj::Array<kj::Own<Trace>> traces)
+    : typeId(typeId), traces(kj::mv(traces)) {}
 
   kj::Promise<Result> run(
       kj::Own<IoContext::IncomingRequest> incomingRequest,
@@ -608,7 +608,6 @@ public:
 
 private:
   uint16_t typeId;
-  kj::TaskSet& waitUntilTasks;
   kj::Array<kj::Own<workerd::Trace>> traces;
 };
 

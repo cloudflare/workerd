@@ -400,9 +400,8 @@ interface EventDispatcher @0xf20697475ec1752d {
   getHttpService @0 () -> (http :HttpService) $Cxx.allowCancellation;
   # Gets the HTTP interface to this worker (to trigger FetchEvents).
 
-  sendTraces @1 (traces :List(Trace)) $Cxx.allowCancellation;
-  # Deliver a trace event to a trace worker. This always completes immediately; the trace handler
-  # runs as a "waitUntil" task.
+  sendTraces @1 (traces :List(Trace)) -> (result :EventOutcome) $Cxx.allowCancellation;
+  # Deliver a trace event to a trace worker.
 
   prewarm @2 (url :Text) $Cxx.allowCancellation;
 
