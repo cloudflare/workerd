@@ -53,9 +53,7 @@ declare namespace Rpc {
     | ReadonlyArray<Serializable>
     | {
         [K in keyof T]: K extends number | string
-          ? T[K] extends Function
-            ? never
-            : Serializable<T[K]>
+          ? Serializable<T[K]>
           : never;
       }
     // Special types
