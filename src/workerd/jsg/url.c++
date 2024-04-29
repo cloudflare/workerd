@@ -2120,8 +2120,11 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
       if (!isAbsolutePathname(pathname)) {
         KJ_IF_SOME(url, maybeBaseUrl) {
           auto basePathname = url.getPathname();
-          auto index = KJ_ASSERT_NONNULL(basePathname.findLast('/'));
-          result.pathname = kj::str(basePathname.slice(0, index + 1), pathname);
+          KJ_IF_SOME(index, basePathname.findLast('/')) {
+            result.pathname = kj::str(basePathname.slice(0, index + 1), pathname);
+          } else {
+            result.pathname = kj::str(basePathname);
+          }
         } else {
           result.pathname = kj::mv(pathname);
         }
