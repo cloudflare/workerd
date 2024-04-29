@@ -144,6 +144,11 @@ git_repository(
     build_file = "//:build/BUILD.dawn",
     commit = "c5169ef5b9982e17a8caddd1218aa0ad5e24a4e3",
     remote = "https://dawn.googlesource.com/dawn.git",
+    patches = [
+        "//:patches/dawn/0001-Add-iomanip.patch",
+        "//:patches/dawn/0002-Add-missing-array-import.patch",
+    ],
+    patch_args = ["-p1"],
     repo_mapping = {
         "@abseil_cpp": "@com_google_absl",
     },
@@ -186,8 +191,15 @@ http_archive(
 #   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    commit = "0764ad493e54a79c7e3e02fc3412ef55b4835b9e",
+    commit = "b3ae305fd5dbc6ad41eed9add26768c29181219f",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
+)
+
+git_repository(
+    name = "fp16",
+    commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
+    build_file_content = "exports_files(glob([\"**\"]))",
+    remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git"
 )
 
 # Bindings for abseil libraries used by V8
@@ -451,15 +463,16 @@ http_archive(
         "//:patches/v8/0010-Enable-V8-shared-linkage.patch",
         "//:patches/v8/0011-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
         "//:patches/v8/0012-Always-enable-continuation-preserved-data-in-the-bui.patch",
-        "//:patches/v8/0013-Attach-continuation-context-to-Promise-thenable-task.patch",
-        "//:patches/v8/0014-increase-visibility-of-virtual-method.patch",
-        "//:patches/v8/0015-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
-        "//:patches/v8/0016-wasm-liftoff-arm64-Fix-LoadTaggedPointer.patch",
+        "//:patches/v8/0013-increase-visibility-of-virtual-method.patch",
+        "//:patches/v8/0014-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
+        "//:patches/v8/0015-Set-torque-generator-path-to-external-v8.-This-allow.patch",
+        "//:patches/v8/0016-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
+        "//:patches/v8/0017-Fixup-RunMicrotask-to-restore-async-context-on-termi.patch",
     ],
-    integrity = "sha256-QphdaJn35eZeo+qoayNFIgm02hX5WHjKf+pr3WXCiEs=",
-    strip_prefix = "v8-12.3.219.10",
+    integrity = "sha256-C6bsXXbKgeCxmG1VNO/LScaPq0HVlmofpVHJ5kswoLg=",
+    strip_prefix = "v8-12.4.254.11",
     type = "tgz",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.3.219.10.tar.gz",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.4.254.11.tar.gz",
 )
 
 git_repository(

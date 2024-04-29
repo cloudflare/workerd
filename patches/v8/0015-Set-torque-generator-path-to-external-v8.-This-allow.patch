@@ -1,0 +1,22 @@
+From 73ad7c7d3b3ff45b835ffba9eb97c6a0ca13deb9 Mon Sep 17 00:00:00 2001
+From: Garrett Gu <garrett@cloudflare.com>
+Date: Wed, 10 Apr 2024 14:31:33 -0500
+Subject: Set torque generator path to external/v8. This allows bazel to find
+ the generated torque outputs even though we are building from a different
+ workspace.
+
+See https://chromium-review.googlesource.com/c/v8/v8/+/5339896
+
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index e55defede9fed3eea9348bd7bd50d98f688a2a7b..faeef2b2ed71b4784050451a61a16febbd7455b8 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -347,7 +347,7 @@ def get_cfg():
+ # split the set of outputs by using OutputGroupInfo, that way we do not need to
+ # run the torque generator twice.
+ def _torque_files_impl(ctx):
+-    v8root = "."
++    v8root = "external/v8"
+ 
+     # Arguments
+     args = []

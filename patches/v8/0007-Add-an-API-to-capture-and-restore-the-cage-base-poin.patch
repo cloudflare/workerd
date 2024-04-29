@@ -1,4 +1,4 @@
-From 45609de67c8486fbda8342799cb36ee1d8d94383 Mon Sep 17 00:00:00 2001
+From 7ffee5a4b6c0cf7b144616a1023a074c71335333 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Tue, 23 May 2023 09:24:11 -0500
 Subject: Add an API to capture and restore the cage base pointers.

@@ -1,4 +1,4 @@
-From 3146e78539903ecedd62d54702e49ae9475c6a7a Mon Sep 17 00:00:00 2001
+From 29224a29f67d26df68fddad0fe8fd8698a629d98 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 2 Mar 2024 09:00:18 -0600
 Subject: Add ValueSerializer::SetTreatFunctionsAsHostObjects().
@@ -28,10 +28,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 0110345fce16e1b2f8baf14737b362998b21c005..613a1679a6514977ed1141cbc2b266158d2fac13 100644
+index dbd42ec0e2bdb37d604bbc4f72e402cf3a153b40..4ce08df6d8cb1c0d1c36b55ab67830f2f01eb4e1 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3569,6 +3569,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3523,6 +3523,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  
@@ -43,10 +43,10 @@ index 0110345fce16e1b2f8baf14737b362998b21c005..613a1679a6514977ed1141cbc2b26615
                                          Local<Value> value) {
    auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index f0b1956253fe603ad6da30a41fb923078ef6bd78..23eff3120d5b20ce4ac1ec8d3700e82a49150308 100644
+index f6b3579da294d86b6ad415471e2f29538ed5a629..d315739d0d604ed0557f51aca44fe0b41afabd38 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
-@@ -304,6 +304,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -328,6 +328,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    treat_array_buffer_views_as_host_objects_ = mode;
  }
  
@@ -57,7 +57,7 @@ index f0b1956253fe603ad6da30a41fb923078ef6bd78..23eff3120d5b20ce4ac1ec8d3700e82a
  void ValueSerializer::WriteTag(SerializationTag tag) {
    uint8_t raw_tag = static_cast<uint8_t>(tag);
    WriteRawBytes(&raw_tag, sizeof(raw_tag));
-@@ -572,8 +576,13 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(Handle<JSReceiver> receiver) {
+@@ -596,8 +600,13 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(Handle<JSReceiver> receiver) {
  
    // Eliminate callable and exotic objects, which should not be serialized.
    InstanceType instance_type = receiver->map()->instance_type();

@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Thu, 18 Apr 2024 13:31:01 -0700
+Subject: Fixup RunMicrotask to restore async context on terminate execution
+
+
+diff --git a/src/execution/microtask-queue.cc b/src/execution/microtask-queue.cc
+index 0dda78af32572981be90e4d86fc789167e97b247..f85be4bcf1641c5d6454c1c90dfd90170027c5a8 100644
+--- a/src/execution/microtask-queue.cc
++++ b/src/execution/microtask-queue.cc
+@@ -188,6 +188,11 @@ int MicrotaskQueue::RunMicrotasks(Isolate* isolate) {
+                      processed_microtask_count);
+   }
+ 
++#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
++  isolate->isolate_data()->set_continuation_preserved_embedder_data(
++      *continuation_preserved_embedder_data);
++#endif  // V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
++
+   if (isolate->is_execution_terminating()) {
+     DCHECK(isolate->has_exception());
+     DCHECK(maybe_result.is_null());
+@@ -201,11 +206,6 @@ int MicrotaskQueue::RunMicrotasks(Isolate* isolate) {
+     return -1;
+   }
+ 
+-#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+-  isolate->isolate_data()->set_continuation_preserved_embedder_data(
+-      *continuation_preserved_embedder_data);
+-#endif  // V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+-
+   DCHECK_EQ(0, size());
+   OnCompleted(isolate);
+ 
