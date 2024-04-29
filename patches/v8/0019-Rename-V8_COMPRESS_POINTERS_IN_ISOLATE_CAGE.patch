@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jon Phillips <jphillips@cloudflare.com>
+Date: Thu, 9 May 2024 23:36:43 +0100
+Subject: =?UTF-8?q?Rename=20V8=5FCOMPRESS=5FPOINTERS=5FIN=5FISOLATE=5FCAGE?=
+ =?UTF-8?q?=20->=0AV8=5FCOMPRESS=5FPOINTERS=5FIN=5FMULTIPLE=5FCAGES=20in?=
+ =?UTF-8?q?=20BUILD.bazel.?=
+
+This appears to have been missed as part of the v8 patch which applied
+this rename elsewhere:
+https://chromium-review.googlesource.com/c/v8/v8/+/5279595.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 453726808be0e2c9b5f7cbdbec148e480b4c7349..7928495046052241943bf14a5a7e08e7c2fd128b 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -296,10 +296,10 @@ selects.config_setting_group(
+     ],
+ )
+
+-# Enable isolated cage if v8_enable_pointer_compression and
++# Enable multiple cages if v8_enable_pointer_compression and
+ # NOT v8_enable_pointer_compression_shared_cage.
+ selects.config_setting_group(
+-    name = "enable_pointer_compression_isolated_cage",
++    name = "enable_pointer_compression_multiple_cages",
+     match_all = [
+         ":is_v8_enable_pointer_compression",
+         ":is_not_v8_enable_pointer_compression_shared_cage",
+@@ -492,8 +492,8 @@ v8_config(
+         ":enable_pointer_compression_shared_cage": [
+             "V8_COMPRESS_POINTERS_IN_SHARED_CAGE",
+         ],
+-        ":enable_pointer_compression_isolated_cage": [
+-            "V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE",
++        ":enable_pointer_compression_multiple_cages": [
++            "V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES",
+         ],
+         "//conditions:default": [],
+     }) + select({

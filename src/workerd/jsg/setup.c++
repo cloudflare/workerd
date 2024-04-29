@@ -372,9 +372,6 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
 
       // Create Symbol.dispose and Symbol.asyncDispose.
-      symbolDispose.Reset(ptr, v8::Symbol::New(ptr,
-          v8::String::NewFromUtf8(ptr, "dispose",
-              v8::NewStringType::kInternalized).ToLocalChecked()));
       symbolAsyncDispose.Reset(ptr, v8::Symbol::New(ptr,
           v8::String::NewFromUtf8(ptr, "asyncDispose",
               v8::NewStringType::kInternalized).ToLocalChecked()));
@@ -406,7 +403,6 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(symbolAsyncDispose.Reset());
-    KJ_DEFER(symbolDispose.Reset());
     KJ_DEFER(opaqueTemplate.Reset());
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
@@ -621,6 +617,7 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
     case v8::StateTag::EXTERNAL:          vmState = "external"; break;
     case v8::StateTag::ATOMICS_WAIT:      vmState = "atomics_wait"; break;
     case v8::StateTag::IDLE:              vmState = "idle"; break;
+    case v8::StateTag::LOGGING:           vmState = "logging"; break;
   }
   appendText("js: (", vmState, ")");
 

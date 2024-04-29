@@ -191,7 +191,7 @@ http_archive(
 #   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    commit = "b3ae305fd5dbc6ad41eed9add26768c29181219f",
+    commit = "a64dd87cec79c80c88190265cfea0cbd4027677f",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
@@ -468,11 +468,13 @@ http_archive(
         "//:patches/v8/0015-Set-torque-generator-path-to-external-v8.-This-allow.patch",
         "//:patches/v8/0016-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
         "//:patches/v8/0017-Fixup-RunMicrotask-to-restore-async-context-on-termi.patch",
+        "//:patches/v8/0018-Expose-v8-Symbol-GetDispose.patch",
+        "//:patches/v8/0019-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE.patch",
     ],
-    integrity = "sha256-C6bsXXbKgeCxmG1VNO/LScaPq0HVlmofpVHJ5kswoLg=",
-    strip_prefix = "v8-12.4.254.11",
+    integrity = "sha256-61Qzg9XnA/S2Jw1xSDgfGm8VUnrPR483gcsQOqlBNq0=",
+    strip_prefix = "v8-12.5.227.3",
     type = "tgz",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.4.254.11.tar.gz",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.5.227.3.tar.gz",
 )
 
 git_repository(

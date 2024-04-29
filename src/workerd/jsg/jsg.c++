@@ -268,7 +268,7 @@ Name Lock::newApiSymbol(kj::StringPtr symbol) {
 }
 
 JsSymbol Lock::symbolDispose() {
-  return IsolateBase::from(v8Isolate).getSymbolDispose();
+  return JsSymbol(v8::Symbol::GetDispose(v8Isolate));
 }
 JsSymbol Lock::symbolAsyncDispose() {
   return IsolateBase::from(v8Isolate).getSymbolAsyncDispose();

@@ -1,14 +1,14 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From e4427f63e1eb3214b868336d02072729a96c49ca Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Thu, 18 Apr 2024 13:31:01 -0700
 Subject: Fixup RunMicrotask to restore async context on terminate execution
 
 
 diff --git a/src/execution/microtask-queue.cc b/src/execution/microtask-queue.cc
-index 0dda78af32572981be90e4d86fc789167e97b247..f85be4bcf1641c5d6454c1c90dfd90170027c5a8 100644
+index 983020785ec769138e0149d9f39ea93a0fc0efc9..ecefe54251b481265c169eafe2fa870c4f088741 100644
 --- a/src/execution/microtask-queue.cc
 +++ b/src/execution/microtask-queue.cc
-@@ -188,6 +188,11 @@ int MicrotaskQueue::RunMicrotasks(Isolate* isolate) {
+@@ -190,6 +190,11 @@ int MicrotaskQueue::RunMicrotasks(Isolate* isolate) {
                       processed_microtask_count);
    }
  
@@ -20,7 +20,7 @@ index 0dda78af32572981be90e4d86fc789167e97b247..f85be4bcf1641c5d6454c1c90dfd9017
    if (isolate->is_execution_terminating()) {
      DCHECK(isolate->has_exception());
      DCHECK(maybe_result.is_null());
-@@ -201,11 +206,6 @@ int MicrotaskQueue::RunMicrotasks(Isolate* isolate) {
+@@ -203,11 +208,6 @@ int MicrotaskQueue::RunMicrotasks(Isolate* isolate) {
      return -1;
    }
  

@@ -1,4 +1,4 @@
-From 2d9e350afb0511e2be66fdfc28321ecef79a9f4d Mon Sep 17 00:00:00 2001
+From 44c1b5772d868c1f048c7cdc30c954a501cc4d09 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg
@@ -12,7 +12,7 @@ generated files as the output set. While unrelated to the build cfg change,
 this also improves build times.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 4a914c56851dbd43329829f9b42c9ca500055fc7..11c26187981450ccbb1291217cae2c4fae3db023 100644
+index 026eeebd5a336597e3bc89b9239a919d94feb6a2..35c8ec1656a0874c182d420954c7b1101dd6b1f7 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -23,7 +23,7 @@ index 4a914c56851dbd43329829f9b42c9ca500055fc7..11c26187981450ccbb1291217cae2c4f
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -4067,22 +4068,20 @@ filegroup(
+@@ -4078,22 +4079,20 @@ filegroup(
      }),
  )
  
@@ -52,7 +52,7 @@ index 4a914c56851dbd43329829f9b42c9ca500055fc7..11c26187981450ccbb1291217cae2c4f
  )
  
  v8_mksnapshot(
-@@ -4283,8 +4282,6 @@ v8_binary(
+@@ -4294,8 +4293,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -61,7 +61,7 @@ index 4a914c56851dbd43329829f9b42c9ca500055fc7..11c26187981450ccbb1291217cae2c4f
      ],
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
-@@ -4296,6 +4293,7 @@ v8_binary(
+@@ -4307,6 +4304,7 @@ v8_binary(
      ],
      deps = [
          "//external:absl_optional",
@@ -70,10 +70,10 @@ index 4a914c56851dbd43329829f9b42c9ca500055fc7..11c26187981450ccbb1291217cae2c4f
      ],
  )
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index fba64a0ca755da3c4a6b24a02d16ca552113a384..a8552489ae1901e380fe6825def658911ffb9d62 100644
+index 4fafb2ae40afa499356777f9bbfedf25f808fdd7..58c5a0273769e0df997e9e92bd4274f3cb8f2fc6 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -337,6 +337,15 @@ def v8_library(
+@@ -338,6 +338,15 @@ def v8_library(
              **kwargs
          )
  
@@ -89,7 +89,7 @@ index fba64a0ca755da3c4a6b24a02d16ca552113a384..a8552489ae1901e380fe6825def65891
  # Use a single generator target for torque definitions and initializers. We can
  # split the set of outputs by using OutputGroupInfo, that way we do not need to
  # run the torque generator twice.
-@@ -401,7 +410,7 @@ _v8_torque_files = rule(
+@@ -402,7 +411,7 @@ _v8_torque_files = rule(
          "tool": attr.label(
              allow_files = True,
              executable = True,
@@ -98,7 +98,7 @@ index fba64a0ca755da3c4a6b24a02d16ca552113a384..a8552489ae1901e380fe6825def65891
          ),
          "args": attr.string_list(),
      },
-@@ -502,13 +511,16 @@ _v8_mksnapshot = rule(
+@@ -503,13 +512,16 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
@@ -117,7 +117,7 @@ index fba64a0ca755da3c4a6b24a02d16ca552113a384..a8552489ae1901e380fe6825def65891
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -631,3 +643,34 @@ def v8_build_config(name):
+@@ -632,3 +644,34 @@ def v8_build_config(name):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )

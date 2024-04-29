@@ -31,17 +31,18 @@ void polyfillSymbols(jsg::Lock& js, v8::Local<v8::Context> context) {
 
     auto symbol = KJ_ASSERT_NONNULL(obj.get(js, "Symbol").tryCast<JsObject>());
 
-    KJ_DASSERT(!symbol.has(js, "dispose") && !symbol.has(js, "asyncDispose"),
-        "It looks like V8 has been updated to support the explicit resource management spec! "
-        "We should now remove our polyfill and depend on V8's version of these symbols.");
+    // At the time of writing, V8 has exposed the `Symbol.dispose` global symbol but not yet
+    // `asyncDispose`.
+    KJ_DASSERT(!symbol.has(js, "asyncDispose"),
+        "It looks like V8 has been updated to support the asyncDispose global symbol! "
+        "We should now remove our polyfill and depend on V8's version of this symbol.");
 
-    symbol.set(js, "dispose", js.symbolDispose());
     symbol.set(js, "asyncDispose", js.symbolAsyncDispose());
   });
 }
 
 v8::Local<v8::Symbol> getSymbolDispose(v8::Isolate* isolate) {
-  return IsolateBase::from(isolate).getSymbolDispose();
+  return v8::Symbol::GetDispose(isolate);
 }
 v8::Local<v8::Symbol> getSymbolAsyncDispose(v8::Isolate* isolate) {
   return IsolateBase::from(isolate).getSymbolAsyncDispose();
