@@ -144,7 +144,10 @@ git_repository(
     build_file = "//:build/BUILD.dawn",
     commit = "c5169ef5b9982e17a8caddd1218aa0ad5e24a4e3",
     remote = "https://dawn.googlesource.com/dawn.git",
-    patches = ["//:patches/dawn/0001-Add-iomanip.patch"],
+    patches = [
+        "//:patches/dawn/0001-Add-iomanip.patch",
+        "//:patches/dawn/0002-Add-missing-array-import.patch",
+    ],
     patch_args = ["-p1"],
     repo_mapping = {
         "@abseil_cpp": "@com_google_absl",
