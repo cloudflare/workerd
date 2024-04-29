@@ -144,6 +144,8 @@ git_repository(
     build_file = "//:build/BUILD.dawn",
     commit = "c5169ef5b9982e17a8caddd1218aa0ad5e24a4e3",
     remote = "https://dawn.googlesource.com/dawn.git",
+    patches = ["//:patches/dawn/0001-Add-iomanip.patch"],
+    patch_args = ["-p1"],
     repo_mapping = {
         "@abseil_cpp": "@com_google_absl",
     },
@@ -461,7 +463,8 @@ http_archive(
         "//:patches/v8/0013-increase-visibility-of-virtual-method.patch",
         "//:patches/v8/0014-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
         "//:patches/v8/0015-Set-torque-generator-path-to-external-v8.-This-allow.patch",
-        "//:patches/v8/0016-Modify-where-to-look-for-fp16-dependency.-This-depen.patch"
+        "//:patches/v8/0016-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
+        "//:patches/v8/0017-Fixup-RunMicrotask-to-restore-async-context-on-termi.patch",
     ],
     integrity = "sha256-C6bsXXbKgeCxmG1VNO/LScaPq0HVlmofpVHJ5kswoLg=",
     strip_prefix = "v8-12.4.254.11",
