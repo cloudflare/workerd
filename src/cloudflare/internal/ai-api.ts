@@ -18,6 +18,7 @@ export type AiOptions = {
    * @deprecated this option is deprecated, do not use this
    */
   sessionOptions?: SessionOptions;
+  functionCalling?: CallableFunction
 };
 
 export class InferenceUpstreamError extends Error {
@@ -48,6 +49,8 @@ export class Ai {
   ): Promise<Response | ReadableStream<Uint8Array> | object | null> {
     this.options = options;
     this.lastRequestId = "";
+
+    if (options.functionCalling) return (options.functionCalling() as Response)
 
     const body = JSON.stringify({
       inputs,

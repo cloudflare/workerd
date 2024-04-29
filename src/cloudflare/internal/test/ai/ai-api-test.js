@@ -33,5 +33,13 @@ export const tests = {
             })
             assert.deepStrictEqual(await resp.json(),  { response: 'model response' });
         }
+
+        {
+            // Test ai function calling
+            const resp = await env.ai.run('test', {prompt: 'test'}, {functionCalling: () => {
+                    return 'function calling works'
+                }})
+            assert.deepStrictEqual(resp, 'function calling works');
+        }
     },
 }
