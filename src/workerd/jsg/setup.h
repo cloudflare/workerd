@@ -93,6 +93,11 @@ public:
     maybeLogger = kj::mv(logger);
   }
 
+  using ErrorReporter = Lock::ErrorReporter;
+  inline void setErrorReporterCallback(kj::Badge<Lock>, kj::Function<ErrorReporter>&& reporter) {
+    maybeErrorReporter = kj::mv(reporter);
+  }
+
   using ModuleFallbackCallback =
       kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(
           jsg::Lock&,
@@ -119,12 +124,21 @@ public:
   }
 
   inline bool areWarningsLogged() const { return maybeLogger != kj::none; }
+  inline bool areErrorsReported() const { return maybeErrorReporter != kj::none; }
 
   // The logger will be optionally set by the isolate setup logic if there is anywhere
   // for the log to go (for instance, if debug logging is enabled or the inspector is
   // being used).
   inline void logWarning(Lock& js, kj::StringPtr message) {
     KJ_IF_SOME(logger, maybeLogger) { logger(js, message); }
+  }
+
+  inline void reportError(Lock& js, kj::String desc,
+                          const JsValue& error,
+                          const JsMessage& message) {
+    KJ_IF_SOME(reporter, maybeErrorReporter) {
+      reporter(js, kj::mv(desc), error, message);
+    }
   }
 
   // Returns a random UUID for this isolate instance.
@@ -190,6 +204,7 @@ private:
   bool asyncContextTrackingEnabled = false;
 
   kj::Maybe<kj::Function<Logger>> maybeLogger;
+  kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
   kj::Maybe<kj::Function<ModuleFallbackCallback>> maybeModuleFallbackCallback;
 
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
@@ -491,6 +506,19 @@ public:
       //   a Ref.
 
       return jsgIsolate.wrapper->newContext(*this, jsgIsolate.getObserver(), (T*)nullptr, kj::fwd<Args>(args)...);
+    }
+
+    void reportError(const JsValue& value) override {
+      KJ_IF_SOME(domException, jsgIsolate.wrapper->tryUnwrap(v8Context(), value,
+                                                             (DOMException*)nullptr,
+                                                             kj::none)) {
+        auto desc = kj::str("DOMException(", domException.getName(), "): ",
+                               domException.getMessage());
+        jsgIsolate.reportError(*this, kj::mv(desc), value, JsMessage::create(*this, value));
+      } else {
+        jsgIsolate.reportError(*this, value.toString(*this),
+                               value, JsMessage::create(*this, value));
+      }
     }
 
   private:

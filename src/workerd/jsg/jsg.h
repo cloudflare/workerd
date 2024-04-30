@@ -2294,6 +2294,9 @@ public:
   using Logger = void(Lock&, kj::StringPtr);
   void setLoggerCallback(kj::Function<Logger>&& logger);
 
+  using ErrorReporter = void(Lock&, kj::String, const JsValue&, const JsMessage&);
+  void setErrorReporterCallback(kj::Function<ErrorReporter>&& errorReporter);
+
   // ---------------------------------------------------------------------------
   // Misc. Stuff
 
@@ -2401,6 +2404,8 @@ public:
 
   void runMicrotasks();
   void terminateExecution();
+
+  virtual void reportError(const JsValue& value) = 0;
 
 private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into

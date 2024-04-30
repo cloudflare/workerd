@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "web-socket.h"
+#include "events.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/io/features.h>
@@ -972,10 +973,6 @@ jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
   return kj::mv(pair);
 }
 
-void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(error);
-}
-
 void WebSocket::reportError(jsg::Lock& js, kj::Exception&& e) {
   reportError(js, js.exceptionToJsValue(kj::cp(e)));
 }
@@ -986,7 +983,11 @@ void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
     auto msg = kj::str(v8::Exception::CreateMessage(js.v8Isolate, err.getHandle(js))->Get());
     error = err.addRef(js);
 
-    dispatchEventImpl(js, jsg::alloc<ErrorEvent>(js, kj::mv(msg), kj::mv(err)));
+    dispatchEventImpl(js, jsg::alloc<ErrorEvent>(kj::str("error"),
+      ErrorEvent::ErrorEventInit {
+        .message = kj::mv(msg),
+        .error = kj::mv(err)
+      }));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we
     // can destroy the connection. Note that we don't set closedOutgoing = true because that flag

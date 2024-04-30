@@ -8,6 +8,7 @@
 
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto.h>
+#include <workerd/api/events.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
@@ -756,6 +757,24 @@ jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(
     jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
     jsg::Optional<Request::Initializer> requestInit) {
   return fetchImpl(js, kj::none, kj::mv(requestOrUrl), kj::mv(requestInit));
+}
+
+void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
+  // Per the spec, we are going to first emit an error event on the global object.
+  // If that event is not prevented, we will log the error to the console. Note
+  // that we do not throw the error at all.
+  auto message = v8::Exception::CreateMessage(js.v8Isolate, error);
+  auto event = jsg::alloc<ErrorEvent>(kj::str("error"),
+      ErrorEvent::ErrorEventInit {
+        .message = kj::str(message->Get()),
+        .filename = kj::str(message->GetScriptResourceName()),
+        .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
+        .colno = jsg::check(message->GetStartColumn(js.v8Context())),
+        .error = jsg::JsRef(js, error)
+      });
+  if (dispatchEventImpl(js, kj::mv(event))) {
+    js.reportError(error);
+  }
 }
 
 double Performance::now() {

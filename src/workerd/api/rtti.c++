@@ -13,6 +13,7 @@
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto.h>
 #include <workerd/api/encoding.h>
+#include <workerd/api/events.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/kv.h>
@@ -48,6 +49,7 @@
   F("cache", EW_CACHE_ISOLATE_TYPES)                                           \
   F("crypto", EW_CRYPTO_ISOLATE_TYPES)                                         \
   F("encoding", EW_ENCODING_ISOLATE_TYPES)                                     \
+  F("events", EW_EVENTS_ISOLATE_TYPES)                                         \
   F("form-data", EW_FORMDATA_ISOLATE_TYPES)                                    \
   F("html-rewriter", EW_HTML_REWRITER_ISOLATE_TYPES)                           \
   F("http", EW_HTTP_ISOLATE_TYPES)                                             \

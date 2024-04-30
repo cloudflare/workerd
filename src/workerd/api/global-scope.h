@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include "basics.h"
+#include "events.h"
 #include "http.h"
 #include "hibernation-event-params.h"
 #include <workerd/io/io-timers.h>
@@ -451,6 +452,8 @@ public:
 
   jsg::Ref<CacheStorage> getCaches();
 
+  void reportError(jsg::Lock& js, jsg::JsValue error);
+
   JSG_RESOURCE_TYPE(ServiceWorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(WorkerGlobalScope);
 
@@ -466,6 +469,7 @@ public:
     JSG_METHOD(clearInterval);
     JSG_METHOD(queueMicrotask);
     JSG_METHOD(structuredClone);
+    JSG_METHOD(reportError);
 
     JSG_METHOD(fetch);
 
@@ -513,6 +517,7 @@ public:
     JSG_NESTED_TYPE(TransformStream);
     JSG_NESTED_TYPE(ByteLengthQueuingStrategy);
     JSG_NESTED_TYPE(CountQueuingStrategy);
+    JSG_NESTED_TYPE(ErrorEvent);
 
     if (flags.getStreamsJavaScriptControllers()) {
       JSG_NESTED_TYPE(ReadableStreamBYOBRequest);

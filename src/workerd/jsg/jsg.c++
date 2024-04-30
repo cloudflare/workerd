@@ -200,6 +200,10 @@ void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
   IsolateBase::from(v8Isolate).setLoggerCallback({}, kj::mv(logger));
 }
 
+void Lock::setErrorReporterCallback(kj::Function<ErrorReporter>&& errorReporter) {
+  IsolateBase::from(v8Isolate).setErrorReporterCallback({}, kj::mv(errorReporter));
+}
+
 void Lock::requestGcForTesting() const {
   if (!isPredictableModeForTest()) {
     KJ_LOG(ERROR, "Test GC used while not in a test");
