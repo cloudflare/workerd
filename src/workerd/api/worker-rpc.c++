@@ -1059,7 +1059,7 @@ public:
         })));
 
         if (ctx.hasOutputGate()) {
-          return result.then([this]() {
+          return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
             return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
           });
         } else {
