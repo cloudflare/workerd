@@ -43,13 +43,11 @@ declare namespace Rpc {
     | Error
     | RegExp
     // Structured cloneable composites
-    | Map<Serializable, Serializable>
-    | Set<Serializable>
-    | ReadonlyArray<Serializable>
+    | Map<Serializable<T>, Serializable<T>>
+    | Set<Serializable<T>>
+    | ReadonlyArray<Serializable<T>>
     | {
-        [K in keyof T]: K extends number | string
-          ? Serializable<T[K]>
-          : never;
+        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
       }
     // Special types
     | ReadableStream<Uint8Array>
@@ -154,7 +152,8 @@ declare module "cloudflare:workers" {
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
 
   export abstract class WorkerEntrypoint<Env = unknown>
-    implements Rpc.WorkerEntrypointBranded {
+    implements Rpc.WorkerEntrypointBranded
+  {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
     protected ctx: ExecutionContext;
@@ -170,7 +169,8 @@ declare module "cloudflare:workers" {
   }
 
   export abstract class DurableObject<Env = unknown>
-    implements Rpc.DurableObjectBranded {
+    implements Rpc.DurableObjectBranded
+  {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 
     protected ctx: DurableObjectState;
