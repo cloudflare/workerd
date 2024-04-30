@@ -48,13 +48,11 @@ declare namespace Rpc {
     | Error
     | RegExp
     // Structured cloneable composites
-    | Map<Serializable, Serializable>
-    | Set<Serializable>
-    | ReadonlyArray<Serializable>
+    | Map<Serializable<T>, Serializable<T>>
+    | Set<Serializable<T>>
+    | ReadonlyArray<Serializable<T>>
     | {
-        [K in keyof T]: K extends number | string
-          ? Serializable<T[K]>
-          : never;
+        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
       }
     // Special types
     | ReadableStream<Uint8Array>
