@@ -14,6 +14,7 @@
 #include <kj/parse/char.h>
 #include <workerd/io/features.h>
 #include <workerd/util/http-util.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
@@ -1163,6 +1164,28 @@ void Request::shallowCopyHeadersTo(kj::HttpHeaders& out) {
 }
 
 kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
+  // When the HTTP_REQUEST_CACHE autogate is enabled and the CacheMode
+  // is anything but CacheMode::NONE, we'll need to possibly modify the
+  // request's cf property to include the appropriate cache mode to pass
+  // down.
+  if (cacheMode != CacheMode::NONE &&
+      util::Autogate::isEnabled(util::AutogateKey::HTTP_REQUEST_CACHE)) {
+    auto clone = cf.deepClone(js);
+    auto obj = KJ_ASSERT_NONNULL(clone.get(js));
+    auto ttl = 0;
+    switch (cacheMode) {
+      case CacheMode::NOSTORE:
+        ttl = -1;
+        break;
+      case CacheMode::NOCACHE:
+        ttl = 0;
+        break;
+      case CacheMode::NONE:
+        KJ_UNREACHABLE;
+    }
+    obj.set(js, "cacheTtl", js.num(ttl));
+    return clone.serialize(js);
+  }
   return cf.serialize(js);
 }
 
@@ -1775,10 +1798,30 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
   // If the jsRequest has a CacheMode, we need to handle that here.
   // Currently, the ony cache mode we support is undefined, but we will soon support
   // no-cache and no-store. These additional modes will be hidden behind an autogate.
-  if (jsRequest->getCacheMode() != Request::CacheMode::NONE) {
-    return js.rejectedPromise<jsg::Ref<Response>>(
-        js.typeError(kj::str("Unsupported cache mode: ",
-            KJ_ASSERT_NONNULL(jsRequest->getCache(js)))));
+  if (util::Autogate::isEnabled(util::AutogateKey::HTTP_REQUEST_CACHE)) {
+    auto cacheMode = jsRequest->getCacheMode();
+    if (cacheMode != Request::CacheMode::NONE) {
+      if (headers.get(ioContext.getHeaderIds().cacheControl) == kj::none) {
+        headers.set(ioContext.getHeaderIds().cacheControl, "no-cache"_kj);
+      }
+      if (headers.get(ioContext.getHeaderIds().pragma) == kj::none) {
+        headers.set(ioContext.getHeaderIds().pragma, "no-cache"_kj);
+      }
+    }
+    if (cacheMode == Request::CacheMode::NOSTORE &&
+        headers.get(ioContext.getHeaderIds().cfCacheLevel) == kj::none) {
+      // TODO(now): Validate that this is the correct way to specify the Cf-Cache-Level
+      // to "byc" to tell the backend to ignore the cache for this requests.
+      headers.set(ioContext.getHeaderIds().cfCacheLevel, "byc"_kj);
+    }
+  } else {
+    // TODO(soon): Remove this branch once the HTTP_REQUEST_CACHE autogate is
+    // permanently enabled.
+    if (jsRequest->getCacheMode() != Request::CacheMode::NONE) {
+      return js.rejectedPromise<jsg::Ref<Response>>(
+          js.typeError(kj::str("Unsupported cache mode: ",
+              KJ_ASSERT_NONNULL(jsRequest->getCache(js)))));
+    }
   }
 
   kj::String url = uriEncodeControlChars(

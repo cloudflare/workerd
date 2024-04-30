@@ -4,6 +4,7 @@
 
 #include "server.h"
 #include <kj/test.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/jsg/setup.h>
 #include <kj/async-queue.h>
@@ -317,7 +318,9 @@ public:
           }
         }),
         fakeDate(kj::UNIX_EPOCH),
-        mockNetwork(*this, {}, {}) {}
+        mockNetwork(*this, {}, {}) {
+    workerd::util::Autogate::initAutogate({});
+  }
 
   ~TestServer() noexcept(false) {
     for (auto& subq: subrequests) {
