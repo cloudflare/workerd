@@ -387,8 +387,8 @@ kj::StringPtr SqliteDatabase::getCurrentQueryForDebug() {
 // statement.
 kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
     Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
-  KJ_ASSERT(currentRegulator == nullptr, "recursive prepareSql()?");
-  KJ_DEFER(currentRegulator = nullptr);
+  KJ_ASSERT(currentRegulator == kj::none, "recursive prepareSql()?");
+  KJ_DEFER(currentRegulator = kj::none);
   currentRegulator = regulator;
 
   for (;;) {
@@ -420,7 +420,7 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
             if (!sqlite3_stmt_readonly(result)) {
               // The callback is allowed to invoke queries of its own, so we have to un-set the
               // regulator while we call it.
-              currentRegulator = nullptr;
+              currentRegulator = kj::none;
               KJ_DEFER(currentRegulator = regulator);
               cb();
             }
@@ -920,13 +920,13 @@ void SqliteDatabase::Query::bind(uint i, decltype(nullptr)) {
 }
 
 void SqliteDatabase::Query::nextRow() {
-  KJ_ASSERT(db.currentStatement == nullptr, "recursive nextRow()?");
-  KJ_DEFER(db.currentStatement = nullptr);
+  KJ_ASSERT(db.currentStatement == kj::none, "recursive nextRow()?");
+  KJ_DEFER(db.currentStatement = kj::none);
   db.currentStatement = *statement;
 
   // The statement could be "re-prepared" during sqlite3_step, so we must set up the regulator.
-  KJ_ASSERT(db.currentRegulator == nullptr, "nextRow() during prepare()?");
-  KJ_DEFER(db.currentRegulator = nullptr);
+  KJ_ASSERT(db.currentRegulator == kj::none, "nextRow() during prepare()?");
+  KJ_DEFER(db.currentRegulator = kj::none);
   db.currentRegulator = regulator;
 
   int err = sqlite3_step(statement);
