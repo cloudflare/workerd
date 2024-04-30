@@ -105,10 +105,10 @@ async function test(storage) {
     const inputBytes = new TextEncoder().encode(INSERT_36_ROWS)
     const decoder = new TextDecoder()
 
-
     // Use a chunk size 1, 3, 9, 27, 81, ... bytes
     for (let length = 1; length < inputBytes.length; length = length * 3) {
       let totalRowsWritten = 0;
+      let totalSqlStatements = 0;
       let buffer = ''
       for (let offset = 0; offset < inputBytes.length; offset += length) {
         // Simulate a single "chunk" arriving
@@ -121,6 +121,7 @@ async function test(storage) {
         let result = sql.ingest(buffer);
         buffer = result.remainder;
         totalRowsWritten += result.rowsWritten;
+        totalSqlStatements += result.statementCount;
 
         // Simulate awaiting next chunk
         await scheduler.wait(1)
@@ -146,6 +147,7 @@ async function test(storage) {
 
       // Verify that all 36 rows we inserted were accounted for.
       assert.equal(totalRowsWritten, 36);
+      assert.equal(totalSqlStatements, 6);
 
       sql.exec(`DELETE FROM streaming`)
       await scheduler.wait(1)

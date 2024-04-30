@@ -255,15 +255,17 @@ private:
 class SqlStorage::IngestResult final : public jsg::Object {
 public:
 
-  IngestResult(kj::String remainder, uint64_t rowsRead, uint64_t rowsWritten);
+  IngestResult(kj::String remainder, uint64_t rowsRead, uint64_t rowsWritten, uint64_t statementCount);
 
   JSG_RESOURCE_TYPE(IngestResult) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(statementCount, getStatementCount);
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsRead, getRowsRead);
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
     JSG_READONLY_PROTOTYPE_PROPERTY(remainder, getRemainder);
   }
 
   kj::StringPtr getRemainder();
+  double getStatementCount();
   double getRowsRead();
   double getRowsWritten();
 
@@ -271,6 +273,7 @@ private:
   kj::String remainder;
   uint64_t rowsRead;
   uint64_t rowsWritten;
+  uint64_t statementCount;
 };
 
 

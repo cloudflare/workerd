@@ -40,6 +40,7 @@ public:
     kj::StringPtr remainder;
     uint64_t rowsRead;
     uint64_t rowsWritten;
+    uint64_t statementCount;
   };
 
   SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::Maybe<kj::WriteMode> maybeMode = kj::none);

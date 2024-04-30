@@ -450,6 +450,7 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
 SqliteDatabase::IngestResult SqliteDatabase::ingestSql(Regulator& regulator, kj::StringPtr sqlCode) {
   uint64_t rowsRead = 0;
   uint64_t rowsWritten = 0;
+  uint64_t statementCount = 0;
 
   // While there's still some input SQL to process
   while (sqlCode.begin() != sqlCode.end()) {
@@ -464,11 +465,12 @@ SqliteDatabase::IngestResult SqliteDatabase::ingestSql(Regulator& regulator, kj:
 
     rowsRead += q.getRowsRead();
     rowsWritten += q.getRowsWritten();
+    statementCount++;
     sqlCode = sqlCode.slice(statementLength);
   }
 
   // Return the leftover buffer
-  return {.remainder = sqlCode, .rowsRead = rowsRead, .rowsWritten = rowsWritten};
+  return {.remainder = sqlCode, .rowsRead = rowsRead, .rowsWritten = rowsWritten, .statementCount = statementCount};
 }
 
 void SqliteDatabase::executeWithRegulator(Regulator& regulator, kj::FunctionParam<void()> func) {
