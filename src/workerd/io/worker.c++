@@ -399,7 +399,7 @@ public:
 
   void resetChannel() {
     auto lockedState = state.lockExclusive();
-    lockedState->channel = {};
+    lockedState->channel = kj::none;
   }
 
   // This method is called by v8 when a breakpoint or debugger statement is hit. This method
@@ -2521,7 +2521,7 @@ private:
     }
 
     void disconnect() {
-      channel = {};
+      channel = kj::none;
       shutdown();
     }
 
@@ -2837,7 +2837,7 @@ void Worker::Isolate::disconnectInspector() {
   // reference on the script, so that the script can be deleted.
   KJ_IF_SOME(current, currentInspectorSession) {
     current.disconnect();
-    currentInspectorSession = {};
+    currentInspectorSession = kj::none;
   }
   impl->inspectorClient.resetChannel();
 }
