@@ -920,8 +920,8 @@ void SqliteDatabase::Query::bind(uint i, decltype(nullptr)) {
 }
 
 void SqliteDatabase::Query::nextRow() {
-  KJ_ASSERT(db.currentStatement == nullptr, "recursive nextRow()?");
-  KJ_DEFER(db.currentStatement = nullptr);
+  KJ_ASSERT(db.currentStatement == kj::none, "recursive nextRow()?");
+  KJ_DEFER(db.currentStatement = kj::none);
   db.currentStatement = *statement;
 
   // The statement could be "re-prepared" during sqlite3_step, so we must set up the regulator.
