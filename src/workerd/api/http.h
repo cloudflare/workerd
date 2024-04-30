@@ -694,9 +694,10 @@ struct RequestInitializerDict {
   jsg::WontImplement credentials;
 
   // In browsers this controls the local browser cache. For Cloudflare Workers it could control the
-  // Cloudflare edge cache. Note that this setting is different from using the `Cache-Control`
-  // header since `Cache-Control` would be forwarded to the origin.
-  jsg::Unimplemented cache;
+  // Cloudflare edge cache. While the standard defines a number of values for this property, our
+  // implementation supports only three: undefined (identifying the default caching behavior that
+  // has been implemented by the runtime), "no-store", and "no-cache".
+  jsg::Optional<kj::String> cache;
 
   // These control how the `Referer` and `Origin` headers are initialized by the browser.
   // Browser-side JavaScript is normally not permitted to set these headers, because servers
@@ -769,13 +770,21 @@ public:
   };
   static kj::Maybe<Redirect> tryParseRedirect(kj::StringPtr redirect);
 
+  enum class CacheMode {
+    // CacheMode::NONE is set when cache is undefined. It represents the dafault cache
+    // mode that workers has supported.
+    NONE,
+    NOSTORE,
+    NOCACHE,
+  };
+
   Request(kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
           jsg::Ref<Headers> headers, kj::Maybe<jsg::Ref<Fetcher>> fetcher,
           kj::Maybe<jsg::Ref<AbortSignal>> signal, CfProperty&& cf,
-          kj::Maybe<Body::ExtractedBody> body)
+          kj::Maybe<Body::ExtractedBody> body, CacheMode cacheMode = CacheMode::NONE)
     : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
       redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
-      cf(kj::mv(cf)) {
+      cacheMode(cacheMode), cf(kj::mv(cf)) {
     KJ_IF_SOME(s, signal) {
       // If the AbortSignal will never abort, assigning it to thisSignal instead ensures
       // that the cancel machinery is not used but the request.signal accessor will still
@@ -870,15 +879,8 @@ public:
   // TODO(conform): Won't implement?
 
   // The cache mode determines how HTTP cache is used with the request.
-  // We currently do not fully implement this. Currently we will explicitly
-  // throw in the Request constructor if the option is set. For the accessor
-  // we want it to always just return undefined while it is not implemented.
-  // The spec does not provide a value to indicate "unimplemented" and all
-  // of the other values would imply semantics we do not follow. In discussion
-  // with other implementers with the same issues, it was decided that
-  // simply returning undefined for these was the best option.
-  // jsg::JsValue getCache(jsg::Lock& js) { return js.v8Undefined(); }
-  // TODO(conform): Won't implement?
+  jsg::Optional<kj::StringPtr> getCache(jsg::Lock& js);
+  CacheMode getCacheMode();
 
   // We do not implement integrity checking at all. However, the spec says that
   // the default value should be an empty string. When the Request object is
@@ -908,7 +910,6 @@ public:
       // JSG_READONLY_PROTOTYPE_PROPERTY(duplex, getDuplex);
       // JSG_READONLY_PROTOTYPE_PROPERTY(mode, getMode);
       // JSG_READONLY_PROTOTYPE_PROPERTY(credentials, getCredentials);
-      // JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
       JSG_READONLY_PROTOTYPE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
 
@@ -934,7 +935,6 @@ public:
       // JSG_READONLY_INSTANCE_PROPERTY(duplex, getDuplex);
       // JSG_READONLY_INSTANCE_PROPERTY(mode, getMode);
       // JSG_READONLY_INSTANCE_PROPERTY(credentials, getCredentials);
-      // JSG_READONLY_INSTANCE_PROPERTY(cache, getCache);
       JSG_READONLY_INSTANCE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_INSTANCE_PROPERTY(keepalive, getKeepalive);
 
@@ -944,6 +944,7 @@ public:
         readonly cf?: Cf;
       });
     }
+    JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
   }
 
   void serialize(
@@ -971,6 +972,8 @@ private:
   jsg::Ref<Headers> headers;
   kj::Maybe<jsg::Ref<Fetcher>> fetcher;
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
+
+  CacheMode cacheMode = CacheMode::NONE;
 
   // The fetch spec definition of Request has a distinction between the "signal" (which is
   // an optional AbortSignal passed in with the options), and "this' signal", which is an

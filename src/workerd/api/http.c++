@@ -113,6 +113,21 @@ void requireValidHeaderValue(kj::StringPtr value) {
   }
 }
 
+Request::CacheMode getCacheModeFromName(kj::StringPtr value) {
+  if (value == "no-store") return Request::CacheMode::NOSTORE;
+  if (value == "no-cache") return Request::CacheMode::NOCACHE;
+  JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported cache mode: ", value));
+}
+
+jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
+  switch (mode) {
+    case (Request::CacheMode::NONE): return kj::none;
+    case (Request::CacheMode::NOCACHE): return "no-cache"_kj;
+    case (Request::CacheMode::NOSTORE): return "no-store"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace
 
 Headers::Headers(jsg::Dict<jsg::ByteString, jsg::ByteString> dict)
@@ -898,6 +913,13 @@ jsg::Ref<Request> Request::coerce(
         : Request::constructor(js, kj::mv(input), kj::mv(init));
 }
 
+jsg::Optional<kj::StringPtr> Request::getCache(jsg::Lock& js) {
+  return getCacheModeName(cacheMode);
+}
+Request::CacheMode Request::getCacheMode() {
+  return cacheMode;
+}
+
 jsg::Ref<Request> Request::constructor(
     jsg::Lock& js,
     Request::Info input,
@@ -910,6 +932,7 @@ jsg::Ref<Request> Request::constructor(
   CfProperty cf;
   kj::Maybe<Body::ExtractedBody> body;
   Redirect redirect = Redirect::FOLLOW;
+  CacheMode cacheMode = CacheMode::NONE;
 
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(u, kj::String) {
@@ -975,6 +998,7 @@ jsg::Ref<Request> Request::constructor(
           body = Body::ExtractedBody((oldJsBody)->detach(js), oldRequest->getBodyBuffer(js));
         }
       }
+      cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
       fetcher = oldRequest->getFetcher();
       signal = oldRequest->getSignal();
@@ -1051,6 +1075,10 @@ jsg::Ref<Request> Request::constructor(
               "response status code).");
         }
 
+        KJ_IF_SOME(c, initDict.cache) {
+          cacheMode = getCacheModeFromName(c);
+        }
+
         if (initDict.method != kj::none || initDict.body != kj::none) {
           // We modified at least one of the method or the body. In this case, we enforce the
           // spec rule that GET/HEAD requests cannot have bodies. (On the other hand, if neither
@@ -1065,6 +1093,7 @@ jsg::Ref<Request> Request::constructor(
       KJ_CASE_ONEOF(otherRequest, jsg::Ref<Request>) {
         method = otherRequest->method;
         redirect = otherRequest->redirect;
+        cacheMode = otherRequest->cacheMode;
         fetcher = otherRequest->getFetcher();
         signal = otherRequest->getSignal();
         headers = jsg::alloc<Headers>(*otherRequest->headers);
@@ -1086,7 +1115,7 @@ jsg::Ref<Request> Request::constructor(
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.
   return jsg::alloc<Request>(method, url, redirect,
                  KJ_ASSERT_NONNULL(kj::mv(headers)), kj::mv(fetcher), kj::mv(signal),
-                 kj::mv(cf), kj::mv(body));
+                 kj::mv(cf), kj::mv(body), cacheMode);
 }
 
 jsg::Ref<Request> Request::clone(jsg::Lock& js) {
@@ -1200,6 +1229,10 @@ void Request::serialize(
     // property should probably go away in any case.
 
     .cf = cf.getRef(js),
+
+    .cache = getCacheModeName(cacheMode).map([](kj::StringPtr name) -> kj::String {
+      return kj::str(name);
+    }),
 
     // .mode is unimplemented
     // .credentials is unimplemented
@@ -1770,6 +1803,15 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
 
   kj::HttpHeaders headers(ioContext.getHeaderTable());
   jsRequest->shallowCopyHeadersTo(headers);
+
+  // If the jsRequest has a CacheMode, we need to handle that here.
+  // Currently, the ony cache mode we support is undefined, but we will soon support
+  // no-cache and no-store. These additional modes will be hidden behind an autogate.
+  if (jsRequest->getCacheMode() != Request::CacheMode::NONE) {
+    return js.rejectedPromise<jsg::Ref<Response>>(
+        js.typeError(kj::str("Unsupported cache mode: ",
+            KJ_ASSERT_NONNULL(jsRequest->getCache(js)))));
+  }
 
   kj::String url = uriEncodeControlChars(
       urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
