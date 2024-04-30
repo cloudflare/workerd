@@ -22,10 +22,10 @@ public:
 
   class Cursor;
   class Statement;
-  class IngestResult;
+  struct IngestResult;
 
   jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
-  jsg::Ref<IngestResult> ingest(jsg::Lock& js, kj::String query);
+  IngestResult ingest(jsg::Lock& js, kj::String query);
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
@@ -250,30 +250,17 @@ private:
   friend class Cursor;
 };
 
+struct SqlStorage::IngestResult {
+  IngestResult(kj::String remainder, double rowsRead, double rowsWritten, double statementCount)
+    : remainder(kj::mv(remainder)), rowsRead(rowsRead), rowsWritten(rowsWritten),
+      statementCount(statementCount) {}
 
-
-class SqlStorage::IngestResult final : public jsg::Object {
-public:
-
-  IngestResult(kj::String remainder, uint64_t rowsRead, uint64_t rowsWritten, uint64_t statementCount);
-
-  JSG_RESOURCE_TYPE(IngestResult) {
-    JSG_READONLY_PROTOTYPE_PROPERTY(statementCount, getStatementCount);
-    JSG_READONLY_PROTOTYPE_PROPERTY(rowsRead, getRowsRead);
-    JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
-    JSG_READONLY_PROTOTYPE_PROPERTY(remainder, getRemainder);
-  }
-
-  kj::StringPtr getRemainder();
-  double getStatementCount();
-  double getRowsRead();
-  double getRowsWritten();
-
-private:
   kj::String remainder;
-  uint64_t rowsRead;
-  uint64_t rowsWritten;
-  uint64_t statementCount;
+  double rowsRead;
+  double rowsWritten;
+  double statementCount;
+
+  JSG_STRUCT(remainder, rowsRead, rowsWritten, statementCount);
 };
 
 

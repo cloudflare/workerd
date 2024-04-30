@@ -19,10 +19,10 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(jsg::Lock& js, kj::String querySql
   return jsg::alloc<Cursor>(*sqlite, regulator, querySql, kj::mv(bindings));
 }
 
-jsg::Ref<SqlStorage::IngestResult> SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
+SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
   SqliteDatabase::Regulator& regulator = *this;
   auto result = sqlite->ingestSql(regulator, querySql);
-  return jsg::alloc<IngestResult>(kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
+  return IngestResult(kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }
 
 jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, kj::String query) {
@@ -295,16 +295,5 @@ void SqlStorage::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
         sizeof(IoPtr<SqliteDatabase::Statement>));
   }
 }
-
-SqlStorage::IngestResult::IngestResult(kj::String remainder, uint64_t rowsRead, uint64_t rowsWritten, uint64_t statementCount) :
-  remainder(kj::mv(remainder)), rowsRead(rowsRead), rowsWritten(rowsWritten), statementCount(statementCount) {}
-
-kj::StringPtr SqlStorage::IngestResult::getRemainder() { return remainder; }
-
-double SqlStorage::IngestResult::getRowsRead() { return rowsRead; }
-
-double SqlStorage::IngestResult::getRowsWritten() { return rowsWritten; }
-
-double SqlStorage::IngestResult::getStatementCount() { return statementCount; }
 
 }  // namespace workerd::api
