@@ -401,7 +401,8 @@ int32_t indexOfOffset(size_t length,
       return -1;
     }
   } else {
-    if (offset + needle_length <= len) {
+    // cast to int64_t to avoid overflow.
+    if ((int64_t)offset + needle_length <= len) {
       // Valid positive offset.
       return offset;
     } else if (needle_length == 0) {

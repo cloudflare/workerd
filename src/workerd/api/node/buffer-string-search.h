@@ -350,7 +350,10 @@ size_t StringSearch<Char>::BoyerMooreSearch(
   size_t start = start_;
 
   int* bad_char_occurrence = bad_char_shift_table_;
-  int* good_suffix_shift = good_suffix_shift_table_ - start_;
+  // Explicitly cast good_suffix_shift_table_ to int* here to avoid a benign UBSan warning.
+  // good_suffix_shift may point outside of the array, but only indices within the array will
+  // actually be accessed based on the checks below.
+  int* good_suffix_shift = (int*)good_suffix_shift_table_ - start_;
 
   Char last_char = pattern_[pattern_length - 1];
   size_t index = start_index;
@@ -400,8 +403,9 @@ void StringSearch<Char>::PopulateBoyerMooreTable() {
 
   // Biased tables so that we can use pattern indices as table indices,
   // even if we only cover the part of the pattern from offset start.
-  int* shift_table = good_suffix_shift_table_ - start_;
-  int* suffix_table = suffix_table_ - start_;
+  // Use explicit int* casts to avoid benign OOB UBsan warnings.
+  int* shift_table = (int*)good_suffix_shift_table_ - start_;
+  int* suffix_table = (int*)suffix_table_ - start_;
 
   // Initialize table.
   for (size_t i = start; i < pattern_length; i++) {
