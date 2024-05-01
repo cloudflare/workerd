@@ -500,7 +500,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, large data)") {
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, (BASE * 7) + 1)
       .then(js, [&](jsg::Lock& js, kj::Array<kj::byte>&& text) {
-        kj::byte check[BASE * 7];
+        kj::byte check[BASE * 7]{};
         memset(&check[0], 'A', BASE);
         memset(&check[0] + BASE, 'B', BASE * 2);
         memset(&check[0] + (BASE * 3), 'C', BASE * 4);

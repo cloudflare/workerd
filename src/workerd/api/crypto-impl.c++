@@ -103,7 +103,7 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
   // we can decipher.
   kj::Vector<kj::String> lines;
   while (unsigned long long error = ERR_get_error()) {
-    char message[1024];
+    char message[1024]{};
     ERR_error_string_n(error, message, sizeof(message));
     lines.add(kj::heapString(message));
   }

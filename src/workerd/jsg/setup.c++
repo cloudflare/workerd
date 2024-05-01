@@ -607,7 +607,7 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 #endif
 
   v8::SampleInfo sampleInfo;
-  void* traceSpace[32];
+  void* traceSpace[32]{};
   isolate->GetStackSample(state, traceSpace, kj::size(traceSpace), &sampleInfo);
 
   kj::StringPtr vmState = "??";

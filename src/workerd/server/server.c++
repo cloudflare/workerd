@@ -86,7 +86,7 @@ static kj::String httpTime(kj::Date date) {
   struct tm tm;
   KJ_ASSERT(gmtime_r(&time, &tm) == &tm);
 #endif
-  char buf[256];
+  char buf[256]{};
   size_t n = strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &tm);
   KJ_ASSERT(n > 0);
   return kj::heapString(buf, n);

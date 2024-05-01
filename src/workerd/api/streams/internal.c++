@@ -31,7 +31,7 @@ namespace {
 }
 
 kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output, bool end) {
-  kj::byte buffer[4096];
+  kj::byte buffer[4096]{};
 
   while (true) {
     auto amount = co_await input.tryRead(buffer, 1, kj::size(buffer));

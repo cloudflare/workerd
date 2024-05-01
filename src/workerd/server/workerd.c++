@@ -149,7 +149,7 @@ public:
   }
 
   kj::Promise<void> onChange() {
-    kj::byte buffer[4096];
+    kj::byte buffer[4096]{};
 
     for (;;) {
       ssize_t n;
@@ -629,7 +629,7 @@ public:
       auto& exe = *e.file;
       auto size = exe.stat().size;
       KJ_ASSERT(size > sizeof(COMPILED_MAGIC_SUFFIX) + sizeof(uint64_t));
-      kj::byte magic[sizeof(COMPILED_MAGIC_SUFFIX)];
+      kj::byte magic[sizeof(COMPILED_MAGIC_SUFFIX)]{};
       exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX), magic);
       if (memcmp(magic, COMPILED_MAGIC_SUFFIX, sizeof(COMPILED_MAGIC_SUFFIX)) == 0) {
         // Oh! It appears we are running a compiled binary, it has a config appended to the end.

@@ -28,8 +28,8 @@ struct Subprocess {
     // Since this is used during error handling we do not to try to free resources in
     // case of errors.
 
-    int in[2]; // process stdin pipe
-    int out[2]; // process stdout pipe
+    int in[2]{}; // process stdin pipe
+    int out[2]{}; // process stdout pipe
 
     if (pipe(in)) {
       KJ_LOG(ERROR, "can't allocate in pipe", strerror(errno));
@@ -142,7 +142,7 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
 
     kj::String lines[256];
     size_t i = 0;
-    for (char line[512]; fgets(line, sizeof(line), out) != nullptr;) {
+    for (char line[512]{}; fgets(line, sizeof(line), out) != nullptr;) {
       if (i < kj::size(lines)) {
         lines[i++] = kj::str(line);
       }
