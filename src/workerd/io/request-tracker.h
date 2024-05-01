@@ -47,7 +47,7 @@ public:
 
   void shutdown() {
     // We want to prevent any hooks from running after this point.
-    hooks = nullptr;
+    hooks = kj::none;
   }
 
   kj::Own<RequestTracker> addRef()  {

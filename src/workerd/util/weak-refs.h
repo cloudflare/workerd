@@ -98,7 +98,7 @@ private:
   friend T;
 
   inline void invalidate() {
-    maybeThing = nullptr;
+    maybeThing = kj::none;
   }
 
   kj::Maybe<T&> maybeThing;

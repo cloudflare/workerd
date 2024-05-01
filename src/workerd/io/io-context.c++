@@ -514,7 +514,7 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
     return;
   });
 
-  context.pendingEvent = nullptr;
+  context.pendingEvent = kj::none;
 
   // We can't execute finalizers just yet. We need to run the event loop to see if any queued
   // events come back into JavaScript. If registerPendingEvent() is called in the meantime, this

@@ -134,7 +134,7 @@ public:
     ~ExpectedCall() noexcept(false) {
       KJ_IF_SOME(r, maybeReceived) {
         KJ_ASSERT(&KJ_ASSERT_NONNULL(r.expectedCall) == this);
-        r.expectedCall = nullptr;
+        r.expectedCall = kj::none;
       }
     }
 
@@ -290,7 +290,7 @@ private:
         mock.receivedCalls.remove(*this);
       }
       KJ_IF_SOME(e, expectedCall) {
-        e.maybeReceived = nullptr;
+        e.maybeReceived = kj::none;
       }
     }
     KJ_DISALLOW_COPY_AND_MOVE(ReceivedCall);
