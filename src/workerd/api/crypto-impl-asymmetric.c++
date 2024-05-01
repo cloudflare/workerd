@@ -2165,7 +2165,7 @@ private:
     KJ_ASSERT(getAlgorithmName() == "X25519"_kj || getAlgorithmName() == "Ed25519"_kj ||
         getAlgorithmName() == "NODE-ED25519"_kj);
 
-    uint8_t rawPublicKey[ED25519_PUBLIC_KEY_LEN];
+    uint8_t rawPublicKey[ED25519_PUBLIC_KEY_LEN]{};
     size_t publicKeyLen = sizeof(rawPublicKey);
     JSG_REQUIRE(1 == EVP_PKEY_get_raw_public_key(getEvpPkey(), rawPublicKey, &publicKeyLen),
         InternalDOMOperationError, "Failed to retrieve public key",
@@ -2186,7 +2186,7 @@ private:
       // boringssl defines ED25519_PRIVATE_KEY_LEN as 64B since it stores the private key together
       // with public key data in some functions, but in the EVP interface only the 32B private key
       // itself is returned.
-      uint8_t rawPrivateKey[ED25519_PUBLIC_KEY_LEN];
+      uint8_t rawPrivateKey[ED25519_PUBLIC_KEY_LEN]{};
       size_t privateKeyLen = ED25519_PUBLIC_KEY_LEN;
       JSG_REQUIRE(1 == EVP_PKEY_get_raw_private_key(getEvpPkey(), rawPrivateKey, &privateKeyLen),
           InternalDOMOperationError, "Failed to retrieve private key",

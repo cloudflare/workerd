@@ -564,7 +564,7 @@ public:
     // 16 bytes. But the HMAC will produce 32 bytes, so we're only taking a prefix of it. We'll
     // allocate a single array big enough to output the HMAC as a suffix, which will then get
     // truncated.
-    kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH];
+    kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]{};
 
     if (isPredictableModeForTest()) {
       memcpy(id, &counter, sizeof(counter));
@@ -579,7 +579,7 @@ public:
   }
 
   kj::Own<ActorId> idFromName(kj::String name) override {
-    kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH];
+    kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]{};
 
     // Compute the first half of the ID by HMACing the name itself. We're using HMAC as a keyed
     // hash here, not actually for authentication, but it works.
@@ -598,7 +598,7 @@ public:
                 decoded.size() == SHA256_DIGEST_LENGTH,
                 TypeError, "Invalid Durable Object ID: must be 64 hex digits");
 
-    kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH];
+    kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]{};
     memcpy(id, decoded.begin(), BASE_LENGTH);
     computeMac(id);
 

@@ -15,7 +15,7 @@ Hyperdrive::Hyperdrive(uint clientIndex, kj::String database,
                        kj::String user, kj::String password, kj::String scheme)
     : clientIndex(clientIndex), database(kj::mv(database)),
       user(kj::mv(user)), password(kj::mv(password)), scheme(kj::mv(scheme)) {
-        kj::byte randomBytes[16];
+        kj::byte randomBytes[16]{};
         KJ_ASSERT(RAND_bytes(randomBytes, sizeof(randomBytes)) == 1);
         randomHost = kj::str(kj::encodeHex(randomBytes), ".hyperdrive.local");
       }
