@@ -577,7 +577,7 @@ struct Worker::Isolate::Impl {
         // The isolate asked this lock to report the stats when it released. Let's do it.
         limitEnforcer.reportMetrics(impl.metrics);
       }
-      impl.currentLock = nullptr;
+      impl.currentLock = kj::none;
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
 
@@ -2161,7 +2161,7 @@ Worker::AsyncWaiter::AsyncWaiter(kj::Own<const Isolate> isolateParam)
     readyFulfiller = kj::mv(paf.fulfiller);
   }
 
-  next = nullptr;
+  next = kj::none;
   prev = lock->tail;
   *lock->tail = this;
   lock->tail = &next;

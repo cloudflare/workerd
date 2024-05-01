@@ -36,8 +36,8 @@ HibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() noexcept
         manager.tagToWs.erase(kj::mv(item.tag));
       }
     }
-    item.hibWS = nullptr;
-    item.list = nullptr;
+    item.hibWS = kj::none;
+    item.list = kj::none;
   }
 }
 
