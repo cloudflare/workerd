@@ -206,6 +206,7 @@ public:
       PipeToOptions options) override;
 
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
+  void detach(jsg::Lock& js) override;
 
   kj::Maybe<int> getDesiredSize() override;
 

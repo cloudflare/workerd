@@ -1296,6 +1296,29 @@ kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamInternalController::removeS
   KJ_UNREACHABLE;
 }
 
+void WritableStreamInternalController::detach(jsg::Lock& js) {
+  JSG_REQUIRE(!isLockedToWriter(), TypeError,
+               "This WritableStream is currently locked to a writer.");
+  JSG_REQUIRE(!isClosedOrClosing(), TypeError, "This WritableStream is closed.");
+
+  writeState.init<Locked>();
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      // Handled by the isClosedOrClosing() check above;
+      KJ_UNREACHABLE;
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      kj::throwFatalException(js.exceptionToKj(errored.addRef(js)));
+    }
+    KJ_CASE_ONEOF(writable, Writable) {
+      state.init<StreamStates::Closed>();
+    }
+  }
+
+  KJ_UNREACHABLE;
+}
+
 kj::Maybe<int> WritableStreamInternalController::getDesiredSize() {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return 0; }

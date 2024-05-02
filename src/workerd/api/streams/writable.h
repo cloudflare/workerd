@@ -116,7 +116,11 @@ public:
   // Remove and return the underlying implementation of this WritableStream. Throw a TypeError if
   // this WritableStream is locked or closed, otherwise this WritableStream becomes immediately
   // locked and closed. If this writable stream is errored, throw the stored error.
-  virtual kj::Own<WritableStreamSink> removeSink(jsg::Lock& js);
+  // TODO(cleanup): There are a couple of places where we need to convert to using detach()
+  // or the inner removeSink (on WritableStreamController) before we can remove this method.
+  virtual KJ_DEPRECATED("Use detach() instead") kj::Own<WritableStreamSink> removeSink(
+      jsg::Lock& js);
+  virtual void detach(jsg::Lock& js);
 
   // ---------------------------------------------------------------------------
   // JS interface

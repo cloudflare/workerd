@@ -250,6 +250,10 @@ kj::Own<WritableStreamSink> WritableStream::removeSink(jsg::Lock& js) {
       "This WritableStream does not have a WritableStreamSink");
 }
 
+void WritableStream::detach(jsg::Lock& js) {
+  getController().detach(js);
+}
+
 jsg::Promise<void> WritableStream::abort(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> reason) {
