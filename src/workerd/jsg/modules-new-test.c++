@@ -1863,5 +1863,36 @@ KJ_TEST("Import attributes are currently unsupported") {
   });
 }
 
+// ======================================================================================
+KJ_TEST("Using a deferred eval callback works") {
+  ResolveObserver resolveObserver;
+  CompilationObserver compilationObserver;
+  ModuleBundle::BundleBuilder builder;
+
+  auto foo = kj::str("export default 1;");
+  builder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+
+  bool called = false;
+  auto registry = ModuleRegistry::Builder(resolveObserver).add(builder.finish())
+      .setEvalCallback([&called](Lock& js, const Module& module, auto v8Module,
+           const auto& observer) {
+    called = true;
+    return js.resolvedPromise<Value>(js.v8Ref<v8::Value>(js.num(123)));
+  }).finish();
+
+  PREAMBLE([&](Lock& js) {
+    registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      ModuleRegistry::resolve(js, "foo", "default"_kjc);
+      KJ_ASSERT(false);
+    }, [&](auto exception) {});
+
+    // We don't care about the specific exception above. We only want to know that
+    // the eval callback was invoked.
+    KJ_ASSERT(called);
+  });
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

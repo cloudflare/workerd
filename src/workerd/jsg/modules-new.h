@@ -171,8 +171,25 @@ public:
     // This is generally only suitable for worker-bundle entry point modules,
     // but could in theory be applied to any module.
     MAIN = 1 << 0,
+    // A Module with the ESM flag set is interpreted as an ECMAScript module.
     ESM = 1 << 1,
+    // A Module with the EVAL flag set is interpreted as a module that requires
+    // code evaluation to complete. This is generally used for synthetic modules
+    // that require loading outside of the current request context. The eval
+    // callback must be set or the flag is ignored.
+    EVAL = 1 << 2,
   };
+
+  // The EvalCallback is used to to ensure evaluation of a module outside of a
+  // request context, when necessary. If the EvalCallback is not set, then the
+  // Flag::EVAL on a module is ignored. If the EvalCallback is set, then any
+  // Modules that have the Flag::EVAL set will have their evaluation deferred
+  // to this callback.
+  using EvalCallback = kj::Function<jsg::Promise<Value>(
+      Lock& js,
+      const Module& module,
+      v8::Local<v8::Module> v8Module,
+      const CompilationObserver& observer)>;
 
   KJ_DISALLOW_COPY_AND_MOVE(Module);
   virtual ~Module() = default;
@@ -185,6 +202,10 @@ public:
 
   // If isMain() returns true, then import.meta.main will be true for this module
   bool isMain() const;
+
+  // If isEval() returns true, then the module requires code evaluation to complete
+  // outside of a request context (that is, it cannot perform certain I/O tasks).
+  bool isEval() const;
 
   // Returns a v8::Module representing this Module definition for the given isolate.
   // The return value follows the established v8 rules for Maybe. If the returned
@@ -217,6 +238,12 @@ public:
   virtual v8::MaybeLocal<v8::Value> evaluate(
       Lock& js,
       v8::Local<v8::Module> module,
+      const CompilationObserver& observer,
+      kj::Maybe<EvalCallback>& maybeEvalCallback) const KJ_WARN_UNUSED_RESULT = 0;
+
+  virtual v8::MaybeLocal<v8::Value> actuallyEvaluate(
+      Lock& js,
+      v8::Local<v8::Module> module,
       const CompilationObserver& observer) const KJ_WARN_UNUSED_RESULT = 0;
 
   // A helper interface that is used to make it easier for a synthetic module
@@ -246,7 +273,8 @@ public:
       Url specifier,
       Type type,
       EvaluateCallback callback,
-      kj::Array<kj::String> namedExports = nullptr);
+      kj::Array<kj::String> namedExports = nullptr,
+      Flags flags = Flags::NONE);
 
   // Creates a new ESM module that takes ownership of the given code array.
   // This is generally used to construct ESM modules from a worker bundle.
@@ -254,7 +282,7 @@ public:
       Url specifier,
       Type type,
       kj::Array<const char> code,
-      Flags flags = Flags::ESM);
+      Flags flags = Flags::NONE);
 
   // Creates a new ESM module that does not take ownership of the given code
   // array. This is used to construct ESM modules from compiled-in built-in
@@ -501,6 +529,7 @@ private:
     kBundleCount
   };
 public:
+  using EvalCallback = Module::EvalCallback;
 
   class Builder final {
   public:
@@ -525,6 +554,8 @@ public:
 
     kj::Own<ModuleRegistry> finish() KJ_WARN_UNUSED_RESULT;
 
+    Builder& setEvalCallback(EvalCallback callback) KJ_LIFETIMEBOUND;
+
   private:
     bool allowsFallback() const;
 
@@ -533,6 +564,7 @@ public:
     kj::Maybe<ModuleRegistry&> maybeParent;
     const Options options;
     kj::Vector<kj::Own<ModuleBundle>> bundles_[ModuleRegistry::kBundleCount];
+    kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
     friend class ModuleRegistry;
   };
 
@@ -553,6 +585,8 @@ public:
       ResolveContext::Source source = ResolveContext::Source::INTERNAL,
       kj::Maybe<const Url&> maybeReferrer = kj::none);
 
+  kj::Maybe<EvalCallback>& getEvalCallback() { return maybeEvalCallback; }
+
   // The constructor is public because kj::heap requires is to be. Do not
   // use the constructor directly. Use the ModuleRegistry::Builder
   ModuleRegistry(ModuleRegistry::Builder* builder);
@@ -563,6 +597,7 @@ private:
   kj::Maybe<ModuleRegistry&> maybeParent;
   // One slot for each of ModuleBundle::Type
   kj::Array<kj::Own<ModuleBundle>> bundles_[kBundleCount];
+  kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
 };
 
 constexpr ModuleRegistry::Builder::Options operator|(
