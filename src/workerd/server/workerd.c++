@@ -360,6 +360,10 @@ public:
   }
 
   kj::Array<const char> readContent() const override {
+    uint64_t size = file->stat().size;
+    if (!size) {
+      return nullptr;
+    }
     return file->mmap(0, file->stat().size).releaseAsChars();
   }
 
