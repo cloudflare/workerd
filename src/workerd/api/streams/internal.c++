@@ -1313,6 +1313,7 @@ void WritableStreamInternalController::detach(jsg::Lock& js) {
     }
     KJ_CASE_ONEOF(writable, Writable) {
       state.init<StreamStates::Closed>();
+      return;
     }
   }
 
