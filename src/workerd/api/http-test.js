@@ -228,7 +228,7 @@ export const cacheMode = {
       message: 'Unsupported cache mode: unsupported',
     });
 
-    // Any value other that undefined is currently not supported
+    // Any value other than undefined is currently not supported
     // TODO(soon): The no-store and no-cache values will be supported
     // soon, at which time this test will need to be updated.
     await assert.rejects((async () => {
