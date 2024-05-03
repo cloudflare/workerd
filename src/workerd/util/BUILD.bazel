@@ -41,6 +41,7 @@ wd_cc_library(
             "sentry.h",
             "autogate.h",
             "perfetto-tracing.h",
+            "url-wrapper.h",
             "use-perfetto-categories.h",
         ],
     ),
@@ -48,6 +49,18 @@ wd_cc_library(
     deps = [
         "@capnp-cpp//src/kj/compat:kj-http",
         "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_cc_library(
+    name = "url-wrapper",
+    srcs = ["url-wrapper.c++"],
+    hdrs = ["url-wrapper.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj/compat:kj-http",
+        "//src/workerd/jsg:url",
+        "//src/workerd/jsg:jsg",
     ],
 )
 
@@ -143,7 +156,7 @@ exports_files(["autogate.h"])
     ],
 ) for f in glob(
     ["*-test.c++"],
-    exclude = ["sqlite-*.c++"],
+    exclude = ["sqlite-*.c++","url-wrapper-*.c++"],
 )]
 
 kj_test(
@@ -157,5 +170,12 @@ kj_test(
     src = "sqlite-kv-test.c++",
     deps = [
         ":sqlite",
+    ],
+)
+
+kj_test(
+    src = "url-wrapper-test.c++",
+    deps = [
+        ":url-wrapper",
     ],
 )
