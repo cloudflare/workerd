@@ -1805,7 +1805,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
   jsRequest->shallowCopyHeadersTo(headers);
 
   // If the jsRequest has a CacheMode, we need to handle that here.
-  // Currently, the ony cache mode we support is undefined, but we will soon support
+  // Currently, the only cache mode we support is undefined, but we will soon support
   // no-cache and no-store. These additional modes will be hidden behind an autogate.
   if (jsRequest->getCacheMode() != Request::CacheMode::NONE) {
     return js.rejectedPromise<jsg::Ref<Response>>(
