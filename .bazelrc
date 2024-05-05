@@ -69,7 +69,7 @@ build:thin-lto --linkopt='-flto=thin'
 # configuration used for performance profiling
 build:profile --config=thin-lto
 build:profile --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
-build:profile --copt='-g1' --copt="-fdebug-info-for-profiling"
+build:profile --config=limited-dbg-info
 build:profile --strip=never
 
 # configuration used for performance benchmarking is the same as profiling for consistency
@@ -87,9 +87,13 @@ build:unix --cxxopt='-fvisibility-inlines-hidden' --host_cxxopt='-fvisibility-in
 
 # Define a config mode which is fastbuild but with basic debug info.
 build:fastdbg -c fastbuild
-build:fastdbg --cxxopt='-g1' --host_cxxopt='-g1'
+build:fastdbg --config=limited-dbg-info
+build:fastdbg --config=rust-debug
 build:fastdbg --strip=never
 build:fastdbg --//:dead_strip=False
+
+# provide a limited amount of debug info, sufficient for qualified stack traces.
+build:limited-dbg-info --copt='-g1' --copt="-fdebug-info-for-profiling"
 
 # Miscellaneous platform-independent options
 build --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True
@@ -99,15 +103,24 @@ build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 # Need to disable debug-assertions for fastbuild, should be off automatically for opt. As long as
 # rust-level LTO is not enabled, LLVM bitcode is not needed so -C embed-bitcode=n provides a free
 # improvement to build speed and rust-deps code size.
-build --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,debug-assertions=n,-C,embed-bitcode=n
+# Using extra_rustc_flag for non-exec flags so they can be overwritten selectively.
+build --@rules_rust//:extra_rustc_flag=-Cembed-bitcode=n
+build --@rules_rust//:extra_rustc_flag=-Cpanic=abort
+build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
 build --@rules_rust//:extra_exec_rustc_flags=-C,panic=abort,-C,debug-assertions=n,-C,embed-bitcode=n
 
-build:fastdbg --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1,-C,embed-bitcode=n
-build:fastdbg --@rules_rust//:extra_exec_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1,-C,embed-bitcode=n
+# We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
+# the right setting, but unfortunately we can't set that directly.
+build:rust-debug --@rules_rust//:extra_rustc_flag=-Cpanic=unwind
+build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=y
+# Use the equivalent of -g/-g2 for Rust here, this is necessary to get qualified stack traces while
+# -Zdebug-info-for-profiling is unavailable. Unlike gcc/clang, Rust defaults to -g3 otherwise.
+build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebuginfo=1
+build:rust-debug --@rules_rust//:extra_rustc_flag=-Cstrip=none
 
 # Adding -C lto=thin here would improve binary size significantly – disable it for now due to
 # compile errors and wrong code generation when bazel and rust use different LLVM versions.
-build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1,-C,embed-bitcode=n
+build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 
 # common sanitizers options
 build:sanitizer-common --@workerd//src/workerd/server:use_tcmalloc=False
@@ -162,6 +175,11 @@ build:macos --macos_minimum_os=11.5 --host_macos_minimum_os=11.5
 # is easier than adding the flag only on x86. See https://reviews.llvm.org/D122258 for detailed
 # information on the flag.
 build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
+
+# Unfortunately experimental_objc_fastbuild_options does not respect options set before and
+# overwrites them. This causes mysterious binary size bloat for fastbuild-based configurations on
+# macOS when enabling some optimizations. Turn it in into a no-op.
+build:mac --experimental_objc_fastbuild_options=""
 
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
 # macOS links with dynamic libc++ by default, which has good backwards compatibility.
@@ -228,7 +246,7 @@ build:windows --copt='/Zc:dllexportInlines-'
 
 # Release configuration.
 build:release -c opt
-build:release --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1,-C,embed-bitcode=n
+build:release --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 
 # enable -O3 for the release configuration. Based on benchmarking there is little difference in
 # performance, but -O3 should generally be expected to be faster for at least parts of the workerd API.
