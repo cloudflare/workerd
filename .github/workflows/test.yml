@@ -125,7 +125,7 @@ jobs:
           build:limit-storage --build_tag_filters=-off-by-default,-benchmark
           build:limit-storage --copt="-g1"
           build:limit-storage --copt="-fno-standalone-debug"
-          build:limit-storage --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=limited,-C,embed-bitcode=n
+          build:limit-storage --config=rust-debug
           build:asan --config=limit-storage
           build:debug --config=limit-storage
           EOF
