@@ -26,10 +26,10 @@ let LOADED_BASELINE_SNAPSHOT;
  */
 
 /**
- * _createPyodideModule and pyodideWasmModule together are produced by the
+ * createPyodideModule and pyodideWasmModule together are produced by the
  * Emscripten linker
  */
-import { _createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
+import { default as createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
 
 const TOP_LEVEL_SNAPSHOT =
   ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;

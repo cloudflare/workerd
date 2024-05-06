@@ -77,56 +77,6 @@ copy_file(
     out = "generated/pyodide-lock.json",
 )
 
-# pyodide.asm.js patches
-# TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
-
-PRELUDE = """
-import { newWasmModule, monotonicDateNow, wasmInstantiate, getRandomValues } from "pyodide-internal:builtin_wrappers";
-
-// Pyodide uses `new URL(some_url, location)` to resolve the path in `loadPackage`. Setting
-// `location = undefined` makes this throw an error if some_url is not an absolute url. Which is what
-// we want here, it doesn't make sense to load a package from a relative URL.
-const location = undefined;
-
-function addEventListener(){}
-
-function reportUndefinedSymbolsNoOp() {}
-"""
-
-REPLACEMENTS = [
-    [
-        # Convert pyodide.asm.js into an es6 module.
-        # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
-        # automatically.
-        "var _createPyodideModule",
-        PRELUDE + "export const _createPyodideModule",
-    ],
-    [
-        "globalThis._createPyodideModule = _createPyodideModule;",
-        "",
-    ],
-    [
-        "new WebAssembly.Module",
-        "newWasmModule",
-    ],
-    [
-        "WebAssembly.instantiate",
-        "wasmInstantiate",
-    ],
-    [
-        "Date.now",
-        "monotonicDateNow",
-    ],
-    [
-        "reportUndefinedSymbols()",
-        "reportUndefinedSymbolsNoOp()"
-    ],
-    [
-        "crypto.getRandomValues(",
-        "getRandomValues(Module, ",
-    ]
-]
-
 load("//:build/pyodide_bucket.bzl", "PYODIDE_PACKAGE_BUCKET_URL")
 
 PYODIDE_BUCKET_MODULE = json.encode({
@@ -139,11 +89,10 @@ write_file(
     content = [PYODIDE_BUCKET_MODULE],
 )
 
-expand_template(
+copy_file(
     name = "pyodide.asm.js@rule",
     out = "generated/pyodide.asm.js",
-    substitutions = dict(REPLACEMENTS),
-    template = "@pyodide//:pyodide/pyodide.asm.js",
+    src = "@pyodide//:pyodide/pyodide.asm.js",
 )
 
 wd_js_bundle(
