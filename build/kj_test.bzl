@@ -18,5 +18,5 @@ def kj_test(
             "//conditions:default": [""],
         }),
         data = data,
-        tags = tags,
+        tags = tags + ["no-cache"],
     )

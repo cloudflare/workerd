@@ -163,6 +163,12 @@ build:macos --macos_minimum_os=11.5 --host_macos_minimum_os=11.5
 # information on the flag.
 build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
 
+# TODO: WIP. Exploratory change only for now, merits discussion.
+build:macos --copt='-UDEBUG'
+build:unix --copt='-DNDEBUG'
+# TODO: File bazel issue, drop this flag.
+build:macos --experimental_objc_fastbuild_options=''
+
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
 # macOS links with dynamic libc++ by default, which has good backwards compatibility.
 build:linux --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
