@@ -137,10 +137,9 @@ jsg::Ref<TransformStream> TransformStream::constructor(
 jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
     jsg::Lock& js,
     jsg::Optional<IdentityTransformStream::QueuingStrategy> maybeQueuingStrategy) {
-  auto readableSide = kj::refcounted<IdentityTransformStreamImpl>();
-  auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();
+  auto pipe = newIdentityPipe();
 
   kj::Maybe<uint64_t> maybeHighWaterMark = kj::none;
   KJ_IF_SOME(queuingStrategy, maybeQueuingStrategy) {
@@ -148,8 +147,8 @@ jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
   }
 
   return jsg::alloc<IdentityTransformStream>(
-      jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide), maybeHighWaterMark));
+      jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
+      jsg::alloc<WritableStream>(ioContext, kj::mv(pipe.out), maybeHighWaterMark));
 }
 
 jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
@@ -161,10 +160,8 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
   JSG_REQUIRE(expectedLength <= MAX_SAFE_INTEGER, TypeError,
       "FixedLengthStream requires an integer expected length less than 2^53.");
 
-  auto readableSide = kj::refcounted<IdentityTransformStreamImpl>(uint64_t(expectedLength));
-  auto writableSide = kj::addRef(*readableSide);
-
   auto& ioContext = IoContext::current();
+  auto pipe = newIdentityPipe(uint64_t(expectedLength));
 
   kj::Maybe<uint64_t> maybeHighWaterMark = kj::none;
   // For a FixedLengthStream we do not want a highWaterMark higher than the expectedLength.
@@ -175,8 +172,17 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
   }
 
   return jsg::alloc<FixedLengthStream>(
-      jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide), maybeHighWaterMark));
+      jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
+      jsg::alloc<WritableStream>(ioContext, kj::mv(pipe.out), maybeHighWaterMark));
+}
+
+OneWayPipe newIdentityPipe(kj::Maybe<uint64_t> expectedLength) {
+  auto readableSide = kj::refcounted<IdentityTransformStreamImpl>(expectedLength);
+  auto writableSide = kj::addRef(*readableSide);
+  return OneWayPipe {
+    .in = kj::mv(readableSide),
+    .out = kj::mv(writableSide)
+  };
 }
 
 }  // namespace workerd::api

@@ -119,4 +119,11 @@ public:
   }
 };
 
+struct OneWayPipe {
+  kj::Own<ReadableStreamSource> in;
+  kj::Own<WritableStreamSink> out;
+};
+
+OneWayPipe newIdentityPipe(kj::Maybe<uint64_t> expectedLength = kj::none);
+
 }  // namespace workerd::api
