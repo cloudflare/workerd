@@ -20,7 +20,7 @@ from .import_patch_manager import block_calls
 import sys
 
 RUST_PACKAGES = ["pydantic_core", "tiktoken"]
-MODULES_TO_PATCH = ["random", "numpy.random", "numpy.random.mtrand"] + RUST_PACKAGES
+MODULES_TO_PATCH = ["random", "numpy.random", "numpy.random.mtrand", "tempfile"] + RUST_PACKAGES
 
 # Control number of allowed entropy calls.
 
@@ -131,3 +131,40 @@ def pydantic_core_context(module):
                 module.validate_core_schema(None)
         except module.SchemaError:
             pass
+
+
+class DeterministicRandomNameSequence:
+    characters = "abcdefghijklmnopqrstuvwxyz0123456789_"
+
+    def __init__(self):
+        self.index = 0
+
+    def __iter__(self):
+        return self
+
+    def index_to_chars(self):
+        base = len(self.characters)
+        idx = self.index
+        s = []
+        for _ in range(8):
+            s.append(self.characters[idx % base])
+            idx //= base
+        return "".join(s)
+
+    def __next__(self):
+        self.index += 1
+        return self.index_to_chars()
+
+
+@contextmanager
+def tempfile_context(module):
+    yield
+    module._orig_RandomNameSequence = module._RandomNameSequence
+    module._RandomNameSequence = DeterministicRandomNameSequence
+
+
+def tempfile_restore_random_name_sequence():
+    import tempfile
+
+    tempfile._RandomNameSequence = tempfile._orig_RandomNameSequence
+    del tempfile._orig_RandomNameSequence
