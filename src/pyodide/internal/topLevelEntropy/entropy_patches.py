@@ -23,11 +23,15 @@ handled in _cloudflare_random_overlays.
 """
 
 import _random
-import sys
 import os
+import sys
 from functools import wraps
 
-from .entropy_import_context import is_bad_entropy_enabled, get_entropy_import_context
+from .entropy_import_context import (
+    is_bad_entropy_enabled,
+    get_entropy_import_context,
+    tempfile_restore_random_name_sequence,
+)
 from .import_patch_manager import (
     install_import_patch_manager,
     remove_import_patch_manager,
@@ -132,3 +136,4 @@ def before_first_request():
     restore_random_seed()
     remove_import_patch_manager()
     reseed_rng()
+    tempfile_restore_random_name_sequence()
