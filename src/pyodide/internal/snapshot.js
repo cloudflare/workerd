@@ -24,12 +24,6 @@ let LOADED_BASELINE_SNAPSHOT;
  * `pyodide.loadPackage`. In trade we add memory snapshots here.
  */
 
-/**
- * _createPyodideModule and pyodideWasmModule together are produced by the
- * Emscripten linker
- */
-import { _createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
-
 const TOP_LEVEL_SNAPSHOT =
   ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
 const SHOULD_UPLOAD_SNAPSHOT =
