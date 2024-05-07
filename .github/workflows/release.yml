@@ -108,16 +108,11 @@ jobs:
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
           fi
       - name: Bazel build
+        # Strip debug info here – we don't generate debug info but some is pulled in from external
+        # static libraries, for example the Rust STL. This is equivalent to the -Wl,-S linker
+        # option, symbols will not be removed.
         run: |
-          bazelisk build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=${{ matrix.bazel-config }} //src/workerd/server:workerd
-      - name: Strip debug symbols
-        if: runner.os != 'Windows'
-        run: |
-          # bazel makes the output directory read-only, fix permissions for binary
-          chmod +w bazel-bin/src/workerd/server/workerd
-          # Strip debug information from the binary, this is acceptable as debug symbols are not
-          # generated for the release configuration. Regular symbols are still included.
-          strip -S bazel-bin/src/workerd/server/workerd
+          bazelisk build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=${{ matrix.bazel-config }} //src/workerd/server:workerd
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
