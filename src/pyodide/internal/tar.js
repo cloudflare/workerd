@@ -1,4 +1,4 @@
-import { default as Reader } from "pyodide-internal:packages_tar_reader";
+import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 
 // This is based on the info about the tar file format on wikipedia
 // And some trial and error with real tar files.
@@ -19,7 +19,7 @@ function decodeNumber(buf, offset, size) {
   return parseInt(decodeField(buf, offset, size), 8);
 }
 
-function decodeHeader(buf) {
+function decodeHeader(buf, reader) {
   const nameBase = decodeField(buf, 0, 100);
   const namePrefix = decodeField(buf, 345, 155);
   let path = namePrefix + nameBase;
@@ -40,10 +40,11 @@ function decodeHeader(buf) {
     type,
     parts: [],
     children: undefined,
+    reader,
   };
 }
 
-export function parseTarInfo() {
+export function parseTarInfo(reader = TarReader) {
   const directories = [];
   const soFiles = [];
   const root = {
@@ -55,14 +56,15 @@ export function parseTarInfo() {
     path: "",
     name: "",
     parts: [],
+    reader,
   };
   let directory = root;
   const buf = new Uint8Array(512);
   let offset = 0;
   let longName = null; // if truthy, overwrites the filename of the next header
   while (true) {
-    Reader.read(offset, buf);
-    const info = decodeHeader(buf);
+    reader.read(offset, buf);
+    const info = decodeHeader(buf, reader);
     if (isNaN(info.mode)) {
       // Invalid mode means we're done
       return [root, soFiles];
@@ -87,7 +89,7 @@ export function parseTarInfo() {
     }
     if (info.type === "L") {
       const buf = new Uint8Array(info.size);
-      Reader.read(contentsOffset, buf);
+      reader.read(contentsOffset, buf);
       longName = decodeString(buf);
       continue;
     }

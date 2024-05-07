@@ -3,7 +3,6 @@ import { createTarFS } from "pyodide-internal:tarfs";
 import { createMetadataFS } from "pyodide-internal:metadatafs";
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { REQUIREMENTS, WORKERD_INDEX_URL } from "pyodide-internal:metadata";
-import { patchFetch } from "pyodide-internal:builtin_wrappers";
 import { simpleRunPython } from "pyodide-internal:util";
 
 const canonicalizeNameRegex = /[-_.]+/g;
@@ -24,6 +23,86 @@ const STDLIB_PACKAGES = Object.values(LOCKFILE.packages)
   .map(({ name }) => canonicalizePackageName(name));
 
 /**
+ * SitePackagesDir keeps track of the virtualized view of the site-packages
+ * directory generated for each worker.
+ */
+class SitePackagesDir {
+  constructor() {
+    this.rootInfo = {
+      children: new Map(),
+      mode: 0o777,
+      type: 5,
+      modtime: 0,
+      size: 0,
+      path: "",
+      name: "",
+      parts: [],
+    };
+    this.soFiles = [];
+    this.loadedRequirements = new Set();
+  }
+
+  /**
+   * mountOverlay "overlays" a directory onto the site-packages root directory.
+   * All files and subdirectories in the overlay will be accessible at site-packages by the worker.
+   * If a file or directory already exists, an error is thrown.
+   * @param {TarInfo} overlayInfo The directory that is to be "copied" into site-packages
+   */
+  mountOverlay(overlayInfo) {
+    overlayInfo.children.forEach((val, key) => {
+      if (this.rootInfo.children.has(key)) {
+        throw new Error(
+          `File/folder ${key} being written by multiple packages`,
+        );
+      }
+      this.rootInfo.children.set(key, val);
+    });
+  }
+
+  /**
+   * A small bundle contains just a single package. The entire bundle will be overlaid onto site-packages.
+   * A small bundle can basically be thought of as a wheel.
+   * @param {TarInfo} tarInfo The root tarInfo for the small bundle (See tar.js)
+   * @param {List<String>} soFiles A list of .so files contained in the small bundle
+   * @param {String} requirement The canonicalized package name this small bundle corresponds to
+   */
+  addSmallBundle(tarInfo, soFiles, requirement) {
+    for (const soFile of soFiles) {
+      this.soFiles.push(soFile.split("/"));
+    }
+    this.mountOverlay(tarInfo);
+    this.loadedRequirements.add(requirement);
+  }
+
+  /**
+   * A big bundle contains multiple packages, each package contained in a folder whose name is the canonicalized package name.
+   * This function overlays the requested packages onto the site-packages directory.
+   * @param {TarInfo} tarInfo The root tarInfo for the big bundle (See tar.js)
+   * @param {List<String>} soFiles A list of .so files contained in the big bundle
+   * @param {List<String>} requirements canonicalized list of packages to pick from the big bundle
+   */
+  addBigBundle(tarInfo, soFiles, requirements) {
+    // add all the .so files we will need to preload from the big bundle
+    for (const soFile of soFiles) {
+      // If folder is in list of requirements include .so file in list to preload.
+      const [pkg, ...rest] = soFile.split("/");
+      if (requirements.has(pkg)) {
+        this.soFiles.push(rest);
+      }
+    }
+
+    for (const req of requirements) {
+      const child = tarInfo.children.get(req);
+      if (!child) {
+        throw new Error(`Requirement ${req} not found in pyodide packages tar`);
+      }
+      this.mountOverlay(child);
+      this.loadedRequirements.add(req);
+    }
+  }
+};
+
+/**
  * This stitches together the view of the site packages directory. Each
  * requirement corresponds to a folder in the original tar file. For each
  * requirement in the list we grab the corresponding folder and stitch them
@@ -33,52 +112,19 @@ const STDLIB_PACKAGES = Object.values(LOCKFILE.packages)
  * directory so we can preload them.
  */
 export function buildSitePackages(requirements) {
-  const [origTarInfo, origSoFiles] = parseTarInfo();
-  // We'd like to set USE_LOAD_PACKAGE = IS_WORKERD but we also build a funny
-  // workerd with the downstream package set. We can distinguish between them by
-  // looking at the contents. This uses the fact that the downstream set is
-  // larger, but there are a lot of differences...
-  const USE_LOAD_PACKAGE = origTarInfo.children.size < 10;
-  if (USE_LOAD_PACKAGE) {
-    requirements = new Set([...STDLIB_PACKAGES]);
-  } else {
-    requirements = new Set([...STDLIB_PACKAGES, ...requirements]);
-  }
-  const soFiles = [];
-  for (const soFile of origSoFiles) {
-    // If folder is in list of requirements include .so file in list to preload.
-    const [pkg, ...rest] = soFile.split("/");
-    if (requirements.has(pkg)) {
-      soFiles.push(rest);
-    }
-  }
-  const newTarInfo = {
-    children: new Map(),
-    mode: 0o777,
-    type: 5,
-    modtime: 0,
-    size: 0,
-    path: "",
-    name: "",
-    parts: [],
-  };
+  const [bigTarInfo, bigTarSoFiles] = parseTarInfo();
 
-  for (const req of requirements) {
-    const child = origTarInfo.children.get(req);
-    if (!child) {
-      throw new Error(`Requirement ${req} not found in pyodide packages tar`);
-    }
-    child.children.forEach((val, key) => {
-      if (newTarInfo.children.has(key)) {
-        throw new Error(
-          `File/folder ${key} being written by multiple packages`,
-        );
-      }
-      newTarInfo.children.set(key, val);
-    });
+  let LOAD_WHEELS_FROM_R2 = true;
+  let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
+  if (bigTarInfo.children.size > 10) {
+    LOAD_WHEELS_FROM_R2 = false;
+    requirements.forEach(r => requirementsInBigBundle.add(r));
   }
 
-  return [newTarInfo, soFiles, USE_LOAD_PACKAGE];
+  const res = new SitePackagesDir();
+  res.addBigBundle(bigTarInfo, bigTarSoFiles, requirementsInBigBundle);
+
+  return [res, LOAD_WHEELS_FROM_R2];
 }
 
 /**
@@ -89,23 +135,12 @@ export function buildSitePackages(requirements) {
  * TODO: stop using loadPackage in workerd.
  */
 export function patchLoadPackage(pyodide) {
-  if (!USE_LOAD_PACKAGE) {
-    pyodide.loadPackage = disabledLoadPackage;
-    return;
-  }
-  patchFetch(new URL(WORKERD_INDEX_URL).origin);
-  const origLoadPackage = pyodide.loadPackage;
-  function loadPackage(packages, options) {
-    return origLoadPackage(packages, {
-      checkIntegrity: false,
-      ...options,
-    });
-  }
-  pyodide.loadPackage = loadPackage;
+  pyodide.loadPackage = disabledLoadPackage;
+  return;
 }
 
 function disabledLoadPackage() {
-  throw new Error("We only use loadPackage in workerd");
+  throw new Error("pyodide.loadPackage is disabled because packages are encoded in the binary");
 }
 
 /**
@@ -138,7 +173,12 @@ export function mountLib(Module, info) {
   const site_packages = getSitePackagesPath(Module);
   Module.FS.mkdirTree(site_packages);
   Module.FS.mkdirTree("/session/metadata");
-  Module.FS.mount(tarFS, { info }, site_packages);
+  if (!LOAD_WHEELS_FROM_R2) {
+    // if we are not loading additional wheels from R2, then we're done
+    // with site-packages and we can mount it here. Otherwise, we must mount it in
+    // loadPackages().
+    Module.FS.mount(tarFS, { info }, site_packages);
+  }
   Module.FS.mount(mdFS, {}, "/session/metadata");
 }
 
@@ -191,5 +231,4 @@ function addPackageToLoad(lockfile, name, toLoad) {
 
 export { REQUIREMENTS };
 export const TRANSITIVE_REQUIREMENTS = getTransitiveRequirements();
-export const [SITE_PACKAGES_INFO, SITE_PACKAGES_SO_FILES, USE_LOAD_PACKAGE] =
-  buildSitePackages(TRANSITIVE_REQUIREMENTS);
+export const [SITE_PACKAGES, LOAD_WHEELS_FROM_R2] = buildSitePackages(TRANSITIVE_REQUIREMENTS);

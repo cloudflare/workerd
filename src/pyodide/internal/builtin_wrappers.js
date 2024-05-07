@@ -114,25 +114,3 @@ export async function wasmInstantiate(module, imports) {
   const instance = new WebAssembly.Instance(module, imports);
   return { module, instance };
 }
-
-export function patchFetch(origin) {
-  // Patch fetch to first go through disk cache, but only when url points to origin
-  const origFetch = globalThis.fetch;
-  globalThis.fetch = async function (url, options) {
-    if (url.origin !== origin) {
-      return origFetch(url, options);
-    }
-
-    const fileName = url.pathname.substring(url.pathname.lastIndexOf("/") + 1);
-    const cached = DiskCache.get(fileName);
-    if (cached) {
-      return new Response(cached);
-    }
-
-    // we didn't find it in the disk cache, continue with original fetch
-    const response = await origFetch(url, options);
-    const arrayBuffer = await response.arrayBuffer();
-    DiskCache.put(fileName, arrayBuffer);
-    return new Response(arrayBuffer);
-  };
-}

@@ -8,9 +8,7 @@ import {
 } from "pyodide-internal:snapshot";
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
-  REQUIREMENTS,
   TRANSITIVE_REQUIREMENTS,
-  USE_LOAD_PACKAGE,
   patchLoadPackage,
 } from "pyodide-internal:setupPackages";
 import {
@@ -23,6 +21,7 @@ import {
 import { reportError } from "pyodide-internal:util";
 import { default as Limiter } from "pyodide-internal:limiter";
 import { entropyBeforeRequest } from "pyodide-internal:topLevelEntropy/lib";
+import { loadPackages } from "pyodide-internal:loadPackage";
 
 function pyimportMainModule(pyodide) {
   if (!MAIN_MODULE_NAME.endsWith(".py")) {
@@ -85,14 +84,11 @@ async function applyPatch(pyodide, patchName) {
 export async function setupPackages(pyodide) {
   return await enterJaegerSpan("setup_packages", async () => {
     patchLoadPackage(pyodide);
-    if (USE_LOAD_PACKAGE) {
-      await pyodide.loadPackage(REQUIREMENTS);
-    }
+    await loadPackages(pyodide._module, TRANSITIVE_REQUIREMENTS);
     // install any extra packages into the site-packages directory, so calculate where that is.
     const pymajor = pyodide._module._py_version_major();
     const pyminor = pyodide._module._py_version_minor();
     pyodide.site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
-
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has("aiohttp")) {
       await applyPatch(pyodide, "aiohttp");

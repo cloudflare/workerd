@@ -1,7 +1,8 @@
 Error.stackTraceLimit = Infinity;
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
-  SITE_PACKAGES_INFO,
+  TRANSITIVE_REQUIREMENTS,
+  SITE_PACKAGES,
   adjustSysPath,
   mountLib,
 } from "pyodide-internal:setupPackages";
@@ -187,7 +188,7 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
  */
 async function prepareWasmLinearMemory(Module) {
   // Note: if we are restoring from a snapshot, runtime is not initialized yet.
-  mountLib(Module, SITE_PACKAGES_INFO);
+  mountLib(Module, SITE_PACKAGES.rootInfo);
   entropyMountFiles(Module);
   if (SHOULD_RESTORE_SNAPSHOT) {
     restoreSnapshot(Module);

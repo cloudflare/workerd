@@ -1,0 +1,86 @@
+/**
+ * This file contains code that roughly replaces pyodide.loadPackage, with workerd-specific
+ * optimizations:
+ * - Wheels are decompressed with a DecompressionStream instead of in Python
+ * - Wheels are overlaid onto the site-packages dir instead of actually being copied
+ * - Wheels are fetched from a disk cache if available.
+ *
+ * Note that loadPackages is only used in local dev for now, internally we use the full big bundle
+ * that contains all the packages ready to go.
+ */
+
+import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
+import { WORKERD_INDEX_URL } from "pyodide-internal:metadata";
+import { SITE_PACKAGES, LOAD_WHEELS_FROM_R2, getSitePackagesPath } from "pyodide-internal:setupPackages";
+import { parseTarInfo } from "pyodide-internal:tar";
+import { default as DiskCache } from "pyodide-internal:disk_cache";
+import { createTarFS } from "pyodide-internal:tarfs";
+
+async function loadBundle(requirement) {
+  // first check if the disk cache has what we want
+  const filename = LOCKFILE["packages"][requirement]["file_name"];
+  const cached = DiskCache.get(filename);
+  if (cached) {
+    return [requirement, cached];
+  }
+
+  // we didn't find it in the disk cache, continue with original fetch
+  const url = new URL(WORKERD_INDEX_URL + filename);
+  const response = await fetch(url);
+
+  const arrayBuffer = await new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+
+  DiskCache.put(filename, arrayBuffer);
+  return [requirement, arrayBuffer];
+};
+
+/**
+ * ArrayBufferReader wraps around an arrayBuffer in a way that tar.js is able to read from
+ */
+class ArrayBufferReader {
+  constructor(arrayBuffer) {
+    this.arrayBuffer = arrayBuffer;
+  }
+
+  read(offset, buf){
+    // buf is a Uint8Array
+    const size = this.arrayBuffer.byteLength;
+    if (offset >= size || offset < 0) {
+      return 0;
+    }
+    let toCopy = buf.length;
+    if (size - offset < toCopy) {
+      toCopy = size - offset;
+    }
+    buf.set(new Uint8Array(this.arrayBuffer, offset, toCopy));
+    return toCopy;
+  }
+}
+
+export async function loadPackages(Module, requirements) {
+  if (!LOAD_WHEELS_FROM_R2) return;
+
+  let loadPromises = [];
+  let loading = [];
+  for (const req of requirements) {
+    if (SITE_PACKAGES.loadedRequirements.has(req)) continue;
+    loadPromises.push(loadBundle(req));
+    loading.push(req);
+  }
+
+  console.log("Loading " + loading.join(", "));
+
+  const buffers = await Promise.all(loadPromises);
+  for (const [requirement, buffer] of buffers) {
+    const reader = new ArrayBufferReader(buffer);
+    const [tarInfo, soFiles] = parseTarInfo(reader);
+    SITE_PACKAGES.addSmallBundle(tarInfo, soFiles, requirement);
+  }
+
+  console.log("Loaded " + loading.join(", "));
+
+  const tarFS = createTarFS(Module);
+  const path = getSitePackagesPath(Module);
+  const info = SITE_PACKAGES.rootInfo;
+  Module.FS.mount(tarFS, { info }, path);
+}

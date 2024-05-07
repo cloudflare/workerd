@@ -2,8 +2,7 @@ import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 import { default as UnsafeEval } from "internal:unsafe-eval";
 import { default as DiskCache } from "pyodide-internal:disk_cache";
 import {
-  SITE_PACKAGES_INFO,
-  SITE_PACKAGES_SO_FILES,
+  SITE_PACKAGES,
   getSitePackagesPath,
 } from "pyodide-internal:setupPackages";
 import { default as TarReader } from "pyodide-internal:packages_tar_reader";
@@ -24,12 +23,6 @@ let LOADED_BASELINE_SNAPSHOT;
  * In particular, it drops the package lock, which disables
  * `pyodide.loadPackage`. In trade we add memory snapshots here.
  */
-
-/**
- * _createPyodideModule and pyodideWasmModule together are produced by the
- * Emscripten linker
- */
-import { _createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
 
 const TOP_LEVEL_SNAPSHOT =
   ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
@@ -119,7 +112,7 @@ const PRELOADED_SO_FILES = [];
  * there.
  */
 export function preloadDynamicLibs(Module) {
-  let SO_FILES_TO_LOAD = SITE_PACKAGES_SO_FILES;
+  let SO_FILES_TO_LOAD = SITE_PACKAGES.soFiles;
   if (LOADED_BASELINE_SNAPSHOT && LOADED_SNAPSHOT_VERSION === 1) {
     // Ideally this should be just
     // [[ '_lzma.so' ], [ '_ssl.so' ]]
@@ -140,7 +133,7 @@ export function preloadDynamicLibs(Module) {
   try {
     const sitePackages = getSitePackagesPath(Module);
     for (const soFile of SO_FILES_TO_LOAD) {
-      let node = SITE_PACKAGES_INFO;
+      let node = SITE_PACKAGES.rootInfo;
       for (const part of soFile) {
         node = node.children.get(part);
       }
