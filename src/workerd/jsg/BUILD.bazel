@@ -124,6 +124,7 @@ npm_package(
     # Required to ensure source files are copied when running internal builds
     # that depend on `workerd` as an external repository
     include_external_repositories = ["workerd"],
+    publishable = False,
     visibility = ["//visibility:public"],
 )
 
