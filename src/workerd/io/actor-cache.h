@@ -494,6 +494,44 @@ private:
     // we won't include this entry as part of our retried delete.
     bool overwritingCountedDelete = false;
 
+    // See `GetWaiter`'s jointReadFailedPromise for details of this fulfiller.
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Exception>>> readFailedFulfiller = kj::none;
+
+    // We may have two separate GetWaiter's waiting on the result of a single key.
+    // In this case, we only want to create a single promise and a single fulfiller, then subsequent
+    // get requests to the same key can just add a branch to listen for failure to get this key.
+    //
+    // Note that if we do a get, followed by a put/delete, then do another get, the second get will
+    // hit cache, and we won't have to create a new GetWaiter.
+    //
+    // TODO(now): I'm not convinced a ForkedPromise is the right way to do this.
+    // Consider the following:
+    //    We have two gets
+    //      1. get("foo", "bar")
+    //      2. get("bar", "baz")
+    //
+    //    Let's say these are made in 2 separate JS calls, so we have two distinct GetWaiters.
+    //    Since there is overlap in the keys (both request "bar"), we have a shared promise for
+    //    key "bar".
+    //
+    //    Now, let's assume the first GetWaiter is part of flush 1, and the second GetWaiter is
+    //    is created while the first flush is active. Suppose the read fails hard and cannot be
+    //    retried. Then we'll use the fulfillers on Entry's "foo" and "bar", remove those entries
+    //    from the dirtyList, and both GetWaiters will have their "failure case" promises resolve.
+    //
+    //    GetWaiter 1 will be cleaned up nicely, since its Entries were removed from the dirtyList,
+    //    but GetWaiter 2 will have left "baz" in the dirtyList as UNKNOWN.
+    //
+    //    We would need some mechanism to then remove "baz" from the dirtyList. The GOOD NEWS is
+    //    we already want to skip storage reads if the waiter has disappeared and the read hasn't
+    //    started, so maybe this isn't an issue... Will circle back to this once I can give early
+    //    cancellation a second look.
+    //
+    // With the above in mind, even if it works, it might just be too clunky of an approach.
+    // It feels a bit weird to be failing a GetWaiter that wasn't actually subject to an in-flight
+    // RPC. Why would we want to fail a pending get() with other keys prior to trying it?
+    kj::Maybe<kj::ForkedPromise<kj::Exception>> readFailedPromise = kj::none;
+
     // If CLEAN, the entry will be in the SharedLru's `cleanList`.
     //
     // If DIRTY, the entry will be in `dirtyList`.
@@ -590,10 +628,31 @@ private:
 
   // A convenient object for holding all our `Entry`s that are waiting on the result of a get() or
   // getMultiple() call. `get()` will only ever have 1 element in `entries`, unlike `getMultiple()`.
+  //
+  // If a read fails during a flush, and the read cannot be retried, then each Entry that we tried
+  // to read from storage will have its `readFailedFulfiller` fulfilled with the Exception.
   class GetWaiter {
   public:
     explicit GetWaiter(ActorCache& cache, kj::Array<kj::Own<Entry>> entries)
-      : cache(cache), entries(kj::mv(entries)) {}
+        : cache(cache), entries(kj::mv(entries)) {
+
+      // Prepare to receive an exception if the read fails.
+      for (auto& entry: this->entries) {
+        KJ_IF_SOME(p, entry->readFailedPromise) {
+          // We already have a ForkedPromise, i.e. a previous GetWaiter is already waiting on the
+          // result for this key from storage. Let's just add a branch to that promise.
+          this->jointReadFailedPromise = this->jointReadFailedPromise.exclusiveJoin(p.addBranch());
+        } else {
+          // This Entry wasn't in cache, so we're the only GetWaiter interested in the result.
+          auto [prom, fulfiller] = kj::newPromiseAndFulfiller<kj::Exception>();
+          entry->readFailedFulfiller = kj::mv(fulfiller);
+          auto forked = prom.fork();
+          auto branch = forked.addBranch();
+          entry->readFailedPromise = kj::mv(forked);
+          this->jointReadFailedPromise = this->jointReadFailedPromise.exclusiveJoin(kj::mv(branch));
+        }
+      }
+    }
     KJ_DISALLOW_COPY_AND_MOVE(GetWaiter);
     ~GetWaiter() noexcept(false) {
       for (auto& entry : entries) {
@@ -611,6 +670,15 @@ private:
     kj::Array<kj::Own<Entry>> getEntries() {
       return KJ_MAP(entry, entries) { return kj::atomicAddRef(*entry); };
     }
+
+    // Each Entry in `entries` will be given a promise fulfiller. This fulfiller will only be used
+    // if the read that should populate the Entry fails. The fulfiller will pass the exception along
+    // to the GetWaiter, which will propagate the exception to the caller of the read.
+    //
+    // Since a GetWaiter could be waiting on many Entries, we take all of the read failure promises
+    // from each Entry and join them into one. This works because if any one Entry fulfills its
+    // "read failed" promise, then we know the entire read failed!
+    kj::Promise<kj::Exception> jointReadFailedPromise = kj::NEVER_DONE;
 
   private:
     ActorCache& cache;
@@ -729,6 +797,9 @@ private:
   };
 
   kj::Maybe<DeleteAllState> requestedDeleteAll;
+
+  // This is true if the previous flush saw the read fail specifically due to a DISCONNECTED error.
+  bool lastReadDisconnected = false;
 
   // Promise for the completion of the previous flush. We can only execute one flushImpl() at a time
   // because we can't allow out-of-order writes.

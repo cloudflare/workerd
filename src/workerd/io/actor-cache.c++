@@ -525,11 +525,20 @@ kj::OneOf<kj::Maybe<ActorCache::Value>, kj::Promise<kj::Maybe<ActorCache::Value>
         return getForPreview(kj::mv(entry), options);
       }
       auto waiter = kj::heap<GetWaiter>(*this, kj::arr(kj::mv(entry)));
-      return readFlush.addBranch().then([waiter = kj::mv(waiter)]() mutable {
+
+      // If this read fails, we'll receive the exception through `jointReadFailedPromise`.
+      auto failProm = waiter->jointReadFailedPromise.then(
+          [](kj::Exception&& e) -> kj::Maybe<kj::Array<const unsigned char>> {
+        kj::throwFatalException(kj::mv(e));
+      });
+
+      // If this read succeeds, readFlush will resolve.
+      auto successProm = readFlush.addBranch().then([waiter = kj::mv(waiter)]() mutable {
         auto entries = waiter->getEntries();
         KJ_ASSERT(entries.size() == 1);
         return entries.front()->getValue();
       });
+      return successProm.exclusiveJoin(kj::mv(failProm));
       // Note that we don't have to add ourselves to cache (addReadResultToCache()) since
       // findInCache() only gives us an UNKNOWN entry if our Entry is already in cache (with an
       // UNKNOWN value because of a list) or if the Entry wasn't in cache, in which case we insert
@@ -543,26 +552,57 @@ kj::Promise<void> ActorCache::syncGet(
   auto key = entry->key.asPtr();
   auto req = client.getRequest(capnp::MessageSize { 4 + key.size() / sizeof(capnp::word), 0 });
   req.setKey(key.asBytes());
-  auto response = co_await req.send().dropPipeline();
+  try {
+    auto response = co_await req.send().dropPipeline();
 
-  if (entry->getValueStatus() != EntryValueStatus::UNKNOWN) {
-    // Ah, we might have gotten filled in by a list operation, that's fine.
-    co_return;
+    if (entry->getValueStatus() != EntryValueStatus::UNKNOWN) {
+      // Ah, we might have gotten filled in by a list operation, that's fine.
+      co_return;
+    }
+
+    if (response.hasValue()) {
+      auto value = kj::heapArray(response.getValue());
+      auto newSize = value.size();
+      auto oldSize = entry->setPresentValue(kj::mv(value));
+      // We need to modify our dirtyList size because we've changed the Value in the Entry.
+      dirtyList.decreaseSize(oldSize);
+      dirtyList.increaseSize(newSize);
+    } else {
+      entry->setAbsentValue();
+    }
+
+    auto lock = lru.cleanList.lockExclusive();
+    processGetResult(lock, *entry);
+  } catch(kj::Exception& e) {
+    // The get failed, we'll determine if we can retry, but if not, we'll remove the relevant
+    // Entry from dirtyList and cache, and inform the GetWaiters of the failure.
+    KJ_DEFER({
+      // We only want to set lastReadFailed on DISCONNECTED exceptions because it indiciates the
+      // operation is retriable. Next time we try to flush we'll know both that the previous read
+      // attempt failed, and that it is retriable.
+      if (e.getType() == kj::Exception::Type::DISCONNECTED) {
+        lastReadDisconnected = true;
+      }
+    });
+
+    if (e.getType() == kj::Exception::Type::DISCONNECTED && !lastReadDisconnected) {
+      // We can just retry the read next flush.
+      kj::throwFatalException(kj::mv(e));
+    }
+
+    // We cannot retry the read and should instead propagate the exception to the GetWaiters.
+    auto lock = lru.cleanList.lockExclusive();
+    // We have to remove all our dirtyList entries!
+    removeEntry(kj::none, *entry);
+    auto& map = currentValues.get(lock);
+    auto& slot = KJ_ASSERT_NONNULL(map.find(entry->key));
+
+    KJ_REQUIRE_NONNULL(entry->readFailedFulfiller)->fulfill(kj::mv(e));
+    if (slot.get() == entry) {
+      // We haven't been replaced in cache, let's remove ourselves!
+      map.erase(slot);
+    }
   }
-
-  if (response.hasValue()) {
-    auto value = kj::heapArray(response.getValue());
-    auto newSize = value.size();
-    auto oldSize = entry->setPresentValue(kj::mv(value));
-    // We need to modify our dirtyList size because we've changed the Value in the Entry.
-    dirtyList.decreaseSize(oldSize);
-    dirtyList.increaseSize(newSize);
-  } else {
-    entry->setAbsentValue();
-  }
-
-  auto lock = lru.cleanList.lockExclusive();
-  processGetResult(lock, *entry);
 }
 
 class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream::Server {
@@ -704,14 +744,32 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
     KJ_FAIL_REQUIRE("NEED TO IMPLEMENT getMultiple() for preview sessions!");
   }
   auto waiter = kj::heap<GetWaiter>(*this, entriesToFetch.releaseAsArray());
-  return readFlush.addBranch().then(
+
+  // If this read fails, we'll receive the exception through `jointReadFailedPromise`.
+  auto failProm = waiter->jointReadFailedPromise.then(
+      [](kj::Exception&& e) -> GetResultList {
+    kj::throwFatalException(kj::mv(e));
+  });
+
+  // If this read succeeds, readFlush will resolve.
+  auto successProm = readFlush.addBranch().then(
       [cachedEntries = kj::mv(cachedEntries), waiter = kj::mv(waiter)]() mutable {
     return GetResultList(kj::mv(cachedEntries), waiter->getEntries(), GetResultList::FORWARD);
   });
+
+  return successProm.exclusiveJoin(kj::mv(failProm));
 }
 
 kj::Promise<void> ActorCache::syncGets(
     rpc::ActorStorage::Operations::Client client, GetFlush getFlush) {
+
+  // We keep a copy of the entries in case we need to hard fail the read attempt and forward the
+  // exception to pending GetWaiters.
+  kj::Vector<kj::Own<Entry>> entries(getFlush.entries.size());
+  for (auto& e : getFlush.entries) {
+    entries.add(kj::atomicAddRef(*e));
+  }
+
   auto entryIt = getFlush.entries.begin();
   // The collection of batch flush promises we'll be waiting on.
   kj::Vector<kj::Promise<void>> promises;
@@ -769,11 +827,51 @@ kj::Promise<void> ActorCache::syncGets(
   multiReadTask = kj::joinPromises(promises.releaseAsArray()).attach(
       kj::defer([&](){
     for (auto& client: clients) {
+      // TODO(now): Sometimes the GetMultiStreamImpl is dtor'd before
+      // we can call clear(). We need to prevent this from happening!
       client->clear();
     }
   }));
 
-  co_await multiReadTask;
+  co_await multiReadTask.catch_([this, entries = kj::mv(entries)](kj::Exception&& e) mutable {
+    // Okay, one of our RPC calls failed and so we need to propagate the exception to all
+    // GetWaiters. Some of the `Entry`s may have actually successfully been updated, for example
+    // we could have two batches succeed and the third fail. With that in mind, although all entries
+    // should have their `readFailedFulfiller` fulfilled with the Exception, potentially not all
+    // need to be removed from the dirtyList!
+    KJ_DEFER({
+      // We only want to set lastReadDisconnected on DISCONNECTED exceptions because it indiciates
+      // the operation is retriable. Next time we try to flush we'll know both that the previous
+      // read attempt failed, and that it is retriable.
+      if (e.getType() == kj::Exception::Type::DISCONNECTED) {
+        lastReadDisconnected = true;
+      }
+    });
+
+    if (e.getType() == kj::Exception::Type::DISCONNECTED && !lastReadDisconnected) {
+      // We can just retry the read next flush.
+      kj::throwFatalException(kj::mv(e));
+    }
+
+    // We cannot retry the read and should instead propagate the exception to the GetWaiters.
+    auto lock = lru.cleanList.lockExclusive();
+    for (auto& entry : entries) {
+      kj::Exception copy(e);
+      KJ_REQUIRE_NONNULL(entry->readFailedFulfiller)->fulfill(kj::mv(copy));
+      // TODO(now): This code path needs to be tested in actor-cache-test.c++ before we merge.
+      if (entry->isDirty()) {
+        // We have to remove all our dirtyList entries!
+        removeEntry(kj::none, *entry);
+        auto& map = currentValues.get(lock);
+        auto& slot = KJ_ASSERT_NONNULL(map.find(entry->key));
+
+        if (slot.get() == entry) {
+          // We haven't been replaced in cache, let's remove ourselves!
+          map.erase(slot);
+        }
+      }
+    }
+  });
 }
 
 kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::getAlarm(
@@ -2660,8 +2758,10 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
     getFlush.batches.clear();
     getFlush.entries.clear();
     co_await syncGet(storage, kj::mv(entry));
+    lastReadDisconnected = false;
   } else if (getFlush.entries.size() > 1) {
     co_await syncGets(storage, kj::mv(getFlush));
+    lastReadDisconnected = false;
   } else {
     // We had no gets!
   }

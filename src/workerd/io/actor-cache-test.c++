@@ -1424,44 +1424,94 @@ KJ_TEST("ActorCache read retry on flush containing only puts") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(promise.wait(ws)) == "123");
 }
 
-// KJ_TEST("ActorCache read hard fail") {
-//   ActorCacheTest test;
-//   auto& ws = test.ws;
-//   auto& mockStorage = test.mockStorage;
+KJ_TEST("ActorCache read hard fail") {
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
 
-//   // Don't use expectCached() this time because we don't want eagerlyReportExceptions(), because
-//   // we actually expect an exception.
-//   auto promise = test.get("foo").get<kj::Promise<kj::Maybe<kj::String>>>();
-//   test.put("bar", "456");
-//   test.delete_("baz");
+  // Don't use expectCached() this time because we don't want eagerlyReportExceptions(), because
+  // we actually expect an exception.
+  auto promise = test.get("foo").get<kj::Promise<kj::Maybe<kj::String>>>();
+  test.put("bar", "456");
+  test.delete_("baz");
 
-//   // Expect the get, but don't resolve yet.
-//   auto mockGet = mockStorage->expectCall("get", ws)
-//       .withParams(CAPNP(key = "foo"));
+  // Expect the get, but don't resolve yet.
+  auto mockGet = mockStorage->expectCall("get", ws)
+      .withParams(CAPNP(key = "foo"));
 
-//   // We won't write anything until the read completes.
-//   mockStorage->expectNoActivity(ws);
+  // We won't write anything until the read completes.
+  mockStorage->expectNoActivity(ws);
 
-//   // Fail out the read with non-disconnect.
-//   kj::mv(mockGet).thenThrow(KJ_EXCEPTION(FAILED, "read failed"));
+  // Fail out the read with non-disconnect.
+  kj::mv(mockGet).thenThrow(KJ_EXCEPTION(FAILED, "read failed"));
 
-//   // The read propagates the error.
-//   KJ_EXPECT_THROW_MESSAGE("read failed", promise.wait(ws));
+  // The read propagates the error.
+  KJ_EXPECT_THROW_MESSAGE("read failed", promise.wait(ws));
 
-//   // The read is NOT retried, so expect the transaction to run now.
-//   auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-//   mockTxn->expectCall("delete", ws)
-//       .withParams(CAPNP(keys = ["baz"]))
-//       .thenReturn(CAPNP(numDeleted = 0));
-//   mockTxn->expectCall("put", ws)
-//       .withParams(CAPNP(entries = [(key = "bar", value = "456")]))
-//       .thenReturn(CAPNP());
-//   mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-//   mockTxn->expectDropped(ws);
+  // The read is NOT retried, so expect the transaction to run now.
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
+  mockTxn->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["baz"]))
+      .thenReturn(CAPNP(numDeleted = 0));
+  mockTxn->expectCall("put", ws)
+      .withParams(CAPNP(entries = [(key = "bar", value = "456")]))
+      .thenReturn(CAPNP());
+  mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
+  mockTxn->expectDropped(ws);
 
-//   // The read is NOT retried.
-//   mockStorage->expectNoActivity(ws);
-// }
+  // The read is NOT retried.
+  mockStorage->expectNoActivity(ws);
+}
+
+/*
+KJ_TEST("ActorCache read multiple hard fail") {
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  // Don't use expectCached() this time because we don't want eagerlyReportExceptions(), because
+  // we actually expect an exception.
+  auto promise = expectUncached(test.get({"foo"_kj, "garply"_kj}));
+  test.put("bar", "456");
+  test.delete_("baz");
+
+  // Expect the get, but don't resolve yet.
+  kj::Maybe<MockClient> external;
+
+  auto mockGet = mockStorage->expectCall("getMultiple", ws)
+      .withParams(CAPNP(keys = ["foo", "garply"]), "stream"_kj)
+      .useCallback("stream", [&](MockClient stream) {
+    // TODO(now): We should test that we propagate the exception
+    // stream.call("values", CAPNP()).expectThrows(kj::Exception::Type::FAILED, "read failed", ws);
+    // kj::throwFatalException(KJ_EXCEPTION(FAILED, "read failed"));
+    external = kj::mv(stream);
+  });
+
+  // We won't write anything until the read completes.
+  mockStorage->expectNoActivity(ws);
+
+  // Fail out the read with non-disconnect.
+  kj::mv(mockGet).thenThrow(KJ_EXCEPTION(FAILED, "read failed"));
+  external = kj::none;
+
+  // The read propagates the error.
+  KJ_EXPECT_THROW_MESSAGE("read failed", promise.wait(ws));
+
+  // The read is NOT retried, so expect the transaction to run now.
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
+  mockTxn->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["baz"]))
+      .thenReturn(CAPNP(numDeleted = 0));
+  mockTxn->expectCall("put", ws)
+      .withParams(CAPNP(entries = [(key = "bar", value = "456")]))
+      .thenReturn(CAPNP());
+  mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
+  mockTxn->expectDropped(ws);
+
+  // The read is NOT retried.
+  mockStorage->expectNoActivity(ws);
+}
+*/
 
 KJ_TEST("ActorCache read cancel") {
   ActorCacheTest test;
@@ -3575,7 +3625,7 @@ KJ_TEST("ActorCache listReverse() retry on failure") {
 // =======================================================================================
 // LRU purge
 
-constexpr size_t ENTRY_SIZE = 120;
+constexpr size_t ENTRY_SIZE = 142;
 KJ_TEST("ActorCache LRU purge") {
   ActorCacheTest test({.softLimit = 1 * ENTRY_SIZE});
   auto& ws = test.ws;
