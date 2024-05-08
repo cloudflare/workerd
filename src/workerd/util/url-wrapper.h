@@ -47,6 +47,12 @@ public:
   static UrlWrapper kStandardFake;
 
 private:
+  // The UrlWrapper is either a kj::Url or a jsg::Url. When the UrlWrapper is
+  // created initially, and the url is going to be a kj::Url, then the inner will
+  // initially be a kj::String that is lazily parsed into the kj::Url. This is to
+  // preserve an existing pattern we've had that defers parsing of the url
+  // until it is used. When the url is going to a jsg::Url, then it is parsed when
+  // the UrlWrapper is created.
   kj::OneOf<kj::String, kj::Url, jsg::Url> inner;
 
   UrlWrapper(kj::OneOf<kj::Url, jsg::Url> inner);
