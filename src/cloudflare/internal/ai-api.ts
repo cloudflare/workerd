@@ -30,6 +30,11 @@ export class InferenceUpstreamError extends Error {
 export class Ai {
   private readonly fetcher: Fetcher
 
+  /*
+   * @deprecated this option is deprecated, do not use this
+   */
+  // @ts-expect-error this option is deprecated, do not use this
+  private logs: Array<string> = [];
   private options: AiOptions = {};
   public lastRequestId: string | null = null;
 
