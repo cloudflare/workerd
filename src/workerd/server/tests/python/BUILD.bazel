@@ -54,3 +54,6 @@ wd_test(
         exclude = ["**/*.wd-test"],
     ),
 )
+
+load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
+gen_import_tests()
