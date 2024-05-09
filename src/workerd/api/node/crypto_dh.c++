@@ -219,7 +219,7 @@ void ZeroPadDiffieHellmanSecret(size_t remainder_size,
     KJ_ASSERT(remainder_size < prime_size);
     const size_t padding = prime_size - remainder_size;
     memmove(data + padding, data, remainder_size);
-    memset(data, 0, padding);
+    kj::arrayPtr(data, padding).fill(0);
   }
 }
 } // namespace

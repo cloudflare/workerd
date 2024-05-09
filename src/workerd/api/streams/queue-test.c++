@@ -424,7 +424,7 @@ KJ_TEST("ByteQueue with single consumer") {
     KJ_ASSERT(queue.desiredSize() == 2);
 
     auto store = jsg::BackingStore::alloc(js, 4);
-    memset(store.asArrayPtr().begin(), 'a', store.size());
+    store.asArrayPtr().fill('a');
 
     auto entry = kj::heap<ByteQueue::Entry>(kj::mv(store));
     queue.push(js, kj::mv(entry));
@@ -508,8 +508,8 @@ KJ_TEST("ByteQueue with single byob consumer") {
     KJ_ASSERT(!pendingByob->isInvalidated());
 
     auto& req = pendingByob->getRequest();
-    auto ptr = req.pullInto.store.asArrayPtr().begin();
-    memset(ptr, 'b', 3);
+    auto ptr = req.pullInto.store.asArrayPtr();
+    ptr.first(3).fill('b');
     pendingByob->respond(js, 3);
     KJ_ASSERT(pendingByob->isInvalidated());
 
@@ -564,8 +564,8 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
     KJ_ASSERT(!pendingByob->isInvalidated());
 
     auto& req = pendingByob->getRequest();
-    auto ptr = req.pullInto.store.asArrayPtr().begin();
-    memset(ptr, 'b', 3);
+    auto ptr = req.pullInto.store.asArrayPtr();
+    ptr.first(3).fill('b');
     pendingByob->respond(js, 3);
     KJ_ASSERT(pendingByob->isInvalidated());
 
@@ -647,8 +647,8 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
     KJ_ASSERT(!pendingByob->isInvalidated());
 
     auto& req = pendingByob->getRequest();
-    auto ptr = req.pullInto.store.asArrayPtr().begin();
-    memset(ptr, 'b', 3);
+    auto ptr = req.pullInto.store.asArrayPtr();
+    ptr.first(3).fill('b');
     pendingByob->respond(js, 3);
     KJ_ASSERT(pendingByob->isInvalidated());
 
@@ -703,8 +703,8 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
     KJ_ASSERT(!pendingByob->isInvalidated());
 
     auto& req = pendingByob->getRequest();
-    auto ptr = req.pullInto.store.asArrayPtr().begin();
-    memset(ptr, 'b', 3);
+    auto ptr = req.pullInto.store.asArrayPtr();
+    ptr.first(3).fill('b');
     pendingByob->respond(js, 3);
     KJ_ASSERT(pendingByob->isInvalidated());
 
@@ -784,9 +784,9 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
     MustCall<void(ByteQueue::ByobRequest&)> respond([&](jsg::Lock&, auto& pending) {
       static uint counter = 0;
       auto& req = pending.getRequest();
-      auto ptr = req.pullInto.store.asArrayPtr().begin();
+      auto ptr = req.pullInto.store.asArrayPtr();
       auto num = 3 - counter;
-      memset(ptr, 'a' + counter++, num);
+      ptr.first(num).fill('a' + counter++);
       pending.respond(js, num);
       KJ_ASSERT(pending.isInvalidated());
     }, 2);
@@ -865,9 +865,9 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
     MustCall<void(ByteQueue::ByobRequest&)> respond([&](jsg::Lock&, auto& pending) {
       static uint counter = 0;
       auto& req = pending.getRequest();
-      auto ptr = req.pullInto.store.asArrayPtr().begin();
+      auto ptr = req.pullInto.store.asArrayPtr();
       auto num = 3 - counter;
-      memset(ptr, 'a' + counter++, num);
+      ptr.first(num).fill('a' + counter++);
       pending.respond(js, num);
       KJ_ASSERT(pending.isInvalidated());
     }, 2);

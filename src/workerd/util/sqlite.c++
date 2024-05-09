@@ -1323,7 +1323,7 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
       size_t actual = self.file->read(iOfst, bytes);
 
       if (actual < iAmt) {
-        memset(bytes.begin() + actual, 0, iAmt - actual);
+        bytes.slice(actual).fill(0);
         return SQLITE_IOERR_SHORT_READ;
       } else {
         return SQLITE_OK;
@@ -1804,7 +1804,7 @@ private:
 
         while (index >= slock->regions.size()) {
           auto newRegion = kj::heapArray<byte>(size);
-          memset(newRegion.begin(), 0, size);
+          newRegion.asPtr().fill(0);
           slock->regions.add(kj::mv(newRegion));
         }
 

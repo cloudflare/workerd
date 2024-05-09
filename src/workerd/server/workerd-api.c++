@@ -568,7 +568,7 @@ public:
 
     if (isPredictableModeForTest()) {
       memcpy(id, &counter, sizeof(counter));
-      memset(id + sizeof(counter), 0, BASE_LENGTH - sizeof(counter));
+      kj::arrayPtr(id).slice(counter).fill(0);
       ++counter;
     } else {
       KJ_ASSERT(RAND_bytes(id, BASE_LENGTH) == 1);

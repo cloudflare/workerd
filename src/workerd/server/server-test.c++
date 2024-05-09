@@ -533,7 +533,7 @@ private:
   void generate(kj::ArrayPtr<kj::byte> buffer) override {
     kj::byte random = 4;  // chosen by fair die roll by Randall Munroe in 2007.
                           // guaranteed to be random.
-    memset(buffer.begin(), random, buffer.size());
+    buffer.fill(random);
   }
 
   // ---------------------------------------------------------------------------

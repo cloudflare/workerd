@@ -1474,7 +1474,7 @@ public:
 
     // Construct WebCrypto format.
     auto out = kj::heapArray<kj::byte>(rsSize * 2);
-    memset(out.begin(), 0, out.size());
+    out.asPtr().fill(0);
 
     // We're dealing with big-endian, so we have to align the copy to the right. This is exactly
     // why big-endian is the wrong edian.

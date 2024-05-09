@@ -505,7 +505,7 @@ protected:
 
       auto remainder = counterBitLength % 8;
       auto idx = expectedCounterByteSize - counterBitLength / 8;
-      memset(counter.begin() + idx, 0, counterBitLength / 8);
+      counter.slice(idx).first(counterBitLength / 8).fill(0);
       if (remainder) {
         counter[idx - 1] &= 0xFF << remainder;
       }
