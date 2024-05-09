@@ -5277,7 +5277,7 @@ KJ_TEST("ActorCache can shutdown") {
 
     auto error = options.maybeError.map([](const kj::Exception& e) {
       return kj::cp(e);
-    }).orDefault(KJ_EXCEPTION(OVERLOADED, kj::str(ActorCache::SHUTDOWN_ERROR_MESSAGE)));
+    }).orDefault(KJ_EXCEPTION(DISCONNECTED, kj::str(ActorCache::SHUTDOWN_ERROR_MESSAGE)));
 
     if (res.shouldBreakOutputGate) {
       // We expected the output gate to break async after shutdown.
