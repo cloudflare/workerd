@@ -16,22 +16,28 @@ import { parseTarInfo } from "pyodide-internal:tar";
 import { default as DiskCache } from "pyodide-internal:disk_cache";
 import { createTarFS } from "pyodide-internal:tarfs";
 
+async function decompressArrayBuffer(arrBuf) {
+  return await new Response(new Response(arrBuf).body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+}
+
 async function loadBundle(requirement) {
   // first check if the disk cache has what we want
   const filename = LOCKFILE["packages"][requirement]["file_name"];
   const cached = DiskCache.get(filename);
   if (cached) {
-    return [requirement, cached];
+    const decompressed = await decompressArrayBuffer(cached);
+    return [requirement, decompressed];
   }
 
   // we didn't find it in the disk cache, continue with original fetch
   const url = new URL(WORKERD_INDEX_URL + filename);
   const response = await fetch(url);
 
-  const arrayBuffer = await new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+  const compressed = response.body.arrayBuffer();
+  const decompressed = await decompressArrayBuffer(compressed);
 
-  DiskCache.put(filename, arrayBuffer);
-  return [requirement, arrayBuffer];
+  DiskCache.put(filename, compressed);
+  return [requirement, decompressed];
 };
 
 /**
