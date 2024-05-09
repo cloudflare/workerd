@@ -2239,11 +2239,11 @@ public:
     this->inner = kj::none;
   }
 
-  void write(const void* buffer, size_t size) override {
-    this->size += size;
+  void write(kj::ArrayPtr<const byte> data) override {
+    this->size += data.size();
     KJ_IF_SOME(inner, this->inner) {
       if (this->size <= this->limit) {
-        inner.write(buffer, size);
+        inner.write(data);
       } else {
         reset();
       }
@@ -3644,18 +3644,18 @@ public:
           // This way we will report sizes up to this point but won't read any more invalid data.
           KJ_ON_SCOPE_FAILURE(decodedBuf.reset());
 
-          gzip.write(buffer.begin(), buffer.size());
+          gzip.write(buffer);
           gzip.flush();
         }
         KJ_CASE_ONEOF(brotli, kj::BrotliOutputStream) {
           KJ_ON_SCOPE_FAILURE(decodedBuf.reset());
 
-          brotli.write(buffer.begin(), buffer.size());
+          brotli.write(buffer);
           brotli.flush();
         }
       }
     } else {
-      decodedBuf.write(buffer.begin(), buffer.size());
+      decodedBuf.write(buffer);
     }
     auto decodedChunkSize = decodedBuf.getWrittenSize() - prevDecodedSize;
 

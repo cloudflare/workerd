@@ -3531,7 +3531,7 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
     KJ_IF_SOME(stream, controlOverride) {
       auto message = kj::str("{\"event\":\"listen-inspector\",\"port\":", port, "}\n");
       try {
-        stream->write(message.begin(), message.size());
+        stream->write(message.asBytes());
       } catch (kj::Exception& e) {
         KJ_LOG(ERROR, e);
       }
@@ -3672,7 +3672,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       KJ_IF_SOME(stream, controlOverride) {
         auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", listener->getPort(), "}\n");
         try {
-          stream->write(message.begin(), message.size());
+          stream->write(message.asBytes());
         } catch (kj::Exception& e) {
           KJ_LOG(ERROR, e);
         }
