@@ -6,12 +6,12 @@
 #     bazel run @//rust-deps:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "rustc_version",
+rust_proc_macro(
+    name = "zerocopy_derive",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -35,13 +35,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=rustc_version",
+        "crate-name=zerocopy-derive",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.4.0",
+    version = "0.7.34",
     deps = [
-        "@crates_vendor__semver-1.0.23//:semver",
+        "@crates_vendor__proc-macro2-1.0.83//:proc_macro2",
+        "@crates_vendor__quote-1.0.36//:quote",
+        "@crates_vendor__syn-2.0.65//:syn",
     ],
 )

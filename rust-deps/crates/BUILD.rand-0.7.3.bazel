@@ -56,26 +56,23 @@ rust_library(
     version = "0.7.3",
     deps = [
         "@crates_vendor__getrandom-0.1.16//:getrandom",
+        "@crates_vendor__libc-0.2.155//:libc",
         "@crates_vendor__rand_core-0.5.1//:rand_core",
         "@crates_vendor__rand_pcg-0.2.1//:rand_pcg",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.153//:libc",  # cfg(unix)
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.153//:libc",  # cfg(unix)
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.153//:libc",  # cfg(unix)
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.153//:libc",  # cfg(unix)
             "@crates_vendor__rand_chacha-0.2.2//:rand_chacha",  # cfg(not(target_os = "emscripten"))
         ],
         "//conditions:default": [],

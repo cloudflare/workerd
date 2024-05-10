@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "flate2",
+    name = "miniz_oxide",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -29,10 +29,7 @@ rust_library(
         ],
     ),
     crate_features = [
-        "any_impl",
-        "default",
-        "miniz_oxide",
-        "rust_backend",
+        "with-alloc",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
@@ -41,14 +38,13 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=flate2",
+        "crate-name=miniz_oxide",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.28",
+    version = "0.7.3",
     deps = [
-        "@crates_vendor__crc32fast-1.4.0//:crc32fast",
-        "@crates_vendor__miniz_oxide-0.7.2//:miniz_oxide",
+        "@crates_vendor__adler-1.0.2//:adler",
     ],
 )

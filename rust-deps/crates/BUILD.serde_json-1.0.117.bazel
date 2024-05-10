@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "semver",
+    name = "serde_json",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -34,25 +34,28 @@ rust_library(
         "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=semver",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.22",
+    version = "1.0.117",
     deps = [
-        "@crates_vendor__semver-1.0.22//:build_script_build",
+        "@crates_vendor__itoa-1.0.11//:itoa",
+        "@crates_vendor__ryu-1.0.18//:ryu",
+        "@crates_vendor__serde-1.0.202//:serde",
+        "@crates_vendor__serde_json-1.0.117//:build_script_build",
     ],
 )
 
 cargo_build_script(
-    name = "semver_bs",
+    name = "serde_json_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -75,23 +78,23 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=semver",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.22",
+    version = "1.0.117",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = ":semver_bs",
+    actual = ":serde_json_bs",
     tags = ["manual"],
 )

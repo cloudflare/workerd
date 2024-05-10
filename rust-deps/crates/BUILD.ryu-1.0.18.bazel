@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "zerocopy",
+    name = "ryu",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -28,9 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "simd",
-    ],
     crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = [
@@ -38,10 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zerocopy",
+        "crate-name=ryu",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.7.32",
+    version = "1.0.18",
 )

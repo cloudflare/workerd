@@ -43,6 +43,6 @@ rust_library(
     version = "0.1.23",
     deps = [
         "@crates_vendor__rustc-hash-1.1.0//:rustc_hash",
-        "@crates_vendor__serde-1.0.198//:serde",
+        "@crates_vendor__serde-1.0.202//:serde",
     ],
 )

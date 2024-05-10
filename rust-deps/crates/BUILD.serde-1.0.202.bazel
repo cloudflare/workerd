@@ -38,7 +38,7 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = "2018",
     proc_macro_deps = [
-        "@crates_vendor__serde_derive-1.0.198//:serde_derive",
+        "@crates_vendor__serde_derive-1.0.202//:serde_derive",
     ],
     rustc_flags = [
         "--cap-lints=allow",
@@ -50,9 +50,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.198",
+    version = "1.0.202",
     deps = [
-        "@crates_vendor__serde-1.0.198//:build_script_build",
+        "@crates_vendor__serde-1.0.202//:build_script_build",
     ],
 )
 
@@ -93,7 +93,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.198",
+    version = "1.0.202",
     visibility = ["//visibility:private"],
 )
 
