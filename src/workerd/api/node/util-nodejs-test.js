@@ -631,19 +631,26 @@ export const utilInspect = {
 
     // Prevent enumerable error properties from being printed.
     {
-      let err = new Error();
+      let err = new Error('foobar');
       err.message = 'foobar';
       let out = util.inspect(err).split('\n');
       assert.strictEqual(out[0], 'Error: foobar');
-      assert(out[out.length - 1].startsWith('    at '));
+      assert(out[1].startsWith('    at '));
       // Reset the error, the stack is otherwise not recreated.
       err = new Error();
       err.message = 'foobar';
+      out = util.inspect(err).split('\n');
+      assert.strictEqual(out[0], 'Error');
+      assert(out[1].startsWith('    at '));
+      assert.strictEqual(out[out.length - 2], "  message: 'foobar'");
+      assert.strictEqual(out[out.length - 1], '}');
+      // Reset the error, the stack is otherwise not recreated.
+      err = new Error('foobar');
       err.name = 'Unique';
       Object.defineProperty(err, 'stack', { value: err.stack, enumerable: true });
       out = util.inspect(err).split('\n');
       assert.strictEqual(out[0], 'Unique: foobar');
-      assert(out[out.length - 1].startsWith('    at '));
+      assert(out[1].startsWith('    at '));
       err.name = 'Baz';
       out = util.inspect(err).split('\n');
       assert.strictEqual(out[0], 'Unique: foobar');

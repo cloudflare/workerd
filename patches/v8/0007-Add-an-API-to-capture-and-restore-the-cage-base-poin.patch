@@ -1,4 +1,4 @@
-From 7ffee5a4b6c0cf7b144616a1023a074c71335333 Mon Sep 17 00:00:00 2001
+From 8dab305cca01cf429c15b75b11f59b5917089e9d Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Tue, 23 May 2023 09:24:11 -0500
 Subject: Add an API to capture and restore the cage base pointers.
@@ -56,7 +56,7 @@ index 22b7a8767a83a702a2601bdfd4c0f71206df0ad5..fee48faffe82400595dca17197c5bbee
  
  #endif  // INCLUDE_V8_LOCKER_H_
 diff --git a/src/execution/v8threads.cc b/src/execution/v8threads.cc
-index 91e1a43d305d06fdf07fccdf80eb07e86115619b..dfe5da8f6bdc5a30d65b7f31d0e3a42fbe49d22b 100644
+index 91e1a43d305d06fdf07fccdf80eb07e86115619b..857da6f175e666930a0d768fbf9edb935f04da5e 100644
 --- a/src/execution/v8threads.cc
 +++ b/src/execution/v8threads.cc
 @@ -6,6 +6,7 @@
@@ -74,7 +74,7 @@ index 91e1a43d305d06fdf07fccdf80eb07e86115619b..dfe5da8f6bdc5a30d65b7f31d0e3a42f
 +
 +PointerCageContext PointerCageContext::GetCurrent() {
 +  PointerCageContext result;
-+#ifdef V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
++#ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
 +  result.cage = i::V8HeapCompressionScheme::base();
 +#ifdef V8_EXTERNAL_CODE_SPACE
 +  result.code_cage = i::ExternalCodeCompressionScheme::base();
@@ -84,12 +84,12 @@ index 91e1a43d305d06fdf07fccdf80eb07e86115619b..dfe5da8f6bdc5a30d65b7f31d0e3a42f
 +#else
 +  result.cage = 0;
 +  result.code_cage = 0;
-+#endif  // V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
++#endif  // V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
 +  return result;
 +}
 +
 +void PointerCageContext::Apply() const {
-+#ifdef V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
++#ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
 +  i::V8HeapCompressionScheme::InitBase(cage);
 +#ifdef V8_EXTERNAL_CODE_SPACE
 +  i::ExternalCodeCompressionScheme::InitBase(code_cage);
@@ -99,7 +99,7 @@ index 91e1a43d305d06fdf07fccdf80eb07e86115619b..dfe5da8f6bdc5a30d65b7f31d0e3a42f
 +  // warning with this line.
 +  (void)code_cage;
 +#endif  // V8_EXTERNAL_CODE_SPACE
-+#endif  // V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
++#endif  // V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
 +}
 +
  }  // namespace v8

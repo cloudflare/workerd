@@ -77,7 +77,7 @@ from the V8 directory.
     You can find the commit versions for V8's dependencies under `v8/DEPS` and the ones
     that are carried through to workerd in the `workerd/WORKSPACE` file.
 
-    These currently include `abseil`, `com_google_chromium_icu` and `trace_event_common`.
+    These currently include `abseil`, `com_googlesource_chromium_icu` and `trace_event_common`.
     Typically you'll get a build failure if the projects are out of sync. Copy the
     commit versions from `v8/DEPS` to the `WORKSPACE` file.
 
