@@ -687,7 +687,6 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(
     jsg::Function<void()> function,
     double msDelay) {
   auto timeoutId = IoContext::current().setTimeoutImpl(
-      timeoutIdGenerator,
       /** repeats = */ false,
       kj::mv(function),
       msDelay);
@@ -707,7 +706,6 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(
     function(js, kj::mv(args));
   };
   auto timeoutId = IoContext::current().setTimeoutImpl(
-      timeoutIdGenerator,
       /* repeats = */ false,
       [function = kj::mv(fn)](jsg::Lock& js) mutable {
     function(js);
@@ -737,7 +735,6 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(
     function(js, jsg::Arguments(kj::mv(argv)));
   };
   auto timeoutId = IoContext::current().setTimeoutImpl(
-      timeoutIdGenerator,
       /* repeats = */ true,
       [function = kj::mv(fn)](jsg::Lock& js) mutable {
     function(js);

@@ -31,8 +31,8 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(TimeoutManagerImpl);
 
   TimeoutId setTimeout(
-      IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) override {
-    auto [id, it] = addState(generator, kj::mv(params));
+      IoContext& context, TimeoutParameters params) override {
+    auto [id, it] = addState(kj::mv(params));
     setTimeoutImpl(context, it);
     return id;
   }
@@ -56,7 +56,7 @@ private:
     TimeoutId id;
     Iterator it;
   };
-  IdAndIterator addState(TimeoutId::Generator& generator, TimeoutParameters params);
+  IdAndIterator addState(TimeoutParameters params);
 
   void setTimeoutImpl(IoContext& context, Iterator it);
 
@@ -74,6 +74,8 @@ private:
       return when == other.when && tiebreaker == other.tiebreaker;
     }
   };
+
+  TimeoutId::Generator timeoutIdGenerator;
 
   // Tracks registered timeouts sorted by the next time the timeout is expected to fire.
   //
@@ -591,13 +593,12 @@ void IoContext::TimeoutManagerImpl::TimeoutState::cancel() {
   ++manager.timeoutsFinished;
 }
 
-auto IoContext::TimeoutManagerImpl::addState(
-    TimeoutId::Generator& generator, TimeoutParameters params) -> IdAndIterator {
+auto IoContext::TimeoutManagerImpl::addState(TimeoutParameters params) -> IdAndIterator {
   JSG_REQUIRE(getTimeoutCount() < MAX_TIMEOUTS, DOMQuotaExceededError,
               "You have exceeded the number of timeouts you may set.",
               MAX_TIMEOUTS);
 
-  auto id = generator.getNext();
+  auto id = timeoutIdGenerator.getNext();
   auto [it, wasEmplaced] = timeouts.try_emplace(id, *this, kj::mv(params));
   if (!wasEmplaced) {
     // We shouldn't have reached here because the `TimeoutId::Generator` throws if it reaches
@@ -763,7 +764,6 @@ void IoContext::TimeoutManagerImpl::clearTimeout(
 }
 
 TimeoutId IoContext::setTimeoutImpl(
-    TimeoutId::Generator& generator,
     bool repeat,
     jsg::Function<void()> function,
     double msDelay) {
@@ -775,7 +775,7 @@ TimeoutId IoContext::setTimeoutImpl(
       msDelay <= 0 || std::isnan(msDelay) ? 0 :
       msDelay >= static_cast<double>(max) ? max : static_cast<int64_t>(msDelay);
   auto params = TimeoutManager::TimeoutParameters(repeat, delay, kj::mv(function));
-  return timeoutManager->setTimeout(*this, generator, kj::mv(params));
+  return timeoutManager->setTimeout(*this, kj::mv(params));
 }
 
 void IoContext::clearTimeoutImpl(TimeoutId id) {

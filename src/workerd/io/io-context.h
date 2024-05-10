@@ -548,7 +548,6 @@ public:
   // Used to implement setTimeout(). We don't expose the timer directly because the
   // promises it returns need to live in this I/O context, anyway.
   TimeoutId setTimeoutImpl(
-    TimeoutId::Generator& generator,
     bool repeat,
     jsg::Function<void()> function,
     double msDelay);
