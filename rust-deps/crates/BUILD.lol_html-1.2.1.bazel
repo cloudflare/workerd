@@ -52,6 +52,6 @@ rust_library(
         "@crates_vendor__memchr-2.7.2//:memchr",
         "@crates_vendor__mime-0.3.17//:mime",
         "@crates_vendor__selectors-0.22.0//:selectors",
-        "@crates_vendor__thiserror-1.0.59//:thiserror",
+        "@crates_vendor__thiserror-1.0.61//:thiserror",
     ],
 )

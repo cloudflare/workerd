@@ -332,9 +332,9 @@ http_file(
 http_file(
     name = "cargo_bazel_macos_arm64",
     executable = True,
-    sha256 = "813d490b06e346e94c6cb34f4e9fda10bd85d23dc89711a170eb0fb68a19018c",
+    sha256 = "983ba22850f1467484fb8a608fdc753e6c5203795edae20b0fc63c9b4f9b66aa",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-aarch64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.43.0/cargo-bazel-aarch64-apple-darwin",
     ],
 )
 
@@ -351,7 +351,7 @@ http_file(
 # TODO(soon): rules_rust starts producing linker errors on Linux as of 0.39 through 0.42.1, try
 # upgrading it again later. This is likely due to https://github.com/bazelbuild/rules_rust/pull/2471.
 # The related cargo_bazel package has been updated already - some version mismatch between them is
-# generally acceptable.
+# acceptable since cargo_bazel is only used to generate build files.
 http_archive(
     name = "rules_rust",
     sha256 = "6501960c3e4da32495d1e1007ded0769a534cb195c30dea36aa54f9d8a3f0361",
