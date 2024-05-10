@@ -1148,7 +1148,7 @@ public:
         uint64_t size = config.totalSize().wordCount + 1;
         static_assert(sizeof(uint64_t) + sizeof(COMPILED_MAGIC_SUFFIX) == sizeof(capnp::word) * 3);
         auto words = kj::heapArray<capnp::word>(size + 3);
-        memset(words.asBytes().begin(), 0, words.asBytes().size());
+        words.asBytes().fill(0);
         capnp::copyToUnchecked(config, words.slice(0, size));
 
         memcpy(&words[words.size() - 3], &size, sizeof(size));

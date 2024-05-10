@@ -331,7 +331,7 @@ kj::Array<kj::byte> BufferUtil::concat(
   }
   KJ_DASSERT(offset <= length);
   if (length - offset > 0) {
-    memset(ptr + offset, 0, length - offset);
+    dest.slice(offset).fill(0);
   }
 
   return kj::mv(dest);

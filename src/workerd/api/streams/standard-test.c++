@@ -466,9 +466,9 @@ KJ_TEST("ReadableStream read all bytes (byte readable, large data)") {
       kj::heapArray<kj::byte>(BASE * 2),
       kj::heapArray<kj::byte>(BASE * 4)
     );
-    memset(chunks[0].begin(), 'A', chunks[0].size());
-    memset(chunks[1].begin(), 'B', chunks[1].size());
-    memset(chunks[2].begin(), 'C', chunks[2].size());
+    chunks[0].asPtr().fill('A');
+    chunks[1].asPtr().fill('B');
+    chunks[2].asPtr().fill('C');
     rs->getController().setup(js, UnderlyingSource {
       .type = kj::str("bytes"),
       .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
@@ -501,9 +501,9 @@ KJ_TEST("ReadableStream read all bytes (byte readable, large data)") {
     auto promise = rs->getController().readAllBytes(js, (BASE * 7) + 1)
       .then(js, [&](jsg::Lock& js, kj::Array<kj::byte>&& text) {
         kj::byte check[BASE * 7]{};
-        memset(&check[0], 'A', BASE);
-        memset(&check[0] + BASE, 'B', BASE * 2);
-        memset(&check[0] + (BASE * 3), 'C', BASE * 4);
+        kj::arrayPtr(check).first(BASE).fill('A');
+        kj::arrayPtr(check).slice(BASE).first(BASE * 2).fill('B');
+        kj::arrayPtr(check).slice(BASE * 3).fill('C');
         KJ_ASSERT(text.size() == BASE * 7);
         KJ_ASSERT(check == text);
         checked++;

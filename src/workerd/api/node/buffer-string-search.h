@@ -528,7 +528,7 @@ void StringSearch<Char>::PopulateBoyerMooreHorspoolTable() {
   const size_t table_size = AlphabetSize();
   if (start == 0) {
     // All patterns less than kBMMaxShift in length.
-    memset(bad_char_occurrence, -1, table_size * sizeof(*bad_char_occurrence));
+    kj::arrayPtr(bad_char_occurrence, table_size).fill(-1);
   } else {
     for (size_t i = 0; i < table_size; i++) {
       bad_char_occurrence[i] = start - 1;
