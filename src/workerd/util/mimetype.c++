@@ -26,7 +26,7 @@ bool isQuotedStringTokenChar(const unsigned char c) {
   return (c == '\t') || (c >= 0x20 && c <= 0x7e) || (c >= 0x80);
 }
 
-kj::StringPtr skipWhitespace(kj::StringPtr str) {
+kj::ArrayPtr<const char> skipWhitespace(kj::ArrayPtr<const char> str) {
   auto ptr = str.begin();
   auto end = str.end();
   while (ptr != end && isWhitespace(*ptr)) { ptr++; }
@@ -83,6 +83,10 @@ MimeType MimeType::parse(kj::StringPtr input, ParseOptions options) {
 }
 
 kj::Maybe<MimeType> MimeType::tryParse(kj::StringPtr input, ParseOptions options) {
+  return tryParseImpl(input, kj::mv(options));
+}
+
+kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, ParseOptions options) {
   // Skip leading whitespace from start
   input = skipWhitespace(input);
   if (input.size() == 0) return kj::none;
@@ -116,7 +120,7 @@ kj::Maybe<MimeType> MimeType::tryParse(kj::StringPtr input, ParseOptions options
     maybeSubtype = kj::str(subtypeCandidate);
     input = input.slice(n + 1);
   } else {
-    auto subtypeCandidate = trimWhitespace(input.asArray());
+    auto subtypeCandidate = trimWhitespace(input);
     if (subtypeCandidate.size() == 0 || hasInvalidCodepoints(subtypeCandidate, isTokenChar)) {
       return kj::none;
     }
@@ -331,6 +335,7 @@ const MimeType MimeType::FORM_DATA = MimeType("multipart"_kj, "form-data"_kj);
 const MimeType MimeType::MANIFEST_JSON = MimeType("application"_kj, "manifest+json"_kj);
 const MimeType MimeType::VTT = MimeType("text"_kj, "vtt"_kj);
 const MimeType MimeType::EVENT_STREAM = MimeType("text"_kj, "event-stream"_kj);
+const MimeType MimeType::WILDCARD = MimeType("*"_kj, "*"_kj);
 
 bool MimeType::isText(const MimeType& mimeType) {
   auto type = mimeType.type();
@@ -378,4 +383,64 @@ bool MimeType::isVideo(const MimeType& mimeType) {
 bool MimeType::isAudio(const MimeType& mimeType) {
   return mimeType.type() == "audio";
 }
+
+kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
+  kj::Maybe<MimeType> mimeType;
+
+  constexpr static auto findNextSeparator = [](auto& input) -> kj::Maybe<size_t> {
+    // Scans input to find the next comma (,) that is not contained within
+    // a quoted section, returning the position of the comma or kj::none
+    // if not found.
+    for (size_t i = 0; i < input.size(); ++i) {
+      if (input[i] == '"' && (i == 0 || input[i-1] != '\\')) {
+        // Skip to the end of the quoted section
+        while (++i < input.size() && (input[i] != '"' || input[i-1] == '\\')) {}
+      } else if (input[i] == ',' && (i == 0 || input[i-1] != '\\')) {
+        return i;
+      }
+    }
+    return kj::none;
+  };
+
+  constexpr static auto processPart = [](auto& mimeType, auto& part) -> kj::Maybe<MimeType>{
+    KJ_IF_SOME(parsed, tryParseImpl(part)) {
+      if (parsed == MimeType::WILDCARD) return kj::none;
+
+      KJ_IF_SOME(current, mimeType) {
+        if (current == parsed) {
+          // mimeType will be set to parsed, but if parsed does not
+          // have a charset, we will set the charset from current, if any.
+          if (parsed.params().find("charset"_kj) == kj::none) {
+            KJ_IF_SOME(charset, current.params().find("charset"_kj)) {
+              parsed.addParam("charset"_kj, charset);
+            }
+          }
+        }
+      }
+      return kj::mv(parsed);
+    }
+
+    return kj::none;
+  };
+
+  while (input.size() > 0) {
+    KJ_IF_SOME(pos, findNextSeparator(input)) {
+      auto part = input.slice(0, pos);
+      input = input.slice(pos + 1);
+      KJ_IF_SOME(parsed, processPart(mimeType, part)) {
+        mimeType = kj::mv(parsed);
+      } else {
+        continue;
+      }
+    } else {
+      KJ_IF_SOME(parsed, processPart(mimeType, input)) {
+        mimeType = kj::mv(parsed);
+      }
+      break;
+    }
+  }
+
+  return kj::mv(mimeType);
+}
+
 }  // namespace workerd

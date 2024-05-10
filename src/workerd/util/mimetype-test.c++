@@ -410,6 +410,176 @@ KJ_TEST("WHATWG tests") {
       KJ_ASSERT_NONNULL(MimeType::tryParse("application/json; charset=\"utf-8\""))));
 }
 
+KJ_TEST("Extract Mime Type") {
+  // These are taken from the fetch spec
+  // https://fetch.spec.whatwg.org/#concept-header-extract-mime-type
+  {
+    auto mimeType = KJ_ASSERT_NONNULL(MimeType::extract("text/plain;charset=gbk, text/html"_kj));
+    KJ_ASSERT(mimeType == MimeType::HTML);
+  }
+
+  {
+    auto mimeType = KJ_ASSERT_NONNULL(
+        MimeType::extract("text/html;charset=gbk;a=b, text/html;x=y"));
+    KJ_ASSERT(mimeType.toString() == "text/html;x=y;charset=gbk");
+  }
+
+  {
+    auto mimeType = KJ_ASSERT_NONNULL(
+        MimeType::extract("text/html;charset=gbk, x/x, text/html;x=y"));
+    KJ_ASSERT(mimeType.toString() == "text/html;x=y");
+  }
+
+  {
+    auto mimeType = KJ_ASSERT_NONNULL(MimeType::extract("text/html, cannot parse"));
+    KJ_ASSERT(mimeType.toString() == "text/html");
+  }
+
+  {
+    auto mimeType = KJ_ASSERT_NONNULL(MimeType::extract("text/html, */*"));
+    KJ_ASSERT(mimeType.toString() == "text/html");
+  }
+
+  {
+    auto mimeType = KJ_ASSERT_NONNULL(MimeType::extract("text/html, "));
+    KJ_ASSERT(mimeType.toString() == "text/html");
+  }
+
+  {
+    // An odd edge case where the parameter value contains an escaped quote and escaped
+    // comma in the value.
+    auto mimeType = KJ_ASSERT_NONNULL(MimeType::extract("text/html;a=\\\"not-quoted\\,, foo/bar"));
+    KJ_ASSERT(mimeType.toString() == "foo/bar");
+  }
+
+  // These are taken from the web platform tests
+  struct Test {
+    kj::StringPtr input;
+    kj::StringPtr encoding;
+    kj::StringPtr result;
+  };
+
+  Test tests[] = {
+    Test {
+      .input = ", text/plain"_kj,
+      .encoding = nullptr,
+      .result = "text/plain"_kj,
+    },
+    Test {
+      .input = "text/plain, "_kj,
+      .encoding = nullptr,
+      .result = "text/plain"_kj,
+    },
+    {
+      .input = "text/html, text/plain"_kj,
+      .encoding = nullptr,
+      .result = "text/plain"_kj,
+    },
+    {
+      .input = "text/plain;charset=gbk, text/html"_kj,
+      .encoding = nullptr,
+      .result = "text/html"_kj,
+    },
+    {
+      .input = "text/plain;charset=gbk, text/html;charset=windows-1254"_kj,
+      .encoding = "windows-1254"_kj,
+      .result = "text/html;charset=windows-1254"_kj,
+    },
+    {
+      .input = "text/plain;charset=gbk, text/plain"_kj,
+      .encoding = "gbk"_kj,
+      .result = "text/plain;charset=gbk"_kj,
+    },
+    {
+      .input = "text/plain;charset=gbk, text/plain;charset=windows-1252"_kj,
+      .encoding = "windows-1252"_kj,
+      .result = "text/plain;charset=windows-1252"_kj,
+    },
+    {
+      .input = "text/plain;charset=gbk;x=foo, text/plain"_kj,
+      .encoding = "gbk"_kj,
+      .result = "text/plain;charset=gbk"_kj,
+    },
+    {
+      .input = "text/html;charset=gbk, text/plain, text/html"_kj,
+      .encoding = nullptr,
+      .result = "text/html"_kj,
+    },
+    {
+      .input = "text/plain, */*"_kj,
+      .encoding = nullptr,
+      .result = "text/plain"_kj,
+    },
+    {
+      .input = "text/html, */*"_kj,
+      .encoding = nullptr,
+      .result = "text/html"_kj,
+    },
+    {
+      .input = "*/*, text/html"_kj,
+      .encoding = nullptr,
+      .result = "text/html"_kj,
+    },
+    {
+      .input = "text/plain, */*;charset=gbk"_kj,
+      .encoding = nullptr,
+      .result = "text/plain"_kj,
+    },
+    {
+      .input = "text/html, */*;charset=gbk"_kj,
+      .encoding = nullptr,
+      .result = "text/html"_kj,
+    },
+    {
+      .input = "text/html;\", \", text/plain"_kj,
+      .encoding = nullptr,
+      .result = "text/plain"_kj,
+    },
+    {
+      .input = "text/html;charset=gbk, text/html;x=\",text/plain"_kj,
+      .encoding = "gbk"_kj,
+      .result = "text/html;x=\",text/plain\";charset=gbk"_kj,
+    },
+    {
+      .input = "text/html;x=\", text/plain"_kj,
+      .encoding = nullptr,
+      .result = "text/html;x=\", text/plain\""_kj,
+    },
+    {
+      .input = "text/html;\", text/plain"_kj,
+      .encoding = nullptr,
+      .result = "text/html"_kj,
+    },
+    {
+      .input = "text/html;\", \\\", text/plain"_kj,
+      .encoding = nullptr,
+      .result = "text/html"_kj,
+    },
+    {
+      // This is actually three separate Content-Type header fields concated together
+      // into a list. The original values are:
+      //  Content-Type: text/html;\"
+      //  Content-Type: \\\"
+      //  Content-Type: text/plain, \";charset=GBK
+      //
+      // When combined using the typical rules for combining multiple headers, the result
+      // actually ends up being just a single mime type with an invalid parameter.
+      .input = "text/html;\", \\\", text/plain, \";charset=GBK"_kj,
+      .encoding = "GBK"_kj,
+      .result = "text/html;charset=GBK"_kj,
+    },
+  };
+  auto ptr = kj::ArrayPtr<Test>(tests, sizeof(tests) / sizeof(Test));
+
+  for (auto& test : ptr) {
+    auto parsed = KJ_ASSERT_NONNULL(MimeType::extract(test.input));
+    KJ_ASSERT(parsed.toString() == test.result);
+    if (test.encoding != nullptr) {
+      KJ_ASSERT(KJ_ASSERT_NONNULL(parsed.params().find("charset"_kj)) == test.encoding);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace workerd
 
