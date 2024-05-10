@@ -862,11 +862,19 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
-  return arrayBuffer(js).then(js, [this](jsg::Lock&, kj::Array<byte> buffer) {
+  return arrayBuffer(js).then(js, [this](jsg::Lock& js, kj::Array<byte> buffer) {
     kj::String contentType =
         headersRef.get(jsg::ByteString(kj::str("Content-Type")))
             .map([](jsg::ByteString&& b) -> kj::String { return kj::mv(b); })
             .orDefault(nullptr);
+
+    if (FeatureFlags::get(js).getBlobStandardMimeType()) {
+      contentType =
+          MimeType::extract(contentType).map([](MimeType&& mt) -> kj::String {
+            return mt.toString();
+          }).orDefault(nullptr);
+    }
+
     return jsg::alloc<Blob>(kj::mv(buffer), kj::mv(contentType));
   });
 }

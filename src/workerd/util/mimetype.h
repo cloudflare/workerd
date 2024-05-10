@@ -92,9 +92,15 @@ public:
   static const MimeType MANIFEST_JSON;
   static const MimeType VTT;
   static const MimeType EVENT_STREAM;
+  static const MimeType WILDCARD;
 
   // exposed directly for performance reasons
   static const kj::StringPtr PLAINTEXT_STRING;
+
+  // Extracts a mime type from a concatenated list of content-type values
+  // per the algorithm defined in the fetch spec:
+  // https://fetch.spec.whatwg.org/#concept-header-extract-mime-type
+  static kj::Maybe<MimeType> extract(kj::StringPtr input);
 
 private:
   kj::String type_;
@@ -105,6 +111,9 @@ private:
   // 128 bytes will keep all reasonable mimetypes on the stack.
 
   void paramsToString(ToStringBuffer& buffer) const;
+
+  static kj::Maybe<MimeType> tryParseImpl(kj::ArrayPtr<const char> input,
+                                          ParseOptions options = ParseOptions::DEFAULT);
 };
 
 kj::String KJ_STRINGIFY(const MimeType& state);

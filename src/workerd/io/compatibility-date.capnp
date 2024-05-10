@@ -426,4 +426,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # is the same as the one passed to the read method. Our original implementation returned
   # undefined instead. This flag changes the behavior to match the spec and to match the behavior
   # implemented by the JS-backed ReadableStream implementation.
+
+  blobStandardMimeType @48 :Bool
+      $compatEnableFlag("blob_standard_mime_type")
+      $compatDisableFlag("blob_legacy_mime_type")
+      $compatEnableDate("2024-06-03");
+  # The original implementation of the Blob mime type normalization when extracting a blob
+  # from the Request or Response body is not compliant with the standard. Unfortunately,
+  # making it compliant is a breaking change. This flag controls the availability of the
+  # new spec-compliant Blob mime type normalization.
 }
