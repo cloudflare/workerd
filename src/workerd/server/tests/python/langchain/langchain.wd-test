@@ -2,14 +2,14 @@ using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "python-hello",
+    ( name = "python-langchain",
       worker = (
         modules = [
           (name = "worker.py", pythonModule = embed "./worker.py"),
           (name = "aiohttp", pythonRequirement = "aiohttp"),
           (name = "ssl", pythonRequirement = "ssl"),
-          (name = "langchain==0.0.339", pythonRequirement = ""),
-          (name = "openai==0.28.1", pythonRequirement = ""),
+          (name = "langchain_core", pythonRequirement = ""),
+          (name = "langchain_openai", pythonRequirement = ""),
         ],
         compatibilityDate = "2024-01-15",
         compatibilityFlags = ["python_workers"],
