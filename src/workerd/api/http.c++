@@ -1887,7 +1887,13 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, uint64_t(0));
     }
     return ioContext.awaitIo(js,
-        AbortSignal::maybeCancelWrap(signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response)),
+        AbortSignal::maybeCancelWrap(signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
+            .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
+          if (exception.getDescription().startsWith("invalid Content-Length header value")) {
+            return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
+          }
+          return kj::mv(exception);
+        }),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
          urlList = kj::mv(urlList), client = kj::mv(client)]
         (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
