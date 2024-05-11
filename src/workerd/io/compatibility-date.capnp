@@ -435,4 +435,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # from the Request or Response body is not compliant with the standard. Unfortunately,
   # making it compliant is a breaking change. This flag controls the availability of the
   # new spec-compliant Blob mime type normalization.
+
+  fetchStandardUrl @49 :Bool
+    $compatEnableFlag("fetch_standard_url")
+    $compatDisableFlag("fetch_legacy_url")
+    $compatEnableDate("2024-06-03");
+  # Ensures that WHATWG standard URL parsing is used in the fetch API implementation.
 }
