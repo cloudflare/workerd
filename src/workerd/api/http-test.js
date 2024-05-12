@@ -126,7 +126,6 @@ export const inspect = {
     });
     assert.strictEqual(util.inspect(request),
 `Request {
-  cache: undefined,
   keepalive: false,
   integrity: '',
   cf: undefined,
@@ -204,38 +203,5 @@ export const inspect = {
     webSocket.send("data");
     webSocket.close();
     await messagePromise;
-  }
-};
-
-export const cacheMode = {
-  async test() {
-    {
-      const req = new Request('https://example.org', { });
-      assert.strictEqual(req.cache, undefined);
-    }
-    {
-      const req = new Request('https://example.org', { cache: 'no-store' });
-      assert.strictEqual(req.cache, 'no-store');
-    }
-    {
-      const req = new Request('https://example.org', { cache: 'no-cache' });
-      assert.strictEqual(req.cache, 'no-cache');
-    }
-    assert.throws(() => {
-      new Request('https://example.org', { cache: 'unsupported' });
-    }, {
-      name: 'TypeError',
-      message: 'Unsupported cache mode: unsupported',
-    });
-
-    // Any value other than undefined is currently not supported
-    // TODO(soon): The no-store and no-cache values will be supported
-    // soon, at which time this test will need to be updated.
-    await assert.rejects((async () => {
-      await fetch('http://example.org', { cache: 'no-store' });
-    })(), {
-      name: 'TypeError',
-      message: 'Unsupported cache mode: no-store',
-    });
   }
 };
