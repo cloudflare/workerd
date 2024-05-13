@@ -51,7 +51,7 @@ ModuleBundle::Type toModuleBuilderType(ModuleBundle::BuiltinBuilder::Type type) 
 class EsModule final : public Module {
 public:
   explicit EsModule(Url specifier, Type type, Flags flags, kj::Array<const char> source)
-      : Module(kj::mv(specifier), type, flags | Flags::ESM),
+      : Module(kj::mv(specifier), type, flags | Flags::ESM | Flags::EVAL),
         source(kj::mv(source)),
         ptr(this->source),
         externed(false),
@@ -150,14 +150,28 @@ public:
   }
 
 private:
-  v8::MaybeLocal<v8::Value> evaluate(
+  v8::MaybeLocal<v8::Value> actuallyEvaluate(
       Lock& js,
       v8::Local<v8::Module> module,
       const CompilationObserver& observer) const override {
+    return module->Evaluate(js.v8Context());
+  }
+
+  v8::MaybeLocal<v8::Value> evaluate(
+      Lock& js,
+      v8::Local<v8::Module> module,
+      const CompilationObserver& observer,
+      kj::Maybe<EvalCallback>& maybeEvalCallback) const override {
     if (!ensureInstantiated(js, module, observer, this)) {
       return v8::MaybeLocal<v8::Value>();
     };
-    return module->Evaluate(js.v8Context());
+
+    // No need to check isEval here since EsModules are always eval'd.
+    KJ_IF_SOME(evalCallback, maybeEvalCallback) {
+      return js.wrapSimplePromise(evalCallback(js, *this, module, observer));
+    }
+
+    return actuallyEvaluate(js, module, observer);
   }
 
   kj::Array<const char> source;
@@ -180,8 +194,9 @@ public:
       Url specifier,
       Type type,
       ModuleBundle::BundleBuilder::EvaluateCallback callback,
-      kj::Array<kj::String> namedExports)
-      : Module(kj::mv(specifier), type),
+      kj::Array<kj::String> namedExports,
+      Flags flags = Flags::NONE)
+      : Module(kj::mv(specifier), type, flags),
         callback(kj::mv(callback)),
         namedExports(kj::mv(namedExports)) {
     // Synthetic modules can never be ESM or Main
@@ -207,14 +222,10 @@ private:
       v8::Local<v8::Context> context,
       v8::Local<v8::Module> module);
 
-  v8::MaybeLocal<v8::Value> evaluate(
+  v8::MaybeLocal<v8::Value> actuallyEvaluate(
       Lock& js,
       v8::Local<v8::Module> module,
       const CompilationObserver& observer) const override {
-    if (!ensureInstantiated(js, module, observer, this)) {
-      return v8::MaybeLocal<v8::Value>();
-    }
-
     // The return value will be a resolved promise.
     v8::Local<v8::Promise::Resolver> resolver;
 
@@ -233,6 +244,26 @@ private:
     }
 
     return resolver->GetPromise();
+  }
+
+  v8::MaybeLocal<v8::Value> evaluate(
+      Lock& js,
+      v8::Local<v8::Module> module,
+      const CompilationObserver& observer,
+      kj::Maybe<EvalCallback>& maybeEvalCallback) const override {
+    if (!ensureInstantiated(js, module, observer, this)) {
+      return v8::MaybeLocal<v8::Value>();
+    }
+
+    // If this synthetic module is marked with Flags::EVAL, and the evalCallback
+    // is specified, then we defer evaluation to the given callback.
+    if (isEval()) {
+      KJ_IF_SOME(evalCallback, maybeEvalCallback) {
+        return js.wrapSimplePromise(evalCallback(js, *this, module, observer));
+      }
+    }
+
+    return actuallyEvaluate(js, module, observer);
   }
 
   ModuleBundle::BundleBuilder::EvaluateCallback callback;
@@ -301,10 +332,11 @@ public:
   v8::MaybeLocal<v8::Promise> dynamicResolve(Lock& js, Url specifier, Url referrer,
                                              kj::StringPtr rawSpecifier) {
     static constexpr auto evaluate = [](Lock& js, Entry& entry,
-                                        const CompilationObserver& observer) {
+                                        const CompilationObserver& observer,
+                                        kj::Maybe<Module::EvalCallback>& maybeEvalCallback) {
       auto module = entry.key.getHandle(js);
       return js.toPromise(
-          check(entry.module.evaluate(js, module, observer)).As<v8::Promise>())
+          check(entry.module.evaluate(js, module, observer, maybeEvalCallback)).As<v8::Promise>())
           .then(js, [module=js.v8Ref(module)](Lock& js, Value) mutable -> Promise<Value> {
         return js.resolvedPromise(js.v8Ref(module.getHandle(js)->GetModuleNamespace()));
       });
@@ -328,12 +360,12 @@ public:
 
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
-        return evaluate(js, found, getObserver());
+        return evaluate(js, found, getObserver(), inner.getEvalCallback());
       }
 
       // No? That's ok, let's look it up.
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
-        return evaluate(js, found, getObserver());
+        return evaluate(js, found, getObserver(), inner.getEvalCallback());
       }
 
       // Nothing found? Aw... fail!
@@ -355,7 +387,8 @@ public:
         Lock& js,
         Entry& entry,
         const Url& specifier,
-        const CompilationObserver& observer) {
+        const CompilationObserver& observer,
+        kj::Maybe<Module::EvalCallback>& maybeEvalCallback) {
       auto module = entry.key.getHandle(js);
       auto status = module->GetStatus();
 
@@ -373,7 +406,8 @@ public:
           kj::str("Circular module dependency with synchronous require: ", specifier));
 
       // Evaluate the module and grab the default export from the module namespace.
-      auto promise = check(entry.module.evaluate(js, module, observer)).As<v8::Promise>();
+      auto promise = check(entry.module.evaluate(js, module, observer, maybeEvalCallback))
+          .As<v8::Promise>();
 
       switch (promise->State()) {
         case v8::Promise::kFulfilled: {
@@ -399,11 +433,11 @@ public:
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Object> {
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
-        return evaluate(js, found, context.specifier, getObserver());
+        return evaluate(js, found, context.specifier, getObserver(), inner.getEvalCallback());
       }
 
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
-        return evaluate(js, found, context.specifier, getObserver());
+        return evaluate(js, found, context.specifier, getObserver(), inner.getEvalCallback());
       }
 
       JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.specifier.getHref()));
@@ -512,7 +546,8 @@ v8::MaybeLocal<v8::Value> SyntheticModule::evaluationSteps(
     auto& registry = IsolateModuleRegistry::from(isolate);
 
     KJ_IF_SOME(found, registry.lookup(js, module)) {
-      return found.module.evaluate(js, module, registry.getObserver());
+      return found.module.evaluate(js, module, registry.getObserver(),
+        registry.inner.getEvalCallback());
     }
 
     // This case really should never actually happen but we handle it anyway.
@@ -1060,6 +1095,11 @@ ModuleRegistry::Builder& ModuleRegistry::Builder::add(kj::Own<ModuleBundle> bund
   return *this;
 }
 
+ModuleRegistry::Builder& ModuleRegistry::Builder::setEvalCallback(EvalCallback callback) {
+  maybeEvalCallback = kj::mv(callback);
+  return *this;
+}
+
 kj::Own<ModuleRegistry> ModuleRegistry::Builder::finish() {
   return kj::heap<ModuleRegistry>(this);
 }
@@ -1071,6 +1111,7 @@ ModuleRegistry::ModuleRegistry(ModuleRegistry::Builder* builder)
   bundles_[kBuiltin] = builder->bundles_[kBuiltin].releaseAsArray();
   bundles_[kBuiltinOnly] = builder->bundles_[kBuiltinOnly].releaseAsArray();
   bundles_[kFallback] = builder->bundles_[kFallback].releaseAsArray();
+  maybeEvalCallback = kj::mv(builder->maybeEvalCallback);
 }
 
 void ModuleRegistry::attachToIsolate(
@@ -1199,6 +1240,10 @@ v8::Maybe<bool> Module::instantiate(
   return module->InstantiateModule(js.v8Context(), resolveCallback);
 }
 
+bool Module::isEval() const {
+  return (flags_ & Flags::EVAL) == Flags::EVAL;
+}
+
 bool Module::isEsm() const {
   return (flags_ & Flags::ESM) == Flags::ESM;
 }
@@ -1217,8 +1262,12 @@ kj::Own<Module> Module::newSynthetic(
     Url specifier,
     Type type,
     EvaluateCallback callback,
-    kj::Array<kj::String> namedExports) {
-  return kj::heap<SyntheticModule>(kj::mv(specifier), type, kj::mv(callback), kj::mv(namedExports));
+    kj::Array<kj::String> namedExports,
+    Flags flags) {
+  return kj::heap<SyntheticModule>(kj::mv(specifier), type,
+                                   kj::mv(callback),
+                                   kj::mv(namedExports),
+                                   flags);
 }
 
 kj::Own<Module> Module::newEsm(Url specifier, Type type, kj::Array<const char> code, Flags flags) {
