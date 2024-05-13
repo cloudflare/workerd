@@ -1,6 +1,5 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//:build/wd_test.bzl", "wd_test")
-load("//:build/pyodide_bucket.bzl", "PYODIDE_IMPORTS_TO_TEST")
 
 def generate_import_py_file(imports):
   res = "def test():\n"
@@ -8,8 +7,7 @@ def generate_import_py_file(imports):
     res += "   import "+imp+"\n"
   return res
 
-def generate_wd_test_file(requirement):
-  return """
+WD_FILE_TEMPLATE = """
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
@@ -25,15 +23,19 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-);""".format(requirement, requirement)
+);"""
 
-def gen_import_tests():
-  for lib in PYODIDE_IMPORTS_TO_TEST.keys():
+def generate_wd_test_file(requirement):
+  return WD_FILE_TEMPLATE.format(requirement, requirement)
+
+# to_test is a dictionary from library name to list of imports
+def gen_import_tests(to_test):
+  for lib in to_test.keys():
     worker_py_fname = "import/{}/worker.py".format(lib)
     wd_test_fname = "import/{}/import.wd-test".format(lib)
     write_file(worker_py_fname + "@rule",
       worker_py_fname,
-      [generate_import_py_file(PYODIDE_IMPORTS_TO_TEST[lib])])
+      [generate_import_py_file(to_test[lib])])
     write_file(wd_test_fname + "@rule",
       wd_test_fname,
       [generate_wd_test_file(lib)])

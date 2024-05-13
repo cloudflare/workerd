@@ -56,4 +56,5 @@ wd_test(
 )
 
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
-gen_import_tests()
+load("//:build/pyodide_bucket.bzl", "PYODIDE_IMPORTS_TO_TEST")
+gen_import_tests(PYODIDE_IMPORTS_TO_TEST)
