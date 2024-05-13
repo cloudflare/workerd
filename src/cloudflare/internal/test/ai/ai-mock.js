@@ -21,6 +21,21 @@ export default {
             })
         }
 
+        if (modelName === 'inputErrorModel') {
+            return Response.json({
+                internalCode: 1001,
+                message: "InvalidInput: prompt and messages are mutually exclusive",
+                name: "InvalidInput",
+                description: "prompt and messages are mutually exclusive"
+            }, {
+                status: 400,
+                headers: {
+                    'content-type': 'application/json',
+                    ...respHeaders
+                }
+            })
+        }
+
         return Response.json({response: 'model response'}, {
             headers: {
                 'content-type': 'application/json',

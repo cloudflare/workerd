@@ -33,5 +33,38 @@ export const tests = {
             })
             assert.deepStrictEqual(await resp.json(),  { response: 'model response' });
         }
+
+        {
+            // Test error response
+            try {
+                await env.ai.run('inputErrorModel', {prompt: 'test'})
+            } catch(e) {
+                assert.deepEqual({
+                    name: e.name, message: e.message
+                }, {
+                  name: 'InvalidInput',
+                  message: '1001: prompt and messages are mutually exclusive',
+                })
+            }
+        }
+
+        {
+            // Test error properties
+            const err = await env.ai._parseError(Response.json({
+                internalCode: 1001,
+                message: "InvalidInput: prompt and messages are mutually exclusive",
+                name: "InvalidInput",
+                description: "prompt and messages are mutually exclusive"
+            }))
+            assert.equal(err.name, 'InvalidInput')
+            assert.equal(err.message, '1001: prompt and messages are mutually exclusive')
+        }
+
+        {
+            // Test error properties from non json response
+            const err = await env.ai._parseError(new Response("Unknown error"))
+            assert.equal(err.name, 'InferenceUpstreamError')
+            assert.equal(err.message, 'Unknown error')
+        }
     },
 }
