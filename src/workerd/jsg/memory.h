@@ -605,7 +605,7 @@ void MemoryTracker::trackField(
     const v8::Local<T>& value,
     kj::Maybe<kj::StringPtr> nodeName) {
   if (!value.IsEmpty()) {
-    addEdge(graph_->V8Node(value), edgeName);
+    addEdge(graph_->V8Node(value.template As<v8::Value>()), edgeName);
   }
 }
 

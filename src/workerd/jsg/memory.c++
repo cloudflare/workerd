@@ -53,7 +53,7 @@ private:
   static v8::EmbedderGraph::Node* maybeWrapperNode(
       MemoryTracker* tracker,
       v8::Local<v8::Object> obj) {
-    if (!obj.IsEmpty()) return tracker->graph_->V8Node(obj);
+    if (!obj.IsEmpty()) return tracker->graph_->V8Node(obj.As<v8::Value>());
     return nullptr;
   }
 
