@@ -906,6 +906,22 @@ jsg::Ref<Request> Request::constructor(
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(u, kj::String) {
       url = kj::mv(u);
+
+      // TODO(later): This is rather unfortunate. The original implementation of
+      // this used non-standard URL parsing in violation of the spec. Unfortunately
+      // some users have come to depend on the non-standard behavior so we have to
+      // gate the standard behavior with a compat flag. Ideally we'd just be able to
+      // use the standard parsed URL throughout all of the code but in order to
+      // minimize the number of changes, we're going to ultimately end up double
+      // parsing (and serializing) the URL... here we parse it with the standard
+      // parser, reserialize it back into a string for the sake of not modifying
+      // the rest of the implementation. Fortunately the standard parser is fast
+      // but it would eventually be nice to eliminate the double parsing.
+      if (FeatureFlags::get(js).getFetchStandardUrl()) {
+        auto parsed = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(url.asPtr()), TypeError,
+            kj::str("Invalid URL: ", url));
+        url = kj::str(parsed.getHref());
+      }
     }
     KJ_CASE_ONEOF(r, jsg::Ref<Request>) {
       // Check to see if we're getting a new body from `init`. If so, we want to ignore `input`'s
@@ -1929,7 +1945,29 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(
   //   - Translates HEAD requests that hit 303 into HEAD requests with null bodies.
   //   - Translates all other requests that hit 303 into GET requests with null bodies.
 
-  auto redirectedLocation = urlList.back().tryParseRelative(location);
+  auto redirectedLocation = ([&]() -> kj::Maybe<kj::Url> {
+    // TODO(later): This is a bit unfortunate. Per the fetch spec, we're supposed to be
+    // using standard WHATWG URL parsing to resolve the redirect URL. However, changing it
+    // now requires a compat flag. In order to minimize changes to the rest of the impl
+    // we end up double parsing the URL here, once with the standard parser to produce the
+    // correct result, and again with kj::Url in order to produce something that works with
+    // the existing code. Fortunately the standard parser is fast but it would be nice to
+    // be able to avoid the double parse at some point.
+    if (FeatureFlags::get(js).getFetchStandardUrl()) {
+      auto base = urlList.back().toString();
+      KJ_IF_SOME(parsed, jsg::Url::tryParse(location, base.asPtr())) {
+        auto str = kj::str(parsed.getHref());
+        return kj::Url::tryParse(str.asPtr(), kj::Url::Context::REMOTE_HREF, kj::Url::Options {
+          .allowEmpty = true,
+          .percentDecode = false,
+        });
+      } else {
+        return kj::none;
+      }
+    } else {
+      return urlList.back().tryParseRelative(location);
+    }
+  })();
 
   if (redirectedLocation == kj::none) {
     auto exception = JSG_KJ_EXCEPTION(FAILED, TypeError,
