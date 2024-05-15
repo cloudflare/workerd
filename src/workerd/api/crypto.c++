@@ -4,6 +4,7 @@
 
 #include "crypto.h"
 #include "crypto-impl.h"
+#include "streams/standard.h"
 #include <array>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
@@ -655,8 +656,7 @@ kj::String Crypto::randomUUID() {
 // =======================================================================================
 // Crypto Streams implementation
 
-namespace {
-DigestStreamSink::DigestContextPtr initContext(DigestStreamSink::HashAlgorithm& algorithm) {
+DigestStream::DigestContextPtr DigestStream::initContext(SubtleCrypto::HashAlgorithm& algorithm) {
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm.name);
   auto type = lookupDigestAlgorithm(algorithm.name).second;
   auto context = makeDigestContext();
@@ -664,91 +664,151 @@ DigestStreamSink::DigestContextPtr initContext(DigestStreamSink::HashAlgorithm& 
   OSSLCALL(EVP_DigestInit_ex(context.get(), type, nullptr));
   return kj::mv(context);
 }
-}  // namespace
-
-DigestStreamSink::DigestStreamSink(
-    HashAlgorithm algorithm,
-    kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller)
-    : algorithm(kj::mv(algorithm)),
-      state(initContext(this->algorithm)),
-      fulfiller(kj::mv(fulfiller)) {}
-
-DigestStreamSink::~DigestStreamSink() {
-  if (fulfiller && fulfiller->isWaiting()) {
-    fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
-        "The digest was never completed. The DigestStream was created but possibly never "
-        "used or finished."));
-  }
-}
-
-kj::Promise<void> DigestStreamSink::write(const void* buffer, size_t size) {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, Closed) {
-      return kj::READY_NOW;
-    }
-    KJ_CASE_ONEOF(errored, Errored) {
-      return kj::cp(errored);
-    }
-    KJ_CASE_ONEOF(context, DigestContextPtr) {
-      auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm.name);
-      OSSLCALL(EVP_DigestUpdate(context.get(), buffer, size));
-      return kj::READY_NOW;
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-kj::Promise<void> DigestStreamSink::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
-  for (auto& piece : pieces) {
-    co_await write(piece.begin(), piece.size());
-  }
-}
-
-kj::Promise<void> DigestStreamSink::end() {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, Closed) {
-      return kj::READY_NOW;
-    }
-    KJ_CASE_ONEOF(errored, Errored) {
-      return kj::cp(errored);
-    }
-    KJ_CASE_ONEOF(context, DigestContextPtr) {
-      auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm.name);
-      uint size = 0;
-      auto digest = kj::heapArray<kj::byte>(EVP_MD_CTX_size(context.get()));
-      OSSLCALL(EVP_DigestFinal_ex(context.get(), digest.begin(), &size));
-      KJ_ASSERT(size, digest.size());
-      state.init<Closed>();
-      fulfiller->fulfill(kj::mv(digest));
-      return kj::READY_NOW;
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-void DigestStreamSink::abort(kj::Exception reason) {
-  fulfiller->reject(kj::cp(reason));
-  state.init<Errored>(kj::mv(reason));
-}
 
 DigestStream::DigestStream(
-    HashAlgorithm algorithm,
-    kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller,
+    kj::Own<WritableStreamController> controller,
+    SubtleCrypto::HashAlgorithm algorithm,
+    jsg::Promise<kj::Array<kj::byte>>::Resolver resolver,
     jsg::Promise<kj::Array<kj::byte>> promise)
-    : WritableStream(IoContext::current(),
-        kj::heap<DigestStreamSink>(kj::mv(algorithm), kj::mv(fulfiller))),
-      promise(kj::mv(promise)) {}
+    : WritableStream(kj::mv(controller)),
+      promise(kj::mv(promise)),
+      state(Ready(kj::mv(algorithm), kj::mv(resolver))) {}
+
+void DigestStream::dispose(jsg::Lock& js) {
+  js.tryCatch([&] {
+    KJ_IF_SOME(ready, state.tryGet<Ready>()) {
+      auto reason = js.typeError("The DigestStream was disposed.");
+      ready.resolver.reject(js, reason);
+      state.init<StreamStates::Errored>(js.v8Ref<v8::Value>(reason));
+    }
+  }, [&](jsg::Value exception) {
+    js.throwException(kj::mv(exception));
+  });
+}
+
+void DigestStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("promise", promise);
+  KJ_IF_SOME(ready, state.tryGet<Ready>()) {
+    tracker.trackField("resolver", ready.resolver);
+  }
+}
+
+void DigestStream::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(promise);
+  KJ_IF_SOME(ready, state.tryGet<Ready>()) {
+    visitor.visit(ready.resolver);
+  }
+}
+
+kj::Maybe<StreamStates::Errored> DigestStream::write(jsg::Lock& js, kj::ArrayPtr<kj::byte> buffer) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return errored.addRef(js);
+    }
+    KJ_CASE_ONEOF(ready, Ready) {
+      auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, ready.algorithm.name);
+      OSSLCALL(EVP_DigestUpdate(ready.context.get(), buffer.begin(), buffer.size()));
+      return kj::none;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<StreamStates::Errored> DigestStream::close(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return errored.addRef(js);
+    }
+    KJ_CASE_ONEOF(ready, Ready) {
+      auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, ready.algorithm.name);
+      uint size = 0;
+      auto digest = kj::heapArray<kj::byte>(EVP_MD_CTX_size(ready.context.get()));
+      OSSLCALL(EVP_DigestFinal_ex(ready.context.get(), digest.begin(), &size));
+      KJ_ASSERT(size, digest.size());
+      ready.resolver.resolve(js, kj::mv(digest));
+      state.init<StreamStates::Closed>();
+      return kj::none;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void DigestStream::abort(jsg::Lock& js, jsg::JsValue reason) {
+  // If the state is already closed or errored, then this is a non-op
+  KJ_IF_SOME(ready, state.tryGet<Ready>()) {
+    ready.resolver.reject(js, reason);
+    state.init<StreamStates::Errored>(js.v8Ref<v8::Value>(reason));
+  }
+}
 
 jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algorithm) {
-  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::byte>>();
+  auto paf = js.newPromiseAndResolver<kj::Array<kj::byte>>();
 
-  auto jsPromise = IoContext::current().awaitIoLegacy(js, kj::mv(paf.promise));
-  jsPromise.markAsHandled(js);
-
-  return jsg::alloc<DigestStream>(
+  auto stream = jsg::alloc<DigestStream>(
+      newWritableStreamJsController(),
       interpretAlgorithmParam(kj::mv(algorithm)),
-      kj::mv(paf.fulfiller),
-      kj::mv(jsPromise));
+      kj::mv(paf.resolver),
+      kj::mv(paf.promise));
+
+  stream->getController().setup(js, UnderlyingSink {
+      .write = [&stream=*stream](jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
+    return js.tryCatch([&] {
+      // Make sure what we got can be interpreted as bytes...
+      std::shared_ptr<v8::BackingStore> backing;
+      if (chunk->IsArrayBuffer() || chunk->IsArrayBufferView()) {
+        jsg::BufferSource source(js, chunk);
+        if (source.size() == 0) return js.resolvedPromise();
+
+        KJ_IF_SOME(error, stream.write(js, source.asArrayPtr())) {
+          return js.rejectedPromise<void>(kj::mv(error));
+        } else {}  // Here to silence a compiler warning
+        stream.bytesWritten += source.size();
+        return js.resolvedPromise();
+      } else if (chunk->IsString()) {
+        // If we receive a string, we'll convert that to UTF-8 bytes and digest that.
+        auto str = js.toString(chunk);
+        if (str.size() == 0) return js.resolvedPromise();
+        KJ_IF_SOME(error, stream.write(js, str.asBytes())) {
+          return js.rejectedPromise<void>(kj::mv(error));
+        }
+        stream.bytesWritten += str.size();
+        return js.resolvedPromise();
+      }
+      return js.rejectedPromise<void>(js.typeError(
+          "DigestStream is a byte stream but received an object of "
+          "non-ArrayBuffer/ArrayBufferView/string type on its writable side."));
+    }, [&](jsg::Value exception) {
+      return js.rejectedPromise<void>(kj::mv(exception));
+    });
+  },
+  .abort = [&stream=*stream](jsg::Lock& js, auto reason) mutable {
+    return js.tryCatch([&] {
+      stream.abort(js, jsg::JsValue(reason));
+      return js.resolvedPromise();
+    }, [&](jsg::Value exception) {
+      return js.rejectedPromise<void>(kj::mv(exception));
+    });
+  },
+  .close = [&stream=*stream](jsg::Lock& js) mutable {
+    return js.tryCatch([&] {
+      // If sink.close returns a non kj::none value, that means the sink was errored
+      // and we return a rejected promise here. Otherwise, we return resolved.
+      KJ_IF_SOME(error, stream.close(js)) {
+        return js.rejectedPromise<void>(kj::mv(error));
+      } else {}  // Here to silence a compiler warning
+      return js.resolvedPromise();
+    }, [&](jsg::Value exception) {
+      return js.rejectedPromise<void>(kj::mv(exception));
+    });
+  }}, kj::none);
+
+  return kj::mv(stream);
 }
 
 }  // namespace workerd::api
