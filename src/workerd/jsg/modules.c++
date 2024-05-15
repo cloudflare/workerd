@@ -9,47 +9,8 @@
 #include <set>
 
 namespace workerd::jsg {
-
 namespace {
-// This list must be kept in sync with the list of builtins from Node.js.
-// It should be unlikely that anything is ever removed from this list, and
-// adding items to it is considered a semver-major change in Node.js.
-static const std::set<kj::StringPtr> NODEJS_BUILTINS {
-  "_http_agent",         "_http_client",        "_http_common",
-  "_http_incoming",      "_http_outgoing",      "_http_server",
-  "_stream_duplex",      "_stream_passthrough", "_stream_readable",
-  "_stream_transform",   "_stream_wrap",        "_stream_writable",
-  "_tls_common",         "_tls_wrap",           "assert",
-  "assert/strict",       "async_hooks",         "buffer",
-  "child_process",       "cluster",             "console",
-  "constants",           "crypto",              "dgram",
-  "diagnostics_channel", "dns",                 "dns/promises",
-  "domain",              "events",              "fs",
-  "fs/promises",         "http",                "http2",
-  "https",               "inspector",           "inspector/promises",
-  "module",              "net",                 "os",
-  "path",                "path/posix",          "path/win32",
-  "perf_hooks",          "process",             "punycode",
-  "querystring",         "readline",            "readline/promises",
-  "repl",                "stream",              "stream/consumers",
-  "stream/promises",     "stream/web",          "string_decoder",
-  "sys",                 "timers",              "timers/promises",
-  "tls",                 "trace_events",        "tty",
-  "url",                 "util",                "util/types",
-  "v8",                  "vm",                  "worker_threads",
-  "zlib"
-};
 
-}  // namespace
-
-void logIfNodeSpecifier(kj::StringPtr specifier) {
-  if (NODEJS_BUILTINS.contains(specifier)) {
-    LOG_NOSENTRY(WARNING, "Using require() to import a module with a known Node.js built-in name",
-                 specifier);
-  }
-}
-
-namespace {
 // The CompileCache is used to hold cached compilation data for built-in JavaScript modules.
 //
 // Importantly, this is a process-lifetime in-memory cache that is only appropriate for
@@ -97,7 +58,6 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         "referrer passed to resolveCallback isn't in modules table");
 
     auto spec = kj::str(specifier);
-    logIfNodeSpecifier(spec);
 
     // If the referrer module is a built-in, it is only permitted to resolve
     // internal modules. If the worker bundle provided an override for a builtin,
@@ -293,8 +253,6 @@ ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
 v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier) {
   auto modulesForResolveCallback = getModulesForResolveCallback(js.v8Isolate);
   KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
-
-  logIfNodeSpecifier(specifier);
 
   kj::Path targetPath = ([&] {
     // If the specifier begins with one of our known prefixes, let's not resolve
@@ -598,11 +556,39 @@ NodeJsModuleContext::NodeJsModuleContext(jsg::Lock& js, kj::Path path)
       exports(js.v8Ref(module->getExports(js))) {}
 
 v8::Local<v8::Value> NodeJsModuleContext::require(jsg::Lock& js, kj::String specifier) {
+  // This list must be kept in sync with the list of builtins from Node.js.
+  // It should be unlikely that anything is ever removed from this list, and
+  // adding items to it is considered a semver-major change in Node.js.
+  static const std::set<kj::StringPtr> NODEJS_BUILTINS {
+    "_http_agent",         "_http_client",        "_http_common",
+    "_http_incoming",      "_http_outgoing",      "_http_server",
+    "_stream_duplex",      "_stream_passthrough", "_stream_readable",
+    "_stream_transform",   "_stream_wrap",        "_stream_writable",
+    "_tls_common",         "_tls_wrap",           "assert",
+    "assert/strict",       "async_hooks",         "buffer",
+    "child_process",       "cluster",             "console",
+    "constants",           "crypto",              "dgram",
+    "diagnostics_channel", "dns",                 "dns/promises",
+    "domain",              "events",              "fs",
+    "fs/promises",         "http",                "http2",
+    "https",               "inspector",           "inspector/promises",
+    "module",              "net",                 "os",
+    "path",                "path/posix",          "path/win32",
+    "perf_hooks",          "process",             "punycode",
+    "querystring",         "readline",            "readline/promises",
+    "repl",                "stream",              "stream/consumers",
+    "stream/promises",     "stream/web",          "string_decoder",
+    "sys",                 "timers",              "timers/promises",
+    "tls",                 "trace_events",        "tty",
+    "url",                 "util",                "util/types",
+    "v8",                  "vm",                  "worker_threads",
+    "zlib"
+  };
+
   // If it is a bare specifier known to be a Node.js built-in, then prefix the
   // specifier with node:
   bool isNodeBuiltin = false;
   auto resolveOption = jsg::ModuleRegistry::ResolveOption::DEFAULT;
-  logIfNodeSpecifier(specifier);
   if (NODEJS_BUILTINS.contains(specifier)) {
     specifier = kj::str("node:", specifier);
     isNodeBuiltin = true;

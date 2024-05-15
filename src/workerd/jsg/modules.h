@@ -14,8 +14,6 @@
 
 namespace workerd::jsg {
 
-void logIfNodeSpecifier(kj::StringPtr specifier);
-
 class CommonJsModuleContext;
 
 class CommonJsModuleObject: public jsg::Object {
@@ -436,12 +434,6 @@ public:
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
     entries.insert(kj::heap<Entry>(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
-
-    if (entries.size() > 1) {
-      // This is just to give us some sense of how many workers make use of multiple modules
-      // in the bundle...
-      LOG_PERIODICALLY(WARNING, "NOSENTRY Worker using multiple modules in a single bundle.");
-    }
   }
 
   void addBuiltinModule(Module::Reader module) {
@@ -835,9 +827,6 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     // If the specifier begins with one of our known prefixes, let's not resolve
     // it against the referrer.
     auto spec = kj::str(specifier);
-
-    logIfNodeSpecifier(spec);
-
     if (spec.startsWith("node:") ||
         spec.startsWith("cloudflare:") ||
         spec.startsWith("workerd:")) {
