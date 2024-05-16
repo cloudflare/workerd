@@ -50,10 +50,10 @@ wd_cc_binary(
         ":server",
         ":workerd-meta_capnp",
         ":workerd_capnp",
+        "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/capnp:capnpc",
-        "//src/pyodide:pyodide_extra_capnp",
     ] + select({
         "@platforms//os:windows": [],
         "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
@@ -103,6 +103,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
+        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 

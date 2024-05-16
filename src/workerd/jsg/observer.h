@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/jsg/url.h>
 #include <kj/common.h>
 #include <kj/string.h>
 #include <kj/exception.h>
@@ -16,6 +15,8 @@ namespace v8 {
 }
 
 namespace workerd::jsg {
+
+class Url;
 
 struct ResolveObserver {
   virtual ~ResolveObserver() noexcept(false) { }

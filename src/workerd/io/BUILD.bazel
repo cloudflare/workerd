@@ -58,6 +58,7 @@ wd_cc_library(
         "//conditions:default": [],
     }),
     implementation_deps = [
+        "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@simdutf",
@@ -82,6 +83,7 @@ wd_cc_library(
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj:kj-async",
+        "@ssl",
     ] + select({
         ":set_enable_experimental_webgpu": ["@dawn"],
         "//conditions:default": [],
@@ -98,7 +100,6 @@ wd_cc_library(
         ":worker-interface_capnp",
         "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util:own-util",
-        "//src/workerd/util:perfetto",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-http",

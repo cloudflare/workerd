@@ -14,8 +14,8 @@ wd_cc_library(
         "iterator.c++",
         "jsg.c++",
         "jsvalue.c++",
-        "modules-new.c++",
         "modules.c++",
+        "modules-new.c++",
         "promise.c++",
         "resource.c++",
         "ser.c++",
@@ -155,7 +155,6 @@ wd_cc_library(
     hdrs = ["observer.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":url",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -201,6 +200,7 @@ kj_test(
     src = "url-test.c++",
     deps = [
         ":jsg",
+        "@ssl",
     ],
 )
 

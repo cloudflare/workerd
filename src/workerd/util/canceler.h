@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #pragma once
-#include <kj/async-io.h>
+#include <kj/async.h>
 #include <kj/common.h>
 #include <kj/debug.h>
+#include <kj/function.h>
 #include <kj/refcount.h>
 #include <kj/list.h>
 

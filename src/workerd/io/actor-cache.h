@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <kj/debug.h>
 #include <kj/async.h>
 #include <workerd/io/actor-storage.h>
 #include <kj/one-of.h>
