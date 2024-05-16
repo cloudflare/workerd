@@ -5,6 +5,7 @@
 #include <workerd/util/sentry.h>
 #include <capnp/message.h>
 #include <kj/common.h>
+#include "kj/debug.h"
 
 namespace workerd::util {
 

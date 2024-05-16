@@ -10,6 +10,7 @@
 // This is imported for the error type and that's shared between internal and public beta.
 
 #include <kj/compat/http.h>
+#include <capnp/message.h>
 #include <capnp/compat/json.h>
 
 namespace workerd::api {

@@ -8,7 +8,7 @@ wd_cc_library(
     hdrs = ["perfetto-tracing.h", "use-perfetto-categories.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "@capnp-cpp//src/kj"
+        "@capnp-cpp//src/kj",
     ] + select({
         "@platforms//os:windows": [],
         "//conditions:default": ["@perfetto//:libperfetto_client_experimental"],
@@ -44,10 +44,10 @@ wd_cc_library(
             "use-perfetto-categories.h",
         ],
     ),
+    implementation_deps = ["@ssl"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj/compat:kj-http",
-        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 
@@ -66,7 +66,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/workerd/util:sentry",
+        ":sentry",
         "@capnp-cpp//src/kj:kj-async",
     ],
 )
@@ -86,8 +86,8 @@ wd_cc_library(
     srcs = ["symbolizer.c++"],
     visibility = ["//visibility:public"],
     deps = [
-        "@capnp-cpp//src/kj",
         ":sentry",
+        "@capnp-cpp//src/kj",
     ],
     alwayslink = 1,
     target_compatible_with = select({
@@ -100,6 +100,7 @@ wd_cc_library(
     name = "own-util",
     hdrs = ["own-util.h"],
     visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
 )
 
 wd_cc_library(

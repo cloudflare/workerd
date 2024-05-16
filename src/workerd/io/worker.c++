@@ -23,6 +23,7 @@
 #include <workerd/jsg/util.h>
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
+#include <capnp/message.h>
 #include <capnp/compat/json.h>
 #include <kj/compat/gzip.h>
 #include <kj/compat/brotli.h>

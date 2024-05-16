@@ -16,7 +16,7 @@
 #include <kj/table.h>
 #include <kj/string.h>
 #include <v8-profiler.h>
-#include <v8.h>
+#include <v8-array-buffer.h>
 #include <stack>
 #include <string>
 

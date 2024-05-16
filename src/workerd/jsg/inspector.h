@@ -1,7 +1,14 @@
 #pragma once
 
-#include <kj/string.h>
-#include <v8-inspector.h>
+namespace kj {
+  class String;
+  class StringPtr;
+}
+
+namespace v8_inspector {
+class V8Inspector;
+class StringView;
+}
 
 namespace workerd::jsg {
 

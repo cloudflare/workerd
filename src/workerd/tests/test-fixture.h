@@ -6,6 +6,7 @@
 
 #include <kj/function.h>
 #include <kj/test.h>
+#include <capnp/message.h>
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-context.h>

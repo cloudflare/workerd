@@ -13,12 +13,14 @@
 #include <kj/refcount.h>
 #include <kj/vector.h>
 #include <kj/list.h>
-#include <v8.h>
-#include <workerd/jsg/memory.h>
+#include <v8-context.h>
+#include <v8-object.h>
 
 namespace cppgc { class Visitor; }
 
 namespace workerd::jsg {
+
+class MemoryTracker;
 
 using kj::uint;
 
