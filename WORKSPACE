@@ -529,13 +529,6 @@ new_local_repository(
     path = "build/perfetto",
 )
 
-git_repository(
-    name = "com_googlesource_chromium_base_trace_event_common",
-    build_file = "@v8//:bazel/BUILD.trace_event_common",
-    commit = "29ac73db520575590c3aceb0a6f1f58dda8934f6",
-    remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
-)
-
 python_register_toolchains(
     name = "python3_12",
     ignore_root_user_error = True,
@@ -570,11 +563,6 @@ py_deps_install()
 bind(
     name = "icu",
     actual = "@com_googlesource_chromium_icu//:icu",
-)
-
-bind(
-    name = "base_trace_event_common",
-    actual = "@com_googlesource_chromium_base_trace_event_common//:trace_event_common",
 )
 
 # Tell workerd code where to find v8.
