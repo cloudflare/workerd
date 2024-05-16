@@ -8,20 +8,11 @@
 
 namespace workerd::jsg {
 
-V8PlatformWrapper::TaskWrapper::TaskWrapper(std::unique_ptr<v8::Task> inner)
-    : inner(kj::mv(inner)), cageCtx(v8::PointerCageContext::GetCurrent()) {}
-
-void V8PlatformWrapper::TaskWrapper::Run() {
-  v8::PointerCageContext::Scope cageScope(cageCtx);
-  inner->Run();
-}
-
 V8PlatformWrapper::JobTaskWrapper::JobTaskWrapper(std::unique_ptr<v8::JobTask> inner)
-    : inner(kj::mv(inner)), cageCtx(v8::PointerCageContext::GetCurrent()) {}
+    : inner(kj::mv(inner)) {}
 
 void V8PlatformWrapper::JobTaskWrapper::Run(v8::JobDelegate* delegate) {
   runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    v8::PointerCageContext::Scope cageScope(cageCtx);
     inner->Run(delegate);
   });
 }
