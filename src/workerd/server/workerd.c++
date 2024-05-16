@@ -1132,13 +1132,13 @@ public:
             "binary with compiled-in config."));
 
         auto mapping = exe.file->mmap(0, exe.file->stat().size);
-        out.write(mapping.begin(), mapping.size());
+        out.write(mapping);
 
         // Pad to a word boundary if necessary.
         size_t n = mapping.size() % sizeof(capnp::word);
         if (n != 0) {
           kj::byte pad[sizeof(capnp::word)] = {0};
-          out.write(pad, sizeof(capnp::word) - n);
+          out.write(kj::arrayPtr(pad).slice(n));
         }
       }
 
@@ -1154,7 +1154,7 @@ public:
         memcpy(&words[words.size() - 3], &size, sizeof(size));
         memcpy(&words[words.size() - 2], COMPILED_MAGIC_SUFFIX, sizeof(COMPILED_MAGIC_SUFFIX));
 
-        out.write(words.asBytes().begin(), words.asBytes().size());
+        out.write(words.asBytes());
       }
 
 #if !_WIN32
@@ -1474,8 +1474,8 @@ private:
     // We don't include a newline but rather a carriage return so that when the next
     // line is written, this line disappears, to reduce noise.
     // TODO(cleanup): Writing directly to stderr is super-hacky.
-    kj::StringPtr message = "Noticed configuration change, reloading shortly...\r";
-    kj::FdOutputStream(STDERR_FILENO).write(message.begin(), message.size());
+    auto message = "Noticed configuration change, reloading shortly...\r"_kjb;
+    kj::FdOutputStream(STDERR_FILENO).write(message);
 
     static auto const waitForResult = [](kj::Promise<void> promise,
                                          bool result = false) -> kj::Promise<bool> {
