@@ -1,4 +1,4 @@
-From 4bef1a065ac955a481e0ef7040eb38c11fad2ecc Mon Sep 17 00:00:00 2001
+From 926c7dee011fa9d95ca75cc8a54f121cb9368749 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg

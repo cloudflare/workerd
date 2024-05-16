@@ -1,4 +1,4 @@
-From fb6eedbf8a5712fee67fb622afcd971b11850a9e Mon Sep 17 00:00:00 2001
+From b36ba5974036d1ca14b2079698577b35b521be44 Mon Sep 17 00:00:00 2001
 From: Garrett Gu <garrett@cloudflare.com>
 Date: Wed, 10 Apr 2024 14:31:33 -0500
 Subject: Set torque generator path to external/v8. This allows bazel to find

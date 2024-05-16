@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include <workerd/jsg/setup.h>
+#include <kj/common.h>
+
 #include <v8-platform.h>
 
 namespace workerd::server {
@@ -32,10 +33,6 @@ public:
     return inner.GetPageAllocator();
   }
 
-  void OnCriticalMemoryPressure() noexcept override {
-    return inner.OnCriticalMemoryPressure();
-  }
-
   int NumberOfWorkerThreads() noexcept override {
     return inner.NumberOfWorkerThreads();
   }
@@ -43,7 +40,6 @@ public:
   std::shared_ptr<v8::TaskRunner> GetForegroundTaskRunner(v8::Isolate* isolate) noexcept override {
     return inner.GetForegroundTaskRunner(isolate);
   }
-
 
   void PostTaskOnWorkerThreadImpl(v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
                                   const v8::SourceLocation& location) override {
@@ -74,10 +70,6 @@ public:
 
   // Overridden to return KJ time
   double CurrentClockTimeMillis() noexcept override;
-
-  StackTracePrinter GetStackTracePrinter() noexcept override {
-    return inner.GetStackTracePrinter();
-  }
 
   v8::TracingController* GetTracingController() noexcept override {
     return inner.GetTracingController();

@@ -1,4 +1,4 @@
-From 4f1a105587c4b382e7bcfe76af4db7d4890ecdae Mon Sep 17 00:00:00 2001
+From 0117f549047b40f62bef917da9d1b93e3799ea93 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
@@ -22,7 +22,7 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 1a4c3ef287ce9a8c1561b94412e852e29aecdd26..4b6771783d086558ae633469512ee973b4200614 100644
+index 708f4e27a580c670b9e4e86c283a88b3fd607790..f8f0cba9227702298240030f765d36ca776c7bc3 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -3433,6 +3433,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
@@ -37,7 +37,7 @@ index 1a4c3ef287ce9a8c1561b94412e852e29aecdd26..4b6771783d086558ae633469512ee973
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 2f69403a7de6bd988471a63de0a60e743126d129..5eee6f066eeda1a17d5498604af468f7d250cc00 100644
+index e0315c836fce8047f4abf954af1120f0370b19cc..92a3810498dd8347ac5ac12facb2dbbd24722919 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -291,6 +291,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,

@@ -1,4 +1,4 @@
-From e2673736d97b0e10cef29c9130d41f7ad60db03e Mon Sep 17 00:00:00 2001
+From 6326c4a7d3245e138e478b8c1be6fcc159d080dc Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 2 Mar 2024 09:00:18 -0600
 Subject: Add ValueSerializer::SetTreatFunctionsAsHostObjects().
@@ -28,7 +28,7 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index fd80458a9d47bded6587f7bef4d689501e594255..b7a25e21ab51e26bdd84585b57dcec77482d5291 100644
+index 6590ea20d3c18d19d11f81cf752e3861bf07f3cc..1418ac18aff535cb8994d96d52bc3ee3c5d34f88 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -3443,6 +3443,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
@@ -43,7 +43,7 @@ index fd80458a9d47bded6587f7bef4d689501e594255..b7a25e21ab51e26bdd84585b57dcec77
                                          Local<Value> value) {
    auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 5eee6f066eeda1a17d5498604af468f7d250cc00..8be576932a2014e53799f047635f3b10e03e8def 100644
+index 92a3810498dd8347ac5ac12facb2dbbd24722919..526f4ec15c26a3760198a4aecb291c7f753ec726 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -328,6 +328,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
