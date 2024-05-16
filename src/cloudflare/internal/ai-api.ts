@@ -18,7 +18,8 @@ export type SessionOptions = {  // Deprecated, do not use this
 }
 
 export type AiOptions = {
-  debug?: boolean;
+  gatewayId?: string;
+
   prefix?: string;
   extraHeaders?: object;
   /*
@@ -61,11 +62,12 @@ export class Ai {
     this.options = options;
     this.lastRequestId = "";
 
+    // This removes some unwanted options from getting sent in the body
+    const cleanedOptions = (({ prefix, extraHeaders, sessionOptions, ...object }): object => object)(this.options || {});
+
     const body = JSON.stringify({
       inputs,
-      options: {
-        debug: this.options?.debug,
-      },
+      options: cleanedOptions
     });
 
     const fetchOptions = {

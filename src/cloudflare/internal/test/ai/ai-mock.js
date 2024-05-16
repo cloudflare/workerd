@@ -21,6 +21,12 @@ export default {
             })
         }
 
+        if (modelName === 'rawInputs') {
+            return Response.json(data, {
+                headers: respHeaders
+            })
+        }
+
         if (modelName === 'inputErrorModel') {
             return Response.json({
                 internalCode: 1001,

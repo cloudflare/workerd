@@ -66,5 +66,26 @@ export const tests = {
             assert.equal(err.name, 'InferenceUpstreamError')
             assert.equal(err.message, 'Unknown error')
         }
+
+        {
+            // Test raw input
+            const resp = await env.ai.run('rawInputs', {prompt: 'test'})
+
+            assert.deepStrictEqual(resp, { inputs: {prompt: 'test'}, options: {} });
+        }
+
+        {
+            // Test gateway option
+            const resp = await env.ai.run('rawInputs', {prompt: 'test'}, {gatewayId: 'my-gateway'})
+
+            assert.deepStrictEqual(resp, { inputs: {prompt: 'test'}, options: {gatewayId: 'my-gateway'} });
+        }
+
+        {
+            // Test unwanted options not getting sent upstream
+            const resp = await env.ai.run('rawInputs', {prompt: 'test'}, {extraHeaders: 'test', example: 123, gatewayId: 'my-gateway'})
+
+            assert.deepStrictEqual(resp, { inputs: {prompt: 'test'}, options: {example: 123, gatewayId: 'my-gateway'} });
+        }
     },
 }
