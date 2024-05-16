@@ -1,4 +1,4 @@
-From 599f2f35811c9afefe99a45724ae89e8c2b169f0 Mon Sep 17 00:00:00 2001
+From 4f1a105587c4b382e7bcfe76af4db7d4890ecdae Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
@@ -22,10 +22,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 151d0380c5c8d043f2f9a6d556d463040749167d..9d46870f6bfdfee90d38a7b3cda2d9846196addc 100644
+index 1a4c3ef287ce9a8c1561b94412e852e29aecdd26..4b6771783d086558ae633469512ee973b4200614 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3450,6 +3450,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3433,6 +3433,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  
@@ -37,7 +37,7 @@ index 151d0380c5c8d043f2f9a6d556d463040749167d..9d46870f6bfdfee90d38a7b3cda2d984
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 1c8f2fa9122e46d8813569504c0534f38f8ae53d..bb36e71af9cb2fda605200550a36c0a74e560671 100644
+index 2f69403a7de6bd988471a63de0a60e743126d129..5eee6f066eeda1a17d5498604af468f7d250cc00 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -291,6 +291,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
@@ -67,7 +67,7 @@ index 1c8f2fa9122e46d8813569504c0534f38f8ae53d..bb36e71af9cb2fda605200550a36c0a7
  }
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
-@@ -1035,10 +1044,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
+@@ -1034,10 +1043,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
    WriteVarint(static_cast<uint8_t>(tag));
    WriteVarint(static_cast<uint32_t>(view->byte_offset()));
    WriteVarint(static_cast<uint32_t>(view->byte_length()));
@@ -83,7 +83,7 @@ index 1c8f2fa9122e46d8813569504c0534f38f8ae53d..bb36e71af9cb2fda605200550a36c0a7
  }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 8d9602b129a6156f051690ed595ca699bb132af4..4747119155007e1fa0075440fefa1dfee036c48a 100644
+index a67079eeb80bc41d7276f9fe4941ab11d4425f0b..dbee8f93f8d7405bab17b5edda204d2d0ebbfac3 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -54,6 +54,11 @@ class ValueSerializer {

@@ -1,4 +1,4 @@
-From 124a4fecfef38f07e8851ad8003db94950c3d2bc Mon Sep 17 00:00:00 2001
+From 1fddf6531ddc3d2cdbf1695a9b2e9c0132bc320b Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Fri, 16 Sep 2022 21:41:45 -0500
 Subject: Add `ArrayBuffer::MaybeNew()`.
@@ -8,7 +8,7 @@ In Cloudflare's edge runtime, this is part of a larger patch that allows gracefu
 (We would like to upstream our internal patch, just need to find the time...)
 
 diff --git a/include/v8-array-buffer.h b/include/v8-array-buffer.h
-index 5d855441f8ed7bd775332c0a20d7a57411a1baa8..981dda00eede693bff1d3a240ffe2396b5de9f21 100644
+index d625b85496bb4a4b3bb6a48f4f0c48de514d3e37..f8f0abc7e2e6e26815f305e621301b27161f87fd 100644
 --- a/include/v8-array-buffer.h
 +++ b/include/v8-array-buffer.h
 @@ -216,6 +216,14 @@ class V8_EXPORT ArrayBuffer : public Object {

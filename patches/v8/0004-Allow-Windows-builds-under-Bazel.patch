@@ -1,11 +1,11 @@
-From fa10e15fe7cef2b0b221b231d6ad9f8f3bc04de5 Mon Sep 17 00:00:00 2001
+From f76a46b70ff501ac8f7dde35b97d4b393c779e01 Mon Sep 17 00:00:00 2001
 From: Brendan Coll <bcoll@cloudflare.com>
 Date: Thu, 16 Mar 2023 11:56:10 +0000
 Subject: Allow Windows builds under Bazel
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 453726808be0e2c9b5f7cbdbec148e480b4c7349..026eeebd5a336597e3bc89b9239a919d94feb6a2 100644
+index 49718b71815797d80f5d6f2726486cec6a77d72d..da6f29728c28433ab9824f7b171b1c221739dc6d 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -779,6 +779,7 @@ filegroup(
@@ -16,7 +16,7 @@ index 453726808be0e2c9b5f7cbdbec148e480b4c7349..026eeebd5a336597e3bc89b9239a919d
          "src/base/platform/semaphore.cc",
          "src/base/platform/semaphore.h",
          "src/base/platform/time.cc",
-@@ -820,7 +821,6 @@ filegroup(
+@@ -821,7 +822,6 @@ filegroup(
      ] + select({
          "@v8//bazel/config:is_posix": [
              "src/base/platform/platform-posix.cc",
@@ -24,7 +24,7 @@ index 453726808be0e2c9b5f7cbdbec148e480b4c7349..026eeebd5a336597e3bc89b9239a919d
              "src/base/platform/platform-posix-time.cc",
              "src/base/platform/platform-posix-time.h",
          ],
-@@ -843,6 +843,7 @@ filegroup(
+@@ -844,6 +844,7 @@ filegroup(
          "@v8//bazel/config:is_windows": [
              "src/base/debug/stack_trace_win.cc",
              "src/base/platform/platform-win32.cc",
@@ -32,7 +32,7 @@ index 453726808be0e2c9b5f7cbdbec148e480b4c7349..026eeebd5a336597e3bc89b9239a919d
              "src/base/win32-headers.h",
          ],
      }),
-@@ -1233,6 +1234,7 @@ filegroup(
+@@ -1225,6 +1226,7 @@ filegroup(
          "include/v8-wasm-trap-handler-posix.h",
          "src/api/api.cc",
          "src/api/api.h",
@@ -40,7 +40,7 @@ index 453726808be0e2c9b5f7cbdbec148e480b4c7349..026eeebd5a336597e3bc89b9239a919d
          "src/api/api-arguments.cc",
          "src/api/api-arguments.h",
          "src/api/api-arguments-inl.h",
-@@ -2686,6 +2688,11 @@ filegroup(
+@@ -2683,6 +2685,11 @@ filegroup(
              "src/trap-handler/handler-inside-posix.cc",
              "src/trap-handler/handler-outside-posix.cc",
          ],
@@ -52,7 +52,7 @@ index 453726808be0e2c9b5f7cbdbec148e480b4c7349..026eeebd5a336597e3bc89b9239a919d
          "//conditions:default": [],
      }) + select({
          "@v8//bazel/config:v8_arm64_simulator": [
-@@ -2693,13 +2700,6 @@ filegroup(
+@@ -2690,13 +2697,6 @@ filegroup(
              "src/trap-handler/trap-handler-simulator.h",
          ],
          "//conditions:default": [],
@@ -90,7 +90,7 @@ index 453726808be0e2c9b5f7cbdbec148e480b4c7349..026eeebd5a336597e3bc89b9239a919d
  )
  
  genrule(
-@@ -4407,7 +4412,7 @@ py_test(
+@@ -4420,7 +4425,7 @@ py_test(
          ":noicu/d8",
          ":noicu/v8_build_config",
          "//testing/pybase",
@@ -99,7 +99,7 @@ index 453726808be0e2c9b5f7cbdbec148e480b4c7349..026eeebd5a336597e3bc89b9239a919d
      main = "tools/run-tests.py",
      python_version = "PY3",
      tags = [
-@@ -4437,7 +4442,7 @@ py_test(
+@@ -4459,7 +4464,7 @@ py_test(
          ":icu/d8",
          ":icu/v8_build_config",
          "//testing/pybase",
@@ -109,10 +109,10 @@ index 453726808be0e2c9b5f7cbdbec148e480b4c7349..026eeebd5a336597e3bc89b9239a919d
      python_version = "PY3",
      tags = [
 diff --git a/bazel/config/BUILD.bazel b/bazel/config/BUILD.bazel
-index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c72ee8847a 100644
+index c81f278203126913c3bad74d31348706678ccf06..96e0f9cdb61d0d8f6597d337c2dd965ba67de12c 100644
 --- a/bazel/config/BUILD.bazel
 +++ b/bazel/config/BUILD.bazel
-@@ -286,6 +286,7 @@ selects.config_setting_group(
+@@ -270,6 +270,7 @@ selects.config_setting_group(
      match_all = [
          ":is_windows",
          ":is_x64",
@@ -120,7 +120,7 @@ index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c7
      ],
  )
  
-@@ -294,6 +295,7 @@ selects.config_setting_group(
+@@ -278,6 +279,7 @@ selects.config_setting_group(
      match_all = [
          ":is_windows",
          ":is_ia32",
@@ -128,7 +128,7 @@ index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c7
      ],
  )
  
-@@ -302,6 +304,34 @@ selects.config_setting_group(
+@@ -286,6 +288,34 @@ selects.config_setting_group(
      match_all = [
          ":is_windows",
          ":is_arm64",
@@ -163,7 +163,7 @@ index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c7
      ],
  )
  
-@@ -343,6 +373,13 @@ config_setting(
+@@ -319,6 +349,13 @@ config_setting(
      },
  )
  
@@ -178,7 +178,7 @@ index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c7
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 2c49fe59ba342491b53dfae762ee6f882cebf075..4fafb2ae40afa499356777f9bbfedf25f808fdd7 100644
+index e142a3e7e8d2761c47394bd7858385548b6f1dbc..f2061f089ecf365aa8654cea400673905eb05d87 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -119,6 +119,24 @@ def _default_args():

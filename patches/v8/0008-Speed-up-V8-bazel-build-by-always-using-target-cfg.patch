@@ -1,4 +1,4 @@
-From 44c1b5772d868c1f048c7cdc30c954a501cc4d09 Mon Sep 17 00:00:00 2001
+From 4bef1a065ac955a481e0ef7040eb38c11fad2ecc Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg
@@ -12,7 +12,7 @@ generated files as the output set. While unrelated to the build cfg change,
 this also improves build times.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 026eeebd5a336597e3bc89b9239a919d94feb6a2..35c8ec1656a0874c182d420954c7b1101dd6b1f7 100644
+index da6f29728c28433ab9824f7b171b1c221739dc6d..f714fdb21097394d87f29f692fdbaa597a2f0145 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -52,7 +52,7 @@ index 026eeebd5a336597e3bc89b9239a919d94feb6a2..35c8ec1656a0874c182d420954c7b110
  )
  
  v8_mksnapshot(
-@@ -4294,8 +4293,6 @@ v8_binary(
+@@ -4293,8 +4292,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -61,7 +61,7 @@ index 026eeebd5a336597e3bc89b9239a919d94feb6a2..35c8ec1656a0874c182d420954c7b110
      ],
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
-@@ -4307,6 +4304,7 @@ v8_binary(
+@@ -4306,6 +4303,7 @@ v8_binary(
      ],
      deps = [
          "//external:absl_optional",
@@ -70,7 +70,7 @@ index 026eeebd5a336597e3bc89b9239a919d94feb6a2..35c8ec1656a0874c182d420954c7b110
      ],
  )
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 4fafb2ae40afa499356777f9bbfedf25f808fdd7..58c5a0273769e0df997e9e92bd4274f3cb8f2fc6 100644
+index f2061f089ecf365aa8654cea400673905eb05d87..7c587522187c26326b4598149842c7e792cdcfce 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -338,6 +338,15 @@ def v8_library(
@@ -117,7 +117,7 @@ index 4fafb2ae40afa499356777f9bbfedf25f808fdd7..58c5a0273769e0df997e9e92bd4274f3
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -632,3 +644,34 @@ def v8_build_config(name):
+@@ -633,3 +645,34 @@ def v8_build_config(name, arch):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )
