@@ -478,7 +478,8 @@ public:
           kj::StringPtr,
           kj::Maybe<kj::String>,
           jsg::CompilationObserver&,
-          jsg::ModuleRegistry::ResolveMethod);
+          jsg::ModuleRegistry::ResolveMethod,
+          kj::Maybe<kj::StringPtr>);
   virtual void setModuleFallbackCallback(
       kj::Function<ModuleFallbackCallback>&& callback) const {
     // By default does nothing.

@@ -2715,7 +2715,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
          kj::StringPtr specifier,
          kj::Maybe<kj::String> referrer,
          jsg::CompilationObserver& observer,
-         jsg::ModuleRegistry::ResolveMethod method) mutable
+         jsg::ModuleRegistry::ResolveMethod method,
+         kj::Maybe<kj::StringPtr> rawSpecifier) mutable
             -> kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>> {
       kj::Maybe<kj::String> jsonPayload;
       bool redirect = false;
@@ -2751,6 +2752,11 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       KJ_IF_SOME(ref, referrer) {
         url.query.add(
           kj::Url::QueryParam { kj::str("referrer"), kj::mv(ref) }
+        );
+      }
+      KJ_IF_SOME(raw, rawSpecifier) {
+        url.query.add(
+          kj::Url::QueryParam { kj::str("raw"), kj::str(raw) }
         );
       }
 

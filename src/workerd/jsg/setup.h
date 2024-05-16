@@ -104,7 +104,8 @@ public:
           kj::StringPtr,
           kj::Maybe<kj::String>,
           jsg::CompilationObserver&,
-          jsg::ModuleRegistry::ResolveMethod);
+          jsg::ModuleRegistry::ResolveMethod,
+          kj::Maybe<kj::StringPtr>);
   inline void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) {
     maybeModuleFallbackCallback = kj::mv(callback);
   }

@@ -68,7 +68,6 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     kj::Path targetPath = ([&] {
       // If the specifier begins with one of our known prefixes, let's not resolve
       // it against the referrer.
-      auto spec = kj::str(specifier);
       if (internalOnly ||
           spec.startsWith("node:") ||
           spec.startsWith("cloudflare:") ||
@@ -81,7 +80,9 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     KJ_IF_SOME(resolved, registry->resolve(js, targetPath, ref.specifier,
         internalOnly ?
             ModuleRegistry::ResolveOption::INTERNAL_ONLY :
-            ModuleRegistry::ResolveOption::DEFAULT)) {
+            ModuleRegistry::ResolveOption::DEFAULT,
+        ModuleRegistry::ResolveMethod::IMPORT,
+        spec.asPtr())) {
       result = resolved.module.getHandle(js);
     } else {
       // This is a bit annoying. If the module was not found, then
@@ -92,7 +93,8 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
       // We only need to do this if internalOnly is false.
       if (!internalOnly && (spec.startsWith("node:") || spec.startsWith("cloudflare:"))) {
         KJ_IF_SOME(resolve, registry->resolve(js, kj::Path::parse(spec), ref.specifier,
-             ModuleRegistry::ResolveOption::DEFAULT)) {
+             ModuleRegistry::ResolveOption::DEFAULT,
+             ModuleRegistry::ResolveMethod::IMPORT, spec.asPtr())) {
           result = resolve.module.getHandle(js);
           return;
         }
@@ -271,7 +273,8 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
   auto& info = JSG_REQUIRE_NONNULL(
       modulesForResolveCallback->resolve(js, targetPath, path,
                                          ModuleRegistry::ResolveOption::DEFAULT,
-                                         ModuleRegistry::ResolveMethod::REQUIRE),
+                                         ModuleRegistry::ResolveMethod::REQUIRE,
+                                         specifier.asPtr()),
       Error, "No such module \"", targetPath.toString(), "\".");
   // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
   // js stack that will include the parent module's name and location of the failed require().
@@ -621,7 +624,8 @@ v8::Local<v8::Value> NodeJsModuleContext::require(jsg::Lock& js, kj::String spec
   // excluded.
   auto& info = JSG_REQUIRE_NONNULL(
       modulesForResolveCallback->resolve(js, targetPath, path, resolveOption,
-                                         ModuleRegistry::ResolveMethod::REQUIRE),
+                                         ModuleRegistry::ResolveMethod::REQUIRE,
+                                         specifier.asPtr()),
       Error, "No such module \"", targetPath.toString(), "\".");
   // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
   // js stack that will include the parent module's name and location of the failed require().
@@ -703,14 +707,15 @@ kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallb
     Lock& js, const kj::Path& specifier,
     kj::Maybe<const kj::Path&>& referrer,
     CompilationObserver& observer,
-    ModuleRegistry::ResolveMethod method) {
+    ModuleRegistry::ResolveMethod method,
+    kj::Maybe<kj::StringPtr> rawSpecifier) {
   auto& isolateBase = IsolateBase::from(js.v8Isolate);
   KJ_IF_SOME(fallback, isolateBase.tryGetModuleFallback()) {
     kj::Maybe<kj::String> maybeRef;
     KJ_IF_SOME(ref, referrer) {
       maybeRef = ref.toString(true);
     }
-    return fallback(js, specifier.toString(true), kj::mv(maybeRef), observer, method);
+    return fallback(js, specifier.toString(true), kj::mv(maybeRef), observer, method, rawSpecifier);
   }
   return kj::none;
 }

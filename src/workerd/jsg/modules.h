@@ -374,13 +374,15 @@ public:
                                          const kj::Path& specifier,
                                          kj::Maybe<const kj::Path&> referrer = kj::none,
                                          ResolveOption option = ResolveOption::DEFAULT,
-                                         ResolveMethod method = ResolveMethod::IMPORT) = 0;
+                                         ResolveMethod method = ResolveMethod::IMPORT,
+                                         kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) = 0;
 
   virtual kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) = 0;
 
   virtual Promise<Value> resolveDynamicImport(jsg::Lock& js,
                                               const kj::Path& specifier,
-                                              const kj::Path& referrer) = 0;
+                                              const kj::Path& referrer,
+                                              kj::StringPtr rawSpecifier) = 0;
 
   virtual Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) = 0;
 
@@ -403,7 +405,8 @@ kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallb
     Lock& js, const kj::Path& specifier,
     kj::Maybe<const kj::Path&>& referrer,
     CompilationObserver& observer,
-    ModuleRegistry::ResolveMethod method);
+    ModuleRegistry::ResolveMethod method,
+    kj::Maybe<kj::StringPtr> rawSpecifier);
 
 template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
@@ -556,7 +559,8 @@ public:
                                  const kj::Path& specifier,
                                  kj::Maybe<const kj::Path&> referrer = kj::none,
                                  ResolveOption option = ResolveOption::DEFAULT,
-                                 ResolveMethod method = ResolveMethod::IMPORT) override {
+                                 ResolveMethod method = ResolveMethod::IMPORT,
+                                 kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) override {
     using Key = typename Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
@@ -587,9 +591,10 @@ public:
       // let's use it to try to resolve. Make sure we're using DEFAULT resolution so BUNDLE-typed
       // modules from the fallback service can be used.
       option = ResolveOption::DEFAULT;
-      return resolve(js, specifier.parent().eval(found), referrer, option, method);
+      return resolve(js, specifier.parent().eval(found), referrer, option, method, rawSpecifier);
     }
-    KJ_IF_SOME(info, tryResolveFromFallbackService(js, specifier, referrer, observer, method)) {
+    KJ_IF_SOME(info, tryResolveFromFallbackService(js, specifier, referrer, observer,
+                                                   method, rawSpecifier)) {
       // If we resolved a module from the fallback service, we have to be sure
       // to add it to the registry...
       KJ_SWITCH_ONEOF(info) {
@@ -615,7 +620,7 @@ public:
           // Make sure we're using DEFAULT resolution so BUNDLE-typed modules from the fallback
           // service can be used.
           option = ResolveOption::DEFAULT;
-          return resolve(js, specifier.parent().eval(s), referrer, option, method);
+          return resolve(js, specifier.parent().eval(s), referrer, option, method, rawSpecifier);
         }
       }
     }
@@ -645,7 +650,8 @@ public:
 
   Promise<Value> resolveDynamicImport(jsg::Lock& js,
                                       const kj::Path& specifier,
-                                      const kj::Path& referrer) override {
+                                      const kj::Path& referrer,
+                                      kj::StringPtr rawSpecifier) override {
     // Here, we first need to determine if the referrer is a built-in module
     // or not. If it is a built-in, then we are only permitted to resolve
     // internal modules. If the worker bundle provided an override for the
@@ -657,7 +663,8 @@ public:
       resolveOption = ModuleRegistry::ResolveOption::INTERNAL_ONLY;
     }
 
-    KJ_IF_SOME(info, resolve(js, specifier, referrer, resolveOption)) {
+    KJ_IF_SOME(info, resolve(js, specifier, referrer, resolveOption,
+                             ResolveMethod::IMPORT, rawSpecifier)) {
       KJ_IF_SOME(func, dynamicImportHandler) {
         auto handler = [&info, isolate = js.v8Isolate]() -> Value {
           auto& js = Lock::from(isolate);
@@ -679,7 +686,8 @@ public:
   Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) override {
     auto specifierPath = kj::Path(specifier);
     auto resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
-    auto maybeModuleInfo = resolve(js, specifierPath, kj::none, resolveOption);
+    auto maybeModuleInfo = resolve(js, specifierPath, kj::none, resolveOption,
+                                   ResolveMethod::IMPORT, specifier);
     auto moduleInfo = &KJ_REQUIRE_NONNULL(maybeModuleInfo, "No such module \"", specifier, "\".");
     auto handle = moduleInfo->module.getHandle(js);
     jsg::instantiateModule(js, handle);
@@ -823,10 +831,10 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     }
   })();
 
+  auto spec = kj::str(specifier);
   auto maybeSpecifierPath = ([&]() -> kj::Maybe<kj::Path> {
     // If the specifier begins with one of our known prefixes, let's not resolve
     // it against the referrer.
-    auto spec = kj::str(specifier);
     if (spec.startsWith("node:") ||
         spec.startsWith("cloudflare:") ||
         spec.startsWith("workerd:")) {
@@ -854,7 +862,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
 
   try {
     return wrapper.wrap(context, kj::none,
-        registry->resolveDynamicImport(js, specifierPath, referrerPath));
+        registry->resolveDynamicImport(js, specifierPath, referrerPath, spec));
   } catch (JsExceptionThrown&) {
     // If the tryCatch.Exception().IsEmpty() here is true, no JavaScript error
     // was scheduled which can happen in a few edge cases. Treat it as if
