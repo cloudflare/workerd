@@ -42,7 +42,7 @@ URL::URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base) : inner(parseImpl(url
 
 URL::~URL() noexcept(false) {
   KJ_IF_SOME(searchParams, maybeSearchParams) {
-    searchParams->maybeUrl = nullptr;
+    searchParams->maybeUrl = kj::none;
   }
 }
 
