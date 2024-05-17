@@ -1518,24 +1518,26 @@ KJ_TEST("ActorCache read cancel") {
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
-  {
-    // We drop this quickly, the get should still be cached later.
-    auto promise = expectUncached(test.get("corge"));
-  }
-
-  auto promise = expectUncached(test.get("foo"));
+  // Don't use expectCached() this time because we don't want eagerlyReportExceptions(), because
+  // we actually expect an exception.
+  auto promise = test.get("foo").get<kj::Promise<kj::Maybe<kj::String>>>();
   test.put("bar", "456");
   test.delete_("baz");
 
-  // Expect the get, but cancel the promise before we finish it.
-  mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["corge", "foo"]), "stream"_kj)
-      .useCallback("stream", [&ws, promise = kj::mv(promise)](MockClient stream) mutable {
-    promise = nullptr;
-    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).thenReturn(CAPNP());
+  // Expect the get, but don't resolve yet.
+  auto mockGet = mockStorage->expectCall("get", ws)
+      .withParams(CAPNP(key = "foo"));
 
-  // The transaction proceeds.
+  // We won't write anything until the read completes.
+  mockStorage->expectNoActivity(ws);
+
+  // Fail out the read with non-disconnect.
+  kj::mv(mockGet).thenThrow(KJ_EXCEPTION(FAILED, "read failed"));
+
+  // The read propagates the error.
+  KJ_EXPECT_THROW_MESSAGE("read failed", promise.wait(ws));
+
+  // The read is NOT retried, so expect the transaction to run now.
   auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
   mockTxn->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["baz"]))
@@ -1547,9 +1549,8 @@ KJ_TEST("ActorCache read cancel") {
   mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
   mockTxn->expectDropped(ws);
 
-  // Since we once asked for these keys, they are now cached even though we dropped the promises.
-  KJ_EXPECT(expectCached(test.get("corge")) == kj::none);
-  KJ_EXPECT(expectCached(test.get("foo")) == kj::none);
+  // The read is NOT retried.
+  mockStorage->expectNoActivity(ws);
 }
 
 KJ_TEST("ActorCache read overwrite") {
@@ -1802,8 +1803,6 @@ KJ_TEST("ActorCache list() with limit") {
 
   // Stuff after the last key is not in cache.
   (void)expectUncached(test.get("fooa"));
-  // Return our uncached get.
-  mockStorage->expectCall("get", ws).withParams(CAPNP(key = "fooa")).thenReturn(CAPNP());
 
   // Listing the same range again, with the same limit or lower, is fully cached.
   KJ_ASSERT(expectCached(test.list("bar", "qux", 3)) ==
@@ -2823,12 +2822,7 @@ KJ_TEST("ActorCache listReverse() with limit") {
   KJ_ASSERT(expectCached(test.get("fon")) == nullptr);
 
   // Stuff before the first key is not in cache.
-  // Since we return a value here, and because currently we are ABSENT, we will show up in the
-  // subsequent list().
   (void)expectUncached(test.get("baq"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "baq"))
-      .thenReturn(CAPNP(value = "321"));
 
   // Listing the same range again, with the same limit or lower, is fully cached.
   KJ_ASSERT(expectCached(test.listReverse("bar", "qux", 3)) ==
@@ -2859,7 +2853,7 @@ KJ_TEST("ActorCache listReverse() with limit") {
 
   // Cached if we try it again though.
   KJ_ASSERT(expectCached(test.listReverse("abc", "qux", 4)) ==
-      kvs({{"foo", "123"}, {"baz", "789"}, {"bar", "456"}, {"baq", "321"}}));
+      kvs({{"foo", "123"}, {"baz", "789"}, {"bar", "456"}, {"baa", "xyz"}}));
 }
 
 KJ_TEST("ActorCache listReverse() with limit around negative entries") {
@@ -2976,17 +2970,8 @@ KJ_TEST("ActorCache listReverse() multiple ranges") {
   KJ_ASSERT(expectCached(test.listReverse("x", "z")) == kvs({{"y", "9"}}));
 
   (void)expectUncached(test.get("w"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "w"))
-      .thenReturn(CAPNP());
   (void)expectUncached(test.get("d"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "d"))
-      .thenReturn(CAPNP());
   (void)expectUncached(test.get("c"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "c"))
-      .thenReturn(CAPNP());
 }
 
 KJ_TEST("ActorCache listReverse() with some already-cached keys in range") {
@@ -3625,7 +3610,7 @@ KJ_TEST("ActorCache listReverse() retry on failure") {
 // =======================================================================================
 // LRU purge
 
-constexpr size_t ENTRY_SIZE = 142;
+constexpr size_t ENTRY_SIZE = 150;
 KJ_TEST("ActorCache LRU purge") {
   ActorCacheTest test({.softLimit = 1 * ENTRY_SIZE});
   auto& ws = test.ws;
@@ -3693,23 +3678,10 @@ KJ_TEST("ActorCache LRU purge ordering") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("qux"))) == "555");
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("xxx"))) == "aaa");
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("yyy"))) == "bbb");
-
-  // Now that we've confirmed `qux`, `xxx`, and `yyy` are in cache, we can let `bar` and `baz` be
-  // inserted into cache. If we did individual `get()`s, then `bar` and `baz` would actually
-  // evict `qux` and `xxx` before we got to verify if they were in cache!
-  mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["bar", "baz"]), "stream"_kj)
-      .useCallback("stream", [&](MockClient stream) {
-    stream.call("values", CAPNP(list = [(key = "bar", value = "456"),
-                                        (key = "baz", value = "789"),
-                                        ]))
-        .expectReturns(CAPNP(), ws);
-    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).thenReturn(CAPNP());
 }
 
 KJ_TEST("ActorCache LRU purge larger") {
-  ActorCacheTest test({.softLimit = 32 * ENTRY_SIZE});
+  ActorCacheTest test({.softLimit = 30 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3767,21 +3739,6 @@ KJ_TEST("ActorCache LRU purge larger") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("corge"))) == kilobyte);
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("grault"))) == kilobyte);
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("garply"))) == kilobyte);
-
-  mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["bar", "baz", "qux"]), "stream"_kj)
-      .useCallback("stream", [&](MockClient stream) {
-    // TODO(cleanup): Using `kilobyte` for value results in the error:
-    // "External constants not allowed."
-    //
-    // What can we do to fix that?
-    stream.call("values", CAPNP(list = [(key = "bar", value = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
-                                        (key = "baz", value = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
-                                        (key = "qux", value = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
-                                        ]))
-        .expectReturns(CAPNP(), ws);
-    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).thenReturn(CAPNP());
 }
 
 KJ_TEST("ActorCache LRU purge") {
@@ -3805,17 +3762,8 @@ KJ_TEST("ActorCache LRU purge") {
   // Nothing was cached, because nothing fit in the LRU.
   KJ_ASSERT(test.lru.currentSize() == 0);
   (void)expectUncached(test.get("foo"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "foo"))
-      .thenReturn(CAPNP(value = "123"));
   (void)expectUncached(test.get("bar"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "bar"))
-      .thenReturn(CAPNP(value = "456"));
   (void)expectUncached(test.get("baz"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "baz"))
-      .thenReturn(CAPNP(value = "789"));
 }
 
 KJ_TEST("ActorCache evict on timeout") {
@@ -3858,9 +3806,6 @@ KJ_TEST("ActorCache evict on timeout") {
 
   // Verify foo is evicted.
   (void)expectUncached(test.get("foo"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "foo"))
-      .thenReturn(CAPNP(value = "123"));
 
   // Touch bar.
   expectCached(test.get("bar"));
@@ -3870,9 +3815,6 @@ KJ_TEST("ActorCache evict on timeout") {
 
   expectCached(test.get("bar"));
   (void)expectUncached(test.get("baz"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "baz"))
-      .thenReturn(CAPNP(value = "789"));
 }
 
 KJ_TEST("ActorCache backpressure due to dirtyPressureThreshold") {
@@ -3980,14 +3922,6 @@ KJ_TEST("ActorCache lru evict entry with known-empty gaps") {
   (void)expectUncached(test.get("baza"));
   (void)expectUncached(test.get("corge"));
   (void)expectUncached(test.get("fo"));
-  // We coalesce these gets.
-  mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["baza", "corge", "fo"]), "stream"_kj)
-      .useCallback("stream", [&](MockClient stream) {
-    stream.call("values", CAPNP(list = [(key = "corge", value = "555"),]))
-        .expectReturns(CAPNP(), ws);
-    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).thenReturn(CAPNP());
 }
 
 KJ_TEST("ActorCache lru evict gap entry with known-empty gaps") {
@@ -4037,9 +3971,6 @@ KJ_TEST("ActorCache lru evict gap entry with known-empty gaps") {
 
   // Okay, that gap is gone now.
   (void)expectUncached(test.get("foo+1"));
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "foo+1"))
-      .thenReturn(CAPNP());
 }
 
 KJ_TEST("ActorCache lru evict entry with trailing known-empty gap (followed by END_GAP)") {
@@ -4092,14 +4023,6 @@ KJ_TEST("ActorCache lru evict entry with trailing known-empty gap (followed by E
   (void)expectUncached(test.get("quw"));
   (void)expectUncached(test.get("qux"));
   (void)expectUncached(test.get("quy"));
-
-  mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["corgf", "foo", "quw", "qux", "quy"]), "stream"_kj)
-      .useCallback("stream", [&](MockClient stream) {
-    stream.call("values", CAPNP(list = [(key = "foo", value = "123"),]))
-        .expectReturns(CAPNP(), ws);
-    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).thenReturn(CAPNP());
 }
 
 KJ_TEST("ActorCache timeout entry with known-empty gaps") {
@@ -4153,13 +4076,6 @@ KJ_TEST("ActorCache timeout entry with known-empty gaps") {
   (void)expectUncached(test.get("baza"));
   (void)expectUncached(test.get("corge"));
   (void)expectUncached(test.get("fo"));
-  mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["baza", "corge", "fo"]), "stream"_kj)
-      .useCallback("stream", [&](MockClient stream) {
-    stream.call("values", CAPNP(list = [(key = "corge", value = "555"),]))
-        .expectReturns(CAPNP(), ws);
-    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).thenReturn(CAPNP());
 }
 
 
@@ -4231,17 +4147,6 @@ KJ_TEST("ActorCache purge everything while listing") {
   (void)expectUncached(test.get("baz"));
   (void)expectUncached(test.get("corge"));
   (void)expectUncached(test.get("foo"));
-  mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["bar", "baz", "corge", "foo"]), "stream"_kj)
-      .useCallback("stream", [&](MockClient stream) {
-    stream.call("values", CAPNP(list = [(key = "bar", value = "456"),
-                                        (key = "baz", value = "789"),
-                                        (key = "corge", value = "555"),
-                                        (key = "foo", value = "123"),
-                                        ]))
-        .expectReturns(CAPNP(), ws);
-    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).thenReturn(CAPNP());
 }
 
 KJ_TEST("ActorCache purge everything while listing; has previous entry") {
@@ -4478,18 +4383,6 @@ KJ_TEST("ActorCache skip cache") {
   // No gaps were cached as empty either.
   (void)expectUncached(test.get("corge"));
   (void)expectUncached(test.get("grault"));
-
-  // Service the read from before -- this will insert the valid results into cache.
-  mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["bar", "baz", "corge", "grault"]), "stream"_kj)
-      .useCallback("stream", [&](MockClient stream) {
-    stream.call("values", CAPNP(list = [(key = "bar", value = "456"),
-                                        (key = "baz", value = "789"),
-                                        (key = "corge", value = "555"),
-                                        ]))
-        .expectReturns(CAPNP(), ws);
-    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).thenReturn(CAPNP());
 }
 
 // =======================================================================================

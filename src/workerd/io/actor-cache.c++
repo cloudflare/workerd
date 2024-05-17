@@ -135,6 +135,65 @@ void ActorCache::Entry::setAbsentValue() {
   value = {};
 }
 
+ActorCache::GetWaiter::GetWaiter(ActorCache& cache, kj::Array<kj::Own<Entry>> entries)
+    : cache(cache), entries(kj::mv(entries)) {
+  // Prepare to receive an exception if the read fails.
+  for (auto& entry: this->entries) {
+    entry->getWaiters++;
+    KJ_IF_SOME(p, entry->readFailedPromise) {
+      // We already have a ForkedPromise, i.e. a previous GetWaiter is already waiting on the
+      // result for this key from storage. Let's just add a branch to that promise.
+      this->jointReadFailedPromise = this->jointReadFailedPromise.exclusiveJoin(p.addBranch());
+    } else {
+      // This Entry wasn't in cache, so we're the only GetWaiter interested in the result.
+      auto [prom, fulfiller] = kj::newPromiseAndFulfiller<kj::Exception>();
+      entry->readFailedFulfiller = kj::mv(fulfiller);
+      auto forked = prom.fork();
+      auto branch = forked.addBranch();
+      entry->readFailedPromise = kj::mv(forked);
+      this->jointReadFailedPromise = this->jointReadFailedPromise.exclusiveJoin(kj::mv(branch));
+    }
+  }
+}
+
+ActorCache::GetWaiter::~GetWaiter() noexcept(false) {
+  for (auto& entry : entries) {
+    KJ_REQUIRE(entry->getWaiters > 0);
+    entry->getWaiters--;
+    if ((entry->getWaiters) == 0) {
+      // We are the last GetWaiter for this Entry!
+      // Note that it's not possible for some other type of operation (a write) to be pending on
+      // this specific Entry, since a subsequent put/delete would create a new Entry entirely.
+      // If we did a write operation followed by a get(), the get() would just hit cache.
+      //
+      // If we're still in the dirtyList, we can remove ourselves to cancel the storage read!
+      if (entry->getSyncStatus() == EntrySyncStatus::DIRTY) {
+        cache.removeEntry(kj::none, *entry);
+
+        auto lock = cache.lru.cleanList.lockExclusive();
+        auto& map = cache.currentValues.get(lock);
+        auto slot = map.seek(entry->key);
+
+        auto ordered = map.ordered();
+        if (slot != ordered.end() && slot->get() == entry) {
+          // We haven't been replaced in cache, and we know that only a get() operation was waiting
+          // on this Entry. Now that the GetWaiter is going away, we know there's no reason for
+          // this Entry to be in cache anymore, and if we left it there it would be UNKNOWN and not
+          // in either the cleanList or dirtyList, so let's remove it.
+          if (slot != ordered.begin()) {
+            // The entry we're removing from cache may have been part of a gap in a list, so we may
+            // need to mark the previous entry as no longer having a gap following it. This only
+            // matters if we are not the first entry.
+            auto prev = slot;
+            (--prev)->get()->gapIsKnownEmpty = false;
+          }
+          map.erase(*slot);
+        }
+      }
+    }
+  }
+}
+
 ActorCache::SharedLru::SharedLru(Options options): options(options) {}
 
 ActorCache::SharedLru::~SharedLru() noexcept(false) {

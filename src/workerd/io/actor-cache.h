@@ -532,6 +532,9 @@ private:
     // RPC. Why would we want to fail a pending get() with other keys prior to trying it?
     kj::Maybe<kj::ForkedPromise<kj::Exception>> readFailedPromise = kj::none;
 
+    // The number of GetWaiters waiting to have this Entry's value read from storage.
+    size_t getWaiters = 0;
+
     // If CLEAN, the entry will be in the SharedLru's `cleanList`.
     //
     // If DIRTY, the entry will be in `dirtyList`.
@@ -633,39 +636,9 @@ private:
   // to read from storage will have its `readFailedFulfiller` fulfilled with the Exception.
   class GetWaiter {
   public:
-    explicit GetWaiter(ActorCache& cache, kj::Array<kj::Own<Entry>> entries)
-        : cache(cache), entries(kj::mv(entries)) {
-
-      // Prepare to receive an exception if the read fails.
-      for (auto& entry: this->entries) {
-        KJ_IF_SOME(p, entry->readFailedPromise) {
-          // We already have a ForkedPromise, i.e. a previous GetWaiter is already waiting on the
-          // result for this key from storage. Let's just add a branch to that promise.
-          this->jointReadFailedPromise = this->jointReadFailedPromise.exclusiveJoin(p.addBranch());
-        } else {
-          // This Entry wasn't in cache, so we're the only GetWaiter interested in the result.
-          auto [prom, fulfiller] = kj::newPromiseAndFulfiller<kj::Exception>();
-          entry->readFailedFulfiller = kj::mv(fulfiller);
-          auto forked = prom.fork();
-          auto branch = forked.addBranch();
-          entry->readFailedPromise = kj::mv(forked);
-          this->jointReadFailedPromise = this->jointReadFailedPromise.exclusiveJoin(kj::mv(branch));
-        }
-      }
-    }
+    explicit GetWaiter(ActorCache& cache, kj::Array<kj::Own<Entry>> entries);
     KJ_DISALLOW_COPY_AND_MOVE(GetWaiter);
-    ~GetWaiter() noexcept(false) {
-      for (auto& entry : entries) {
-        if (!entry->isShared()) {
-          // Ah, we're the last waiter. This probably means it was replaced by a dirty write in the
-          // cache.
-          if (entry->getSyncStatus() == EntrySyncStatus::DIRTY) {
-            // We're still in the dirty list too, let's remove it and try to skip the get.
-            cache.removeEntry(kj::none, *entry);
-          }
-        }
-      }
-    }
+    ~GetWaiter() noexcept(false);
 
     kj::Array<kj::Own<Entry>> getEntries() {
       return KJ_MAP(entry, entries) { return kj::atomicAddRef(*entry); };
