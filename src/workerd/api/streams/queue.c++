@@ -400,8 +400,8 @@ ByteQueue::ByobRequest::~ByobRequest() noexcept(false) {
 
 void ByteQueue::ByobRequest::invalidate() {
   KJ_IF_SOME(req, request) {
-    req.byobReadRequest = nullptr;
-    request = nullptr;
+    req.byobReadRequest = kj::none;
+    request = kj::none;
   }
 }
 

@@ -78,7 +78,7 @@ SqlStorage::Cursor::~Cursor() noexcept(false) {
   KJ_IF_SOME(s, selfRef) {
     KJ_IF_SOME(p, s) {
       if (&p == this) {
-        s = nullptr;
+        s = kj::none;
       }
     }
   }
