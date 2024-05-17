@@ -1011,7 +1011,7 @@ private:
 
             auto content = kj::str('[', kj::strArray(jsonEntries, ","), ']');
 
-            co_return co_await out->write(content.begin(), content.size());
+            co_return co_await out->write(content.asBytes());
           }
         }
         default:
@@ -1260,7 +1260,7 @@ public:
       responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
       auto content = kj::str("{\"Browser\": \"workerd\", \"Protocol-Version\": \"1.3\" }");
       auto out = response.send(200, "OK", responseHeaders, content.size());
-      co_return co_await out->write(content.begin(), content.size());
+      co_return co_await out->write(content.asBytes());
     } else if (url.endsWith("/json") ||
                url.endsWith("/json/list") ||
                url.endsWith("/json/list?for_tab")) {
@@ -1312,8 +1312,7 @@ public:
       auto content = kj::str('[', kj::strArray(entries, ","), ']');
 
       auto out = response.send(200, "OK", responseHeaders, content.size());
-      co_return co_await out->write(content.begin(), content.size()).attach(kj::mv(content),
-                                    kj::mv(out));
+      co_return co_await out->write(content.asBytes()).attach(kj::mv(content), kj::mv(out));
     }
 
     co_return co_await response.sendError(500, "Not yet implemented", responseHeaders);
@@ -2109,7 +2108,7 @@ private:
     auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
     auto request = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
 
-    co_await request.body->write(requestJson.begin(), requestJson.size())
+    co_await request.body->write(requestJson.asBytes())
           .attach(kj::mv(requestJson), kj::mv(request.body));
     auto response = co_await request.response;
 

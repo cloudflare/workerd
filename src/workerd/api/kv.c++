@@ -392,10 +392,10 @@ jsg::Promise<void> KvNamespace::put(
       kj::Promise<void> writePromise = nullptr;
       KJ_SWITCH_ONEOF(supportedBody) {
         KJ_CASE_ONEOF(text, kj::String) {
-          writePromise = req.body->write(text.begin(), text.size()).attach(kj::mv(text));
+          writePromise = req.body->write(text.asBytes()).attach(kj::mv(text));
         }
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
-          writePromise = req.body->write(data.begin(), data.size()).attach(kj::mv(data));
+          writePromise = req.body->write(data).attach(kj::mv(data));
         }
         KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
           writePromise = context.run([

@@ -151,7 +151,7 @@ public:
   explicit EncodedAsyncOutputStream(kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding,
                                     IoContext& context);
 
-  kj::Promise<void> write(const void* buffer, size_t size) override;
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override;
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
 
   kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
@@ -188,14 +188,13 @@ EncodedAsyncOutputStream::EncodedAsyncOutputStream(
     kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding, IoContext& context)
     : inner(kj::mv(inner)), encoding(encoding), ioContext(context) {}
 
-kj::Promise<void> EncodedAsyncOutputStream::write(const void* buffer, size_t size) {
+kj::Promise<void> EncodedAsyncOutputStream::write(kj::ArrayPtr<const byte> buffer) {
   // Alternatively, we could throw here but this is erring on the side of leniency.
   if (inner.is<Ended>()) return kj::READY_NOW;
 
   ensureIdentityEncoding();
 
-  return getInner().write(buffer, size)
-      .attach(ioContext.registerPendingEvent());
+  return getInner().write(buffer).attach(ioContext.registerPendingEvent());
 }
 
 kj::Promise<void> EncodedAsyncOutputStream::write(

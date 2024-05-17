@@ -3019,8 +3019,7 @@ private:
             KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
                 // We received bytes to write. Do so...
-                auto promise = reader.sink->write(bytes.begin(), bytes.size())
-                    .attach(kj::mv(bytes));
+                auto promise = reader.sink->write(bytes).attach(kj::mv(bytes));
                 // Wrap the write promise in a canceler that will be triggered when the
                 // PumpToReader is dropped. While the write promise is pending, it is
                 // possible for the promise that is holding the PumpToReader to be

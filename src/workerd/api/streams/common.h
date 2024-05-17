@@ -189,7 +189,7 @@ struct Transformer {
 
 class WritableStreamSink {
 public:
-  virtual kj::Promise<void> write(const void* buffer, size_t size)
+  virtual kj::Promise<void> write(kj::ArrayPtr<const byte> buffer)
       KJ_WARN_UNUSED_RESULT = 0;
   virtual kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces)
       KJ_WARN_UNUSED_RESULT = 0;

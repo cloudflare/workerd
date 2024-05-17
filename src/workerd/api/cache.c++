@@ -212,7 +212,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
       static auto constexpr handleHeaders = [](kj::Own<kj::AsyncOutputStream> out,
                                                kj::String serializedHeaders)
           -> kj::Promise<kj::Tuple<kj::Own<kj::AsyncOutputStream>, bool>> {
-        co_await out->write(serializedHeaders.begin(), serializedHeaders.size());
+        co_await out->write(serializedHeaders.asBytes());
         co_return kj::tuple(kj::mv(out), false);
       };
 

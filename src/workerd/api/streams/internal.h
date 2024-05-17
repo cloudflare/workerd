@@ -399,7 +399,7 @@ public:
 
   // WritableStreamSink implementation ---------------------------------------------------
 
-  kj::Promise<void> write(const void* buffer, size_t size) override;
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override;
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
 

@@ -199,9 +199,7 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
 
   class MySink final : public WritableStreamSink {
   public:
-    kj::Promise<void> write(const void* buffer, size_t size) override {
-      return kj::READY_NOW;
-    }
+    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override { return kj::READY_NOW; }
     kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
       return kj::READY_NOW;
     }

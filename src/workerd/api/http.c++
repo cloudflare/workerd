@@ -596,7 +596,7 @@ public:
     if (unread != nullptr) {
       auto data = unread;
       unread = nullptr;
-      co_await output.write(data.begin(), data.size());
+      co_await output.write(data);
       if (end) co_await output.end();
     }
 
