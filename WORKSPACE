@@ -205,7 +205,7 @@ http_archive(
 #   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    commit = "a64dd87cec79c80c88190265cfea0cbd4027677f",
+    commit = "8c54b7dae4c4692f32abe9b3e8113cdf0a8842b9",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
@@ -481,20 +481,19 @@ http_archive(
         "//:patches/v8/0014-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
         "//:patches/v8/0015-Set-torque-generator-path-to-external-v8.-This-allow.patch",
         "//:patches/v8/0016-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-        "//:patches/v8/0017-Fixup-RunMicrotask-to-restore-async-context-on-termi.patch",
-        "//:patches/v8/0018-Expose-v8-Symbol-GetDispose.patch",
-        "//:patches/v8/0019-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE.patch",
+        "//:patches/v8/0017-Expose-v8-Symbol-GetDispose.patch",
+        "//:patches/v8/0018-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE-V8_COMPR.patch",
     ],
-    integrity = "sha256-61Qzg9XnA/S2Jw1xSDgfGm8VUnrPR483gcsQOqlBNq0=",
-    strip_prefix = "v8-12.5.227.3",
+    integrity = "sha256-UTjJpSFKyLIIAhgs+z8u+2t5hKE4J4kfwzYqEUAYpVM=",
+    strip_prefix = "v8-12.6.228.3",
     type = "tgz",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.5.227.3.tar.gz",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.6.228.3.tar.gz",
 )
 
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "a622de35ac311c5ad390a7af80724634e5dc61ed",
+    commit = "98f2494518c2dbb9c488e83e507b070ea5910e95",
     patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
     patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
@@ -528,13 +527,6 @@ new_local_repository(
     name = "perfetto_cfg",
     build_file_content = "",
     path = "build/perfetto",
-)
-
-git_repository(
-    name = "com_googlesource_chromium_base_trace_event_common",
-    build_file = "@v8//:bazel/BUILD.trace_event_common",
-    commit = "29ac73db520575590c3aceb0a6f1f58dda8934f6",
-    remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
 )
 
 python_register_toolchains(
@@ -571,11 +563,6 @@ py_deps_install()
 bind(
     name = "icu",
     actual = "@com_googlesource_chromium_icu//:icu",
-)
-
-bind(
-    name = "base_trace_event_common",
-    actual = "@com_googlesource_chromium_base_trace_event_common//:trace_event_common",
 )
 
 # Tell workerd code where to find v8.

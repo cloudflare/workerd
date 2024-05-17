@@ -2,7 +2,6 @@
 -stdlib=libc++
 -xc++
 -nostdinc
--Ibazel-bin/external/com_googlesource_chromium_base_trace_event_common/_virtual_includes/trace_event_common
 -Ibazel-bin/external/dawn/include
 -Ibazel-bin/external/ada-url/_virtual_includes/ada-url/
 -Ibazel-bin/external/com_cloudflare_lol_html/_virtual_includes/lolhtml
