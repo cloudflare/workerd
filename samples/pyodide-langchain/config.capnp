@@ -13,6 +13,8 @@ const config :Workerd.Config = (
       service = "main"
     ),
   ],
+
+  v8Flags = [ "--print-wasm-code" ]
 );
 
 const mainWorker :Workerd.Worker = (
