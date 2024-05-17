@@ -1958,8 +1958,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(
       KJ_IF_SOME(parsed, jsg::Url::tryParse(location, base.asPtr())) {
         auto str = kj::str(parsed.getHref());
         return kj::Url::tryParse(str.asPtr(), kj::Url::Context::REMOTE_HREF, kj::Url::Options {
-          .allowEmpty = true,
           .percentDecode = false,
+          .allowEmpty = true,
         });
       } else {
         return kj::none;
