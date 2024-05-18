@@ -55,16 +55,19 @@ void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Objec
   // The default error that V8 would generate is "#<TypeName> could not be cloned." -- for some
   // reason, it surrounds the type name in "#<>", which seems bizarre? Let's generate a better
   // error.
-  v8::Local<v8::String> message = js.str(kj::str(
+  auto message = kj::str(
       "Could not serialize object of type \"", obj->GetConstructorName(), "\". This type does "
-      "not support serialization."));
-  js.throwException(jsg::JsValue(makeDOMException(js.v8Isolate, message, "DataCloneError")));
+      "not support serialization.");
+  auto exception = js.domException(kj::str("DataCloneError"), kj::mv(message));
+  js.throwException(jsg::JsValue(KJ_ASSERT_NONNULL(exception.tryGetHandle(js))));
 }
 
 void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
   auto isolate = v8::Isolate::GetCurrent();
   try {
-    isolate->ThrowException(makeDOMException(isolate, message, "DataCloneError"));
+    Lock& js = Lock::from(isolate);
+    auto exception = js.domException(kj::str("DataCloneError"), kj::str(message));
+    isolate->ThrowException(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
   } catch (JsExceptionThrown&) {
     // Apparently an exception was thrown during the construction of the DOMException. Most likely
     // we were terminated. In any case, we'll let that exception stay scheduled and propagate back

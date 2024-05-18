@@ -70,5 +70,25 @@ KJ_TEST("DOMException has legacy code constants") {
   );
 }
 
+KJ_TEST("jsg::Lock domException") {
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      Ref<DOMException> exception = js.domException(kj::str("foo"), kj::str("bar"));
+
+      // The DOMException object should have the JS handle created already.
+      auto handle = JsObject(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
+
+      // And it will have the stack.
+      KJ_ASSERT(handle.has(js, "stack"_kj));
+
+      KJ_ASSERT(exception->getName() == "foo"_kj);
+      KJ_ASSERT(exception->getMessage() == "bar"_kj);
+    });
+  });
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

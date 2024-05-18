@@ -100,48 +100,6 @@ kj::StringPtr trimErrorMessage(kj::StringPtr errorString) {
   return "";
 }
 
-kj::Maybe<v8::Local<v8::Value>> tryMakeDomException(v8::Isolate* isolate,
-                                                    v8::Local<v8::String> message,
-                                                    kj::StringPtr errorName) {
-  // If the global scope object has a "DOMException" object that is a constructor, construct a new
-  // DOMException with the passed parameters. Note that this information is available at
-  // compile-time via TypeWrapper, but threading TypeWrapper up from liftKj() call sites all the
-  // way up here would be a readability nerf and lock users into our version of DOMException.
-
-  auto context = isolate->GetCurrentContext();
-  auto global = context->Global();
-
-  const auto toObject = [context](v8::Local<v8::Value> value) {
-    return check(value->ToObject(context));
-  };
-  const auto getInterned = [isolate, context](v8::Local<v8::Object> object, const char* s) {
-    return check(object->Get(context, v8StrIntern(isolate, s)));
-  };
-
-  if (auto domException = getInterned(global, "DOMException"); domException->IsObject()) {
-    if (auto domExceptionCtor = toObject(domException); domExceptionCtor->IsConstructor()) {
-      v8::Local<v8::Value> args[2] = {
-        message, v8StrIntern(isolate, errorName)
-      };
-      return check(domExceptionCtor->CallAsConstructor(context, 2, args));
-    }
-  }
-
-  return kj::none;
-}
-
-v8::Local<v8::Value> tryMakeDomExceptionOrDefaultError(
-    v8::Isolate* isolate, v8::Local<v8::String> message, kj::StringPtr errorName) {
-  return tryMakeDomException(isolate, message, errorName).orDefault([&]() {
-    return v8::Exception::Error(message);
-  });
-}
-
-v8::Local<v8::Value> tryMakeDomExceptionOrDefaultError(
-    v8::Isolate* isolate, kj::StringPtr message, kj::StringPtr errorName) {
-  return tryMakeDomExceptionOrDefaultError(isolate, v8Str(isolate, message), errorName);
-}
-
 bool setRemoteError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
   // If an exception was tunneled, we add a property `.remote` to the Javascript error.
   KJ_ASSERT(exception->IsObject());
@@ -227,9 +185,11 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
         errorType = errorType.slice(strlen("DOMException("));
         // Check for closing brace
         KJ_IF_SOME(closeParen, errorType.findFirst(')')) {
+          auto& js = Lock::from(isolate);
           auto errorName = kj::str(errorType.slice(0, closeParen));
           auto message = appMessage(errorType.slice(1 + closeParen));
-          result.handle = tryMakeDomExceptionOrDefaultError(isolate, message, errorName);
+          auto exception = js.domException(kj::mv(errorName), kj::str(message));
+          result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
           break;
         }
       }
@@ -586,13 +546,6 @@ v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Val
   // This is implemented in the classic JSON restringification way.
   auto serialized = check(v8::JSON::Stringify(context, value));
   return check(v8::JSON::Parse(context, serialized));
-}
-
-v8::Local<v8::Value> makeDOMException(
-    v8::Isolate* isolate,
-    v8::Local<v8::String> message,
-    kj::StringPtr name) {
-  return KJ_ASSERT_NONNULL(tryMakeDomException(isolate, message, name));
 }
 
 namespace {

@@ -2026,6 +2026,8 @@ class JsMessage;
   JS_TYPE_CLASSES(V)
 #undef V
 
+class DOMException;
+
 // Represents an isolate lock, which allows the current thread to execute JavaScript code within
 // an isolate. A thread must lock an isolate -- obtaining an instance of `Lock` -- before it can
 // manipulate JavaScript objects or execute JavaScript code inside the isolate.
@@ -2329,6 +2331,9 @@ public:
       return fn();
     }
   }
+
+  virtual Ref<DOMException> domException(kj::String name, kj::String message,
+      kj::Maybe<kj::String> stackValue = kj::none) = 0;
 
   // ====================================================================================
   JsObject global() KJ_WARN_UNUSED_RESULT;

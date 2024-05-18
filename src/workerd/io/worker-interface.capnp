@@ -228,6 +228,7 @@ enum SerializationTag {
   response @6;
 
   domException @7;
+  domExceptionV2 @8;
   # Keep this value in sync with the DOMException::SERIALIZATION_TAG in
   # /src/workerd/jsg/dom-exception (but we can't actually change this value
   # without breaking things).
