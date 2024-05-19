@@ -331,7 +331,7 @@ kj::uint Url::hashCode() const {
   return kj::hashCode(getHref());
 }
 
-kj::Array<const kj::byte> Url::percentDecode(kj::ArrayPtr<const kj::byte> input) {
+kj::Array<kj::byte> Url::percentDecode(kj::ArrayPtr<const kj::byte> input) {
   std::string_view data(input.asChars().begin(), input.size());
   auto str = ada::unicode::percent_decode(data, 0);
   auto ret = kj::heapArray<kj::byte>(str.size());

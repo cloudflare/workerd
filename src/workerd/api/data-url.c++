@@ -78,7 +78,7 @@ kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
     unparsed = trim(unparsed);
 
     // Determine if the data is base64 encoded
-    kj::Array<const kj::byte> decoded = nullptr;
+    kj::Array<kj::byte> decoded = nullptr;
     if (isBase64(unparsed)) {
       unparsed = unparsed.first(KJ_ASSERT_NONNULL(unparsed.findLast(';')));
       decoded = kj::decodeBase64(strip(jsg::Url::percentDecode(data.asBytes())).asChars());

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "http.h"
+#include "data-url.h"
 #include "sockets.h"
 #include "system-streams.h"
 #include "util.h"
@@ -2109,6 +2110,20 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
     } else {
       actualFetcher = jsg::alloc<Fetcher>(
           IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
+    }
+
+    KJ_IF_SOME(dataUrl, DataUrl::tryParse(jsRequest->getUrl())) {
+      // If the URL is a data URL, we need to handle it specially.
+      auto data = dataUrl.releaseData();
+      auto headers = jsg::alloc<Headers>();
+      headers->set(jsg::ByteString(kj::str("content-type")),
+                   jsg::ByteString(dataUrl.getMimeType().toString()));
+      return js.resolvedPromise(Response::constructor(js, kj::Maybe(kj::mv(data)),
+         Response::InitializerDict {
+          .status = 200,
+          .statusText = kj::str("OK"),
+          .headers = kj::mv(headers),
+        }));
     }
 
     urlList.add(actualFetcher->parseUrl(js, jsRequest->getUrl()));

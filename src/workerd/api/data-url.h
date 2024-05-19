@@ -18,12 +18,14 @@ public:
   const MimeType& getMimeType() const { return mimeType; }
   kj::ArrayPtr<const kj::byte> getData() const { return data.asPtr(); }
 
+  kj::Array<kj::byte> releaseData() { return data.releaseAsBytes(); }
+
 private:
-  DataUrl(MimeType mimeType, kj::Array<const kj::byte> data)
+  DataUrl(MimeType mimeType, kj::Array<kj::byte> data)
       : mimeType(kj::mv(mimeType)), data(kj::mv(data)) {}
 
   MimeType mimeType;
-  kj::Array<const kj::byte> data;
+  kj::Array<kj::byte> data;
 };
 
 }  // namespace workerd::api
