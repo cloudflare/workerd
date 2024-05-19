@@ -25,7 +25,7 @@ public:
   // Returning nullptr implies that the input is not a valid mime type construction.
   // If the ParseOptions::IGNORE_PARAMS option is set then the mime type parameters
   // will be ignored and will not be included in the parsed result.
-  static kj::Maybe<MimeType> tryParse(kj::StringPtr input,
+  static kj::Maybe<MimeType> tryParse(kj::ArrayPtr<const char> input,
                                       ParseOptions options = ParseOptions::DEFAULT);
 
   // Asserts if the input could not be parsed as a valid MimeType. tryParse should
@@ -80,6 +80,7 @@ public:
 
   static const MimeType JSON;
   static const MimeType PLAINTEXT;
+  static const MimeType PLAINTEXT_ASCII;
   static const MimeType FORM_URLENCODED;
   static const MimeType FORM_DATA;
   static const MimeType OCTET_STREAM;
@@ -96,6 +97,7 @@ public:
 
   // exposed directly for performance reasons
   static const kj::StringPtr PLAINTEXT_STRING;
+  static const kj::StringPtr PLAINTEXT_ASCII_STRING;
 
   // Extracts a mime type from a concatenated list of content-type values
   // per the algorithm defined in the fetch spec:
