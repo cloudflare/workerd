@@ -691,8 +691,9 @@ struct WildcardPropertyCallbacks<
         static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
         static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))) {}
 
-  static void getter(v8::Local<v8::Name> name,
+  static v8::Intercepted getter(v8::Local<v8::Name> name,
                        const v8::PropertyCallbackInfo<v8::Value>& info) {
+    v8::Intercepted result = v8::Intercepted::kNo;
     liftKj(info, [&]() -> v8::Local<v8::Value> {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
@@ -704,12 +705,14 @@ struct WildcardPropertyCallbacks<
       auto& self = extractInternalPointer<T, false>(context, obj);
       auto& lock = Lock::from(isolate);
       KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(name.As<v8::String>()))) {
+        result = v8::Intercepted::kYes;
         return wrapper.wrap(context, obj, kj::fwd<Ret>(value));
       } else {
         // Return an empty handle to indicate the member doesn't exist.
         return {};
       }
     });
+    return result;
   }
 };
 
@@ -821,6 +824,8 @@ struct ResourceTypeBuilder {
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
 
+    // TODO(soon): The SetAccessor method is deprecated. We should switch to SetNativeDataProperty
+    // but doing so causes some tests to fail. Needs further investigation.
     prototype->SetAccessor(
         v8Name,
         Gcb::callback,
@@ -862,7 +867,7 @@ struct ResourceTypeBuilder {
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
 
-    prototype->SetAccessor(
+    prototype->SetNativeDataProperty(
         v8Name,
         &Gcb::callback,
         nullptr,
@@ -906,7 +911,7 @@ struct ResourceTypeBuilder {
     auto symbol = v8::Symbol::New(isolate, v8Name);
     inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
 
-    prototype->SetAccessor(
+    prototype->SetNativeDataProperty(
         symbol,
         &Gcb::callback,
         nullptr,
