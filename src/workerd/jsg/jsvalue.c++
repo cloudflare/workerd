@@ -271,14 +271,7 @@ kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, kj::StringPtr input) const {
 }
 
 jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
-  // TODO(cleanup): Add a toUTCString method to v8::Date to avoid having to grab
-  // the implementation like this from the JS prototype.
-  const auto stringify = js.v8Get(inner, "toUTCString"_kj);
-  JSG_REQUIRE(stringify->IsFunction(), TypeError, "toUTCString on a Date is not a function");
-  const auto stringified = jsg::check(stringify.template As<v8::Function>()->Call(
-      js.v8Context(), inner, 0, nullptr));
-  JSG_REQUIRE(stringified->IsString(), TypeError, "toUTCString on a Date did not return a string");
-  JsString str(stringified.As<v8::String>());
+  JsString str(inner->ToUTCString());
   return jsg::ByteString(str.toString(js));
 }
 
@@ -466,15 +459,8 @@ JsDate Lock::date(kj::Date date) {
 }
 
 JsDate Lock::date(kj::StringPtr date) {
-  // TODO(cleanup): Add v8::Date::Parse API to avoid having to grab the constructor like this.
-  const auto tmp = jsg::check(v8::Date::New(v8Context(), 0));
-  KJ_REQUIRE(tmp->IsDate());
-  const auto constructor = v8Get(tmp.As<v8::Object>(), "constructor"_kj);
-  JSG_REQUIRE(constructor->IsFunction(), TypeError, "Date.constructor is not a function");
-  v8::Local<v8::Value> argv = str(date);
-  const auto converted = jsg::check(
-      constructor.template As<v8::Function>()->NewInstance(v8Context(), 1, &argv));
-  JSG_REQUIRE(converted->IsDate(), TypeError, "Date.constructor did not return a Date");
+  v8::Local<v8::Value> converted = check(v8::Date::Parse(v8Context(), str(date)));
+  KJ_REQUIRE(converted->IsDate());
   return JsDate(converted.As<v8::Date>());
 }
 
