@@ -668,9 +668,13 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
 public:
   GetMultiStreamImpl(
       ActorCache& cache, kj::Array<kj::Own<Entry>> entries,
-      kj::Own<kj::PromiseFulfiller<void>> endFulfiller)
-    : cache(cache), entries(kj::mv(entries)), endFulfiller(kj::mv(endFulfiller)) {}
+      kj::Own<kj::PromiseFulfiller<void>> endFulfiller, kj::Maybe<GetMultiStreamImpl&>& selfRef)
+    : cache(cache), entries(kj::mv(entries)), endFulfiller(kj::mv(endFulfiller)),
+      selfRef(selfRef) {}
   ~GetMultiStreamImpl() noexcept(false) {
+    KJ_IF_SOME(terminated, selfRef) {
+      terminated = kj::none;
+    }
     if (endFulfiller->isWaiting()) {
       // Our capability has been dropped but we haven't seen an end invocation, reject if we have
       // any waiters. It's fine, we can retry again later.
@@ -689,6 +693,8 @@ public:
   // referring to the entries anymore so this is fine.
   void clear() {
     entries = {};
+    // Clear this out because our waiters have gone away before we were destructed.
+    selfRef = kj::none;
   }
 
   kj::Promise<void> values(ValuesContext context) override {
@@ -756,6 +762,23 @@ private:
   ActorCache& cache;
   kj::Array<kj::Own<Entry>> entries;
   kj::Own<kj::PromiseFulfiller<void>> endFulfiller;
+
+  // We keep a reference to this GetMultiStreamImpl elsewhere, but need to be careful about
+  // destruction ordering. If the ActorCache destructor runs first, we need to clear out `entries`
+  // to ensure the clean destruction of the SharedLru (`Entry`s are refcounted, and
+  // GetMultiStreamImpl would otherwise over-extend their lifetime). If the GetMultiStreamImpl
+  // is destroyed first, we need to invalidate our weak reference to it elsewhere, otherwise we may
+  // attempt a UAF by calling GetMultiStreamImpl::clear() after it was already destroyed.
+  //
+  // We can't just extend this objects lifetime because we use its destructor to reject a promise
+  // fulfiller that informs waiters to stop waiting for an end() call.
+  //
+  // So, to clarify the usage here:
+  //    - The outer maybe is set to kj::none when the waiter (syncGets() promise) is going away
+  //      before the GetMultiStreamImpl.
+  //    - The inner maybe is set to kj::none when the GetMultiStreamImpl is going away before the
+  //      waiter (syncGets() promise), so it doesn't attempt a UAF.
+  kj::Maybe<kj::Maybe<GetMultiStreamImpl&>&> selfRef;
 };
 
 kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
@@ -834,10 +857,9 @@ kj::Promise<void> ActorCache::syncGets(
   kj::Vector<kj::Promise<void>> promises;
 
   // If ActorCache is dtor'd, we need each GetMultiStreamImpl to drop their strong refs to `Entry`s
-  // so that we clear out all entries from cache.
-  // TODO(cleanup): Is there a way to actually get the `GetMultiStreamImpl objects/capnp capabilities
-  // to be dtor'd instead? That would be a lot nicer.
-  kj::Vector<GetMultiStreamImpl*> clients;
+  // so that we clear out all entries from cache. If the GetMultiStreamImpl has already been
+  // destroyed then the entry in this vector will be set to kj::none.
+  kj::Vector<kj::Maybe<GetMultiStreamImpl&>> clients;
 
   for (size_t i = 0; i < getFlush.batches.size(); ++i) {
     auto [p, f] = kj::newPromiseAndFulfiller<void>();
@@ -863,10 +885,12 @@ kj::Promise<void> ActorCache::syncGets(
     // The storage-proxy will stream results to us by calling `GetMultiStreamImpl::values()`,
     // where we will update the `Entry`s in `batchEntries` with their values from storage (or set
     // them ABSENT if they weren't found).
+    auto& streamRef = clients.add(kj::none);
     kj::Own<GetMultiStreamImpl> client =
-        kj::heap<GetMultiStreamImpl>(*this, batchEntries.releaseAsArray(), kj::mv(f));
+        kj::heap<GetMultiStreamImpl>(*this, batchEntries.releaseAsArray(), kj::mv(f), streamRef);
 
-    clients.add(client.get());
+    // We will hold a reference to the GetMultiStreamImpl in case we need to clear out the entries.
+    streamRef = *client;
 
     rpc::ActorStorage::ListStream::Client streamClient(kj::mv(client));
     req.setStream(streamClient);
@@ -885,10 +909,11 @@ kj::Promise<void> ActorCache::syncGets(
   // the `Entry`s associated with each GetMultiStreamImpl above.
   multiReadTask = kj::joinPromises(promises.releaseAsArray()).attach(
       kj::defer([&](){
-    for (auto& client: clients) {
-      // TODO(now): Sometimes the GetMultiStreamImpl is dtor'd before
-      // we can call clear(). We need to prevent this from happening!
-      client->clear();
+    for (auto& maybeClient: clients) {
+      KJ_IF_SOME(client, maybeClient) {
+        // The GetMultiStreamImpl is still alive so we need to destroy the `entries`.
+        client.clear();
+      }
     }
   }));
 
