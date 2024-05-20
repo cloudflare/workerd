@@ -339,7 +339,7 @@ void JsRpcPromise::resolve(jsg::Lock& js, jsg::JsValue result) {
   if (state.is<Pending>()) {
     state = Resolved {
       .result = jsg::Value(js.v8Isolate, result),
-      .ioCtx = IoContext::current().getWeakRef()
+      .ctxCheck = IoContext::current().addObject(*this),
     };
   } else {
     // We'd better dispose this.
@@ -370,7 +370,9 @@ rpc::JsRpcTarget::Client JsRpcPromise::getClientForOneCall(
       return pending.pipeline->getCallPipeline();
     }
     KJ_CASE_ONEOF(resolved, Resolved) {
-      IoContext::requireCurrentOrThrowJs(*resolved.ioCtx);
+      // Dereference `ctxCheck` just to verify we're running in the correct context. (If not,
+      // this will throw.)
+      *resolved.ctxCheck;
 
       // A value was already returned, and we closed the original RPC pipeline. But the application
       // kept the promise around and is still trying to pipeline on it. What do we do?

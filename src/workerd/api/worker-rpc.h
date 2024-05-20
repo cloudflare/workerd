@@ -213,8 +213,11 @@ private:
   struct Resolved {
     jsg::Value result;
 
-    // We only use this to prohibit use from the wrong context.
-    kj::Own<IoContext::WeakRef> ioCtx;
+    // Dummy IoPtr to self, used only to verify that we're running in the correct context.
+    // (Dereferencing from the wrong context would throw an exception.)
+    // Note: Can't use IoContext::WeakRef here because it's not thread-safe (it's only intended to
+    //   be helf from KJ I/O objects, but this is a JSG object).
+    IoPtr<JsRpcPromise> ctxCheck;
   };
   struct Disposed {};
 
