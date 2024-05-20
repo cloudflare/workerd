@@ -47,29 +47,31 @@ class HeapTracer;
 // Wrappable and are not visible to GC tracing.
 class Wrappable: public kj::Refcounted {
 public:
-  // Number of internal fields in a wrapper object.
-  static constexpr uint INTERNAL_FIELD_COUNT = 3;
 
-  // Index of the internal field that points back to the `Wrappable`.
-  static constexpr uint WRAPPED_OBJECT_FIELD_INDEX = 2;
+  enum InternalFields : int {
+    // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`. This is a workerd-specific
+    // tag that helps us to identify a v8 API object as one of our own.
+    WRAPPABLE_TAG_FIELD_INDEX,
 
-  // Index of the internal field that contains a pointer to the cppgc shim object, used to get
-  // tracing callback from V8 and get notification when the wrapper is collected.
-  static constexpr uint CPPGC_SHIM_FIELD_INDEX = 1;
+    // Index of the internal field that points back to the `Wrappable`.
+    WRAPPED_OBJECT_FIELD_INDEX,
 
-  // Field must contain a pointer to `WRAPPABLE_TAG`. This is a requirement of v8::CppHeap. The
-  // purpose is not clear.
-  //
-  // Note that although V8 lets us configure which slot this tag is in, in practice if we set it
-  // to anything other than zero, we see crashes inside V8. It appears that V8 allocates some
-  // objects of its own which have internal fields, and then GC doesn't check that the index is
-  // in-bounds before reading it...
-  static constexpr uint WRAPPABLE_TAG_FIELD_INDEX = 0;
+    // Number of internal fields in a wrapper object.
+    INTERNAL_FIELD_COUNT,
+  };
+
+  static constexpr v8::CppHeapPointerTag WRAPPABLE_TAG =
+      v8::CppHeapPointerTag::kDefaultTag;
 
   // The value pointed to by the internal field field `WRAPPABLE_TAG_FIELD_INDEX`.
   //
   // This value was chosen randomly.
-  static constexpr uint16_t WRAPPABLE_TAG = 0xeb04;
+  static constexpr uint16_t WORKERD_WRAPPABLE_TAG = 0xeb04;
+
+  static bool isWorkerdApiObject(v8::Local<v8::Object> object) {
+    return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX) ==
+        &WORKERD_WRAPPABLE_TAG;
+  }
 
   void addStrongRef();
   void removeStrongRef();

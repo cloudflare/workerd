@@ -103,8 +103,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     jsg::Lock& js = jsg::Lock::from(isolate);
 
     if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
-        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPABLE_TAG_FIELD_INDEX) !=
-            &Wrappable::WRAPPABLE_TAG) {
+        !Wrappable::isWorkerdApiObject(object)) {
       KJ_IF_SOME(eh, externalHandler) {
         if (object->IsFunction()) {
           eh.serializeFunction(js, *this, object.As<v8::Function>());

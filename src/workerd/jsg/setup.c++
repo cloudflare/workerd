@@ -278,13 +278,7 @@ bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
 namespace {
   std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
     return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      v8::CppHeapCreateParams heapParams {
-        {},
-        v8::WrapperDescriptor(
-            Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-            Wrappable::CPPGC_SHIM_FIELD_INDEX,
-            Wrappable::WRAPPABLE_TAG)
-      };
+      v8::CppHeapCreateParams heapParams {{}};
       heapParams.marking_support = cppgc::Heap::MarkingType::kAtomic;
       heapParams.sweeping_support = cppgc::Heap::SweepingType::kAtomic;
       return v8::CppHeap::Create(system, heapParams);
