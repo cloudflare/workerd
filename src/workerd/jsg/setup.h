@@ -187,6 +187,7 @@ private:
   using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete>;
 
   const V8System& system;
+  std::unique_ptr<class v8::CppHeap> cppHeap;
   v8::Isolate* ptr;
   kj::Maybe<kj::String> uuid;
   bool evalAllowed = false;
