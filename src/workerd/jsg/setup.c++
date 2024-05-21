@@ -276,10 +276,8 @@ bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
 }
 
 namespace {
-  static v8::Isolate* newIsolate(
-      V8PlatformWrapper* system,
-      v8::Isolate::CreateParams&& params) {
-    return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
+  std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
+    return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       v8::CppHeapCreateParams heapParams {
         {},
         v8::WrapperDescriptor(
@@ -289,6 +287,13 @@ namespace {
       };
       heapParams.marking_support = cppgc::Heap::MarkingType::kAtomic;
       heapParams.sweeping_support = cppgc::Heap::SweepingType::kAtomic;
+      return v8::CppHeap::Create(system, heapParams);
+    });
+  }
+  static v8::Isolate* newIsolate(
+      v8::Isolate::CreateParams&& params,
+      v8::CppHeap* cppHeap) {
+    return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
       // We currently don't attempt to support incremental marking or sweeping. We probably could
       // support them, but it will take some careful investigation and testing. It's not clear if
       // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
@@ -300,8 +305,10 @@ namespace {
       // fully utilized. This differs from browser environments, where a user is typically doing
       // only one thing at a time and thus likely has CPU cores to spare.
 
-      // v8 takes ownership of the v8::CppHeap when passed this way.
-      params.cpp_heap = v8::CppHeap::Create(system, heapParams).release();
+      // V8 *claims* to take ownership of the v8::CppHeap but actually releases ownership of it
+      // during v8::Isolate::Dispose.
+      // TODO(soon): submit a bug report/patch to v8.
+      params.cpp_heap = cppHeap;
 
       if (params.array_buffer_allocator == nullptr &&
           params.array_buffer_allocator_shared == nullptr) {
@@ -316,8 +323,8 @@ namespace {
 IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams,
                          kj::Own<IsolateObserver> observer)
     : system(system),
-      ptr(newIsolate(const_cast<V8PlatformWrapper*>(&system.platformWrapper),
-                     kj::mv(createParams))),
+      cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
+      ptr(newIsolate(kj::mv(createParams), cppHeap.get())),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
@@ -382,6 +389,7 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     ptr->Dispose();
+    cppHeap.reset();;
   });
 }
 
