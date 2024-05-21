@@ -4,6 +4,7 @@
 
 #include "server.h"
 #include <kj/test.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/jsg/setup.h>
 #include <kj/async-queue.h>
@@ -36,6 +37,8 @@ kj::Own<config::Config::Reader> parseConfig(kj::StringPtr text, kj::SourceLocati
   })) {
     KJ_FAIL_REQUIRE_AT(loc, exception);
   }
+
+  util::Autogate::initAutogate(root.asReader().getAutogates());
 
   return capnp::clone(root.asReader());
 }

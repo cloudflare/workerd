@@ -13,6 +13,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
     case AutogateKey::TEST_WORKERD:
       return "test-workerd"_kj;
+    case AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES:
+      return "updated-actor-exception-types";
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

@@ -75,6 +75,7 @@ wd_cc_library(
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:r2-api_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:duration-exceeded-logger",
         "//src/workerd/util:sqlite",
         "@capnp-cpp//src/capnp:capnp-rpc",
@@ -222,6 +223,7 @@ wd_cc_capnp_library(
     src = f,
     deps = [
         ":io",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:test-util",
     ],
 ) for f in glob(["*-test.c++"])]

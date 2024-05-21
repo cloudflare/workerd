@@ -9,6 +9,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-gate.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/duration-exceeded-logger.h>
 
@@ -2224,9 +2225,11 @@ void ActorCache::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
       }
 
       // Use the direct constructor so that we can reuse the constexpr message variable for testing.
-      auto exception = kj::Exception(
-          kj::Exception::Type::DISCONNECTED, __FILE__, __LINE__,
-          kj::heapString(SHUTDOWN_ERROR_MESSAGE));
+      auto excType = (util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES)
+              ? kj::Exception::Type::DISCONNECTED
+              : kj::Exception::Type::OVERLOADED);
+      auto exception =
+          kj::Exception(excType, __FILE__, __LINE__, kj::heapString(SHUTDOWN_ERROR_MESSAGE));
 
       // Add trace info sufficient to tell us which operation caused the failure.
       exception.addTraceHere();
