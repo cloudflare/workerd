@@ -16,6 +16,8 @@ import {
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors'
 
+import { default as utilImpl } from 'node-internal:util';
+
 export function nextTick(cb: Function, ...args: unknown[]) {
   queueMicrotask(() => { cb(...args); });
 };
@@ -62,7 +64,12 @@ export const env = new Proxy({}, {
   }
 });
 
+export function getBuiltinModule(id: string) : any {
+  return utilImpl.getBuiltinModule(id);
+}
+
 export default {
   nextTick,
   env,
+  getBuiltinModule,
 };

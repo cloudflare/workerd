@@ -1018,6 +1018,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
 
     lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
     lock->setCommonJsExportDefault(features.getExportCommonJsDefaultNamespace());
+    if (features.getNodeJsCompatV2()) {
+      lock->setNodeJsCompatEnabled();
+    }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {

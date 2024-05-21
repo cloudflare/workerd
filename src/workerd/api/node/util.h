@@ -196,6 +196,8 @@ public:
   bool isAnyArrayBuffer(jsg::JsValue value);
   bool isBoxedPrimitive(jsg::JsValue value);
 
+  jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
+
   JSG_RESOURCE_TYPE(UtilModule) {
     JSG_NESTED_TYPE(MIMEType);
     JSG_NESTED_TYPE(MIMEParams);
@@ -220,6 +222,8 @@ public:
   #undef V
     JSG_METHOD(isAnyArrayBuffer);
     JSG_METHOD(isBoxedPrimitive);
+
+    JSG_METHOD(getBuiltinModule);
   }
 };
 

@@ -107,3 +107,5 @@ export function isWeakMap(value: unknown): value is WeakMap<any, unknown>;
 export function isWeakSet(value: unknown): value is WeakSet<any>;
 export function isAnyArrayBuffer(value: unknown): value is ArrayBuffer | SharedArrayBuffer;
 export function isBoxedPrimitive(value: unknown): value is Number | String | Boolean | BigInt | Symbol;
+
+export function getBuiltinModule(id: string): any;

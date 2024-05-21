@@ -60,16 +60,19 @@ void registerNodeJsCompatModules(
 #undef V
 #undef NODEJS_MODULES
 
+  bool nodeJsCompatEnabled = featureFlags.getNodeJsCompat() ||
+                             featureFlags.getNodeJsCompatV2();
+
   // If the `nodejs_compat` flag isn't enabled, only register internal modules.
   // We need these for `console.log()`ing when running `workerd` locally.
   kj::Maybe<jsg::ModuleType> maybeFilter;
-  if (!featureFlags.getNodeJsCompat()) maybeFilter = jsg::ModuleType::INTERNAL;
+  if (!nodeJsCompatEnabled) maybeFilter = jsg::ModuleType::INTERNAL;
 
   registry.addBuiltinBundle(NODE_BUNDLE, maybeFilter);
 
   // If the `nodejs_compat` flag is off, but the `nodejs_als` flag is on, we
   // need to register the `node:async_hooks` module from the bundle.
-  if (!featureFlags.getNodeJsCompat() && featureFlags.getNodeJsAls()) {
+  if (!nodeJsCompatEnabled && featureFlags.getNodeJsAls()) {
     jsg::Bundle::Reader reader = NODE_BUNDLE;
     for (auto module : reader.getModules()) {
       auto specifier = module.getName();

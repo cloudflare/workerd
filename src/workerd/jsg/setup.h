@@ -124,8 +124,14 @@ public:
     exportCommonJsDefault = exportDefault;
   }
 
+  inline void setNodeJsCompatEnabled(kj::Badge<Lock>, bool enabled) {
+    nodeJsCompatEnabled = enabled;
+  }
+
   inline bool areWarningsLogged() const { return maybeLogger != kj::none; }
   inline bool areErrorsReported() const { return maybeErrorReporter != kj::none; }
+
+  inline bool isNodeJsCompatEnabled() const { return nodeJsCompatEnabled; }
 
   // The logger will be optionally set by the isolate setup logic if there is anywhere
   // for the log to go (for instance, if debug logging is enabled or the inspector is
@@ -201,6 +207,7 @@ private:
   bool captureThrowsAsRejections = false;
   bool exportCommonJsDefault = false;
   bool asyncContextTrackingEnabled = false;
+  bool nodeJsCompatEnabled = false;
 
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
