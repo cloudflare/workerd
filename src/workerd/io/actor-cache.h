@@ -845,6 +845,10 @@ private:
   // Type of a lock on `SharedLru::cleanList`. We use the same lock to protect `currentValues`.
   typedef kj::Locked<kj::List<Entry, &Entry::link>> Lock;
 
+  // If we failed a storage read and cannot retry, we need to remove the associated `Entry`s from
+  // the dirtyList and possibly from cache (if it hasn't subsequently been overwritten).
+  void evictUnfinishedGet(Lock& lock, kj::Own<Entry>& entry);
+
   // `Entry`s subject to a coalesced get() need to be removed from the dirtyList before we move on
   // to flushing our writes. Additionally, a key may have subsequently been modified, in which case
   // we shouldn't put the result of the get() into the cleanList.

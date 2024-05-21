@@ -157,8 +157,9 @@ ActorCache::GetWaiter::GetWaiter(ActorCache& cache, kj::Array<kj::Own<Entry>> en
 }
 
 ActorCache::GetWaiter::~GetWaiter() noexcept(false) {
+  auto lock = cache.lru.cleanList.lockExclusive();
   for (auto& entry : entries) {
-    KJ_REQUIRE(entry->getWaiters > 0);
+    KJ_DREQUIRE(entry->getWaiters > 0);
     entry->getWaiters--;
     if ((entry->getWaiters) == 0) {
       // We are the last GetWaiter for this Entry!
@@ -168,27 +169,7 @@ ActorCache::GetWaiter::~GetWaiter() noexcept(false) {
       //
       // If we're still in the dirtyList, we can remove ourselves to cancel the storage read!
       if (entry->getSyncStatus() == EntrySyncStatus::DIRTY) {
-        cache.removeEntry(kj::none, *entry);
-
-        auto lock = cache.lru.cleanList.lockExclusive();
-        auto& map = cache.currentValues.get(lock);
-        auto slot = map.seek(entry->key);
-
-        auto ordered = map.ordered();
-        if (slot != ordered.end() && slot->get() == entry) {
-          // We haven't been replaced in cache, and we know that only a get() operation was waiting
-          // on this Entry. Now that the GetWaiter is going away, we know there's no reason for
-          // this Entry to be in cache anymore, and if we left it there it would be UNKNOWN and not
-          // in either the cleanList or dirtyList, so let's remove it.
-          if (slot != ordered.begin()) {
-            // The entry we're removing from cache may have been part of a gap in a list, so we may
-            // need to mark the previous entry as no longer having a gap following it. This only
-            // matters if we are not the first entry.
-            auto prev = slot;
-            (--prev)->get()->gapIsKnownEmpty = false;
-          }
-          map.erase(*slot);
-        }
+        cache.evictUnfinishedGet(lock, entry);
       }
     }
   }
@@ -403,6 +384,32 @@ void ActorCache::ReadFulfiller::fulfillWaiters() {
   currentReadFulfiller = kj::none;
 }
 
+void ActorCache::evictUnfinishedGet(Lock& lock, kj::Own<Entry>& entry) {
+  KJ_REQUIRE(entry->isDirty() && entry->getValueStatus() == ActorCache::EntryValueStatus::UNKNOWN,
+      "only Entries subject to failed get()s should be evicted here.");
+  // First, we remove ourselves from dirtyList.
+  removeEntry(kj::none, *entry);
+
+  auto& map = currentValues.get(lock);
+  auto slot = map.seek(entry->key);
+
+  auto ordered = map.ordered();
+  if (slot != ordered.end() && slot->get() == entry) {
+    // We haven't been replaced in cache, and we know that only a get() operation was waiting
+    // on this Entry. Now that the GetWaiter is going away (since we failed / are canceling the
+    // storage read operation), we know there's no reason for this Entry to be in cache anymore,
+    // and if we left it there it would be UNKNOWN and not in either the cleanList or dirtyList,
+    // so let's remove it.
+    if (slot != ordered.begin()) {
+      // The entry we're removing from cache may have been part of a gap in a list(), so we may
+      // need to mark the previous entry as no longer having a gap following it. This only
+      // matters if we are not the first entry, since there is no entry before the first one.
+      auto prev = slot;
+      (--prev)->get()->gapIsKnownEmpty = false;
+    }
+    map.erase(*slot);
+  }
+}
 
 void ActorCache::processGetResult(Lock& lock, Entry& entry) {
   auto& map = currentValues.get(lock);
@@ -649,18 +656,11 @@ kj::Promise<void> ActorCache::syncGet(
       kj::throwFatalException(kj::mv(e));
     }
 
-    // We cannot retry the read and should instead propagate the exception to the GetWaiters.
-    auto lock = lru.cleanList.lockExclusive();
-    // We have to remove all our dirtyList entries!
-    removeEntry(kj::none, *entry);
-    auto& map = currentValues.get(lock);
-    auto& slot = KJ_ASSERT_NONNULL(map.find(entry->key));
-
+    KJ_ASSERT(entry->isDirty());
+    // We cannot retry the read and should instead propagate the exception to the GetWaiter(s).
     KJ_REQUIRE_NONNULL(entry->readFailedFulfiller)->fulfill(kj::mv(e));
-    if (slot.get() == entry) {
-      // We haven't been replaced in cache, let's remove ourselves!
-      map.erase(slot);
-    }
+    auto lock = lru.cleanList.lockExclusive();
+    evictUnfinishedGet(lock, entry);
   }
 }
 
@@ -861,6 +861,18 @@ kj::Promise<void> ActorCache::syncGets(
   // destroyed then the entry in this vector will be set to kj::none.
   kj::Vector<kj::Maybe<GetMultiStreamImpl&>> clients;
 
+  // If our RPC request rejects, we'll store the exception here.
+  //
+  // Unfortunately, if the server side fails for some reason, our ~GetMultiStreamImpl() will run
+  // before we get a chance to "catch" the actual RPC exception. This is not ideal since the dtor
+  // rejects the `endFulfiller`, which rejects a promise we are waiting on that indicates the stream
+  // has completed and there are no more results to wait on.
+  //
+  // The issue is that promise gets "completed" (rejected) before our RPC exception is caught,
+  // so later when we combine all our rpc promises, if we catch the exception, we'll get the default
+  // exception generated by ~GetMultiStreamImpl() rather than the exception we received over RPC.
+  kj::Maybe<kj::Exception> rpcException;
+
   for (size_t i = 0; i < getFlush.batches.size(); ++i) {
     auto [p, f] = kj::newPromiseAndFulfiller<void>();
     promises.add(kj::mv(p));
@@ -894,7 +906,11 @@ kj::Promise<void> ActorCache::syncGets(
 
     rpc::ActorStorage::ListStream::Client streamClient(kj::mv(client));
     req.setStream(streamClient);
-    promises.add(req.send().ignoreResult().eagerlyEvaluate([](auto e) -> kj::Promise<void>{
+    promises.add(req.send().ignoreResult().eagerlyEvaluate([&](auto e) -> kj::Promise<void> {
+      // Our RPC request failed, so we should set the rpcException.
+      if (rpcException == kj::none) {
+        rpcException = kj::Exception(e);
+      }
       return kj::mv(e);
     }));
   }
@@ -917,7 +933,19 @@ kj::Promise<void> ActorCache::syncGets(
     }
   }));
 
-  co_await multiReadTask.catch_([this, entries = kj::mv(entries)](kj::Exception&& e) mutable {
+  co_await multiReadTask.catch_(
+      [this, entries = kj::mv(entries), &rpcException](kj::Exception&& defaultException) mutable {
+    // We might not use the default exception, and since we can't copy kj::Exceptions, we have to
+    // put this in a container like a kj::Maybe.
+    kj::Maybe<kj::Exception> exception = defaultException;
+
+    KJ_IF_SOME(re, rpcException) {
+      // We got an exception via RPC, that would be a more useful exception than the default one
+      // generated by ~GetMultiStreamImpl().
+      exception = kj::mv(re);
+    }
+    kj::Exception e = KJ_REQUIRE_NONNULL(exception);
+
     // Okay, one of our RPC calls failed and so we need to propagate the exception to all
     // GetWaiters. Some of the `Entry`s may have actually successfully been updated, for example
     // we could have two batches succeed and the third fail. With that in mind, although all entries
@@ -940,19 +968,13 @@ kj::Promise<void> ActorCache::syncGets(
     // We cannot retry the read and should instead propagate the exception to the GetWaiters.
     auto lock = lru.cleanList.lockExclusive();
     for (auto& entry : entries) {
+      // Although every promise fulfiller must be consumed, we really only need one of the `Entry`s
+      // to have their fulfiller fulfilled, since we exclusive joined all the promises in the
+      // GetWaiter.
       kj::Exception copy(e);
       KJ_REQUIRE_NONNULL(entry->readFailedFulfiller)->fulfill(kj::mv(copy));
-      // TODO(now): This code path needs to be tested in actor-cache-test.c++ before we merge.
-      if (entry->isDirty()) {
-        // We have to remove all our dirtyList entries!
-        removeEntry(kj::none, *entry);
-        auto& map = currentValues.get(lock);
-        auto& slot = KJ_ASSERT_NONNULL(map.find(entry->key));
-
-        if (slot.get() == entry) {
-          // We haven't been replaced in cache, let's remove ourselves!
-          map.erase(slot);
-        }
+      if (entry->getSyncStatus() == EntrySyncStatus::DIRTY) {
+        evictUnfinishedGet(lock, entry);
       }
     }
   });

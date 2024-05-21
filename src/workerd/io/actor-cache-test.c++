@@ -1463,7 +1463,6 @@ KJ_TEST("ActorCache read hard fail") {
   mockStorage->expectNoActivity(ws);
 }
 
-/*
 KJ_TEST("ActorCache read multiple hard fail") {
   ActorCacheTest test;
   auto& ws = test.ws;
@@ -1475,26 +1474,21 @@ KJ_TEST("ActorCache read multiple hard fail") {
   test.put("bar", "456");
   test.delete_("baz");
 
-  // Expect the get, but don't resolve yet.
-  kj::Maybe<MockClient> external;
-
   auto mockGet = mockStorage->expectCall("getMultiple", ws)
       .withParams(CAPNP(keys = ["foo", "garply"]), "stream"_kj)
-      .useCallback("stream", [&](MockClient stream) {
-    // TODO(now): We should test that we propagate the exception
-    // stream.call("values", CAPNP()).expectThrows(kj::Exception::Type::FAILED, "read failed", ws);
-    // kj::throwFatalException(KJ_EXCEPTION(FAILED, "read failed"));
-    external = kj::mv(stream);
-  });
+      .useCallback("stream", [&](MockClient stream) {});
 
   // We won't write anything until the read completes.
   mockStorage->expectNoActivity(ws);
 
   // Fail out the read with non-disconnect.
+  // TODO(now): For some reason, although the client code (the test) is the same in the single-key
+  // get as in the multi-key get test, throwing here causes problems within the ActorCache code.
+  //
+  // Similarly, we set up our failed promise path the same way for single key as multi key in the
+  // ActorCache code, so it's really weird that this is causing issues there. I suspect the issue
+  // is that we're failing to correctly catch the exception somewhere in capnp rpc.
   kj::mv(mockGet).thenThrow(KJ_EXCEPTION(FAILED, "read failed"));
-  external = kj::none;
-
-  // The read propagates the error.
   KJ_EXPECT_THROW_MESSAGE("read failed", promise.wait(ws));
 
   // The read is NOT retried, so expect the transaction to run now.
@@ -1511,7 +1505,6 @@ KJ_TEST("ActorCache read multiple hard fail") {
   // The read is NOT retried.
   mockStorage->expectNoActivity(ws);
 }
-*/
 
 KJ_TEST("ActorCache read cancel") {
   ActorCacheTest test;
