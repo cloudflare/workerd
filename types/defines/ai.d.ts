@@ -139,6 +139,7 @@ export declare abstract class BaseAiTranslation {
   postProcessedOutputs: AiTranslationOutput;
 }
 export type AiOptions = {
+  gatewayId?: string;
   prefix?: string;
   extraHeaders?: object;
 };
