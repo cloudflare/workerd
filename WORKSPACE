@@ -8,10 +8,10 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file"
 
 http_archive(
     name = "bazel_skylib",
-    sha256 = "cd55a062e763b9349921f0f5db8c3933288dc8ba4f76dd9416aac68acee3cb94",
+    sha256 = "9f38886a40548c6e96c106b752f242130ee11aaa068a56ba7e56f4511f33e4f2",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.5.0/bazel-skylib-1.5.0.tar.gz",
-        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.5.0/bazel-skylib-1.5.0.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.6.1/bazel-skylib-1.6.1.tar.gz",
+        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.6.1/bazel-skylib-1.6.1.tar.gz",
     ],
 )
 
@@ -71,9 +71,9 @@ http_archive(
 
 http_archive(
     name = "rules_python",
-    sha256 = "c68bdc4fbec25de5b5493b8819cfc877c4ea299c0dcb15c244c5a00208cde311",
-    strip_prefix = "rules_python-0.31.0",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.31.0/rules_python-0.31.0.tar.gz",
+    integrity = "sha256-SRLO1w3BoqjkuGzsIzsZLKBT6CvHLYd7mOEmFW6PIo0=",
+    strip_prefix = "rules_python-0.32.2",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.32.2/rules_python-0.32.2.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
@@ -82,9 +82,9 @@ py_repositories()
 
 http_archive(
     name = "com_google_benchmark",
-    sha256 = "2aab2980d0376137f969d92848fbb68216abb07633034534fc8c65cc4e7a0e93",
-    strip_prefix = "benchmark-1.8.2",
-    url = "https://github.com/google/benchmark/archive/refs/tags/v1.8.2.tar.gz",
+    integrity = "sha256-a8GApX0j1NlRVRn5KwyD1hsFtbqxiJYfNqx7BrDZ6c4=",
+    strip_prefix = "benchmark-1.8.3",
+    url = "https://github.com/google/benchmark/archive/refs/tags/v1.8.3.tar.gz",
 )
 
 # These are part of what's needed to get `bazel query 'deps(//...)'`, to work, but this is difficult to support
@@ -96,7 +96,6 @@ http_archive(
     name = "brotli",
     sha256 = "e720a6ca29428b803f4ad165371771f5398faba397edf6778837a18599ea13ff",
     strip_prefix = "brotli-1.1.0",
-    type = "tgz",
     urls = ["https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz"],
 )
 
@@ -211,7 +210,7 @@ git_repository(
 
 git_repository(
     name = "fp16",
-    commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
+    commit = "95163a75c51bc8dc29f72d0d7419ec50132984ff",
     build_file_content = "exports_files(glob([\"**\"]))",
     remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git"
 )
@@ -238,10 +237,9 @@ bind(
 # though it is unused for our purposes.
 http_archive(
     name = "rules_fuzzing",
-    sha256 = "4c69bcf4573888be1f676e1ebeb9e4258b8fe19924a5a8f50a57df5cbe3f6d63",
-    strip_prefix = "bazelbuild-rules_fuzzing-1dbcd91",
-    type = "tgz",
-    url = "https://github.com/bazelbuild/rules_fuzzing/tarball/1dbcd9167300ad226d29972f5f9c925d6d81f441",
+    integrity = "sha256-PsDu4FskNVLMSnhLMDI9CIv3PLIXfd2gLIJ+aJgZM/E=",
+    strip_prefix = "rules_fuzzing-0.5.2",
+    url = "https://github.com/bazelbuild/rules_fuzzing/archive/refs/tags/v0.5.2.tar.gz",
 )
 
 load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
@@ -258,10 +256,10 @@ rules_fuzzing_init()
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
-    sha256 = "22b168aefb066b53e940c25503cfa2a840c635763bc86fae90ed98a641978852",
-    strip_prefix = "google-tcmalloc-9b7cd13",
+    sha256 = "1003d34b60c337e2d4168a55da6b3658e74b944e5ace46136fd7ba5e32c4d544",
+    strip_prefix = "google-tcmalloc-d67d394",
     type = "tgz",
-    url = "https://github.com/google/tcmalloc/tarball/9b7cd1327fee6f191ee21b46c014a3a5b17f11ce",
+    url = "https://github.com/google/tcmalloc/tarball/d67d3949c45ae9b4017db8b1c61fdf37a3b0d645",
 )
 
 # ========================================================================================
@@ -389,9 +387,9 @@ rust_analyzer_dependencies()
 # Fetch rules_nodejs before aspect_rules_js, otherwise we'll get an outdated rules_nodejs version.
 http_archive(
     name = "rules_nodejs",
-    sha256 = "dddd60acc3f2f30359bef502c9d788f67e33814b0ddd99aa27c5a15eb7a41b8c",
-    strip_prefix = "rules_nodejs-6.1.0",
-    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.1.0/rules_nodejs-v6.1.0.tar.gz",
+    integrity = "sha256-PoNpJWrWMZeVnSJTxHOp3MV8KEHRdhkOWbkdJdT+nmc=",
+    strip_prefix = "rules_nodejs-6.1.1",
+    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.1.1/rules_nodejs-v6.1.1.tar.gz",
 )
 
 http_archive(
@@ -421,7 +419,7 @@ nodejs_register_toolchains(
         # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
         "https://nodejs.org/dist/v{version}/{filename}",
     ],
-    node_version = "20.12.1",
+    node_version = "20.13.1",
 )
 
 load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies", TS_LATEST_VERSION = "LATEST_TYPESCRIPT_VERSION")
@@ -486,7 +484,6 @@ http_archive(
     ],
     integrity = "sha256-UTjJpSFKyLIIAhgs+z8u+2t5hKE4J4kfwzYqEUAYpVM=",
     strip_prefix = "v8-12.6.228.3",
-    type = "tgz",
     url = "https://github.com/v8/v8/archive/refs/tags/12.6.228.3.tar.gz",
 )
 
@@ -497,7 +494,6 @@ git_repository(
     patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
     patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    shallow_since = "1697047535 +0000",
 )
 
 http_archive(
@@ -509,7 +505,6 @@ http_archive(
     repo_mapping = {"@perfetto_dep_zlib": "@zlib"},
     sha256 = "241cbaddc9ff4e5d1de2d28497fef40b5510e9ca60808815bf4944d0d2f026db",
     strip_prefix = "perfetto-39.0",
-    type = "tgz",
     url = "https://github.com/google/perfetto/archive/refs/tags/v39.0.tar.gz",
 )
 
@@ -518,7 +513,6 @@ http_archive(
     name = "com_google_protobuf",
     sha256 = "6adf73fd7f90409e479d6ac86529ade2d45f50494c5c10f539226693cb8fe4f7",
     strip_prefix = "protobuf-3.10.1",
-    type = "tgz",
     url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.10.1.tar.gz",
 )
 
