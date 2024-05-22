@@ -191,6 +191,14 @@ build:macos --macos_minimum_os=11.5 --host_macos_minimum_os=11.5
 # information on the flag.
 build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
 
+# Bazel doesn't allow setting flags only for a specific build mode like fastbuild, but somehow has
+# a flag that does this for ObjC to set "-O0 -DDEBUG=1". Worse yet, options set by this flag cannot
+# be overwritten on the command line, which confusingly makes enabling optimization there not have
+# an effect. On macOS we build some ObjC as part of Dawn, set this flag to an empty string so we
+# can set the right configuration flags.
+# TODO(soon): File a bazel issue for the flag so we can drop this.
+build:macos --experimental_objc_fastbuild_options=''
+
 # Unfortunately experimental_objc_fastbuild_options does not respect options set before and
 # overwrites them. This causes mysterious binary size bloat for fastbuild-based configurations on
 # macOS when enabling some optimizations. Turn it in into a no-op.
@@ -247,10 +255,10 @@ build:windows --extra_execution_platforms=//:x64_windows-clang-cl
 # workaround.
 
 build:windows_no_dbg -c opt
-build:windows_no_dbg --copt='-O0' --host_copt='-O0'
-build:windows_no_dbg --copt='/Od' --host_copt='/Od'
-build:windows_no_dbg --linkopt='/INCREMENTAL:NO' --host_linkopt='/INCREMENTAL:NO'
-build:windows_no_dbg --features=-smaller_binary --features=-disable_assertions_feature
+build:windows_no_dbg --copt='-O0'
+build:windows_no_dbg --copt='/Od'
+build:windows_no_dbg --linkopt='/INCREMENTAL:NO'
+build:windows_no_dbg --features=-smaller_binary
 
 # Mitigate the large size impact of Windows debug binaries somewhat by applying string merging and
 # linker garbage collection.
