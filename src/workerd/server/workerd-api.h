@@ -224,6 +224,9 @@ public:
   void setModuleFallbackCallback(
        kj::Function<ModuleFallbackCallback>&& callback) const override;
 
+  void enableUnsettledPromiseTracker() override;
+  bool isUnsettledPromiseTrackerEnabled() const override;
+
 private:
   struct Impl;
   kj::Own<Impl> impl;

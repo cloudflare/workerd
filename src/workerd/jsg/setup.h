@@ -14,6 +14,7 @@
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <workerd/jsg/observer.h>
+#include <workerd/jsg/promise-tracker.h>
 
 namespace workerd::jsg {
 
@@ -68,6 +69,8 @@ private:
 class IsolateBase {
 public:
   static IsolateBase& from(v8::Isolate* isolate);
+
+  inline v8::Isolate* getIsolate() { return ptr; }
 
   // Unwraps a JavaScript exception as a kj::Exception.
   virtual kj::Exception unwrapException(v8::Local<v8::Context> context,
@@ -156,6 +159,9 @@ public:
     return JsSymbol(symbolAsyncDispose.Get(ptr));
   }
 
+  void enableUnsettledPromiseTracker();
+  kj::Maybe<UnsettledPromiseTracker&> getUnsettledPromiseTracker();
+
 private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -204,6 +210,8 @@ private:
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
   kj::Maybe<kj::Function<ModuleFallbackCallback>> maybeModuleFallbackCallback;
+
+  kj::Maybe<kj::Own<UnsettledPromiseTracker>> unsettledPromiseTracker;
 
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
   // object with 2 internal fields.

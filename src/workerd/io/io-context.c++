@@ -7,6 +7,7 @@
 #include <workerd/io/worker.h>
 #include <kj/debug.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <map>
@@ -1165,6 +1166,16 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
     if (limitEnforcer->getLimitsExceeded() == kj::none) {
       abortFulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
           "The script will never generate a response."));
+      if (worker->getIsolate().getApi().isUnsettledPromiseTrackerEnabled()) {
+        worker->runInLockScope(asyncLock, [](Worker::Lock& lock) {
+          jsg::Lock& js = lock;
+          auto& isolate = jsg::IsolateBase::from(js.v8Isolate);
+          auto& tracker = KJ_ASSERT_NONNULL(isolate.getUnsettledPromiseTracker());
+          if (tracker.size() > 0) {
+            KJ_LOG(INFO, tracker.report());
+          }
+        });
+      }
     }
   }
 

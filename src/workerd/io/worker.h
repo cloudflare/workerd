@@ -483,6 +483,12 @@ public:
       kj::Function<ModuleFallbackCallback>&& callback) const {
     // By default does nothing.
   }
+
+  virtual void enableUnsettledPromiseTracker() {
+    // Non-op by default
+  }
+
+  virtual bool isUnsettledPromiseTrackerEnabled() const { return false; }
 };
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually

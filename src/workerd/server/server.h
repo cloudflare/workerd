@@ -71,6 +71,10 @@ public:
     pythonConfig.createBaselineSnapshot = true;
   }
 
+  void enableTraceUnsettledPromises() {
+    traceUnsettledPromises = true;
+  }
+
   // Runs the server using the given config.
   kj::Promise<void> run(jsg::V8System& v8System, config::Config::Reader conf,
                         kj::Promise<void> drainWhen = kj::NEVER_DONE);
@@ -109,6 +113,7 @@ private:
   };
 
   bool experimental = false;
+  bool traceUnsettledPromises = false;
 
   Worker::ConsoleMode consoleMode;
 

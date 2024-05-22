@@ -879,4 +879,12 @@ const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
   return kj::downcast<const WorkerdApi>(api);
 }
 
+void WorkerdApi::enableUnsettledPromiseTracker() {
+  impl->jsgIsolate.enableUnsettledPromiseTracker();
+}
+
+bool WorkerdApi::isUnsettledPromiseTrackerEnabled() const {
+  return const_cast<JsgWorkerdIsolate&>(impl->jsgIsolate).getUnsettledPromiseTracker() != kj::none;
+}
+
 }  // namespace workerd::server
