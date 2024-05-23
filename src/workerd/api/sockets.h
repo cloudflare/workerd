@@ -38,7 +38,8 @@ typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
 struct SocketOptions {
   jsg::Optional<kj::String> secureTransport;
   bool allowHalfOpen = false;
-  JSG_STRUCT(secureTransport, allowHalfOpen);
+  jsg::Optional<uint64_t> highWaterMark;
+  JSG_STRUCT(secureTransport, allowHalfOpen, highWaterMark);
   JSG_MEMORY_INFO(SocketOptions) {
     tracker.trackField("secureTransport", secureTransport);
   }
