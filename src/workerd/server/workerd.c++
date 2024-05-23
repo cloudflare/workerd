@@ -613,7 +613,7 @@ class CliMain: public SchemaFileImpl::ErrorReporter {
 public:
   CliMain(kj::ProcessContext& context, char** argv)
       : context(context), argv(argv),
-        server(*fs, io.provider->getTimer(), network, entropySource,
+        server(kj::heap<Server>(*fs, io.provider->getTimer(), network, entropySource,
             Worker::ConsoleMode::STDOUT, [&](kj::String error) {
           if (watcher == kj::none) {
             // TODO(someday): Don't just fail on the first error, keep going in order to report
@@ -628,7 +628,7 @@ public:
             hadErrors = true;
             context.error(error);
           }
-        }) {
+        })) {
     KJ_IF_SOME(e, exeInfo) {
       auto& exe = *e.file;
       auto size = exe.stat().size;
@@ -728,14 +728,14 @@ public:
         .addOption({'w', "watch"}, CLI_METHOD(watch),
                    "Watch configuration files (and server binary) and reload if they change. "
                    "Useful for development, but not recommended in production.")
-        .addOption({"experimental"}, [this]() { server.allowExperimental(); return true; },
+        .addOption({"experimental"}, [this]() { server->allowExperimental(); return true; },
                    "Permit the use of experimental features which may break backwards "
                    "compatibility in a future release.")
         .addOptionWithArg({"disk-cache-dir"}, CLI_METHOD(setPythonDiskCacheDir), "<path>",
                   "Use <path> as a disk cache to avoid repeatedly fetching packages from the internet. ")
-        .addOption({"python-save-snapshot"}, [this]() { server.setPythonCreateSnapshot();  return true; },
+        .addOption({"python-save-snapshot"}, [this]() { server->setPythonCreateSnapshot();  return true; },
                   "Save a dedicated snapshot to the disk cache")
-        .addOption({"python-save-baseline-snapshot"}, [this]() { server.setPythonCreateBaselineSnapshot();  return true; },
+        .addOption({"python-save-baseline-snapshot"}, [this]() { server->setPythonCreateBaselineSnapshot();  return true; },
                   "Save a baseline snapshot to the disk cache");
   }
 
@@ -849,7 +849,7 @@ public:
 
   void overrideSocketAddr(kj::StringPtr param) {
     auto [ name, value ] = parseOverride(param);
-    server.overrideSocket(kj::mv(name), kj::str(value));
+    server->overrideSocket(kj::mv(name), kj::str(value));
   }
 
 #if _WIN32
@@ -905,18 +905,18 @@ public:
     validateSocketFd(fd, name);
 
     inheritedFds.add(fd);
-    server.overrideSocket(kj::mv(name), io.lowLevelProvider->wrapListenSocketFd(
+    server->overrideSocket(kj::mv(name), io.lowLevelProvider->wrapListenSocketFd(
         fd, kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP));
   }
 
   void overrideDirectory(kj::StringPtr param) {
     auto [ name, value ] = parseOverride(param);
-    server.overrideDirectory(kj::mv(name), kj::str(value));
+    server->overrideDirectory(kj::mv(name), kj::str(value));
   }
 
   void overrideExternal(kj::StringPtr param) {
     auto [ name, value ] = parseOverride(param);
-    server.overrideExternal(kj::mv(name), kj::str(value));
+    server->overrideExternal(kj::mv(name), kj::str(value));
   }
 
 #if defined(WORKERD_USE_PERFETTO)
@@ -928,19 +928,19 @@ public:
 #endif
 
   void enableInspector(kj::StringPtr param) {
-    server.enableInspector(kj::str(param));
+    server->enableInspector(kj::str(param));
   }
 
   void enableControl(kj::StringPtr param) {
     int fd = KJ_UNWRAP_OR(param.tryParseAs<uint>(),
         CLI_ERROR("Output value must be a file descriptor (non-negative integer)."));
-    server.enableControl(fd);
+    server->enableControl(fd);
   }
 
   void setPythonDiskCacheDir(kj::StringPtr pathStr) {
     kj::Path path = fs->getCurrentPath().eval(pathStr);
     kj::Maybe<kj::Own<const kj::Directory>> dir = fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
-    server.setPythonDiskCacheRoot(kj::mv(dir));
+    server->setPythonDiskCacheRoot(kj::mv(dir));
   }
 
   void watch() {
@@ -1179,7 +1179,7 @@ public:
   }
 
   template <typename Func>
-  [[noreturn]] void serveImpl(Func&& func) noexcept {
+  void serveImpl(Func&& func) {
     if (hadErrors) {
       // Can't start, stuff is broken.
       KJ_IF_SOME(w, watcher) {
@@ -1221,23 +1221,27 @@ public:
         maybePerfettoSession = kj::none;
       }
 #endif
+      // under normal circumstances context.exit() does fast shutdown, but under
+      // KJ_CLEAN_SHUTDOWN server instance maintains dependency on v8 platform.
+      // Clean up the server if we're doing clean shutdown.
+      KJ_DEFER(server = nullptr);
       context.exit();
     }
   }
 
-  [[noreturn]] void serve() noexcept {
+  void serve() {
     serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
 #if _WIN32
-      return server.run(v8System, config);
+      return server->run(v8System, config);
 #else
-      return server.run(v8System, config,
+      return server->run(v8System, config,
           // Gracefully drain when SIGTERM is received.
           io.unixEventPort.onSignal(SIGTERM).ignoreResult());
 #endif
     });
   }
 
-  [[noreturn]] void test() noexcept {
+  void test() {
     if (!noVerbose) {
       // Always turn on info logging when running tests so that uncaught exceptions are displayed.
       // TODO(beta): This can be removed once we improve our error logging story.
@@ -1248,7 +1252,7 @@ public:
     network.enableLoopback();
 
     serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
-      return server.test(v8System, config,
+      return server->test(v8System, config,
           testServicePattern.map([](auto& s) -> kj::StringPtr { return s; }).orDefault("*"_kj),
           testEntrypointPattern.map([](auto& s) -> kj::StringPtr { return s; }).orDefault("*"_kj))
           .then([this](bool result) -> kj::Promise<void> {
@@ -1332,7 +1336,7 @@ private:
   kj::Maybe<kj::String> perfettoTraceCategories;
 #endif
 
-  Server server;
+  kj::Own<Server> server;
 
   // This is a randomly-generated 128-bit number that identifies when a binary has been compiled
   // with a specific config in order to run stand-alone.

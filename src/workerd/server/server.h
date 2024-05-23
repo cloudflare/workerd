@@ -32,7 +32,7 @@ using api::pyodide::PythonConfig;
 //
 // The purpose of this class is to implement the core logic independently of the CLI itself,
 // in such a way that it can be unit-tested. workerd.c++ implements the CLI wrapper around this.
-class Server: private kj::TaskSet::ErrorHandler {
+class Server final: private kj::TaskSet::ErrorHandler {
 public:
   Server(kj::Filesystem& fs, kj::Timer& timer, kj::Network& network,
          kj::EntropySource& entropySource, Worker::ConsoleMode consoleMode,
