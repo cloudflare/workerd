@@ -65,6 +65,13 @@ bool getAllowHalfOpen(jsg::Optional<SocketOptions>& opts) {
   return false;
 }
 
+kj::Maybe<uint64_t> getWritableHighWaterMark(jsg::Optional<SocketOptions>& opts) {
+  KJ_IF_SOME(o, opts) {
+    return o.highWaterMark;
+  }
+  return kj::none;
+}
+
 } // namespace
 
 jsg::Ref<Socket> setupSocket(
@@ -146,7 +153,9 @@ jsg::Ref<Socket> setupSocket(
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   openedPrPair.promise.markAsHandled(js);
   auto writable = jsg::alloc<WritableStream>(
-      ioContext, kj::mv(sysStreams.writable), kj::none, openedPrPair.promise.whenResolved(js));
+      ioContext, kj::mv(sysStreams.writable),
+      getWritableHighWaterMark(options),
+      openedPrPair.promise.whenResolved(js));
 
   auto result = jsg::alloc<Socket>(
       js, ioContext,
