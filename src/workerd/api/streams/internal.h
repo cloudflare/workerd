@@ -275,6 +275,8 @@ private:
   kj::Maybe<PendingAbort> maybePendingAbort;
 
   uint64_t currentWriteBufferSize = 0;
+  bool warnAboutExcessiveBackpressure = true;
+  size_t excessiveBackpressureWarningCount = 0;
 
   // The highWaterMark is the total amount of data currently buffered in
   // the controller waiting to be flushed out to the underlying WritableStreamSink.
