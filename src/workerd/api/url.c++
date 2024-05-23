@@ -186,12 +186,12 @@ URL::URL(kj::Url&& u): url(kj::refcounted<RefcountedUrl>(kj::mv(u))) {
 kj::String URL::getHref() {
   return toString();
 }
-void URL::setHref(const v8::PropertyCallbackInfo<void>& info, kj::String value) {
+void URL::setHref(jsg::Lock& js, kj::String value) {
   KJ_IF_SOME(u, kj::Url::tryParse(kj::mv(value))) {
     url->kj::Url::operator=(kj::mv(u));
   } else {
     auto context = jsg::TypeErrorContext::setterArgument(typeid(URL), "href");
-    jsg::throwTypeError(info.GetIsolate(), context, "valid URL string");
+    jsg::throwTypeError(js.v8Isolate, context, "valid URL string");
     // href's is the only setter which is allowed to throw on invalid input, according to the spec.
   }
 }
