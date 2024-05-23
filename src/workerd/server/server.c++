@@ -2682,6 +2682,11 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
                                   *memoryCacheProvider,
                                   pythonConfig
                                   );
+
+  if (traceUnsettledPromises) {
+    api->enableUnsettledPromiseTracker();
+  }
+
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.

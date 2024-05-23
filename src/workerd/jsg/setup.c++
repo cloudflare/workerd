@@ -388,8 +388,9 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
 IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    unsettledPromiseTracker = kj::none;
     ptr->Dispose();
-    cppHeap.reset();;
+    cppHeap.reset();
   });
 }
 
@@ -684,6 +685,18 @@ kj::StringPtr IsolateBase::getUuid() {
   // Lazily create a random UUID for this isolate.
   KJ_IF_SOME(u, uuid) { return u; }
   return uuid.emplace(randomUUID(kj::none));
+}
+
+void IsolateBase::enableUnsettledPromiseTracker() {
+  KJ_ASSERT(unsettledPromiseTracker == kj::none);
+  unsettledPromiseTracker = kj::heap<UnsettledPromiseTracker>(ptr);
+}
+
+kj::Maybe<UnsettledPromiseTracker&> IsolateBase::getUnsettledPromiseTracker() {
+  return unsettledPromiseTracker.map([](kj::Own<UnsettledPromiseTracker>& tracker)
+      -> UnsettledPromiseTracker& {
+    return *tracker;
+  });
 }
 
 }  // namespace workerd::jsg

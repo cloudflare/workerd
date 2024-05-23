@@ -23,6 +23,7 @@ wd_cc_library(
         "util.c++",
         "v8-platform-wrapper.c++",
         "wrappable.c++",
+        "promise-tracker.c++",
     ],
     hdrs = [
         "async-context.h",
@@ -49,6 +50,7 @@ wd_cc_library(
         "value.h",
         "web-idl.h",
         "wrappable.h",
+        "promise-tracker.h",
     ],
     visibility = ["//visibility:public"],
     deps = [

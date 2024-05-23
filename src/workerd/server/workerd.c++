@@ -736,7 +736,10 @@ public:
         .addOption({"python-save-snapshot"}, [this]() { server.setPythonCreateSnapshot();  return true; },
                   "Save a dedicated snapshot to the disk cache")
         .addOption({"python-save-baseline-snapshot"}, [this]() { server.setPythonCreateBaselineSnapshot();  return true; },
-                  "Save a baseline snapshot to the disk cache");
+                  "Save a baseline snapshot to the disk cache")
+        .addOption({"trace-unsettled-promises"}, [this]() {
+            server.enableTraceUnsettledPromises(); return true;
+        }, "Trace unsettled promises on request completion");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {
