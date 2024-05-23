@@ -437,6 +437,33 @@ public:
           context, handle, jsg::TypeErrorContext::other());
     }
 
+    Ref<DOMException> domException(kj::String name, kj::String message,
+                                   kj::Maybe<kj::String> maybeStack)
+                                   override {
+      return withinHandleScope([&] {
+        v8::Local<v8::FunctionTemplate> tmpl = jsgIsolate.wrapper->getTemplate(v8Isolate, (DOMException*)nullptr);
+        KJ_DASSERT(!tmpl.IsEmpty());
+        v8::Local<v8::Object> obj = check(tmpl->InstanceTemplate()->NewInstance(v8Context()));
+        v8::Local<v8::String> stackName = str("stack"_kjc);
+
+        KJ_IF_SOME(stack, maybeStack) {
+          v8::PropertyDescriptor prop(str(stack), true);
+          prop.set_enumerable(true);
+          jsg::check(obj->DefineProperty(v8Context(), stackName, prop));
+        } else {
+          v8::Exception::CaptureStackTrace(v8Context(), obj);
+          v8::PropertyDescriptor prop;
+          prop.set_enumerable(true);
+          jsg::check(obj->DefineProperty(v8Context(), stackName, prop));
+        }
+
+        auto de = jsg::alloc<DOMException>(kj::mv(message), kj::mv(name));
+        de.attachWrapper(v8Isolate, obj);
+
+        return kj::mv(de);
+      });
+    }
+
     // Returns the constructor function for a given type declared as JSG_RESOURCE_TYPE.
     //
     // Note there's a useful property of class constructor functions: A constructor's __proto__

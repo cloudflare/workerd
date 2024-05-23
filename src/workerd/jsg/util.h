@@ -411,11 +411,6 @@ template <typename Arg> auto getParameterType(void (*)(Arg)) -> Arg;
 // SFINAE-friendly accessor for a resource type's configuration parameter.
 template <typename T> using GetConfiguration = decltype(getParameterType(&T::jsgConfiguration));
 
-v8::Local<v8::Value> makeDOMException(
-    v8::Isolate* isolate,
-    v8::Local<v8::String> message,
-    kj::StringPtr name);
-
 inline bool isFinite(double value) {
   return !(kj::isNaN(value) || value == kj::inf() || value == -kj::inf());
 }
