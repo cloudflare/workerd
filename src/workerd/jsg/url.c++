@@ -161,7 +161,10 @@ kj::Maybe<Url> Url::tryParse(kj::ArrayPtr<const char> input,
   } else {
     result = ada_parse(input.begin(), input.size());
   }
-  if (!ada_is_valid(result)) return kj::none;
+  if (!ada_is_valid(result)) {
+    ada_free(result);
+    return kj::none;
+  }
   return Url(wrap(result));
 }
 
