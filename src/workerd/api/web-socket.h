@@ -445,6 +445,9 @@ private:
   // `close()`, thereby preventing calls to `send()` even after we wake from hibernation.
   bool closedOutgoingForHib = false;
 
+  // Maximum allowed size for WebSocket messages
+  size_t maxMessageSize = 1u << 20;
+
   // Maximum size of a WebSocket attachment.
   inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 2;
 
