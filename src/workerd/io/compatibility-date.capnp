@@ -527,5 +527,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   increaseWebsocketMessageSize @56 :Bool
       $compatEnableFlag("increase_websocket_message_size")
       $experimental;
-  # Experimental, increase the WebSocket message size limit to 128MB
+  # For local development purposes only, increase the message size limit to 128MB.
+  # This is not expected ever to be made available in production, as large messages are inefficient.
+
 }
