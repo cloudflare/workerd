@@ -341,16 +341,17 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this);
+  int indices[] = {
+      WRAPPABLE_TAG_FIELD_INDEX,
+      WRAPPED_OBJECT_FIELD_INDEX
+  };
+  void* values[] = {
+    const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG),
+    this
+  };
+  object->SetAlignedPointerInInternalFields(2, indices, values);
 
-  // Allocate the cppgc shim.
-  auto cppgcShim = tracer.allocateShim(*this);
-
-  object->SetAlignedPointerInInternalField(CPPGC_SHIM_FIELD_INDEX, cppgcShim);
-  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX,
-      // const_cast because V8 expects non-const `void*` pointers, but it won't actually modify
-      // the tag.
-      const_cast<uint16_t*>(&WRAPPABLE_TAG));
+  v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
 
   if (strongRefcount > 0) {
     strongWrapper.Reset(isolate, object);
