@@ -8,6 +8,7 @@
 #include <kj/compat/http.h>
 #include "basics.h"
 #include <workerd/io/io-context.h>
+#include <workerd/util/weak-refs.h>
 #include <stdlib.h>
 
 namespace workerd {
@@ -230,6 +231,10 @@ public:
     bool closedOutgoingConnection = false;
   };
 
+  ~WebSocket() noexcept(false) {
+    weakRef->invalidate();
+  }
+
   // This WebSocket constructor is only used when WebSockets wake up from hibernation.
   // It will immediately set the `state` to `Accepted`, but it limits the behavior by specifying it
   // as `Hibernatable` -- thereby making most api::WebSocket methods inaccessible.
@@ -409,7 +414,12 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
+  kj::Own<WeakRef<WebSocket>> addWeakRef() {
+    return weakRef->addRef();
+  }
+
 private:
+  kj::Own<WeakRef<WebSocket>> weakRef;
   kj::Maybe<kj::String> url;
   kj::Maybe<kj::String> protocol = kj::String();
   kj::Maybe<kj::String> extensions = kj::String();
@@ -599,9 +609,17 @@ private:
   };
 
   // So that each end of a WebSocketPair can keep track of its pair.
-  kj::Maybe<jsg::Ref<WebSocket>> maybePair;
+  // We use a weak ref to track the pair to avoid having a strong ref cycle
+  // between the two WebSocket instances that would cause them to leak. This
+  // can mean, however, that it's possible for one side of the pair to be garbage
+  // collected while the other still exists. This should be fairly unusual tho.
+  kj::Maybe<kj::Own<WeakRef<WebSocket>>> maybePair;
 
-  void setMaybePair(jsg::Ref<WebSocket> other);
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(error);
+  }
+
+  void setMaybePair(kj::Own<WeakRef<WebSocket>> other);
 
   friend jsg::Ref<WebSocketPair> WebSocketPair::constructor();
 

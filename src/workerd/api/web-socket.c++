@@ -48,7 +48,8 @@ WebSocket::WebSocket(jsg::Lock& js,
     IoContext& ioContext,
     kj::WebSocket& ws,
     HibernationPackage package)
-    : url(kj::mv(package.url)),
+    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket> {}, *this)),
+      url(kj::mv(package.url)),
       protocol(kj::mv(package.protocol)),
       extensions(kj::mv(package.extensions)),
       serializedAttachment(kj::mv(package.serializedAttachment)),
@@ -71,7 +72,8 @@ jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
 }
 
 WebSocket::WebSocket(kj::Own<kj::WebSocket> native, Locality locality)
-    : url(kj::none),
+    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket> {}, *this)),
+      url(kj::none),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
       locality(locality) {
@@ -81,7 +83,8 @@ WebSocket::WebSocket(kj::Own<kj::WebSocket> native, Locality locality)
 }
 
 WebSocket::WebSocket(kj::String url, Locality locality)
-    : url(kj::mv(url)),
+    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket> {}, *this)),
+      url(kj::mv(url)),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
       locality(locality) {
@@ -968,8 +971,8 @@ jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
   auto first = pair->getFirst();
   auto second = pair->getSecond();
 
-  first->setMaybePair(second.addRef());
-  second->setMaybePair(first.addRef());
+  first->setMaybePair(second->addWeakRef());
+  second->setMaybePair(first->addWeakRef());
   return kj::mv(pair);
 }
 
@@ -1015,8 +1018,8 @@ void WebSocket::assertNoError(jsg::Lock& js) {
   }
 }
 
-void WebSocket::setMaybePair(jsg::Ref<WebSocket> other) {
-  maybePair = other.addRef();
+void WebSocket::setMaybePair(kj::Own<WeakRef<WebSocket>> other) {
+  maybePair = kj::mv(other);
 }
 
 kj::Own<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::StringPtr> tags) {
@@ -1068,15 +1071,19 @@ bool WebSocket::awaitingHibernatableRelease() {
 }
 
 void WebSocket::setRemoteOnPair() {
-  JSG_REQUIRE_NONNULL(maybePair, Error,
-      "this WebSocket is not one end of a WebSocketPair")->locality = REMOTE;
+  auto& ref = JSG_REQUIRE_NONNULL(maybePair, Error,
+      "this WebSocket is not one end of a WebSocketPair");
+  ref->runIfAlive([](WebSocket& ref) { ref.locality = REMOTE; });
 }
 
 bool WebSocket::pairIsAwaitingCoupling() {
+  bool answer = false;
   KJ_IF_SOME(pair, maybePair) {
-    return pair->farNative->state.is<AwaitingAcceptanceOrCoupling>();
+    pair->runIfAlive([&answer](WebSocket& pair) {
+      answer = pair.farNative->state.is<AwaitingAcceptanceOrCoupling>();
+    });
   }
-  return false;
+  return answer;
 }
 
 WebSocket::HibernationPackage WebSocket::buildPackageForHibernation() {
@@ -1199,7 +1206,6 @@ void WebSocket::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("error", error);
   tracker.trackFieldWithSize("IoOwn<OutgoingMessagesMap>", sizeof(IoOwn<OutgoingMessagesMap>));
   tracker.trackField("autoResponseStatus", autoResponseStatus);
-  tracker.trackField("maybePair", maybePair);
 }
 
 }  // namespace workerd::api
