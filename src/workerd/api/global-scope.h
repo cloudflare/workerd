@@ -524,6 +524,7 @@ public:
       JSG_NESTED_TYPE(ReadableStreamDefaultController);
       JSG_NESTED_TYPE(ReadableByteStreamController);
       JSG_NESTED_TYPE(WritableStreamDefaultController);
+      JSG_NESTED_TYPE(TransformStreamDefaultController);
     }
 
     JSG_NESTED_TYPE(CompressionStream);
