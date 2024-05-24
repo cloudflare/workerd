@@ -259,7 +259,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
   }
 
-  if (!FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
+  if (FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
     ws->maxMessageSize = 128u << 20;
   }
 
