@@ -2630,8 +2630,15 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       } else {
         LOG_NOSENTRY(ERROR, "actor cache flush failed", e);
       }
-      return KJ_EXCEPTION(FAILED, "broken.outputGateBroken; jsg.Error: Internal error in Durable "
-          "Object storage write caused object to be reset.");
+      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES)) {
+        // Pass through exception type to convey appropriate retry behavior.
+        return kj::Exception(e.getType(), __FILE__, __LINE__,
+            kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable "
+                "Object storage write caused object to be reset."));
+      } else {
+        return KJ_EXCEPTION(FAILED, "broken.outputGateBroken; jsg.Error: Internal error in Durable "
+            "Object storage write caused object to be reset.");
+      }
     }
   });
 }
@@ -2990,9 +2997,15 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
       return kj::mv(e);
     } else {
       LOG_EXCEPTION("actorCacheDeleteAll", e);
-      return KJ_EXCEPTION(FAILED,
-          "broken.outputGateBroken; jsg.Error: Internal error in Durable Object storage deleteAll() caused object to be "
-          "reset.");
+      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES)) {
+        // Pass through exception type to convey appropriate retry behavior.
+        return kj::Exception(e.getType(), __FILE__, __LINE__,
+            kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable Object storage deleteAll() caused object to be reset."));
+      } else {
+        return KJ_EXCEPTION(FAILED,
+            "broken.outputGateBroken; jsg.Error: Internal error in Durable Object storage deleteAll() caused object to be "
+            "reset.");
+      }
     }
   });
 }
