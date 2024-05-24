@@ -268,11 +268,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Experimental, allows getting a durable object stub that ensures the object already exists.
   # This is currently a work in progress mechanism that is not yet available for use in workerd.
 
-  increaseWebsocketMessageSize @25 :Bool
-      $compatEnableFlag("increase_websocket_message_size")
-      $experimental;
-  # Experimental, increase the WebSocket message size limit to 128MB
-
   httpHeadersGetSetCookie @26 :Bool
       $compatEnableFlag("http_headers_getsetcookie")
       $compatDisableFlag("no_http_headers_getsetcookie")
@@ -528,4 +523,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables fetching hosts with a custom port from workers.
   # For orange clouded sites only standard ports are allowed (https://developers.cloudflare.com/fundamentals/reference/network-ports/#network-ports-compatible-with-cloudflares-proxy).
   # For grey clouded sites all ports are allowed.
+
+  increaseWebsocketMessageSize @56 :Bool
+      $compatEnableFlag("increase_websocket_message_size")
+      $experimental;
+  # Experimental, increase the WebSocket message size limit to 128MB
 }
