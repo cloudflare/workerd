@@ -412,7 +412,7 @@ kj::Array<kj::ArrayPtr<const char>> UrlSearchParams::getAll(kj::ArrayPtr<const c
     auto item = ada_strings_get(results, n);
     items.add(kj::ArrayPtr<const char>(item.data, item.length));
   }
-  return items.releaseAsArray();
+  return items.releaseAsArray().attach(kj::defer([results](){ada_free_strings(results);}));
 }
 
 void UrlSearchParams::sort() {
