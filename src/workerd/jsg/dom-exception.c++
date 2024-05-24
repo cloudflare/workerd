@@ -100,6 +100,7 @@ jsg::Ref<DOMException> DOMException::deserialize(
       return js.domException(kj::mv(message), kj::mv(name), kj::mv(stack));
     }
   }
+  KJ_UNREACHABLE;
 }
 
 }  // namespace workerd::jsg
