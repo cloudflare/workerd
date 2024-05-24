@@ -62,10 +62,8 @@ jobs:
           # resulting in a snowballing cache size and cache download/upload times.
       - name: Setup Linux
         if: matrix.os.name == 'linux'
-        # Install dependencies, including clang via through LLVM APT repository. Note that this
-        # will also install lldb and clangd alongside dependencies, which can be removed with
-        # `sudo apt-get remove -y lldb-15 clangd-15; sudo apt-get autoremove -y` if space is
-        # limited.
+        # Install dependencies, including clang through the LLVM APT repository. We drop the
+        # install step so we can install just the packages we need.
         # libunwind, libc++abi1 and libc++1 should be automatically installed as dependencies of
         # libc++, but this appears to cause errors so they are also being explicitly installed.
         # Since the GitHub runner image comes with a number of preinstalled packages, we don't need
@@ -75,9 +73,10 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           wget https://apt.llvm.org/llvm.sh
+          sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 15
-          sudo apt-get install -y libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev libclang-rt-15-dev
+          sudo apt-get install -y --no-install-recommends clang-15 lld-15 libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev libclang-rt-15-dev
           echo "build:linux --action_env=CC=/usr/lib/llvm-15/bin/clang --action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
           echo "build:linux --host_action_env=CC=/usr/lib/llvm-15/bin/clang --host_action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
           sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-15/bin/llvm-symbolizer%" .bazelrc

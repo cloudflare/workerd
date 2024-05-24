@@ -86,9 +86,10 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           wget https://apt.llvm.org/llvm.sh
+          sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 15
-          sudo apt-get install -y libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev
+          sudo apt-get install -y --no-install-recommends clang-15 lld-15 libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev
           echo "build:linux --action_env=CC=/usr/lib/llvm-15/bin/clang --action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
           echo "build:linux --host_action_env=CC=/usr/lib/llvm-15/bin/clang --host_action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
       - name: Setup macOS
