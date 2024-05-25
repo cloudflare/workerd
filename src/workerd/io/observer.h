@@ -259,7 +259,7 @@ public:
   static void init(kj::Own<FeatureObserver> instance);
   static kj::Maybe<FeatureObserver&> get();
 
-  // A "Feature" is just an opaque identifier defines in the features.capnp
+  // A "Feature" is just an opaque identifier defined in the features.capnp
   // file.
   using Feature = workerd::Features;
 
@@ -267,6 +267,8 @@ public:
   virtual void use(Feature feature) const {}
 
   using CollectCallback = kj::Function<void(Feature, const uint64_t)>;
+  // This method is called from the internal metrics collection mechanisn to harvest the
+  // current features and counts that have been recorded by the observer.
   virtual void collect(CollectCallback&& callback) const {}
 
   // Records the use of the feature if a FeatureObserver is available.

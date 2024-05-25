@@ -17,7 +17,7 @@ public:
   Blob(jsg::Lock& js, kj::Array<byte> data, kj::String type);
   Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type);
 
-  inline kj::ArrayPtr<const byte> getData() const KJ_LIFETIMEBOUND { return data; }
+  kj::ArrayPtr<const byte> getData() const KJ_LIFETIMEBOUND;
 
   // ---------------------------------------------------------------------------
   // JS API
