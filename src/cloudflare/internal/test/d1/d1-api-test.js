@@ -475,4 +475,46 @@ export const test_d1_api = test(async (DB) => {
       meta: meta({ rows_read: 3, rows_written: 0 }),
     }
   )
+
+  await itShould(
+    'properly JOIN columns with the same name',
+    () =>
+      DB.batch([
+        DB.prepare(
+          `CREATE TABLE organizations
+          (
+            id         INTEGER PRIMARY KEY,
+            name       TEXT
+          );`
+        ),
+        DB.prepare(
+          `CREATE TABLE projects (
+            id         INTEGER PRIMARY KEY,
+            name       TEXT,
+            organization_id INTEGER,
+            FOREIGN KEY (organization_id) REFERENCES organizations(id)
+          );`
+        )
+      ]),
+    [
+      { success: true, results: [], meta: anything },
+      { success: true, results: [], meta: anything }
+    ],
+    () =>
+      DB.batch([
+        DB.prepare(`INSERT INTO organizations (id, name) VALUES (1, 'Cloudflare');`),
+        DB.prepare(`INSERT INTO projects (id, name, organization_id) VALUES (1, 'Cloudflare', 1);`),
+      ]),
+    [
+      { success: true, results: [], meta: anything },
+      { success: true, results: [], meta: anything }
+    ],
+    () =>
+      DB.prepare(
+        `SELECT projects.name, organizations.name
+        FROM projects
+        JOIN organizations ON projects.organization_id = organizations.id;`
+      ).raw(),
+    [['Cloudflare', 'Cloudflare']]
+  )
 })
