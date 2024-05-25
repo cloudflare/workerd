@@ -173,6 +173,7 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
     deps = [
         ":compatibility_date_capnp",
+        ":features_capnp",
         ":outcome_capnp",
         ":script_version_capnp",
         ":trimmed-supported-compatibility-date",
@@ -216,6 +217,12 @@ wd_cc_capnp_library(
 wd_cc_capnp_library(
     name = "compatibility_date_capnp",
     srcs = ["compatibility-date.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_capnp_library(
+    name = "features_capnp",
+    srcs = ["features.capnp"],
     visibility = ["//visibility:public"],
 )
 
