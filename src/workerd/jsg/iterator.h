@@ -159,7 +159,6 @@ private:
   friend Generator;
 };
 
-#if _LIBCPP_VERSION >= 15000
 template <class Func, class T>
 concept GeneratorCallback = std::invocable<Func, Lock&, T, GeneratorContext<T>&>
     && std::same_as<void, std::invoke_result_t<Func, Lock&, T, GeneratorContext<T>&>>;
@@ -167,15 +166,6 @@ concept GeneratorCallback = std::invocable<Func, Lock&, T, GeneratorContext<T>&>
 template <class Func, class T>
 concept AsyncGeneratorCallback = std::invocable<Func, Lock&, T, GeneratorContext<T>&>
     && std::same_as<Promise<void>, std::invoke_result_t<Func, Lock&, T, GeneratorContext<T>&>>;
-#else
-// These don't work in libc++ 11. I haven't tried 12-14, but they do work in 15. So we'll just
-// skip the extra type checking if we don't have libc++ 15 or newer.
-template <class Func, class T>
-concept GeneratorCallback = true;
-
-template <class Func, class T>
-concept AsyncGeneratorCallback = true;
-#endif
 
 template <typename T>
 class Generator final {
