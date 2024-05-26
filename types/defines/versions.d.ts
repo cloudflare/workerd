@@ -7,4 +7,6 @@ export type WorkerVersionMetadata = {
   id: string;
   /** The tag of the Worker Version using this binding */
   tag: string;
+  /** The timestamp of when the Worker Version was uploaded */
+  timestamp: string;
 }
