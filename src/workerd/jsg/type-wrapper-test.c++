@@ -10,57 +10,6 @@ namespace {
 V8System v8System;
 class ContextGlobalObject: public Object, public ContextGlobal {};
 
-struct InfoContext: public ContextGlobalObject {
-  struct WantInfo: public Object {
-    static Ref<WantInfo> constructor() { return jsg::alloc<WantInfo>(); }
-
-    double method(const v8::FunctionCallbackInfo<v8::Value>& info, double d) {
-      return d + info.Length();
-    }
-
-    double getProp(const v8::PropertyCallbackInfo<v8::Value>& info) {
-      return 123;
-    }
-    void setProp(const v8::PropertyCallbackInfo<void>& info, NumberBox& n) {
-      n.value = info.ShouldThrowOnError() ? 123 : 456;
-    }
-
-    JSG_RESOURCE_TYPE(WantInfo) {
-      JSG_METHOD(method);
-      JSG_INSTANCE_PROPERTY(prop, getProp, setProp);
-    }
-  };
-
-  JSG_RESOURCE_TYPE(InfoContext) {
-    JSG_NESTED_TYPE(NumberBox);
-    JSG_NESTED_TYPE(WantInfo);
-  }
-};
-JSG_DECLARE_ISOLATE_TYPE(InfoIsolate, InfoContext, InfoContext::WantInfo, NumberBox);
-
-KJ_TEST("explicit FunctionCallbackInfo / PropertyCallbackInfo") {
-  Evaluator<InfoContext, InfoIsolate> e(v8System);
-  e.expectEval(
-      "var w = new WantInfo();\n"
-      "w.method(123, 'foo', true)", "number", "126");
-
-  e.expectEval(
-      "var w = new WantInfo();\n"
-      "w.prop", "number", "123");
-
-  e.expectEval(
-      "var w = new WantInfo();\n"
-      "var n = new NumberBox(0);\n"
-      "w.prop = n;\n"
-      "n.value", "number", "456");
-  e.expectEval(
-      "\"use strict\";\n"
-      "var w = new WantInfo();\n"
-      "var n = new NumberBox(0);\n"
-      "w.prop = n;\n"
-      "n.value", "number", "123");
-}
-
 // ========================================================================================
 
 struct TestExtensionType {
