@@ -381,6 +381,8 @@ private:
 
   std::deque<WriteRequest> writeRequests;
   size_t amountBuffered = 0;
+  bool warnAboutExcessiveBackpressure = true;
+  size_t excessiveBackpressureWarningCount = 0;
 
   kj::Maybe<WriteRequest> inFlightWrite;
   kj::Maybe<jsg::Promise<void>::Resolver> inFlightClose;

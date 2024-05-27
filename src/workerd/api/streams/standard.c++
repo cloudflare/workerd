@@ -1538,6 +1538,30 @@ void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
   KJ_ASSERT(isWritable());
   KJ_ASSERT(!isCloseQueuedOrInFlight());
   bool bp = getDesiredSize() < 0;
+
+  // We use a variable multiplier here in order to prevent the warning from being too
+  // spammy in the default case. The default high water mark for a standard writable stream
+  // is 1, which means we'd end up emitting a warning every time the buffer size is greater
+  // than 2, which is not very helpful. Instead, for any highWaterMark < 10, we'll configure
+  // a multiplier of 10, and for any highWaterMark >= 10, we'll configure a multiplier of 2.
+  // This is fairly arbitrary and may need to be tuned further.
+  int warningMultiplier = highWaterMark <= 10 ? 10 : 2;
+
+  if (warnAboutExcessiveBackpressure && (amountBuffered >= warningMultiplier * highWaterMark)) {
+    excessiveBackpressureWarningCount++;
+    auto warning = kj::str("A WritableStream is experiencing excessive backpressure. "
+                            "The current write buffer size is ", amountBuffered,
+                            ", which is greater than or equal to ", warningMultiplier,
+                            " times the high water mark of ", highWaterMark,
+                            ". Streams that consistently exceed the configured high water ",
+                            "mark may cause excessive memory usage. ",
+                            "(Count ", excessiveBackpressureWarningCount, ")");
+    js.logWarning(warning);
+    warnAboutExcessiveBackpressure = false;
+  }
+
+  if (!bp) warnAboutExcessiveBackpressure = true;
+
   if (bp != backpressure) {
     backpressure = bp;
     KJ_IF_SOME(owner, tryGetOwner()) {

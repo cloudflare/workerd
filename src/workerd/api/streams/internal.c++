@@ -958,7 +958,28 @@ void WritableStreamInternalController::increaseCurrentWriteBufferSize(
     uint64_t amount) {
   currentWriteBufferSize += amount;
   KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    updateBackpressure(js, highWaterMark - currentWriteBufferSize <= 0);
+    int64_t amount = highWaterMark - currentWriteBufferSize;
+    updateBackpressure(js, amount <= 0);
+    // If the current buffer size is greater than or equal to double the high water mark,
+    // let's emit a warning about excessive backpressure.
+    // TODO(later): For the standard stream, we use a variable multiplier if the highWaterMark
+    // is < 10 because the default high water mark is 1 and we don't want to emit the warning
+    // too often. For internal streams, tho, there is no default high water mark and the user
+    // would have to provide one... and since these are always bytes it would make sense
+    // for the user to specify a larger value here in the typical case... so I decided to go with
+    // the fixed 2x multiplier. However, I can make this variable too if folks feel the consistency
+    // is important.
+    if (warnAboutExcessiveBackpressure && (currentWriteBufferSize >= 2 * highWaterMark)) {
+      excessiveBackpressureWarningCount++;
+      auto warning = kj::str("A WritableStream is experiencing excessive backpressure. "
+                             "The current write buffer size is ", currentWriteBufferSize,
+                             " bytes, which is greater than or equal to double the high water mark "
+                             "of ", highWaterMark, " bytes. Streams that consistently exceed the "
+                             "configured high water mark may cause excessive memory usage. ",
+                             "(Count ", excessiveBackpressureWarningCount, ")");
+      js.logWarning(warning);
+      warnAboutExcessiveBackpressure = false;
+    }
   }
 }
 
@@ -967,7 +988,8 @@ void WritableStreamInternalController::decreaseCurrentWriteBufferSize(
     uint64_t amount) {
   currentWriteBufferSize -= amount;
   KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
-    updateBackpressure(js, highWaterMark - currentWriteBufferSize <= 0);
+    int64_t amount = highWaterMark - currentWriteBufferSize;
+    updateBackpressure(js, amount <= 0);
   }
 }
 
@@ -984,6 +1006,7 @@ void WritableStreamInternalController::updateBackpressure(jsg::Lock& js, bool ba
     }
 
     // When backpressure is updated and is false, we resolve the ready promise on the writer
+    warnAboutExcessiveBackpressure = true;
     maybeResolvePromise(js, writerLock.getReadyFulfiller());
   }
 }
