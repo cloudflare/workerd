@@ -22,31 +22,40 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          show-progress: false
       - id: echo
         run: |
           echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
           echo "version=${{ inputs.prerelease == false && '4' || '0'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
           echo "release_version=1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0" >> $GITHUB_OUTPUT;
   build-and-publish-types:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-20.04
     needs: version
     steps:
       - uses: actions/checkout@v4
+        with:
+          show-progress: false
       - name: Cache
         id: cache
         uses: actions/cache@v4
+        # Use same cache and build configuration as release build, this allows us to keep download
+        # sizes small and generate types with optimization enabled, should be slightly faster.
         with:
           path: ~/bazel-disk-cache
-          # The types cache is significantly smaller than the whole cache (350MB as of writing), so
-          # we can probably afford for it to have its own cache key.
-          key: bazel-disk-cache-types-${{ runner.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-
-      - name: install dependencies
+          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+      - name: Setup Linux
         run: |
             export DEBIAN_FRONTEND=noninteractive
+            wget https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            sudo ./llvm.sh 15
+            sudo apt-get install -y libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev
+            echo "build:linux --action_env=CC=/usr/lib/llvm-15/bin/clang --action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
+            echo "build:linux --host_action_env=CC=/usr/lib/llvm-15/bin/clang --host_action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
       - name: build types
         run: |
-            bazel build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //types:types
+            bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=release_linux //types:types
       - name: Build package
         run: node npm/scripts/build-types-package.mjs
         env:
