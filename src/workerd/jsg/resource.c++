@@ -77,9 +77,8 @@ void scheduleUnimplementedMethodError(
 }
 
 void scheduleUnimplementedPropertyError(
-    const v8::PropertyCallbackInfo<v8::Value>& args,
+    v8::Isolate* isolate,
     const std::type_info& type, const char* propertyName) {
-  auto isolate = args.GetIsolate();
   isolate->ThrowError(v8StrIntern(isolate,
       kj::str("Failed to get the '", propertyName, "' property on '", typeName(type),
               "': the property is not implemented.")));

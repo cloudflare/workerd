@@ -25,7 +25,7 @@ public:
 
   // Href is the only setter that throws. All others ignore errors, leaving their values
   // unchanged.
-  void setHref(const v8::PropertyCallbackInfo<void>& info, kj::String value);
+  void setHref(jsg::Lock& js, kj::String value);
 
   kj::String getOrigin();
 

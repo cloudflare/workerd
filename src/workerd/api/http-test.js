@@ -90,17 +90,17 @@ export const inspect = {
     assert.strictEqual(util.inspect(url),
 `URL {
   searchParams: URLSearchParams(3) { 'a' => '1', 'a' => '2', 'b' => '3' },
-  hash: '',
-  search: '?a=1&a=2&b=3',
-  pathname: '/path',
-  port: '8787',
-  hostname: 'placeholder',
-  host: 'placeholder:8787',
-  password: 'pass',
-  username: 'user',
-  protocol: 'http:',
+  origin: 'http://placeholder:8787',
   href: 'http://user:pass@placeholder:8787/path?a=1&a=2&b=3',
-  origin: 'http://placeholder:8787'
+  protocol: 'http:',
+  username: 'user',
+  password: 'pass',
+  host: 'placeholder:8787',
+  hostname: 'placeholder',
+  port: '8787',
+  pathname: '/path',
+  search: '?a=1&a=2&b=3',
+  hash: ''
 }`
     );
 
@@ -129,7 +129,7 @@ export const inspect = {
   keepalive: false,
   integrity: '',
   cf: undefined,
-  signal: AbortSignal { onabort: null, reason: undefined, aborted: false },
+  signal: AbortSignal { reason: undefined, aborted: false, onabort: null },
   fetcher: null,
   redirect: 'follow',
   headers: Headers(1) { 'content-type' => 'text/plain', [immutable]: false },
@@ -178,7 +178,6 @@ export const inspect = {
         assert.strictEqual(event.data,
 `MessageEvent {
   data: 'data',
-  cancelBubble: false,
   isTrusted: true,
   timeStamp: 0,
   srcElement: WebSocket { extensions: '', protocol: '', url: null, readyState: 1 },
@@ -190,6 +189,7 @@ export const inspect = {
   composed: false,
   eventPhase: 2,
   type: 'message',
+  cancelBubble: false,
   NONE: 0,
   CAPTURING_PHASE: 1,
   AT_TARGET: 2,

@@ -76,9 +76,8 @@ void scheduleUnimplementedMethodError(
 // Called to throw errors about calling unimplemented functionality. It's assumed these are called
 // directly from the V8 trampoline without liftKj, so they don't throw JsExceptionThrown.
 void scheduleUnimplementedPropertyError(
-    const v8::PropertyCallbackInfo<v8::Value>& args,
+    v8::Isolate* isolate,
     const std::type_info& type, const char* propertyName);
-
 
 // Implements the V8 callback function for calling the static `constructor()` method of the C++
 // class.
@@ -416,17 +415,32 @@ struct GetterCallback;
       } \
     }; \
     \
-    /* Specialization for methods that take `const v8::PropertyCallbackInfo<v8::Value>&` as \
-      * their first parameter. */ \
-    template <typename TypeWrapper, const char* methodName, typename T, typename Ret, \
-              typename... Args, \
-              Ret (T::*method)(const v8::PropertyCallbackInfo<v8::Value>&, Args...) __VA_ARGS__, \
-              bool isContext> \
-    struct GetterCallback<TypeWrapper, methodName, \
-                          Ret (T::*)(const v8::PropertyCallbackInfo<v8::Value>&, Args...) __VA_ARGS__, \
-                          method, isContext> { \
-      static constexpr bool enumerable = true; \
+    template <typename TypeWrapper, const char* propertyName, typename T, \
+              Unimplemented (T::*method)() __VA_ARGS__, bool isContext> \
+    struct GetterCallback<TypeWrapper, propertyName, Unimplemented (T::*)() __VA_ARGS__, method, \
+                          isContext> { \
+      static constexpr bool enumerable = false; \
       static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) { \
+        scheduleUnimplementedPropertyError(info.GetIsolate(), typeid(T), propertyName); \
+      } \
+    };
+
+JSG_DEFINE_GETTER_CALLBACK_STRUCTS()
+JSG_DEFINE_GETTER_CALLBACK_STRUCTS(const)
+
+#undef JSG_DEFINE_GETTER_CALLBACK_STRUCTS
+
+template <typename TypeWrapper, const char* methodName,
+          typename Method, Method method, bool isContext>
+struct PropertyGetterCallback;
+
+#define JSG_DEFINE_PROPERTY_GETTER_CALLBACK_STRUCTS(...) \
+    template <typename TypeWrapper, const char* methodName, typename T, typename Ret, \
+              typename... Args, Ret (T::*method)(Args...) __VA_ARGS__, bool isContext> \
+    struct PropertyGetterCallback<TypeWrapper, methodName, Ret (T::*)(Args...) __VA_ARGS__, \
+                                  method, isContext> { \
+      static constexpr bool enumerable = true; \
+      static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) { \
         liftKj(info, [&]() { \
           auto isolate = info.GetIsolate(); \
           auto context = isolate->GetCurrentContext(); \
@@ -437,26 +451,50 @@ struct GetterCallback;
             throwTypeError(isolate, "Illegal invocation"); \
           } \
           auto& self = extractInternalPointer<T, isContext>(context, obj); \
-          return wrapper.wrap(context, obj, (self.*method)(info, \
+          return wrapper.wrap(context, obj, (self.*method)( \
               wrapper.unwrap(context, (kj::Decay<Args>*)nullptr)...)); \
         }); \
       } \
     }; \
     \
+    /* Specialization for methods that take `Lock&` as their first parameter. */ \
+    template <typename TypeWrapper, const char* methodName, typename T, typename Ret, \
+              typename... Args, \
+              Ret (T::*method)(Lock&, Args...) __VA_ARGS__, \
+              bool isContext> \
+    struct PropertyGetterCallback<TypeWrapper, methodName, \
+                          Ret (T::*)(Lock&, Args...) __VA_ARGS__, \
+                          method, isContext> { \
+      static constexpr bool enumerable = true; \
+      static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) { \
+        liftKj(info, [&]() { \
+          auto isolate = info.GetIsolate(); \
+          auto context = isolate->GetCurrentContext(); \
+          auto obj = info.This(); \
+          auto& wrapper = TypeWrapper::from(isolate); \
+          /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */\
+          if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
+            throwTypeError(isolate, "Illegal invocation"); \
+          } \
+          auto& self = extractInternalPointer<T, isContext>(context, obj); \
+          return wrapper.wrap(context, obj, (self.*method)(Lock::from(isolate), \
+              wrapper.unwrap(context, (kj::Decay<Args>*)nullptr)...)); \
+        }); \
+      } \
+    }; \
     template <typename TypeWrapper, const char* propertyName, typename T, \
               Unimplemented (T::*method)() __VA_ARGS__, bool isContext> \
-    struct GetterCallback<TypeWrapper, propertyName, Unimplemented (T::*)() __VA_ARGS__, method, \
-                          isContext> { \
+    struct PropertyGetterCallback<TypeWrapper, propertyName, \
+                                  Unimplemented (T::*)() __VA_ARGS__, method, isContext> { \
       static constexpr bool enumerable = false; \
-      static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) { \
-        scheduleUnimplementedPropertyError(info, typeid(T), propertyName); \
+      static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) { \
+        scheduleUnimplementedPropertyError(info.GetIsolate(), typeid(T), propertyName); \
       } \
     };
 
-JSG_DEFINE_GETTER_CALLBACK_STRUCTS()
-JSG_DEFINE_GETTER_CALLBACK_STRUCTS(const)
+JSG_DEFINE_PROPERTY_GETTER_CALLBACK_STRUCTS()
+JSG_DEFINE_PROPERTY_GETTER_CALLBACK_STRUCTS(const)
 
-#undef JSG_DEFINE_GETTER_CALLBACK_STRUCTS
 
 // Implements the V8 callback function for calling a property setter method of a C++ class.
 template <typename TypeWrapper, const char* methodName,
@@ -507,14 +545,14 @@ struct SetterCallback<TypeWrapper, methodName,
   }
 };
 
-// Specialization for methods that take `const v8::PropertyCallbackInfo<void>&` as their
-// first parameter.
+template <typename TypeWrapper, const char* methodName,
+          typename Method, Method method, bool isContext>
+struct PropertySetterCallback;
+
 template <typename TypeWrapper, const char* methodName, typename T, typename Arg,
-          void (T::*method)(const v8::PropertyCallbackInfo<void>&, Arg), bool isContext>
-struct SetterCallback<TypeWrapper, methodName,
-                      void (T::*)(const v8::PropertyCallbackInfo<void>&, Arg), method, isContext> {
-  static void callback(v8::Local<v8::Name>, v8::Local<v8::Value> value,
-                       const v8::PropertyCallbackInfo<void>& info) {
+          void (T::*method)(Arg), bool isContext>
+struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isContext> {
+  static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
     liftKj(info, [&]() {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
@@ -525,7 +563,29 @@ struct SetterCallback<TypeWrapper, methodName,
         throwTypeError(isolate, "Illegal invocation");
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
-      (self.*method)(info, wrapper.template unwrap<Arg>(context, value,
+      (self.*method)(wrapper.template unwrap<Arg>(context, info[0],
+          TypeErrorContext::setterArgument(typeid(T), methodName)));
+    });
+  }
+};
+
+// Specialization for methods that take `Lock&` as their first parameter.
+template <typename TypeWrapper, const char* methodName, typename T, typename Arg,
+          void (T::*method)(Lock&, Arg), bool isContext>
+struct PropertySetterCallback<TypeWrapper, methodName,
+                      void (T::*)(Lock&, Arg), method, isContext> {
+  static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    liftKj(info, [&]() {
+      auto isolate = info.GetIsolate();
+      auto context = isolate->GetCurrentContext();
+      auto obj = info.This();
+      auto& wrapper = TypeWrapper::from(isolate);
+      // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
+      if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+        throwTypeError(isolate, "Illegal invocation");
+      }
+      auto& self = extractInternalPointer<T, isContext>(context, obj);
+      (self.*method)(Lock::from(isolate), wrapper.template unwrap<Arg>(context, info[0],
           TypeErrorContext::setterArgument(typeid(T), methodName)));
     });
   }
@@ -819,18 +879,21 @@ struct ResourceTypeBuilder {
   inline void registerPrototypeProperty() {
     auto v8Name = v8StrIntern(isolate, name);
 
-    using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    using Gcb = PropertyGetterCallback<TypeWrapper, name, Getter, getter, isContext>;
     if (!Gcb::enumerable) {
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
 
-    // TODO(soon): The SetAccessor method is deprecated. We should switch to SetNativeDataProperty
-    // but doing so causes some tests to fail. Needs further investigation.
-    prototype->SetAccessor(
-        v8Name,
-        Gcb::callback,
-        &SetterCallback<TypeWrapper, name, Setter, setter, isContext>::callback,
-        v8::Local<v8::Value>(),
+    // Note that we cannot use `SetNativeDataProperty(...)` here the way we do with other
+    // properties because it will not properly handle the prototype chain when it comes
+    // to using setters... which is annoying. It means we end up having to use FunctionTemplates
+    // instead of the more convenient property callbacks.
+    auto getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
+    auto setterFn = v8::FunctionTemplate::New(isolate,
+        &PropertySetterCallback<TypeWrapper, name, Setter, setter, isContext>::callback);
+
+    prototype->SetAccessorProperty(
+        v8Name, getterFn, setterFn,
         Gcb::enumerable ? v8::PropertyAttribute::None : v8::PropertyAttribute::DontEnum);
   }
 
