@@ -9,9 +9,9 @@ jobs:
   version:
     outputs:
       version: ${{ steps.echo.outputs.version }}
-    # version job uses ubuntu 22.04, this way we don't have to install the updated clang while
+    # version job uses ubuntu 24.04, this way we don't have to install the updated clang while
     # the build job uses 20.04 for libc compatibility.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - id: echo
