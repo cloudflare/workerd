@@ -183,6 +183,7 @@ export const secret_key_test = {
     const key2 = createSecretKey('hello');
     const key3 = createSecretKey('there');
 
+    key1.toString();
     ok(key1 instanceof SecretKeyObject);
     ok(key2 instanceof SecretKeyObject);
     ok(key3 instanceof SecretKeyObject);
