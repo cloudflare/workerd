@@ -20,9 +20,7 @@ public:
 
   kj::StringPtr getAlgorithmName() const override { return "secret"_kj; }
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
-    return CryptoKey::KeyAlgorithm {
-      .name = kj::str("secret"_kj)
-    };
+    return CryptoKey::KeyAlgorithm { .name = "secret"_kj };
   }
 
   bool equals(const CryptoKey::Impl& other) const override final {
