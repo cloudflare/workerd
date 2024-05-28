@@ -896,6 +896,10 @@ public:
     //   it may be best to stick with allocating an Array<byte> on the heap after all...
     byte* begin = value.begin();
     size_t size = value.size();
+    if (size == 0) {
+      return  v8::ArrayBuffer::New(isolate, 0);
+    }
+    
     auto ownerPtr = new kj::Array<byte>(kj::mv(value));
 
     std::unique_ptr<v8::BackingStore> backing =
