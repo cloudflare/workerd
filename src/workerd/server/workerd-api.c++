@@ -603,7 +603,7 @@ public:
     computeMac(id);
 
     // Verify that the computed mac matches the input.
-    JSG_REQUIRE(kj::arrayPtr(id).slice(BASE_LENGTH) == decoded.slice(BASE_LENGTH),
+    JSG_REQUIRE(kj::arrayPtr(id).slice(BASE_LENGTH).startsWith(decoded.slice(BASE_LENGTH)),
                 TypeError, "Durable Object ID is not valid for this namespace.");
 
     return kj::heap<ActorIdImpl>(id, kj::none);
