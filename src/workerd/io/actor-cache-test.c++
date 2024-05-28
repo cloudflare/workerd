@@ -12,6 +12,7 @@
 #include <kj/source-location.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
+#include <workerd/util/test.h>
 
 namespace workerd {
 namespace {
@@ -5282,19 +5283,6 @@ KJ_TEST("ActorCache can shutdown") {
 
     afterShutdown(test, kj::mv(res.maybeReq));
 
-// Helper macro to check both exception type and message.
-#define EXPECT_THROW(expException, code, ...)                                                      \
-  do {                                                                                             \
-    KJ_IF_SOME(e, ::kj::runCatchingExceptions([&]() { (void)({ code; }); })) {                     \
-      KJ_EXPECT(e.getType() == expException.getType(), "code threw wrong exception type: " #code,  \
-          e, ##__VA_ARGS__);                                                                       \
-      KJ_EXPECT(e.getDescription() == expException.getDescription(),                               \
-          "exception description didn't match", e, ##__VA_ARGS__);                                 \
-    } else {                                                                                       \
-      KJ_FAIL_EXPECT("code did not throw: " #code, ##__VA_ARGS__);                                 \
-    }                                                                                              \
-  } while (false)
-
     KJ_ASSERT(options.withUpdatedExceptionTypes ==
         util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES));
     auto defaultError = (options.withUpdatedExceptionTypes
@@ -5307,9 +5295,9 @@ KJ_TEST("ActorCache can shutdown") {
     if (res.shouldBreakOutputGate) {
       // We expected the output gate to break async after shutdown.
       auto& shutdownPromise = KJ_REQUIRE_NONNULL(maybeShutdownPromise);
-      EXPECT_THROW(error, shutdownPromise.wait(ws));
+      WD_EXPECT_THROW(error, shutdownPromise.wait(ws));
       KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
-      EXPECT_THROW(error, test.gate.wait().wait(ws));
+      WD_EXPECT_THROW(error, test.gate.wait().wait(ws));
     } else KJ_IF_SOME(promise, maybeShutdownPromise) {
       // The in-flight flush should resolve cleanly without any follow on or breaking the output
       // gate.
@@ -5319,19 +5307,18 @@ KJ_TEST("ActorCache can shutdown") {
     }
 
     // Puts and deletes, even with allowedUnconfirmed, should throw.
-    EXPECT_THROW(error, test.put("foo", "baz"));
-    EXPECT_THROW(error, test.put("foo", "bat", {.allowUnconfirmed = true}));
-    EXPECT_THROW(error, test.delete_("foo"));
-    EXPECT_THROW(error, test.delete_("foo", {.allowUnconfirmed = true}));
+    WD_EXPECT_THROW(error, test.put("foo", "baz"));
+    WD_EXPECT_THROW(error, test.put("foo", "bat", {.allowUnconfirmed = true}));
+    WD_EXPECT_THROW(error, test.delete_("foo"));
+    WD_EXPECT_THROW(error, test.delete_("foo", {.allowUnconfirmed = true}));
 
     if (!res.shouldBreakOutputGate) {
       // We tried to use storage after shutdown, we should now be breaking the output gate.
       auto afterShutdownPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
-      EXPECT_THROW(error, afterShutdownPromise.wait(ws));
+      WD_EXPECT_THROW(error, afterShutdownPromise.wait(ws));
       KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
-      EXPECT_THROW(error, test.gate.wait().wait(ws));
+      WD_EXPECT_THROW(error, test.gate.wait().wait(ws));
     }
-#undef EXPECT_THROW
   };
 
   auto verify = [&](auto&& beforeShutdown, auto&& afterShutdown) {
