@@ -894,8 +894,14 @@ public:
     //   Array<T> this way, and it might not want to, as this could make it impossible to support
     //   unifying Array<T> and Vector<T> in the future (i.e. making all Array<T>s growable). So
     //   it may be best to stick with allocating an Array<byte> on the heap after all...
-    byte* begin = value.begin();
     size_t size = value.size();
+    if (size == 0) {
+      // BackingStore doesn't call custom deleter if begin is null, which it often is for empty
+      // arrays.
+      return  v8::ArrayBuffer::New(isolate, 0);
+    }
+    byte* begin = value.begin();
+    
     auto ownerPtr = new kj::Array<byte>(kj::mv(value));
 
     std::unique_ptr<v8::BackingStore> backing =
