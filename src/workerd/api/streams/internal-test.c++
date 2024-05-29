@@ -66,7 +66,7 @@ KJ_TEST("test") {
 
   stream.readAllBytes(10001).then([&](auto bytes) {
     KJ_ASSERT(bytes.size() == 10000);
-    KJ_ASSERT(memcmp(bytes.begin(), stream.buf().begin(), 10000) == 0);
+    KJ_ASSERT(bytes == stream.buf().first(10000));
   }).wait(waitScope);
 
   KJ_ASSERT(stream.numreads() == 3);
@@ -83,7 +83,7 @@ KJ_TEST("test (text)") {
 
   stream.readAllText(10001).then([&](auto bytes) {
     KJ_ASSERT(bytes.size() == 10000);
-    KJ_ASSERT(memcmp(bytes.begin(), stream.buf().begin(), 10000) == 0);
+    KJ_ASSERT(bytes.asBytes() == stream.buf().first(10000));
   }).wait(waitScope);
 
   KJ_ASSERT(stream.numreads() == 3);
@@ -100,7 +100,7 @@ KJ_TEST("test2") {
 
   stream.readAllBytes(10001).then([&](auto bytes) {
     KJ_ASSERT(bytes.size() == 10000);
-    KJ_ASSERT(memcmp(bytes.begin(), stream.buf().begin(), 10000) == 0);
+    KJ_ASSERT(bytes == stream.buf().first(10000));
   }).wait(waitScope);
 
   KJ_ASSERT(stream.numreads() == 2);
@@ -117,7 +117,7 @@ KJ_TEST("test2 (text)") {
 
   stream.readAllText(10001).then([&](auto bytes) {
     KJ_ASSERT(bytes.size() == 10000);
-    KJ_ASSERT(memcmp(bytes.begin(), stream.buf().begin(), 10000) == 0);
+    KJ_ASSERT(bytes.asBytes() == stream.buf().first(10000));
   }).wait(waitScope);
 
   KJ_ASSERT(stream.numreads() == 2);
