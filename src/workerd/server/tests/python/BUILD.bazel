@@ -33,16 +33,17 @@ wd_test(
     ),
 )
 
-wd_test(
-    src = "langchain/langchain.wd-test",
-    args = ["--experimental", "--disk-cache-dir", "../all_pyodide_wheels"],
-    data = glob(
-        [
-            "langchain/*",
-        ],
-        exclude = ["**/*.wd-test"],
-    ) + ["@all_pyodide_wheels//:whls"],
-)
+# Disabled because it tests the same thing as the import test defined in import_tests.bzl
+# wd_test(
+#     src = "langchain/langchain.wd-test",
+#     args = ["--experimental", "--disk-cache-dir", "../all_pyodide_wheels"],
+#     data = glob(
+#         [
+#             "langchain/*",
+#         ],
+#         exclude = ["**/*.wd-test"],
+#     ) + ["@all_pyodide_wheels//:whls"],
+# )
 
 wd_test(
     src = "subdirectory/subdirectory.wd-test",
