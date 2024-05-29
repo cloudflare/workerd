@@ -2756,7 +2756,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       }
       KJ_IF_SOME(raw, rawSpecifier) {
         url.query.add(
-          kj::Url::QueryParam { kj::str("raw"), kj::str(raw) }
+          kj::Url::QueryParam { kj::str("rawSpecifier"), kj::str(raw) }
         );
       }
 
