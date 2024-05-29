@@ -454,6 +454,12 @@ public:
 
   void reportError(jsg::Lock& js, jsg::JsValue error);
 
+  // When the nodejs_compat_v2 compatibility flag is enabled, we expose the Node.js
+  // compat Buffer and process at the global scope in all modules as lazy instance
+  // properties.
+  jsg::JsValue getBuffer(jsg::Lock& js);
+  jsg::JsValue getProcess(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(ServiceWorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(WorkerGlobalScope);
 
@@ -525,6 +531,12 @@ public:
       JSG_NESTED_TYPE(ReadableByteStreamController);
       JSG_NESTED_TYPE(WritableStreamDefaultController);
       JSG_NESTED_TYPE(TransformStreamDefaultController);
+    }
+
+    if (flags.getNodeJsCompatV2()) {
+      JSG_LAZY_INSTANCE_PROPERTY(Buffer, getBuffer);
+      JSG_LAZY_INSTANCE_PROPERTY(process, getProcess);
+      JSG_LAZY_INSTANCE_PROPERTY(global, getSelf);
     }
 
     JSG_NESTED_TYPE(CompressionStream);

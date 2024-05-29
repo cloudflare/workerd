@@ -14,6 +14,9 @@
 
 namespace workerd::jsg {
 
+kj::Maybe<kj::String> checkNodeSpecifier(kj::StringPtr specifier);
+bool isNodeJsCompatEnabled(jsg::Lock& js);
+
 class CommonJsModuleContext;
 
 class CommonJsModuleObject: public jsg::Object {
@@ -441,12 +444,8 @@ public:
 
   void addBuiltinModule(Module::Reader module) {
     if (module.which() != Module::SRC) {
-      using Key = typename Entry::Key;
       auto specifier = module.getName();
       auto path = kj::Path::parse(specifier);
-      if (module.getType() == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-        return;
-      }
       switch (module.which()) {
       case Module::WASM:
         // The body of this callback is copied from `compileWasmGlobal` in
@@ -516,31 +515,15 @@ public:
                         kj::ArrayPtr<const char> sourceCode,
                         Type type = Type::BUILTIN) {
     KJ_ASSERT(type != Type::BUNDLE);
-    using Key = typename Entry::Key;
-
-    // We need to make sure there is not an existing worker bundle module with the same
-    // name if type == Type::BUILTIN
     auto path = kj::Path::parse(specifier);
-    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-      return;
-    }
-
     entries.insert(kj::heap<Entry>(path, type, sourceCode));
   }
 
   void addBuiltinModule(kj::StringPtr specifier,
                         ModuleCallback factory,
                         Type type = Type::BUILTIN) {
-    using Key = typename Entry::Key;
-
+    KJ_ASSERT(type != Type::BUNDLE);
     auto path = kj::Path::parse(specifier);
-
-    // We need to make sure there is not an existing worker bundle module with the same
-    // name if type == Type::BUILTIN
-    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-      return;
-    }
-
     entries.insert(kj::heap<Entry>(path, type, kj::mv(factory)));
   }
 
@@ -567,6 +550,10 @@ public:
         return entry->module(js, observer, referrer, method);
       }
       return kj::none;
+    } else if (option == ResolveOption::BUILTIN_ONLY) {
+      KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUILTIN))) {
+        return entry->module(js, observer, referrer, method);
+      }
     } else {
       if (option == ResolveOption::DEFAULT) {
         // First, we try to resolve a worker bundle version of the module.
@@ -832,6 +819,12 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   })();
 
   auto spec = kj::str(specifier);
+  if (isNodeJsCompatEnabled(js)) {
+    KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
+      spec = kj::mv(nodeSpec);
+    }
+  }
+
   auto maybeSpecifierPath = ([&]() -> kj::Maybe<kj::Path> {
     // If the specifier begins with one of our known prefixes, let's not resolve
     // it against the referrer.

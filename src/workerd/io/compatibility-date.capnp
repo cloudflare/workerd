@@ -441,4 +441,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatDisableFlag("fetch_legacy_url")
     $compatEnableDate("2024-06-03");
   # Ensures that WHATWG standard URL parsing is used in the fetch API implementation.
+
+  nodeJsCompatV2 @50 :Bool
+      $compatEnableFlag("nodejs_compat_v2")
+      $compatDisableFlag("no_nodejs_compat_v2")
+      $experimental;
+  # Implies nodeJSCompat with the following additional modifications:
+  # * Node.js Compat built-ins may be imported/required with or without the node: prefix
+  # * Node.js Compat the globals Buffer and process are available everywhere
 }

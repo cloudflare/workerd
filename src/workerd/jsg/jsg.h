@@ -2296,6 +2296,8 @@ public:
   void setCaptureThrowsAsRejections(bool capture);
   void setCommonJsExportDefault(bool exportDefault);
 
+  void setNodeJsCompatEnabled();
+
   using Logger = void(Lock&, kj::StringPtr);
   void setLoggerCallback(kj::Function<Logger>&& logger);
 

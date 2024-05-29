@@ -192,6 +192,10 @@ void Lock::setCaptureThrowsAsRejections(bool capture) {
   IsolateBase::from(v8Isolate).setCaptureThrowsAsRejections({}, capture);
 }
 
+void Lock::setNodeJsCompatEnabled() {
+  IsolateBase::from(v8Isolate).setNodeJsCompatEnabled({}, true);
+}
+
 void Lock::setCommonJsExportDefault(bool exportDefault) {
   IsolateBase::from(v8Isolate).setCommonJsExportDefault({}, exportDefault);
 }
