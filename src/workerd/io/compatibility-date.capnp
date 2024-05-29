@@ -441,4 +441,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatDisableFlag("fetch_legacy_url")
     $compatEnableDate("2024-06-03");
   # Ensures that WHATWG standard URL parsing is used in the fetch API implementation.
+
+  increaseWebsocketMessageSize @50 :Bool
+      $compatEnableFlag("increase_websocket_message_size")
+      $experimental;
+  # For local development purposes only, increase the message size limit to 128MB.
+  # This is not expected ever to be made available in production, as large messages are inefficient.
+
 }

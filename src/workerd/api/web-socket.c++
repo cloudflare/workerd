@@ -262,6 +262,10 @@ jsg::Ref<WebSocket> WebSocket::constructor(
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
   }
 
+  if (FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
+    ws->maxMessageSize = 128u << 20;
+  }
+
   auto prom = ([](auto& context, auto connUrl, auto headers, auto client)
       -> kj::Promise<PackedWebSocket> {
     auto response = co_await client->openWebSocket(connUrl, headers);
@@ -914,7 +918,7 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
         KJ_ASSERT_NONNULL(farNative->state.tryGet<Accepted>()).ws.getIfNotHibernatable());
     auto& context = IoContext::current();
     while (true) {
-      auto message = co_await ws.receive();
+      auto message = co_await ws.receive(ws.maxMessageSize);
 
       context.getLimitEnforcer().topUpActor();
       KJ_IF_SOME(a, context.getActor()) {
