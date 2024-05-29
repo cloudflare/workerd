@@ -135,6 +135,7 @@ build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-f
 build:asan --config=sanitizer-common
 build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
 build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
+build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 
 #
 # Linux and macOS
