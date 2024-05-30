@@ -515,31 +515,35 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         js.v8TypeError("This ReadableStream belongs to an object that is closing."_kj));
   }
 
-  std::shared_ptr<v8::BackingStore> store;
+  v8::Local<v8::ArrayBuffer> store;
   size_t byteLength = 0;
   size_t byteOffset = 0;
   size_t atLeast = 1;
 
   KJ_IF_SOME(byobOptions, maybeByobOptions) {
-    auto buffer = byobOptions.bufferView.getHandle(js)->Buffer();
-    store = buffer->GetBackingStore();
+    store = byobOptions.bufferView.getHandle(js)->Buffer();
     byteOffset = byobOptions.byteOffset;
     byteLength = byobOptions.byteLength;
     atLeast = byobOptions.atLeast.orDefault(atLeast);
     if (byobOptions.detachBuffer) {
-      if (!buffer->IsDetachable()) {
+      if (!store->IsDetachable()) {
         return js.rejectedPromise<ReadResult>(
             js.v8TypeError("Unable to use non-detachable ArrayBuffer"_kj));
       }
-      jsg::check(buffer->Detach(v8::Local<v8::Value>()));
+      auto backing = store->GetBackingStore();
+      jsg::check(store->Detach(v8::Local<v8::Value>()));
+      store = v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backing));
     }
   }
 
   auto getOrInitStore = [&](bool errorCase = false) {
-    if (!store) {
+    if (store.IsEmpty()) {
       // In an error case, where store is not provided, we can use zero length
       byteLength = errorCase ? 0 : UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;
-      store = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, byteLength);
+
+      if (!v8::ArrayBuffer::MaybeNew(js.v8Isolate, byteLength).ToLocal(&store)) {
+        return v8::Local<v8::ArrayBuffer>();
+      }
     }
     return store;
   };
@@ -551,10 +555,13 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       if (maybeByobOptions != kj::none && FeatureFlags::get(js).getInternalStreamByobReturn()) {
         // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
         // by the ArrayBuffer passed in the options.
-        auto u8 = v8::Uint8Array::New(
-            v8::ArrayBuffer::New(js.v8Isolate, getOrInitStore(true)), 0, 0);
+        auto theStore = getOrInitStore(true);
+        if (theStore.IsEmpty()) {
+          return js.rejectedPromise<ReadResult>(
+              js.v8TypeError("Unable to allocate memory for read"_kj));
+        }
         return js.resolvedPromise(ReadResult {
-          .value = js.v8Ref(u8.As<v8::Value>()),
+          .value = js.v8Ref(v8::Uint8Array::New(theStore, 0, 0).As<v8::Value>()),
           .done = true,
         });
       }
@@ -577,7 +584,13 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       }
       readPending = true;
 
-      auto ptr = static_cast<kj::byte*>(getOrInitStore()->Data());
+      auto theStore = getOrInitStore();
+      if (theStore.IsEmpty()) {
+        return js.rejectedPromise<ReadResult>(
+            js.v8TypeError("Unable to allocate memory for read"_kj));
+      }
+
+      auto ptr = static_cast<kj::byte*>(theStore->Data());
       auto bytes = kj::arrayPtr(ptr + byteOffset, byteLength);
 
       auto promise = kj::evalNow([&] {
@@ -598,7 +611,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       auto& ioContext = IoContext::current();
       return ioContext.awaitIoLegacy(js, kj::mv(promise)).then(js,
           ioContext.addFunctor(
-              [this,store = kj::mv(store), byteOffset, byteLength,
+              [this,store = js.v8Ref(store), byteOffset, byteLength,
                isByob = maybeByobOptions != kj::none]
               (jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
         readPending = false;
@@ -613,7 +626,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           if (isByob && FeatureFlags::get(js).getInternalStreamByobReturn()) {
             // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
             // by the ArrayBuffer passed in the options.
-            auto u8 = v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, store), 0, 0);
+            auto u8 = v8::Uint8Array::New(store.getHandle(js), 0, 0);
             return js.resolvedPromise(ReadResult {
               .value = js.v8Ref(u8.As<v8::Value>()),
               .done = true,
@@ -622,11 +635,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           return js.resolvedPromise(ReadResult { .done = true });
         }
         // Return a slice so the script can see how many bytes were read.
-        auto buffer = v8::ArrayBuffer::New(js.v8Isolate, store);
-        auto ui8Handle = v8::Uint8Array::New(buffer, byteOffset, amount);
-
         return js.resolvedPromise(ReadResult {
-          .value = js.v8Ref(ui8Handle.As<v8::Value>()),
+          .value = js.v8Ref(v8::Uint8Array::New(store.getHandle(js), byteOffset, amount)
+              .As<v8::Value>()),
           .done = false
         });
       }), ioContext.addFunctor(
@@ -940,13 +951,15 @@ jsg::Promise<void> WritableStreamInternalController::write(
 
       auto prp = js.newPromiseAndResolver<void>();
       increaseCurrentWriteBufferSize(js, byteLength);
+      auto ptr = kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset,
+                                        byteLength);
       queue.push_back(WriteEvent {
         .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
         .event = Write {
           .promise = kj::mv(prp.resolver),
-          .ownBytes = store,
-          .bytes = kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset,
-                                          byteLength),
+          .totalBytes = store->ByteLength(),
+          .ownBytes = js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(store))),
+          .bytes = ptr,
         }
       });
 
@@ -1833,7 +1846,8 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(v8::Local<v8::V
   // v8::Isolate::GetCurrent();
   jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
   return IoContext::current().awaitIo(js,
-      writable->write(data, byteLength).attach(kj::mv(store)), [](jsg::Lock&){});
+      writable->write(data, byteLength)
+          .attach(js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, store))), [](jsg::Lock&){});
 }
 
 jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& js) {
