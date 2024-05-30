@@ -766,7 +766,7 @@ public:
     kj::Maybe<ByobRequest&> byobReadRequest;
 
     struct PullInto {
-      jsg::BackingStore store;
+      jsg::BufferSource store;
       size_t filled = 0;
       size_t atLeast = 1;
       Type type = Type::DEFAULT;
@@ -849,11 +849,11 @@ public:
     }
   };
 
-  // A byte queue entry consists of a jsg::BackingStore containing a non-zero-length
+  // A byte queue entry consists of a jsg::BufferSource containing a non-zero-length
   // sequence of bytes. The size is determined by the number of bytes in the entry.
   class Entry {
   public:
-    explicit Entry(jsg::BackingStore store);
+    explicit Entry(jsg::BufferSource store);
 
     kj::ArrayPtr<kj::byte> toArrayPtr();
 
@@ -868,7 +868,7 @@ public:
     }
 
   private:
-    jsg::BackingStore store;
+    jsg::BufferSource store;
   };
 
   struct QueueEntry {

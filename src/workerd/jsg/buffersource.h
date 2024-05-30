@@ -367,6 +367,25 @@ public:
   // to successfully detach the backing store.
   void setDetachKey(Lock& js, v8::Local<v8::Value> key);
 
+  // Shrinks the effective size of the backing store by a number of bytes off
+  // the end of the data. Useful when a more limited view of the buffer is
+  // required (such as when fulfilling partial stream reads).
+  inline void trim(jsg::Lock& js, size_t bytes) {
+    auto& backing = KJ_ASSERT_NONNULL(maybeBackingStore);
+    backing.trim(bytes);
+    // When trimming, we need to also update the handle to reflect the new size.
+    handle = js.v8Ref(backing.createHandle(js));
+  }
+
+  BufferSource clone(jsg::Lock& js) {
+    return BufferSource(js, KJ_ASSERT_NONNULL(maybeBackingStore).clone());
+  }
+
+  template <BufferSourceType T = v8::Uint8Array>
+  BufferSource getTypedViewSlice(jsg::Lock& js, size_t start, size_t end) {
+    return BufferSource(js, KJ_ASSERT_NONNULL(maybeBackingStore).getTypedViewSlice<T>(start, end));
+  }
+
   JSG_MEMORY_INFO(BufferSource) {
     tracker.trackField("handle", handle);
     KJ_IF_SOME(backing, maybeBackingStore) {
