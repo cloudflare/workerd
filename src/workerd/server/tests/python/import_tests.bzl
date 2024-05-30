@@ -44,5 +44,5 @@ def gen_import_tests(to_test):
       src = "import/{}/import.wd-test".format(lib),
       args = ["--experimental", "--disk-cache-dir", "../all_pyodide_wheels"],
       data = [worker_py_fname, "@all_pyodide_wheels//:whls"],
-      tags = ["linux-nondebug-only"]
+      tags = ["slow"]
     )
