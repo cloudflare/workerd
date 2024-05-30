@@ -299,13 +299,14 @@ private:
 
   struct Write {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
-    std::shared_ptr<v8::BackingStore> ownBytes;
+    size_t totalBytes;
+    jsg::V8Ref<v8::ArrayBuffer> ownBytes;
     kj::ArrayPtr<const kj::byte> bytes;
 
     JSG_MEMORY_INFO(Write) {
       tracker.trackField("resolver", promise);
       if (ownBytes != nullptr) {
-        tracker.trackFieldWithSize("backing", ownBytes->ByteLength());
+        tracker.trackFieldWithSize("backing", totalBytes);
       }
     }
   };

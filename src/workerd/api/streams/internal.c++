@@ -951,13 +951,15 @@ jsg::Promise<void> WritableStreamInternalController::write(
 
       auto prp = js.newPromiseAndResolver<void>();
       increaseCurrentWriteBufferSize(js, byteLength);
+      auto ptr = kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset,
+                                        byteLength);
       queue.push_back(WriteEvent {
         .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
         .event = Write {
           .promise = kj::mv(prp.resolver),
-          .ownBytes = store,
-          .bytes = kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset,
-                                          byteLength),
+          .totalBytes = store->ByteLength(),
+          .ownBytes = js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(store))),
+          .bytes = ptr,
         }
       });
 
@@ -1844,7 +1846,8 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(v8::Local<v8::V
   // v8::Isolate::GetCurrent();
   jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
   return IoContext::current().awaitIo(js,
-      writable->write(data, byteLength).attach(kj::mv(store)), [](jsg::Lock&){});
+      writable->write(data, byteLength)
+          .attach(js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, store))), [](jsg::Lock&){});
 }
 
 jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& js) {
