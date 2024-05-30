@@ -533,13 +533,17 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       }
       jsg::check(buffer->Detach(v8::Local<v8::Value>()));
     }
-  } else {
-    byteLength = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;
-    store = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, byteLength);
   }
 
-  auto ptr = static_cast<kj::byte*>(store->Data());
-  auto bytes = kj::arrayPtr(ptr + byteOffset, byteLength);
+  auto getOrInitStore = [&](bool errorCase = false) {
+    if (!store) {
+      // In an error case, where store is not provided, we can use zero length
+      byteLength = errorCase ? 0 : UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;
+      store = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, byteLength);
+    }
+    return store;
+  };
+
   disturbed = true;
 
   KJ_SWITCH_ONEOF(state) {
@@ -547,7 +551,8 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       if (maybeByobOptions != kj::none && FeatureFlags::get(js).getInternalStreamByobReturn()) {
         // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
         // by the ArrayBuffer passed in the options.
-        auto u8 = v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, store), 0, 0);
+        auto u8 = v8::Uint8Array::New(
+            v8::ArrayBuffer::New(js.v8Isolate, getOrInitStore(true)), 0, 0);
         return js.resolvedPromise(ReadResult {
           .value = js.v8Ref(u8.As<v8::Value>()),
           .done = true,
@@ -572,8 +577,8 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       }
       readPending = true;
 
-      // TODO(now): This is the implementation we should be able to move to except there's a bug
-      // somewhere in the awaitIo implementation that allows IdentityTransformStream to hang.
+      auto ptr = static_cast<kj::byte*>(getOrInitStore()->Data());
+      auto bytes = kj::arrayPtr(ptr + byteOffset, byteLength);
 
       auto promise = kj::evalNow([&] {
         return readable->tryRead(bytes.begin(), atLeast, bytes.size());
