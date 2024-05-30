@@ -33,26 +33,16 @@ wd_test(
     ),
 )
 
-# langchain test: disabled for now because it's flaky
-# TODO: reenable this?
-#
+# Disabled because it tests the same thing as the import test defined in import_tests.bzl
 # wd_test(
 #     src = "langchain/langchain.wd-test",
-#     args = ["--experimental"],
+#     args = ["--experimental", "--disk-cache-dir", "../all_pyodide_wheels"],
 #     data = glob(
 #         [
 #             "langchain/*",
 #         ],
 #         exclude = ["**/*.wd-test"],
-#     ),
-#     # TODO: fails in micropip on windows with:
-#     #
-#     # ValueError: Can't fetch metadata for 'openai'. Please make sure you have entered a correct
-#     # package name and correctly specified index_urls (if you changed them).
-#     target_compatible_with = select({
-#         "@platforms//os:windows": ["@platforms//:incompatible"],
-#         "//conditions:default": [],
-#     }),
+#     ) + ["@all_pyodide_wheels//:whls"],
 # )
 
 wd_test(
@@ -65,3 +55,7 @@ wd_test(
         exclude = ["**/*.wd-test"],
     ),
 )
+
+load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
+load("//:build/pyodide_bucket.bzl", "PYODIDE_IMPORTS_TO_TEST")
+gen_import_tests(PYODIDE_IMPORTS_TO_TEST)

@@ -136,7 +136,6 @@ http_file(
 http_archive(
     name = "all_pyodide_wheels",
     sha256 = PYODIDE_ALL_WHEELS_ZIP_SHA256,
-    type="zip",
     urls = [PYODIDE_GITHUB_RELEASE_URL + "all_wheels.zip"],
     build_file_content = """
 filegroup(
