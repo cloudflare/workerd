@@ -272,6 +272,10 @@ struct Worker {
       # Pyodide (https://pyodide.org/en/stable/usage/packages-in-pyodide.html). All packages listed
       # will be installed prior to the execution of the worker.
     }
+
+    namedExports @10 :List(Text);
+    # For commonJsModule and nodeJsCompatModule, this is a list of named exports that the
+    # module expects to be exported once the evaluation is complete.
   }
 
   compatibilityDate @3 :Text;
