@@ -108,24 +108,29 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
     };
   }
 
-  jsg::Ref<R2Bucket::Checksums> checksums = jsg::alloc<R2Bucket::Checksums>(kj::none, kj::none, kj::none, kj::none, kj::none);
+  auto checksums = jsg::alloc<R2Bucket::Checksums>();
 
   if (responseReader.hasChecksums()) {
     R2Checksums::Reader checksumsBuilder = responseReader.getChecksums();
     if (checksumsBuilder.hasMd5()) {
-      checksums->md5 = kj::heapArray(checksumsBuilder.getMd5());
+      KJ_ASSERT(checksumsBuilder.getMd5().size() == 16);
+      checksums->md5.emplace().asPtr().copyFrom(checksumsBuilder.getMd5());
     }
     if (checksumsBuilder.hasSha1()) {
-      checksums->sha1 = kj::heapArray(checksumsBuilder.getSha1());
+      KJ_ASSERT(checksumsBuilder.getSha1().size() == 20);
+      checksums->sha1.emplace().asPtr().copyFrom(checksumsBuilder.getSha1());
     }
     if (checksumsBuilder.hasSha256()) {
-      checksums->sha256 = kj::heapArray(checksumsBuilder.getSha256());
+      KJ_ASSERT(checksumsBuilder.getSha256().size() == 32);
+      checksums->sha256.emplace().asPtr().copyFrom(checksumsBuilder.getSha256());
     }
     if (checksumsBuilder.hasSha384()) {
-      checksums->sha384 = kj::heapArray(checksumsBuilder.getSha384());
+      KJ_ASSERT(checksumsBuilder.getSha384().size() == 48);
+      checksums->sha384.emplace().asPtr().copyFrom(checksumsBuilder.getSha384());
     }
     if (checksumsBuilder.hasSha512()) {
-      checksums->sha512 = kj::heapArray(checksumsBuilder.getSha512());
+      KJ_ASSERT(checksumsBuilder.getSha512().size() == 64);
+      checksums->sha512.emplace().asPtr().copyFrom(checksumsBuilder.getSha512());
     }
   }
 
@@ -1063,10 +1068,6 @@ R2Bucket::StringChecksums R2Bucket::Checksums::toJSON() {
     .sha384 = this->sha384.map(kj::encodeHex),
     .sha512 = this->sha512.map(kj::encodeHex),
   };
-}
-
-kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte> &arr) {
-  return kj::heapArray(arr.asPtr());
 }
 
 kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(
