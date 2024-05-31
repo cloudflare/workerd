@@ -73,3 +73,16 @@ export const nodeJsEventsExports = {
     assert.strictEqual(usingDomains, EventEmitter.usingDomains);
   }
 };
+
+export const nodeJsBufferExports = {
+  async test() {
+    // Expected node:buffer exports should be present
+    const { atob, btoa, Blob } = await import('node:buffer');
+    assert.notEqual(atob, undefined);
+    assert.strictEqual(atob, globalThis.atob);
+    assert.notEqual(btoa, undefined);
+    assert.strictEqual(btoa, globalThis.btoa);
+    assert.notEqual(Blob, undefined);
+    assert.strictEqual(Blob, globalThis.Blob);
+  }
+};
