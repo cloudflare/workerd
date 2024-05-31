@@ -62,3 +62,14 @@ export const nodeJsGetBuiltins = {
     assert.strictEqual(process.getBuiltinModule('cloudflare:sockets'), socket);
   }
 };
+
+export const nodeJsEventsExports = {
+  async test() {
+    // Expected node:events exports should be present
+    const { EventEmitter, getMaxListeners, usingDomains } = await import('node:events');
+    assert.notEqual(getMaxListeners, undefined);
+    assert.strictEqual(getMaxListeners, EventEmitter.getMaxListeners);
+    assert.notEqual(usingDomains, undefined);
+    assert.strictEqual(usingDomains, EventEmitter.usingDomains);
+  }
+};
