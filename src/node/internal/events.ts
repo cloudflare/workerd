@@ -135,6 +135,7 @@ export default EventEmitter;
 EventEmitter.on = on;
 EventEmitter.once = once;
 EventEmitter.getEventListeners = getEventListeners;
+EventEmitter.getMaxListeners = _getMaxListeners;
 EventEmitter.setMaxListeners = setMaxListeners;
 EventEmitter.listenerCount = listenerCount;
 EventEmitter.EventEmitter = EventEmitter;
@@ -145,6 +146,8 @@ EventEmitter.EventEmitterAsyncResource = EventEmitterAsyncResource;
 
 export const captureRejectionSymbol = EventEmitter.captureRejectionSymbol;
 export const errorMonitor = EventEmitter.errorMonitor;
+export const getMaxListeners = _getMaxListeners;
+export const usingDomains = EventEmitter.usingDomains;
 export let defaultMaxListeners = 10;
 
 Object.defineProperties(EventEmitter, {
