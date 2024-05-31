@@ -1462,7 +1462,7 @@ KJ_TEST("URLPattern - MDN example 3 - pathname: '/books/:id(\\d+)' with base") {
   }
 }
 
-KJ_TEST("URLPattern - MDN example 4 - pathame: '/:type(foo|bar)'") {
+KJ_TEST("URLPattern - MDN example 4 - pathname: '/:type(foo|bar)'") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile({
     .pathname = kj::str("/:type(foo|bar)")
   })) {

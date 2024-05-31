@@ -265,7 +265,7 @@ KJ_TEST("serialization") {
   // Also try round-tripping the new version. It now accepts arbitrary values, not just strings.
   e2.expectEval("roundTrip(new Bar(123)).val", "number", "123");
 
-  // Note that cycles through host objects are correcty serialized!
+  // Note that cycles through host objects are correctly serialized!
   //
   // V8 BUG ALERT: The below works if we use `obj` as the root of serialization, but NOT if we
   //   use `bar` as the root. The reason is a flaw in the design of V8's callbacks for parsing

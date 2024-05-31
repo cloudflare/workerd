@@ -123,7 +123,7 @@ private:
 // =======================================================================================
 // inline implementation details
 //
-// We define these two methods as templates rather than ues kj::Function since they're not too
+// We define these two methods as templates rather than use kj::Function since they're not too
 // complicated and avoiding the virtual call is nice. Plus in list()'s case, the actual call sites
 // pass constants for `order` so the `order ==` branch can be eliminated.
 

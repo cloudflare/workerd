@@ -1030,7 +1030,7 @@ static thread_local int currentVfsRoot = AT_FDCWD;
 // We will tell SQLite to use alternate implementations of path-oriented syscalls which use the
 // `*at()` versions of the calls with `currentVfsRoot` as the directory descriptor. When the
 // descriptor is `AT_FDCWD`, this will naturally reproduce the behavior of the non-`at()` versions.
-// We temporarily swap this for a real desriptor when our custom VFS wrapper is being invoked.
+// We temporarily swap this for a real descriptor when our custom VFS wrapper is being invoked.
 
 static int replaced_open(const char* path, int flags, int mode) {
   return openat(currentVfsRoot, path, flags, mode);
@@ -1278,7 +1278,7 @@ struct SqliteDatabase::Vfs::FileImpl: public sqlite3_file {
   kj::Maybe<kj::Own<Lock>> lock;
   // Rather complicatedly, SQLite doesn't consider the -shm file to be a separate file that it
   // opens via the VFS, but rather a facet of the database file itself. We implement it using an
-  // entirely different interface anyawy.
+  // entirely different interface anyway.
   //
   // We leave this null if the file is not the main database file.
 

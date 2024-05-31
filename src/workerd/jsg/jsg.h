@@ -1461,7 +1461,7 @@ class Constructor;
 //
 // If the type T is GC visitable (i.e. it is a type that you could pass to GcVisitor::visit()),
 // then the system will arrange to correctly visit it when the T is wrapped in a Promise.
-// Additionally, if a continuation function passed to `.then()` is GC-visitable, it will similary
+// Additionally, if a continuation function passed to `.then()` is GC-visitable, it will similarly
 // be visited. JSG_VISITABLE_LAMBDA is a useful in conjunction with `.then()` (see jsg::Function,
 // above).
 //

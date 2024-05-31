@@ -408,7 +408,7 @@ public:
   // Historically, we solved this with something called `capctx`. You would write something like:
   // `awaitIo(promise.then(capctx(func)))`. This provided both properties: `func()` ran both in
   // the KJ event loop and with the isolate lock held. However, this had the problem that it
-  // required returning to the KJ event loop between running func() and runnning whatever
+  // required returning to the KJ event loop between running func() and running whatever
   // JavaScript code was waiting on it. This implies releasing the isolate lock just to
   // immediately acquire it again, which was wasteful. Passing `func` as a parameter to `awaitIo()`
   // allows it to run under the same isolate lock that then runs the awaiting JavaScript.
@@ -523,7 +523,7 @@ public:
   }
 
   // Like awaitIo(), but handles the specific case of Promise<DeferredProxy>. This is special
-  // becaues the convention is that the outer promise is NOT treated as a pending I/O event; it
+  // because the convention is that the outer promise is NOT treated as a pending I/O event; it
   // may actually be waiting for something to happen in JavaScript land. Once the outer promise
   // resolves, the inner promise (the DeferredProxy<T>) is treated as external I/O.
   template <typename T>
@@ -870,7 +870,7 @@ private:
     return incomingRequests.front();
   }
 
-  // Run the given callback within the scope of this IoContext. This encapsultes the
+  // Run the given callback within the scope of this IoContext. This encapsulates the
   // setup of a number of scopes that must be entered prior to running within the
   // context, including entering the V8StackScope and acquiring the Worker::Lock.
   void runInContextScope(Worker::LockType lockType,
@@ -1061,7 +1061,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
           // We don't use `resolver.reject()` here because if we convert the kj::Exception into
           // a JS Error here, it won't have a useful stack trace. V8 can generate a good stack
           // trace as long as we construct the Error inside of a promise continuation, so we use
-          // a `.then()` below that acutally extracts the kj::Exception and turn it into a JS
+          // a `.then()` below that actually extracts the kj::Exception and turn it into a JS
           // Error.
           resolver.resolve(js, kj::mv(e));
         } else {
@@ -1292,7 +1292,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
     // Annotate as broken for periodic metrics.
     auto msg = e.getDescription();
     if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
-      // If we already set up a brokeness reason, we shouldn't override it.
+      // If we already set up a brokenness reason, we shouldn't override it.
 
       auto description = jsg::annotateBroken(msg, "broken.inputGateBroken");
       e.setDescription(kj::mv(description));

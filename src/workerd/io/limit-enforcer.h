@@ -136,7 +136,7 @@ public:
   // are exceeded.
   virtual kj::Maybe<EventOutcome> getLimitsExceeded() = 0;
 
-  // Reutrns a promise that will reject if and when a limit is exceeded that prevents further
+  // Returns a promise that will reject if and when a limit is exceeded that prevents further
   // JavaScript execution, such as the CPU or memory limit.
   virtual kj::Promise<void> onLimitsExceeded() = 0;
 

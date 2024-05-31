@@ -4,7 +4,7 @@
 
 #pragma once
 // This file contains several horrible hacks involving setting a thread-local value within some
-// scope in the call stack, and then being able to check the vaule from deeper in the stack,
+// scope in the call stack, and then being able to check the value from deeper in the stack,
 // without passing down an object. We use this pattern to signal hints across modules that do not
 // directly call each other, where it would be excessively inconvenient to pass the value down the
 // stack, perhaps because there is code in between that we do not control (e.g., V8).

@@ -63,7 +63,7 @@ public:
   // except:
   // - It may be more efficient for one-off use caes.
   // - The code can include multiple statements, separated by semicolons. The bindings and returned
-  //   `Query` object are both associated with the last statement. This is particulary convenient
+  //   `Query` object are both associated with the last statement. This is particularly convenient
   //   for doing database initialization such as creating several tables at once.
   template <typename... Params>
   Query run(Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings);
@@ -483,7 +483,7 @@ public:
 //
 // When using a Vfs based on a regular disk directory, this class isn't used; instead, SQLite's
 // native implementation kicks in, which is based on advisory file locks at the OS level, as well
-// as mmaped shared memory from a file next to the database with suffix `-shm`.
+// as mmapped shared memory from a file next to the database with suffix `-shm`.
 class SqliteDatabase::Lock {
 public:
   // The main database can be locked at one of these levels.

@@ -314,7 +314,7 @@ void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
   js.tryCatch([&]() {
     Serializer ser(js, {
-      // Make sure we don't break compatibility if V8 introduces a new version. This vaule can
+      // Make sure we don't break compatibility if V8 introduces a new version. This value can
       // be bumped to match the new version once all of production is updated to understand it.
       .version = 15,
     });

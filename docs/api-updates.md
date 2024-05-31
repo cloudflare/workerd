@@ -10,9 +10,9 @@ update the documentation at the same time as the flag.
 Compatibility flags and dates for use within Workerd are defined in [compatibility-date.capnp](src/workerd/io/compatibility-date.capnp).
 
 When you create a Workerd pull request that contains new compatibility definitions, please
-create a pull request to update CloudFlare docs at the same time.
+create a pull request to update Cloudflare docs at the same time.
 
-## Compatibility documentation in CloudFlare docs
+## Compatibility documentation in Cloudflare docs
 
 Compatibility flags and dates should be added to the [Cloudflare Workers Compatibility Dates](https://developers.cloudflare.com/workers/platform/compatibility-dates) documentation.
 

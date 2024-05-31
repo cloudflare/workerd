@@ -335,7 +335,7 @@ void ActorCache::evictEntry(Lock& lock, Entry& entry) {
   //
   // TODO(perf): Maybe we should instead replace the evicted entry with an UNKNOWN entry in this
   //   case? The problem is, when the app accesses a key in the gap, the LRU time of the previous
-  //   entry gets bumped, but the _next_ entry does not get bumped. Hence these acccesses won't
+  //   entry gets bumped, but the _next_ entry does not get bumped. Hence these accesses won't
   //   prevent the next entry from being evicted, and when it is, the gap effectively gets evicted
   //   too, leading to a cache miss on a key that had been recently accessed. This is a pretty
   //   obscure scenario, though, and after one cache miss the key would then be in cache again.
@@ -1778,7 +1778,7 @@ kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> ActorCache::sc
     Func&& function) {
   // This is basically kj::retryOnDisconnect() except that we make the first call synchronously.
   // For our use case, this is safe, and I wanted to make sure reads get sent concurrently with
-  // futher JavaScript execution if possible.
+  // further JavaScript execution if possible.
   auto promise = kj::evalNow([&]() mutable {
     return function(storage).attach(recordStorageRead(hooks, clock));
   });
@@ -2212,7 +2212,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush() {
   }
 
   // There are no scheduled or in-flight flushes (and there may never have been any), we can return
-  // a false maybee.
+  // a false Maybe.
   return kj::none;
 }
 
@@ -2617,7 +2617,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
                jsg::isDoNotLogException(e.getDescription())) {
       // Before passing along the exception, give it the proper brokenness reason.
       // We were overriding any exception that came through here by ioGateBroken (now outputGateBroken).
-      // without checking for previous brokeness reasons we would be unable to throw
+      // without checking for previous brokenness reasons we would be unable to throw
       // exceededConcurrentStorageOps at all.
       auto msg = jsg::stripRemoteExceptionPrefix(e.getDescription());
       if (!(msg.startsWith("broken."))) {

@@ -202,7 +202,7 @@ struct ApiEncoderMain {
 #undef EW_TYPE_GROUP_COUNT
 #undef EW_TYPE_GROUP_WRITE
 
-    // Write structure groups to a file or stdout if none specifed
+    // Write structure groups to a file or stdout if none specified
     KJ_IF_SOME (value, output) {
       auto fs = kj::newDiskFilesystem();
       auto path = kj::Path::parse(value);
