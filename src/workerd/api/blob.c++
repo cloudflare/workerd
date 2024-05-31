@@ -9,56 +9,93 @@
 
 namespace workerd::api {
 
+namespace {
 // Concatenate an array of segments (parameter to Blob constructor).
-static kj::Array<byte> concat(jsg::Optional<Blob::Bits> maybeBits) {
+kj::Array<byte> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
   // TODO(perf): Make it so that a Blob can keep references to the input data rather than copy it.
   //   Note that we can't keep references to ArrayBuffers since they are mutable, but we can
   //   reference other Blobs in the input.
 
   auto bits = kj::mv(maybeBits).orDefault(nullptr);
 
+  auto maxBlobSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
   size_t size = 0;
   for (auto& part: bits) {
+    size_t partSize = 0;
     KJ_SWITCH_ONEOF(part) {
       KJ_CASE_ONEOF(bytes, kj::Array<const byte>) {
-        size += bytes.size();
+        partSize = bytes.size();
       }
       KJ_CASE_ONEOF(text, kj::String) {
-        size += text.size();
+        partSize = text.size();
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-        size += blob->getData().size();
+        partSize = blob->getData().size();
       }
     }
+
+    // We can skip the remaining checks if the part is empty.
+    if (partSize == 0) continue;
+
+    // While overflow is *extremely* unlikely to ever be a problem here, let's
+    // be extra cautious and check for it anyway.
+    static constexpr size_t kOverflowLimit = kj::maxValue;
+    // Upper limit the max number of bytes we can add to size to avoid overflow.
+    // partSize must be less than or equal to upperLimit. Practically speaking,
+    // however, it is practically impossible to reach this limit in any real-world
+    // scenario given the size limit check below.
+    size_t upperLimit = kOverflowLimit - size;
+    JSG_REQUIRE(partSize <= upperLimit, RangeError,
+                kj::str("Blob part too large: ", partSize, " bytes"));
+
+    // Checks for oversize
+    if (size + partSize > maxBlobSize) {
+      // TODO(soon): This logging is just to help us determine further how common
+      // this case is. We can and should remove the logging once we have enough data.
+      LOG_WARNING_PERIODICALLY(
+          kj::str("NOSENTRY Attempt to create a Blob with size ", size + partSize));
+    }
+    JSG_REQUIRE(size + partSize <= maxBlobSize, RangeError,
+                kj::str("Blob size ", size + partSize ," exceeds limit ", maxBlobSize));
+    size += partSize;
   }
 
   if (size == 0) return nullptr;
 
   auto result = kj::heapArray<byte>(size);
-  byte* ptr = result.begin();
+  auto view = result.asPtr();
 
   for (auto& part: bits) {
     KJ_SWITCH_ONEOF(part) {
       KJ_CASE_ONEOF(bytes, kj::Array<const byte>) {
-        memcpy(ptr, bytes.begin(), bytes.size());
-        ptr += bytes.size();
+        if (bytes.size() == 0) continue;
+        KJ_ASSERT(view.size() >= bytes.size());
+        view.first(bytes.size()).copyFrom(bytes);
+        view = view.slice(bytes.size());
       }
       KJ_CASE_ONEOF(text, kj::String) {
-        memcpy(ptr, text.begin(), text.size());
-        ptr += text.size();
+        auto byteLength = text.asBytes().size();
+        if (byteLength == 0) continue;
+        KJ_ASSERT(view.size() >= byteLength);
+        view.first(byteLength).copyFrom(text.asBytes());
+        view = view.slice(byteLength);
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-        memcpy(ptr, blob->getData().begin(), blob->getData().size());
-        ptr += blob->getData().size();
+        auto data = blob->getData();
+        if (data.size() == 0) continue;
+        KJ_ASSERT(view.size() >= data.size());
+        view.first(data.size()).copyFrom(data);
+        view = view.slice(data.size());
       }
     }
   }
 
-  KJ_ASSERT(ptr == result.end());
+  KJ_ASSERT(view == nullptr);
+
   return result;
 }
 
-static kj::String normalizeType(kj::String type) {
+kj::String normalizeType(kj::String type) {
   // This does not properly parse mime types. We have the new workerd::MimeType impl
   // but that handles mime types a bit more strictly than this. Ideally we'd be able to
   // switch over to it but there's a non-zero risk of breaking running code. We might need
@@ -79,7 +116,40 @@ static kj::String normalizeType(kj::String type) {
   return kj::mv(type);
 }
 
-jsg::Ref<Blob> Blob::constructor(jsg::Optional<Bits> bits, jsg::Optional<Options> options) {
+jsg::BufferSource wrap(jsg::Lock& js, kj::Array<byte> data) {
+  auto buf = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, data.size()),
+      Error, "Unable to allocate space for Blob data");
+  buf.asArrayPtr().copyFrom(data);
+  return kj::mv(buf);
+
+  // TODO(perf): Ideally we could just wrap the data like this, in which
+  // the underlying v8::BackingStore is supposed to free the buffer when
+  // it is done with it. Unfortunately ASAN complains about a leak that
+  // will require more investigation.
+  // return jsg::BufferSource(js, jsg::BackingStore::from(kj::mv(data)));
+}
+
+kj::ArrayPtr<const kj::byte> getPtr(jsg::BufferSource& source) {
+  return source.asArrayPtr();
+}
+}  // namespace
+
+Blob::Blob(kj::Array<byte> data, kj::String type)
+    : ownData(kj::mv(data)),
+      data(ownData.get<kj::Array<kj::byte>>()),
+      type(kj::mv(type)) {}
+
+Blob::Blob(jsg::Lock& js, kj::Array<byte> data, kj::String type)
+    : ownData(wrap(js, kj::mv(data))),
+      data(getPtr(ownData.get<jsg::BufferSource>())),
+      type(kj::mv(type)) {}
+
+Blob::Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type)
+      : ownData(kj::mv(parent)), data(data), type(kj::mv(type)) {}
+
+jsg::Ref<Blob> Blob::constructor(jsg::Lock& js,
+                                 jsg::Optional<Bits> bits,
+                                 jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(t, o.type) {
@@ -87,7 +157,7 @@ jsg::Ref<Blob> Blob::constructor(jsg::Optional<Bits> bits, jsg::Optional<Options
     }
   }
 
-  return jsg::alloc<Blob>(concat(kj::mv(bits)), kj::mv(type));
+  return jsg::alloc<Blob>(js, concat(js, kj::mv(bits)), kj::mv(type));
 }
 
 jsg::Ref<Blob> Blob::slice(jsg::Optional<int> maybeStart, jsg::Optional<int> maybeEnd,
@@ -192,7 +262,22 @@ jsg::Ref<ReadableStream> Blob::stream() {
 
 // =======================================================================================
 
-jsg::Ref<File> File::constructor(jsg::Optional<Bits> bits,
+File::File(kj::Array<byte> data, kj::String name, kj::String type,
+           double lastModified)
+    : Blob(kj::mv(data), kj::mv(type)),
+      name(kj::mv(name)), lastModified(lastModified) {}
+
+File::File(jsg::Lock& js, kj::Array<byte> data, kj::String name, kj::String type,
+           double lastModified)
+    : Blob(js, kj::mv(data), kj::mv(type)),
+      name(kj::mv(name)), lastModified(lastModified) {}
+
+File::File(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data,
+           kj::String name, kj::String type, double lastModified)
+    : Blob(kj::mv(parent), data, kj::mv(type)),
+      name(kj::mv(name)), lastModified(lastModified) {}
+
+jsg::Ref<File> File::constructor(jsg::Lock& js, jsg::Optional<Bits> bits,
     kj::String name, jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
   kj::Maybe<double> maybeLastModified;
@@ -210,7 +295,7 @@ jsg::Ref<File> File::constructor(jsg::Optional<Bits> bits,
     lastModified = dateNow();
   }
 
-  return jsg::alloc<File>(concat(kj::mv(bits)), kj::mv(name), kj::mv(type), lastModified);
+  return jsg::alloc<File>(js, concat(js, kj::mv(bits)), kj::mv(name), kj::mv(type), lastModified);
 }
 
 }  // namespace workerd::api

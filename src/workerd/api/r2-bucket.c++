@@ -1056,7 +1056,7 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
     kj::String contentType = KJ_REQUIRE_NONNULL(httpMetadata).contentType
         .map([](const auto& str) { return kj::str(str); })
         .orDefault(nullptr);
-    return jsg::alloc<Blob>(kj::mv(buffer), kj::mv(contentType));
+    return jsg::alloc<Blob>(js, kj::mv(buffer), kj::mv(contentType));
   });
 }
 

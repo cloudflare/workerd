@@ -825,7 +825,7 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
           context.getLimitEnforcer().getBufferingLimit()).then(js,
           [contentType = kj::mv(contentType), formData = kj::mv(formData)]
           (auto& js, kj::String rawText) mutable {
-        formData->parse(kj::mv(rawText), contentType,
+        formData->parse(js, kj::mv(rawText), contentType,
             !FeatureFlags::get(js).getFormDataParserSupportsFiles());
         return kj::mv(formData);
       });
@@ -834,7 +834,7 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
     // Theoretically, we already know if this will throw: the empty string is a valid
     // application/x-www-form-urlencoded body, but not multipart/form-data. However, best to let
     // FormData::parse() make the decision, to keep the logic in one place.
-    formData->parse(kj::String(), contentType,
+    formData->parse(js, kj::String(), contentType,
         !FeatureFlags::get(js).getFormDataParserSupportsFiles());
     return js.resolvedPromise(kj::mv(formData));
   });
@@ -860,7 +860,7 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
           }).orDefault(nullptr);
     }
 
-    return jsg::alloc<Blob>(kj::mv(buffer), kj::mv(contentType));
+    return jsg::alloc<Blob>(js, kj::mv(buffer), kj::mv(contentType));
   });
 }
 
