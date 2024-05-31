@@ -415,7 +415,7 @@ private:
   kj::UnwindDetector unwindDetector;
 
   // ---------------------------------------------------------------------------
-  // implements Filesytem
+  // implements Filesystem
 
   const kj::Directory& getRoot() const override {
     return *root;
@@ -1350,7 +1350,7 @@ KJ_TEST("Server: named entrypoints") {
                 `  }
                 `}
                 `
-                `// Also exprot some symbols that aren't valid entrypoints, but we should still
+                `// Also export some symbols that aren't valid entrypoints, but we should still
                 `// be allowed to point sockets at them. (Sending any actual requests to them
                 `// will still fail.)
                 `export let invalidObj = {};  // no handlers

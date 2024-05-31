@@ -202,7 +202,7 @@ private:
 // Class which uses inotify to watch a set of files and alert when they change.
 //
 // This version uses kqueue to watch for changes in files. kqueue typically doesn't scale well
-// to watching whole directory trees, since it must keep a file descriptor opne for each watched
+// to watching whole directory trees, since it must keep a file descriptor open for each watched
 // file. However, for our use case, we don't really want to watch a directory tree anyway, we
 // want to watch the specific set of files which were opened while parsing the config. This is
 // not so bad, probably.
@@ -220,7 +220,7 @@ public:
   void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {
     KJ_IF_SOME(f, file) {
       KJ_IF_SOME(fd, f.getFd()) {
-        // We need to duplicate the FD becasue the original will probably be closed later and
+        // We need to duplicate the FD because the original will probably be closed later and
         // closing the FD unregisters it from kqueue.
         int duped;
         KJ_SYSCALL(duped = dup(fd));
@@ -808,7 +808,7 @@ public:
           "    }\n");
     return addServeOrTestOptions(addConfigParsingOptionsNoConstName(builder))
         .addOption({"no-verbose"}, [this]() { noVerbose = true; return true; },
-            "Disable INFO-level logging for this test. Otherwise, INFO logging is enalbed by "
+            "Disable INFO-level logging for this test. Otherwise, INFO logging is enabled by "
             "default for tests in order to show uncaught exceptions, but it can be noisey.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
         .callAfterParsing(CLI_METHOD(test))
@@ -1085,7 +1085,7 @@ public:
 
   void compile() {
     if (hadErrors) {
-      // Errors were already reported with context.error(), so contex.exit() will exit with a
+      // Errors were already reported with context.error(), so context.exit() will exit with a
       // non-zero code.
       context.exit();
     }
@@ -1434,7 +1434,7 @@ private:
           return cnst.getShortDisplayName();
         };
         // TODO: this error message says "you must specify which one to use".
-        // This is not actaully possible? Either fix the error message to say
+        // This is not actually possible? Either fix the error message to say
         // **how** to specify which config object to use or tell user to define
         // exactly one top level Config constant.
         context.exitError(kj::str(

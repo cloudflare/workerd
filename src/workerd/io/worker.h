@@ -764,7 +764,7 @@ public:
 
   // Wait for `Date.now()` to be greater than or equal to `scheduledTime`. If the promise resolves
   // to an `AlarmFulfiller`, then the caller is responsible for invoking `fulfill()`, `reject()`, or
-  // `cancel()`. Otherwise, the scheduled alarm was overriden by another call to `scheduleAlarm()`
+  // `cancel()`. Otherwise, the scheduled alarm was overridden by another call to `scheduleAlarm()`
   // and thus was cancelled. Note that callers likely want to invoke `getAlarm()` first to see if
   // there is an existing alarm at `scheduledTime` for which they want to wait (instead of
   // cancelling it).

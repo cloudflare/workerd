@@ -1349,7 +1349,7 @@ KJ_TEST("ActorCache flush hard failure") {
 
   KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken; jsg.Error: flush failed hard", promise.wait(ws));
 
-  // Futher writes won't even try to start any new transactions because the failure killed them all.
+  // Further writes won't even try to start any new transactions because the failure killed them all.
   test.put("bar", "456");
 }
 
@@ -1376,7 +1376,7 @@ KJ_TEST("ActorCache flush hard failure with output gate bypass") {
   KJ_EXPECT_THROW_MESSAGE("flush failed hard", promise.wait(ws));
   KJ_EXPECT_THROW_MESSAGE("flush failed hard", test.gate.wait().wait(ws));
 
-  // Futher writes won't even try to start any new transactions because the failure killed them all.
+  // Further writes won't even try to start any new transactions because the failure killed them all.
   test.put("bar", "456");
 }
 
@@ -3605,7 +3605,7 @@ KJ_TEST("ActorCache LRU purge larger") {
   test.put("corge", kilobyte);
 
   // Dropped from cache, because the puts are in-flight and so cannot be dropped. This read gets
-  // sent off before the puts above becase the event loop hasn't been yielded yet.
+  // sent off before the puts above because the event loop hasn't been yielded yet.
   // TODO(cleanup): We hold onto the promise here (even though in theory it'd be fine to drop)
   // because the capnp-mock framework doesn't handle dropped client promises well (capnp destructs
   // the ReceivedCall before waitForEvent resolves and hands control back to expectCall, leaving
@@ -5228,7 +5228,7 @@ KJ_TEST("ActorCache can wait for flush") {
     }, {
       // We can't test the second operation because deleteAll immediately follows up with any puts
       // that happened while it was in flight. This means that we invoke the mock twice in the same
-      // promise chain without being able to set up expections in time.
+      // promise chain without being able to set up exceptions in time.
       .skipSecondOperation = true,
     });
   }

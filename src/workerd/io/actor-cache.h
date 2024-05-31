@@ -156,7 +156,7 @@ public:
       kj::Array<Key> keys, WriteOptions options) = 0;
 };
 
-// Abstract interface that is implemneted by ActorCache as well as ActorSqlite.
+// Abstract interface that is implemented by ActorCache as well as ActorSqlite.
 //
 // This extends ActorCacheOps and adds some methods that don't make sense as part of
 // ActorCache::Transaction.
@@ -304,7 +304,7 @@ private:
   class DeferredAlarmDeleter: public kj::Disposer {
   public:
     // The `Own<void>` returned by `armAlarmHandler()` is actually set up to point to the
-    // `ActorCache` itself, but with an alterante disposer that deletes the alarm rather than
+    // `ActorCache` itself, but with an alternate disposer that deletes the alarm rather than
     // the whole object.
     void disposeImpl(void* pointer) const {
       auto p = reinterpret_cast<ActorCache*>(pointer);
@@ -427,7 +427,7 @@ private:
 
     // Avoid using setClean() and setDirty() directly. If you want to set the status to CLEAN or
     // DIRTY, consider using the addToCleanList() and addToDirtyList() methods. This helps us keep
-    // the state transitions managable.
+    // the state transitions manageable.
     void setClean() {
       syncStatus = EntrySyncStatus::CLEAN;
     }

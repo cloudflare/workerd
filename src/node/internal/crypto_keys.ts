@@ -79,7 +79,7 @@ import {
 // In Node.js, the definition of KeyObject is a bit complicated because
 // KeyObject instances in Node.js can be transferred via postMessage() and
 // structuredClone(), etc, allowing instances to be shared across multiple
-// worker threads. We do not implement that model so we're esssentially
+// worker threads. We do not implement that model so we're essentially
 // re-implementing the Node.js API here instead of just taking their code.
 // Also in Node.js, CryptoKey is layered on top of KeyObject since KeyObject
 // existed first. We're, however, going to layer our KeyObject on top of

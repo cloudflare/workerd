@@ -3187,7 +3187,7 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
       auto msg = e.getDescription();
 
       if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
-        // If we already set up a brokeness reason, we shouldn't override it.
+        // If we already set up a brokenness reason, we shouldn't override it.
 
         auto description = jsg::annotateBroken(msg, "broken.constructorFailed");
         e.setDescription(kj::mv(description));

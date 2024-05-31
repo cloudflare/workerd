@@ -104,7 +104,7 @@ namespace workerd::jsg {
 // typically it should have very little cost. Heap snapshots are generally
 // fairly expensive to create, however, so care should be taken not to make
 // things too complicated. Ideally, none of the implementation methods in a
-// type should allocate. There is some allocation occuring internally while
+// type should allocate. There is some allocation occurring internally while
 // building the graph, of course, but the methods for visitation (in particular
 // the jsgGetMemoryInfo(...) method) should not perform any allocations if it
 // can be avoided.

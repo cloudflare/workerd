@@ -25,7 +25,7 @@
 # to see and restrict what each Worker can access. Instead, the default is that a Worker has
 # access to no privileged resources at all, and you must explicitly declare "bindings" to give
 # it access to specific resources. A binding gives the Worker a JavaScript API object that points
-# to a specific resource. This means that by changing config alone, you can fully controll which
+# to a specific resource. This means that by changing config alone, you can fully control which
 # resources an Worker connects to. (You can even disallow access to the public internet, although
 # public internet access is granted by default.)
 #
@@ -207,7 +207,7 @@ struct Worker {
     # event handlers.
     #
     # The value of this field is the raw source code. When using Cap'n Proto text format, use the
-    # `embed` directive to read the code from an exnternal file:
+    # `embed` directive to read the code from an external file:
     #
     #     serviceWorkerScript = embed "worker.js"
 
@@ -346,7 +346,7 @@ struct Worker {
 
       kvNamespace @11 :ServiceDesignator;
       # A KV namespace, implemented by the named service. The Worker sees a KvNamespace-typed
-      # binding. Requests to the namespace will be converted into HTTP requests targetting the
+      # binding. Requests to the namespace will be converted into HTTP requests targeting the
       # given service name.
 
       r2Bucket @12 :ServiceDesignator;
@@ -359,7 +359,7 @@ struct Worker {
 
       queue @15 :ServiceDesignator;
       # A Queue binding, implemented by the named service. Requests to the
-      # namespace will be converted into HTTP requests targetting the given
+      # namespace will be converted into HTTP requests targeting the given
       # service name.
 
       fromEnvironment @16 :Text;
@@ -556,10 +556,10 @@ struct Worker {
       # Instances of this class are ephemeral -- they have no durable storage at all. The
       # `state.storage` API will not be present. Additionally, this namespace will allow arbitrary
       # strings as IDs. There are no `idFromName()` nor `newUniqueId()` methods; `get()` takes any
-      # string as a paremeter.
+      # string as a parameter.
       #
       # Ephemeral objects are NOT globally unique, only "locally" unique, for some definition of
-      # "local". For exmaple, on Cloudflare's network, these objects are unique per-colo.
+      # "local". For example, on Cloudflare's network, these objects are unique per-colo.
       #
       # WARNING: Cloudflare Workers currently limits this feature to Cloudflare-internal users
       #   only, because using them correctly requires deep understanding of Cloudflare network
@@ -731,7 +731,7 @@ struct DiskDirectory {
   # particular, no attempt is made to guess the `Content-Type` header. You normally would wrap
   # this in a Worker that fills in the metadata in the way you want.
   #
-  # A GET request targetting a directory (rather than a file) will return a basic JSAN directory
+  # A GET request targeting a directory (rather than a file) will return a basic JSAN directory
   # listing like:
   #
   #     [{"name":"foo","type":"file"},{"name":"bar","type":"directory"}]

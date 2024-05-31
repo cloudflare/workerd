@@ -58,7 +58,7 @@ void AlarmScheduler::loadAlarmsFromDb() {
   auto now = clock.now();
 
   // TODO(someday): don't maintain the entire alarm set in memory -- right now for the usecase of
-  // local development, doing so is sufficent.
+  // local development, doing so is sufficient.
   auto query = db->run(R"(
     SELECT actor_unique_key, actor_id, scheduled_time FROM _cf_ALARM;
   )");
@@ -230,7 +230,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(kj::Duration delay,
       co_return;
     }
 
-    // When we reach this block of code and alarm has either successed or failed and may (or may
+    // When we reach this block of code and alarm has either succeeded or failed and may (or may
     // not) retry. Setting the status of an alarm as FINISHED here, will allow deletion of alarms
     // between retries. If there's a retry, `makeAlarmTask` is called, setting status as RUNNING
     // again.

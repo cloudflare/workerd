@@ -164,7 +164,7 @@ async def process_websocket(app, req):
             s = got.get("text", None)
             if b:
                 with acquire_js_buffer(b) as jsbytes:
-                    # Unlike the `Reponse` constructor,  server.send seems to
+                    # Unlike the `Response` constructor,  server.send seems to
                     # eagerly copy the source buffer
                     server.send(jsbytes)
             if s:

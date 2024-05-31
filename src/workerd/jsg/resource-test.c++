@@ -681,7 +681,7 @@ KJ_TEST("lazy js global class works") {
   e.expectEval("new BootstrapClass().run()", "string", "THIS_IS_BOOTSTRAP_CLASS");
 }
 
-KJ_TEST("lazy js readonly property can not be overriden") {
+KJ_TEST("lazy js readonly property can not be overridden") {
   Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
   e.expectEval("globalThis.bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
   e.expectEval("bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
@@ -720,7 +720,7 @@ KJ_TEST("lazy js global class works") {
   e.expectEval("new BootstrapClass().run()", "string", "THIS_IS_BOOTSTRAP_CLASS");
 }
 
-KJ_TEST("lazy js property can be overriden") {
+KJ_TEST("lazy js property can be overridden") {
   Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate, decltype(nullptr), JsLazyPropertyIsolate_TypeWrapper> e(v8System);
   // for module syntax
   e.expectEvalModule(R"(

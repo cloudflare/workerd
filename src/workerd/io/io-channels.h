@@ -64,7 +64,7 @@ public:
 // a unique subrequest channel number, and calling `binding.fetch()` sends the request to the
 // given channel.
 //
-// While most channels are SubrequestChannels, other channel types exit to handle I/O that is
+// While most channels are SubrequestChannels, other channel types exist to handle I/O that is
 // not subrequest-shaped. For example, a Workers Analytics Engine binding uses a logging channel.
 //
 // Note that each type of channel has its own number space. That is, subrequest channel 5 and

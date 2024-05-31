@@ -31,7 +31,7 @@ public:
       HeaderIdBundle headerIds, capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
           capnp::ByteStreamFactory& byteStreamFactory, bool isFiddle);
 
-  // This should only be used to costruct TimerChannel. Everything else should use TimerChannel.
+  // This should only be used to construct TimerChannel. Everything else should use TimerChannel.
   inline kj::Timer& getUnsafeTimer() const { return timer; }
   inline kj::EntropySource& getEntropySource() const { return entropySource; }
   inline const kj::HttpHeaderTable& getHeaderTable() const { return headerIds.table; }

@@ -944,7 +944,7 @@ private:
           // (especially with HEAD requests) is quite useful.
           // TODO(cleanup): Arguably the implementation of `fetch()` should be adjusted so that
           //   if no `Content-Length` header is returned, but the body size is known via the KJ
-          //   HTTP API, then the header shoud be filled in automatically. Unclear if this is safe
+          //   HTTP API, then the header should be filled in automatically. Unclear if this is safe
           //   to change without a compat flag.
 
           if (method == kj::HttpMethod::HEAD) {
@@ -1128,7 +1128,7 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(
 // This class provides a small thread-safe interface to the InspectorService so <name>:<isolate>
 // mappings can be added after the InspectorService has started.
 //
-// The CloudFlare devtools only show the first service in workerd configuration. This service
+// The Cloudflare devtools only show the first service in workerd configuration. This service
 // is always contains a users code. However, in packaging user code wrangler may add
 // additional services that also have code. If using Chrome devtools to inspect a workerd,
 // instance all services are visible and can be debugged.
@@ -1617,7 +1617,7 @@ public:
           a->shutdown(0, KJ_EXCEPTION(DISCONNECTED,
               "broken.dropped; Actor freed due to inactivity"));
         }
-        // Destory the last strong Worker::Actor reference.
+        // Destroy the last strong Worker::Actor reference.
         actor = kj::none;
       }
 
@@ -2600,7 +2600,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       // any actual requests are sent to an empty handler, they will fail at runtime.
       //
       // The reason we want the config to be considered valid even if it refers to empty
-      // entrypoints is so that it's safe to auto-generate a config that binds every exprot to
+      // entrypoints is so that it's safe to auto-generate a config that binds every export to
       // a socket, without checking the types of all the exports. Miniflare does this.
       KJ_IF_SOME(e, exportName) {
         namedEntrypoints.findOrCreate(e,
@@ -3179,7 +3179,7 @@ private:
       // TODO(someday): Use cfBlobJson from the connection if there is one, or from RPC params
       //   if we add that? (Note that if a connection-level cf blob exists, it should take
       //   priority; we should only accept a cf blob from the client if we have a cfBlobHeader
-      //   configrued, which hints that this service trusts the client to provide the cf blob.)
+      //   configured, which hints that this service trusts the client to provide the cf blob.)
 
       context.initResults(capnp::MessageSize {4, 1}).setDispatcher(
           kj::heap<EventDispatcherImpl>(parent, parent.service.startRequest({})));

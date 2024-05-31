@@ -47,7 +47,7 @@ export function monotonicDateNow() {
  *    passes this check.
  * 3. In normal Python code, this will only be called a fixed number of times
  *    every time we load a .so file. If we ever get to the position where
- *    `checkCallee` is a performance bottleneck, that would be a great successs.
+ *    `checkCallee` is a performance bottleneck, that would be a great success.
  *    Using ctypes, one can arrange to call a lot more times by repeatedly
  *    allocating and discarding closures. But:
  *      - ctypes is quite slow even by Python's standards

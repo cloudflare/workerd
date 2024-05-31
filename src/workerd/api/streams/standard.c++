@@ -2864,7 +2864,7 @@ public:
         // by kj write promise. If the outer kj Promise is dropped, the PumpToReader attached
         // to it is dropped. When that happens, there's a chance the JS continuation will still
         // be scheduled to run. The IoOwn ensures that the PumpToReader, and the sink it owns,
-        // are always accessed from the right IoContext. Thw WeakRef ensures that if the
+        // are always accessed from the right IoContext. The WeakRef ensures that if the
         // PumpToReader is freed while the JS continuation is pending, there won't be a dangling
         // reference.
         return ioContext.awaitJs(js,

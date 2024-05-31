@@ -342,7 +342,7 @@ mappings for these structures.
 One choice is to map to and from a `kj::Array<kj::byte>`.
 
 When receiving a `kj::Array<kj::byte>` in C++ *from* a JavaScript `TypedArray` or `ArrayBuffer`,
-it is important to understand that the underlying data is not copied or transfered. Instead, the
+it is important to understand that the underlying data is not copied or transferred. Instead, the
 `kj::Array<kj::byte>` provides a *view* over the same underlying `v8::BackingStore` as the
 `TypedArray` or `ArrayBuffer`.
 
@@ -1686,7 +1686,7 @@ This code is only ever called when a heap snapshot is being generated so
 typically it should have very little cost. Heap snapshots are generally
 fairly expensive to create, however, so care should be taken not to make
 things too complicated. Ideally, none of the implementation methods in a
-type should allocate. There is some allocation occuring internally while
+type should allocate. There is some allocation occurring internally while
 building the graph, of course, but the methods for visitation (in particular
 the `jsgGetMemoryInfo(...)` method) should not perform any allocations if it
 can be avoided.

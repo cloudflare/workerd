@@ -90,7 +90,7 @@ function instantiateWasm(wasmImports, successCallback) {
  * We also make an empty home directory and an empty global site-packages
  * directory `/lib/pythonv.vv/site-packages`.
  *
- * This is a simpified version of the `prepareFileSystem` function here:
+ * This is a simplified version of the `prepareFileSystem` function here:
  * https://github.com/pyodide/pyodide/blob/main/src/js/module.ts
  */
 function prepareFileSystem(Module) {
