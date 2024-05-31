@@ -605,7 +605,7 @@ public:
     // Verify that the computed mac matches the input.
     JSG_REQUIRE(memcmp(id + BASE_LENGTH, decoded.begin() + BASE_LENGTH,
                 decoded.size() - BASE_LENGTH) == 0,
-                TypeError, "Durable Object ID is not valid for this namespace.");
+                TypeError, "Durable Object ID is not valid for this namespace. Please ensure that the ID was previously created within the same namespace.");
 
     return kj::heap<ActorIdImpl>(id, kj::none);
   }
