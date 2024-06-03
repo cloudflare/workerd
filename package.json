@@ -7,17 +7,17 @@
   "dependencies": {
     "capnp-ts": "^0.7.0",
     "prettier": "^3.2.5",
-    "typescript": "~5.4.2"
+    "typescript": "~5.4.5"
   },
   "devDependencies": {
-    "@bazel/bazelisk": "~1.12.1",
+    "@bazel/bazelisk": "~1.19.0",
     "@types/debug": "^4.1.10",
-    "@types/node": "^20.8.10",
+    "@types/node": "^20.11.6",
     "@types/prettier": "^2.7.1",
     "@typescript-eslint/eslint-plugin": "^7.3.1",
     "@typescript-eslint/parser": "^7.3.1",
     "capnpc-ts": "^0.7.0",
-    "esbuild": "^0.15.10",
+    "esbuild": "^0.15.18",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-import": "^2.29.1",
@@ -26,7 +26,7 @@
   },
   "pnpm": {
     "overrides": {
-      "capnpc-ts>typescript": "4.2.4"
+      "capnpc-ts>typescript": "4.7.4"
     }
   }
 }
