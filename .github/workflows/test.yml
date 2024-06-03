@@ -136,6 +136,7 @@ jobs:
         shell: bash
         run: |
           cat <<EOF >> .bazelrc
+          test --test_tag_filters=-off-by-default
           test --config=enable-slow-tests
           EOF
       - name: Configure git hooks
