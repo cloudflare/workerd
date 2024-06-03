@@ -14,6 +14,7 @@
 #include <kj/time.h>
 #include <kj/debug.h>
 #include <kj/one-of.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::jsg {
 
@@ -1292,6 +1293,24 @@ public:
     auto& js = Lock::from(context->GetIsolate());
     auto& wrapper = TypeWrapper::from(js.v8Isolate);
     kj::Exception result = [&]() {
+
+      kj::Exception::Type excType = [&]() {
+        if (util::Autogate::isEnabled(util::AutogateKey::ACTOR_EXCEPTION_PROPERTIES)) {
+          // Use .retryable and .overloaded properties as hints for what kj exception type to use.
+          if (handle->IsObject()) {
+            auto object = handle.As<v8::Object>();
+
+            if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "overloaded"_kj))))) {
+              return kj::Exception::Type::OVERLOADED;
+            }
+            if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "retryable"_kj))))) {
+              return kj::Exception::Type::DISCONNECTED;
+            }
+          }
+        }
+        return kj::Exception::Type::FAILED;
+      }();
+
       KJ_IF_SOME(domException, wrapper.tryUnwrap(context, handle,
                                                   (DOMException*)nullptr,
                                                   parentObject)) {
@@ -1336,8 +1355,7 @@ public:
             reason = kj::str(JSG_EXCEPTION(Error) ": ", reason);
           }
         }
-        return kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-                            kj::mv(reason));
+        return kj::Exception(excType, __FILE__, __LINE__, kj::mv(reason));
       }
     }();
 
