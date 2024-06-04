@@ -49,8 +49,12 @@ public:
   // `convertFilesToStrings` is for backwards-compatibility. The first implementation of this
   // class in Workers incorrectly represented files as strings (of their content). Changing this
   // could break deployed code, so this has to be controlled by a compatibility flag.
-  void parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType,
-             bool convertFilesToStrings);
+  //
+  // Parsing may or may not pass a jsg::Lock. If a lock is passed, any File objects created will
+  // track their internal allocated memory in the associated isolate. If a lock is not passed,
+  // the internal allocated memory will not be tracked.
+  void parse(kj::Maybe<jsg::Lock&> js, kj::ArrayPtr<const char> rawText,
+             kj::StringPtr contentType, bool convertFilesToStrings);
 
   struct Entry {
     kj::String name;
@@ -79,7 +83,8 @@ public:
   // message they receive too pretty: they won't get farther than `document.getElementById()`.
   static jsg::Ref<FormData> constructor();
 
-  void append(kj::String name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+  void append(jsg::Lock& js, kj::String name,
+              kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
               jsg::Optional<kj::String> filename);
 
   void delete_(kj::String name);
@@ -90,7 +95,8 @@ public:
 
   bool has(kj::String name);
 
-  void set(kj::String name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+  void set(jsg::Lock& js, kj::String name,
+           kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
            jsg::Optional<kj::String> filename);
 
   JSG_ITERATOR(EntryIterator, entries,

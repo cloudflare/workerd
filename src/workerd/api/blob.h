@@ -14,10 +14,8 @@ class ReadableStream;
 // An implementation of the Web Platform Standard Blob API
 class Blob: public jsg::Object {
 public:
-  Blob(kj::Array<byte> data, kj::String type)
-      : ownData(kj::mv(data)), data(ownData.get<kj::Array<byte>>()), type(kj::mv(type)) {}
-  Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type)
-      : ownData(kj::mv(parent)), data(data), type(kj::mv(type)) {}
+  Blob(jsg::Lock& js, kj::Array<byte> data, kj::String type);
+  Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type);
 
   inline kj::ArrayPtr<const byte> getData() const KJ_LIFETIMEBOUND { return data; }
 
@@ -33,7 +31,8 @@ public:
 
   typedef kj::Array<kj::OneOf<kj::Array<const byte>, kj::String, jsg::Ref<Blob>>> Bits;
 
-  static jsg::Ref<Blob> constructor(jsg::Optional<Bits> bits, jsg::Optional<Options> options);
+  static jsg::Ref<Blob> constructor(jsg::Lock& js, jsg::Optional<Bits> bits,
+                                    jsg::Optional<Options> options);
 
   int getSize() const { return data.size(); }
   kj::StringPtr getType() const { return type; }
@@ -62,10 +61,13 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     KJ_SWITCH_ONEOF(ownData) {
-      KJ_CASE_ONEOF(data, kj::Array<byte>) {
+      KJ_CASE_ONEOF(data, jsg::BufferSource) {
         tracker.trackField("ownData", data);
       }
       KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
+        tracker.trackField("ownData", data);
+      }
+      KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
         tracker.trackField("ownData", data);
       }
     }
@@ -73,25 +75,43 @@ public:
   }
 
 private:
-  kj::OneOf<kj::Array<byte>, jsg::Ref<Blob>> ownData;
+  Blob(kj::Array<byte> data, kj::String type);
+
+  // Using a jsg::BufferSource to store the ownData allows the associated isolate
+  // to track the external data allocation correctly.
+  // The Variation that uses kj::Array<kj::byte> only is used only in very
+  // specific cases (i.e. the internal fiddle service) where we parse FormData
+  // outside of the isolate lock.
+  kj::OneOf<jsg::BufferSource, kj::Array<kj::byte>, jsg::Ref<Blob>> ownData;
   kj::ArrayPtr<const byte> data;
   kj::String type;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_SOME(b, ownData.tryGet<jsg::Ref<Blob>>()) {
-      visitor.visit(b);
+    KJ_SWITCH_ONEOF(ownData) {
+      KJ_CASE_ONEOF(b, jsg::BufferSource) {
+        visitor.visit(b);
+      }
+      KJ_CASE_ONEOF(b, jsg::Ref<Blob>) {
+        visitor.visit(b);
+      }
+      KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {}
     }
   }
 
   class BlobInputStream;
+  friend class File;
 };
 
 // An implementation of the Web Platform Standard File API
 class File: public Blob {
 public:
-  File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified)
-      : Blob(kj::mv(data), kj::mv(type)),
-        name(kj::mv(name)), lastModified(lastModified) {}
+  // This constructor variation is used when a File is created outside of the isolate
+  // lock. This is currently only the case when parsing FormData outside of running
+  // JavaScript (such as in the internal fiddle service).
+  File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified);
+  File(jsg::Lock& js, kj::Array<byte> data, kj::String name, kj::String type, double lastModified);
+  File(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data,
+       kj::String name, kj::String type, double lastModified);
 
   struct Options {
     jsg::Optional<kj::String> type;
@@ -101,7 +121,7 @@ public:
     JSG_STRUCT(type, lastModified, endings);
   };
 
-  static jsg::Ref<File> constructor(jsg::Optional<Bits> bits,
+  static jsg::Ref<File> constructor(jsg::Lock& js, jsg::Optional<Bits> bits,
       kj::String name, jsg::Optional<Options> options);
 
   kj::StringPtr getName() { return name; }

@@ -66,8 +66,9 @@ constexpr auto contentDisposition =
     p::sequence(p::discardWhitespace, httpIdentifier,
                 p::discardWhitespace, p::many(contentDispositionParam));
 
-void parseFormData(kj::Vector<FormData::Entry>& data, kj::StringPtr boundary,
-                   kj::ArrayPtr<const char> body, bool convertFilesToStrings) {
+void parseFormData(kj::Maybe<jsg::Lock&> js, kj::Vector<FormData::Entry>& data,
+                   kj::StringPtr boundary, kj::ArrayPtr<const char> body,
+                   bool convertFilesToStrings) {
   // multipart/form-data messages are delimited by <CRLF>--<boundary>. We want to be able to handle
   // omitted carriage returns, though, so our delimiter only matches against a preceding line feed.
   const auto delimiter = kj::str("\n--", boundary);
@@ -165,17 +166,32 @@ void parseFormData(kj::Vector<FormData::Entry>& data, kj::StringPtr boundary,
     if (filename == kj::none || convertFilesToStrings) {
       data.add(FormData::Entry { kj::mv(name), kj::str(message) });
     } else {
-      data.add(FormData::Entry {
-        kj::mv(name),
-        jsg::alloc<File>(kj::heapArray(message.asBytes()), KJ_ASSERT_NONNULL(kj::mv(filename)),
-                          kj::str(type.orDefault(nullptr)), dateNow())
-      });
+      auto bytes = kj::heapArray(message.asBytes());
+      KJ_IF_SOME(lock, js) {
+        data.add(FormData::Entry {
+          kj::mv(name),
+          jsg::alloc<File>(lock, kj::mv(bytes),
+                           KJ_ASSERT_NONNULL(kj::mv(filename)),
+                           kj::str(type.orDefault(nullptr)), dateNow())
+        });
+      } else {
+        // This variation is used when we do not have an isolate lock. In this
+        // case, the external memory held by the File is not tracked towards
+        // the isolate's external memory.
+        data.add(FormData::Entry {
+          kj::mv(name),
+          jsg::alloc<File>(kj::mv(bytes),
+                           KJ_ASSERT_NONNULL(kj::mv(filename)),
+                           kj::str(type.orDefault(nullptr)), dateNow())
+        });
+      }
     }
   }
 }
 
 kj::OneOf<jsg::Ref<File>, kj::String>
-blobToFile(kj::StringPtr name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+blobToFile(jsg::Lock& js, kj::StringPtr name,
+           kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
            jsg::Optional<kj::String> filename) {
   auto fromBlob = [&](jsg::Ref<Blob> blob) {
     kj::String fn;
@@ -184,8 +200,10 @@ blobToFile(kj::StringPtr name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::Str
     } else {
       fn = kj::str(name);
     }
-    return jsg::alloc<File>(kj::heapArray(blob->getData()), kj::mv(fn),
-                             kj::str(blob->getType()), dateNow());
+    // The file is created with the same data as the blob (essentially as just
+    // a view of the same blob) to avoid copying the data.
+    return jsg::alloc<File>(blob.addRef(), blob->getData(), kj::mv(fn),
+                            kj::str(blob->getType()), dateNow());
   };
 
   KJ_SWITCH_ONEOF(value) {
@@ -297,8 +315,8 @@ FormData::EntryType FormData::clone(FormData::EntryType& value) {
   KJ_UNREACHABLE;
 }
 
-void FormData::parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType,
-                     bool convertFilesToStrings) {
+void FormData::parse(kj::Maybe<jsg::Lock&> js, kj::ArrayPtr<const char> rawText,
+                     kj::StringPtr contentType, bool convertFilesToStrings) {
   KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
     auto& params = parsed.params();
     if (MimeType::FORM_DATA == parsed) {
@@ -306,7 +324,7 @@ void FormData::parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType
           "No boundary string in Content-Type header. The multipart/form-data MIME "
           "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
           "boundary=\"abcd\"'. See RFC 7578, section 4.");
-      parseFormData(data, boundary, rawText, convertFilesToStrings);
+      parseFormData(js, data, boundary, rawText, convertFilesToStrings);
       return;
     } else if (MimeType::FORM_URLENCODED == parsed) {
       // Let's read the charset so we can barf if the body isn't UTF-8.
@@ -339,10 +357,10 @@ jsg::Ref<FormData> FormData::constructor() {
   return jsg::alloc<FormData>();
 }
 
-void FormData::append(kj::String name,
+void FormData::append(jsg::Lock& js, kj::String name,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
     jsg::Optional<kj::String> filename) {
-  auto filifiedValue = blobToFile(name, kj::mv(value), kj::mv(filename));
+  auto filifiedValue = blobToFile(js, name, kj::mv(value), kj::mv(filename));
   data.add(Entry { kj::mv(name), kj::mv(filifiedValue) });
 }
 
@@ -381,17 +399,17 @@ bool FormData::has(kj::String name) {
 }
 
 // Set the first element named `name` to `value`, then remove all the rest matching that name.
-void FormData::set(kj::String name,
+void FormData::set(jsg::Lock& js, kj::String name,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
     jsg::Optional<kj::String> filename) {
   const auto predicate = [name = name.slice(0)](const auto& kv) { return kv.name == name; };
   auto firstFound = std::find_if(data.begin(), data.end(), predicate);
   if (firstFound != data.end()) {
-    firstFound->value = blobToFile(name, kj::mv(value), kj::mv(filename));
+    firstFound->value = blobToFile(js, name, kj::mv(value), kj::mv(filename));
     auto pivot = std::remove_if(++firstFound, data.end(), predicate);
     data.truncate(pivot - data.begin());
   } else {
-    append(kj::mv(name), kj::mv(value), kj::mv(filename));
+    append(js, kj::mv(name), kj::mv(value), kj::mv(filename));
   }
 }
 

@@ -78,6 +78,11 @@ public:
     if (iterations > DEFAULT_MAX_PBKDF2_ITERATIONS) return DEFAULT_MAX_PBKDF2_ITERATIONS;
     return kj::none;
   }
+
+  // Called when a Blob is being created to determine the maximum allowed size of the Blob.
+  virtual size_t getBlobSizeLimit() const {
+    return 128 * 1024 * 1024;  // 128 MB
+  }
 };
 
 // Abstract interface that enforces resource limits on a IoContext.
