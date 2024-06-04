@@ -34,10 +34,11 @@ import { normalizeEncoding } from "node-internal:internal_utils";
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
+  ERR_SOCKET_BAD_PORT,
   ERR_OUT_OF_RANGE,
 } from "node-internal:internal_errors";
 
-// TODO(someday): Not current implementing parseFileMode, validatePort
+// TODO(someday): Not current implementing parseFileMode
 
 export const isInt32 = (value: any) => value === (value | 0);
 export const isUint32 = (value: any) => value === (value >>> 0);
@@ -202,6 +203,17 @@ export function validateArray(value: unknown, name: string, minLength = 0) {
   }
 }
 
+export function validatePort(port: unknown, name = 'Port', allowZero = true) {
+  if ((typeof port !== 'number' && typeof port !== 'string') ||
+      (typeof port === 'string' && port.trim().length === 0) ||
+      +port !== (+port >>> 0) ||
+      +port > 0xFFFF ||
+      (port === 0 && !allowZero)) {
+    throw new ERR_SOCKET_BAD_PORT(name, port, allowZero);
+  }
+  return +port | 0;
+};
+
 export default {
   isInt32,
   isUint32,
@@ -217,4 +229,5 @@ export default {
   validateOneOf,
   validateString,
   validateUint32,
+  validatePort,
 };
