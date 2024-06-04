@@ -150,7 +150,8 @@ struct ApiEncoderMain {
           enableFlagName = annotation.getValue().getText();
           // Exclude nodejs_compat, since the type generation scripts don't support node:* imports
           // TODO: Figure out typing for node compat
-          isNode = enableFlagName == "nodejs_compat";
+          isNode = enableFlagName == "nodejs_compat" ||
+                   enableFlagName == "nodejs_compat_v2";
         }
       }
 
