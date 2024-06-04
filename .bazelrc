@@ -1,6 +1,6 @@
 common --enable_platform_specific_config
 build --verbose_failures
-build --build_tag_filters=-off-by-default
+build --build_tag_filters=-off-by-default,-slow
 test --test_tag_filters=-off-by-default,-slow
 
 # Not using bzlmod for dependencies yet

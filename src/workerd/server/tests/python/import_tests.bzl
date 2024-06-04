@@ -33,16 +33,22 @@ def gen_import_tests(to_test):
   for lib in to_test.keys():
     worker_py_fname = "import/{}/worker.py".format(lib)
     wd_test_fname = "import/{}/import.wd-test".format(lib)
-    write_file(worker_py_fname + "@rule",
-      worker_py_fname,
-      [generate_import_py_file(to_test[lib])])
-    write_file(wd_test_fname + "@rule",
-      wd_test_fname,
-      [generate_wd_test_file(lib)])
+    write_file(
+      name = worker_py_fname + "@rule",
+      out = worker_py_fname,
+      content = [generate_import_py_file(to_test[lib])],
+      tags = ["slow"],
+    )
+    write_file(
+      name = wd_test_fname + "@rule",
+      out = wd_test_fname,
+      content = [generate_wd_test_file(lib)],
+      tags = ["slow"],
+    )
 
     wd_test(
-      src = "import/{}/import.wd-test".format(lib),
+      src = wd_test_fname,
       args = ["--experimental", "--disk-cache-dir", "../all_pyodide_wheels"],
       data = [worker_py_fname, "@all_pyodide_wheels//:whls"],
-      tags = ["slow"]
+      tags = ["slow"],
     )
