@@ -4,6 +4,7 @@
 #include "autogate.h"
 #include <workerd/util/sentry.h>
 #include <kj/common.h>
+#include <capnp/message.h>
 
 namespace workerd::util {
 
@@ -15,6 +16,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "test-workerd"_kj;
     case AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES:
       return "updated-actor-exception-types";
+    case AutogateKey::ACTOR_EXCEPTION_PROPERTIES:
+      return "actor-exception-properties";
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
@@ -54,6 +57,14 @@ bool Autogate::isEnabled(AutogateKey key) {
 
 void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates) {
   globalAutogate = Autogate(gates);
+}
+
+void Autogate::initEmptyAutogateForTesting() {
+  capnp::MallocMessageBuilder message;
+  auto orphanage = message.getOrphanage();
+  auto gatesOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(0);
+  auto gates = gatesOrphan.get();
+  initAutogate(gates.asReader());
 }
 
 void Autogate::deinitAutogate() { globalAutogate = kj::none; }
