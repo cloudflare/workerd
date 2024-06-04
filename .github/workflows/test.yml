@@ -106,16 +106,16 @@ jobs:
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
           fi
-      - name: Disable slow tests if applicable
+      - name: Enable slow tests if applicable
         # Some tests (like Python import tests) take a long time to run and don't benefit much
         # from multi-platform testing. For that reason, we only run them in a single configuration
         # to minimize effect on CI pipeline runtime.
-        if: matrix.os.name != 'linux' || matrix.config.suffix != ''
+        if: matrix.os.name == 'linux' && matrix.config.suffix == ''
         shell: bash
         run: |
           cat <<EOF >> .bazelrc
-          build --build_tag_filters=-off-by-default,-slow
-          test --test_tag_filters=-off-by-default,-slow
+          build --build_tag_filters=-off-by-default
+          test --test_tag_filters=-off-by-default
           EOF
       - name: Generate list of excluded Bazel targets
         # Exclude large benchmarking binaries created in debug and asan configurations to avoid
