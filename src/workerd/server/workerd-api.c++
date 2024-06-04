@@ -311,6 +311,16 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileScriptGlobals(
   return compiledGlobals.finish();
 }
 
+namespace {
+kj::Array<kj::StringPtr> compileNamedExports(capnp::List<capnp::Text>::Reader namedExports) {
+  kj::Vector<kj::StringPtr> results;
+  for (auto name: namedExports) {
+    results.add(name);
+  }
+  return results.releaseAsArray();
+}
+}  // namespace
+
 kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
     jsg::Lock& js,
     config::Worker::Module::Reader module,
@@ -361,10 +371,14 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
           observer);
     }
     case config::Worker::Module::COMMON_JS_MODULE: {
+      kj::Maybe<kj::Array<kj::StringPtr>> named = kj::none;
+      if (module.hasNamedExports()) {
+        named = compileNamedExports(module.getNamedExports());
+      }
       return jsg::ModuleRegistry::ModuleInfo(
           lock,
           module.getName(),
-          kj::none,
+          named.map([](kj::Array<kj::StringPtr>& named) { return named.asPtr(); }),
           jsg::ModuleRegistry::CommonJsModuleInfo(
               lock,
               module.getName(),
@@ -373,10 +387,14 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
     case config::Worker::Module::NODE_JS_COMPAT_MODULE: {
       KJ_REQUIRE(featureFlags.getNodeJsCompat(),
           "The nodejs_compat compatibility flag is required to use the nodeJsCompatModule type.");
+      kj::Maybe<kj::Array<kj::StringPtr>> named = kj::none;
+      if (module.hasNamedExports()) {
+        named = compileNamedExports(module.getNamedExports());
+      }
       return jsg::ModuleRegistry::ModuleInfo(
           lock,
           module.getName(),
-          kj::none,
+          named.map([](kj::Array<kj::StringPtr>& named) { return named.asPtr(); }),
           jsg::ModuleRegistry::NodeJsModuleInfo(
               lock,
               module.getName(),

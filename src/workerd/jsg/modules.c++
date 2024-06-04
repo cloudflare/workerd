@@ -178,7 +178,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
     };
 
     auto& synthetic = KJ_REQUIRE_NONNULL(ref.module.maybeSynthetic, "Not a synthetic module.");
-    auto defaultStr = v8StrIntern(js.v8Isolate, "default"_kj);
+    auto defaultStr = js.strIntern("default"_kj);
 
     KJ_SWITCH_ONEOF(synthetic) {
       KJ_CASE_ONEOF(info, ModuleRegistry::CapnpModuleInfo) {
@@ -201,6 +201,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
         }
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::CommonJsModuleInfo) {
+        bool ok = true;
         v8::TryCatch catcher(js.v8Isolate);
         // const_cast is safe here because we're protected by the isolate js.
         auto& commonjs = const_cast<ModuleRegistry::CommonJsModuleInfo&>(info);
@@ -209,20 +210,40 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
         } catch (const JsExceptionThrown&) {
           if (catcher.CanContinue()) catcher.ReThrow();
           // leave `result` empty to propagate the JS exception
-          return;
+          ok = false;
         }
 
-        if (module->SetSyntheticModuleExport(
-                js.v8Isolate,
-                defaultStr,
-                commonjs.moduleContext->module->getExports(js)).IsJust()) {
-          result = makeResolvedPromise();
-        } else {
-          // leave `result` empty to propagate the JS exception
+        if (ok) {
+          // Handle the named exports...
+          auto exports = commonjs.moduleContext->module->getExports(js);
+          if (!module->SetSyntheticModuleExport(js.v8Isolate, defaultStr, exports).IsJust()) {
+            ok = false;
+          }
+
+          if (ok && exports->IsObject()) {
+            JsObject obj = JsObject(exports.As<v8::Object>());
+            KJ_IF_SOME(exports, ref.module.maybeNamedExports) {
+              for (auto& name : exports) {
+                // Ignore default... just in case someone was silly enough to include it.
+                if (name == "default"_kj) continue;
+                auto val = obj.get(js, name);
+                if (!module->SetSyntheticModuleExport(
+                    js.v8Isolate, js.strIntern(name), val).IsJust()) {
+                  ok = false;
+                  break;
+                }
+              }
+            }
+          }
         }
+
+        if (ok) result = makeResolvedPromise();
+        // If ok is false, we leave result empty to propagate the JS exception
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::NodeJsModuleInfo) {
-        result = info.evaluate(js, const_cast<ModuleRegistry::NodeJsModuleInfo&>(info), module);
+        result = info.evaluate(js,
+            const_cast<ModuleRegistry::NodeJsModuleInfo&>(info), module,
+            ref.module.maybeNamedExports);
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::TextModuleInfo) {
         if (module->SetSyntheticModuleExport(js.v8Isolate,
@@ -532,7 +553,13 @@ ModuleRegistry::ModuleInfo::ModuleInfo(
     kj::StringPtr name,
     kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
     SyntheticModuleInfo synthetic)
-    : ModuleInfo(js, createSyntheticModule(js, name, maybeExports), kj::mv(synthetic)) {}
+    : ModuleInfo(js, createSyntheticModule(js, name, maybeExports), kj::mv(synthetic)) {
+  KJ_IF_SOME(exports, maybeExports) {
+    maybeNamedExports = KJ_MAP(name, exports) {
+      return kj::str(name);
+    };
+  }
+}
 
 Ref<CommonJsModuleContext>
 ModuleRegistry::CommonJsModuleInfo::initModuleContext(
@@ -570,7 +597,8 @@ jsg::Ref<jsg::Object> ModuleRegistry::NodeJsModuleInfo::initModuleContext(
 v8::MaybeLocal<v8::Value> ModuleRegistry::NodeJsModuleInfo::evaluate(
       jsg::Lock& js,
       ModuleRegistry::NodeJsModuleInfo& info,
-      v8::Local<v8::Module> module) {
+      v8::Local<v8::Module> module,
+      const kj::Maybe<kj::Array<kj::String>>& maybeExports) {
   const auto makeResolvedPromise = [&]() {
     v8::Local<v8::Promise::Resolver> resolver;
     if (!v8::Promise::Resolver::New(js.v8Context()).ToLocal(&resolver)) {
@@ -595,15 +623,33 @@ v8::MaybeLocal<v8::Value> ModuleRegistry::NodeJsModuleInfo::evaluate(
   }
 
   auto ctx = static_cast<NodeJsModuleContext*>(info.moduleContext.get());
+  bool ok = true;
 
-  if (module->SetSyntheticModuleExport(
+  auto exports = ctx->module->getExports(js);
+  if (!module->SetSyntheticModuleExport(
           js.v8Isolate,
-          v8StrIntern(js.v8Isolate, "default"_kj),
-          ctx->module->getExports(js)).IsJust()) {
-    result = makeResolvedPromise();
-  } else {
-    // leave `result` empty to propagate the JS exception
+          js.strIntern("default"_kj),
+          exports).IsJust()) {
+    ok = false;
   }
+
+  if (ok && exports->IsObject()) {
+    JsObject obj = JsObject(exports.As<v8::Object>());
+    KJ_IF_SOME(exports, maybeExports) {
+      for (auto& name : exports) {
+        if (name == "default"_kj) continue;
+        if (!module->SetSyntheticModuleExport(js.v8Isolate,
+            js.strIntern(name),
+            obj.get(js, name)).IsJust()) {
+          ok = false;
+          break;
+        }
+      }
+    }
+  }
+
+  if (ok) result = makeResolvedPromise();
+  // If ok is false, leave result empty to propagate the JS exception
   return result;
 }
 

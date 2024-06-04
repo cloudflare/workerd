@@ -253,9 +253,11 @@ public:
         jsg::Lock& js,
         kj::StringPtr name);
 
-    static v8::MaybeLocal<v8::Value> evaluate(jsg::Lock& js,
-                                              NodeJsModuleInfo& info,
-                                              v8::Local<v8::Module> module);
+    static v8::MaybeLocal<v8::Value> evaluate(
+        jsg::Lock& js,
+        NodeJsModuleInfo& info,
+        v8::Local<v8::Module> module,
+        const kj::Maybe<kj::Array<kj::String>>& maybeExports);
 
     jsg::Function<void()> initEvalFunc(
         auto& lock,
@@ -336,6 +338,7 @@ public:
                                           ObjectModuleInfo,
                                           NodeJsModuleInfo>;
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
+    kj::Maybe<kj::Array<kj::String>> maybeNamedExports;
 
     ModuleInfo(jsg::Lock& js,
                v8::Local<v8::Module> module,
