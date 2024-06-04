@@ -111,26 +111,6 @@ bool setRemoteError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
       v8::True(isolate)));
 }
 
-bool setRetryableError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
-  KJ_ASSERT(exception->IsObject());
-  auto obj = exception.As<v8::Object>();
-  return jsg::check(
-    obj->Set(
-      isolate->GetCurrentContext(),
-      jsg::v8StrIntern(isolate, "retryable"_kj),
-      v8::True(isolate)));
-}
-
-bool setOverloadedError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
-  KJ_ASSERT(exception->IsObject());
-  auto obj = exception.As<v8::Object>();
-  return jsg::check(
-    obj->Set(
-      isolate->GetCurrentContext(),
-      jsg::v8StrIntern(isolate, "overloaded"_kj),
-      v8::True(isolate)));
-}
-
 bool setDurableObjectResetError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
   KJ_ASSERT(exception->IsObject());
   auto obj = exception.As<v8::Object>();
@@ -148,8 +128,7 @@ struct DecodedException {
 };
 
 DecodedException decodeTunneledException(v8::Isolate* isolate,
-                                         kj::StringPtr internalMessage,
-                                         kj::Exception::Type excType) {
+                                         kj::StringPtr internalMessage) {
   // We currently support tunneling the following error types:
   //
   // - Error:        While the Web IDL spec claims this is reserved for use by program authors, this
@@ -225,14 +204,6 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
     setRemoteError(isolate, result.handle);
   }
 
-  if (util::Autogate::isEnabled(util::AutogateKey::ACTOR_EXCEPTION_PROPERTIES)) {
-    if (excType == kj::Exception::Type::DISCONNECTED) {
-      setRetryableError(isolate, result.handle);
-    } else if (excType == kj::Exception::Type::OVERLOADED) {
-      setOverloadedError(isolate, result.handle);
-    }
-  }
-
   if (result.isDurableObjectReset) {
     setDurableObjectResetError(isolate, result.handle);
   }
@@ -251,6 +222,8 @@ kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message) {
   }
 }
 
+
+
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
   auto desc = exception.getDescription();
 
@@ -262,7 +235,7 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
   //   in order to extract a full stack trace. Once we do it here, we can remove the code from
   //   there.
 
-  auto tunneledException = decodeTunneledException(isolate, desc, exception.getType());
+  auto tunneledException = decodeTunneledException(isolate, desc);
 
   if (tunneledException.isInternal) {
     auto& observer = IsolateBase::from(isolate).getObserver();
@@ -284,11 +257,6 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
       auto exception = v8::Exception::Error(v8StrIntern(isolate, "Network connection lost."_kj));
       if (tunneledException.isFromRemote) {
         setRemoteError(isolate, exception);
-      }
-
-      if (util::Autogate::isEnabled(util::AutogateKey::ACTOR_EXCEPTION_PROPERTIES)) {
-        // DISCONNECTED exceptions are considered retryable
-        setRetryableError(isolate, exception);
       }
 
       if (tunneledException.isDurableObjectReset) {
