@@ -264,17 +264,17 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
   if (pullInto.filled > 0) {
     // There's been at least some data written, we need to respond but not
     // set done to true since that's what the streams spec requires.
-    pullInto.store.trim(pullInto.store.size() - pullInto.filled);
+    pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
     resolver.resolve(js, ReadResult {
-      .value = js.v8Ref(pullInto.store.createHandle(js)),
+      .value = js.v8Ref(pullInto.store.getHandle(js)),
       .done = false
     });
   } else {
     // Otherwise, we set the length to zero
-    pullInto.store.trim(pullInto.store.size());
+    pullInto.store.trim(js, pullInto.store.size());
     KJ_ASSERT(pullInto.store.size() == 0);
     resolver.resolve(js, ReadResult {
-      .value = js.v8Ref(pullInto.store.createHandle(js)),
+      .value = js.v8Ref(pullInto.store.getHandle(js)),
       .done = true
     });
   }
@@ -282,9 +282,9 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
 }
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
-  pullInto.store.trim(pullInto.store.size() - pullInto.filled);
+  pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
   resolver.resolve(js, ReadResult {
-    .value = js.v8Ref(pullInto.store.createHandle(js)),
+    .value = js.v8Ref(pullInto.store.getHandle(js)),
     .done = false
   });
   maybeInvalidateByobRequest(byobReadRequest);
@@ -307,14 +307,14 @@ kj::Own<ByteQueue::ByobRequest> ByteQueue::ReadRequest::makeByobReadRequest(
 
 #pragma region ByteQueue::Entry
 
-ByteQueue::Entry::Entry(jsg::BackingStore store) : store(kj::mv(store)) {}
+ByteQueue::Entry::Entry(jsg::BufferSource store) : store(kj::mv(store)) {}
 
 kj::ArrayPtr<kj::byte> ByteQueue::Entry::toArrayPtr() { return store.asArrayPtr(); }
 
 size_t ByteQueue::Entry::getSize() const { return store.size(); }
 
 kj::Own<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
-  return kj::heap<ByteQueue::Entry>(store.clone());
+  return kj::heap<ByteQueue::Entry>(store.clone(js));
 }
 
 void ByteQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {}
@@ -432,15 +432,20 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   if (queue.getConsumerCount() > 1) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
-    auto entry = kj::heap<Entry>(jsg::BackingStore::alloc(js, amount));
+    KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, amount)) {
 
-    auto start = sourcePtr.begin() + req.pullInto.filled;
+      auto entry = kj::heap<Entry>(kj::mv(store));
 
-    // Safely copy the data over into the entry.
-    std::copy(start, start + amount, entry->toArrayPtr().begin());
+      auto start = sourcePtr.begin() + req.pullInto.filled;
 
-    // Push the entry into the other consumers.
-    queue.push(js, kj::mv(entry), consumer);
+      // Safely copy the data over into the entry.
+      std::copy(start, start + amount, entry->toArrayPtr().begin());
+
+      // Push the entry into the other consumers.
+      queue.push(js, kj::mv(entry), consumer);
+    } else {
+      js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
+    }
   }
 
   // For this consumer, if the number of bytes provided in the response does not
@@ -473,9 +478,14 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
 
   if (unaligned > 0) {
     auto start = sourcePtr.begin() + (amount - unaligned);
-    auto excess = kj::heap<Entry>(jsg::BackingStore::alloc(js, unaligned));
-    std::copy(start, start + unaligned, excess->toArrayPtr().begin());
-    consumer.push(js, kj::mv(excess));
+
+    KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, unaligned)) {
+      auto excess = kj::heap<Entry>(kj::mv(store));
+      std::copy(start, start + unaligned, excess->toArrayPtr().begin());
+      consumer.push(js, kj::mv(excess));
+    } else {
+      js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
+    }
   }
 
   return true;
@@ -501,7 +511,7 @@ bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource
                RangeError,
                "The view is not the correct length.");
 
-  req.pullInto.store = view.detach(js);
+  req.pullInto.store = jsg::BufferSource(js, view.detach(js));
   return respond(js, amount);
 }
 
@@ -514,10 +524,10 @@ size_t ByteQueue::ByobRequest::getAtLeast() const {
 
 v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
   KJ_IF_SOME(req, request) {
-    return req.pullInto.store.getTypedViewSlice<v8::Uint8Array>(
+    return req.pullInto.store.getTypedViewSlice<v8::Uint8Array>(js,
       req.pullInto.filled,
       req.pullInto.store.size()
-    ).createHandle(js).As<v8::Uint8Array>();
+    ).getHandle(js).As<v8::Uint8Array>();
   }
   return v8::Local<v8::Uint8Array>();
 }

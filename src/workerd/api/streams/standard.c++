@@ -1860,19 +1860,25 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
         s.consumer->read(js, ByteQueue::ReadRequest(
           kj::mv(prp.resolver),
           {
-            .store = source.detach(js),
+            .store = jsg::BufferSource(js, source.detach(js)),
             .atLeast = atLeast,
             .type = ByteQueue::ReadRequest::Type::BYOB,
           }
         ));
       } else {
-        s.consumer->read(js, ByteQueue::ReadRequest(
-          kj::mv(prp.resolver),
-          {
-            .store = jsg::BackingStore::alloc(js, autoAllocateChunkSize),
-            .type = ByteQueue::ReadRequest::Type::BYOB,
-          }
-        ));
+        KJ_IF_SOME(store, jsg::BufferSource::tryAlloc(js, autoAllocateChunkSize)) {
+          // Ensure that the handle is created here so that the size of the buffer
+          // is accounted for in the isolate memory tracking.
+          s.consumer->read(js, ByteQueue::ReadRequest(
+            kj::mv(prp.resolver),
+            {
+              .store = kj::mv(store),
+              .type = ByteQueue::ReadRequest::Type::BYOB,
+            }
+          ));
+        } else {
+          prp.resolver.reject(js, js.v8Error("Failed to allocate buffer for read."));
+        }
       }
 
       return kj::mv(prp.promise);
@@ -2103,7 +2109,7 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
       // While this particular request may be invalidated, there are still
       // other branches we can push the data to. Let's do so.
       jsg::BufferSource source(js, impl.view.getHandle(js));
-      auto entry = kj::heap<ByteQueue::Entry>(source.detach(js));
+      auto entry = kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, source.detach(js)));
       impl.controller->impl.enqueue(js, kj::mv(entry), impl.controller.addRef());
     } else {
       JSG_REQUIRE(bytesWritten > 0,
@@ -2141,7 +2147,7 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
     if (impl.readRequest->isInvalidated() && impl.controller->impl.consumerCount() >= 1) {
       // While this particular request may be invalidated, there are still
       // other branches we can push the data to. Let's do so.
-      auto entry = kj::heap<ByteQueue::Entry>(view.detach(js));
+      auto entry = kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, view.detach(js)));
       impl.controller->impl.enqueue(js, kj::mv(entry), impl.controller.addRef());
     } else {
       JSG_REQUIRE(view.size() > 0,
@@ -2234,7 +2240,7 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chun
     byobRequest->invalidate(js);
   }
 
-  impl.enqueue(js, kj::heap<ByteQueue::Entry>(chunk.detach(js)), JSG_THIS);
+  impl.enqueue(js, kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, chunk.detach(js))), JSG_THIS);
 }
 
 void ReadableByteStreamController::error(jsg::Lock& js, v8::Local<v8::Value> reason) {
@@ -2750,7 +2756,7 @@ public:
 private:
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, jsg::Ref<ReadableStream>> state;
   uint64_t limit;
-  kj::Vector<jsg::BackingStore> parts;
+  kj::Vector<jsg::BufferSource> parts;
   uint64_t runningTotal = 0;
 
   jsg::Promise<PartList> loop(jsg::Lock& js) {
@@ -2802,7 +2808,7 @@ private:
           }
 
           runningTotal += backing.size();
-          parts.add(kj::mv(backing));
+          parts.add(jsg::BufferSource(js, kj::mv(backing)));
           return loop(js);
         };
 
