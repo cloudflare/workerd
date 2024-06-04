@@ -5,7 +5,6 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.capnp.h>
-#include <workerd/util/autogate.h>
 #include "observer.h"
 #include "url.h"
 #include <kj/async-io.h>
@@ -109,7 +108,6 @@ struct TestContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
 
 #define PREAMBLE(fn)                                                                     \
-  util::Autogate::initEmptyAutogateForTesting();                                         \
   TestIsolate isolate(v8System, 123, kj::heap<IsolateObserver>());                       \
   runInV8Stack([&](auto& stackScope) {                                                   \
     TestIsolate::Lock lock(isolate, stackScope);                                         \

@@ -3,7 +3,6 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/observer.h>
-#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 namespace {
@@ -16,7 +15,6 @@ struct RsContext: public jsg::Object, public jsg::ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(RsIsolate, RsContext, ReadResult);
 
 void preamble(auto callback) {
-  util::Autogate::initEmptyAutogateForTesting();
   RsIsolate isolate(v8System, kj::heap<jsg::IsolateObserver>());
   isolate.runInLockScope([&](RsIsolate::Lock& lock) {
     JSG_WITHIN_CONTEXT_SCOPE(lock,

@@ -8,7 +8,6 @@
 #include "jsg.h"
 #include "setup.h"
 #include <kj/test.h>
-#include <workerd/util/autogate.h>
 
 namespace workerd::jsg::test {
 
@@ -27,9 +26,7 @@ class Evaluator {
   //   in cases that the isolate includes types that require configuration, but currently the
   //   type is always default-constructed. What if you want to specify a test config?
 public:
-  explicit Evaluator(V8System& v8System) : v8System(v8System) {
-    util::Autogate::initEmptyAutogateForTesting();
-  }
+  explicit Evaluator(V8System& v8System) : v8System(v8System) {}
 
   IsolateType& getIsolate() {
     // Slightly more efficient to only instantiate each isolate type once (17s vs. 20s):
