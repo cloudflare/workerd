@@ -76,16 +76,16 @@ export const tests = {
 
         {
             // Test gateway option
-            const resp = await env.ai.run('rawInputs', {prompt: 'test'}, {gatewayId: 'my-gateway'})
+            const resp = await env.ai.run('rawInputs', {prompt: 'test'}, {gateway: {id: 'my-gateway', skipCache: true}})
 
-            assert.deepStrictEqual(resp, { inputs: {prompt: 'test'}, options: {gatewayId: 'my-gateway'} });
+            assert.deepStrictEqual(resp, { inputs: {prompt: 'test'}, options: {gateway: {id: 'my-gateway', skipCache: true}}});
         }
 
         {
             // Test unwanted options not getting sent upstream
-            const resp = await env.ai.run('rawInputs', {prompt: 'test'}, {extraHeaders: 'test', example: 123, gatewayId: 'my-gateway'})
+            const resp = await env.ai.run('rawInputs', {prompt: 'test'}, {extraHeaders: 'test', example: 123, gateway: {id: 'my-gateway', metadata: { "employee": 1233}}})
 
-            assert.deepStrictEqual(resp, { inputs: {prompt: 'test'}, options: {example: 123, gatewayId: 'my-gateway'} });
+            assert.deepStrictEqual(resp, { inputs: {prompt: 'test'}, options: {example: 123, gateway: {id: 'my-gateway', metadata: { "employee": 1233}}} });
         }
     },
 }

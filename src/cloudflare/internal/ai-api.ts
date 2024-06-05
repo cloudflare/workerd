@@ -17,8 +17,15 @@ export type SessionOptions = {  // Deprecated, do not use this
   extraHeaders?: object;
 }
 
+export type GatewayOptions = {
+  id: string;
+  cacheTtl?: number
+  skipCache?: boolean
+  metadata?: Record<string, number | string | boolean | null | bigint>;
+}
+
 export type AiOptions = {
-  gatewayId?: string;
+  gateway?: GatewayOptions;
 
   prefix?: string;
   extraHeaders?: object;

@@ -138,8 +138,14 @@ export declare abstract class BaseAiTranslation {
   inputs: AiTranslationInput;
   postProcessedOutputs: AiTranslationOutput;
 }
+export type GatewayOptions = {
+  id: string;
+  cacheTtl?: number;
+  skipCache?: boolean;
+  metadata?: Record<string, number | string | boolean | null | bigint>;
+};
 export type AiOptions = {
-  gatewayId?: string;
+  gateway?: GatewayOptions;
   prefix?: string;
   extraHeaders?: object;
 };
