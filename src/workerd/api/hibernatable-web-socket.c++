@@ -213,13 +213,13 @@ HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(
     kj::TaskSet& waitUntilTasks,
     kj::Own<HibernationReader> params,
     kj::Maybe<Worker::Actor::HibernationManager&> manager)
-  : typeId(typeId), waitUntilTasks(waitUntilTasks), params(kj::mv(params)) {}
+  : typeId(typeId), params(kj::mv(params)) {}
 HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(
     uint16_t typeId,
     kj::TaskSet& waitUntilTasks,
     HibernatableSocketParams params,
     Worker::Actor::HibernationManager& manager)
-  : typeId(typeId), waitUntilTasks(waitUntilTasks), params(kj::mv(params)), manager(manager) {}
+  : typeId(typeId), params(kj::mv(params)), manager(manager) {}
 
 HibernatableSocketParams HibernatableWebSocketCustomEventImpl::consumeParams() {
   KJ_IF_SOME(p, params.tryGet<kj::Own<HibernationReader>>()) {

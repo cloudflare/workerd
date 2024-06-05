@@ -90,7 +90,6 @@ private:
   HibernatableSocketParams consumeParams();
 
   uint16_t typeId;
-  kj::TaskSet& waitUntilTasks;
   kj::OneOf<HibernatableSocketParams, kj::Own<HibernationReader>> params;
   kj::Maybe<uint32_t> timeoutMs;
   kj::Maybe<Worker::Actor::HibernationManager&> manager;
