@@ -119,14 +119,7 @@ public:
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha384, getSha384);
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha512, getSha512);
       JSG_METHOD(toJSON);
-      JSG_TS_OVERRIDE(R2Checksums {
-        readonly md5?: ArrayBuffer;
-        readonly sha1?: ArrayBuffer;
-        readonly sha256?: ArrayBuffer;
-        readonly sha384?: ArrayBuffer;
-        readonly sha512?: ArrayBuffer;
-        toJSON(): R2StringChecksums;
-      });
+      JSG_TS_OVERRIDE(R2Checksums);
     }
 
     jsg::Optional<kj::Array<kj::byte>> md5;
