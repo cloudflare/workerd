@@ -331,6 +331,14 @@ kj::uint Url::hashCode() const {
   return kj::hashCode(getHref());
 }
 
+kj::Array<kj::byte> Url::percentDecode(kj::ArrayPtr<const kj::byte> input) {
+  std::string_view data(input.asChars().begin(), input.size());
+  auto str = ada::unicode::percent_decode(data, 0);
+  auto ret = kj::heapArray<kj::byte>(str.size());
+  memcpy(ret.begin(), str.data(), str.size());
+  return kj::mv(ret);
+}
+
 const Url operator "" _url(const char* str, size_t size) {
   return KJ_ASSERT_NONNULL(Url::tryParse(kj::ArrayPtr<const char>(str, size)));
 }

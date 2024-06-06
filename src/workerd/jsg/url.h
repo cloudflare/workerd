@@ -124,6 +124,8 @@ public:
                                         getSearch().size());
   }
 
+  static kj::Array<kj::byte> percentDecode(kj::ArrayPtr<const kj::byte> input);
+
 private:
   Url(kj::Own<void> inner);
   kj::Own<void> inner;

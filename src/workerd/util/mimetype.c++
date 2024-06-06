@@ -82,7 +82,7 @@ MimeType MimeType::parse(kj::StringPtr input, ParseOptions options) {
   return KJ_ASSERT_NONNULL(tryParse(input, options));
 }
 
-kj::Maybe<MimeType> MimeType::tryParse(kj::StringPtr input, ParseOptions options) {
+kj::Maybe<MimeType> MimeType::tryParse(kj::ArrayPtr<const char> input, ParseOptions options) {
   return tryParseImpl(input, kj::mv(options));
 }
 
@@ -321,7 +321,9 @@ kj::String KJ_STRINGIFY(const MimeType& mimeType) {
 }
 
 const kj::StringPtr MimeType::PLAINTEXT_STRING = "text/plain;charset=UTF-8"_kj;
+const kj::StringPtr MimeType::PLAINTEXT_ASCII_STRING = "text/plain;charset=US-ASCII"_kj;
 const MimeType MimeType::PLAINTEXT = MimeType::parse(PLAINTEXT_STRING);
+const MimeType MimeType::PLAINTEXT_ASCII = MimeType::parse(PLAINTEXT_ASCII_STRING);
 const MimeType MimeType::CSS = MimeType("text"_kj, "css"_kj);
 const MimeType MimeType::HTML = MimeType("text"_kj, "html"_kj);
 const MimeType MimeType::TEXT_JAVASCRIPT = MimeType("text"_kj, "javascript"_kj);

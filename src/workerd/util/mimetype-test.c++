@@ -391,11 +391,11 @@ KJ_TEST("WHATWG tests") {
   }
 
   KJ_ASSERT(MimeType::JSON ==
-            KJ_ASSERT_NONNULL(MimeType::tryParse("application/json;charset=nothing")));
+            KJ_ASSERT_NONNULL(MimeType::tryParse("application/json;charset=nothing"_kj)));
   KJ_ASSERT(MimeType::JSON ==
-            KJ_ASSERT_NONNULL(MimeType::tryParse("application/json;")));
+            KJ_ASSERT_NONNULL(MimeType::tryParse("application/json;"_kj)));
   KJ_ASSERT(MimeType::JSON ==
-            KJ_ASSERT_NONNULL(MimeType::tryParse("application/json;char=\"UTF-8\"")));
+            KJ_ASSERT_NONNULL(MimeType::tryParse("application/json;char=\"UTF-8\""_kj)));
   KJ_ASSERT(MimeType::isJson(MimeType::JSON));
   KJ_ASSERT(MimeType::isJson(MimeType::MANIFEST_JSON));
   KJ_ASSERT(MimeType::isJavascript(MimeType::JAVASCRIPT));
@@ -407,7 +407,7 @@ KJ_TEST("WHATWG tests") {
   KJ_ASSERT(MimeType::isText(MimeType::JAVASCRIPT));
   KJ_ASSERT(MimeType::isText(MimeType::XJAVASCRIPT));
   KJ_ASSERT(MimeType::isText(
-      KJ_ASSERT_NONNULL(MimeType::tryParse("application/json; charset=\"utf-8\""))));
+      KJ_ASSERT_NONNULL(MimeType::tryParse("application/json; charset=\"utf-8\""_kj))));
 }
 
 KJ_TEST("Extract Mime Type") {
