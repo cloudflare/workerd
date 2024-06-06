@@ -3487,7 +3487,7 @@ void WritableStreamJsController::releaseWriter(
 }
 
 kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamJsController::removeSink(jsg::Lock& js) {
-  KJ_UNIMPLEMENTED("WritableStreamJsController::removeSink is not implemented");
+  return kj::none;
 }
 void WritableStreamJsController::detach(jsg::Lock& js) {
   KJ_UNIMPLEMENTED("WritableStreamJsController::detach is not implemented");
