@@ -18,6 +18,7 @@ namespace workerd::api {
 
 namespace workerd::api::public_beta {
 
+kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr);
 kj::ArrayPtr<kj::StringPtr> fillR2Path(kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket);
 
 class R2MultipartUpload;
@@ -90,23 +91,24 @@ public:
 
   class Checksums: public jsg::Object {
   public:
-    Checksums() = default;
+    Checksums(
+      jsg::Optional<kj::Array<kj::byte>> md5,
+      jsg::Optional<kj::Array<kj::byte>> sha1,
+      jsg::Optional<kj::Array<kj::byte>> sha256,
+      jsg::Optional<kj::Array<kj::byte>> sha384,
+      jsg::Optional<kj::Array<kj::byte>> sha512
+    ):
+      md5(kj::mv(md5)),
+      sha1(kj::mv(sha1)),
+      sha256(kj::mv(sha256)),
+      sha384(kj::mv(sha384)),
+      sha512(kj::mv(sha512)) {}
 
-    jsg::Optional<kj::ArrayPtr<kj::byte>> getMd5() {
-      return md5.map([](auto& data) { return data.asPtr(); });
-    }
-    jsg::Optional<kj::ArrayPtr<kj::byte>> getSha1() {
-      return sha1.map([](auto& data) { return data.asPtr(); });
-    }
-    jsg::Optional<kj::ArrayPtr<kj::byte>> getSha256() {
-      return sha256.map([](auto& data) { return data.asPtr(); });
-    }
-    jsg::Optional<kj::ArrayPtr<kj::byte>> getSha384() {
-      return sha384.map([](auto& data) { return data.asPtr(); });
-    }
-    jsg::Optional<kj::ArrayPtr<kj::byte>> getSha512() {
-      return sha512.map([](auto& data) { return data.asPtr(); });
-    }
+    jsg::Optional<kj::Array<kj::byte>> getMd5() const { return md5.map(cloneByteArray); }
+    jsg::Optional<kj::Array<kj::byte>> getSha1() const { return sha1.map(cloneByteArray); }
+    jsg::Optional<kj::Array<kj::byte>> getSha256() const { return sha256.map(cloneByteArray); }
+    jsg::Optional<kj::Array<kj::byte>> getSha384() const { return sha384.map(cloneByteArray); }
+    jsg::Optional<kj::Array<kj::byte>> getSha512() const { return sha512.map(cloneByteArray); }
 
     StringChecksums toJSON();
 
@@ -117,31 +119,21 @@ public:
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha384, getSha384);
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha512, getSha512);
       JSG_METHOD(toJSON);
-      JSG_TS_OVERRIDE(R2Checksums {
-        readonly md5?: ArrayBuffer;
-        readonly sha1?: ArrayBuffer;
-        readonly sha256?: ArrayBuffer;
-        readonly sha384?: ArrayBuffer;
-        readonly sha512?: ArrayBuffer;
-        toJSON(): R2StringChecksums;
-      });
+      JSG_TS_OVERRIDE(R2Checksums);
     }
 
-    // Using FixedArrays here is a trade off. The Checksums class
-    // ends up being a bit larger but we avoid multiple heap allocations
-    // and copies.
-    jsg::Optional<kj::FixedArray<kj::byte, 16>> md5;
-    jsg::Optional<kj::FixedArray<kj::byte, 20>> sha1;
-    jsg::Optional<kj::FixedArray<kj::byte, 32>> sha256;
-    jsg::Optional<kj::FixedArray<kj::byte, 48>> sha384;
-    jsg::Optional<kj::FixedArray<kj::byte, 64>> sha512;
+    jsg::Optional<kj::Array<kj::byte>> md5;
+    jsg::Optional<kj::Array<kj::byte>> sha1;
+    jsg::Optional<kj::Array<kj::byte>> sha256;
+    jsg::Optional<kj::Array<kj::byte>> sha384;
+    jsg::Optional<kj::Array<kj::byte>> sha512;
 
     void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-      if (md5 != kj::none) tracker.trackFieldWithSize("md5", 16);
-      if (sha1 != kj::none) tracker.trackFieldWithSize("sha1", 20);
-      if (sha256 != kj::none) tracker.trackFieldWithSize("sha256", 32);
-      if (sha384 != kj::none) tracker.trackFieldWithSize("sha384", 48);
-      if (sha512 != kj::none) tracker.trackFieldWithSize("sha512", 64);
+      tracker.trackField("md5", md5);
+      tracker.trackField("sha1", sha1);
+      tracker.trackField("sha256", sha256);
+      tracker.trackField("sha384", sha384);
+      tracker.trackField("sha512", sha512);
     }
   };
 
