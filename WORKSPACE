@@ -479,6 +479,8 @@ http_archive(
         "//:patches/v8/0015-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
         "//:patches/v8/0016-Expose-v8-Symbol-GetDispose.patch",
         "//:patches/v8/0017-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE-V8_COMPR.patch",
+        "//:patches/v8/0018-EW-3483-CPU-profiler-patches.patch",
+        "//:patches/v8/0019-EW-6624-Profiler-fix-for-V8-versions-10.0-and-above.patch",
     ],
     integrity = "sha256-5gW+N4R+oVxzMZexrqgp14gU42bsFBc5RHPN2oOrTTw=",
     strip_prefix = "v8-12.6.228.9",

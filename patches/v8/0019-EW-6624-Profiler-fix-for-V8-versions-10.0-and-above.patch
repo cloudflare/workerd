@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Samuel Warfield <swarfield@cloudflare.com>
+Date: Fri, 5 Aug 2022 09:43:13 -0600
+Subject: EW-6624 Profiler fix for V8 versions 10.0 and above.
+
+There was an update to the sampler that did thread lock lookups with
+the V8 Thread ID whereas the Runtime allocates each isolate to an
+individual thread, so the linux thread ID must be used.
+
+diff --git a/src/execution/v8threads.h b/src/execution/v8threads.h
+index f87a6d11944895d7a6e7bf22ce154d695b809a5d..00888520a8cb164dff7612f4d829c508176e35f5 100644
+--- a/src/execution/v8threads.h
++++ b/src/execution/v8threads.h
+@@ -73,8 +73,8 @@ class ThreadManager {
+   bool IsLockedByCurrentThread() const {
+     return mutex_owner_.load(std::memory_order_relaxed) == ThreadId::Current();
+   }
+-  bool IsLockedByThread(ThreadId id) const {
+-    return mutex_owner_.load(std::memory_order_relaxed) == id;
++  bool IsLockedByThread() const {
++    return GetLockedByThreadId() != 0;
+   }
+ 
+   pid_t GetLockedByThreadId() const {
+diff --git a/src/logging/log.cc b/src/logging/log.cc
+index d990a57783f1111c15467bd846b17e324a252b8d..9b491f51ce0073bb9997d6c81a94ab939c025722 100644
+--- a/src/logging/log.cc
++++ b/src/logging/log.cc
+@@ -1127,8 +1127,7 @@ class Ticker : public sampler::Sampler {
+     if (!profiler_) return;
+     Isolate* isolate = reinterpret_cast<Isolate*>(this->isolate());
+     if (isolate->was_locker_ever_used() &&
+-        (!isolate->thread_manager()->IsLockedByThread(
+-             perThreadData_->thread_id()) ||
++        (!isolate->thread_manager()->IsLockedByThread() ||
+          perThreadData_->thread_state() != nullptr))
+       return;
+ #if V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
+diff --git a/src/profiler/cpu-profiler.cc b/src/profiler/cpu-profiler.cc
+index a6bff4732933b22ee3e68f3ba82bdf6bfa3e5e88..a27f9fc487b48aaa8d8377d1918fa2c7249864af 100644
+--- a/src/profiler/cpu-profiler.cc
++++ b/src/profiler/cpu-profiler.cc
+@@ -41,8 +41,7 @@ class CpuSampler : public sampler::Sampler {
+   void SampleStack(const v8::RegisterState& regs) override {
+     Isolate* isolate = reinterpret_cast<Isolate*>(this->isolate());
+     if (isolate->was_locker_ever_used() &&
+-        (!isolate->thread_manager()->IsLockedByThread(
+-             perThreadData_->thread_id()) ||
++        (!isolate->thread_manager()->IsLockedByThread() ||
+          perThreadData_->thread_state() != nullptr)) {
+       ProfilerStats::Instance()->AddReason(
+           ProfilerStats::Reason::kIsolateNotLocked);
