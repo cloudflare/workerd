@@ -33,7 +33,7 @@ async function loadBundle(requirement) {
   const url = new URL(WORKERD_INDEX_URL + filename);
   const response = await fetch(url);
 
-  const compressed = response.body.arrayBuffer();
+  const compressed = await response.arrayBuffer();
   const decompressed = await decompressArrayBuffer(compressed);
 
   DiskCache.put(filename, compressed);
