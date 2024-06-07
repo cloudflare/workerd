@@ -236,7 +236,10 @@ jsg::Ref<Socket> connectImplNoOutputLock(
         IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
   }
 
-  auto jsRequest = Request::constructor(js, kj::str(addressStr), kj::none);
+  // TODO(cleanup): The jsRequest here appears to only be used to serialize the
+  // cf blob json, which seems quite wasteful. We ought to be able to avoid the
+  // extra allocations and work here.
+  auto jsRequest = Request::constructor(js, kj::str("tcp://", addressStr), kj::none);
   kj::Own<WorkerInterface> client = actualFetcher->getClient(
       ioContext, jsRequest->serializeCfBlobJson(js), "connect"_kjc);
 
