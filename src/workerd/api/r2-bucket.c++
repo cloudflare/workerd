@@ -846,8 +846,27 @@ kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(
     // which just results in an empty list if it's out of bounds by 1.
     return parseConditionalEtagHeader(condHeader.slice(nextComma + 1), kj::mv(etagAccumulator));
   } else if (leadingCommaRequired) {
-  // Did not find a leading comma, and we expected a leading comma before any further etags
-    JSG_FAIL_REQUIRE(Error, "Comma was expected to separate etags");
+    // we don't need to include nextComma in this min check since in this else branch nextComma is
+    // always larger than at least one of nextWildcard, nextQuotation and nextWeak
+    size_t firstEncounteredProblem = std::min({nextWildcard, nextQuotation, nextWeak});
+
+    kj::String failureReason;
+    if (firstEncounteredProblem == nextWildcard) {
+      failureReason = kj::str("Encountered a wildcard character '*' instead.");
+    } else if (firstEncounteredProblem == nextQuotation) {
+      failureReason = kj::str(
+        "Encountered a double quote character '\"' instead. "
+        "This would otherwise indicate the start of a new strong etag.");
+    } else if (firstEncounteredProblem == nextWeak) {
+      failureReason = kj::str(
+        "Encountered a weak quotation character 'W' instead. "
+        "This would otherwise indicate the start of a new weak etag.");
+    } else {
+      KJ_FAIL_ASSERT("We shouldn't be able to reach this point. The above etag parsing code is incorrect.");
+    }
+
+    // Did not find a leading comma, and we expected a leading comma before any further etags
+    JSG_FAIL_REQUIRE(Error, "Comma was expected to separate etags. ", failureReason);
   }
 
   if (nextWildcard < nextQuotation) {
