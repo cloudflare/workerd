@@ -10,6 +10,7 @@ import {
   generatePrimeSync,
   checkPrime,
   checkPrimeSync,
+  timingSafeEqual,
 } from 'node:crypto';
 
 import {
@@ -376,5 +377,11 @@ export const test = {
       });
       await p.promise;
     }
+  }
+};
+
+export const timingSafeEqualTest = {
+  test() {
+    timingSafeEqual(new Uint8Array(1), new Uint8Array(1));
   }
 };
