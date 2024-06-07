@@ -113,19 +113,44 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
   if (responseReader.hasChecksums()) {
     R2Checksums::Reader checksumsBuilder = responseReader.getChecksums();
     if (checksumsBuilder.hasMd5()) {
-      checksums->md5 = kj::heapArray(checksumsBuilder.getMd5());
+      auto md5 = checksumsBuilder.getMd5();
+      if (md5.size() != 16) {
+        KJ_LOG(WARNING, "NOSENTRY MD5 checksum is not 16 bytes long",
+               md5.size(), md5.asBytes());
+      }
+      checksums->md5 = kj::heapArray(md5);
     }
     if (checksumsBuilder.hasSha1()) {
-      checksums->sha1 = kj::heapArray(checksumsBuilder.getSha1());
+      auto sha1 = checksumsBuilder.getSha1();
+      if (sha1.size() != 20) {
+        KJ_LOG(WARNING, "NOSENTRY SHA-1 checksum is not 20 bytes long",
+               sha1.size(), sha1.asBytes());
+      }
+      checksums->sha1 = kj::heapArray(sha1);
     }
     if (checksumsBuilder.hasSha256()) {
-      checksums->sha256 = kj::heapArray(checksumsBuilder.getSha256());
+      auto sha256 = checksumsBuilder.getSha256();
+      if (sha256.size() != 32) {
+        KJ_LOG(WARNING, "NOSENTRY SHA-256 checksum is not 32 bytes long",
+               sha256.size(), sha256.asBytes());
+      }
+      checksums->sha256 = kj::heapArray(sha256);
     }
     if (checksumsBuilder.hasSha384()) {
-      checksums->sha384 = kj::heapArray(checksumsBuilder.getSha384());
+      auto sha384 = checksumsBuilder.getSha384();
+      if (sha384.size() != 48) {
+        KJ_LOG(WARNING, "NOSENTRY SHA-384 checksum is not 48 bytes long",
+               sha384.size(), sha384.asBytes());
+      }
+      checksums->sha384 = kj::heapArray(sha384);
     }
     if (checksumsBuilder.hasSha512()) {
-      checksums->sha512 = kj::heapArray(checksumsBuilder.getSha512());
+      auto sha512 = checksumsBuilder.getSha512();
+      if (sha512.size() != 64) {
+        KJ_LOG(WARNING, "NOSENTRY SHA-512 checksum is not 64 bytes long",
+               sha512.size(), sha512.asBytes());
+      }
+      checksums->sha512 = kj::heapArray(sha512);
     }
   }
 
