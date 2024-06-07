@@ -10,8 +10,11 @@ import {
 
 export const getRandomValues = crypto.getRandomValues;
 export const subtle = crypto.subtle;
-export const timingSafeEqual = (subtle as any).timingSafeEqual;
 export const webcrypto = crypto;
+
+export function timingSafeEqual(a: any, b: any) {
+  return (subtle as any).timingSafeEqual(a, b);
+}
 
 import {
   DiffieHellman,
