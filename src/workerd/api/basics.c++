@@ -5,6 +5,7 @@
 #include "actor-state.h"
 #include "basics.h"
 #include "global-scope.h"
+#include "observable.h"
 #include <kj/async.h>
 #include <kj/vector.h>
 #include <workerd/io/io-context.h>
@@ -596,7 +597,7 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
 jsg::Ref<AbortSignal> AbortSignal::any(
     jsg::Lock& js,
     kj::Array<jsg::Ref<AbortSignal>> signals,
-    const jsg::TypeHandler<EventTarget::HandlerFunction>& handler) {
+    const jsg::TypeHandler<HandlerFunction>& handler) {
   // If nothing was passed in, we can just return a signal that never aborts.
   if (signals.size() == 0) {
     return jsg::alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
@@ -844,6 +845,18 @@ void EventTarget::EventHandlerSet::jsgGetMemoryInfo(jsg::MemoryTracker& tracker)
 
 void EventTarget::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("typeMap", typeMap);
+}
+
+jsg::Ref<Observable> EventTarget::on(jsg::Lock& js, kj::String type,
+    jsg::Optional<ObservableEventListenerOptions> options,
+    const jsg::TypeHandler<HandlerFunction>& handler,
+    const jsg::TypeHandler<jsg::Ref<Observable>>& observableHandler,
+    const jsg::TypeHandler<jsg::Promise<jsg::JsRef<jsg::JsValue>>>& promiseHandler,
+    const jsg::TypeHandler<jsg::AsyncGenerator<jsg::JsRef<jsg::JsValue>>>& asyncGeneratorHandler,
+    const jsg::TypeHandler<jsg::Ref<Event>>& eventHandler) {
+  return addObservableHandler(js, JSG_THIS, kj::mv(type), kj::mv(options),
+                              handler, observableHandler, promiseHandler,
+                              asyncGeneratorHandler, eventHandler);
 }
 
 }  // namespace workerd::api

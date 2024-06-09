@@ -109,7 +109,7 @@ public:
   inline bool isFinished() const { return state.template is<Finished>(); }
 
   void visitForGc(GcVisitor& visitor) {
-    KJ_IF_SOME(active, state) {
+    KJ_IF_SOME(active, state.template tryGet<Active>()) {
       visitor.visit(active.maybeNext, active.maybeReturn, active.maybeThrow);
     }
   }
@@ -333,7 +333,7 @@ public:
 
   void visitForGc(GcVisitor& visitor) {
     KJ_IF_SOME(i, impl) {
-      i.visitForGc(visitor);
+      i->visitForGc(visitor);
     }
   }
 
@@ -553,13 +553,21 @@ public:
   v8::Local<v8::Object> wrap(
       v8::Local<v8::Context>,
       kj::Maybe<v8::Local<v8::Object>>,
-      Generator<T>&&) = delete;
+      Generator<T>&&) {
+    // We can't delete it because we need to be able to get
+    // a TypeHandler for it.
+    KJ_UNIMPLEMENTED("Not implemented");
+  }
 
   template <typename T>
   v8::Local<v8::Object> wrap(
       v8::Local<v8::Context>,
       kj::Maybe<v8::Local<v8::Object>>,
-      AsyncGenerator<T>&&) = delete;
+      AsyncGenerator<T>&&) {
+    // We can't delete it because we need to be able to get
+    // a TypeHandler for it.
+    KJ_UNIMPLEMENTED("Not implemented");
+  }
 
   template <typename T>
   v8::Local<v8::Object> wrap(

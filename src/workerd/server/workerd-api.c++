@@ -20,6 +20,7 @@
 #include <workerd/api/hyperdrive.h>
 #include <workerd/api/kv.h>
 #include <workerd/api/modules.h>
+#include <workerd/api/basics.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/scheduled.h>
