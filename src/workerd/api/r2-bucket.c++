@@ -127,6 +127,7 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
     if (checksumsBuilder.hasMd5()) {
       auto md5 = checksumsBuilder.getMd5();
       logIfMismatchedChecksumLength(16, md5, responseReader);
+      checksums->md5 = kj::heapArray(md5);
     }
     if (checksumsBuilder.hasSha1()) {
       auto sha1 = checksumsBuilder.getSha1();
