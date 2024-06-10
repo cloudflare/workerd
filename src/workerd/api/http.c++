@@ -782,6 +782,13 @@ jsg::Promise<kj::Array<byte>> Body::arrayBuffer(jsg::Lock& js) {
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
   return js.resolvedPromise(kj::Array<byte>());
 }
+
+jsg::Promise<jsg::BufferSource> Body::bytes(jsg::Lock& js) {
+  return arrayBuffer(js).then(js, [](jsg::Lock& js, kj::Array<kj::byte> data) {
+    return js.bytes(kj::mv(data));
+  });
+}
+
 jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
     return js.evalNow([&] {

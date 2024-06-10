@@ -41,6 +41,7 @@ public:
                         jsg::Optional<kj::String> type);
 
   jsg::Promise<kj::Array<kj::byte>> arrayBuffer(jsg::Lock& js);
+  jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
   jsg::Promise<kj::String> text(jsg::Lock& js);
   jsg::Ref<ReadableStream> stream();
 
@@ -55,8 +56,13 @@ public:
 
     JSG_METHOD(slice);
     JSG_METHOD(arrayBuffer);
+    JSG_METHOD(bytes);
     JSG_METHOD(text);
     JSG_METHOD(stream);
+
+    JSG_TS_OVERRIDE({
+      bytes(): Promise<Uint8Array>;
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

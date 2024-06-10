@@ -195,6 +195,11 @@ jsg::Promise<kj::Array<kj::byte>> Blob::arrayBuffer(jsg::Lock& js) {
   // TODO(perf): Find a way to avoid the copy.
   return js.resolvedPromise(kj::heapArray<byte>(data));
 }
+
+jsg::Promise<jsg::BufferSource> Blob::bytes(jsg::Lock& js) {
+  return js.resolvedPromise(js.bytes(kj::heapArray<byte>(data)));
+}
+
 jsg::Promise<kj::String> Blob::text(jsg::Lock& js) {
   return js.resolvedPromise(kj::str(data.asChars()));
 }

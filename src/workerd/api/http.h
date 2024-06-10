@@ -361,6 +361,7 @@ public:
   kj::Maybe<jsg::Ref<ReadableStream>> getBody();
   bool getBodyUsed();
   jsg::Promise<kj::Array<byte>> arrayBuffer(jsg::Lock& js);
+  jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
   jsg::Promise<kj::String> text(jsg::Lock& js);
   jsg::Promise<jsg::Ref<FormData>> formData(jsg::Lock& js);
   jsg::Promise<jsg::Value> json(jsg::Lock& js);
@@ -375,6 +376,7 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(bodyUsed, getBodyUsed);
     }
     JSG_METHOD(arrayBuffer);
+    JSG_METHOD(bytes);
     JSG_METHOD(text);
     JSG_METHOD(json);
     JSG_METHOD(formData);
@@ -383,7 +385,10 @@ public:
     JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData);
     // All type aliases get inlined when exporting RTTI, but this type alias is included by
     // the official TypeScript types, so users might be depending on it.
-    JSG_TS_OVERRIDE({ json<T>(): Promise<T>; });
+    JSG_TS_OVERRIDE({
+      json<T>(): Promise<T>;
+      bytes(): Promise<Uint8Array>;
+    });
     // Allow JSON body type to be specified
   }
 
