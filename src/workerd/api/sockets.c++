@@ -75,7 +75,7 @@ kj::Maybe<uint64_t> getWritableHighWaterMark(jsg::Optional<SocketOptions>& opts)
 } // namespace
 
 jsg::Ref<Socket> setupSocket(
-    jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection,
+    jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection, kj::String remoteAddress,
     jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
     bool isSecureSocket, kj::String domain, bool isDefaultFetchPort) {
   auto& ioContext = IoContext::current();
@@ -160,6 +160,7 @@ jsg::Ref<Socket> setupSocket(
   auto result = jsg::alloc<Socket>(
       js, ioContext,
       kj::mv(refcountedConnection),
+      kj::mv(remoteAddress),
       kj::mv(readable),
       kj::mv(writable),
       kj::mv(closedPrPair),
@@ -257,7 +258,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   request.connection = request.connection.attach(kj::mv(httpClient));
 
   auto result = setupSocket(
-      js, kj::mv(request.connection), kj::mv(options), kj::mv(tlsStarter),
+      js, kj::mv(request.connection), kj::mv(addressStr), kj::mv(options), kj::mv(tlsStarter),
       httpConnectSettings.useTls, kj::mv(domain), isDefaultFetchPort);
   // `handleProxyStatus` needs an initialised refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor. Also it's only necessary when creating a Socket as a result of
@@ -352,8 +353,9 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // The existing tlsStarter gets consumed and we won't need it again. Pass in an empty tlsStarter
   // to `setupSocket`.
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
-  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)), kj::mv(options),
-      kj::mv(newTlsStarter), true, kj::mv(domain), isDefaultFetchPort);
+  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)),
+      kj::str(remoteAddress), kj::mv(options), kj::mv(newTlsStarter), true,
+      kj::mv(domain), isDefaultFetchPort);
 }
 
 void Socket::handleProxyStatus(
@@ -375,8 +377,12 @@ void Socket::handleProxyStatus(
       }
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {
-      // TODO(later): implement local and remote address in proxy and read it here
-      openedResolver.resolve(js, SocketInfo{ kj::none, kj::none });
+      // In our implementation we do not expose the local address at all simply
+      // because there's no useful value we can provide.
+      openedResolver.resolve(js, SocketInfo{
+        .remoteAddress = kj::str(remoteAddress),
+        .localAddress = kj::none,
+      });
     }
   });
   result.markAsHandled(js);
@@ -398,8 +404,12 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
     if (result != kj::none) {
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
     } else {
-      // TODO(later): implement local and remote address in proxy and read it here
-      openedResolver.resolve(js, SocketInfo{ kj::none, kj::none });
+      // In our implementation we do not expose the local address at all simply
+      // because there's no useful value we can provide.
+      openedResolver.resolve(js, SocketInfo{
+        .remoteAddress = kj::str(remoteAddress),
+        .localAddress = kj::none,
+      });
     }
   });
   result.markAsHandled(js);
