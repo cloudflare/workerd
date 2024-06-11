@@ -12,6 +12,7 @@
 #include <kj/time.h>
 #include <kj/compat/http.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/features.capnp.h>
 #include <workerd/jsg/observer.h>
 
 namespace workerd {
@@ -245,6 +246,37 @@ public:
 
 private:
   Observer& ref;
+};
+
+// Provides counters/observers for various features. The intent is to
+// make it possible to collect metrics on which runtime features are
+// used and how often.
+//
+// There is exactly one instance of this class per worker process.
+class FeatureObserver {
+public:
+  static kj::Own<FeatureObserver> createDefault();
+  static void init(kj::Own<FeatureObserver> instance);
+  static kj::Maybe<FeatureObserver&> get();
+
+  // A "Feature" is just an opaque identifier defined in the features.capnp
+  // file.
+  using Feature = workerd::Features;
+
+  // Called to increment the usage counter for a feature.
+  virtual void use(Feature feature) const {}
+
+  using CollectCallback = kj::Function<void(Feature, const uint64_t)>;
+  // This method is called from the internal metrics collection mechanisn to harvest the
+  // current features and counts that have been recorded by the observer.
+  virtual void collect(CollectCallback&& callback) const {}
+
+  // Records the use of the feature if a FeatureObserver is available.
+  static inline void maybeRecordUse(Feature feature) {
+    KJ_IF_SOME(observer, get()) {
+      observer.use(feature);
+    }
+  }
 };
 
 }  // namespace workerd
