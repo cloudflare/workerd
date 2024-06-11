@@ -177,8 +177,8 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
-        with:
-          version: 9.1.2
+        # version is no longer being defined here, since we can automatically use the version
+        # defined in workers-sdk/package.json instead.
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
