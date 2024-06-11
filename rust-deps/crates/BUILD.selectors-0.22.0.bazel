@@ -32,7 +32,7 @@ rust_library(
     crate_root = "lib.rs",
     edition = "2015",
     proc_macro_deps = [
-        "@crates_vendor__derive_more-0.99.17//:derive_more",
+        "@crates_vendor__derive_more-0.99.18//:derive_more",
     ],
     rustc_flags = [
         "--cap-lints=allow",
@@ -61,7 +61,7 @@ rust_library(
 )
 
 cargo_build_script(
-    name = "selectors_bs",
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -81,6 +81,7 @@ cargo_build_script(
         ],
     ),
     edition = "2015",
+    pkg_name = "selectors",
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -100,6 +101,6 @@ cargo_build_script(
 
 alias(
     name = "build_script_build",
-    actual = ":selectors_bs",
+    actual = ":_bs",
     tags = ["manual"],
 )

@@ -38,7 +38,7 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = "2018",
     proc_macro_deps = [
-        "@crates_vendor__serde_derive-1.0.202//:serde_derive",
+        "@crates_vendor__serde_derive-1.0.203//:serde_derive",
     ],
     rustc_flags = [
         "--cap-lints=allow",
@@ -50,14 +50,14 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.202",
+    version = "1.0.203",
     deps = [
-        "@crates_vendor__serde-1.0.202//:build_script_build",
+        "@crates_vendor__serde-1.0.203//:build_script_build",
     ],
 )
 
 cargo_build_script(
-    name = "serde_bs",
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -83,6 +83,7 @@ cargo_build_script(
         ],
     ),
     edition = "2018",
+    pkg_name = "serde",
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -93,12 +94,12 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.202",
+    version = "1.0.203",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = ":serde_bs",
+    actual = ":_bs",
     tags = ["manual"],
 )

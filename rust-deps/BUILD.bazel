@@ -65,6 +65,8 @@ crates_vendor(
    render_config = render_config(generate_target_compatible_with = False),
 )
 
+# TODO(cleanup): Switching to rust_library() would reduce the overhead of this by not creating a
+# crate-of-crates but this previously broke the Windows build.
 rust_static_library(
     name = "rust-deps",
     srcs = ["src/lib.rs"],

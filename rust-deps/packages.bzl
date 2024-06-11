@@ -21,11 +21,6 @@ RTTI_PACKAGES = {
     "pico-args": crate.spec(
         version = "0.5",
     ),
-    # TODO: Unpinning this breaks on windows for unknown reasons
-    # because the output command is too long.
-    "proc-macro-hack": crate.spec(
-        version = "=0.5.19"
-    )
 }
 
 PACKAGES = RTTI_PACKAGES | {

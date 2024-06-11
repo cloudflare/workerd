@@ -47,7 +47,7 @@ rust_library(
     version = "0.27.2",
     deps = [
         "@crates_vendor__cssparser-0.27.2//:build_script_build",
-        "@crates_vendor__dtoa-short-0.3.4//:dtoa_short",
+        "@crates_vendor__dtoa-short-0.3.5//:dtoa_short",
         "@crates_vendor__itoa-0.4.8//:itoa",
         "@crates_vendor__matches-0.1.10//:matches",
         "@crates_vendor__phf-0.8.0//:phf",
@@ -56,7 +56,7 @@ rust_library(
 )
 
 cargo_build_script(
-    name = "cssparser_bs",
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -76,6 +76,7 @@ cargo_build_script(
         ],
     ),
     edition = "2018",
+    pkg_name = "cssparser",
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -89,7 +90,7 @@ cargo_build_script(
     version = "0.27.2",
     visibility = ["//visibility:private"],
     deps = [
-        "@crates_vendor__proc-macro2-1.0.83//:proc_macro2",
+        "@crates_vendor__proc-macro2-1.0.86//:proc_macro2",
         "@crates_vendor__quote-1.0.36//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
@@ -97,6 +98,6 @@ cargo_build_script(
 
 alias(
     name = "build_script_build",
-    actual = ":cssparser_bs",
+    actual = ":_bs",
     tags = ["manual"],
 )
