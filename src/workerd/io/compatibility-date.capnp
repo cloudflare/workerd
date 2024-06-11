@@ -448,4 +448,44 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Implies nodeJSCompat with the following additional modifications:
   # * Node.js Compat built-ins may be imported/required with or without the node: prefix
   # * Node.js Compat the globals Buffer and process are available everywhere
+
+  globalFetchStrictlyPublic @51 :Bool
+      $compatEnableFlag("global_fetch_strictly_public")
+      $compatDisableFlag("global_fetch_private_origin")
+      $experimental;
+  # Controls what happens when a Worker hosted on Cloudflare uses the global `fetch()` function to
+  # request a hostname that is within the Worker's own Cloudflare zone (domain).
+  #
+  # Historically, such requests would be routed to the zone's origin server, ignoring any Workers
+  # mapped to the URL and also bypassing Cloudflare security settings. This behavior made sense
+  # when Workers was first introduced as a way to rewrite requests before passing them along to
+  # the origin, and bindings didn't exist: the only way to forward the request to origin was to
+  # use global fetch(), and if it didn't bypass Workers, you'd end up looping back to the same
+  # Worker.
+  #
+  # However, this behavior has a problem: it opens the door for SSRF attacks. Imagine a Worker is
+  # designed to fetch a resource from a user-provided URL. An attacker could provide a URL that
+  # points back to the Worker's own zone, and possibly cause the Worker to fetch a resource from
+  # origin that isn't meant to be reachable by the public.
+  #
+  # Traditionally, this kind of attack is considered a bug in the application: an application that
+  # fetches untrusted URLs must verify that the URL doesn't refer to a private resource that only
+  # the application itself is meant to access. However, applications can easily get this wrong.
+  # Meanwhile, by using bindings, we can make this class of problem go away.
+  #
+  # When global_fetch_strictly_public is enabled, the global `fetch()` function (when invoked on
+  # Cloudflare Workers) will strictly route requests as if they were made on the public internet.
+  # Thus, requests to a Worker's own zone will loop back to the "front door" of Cloudflare and
+  # will be treated like a request from the internet, possibly even looping back to the same Worker
+  # again. If an application wishes to send requests to its origin, it must configure an "origin
+  # binding". An origin binding behaves like a service binding (it has a `fetch()` method) but
+  # sends requests to the zone's origin servers, bypassing Cloudflare. E.g. the Worker would write
+  # `env.ORIGIN.fetch(req)` to send a request to its origin.
+  #
+  # Note: This flag only impacts behavior on Cloudflare. It has no effect when using workerd.
+  # Under workerd, the config file can control where global `fetch()` goes by configuring the
+  # worker's `globalOutbound` implicit binding. By default, under workerd, global `fetch()` has
+  # always been configured to accept publicly-routable internet hosts only; hostnames which map
+  # to private IP addresses (as defined in e.g. RFC 1918) will be rejected. Thus, workerd has
+  # always been SSRF-safe by default.
 }
