@@ -45,15 +45,15 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.83",
+    version = "1.0.86",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.83//:build_script_build",
+        "@crates_vendor__proc-macro2-1.0.86//:build_script_build",
         "@crates_vendor__unicode-ident-1.0.12//:unicode_ident",
     ],
 )
 
 cargo_build_script(
-    name = "proc-macro2_bs",
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -77,6 +77,7 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
+    pkg_name = "proc-macro2",
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -87,12 +88,12 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.83",
+    version = "1.0.86",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = ":proc-macro2_bs",
+    actual = ":_bs",
     tags = ["manual"],
 )

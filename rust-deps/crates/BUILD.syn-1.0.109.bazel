@@ -55,7 +55,7 @@ rust_library(
     ],
     version = "1.0.109",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.83//:proc_macro2",
+        "@crates_vendor__proc-macro2-1.0.86//:proc_macro2",
         "@crates_vendor__quote-1.0.36//:quote",
         "@crates_vendor__syn-1.0.109//:build_script_build",
         "@crates_vendor__unicode-ident-1.0.12//:unicode_ident",
@@ -63,7 +63,7 @@ rust_library(
 )
 
 cargo_build_script(
-    name = "syn_bs",
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -95,6 +95,7 @@ cargo_build_script(
         ],
     ),
     edition = "2018",
+    pkg_name = "syn",
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -111,6 +112,6 @@ cargo_build_script(
 
 alias(
     name = "build_script_build",
-    actual = ":syn_bs",
+    actual = ":_bs",
     tags = ["manual"],
 )

@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "lazy_static",
+    name = "rustc_hash",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = False,
@@ -28,17 +28,21 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
-    edition = "2015",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=lazy_static",
+        "crate-name=rustc-hash",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.4.0",
+    version = "2.0.0",
 )
