@@ -126,6 +126,16 @@ interface VectorizeVectorMutation {
   count: number;
 }
 
+/**
+* Results of an operation that performed a mutation on a set of vectors
+* with the v2 version of Vectorize.
+* Here, `mutationId` is the identifier for the last mutation processed by Vectorize.
+*/
+interface VectorizeVectorMutationV2 {
+  /* The identifier for the last mutation processed by Vectorize. */
+  mutationId: string;
+}
+
 declare abstract class VectorizeIndex {
   /**
    * Get information about the currently bound index.
