@@ -312,9 +312,9 @@ http_archive(
 http_file(
     name = "cargo_bazel_linux_x64",
     executable = True,
-    sha256 = "dffd5f2ceb91c5a6c0d0e8df5401160d6a5cf15511416b579c0c3936d22ccb8c",
+    sha256 = "87a56511eb592f4f118750043e38ad40814f4be20b30f796506de7634aa2d41e",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-x86_64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.46.0/cargo-bazel-x86_64-unknown-linux-gnu",
     ],
 )
 
@@ -339,9 +339,9 @@ http_file(
 http_file(
     name = "cargo_bazel_macos_arm64",
     executable = True,
-    sha256 = "983ba22850f1467484fb8a608fdc753e6c5203795edae20b0fc63c9b4f9b66aa",
+    sha256 = "30b01033e7b534c6e1927d9225f52a239a41bad402aac12fb6410683a3daa8b1",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.43.0/cargo-bazel-aarch64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.46.0/cargo-bazel-aarch64-apple-darwin",
     ],
 )
 
@@ -355,15 +355,14 @@ http_file(
     ],
 )
 
-# TODO(soon): rules_rust starts producing linker errors on Linux as of 0.39 through 0.42.1, try
-# upgrading it again later. This is likely due to https://github.com/bazelbuild/rules_rust/pull/2471.
-# The related cargo_bazel package has been updated already - some version mismatch between them is
-# acceptable since cargo_bazel is only used to generate build files.
+# TODO(cleanup): Bring rules_rust and cargo_bazel back in sync – rules_rust was stuck at an older
+# version due to linker errors but has been upgraded since. Some version mismatch is acceptable here
+# since cargo_bazel is only used to generate build files.
 http_archive(
     name = "rules_rust",
-    sha256 = "6501960c3e4da32495d1e1007ded0769a534cb195c30dea36aa54f9d8a3f0361",
+    integrity = "sha256-F8U7+AC5MvMtPKGdLLnorVM84cDXKfDRgwd7/dq3rUY=",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.38.0/rules_rust-v0.38.0.tar.gz",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.46.0/rules_rust-v0.46.0.tar.gz",
     ],
 )
 

@@ -196,9 +196,15 @@ build:mac --experimental_objc_fastbuild_options=""
 
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
 # macOS links with dynamic libc++ by default, which has good backwards compatibility.
+# Drop default link flags, which include libstdc++ for Linux
+build:linux --features=-default_link_libs --host_features=-default_link_libs
 build:linux --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
 build:linux --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
-build:linux --action_env=BAZEL_LINKLIBS='-l%:libc++.a -lm -static-libgcc'
+build:linux --linkopt='-l:libc++.a' --linkopt='-lm' --linkopt='-static-libgcc'
+# We don't expect to distribute host tools, no need to statically link libgcc.
+# TODO(cleanup): Ideally we'd also use shared libc++ here, we'd just need to install the
+# libunwind-15-dev and libc++abi-15-dev packages on CI to have all of shared libc++ available.
+build:linux --host_linkopt='-l:libc++.a' --host_linkopt='-lm'
 
 # On Linux, enable PIC. In macos pic is the default, and the objc_library rule does not work
 # correctly if we use this flag since it will not find the object files to include
