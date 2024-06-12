@@ -563,7 +563,7 @@ public:
       return name;
     }
     bool equals(const ActorId& other) const override {
-      return memcmp(id, kj::downcast<const ActorIdImpl>(other).id, sizeof(id)) == 0;
+      return kj::arrayPtr(id).asBytes() == kj::arrayPtr(kj::downcast<const ActorIdImpl>(other).id).asBytes();
     }
     kj::Own<ActorId> clone() const override {
       return kj::heap<ActorIdImpl>(id, name.map([](kj::StringPtr str) { return kj::str(str); }));
@@ -621,8 +621,7 @@ public:
     computeMac(id);
 
     // Verify that the computed mac matches the input.
-    JSG_REQUIRE(memcmp(id + BASE_LENGTH, decoded.begin() + BASE_LENGTH,
-                decoded.size() - BASE_LENGTH) == 0,
+    JSG_REQUIRE(kj::arrayPtr(id).slice(BASE_LENGTH).startsWith(decoded.slice(BASE_LENGTH)),
                 TypeError, "Durable Object ID is not valid for this namespace.");
 
     return kj::heap<ActorIdImpl>(id, kj::none);
