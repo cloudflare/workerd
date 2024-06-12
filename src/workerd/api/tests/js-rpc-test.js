@@ -1341,6 +1341,18 @@ export let testAsyncStackTrace = {
   }
 }
 
+// Test that exceptions thrown over RPC have the .remote property.
+export let testExceptionProperties = {
+  async test(controller, env, ctx) {
+    try {
+      await env.MyService.throwingMethod();
+    } catch (e) {
+      assert.strictEqual(e.remote, true);
+      assert.strictEqual(e.message, "METHOD THREW");
+    }
+  }
+}
+
 // Test that get(), put(), and delete() are valid RPC method names, not hijacked by Fetcher.
 export let canUseGetPutDelete = {
   async test(controller, env, ctx) {
