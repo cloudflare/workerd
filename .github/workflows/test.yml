@@ -98,7 +98,9 @@ jobs:
         # runner.
         # Use latest available Xcode version – runner still defaults to 15.0.1.
         run: |
-          sudo xcode-select -s "/Applications/Xcode_15.3.app"
+          # sudo xcode-select -s "/Applications/Xcode_15.3.app"
+          # Evaluating Xcode 16.0 beta
+          sudo xcode-select -s "/Applications/Xcode_16_beta_4.app"
           # export LLVM_SYMBOLIZER=$(brew --prefix llvm@15)/bin/llvm-symbolizer
           # sed -i -e "s%llvm-symbolizer%${LLVM_SYMBOLIZER}%" .bazelrc
       - name: Setup Windows
@@ -107,7 +109,7 @@ jobs:
         run: |
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
           # TODO: Test that the build is still compatible with the latest LLVM release
-          choco upgrade llvm --version=18.1.6
+          # choco upgrade llvm --version=18.1.6
       - name: Configure download mirrors
         shell: bash
         run: |

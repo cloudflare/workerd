@@ -365,7 +365,7 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2021",
-    versions = ["1.77.0"], # LLVM 17
+    versions = ["1.80.0", "nightly/2024-06-14"], # LLVM 18
     # Rust registers wasm targets by default which we don't need, workerd is only built for its native platform.
     extra_target_triples = [],
 )
