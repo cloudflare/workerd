@@ -9,6 +9,7 @@
 #include <workerd/jsg/modules.h>
 #include <capnp/dynamic.h>
 #include <node/node.capnp.h>
+#include <workerd/io/compatibility-date.h>
 
 namespace workerd::api::node {
 
@@ -17,7 +18,28 @@ namespace workerd::api::node {
 // built-ins
 class CompatibilityFlags : public jsg::Object {
 public:
+
+  jsg::JsObject getCompatFlags(jsg::Lock& js, workerd::CompatibilityFlags::Reader flags) {
+    auto obj = js.obj();
+    auto dynamic  = capnp::toDynamic(flags);
+    auto schema = dynamic.getSchema();
+    for (auto field : schema.getFields()) {
+      bool value = dynamic.get(field).as<bool>();
+      for (auto annotation : field.getProto().getAnnotations()) {
+        if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+          obj.setReadOnly(js, annotation.getValue().getText(), js.boolean(value));
+        }
+        else if (annotation.getId() == COMPAT_DISABLE_FLAG_ANNOTATION_ID) {
+          obj.setReadOnly(js, annotation.getValue().getText(), js.boolean(!value));
+        }
+      }
+    }
+    return obj;
+  }
+
   JSG_RESOURCE_TYPE(CompatibilityFlags, workerd::CompatibilityFlags::Reader flags) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(compatFlags, getCompatFlags);
+
     // Not your typical JSG_RESOURCE_TYPE definition.. here we are iterating
     // through all of the compatibility flags and registering each as read-only
     // literal values on the instance...
