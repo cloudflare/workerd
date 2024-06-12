@@ -686,10 +686,12 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
     case SQLITE_CREATE_VTABLE      :   /* Table Name      Module Name     */
     case SQLITE_DROP_VTABLE        :   /* Table Name      Module Name     */
-      // Virtual tables are tables backed by some native-code callbacks. We don't support these except for FTS5 (Full Text Search) https://www.sqlite.org/fts5.html
+      // Virtual tables are tables backed by some native-code callbacks.
+      // We don't support these except for FTS5 (Full Text Search) https://www.sqlite.org/fts5.html
+      // (Which also includes fts5vocab: "[fts5vocab] is available whenever FTS5 is")
       {
         KJ_IF_SOME (moduleName, param2) {
-          if (strcasecmp(moduleName.begin(), "fts5") == 0) {
+          if (strcasecmp(moduleName.begin(), "fts5") == 0 || strcasecmp(moduleName.begin(), "fts5vocab") == 0) {
             return true;
           }
         }

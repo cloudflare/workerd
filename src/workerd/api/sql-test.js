@@ -356,7 +356,7 @@ async function test(storage) {
   assert.throws(() => sql.exec('SAVEPOINT foo'), /not authorized/)
 
   // Virtual tables
-  // Only fts5 module is allowed
+  // Only fts5 and fts5vocab modules are allowed
   assert.throws(
     () => sql.exec(`CREATE VIRTUAL TABLE test_fts USING fts5abcd(id);`),
     /not authorized/
@@ -371,9 +371,18 @@ async function test(storage) {
     );
   `)
 
-  // Module name is case-insensitive
+  // Module names are case-insensitive
   sql.exec(`
     CREATE VIRTUAL TABLE documents_fts USING FtS5(id, title, content, tokenize = porter);
+  `)
+  sql.exec(`
+    CREATE VIRTUAL TABLE documents_fts_v_col USING fTs5VoCaB(documents_fts, col);
+  `)
+  sql.exec(`
+    CREATE VIRTUAL TABLE documents_fts_v_row USING FtS5vOcAb(documents_fts, row);
+  `)
+  sql.exec(`
+    CREATE VIRTUAL TABLE documents_fts_v_instance USING fTs5VoCaB(documents_fts, instance);
   `)
 
   sql.exec(`
@@ -498,10 +507,10 @@ async function test(storage) {
         )
       )[0].data
     )
-    assert.equal(jsonResult.length, 8)
+    assert.equal(jsonResult.length, 11)
     assert.equal(
       jsonResult.map((r) => r.name).join(','),
-      'myTable,documents,documents_fts,documents_fts_data,documents_fts_idx,documents_fts_content,documents_fts_docsize,documents_fts_config'
+      'myTable,documents,documents_fts,documents_fts_data,documents_fts_idx,documents_fts_content,documents_fts_docsize,documents_fts_config,documents_fts_v_col,documents_fts_v_row,documents_fts_v_instance'
     )
     assert.equal(jsonResult[0].columns.foo, 'TEXT')
     assert.equal(jsonResult[0].columns.bar, 'INTEGER')
