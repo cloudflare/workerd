@@ -99,9 +99,10 @@ jobs:
         # Set a custom output root directory to avoid long file name issues.
         run: |
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
-          # Work around https://github.com/actions/runner-images/issues/10004
+          # TODO(cleanup): Work around https://github.com/actions/runner-images/issues/10004. Drop
+          # this after the updated image has been fully rolled out.
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --copt=/D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR --host_copt=/D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR')
-          choco upgrade llvm --version=17.0.6
+          choco upgrade llvm --allow-downgrade --version=17.0.6
       - name: Configure download mirrors
         shell: bash
         run: |
