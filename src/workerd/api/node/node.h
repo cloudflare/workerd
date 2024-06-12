@@ -12,6 +12,7 @@
 #include <workerd/jsg/modules-new.h>
 #include <capnp/dynamic.h>
 #include <node/node.capnp.h>
+#include <workerd/io/compatibility-date.h>
 
 namespace workerd::api::node {
 

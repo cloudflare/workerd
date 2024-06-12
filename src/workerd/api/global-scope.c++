@@ -918,4 +918,40 @@ void ServiceWorkerGlobalScope::clearImmediate(kj::Maybe<jsg::Ref<Immediate>> may
   }
 }
 
+jsg::JsObject Cloudflare::getCompatibilityFlags(jsg::Lock& js) {
+  auto flags = FeatureFlags::get(js);
+  auto obj = js.objNoProto();
+  auto dynamic = capnp::toDynamic(flags);
+  auto schema = dynamic.getSchema();
+
+  bool skipExperimental = !flags.getWorkerdExperimental();
+
+  for (auto field: schema.getFields()) {
+    // If this is an experimental flag, we expose it only if the experimental mode
+    // is enabled.
+    auto annotations = field.getProto().getAnnotations();
+    bool skip = false;
+    if (skipExperimental) {
+      for (auto annotation: annotations) {
+        if (annotation.getId() == EXPERIMENTAl_ANNOTATION_ID) {
+          skip = true;
+          break;
+        }
+      }
+    }
+    if (skip) continue;
+
+    // Note that disable flags are not exposed.
+    for (auto annotation: annotations) {
+      if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+        obj.setReadOnly(
+            js, annotation.getValue().getText(), js.boolean(dynamic.get(field).as<bool>()));
+      }
+    }
+  }
+
+  obj.seal(js);
+  return obj;
+}
+
 }  // namespace workerd::api
