@@ -11,9 +11,3 @@ export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;
 export const RpcStub = entrypoints.RpcStub;
 export const RpcTarget = entrypoints.RpcTarget;
-
-/* eslint-disable */
-import { default as flags } from 'workerd:compatibility-flags';
-export const compatFlags = (flags as any).compatFlags;
-Object.freeze(compatFlags);
-/* eslint-enable */

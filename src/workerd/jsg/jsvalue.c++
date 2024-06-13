@@ -58,11 +58,6 @@ void JsObject::set(Lock& js, kj::StringPtr name, const JsValue& value) {
   set(js, js.strIntern(name), value);
 }
 
-void JsObject::setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value) {
-  v8::Local<v8::String> nameStr = js.strIntern(name);
-  check(inner->DefineOwnProperty(js.v8Context(), nameStr, value, v8::ReadOnly));
-}
-
 JsValue JsObject::get(Lock& js, const JsValue& name) {
   return JsValue(check(inner->Get(js.v8Context(), name.inner)));
 }
