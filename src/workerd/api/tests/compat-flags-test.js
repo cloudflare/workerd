@@ -3,18 +3,18 @@ import {
   throws,
 } from 'node:assert';
 
-import { compatibilityFlags } from 'cloudflare:workers';
+import { compatFlags } from 'cloudflare:workers';
 
 export const compatFlagsTest = {
   test() {
-    throws(() => compatibilityFlags.no_nodejs_compat_v2 = true);
-    throws(() => compatibilityFlags.not_a_real_compat_flag = true);
-    ok(compatibilityFlags['nodejs_compat_v2']);
-    ok(!compatibilityFlags['no_nodejs_compat_v2']);
-    ok(compatibilityFlags['url_standard']);
-    ok(!compatibilityFlags['url_original']);
-    ok(!compatibilityFlags['not-a-real-compat-flag']);
-    const keys = Object.keys(compatibilityFlags);
+    throws(() => compatFlags.no_nodejs_compat_v2 = true);
+    throws(() => compatFlags.not_a_real_compat_flag = true);
+    ok(compatFlags['nodejs_compat_v2']);
+    ok(!compatFlags['no_nodejs_compat_v2']);
+    ok(compatFlags['url_standard']);
+    ok(!compatFlags['url_original']);
+    ok(!compatFlags['not-a-real-compat-flag']);
+    const keys = Object.keys(compatFlags);
     ok(keys.includes('nodejs_compat_v2'));
     ok(keys.includes('url_standard'));
     ok(keys.includes('url_original'));

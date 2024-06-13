@@ -14,6 +14,6 @@ export const RpcTarget = entrypoints.RpcTarget;
 
 /* eslint-disable */
 import { default as flags } from 'workerd:compatibility-flags';
-export const compatibilityFlags = (flags as any).compatFlags;
-Object.freeze(compatibilityFlags);
+export const compatFlags = (flags as any).compatFlags;
+Object.freeze(compatFlags);
 /* eslint-enable */
