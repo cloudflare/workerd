@@ -1,5 +1,5 @@
+// @ts-nocheck
 import { default as UnsafeEval } from "internal:unsafe-eval";
-import { default as DiskCache } from "pyodide-internal:disk_cache";
 export { getRandomValues } from "pyodide-internal:topLevelEntropy/lib";
 
 let lastTime;

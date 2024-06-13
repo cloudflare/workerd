@@ -20,8 +20,10 @@ def wd_ts_bundle(
         eslintrc_json,
         internal_wasm_modules = [],
         internal_data_modules = [],
+        internal_json_modules = [],
         lint = True,
-        deps = []):
+        deps = [],
+        js_deps = []):
     """Compiles typescript modules and generates api bundle with the result.
 
     Args:
@@ -67,9 +69,10 @@ def wd_ts_bundle(
         internal_modules = [_to_js(m) for m in internal_modules if not m.endswith(".d.ts")],
         internal_wasm_modules = internal_wasm_modules,
         internal_data_modules = internal_data_modules,
+        internal_json_modules = internal_json_modules,
         declarations = declarations,
         schema_id = schema_id,
-        deps = deps,
+        deps = deps + js_deps,
     )
 
     if lint:
