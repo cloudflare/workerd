@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 
 // This is based on the info about the tar file format on wikipedia

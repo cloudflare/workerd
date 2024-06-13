@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
 import { createReadonlyFS } from "pyodide-internal:readOnlyFS";
 

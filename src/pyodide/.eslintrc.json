@@ -1,6 +1,0 @@
-{
-  "env": {
-    "es2022": true,
-    "worker": true
-  }
-}

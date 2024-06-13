@@ -1,4 +1,3 @@
-// @ts-nocheck
 Error.stackTraceLimit = Infinity;
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
