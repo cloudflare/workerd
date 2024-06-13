@@ -78,6 +78,7 @@ export function isBigUint64Array(value: unknown): value is BigUint64Array;
 export function isBooleanObject(value: unknown): value is Boolean;
 export function isDataView(value: unknown): value is DataView;
 export function isDate(value: unknown): value is Date;
+export function isExternal(value: unknown): boolean;
 export function isFloat32Array(value: unknown): value is Float32Array;
 export function isFloat64Array(value: unknown): value is Float64Array;
 export function isGeneratorFunction(value: unknown): value is GeneratorFunction;

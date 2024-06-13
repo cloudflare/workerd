@@ -42,6 +42,7 @@ export const isArrayBuffer = internal.isArrayBuffer.bind(internal);
 export const isArgumentsObject = internal.isArgumentsObject.bind(internal);
 export const isBoxedPrimitive = internal.isBoxedPrimitive.bind(internal);
 export const isDataView = internal.isDataView.bind(internal);
+export const isExternal = internal.isExternal.bind(internal);
 export const isMap = internal.isMap.bind(internal);
 export const isMapIterator = internal.isMapIterator.bind(internal);
 export const isModuleNamespaceObject = internal.isModuleNamespaceObject.bind(internal);
@@ -117,5 +118,5 @@ export default {
   isUint8ClampedArray,
   isUint16Array,
   isUint32Array,
-  // TODO(soon): isExternal
+  isExternal,
 };
