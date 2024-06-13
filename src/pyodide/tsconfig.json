@@ -11,9 +11,11 @@
       "pyodide:*": ["./*"],
       "pyodide-internal:*": ["./internal/*"],
     },
+    "types": [],
     "declaration": true,
     "noEmit": false,
     "noEmitOnError": false,
   },
-  "include": ["./**/*"]
+  "include": ["./**/*"],
+  "exclude": ["./generated/**/*"]
 }
