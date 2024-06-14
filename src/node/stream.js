@@ -11,8 +11,12 @@ import {
   eos,
   isErrored,
   isDisturbed,
+  isDestroyed,
   isReadable,
   addAbortSignal,
+  getDefaultHighWaterMark,
+  setDefaultHighWaterMark,
+  isWritable,
 } from 'node-internal:streams_util';
 import {
   compose,
@@ -24,6 +28,7 @@ import { Duplex } from 'node-internal:streams_duplex';
 import { Transform, PassThrough } from 'node-internal:streams_transform';
 import { promises } from 'node-internal:streams_promises';
 
+export const _isArrayBufferView = Stream._isArrayBufferView;
 export const _isUint8Array = Stream._isUint8Array;
 export const _uint8ArrayToBuffer = Stream._uint8ArrayToBuffer;
 const destroy = destroyer;
@@ -45,6 +50,10 @@ export {
   Transform,
   PassThrough,
   promises,
+  getDefaultHighWaterMark,
+  setDefaultHighWaterMark,
+  isDestroyed,
+  isWritable,
 };
 
 Stream.addAbortSignal = addAbortSignal;
@@ -52,6 +61,7 @@ Stream.compose = compose;
 Stream.destroy = destroy;
 Stream.finished = finished;
 Stream.isReadable = isReadable;
+Stream.isWritable = isWritable;
 Stream.isErrored = isErrored;
 Stream.isDisturbed = isDisturbed;
 Stream.pipeline = pipeline;
@@ -62,5 +72,8 @@ Stream.Duplex = Duplex;
 Stream.Transform = Transform;
 Stream.PassThrough = PassThrough;
 Stream.promises = promises;
+Stream.getDefaultHighWaterMark = getDefaultHighWaterMark;
+Stream.setDefaultHighWaterMark = setDefaultHighWaterMark;
+Stream.isDestroyed = isDestroyed;
 
 export default Stream;

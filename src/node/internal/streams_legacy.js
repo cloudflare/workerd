@@ -110,6 +110,9 @@ Stream.Stream = Stream
 Stream._isUint8Array = function isUint8Array(value) {
   return value instanceof Uint8Array;
 }
+Stream._isArrayBufferView = function isArrayBufferView(value) {
+  return ArrayBuffer.isView(value);
+}
 Stream._uint8ArrayToBuffer = function _uint8ArrayToBuffer(chunk) {
   return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
 }
