@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 import { default as UnsafeEval } from "internal:unsafe-eval";
 import { default as DiskCache } from "pyodide-internal:disk_cache";

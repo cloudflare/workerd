@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * This file contains code that roughly replaces pyodide.loadPackage, with workerd-specific
  * optimizations:

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 

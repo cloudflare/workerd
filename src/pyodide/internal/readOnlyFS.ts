@@ -1,3 +1,4 @@
+// @ts-nocheck
 export function createReadonlyFS(FSOps, Module) {
   const FS = Module.FS;
   const ReadOnlyFS = {
