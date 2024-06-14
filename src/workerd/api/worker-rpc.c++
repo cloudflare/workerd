@@ -254,7 +254,7 @@ jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
 // fulfills a fulfiller.
 //
 // TODO(cleanup): This is generally useful, should it be part of capnp?
-class CompletionMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+class CompletionMembrane final: public capnp::MembranePolicy {
 public:
   explicit CompletionMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : doneFulfiller(kj::mv(doneFulfiller)) {}
@@ -272,10 +272,6 @@ public:
     return kj::none;
   }
 
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
-  }
-
 private:
   kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
 };
@@ -283,7 +279,7 @@ private:
 // A membrane which revokes when some Promise is fulfilled.
 //
 // TODO(cleanup): This is generally useful, should it be part of capnp?
-class RevokerMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+class RevokerMembrane final: public capnp::MembranePolicy {
 public:
   explicit RevokerMembrane(kj::Promise<void> promise)
       : promise(promise.fork()) {}
@@ -296,10 +292,6 @@ public:
   kj::Maybe<capnp::Capability::Client> outboundCall(
       uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
     return kj::none;
-  }
-
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
   }
 
   kj::Maybe<kj::Promise<void>> onRevoked() override {
@@ -1653,7 +1645,7 @@ private:
 // call doesn't return until the `CompletionMembrane` says all capabilities were dropped, so this
 // would create a cycle.
 class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final
-    : public capnp::MembranePolicy, public kj::Refcounted {
+    : public capnp::MembranePolicy {
 public:
   explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : doneFulfiller(kj::mv(doneFulfiller)) {}
@@ -1669,16 +1661,12 @@ public:
     auto f = kj::mv(JSG_REQUIRE_NONNULL(doneFulfiller,
         Error, "Only one RPC method call is allowed on this object."));
     doneFulfiller = kj::none;
-    return capnp::membrane(kj::mv(target), kj::refcounted<CompletionMembrane>(kj::mv(f)));
+    return capnp::membrane(kj::mv(target), kj::rc<CompletionMembrane>(kj::mv(f)));
   }
 
   kj::Maybe<capnp::Capability::Client> outboundCall(
       uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
     KJ_FAIL_ASSERT("ServerTopLevelMembrane shouldn't have outgoing capabilities");
-  }
-
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
   }
 
 private:
@@ -1698,7 +1686,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
       capnp::membrane(
           kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName,
               mapAddRef(incomingRequest->getWorkerTracer())),
-          kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
+          kj::rc<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
@@ -1742,7 +1730,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
 
   cap = capnp::membrane(
       sent.getTopLevel(),
-      kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
+      kj::rc<RevokerMembrane>(kj::mv(revokePaf.promise)));
 
   // When no more capabilities exist on the connection, we want to proactively cancel the RPC.
   // This is needed in particular for the case where the client is dropped without making any calls
@@ -1757,7 +1745,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
   cap = capnp::membrane(
       sent.getTopLevel(),
-      kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+      kj::rc<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
 
   this->capFulfiller->fulfill(kj::mv(cap));
 
