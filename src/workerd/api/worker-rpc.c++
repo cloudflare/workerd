@@ -1755,7 +1755,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   rpc::JsRpcTarget::Client cap = sent.getTopLevel();
 
   cap = capnp::membrane(
-      sent.getTopLevel(),
+      kj::mv(cap),
       kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
 
   // When no more capabilities exist on the connection, we want to proactively cancel the RPC.
@@ -1770,7 +1770,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   //   less ugly?
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
   cap = capnp::membrane(
-      sent.getTopLevel(),
+      kj::mv(cap),
       kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
 
   this->capFulfiller->fulfill(kj::mv(cap));
