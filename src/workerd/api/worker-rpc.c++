@@ -527,8 +527,6 @@ JsRpcPromiseAndPipleine callImpl(
         builder.getOperation().setGetProperty();
       }
 
-      StreamSinkFulfiller resultsStreamSinkFulfiller;
-
       // Unfortunately, we always have to send a `resultsStreamSink` because we don't know until
       // after the call completes whether or not it will return any streams. If it's unused,
       // though, it should only be a couple allocations.
