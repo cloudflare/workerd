@@ -27,6 +27,9 @@
     ],
     "paths": {
       "node:*": ["./*"],
+      "node:assert/*": ["./*"],
+      "node:util/*": ["./*"],
+      "node:path/*": ["./*"],
       "node:stream/*": ["./*"],
       "node-internal:*": ["./internal/*"],
       "cloudflare-internal:workers": ["./internal/workers.d.ts"],
@@ -35,8 +38,14 @@
   },
   "include": [
     "*.ts",
+    "assert/*.ts",
+    "assert/*.js",
     "stream/*.ts",
     "stream/*.js",
+    "util/*.js",
+    "util/*.ts",
+    "path/*.ts",
+    "path/*.js",
     "internal/*.ts"
   ],
 }

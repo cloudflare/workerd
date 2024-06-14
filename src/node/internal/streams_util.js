@@ -364,6 +364,10 @@ export function getDefaultHighWaterMark(objectMode = false) {
   return objectMode ? 16 : 16 * 1024
 }
 
+export function setDefaultHighWaterMark() {
+  throw new Error("Setting the default high water mark is currently not implemented");
+}
+
 export function getHighWaterMark(state, options, duplexKey, isDuplex) {
   const hwm = highWaterMarkFrom(options, isDuplex, duplexKey)
   if (hwm != null) {
