@@ -1390,14 +1390,15 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
 public:
   TransientJsRpcTarget(jsg::Lock& js, IoContext& ioCtx, jsg::JsObject object,
                        bool allowInstanceProperties = false)
-      : JsRpcTargetBase(ioCtx), object(js, object),
+      : JsRpcTargetBase(ioCtx),
+        handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object, kj::none))),
         allowInstanceProperties(allowInstanceProperties),
         pendingEvent(ioCtx.registerPendingEvent()) {
     // Check for the existence of a dispose function now so that the destructor doesn't have to
     // take an isolate lock if there isn't one.
     auto getResult = object.get(js, js.symbolDispose());
     if (getResult.isFunction()) {
-      dispose.emplace(js.v8Isolate, v8::Local<v8::Value>(getResult).As<v8::Function>());
+      handles->dispose.emplace(js.v8Isolate, v8::Local<v8::Value>(getResult).As<v8::Function>());
     }
   }
 
@@ -1405,20 +1406,18 @@ public:
   TransientJsRpcTarget(jsg::Lock& js, IoContext& ioCtx, jsg::JsObject object,
                        kj::Maybe<v8::Local<v8::Function>> dispose,
                        bool allowInstanceProperties = false)
-      : JsRpcTargetBase(ioCtx), object(js, object),
-        dispose(dispose.map([&](v8::Local<v8::Function> func) {
-          return jsg::V8Ref<v8::Function>(js.v8Isolate, func);
-        })),
+      : JsRpcTargetBase(ioCtx),
+        handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object, dispose))),
         allowInstanceProperties(allowInstanceProperties),
         pendingEvent(ioCtx.registerPendingEvent()) {}
 
   ~TransientJsRpcTarget() noexcept(false) {
     // If we have a disposer, and the I/O context is not already destroyed, arrange to call the
     // disposer.
-    KJ_IF_SOME(d, dispose) {
-      KJ_IF_SOME(ctx, weakIoContext->tryGet()) {
+    KJ_IF_SOME(ctx, weakIoContext->tryGet()) {
+      KJ_IF_SOME(d, handles->dispose) {
         ctx.addTask(ctx.run(
-            [dispose = kj::mv(d), object = kj::mv(object)](Worker::Lock& lock) mutable {
+            [dispose = kj::mv(d), object = kj::mv(handles->object)](Worker::Lock& lock) mutable {
           jsg::Lock& js = lock;
           jsg::check(dispose.getHandle(js)->Call(
               js.v8Context(), object.getHandle(js), 0, nullptr));
@@ -1429,15 +1428,30 @@ public:
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
     return {
-      .target = object.getHandle(lock),
+      .target = handles->object.getHandle(lock),
       .envCtx = kj::none,
       .allowInstanceProperties = allowInstanceProperties,
     };
   }
 
 private:
-  jsg::JsRef<jsg::JsObject> object;
-  kj::Maybe<jsg::V8Ref<v8::Function>> dispose;
+  struct Handles {
+    jsg::JsRef<jsg::JsObject> object;
+    kj::Maybe<jsg::V8Ref<v8::Function>> dispose;
+
+    Handles(jsg::Lock& js, jsg::JsObject object, kj::Maybe<v8::Local<v8::Function>> dispose)
+        : object(js, object),
+          dispose(dispose.map([&](v8::Local<v8::Function> func) {
+            return jsg::V8Ref<v8::Function>(js.v8Isolate, func);
+          })) {}
+  };
+
+  // This object could outlive the IoContext (that's why `JsRpcTargetBase` holds a `WeakRef` to the
+  // context). That means hypothetically it could also outlive the isolate. We therefore need to
+  // place these handles in a `ReverseIoOwn` so that if the `IoContext` dies before we do, they are
+  // dropped at that point.
+  ReverseIoOwn<Handles> handles;
+
   bool allowInstanceProperties;
 
   // An RpcTarget could receive a new call (in the existing IoContext) at any time, therefore
