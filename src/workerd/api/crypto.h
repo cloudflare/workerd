@@ -286,6 +286,11 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
+  static EVP_PKEY* getEvpPkeyIfAsymmetric(const CryptoKey* key);
+  // helper function to allow Node crypto to access the key itself. Currently this is just
+  // implemented for AsymmetricKey, if we end up needing it for more classes it is much cleaner to
+  // add a getKeyObject() method to CryptoKey itself.
+
 private:
   kj::Own<Impl> impl;
 
