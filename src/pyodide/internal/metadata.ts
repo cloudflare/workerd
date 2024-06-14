@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
 export { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { default as PYODIDE_BUCKET } from "pyodide-internal:generated/pyodide-bucket.json";

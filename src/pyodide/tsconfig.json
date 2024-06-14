@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": [ "ESNext", "dom" ],
+    "alwaysStrict": true,
+    "strict": true,
+    "allowJs": true,
+    "moduleResolution": "node",
+    "paths": {
+      "pyodide:*": ["./*"],
+      "pyodide-internal:*": ["./internal/*"],
+    },
+    "declaration": true,
+    "noEmit": false,
+    "noEmitOnError": false,
+  },
+  "include": ["./**/*"]
+}
