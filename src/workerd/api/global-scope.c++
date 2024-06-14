@@ -131,6 +131,9 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(
     // Has a connect handler!
     response.accept(200, "OK", headers);
 
+    // TODO(cleanup): There's a fair amount of duplication between this and
+    // the request() method, and much of this could likely be cleaned up to
+    // use co_awaits rather than the promise syntax.
     auto ownConnection = newNeuterableIoStream(connection);
     auto deferredNeuter = kj::defer([ownConnection = kj::addRef(*ownConnection)]() mutable {
       ownConnection->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
