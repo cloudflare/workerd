@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { default as internalJaeger } from "pyodide-internal:internalJaeger";
 
 /**

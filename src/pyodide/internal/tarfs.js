@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { createReadonlyFS } from "pyodide-internal:readOnlyFS";
 
 const FSOps = {

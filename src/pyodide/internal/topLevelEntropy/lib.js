@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 /**
  * Handle the top level getentropy() mess. See entropy_patches.py which is the
  * main file for the entropy patches.
@@ -8,6 +6,7 @@
  * entropy_patches.py. setupShouldAllowBadEntropy reads out the address of the
  * byte that we use to control calls to crypto.getRandomValues from Python.
  */
+
 import { default as entropyPatches } from "pyodide-internal:topLevelEntropy/entropy_patches.py";
 import { default as entropyImportContext } from "pyodide-internal:topLevelEntropy/entropy_import_context.py";
 import { default as importPatchManager } from "pyodide-internal:topLevelEntropy/import_patch_manager.py";

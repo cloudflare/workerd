@@ -3,7 +3,7 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
-load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
+load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 copy_file(
     name = "pyodide_packages_archive",
@@ -146,9 +146,9 @@ expand_template(
     template = "@pyodide//:pyodide/pyodide.asm.js",
 )
 
-wd_ts_bundle(
+wd_js_bundle(
     name = "pyodide",
-    modules = ["python-entrypoint-helper.ts"],
+    builtin_modules = ["python-entrypoint-helper.js"],
     import_name = "pyodide",
     internal_data_modules = ["generated/python_stdlib.zip"] + glob([
         "internal/*.py",
@@ -159,17 +159,12 @@ wd_ts_bundle(
     internal_modules = [
         "generated/pyodide.asm.js",
     ] + glob([
-        "internal/*.ts",
         "internal/*.js",
-        "internal/topLevelEntropy/*.ts",
         "internal/topLevelEntropy/*.js",
-    ], allow_empty = True),
+    ]),
     internal_wasm_modules = ["generated/pyodide.asm.wasm"],
     schema_id = "0xbcc8f57c63814005",
-    tsconfig_json = "tsconfig.json",
-    eslintrc_json = ".eslintrc.json",
-    lint = False,
-    js_deps = [
+    deps = [
         "pyodide.asm.js@rule",
         "pyodide.asm.wasm@rule",
         "pyodide-lock.js@rule",
