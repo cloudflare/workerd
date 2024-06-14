@@ -34,8 +34,6 @@ export default {
 
     console.log(s.bytesRead, s.bytesWritten);
 
-    s.connect({ host: '::1', port: 8888 });
-
     return new Response("ok");
   }
 };
