@@ -101,8 +101,6 @@ jobs:
         run: |
           # Set a custom output root directory to avoid long file name issues.
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
-          [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --copt=/D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR --host_copt=/D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR')
-          choco upgrade llvm --allow-downgrade --version=17.0.6
       - name: Configure download mirrors
         shell: bash
         run: |
