@@ -547,6 +547,8 @@ JsRpcPromiseAndPipleine callImpl(
       // here, which is filled in later on to point at the JsRpcPromise, if and when one is created.
       auto weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>();
 
+      // RemotePromise lets us consume its pipeline and promise portions independently; we consume
+      // the promise here and we consume the pipeline below, both via kj::mv().
       auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
             [weakRef = kj::atomicAddRef(*weakRef), resultStreamSink = kj::mv(resultStreamSink)]
             (jsg::Lock& js, capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable
@@ -1099,6 +1101,17 @@ public:
       }
 
       KJ_FAIL_ASSERT("unknown JsRpcTarget::CallParams::Operation", (uint)op.which());
+    }).catch_([](kj::Exception&& e) {
+      if (jsg::isTunneledException(e.getDescription())) {
+        // Annotate exceptions in RPC worker calls as remote exceptions.
+        auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
+        if (!description.startsWith("remote.")) {
+          // If we already were annotated as remote from some other worker entrypoint, no point
+          // adding an additional prefix.
+          e.setDescription(kj::str("remote.", description));
+        }
+      }
+      kj::throwFatalException(kj::mv(e));
     });
 
     // We need to make sure this RPC is canceled if the IoContext is destroyed. To accomplish that,
