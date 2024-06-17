@@ -2,6 +2,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-context.h>
+#include <iostream>
 
 namespace workerd::api {
 
@@ -60,6 +61,22 @@ public:
   }
 };
 
+// A special binding that allows access to stdin. Used for REPL.
+class Stdin: public jsg::Object {
+public:
+  Stdin() = default;
+
+  kj::String getline(jsg::Lock& js) {
+    std::string res;
+    std::getline(std::cin, res);
+    return kj::heapString(res.c_str());
+  }
+
+  JSG_RESOURCE_TYPE(Stdin) {
+    JSG_METHOD(getline);
+  }
+};
+
 class UnsafeModule: public jsg::Object {
 public:
   jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);
@@ -76,10 +93,13 @@ void registerUnsafeModule(Registry& registry) {
 }
 
 #define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, \
-  api::UnsafeModule
+  api::UnsafeModule, \
+  api::Stdin
 
 template <class Registry> void registerUnsafeModules(Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<UnsafeEval>("internal:unsafe-eval",
+                                                 workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  registry.template addBuiltinModule<Stdin>("workerd:stdin",
                                                  workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 } // namespace workerd::api
