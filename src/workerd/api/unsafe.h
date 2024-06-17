@@ -3,6 +3,8 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
+#include <workerd/io/io-context.h>
+#include <iostream>
 
 namespace workerd::api {
 
@@ -57,6 +59,22 @@ class UnsafeEval: public jsg::Object {
     JSG_METHOD(newFunction);
     JSG_METHOD(newAsyncFunction);
     JSG_METHOD(newWasmModule);
+  }
+};
+
+// A special binding that allows access to stdin. Used for REPL.
+class Stdin: public jsg::Object {
+public:
+  Stdin() = default;
+
+  kj::String getline(jsg::Lock& js) {
+    std::string res;
+    std::getline(std::cin, res);
+    return kj::heapString(res.c_str());
+  }
+
+  JSG_RESOURCE_TYPE(Stdin) {
+    JSG_METHOD(getline);
   }
 };
 
