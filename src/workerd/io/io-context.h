@@ -505,6 +505,12 @@ public:
   template <typename Func>
   auto addFunctor(Func&& func);
 
+  // Attach an object to the IoContext such that it will be destroyed when either the returned
+  // reference is dropped OR the IoContext itself is destroyed. In the latter case, further
+  // attempts to access the returned reference will throw. The reference can only be used and
+  // destroyed within the same thread as the IoContext lives.
+  template <typename T> ReverseIoOwn<T> addObjectReverse(kj::Own<T> obj);
+
   // Call this to indicate that the caller expects to call into JavaScript in this IoContext
   // at some point in the future, in response to some *external* event that the caller is waiting
   // for. Then, hold on to the returned handle until that time. This prevents finalizers from being
@@ -1243,6 +1249,13 @@ auto IoContext::addFunctor(Func&& func) {
       return (*func)(kj::fwd<decltype(params)>(params)...);
     };
   }
+}
+
+template <typename T>
+inline ReverseIoOwn<T> IoContext::addObjectReverse(kj::Own<T> obj) {
+  // We intentionally don't requireCurrent() -- the only requirement is that the caller is in the
+  // same thread.
+  return deleteQueue->addObjectReverse(getWeakRef(), kj::mv(obj), ownedObjects);
 }
 
 template <typename Func>

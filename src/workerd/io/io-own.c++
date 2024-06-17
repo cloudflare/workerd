@@ -36,6 +36,13 @@ void DeleteQueue::checkFarGet(const DeleteQueue* deleteQueue, const std::type_in
   IoContext::current().checkFarGet(deleteQueue, type);
 }
 
+void DeleteQueue::checkWeakGet(workerd::WeakRef<IoContext>& weak) {
+  if (!weak.isValid()) {
+    JSG_FAIL_REQUIRE(Error,
+        kj::str("Couldn't complete operation because the execution context has ended."));
+  }
+}
+
 OwnedObjectList::~OwnedObjectList() noexcept(false) {
   while (head != kj::none) {
     // We want to have the same order of operations as the recursive destructor here. Without this
