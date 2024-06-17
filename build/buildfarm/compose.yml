@@ -1,0 +1,20 @@
+services:
+  redis:
+    image: "redis:alpine"
+    ports: ["6379:6379"]
+  server:
+    image: "workerd/buildfarm-server"
+    build:
+      context: "."
+      dockerfile: "server.Dockerfile"
+    depends_on: ["redis"]
+    ports: ["8980:8980"]
+    privileged: true
+  worker:
+    image: "workerd/buildfarm-worker"
+    build:
+      context: "."
+      dockerfile: "worker.Dockerfile"
+    depends_on: ["server"]
+    ports: ["8981:8981"]
+    privileged: true
