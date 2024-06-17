@@ -8,6 +8,8 @@ import {
   kStringMaxLength,
   Buffer,
   SlowBuffer,
+  isAscii,
+  isUtf8,
 } from 'node-internal:internal_buffer';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -26,6 +28,8 @@ export {
   Blob,
   Buffer,
   SlowBuffer,
+  isAscii,
+  isUtf8,
 };
 
 export default {
@@ -40,4 +44,6 @@ export default {
   Blob,
   Buffer,
   SlowBuffer,
+  isAscii,
+  isUtf8,
 };

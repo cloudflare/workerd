@@ -77,6 +77,8 @@ public:
                         kj::Array<kj::byte> bytes,
                         kj::Array<kj::byte> state);
   jsg::JsString flush(jsg::Lock& js, kj::Array<kj::byte> state);
+  bool isAscii(kj::Array<kj::byte> bytes);
+  bool isUtf8(kj::Array<kj::byte> bytes);
 
   JSG_RESOURCE_TYPE(BufferUtil) {
     JSG_METHOD(byteLength);
@@ -88,6 +90,8 @@ public:
     JSG_METHOD(swap);
     JSG_METHOD(toString);
     JSG_METHOD(write);
+    JSG_METHOD(isAscii);
+    JSG_METHOD(isUtf8);
 
     // For StringDecoder
     JSG_METHOD(decode);

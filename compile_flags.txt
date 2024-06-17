@@ -4,9 +4,11 @@
 -nostdinc
 -Ibazel-bin/external/dawn/include
 -Ibazel-bin/external/ada-url/_virtual_includes/ada-url/
+-Ibazek-bin/external/simdutf/virtual_includes/simdutf/
 -Ibazel-bin/external/com_cloudflare_lol_html/_virtual_includes/lolhtml
 -Iexternal/perfetto-sdk/sdk/
 -Iexternal/ada-url/
+-Iexternal/simdutf/
 -Iexternal/com_google_benchmark/include/
 -Iexternal/dawn/include
 -Iexternal/ssl/src/include

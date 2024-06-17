@@ -35,3 +35,5 @@ export function write(buffer: Uint8Array,
                       encoding: string): void;
 export function decode(buffer: Uint8Array, state: Uint8Array): string;
 export function flush(state: Uint8Array): string;
+export function isAscii(value: ArrayBufferView): boolean;
+export function isUtf8(value: ArrayBufferView): boolean;
