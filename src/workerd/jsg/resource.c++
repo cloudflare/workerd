@@ -25,27 +25,11 @@ void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context)
   KJ_ASSERT(check(global->Set(context, name, constructor)));
 }
 
-void polyfillSymbols(jsg::Lock& js, v8::Local<v8::Context> context) {
-  js.withinHandleScope([&]() {
-    JsObject obj(context->Global());
-
-    auto symbol = KJ_ASSERT_NONNULL(obj.get(js, "Symbol").tryCast<JsObject>());
-
-    // At the time of writing, V8 has exposed the `Symbol.dispose` global symbol but not yet
-    // `asyncDispose`.
-    KJ_DASSERT(!symbol.has(js, "asyncDispose"),
-        "It looks like V8 has been updated to support the asyncDispose global symbol! "
-        "We should now remove our polyfill and depend on V8's version of this symbol.");
-
-    symbol.set(js, "asyncDispose", js.symbolAsyncDispose());
-  });
-}
-
 v8::Local<v8::Symbol> getSymbolDispose(v8::Isolate* isolate) {
   return v8::Symbol::GetDispose(isolate);
 }
 v8::Local<v8::Symbol> getSymbolAsyncDispose(v8::Isolate* isolate) {
-  return IsolateBase::from(isolate).getSymbolAsyncDispose();
+  return v8::Symbol::GetAsyncDispose(isolate);
 }
 
 void throwIfConstructorCalledAsFunction(

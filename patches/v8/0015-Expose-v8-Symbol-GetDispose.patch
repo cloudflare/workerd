@@ -1,4 +1,4 @@
-From 9f38012918f72b17346cf1550af084b840866d2a Mon Sep 17 00:00:00 2001
+From f99871d2fbf5ecf64ee7196546833d524e4c0225 Mon Sep 17 00:00:00 2001
 From: Jon Phillips <jphillips@cloudflare.com>
 Date: Tue, 30 Apr 2024 00:06:33 +0100
 Subject: Expose v8::Symbol::GetDispose().
@@ -8,28 +8,30 @@ management spec. Since `Symbol.dispose` has been exposed to JS we need
 to be able to access the native v8::Symbol too.
 
 diff --git a/include/v8-primitive.h b/include/v8-primitive.h
-index eb0a791cf73946c0955f6ccadbb36f0c4999cbab..0fe1b2cd6ac9ad383f1e178221126d92a446154e 100644
+index eb0a791cf73946c0955f6ccadbb36f0c4999cbab..a2726084a905173ec4f6179160ce5bd581f9c2df 100644
 --- a/include/v8-primitive.h
 +++ b/include/v8-primitive.h
-@@ -625,6 +625,7 @@ class V8_EXPORT Symbol : public Name {
+@@ -625,6 +625,8 @@ class V8_EXPORT Symbol : public Name {
    static Local<Symbol> GetToPrimitive(Isolate* isolate);
    static Local<Symbol> GetToStringTag(Isolate* isolate);
    static Local<Symbol> GetUnscopables(Isolate* isolate);
 +  static Local<Symbol> GetDispose(Isolate* isolate);
++  static Local<Symbol> GetAsyncDispose(Isolate* isolate);
  
    V8_INLINE static Symbol* Cast(Data* data) {
  #ifdef V8_ENABLE_CHECKS
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 1418ac18aff535cb8994d96d52bc3ee3c5d34f88..b44611da0da97f9fcbee59c9c8e9e03f81447139 100644
+index 9954e6a9182d1908b2e92150fba14c31dc23455f..246c3fb5568fafb64f861079566ab35487bdb8ce 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -9372,7 +9372,8 @@ Local<Symbol> v8::Symbol::ForApi(Isolate* v8_isolate, Local<String> name) {
+@@ -9388,7 +9388,9 @@ Local<Symbol> v8::Symbol::ForApi(Isolate* v8_isolate, Local<String> name) {
    V(Split, split)                             \
    V(ToPrimitive, to_primitive)                \
    V(ToStringTag, to_string_tag)               \
 -  V(Unscopables, unscopables)
 +  V(Unscopables, unscopables)                 \
 +  V(Dispose, dispose)                         \
++  V(AsyncDispose, async_dispose)              \
  
  #define SYMBOL_GETTER(Name, name)                                      \
    Local<Symbol> v8::Symbol::Get##Name(Isolate* v8_isolate) {           \

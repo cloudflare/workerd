@@ -1,14 +1,14 @@
-From caf65753d7a5e9ddc69d50b983d6ceced01eca94 Mon Sep 17 00:00:00 2001
+From d256438d4d8303abf6d3fafb6b4c8f7aa826a28a Mon Sep 17 00:00:00 2001
 From: Brendan Coll <bcoll@cloudflare.com>
 Date: Thu, 16 Mar 2023 11:56:10 +0000
 Subject: Allow Windows builds under Bazel
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 49718b71815797d80f5d6f2726486cec6a77d72d..da6f29728c28433ab9824f7b171b1c221739dc6d 100644
+index 30be47fa333f75b2572927f8d7b836a99ee76181..338e21dfa9d6aa88711526dece59fb792e84bff7 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -779,6 +779,7 @@ filegroup(
+@@ -768,6 +768,7 @@ filegroup(
          "src/base/platform/mutex.h",
          "src/base/platform/platform.cc",
          "src/base/platform/platform.h",
@@ -16,7 +16,7 @@ index 49718b71815797d80f5d6f2726486cec6a77d72d..da6f29728c28433ab9824f7b171b1c22
          "src/base/platform/semaphore.cc",
          "src/base/platform/semaphore.h",
          "src/base/platform/time.cc",
-@@ -821,7 +822,6 @@ filegroup(
+@@ -811,7 +812,6 @@ filegroup(
      ] + select({
          "@v8//bazel/config:is_posix": [
              "src/base/platform/platform-posix.cc",
@@ -24,7 +24,7 @@ index 49718b71815797d80f5d6f2726486cec6a77d72d..da6f29728c28433ab9824f7b171b1c22
              "src/base/platform/platform-posix-time.cc",
              "src/base/platform/platform-posix-time.h",
          ],
-@@ -844,6 +844,7 @@ filegroup(
+@@ -834,6 +834,7 @@ filegroup(
          "@v8//bazel/config:is_windows": [
              "src/base/debug/stack_trace_win.cc",
              "src/base/platform/platform-win32.cc",
@@ -32,7 +32,7 @@ index 49718b71815797d80f5d6f2726486cec6a77d72d..da6f29728c28433ab9824f7b171b1c22
              "src/base/win32-headers.h",
          ],
      }),
-@@ -1225,6 +1226,7 @@ filegroup(
+@@ -1215,6 +1216,7 @@ filegroup(
          "include/v8-wasm-trap-handler-posix.h",
          "src/api/api.cc",
          "src/api/api.h",
@@ -40,7 +40,7 @@ index 49718b71815797d80f5d6f2726486cec6a77d72d..da6f29728c28433ab9824f7b171b1c22
          "src/api/api-arguments.cc",
          "src/api/api-arguments.h",
          "src/api/api-arguments-inl.h",
-@@ -2683,6 +2685,11 @@ filegroup(
+@@ -2678,6 +2680,11 @@ filegroup(
              "src/trap-handler/handler-inside-posix.cc",
              "src/trap-handler/handler-outside-posix.cc",
          ],
@@ -52,7 +52,7 @@ index 49718b71815797d80f5d6f2726486cec6a77d72d..da6f29728c28433ab9824f7b171b1c22
          "//conditions:default": [],
      }) + select({
          "@v8//bazel/config:v8_arm64_simulator": [
-@@ -2690,13 +2697,6 @@ filegroup(
+@@ -2685,13 +2692,6 @@ filegroup(
              "src/trap-handler/trap-handler-simulator.h",
          ],
          "//conditions:default": [],
@@ -178,7 +178,7 @@ index c81f278203126913c3bad74d31348706678ccf06..96e0f9cdb61d0d8f6597d337c2dd965b
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index e142a3e7e8d2761c47394bd7858385548b6f1dbc..f2061f089ecf365aa8654cea400673905eb05d87 100644
+index 520a311595e488f39445bf9500f24971eecf0091..a81ec956ddd4e985cc6257fc015983baf593f19d 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -119,6 +119,24 @@ def _default_args():
@@ -206,7 +206,7 @@ index e142a3e7e8d2761c47394bd7858385548b6f1dbc..f2061f089ecf365aa8654cea40067390
              "//conditions:default": [],
          }) + select({
              "@v8//bazel/config:is_clang": [
-@@ -165,13 +183,23 @@ def _default_args():
+@@ -167,13 +185,23 @@ def _default_args():
              ],
              "//conditions:default": [
              ],
@@ -230,7 +230,7 @@ index e142a3e7e8d2761c47394bd7858385548b6f1dbc..f2061f089ecf365aa8654cea40067390
              ],
              "@v8//bazel/config:is_macos": ["-pthread"],
              "//conditions:default": ["-Wl,--no-as-needed -ldl -pthread"],
-@@ -493,6 +521,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+@@ -495,6 +523,7 @@ def v8_mksnapshot(name, args, suffix = ""):
          suffix = suffix,
          target_os = select({
              "@v8//bazel/config:is_macos": "mac",
@@ -238,7 +238,7 @@ index e142a3e7e8d2761c47394bd7858385548b6f1dbc..f2061f089ecf365aa8654cea40067390
              "//conditions:default": "",
          }),
      )
-@@ -504,6 +533,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+@@ -506,6 +535,7 @@ def v8_mksnapshot(name, args, suffix = ""):
          suffix = suffix,
          target_os = select({
              "@v8//bazel/config:is_macos": "mac",

@@ -1,4 +1,4 @@
-From 6326c4a7d3245e138e478b8c1be6fcc159d080dc Mon Sep 17 00:00:00 2001
+From 1c1feb90cfe60b40bb7e4bba3a520706776fcbee Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 2 Mar 2024 09:00:18 -0600
 Subject: Add ValueSerializer::SetTreatFunctionsAsHostObjects().
@@ -28,10 +28,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 6590ea20d3c18d19d11f81cf752e3861bf07f3cc..1418ac18aff535cb8994d96d52bc3ee3c5d34f88 100644
+index a0988b509630a854c167cb634dde5b059ec9c0c1..9954e6a9182d1908b2e92150fba14c31dc23455f 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3443,6 +3443,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3448,6 +3448,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  
@@ -43,7 +43,7 @@ index 6590ea20d3c18d19d11f81cf752e3861bf07f3cc..1418ac18aff535cb8994d96d52bc3ee3
                                          Local<Value> value) {
    auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 92a3810498dd8347ac5ac12facb2dbbd24722919..526f4ec15c26a3760198a4aecb291c7f753ec726 100644
+index 2e574704650c3b5d860fc21d083e9e6fed9ddfcf..0c82ae8299f2f45bee34177c3d1b663cede0c02e 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -328,6 +328,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
@@ -74,7 +74,7 @@ index 92a3810498dd8347ac5ac12facb2dbbd24722919..526f4ec15c26a3760198a4aecb291c7f
    }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index dbee8f93f8d7405bab17b5edda204d2d0ebbfac3..85c7c5b65f72f92dc2708657953faec733aba3b8 100644
+index c3a44e9f64f944641eea417584429a0b147ef654..fcf6e66d44508c2c29889354f3794d37cc22b52d 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -102,6 +102,15 @@ class ValueSerializer {
@@ -93,7 +93,7 @@ index dbee8f93f8d7405bab17b5edda204d2d0ebbfac3..85c7c5b65f72f92dc2708657953faec7
   private:
    // Managing allocations of the internal buffer.
    Maybe<bool> ExpandBuffer(size_t required_capacity);
-@@ -181,6 +190,7 @@ class ValueSerializer {
+@@ -182,6 +191,7 @@ class ValueSerializer {
    size_t buffer_capacity_ = 0;
    bool has_custom_host_objects_ = false;
    bool treat_array_buffer_views_as_host_objects_ = false;

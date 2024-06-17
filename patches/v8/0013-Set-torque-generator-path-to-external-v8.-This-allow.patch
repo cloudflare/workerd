@@ -1,4 +1,4 @@
-From b36ba5974036d1ca14b2079698577b35b521be44 Mon Sep 17 00:00:00 2001
+From 7f47c9edc46d15ee3576fc455a76950da848cb78 Mon Sep 17 00:00:00 2001
 From: Garrett Gu <garrett@cloudflare.com>
 Date: Wed, 10 Apr 2024 14:31:33 -0500
 Subject: Set torque generator path to external/v8. This allows bazel to find
@@ -8,10 +8,10 @@ Subject: Set torque generator path to external/v8. This allows bazel to find
 See https://chromium-review.googlesource.com/c/v8/v8/+/5339896
 
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index a19a81d8c01fe24aab7966605bc5b6932fc277f6..d3f897cc3ec4b30ac9beebed77c8fb961c1e9279 100644
+index ad8bd53dcc19c50144a6e94ed899983e014e0033..ff95ab431effc3ed5ebfe0985aff3341997204bb 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -348,7 +348,7 @@ def get_cfg():
+@@ -350,7 +350,7 @@ def get_cfg():
  # split the set of outputs by using OutputGroupInfo, that way we do not need to
  # run the torque generator twice.
  def _torque_files_impl(ctx):

@@ -1,14 +1,14 @@
-From 159185ee2f8897f6ea666d5dd3120625678afb46 Mon Sep 17 00:00:00 2001
+From f6765f5293746b5f8206ca87f7aaefd69bf0d856 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index f714fdb21097394d87f29f692fdbaa597a2f0145..4d4c716d6605dbd6e0b2395bf1e7f86b7a4df946 100644
+index 5aeac1aa629fcb2879a33e242bf96f5a8fe1ff13..bdf7568ff0ac11d2393fc398b9f4fb84b936bd07 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1493,7 +1493,6 @@ filegroup(
+@@ -1484,7 +1484,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
@@ -37,10 +37,10 @@ index f714fdb21097394d87f29f692fdbaa597a2f0145..4d4c716d6605dbd6e0b2395bf1e7f86b
          ":is_not_v8_enable_turbofan": [
              # With Turbofan disabled, we only include the stubbed-out API.
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 7c587522187c26326b4598149842c7e792cdcfce..a19a81d8c01fe24aab7966605bc5b6932fc277f6 100644
+index f8dfd9b5eb9c65547db3b17814c84e4fbc312d07..ad8bd53dcc19c50144a6e94ed899983e014e0033 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -295,7 +295,6 @@ def v8_library(
+@@ -297,7 +297,6 @@ def v8_library(
              copts = copts + default.copts,
              linkopts = linkopts + default.linkopts,
              alwayslink = 1,
@@ -48,7 +48,7 @@ index 7c587522187c26326b4598149842c7e792cdcfce..a19a81d8c01fe24aab7966605bc5b693
              **kwargs
          )
  
-@@ -314,7 +313,6 @@ def v8_library(
+@@ -316,7 +315,6 @@ def v8_library(
              copts = copts + default.copts + ENABLE_I18N_SUPPORT_DEFINES,
              linkopts = linkopts + default.linkopts,
              alwayslink = 1,
@@ -56,7 +56,7 @@ index 7c587522187c26326b4598149842c7e792cdcfce..a19a81d8c01fe24aab7966605bc5b693
              **kwargs
          )
  
-@@ -334,7 +332,6 @@ def v8_library(
+@@ -336,7 +334,6 @@ def v8_library(
              copts = copts + default.copts,
              linkopts = linkopts + default.linkopts,
              alwayslink = 1,
