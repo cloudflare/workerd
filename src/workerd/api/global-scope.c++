@@ -123,6 +123,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(
     kj::Maybe<ExportedHandler&> exportedHandler) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
       "Connect ingress is not currently supported with Service Workers syntax.");
+  KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
+              "TCP ingress requires the experimental flag.");
 
   kj::HttpHeaderTable table;
   kj::HttpHeaders headers(table);
