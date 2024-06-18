@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-#include "crypto_util.h"
+#include "crypto-util.h"
 #include <openssl/rand.h>
 #include <openssl/err.h>
 
