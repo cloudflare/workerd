@@ -110,6 +110,16 @@ http_archive(
 )
 
 http_archive(
+    name = "simdutf",
+    build_file = "//:build/BUILD.simdutf",
+    patch_args = ["-p1"],
+    patches = [],
+    sha256 = "7867c118a11bb7ccaea0f999a28684b06040027506b424b706146cc912b80ff6",
+    type = "zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v5.2.8/singleheader.zip",
+)
+
+http_archive(
     name = "pyodide",
     build_file = "//:build/BUILD.pyodide",
     sha256 = "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",

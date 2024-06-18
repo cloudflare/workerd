@@ -2280,10 +2280,26 @@ function writeU_Int24LE(
   return offset;
 }
 
+export function isAscii(value: ArrayBufferView) {
+  if ((value as any)?.detached || (value as any)?.buffer?.detached) {
+    throw new Error('Unable to determine if buffer is ASCII when it is detached');
+  }
+  return bufferUtil.isAscii(value);
+}
+
+export function isUtf8(value: ArrayBufferView) {
+  if ((value as any)?.detached || (value as any)?.buffer?.detached) {
+    throw new Error('Unable to determine if buffer is UTF8 when it is detached');
+  }
+  return bufferUtil.isUtf8(value);
+}
+
 export default {
   Buffer,
   constants,
   kMaxLength,
   kStringMaxLength,
   SlowBuffer,
+  isAscii,
+  isUtf8,
 };

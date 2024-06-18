@@ -9,6 +9,7 @@
 #include <workerd/jsg/buffersource.h>
 #include <kj/encoding.h>
 #include <algorithm>
+#include "simdutf.h"
 
 // These are defined by <sys/byteorder.h> or <netinet/in.h> on some systems.
 // To avoid warnings, undefine them before redefining them.
@@ -860,6 +861,16 @@ jsg::JsString BufferUtil::flush(jsg::Lock& js, kj::Array<kj::byte> state) {
   state[kMissingBytes] = 0;
 
   return ret;
+}
+
+bool BufferUtil::isAscii(kj::Array<kj::byte> buffer) {
+  if (buffer.size() == 0) return true;
+  return simdutf::validate_ascii(buffer.asChars().begin(), buffer.size());
+}
+
+bool BufferUtil::isUtf8(kj::Array<kj::byte> buffer) {
+  if (buffer.size() == 0) return true;
+  return simdutf::validate_utf8(buffer.asChars().begin(), buffer.size());
 }
 
 }  // namespace workerd::api::node {
