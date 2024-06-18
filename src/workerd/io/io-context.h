@@ -1083,6 +1083,10 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
               // Here we can just `resolver.reject` because we already have a JS exception.
               resolver.reject(js, error.getHandle(js));
             });
+          } catch (jsg::JsExceptionThrown&) {
+            // An uncatchable JS exception -- presumably, the isolate has been terminated. We
+            // can't convert this into a promise rejection, we need to just propagate it up.
+            throw;
           } catch (...) {
             // Again, pass along the KJ exception so we can convert it later in the right context.
             resolver.resolve(js, kj::getCaughtExceptionAsKj());
@@ -1108,6 +1112,10 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
               }, [&](jsg::Value error) {
                 resolver.reject(js, error.getHandle(js));
               });
+            } catch (jsg::JsExceptionThrown&) {
+              // An uncatchable JS exception -- presumably, the isolate has been terminated. We
+              // can't convert this into a promise rejection, we need to just propagate it up.
+              throw;
             } catch (...) {
               // Again, pass along the KJ exception so we can convert it later in the right context.
               resolver.resolve(js, kj::getCaughtExceptionAsKj());
