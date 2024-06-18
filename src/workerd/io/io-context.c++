@@ -594,8 +594,10 @@ void IoContext::TimeoutManagerImpl::TimeoutState::cancel() {
 auto IoContext::TimeoutManagerImpl::addState(
     TimeoutId::Generator& generator, TimeoutParameters params) -> IdAndIterator {
   JSG_REQUIRE(getTimeoutCount() < MAX_TIMEOUTS, DOMQuotaExceededError,
-              "You have exceeded the number of timeouts you may set.",
-              MAX_TIMEOUTS);
+              "You have exceeded the number of active timeouts you may set.",
+              " max active timeouts: ", MAX_TIMEOUTS,
+              ", current active timeouts: ", getTimeoutCount(),
+              ", finished timeouts: ", timeoutsFinished);
 
   auto id = generator.getNext();
   auto [it, wasEmplaced] = timeouts.try_emplace(id, *this, kj::mv(params));
