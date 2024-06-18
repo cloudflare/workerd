@@ -65,9 +65,6 @@ private:
 
 class TimeoutManager {
 public:
-  // Upper bound on the number of timeouts a user can *ever* have active.
-  constexpr static auto MAX_TIMEOUTS = 10'000;
-
   struct TimeoutParameters {
     TimeoutParameters(bool repeat, int64_t msDelay, jsg::Function<void()> function);
 
