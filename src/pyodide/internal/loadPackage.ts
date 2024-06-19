@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * This file contains code that roughly replaces pyodide.loadPackage, with workerd-specific
  * optimizations:
@@ -17,11 +16,11 @@ import { parseTarInfo } from "pyodide-internal:tar";
 import { default as DiskCache } from "pyodide-internal:disk_cache";
 import { createTarFS } from "pyodide-internal:tarfs";
 
-async function decompressArrayBuffer(arrBuf) {
+async function decompressArrayBuffer(arrBuf: ArrayBuffer) {
   return await new Response(new Response(arrBuf).body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
 }
 
-async function loadBundle(requirement) {
+async function loadBundle(requirement: string) {
   // first check if the disk cache has what we want
   const filename = LOCKFILE["packages"][requirement]["file_name"];
   const cached = DiskCache.get(filename);
@@ -45,12 +44,11 @@ async function loadBundle(requirement) {
  * ArrayBufferReader wraps around an arrayBuffer in a way that tar.js is able to read from
  */
 class ArrayBufferReader {
-  constructor(arrayBuffer) {
-    this.arrayBuffer = arrayBuffer;
+  constructor(private arrayBuffer: ArrayBuffer) {
+
   }
 
-  read(offset, buf){
-    // buf is a Uint8Array
+  read(offset: number, buf: Uint8Array){
     const size = this.arrayBuffer.byteLength;
     if (offset >= size || offset < 0) {
       return 0;
@@ -64,7 +62,7 @@ class ArrayBufferReader {
   }
 }
 
-export async function loadPackages(Module, requirements) {
+export async function loadPackages(Module: Module, requirements: Array<string>) {
   if (!LOAD_WHEELS_FROM_R2) return;
 
   let loadPromises = [];
