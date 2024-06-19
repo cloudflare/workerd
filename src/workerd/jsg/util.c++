@@ -344,7 +344,8 @@ void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
 }
 
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
-  js.tryCatch([&]() {
+  v8::TryCatch tryCatch(js.v8Isolate);
+  try {
     Serializer ser(js, {
       // Make sure we don't break compatibility if V8 introduces a new version. This value can
       // be bumped to match the new version once all of production is updated to understand it.
@@ -352,9 +353,14 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
     });
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
-  }, [](jsg::Value&& error) {
-    // Exception not serializable, ignore.
-  });
+  } catch (JsExceptionThrown&) {
+    // Either:
+    // a. The exception is not serializable, and we caught the exception. We will just ignore it
+    //    and proceed without annotating.
+    // b. The isolate's execution is being terminated, and so tryCatch.CanContinue() is false. In
+    //    this case we cannot serialize the exception, but again we'll just move on without the
+    //    annotation.
+  }
 }
 
 static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType) {
