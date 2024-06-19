@@ -1,5 +1,6 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
@@ -179,3 +180,11 @@ kj_test(
         "@ssl",
     ],
 )
+
+
+copy_file(
+    name = "pyodide.capnp.bin@rule",
+    src = "//src/pyodide:pyodide.capnp.bin@rule",
+    out = "pyodide.capnp.bin",
+)
+
