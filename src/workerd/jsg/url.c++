@@ -339,10 +339,6 @@ kj::Array<kj::byte> Url::percentDecode(kj::ArrayPtr<const kj::byte> input) {
   return kj::mv(ret);
 }
 
-const Url operator "" _url(const char* str, size_t size) {
-  return KJ_ASSERT_NONNULL(Url::tryParse(kj::ArrayPtr<const char>(str, size)));
-}
-
 // ======================================================================================
 
 namespace {
@@ -2348,3 +2344,7 @@ UrlPattern::UrlPattern(kj::Array<Component> components, bool ignoreCase)
       ignoreCase(ignoreCase) {}
 
 }  // namespace workerd::jsg
+
+const workerd::jsg::Url operator "" _url(const char* str, size_t size) {
+  return KJ_ASSERT_NONNULL(workerd::jsg::Url::tryParse(kj::ArrayPtr<const char>(str, size)));
+}

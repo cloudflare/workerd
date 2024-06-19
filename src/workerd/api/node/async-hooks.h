@@ -217,6 +217,8 @@ private:
 // Node.js.
 class AsyncHooksModule final: public jsg::Object {
 public:
+  AsyncHooksModule() = default;
+  AsyncHooksModule(jsg::Lock&, const jsg::Url&) {}
 
   JSG_RESOURCE_TYPE(AsyncHooksModule) {
     JSG_NESTED_TYPE(AsyncLocalStorage);

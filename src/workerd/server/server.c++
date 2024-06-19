@@ -121,6 +121,10 @@ static kj::Vector<char> escapeJsonString(kj::StringPtr text) {
   return escaped;
 }
 
+// TODO(now): Temporary
+class ServerResolveObserver final : public jsg::ResolveObserver {};
+ServerResolveObserver serverResolveObserver;
+
 }  // namespace
 
 // =======================================================================================
@@ -2674,12 +2678,23 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
+
+  kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
+  if (featureFlags.getNewModuleRegistry()) {
+    KJ_REQUIRE(experimental,
+               "The new ModuleRegistry implementation is an experimental feature. "
+               "You must run workerd with `--experimental` to use this feature.");
+    newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
+        *observer, conf, featureFlags.asReader(), pythonConfig);
+  }
+
   auto api = kj::heap<WorkerdApi>(globalContext->v8System,
                                   featureFlags.asReader(),
                                   *limitEnforcer,
                                   kj::atomicAddRef(*observer),
                                   *memoryCacheProvider,
-                                  pythonConfig
+                                  pythonConfig,
+                                  kj::mv(newModuleRegistry)
                                   );
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {

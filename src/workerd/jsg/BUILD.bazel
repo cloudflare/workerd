@@ -169,8 +169,6 @@ wd_cc_library(
     exclude = [
         # defined below
         "macro-meta-test.c++",
-        # TODO(jasnell) modules-new-test is leaking IsolateModuleRegistry and fails asan leak detector
-        "modules-new-test.c++",
         "resource-test.c++",
         "rtti-test.c++",
         "url-test.c++",

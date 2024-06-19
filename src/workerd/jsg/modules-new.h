@@ -150,12 +150,15 @@ struct ResolveContext final {
   // before it was normalized into the specifier URL.
   kj::Maybe<kj::StringPtr> rawSpecifier = kj::none;
 
-  // TODO(soon): Support import attributes
-  // kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+  // Per the standard, import attributes are considered to be part of the
+  // specifier key when the module is resolved and cached.
+  kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
 };
 
 // The abstraction of a module within the ModuleRegistry.
 // Importantly, a Module is immutable once created and must be thread-safe.
+// The Module class itself represents the definition of a module and not
+// it's actual instantiation.
 class Module {
 public:
   enum class Type : uint8_t {
@@ -175,8 +178,8 @@ public:
     ESM = 1 << 1,
     // A Module with the EVAL flag set is interpreted as a module that requires
     // code evaluation to complete. This is generally used for synthetic modules
-    // that require loading outside of the current request context. The eval
-    // callback must be set or the flag is ignored.
+    // that require JavaScript evaluation outside of the current request context.
+    // The eval callback must be set or the flag is ignored.
     EVAL = 1 << 2,
   };
 
@@ -185,8 +188,7 @@ public:
   // Flag::EVAL on a module is ignored. If the EvalCallback is set, then any
   // Modules that have the Flag::EVAL set will have their evaluation deferred
   // to this callback.
-  using EvalCallback = kj::Function<jsg::Promise<Value>(
-      Lock& js,
+  using EvalCallback = Function<jsg::Promise<Value>(
       const Module& module,
       v8::Local<v8::Module> v8Module,
       const CompilationObserver& observer)>;
@@ -194,6 +196,7 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(Module);
   virtual ~Module() = default;
 
+  // The fully resolved absolute import specifier URL for the module.
   inline const Url& specifier() const KJ_LIFETIMEBOUND { return specifier_; }
   inline Type type() const { return type_; }
 
@@ -205,7 +208,7 @@ public:
 
   // If isEval() returns true, then the module requires code evaluation to complete
   // outside of a request context (that is, it cannot perform certain I/O tasks).
-  bool isEval() const;
+  inline bool isEval() const;
 
   // Returns a v8::Module representing this Module definition for the given isolate.
   // The return value follows the established v8 rules for Maybe. If the returned
@@ -257,6 +260,10 @@ public:
     bool set(Lock& js, kj::StringPtr name, JsValue value) const;
     bool setDefault(Lock& js, JsValue value) const;
 
+    // Returns the list of the named exports expected for the module
+    // (should not include the "default")
+    kj::ArrayPtr<const kj::StringPtr> getNamedExports() const;
+
   private:
     v8::Local<v8::Module> inner;
     kj::HashSet<kj::StringPtr> namedExports;
@@ -265,9 +272,9 @@ public:
   // The EvaluateCallback is used to evaluate a synthetic module. The callback
   // is called after the module is resolved and instantiated.
   using EvaluateCallback =
-      kj::Function<bool(Lock&, const Url& specifier,
-                        const ModuleNamespace&,
-                        const CompilationObserver&)>;
+      Function<bool(const Url& specifier,
+                    const ModuleNamespace&,
+                    const CompilationObserver&)>;
 
   static kj::Own<Module> newSynthetic(
       Url specifier,
@@ -287,6 +294,8 @@ public:
   // Creates a new ESM module that does not take ownership of the given code
   // array. This is used to construct ESM modules from compiled-in built-in
   // modules.
+  // This variation of newEsm does not take Flags as none of the existing
+  // Flags are relevant other than the ESM flag which will be set automatically.
   static kj::Own<Module> newEsm(
       Url specifier,
       Type type,
@@ -354,11 +363,31 @@ public:
             JsObject(wrapper.wrap(js.v8Context(), kj::none, ext.addRef())),
             observer);
         fn(js);
-        return ns.setDefault(js, ext->getExports(js));
+        // If there are named exports specified for the module namespace,
+        // then we want to examine the ext->getExports() to extract those.
+        auto exports = ext->getExports(js);
+        for (auto& name : ns.getNamedExports()) {
+          ns.set(js, name, exports.get(js, name));
+        }
+        return ns.setDefault(js, exports);
       }, [&](Value exception) {
         js.v8Isolate->ThrowException(exception.getHandle(js));
         return false;
       });
+    };
+  }
+
+  template <typename T, typename TypeWrapper, typename Func>
+  static EvaluateCallback newJsgObjectModuleHandler(Func factory)
+      KJ_WARN_UNUSED_RESULT {
+    return [factory=kj::mv(factory)](Lock& js,
+              const Url& specifier,
+              const Module::ModuleNamespace& ns,
+              const CompilationObserver& observer) mutable -> bool {
+      Ref<T> instance = factory(js);
+      auto value = TypeWrapper::from(js.v8Isolate).wrap(
+          js.v8Context(), kj::none, kj::mv(instance));
+      return ns.setDefault(js, JsValue(value));
     };
   }
 
@@ -479,13 +508,12 @@ public:
 
   enum class BuiltInBundleOptions {
     NONE = 0,
-    ALLOW_DATA_MODULES = 1 << 0,
   };
 
   static void getBuiltInBundleFromCapnp(
       BuiltinBuilder& builder,
       Bundle::Reader bundle,
-      BuiltInBundleOptions options);
+      BuiltInBundleOptions options = BuiltInBundleOptions::NONE);
 
   KJ_DISALLOW_COPY_AND_MOVE(ModuleBundle);
 
@@ -573,7 +601,7 @@ public:
 
   // Attaches the ModuleRegistry to the given isolate by creating an IsolateModuleRegistry
   // and linking that to the isolate.
-  void attachToIsolate(Lock& js, const CompilationObserver& observer) override;
+  kj::Own<void> attachToIsolate(Lock& js, const CompilationObserver& observer) override;
 
   // Synchronously resolve the specified module from the registry bound to the given lock.
   // This will throw a JsExceptionThrown exception if the module cannot be found or an
@@ -582,6 +610,16 @@ public:
   static JsValue resolve(Lock& js, kj::StringPtr specifier,
       kj::StringPtr exportName = "default"_kjc,
       ResolveContext::Type type = ResolveContext::Type::BUNDLE,
+      ResolveContext::Source source = ResolveContext::Source::INTERNAL,
+      kj::Maybe<const Url&> maybeReferrer = kj::none);
+
+  // Synchronously resolve the specified module from the registry bound to the given lock.
+  // This variant will return kj::none if the module cannot be found but will throw a
+  // JsExceptionThrown exception if an error occurs while the module is being evaluated.
+  // Modules resolved with this method must be capable of fully evaluating within one
+  // drain of the microtask queue.
+  static kj::Maybe<JsObject> tryResolveModuleNamespace(Lock& js,
+      kj::StringPtr specifier, ResolveContext::Type type = ResolveContext::Type::BUNDLE,
       ResolveContext::Source source = ResolveContext::Source::INTERNAL,
       kj::Maybe<const Url&> maybeReferrer = kj::none);
 

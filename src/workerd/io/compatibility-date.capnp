@@ -488,4 +488,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # always been configured to accept publicly-routable internet hosts only; hostnames which map
   # to private IP addresses (as defined in e.g. RFC 1918) will be rejected. Thus, workerd has
   # always been SSRF-safe by default.
+
+  newModuleRegistry @52 :Bool
+      $compatEnableFlag("new_module_registry")
+      $compatDisableFlag("legacy_module_registry")
+      $experimental;
+  # Enables of the new module registry implementation.
 }

@@ -799,7 +799,7 @@ KJ_TEST("Attaching a module registry works") {
     };
     KJ_ASSERT(registry->resolve(resolveContext) != kj::none);
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       auto val = ModuleRegistry::resolve(js, "file:///worker1");
@@ -884,7 +884,7 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
     };
     KJ_ASSERT_NONNULL(registry->resolve(resolveContext));
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       auto val = ModuleRegistry::resolve(js, "file:///worker", "abc"_kjc);
@@ -966,7 +966,7 @@ KJ_TEST("compileEvalFunction in synthetic module works") {
 
     auto registry = ModuleRegistry::Builder(resolveObserver).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       auto val = ModuleRegistry::resolve(js, "file:///main");
@@ -992,7 +992,7 @@ KJ_TEST("import.meta works as expected") {
         Module::Flags::MAIN);
     auto registry = ModuleRegistry::Builder(ResolveObserver).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       auto val = ModuleRegistry::resolve(js, "file:///foo");
@@ -1063,7 +1063,7 @@ KJ_TEST("import specifiers with query params and hash fragments work") {
 
     auto registry = ModuleRegistry::Builder(ResolveObserver).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       auto val1 = ModuleRegistry::resolve(js, "file:///foo?1");
@@ -1118,7 +1118,7 @@ KJ_TEST("Previously resolved modules not found with incompatible resolve context
         .add(bundleBuilder.finish())
         .finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       // The built-in only foo:bar module should be found when using a built-in context
@@ -1170,7 +1170,7 @@ KJ_TEST("Awaiting top-level dynamic import in synchronous require fails as expec
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       // This is a synchronous resolve that should fail.
@@ -1198,7 +1198,7 @@ KJ_TEST("Awaiting a never resolved promise in synchronous require fails as expec
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
@@ -1225,7 +1225,7 @@ KJ_TEST("Throwing an exception inside a ESM module works as expected") {
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
@@ -1251,7 +1251,7 @@ KJ_TEST("Syntax error in ESM module is properly reported") {
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
@@ -1277,7 +1277,7 @@ KJ_TEST("Throwing an exception inside a CJS-style eval module works as expected"
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "file:///foo", "foo"_kjc);
@@ -1307,7 +1307,7 @@ KJ_TEST("Invalid JSON syntax module throws exception as expected") {
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
@@ -1358,7 +1358,7 @@ KJ_TEST("Recursive import works or fails as expected") {
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     auto val1 = ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
     KJ_ASSERT(val1.isNumber());
@@ -1396,7 +1396,7 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (d
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "file:///bar", "default"_kjc);
@@ -1434,7 +1434,7 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (s
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "file:///bar", "default"_kjc);
@@ -1474,7 +1474,7 @@ KJ_TEST("Resolution occurs relative to the referrer") {
   auto registry = registryBuilder.add(builder.finish()).finish();
 
   PREAMBLE([&](Lock& js) {
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       auto abc = ModuleRegistry::resolve(js, "file:///foo/", "abc"_kjc);
@@ -1526,10 +1526,7 @@ KJ_TEST("Building a bundle from a capnp description works") {
   modules[2].setType(workerd::jsg::ModuleType::BUILTIN);
 
   ModuleBundle::BuiltinBuilder bundleBuilder;
-  ModuleBundle::getBuiltInBundleFromCapnp(
-      bundleBuilder,
-      bundle.asReader(),
-      ModuleBundle::BuiltInBundleOptions::ALLOW_DATA_MODULES);
+  ModuleBundle::getBuiltInBundleFromCapnp(bundleBuilder, bundle.asReader());
   auto moduleBundle = bundleBuilder.finish();
 
   {
@@ -1574,7 +1571,7 @@ KJ_TEST("Building a bundle from a capnp description works") {
     auto registry = ModuleRegistry::Builder(resolveObserver)
         .add(kj::mv(moduleBundle)).finish();
 
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     // The foo:bar module is interpreted as an ESM
     js.tryCatch([&] {
@@ -1604,7 +1601,7 @@ KJ_TEST("Using a registry from multiple threads works") {
     kj::Thread thread([&registry,fulfiller=kj::mv(paf.fulfiller)] {
       PREAMBLE([&](Lock& js) {
         CompilationObserver compilationObserver;
-        registry.attachToIsolate(js, compilationObserver);
+        auto attached = registry.attachToIsolate(js, compilationObserver);
         js.tryCatch([&] {
           auto val = ModuleRegistry::resolve(js, "file:///foo");
           KJ_ASSERT(val.isNumber());
@@ -1747,7 +1744,7 @@ KJ_TEST("Percent-encoding in specifiers is normalized properly") {
   auto registry = ModuleRegistry::Builder(resolveObserver).add(builder.finish()).finish();
 
   PREAMBLE([&](Lock& js) {
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       auto abc = ModuleRegistry::resolve(js, "foo", "abc"_kjc);
@@ -1816,7 +1813,7 @@ KJ_TEST("Aliased modules (import maps) work") {
   KJ_ASSERT(&bar == &foo);
 
   PREAMBLE([&](Lock& js) {
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       // While the aliased identifiers resolve to the same underlying module, the
@@ -1859,7 +1856,7 @@ KJ_TEST("Aliased modules (import maps) work") {
 //   auto registry = ModuleRegistry::Builder(resolveObserver).add(builder.finish()).finish();
 
 //   PREAMBLE([&](Lock& js) {
-//     registry->attachToIsolate(js, compilationObserver);
+//     auto attached = registry->attachToIsolate(js, compilationObserver);
 
 //     js.tryCatch([&] {
 //       ModuleRegistry::resolve(js, "foo", "default"_kjc);
@@ -1889,7 +1886,7 @@ KJ_TEST("Using a deferred eval callback works") {
   }).finish();
 
   PREAMBLE([&](Lock& js) {
-    registry->attachToIsolate(js, compilationObserver);
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "foo", "default"_kjc);

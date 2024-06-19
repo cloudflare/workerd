@@ -1,6 +1,8 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/url.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
@@ -9,6 +11,7 @@ namespace workerd::api {
 class UnsafeEval: public jsg::Object {
 public:
   UnsafeEval() = default;
+  UnsafeEval(jsg::Lock&, const jsg::Url&) {}
 
   // A non-capturing eval. Compile and evaluates the given script, returning whatever
   // value is returned by the script. This version of eval intentionally does not
@@ -62,6 +65,8 @@ public:
 
 class UnsafeModule: public jsg::Object {
 public:
+  UnsafeModule() = default;
+  UnsafeModule(jsg::Lock&, const jsg::Url&) {}
   jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(UnsafeModule) {
@@ -83,5 +88,26 @@ void registerUnsafeModule(Registry& registry) {
 template <class Registry> void registerUnsafeModules(Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<UnsafeEval>("internal:unsafe-eval",
                                                  workerd::jsg::ModuleRegistry::Type::INTERNAL);
+}
+
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> getInternalUnsafeModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+  static const auto kSpecifier = "internal:unsafe-eval"_url;
+  builder.addObject<UnsafeEval, TypeWrapper>(kSpecifier);
+  return builder.finish();
+}
+
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> getExternalUnsafeModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+  static const auto kSpecifier = "workerd:unsafe-eval"_url;
+  builder.addObject<UnsafeEval, TypeWrapper>(kSpecifier);
+
+  static const auto kUnsafeSpecifier = "workerd:unsafe"_url;
+  builder.addObject<UnsafeModule, TypeWrapper>(kUnsafeSpecifier);
+  return builder.finish();
 }
 } // namespace workerd::api

@@ -287,7 +287,7 @@ TestFixture::TestFixture(SetupParams&& params)
       *isolateLimitEnforcer,
       kj::atomicRefcounted<IsolateObserver>(),
       *memoryCacheProvider,
-      defaultPythonConfig)),
+      defaultPythonConfig, kj::none)),
     workerIsolate(kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(api),
       kj::atomicRefcounted<IsolateObserver>(),

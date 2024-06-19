@@ -1175,7 +1175,8 @@ private:
 class ModuleRegistryBase {
 public:
   virtual ~ModuleRegistryBase() noexcept(false) {}
-  virtual void attachToIsolate(Lock& js, const CompilationObserver& observer) = 0;
+  virtual kj::Own<void> attachToIsolate(Lock& js, const CompilationObserver& observer)
+      KJ_WARN_UNUSED_RESULT = 0;
 };
 
 struct NewContextOptions {
@@ -1336,8 +1337,12 @@ public:
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
 
+    kj::Maybe<kj::Own<void>> maybeNewModuleRegistry;
     KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
-      newModuleRegistry.attachToIsolate(js, compilationObserver);
+      JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+        // The context must be current for attachToIsolate to succeed.
+        maybeNewModuleRegistry = newModuleRegistry.attachToIsolate(js, compilationObserver);
+      });
     } else {
       ptr->setModuleRegistry(ModuleRegistryImpl<TypeWrapper>::install(
           isolate, context, compilationObserver));
@@ -1346,7 +1351,7 @@ public:
     return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
       polyfillSymbols(js, context);
       setupJavascript(js);
-      return JsContext<T>(context, kj::mv(ptr));
+      return JsContext<T>(context, kj::mv(ptr), kj::mv(maybeNewModuleRegistry));
     });
   }
 

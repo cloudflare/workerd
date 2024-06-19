@@ -6,6 +6,8 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/api/actor.h>
@@ -119,6 +121,7 @@ static PythonConfig defaultConfig {
 
 struct WorkerdApi::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
+  kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
   PythonConfig pythonConfig;
@@ -144,9 +147,12 @@ struct WorkerdApi::Impl {
        IsolateLimitEnforcer& limitEnforcer,
        kj::Own<jsg::IsolateObserver> observer,
        api::MemoryCacheProvider& memoryCacheProvider,
-       PythonConfig& pythonConfig = defaultConfig)
+       PythonConfig& pythonConfig = defaultConfig,
+       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
       : features(capnp::clone(featuresParam)),
-        jsgIsolate(v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
+        maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
+        jsgIsolate(v8System, Configuration(*this), kj::mv(observer),
+                   limitEnforcer.getCreateParams()),
         memoryCacheProvider(memoryCacheProvider), pythonConfig(kj::mv(pythonConfig)) {}
 
   static v8::Local<v8::String> compileTextGlobal(JsgWorkerdIsolate::Lock& lock,
@@ -181,6 +187,12 @@ struct WorkerdApi::Impl {
         lock.wrapNoContext(reader)));
   };
 
+  kj::Maybe<jsg::modules::ModuleRegistry&> tryGetModuleRegistry() const {
+    KJ_IF_SOME(owned, maybeOwnedModuleRegistry) {
+      return *const_cast<jsg::modules::ModuleRegistry*>(owned.get());
+    }
+    return kj::none;
+  }
 };
 
 WorkerdApi::WorkerdApi(jsg::V8System& v8System,
@@ -188,9 +200,11 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     IsolateLimitEnforcer& limitEnforcer,
     kj::Own<jsg::IsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
-    PythonConfig &pythonConfig)
+    PythonConfig &pythonConfig,
+    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
     : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer),
-                          memoryCacheProvider, pythonConfig)) {}
+                          memoryCacheProvider, pythonConfig,
+                          kj::mv(newModuleRegistry))) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -201,8 +215,11 @@ CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope>
     WorkerdApi::newContext(jsg::Lock& lock) const {
+  jsg::NewContextOptions options {
+    .newModuleRegistry = impl->tryGetModuleRegistry(),
+  };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
-      .newContext<api::ServiceWorkerGlobalScope>(lock.v8Isolate);
+      .newContext<api::ServiceWorkerGlobalScope>(kj::mv(options), lock.v8Isolate);
 }
 jsg::Dict<NamedExport> WorkerdApi::unwrapExports(
     jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const {
@@ -784,6 +801,155 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
 
 const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
   return kj::downcast<const WorkerdApi>(api);
+}
+
+// =======================================================================================
+
+kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry(
+    const jsg::ResolveObserver& observer,
+    const config::Worker::Reader& conf,
+    const CompatibilityFlags::Reader& featureFlags,
+    const PythonConfig& pythonConfig) {
+  jsg::modules::ModuleRegistry::Builder builder(observer,
+      jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
+
+  api::registerBuiltinModules<JsgWorkerdIsolate_TypeWrapper>(builder, featureFlags);
+
+  jsg::modules::ModuleBundle::BundleBuilder bundleBuilder;
+  bool firstEsm = true;
+  bool hasPythonModules = false;
+  auto confModules = conf.getModules();
+  using namespace workerd::api::pyodide;
+  for (auto def : confModules) {
+    switch (def.which()) {
+      case config::Worker::Module::ES_MODULE: {
+        jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
+        if (firstEsm) {
+          flags = flags | jsg::modules::Module::Flags::MAIN;
+          firstEsm = false;
+        }
+        bundleBuilder.addEsmModule(def.getName(),
+          kj::heapArray<const char>(def.getEsModule()), flags);
+        break;
+      }
+      case config::Worker::Module::TEXT: {
+        bundleBuilder.addSyntheticModule(
+            def.getName(), jsg::modules::Module::newTextModuleHandler(
+                kj::heapArray<const char>(def.getText())));
+        break;
+      }
+      case config::Worker::Module::DATA: {
+        bundleBuilder.addSyntheticModule(
+            def.getName(), jsg::modules::Module::newDataModuleHandler(
+                kj::heapArray<kj::byte>(def.getData())));
+        break;
+      }
+      case config::Worker::Module::WASM: {
+        bundleBuilder.addSyntheticModule(
+            def.getName(), jsg::modules::Module::newWasmModuleHandler(
+                kj::heapArray<kj::byte>(def.getWasm())));
+        break;
+      }
+      case config::Worker::Module::JSON: {
+        bundleBuilder.addSyntheticModule(
+            def.getName(), jsg::modules::Module::newJsonModuleHandler(
+                kj::heapArray<const char>(def.getJson())));
+        break;
+      }
+      case config::Worker::Module::COMMON_JS_MODULE: {
+        // TODO(soon): These are intentionally commented out for the time
+        // being and will be soon handled in a follow up PR. This branch
+        // is not yet taken in production.
+        // bundleBuilder.addSyntheticModule(
+        //     def.getName(), jsg::modules::Module::newCjsStyleModuleHandler<
+        //         jsg::CommonJsModuleContext,
+        //         JsgWorkerdIsolate_TypeWrapper>(
+        //             kj::str(def.getCommonJsModule()),
+        //             kj::str(def.getName())));
+        break;
+      }
+      case config::Worker::Module::NODE_JS_COMPAT_MODULE: {
+        // bundleBuilder.addSyntheticModule(
+        //     def.getName(), jsg::modules::Module::newCjsStyleModuleHandler<
+        //         jsg::NodeJsModuleContext,
+        //         JsgWorkerdIsolate_TypeWrapper>(
+        //             kj::str(def.getNodeJsCompatModule()),
+        //             kj::str(def.getName())));
+        break;
+      }
+      case config::Worker::Module::PYTHON_MODULE: {
+        KJ_REQUIRE(featureFlags.getPythonWorkers(),
+          "The python_workers compatibility flag is required to use Python.");
+        hasPythonModules = true;
+        bundleBuilder.addEsmModule(
+          def.getName(), kj::str(PYTHON_ENTRYPOINT).releaseArray());
+        break;
+      }
+      case config::Worker::Module::PYTHON_REQUIREMENT: {
+        // Handled separately
+        break;
+      }
+    }
+  }
+
+  builder.add(bundleBuilder.finish());
+
+  if (hasPythonModules) {
+    jsg::modules::ModuleBundle::BuiltinBuilder pyodideBundleBuilder;
+    auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
+    auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
+    auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
+    auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
+    auto limiterSpecifier = "pyodide-internal:limiter"_url;
+
+    // Inject metadata that the entrypoint module will read.
+    pyodideBundleBuilder.addSynthetic(metadataSpecifier,
+        jsg::modules::Module::newJsgObjectModuleHandler<
+            PyodideMetadataReader,
+            JsgWorkerdIsolate_TypeWrapper>(
+            [metadataReader=makePyodideMetadataReader(conf, pythonConfig)]
+            (jsg::Lock& js) mutable
+                -> jsg::Ref<PyodideMetadataReader> {
+      return metadataReader.addRef();
+    }));
+    // Inject artifact bundler.
+    pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
+        jsg::modules::Module::newJsgObjectModuleHandler<
+            ArtifactBundler,
+            JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable
+                -> jsg::Ref<ArtifactBundler> {
+      return ArtifactBundler::makeDisabledBundler();
+    }));
+    // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
+    pyodideBundleBuilder.addSynthetic(internalJaegerSpecifier,
+        jsg::modules::Module::newJsgObjectModuleHandler<
+            DisabledInternalJaeger,
+            JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable
+                -> jsg::Ref<DisabledInternalJaeger> {
+      return DisabledInternalJaeger::create();
+    }));
+    // Inject disk cache module
+    pyodideBundleBuilder.addSynthetic(diskCacheSpecifier,
+        jsg::modules::Module::newJsgObjectModuleHandler<
+            DiskCache,
+            JsgWorkerdIsolate_TypeWrapper>(
+                [diskCache=jsg::alloc<DiskCache>(pythonConfig.diskCacheRoot)]
+                (jsg::Lock& js) mutable -> jsg::Ref<DiskCache> {
+      return diskCache.addRef();
+    }));
+    // Inject a (disabled) SimplePythonLimiter
+    pyodideBundleBuilder.addSynthetic(limiterSpecifier,
+        jsg::modules::Module::newJsgObjectModuleHandler<
+            SimplePythonLimiter,
+            JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable
+                -> jsg::Ref<SimplePythonLimiter> {
+      return SimplePythonLimiter::makeDisabled();
+    }));
+
+    builder.add(pyodideBundleBuilder.finish());
+  }
+
+  return builder.finish();
 }
 
 }  // namespace workerd::server

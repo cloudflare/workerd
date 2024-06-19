@@ -101,7 +101,7 @@ public:
       KJ_IF_SOME(c, *lock) {
         // We new new here because v8 will take ownership of the CachedData instance,
         // even tho we are maintaining ownership of the underlying buffer.
-        data = new v8::ScriptCompiler::CachedData(c.begin(), c.size());
+        data = new v8::ScriptCompiler::CachedData(c->data, c->length);
       }
     }
 
@@ -137,11 +137,11 @@ public:
     if (options == v8::ScriptCompiler::CompileOptions::kNoCompileOptions) {
       auto lock = cachedData.lockExclusive();
       if (*lock == kj::none) {
-        auto cached = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript());
-        if (cached != nullptr) {
-          auto buf = kj::heapArray<kj::byte>(cached->length);
-          memcpy(buf.begin(), cached->data, cached->length);
-          *lock = kj::mv(buf);
+        auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript());
+        if (ptr != nullptr) {
+          kj::Own<v8::ScriptCompiler::CachedData> cached(ptr,
+              kj::_::HeapDisposer<v8::ScriptCompiler::CachedData>::instance);
+          *lock = kj::mv(cached);
         }
       }
     }
@@ -179,7 +179,7 @@ private:
   // When externed is true, the source buffer is passed into the isolate as an externalized
   // string. This is only appropriate for built-in modules that are compiled into the binary.
   bool externed = false;
-  kj::MutexGuarded<kj::Maybe<kj::Array<kj::byte>>> cachedData;
+  kj::MutexGuarded<kj::Maybe<kj::Own<v8::ScriptCompiler::CachedData>>> cachedData;
 };
 
 // A SyntheticModule is essentially any type of module that is not backed by an ESM
@@ -375,14 +375,21 @@ public:
     }));
   }
 
+  enum class RequireOption {
+    DEFAULT,
+    RETURN_EMPTY,
+  };
+
   // Used to implement the synchronous dynamic import of modules in support of APIs
   // like the CommonJS require. Returns the instantiated/evaluated module namespace.
-  // If an empty v8::MaybeLocal is returned, then an exception has been scheduled.
-  // In this case, module evaluation *is not permitted* to use promise microtasks.
-  // If module.evaluate() returns a pending promise the require will fail.
+  // If an empty v8::MaybeLocal is returned and the default option is given, then an
+  // exception has been scheduled. In this case, module evaluation *is not permitted*
+  // to use promise microtasks. If module.evaluate() returns a pending promise the
+  // require will fail.
   // Note that this returns the module namespace object. In CommonJS, the require()
   // function will actually return the default export from the module namespace object.
-  v8::MaybeLocal<v8::Object> require(Lock& js, const ResolveContext& context) {
+  v8::MaybeLocal<v8::Object> require(Lock& js, const ResolveContext& context,
+                                     RequireOption option = RequireOption::DEFAULT) {
     static constexpr auto evaluate = [](
         Lock& js,
         Entry& entry,
@@ -440,6 +447,9 @@ public:
         return evaluate(js, found, context.specifier, getObserver(), inner.getEvalCallback());
       }
 
+      if (option == RequireOption::RETURN_EMPTY) {
+        return v8::MaybeLocal<v8::Object>();
+      }
       JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.specifier.getHref()));
     }, [&](Value exception) {
       // Use the isolate to rethrow the exception here instead of using the lock.
@@ -704,6 +714,7 @@ IsolateModuleRegistry::IsolateModuleRegistry(
       lookupCache(EntryCallbacks{}, ContextCallbacks{}, UrlCallbacks{}) {
   auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
+  KJ_ASSERT(!context.IsEmpty());
   KJ_ASSERT(context->GetAlignedPointerFromEmbedderData(2) == nullptr);
   context->SetAlignedPointerInEmbedderData(2, this);
   isolate->SetHostImportModuleDynamicallyCallback(&dynamicImport);
@@ -889,6 +900,8 @@ private:
 kj::HashSet<kj::StringPtr> toHashSet(kj::ArrayPtr<const kj::String> arr) {
   kj::HashSet<kj::StringPtr> set;
   set.insertAll(arr);
+  // Make sure there is no "default" export listed explicitly in the set.
+  set.eraseMatch("default"_kj);
   return kj::mv(set);
 }
 
@@ -903,17 +916,6 @@ void ModuleBundle::getBuiltInBundleFromCapnp(
       BuiltinBuilder& builder,
       Bundle::Reader bundle,
       BuiltInBundleOptions options) {
-
-  static constexpr auto checkAllowDataModules = [](BuiltInBundleOptions options) -> bool {
-    if ((options & BuiltInBundleOptions::ALLOW_DATA_MODULES) !=
-            BuiltInBundleOptions::ALLOW_DATA_MODULES) {
-      LOG_ERROR_ONCE("Builtin wasm module or data module used without passing "
-                     "builtin-wasm-modules autogate flag");
-      return false;
-    }
-    return true;
-  };
-
   auto filter = ([&] {
     switch (builder.type()) {
       case Module::Type::BUILTIN: return ModuleType::BUILTIN;
@@ -934,19 +936,15 @@ void ModuleBundle::getBuiltInBundleFromCapnp(
           continue;
         }
         case workerd::jsg::Module::WASM: {
-          if (checkAllowDataModules(options)) {
-            builder.addSynthetic(specifier,
-                Module::newWasmModuleHandler(
-                    kj::heapArray<kj::byte>(module.getWasm().asBytes())));
-          }
+          builder.addSynthetic(specifier,
+              Module::newWasmModuleHandler(
+                  kj::heapArray<kj::byte>(module.getWasm().asBytes())));
           continue;
         }
         case workerd::jsg::Module::DATA: {
-          if (checkAllowDataModules(options)) {
-            builder.addSynthetic(specifier,
-                Module::newDataModuleHandler(
-                    kj::heapArray<kj::byte>(module.getData().asBytes())));
-          }
+          builder.addSynthetic(specifier,
+              Module::newDataModuleHandler(
+                  kj::heapArray<kj::byte>(module.getData().asBytes())));
           continue;
         }
         case workerd::jsg::Module::JSON: {
@@ -1114,13 +1112,13 @@ ModuleRegistry::ModuleRegistry(ModuleRegistry::Builder* builder)
   maybeEvalCallback = kj::mv(builder->maybeEvalCallback);
 }
 
-void ModuleRegistry::attachToIsolate(
+kj::Own<void> ModuleRegistry::attachToIsolate(
     Lock& js,
     const CompilationObserver& observer) {
-  // We use new here because it is required for the v8 integration.
-  // Responsibility for cleaning up the type is passed to v8 when
-  // the context is cleaned up.
-  new IsolateModuleRegistry(js, *this, observer);
+  // The IsolateModuleRegistry is attached to the isolate as an embedder data slot.
+  // We have to keep it alive for the duration of the v8::Context so we return a
+  // kj::Own and store that in the jsg::JsContext
+  return kj::heap<IsolateModuleRegistry>(js, *this, observer);
 }
 
 kj::Maybe<Module&> ModuleRegistry::resolve(const ResolveContext& context) {
@@ -1200,13 +1198,11 @@ kj::Maybe<Module&> ModuleRegistry::resolve(const ResolveContext& context) {
   return kj::none;
 }
 
-JsValue ModuleRegistry::resolve(
-    Lock& js,
-    kj::StringPtr specifier,
-    kj::StringPtr exportName,
-    ResolveContext::Type type,
-    ResolveContext::Source source,
-    kj::Maybe<const Url&> maybeReferrer) {
+kj::Maybe<JsObject> ModuleRegistry::tryResolveModuleNamespace(
+      Lock& js,
+      kj::StringPtr specifier, ResolveContext::Type type,
+      ResolveContext::Source source,
+      kj::Maybe<const Url&> maybeReferrer) {
   auto& bound = IsolateModuleRegistry::from(js.v8Isolate);
   auto url = ([&]{
     KJ_IF_SOME(referrer, maybeReferrer) {
@@ -1222,7 +1218,27 @@ JsValue ModuleRegistry::resolve(
     .referrer = maybeReferrer.orDefault(ModuleBundle::BundleBuilder::BASE),
     .rawSpecifier = specifier,
   };
-  return JsObject(check(bound.require(js, context))).get(js, exportName);
+  v8::TryCatch tryCatch(js.v8Isolate);
+  auto ns = bound.require(js, context, IsolateModuleRegistry::RequireOption::RETURN_EMPTY);
+  if (tryCatch.HasCaught()) {
+    tryCatch.ReThrow();
+    throw JsExceptionThrown();
+  }
+  if (ns.IsEmpty()) return kj::none;
+  return JsObject(check(ns));
+}
+
+JsValue ModuleRegistry::resolve(
+    Lock& js,
+    kj::StringPtr specifier,
+    kj::StringPtr exportName,
+    ResolveContext::Type type,
+    ResolveContext::Source source,
+    kj::Maybe<const Url&> maybeReferrer) {
+  KJ_IF_SOME(ns, tryResolveModuleNamespace(js, specifier, type, source, maybeReferrer)) {
+    return ns.get(js, exportName);
+  }
+  JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", specifier));
 }
 
 // ======================================================================================
@@ -1300,6 +1316,10 @@ bool Module::ModuleNamespace::set(Lock& js, kj::StringPtr name, JsValue value) c
 
 bool Module::ModuleNamespace::setDefault(Lock& js, JsValue value) const {
   return set(js, SyntheticModule::DEFAULT, value);
+}
+
+kj::ArrayPtr<const kj::StringPtr> Module::ModuleNamespace::getNamedExports() const {
+  return kj::ArrayPtr<const kj::StringPtr>(namedExports.begin(), namedExports.size());
 }
 
 // ======================================================================================

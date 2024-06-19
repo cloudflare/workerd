@@ -7,6 +7,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/jsg/modules-new.h>
 #include <workerd/api/pyodide/pyodide.h>
 
 namespace workerd::api {
@@ -25,7 +26,8 @@ public:
       IsolateLimitEnforcer& limitEnforcer,
       kj::Own<jsg::IsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
-      PythonConfig& pythonConfig);
+      PythonConfig& pythonConfig,
+      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
@@ -223,6 +225,12 @@ public:
   using ModuleFallbackCallback = Worker::Api::ModuleFallbackCallback;
   void setModuleFallbackCallback(
        kj::Function<ModuleFallbackCallback>&& callback) const override;
+
+  static kj::Own<jsg::modules::ModuleRegistry> initializeBundleModuleRegistry(
+    const jsg::ResolveObserver& resolveObserver,
+    const config::Worker::Reader& conf,
+    const CompatibilityFlags::Reader& featureFlags,
+    const PythonConfig& pythonConfig);
 
 private:
   struct Impl;

@@ -20,6 +20,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/inspector.h>
 #include <workerd/jsg/modules.h>
+#include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/util.h>
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
@@ -1248,10 +1249,12 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
 
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
                 this->isPython = modulesSource.isPython;
-                auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-                auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
-                impl->configureDynamicImports(lock, modules);
-                modulesSource.compileModules(lock, isolate->getApi());
+                if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
+                  auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
+                  auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
+                  impl->configureDynamicImports(lock, modules);
+                  modulesSource.compileModules(lock, isolate->getApi());
+                }
                 impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
                 break;
               }
@@ -1354,6 +1357,64 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
 
 // =======================================================================================
 
+namespace {
+kj::Maybe<jsg::JsObject> tryResolveMainModule(
+    jsg::Lock& js,
+    const kj::Path& mainModule,
+    jsg::JsContext<api::ServiceWorkerGlobalScope>& jsContext,
+    const Worker::Script& script,
+    kj::Maybe<kj::Exception>& maybeLimitError) {
+  kj::Own<void> limitScope;
+  if (script.isPython) {
+    limitScope = script.getIsolate().getLimitEnforcer().enterStartupPython(
+        js, maybeLimitError);
+  } else {
+    limitScope =
+        script.getIsolate().getLimitEnforcer().enterStartupJs(js, maybeLimitError);
+  }
+  if (script.getIsolate().getApi().getFeatureFlags().getNewModuleRegistry()) {
+    KJ_DEFER({
+      if (maybeLimitError != kj::none) {
+        // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
+        // thrown an exception.
+        throw jsg::JsExceptionThrown();
+      }
+    });
+    // This intentionally does not return the kj::Maybe directly from the
+    // call to tryResolveModuleNamespace because I intend to add some additional
+    // logging/metrics logic around this call.
+    KJ_IF_SOME(ns, jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
+                       js, mainModule.toString(true))) {
+      return ns;
+    }
+  } else {
+    auto& registry = jsContext->getModuleRegistry();
+    KJ_IF_SOME(entry, registry.resolve(js, mainModule, kj::none)) {
+      JSG_REQUIRE(entry.maybeSynthetic == kj::none, TypeError,
+                  "Main module must be an ES module.");
+      auto module = entry.module.getHandle(js);
+      jsg::instantiateModule(js, module);
+
+      if (maybeLimitError != kj::none) {
+        // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
+        // thrown an exception.
+        throw jsg::JsExceptionThrown();
+      }
+
+      auto ns = module->GetModuleNamespace().As<v8::Object>();
+      // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
+      // module, even if subsequent calls pass a different context. Verify that we didn't
+      // switch contexts.
+      KJ_ASSERT(jsg::check(ns->GetCreationContext()) == js.v8Context(),
+          "module was originally instantiated in a different context");
+
+      return jsg::JsObject(ns);
+    }
+  }
+  return kj::none;
+}
+}  // anonymous namespace
+
 Worker::Worker(kj::Own<const Script> scriptParam,
                kj::Own<WorkerObserver> metricsParam,
                kj::FunctionParam<void(
@@ -1455,42 +1516,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 unboundScript.run(lock.v8Context());
               }
               KJ_CASE_ONEOF(mainModule, kj::Path) {
-                auto& registry = (*jsContext)->getModuleRegistry();
-                KJ_IF_SOME(entry, registry.resolve(lock, mainModule, kj::none)) {
-                  JSG_REQUIRE(entry.maybeSynthetic == kj::none, TypeError,
-                              "Main module must be an ES module.");
-                  auto module = entry.module.getHandle(lock);
-
-                  {
-                    kj::Own<void> limitScope;
-                    if (script->isPython) {
-                      limitScope = script->isolate->getLimitEnforcer().enterStartupPython(
-                          lock, maybeLimitError);
-                    } else {
-                      limitScope =
-                          script->isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-                    }
-
-                    jsg::instantiateModule(lock, module);
-                  }
-
-                  if (maybeLimitError != kj::none) {
-                    // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
-                    // thrown an exception.
-                    throw jsg::JsExceptionThrown();
-                  }
-
-                  v8::Local<v8::Value> ns = module->GetModuleNamespace();
-
-                  {
-                    // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
-                    // module, even if subsequent calls pass a different context. Verify that we didn't
-                    // switch contexts.
-                    auto creationContext = jsg::check(ns.As<v8::Object>()->GetCreationContext());
-                    KJ_ASSERT(creationContext == context,
-                        "module was originally instantiated in a different context");
-                  }
-
+                KJ_IF_SOME(ns, tryResolveMainModule(lock, mainModule, *jsContext, *script,
+                                                    maybeLimitError)) {
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
 
                   auto& api = script->isolate->getApi();
