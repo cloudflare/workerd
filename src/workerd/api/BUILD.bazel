@@ -69,7 +69,6 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":html-rewriter",
-        "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
@@ -103,7 +102,6 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/io",
         "//src/workerd/jsg",
