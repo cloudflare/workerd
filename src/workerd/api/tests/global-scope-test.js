@@ -38,7 +38,7 @@ export const timeoutCount = {
       setTimeout(() => {});
     }
     throws(() => setTimeout(() => {}), {
-      message: 'You have exceeded the number of timeouts you may set.10000'
+      message: 'You have exceeded the number of active timeouts you may set. max active timeouts: 10000, current active timeouts: 10000, finished timeouts: 0'
     });
   }
 };
