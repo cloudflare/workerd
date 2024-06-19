@@ -185,31 +185,23 @@ export type AiOptions = {
   extraHeaders?: object;
 };
 export type BaseAiTextClassificationModels =
-  | "@cf/huggingface/distilbert-sst-2-int8"
-  | string;
+  "@cf/huggingface/distilbert-sst-2-int8";
 export type BaseAiTextToImageModels =
   | "@cf/stabilityai/stable-diffusion-xl-base-1.0"
   | "@cf/runwayml/stable-diffusion-v1-5-inpainting"
   | "@cf/runwayml/stable-diffusion-v1-5-img2img"
   | "@cf/lykon/dreamshaper-8-lcm"
-  | "@cf/bytedance/stable-diffusion-xl-lightning"
-  | string;
+  | "@cf/bytedance/stable-diffusion-xl-lightning";
 export type BaseAiTextEmbeddingsModels =
   | "@cf/baai/bge-small-en-v1.5"
   | "@cf/baai/bge-base-en-v1.5"
-  | "@cf/baai/bge-large-en-v1.5"
-  | string;
+  | "@cf/baai/bge-large-en-v1.5";
 export type BaseAiSpeechRecognitionModels =
   | "@cf/openai/whisper"
   | "@cf/openai/whisper-tiny-en"
-  | "@cf/openai/whisper-sherpa"
-  | string;
-export type BaseAiImageClassificationModels =
-  | "@cf/microsoft/resnet-50"
-  | string;
-export type BaseAiObjectDetectionModels =
-  | "@cf/facebook/detr-resnet-50"
-  | string;
+  | "@cf/openai/whisper-sherpa";
+export type BaseAiImageClassificationModels = "@cf/microsoft/resnet-50";
+export type BaseAiObjectDetectionModels = "@cf/facebook/detr-resnet-50";
 export type BaseAiTextGenerationModels =
   | "@cf/meta/llama-3-8b-instruct"
   | "@cf/meta/llama-3-8b-instruct-awq"
@@ -245,14 +237,12 @@ export type BaseAiTextGenerationModels =
   | "@cf/google/gemma-7b-it-lora"
   | "@cf/meta-llama/llama-2-7b-chat-hf-lora"
   | "@cf/fblgit/una-cybertron-7b-v2-bf16"
-  | "@cf/fblgit/una-cybertron-7b-v2-awq"
-  | string;
-export type BaseAiTranslationModels = "@cf/meta/m2m100-1.2b" | string;
-export type BaseAiSummarizationModels = "@cf/facebook/bart-large-cnn" | string;
+  | "@cf/fblgit/una-cybertron-7b-v2-awq";
+export type BaseAiTranslationModels = "@cf/meta/m2m100-1.2b";
+export type BaseAiSummarizationModels = "@cf/facebook/bart-large-cnn";
 export type BaseAiImageToTextModels =
   | "@cf/unum/uform-gen2-qwen-500m"
-  | "@cf/llava-hf/llava-1.5-7b-hf"
-  | string;
+  | "@cf/llava-hf/llava-1.5-7b-hf";
 export declare abstract class Ai {
   run(
     model: BaseAiTextClassificationModels,
