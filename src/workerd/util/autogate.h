@@ -13,7 +13,6 @@ namespace workerd::util {
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
-  UPDATED_ACTOR_EXCEPTION_TYPES, // updates exception types to better match retriability
   ACTOR_EXCEPTION_PROPERTIES, // adds .retryable and .overloaded properties to tunneled exceptions
   NumOfKeys // Reserved for iteration.
 };

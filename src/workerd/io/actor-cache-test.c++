@@ -10,7 +10,6 @@
 #include "io-gate.h"
 #include <kj/thread.h>
 #include <kj/source-location.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/test.h>
 
@@ -199,7 +198,6 @@ struct ActorCacheTestOptions {
   size_t maxKeysPerRpc = 128;
   bool noCache = false;
   bool neverFlush = false;
-  bool withUpdatedExceptionTypes = false;
 };
 
 struct ActorCacheTest: public ActorCacheConvenienceWrappers {
@@ -228,21 +226,7 @@ struct ActorCacheTest: public ActorCacheConvenienceWrappers {
         cache(kj::mv(mockPair.client), lru, gate),
         gateBrokenPromise(options.monitorOutputGate
             ? eagerlyReportExceptions(gate.onBroken())
-            : kj::Promise<void>(kj::READY_NOW)) {
-    // Set up autogate
-    capnp::MallocMessageBuilder message;
-    auto orphanage = message.getOrphanage();
-    kj::Vector<kj::StringPtr> strs;
-    if (options.withUpdatedExceptionTypes) {
-      strs.add("workerd-autogate-updated-actor-exception-types"_kj);
-    }
-    auto gatesOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(strs.size());
-    auto gates = gatesOrphan.get();
-    for (auto i: kj::indices(strs)) {
-      gates.set(i, strs[i]);
-    }
-    util::Autogate::initAutogate(gates.asReader());
-  }
+            : kj::Promise<void>(kj::READY_NOW)) {}
 
   ~ActorCacheTest() noexcept(false) {
     // Make sure if the output gate has been broken, the exception was reported. This is important
@@ -5266,13 +5250,9 @@ KJ_TEST("ActorCache can shutdown") {
 
   struct VerifyOptions {
     kj::Maybe<const kj::Exception&> maybeError;
-    bool withUpdatedExceptionTypes = false;
   };
   auto verifyWithOptions = [&](auto&& beforeShutdown, auto&& afterShutdown, VerifyOptions options) {
-    auto test = ActorCacheTest({
-      .monitorOutputGate = false,
-      .withUpdatedExceptionTypes = options.withUpdatedExceptionTypes,
-    });
+    auto test = ActorCacheTest({.monitorOutputGate = false});
     auto& ws = test.ws;
 
     BeforeShutdownResult res = beforeShutdown(test);
@@ -5283,14 +5263,9 @@ KJ_TEST("ActorCache can shutdown") {
 
     afterShutdown(test, kj::mv(res.maybeReq));
 
-    KJ_ASSERT(options.withUpdatedExceptionTypes ==
-        util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES));
-    auto defaultError = (options.withUpdatedExceptionTypes
-            ? KJ_EXCEPTION(DISCONNECTED, kj::str(ActorCache::SHUTDOWN_ERROR_MESSAGE))
-            : KJ_EXCEPTION(OVERLOADED, kj::str(ActorCache::SHUTDOWN_ERROR_MESSAGE)));
     auto error = options.maybeError.map([](const kj::Exception& e) {
       return kj::cp(e);
-    }).orDefault(defaultError);
+    }).orDefault(KJ_EXCEPTION(DISCONNECTED, kj::str(ActorCache::SHUTDOWN_ERROR_MESSAGE)));
 
     if (res.shouldBreakOutputGate) {
       // We expected the output gate to break async after shutdown.
@@ -5322,14 +5297,8 @@ KJ_TEST("ActorCache can shutdown") {
   };
 
   auto verify = [&](auto&& beforeShutdown, auto&& afterShutdown) {
-    verifyWithOptions(beforeShutdown, afterShutdown,
-        { .maybeError = kj::none, .withUpdatedExceptionTypes = false });
-    verifyWithOptions(beforeShutdown, afterShutdown,
-        { .maybeError = kj::none, .withUpdatedExceptionTypes = true });
-    verifyWithOptions(beforeShutdown, afterShutdown,
-        { .maybeError = KJ_EXCEPTION(FAILED, "Nope."), .withUpdatedExceptionTypes = false });
-    verifyWithOptions(beforeShutdown, afterShutdown,
-        { .maybeError = KJ_EXCEPTION(FAILED, "Nope."), .withUpdatedExceptionTypes = true });
+    verifyWithOptions(beforeShutdown, afterShutdown, {.maybeError = kj::none});
+    verifyWithOptions(beforeShutdown, afterShutdown, {.maybeError = KJ_EXCEPTION(FAILED, "Nope.")});
   };
 
   verify([](ActorCacheTest& test){

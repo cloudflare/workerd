@@ -9,7 +9,6 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-gate.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/duration-exceeded-logger.h>
 
@@ -2225,11 +2224,8 @@ void ActorCache::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
       }
 
       // Use the direct constructor so that we can reuse the constexpr message variable for testing.
-      auto excType = (util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES)
-              ? kj::Exception::Type::DISCONNECTED
-              : kj::Exception::Type::OVERLOADED);
-      auto exception =
-          kj::Exception(excType, __FILE__, __LINE__, kj::heapString(SHUTDOWN_ERROR_MESSAGE));
+      auto exception = kj::Exception(kj::Exception::Type::DISCONNECTED, __FILE__, __LINE__,
+          kj::heapString(SHUTDOWN_ERROR_MESSAGE));
 
       // Add trace info sufficient to tell us which operation caused the failure.
       exception.addTraceHere();
@@ -2630,15 +2626,10 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       } else {
         LOG_NOSENTRY(ERROR, "actor cache flush failed", e);
       }
-      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES)) {
-        // Pass through exception type to convey appropriate retry behavior.
-        return kj::Exception(e.getType(), __FILE__, __LINE__,
-            kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable "
-                "Object storage write caused object to be reset."));
-      } else {
-        return KJ_EXCEPTION(FAILED, "broken.outputGateBroken; jsg.Error: Internal error in Durable "
-            "Object storage write caused object to be reset.");
-      }
+      // Pass through exception type to convey appropriate retry behavior.
+      return kj::Exception(e.getType(), __FILE__, __LINE__,
+          kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable "
+              "Object storage write caused object to be reset."));
     }
   });
 }
@@ -2997,15 +2988,9 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
       return kj::mv(e);
     } else {
       LOG_EXCEPTION("actorCacheDeleteAll", e);
-      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES)) {
-        // Pass through exception type to convey appropriate retry behavior.
-        return kj::Exception(e.getType(), __FILE__, __LINE__,
-            kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable Object storage deleteAll() caused object to be reset."));
-      } else {
-        return KJ_EXCEPTION(FAILED,
-            "broken.outputGateBroken; jsg.Error: Internal error in Durable Object storage deleteAll() caused object to be "
-            "reset.");
-      }
+      // Pass through exception type to convey appropriate retry behavior.
+      return kj::Exception(e.getType(), __FILE__, __LINE__,
+          kj::str("broken.outputGateBroken; jsg.Error: Internal error in Durable Object storage deleteAll() caused object to be reset."));
     }
   });
 }
