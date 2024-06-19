@@ -14,7 +14,6 @@
 #include <kj/time.h>
 #include <kj/debug.h>
 #include <kj/one-of.h>
-#include <workerd/util/autogate.h>
 
 namespace workerd::jsg {
 
@@ -1295,17 +1294,15 @@ public:
     kj::Exception result = [&]() {
 
       kj::Exception::Type excType = [&]() {
-        if (util::Autogate::isEnabled(util::AutogateKey::ACTOR_EXCEPTION_PROPERTIES)) {
-          // Use .retryable and .overloaded properties as hints for what kj exception type to use.
-          if (handle->IsObject()) {
-            auto object = handle.As<v8::Object>();
+        // Use .retryable and .overloaded properties as hints for what kj exception type to use.
+        if (handle->IsObject()) {
+          auto object = handle.As<v8::Object>();
 
-            if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "overloaded"_kj))))) {
-              return kj::Exception::Type::OVERLOADED;
-            }
-            if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "retryable"_kj))))) {
-              return kj::Exception::Type::DISCONNECTED;
-            }
+          if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "overloaded"_kj))))) {
+            return kj::Exception::Type::OVERLOADED;
+          }
+          if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "retryable"_kj))))) {
+            return kj::Exception::Type::DISCONNECTED;
           }
         }
         return kj::Exception::Type::FAILED;

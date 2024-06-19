@@ -13,7 +13,6 @@ namespace workerd::util {
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
-  ACTOR_EXCEPTION_PROPERTIES, // adds .retryable and .overloaded properties to tunneled exceptions
   NumOfKeys // Reserved for iteration.
 };
 
@@ -40,9 +39,6 @@ public:
   // process before any threads are created.
   static void initAutogate(
       capnp::List<capnp::Text>::Reader autogates);
-
-  // Convenience method for tests to use to invoke initAutogate()
-  static void initEmptyAutogateForTesting();
 
   // Destroys an initialised global Autogate instance. Used only for testing.
   static void deinitAutogate();
