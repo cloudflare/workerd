@@ -254,7 +254,6 @@ export type BaseAiImageToTextModels =
   | "@cf/llava-hf/llava-1.5-7b-hf"
   | string;
 export declare abstract class Ai {
-  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   run(
     model: BaseAiTextClassificationModels,
     inputs: BaseAiTextClassification["inputs"],
