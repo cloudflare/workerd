@@ -2622,6 +2622,10 @@ private:
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
             shutdown();
+            // Pause here to give transmitLoop() the chance to finish and send a reply close.
+            // When `transmitLoop()` ends, `messagePump()` as a whole will end, canceling
+            // `receiveLoop()`.
+            co_await kj::Promise<void>(kj::NEVER_DONE);
           }
         }
       }
