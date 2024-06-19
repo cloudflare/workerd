@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 /**
  * Handle the top level getentropy() mess. See entropy_patches.py which is the
  * main file for the entropy patches.
@@ -20,7 +18,7 @@ const SHOULD_GATE_ENTROPY =
   !IS_TRACING &&
   (LOADED_SNAPSHOT_VERSION === undefined || LOADED_SNAPSHOT_VERSION === 2);
 
-let allowed_entropy_calls_addr;
+let allowed_entropy_calls_addr: number;
 
 /**
  * Set up a byte for communication between JS and Python.
@@ -28,7 +26,7 @@ let allowed_entropy_calls_addr;
  * We make an array in Python and then get its address in JavaScript so
  * shouldAllowBadEntropy can check / write back the value
  */
-function setupShouldAllowBadEntropy(Module) {
+function setupShouldAllowBadEntropy(Module: Module) {
   // get_bad_entropy_flag prints the address we want into stderr which is returned into res.
   // We parse this as an integer.
   const res = simpleRunPython(
@@ -40,7 +38,7 @@ function setupShouldAllowBadEntropy(Module) {
   allowed_entropy_calls_addr = Number(res);
 }
 
-function shouldAllowBadEntropy(Module) {
+function shouldAllowBadEntropy(Module: Module) {
   if (!SHOULD_GATE_ENTROPY) {
     return true;
   }
@@ -63,10 +61,10 @@ function shouldAllowBadEntropy(Module) {
  * See entropy_import_context.py where `allow_bad_entropy_calls` is used to dole
  * out the bad entropy.
  */
-export function getRandomValues(Module, arr) {
+export function getRandomValues(Module: Module, arr: Uint8Array) {
   try {
     return crypto.getRandomValues(arr);
-  } catch (e) {
+  } catch (e: any) {
     if (
       !e.message.includes("Disallowed operation called within global scope")
     ) {
@@ -88,7 +86,7 @@ export function getRandomValues(Module, arr) {
  * after instantiating the Emscripten module but before restoring the snapshot.
  * Hypothetically, we could skip it for new dedicated snapshots.
  */
-export function entropyMountFiles(Module) {
+export function entropyMountFiles(Module: Module) {
   Module.FS.mkdir(`/lib/python3.12/site-packages/_cloudflare`);
   Module.FS.writeFile(
     `/lib/python3.12/site-packages/_cloudflare/__init__.py`,
@@ -118,7 +116,7 @@ export function entropyMountFiles(Module) {
  * after the runtime is ready, so after restoring the snapshot in the snapshot
  * branch and after entropyMountFiles in the no-snapshot branch.
  */
-export function entropyAfterRuntimeInit(Module) {
+export function entropyAfterRuntimeInit(Module: Module) {
   setupShouldAllowBadEntropy(Module);
 }
 
@@ -126,7 +124,7 @@ export function entropyAfterRuntimeInit(Module) {
  * This prepares us to execute the top level scope. It changes only Python state
  * so it doesn't need to be called when restoring from snapshot.
  */
-export function entropyBeforeTopLevel(Module) {
+export function entropyBeforeTopLevel(Module: Module) {
   if (!SHOULD_GATE_ENTROPY) {
     return;
   }
@@ -144,7 +142,7 @@ let isReady = false;
 /**
  * Called to reseed rngs and turn off blocks that prevent access to rng APIs.
  */
-export function entropyBeforeRequest(Module) {
+export function entropyBeforeRequest(Module: Module) {
   if (isReady) {
     // I think this is only ever called once, but we guard it just to be sure.
     return;

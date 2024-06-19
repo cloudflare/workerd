@@ -10,7 +10,9 @@
     "paths": {
       "pyodide:*": ["./*"],
       "pyodide-internal:*": ["./internal/*"],
+      "internal:*": ["./types/*"]
     },
+    "typeRoots": ["./types"],
     "types": [],
     "declaration": true,
     "noEmit": false,
