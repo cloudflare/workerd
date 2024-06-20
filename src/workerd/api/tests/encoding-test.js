@@ -577,6 +577,9 @@ export const allTheDecoders = {
       ["utf-16", "utf-16le"],
       ["utf-16le", "utf-16le"],
       ["x-user-defined", undefined],
+      // Test that match is case-insensitive
+      ["UTF-8", "utf-8"],
+      ["UtF-8", "utf-8"],
     ].forEach((pair) => {
       const [label, key] = pair;
       if (key === undefined) {
