@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "encoding.h"
+#include "util.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/buffersource.h>
 #include <unicode/ucnv.h>
@@ -256,6 +257,7 @@ kj::StringPtr getEncodingId(Encoding encoding) {
 }
 
 Encoding getEncodingForLabel(kj::StringPtr label) {
+  kj::String labelInsensitive = toLower(label);
   const auto trim = [](kj::StringPtr label) {
     const auto isAsciiWhitespace = [](auto c) {
       return c == 0x09 /* tab */ ||
@@ -271,7 +273,7 @@ Encoding getEncodingForLabel(kj::StringPtr label) {
     return label.slice(start, end).asChars();
   };
 
-  auto trimmed = trim(label);
+  auto trimmed = trim(labelInsensitive);
 #define V(label, key) if (trimmed == label##_kj) return Encoding::key;
   EW_ENCODING_LABELS(V)
 #undef V
