@@ -43,7 +43,7 @@ kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output
       co_return;
     }
 
-    co_await output.write(buffer, amount);
+    co_await output.write(kj::arrayPtr(buffer, amount));
   }
 }
 
@@ -333,8 +333,8 @@ private:
   public:
     explicit PumpAdapter(WritableStreamSink& inner): inner(inner) {}
 
-    kj::Promise<void> write(const void* buffer, size_t size) override {
-      return inner.write(buffer, size);
+    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+      return inner.write(buffer);
     }
 
     kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
@@ -1596,8 +1596,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
       auto amountToWrite = request.bytes.size();
 
-      auto promise = writable->write(request.bytes.begin(), request.bytes.size())
-          .attach(kj::mv(request.ownBytes));
+      auto promise = writable->write(request.bytes).attach(kj::mv(request.ownBytes));
 
       // TODO(soon): We use awaitIoLegacy() here because if the stream terminates in JavaScript in
       // this same isolate, then the promise may actually be waiting on JavaScript to do something,
@@ -1846,7 +1845,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(v8::Local<v8::V
   // v8::Isolate::GetCurrent();
   jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
   return IoContext::current().awaitIo(js,
-      writable->write(data, byteLength)
+      writable->write(kj::arrayPtr(data, byteLength))
           .attach(js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, store))), [](jsg::Lock&){});
 }
 
@@ -2287,11 +2286,11 @@ void IdentityTransformStreamImpl::cancel(kj::Exception reason) {
   // TODO(conform): Proactively put WritableStream into Errored state.
 }
 
-kj::Promise<void> IdentityTransformStreamImpl::write(const void* buffer, size_t size) {
-  if (size == 0) {
+kj::Promise<void> IdentityTransformStreamImpl::write(kj::ArrayPtr<const byte> buffer) {
+  if (buffer == nullptr) {
     return kj::READY_NOW;
   }
-  return writeHelper(kj::arrayPtr(static_cast<const kj::byte*>(buffer), size));
+  return writeHelper(buffer);
 }
 
 kj::Promise<void> IdentityTransformStreamImpl::write(

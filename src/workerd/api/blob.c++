@@ -249,7 +249,7 @@ public:
   // returned promise is fulfilled.
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
     if (unread.size() != 0) {
-      auto promise = output.write(unread.begin(), unread.size());
+      auto promise = output.write(unread);
       unread = nullptr;
 
       co_await promise;

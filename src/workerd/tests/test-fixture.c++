@@ -213,9 +213,8 @@ inline server::config::Worker::Reader buildConfig(
 struct MemoryOutputStream final: kj::AsyncOutputStream, public kj::Refcounted  {
   kj::Vector<byte> content;
 
-  kj::Promise<void> write(const void* buffer, size_t size) override {
-    auto ptr = reinterpret_cast<const byte*>(buffer);
-    content.addAll(ptr, ptr + size);
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+    content.addAll(buffer);
     return kj::READY_NOW;
   }
 

@@ -11,7 +11,7 @@ class NullIoStream final: public kj::AsyncIoStream {
 public:
   void shutdownWrite() override {}
 
-  kj::Promise<void> write(const void* buffer, size_t size) override {
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     return kj::READY_NOW;
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
@@ -123,8 +123,8 @@ public:
 
   // AsyncOutputStream
 
-  kj::Promise<void> write(const void* buffer, size_t size) override {
-    return canceler.wrap(getStream().write(buffer, size));
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return canceler.wrap(getStream().write(buffer));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     return canceler.wrap(getStream().write(pieces));

@@ -225,7 +225,7 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
 
   static constexpr auto handleSend = [](auto req, auto serialized, auto client)
       -> kj::Promise<void> {
-    co_await req.body->write(serialized.data.begin(), serialized.data.size());
+    co_await req.body->write(serialized.data);
     auto response = co_await req.response;
 
     JSG_REQUIRE(response.statusCode == 200, Error,
@@ -339,7 +339,7 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
                              headers, body.size());
 
   static constexpr auto handleWrite = [](auto req, auto body, auto client) -> kj::Promise<void> {
-    co_await req.body->write(body.begin(), body.size());
+    co_await req.body->write(body.asBytes());
     auto response = co_await req.response;
 
     JSG_REQUIRE(response.statusCode == 200, Error,

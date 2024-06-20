@@ -90,7 +90,7 @@ public:
       : ws(ws), stream(kj::mv(stream)) {}
 
   void send(kj::StringPtr data, kj::SourceLocation loc = {}) {
-    stream->write(data.begin(), data.size()).wait(ws);
+    stream->write(data.asBytes()).wait(ws);
   }
   void recv(kj::StringPtr expected, kj::SourceLocation loc = {}) {
     auto actual = readAllAvailable();

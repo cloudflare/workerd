@@ -546,8 +546,8 @@ public:
                                kj::Own<kj::RefcountedWrapper<bool>> ended)
       : inner(kj::mv(inner)), ended(kj::mv(ended)) {}
 
-  kj::Promise<void> write(const void* buffer, size_t size) override {
-    return KJ_REQUIRE_NONNULL(inner)->write(buffer, size);
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+    return KJ_REQUIRE_NONNULL(inner)->write(buffer);
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
     return KJ_REQUIRE_NONNULL(inner)->write(pieces);

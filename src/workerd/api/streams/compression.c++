@@ -146,7 +146,7 @@ public:
 
   // WritableStreamSink implementation ---------------------------------------------------
 
-  kj::Promise<void> write(const void* buffer, size_t size) override {
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ended, Ended) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Write after close.");
@@ -155,7 +155,7 @@ public:
         return kj::cp(exception);
       }
       KJ_CASE_ONEOF(open, Open) {
-        context.setInput(buffer, size);
+        context.setInput(buffer.begin(), buffer.size());
         return writeInternal(Z_NO_FLUSH);
       }
     }
@@ -174,7 +174,7 @@ public:
       }
       KJ_CASE_ONEOF(open, Open) {
         if (pieces.size() == 0) return kj::READY_NOW;
-        return write(pieces[0].begin(), pieces[0].size())
+        return write(pieces[0])
             .then([this, pieces = pieces.slice(1)]() mutable {
           return write(pieces);
         });

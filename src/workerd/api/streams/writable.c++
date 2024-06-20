@@ -327,8 +327,8 @@ public:
     }));
   }
 
-  kj::Promise<void> write(const void* buffer, size_t size) override {
-    return canceler.wrap(getInner().write(buffer, size));
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+    return canceler.wrap(getInner().write(buffer));
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
     return canceler.wrap(getInner().write(pieces));
@@ -445,16 +445,15 @@ public:
     }));
   }
 
-  kj::Promise<void> write(const void* buffer, size_t size) override {
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
     if (writer == kj::none) {
       return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
     }
-    if (size == 0) return kj::READY_NOW;
-    kj::ArrayPtr<const kj::byte> ptr(reinterpret_cast<const kj::byte*>(buffer), size);
-    return canceler.wrap(context.run([this, ptr](Worker::Lock& lock) mutable {
+    if (buffer == nullptr) return kj::READY_NOW;
+    return canceler.wrap(context.run([this, buffer](Worker::Lock& lock) mutable {
       auto& writer = getInner();
-      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, ptr.size()));
-      source.asArrayPtr().copyFrom(ptr);
+      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, buffer.size()));
+      source.asArrayPtr().copyFrom(buffer);
       return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
     }));
   }

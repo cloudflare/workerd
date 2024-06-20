@@ -3627,9 +3627,9 @@ public:
     });
   }
 
-  kj::Promise<void> write(const void* buffer, size_t size) override {
-    reportBytes(kj::arrayPtr(reinterpret_cast<const byte*>(buffer), size));
-    return inner->write(buffer, size);
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+    reportBytes(buffer);
+    return inner->write(buffer);
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
     for (auto& piece: pieces) {
