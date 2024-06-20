@@ -5,7 +5,6 @@
 #include "actor-sqlite.h"
 #include <algorithm>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/autogate.h>
 #include "io-gate.h"
 
 namespace workerd {
@@ -315,11 +314,8 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
       }
 
       // Use the direct constructor so that we can reuse the constexpr message variable for testing.
-      auto excType = (util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES)
-              ? kj::Exception::Type::DISCONNECTED
-              : kj::Exception::Type::OVERLOADED);
-      auto exception = kj::Exception(
-          excType, __FILE__, __LINE__, kj::heapString(ActorCache::SHUTDOWN_ERROR_MESSAGE));
+      auto exception = kj::Exception(kj::Exception::Type::DISCONNECTED, __FILE__, __LINE__,
+          kj::heapString(ActorCache::SHUTDOWN_ERROR_MESSAGE));
 
       // Add trace info sufficient to tell us which operation caused the failure.
       exception.addTraceHere();

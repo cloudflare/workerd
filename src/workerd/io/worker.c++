@@ -6,7 +6,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
-#include <workerd/util/autogate.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
@@ -2986,15 +2985,9 @@ struct Worker::Actor::Impl {
       auto timeout = 30 * kj::SECONDS;
       co_await timerChannel.afterLimitTimeout(timeout);
 
-      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_ACTOR_EXCEPTION_TYPES)) {
-        kj::throwFatalException(KJ_EXCEPTION(OVERLOADED,
-              "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
-              "timeout which caused object to be reset."));
-      } else {
-        kj::throwFatalException(KJ_EXCEPTION(FAILED,
-              "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
-              "timeout which caused object to be reset."));
-      }
+      kj::throwFatalException(KJ_EXCEPTION(OVERLOADED,
+            "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
+            "timeout which caused object to be reset."));
     }
 
     // Implements OutputGate::Hooks.

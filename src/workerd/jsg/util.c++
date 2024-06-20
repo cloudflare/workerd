@@ -225,12 +225,10 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
     setRemoteError(isolate, result.handle);
   }
 
-  if (util::Autogate::isEnabled(util::AutogateKey::ACTOR_EXCEPTION_PROPERTIES)) {
-    if (excType == kj::Exception::Type::DISCONNECTED) {
-      setRetryableError(isolate, result.handle);
-    } else if (excType == kj::Exception::Type::OVERLOADED) {
-      setOverloadedError(isolate, result.handle);
-    }
+  if (excType == kj::Exception::Type::DISCONNECTED) {
+    setRetryableError(isolate, result.handle);
+  } else if (excType == kj::Exception::Type::OVERLOADED) {
+    setOverloadedError(isolate, result.handle);
   }
 
   if (result.isDurableObjectReset) {
@@ -286,10 +284,8 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
         setRemoteError(isolate, exception);
       }
 
-      if (util::Autogate::isEnabled(util::AutogateKey::ACTOR_EXCEPTION_PROPERTIES)) {
-        // DISCONNECTED exceptions are considered retryable
-        setRetryableError(isolate, exception);
-      }
+      // DISCONNECTED exceptions are considered retryable
+      setRetryableError(isolate, exception);
 
       if (tunneledException.isDurableObjectReset) {
         setDurableObjectResetError(isolate, exception);
