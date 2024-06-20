@@ -28,7 +28,7 @@ const STDLIB_PACKAGES: string[] = Object.values(LOCKFILE.packages)
  */
 class SitePackagesDir {
   public rootInfo: FSInfo;
-  public soFiles: string[];
+  public soFiles: string[][];
   public loadedRequirements: Set<string>;
   constructor() {
     this.rootInfo = {
@@ -75,7 +75,7 @@ class SitePackagesDir {
     requirement: string,
   ): void {
     for (const soFile of soFiles) {
-      this.soFiles.push(...soFile.split("/"));
+      this.soFiles.push(soFile.split("/"));
     }
     this.mountOverlay(tarInfo);
     this.loadedRequirements.add(requirement);
@@ -98,7 +98,7 @@ class SitePackagesDir {
       // If folder is in list of requirements include .so file in list to preload.
       const [pkg, ...rest] = soFile.split("/");
       if (requirements.has(pkg)) {
-        this.soFiles.push(...rest);
+        this.soFiles.push(rest);
       }
     }
 
@@ -147,7 +147,7 @@ export function buildSitePackages(
  *
  * TODO: stop using loadPackage in workerd.
  */
-export function patchLoadPackage(pyodide: { loadPackage: Function }) {
+export function patchLoadPackage(pyodide: { loadPackage: Function }): void {
   pyodide.loadPackage = disabledLoadPackage;
   return;
 }
@@ -240,7 +240,7 @@ function addPackageToLoad(
   if (!pkgInfo) {
     throw new Error(
       `It appears that a package ("${name}") you requested is not available yet in workerd. \n` +
-        "If you would like this package to be included, please open an issue at https://github.com/cloudflare/workerd/discussions/new?category=python-packages.",
+      "If you would like this package to be included, please open an issue at https://github.com/cloudflare/workerd/discussions/new?category=python-packages.",
     );
   }
 
