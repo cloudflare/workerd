@@ -45,7 +45,7 @@ function decodeHeader(buf, reader) {
   };
 }
 
-export function parseTarInfo(reader = TarReader) {
+export function parseTarInfo(reader = TarReader): [FSInfo, string[]] {
   const directories = [];
   const soFiles = [];
   const root = {

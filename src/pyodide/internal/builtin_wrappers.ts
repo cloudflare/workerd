@@ -8,7 +8,7 @@ let lastDelta = 0;
  * directories change their modification time when updated so that Python
  * doesn't use stale directory contents in its import system.
  */
-export function monotonicDateNow() {
+export function monotonicDateNow(): number {
   const now = Date.now();
   if (now === lastTime) {
     lastDelta++;
@@ -52,7 +52,7 @@ export function monotonicDateNow() {
  *      - ctypes is quite slow even by Python's standards
  *      - Normally ctypes allocates all closures up front
  */
-export function newWasmModule(buffer: Uint8Array) {
+export function newWasmModule(buffer: Uint8Array): WebAssembly.Module {
   checkCallee();
   return UnsafeEval.newWasmModule(buffer);
 }
@@ -63,7 +63,7 @@ export function newWasmModule(buffer: Uint8Array) {
  * `convertJsFunctionToWasm` in `"pyodide-internal:generated/pyodide.asm"`,
  * if it's anything else we'll bail.
  */
-function checkCallee() {
+function checkCallee(): void {
   const origPrepareStackTrace = Error.prepareStackTrace;
   let isOkay;
   try {
@@ -83,7 +83,7 @@ function checkCallee() {
  * `convertJsFunctionToWasm` or `loadModule` in `pyodide.asm.js`, `false` if not. This will set
  * the `stack` field in the error so we can read back the result there.
  */
-function prepareStackTrace(_error: Error, stack: StackItem[]) {
+function prepareStackTrace(_error: Error, stack: StackItem[]): boolean {
   // In case a logic error is ever introduced in this function, defend against
   // reentrant calls by setting `prepareStackTrace` to `undefined`.
   Error.prepareStackTrace = undefined;
@@ -105,10 +105,16 @@ function prepareStackTrace(_error: Error, stack: StackItem[]) {
   }
 }
 
-export async function wasmInstantiate(module: WebAssembly.Module | Uint8Array, imports: WebAssembly.Imports) {
-  if (!(module instanceof WebAssembly.Module)) {
+export async function wasmInstantiate(
+  mod: WebAssembly.Module | Uint8Array,
+  imports: WebAssembly.Imports,
+): Promise<{ module: WebAssembly.Module, instance: WebAssembly.Instance }> {
+  let module;
+  if (mod instanceof WebAssembly.Module) {
+    module = mod;
+  } else {
     checkCallee();
-    module = UnsafeEval.newWasmModule(module);
+    module = UnsafeEval.newWasmModule(mod);
   }
   const instance = new WebAssembly.Instance(module, imports);
   return { module, instance };
