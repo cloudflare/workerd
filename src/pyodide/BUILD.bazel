@@ -163,6 +163,7 @@ wd_ts_bundle(
         "internal/*.js",
         "internal/topLevelEntropy/*.ts",
         "internal/topLevelEntropy/*.js",
+        "types/*.ts",
     ], allow_empty = True),
     internal_wasm_modules = ["generated/pyodide.asm.wasm"],
     schema_id = "0xbcc8f57c63814005",

@@ -83,7 +83,7 @@ function checkCallee() {
  * `convertJsFunctionToWasm` or `loadModule` in `pyodide.asm.js`, `false` if not. This will set
  * the `stack` field in the error so we can read back the result there.
  */
-function prepareStackTrace(_error: Error, stack: Array<StackItem>) {
+function prepareStackTrace(_error: Error, stack: StackItem[]) {
   // In case a logic error is ever introduced in this function, defend against
   // reentrant calls by setting `prepareStackTrace` to `undefined`.
   Error.prepareStackTrace = undefined;
@@ -105,7 +105,7 @@ function prepareStackTrace(_error: Error, stack: Array<StackItem>) {
   }
 }
 
-export async function wasmInstantiate(module: any, imports: WebAssembly.Imports) {
+export async function wasmInstantiate(module: WebAssembly.Module | Uint8Array, imports: WebAssembly.Imports) {
   if (!(module instanceof WebAssembly.Module)) {
     checkCallee();
     module = UnsafeEval.newWasmModule(module);
