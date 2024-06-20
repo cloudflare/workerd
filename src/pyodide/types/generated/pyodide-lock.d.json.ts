@@ -1,5 +1,3 @@
-declare namespace LOCKFILE {
-
-}
+declare const LOCKFILE: PackageLock;
 
 export default LOCKFILE;

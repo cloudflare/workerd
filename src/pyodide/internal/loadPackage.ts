@@ -16,11 +16,16 @@ import { parseTarInfo } from "pyodide-internal:tar";
 import { default as DiskCache } from "pyodide-internal:disk_cache";
 import { createTarFS } from "pyodide-internal:tarfs";
 
-async function decompressArrayBuffer(arrBuf: ArrayBuffer) {
-  return await new Response(new Response(arrBuf).body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+async function decompressArrayBuffer(arrBuf: ArrayBuffer): Promise<ArrayBuffer> {
+  const resp = new Response(arrBuf);
+  if (resp && resp.body) {
+    return await new Response(resp.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+  } else {
+    throw "Failed to decompress array buffer";
+  }
 }
 
-async function loadBundle(requirement: string) {
+async function loadBundle(requirement: string): Promise<[string, ArrayBuffer]> {
   // first check if the disk cache has what we want
   const filename = LOCKFILE["packages"][requirement]["file_name"];
   const cached = DiskCache.get(filename);
