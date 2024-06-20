@@ -24,7 +24,10 @@ const FSOps = {
     return parent.info.children.get(name);
   },
   read(stream, position, buffer) {
-    return stream.node.info.reader.read(stream.node.contentsOffset + position, buffer);
+    return stream.node.info.reader.read(
+      stream.node.contentsOffset + position,
+      buffer,
+    );
   },
 };
 

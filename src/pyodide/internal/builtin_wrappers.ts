@@ -105,7 +105,10 @@ function prepareStackTrace(_error: Error, stack: StackItem[]) {
   }
 }
 
-export async function wasmInstantiate(module: WebAssembly.Module | Uint8Array, imports: WebAssembly.Imports) {
+export async function wasmInstantiate(
+  module: WebAssembly.Module | Uint8Array,
+  imports: WebAssembly.Imports,
+) {
   if (!(module instanceof WebAssembly.Module)) {
     checkCallee();
     module = UnsafeEval.newWasmModule(module);

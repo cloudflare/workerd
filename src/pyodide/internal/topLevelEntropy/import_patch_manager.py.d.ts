@@ -1,2 +1,2 @@
-declare const buf: ArrayBuffer
+declare const buf: ArrayBuffer;
 export default buf;

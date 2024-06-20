@@ -11,15 +11,23 @@
 
 import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
 import { WORKERD_INDEX_URL } from "pyodide-internal:metadata";
-import { SITE_PACKAGES, LOAD_WHEELS_FROM_R2, getSitePackagesPath } from "pyodide-internal:setupPackages";
+import {
+  SITE_PACKAGES,
+  LOAD_WHEELS_FROM_R2,
+  getSitePackagesPath,
+} from "pyodide-internal:setupPackages";
 import { parseTarInfo } from "pyodide-internal:tar";
 import { default as DiskCache } from "pyodide-internal:disk_cache";
 import { createTarFS } from "pyodide-internal:tarfs";
 
-async function decompressArrayBuffer(arrBuf: ArrayBuffer): Promise<ArrayBuffer> {
+async function decompressArrayBuffer(
+  arrBuf: ArrayBuffer,
+): Promise<ArrayBuffer> {
   const resp = new Response(arrBuf);
   if (resp && resp.body) {
-    return await new Response(resp.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+    return await new Response(
+      resp.body.pipeThrough(new DecompressionStream("gzip")),
+    ).arrayBuffer();
   } else {
     throw new Error("Failed to decompress array buffer");
   }
@@ -43,17 +51,15 @@ async function loadBundle(requirement: string): Promise<[string, ArrayBuffer]> {
 
   DiskCache.put(filename, compressed);
   return [requirement, decompressed];
-};
+}
 
 /**
  * ArrayBufferReader wraps around an arrayBuffer in a way that tar.js is able to read from
  */
 class ArrayBufferReader {
-  constructor(private arrayBuffer: ArrayBuffer) {
+  constructor(private arrayBuffer: ArrayBuffer) {}
 
-  }
-
-  read(offset: number, buf: Uint8Array){
+  read(offset: number, buf: Uint8Array): number {
     const size = this.arrayBuffer.byteLength;
     if (offset >= size || offset < 0) {
       return 0;
@@ -67,7 +73,7 @@ class ArrayBufferReader {
   }
 }
 
-export async function loadPackages(Module: Module, requirements: Array<string>) {
+export async function loadPackages(Module: Module, requirements: string[]) {
   if (!LOAD_WHEELS_FROM_R2) return;
 
   let loadPromises = [];

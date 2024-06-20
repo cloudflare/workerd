@@ -29,7 +29,7 @@ const STDLIB_PACKAGES: string[] = Object.values(LOCKFILE.packages)
 class SitePackagesDir {
   public rootInfo: FSInfo;
   public soFiles: string[];
-  public loadedRequirements: Set<string>
+  public loadedRequirements: Set<string>;
   constructor() {
     this.rootInfo = {
       children: new Map(),
@@ -51,7 +51,7 @@ class SitePackagesDir {
    * If a file or directory already exists, an error is thrown.
    * @param {TarInfo} overlayInfo The directory that is to be "copied" into site-packages
    */
-  mountOverlay(overlayInfo: FSInfo) {
+  mountOverlay(overlayInfo: FSInfo): void {
     overlayInfo.children!.forEach((val, key) => {
       if (this.rootInfo.children!.has(key)) {
         throw new Error(
@@ -69,7 +69,11 @@ class SitePackagesDir {
    * @param {List<String>} soFiles A list of .so files contained in the small bundle
    * @param {String} requirement The canonicalized package name this small bundle corresponds to
    */
-  addSmallBundle(tarInfo: FSInfo, soFiles: string[], requirement: string) {
+  addSmallBundle(
+    tarInfo: FSInfo,
+    soFiles: string[],
+    requirement: string,
+  ): void {
     for (const soFile of soFiles) {
       this.soFiles.push(...soFile.split("/"));
     }
@@ -84,7 +88,11 @@ class SitePackagesDir {
    * @param {List<String>} soFiles A list of .so files contained in the big bundle
    * @param {List<String>} requirements canonicalized list of packages to pick from the big bundle
    */
-  addBigBundle(tarInfo: FSInfo, soFiles: string[], requirements: Set<string>) {
+  addBigBundle(
+    tarInfo: FSInfo,
+    soFiles: string[],
+    requirements: Set<string>,
+  ): void {
     // add all the .so files we will need to preload from the big bundle
     for (const soFile of soFiles) {
       // If folder is in list of requirements include .so file in list to preload.
@@ -103,7 +111,7 @@ class SitePackagesDir {
       this.loadedRequirements.add(req);
     }
   }
-};
+}
 
 /**
  * This stitches together the view of the site packages directory. Each
@@ -114,14 +122,16 @@ class SitePackagesDir {
  * This also returns the list of soFiles in the resulting site-packages
  * directory so we can preload them.
  */
-export function buildSitePackages(requirements: Set<string>): [SitePackagesDir, boolean] {
+export function buildSitePackages(
+  requirements: Set<string>,
+): [SitePackagesDir, boolean] {
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo();
 
   let LOAD_WHEELS_FROM_R2 = true;
   let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
   if (bigTarInfo.children!.size > 10) {
     LOAD_WHEELS_FROM_R2 = false;
-    requirements.forEach(r => requirementsInBigBundle.add(r));
+    requirements.forEach((r) => requirementsInBigBundle.add(r));
   }
 
   const res = new SitePackagesDir();
@@ -137,13 +147,15 @@ export function buildSitePackages(requirements: Set<string>): [SitePackagesDir, 
  *
  * TODO: stop using loadPackage in workerd.
  */
-export function patchLoadPackage(pyodide: {loadPackage: Function}) {
+export function patchLoadPackage(pyodide: { loadPackage: Function }) {
   pyodide.loadPackage = disabledLoadPackage;
   return;
 }
 
 function disabledLoadPackage() {
-  throw new Error("pyodide.loadPackage is disabled because packages are encoded in the binary");
+  throw new Error(
+    "pyodide.loadPackage is disabled because packages are encoded in the binary",
+  );
 }
 
 /**
@@ -156,7 +168,7 @@ function getTransitiveRequirements(): Set<string> {
   return new Set(packageDatas.map(({ name }) => canonicalizePackageName(name)));
 }
 
-export function getSitePackagesPath(Module: Module) {
+export function getSitePackagesPath(Module: Module): string {
   const pymajor = Module._py_version_major();
   const pyminor = Module._py_version_minor();
   return `/session/lib/python${pymajor}.${pyminor}/site-packages`;
@@ -170,7 +182,7 @@ export function getSitePackagesPath(Module: Module) {
  * details, so even though we want these directories to be on sys.path, we
  * handle that separately in adjustSysPath.
  */
-export function mountLib(Module: Module, info: FSInfo) {
+export function mountLib(Module: Module, info: FSInfo): void {
   const tarFS = createTarFS(Module);
   const mdFS = createMetadataFS(Module);
   const site_packages = getSitePackagesPath(Module);
@@ -189,7 +201,7 @@ export function mountLib(Module: Module, info: FSInfo) {
  * Add the directories created by mountLib to sys.path.
  * Has to run after the runtime is initialized.
  */
-export function adjustSysPath(Module: Module) {
+export function adjustSysPath(Module: Module): void {
   const site_packages = getSitePackagesPath(Module);
   simpleRunPython(
     Module,
@@ -197,7 +209,10 @@ export function adjustSysPath(Module: Module) {
   );
 }
 
-function recursiveDependencies(lockfile: PackageLock, names: string[]) {
+function recursiveDependencies(
+  lockfile: PackageLock,
+  names: string[],
+): PackageDeclaration[] {
   const toLoad = new Map();
   for (const name of names) {
     addPackageToLoad(lockfile, name, toLoad);
@@ -212,7 +227,11 @@ function recursiveDependencies(lockfile: PackageLock, names: string[]) {
  * @param toLoad The set of names of packages to load
  * @private
  */
-function addPackageToLoad(lockfile: PackageLock, name: string, toLoad: Map<string, PackageDeclaration>) {
+function addPackageToLoad(
+  lockfile: PackageLock,
+  name: string,
+  toLoad: Map<string, PackageDeclaration>,
+): void {
   const normalizedName = canonicalizePackageName(name);
   if (toLoad.has(normalizedName)) {
     return;
@@ -234,4 +253,6 @@ function addPackageToLoad(lockfile: PackageLock, name: string, toLoad: Map<strin
 
 export { REQUIREMENTS };
 export const TRANSITIVE_REQUIREMENTS = getTransitiveRequirements();
-export const [SITE_PACKAGES, LOAD_WHEELS_FROM_R2] = buildSitePackages(TRANSITIVE_REQUIREMENTS);
+export const [SITE_PACKAGES, LOAD_WHEELS_FROM_R2] = buildSitePackages(
+  TRANSITIVE_REQUIREMENTS,
+);
