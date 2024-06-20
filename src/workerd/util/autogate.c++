@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "autogate.h"
 #include <workerd/util/sentry.h>
+#include <capnp/message.h>
 #include <kj/common.h>
 
 namespace workerd::util {
@@ -56,4 +57,16 @@ void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates) {
 
 void Autogate::deinitAutogate() { globalAutogate = kj::none; }
 
-}  // namespace workerd::server
+void Autogate::initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames) {
+  capnp::MallocMessageBuilder message;
+  auto orphanage = message.getOrphanage();
+  auto gatesOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(gateNames.size());
+  auto gates = gatesOrphan.get();
+  size_t count = 0;
+  for (auto name: gateNames) {
+    gates.set(count++, kj::str("workerd-autogate-", name));
+  }
+  Autogate::initAutogate(gates.asReader());
+}
+
+}  // namespace workerd::util

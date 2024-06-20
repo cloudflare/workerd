@@ -7,6 +7,7 @@
 #include <kj/map.h>
 #include <capnp/common.h>
 #include <capnp/list.h>
+#include <initializer_list>
 
 namespace workerd::util {
 
@@ -40,6 +41,9 @@ public:
   static void initAutogate(
       capnp::List<capnp::Text>::Reader autogates);
 
+  // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
+  static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames);
+
   // Destroys an initialised global Autogate instance. Used only for testing.
   static void deinitAutogate();
 private:
@@ -53,4 +57,4 @@ private:
 // When adding a new gate, add it into this method as well.
 kj::StringPtr KJ_STRINGIFY(AutogateKey key);
 
-}  // namespace workerd::server
+}  // namespace workerd::util
