@@ -1,8 +1,7 @@
-// @ts-nocheck
 import { default as UnsafeEval } from "internal:unsafe-eval";
 export { getRandomValues } from "pyodide-internal:topLevelEntropy/lib";
 
-let lastTime;
+let lastTime: number;
 let lastDelta = 0;
 /**
  * Wrapper for Date.now that always advances by at least a millisecond. So that
@@ -53,7 +52,7 @@ export function monotonicDateNow() {
  *      - ctypes is quite slow even by Python's standards
  *      - Normally ctypes allocates all closures up front
  */
-export function newWasmModule(buffer) {
+export function newWasmModule(buffer: Uint8Array) {
   checkCallee();
   return UnsafeEval.newWasmModule(buffer);
 }
@@ -84,7 +83,7 @@ function checkCallee() {
  * `convertJsFunctionToWasm` or `loadModule` in `pyodide.asm.js`, `false` if not. This will set
  * the `stack` field in the error so we can read back the result there.
  */
-function prepareStackTrace(_error, stack) {
+function prepareStackTrace(_error: Error, stack: StackItem[]) {
   // In case a logic error is ever introduced in this function, defend against
   // reentrant calls by setting `prepareStackTrace` to `undefined`.
   Error.prepareStackTrace = undefined;
@@ -106,7 +105,7 @@ function prepareStackTrace(_error, stack) {
   }
 }
 
-export async function wasmInstantiate(module, imports) {
+export async function wasmInstantiate(module: WebAssembly.Module | Uint8Array, imports: WebAssembly.Imports) {
   if (!(module instanceof WebAssembly.Module)) {
     checkCallee();
     module = UnsafeEval.newWasmModule(module);
