@@ -299,6 +299,7 @@ Socket.prototype._writeGeneric = function(writev, data, encoding, cb) {
         cb(new ERR_SOCKET_CLOSED_BEFORE_CONNECTION());
       }
       this.once('connect', function () {
+        // Note that off is a Node.js equivalent to removeEventListener
         this.off('close', onClose);
         this._writeGeneric(writev, data, encoding, cb);
       });
@@ -838,7 +839,7 @@ function onConnectionOpened() {
 
 function onConnectionClosed() {
   if (this[kTimeout] != null) clearTimeout(this[kTimeout]);
-  // TODO(now): What else should we do here? Anything?
+  // TODO(later): What else should we do here? Anything?
 }
 
 async function startRead(socket) {
