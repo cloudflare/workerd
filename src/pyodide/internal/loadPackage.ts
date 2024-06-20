@@ -21,7 +21,7 @@ async function decompressArrayBuffer(arrBuf: ArrayBuffer): Promise<ArrayBuffer> 
   if (resp && resp.body) {
     return await new Response(resp.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
   } else {
-    throw "Failed to decompress array buffer";
+    throw new Error("Failed to decompress array buffer");
   }
 }
 
