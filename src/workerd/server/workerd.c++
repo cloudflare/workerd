@@ -1179,7 +1179,7 @@ public:
   }
 
   template <typename Func>
-  void serveImpl(Func&& func) {
+  void serveImpl(Func&& func) noexcept {
     if (hadErrors) {
       // Can't start, stuff is broken.
       KJ_IF_SOME(w, watcher) {
@@ -1221,15 +1221,17 @@ public:
         maybePerfettoSession = kj::none;
       }
 #endif
-      // under normal circumstances context.exit() does fast shutdown, but under
-      // KJ_CLEAN_SHUTDOWN server instance maintains dependency on v8 platform.
-      // Clean up the server if we're doing clean shutdown.
-      KJ_DEFER(server = nullptr);
-      context.exit();
+
+      if (getenv("KJ_CLEAN_SHUTDOWN") == nullptr) {
+        context.exit();
+      }
+
+      // Server maintains a reference to the v8 platform. Clean up before destroying the platform.
+      server = nullptr;
     }
   }
 
-  void serve() {
+  void serve() noexcept {
     serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
 #if _WIN32
       return server->run(v8System, config);
