@@ -224,11 +224,11 @@ public:
   // The minBytes argument is ignored in this implementation of tryRead.
   // The buffer must be kept alive by the caller until the returned promise is fulfilled.
   // The returned promise is fulfilled with the actual number of bytes read.
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t amount = kj::min(maxBytes, unread.size());
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    size_t amount = kj::min(buffer.size(), unread.size());
     if (amount > 0) {
-      memcpy(buffer, unread.begin(), amount);
-      unread = unread.slice(amount, unread.size());
+      buffer.first(amount).copyFrom(unread.first(amount));
+      unread = unread.slice(amount);
     }
     return amount;
   }

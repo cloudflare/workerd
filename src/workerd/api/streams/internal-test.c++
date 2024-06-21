@@ -19,14 +19,15 @@ public:
   FooStream() : ptr(&data[0]), remaining_(size) {
     KJ_ASSERT(RAND_bytes(data, size) == 1);
   }
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    auto maxBytes = buffer.size();
     maxMaxBytesSeen_ = kj::max(maxMaxBytesSeen_, maxBytes);
     numreads_++;
     if (remaining_ == 0) return (size_t)0;
     KJ_ASSERT(minBytes == maxBytes);
     KJ_ASSERT(maxBytes <= size);
     auto amount = kj::min(remaining_, maxBytes);
-    memcpy(buffer, ptr, amount);
+    memcpy(buffer.begin(), ptr, amount);
     ptr += amount;
     remaining_ -= amount;
     return amount;
@@ -130,10 +131,10 @@ KJ_TEST("zero-length stream") {
 
   class Zero : public ReadableStreamSource {
   public:
-    kj::Promise<size_t> tryRead(void*, size_t, size_t) {
+    kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t) override {
       return (size_t)0;
     }
-    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
+    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
       return (size_t)0;
     }
   };

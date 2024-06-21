@@ -34,7 +34,7 @@ kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output
   kj::byte buffer[4096]{};
 
   while (true) {
-    auto amount = co_await input.tryRead(buffer, 1, kj::size(buffer));
+    auto amount = co_await input.tryRead(buffer, 1);
 
     if (amount == 0) {
       if (end) {
@@ -150,7 +150,7 @@ private:
         // Note that we're passing amountToRead as the *minBytes* here so the tryRead should
         // attempt to fill the entire buffer. If it doesn't, the implication is that we read
         // everything.
-        uint64_t amount = co_await input.tryRead(bytes.begin(), amountToRead, amountToRead);
+        uint64_t amount = co_await input.tryRead(bytes.asBytes(), amountToRead);
         KJ_DASSERT(amount <= amountToRead);
 
         runningTotal += amount;
@@ -252,8 +252,8 @@ public:
   explicit TeeAdapter(kj::Own<ReadableStreamSource> inner)
       : inner(kj::mv(inner)) {}
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return inner->tryRead(buffer, minBytes, maxBytes);
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return inner->tryRead(buffer, minBytes);
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
@@ -269,8 +269,8 @@ public:
   explicit TeeBranch(kj::Own<kj::AsyncInputStream> inner)
       : inner(kj::mv(inner)) {}
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return inner->tryRead(buffer, minBytes, maxBytes);
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return inner->tryRead(buffer, minBytes);
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
@@ -416,9 +416,9 @@ public:
     return inner->pumpTo(output, end);
   }
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
     wasRead = true;
-    return inner->tryRead(buffer, minBytes, maxBytes);
+    return inner->tryRead(buffer, minBytes);
   }
 
   // TODO(someday): we set `wasRead` to avoid warning here, but TeeBranch might still buffer the
@@ -594,7 +594,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       auto bytes = kj::arrayPtr(ptr + byteOffset, byteLength);
 
       auto promise = kj::evalNow([&] {
-        return readable->tryRead(bytes.begin(), atLeast, bytes.size());
+        return readable->tryRead(bytes, atLeast);
       });
       KJ_IF_SOME(readerLock, readState.tryGet<ReaderLocked>()) {
         promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
@@ -799,7 +799,7 @@ kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::remov
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       class NullSource final: public ReadableStreamSource {
       public:
-        kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+        kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
           return size_t(0);
         }
 
@@ -2188,32 +2188,29 @@ StreamEncoding ReadableStreamInternalController::getPreferredEncoding() {
 }
 
 kj::Promise<size_t> IdentityTransformStreamImpl::tryRead(
-    void* buffer,
-    size_t minBytes,
-    size_t maxBytes) {
+    kj::ArrayPtr<kj::byte> buffer, size_t minBytes) {
   size_t total = 0;
   while (total < minBytes) {
     // TODO(perf): tryReadInternal was written assuming minBytes would always be 1 but we've now
     // introduced an API for user to specify a larger minBytes. For now, this is implemented as a
     // naiive loop dispatching to the 1 byte version but would be better to bake it deeper into
     // the implementation where it can be more efficient.
-    auto amount = co_await tryReadInternal(buffer, maxBytes);
-    KJ_ASSERT(amount <= maxBytes);
+    auto amount = co_await tryReadInternal(buffer);
+    KJ_ASSERT(amount <= buffer.size());
     if (amount == 0) {
       // EOF.
       break;
     }
 
     total += amount;
-    buffer = reinterpret_cast<char*>(buffer) + amount;
-    maxBytes -= amount;
+    buffer = buffer.slice(amount);
   }
 
   co_return total;
 }
 
-kj::Promise<size_t> IdentityTransformStreamImpl::tryReadInternal(void* buffer, size_t maxBytes) {
-  auto promise = readHelper(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes));
+kj::Promise<size_t> IdentityTransformStreamImpl::tryReadInternal(kj::ArrayPtr<kj::byte> buffer) {
+  auto promise = readHelper(buffer);
 
   KJ_IF_SOME(l, limit) {
     promise = promise.then([this, &l = l](size_t amount) -> kj::Promise<size_t> {

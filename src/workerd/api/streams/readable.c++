@@ -581,8 +581,8 @@ public:
                               kj::Maybe<uint64_t> expectedLength)
       : inner(kj::mv(inner)), ended(kj::mv(ended)), expectedLength(expectedLength) {}
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t result = co_await inner->tryRead(buffer, minBytes, maxBytes);
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    size_t result = co_await inner->tryRead(buffer, minBytes);
 
     KJ_IF_SOME(l, expectedLength) {
       KJ_ASSERT(result <= l);
@@ -629,8 +629,8 @@ public:
   NoDeferredProxyReadableStream(kj::Own<ReadableStreamSource> inner, IoContext& ioctx)
       : inner(kj::mv(inner)), ioctx(ioctx) {}
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return inner->tryRead(buffer, minBytes, maxBytes);
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return inner->tryRead(buffer, minBytes);
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
