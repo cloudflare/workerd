@@ -30,7 +30,7 @@ void AsyncRunner::QueueTick() {
   tick_queued_ = true;
 
   IoContext::current().setTimeoutImpl(
-      timeoutIdGenerator, false,
+      false,
       [this](jsg::Lock& js) mutable {
         this->tick_queued_ = false;
         if (this->count_ > 0) {

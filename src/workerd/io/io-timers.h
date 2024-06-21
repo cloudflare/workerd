@@ -79,11 +79,10 @@ public:
     kj::Maybe<jsg::Function<void()>> function;
   };
 
-  virtual TimeoutId setTimeout(
-      IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) = 0;
+  virtual TimeoutId setTimeout(IoContext& context, TimeoutParameters params) = 0;
   virtual void clearTimeout(IoContext& context, TimeoutId id) = 0;
   virtual size_t getTimeoutCount() const = 0;
   virtual kj::Maybe<kj::Date> getNextTimeout() const = 0;
 };
 
-}  // namespace workerd
+} // namespace workerd
