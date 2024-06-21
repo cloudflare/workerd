@@ -72,7 +72,7 @@ wd_cc_library(
     deps = [
         "//src/workerd/io",
         "//src/workerd/util:sqlite",
-        "@capnp-cpp//src/kj:kj",
+        "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
     ],
 )
@@ -87,8 +87,11 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/workerd/io",
+        "//src/workerd/io:actor-id",
+        "//src/workerd/jsg:exception",
+        "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj:kj",
+        "@ssl",
     ],
 )
 
@@ -117,6 +120,7 @@ wd_cc_library(
         "//src/workerd/api:pyodide",
         "//src/workerd/api:rtti",
         "//src/workerd/io",
+        "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-tls",
@@ -157,10 +161,21 @@ sh_test(
     tags = ["no-qemu"],
 )
 
-[kj_test(
-    src = f,
+kj_test(
+    src = "server-test.c++",
     deps = [
         ":server",
         "//src/workerd/util:test-util",
     ],
-) for f in glob(["*-test.c++"])]
+)
+
+kj_test(
+    src = "actor-id-impl-test.c++",
+    deps = [
+        ":actor-id-impl",
+        "//src/workerd/jsg:exception",
+        "//src/workerd/util:thread-scopes",
+        "@capnp-cpp//src/kj",
+        "@ssl",
+    ],
+)

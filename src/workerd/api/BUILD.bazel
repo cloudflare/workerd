@@ -10,6 +10,7 @@ filegroup(
             ["**/*.c++"],
             exclude = [
                 "html-rewriter.c++",
+                "data-url.c++",
                 "rtti.c++",
                 "**/*test*.c++",
                 "pyodide.c++",
@@ -20,6 +21,7 @@ filegroup(
             ["**/*.c++"],
             exclude = [
                 "html-rewriter.c++",
+                "data-url.c++",
                 "rtti.c++",
                 "**/*test*.c++",
                 "pyodide.c++",
@@ -31,27 +33,25 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+api_header_exclusions = [
+    "html-rewriter.h",
+    "deferred-proxy.h",
+    "data-url.h",
+    "modules.h",
+    "rtti.h",
+    "**/*test*.h",
+]
+
 filegroup(
     name = "hdrs",
     srcs = select({
         "//src/workerd/io:set_enable_experimental_webgpu": glob(
             ["**/*.h"],
-            exclude = [
-                "html-rewriter.h",
-                "modules.h",
-                "rtti.h",
-                "**/*test*.h",
-            ],
+            exclude = api_header_exclusions,
         ),
         "//conditions:default": glob(
             ["**/*.h"],
-            exclude = [
-                "html-rewriter.h",
-                "modules.h",
-                "rtti.h",
-                "**/*test*.h",
-                "gpu/*.h",
-            ],
+            exclude = api_header_exclusions + ["gpu/*.h"],
         ),
     }),
     visibility = ["//visibility:public"],
@@ -111,6 +111,28 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "data-url",
+    srcs = ["data-url.c++"],
+    hdrs = ["data-url.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg:url",
+        "//src/workerd/util",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "deferred-proxy",
+    hdrs = ["deferred-proxy.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
 wd_cc_capnp_library(
     name = "r2-api_capnp",
     srcs = ["r2-api.capnp"],
@@ -128,16 +150,30 @@ wd_cc_capnp_library(
     deps = [
         "//src/workerd/io",
     ],
-) for f in glob(
-    ["**/*-test.c++"],
-    exclude = [
-        "api-rtti-test.c++",
-        "actor-state-iocontext-test.c++",
-        "cf-property-test.c++",
-        "node/*-test.c++",
-        "streams/internal-test.c++",
+) for f in [
+    "actor-state-test.c++",
+    "basics-test.c++",
+    "crypto/aes-test.c++",
+    "crypto/impl-test.c++",
+    "streams/queue-test.c++",
+    "streams/standard-test.c++",
+    "util-test.c++",
+    ]
+]
+
+kj_test(
+    src = "data-url-test.c++",
+    deps = [
+        ":data-url",
     ],
-)]
+)
+
+kj_test(
+    src = "deferred-proxy-test.c++",
+    deps = [
+        ":deferred-proxy",
+    ],
+)
 
 kj_test(
     src = "streams/internal-test.c++",

@@ -60,6 +60,7 @@ wd_cc_library(
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
+        "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
     ],
@@ -197,7 +198,7 @@ kj_test(
 kj_test(
     src = "url-test.c++",
     deps = [
-        ":jsg",
+        ":url",
         "@ssl",
     ],
 )

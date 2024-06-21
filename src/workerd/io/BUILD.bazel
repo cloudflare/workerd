@@ -20,36 +20,33 @@ wd_cc_library(
     # HACK: Currently, the `io` and `api` packages are interdependent. We fold all the sources
     #   from `api` into `io`. In principle, it should be possible to pull them apart so `api`
     #   depends on `io` but not vice versa.
-    # TODO(cleaunp): Fix this.
+    # TODO(cleanup): Fix this.
     srcs = glob(
         ["*.c++"],
         exclude = [
             "worker-interface.c++",
             "*-test.c++",
             "trace.c++",
+            "io-gate.c++",
+            "observer.c++",
+            "actor-cache.c++",
+            "actor-sqlite.c++",
+            "actor-storage.c++",
+            "worker-entrypoint.c++",
         ],
     ) + ["//src/workerd/api:srcs"],
     hdrs = glob(
         ["*.h"],
-        # `trace.h` should really be excluded here, but doing so causes the build to fail on
-        # Windows with errors like:
-        #
-        # ```
-        # ERROR: C:/.../src/workerd/io/BUILD.bazel: Compiling src/workerd/io/compatibility-date.c++ failed: undeclared inclusion(s) in rule '//src/workerd/io:io':
-        # this rule is missing dependency declarations for the following files included by 'src/workerd/io/compatibility-date.c++':
-        #   'bazel-out/x64_windows-opt/bin/src/workerd/io/_virtual_includes/io/workerd/io/trace.h'
-        # In file included from <built-in>:429:
-        # ```
-        #
-        # This feels like a weird interaction between symlinks on Windows and Bazel.
-        # `trace.h` is `#pragma once`d though, so including it in both `io` and `trace` targets
-        # should be ok.
-        #
-        # TODO(soon): Fix this
         exclude = [
             "actor-id.h",
+            "actor-cache.h",
+            "actor-sqlite.h",
+            "actor-storage.h",
             "io-channels.h",
+            "io-gate.h",
+            "trace.h",
             "observer.h",
+            "worker-entrypoint.h",
             "worker-interface.h",
         ],
     ) + ["//src/workerd/api:hdrs"],
@@ -65,21 +62,26 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":actor",
         ":actor-id",
         ":actor-storage_capnp",
         ":capnp",
         ":io-channels",
+        ":io-gate",
         ":observer",
         ":trace",
         ":worker-interface",
         "//src/cloudflare",
         "//src/node",
         "//src/workerd/api:analytics-engine_capnp",
+        "//src/workerd/api:data-url",
+        "//src/workerd/api:deferred-proxy",
         "//src/workerd/api:r2-api_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:autogate",
-        "//src/workerd/util:duration-exceeded-logger",
         "//src/workerd/util:sqlite",
+        "//src/workerd/util:thread-scopes",
+        "//src/workerd/util:uuid",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj:kj-async",
@@ -90,29 +92,67 @@ wd_cc_library(
     }),
 )
 
+# TODO(cleanup): Split this up further.
+wd_cc_library(
+    name = "actor",
+    srcs = [
+        "actor-cache.c++",
+        "actor-sqlite.c++",
+        "actor-storage.c++",
+    ],
+    hdrs = [
+        "actor-cache.h",
+        "actor-sqlite.h",
+        "actor-storage.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":actor-storage_capnp",
+        ":io-gate",
+        "//src/workerd/jsg:exception",
+        "//src/workerd/util:duration-exceeded-logger",
+        "//src/workerd/util:sqlite",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
 wd_cc_library(
     name = "trace",
     srcs = ["trace.c++"],
     hdrs = ["trace.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":capnp",
         ":worker-interface_capnp",
         "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util:own-util",
-        "//src/workerd/util:thread-scopes",
+        "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj:kj-async",
-        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
 wd_cc_library(
     name = "observer",
+    srcs = ["observer.c++"],
     hdrs = ["observer.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":features_capnp",
         ":trace",
+        ":worker-interface",
         "//src/workerd/jsg:observer",
+    ],
+)
+
+wd_cc_library(
+    name = "io-gate",
+    srcs = ["io-gate.c++"],
+    hdrs = ["io-gate.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
     ],
 )
 
@@ -120,6 +160,21 @@ wd_cc_library(
     name = "limit-enforcer",
     hdrs = ["limit-enforcer.h"],
     visibility = ["//visibility:public"],
+    deps = [
+        ":observer",
+        "//src/workerd/jsg",
+    ],
+)
+
+wd_cc_library(
+    name = "worker-entrypoint",
+    srcs = ["worker-entrypoint.c++"],
+    hdrs = ["worker-entrypoint.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":io",
+        "//src/workerd/util:perfetto",
+    ],
 )
 
 wd_cc_library(
@@ -128,7 +183,9 @@ wd_cc_library(
     hdrs = ["worker-interface.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":trace",
+        ":worker-interface_capnp",
+        "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
     ],
 )
@@ -228,11 +285,40 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
 )
 
-[kj_test(
-    src = f,
+kj_test(
+    src = "io-gate-test.c++",
     deps = [
-        ":io",
-        "//src/workerd/util:autogate",
+        ":io-gate",
+    ],
+)
+
+kj_test(
+    src = "actor-cache-test.c++",
+    deps = [
+        ":actor",
+        ":io-gate",
+        "//src/workerd/util:test",
         "//src/workerd/util:test-util",
     ],
-) for f in glob(["*-test.c++"])]
+)
+
+kj_test(
+    src = "promise-wrapper-test.c++",
+    deps = [":io"],
+)
+
+kj_test(
+    src = "compatibility-date-test.c++",
+    deps = [
+        ":io",
+        "@capnp-cpp//src/capnp:capnpc",
+    ],
+)
+
+kj_test(
+    src = "observer-test.c++",
+    deps = [
+        ":observer",
+        "@capnp-cpp//src/capnp:capnpc",
+    ],
+)
