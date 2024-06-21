@@ -1210,8 +1210,8 @@ public:
     fulfiller->fulfill();
   }
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return inner->tryRead(buffer, minBytes, maxBytes);
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return inner->tryRead(buffer, minBytes);
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {

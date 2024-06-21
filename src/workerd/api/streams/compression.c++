@@ -194,23 +194,19 @@ public:
 
   // ReadableStreamSource implementation -------------------------------------------------
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    KJ_ASSERT(minBytes <= maxBytes);
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    KJ_ASSERT(minBytes <= buffer.size());
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ended, Ended) {
         // There might still be data in the output buffer remaining to read.
         if (output.empty()) return size_t(0);
-        return tryReadInternal(
-            kj::ArrayPtr<kj::byte>(reinterpret_cast<kj::byte*>(buffer), maxBytes),
-            minBytes);
+        return tryReadInternal(buffer, minBytes);
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
         return kj::cp(exception);
       }
       KJ_CASE_ONEOF(open, Open) {
-        return tryReadInternal(
-            kj::ArrayPtr<kj::byte>(reinterpret_cast<kj::byte*>(buffer), maxBytes),
-            minBytes);
+        return tryReadInternal(buffer, minBytes);
       }
     }
     KJ_UNREACHABLE;

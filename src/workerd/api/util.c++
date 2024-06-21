@@ -119,9 +119,9 @@ kj::Own<kj::AsyncInputStream> newTeeErrorAdapter(kj::Own<kj::AsyncInputStream> i
   public:
     explicit Adapter(kj::Own<AsyncInputStream> inner): inner(kj::mv(inner)) {}
 
-    kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-      return translateTeeErrors([&] {
-        return inner->tryRead(buffer, minBytes, maxBytes);
+    kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+      return translateTeeErrors([&] () mutable {
+        return inner->tryRead(buffer, minBytes);
       });
     }
 
