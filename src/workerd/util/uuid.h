@@ -4,9 +4,13 @@
 
 #pragma once
 
-#include <kj/compat/http.h>
+#include <cstdint>
 #include <kj/string.h>
 #include <kj/hash.h>
+
+namespace kj {
+  class EntropySource;
+}
 
 namespace workerd {
 

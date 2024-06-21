@@ -1,5 +1,6 @@
 #include <workerd/server/actor-id-impl.h>
-#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/exception.h>
+#include <workerd/util/thread-scopes.h>
 #include <openssl/rand.h>
 #include <openssl/hmac.h>
 #include <kj/encoding.h>
@@ -59,7 +60,7 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromName(kj::String name)
 
   // Compute the first half of the ID by HMACing the name itself. We're using HMAC as a keyed
   // hash here, not actually for authentication, but it works.
-  uint len = SHA256_DIGEST_LENGTH;
+  unsigned int len = SHA256_DIGEST_LENGTH;
   KJ_ASSERT(HMAC(EVP_sha256(), key, sizeof(key), name.asBytes().begin(), name.size(), id, &len)
                   == id);
   KJ_ASSERT(len == SHA256_DIGEST_LENGTH);
@@ -100,7 +101,7 @@ void ActorIdFactoryImpl::computeMac(kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENG
   // of the final ID.
 
   kj::byte* hmacOut = id + BASE_LENGTH;
-  uint len = SHA256_DIGEST_LENGTH;
+  unsigned int len = SHA256_DIGEST_LENGTH;
   KJ_ASSERT(HMAC(EVP_sha256(), key, sizeof(key), id, BASE_LENGTH, hmacOut, &len) == hmacOut);
   KJ_ASSERT(len == SHA256_DIGEST_LENGTH);
 }

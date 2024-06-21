@@ -7,6 +7,7 @@
 #include "time.h"
 #include <capnp/schema.h>
 #include <capnp/dynamic.h>
+#include <kj/debug.h>
 #include <kj/map.h>
 #include <kj/vector.h>
 
