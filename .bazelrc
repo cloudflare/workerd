@@ -223,7 +223,7 @@ build:linux --force_pic
 
 # On Linux, garbage collection sections and optimize binary size. These do not apply to the macOS
 # toolchain.
-build:linux --linkopt="-Wl,--gc-sections" --linkopt="-Wl,-O2"
+build:linux --linkopt="-Wl,--gc-sections"
 build:linux --copt="-ffunction-sections" --host_copt="-ffunction-sections"
 build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
@@ -281,7 +281,9 @@ build:release --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 # performance, but -O3 should generally be expected to be faster for at least parts of the workerd API.
 build:release_unix --copt='-O3'
 build:release_unix --config=release
+
 build:release_linux --config=release_unix
+build:release_linux --linkopt="-Wl,-O2"
 
 build:release_macos --config=release_unix
 # Disable generating LC_DATA_IN_CODE and LC_FUNCTION_STARTS binary sections, two rarely used types
