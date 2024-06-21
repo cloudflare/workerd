@@ -37,5 +37,5 @@ const helloWorld :Workerd.Worker = (
     ),
   ],
   compatibilityDate = "2023-02-28",
-  compatibilityFlags = ["nodejs_compat"]
+  compatibilityFlags = ["nodejs_compat", "experimental", "unsafe_module"]
 );
