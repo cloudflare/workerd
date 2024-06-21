@@ -6,8 +6,7 @@
 #include <kj/test.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
-#include <kj/compat/gtest.h>
-#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/exception.h>
 #include <openssl/hmac.h>
 
 

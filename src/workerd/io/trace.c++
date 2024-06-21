@@ -5,7 +5,6 @@
 #include <workerd/io/trace.h>
 #include <capnp/message.h>
 #include <capnp/schema.h>
-#include <kj/compat/http.h>
 #include <kj/debug.h>
 #include <cstdlib>
 

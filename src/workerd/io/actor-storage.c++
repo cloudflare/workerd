@@ -4,7 +4,7 @@
 
 #include "actor-storage.h"
 
-#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/exception.h>
 
 namespace workerd {
 void ActorStorageLimits::checkMaxKeySize(kj::StringPtr key) {

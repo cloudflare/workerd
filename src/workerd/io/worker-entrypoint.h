@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "worker.h"
+#include <workerd/io/worker.h>
 
 namespace workerd {
 
