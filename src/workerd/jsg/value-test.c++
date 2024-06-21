@@ -1135,8 +1135,10 @@ struct IdentifiedContext: public ContextGlobalObject {
     if (result) {
       KJ_EXPECT(a.identity.hashCode() == b.identity.hashCode());
     }
-    KJ_EXPECT(a.identity.hashCode() == a.identity.getHandle(isolate)->GetIdentityHash());
-    KJ_EXPECT(b.identity.hashCode() == b.identity.getHandle(isolate)->GetIdentityHash());
+    KJ_EXPECT(a.identity.hashCode() ==
+        kj::hashCode(a.identity.getHandle(isolate)->GetIdentityHash()));
+    KJ_EXPECT(b.identity.hashCode() ==
+        kj::hashCode(b.identity.getHandle(isolate)->GetIdentityHash()));
 
     return kj::str(result, ' ', a.unwrapped - b.unwrapped);
   }

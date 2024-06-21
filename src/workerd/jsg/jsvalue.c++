@@ -103,7 +103,7 @@ bool JsObject::hasPrivate(Lock& js, kj::StringPtr name) {
 }
 
 int JsObject::hashCode() const {
-  return inner->GetIdentityHash();
+  return kj::hashCode(inner->GetIdentityHash());
 }
 
 kj::String JsObject::getConstructorName() {
@@ -198,7 +198,7 @@ kj::String JsString::toString(jsg::Lock& js) const {
 }
 
 int JsString::hashCode() const {
-  return inner->GetIdentityHash();
+  return kj::hashCode(inner->GetIdentityHash());
 }
 
 JsString JsString::concat(Lock& js, const JsString& one, const JsString& two) {
