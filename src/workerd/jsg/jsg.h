@@ -756,6 +756,9 @@ public:
   inline bool operator==(const Data& other) const {
     return handle == other.handle;
   }
+  inline bool operator==(const v8::Local<v8::Data>& other) const {
+    return handle == other;
+  }
 
 private:
   // The isolate with which the handles below are associated.
@@ -826,6 +829,9 @@ public:
   V8Ref deepClone(jsg::Lock& js);
 
   inline bool operator==(const V8Ref& other) const {
+    return Data::operator==(other);
+  }
+  inline bool operator==(const v8::Local<T>& other) const {
     return Data::operator==(other);
   }
 
