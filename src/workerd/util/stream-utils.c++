@@ -21,7 +21,7 @@ public:
     return kj::NEVER_DONE;
   }
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
     return kj::constPromise<size_t, 0>();
   }
 
@@ -39,10 +39,10 @@ public:
   MemoryInputStream(kj::ArrayPtr<const kj::byte> data)
       : data(data) { }
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t toRead = kj::min(data.size(), maxBytes);
-    memcpy(buffer, data.begin(), toRead);
-    data = data.slice(toRead, data.size());
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    size_t toRead = kj::min(data.size(), buffer.size());
+    buffer.first(toRead).copyFrom(data.first(toRead));
+    data = data.slice(toRead);
     return toRead;
   }
 
@@ -63,11 +63,11 @@ public:
     }
   }
 
-  kj::Promise<size_t> read(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return canceler.wrap(getStream().read(buffer, minBytes, maxBytes));
+  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return canceler.wrap(getStream().read(buffer, minBytes));
   }
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return canceler.wrap(getStream().tryRead(buffer, minBytes, maxBytes));
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return canceler.wrap(getStream().tryRead(buffer, minBytes));
   }
   kj::Maybe<uint64_t> tryGetLength() override {
     return getStream().tryGetLength();
@@ -108,11 +108,11 @@ public:
 
   // AsyncInputStream
 
-  kj::Promise<size_t> read(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return canceler.wrap(getStream().read(buffer, minBytes, maxBytes));
+  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return canceler.wrap(getStream().read(buffer, minBytes));
   }
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return canceler.wrap(getStream().tryRead(buffer, minBytes, maxBytes));
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return canceler.wrap(getStream().tryRead(buffer, minBytes));
   }
   kj::Maybe<uint64_t> tryGetLength() override {
     return getStream().tryGetLength();

@@ -24,7 +24,7 @@ public:
 
   // Read bytes in identity encoding. If the stream is not already in identity encoding, it will be
   // converted to identity encoding via an appropriate stream wrapper.
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override;
 
   StreamEncoding getPreferredEncoding() override { return encoding; }
 
@@ -59,11 +59,11 @@ EncodedAsyncInputStream::EncodedAsyncInputStream(
     : inner(kj::mv(inner)), encoding(encoding), ioContext(context) {}
 
 kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
-    void* buffer, size_t minBytes, size_t maxBytes) {
+    kj::ArrayPtr<kj::byte> buffer, size_t minBytes) {
   ensureIdentityEncoding();
 
-  return kj::evalNow([&]() {
-    return inner->tryRead(buffer, minBytes, maxBytes)
+  return kj::evalNow([&]() mutable {
+    return inner->tryRead(buffer, minBytes)
       .attach(ioContext.registerPendingEvent());
   }).catch_([](kj::Exception&& exception) -> kj::Promise<size_t> {
     KJ_IF_SOME(e, translateKjException(exception, {

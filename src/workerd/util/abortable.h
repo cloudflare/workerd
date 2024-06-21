@@ -56,12 +56,12 @@ public:
   AbortableInputStream(kj::Own<kj::AsyncInputStream> inner, RefcountedCanceler& canceler)
       : impl(kj::mv(inner), canceler) {}
 
-  kj::Promise<size_t> read(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return impl.wrap<size_t>(&kj::AsyncInputStream::read, buffer, minBytes, maxBytes);
+  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return impl.wrap<size_t>(&kj::AsyncInputStream::read, buffer, minBytes);
   }
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return impl.wrap(&kj::AsyncInputStream::tryRead, buffer, minBytes, maxBytes);
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    return impl.wrap(&kj::AsyncInputStream::tryRead, buffer, minBytes);
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
