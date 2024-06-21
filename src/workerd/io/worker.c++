@@ -3444,9 +3444,14 @@ kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::handleAlarm(
     .scheduledTime = scheduledAlarm.scheduledTime,
     .resultPromise = kj::mv(scheduledAlarm.resultPromise),
   });
-  impl->runningAlarmTask = scheduledAlarm.cleanupPromise.attach(kj::defer([this](){
+  impl->runningAlarmTask = scheduledAlarm.cleanupPromise.attach(kj::defer([&impl=*impl](){
     // As soon as we get fulfilled or rejected, let's unset this alarm as the running alarm.
-    impl->maybeRunningAlarm = kj::none;
+    //
+    // NOTE: We could get here during `Actor`'s destructor, which in turn calls `Actor::Impl`'s
+    // destructor, which destroys `runningAlarmTask`, which is us. But in this case, `actor.impl`
+    // is already nulled out (the pointer gets nulled before the destructor runs). This is why we
+    // captured `impl` by reference above, rather than capturing `this`.
+    impl.maybeRunningAlarm = kj::none;
   })).eagerlyEvaluate([](kj::Exception&& e){
     LOG_EXCEPTION("actorAlarmCleanup", e);
   }).fork();
