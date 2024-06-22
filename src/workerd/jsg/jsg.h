@@ -756,6 +756,9 @@ public:
   inline bool operator==(const Data& other) const {
     return handle == other.handle;
   }
+  inline bool operator==(const v8::Local<v8::Data>& other) const {
+    return handle == other;
+  }
 
 private:
   // The isolate with which the handles below are associated.
@@ -828,6 +831,9 @@ public:
   inline bool operator==(const V8Ref& other) const {
     return Data::operator==(other);
   }
+  inline bool operator==(const v8::Local<T>& other) const {
+    return Data::operator==(other);
+  }
 
   template <typename U>
   V8Ref<U> cast(jsg::Lock& js);
@@ -847,7 +853,12 @@ class HashableV8Ref: public V8Ref<T> {
 public:
   HashableV8Ref(decltype(nullptr)): V8Ref<T>(nullptr), identityHash(0) {}
   HashableV8Ref(v8::Isolate* isolate, v8::Local<T> handle)
-      : V8Ref<T>(isolate, handle), identityHash(handle->GetIdentityHash()) {}
+      // TODO(perf): It's not clear if V8's `GetIdentityHash()` is intended to return uniform
+      //   results as required for KJ hashing, so we pass it to `kj::hashCode()` to further hash
+      //   it. This may be unnecessary. Note that there are several other call sites of
+      //   `GetIdentityHash()` which do the same -- if we decide we don't need this we should fix
+      //   all of them.
+      : V8Ref<T>(isolate, handle), identityHash(kj::hashCode(handle->GetIdentityHash())) {}
   HashableV8Ref(HashableV8Ref&& other) = default;
   HashableV8Ref& operator=(HashableV8Ref&& other) = default;
   KJ_DISALLOW_COPY(HashableV8Ref);

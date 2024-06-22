@@ -36,7 +36,7 @@ UnhandledRejectionHandler::UnhandledRejection::UnhandledRejection(
     jsg::Value value,
     v8::Local<v8::Message> message,
     size_t rejectionNumber)
-    : hash(promise.getHandle(js)->GetIdentityHash()),
+    : hash(kj::hashCode(promise.getHandle(js)->GetIdentityHash())),
       promise(js.v8Isolate, promise.getHandle(js)),
       value(js.v8Isolate, value.getHandle(js)),
       message(js.v8Isolate, message),

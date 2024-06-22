@@ -766,7 +766,7 @@ private:
     uint hash;
 
     HashedPromise(v8::Local<v8::Promise> promise)
-        : promise(promise), hash(promise->GetIdentityHash()) {}
+        : promise(promise), hash(kj::hashCode(promise->GetIdentityHash())) {}
 
     JSG_MEMORY_INFO(HashedPromise) {
       tracker.trackField("promise", promise);

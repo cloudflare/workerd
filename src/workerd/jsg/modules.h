@@ -624,7 +624,7 @@ public:
       // be initialized lazily at any point after the entry is indexed, making the lookup
       // by module a bit problematic. Iterating through the entries is slower but it works.
       KJ_IF_SOME(info, entry->info.template tryGet<ModuleInfo>()) {
-        if (info.hashCode() == module->GetIdentityHash()) {
+        if (info.module == module) {
           return ModuleRef {
             .specifier = entry->specifier,
             .type = entry->type,

@@ -287,7 +287,7 @@ Name::Name(kj::StringPtr string)
       inner(kj::str(string)) {}
 
 Name::Name(Lock& js, v8::Local<v8::Symbol> symbol)
-    : hash(symbol->GetIdentityHash()),
+    : hash(kj::hashCode(symbol->GetIdentityHash())),
       inner(js.v8Ref(symbol)) {}
 
 kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> Name::getUnwrapped(v8::Isolate* isolate) {
