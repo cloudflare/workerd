@@ -2156,18 +2156,35 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
   struct Holder: public kj::Refcounted {
     kj::Own<WritableStreamSink> sink;
     kj::Own<ReadableStreamSource> source;
+    bool done = false;
+
     Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
         : sink(kj::mv(sink)), source(kj::mv(source)) {}
+    ~Holder() noexcept(false) {
+      if (!done) {
+        // It appears the pump was canceled. We should make sure this propagates back to the
+        // source stream. This is important in particular when we're implementing the response
+        // pump for an HTTP event (see Response::send()). Presumably it was canceled because the
+        // client disconnecnted. If we don't cancel the source, then if the source is one end of
+        // a TransformStream, the write end will just hang. Of course, this is fine if there are
+        // no waitUntil()s running, because the whole I/O context will be canceled anyawy. But if
+        // there are waitUntil()s, then the application probably expects to get an exception from
+        // the write() on cancellation, rather than have it hang.
+        source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
+      }
+    }
   };
 
   auto holder = kj::refcounted<Holder>(kj::mv(sink), kj::mv(source));
   return holder->source->pumpTo(*holder->sink, end).then(
       [&holder=*holder](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
     proxy.proxyTask = proxy.proxyTask.attach(kj::addRef(holder));
+    holder.done = true;
     return kj::mv(proxy);
   }, [&holder=*holder](kj::Exception&& ex) mutable {
     holder.sink->abort(kj::cp(ex));
     holder.source->cancel(kj::cp(ex));
+    holder.done = true;
     return kj::mv(ex);
   }).attach(kj::mv(holder));
 }
