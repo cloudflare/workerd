@@ -3,6 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 /* eslint-disable */
-import { Writable } from 'node-internal:streams_writable';
-export { Writable };
+import {
+  Writable,
+  WritableState,
+  fromWeb,
+  toWeb,
+} from 'node-internal:streams_writable';
+export {
+  Writable,
+  WritableState,
+  fromWeb,
+  toWeb,
+};
 export default Writable;
