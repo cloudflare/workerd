@@ -7,7 +7,7 @@
 #include <kj/encoding.h>
 
 #include <workerd/api/cache.h>
-#include <workerd/api/crypto.h>
+#include <workerd/api/crypto/crypto.h>
 #include <workerd/api/events.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/system-streams.h>

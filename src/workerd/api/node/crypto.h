@@ -1,7 +1,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
-#include <workerd/api/crypto.h>
+#include <workerd/api/crypto/crypto.h>
 #include <openssl/evp.h>
 
 namespace workerd::api::node {

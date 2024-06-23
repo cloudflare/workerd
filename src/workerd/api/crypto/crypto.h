@@ -11,7 +11,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/buffersource.h>
 #include <openssl/err.h>
-#include "streams.h"
+#include "../streams.h"
 
 namespace workerd::api {
 namespace node {
