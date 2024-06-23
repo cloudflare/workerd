@@ -21,7 +21,7 @@ kj::Maybe<kj::StringPtr> ActorIdFactoryImpl::ActorIdImpl::getName() const {
 }
 
 bool ActorIdFactoryImpl::ActorIdImpl::equals(const ActorId& other) const {
-  return memcmp(id, kj::downcast<const ActorIdImpl>(other).id, sizeof(id)) == 0;
+  return kj::arrayPtr(id) == kj::arrayPtr(kj::downcast<const ActorIdImpl>(other).id);
 }
 
 kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::ActorIdImpl::clone() const {
@@ -79,8 +79,7 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromString(kj::String str
   computeMac(id);
 
   // Verify that the computed mac matches the input.
-  JSG_REQUIRE(memcmp(id + BASE_LENGTH, decoded.begin() + BASE_LENGTH,
-              decoded.size() - BASE_LENGTH) == 0,
+  JSG_REQUIRE(kj::arrayPtr(id).slice(BASE_LENGTH).startsWith(decoded.asPtr().slice(BASE_LENGTH)),
               TypeError, "Durable Object ID is not valid for this namespace.");
 
   return kj::heap<ActorIdImpl>(id, kj::none);
