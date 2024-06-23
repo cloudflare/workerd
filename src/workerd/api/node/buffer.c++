@@ -213,7 +213,7 @@ uint32_t writeInto(
       string.writeInto(js, buf, options);
       auto bytes = decodeHexTruncated(buf, false);
       auto amountToCopy = kj::min(bytes.size(), dest.size());
-      memcpy(dest.begin(), bytes.begin(), amountToCopy);
+      dest.first(amountToCopy).copyFrom(bytes.first(amountToCopy));
       return amountToCopy;
     }
   }
@@ -319,22 +319,29 @@ kj::Array<kj::byte> BufferUtil::concat(
     uint32_t length) {
   if (length == 0) return kj::Array<kj::byte>();
 
+  // The Node.js Buffer.concat is interesting in that it doesn't just append
+  // the buffers together as is. The length parameter is used to determine the
+  // length of the result which can be lesser or greater than the actual
+  // combined lengths of the inputs. If the length is lesser, the result will
+  // be a truncated version of the combined buffers. If the length is greater,
+  // the result will be the combined buffers with the remaining space filled
+  // with zeroes.
+
   auto dest = kj::heapArray<kj::byte>(length);
-  uint32_t offset = 0;
-  uint32_t remaining = length;
-  auto ptr = dest.begin();
+  auto view = dest.asPtr();
+
   for (auto& src : list) {
     if (src.size() == 0) continue;
-    auto amountToCopy = kj::min(src.size(), remaining);
-    std::copy(src.begin(), src.begin() + amountToCopy, ptr + offset);
-    offset += amountToCopy;
-    remaining -= amountToCopy;
+    // The amount to copy is the lesser of the remaining space in the destination or
+    // the size of the chunk we're copying.
+    auto amountToCopy = kj::min(src.size(), view.size());
+    view.first(amountToCopy).copyFrom(src.first(amountToCopy));
+    view = view.slice(amountToCopy);
+    // If there's no more space in the destination, we're done.
+    if (view == nullptr) return kj::mv(dest);
   }
-  KJ_DASSERT(offset <= length);
-  if (length - offset > 0) {
-    dest.slice(offset).fill(0);
-  }
-
+  // Fill any remaining space in the destination with zeroes.
+  view.fill(0);
   return kj::mv(dest);
 }
 
