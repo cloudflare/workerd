@@ -3,6 +3,20 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 /* eslint-disable */
-import { Readable } from 'node-internal:streams_readable';
-export { Readable };
+import {
+  Readable,
+  ReadableState,
+  toWeb,
+  fromWeb,
+  from,
+  wrap,
+} from 'node-internal:streams_readable';
+export {
+  Readable,
+  ReadableState,
+  toWeb,
+  fromWeb,
+  from,
+  wrap,
+};
 export default Readable;

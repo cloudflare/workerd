@@ -86,7 +86,7 @@ import { isDuplexInstance } from 'node-internal:streams_duplex';
 // ======================================================================================
 // ReadableState
 
-function ReadableState(options, stream, isDuplex) {
+export function ReadableState(options, stream, isDuplex) {
   // Duplex streams are both readable and writable, but share
   // the same options object.
   // However, some cases require setting options to different
@@ -1215,14 +1215,15 @@ function endWritableNT(stream) {
   }
 }
 
-Readable.fromWeb = function (readableStream, options) {
+export function fromWeb(readableStream, options) {
   return newStreamReadableFromReadableStream(readableStream, options)
 }
-Readable.toWeb = function (streamReadable, options) {
+
+export function toWeb(streamReadable, options) {
   return newReadableStreamFromStreamReadable(streamReadable, options)
 }
 
-Readable.wrap = function (src, options) {
+export function wrap(src, options) {
   let _ref, _src$readableObjectMo;
   return new Readable({
     objectMode:
@@ -1238,7 +1239,12 @@ Readable.wrap = function (src, options) {
       callback(err)
     }
   }).wrap(src);
-};
+}
+
+Readable.toWeb = toWeb;
+Readable.fromWeb = fromWeb;
+Readable.wrap = wrap;
+
 
 // ======================================================================================
 //

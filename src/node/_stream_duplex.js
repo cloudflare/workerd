@@ -3,6 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 /* eslint-disable */
-import { Duplex } from 'node-internal:streams_duplex';
-export { Duplex };
+import {
+  Duplex,
+  from,
+  fromWeb,
+  toWeb,
+} from 'node-internal:streams_duplex';
+export {
+  Duplex,
+  from,
+  fromWeb,
+  toWeb,
+};
 export default Duplex;

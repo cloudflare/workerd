@@ -74,7 +74,7 @@ import { isDuplexInstance } from 'node-internal:streams_duplex';
 // ======================================================================================
 // WritableState
 
-function WritableState(options, stream, isDuplex) {
+export function WritableState(options, stream, isDuplex) {
   // Duplex streams are both readable and writable, but share
   // the same options object.
   // However, some cases require setting options to different
@@ -835,9 +835,13 @@ Writable.prototype[EventEmitter.captureRejectionSymbol] = function (err) {
   this.destroy(err);
 }
 
-Writable.fromWeb = function (writableStream, options) {
+export function fromWeb(writableStream, options) {
   return newStreamWritableFromWritableStream(writableStream, options)
 }
-Writable.toWeb = function (streamWritable) {
+
+export function toWeb(streamWritable) {
   return newWritableStreamFromStreamWritable(streamWritable)
 }
+
+Writable.fromWeb = fromWeb;
+Writable.toWeb = toWeb;

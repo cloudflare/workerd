@@ -28,7 +28,6 @@
 
 import {
   Readable,
-  from,
 } from 'node-internal:streams_readable';
 
 import {
@@ -146,18 +145,23 @@ Object.defineProperties(Duplex.prototype, {
   }
 });
 
-Duplex.fromWeb = function (pair, options) {
+export function fromWeb(pair, options) {
   return newStreamDuplexFromReadableWritablePair(pair, options)
 }
-Duplex.toWeb = function (duplex) {
+
+export function toWeb(duplex) {
   return newReadableWritablePairFromDuplex(duplex)
 }
 
-// ======================================================================================
-
-Duplex.from = function (body) {
-  return duplexify(body, 'body')
+export function from(body) {
+  return duplexify(body, 'body');
 }
+
+Duplex.fromWeb = fromWeb;
+Duplex.toWeb = toWeb;
+Duplex.from = from;
+
+// ======================================================================================
 
 function isBlob(b) {
   return b instanceof Blob;
@@ -204,20 +208,18 @@ function duplexify(body, name) {
     });
   }
 
-  // TODO: Webstreams
-  // if (isReadableStream(body)) {
-  //   return _duplexify({ readable: Readable.fromWeb(body) });
-  // }
+  if (body instanceof ReadableStream) {
+    return _duplexify({ readable: Readable.fromWeb(body) });
+  }
 
-  // TODO: Webstreams
-  // if (isWritableStream(body)) {
-  //   return _duplexify({ writable: Writable.fromWeb(body) });
-  // }
+  if (body instanceof WritableStream) {
+    return _duplexify({ writable: Writable.fromWeb(body) });
+  }
 
   if (typeof body === 'function') {
     const { value, write, final, destroy } = fromAsyncGen(body)
     if (isIterable(value)) {
-      return from(Duplexify, value, {
+      return Readable.from(Duplexify, value, {
         // TODO (ronag): highWaterMark?
         objectMode: true,
         write,
@@ -263,20 +265,19 @@ function duplexify(body, name) {
     return duplexify(body.arrayBuffer(), name);
   }
   if (isIterable(body)) {
-    return from(Duplexify, body, {
+    return Readable.from(Duplexify, body, {
       // TODO (ronag): highWaterMark?
       objectMode: true,
       writable: false
     })
   }
 
-  // TODO: Webstreams.
-  // if (
-  //   isReadableStream(body?.readable) &&
-  //   isWritableStream(body?.writable)
-  // ) {
-  //   return Duplexify.fromWeb(body);
-  // }
+  if (
+    body?.readable instanceof ReadableStream &&
+    body?.writable instanceof WritableStream
+  ) {
+    return Duplexify.fromWeb(body);
+  }
 
   if (
     typeof (body === null || body === undefined ? undefined : body.writable) === 'object' ||
