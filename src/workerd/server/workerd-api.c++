@@ -36,6 +36,7 @@
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
+#include <workerd/server/actor-id-impl.h>
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
@@ -542,118 +543,6 @@ void WorkerdApi::compileModules(
     }
   });
 }
-
-class ActorIdFactoryImpl final: public ActorIdFactory {
-public:
-  ActorIdFactoryImpl(kj::StringPtr uniqueKey) {
-    KJ_ASSERT(SHA256(uniqueKey.asBytes().begin(), uniqueKey.size(), key) == key);
-  }
-
-  class ActorIdImpl final: public ActorId {
-  public:
-    ActorIdImpl(const kj::byte idParam[SHA256_DIGEST_LENGTH], kj::Maybe<kj::String> name)
-        : name(kj::mv(name)) {
-      memcpy(id, idParam, sizeof(id));
-    }
-
-    kj::String toString() const override {
-      return kj::encodeHex(kj::ArrayPtr<const kj::byte>(id));
-    }
-    kj::Maybe<kj::StringPtr> getName() const override {
-      return name;
-    }
-    bool equals(const ActorId& other) const override {
-      return memcmp(id, kj::downcast<const ActorIdImpl>(other).id, sizeof(id)) == 0;
-    }
-    kj::Own<ActorId> clone() const override {
-      return kj::heap<ActorIdImpl>(id, name.map([](kj::StringPtr str) { return kj::str(str); }));
-    }
-
-  private:
-    kj::byte id[SHA256_DIGEST_LENGTH];
-    kj::Maybe<kj::String> name;
-  };
-
-  kj::Own<ActorId> newUniqueId(kj::Maybe<kj::StringPtr> jurisdiction) override {
-    JSG_REQUIRE(jurisdiction == kj::none, Error,
-        "Jurisdiction restrictions are not implemented in workerd.");
-
-    // We want to randomly-generate the first 16 bytes, then HMAC those to produce the latter
-    // 16 bytes. But the HMAC will produce 32 bytes, so we're only taking a prefix of it. We'll
-    // allocate a single array big enough to output the HMAC as a suffix, which will then get
-    // truncated.
-    kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]{};
-
-    if (isPredictableModeForTest()) {
-      memcpy(id, &counter, sizeof(counter));
-      kj::arrayPtr(id).slice(counter).fill(0);
-      ++counter;
-    } else {
-      KJ_ASSERT(RAND_bytes(id, BASE_LENGTH) == 1);
-    }
-
-    computeMac(id);
-    return kj::heap<ActorIdImpl>(id, kj::none);
-  }
-
-  kj::Own<ActorId> idFromName(kj::String name) override {
-    kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]{};
-
-    // Compute the first half of the ID by HMACing the name itself. We're using HMAC as a keyed
-    // hash here, not actually for authentication, but it works.
-    uint len = SHA256_DIGEST_LENGTH;
-    KJ_ASSERT(HMAC(EVP_sha256(), key, sizeof(key), name.asBytes().begin(), name.size(), id, &len)
-                   == id);
-    KJ_ASSERT(len == SHA256_DIGEST_LENGTH);
-
-    computeMac(id);
-    return kj::heap<ActorIdImpl>(id, kj::mv(name));
-  }
-
-  kj::Own<ActorId> idFromString(kj::String str) override {
-    auto decoded = kj::decodeHex(str);
-    JSG_REQUIRE(str.size() == SHA256_DIGEST_LENGTH * 2 && !decoded.hadErrors &&
-                decoded.size() == SHA256_DIGEST_LENGTH,
-                TypeError, "Invalid Durable Object ID: must be 64 hex digits");
-
-    kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]{};
-    memcpy(id, decoded.begin(), BASE_LENGTH);
-    computeMac(id);
-
-    // Verify that the computed mac matches the input.
-    JSG_REQUIRE(memcmp(id + BASE_LENGTH, decoded.begin() + BASE_LENGTH,
-                decoded.size() - BASE_LENGTH) == 0,
-                TypeError, "Durable Object ID is not valid for this namespace.");
-
-    return kj::heap<ActorIdImpl>(id, kj::none);
-  }
-
-  kj::Own<ActorIdFactory> cloneWithJurisdiction(kj::StringPtr jurisdiction) override {
-    JSG_FAIL_REQUIRE(Error, "Jurisdiction restrictions are not implemented in workerd.");
-  }
-
-  bool matchesJurisdiction(const ActorId& id) override {
-    return true;
-  }
-
-private:
-  kj::byte key[SHA256_DIGEST_LENGTH];
-
-  uint64_t counter = 0;   // only used in predictable mode
-
-  static constexpr size_t BASE_LENGTH = SHA256_DIGEST_LENGTH / 2;
-  void computeMac(kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]) {
-    // Given that the first `BASE_LENGTH` bytes of `id` are filled in, compute the second half
-    // of the ID by HMACing the first half. The id must be in a buffer large enough to store the
-    // first half of the ID plus a full HMAC, even though only a prefix of the HMAC becomes part
-    // of the final ID.
-
-    kj::byte* hmacOut = id + BASE_LENGTH;
-    uint len = SHA256_DIGEST_LENGTH;
-    KJ_ASSERT(HMAC(EVP_sha256(), key, sizeof(key), id, BASE_LENGTH, hmacOut, &len) == hmacOut);
-    KJ_ASSERT(len == SHA256_DIGEST_LENGTH);
-  }
-};
 
 static v8::Local<v8::Value> createBindingValue(
     JsgWorkerdIsolate::Lock& lock,
