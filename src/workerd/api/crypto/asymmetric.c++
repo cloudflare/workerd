@@ -302,6 +302,8 @@ public:
   bool verify(
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const override {
+    ClearErrorOnReturn clearErrorOnReturn;
+
     JSG_REQUIRE(keyType == "public", DOMInvalidAccessError,
         "Asymmetric verification requires a public key.");
 
@@ -320,9 +322,6 @@ public:
     auto result = EVP_DigestVerifyFinal(digestCtx.get(), sslSignature.begin(), sslSignature.size());
     JSG_REQUIRE(result == 0 || result == 1, InternalDOMOperationError,
         "Unexpected return code from digest verify", getAlgorithmName());
-    if (result == 0) {
-      ERR_clear_error();
-    }
     return !!result;
   }
 
@@ -2045,6 +2044,8 @@ public:
   bool verify(
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const override {
+    ClearErrorOnReturn clearErrorOnReturn;
+
     JSG_REQUIRE(getType() == "public", DOMInvalidAccessError,
         "Asymmetric verification requires a public key.");
 
@@ -2064,10 +2065,6 @@ public:
 
     JSG_REQUIRE(result == 0 || result == 1, InternalDOMOperationError, "Unexpected return code",
         result, internalDescribeOpensslErrors());
-
-    if (result == 0) {
-      ERR_clear_error();
-    }
 
     return !!result;
   }

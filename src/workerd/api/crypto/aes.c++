@@ -55,7 +55,7 @@ int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
   // throws an unhelpful opaque OperationError.
 
   // Clear the error queue; who knows what kind of junk is in there.
-  ERR_clear_error();
+  ClearErrorOnReturn clearErrorOnReturn;
 
   int finalPlainSize = 0;
   if (EVP_DecryptFinal_ex(cipherCtx, out, &finalPlainSize)) {
@@ -64,7 +64,7 @@ int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
 
   // Decryption failure! Let's figure out what exception to throw.
 
-  auto ec = ERR_peek_error();
+  auto ec = clearErrorOnReturn.peekError();
 
   // If the error code is anything other than zero or BAD_DECRYPT, just throw an opaque
   // OperationError for consistency with our OSSLCALL() macro. Notably, AES-GCM tag authentication
@@ -74,7 +74,7 @@ int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
       "Unexpected issue decrypting", internalDescribeOpensslErrors());
 
   // Consume the error since it's one we were expecting.
-  ERR_get_error();
+  clearErrorOnReturn.consumeError();
 
   // Otherwise, tell the script author they gave us garbage.
   JSG_FAIL_REQUIRE(DOMOperationError, "Decryption failed. This could be due "
