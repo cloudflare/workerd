@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
-#include "util.h"
+#include <workerd/api/util.h>
 #include <algorithm>
 #include <map>
+#include <openssl/bn.h>
 #include <openssl/err.h>
 #include <openssl/ec.h>
 #include <openssl/rsa.h>
@@ -218,6 +219,41 @@ void checkPbkdfLimits(jsg::Lock& js, size_t iterations) {
         kj::str("Pbkdf2 failed: iteration counts above ", max ," are not supported (requested ",
                 iterations, ")."));
   }
+}
+
+kj::Maybe<kj::Own<BIGNUM>> toBignum(kj::ArrayPtr<const kj::byte> data) {
+  BIGNUM* result = BN_bin2bn(data.begin(), data.size(), nullptr);
+  if (result == nullptr) return kj::none;
+  return kj::Own<BIGNUM>(result, workerd::api::SslDisposer<BIGNUM, &BIGNUM_free>::INSTANCE);
+}
+
+BIGNUM* toBignumUnowned(kj::ArrayPtr<const kj::byte> data) {
+  return BN_bin2bn(data.begin(), data.size(), nullptr);
+}
+
+kj::Maybe<kj::Array<kj::byte>> bignumToArray(const BIGNUM& n) {
+  auto result = kj::heapArray<kj::byte>(BN_num_bytes(&n));
+  if (BN_bn2bin(&n, result.begin()) != result.size()) return kj::none;
+  return kj::mv(result);
+}
+
+kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& n) {
+  auto result = kj::heapArray<kj::byte>(BN_num_bytes(&n));
+  if (BN_bn2binpad(&n, result.begin(), result.size()) != result.size()) return kj::none;
+  return kj::mv(result);
+}
+
+kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& n, size_t paddedLength) {
+  auto result = kj::heapArray<kj::byte>(paddedLength);
+  if (BN_bn2bin_padded(result.begin(), paddedLength, &n) == 0) {
+    return kj::none;
+  }
+  return kj::mv(result);
+
+}
+
+kj::Own<BIGNUM> newBignum() {
+  return kj::Own<BIGNUM>(BN_new(), workerd::api::SslDisposer<BIGNUM, &BIGNUM_free>::INSTANCE);
 }
 
 void CryptoKey::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

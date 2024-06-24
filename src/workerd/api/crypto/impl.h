@@ -13,6 +13,8 @@
 #include <openssl/evp.h>
 #include <openssl/bio.h>
 
+typedef struct bignum_st BIGNUM;
+
 // Wrap calls to OpenSSL's EVP_* interface (and similar APIs) in this macro to
 // deal with errors.
 #define OSSLCALL(...) if ((__VA_ARGS__) != 1) \
@@ -292,6 +294,14 @@ const SslDisposer<T, sslFree> SslDisposer<T, sslFree>::INSTANCE;
 // BIGNUM obnoxiously doesn't follow the naming convention...
 // Using BN_clear_free here ensures that any potentially sensitive information in the
 // BIGNUM is also cleansed when it is freed.
+
+using UniqueBignum = std::unique_ptr<BIGNUM, void(*)(BIGNUM*)>;
+kj::Maybe<kj::Own<BIGNUM>> toBignum(kj::ArrayPtr<const kj::byte> data);
+BIGNUM* toBignumUnowned(kj::ArrayPtr<const kj::byte> data);
+kj::Maybe<kj::Array<kj::byte>> bignumToArray(const BIGNUM& bignum);
+kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum);
+kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum, size_t paddedLength);
+kj::Own<BIGNUM> newBignum();
 
 #define OSSL_BIO_MEM() \
   ({ \
