@@ -68,6 +68,7 @@ class TraceItem final: public jsg::Object {
 public:
   class FetchEventInfo;
   class JsRpcEventInfo;
+  class ConnectEventInfo;
   class ScheduledEventInfo;
   class AlarmEventInfo;
   class QueueEventInfo;
@@ -80,6 +81,7 @@ public:
 
   typedef kj::OneOf<jsg::Ref<FetchEventInfo>,
                     jsg::Ref<JsRpcEventInfo>,
+                    jsg::Ref<ConnectEventInfo>,
                     jsg::Ref<ScheduledEventInfo>,
                     jsg::Ref<AlarmEventInfo>,
                     jsg::Ref<QueueEventInfo>,
@@ -266,6 +268,21 @@ public:
 
 private:
   kj::String rpcMethod;
+};
+
+class TraceItem::ConnectEventInfo final: public jsg::Object {
+public:
+  explicit ConnectEventInfo(jsg::Lock& js, const Trace& trace,
+                            const Trace::ConnectEventInfo& eventInfo);
+
+  jsg::Optional<jsg::V8Ref<v8::Object>> getCf(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ConnectEventInfo) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(cf, getCf);
+  }
+
+private:
+  jsg::Optional<jsg::V8Ref<v8::Object>> cf;
 };
 
 class TraceItem::ScheduledEventInfo final: public jsg::Object {
@@ -616,6 +633,7 @@ private:
   api::TailEvent,                                                 \
   api::TraceItem,                                                 \
   api::TraceItem::AlarmEventInfo,                                 \
+  api::TraceItem::ConnectEventInfo,                               \
   api::TraceItem::CustomEventInfo,                                \
   api::TraceItem::ScheduledEventInfo,                             \
   api::TraceItem::QueueEventInfo,                                 \

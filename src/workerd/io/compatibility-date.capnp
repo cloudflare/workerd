@@ -488,4 +488,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # always been configured to accept publicly-routable internet hosts only; hostnames which map
   # to private IP addresses (as defined in e.g. RFC 1918) will be rejected. Thus, workerd has
   # always been SSRF-safe by default.
+
+  nodeJsCompatNet @52 :Bool
+      $compatEnableFlag("nodejs_compat_net")
+      $compatDisableFlag("no_nodejs_compat_net")
+      $compatEnableDate("2024-08-01")
+      $experimental;
+  # When the nodejs_compat or nodejs_compat v2 flags are enabled, the nodejs_compat_net
+  # flag determines if the node:net built-in module is also available.
 }

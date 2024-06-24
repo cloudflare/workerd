@@ -464,6 +464,14 @@ export class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
   }
 }
 
+export class ERR_OPTION_NOT_IMPLEMENTED extends NodeError {
+  constructor(name: string|symbol) {
+    if (typeof name === 'symbol') {
+      name = (name as symbol).description!;
+    }
+    super("ERR_OPTION_NOT_IMPLEMENTED", `The ${name} option is not implemented`);
+  }
+}
 export class ERR_STREAM_CANNOT_PIPE extends NodeError {
   constructor() {
     super("ERR_STREAM_CANNOT_PIPE", "Cannot pipe, not readable");
@@ -505,6 +513,38 @@ export class ERR_STREAM_PUSH_AFTER_EOF extends NodeError {
 export class ERR_STREAM_UNSHIFT_AFTER_END_EVENT extends NodeError {
   constructor() {
     super("ERR_STREAM_UNSHIFT_AFTER_END_EVENT", "stream.unshift() after end event");
+  }
+}
+
+export class ERR_SOCKET_BAD_PORT extends NodeError {
+  constructor(name: string, port: any, allowZero: boolean) {
+    const operator = allowZero ? '>=' : '>';
+    super("ERR_SOCKET_BAD_PORT",
+        `${name} should be ${operator} 0 and < 65536. Received ${typeof port}.`);
+  }
+}
+
+export class EPIPE extends NodeError {
+  constructor() {
+    super("EPIPE", "This socket has been ended by the other party");
+  }
+}
+
+export class ERR_SOCKET_CLOSED_BEFORE_CONNECTION extends NodeError {
+  constructor() {
+    super("ERR_SOCKET_CLOSED_BEFORE_CONNETION", "Socket closed before connection established");
+  }
+}
+
+export class ERR_SOCKET_CLOSED extends NodeError {
+  constructor() {
+    super("ERR_SOCKET_CLOSED", "Socket is closed");
+  }
+}
+
+export class ERR_SOCKET_CONNECTING extends NodeError {
+  constructor() {
+    super("ERR_SOCKET_CONNECTING", "Socket is already connecting");
   }
 }
 

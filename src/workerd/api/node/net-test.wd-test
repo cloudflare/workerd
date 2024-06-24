@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "net-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "net-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat_v2", "nodejs_compat_net", "experimental"],
+      )
+    ),
+    ( name = "internet", network = ( allow = ["private"] ) ),
+  ],
+  sockets = [
+    (name = "tcp", address = "*:9999", tcp = (), service = "net-test"),
+    (name = "echoTcp", address = "*:9998", tcp = (), service = (
+      name = "net-test",
+      entrypoint = "echoServer",
+    )),
+  ],
+);

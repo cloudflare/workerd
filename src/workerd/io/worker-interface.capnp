@@ -58,6 +58,7 @@ struct Trace @0x8e8d911203762d34 {
     email @16 :EmailEventInfo;
     trace @18 :TraceEventInfo;
     hibernatableWebSocket @20 :HibernatableWebSocketEventInfo;
+    connect @24 :ConnectEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -73,6 +74,10 @@ struct Trace @0x8e8d911203762d34 {
 
   struct JsRpcEventInfo {
     methodName @0 :Text;
+  }
+
+  struct ConnectEventInfo {
+    cfJson @0 :Text;
   }
 
   struct ScheduledEventInfo {

@@ -101,6 +101,16 @@ public:
     void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
   };
 
+  class ConnectEventInfo {
+  public:
+    explicit ConnectEventInfo(kj::String cfJson);
+    explicit ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader);
+
+    kj::String cfJson;
+
+    void copyTo(rpc::Trace::ConnectEventInfo::Builder builder);
+  };
+
   class ScheduledEventInfo {
   public:
     explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
@@ -266,7 +276,7 @@ public:
 
   typedef kj::OneOf<FetchEventInfo, JsRpcEventInfo, ScheduledEventInfo, AlarmEventInfo,
           QueueEventInfo, EmailEventInfo, TraceEventInfo, HibernatableWebSocketEventInfo,
-          CustomEventInfo> EventInfo;
+          CustomEventInfo, ConnectEventInfo> EventInfo;
   kj::Maybe<EventInfo> eventInfo;
   // TODO(someday): Support more event types.
   // TODO(someday): Work out what sort of information we may want to convey about the parent
