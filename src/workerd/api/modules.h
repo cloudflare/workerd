@@ -12,6 +12,7 @@
 #include <workerd/api/unsafe.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/modules-new.h>
 #include <cloudflare/cloudflare.capnp.h>
 
 namespace workerd::api {
@@ -30,6 +31,42 @@ void registerModules(Registry& registry, auto featureFlags) {
   registerSocketsModule(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerRpcModules(registry, featureFlags);
+}
+
+template <class TypeWrapper>
+void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto featureFlags) {
+  builder.add(node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags));
+  builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalRpcModuleBundle<TypeWrapper>(featureFlags));
+
+  builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
+  if (featureFlags.getUnsafeModule()) {
+    builder.add(getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
+  }
+
+  if (featureFlags.getPythonWorkers()) {
+    builder.add(pyodide::getExternalPyodideModuleBundle(featureFlags));
+    builder.add(pyodide::getInternalPyodideModuleBundle(featureFlags));
+  }
+
+  if (featureFlags.getRttiApi()) {
+    builder.add(getExternalRttiModuleBundle<TypeWrapper>(featureFlags));
+  }
+
+  {
+    jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
+        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
+    builder.add(builtinsBuilder.finish());
+  }
+
+  {
+    jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
+        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
+    builder.add(builtinsBuilder.finish());
+  }
 }
 
 }  // namespace workerd::api

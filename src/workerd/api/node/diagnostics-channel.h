@@ -77,6 +77,9 @@ private:
 
 class DiagnosticsChannelModule : public jsg::Object {
 public:
+  DiagnosticsChannelModule() = default;
+  DiagnosticsChannelModule(jsg::Lock&, const jsg::Url&) {}
+
   bool hasSubscribers(jsg::Lock& js, jsg::Name name);
   jsg::Ref<Channel> channel(jsg::Lock& js, jsg::Name name);
   void subscribe(jsg::Lock& js, jsg::Name name, jsg::Identified<Channel::MessageCallback> callback);

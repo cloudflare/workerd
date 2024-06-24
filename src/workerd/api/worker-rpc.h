@@ -17,6 +17,8 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/function.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/url.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.capnp.h>
 
@@ -480,6 +482,9 @@ public:
 // for extending.
 class EntrypointsModule: public jsg::Object {
 public:
+  EntrypointsModule() = default;
+  EntrypointsModule(jsg::Lock&, const jsg::Url&) {}
+
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
@@ -505,4 +510,12 @@ void registerRpcModules(Registry& registry, CompatibilityFlags::Reader flags) {
       "cloudflare-internal:workers", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> getInternalRpcModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+  static const auto kSpecifier = "cloudflare-internal:workers"_url;
+  builder.addObject<EntrypointsModule, TypeWrapper>(kSpecifier);
+  return builder.finish();
+}
 }; // namespace workerd::api

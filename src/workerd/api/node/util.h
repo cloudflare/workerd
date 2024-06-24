@@ -152,6 +152,9 @@ private:
 
 class UtilModule final: public jsg::Object {
 public:
+  UtilModule() = default;
+  UtilModule(jsg::Lock&, const jsg::Url&) {}
+
   jsg::Name getResourceTypeInspect(jsg::Lock& js);
 
   // `getOwnNonIndexProperties()` `filter`s

@@ -7,6 +7,8 @@
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/url.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/io/io-context.h>
 
@@ -348,6 +350,20 @@ template <class Registry> void registerPyodideModules(Registry& registry, auto f
     registry.template addBuiltinModule<PackagesTarReader>(
         "pyodide-internal:packages_tar_reader", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   }
+}
+
+kj::Own<jsg::modules::ModuleBundle> getInternalPyodideModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  return builder.finish();
+}
+
+kj::Own<jsg::modules::ModuleBundle> getExternalPyodideModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  return builder.finish();
 }
 
 } // namespace workerd::api::pyodide

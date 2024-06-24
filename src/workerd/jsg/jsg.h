@@ -1611,9 +1611,11 @@ public:
   static_assert(std::is_base_of_v<ContextGlobal, T>,
       "context global type must extend jsg::ContextGlobal");
 
-  JsContext(v8::Local<v8::Context> handle, Ref<T> object)
+  JsContext(v8::Local<v8::Context> handle, Ref<T> object,
+            kj::Maybe<kj::Own<void>> maybeNewRegistryHandle = kj::none)
       : handle(handle->GetIsolate(), handle),
-        object(kj::mv(object)) {}
+        object(kj::mv(object)),
+        maybeNewRegistryHandle(kj::mv(maybeNewRegistryHandle)) {}
 
   JsContext(JsContext&&) = default;
   KJ_DISALLOW_COPY(JsContext);
@@ -1629,6 +1631,7 @@ public:
 private:
   v8::Global<v8::Context> handle;
   Ref<T> object;
+  kj::Maybe<kj::Own<void>> maybeNewRegistryHandle;
 };
 
 class BufferSource;

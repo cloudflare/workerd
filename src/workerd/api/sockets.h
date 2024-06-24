@@ -6,6 +6,8 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/url.h>
 #include "streams.h"
 
 namespace workerd::api {
@@ -223,6 +225,9 @@ jsg::Ref<Socket> connectImpl(
 
 class SocketsModule final: public jsg::Object {
 public:
+  SocketsModule() = default;
+  SocketsModule(jsg::Lock&, const jsg::Url&) {}
+
   jsg::Ref<Socket> connect(jsg::Lock& js, AnySocketAddress address,
     jsg::Optional<SocketOptions> options) {
     return connectImpl(js, kj::none, kj::mv(address), kj::mv(options));
@@ -238,7 +243,15 @@ void registerSocketsModule(
     Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<SocketsModule>("cloudflare-internal:sockets",
     workerd::jsg::ModuleRegistry::Type::INTERNAL);
+}
 
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> getInternalSocketModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+  static const auto kSpecifier = "cloudflare-internal:sockets"_url;
+  builder.addObject<SocketsModule, TypeWrapper>(kSpecifier);
+  return builder.finish();
 }
 
 #define EW_SOCKETS_ISOLATE_TYPES     \

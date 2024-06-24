@@ -179,6 +179,9 @@ public:
     JSG_STRUCT(key, format, type, passphrase);
   };
 
+  CryptoImpl() = default;
+  CryptoImpl(jsg::Lock&, const jsg::Url&) {}
+
   kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> exportKey(
       jsg::Lock& js,
       jsg::Ref<CryptoKey> key,
