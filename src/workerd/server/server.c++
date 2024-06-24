@@ -3739,7 +3739,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
   // TODO(cleanup): A better solution wolud be for `TaskSet` to have a new variant of the
   //   `onEmpty()` method like `onEmptyOrException()`, which propagates any exception thrown by
   //   any task.
-  co_await kj::evalLast([]() {});
+  co_await kj::yieldUntilQueueEmpty();
 }
 
 // =======================================================================================
