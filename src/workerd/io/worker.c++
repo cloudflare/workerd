@@ -824,7 +824,7 @@ struct Worker::Script::Impl {
            DynamicImportHandler handler,
            kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext) ->
                kj::Promise<DynamicImportResult> {
-      co_await kj::evalLater([] {});
+      co_await kj::yield();
       auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
 
       co_return worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
@@ -2239,7 +2239,7 @@ kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
       continue;
     }
 
-    co_await kj::evalLast([] {});
+    co_await kj::yieldUntilQueueEmpty();
 
     if (AsyncWaiter::threadCurrentWaiter == nullptr) {
       co_return;
