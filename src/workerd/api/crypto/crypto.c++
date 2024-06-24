@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "crypto.h"
-#include "crypto-impl.h"
+#include "impl.h"
 #include "../streams/standard.h"
 #include "../util.h"
 #include <array>

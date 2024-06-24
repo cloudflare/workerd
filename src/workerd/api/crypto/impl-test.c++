@@ -4,7 +4,7 @@
 
 #include <kj/test.h>
 
-#include "crypto-impl.h"
+#include "impl.h"
 
 #include <openssl/err.h>
 #include <openssl/rsa.h>
