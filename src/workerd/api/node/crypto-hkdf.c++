@@ -6,7 +6,7 @@
 #include "crypto.h"
 #include <workerd/jsg/jsg.h>
 #include <openssl/hkdf.h>
-#include <workerd/api/crypto-impl.h>
+#include <workerd/api/crypto/impl.h>
 
 namespace workerd::api::node {
 kj::Array<kj::byte> CryptoImpl::getHkdf(kj::String hash, kj::Array<kj::byte> key,

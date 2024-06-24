@@ -8,7 +8,7 @@
 #include <v8.h>
 #include <openssl/evp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/api/crypto-impl.h>
+#include <workerd/api/crypto/impl.h>
 
 namespace workerd::api::node {
 jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::constructor(

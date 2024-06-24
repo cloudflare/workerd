@@ -12,7 +12,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/api/analytics-engine.h>
 #include <workerd/api/cache.h>
-#include <workerd/api/crypto-impl.h>
+#include <workerd/api/crypto/impl.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
 #include <workerd/api/global-scope.h>

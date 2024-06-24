@@ -8,7 +8,7 @@
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/api/crypto-impl.h>
+#include <workerd/api/crypto/impl.h>
 
 namespace workerd::api::node {
 jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(jsg::Lock& js,

@@ -1,5 +1,5 @@
 #include "crypto.h"
-#include <workerd/api/crypto-impl.h>
+#include <workerd/api/crypto/impl.h>
 #include <openssl/crypto.h>
 #include <map>
 

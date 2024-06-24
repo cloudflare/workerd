@@ -6,7 +6,7 @@
 #include "crypto.h"
 #include <openssl/evp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/api/crypto-impl.h>
+#include <workerd/api/crypto/impl.h>
 
 namespace workerd::api::node {
 

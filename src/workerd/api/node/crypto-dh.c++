@@ -6,7 +6,7 @@
 #include "crypto.h"
 #include <openssl/bn.h>
 #include <openssl/dh.h>
-#include <workerd/api/crypto-impl.h>
+#include <workerd/api/crypto/impl.h>
 #include <workerd/jsg/jsg.h>
 
 // Import DH primes if needed.

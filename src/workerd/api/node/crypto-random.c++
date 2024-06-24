@@ -9,7 +9,7 @@
 #include <openssl/bn.h>
 #include <openssl/rand.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/api/crypto-impl.h>
+#include <workerd/api/crypto/impl.h>
 
 namespace workerd::api::node {
   kj::Array<kj::byte> CryptoImpl::randomPrime(uint32_t size, bool safe,

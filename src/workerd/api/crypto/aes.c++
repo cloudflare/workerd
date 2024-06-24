@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "crypto-impl.h"
+#include "impl.h"
 #include <algorithm>
 #include <cstdint>
 #include <openssl/aes.h>

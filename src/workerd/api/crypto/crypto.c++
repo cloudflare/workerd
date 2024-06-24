@@ -3,13 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "crypto.h"
-#include "crypto-impl.h"
-#include "streams/standard.h"
+#include "impl.h"
+#include "../streams/standard.h"
+#include "../util.h"
 #include <array>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <workerd/jsg/jsg.h>
-#include "util.h"
 #include <workerd/io/io-context.h>
 #include <workerd/util/uuid.h>
 #include <set>

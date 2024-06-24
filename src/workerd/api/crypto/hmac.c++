@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "crypto-impl.h"
-#include <workerd/api/crypto.h>
+#include "impl.h"
+#include <workerd/api/crypto/crypto.h>
 #include <workerd/io/io-context.h>
 #include <openssl/hmac.h>
 #include <openssl/mem.h>
