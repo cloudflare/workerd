@@ -94,13 +94,6 @@ namespace {
 //   kj::ArrayPtr<const kj::byte>s, rather than kj::Array<kj::byte>s.
 
 // =======================================================================================
-// OpenSSL shims
-
-std::unique_ptr<EVP_MD_CTX, void(*)(EVP_MD_CTX*)> makeDigestContext() {
-  return {EVP_MD_CTX_new(), EVP_MD_CTX_free};
-}
-
-// =======================================================================================
 // Registered algorithms
 
 static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
@@ -366,8 +359,8 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::digest(
   return js.evalNow([&] {
     auto type = lookupDigestAlgorithm(algorithm.name).second;
 
-    auto digestCtx = makeDigestContext();
-    KJ_ASSERT(digestCtx != nullptr);
+    auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
+    KJ_ASSERT(digestCtx.get() != nullptr);
 
     OSSLCALL(EVP_DigestInit_ex(digestCtx.get(), type, nullptr));
     OSSLCALL(EVP_DigestUpdate(digestCtx.get(), data.begin(), data.size()));
@@ -659,8 +652,8 @@ kj::String Crypto::randomUUID() {
 DigestStream::DigestContextPtr DigestStream::initContext(SubtleCrypto::HashAlgorithm& algorithm) {
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm.name);
   auto type = lookupDigestAlgorithm(algorithm.name).second;
-  auto context = makeDigestContext();
-  KJ_ASSERT(context != nullptr);
+  auto context = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
+  KJ_ASSERT(context.get() != nullptr);
   OSSLCALL(EVP_DigestInit_ex(context.get(), type, nullptr));
   return kj::mv(context);
 }

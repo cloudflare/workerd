@@ -605,7 +605,7 @@ public:
 // WritableStream and is compatible with both APIs.
 class DigestStream: public WritableStream {
 public:
-  using DigestContextPtr = std::unique_ptr<EVP_MD_CTX, void(*)(EVP_MD_CTX*)>;
+  using DigestContextPtr = kj::Own<EVP_MD_CTX>;
   using Algorithm = kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>;
 
   explicit DigestStream(
@@ -735,3 +735,5 @@ private:
   api::DigestStream
 
 }  // namespace workerd::api
+
+KJ_DECLARE_NON_POLYMORPHIC(EVP_MD_CTX)
