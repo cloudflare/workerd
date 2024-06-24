@@ -7,6 +7,7 @@ interface FSInfo {
   path: string;
   name: string;
   parts: string[];
+  contentsOffset?: number;
 }
 
 interface FS {

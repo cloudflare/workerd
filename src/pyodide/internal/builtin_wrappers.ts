@@ -108,7 +108,7 @@ function prepareStackTrace(_error: Error, stack: StackItem[]): boolean {
 export async function wasmInstantiate(
   mod: WebAssembly.Module | Uint8Array,
   imports: WebAssembly.Imports,
-): Promise<{ module: WebAssembly.Module, instance: WebAssembly.Instance }> {
+): Promise<{ module: WebAssembly.Module; instance: WebAssembly.Instance }> {
   let module;
   if (mod instanceof WebAssembly.Module) {
     module = mod;
