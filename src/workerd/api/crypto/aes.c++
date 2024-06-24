@@ -18,12 +18,6 @@ std::unique_ptr<EVP_CIPHER_CTX, void(*)(EVP_CIPHER_CTX*)> makeCipherContext() {
   return {EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free};
 }
 
-using UniqueBignum = std::unique_ptr<BIGNUM, void(*)(BIGNUM*)>;
-
-UniqueBignum newBignum() {
-  return {BN_new(), BN_free};
-}
-
 auto lookupAesCbcType(uint bitLength) {
   switch (bitLength) {
     case 128: return EVP_aes_128_cbc();
@@ -518,13 +512,11 @@ protected:
   }
 
 private:
-  UniqueBignum getCounter(kj::ArrayPtr<kj::byte> counterBlock,
+  kj::Own<BIGNUM> getCounter(kj::ArrayPtr<kj::byte> counterBlock,
       const unsigned counterBitLength) const {
     // See GetCounter from https://chromium.googlesource.com/chromium/src/+/refs/tags/91.0.4458.2/components/webcrypto/algorithms/aes_ctr.cc#86
     // The counter is the rightmost "counterBitLength" of the block as a big-endian number.
     KJ_DASSERT(counterBlock.size() == expectedCounterByteSize);
-
-    auto result = newBignum();
 
     auto remainderBits = counterBitLength % 8;
     if (remainderBits == 0) {
@@ -532,10 +524,10 @@ private:
       auto byteLength = counterBitLength / 8;
       auto remainingCounter = counterBlock.slice(expectedCounterByteSize - byteLength,
           counterBlock.size());
-      JSG_REQUIRE(result.get() == BN_bin2bn(remainingCounter.asBytes().begin(),
-          byteLength, result.get()), InternalDOMOperationError, "Error doing ", getAlgorithmName(),
+
+      return JSG_REQUIRE_NONNULL(toBignum(remainingCounter.asBytes()),
+          InternalDOMOperationError, "Error doing ", getAlgorithmName(),
           " encrypt/decrypt", internalDescribeOpensslErrors());
-      return result;
     }
 
     // Convert the counter but zero out the topmost bits so that we can convert to bignum from a
@@ -555,11 +547,8 @@ private:
     // operation because we own the buffer. Technically the restoration isn't even strictly
     // necessary because this buffer isn't used any more after this.
 
-    JSG_REQUIRE(result.get() == BN_bin2bn(counterToProcess.begin(), counterToProcess.size(),
-        result.get()), InternalDOMOperationError, "Error doing ", getAlgorithmName(),
-        " encrypt/decrypt", internalDescribeOpensslErrors());
-
-    return result;
+    return JSG_REQUIRE_NONNULL(toBignum(counterToProcess), InternalDOMOperationError,
+        "Error doing ", getAlgorithmName(), " encrypt/decrypt", internalDescribeOpensslErrors());
   }
 
   void process(const EVP_CIPHER* cipher, kj::ArrayPtr<const kj::byte> input,

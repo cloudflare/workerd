@@ -13,7 +13,7 @@
 #include <map>
 #include <kj/function.h>
 #include <type_traits>
-#include "util.h"
+#include <workerd/api/util.h>
 #include <workerd/io/features.h>
 
 namespace workerd::api {
@@ -548,13 +548,6 @@ protected:
   CryptoKey::RsaKeyAlgorithm keyAlgorithm;
 
 private:
-  static kj::Array<kj::byte> bigNumToArray(const BIGNUM& n) {
-    kj::Vector<kj::byte> result(BN_num_bytes(&n));
-    result.resize(result.capacity());
-    BN_bn2bin(&n, result.begin());
-    return result.releaseAsArray();
-  }
-
   SubtleCrypto::JsonWebKey exportJwk() const override final {
     const auto& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(getEvpPkey()), DOMOperationError,
         "No RSA data backing key", tryDescribeOpensslErrors());
@@ -563,16 +556,16 @@ private:
     jwk.kty = kj::str("RSA");
     jwk.alg = jwkHashAlgorithmName();
 
-    jwk.n = kj::encodeBase64Url(bigNumToArray(KJ_REQUIRE_NONNULL(rsa.n)));
-    jwk.e = kj::encodeBase64Url(bigNumToArray(KJ_REQUIRE_NONNULL(rsa.e)));
+    jwk.n = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.n))));
+    jwk.e = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.e))));
 
     if (getType() == "private"_kj) {
-      jwk.d = kj::encodeBase64Url(bigNumToArray(KJ_REQUIRE_NONNULL(rsa.d)));
-      jwk.p = kj::encodeBase64Url(bigNumToArray(KJ_REQUIRE_NONNULL(rsa.p)));
-      jwk.q = kj::encodeBase64Url(bigNumToArray(KJ_REQUIRE_NONNULL(rsa.q)));
-      jwk.dp = kj::encodeBase64Url(bigNumToArray(KJ_REQUIRE_NONNULL(rsa.dmp1)));
-      jwk.dq = kj::encodeBase64Url(bigNumToArray(KJ_REQUIRE_NONNULL(rsa.dmq1)));
-      jwk.qi = kj::encodeBase64Url(bigNumToArray(KJ_REQUIRE_NONNULL(rsa.iqmp)));
+      jwk.d = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.d))));
+      jwk.p = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.p))));
+      jwk.q = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.q))));
+      jwk.dp = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.dmp1))));
+      jwk.dq = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.dmq1))));
+      jwk.qi = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.iqmp))));
     }
 
     return jwk;
@@ -598,10 +591,8 @@ private:
     CryptoKey::AsymmetricKeyDetails details;
     details.modulusLength = BN_num_bits(n);
 
-    auto public_exponent = kj::heapArray<kj::byte>(BN_num_bytes(e));
-    KJ_ASSERT(BN_bn2binpad(e, static_cast<unsigned char*>(public_exponent.begin()),
-                           public_exponent.size()) == public_exponent.size());
-    details.publicExponent = kj::mv(public_exponent);
+    details.publicExponent = JSG_REQUIRE_NONNULL(bignumToArrayPadded(*e), Error,
+        "Failed to extract public exponent");
 
     // TODO(soon): Does BoringSSL not support retrieving RSA_PSS params?
     // if (type == EVP_PKEY_RSA_PSS) {
@@ -855,9 +846,8 @@ public:
         "Blind Signing requires presigned data (", data.size(), " bytes) to be smaller than "
         "the key (", size, " bytes).");
     if (data.size() == size) {
-      auto dataVal = OSSLCALL_OWN(BIGNUM, BN_bin2bn(data.begin(), data.size(), nullptr),
-          InternalDOMOperationError, "Error converting presigned data",
-          internalDescribeOpensslErrors());
+      auto dataVal = JSG_REQUIRE_NONNULL(toBignum(data), InternalDOMOperationError,
+          "Error converting presigned data", internalDescribeOpensslErrors());
       JSG_REQUIRE(BN_ucmp(dataVal, rsa->n) < 0, DOMDataError,
           "Blind Signing requires presigned data value to be strictly smaller than RSA key"
           "modulus, consider using a larger key size.");
@@ -1029,8 +1019,8 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
   JSG_REQUIRE(!(FeatureFlags::get(js).getStrictCrypto() && (modulusLength & 127)), DOMOperationError,
       "Can't generate key: RSA key size is required to be a multiple of 128");
 
-  auto bnExponent = OSSLCALL_OWN(BIGNUM, BN_bin2bn(publicExponent.begin(),
-      publicExponent.size(), nullptr), InternalDOMOperationError, "Error setting up RSA keygen.");
+  auto bnExponent = JSG_REQUIRE_NONNULL(toBignum(publicExponent), InternalDOMOperationError,
+      "Error setting up RSA keygen.");
 
   auto rsaPrivateKey = OSSL_NEW(RSA);
   OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), 0));
@@ -1065,8 +1055,8 @@ kj::Own<EVP_PKEY> rsaJwkReader(SubtleCrypto::JsonWebKey&& keyDataJwk) {
   // RSA_set0_*() transfers BIGNUM ownership to the RSA key, so we don't need to worry about
   // calling BN_free().
   OSSLCALL(RSA_set0_key(rsaKey.get(),
-      BN_bin2bn(modulus.begin(), modulus.size(), nullptr),
-      BN_bin2bn(publicExponent.begin(), publicExponent.size(), nullptr),
+      toBignumUnowned(modulus),
+      toBignumUnowned(publicExponent),
       nullptr));
 
   if (keyDataJwk.d != kj::none) {
@@ -1076,8 +1066,7 @@ kj::Own<EVP_PKEY> rsaJwkReader(SubtleCrypto::JsonWebKey&& keyDataJwk) {
         DOMDataError, "Invalid RSA key in JSON Web Key; missing or invalid "
         "Private Exponent parameter (\"d\").");
 
-    OSSLCALL(RSA_set0_key(rsaKey.get(), nullptr, nullptr,
-        BN_bin2bn(privateExponent.begin(), privateExponent.size(), nullptr)));
+    OSSLCALL(RSA_set0_key(rsaKey.get(), nullptr, nullptr, toBignumUnowned(privateExponent)));
 
     auto presence = (keyDataJwk.p != kj::none) + (keyDataJwk.q != kj::none) +
                     (keyDataJwk.dp != kj::none) + (keyDataJwk.dq != kj::none) +
@@ -1101,12 +1090,12 @@ kj::Own<EVP_PKEY> rsaJwkReader(SubtleCrypto::JsonWebKey&& keyDataJwk) {
           "Coefficient parameter (\"qi\").");
 
       OSSLCALL(RSA_set0_factors(rsaKey.get(),
-          BN_bin2bn(firstPrimeFactor.begin(), firstPrimeFactor.size(), nullptr),
-          BN_bin2bn(secondPrimeFactor.begin(), secondPrimeFactor.size(), nullptr)));
+          toBignumUnowned(firstPrimeFactor),
+          toBignumUnowned(secondPrimeFactor)));
       OSSLCALL(RSA_set0_crt_params(rsaKey.get(),
-          BN_bin2bn(firstFactorCrtExponent.begin(), firstFactorCrtExponent.size(), nullptr),
-          BN_bin2bn(secondFactorCrtExponent.begin(), secondFactorCrtExponent.size(), nullptr),
-          BN_bin2bn(firstCrtCoefficient.begin(), firstCrtCoefficient.size(), nullptr)));
+          toBignumUnowned(firstFactorCrtExponent),
+          toBignumUnowned(secondFactorCrtExponent),
+          toBignumUnowned(firstCrtCoefficient)));
     } else {
       JSG_REQUIRE(presence == 0, DOMDataError,
           "Invalid RSA private key in JSON Web Key; if one Prime "
@@ -1203,8 +1192,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
   const BIGNUM *n, *e, *d;
   RSA_get0_key(&rsa, &n, &e, &d);
 
-  auto publicExponent = kj::heapArray<kj::byte>(BN_num_bytes(e));
-  KJ_ASSERT(BN_bn2bin(e, publicExponent.begin()) == publicExponent.size());
+  auto publicExponent = KJ_REQUIRE_NONNULL(bignumToArray(*e));
 
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
   validateRsaParams(js, modulusLength, publicExponent, true);
@@ -1274,8 +1262,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
   const BIGNUM *n, *e, *d;
   RSA_get0_key(&rsa, &n, &e, &d);
 
-  auto publicExponent = kj::heapArray<kj::byte>(BN_num_bytes(e));
-  KJ_ASSERT(BN_bn2bin(e, publicExponent.begin()) == publicExponent.size());
+  auto publicExponent = KJ_REQUIRE_NONNULL(bignumToArray(*e));
 
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
   validateRsaParams(js, modulusLength, publicExponent, true);
@@ -1546,16 +1533,6 @@ public:
   }
 
 private:
-  static kj::Array<kj::byte> bigNumToPaddedArray(const BIGNUM& n, size_t paddedLength) {
-    kj::Vector<kj::byte> result(paddedLength);
-    result.resize(paddedLength);
-    JSG_REQUIRE(1 == BN_bn2bin_padded(result.begin(), paddedLength, &n), InternalDOMOperationError,
-        "Error converting EC affine co-ordinates to padded array",
-        internalDescribeOpensslErrors());
-    return result.releaseAsArray();
-
-  }
-
   SubtleCrypto::JsonWebKey exportJwk() const override final {
     const EC_KEY& ec = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(getEvpPkey()), DOMOperationError,
         "No elliptic curve data backing key", tryDescribeOpensslErrors());
@@ -1580,13 +1557,24 @@ private:
     SubtleCrypto::JsonWebKey jwk;
     jwk.kty = kj::str("EC");
     jwk.crv = kj::str(keyAlgorithm.namedCurve);
-    jwk.x = kj::encodeBase64Url(bigNumToPaddedArray(x, groupDegreeInBytes));
-    jwk.y = kj::encodeBase64Url(bigNumToPaddedArray(y, groupDegreeInBytes));
+
+    static constexpr auto handleBn = [](const BIGNUM& bn, size_t size) {
+      return JSG_REQUIRE_NONNULL(bignumToArrayPadded(bn, size),
+        InternalDOMOperationError, "Error converting EC affine co-ordinates to padded array",
+        internalDescribeOpensslErrors());
+    };
+
+    auto xa = handleBn(x, groupDegreeInBytes);
+    auto ya = handleBn(y, groupDegreeInBytes);
+
+    jwk.x = kj::encodeBase64Url(xa);
+    jwk.y = kj::encodeBase64Url(ya);
     if (getType() == "private"_kj) {
       const auto& privateKey = JSG_REQUIRE_NONNULL(EC_KEY_get0_private_key(&ec),
           InternalDOMOperationError, "Error getting private key material for JSON Web Key export",
           internalDescribeOpensslErrors());
-      jwk.d = kj::encodeBase64Url(bigNumToPaddedArray(privateKey, groupDegreeInBytes));
+      auto pk = handleBn(privateKey, groupDegreeInBytes);
+      jwk.d = kj::encodeBase64Url(pk);
     }
     return jwk;
   }
@@ -1831,10 +1819,12 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyD
       "Invalid EC key in JSON Web Key; missing \"y\".");
 
   auto group = EC_KEY_get0_group(ecKey);
-  auto bigX = OSSLCALL_OWN(BIGNUM, BN_bin2bn(x.begin(), x.size(), nullptr),
-      InternalDOMOperationError, "Error importing EC key", internalDescribeOpensslErrors());
-  auto bigY = OSSLCALL_OWN(BIGNUM, BN_bin2bn(y.begin(), y.size(), nullptr),
-      InternalDOMOperationError, "Error importing EC key", internalDescribeOpensslErrors());
+
+  auto bigX = JSG_REQUIRE_NONNULL(toBignum(x), InternalDOMOperationError,
+      "Error importing EC key", internalDescribeOpensslErrors());
+  auto bigY = JSG_REQUIRE_NONNULL(toBignum(y), InternalDOMOperationError,
+      "Error importing EC key", internalDescribeOpensslErrors());
+
   auto point = OSSL_NEW(EC_POINT, group);
   OSSLCALL(EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr));
   OSSLCALL(EC_KEY_set_public_key(ecKey, point));
@@ -1845,8 +1835,8 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyD
     auto d = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.d), DOMDataError,
         "Invalid EC key in JSON Web Key; missing or invalid private key component (\"d\").");
 
-    auto bigD = OSSLCALL_OWN(BIGNUM, BN_bin2bn(d.begin(), d.size(), nullptr),
-        InternalDOMOperationError, "Error importing EC key", internalDescribeOpensslErrors());
+    auto bigD = JSG_REQUIRE_NONNULL(toBignum(d), InternalDOMOperationError,
+        "Error importing EC key", internalDescribeOpensslErrors());
 
     OSSLCALL(EC_KEY_set_private_key(ecKey, bigD));
   }

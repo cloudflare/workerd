@@ -17,9 +17,9 @@ namespace workerd::api::node {
   // Use mapping to have kj::Own work with optional buffer
   const auto maybeOwnBignum = [](jsg::Optional<kj::Array<kj::byte>>& maybeBignum) {
     return maybeBignum.map([](kj::Array<kj::byte>& a) {
-      return OSSLCALL_OWN(BIGNUM, BN_bin2bn(a.begin(), a.size(), nullptr),
-          RangeError, "Error importing add parameter", internalDescribeOpensslErrors());
-      });
+      return JSG_REQUIRE_NONNULL(toBignum(a), RangeError,
+          "Error importing add parameter", internalDescribeOpensslErrors());
+    });
   };
 
   BIGNUM* add = nullptr;
@@ -92,19 +92,12 @@ namespace workerd::api::node {
           nullptr);
   JSG_REQUIRE(ret == 1, Error, "Error while generating prime");
 
-  size_t prime_size = BN_num_bytes(prime.get());
-  auto prime_enc = kj::heapArray<kj::byte>(prime_size);
-  int next = BN_bn2binpad(
-      prime.get(),
-      prime_enc.begin(),
-      prime_size);
-  JSG_REQUIRE(next == (int)prime_size, Error, "Error while generating prime");
-  return prime_enc;
+  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*prime), Error,
+      "Error while generating prime");
 }
 
 bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks) {
-  auto candidate = OSSLCALL_OWN(BIGNUM, BN_bin2bn(bufferView.begin(), bufferView.size(), nullptr),
-    Error, "Error while checking prime");
+  auto candidate = JSG_REQUIRE_NONNULL(toBignum(bufferView), Error, "Error while checking prime");
   auto ctx = OSSL_NEW(BN_CTX);
   int ret = BN_is_prime_ex(candidate.get(), num_checks, ctx.get(), nullptr);
   JSG_REQUIRE(ret >= 0, Error, "Error while checking prime");
