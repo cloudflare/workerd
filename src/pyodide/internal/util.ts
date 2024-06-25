@@ -1,7 +1,5 @@
-// @ts-nocheck
-
-export function reportError(e) {
-  e.stack.split("\n").forEach((s) => console.warn(s));
+export function reportError(e: any): never {
+  e.stack?.split("\n").forEach((s: any) => console.warn(s));
   throw e;
 }
 
@@ -30,7 +28,10 @@ export function reportError(e) {
  *  so all variables defined get leaked into the global namespace unless we
  *  clean them up explicitly.
  */
-export function simpleRunPython(emscriptenModule, code) {
+export function simpleRunPython(
+  emscriptenModule: Module,
+  code: string,
+): string {
   const [status, err] = emscriptenModule.API.rawRun(code);
   // status 0: Ok
   // status -1: Error

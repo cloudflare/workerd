@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { default as ArtifactBundler } from "pyodide-internal:artifacts";
 import { default as UnsafeEval } from "internal:unsafe-eval";
 import { default as DiskCache } from "pyodide-internal:disk_cache";
@@ -15,7 +14,7 @@ import {
 } from "pyodide-internal:metadata";
 import { reportError, simpleRunPython } from "pyodide-internal:util";
 
-let LOADED_BASELINE_SNAPSHOT;
+let LOADED_BASELINE_SNAPSHOT: number;
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -36,22 +35,22 @@ const SHOULD_UPLOAD_SNAPSHOT =
  * which is quite slow. Startup with snapshot is 3-5 times faster than without
  * it.
  */
-let READ_MEMORY = undefined;
-let SNAPSHOT_SIZE = undefined;
+let READ_MEMORY: ((mod: Module) => void) | undefined = undefined;
+let SNAPSHOT_SIZE: number | undefined = undefined;
 export let SHOULD_RESTORE_SNAPSHOT = false;
 
 /**
  * Record the dlopen handles that are needed by the MEMORY.
  */
-let DSO_METADATA = {};
+let DSO_METADATA: any = {}; // TODO
 
 /**
  * Used to defer artifact upload. This is set during initialisation, but is executed during a
  * request because an IO context is needed for the upload.
  */
-let DEFERRED_UPLOAD_FUNCTION = undefined;
+let DEFERRED_UPLOAD_FUNCTION: (() => Promise<void>) | undefined = undefined;
 
-export async function uploadArtifacts() {
+export async function uploadArtifacts(): Promise<void> {
   if (DEFERRED_UPLOAD_FUNCTION) {
     return await DEFERRED_UPLOAD_FUNCTION();
   }
@@ -60,8 +59,8 @@ export async function uploadArtifacts() {
 /**
  * Used to hold the memory that needs to be uploaded for the validator.
  */
-let MEMORY_TO_UPLOAD = undefined;
-function getMemoryToUpload() {
+let MEMORY_TO_UPLOAD: Uint8Array | undefined = undefined;
+function getMemoryToUpload(): Uint8Array {
   if (!MEMORY_TO_UPLOAD) {
     throw new TypeError("Expected MEMORY_TO_UPLOAD to be set");
   }
@@ -79,7 +78,11 @@ function getMemoryToUpload() {
  * like scipy, shapely, geos...
  * TODO(someday) fix this.
  */
-function loadDynlib(Module, path, wasmModuleData) {
+function loadDynlib(
+  Module: Module,
+  path: string,
+  wasmModuleData: Uint8Array,
+): void {
   const wasmModule = UnsafeEval.newWasmModule(wasmModuleData);
   const dso = Module.newDSO(path, undefined, "loading");
   // even though these are used via dlopen, we are allocating them in an arena
@@ -99,7 +102,7 @@ function loadDynlib(Module, path, wasmModuleData) {
 }
 
 // used for checkLoadedSoFiles a snapshot sanity check
-const PRELOADED_SO_FILES = [];
+const PRELOADED_SO_FILES: string[] = [];
 
 /**
  * This loads all dynamic libraries visible in the site-packages directory. They
@@ -112,7 +115,7 @@ const PRELOADED_SO_FILES = [];
  * separate shared lib metadata arena at startup and allocating shared libs
  * there.
  */
-export function preloadDynamicLibs(Module) {
+export function preloadDynamicLibs(Module: Module): void {
   let SO_FILES_TO_LOAD = SITE_PACKAGES.soFiles;
   if (LOADED_BASELINE_SNAPSHOT && LOADED_SNAPSHOT_VERSION === 1) {
     // Ideally this should be just
@@ -134,11 +137,17 @@ export function preloadDynamicLibs(Module) {
   try {
     const sitePackages = getSitePackagesPath(Module);
     for (const soFile of SO_FILES_TO_LOAD) {
-      let node = SITE_PACKAGES.rootInfo;
+      let node: FSInfo | undefined = SITE_PACKAGES.rootInfo;
       for (const part of soFile) {
-        node = node.children.get(part);
+        node = node?.children?.get(part);
+      }
+      if (!node) {
+        throw Error("fs node could not be found for " + soFile);
       }
       const { contentsOffset, size } = node;
+      if (contentsOffset === undefined) {
+        throw Error("contentsOffset not defined for " + soFile);
+      }
       const wasmModuleData = new Uint8Array(size);
       TarReader.read(contentsOffset, wasmModuleData);
       const path = sitePackages + "/" + soFile.join("/");
@@ -162,17 +171,23 @@ export function getSnapshotSettings() {
   };
 }
 
+type DylinkInfo = {
+  [name: string]: { handles: string[] };
+} & {
+  settings?: { baselineSnapshot?: boolean };
+};
+
 /**
  * This records which dynamic libraries have open handles (handed out by dlopen,
  * not yet dlclosed). We'll need to track this information so that we don't
  * crash if we dlsym the handle after restoring from the snapshot
  */
-function recordDsoHandles(Module) {
-  const dylinkInfo = {};
+function recordDsoHandles(Module: Module): DylinkInfo {
+  const dylinkInfo: DylinkInfo = {};
   for (const [handle, { name }] of Object.entries(
     Module.LDSO.loadedLibsByHandle,
   )) {
-    if (handle === 0) {
+    if (Number(handle) === 0) {
       continue;
     }
     if (!(name in dylinkInfo)) {
@@ -230,7 +245,7 @@ const SNAPSHOT_IMPORTS = [
  * pollute it with extra included-by-default names (user code is executed in its
  * own separate module scope though so it's not _that_ important).
  */
-function memorySnapshotDoImports(Module) {
+function memorySnapshotDoImports(Module: Module): void {
   const toImport = SNAPSHOT_IMPORTS.join(",");
   const toDelete = Array.from(
     new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".", 1)[0])),
@@ -252,7 +267,7 @@ function memorySnapshotDoImports(Module) {
   simpleRunPython(Module, processScriptImportsString);
 }
 
-function checkLoadedSoFiles(dsoJSON) {
+function checkLoadedSoFiles(dsoJSON: DylinkInfo): void {
   PRELOADED_SO_FILES.sort();
   const keys = Object.keys(dsoJSON).filter((k) => k.startsWith("/"));
   keys.sort();
@@ -272,7 +287,7 @@ function checkLoadedSoFiles(dsoJSON) {
  * are initialized in the linear memory snapshot and then saving a copy of the
  * linear memory into MEMORY.
  */
-function makeLinearMemorySnapshot(Module) {
+function makeLinearMemorySnapshot(Module: Module): Uint8Array {
   memorySnapshotDoImports(Module);
   const dsoJSON = recordDsoHandles(Module);
   if (IS_CREATING_BASELINE_SNAPSHOT) {
@@ -281,7 +296,7 @@ function makeLinearMemorySnapshot(Module) {
   return encodeSnapshot(Module.HEAP8, dsoJSON);
 }
 
-function setUploadFunction(toUpload) {
+function setUploadFunction(toUpload: Uint8Array): void {
   if (toUpload.constructor.name !== "Uint8Array") {
     throw new TypeError("Expected TO_UPLOAD to be a Uint8Array");
   }
@@ -293,6 +308,7 @@ function setUploadFunction(toUpload) {
     try {
       const success = await ArtifactBundler.uploadMemorySnapshot(toUpload);
       // Free memory
+      // @ts-ignore
       toUpload = undefined;
       if (!success) {
         console.warn("Memory snapshot upload failed.");
@@ -304,7 +320,7 @@ function setUploadFunction(toUpload) {
   };
 }
 
-export function maybeSetupSnapshotUpload(Module) {
+export function maybeSetupSnapshotUpload(Module: Module): void {
   if (!SHOULD_UPLOAD_SNAPSHOT) {
     return;
   }
@@ -315,12 +331,12 @@ export function maybeSetupSnapshotUpload(Module) {
 const SNAPSHOT_MAGIC = 0x706e7300;
 const CREATE_SNAPSHOT_VERSION = 2;
 const HEADER_SIZE = 4 * 4;
-export let LOADED_SNAPSHOT_VERSION = undefined;
+export let LOADED_SNAPSHOT_VERSION: number | undefined = undefined;
 
 /**
  * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
  */
-function encodeSnapshot(heap, dsoJSON) {
+function encodeSnapshot(heap: Uint8Array, dsoJSON: object): Uint8Array {
   const dsoString = JSON.stringify(dsoJSON);
   let snapshotOffset = HEADER_SIZE + 2 * dsoString.length;
   // align to 8 bytes
@@ -343,7 +359,10 @@ function encodeSnapshot(heap, dsoJSON) {
 /**
  * Decode heap and dsoJSON from the memory snapshot artifact we downloaded
  */
-function decodeSnapshot() {
+function decodeSnapshot(): void {
+  if (!MEMORY_SNAPSHOT_READER) {
+    throw Error("Memory snapshot reader not available");
+  }
   let buf = new Uint32Array(2);
   let offset = 0;
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, buf);
@@ -365,17 +384,23 @@ function decodeSnapshot() {
   LOADED_BASELINE_SNAPSHOT = Number(DSO_METADATA?.settings?.baselineSnapshot);
   READ_MEMORY = function (Module) {
     // restore memory from snapshot
+    if (!MEMORY_SNAPSHOT_READER) {
+      throw Error("Memory snapshot reader not available when reading memory");
+    }
     MEMORY_SNAPSHOT_READER.readMemorySnapshot(snapshotOffset, Module.HEAP8);
     MEMORY_SNAPSHOT_READER.disposeMemorySnapshot();
   };
   SHOULD_RESTORE_SNAPSHOT = true;
 }
 
-export function restoreSnapshot(Module) {
+export function restoreSnapshot(Module: Module): void {
+  if (!READ_MEMORY) {
+    throw Error("READ_MEMORY not defined when restoring snapshot");
+  }
   READ_MEMORY(Module);
 }
 
-let TEST_SNAPSHOT = undefined;
+let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
 (function () {
   try {
     // Lookup memory snapshot from artifact store.
@@ -401,7 +426,7 @@ let TEST_SNAPSHOT = undefined;
   }
 })();
 
-export function finishSnapshotSetup(pyodide) {
+export function finishSnapshotSetup(pyodide: Pyodide): void {
   if (DSO_METADATA?.settings?.baselineSnapshot) {
     // Invalidate caches if we have a baseline snapshot because the contents of site-packages may
     // have changed.

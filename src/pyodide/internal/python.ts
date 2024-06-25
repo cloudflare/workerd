@@ -1,4 +1,3 @@
-// @ts-nocheck
 Error.stackTraceLimit = Infinity;
 import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import {
@@ -61,7 +60,13 @@ import stdlib from "pyodide-internal:generated/python_stdlib.zip";
  * the instantiation is performed asynchronously, or ``false`` if instantiation
  * synchronously failed. There is no way to indicate asynchronous failure.
  */
-function instantiateWasm(wasmImports, successCallback) {
+function instantiateWasm(
+  wasmImports: WebAssembly.Imports,
+  successCallback: (
+    inst: WebAssembly.Instance,
+    mod: WebAssembly.Module,
+  ) => void,
+): WebAssembly.Exports {
   (async function () {
     // Instantiate pyodideWasmModule with wasmImports
     const instance = await WebAssembly.instantiate(
@@ -94,7 +99,7 @@ function instantiateWasm(wasmImports, successCallback) {
  * This is a simplified version of the `prepareFileSystem` function here:
  * https://github.com/pyodide/pyodide/blob/main/src/js/module.ts
  */
-function prepareFileSystem(Module) {
+function prepareFileSystem(Module: Module): void {
   try {
     const pymajor = Module._py_version_major();
     const pyminor = Module._py_version_minor();
@@ -113,7 +118,7 @@ function prepareFileSystem(Module) {
 /**
  * A preRun hook. Make sure environment variables are visible at runtime.
  */
-function setEnv(Module) {
+function setEnv(Module: Module): void {
   Object.assign(Module.ENV, Module.API.config.env);
 }
 
@@ -122,7 +127,10 @@ function setEnv(Module) {
  *
  * This isn't public API of Pyodide so it's a bit fiddly.
  */
-function getEmscriptenSettings(lockfile, indexURL) {
+function getEmscriptenSettings(
+  lockfile: PackageLock,
+  indexURL: string,
+): EmscriptenSettings {
   const config = {
     // jsglobals is used for the js module.
     jsglobals: globalThis,
@@ -162,16 +170,22 @@ function getEmscriptenSettings(lockfile, indexURL) {
  *
  * Returns the instantiated emscriptenModule object.
  */
-async function instantiateEmscriptenModule(emscriptenSettings) {
+async function instantiateEmscriptenModule(
+  emscriptenSettings: EmscriptenSettings,
+): Promise<Module> {
   try {
     // Force Emscripten to feature detect the way we want
     // They used to have an `environment` setting that did this but it has been
     // removed =(
     // If/when we link our own Pyodide we can remove this.
+    // @ts-ignore
     globalThis.window = {}; // makes ENVIRONMENT_IS_WEB    = true
+    // @ts-ignore
     globalThis.importScripts = 1; // makes ENVIRONMENT_IS_WORKER = false
     const p = _createPyodideModule(emscriptenSettings);
+    // @ts-ignore
     delete globalThis.window;
+    // @ts-ignore
     delete globalThis.importScripts;
     const emscriptenModule = await p;
     return emscriptenModule;
@@ -187,7 +201,7 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
  * `noInitialRun: true` and so the C runtime is in an incoherent state until we
  * restore the linear memory from the snapshot.
  */
-async function prepareWasmLinearMemory(Module) {
+async function prepareWasmLinearMemory(Module: Module): Promise<void> {
   // Note: if we are restoring from a snapshot, runtime is not initialized yet.
   mountLib(Module, SITE_PACKAGES.rootInfo);
   entropyMountFiles(Module);
@@ -205,7 +219,10 @@ async function prepareWasmLinearMemory(Module) {
   adjustSysPath(Module);
 }
 
-export async function loadPyodide(lockfile, indexURL) {
+export async function loadPyodide(
+  lockfile: PackageLock,
+  indexURL: string,
+): Promise<Pyodide> {
   const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
   const Module = await enterJaegerSpan("instantiate_emscripten", () =>
     instantiateEmscriptenModule(emscriptenSettings),

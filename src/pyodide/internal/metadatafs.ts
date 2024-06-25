@@ -2,9 +2,10 @@
 import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
 import { createReadonlyFS } from "pyodide-internal:readOnlyFS";
 
-function createTree(paths) {
+declare type TreeNode = Map<string, TreeNode>;
+function createTree(paths: string[]): TreeNode {
   const tree = new Map();
-  paths.forEach((elt, idx) => {
+  paths.forEach((elt: string, idx: number) => {
     let subTree = tree;
     const parts = elt.split("/");
     const name = parts.pop();
@@ -21,7 +22,7 @@ function createTree(paths) {
   return tree;
 }
 
-export function createMetadataFS(Module) {
+export function createMetadataFS(Module: Module): object { // TODO: Make this type more specific
   const TIMESTAMP = Date.now();
   const names = MetadataReader.getNames();
   const sizes = MetadataReader.getSizes();
