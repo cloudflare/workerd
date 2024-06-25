@@ -113,7 +113,7 @@ jobs:
         # static libraries, for example the Rust STL. This is equivalent to the -Wl,-S linker
         # option, symbols will not be removed.
         run: |
-          bazelisk build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=${{ matrix.bazel-config }} //src/workerd/server:workerd
+          bazelisk build --jobs=32 --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=${{ matrix.bazel-config }} //src/workerd/server:workerd
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
