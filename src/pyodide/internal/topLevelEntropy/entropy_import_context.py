@@ -119,9 +119,7 @@ def numpy_random_mtrand_context(module):
 @contextmanager
 def pydantic_core_context(module):
     try:
-        # Initial import needs one entropy call to initialize std::collections::HashMap hash seed
-        with allow_bad_entropy_calls(1):
-            yield
+        yield
     finally:
         try:
             with allow_bad_entropy_calls(1):
