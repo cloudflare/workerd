@@ -114,13 +114,16 @@ public:
   };
 
   // Hkdf
-  kj::Array<kj::byte> getHkdf(kj::String hash, kj::Array<kj::byte> key, kj::Array<kj::byte> salt,
-                              kj::Array<kj::byte> info, uint32_t length);
+  kj::Array<kj::byte> getHkdf(kj::String hash,
+                              kj::Array<const kj::byte> key,
+                              kj::Array<const kj::byte> salt,
+                              kj::Array<const kj::byte> info,
+                              uint32_t length);
 
   // Pbkdf2
   kj::Array<kj::byte> getPbkdf(jsg::Lock& js,
-                               kj::Array<kj::byte> password,
-                               kj::Array<kj::byte> salt,
+                               kj::Array<const kj::byte> password,
+                               kj::Array<const kj::byte> salt,
                                uint32_t num_iterations,
                                uint32_t keylen,
                                kj::String name);
