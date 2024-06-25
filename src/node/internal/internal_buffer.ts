@@ -82,7 +82,7 @@ function createBuffer(length: number) : Buffer {
 }
 
 type WithImplicitCoercion<T> = | T | { valueOf(): T; };
-type StringLike = WithImplicitCoercion<string> | { [Symbol.toPrimitive](hint: "string"): string; };
+export type StringLike = WithImplicitCoercion<string> | { [Symbol.toPrimitive](hint: "string"): string; };
 type ArrayBufferLike = WithImplicitCoercion<ArrayBuffer| SharedArrayBuffer>;
 type BufferSource = StringLike|ArrayBufferLike|Uint8Array|ReadonlyArray<number>;
 
