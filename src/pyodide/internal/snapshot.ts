@@ -145,7 +145,7 @@ export function preloadDynamicLibs(Module: Module): void {
         throw Error("fs node could not be found for " + soFile);
       }
       const { contentsOffset, size } = node;
-      if(contentsOffset === undefined) {
+      if (contentsOffset === undefined) {
         throw Error("contentsOffset not defined for " + soFile);
       }
       const wasmModuleData = new Uint8Array(size);

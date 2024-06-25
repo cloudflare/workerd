@@ -28,7 +28,10 @@ export function reportError(e: any): never {
  *  so all variables defined get leaked into the global namespace unless we
  *  clean them up explicitly.
  */
-export function simpleRunPython(emscriptenModule: Module, code: string): string {
+export function simpleRunPython(
+  emscriptenModule: Module,
+  code: string,
+): string {
   const [status, err] = emscriptenModule.API.rawRun(code);
   // status 0: Ok
   // status -1: Error
