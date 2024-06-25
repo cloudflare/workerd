@@ -6,13 +6,13 @@ test --test_tag_filters=-off-by-default,-slow
 # Not using bzlmod for dependencies yet
 common --noenable_bzlmod
 
-# TODO(soon): bazel7 enables Build without the Bytes (BwoB) by default. This could significantly
-# speed up builds using the remote cache since less data needs to be fetched. Unfortunately, it
-# appears to cause build failures due to https://github.com/bazelbuild/bazel/issues/20559 at this
-# time. Use --remote_download_all to disable BwoB for now.
-# When that issue and https://github.com/bazelbuild/bazel/issues/20576 have been addressed, we can
-# also explore --remote_download_minimal.
-build --remote_download_all
+# bazel7 enables Build without the Bytes (BwoB) by default. This significantly speeds up builds
+# using the remote cache since less data needs to be fetched. Enable it explicitly here and set
+# remote_cache_eviction_retries just in case there are cache evictions during the build.
+# TODO(soon): If this proves stable also try --remote_download_minimal for test builds.
+# https://github.com/bazelbuild/bazel/issues/20576 may need to be addressed beforehand.
+build --remote_download_toplevel
+build --experimental_remote_cache_eviction_retries=3
 
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
