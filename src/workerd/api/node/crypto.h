@@ -128,6 +128,16 @@ public:
                                uint32_t keylen,
                                kj::String name);
 
+  // Scrypt
+  kj::Array<kj::byte> getScrypt(jsg::Lock& js,
+                                kj::Array<const kj::byte> password,
+                                kj::Array<const kj::byte> salt,
+                                uint32_t N,
+                                uint32_t r,
+                                uint32_t p,
+                                uint32_t maxmem,
+                                uint32_t keylen);
+
   // Keys
   struct KeyExportOptions {
     jsg::Optional<kj::String> type;
@@ -213,6 +223,8 @@ public:
     JSG_METHOD(getHkdf);
     // Pbkdf2
     JSG_METHOD(getPbkdf);
+    // Scrypt
+    JSG_METHOD(getScrypt);
     // Keys
     JSG_METHOD(exportKey);
     JSG_METHOD(equals);

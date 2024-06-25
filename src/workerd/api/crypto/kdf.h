@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kj/common.h>
+#include <cstdint>
 
 typedef struct env_md_st EVP_MD;
 
@@ -20,4 +21,13 @@ kj::Maybe<kj::Array<kj::byte>> pbkdf2(size_t length,
                                       kj::ArrayPtr<const kj::byte> password,
                                       kj::ArrayPtr<const kj::byte> salt);
 
-}
+// Perform Scrypt key derivation.
+kj::Maybe<kj::Array<kj::byte>> scrypt(size_t length,
+                                      uint32_t N,
+                                      uint32_t r,
+                                      uint32_t p,
+                                      uint32_t maxmem,
+                                      kj::ArrayPtr<const kj::byte> pass,
+                                      kj::ArrayPtr<const kj::byte> salt);
+
+}  // namespace workerd::api

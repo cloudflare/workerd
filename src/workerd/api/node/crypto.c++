@@ -66,4 +66,19 @@ kj::Array<kj::byte> CryptoImpl::getPbkdf(jsg::Lock& js,
       Error, "Pbkdf2 failed");
 }
 
+kj::Array<kj::byte> CryptoImpl::getScrypt(jsg::Lock& js,
+                                          kj::Array<const kj::byte> password,
+                                          kj::Array<const kj::byte> salt,
+                                          uint32_t N,
+                                          uint32_t r,
+                                          uint32_t p,
+                                          uint32_t maxmem,
+                                          uint32_t keylen) {
+  ClearErrorOnReturn clearErrorOnReturn;
+  JSG_REQUIRE(password.size() <= INT32_MAX, RangeError, "Scrypt failed: password is too large");
+  JSG_REQUIRE(salt.size() <= INT32_MAX, RangeError, "Scrypt failed: salt is too large");
+
+  return JSG_REQUIRE_NONNULL(scrypt(keylen, N, r, p, maxmem, password, salt),
+      Error, "Scrypt failed");
+}
 }  // namespace workerd::api::node

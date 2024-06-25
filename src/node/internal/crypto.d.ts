@@ -35,6 +35,10 @@ export function getHkdf(hash: string, key: ArrayLike, salt: ArrayLike, info: Arr
 export function getPbkdf(password: ArrayLike, salt: ArrayLike, iterations: number, keylen: number,
                          digest: string): ArrayBuffer;
 
+// scrypt
+export function getScrypt(password: ArrayLike, salt: ArrayLike, N: number, r: number, p: number,
+                          maxmem: number, keylen: number): ArrayBuffer;
+
 // Keys
 export function exportKey(key: CryptoKey, options?: InnerExportOptions): KeyExportResult;
 export function equals(key: CryptoKey, otherKey: CryptoKey): boolean;
