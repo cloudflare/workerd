@@ -192,7 +192,6 @@ async function instantiateEmscriptenModule(
   } catch (e) {
     console.warn("Error in instantiateEmscriptenModule");
     reportError(e);
-    throw e;
   }
 }
 
@@ -225,7 +224,7 @@ export async function loadPyodide(
   indexURL: string,
 ): Promise<Pyodide> {
   const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
-  const Module: Module = await enterJaegerSpan("instantiate_emscripten", () =>
+  const Module = await enterJaegerSpan("instantiate_emscripten", () =>
     instantiateEmscriptenModule(emscriptenSettings),
   );
   await enterJaegerSpan("prepare_wasm_linear_memory", () =>

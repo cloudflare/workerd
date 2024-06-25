@@ -115,7 +115,7 @@ const PRELOADED_SO_FILES: string[] = [];
  * separate shared lib metadata arena at startup and allocating shared libs
  * there.
  */
-export function preloadDynamicLibs(Module: Module) {
+export function preloadDynamicLibs(Module: Module): void {
   let SO_FILES_TO_LOAD = SITE_PACKAGES.soFiles;
   if (LOADED_BASELINE_SNAPSHOT && LOADED_SNAPSHOT_VERSION === 1) {
     // Ideally this should be just
@@ -182,7 +182,7 @@ type DylinkInfo = {
  * not yet dlclosed). We'll need to track this information so that we don't
  * crash if we dlsym the handle after restoring from the snapshot
  */
-function recordDsoHandles(Module: Module) {
+function recordDsoHandles(Module: Module): DylinkInfo {
   const dylinkInfo: DylinkInfo = {};
   for (const [handle, { name }] of Object.entries(
     Module.LDSO.loadedLibsByHandle,
@@ -267,7 +267,7 @@ function memorySnapshotDoImports(Module: Module): void {
   simpleRunPython(Module, processScriptImportsString);
 }
 
-function checkLoadedSoFiles(dsoJSON: object): void {
+function checkLoadedSoFiles(dsoJSON: DylinkInfo): void {
   PRELOADED_SO_FILES.sort();
   const keys = Object.keys(dsoJSON).filter((k) => k.startsWith("/"));
   keys.sort();
@@ -426,7 +426,7 @@ let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
   }
 })();
 
-export function finishSnapshotSetup(pyodide: Pyodide) {
+export function finishSnapshotSetup(pyodide: Pyodide): void {
   if (DSO_METADATA?.settings?.baselineSnapshot) {
     // Invalidate caches if we have a baseline snapshot because the contents of site-packages may
     // have changed.
