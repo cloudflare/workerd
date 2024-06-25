@@ -22,7 +22,7 @@ function createTree(paths: string[]): TreeNode {
   return tree;
 }
 
-export function createMetadataFS(Module: Module): void {
+export function createMetadataFS(Module: Module): object { // TODO: Make this type more specific
   const TIMESTAMP = Date.now();
   const names = MetadataReader.getNames();
   const sizes = MetadataReader.getSizes();
