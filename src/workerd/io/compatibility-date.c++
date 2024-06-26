@@ -8,6 +8,7 @@
 #include <capnp/schema.h>
 #include <capnp/dynamic.h>
 #include <kj/map.h>
+#include <kj/vector.h>
 
 namespace workerd {
 
@@ -84,7 +85,6 @@ struct CompatDate {
     return kj::str(year, '-', month < 10 ? "0" : "",  month, '-', day < 10 ? "0" : "", day);
   }
 };
-
 }  // namespace
 
 kj::String currentDateStr() {
@@ -129,6 +129,14 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
   auto schema = capnp::Schema::from<CompatibilityFlags>();
   auto dynamicOutput = capnp::toDynamic(output);
 
+  // For each item added to this list, the flag identified by field will be
+  // enabled if the flag identified by other is enabled.
+  struct ImpliedBy {
+    capnp::StructSchema::Field field;
+    capnp::StructSchema::Field other;
+  };
+  kj::Vector<ImpliedBy> impliedByList(schema.getFields().size());
+
   for (auto field: schema.getFields()) {
     bool enableByDate = false;
     bool enableByFlag = false;
@@ -138,6 +146,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
     kj::Maybe<CompatDate> enableDate;
     kj::StringPtr enableFlagName;
     kj::StringPtr disableFlagName;
+    kj::Maybe<ImpliedBy> maybeImpliedBy;
 
     for (auto annotation: field.getProto().getAnnotations()) {
       if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
@@ -160,6 +169,26 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
         enableByDate = true;
       } else if (annotation.getId() == EXPERIMENTAl_ANNOTATION_ID) {
         isExperimental = true;
+      } else if (annotation.getId() == IMPLIED_BY_AFTER_DATE_ANNOTATION_ID) {
+        if (maybeImpliedBy == kj::none) {
+          auto value = annotation.getValue();
+          auto s = value.getStruct().getAs<workerd::ImpliedByAfterDate>();
+          auto parsedDate = KJ_ASSERT_NONNULL(CompatDate::parse(s.getDate()));
+          // This flag will be marked as enabled if the flag identified by
+          // s.getName() is enabled, but only on or after the specified date.
+          if (parsedCompatDate >= parsedDate && !disableByFlag) {
+            maybeImpliedBy.emplace(ImpliedBy {
+              .field = field,
+              .other = schema.getFieldByName(s.getName()),
+            });
+          }
+        }
+      }
+    }
+    KJ_IF_SOME(impliedBy, maybeImpliedBy) {
+      // We only want to add the implied by flag if it is not explicitly disabled.
+      if (!disableByFlag) {
+        impliedByList.add(kj::mv(impliedBy));
       }
     }
 
@@ -198,6 +227,12 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
     }
 
     dynamicOutput.set(field, enableByFlag || (enableByDate && !disableByFlag));
+  }
+
+  for (auto& implied : impliedByList) {
+    if (capnp::toDynamic(output).get(implied.other).as<bool>()) {
+      dynamicOutput.set(implied.field, true);
+    }
   }
 
   for (auto& flag: flagSet) {

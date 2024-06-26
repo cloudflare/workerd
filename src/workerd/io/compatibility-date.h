@@ -56,6 +56,7 @@ static constexpr uint64_t COMPAT_DISABLE_FLAG_ANNOTATION_ID = 0xd145cf1adc42577c
 static constexpr uint64_t COMPAT_ENABLE_DATE_ANNOTATION_ID = 0x91a5d5d7244cf6d0ull;
 static constexpr uint64_t COMPAT_ENABLE_ALL_DATES_ANNOTATION_ID = 0x9a1d37c8030d9418;
 static constexpr uint64_t EXPERIMENTAl_ANNOTATION_ID = 0xe3e5a63e76284d88;
+static constexpr uint64_t IMPLIED_BY_AFTER_DATE_ANNOTATION_ID = 0xe3e5a63e76284d89;
 static constexpr uint64_t NEEDED_BY_FL = 0xbd23aff9deefc308ull;
 
 }  // namespace workerd

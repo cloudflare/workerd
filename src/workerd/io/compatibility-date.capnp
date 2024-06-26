@@ -8,6 +8,13 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd");
 $Cxx.allowCancellation;
 
+struct ImpliedByAfterDate @0x8f8c1b68151b6cff {
+  # Annotates a compatibility flag to indicate that it is implied by the enablement
+  # of the named flag after the specified date.
+  name @0 :Text;
+  date @1 :Text;
+}
+
 struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Flags that change the basic behavior of the runtime API, especially for
   # backwards-compatibility with old bugs.
@@ -59,6 +66,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # not covered by Workers' usual backwards-compatibility promise. Experimental flags cannot be
   # used in Workers deployed on Cloudflare except by test accounts belonging to Cloudflare team
   # members.
+
+  annotation impliedByAfterDate @0xe3e5a63e76284d89 (field) :ImpliedByAfterDate;
 
   formDataParserSupportsFiles @0 :Bool
       $compatEnableFlag("formdata_parser_supports_files")
@@ -444,7 +453,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   nodeJsCompatV2 @50 :Bool
       $compatEnableFlag("nodejs_compat_v2")
-      $compatDisableFlag("no_nodejs_compat_v2");
+      $compatDisableFlag("no_nodejs_compat_v2")
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-02");
   # Implies nodeJSCompat with the following additional modifications:
   # * Node.js Compat built-ins may be imported/required with or without the node: prefix
   # * Node.js Compat the globals Buffer and process are available everywhere
