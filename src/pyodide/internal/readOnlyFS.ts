@@ -1,7 +1,6 @@
-// @ts-nocheck
-export function createReadonlyFS(FSOps, Module) {
+export function createReadonlyFS(FSOps: FSOps, Module: Module) {
   const FS = Module.FS;
-  const ReadOnlyFS = {
+  const ReadOnlyFS: EmscriptenFS = {
     mount(mount) {
       return ReadOnlyFS.createNode(null, "/", mount.opts.info);
     },

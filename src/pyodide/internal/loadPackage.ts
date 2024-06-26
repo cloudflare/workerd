@@ -73,7 +73,7 @@ class ArrayBufferReader {
   }
 }
 
-export async function loadPackages(Module: Module, requirements: string[]) {
+export async function loadPackages(Module: Module, requirements: Set<string>) {
   if (!LOAD_WHEELS_FROM_R2) return;
 
   let loadPromises = [];

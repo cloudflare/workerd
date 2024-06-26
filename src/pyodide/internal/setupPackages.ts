@@ -34,7 +34,7 @@ class SitePackagesDir {
     this.rootInfo = {
       children: new Map(),
       mode: 0o777,
-      type: 5,
+      type: "5",
       modtime: 0,
       size: 0,
       path: "",
@@ -147,12 +147,12 @@ export function buildSitePackages(
  *
  * TODO: stop using loadPackage in workerd.
  */
-export function patchLoadPackage(pyodide: { loadPackage: Function }): void {
+export function patchLoadPackage(pyodide: Pyodide): void {
   pyodide.loadPackage = disabledLoadPackage;
   return;
 }
 
-function disabledLoadPackage() {
+function disabledLoadPackage(): never {
   throw new Error(
     "pyodide.loadPackage is disabled because packages are encoded in the binary",
   );

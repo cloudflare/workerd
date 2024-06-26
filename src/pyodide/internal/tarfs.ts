@@ -1,7 +1,6 @@
-// @ts-nocheck
 import { createReadonlyFS } from "pyodide-internal:readOnlyFS";
 
-const FSOps = {
+const FSOps: FSOps = {
   getNodeMode(parent, name, info) {
     return {
       permissions: info.mode,
@@ -18,19 +17,22 @@ const FSOps = {
     }
   },
   readdir(node) {
-    return Array.from(node.info.children.keys());
+    return Array.from(node.info.children!.keys());
   },
   lookup(parent, name) {
-    return parent.info.children.get(name);
+    return parent.info.children!.get(name)!;
   },
   read(stream, position, buffer) {
-    return stream.node.info.reader.read(
+    if (stream.node.contentsOffset == undefined) {
+      throw new Error("contentsOffset is undefined");
+    }
+    return stream.node.info.reader!.read(
       stream.node.contentsOffset + position,
       buffer,
     );
   },
 };
 
-export function createTarFS(Module) {
+export function createTarFS(Module: Module) {
   return createReadonlyFS(FSOps, Module);
 }
