@@ -47,7 +47,7 @@ import {
 } from 'node-internal:internal_buffer';
 
 import {
-  validateByteSource,
+  getArrayBufferOrView,
 } from 'node-internal:crypto_util';
 
 import {
@@ -84,8 +84,15 @@ const defaults: ScryptOptions = {
 function validateParameters(password: ArrayLike, salt: ArrayLike,
                             keylen: number, options: ScryptOptions) : ValidatedScryptOptions {
   // TODO(soon): Add support for KeyObject input.
-  password = validateByteSource(password, 'password');
-  salt = validateByteSource(salt, 'salt');
+  password = getArrayBufferOrView(password, 'password');
+  salt = getArrayBufferOrView(salt, 'salt');
+
+  if (password.byteLength >= kMaxLength) {
+    throw new ERR_INVALID_ARG_VALUE('password', password, 'is too big');
+  }
+  if (salt.byteLength >= kMaxLength) {
+    throw new ERR_INVALID_ARG_VALUE('salt', salt, 'is too big');
+  }
 
   validateInteger(keylen, 'keylen', 0, kMaxLength);
 
