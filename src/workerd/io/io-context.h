@@ -884,6 +884,10 @@ private:
 
   friend class Finalizeable;
   friend class DeleteQueue;
+  template <typename T>
+  friend kj::Promise<ExceptionOr<T>> promiseForExceptionOrT(kj::Promise<T> promise);
+  template<typename Result>
+  friend Result throwOrReturnResult(jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult);
 };
 
 // =======================================================================================
@@ -998,6 +1002,49 @@ jsg::Promise<T> IoContext::awaitIoLegacyWithInputLock(jsg::Lock& js, kj::Promise
   return awaitIoImpl(js, kj::mv(promise), getInputLock(), IdentityFunc<T>());
 }
 
+// To reduce the code size impact of awaitIoImpl, move promise continuation code out of
+// awaitIoImpl() where possible. This way, the then() parameters are only templated based on one
+// type each.
+template<typename T>
+kj::Promise<IoContext::ExceptionOr<T>> promiseForExceptionOrT(kj::Promise<T> promise) {
+  if constexpr (jsg::isVoid<T>()) {
+    return promise.then([]() -> IoContext::ExceptionOr<T> {
+      return kj::none;
+    }, [](kj::Exception&& exception) -> IoContext::ExceptionOr<T> {
+      return kj::mv(exception);
+    });
+  } else {
+    return promise.then([](T&& result) -> IoContext::ExceptionOr<T> {
+      return kj::mv(result);
+    }, [](kj::Exception&& exception) -> IoContext::ExceptionOr<T> {
+      return kj::mv(exception);
+    });
+  }
+};
+
+template<typename Result>
+Result throwOrReturnResult(jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult) {
+  if constexpr (jsg::isVoid<Result>()) {
+    KJ_IF_SOME(e, exceptionOrResult) {
+      // Now that we're in a promise continuation, we can convert the error and get a good stack
+      // trace.
+      js.throwException(kj::mv(e));
+    }
+  } else {
+    KJ_SWITCH_ONEOF(exceptionOrResult) {
+      KJ_CASE_ONEOF(e, kj::Exception) {
+        // Now that we're in a promise continuation, we can convert the error and get a good stack
+        // trace.
+        js.throwException(kj::mv(e));
+      }
+      KJ_CASE_ONEOF(result, Result) {
+        return kj::mv(result);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+};
+
 template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
     jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func) {
@@ -1019,27 +1066,13 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 
   // We need to catch exceptions from KJ and merge them into the result, so that they can propagate
   // to JavaScript.
-  kj::Promise<ExceptionOr<T>> promiseForExceptionOrT = [&]() {
-    if constexpr (jsg::isVoid<T>()) {
-      return promise.then([]() -> ExceptionOr<T> {
-        return kj::none;
-      }, [](kj::Exception&& exception) -> ExceptionOr<T> {
-        return kj::mv(exception);
-      });
-    } else {
-      return promise.then([](T&& result) -> ExceptionOr<T> {
-        return kj::mv(result);
-      }, [](kj::Exception&& exception) -> ExceptionOr<T> {
-        return kj::mv(exception);
-      });
-    }
-  }();
+  kj::Promise<ExceptionOr<T>> promiseExceptionOrT = promiseForExceptionOrT(kj::mv(promise));
 
-  // Reminder: This can throw JsExceptionThrown if the execution context has been termintaed.
-  // it's important in that case that `promiseForExceptionOrT` will be destroyed before `func`.
+  // Reminder: This can throw JsExceptionThrown if the execution context has been terminated.
+  // it's important in that case that `promiseExceptionOrT` will be destroyed before `func`.
   auto [ jsPromise, resolver ] = js.newPromiseAndResolver<ExceptionOr<Result>>();
 
-  addTask(promiseForExceptionOrT
+  addTask(promiseExceptionOrT
       .then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js),
             // Reminder: It's important that `func` gets attached to the promise before the whole
@@ -1125,31 +1158,10 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
     }, kj::mv(ilOrCs));
   }));
 
-  // Reminder: This can throw JsExceptionThrown if the execution context has been termintaed. We
+  // Reminder: This can throw JsExceptionThrown if the execution context has been terminated. We
   // have already disowned `promise` and `func` by this point, though, so teardown order is no
   // longer our concern.
-  return jsPromise.then(js, [](jsg::Lock& js, ExceptionOr<Result>&& exceptionOrResult) -> Result {
-    if constexpr (jsg::isVoid<Result>()) {
-      KJ_IF_SOME(e, exceptionOrResult) {
-        // Now that we're in a promise continuation, we can convert the error and get a good stack
-        // trace.
-        js.throwException(kj::mv(e));
-      }
-      return;
-    } else {
-      KJ_SWITCH_ONEOF(exceptionOrResult) {
-        KJ_CASE_ONEOF(e, kj::Exception) {
-          // Now that we're in a promise continuation, we can convert the error and get a good stack
-          // trace.
-          js.throwException(kj::mv(e));
-        }
-        KJ_CASE_ONEOF(result, Result) {
-          return kj::mv(result);
-        }
-      }
-      KJ_UNREACHABLE;
-    }
-  });
+  return jsPromise.then(js, throwOrReturnResult<Result>);
 }
 
 template <typename T>
