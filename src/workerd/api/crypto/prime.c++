@@ -1,22 +1,18 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
-// Licensed under the Apache 2.0 license found in the LICENSE file or at:
-//     https://opensource.org/licenses/Apache-2.0
-// Copyright Joyent and Node contributors. All rights reserved. MIT license.
+#include "prime.h"
 
-#include "crypto.h"
 #include <workerd/api/crypto/impl.h>
-#include <v8.h>
 #include <openssl/bn.h>
-#include <openssl/rand.h>
-#include <workerd/jsg/jsg.h>
-#include <workerd/api/crypto/impl.h>
 
-namespace workerd::api::node {
-  kj::Array<kj::byte> CryptoImpl::randomPrime(uint32_t size, bool safe,
-      jsg::Optional<kj::Array<kj::byte>> add_buf, jsg::Optional<kj::Array<kj::byte>> rem_buf) {
+namespace workerd::api {
+
+kj::Array<kj::byte> randomPrime(uint32_t size, bool safe,
+                                kj::Maybe<kj::ArrayPtr<kj::byte>> add_buf,
+                                kj::Maybe<kj::ArrayPtr<kj::byte>> rem_buf) {
+  ClearErrorOnReturn clearErrorOnReturn;
+
   // Use mapping to have kj::Own work with optional buffer
-  const auto maybeOwnBignum = [](jsg::Optional<kj::Array<kj::byte>>& maybeBignum) {
-    return maybeBignum.map([](kj::Array<kj::byte>& a) {
+  const auto maybeOwnBignum = [](kj::Maybe<kj::ArrayPtr<kj::byte>>& maybeBignum) {
+    return maybeBignum.map([](kj::ArrayPtr<kj::byte>& a) {
       return JSG_REQUIRE_NONNULL(toBignum(a), RangeError,
           "Error importing add parameter", internalDescribeOpensslErrors());
     });
@@ -96,7 +92,12 @@ namespace workerd::api::node {
       "Error while generating prime");
 }
 
-bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks) {
+bool checkPrime(kj::ArrayPtr<kj::byte> bufferView, uint32_t num_checks) {
+  ClearErrorOnReturn clearErrorOnReturn;
+  static constexpr int32_t kMaxChecks = kj::maxValue;
+  // Strictly upper bound the number of checks. If this proves to be too expensive
+  // then we may need to consider lowering this limit further.
+  JSG_REQUIRE(num_checks <= kMaxChecks, RangeError, "Invalid number of checks");
   auto candidate = JSG_REQUIRE_NONNULL(toBignum(bufferView), Error, "Error while checking prime");
   auto ctx = OSSL_NEW(BN_CTX);
   int ret = BN_is_prime_ex(candidate.get(), num_checks, ctx.get(), nullptr);
@@ -104,4 +105,4 @@ bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_che
   return ret > 0;
 }
 
-}  // namespace workerd::api::node
+}  // namespace workerd::api

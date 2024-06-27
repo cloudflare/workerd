@@ -4,6 +4,7 @@
 #include "crypto.h"
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/crypto/kdf.h>
+#include <workerd/api/crypto/prime.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/crypto/spkac.h>
 
@@ -96,6 +97,18 @@ kj::Maybe<kj::Array<kj::byte>> CryptoImpl::exportPublicKey(kj::Array<const kj::b
 
 kj::Maybe<kj::Array<kj::byte>> CryptoImpl::exportChallenge(kj::Array<const kj::byte> input) {
   return workerd::api::exportChallenge(input);
+}
+
+kj::Array<kj::byte> CryptoImpl::randomPrime(uint32_t size, bool safe,
+                                            jsg::Optional<kj::Array<kj::byte>> add_buf,
+                                            jsg::Optional<kj::Array<kj::byte>> rem_buf) {
+  return workerd::api::randomPrime(size, safe,
+      add_buf.map([](kj::Array<kj::byte>& buf) { return buf.asPtr(); }),
+      rem_buf.map([](kj::Array<kj::byte>& buf) { return buf.asPtr(); }));
+}
+
+bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks) {
+  return workerd::api::checkPrime(bufferView.asPtr(), num_checks);
 }
 
 }  // namespace workerd::api::node
