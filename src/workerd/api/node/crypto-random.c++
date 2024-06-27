@@ -4,7 +4,7 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 #include "crypto.h"
-#include "crypto-util.h"
+#include <workerd/api/crypto/impl.h>
 #include <v8.h>
 #include <openssl/bn.h>
 #include <openssl/rand.h>
@@ -78,7 +78,7 @@ namespace workerd::api::node {
 
   // BN_generate_prime_ex() calls RAND_bytes_ex() internally.
   // Make sure the CSPRNG is properly seeded.
-  JSG_REQUIRE(workerd::api::node::CryptoUtil::CSPRNG(nullptr, 0).is_ok(), Error,
+  JSG_REQUIRE(workerd::api::CSPRNG(nullptr), Error,
       "Error while generating prime (bad random state)");
 
   auto prime = OSSL_NEW(BIGNUM);

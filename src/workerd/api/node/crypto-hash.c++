@@ -4,7 +4,6 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 #include "crypto.h"
-#include "crypto-util.h"
 #include <v8.h>
 #include <openssl/evp.h>
 #include <workerd/jsg/jsg.h>
