@@ -8,6 +8,7 @@
 #include "basics.h"
 #include "events.h"
 #include "http.h"
+#include "eventsource.h"
 #include "hibernation-event-params.h"
 #include <workerd/io/io-timers.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
@@ -524,6 +525,8 @@ public:
     JSG_NESTED_TYPE(ByteLengthQueuingStrategy);
     JSG_NESTED_TYPE(CountQueuingStrategy);
     JSG_NESTED_TYPE(ErrorEvent);
+
+    JSG_NESTED_TYPE(EventSource);
 
     if (flags.getStreamsJavaScriptControllers()) {
       JSG_NESTED_TYPE(ReadableStreamBYOBRequest);
