@@ -320,9 +320,12 @@ struct MarkPopErrorOnReturn {
 };
 
 struct ClearErrorOnReturn {
-  ClearErrorOnReturn() = default;
+  ClearErrorOnReturn() { ERR_clear_error(); }
   ~ClearErrorOnReturn() { ERR_clear_error(); }
   KJ_DISALLOW_COPY_AND_MOVE(ClearErrorOnReturn);
+
+  uint32_t peekError() { return ERR_peek_error(); }
+  uint32_t consumeError() { return ERR_get_error(); }
 };
 
 // Returns ceil(a / b) for integers (std::ceil always returns a floating point result).

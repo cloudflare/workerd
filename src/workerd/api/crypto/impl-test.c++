@@ -14,7 +14,8 @@ namespace workerd::api {
 namespace {
 
 KJ_TEST("Crypto error conversion") {
-  ERR_clear_error();
+  ClearErrorOnReturn clearErrorOnReturn;
+
   // Intentionally provide an error type not handled in throwOpensslError()
   // (RSA_R_CANNOT_RECOVER_MULTI_PRIME_KEY) that overlaps with an EC error that we do handle
   // (EC_R_INVALID_ENCODING). This test will fail if we do not check the library code of the error.

@@ -73,10 +73,10 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
     case ERR_LIB_EC:
       switch (ERR_GET_REASON(ERR_peek_last_error())) {
 #define MAP_ERROR(CODE, TEXT) \
-        case CODE: \
-          ERR_clear_error(); \
+        case CODE: { \
+          ClearErrorOnReturn clearErrorOnReturn; \
           kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line, \
-              kj::str(JSG_EXCEPTION(DOMOperationError) ": ", TEXT)));
+              kj::str(JSG_EXCEPTION(DOMOperationError) ": ", TEXT))); }
 
         MAP_ERROR(EC_R_INVALID_ENCODING, "Invalid point encoding.")
         MAP_ERROR(EC_R_INVALID_COMPRESSED_POINT, "Invalid compressed point.")

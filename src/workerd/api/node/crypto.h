@@ -1,3 +1,6 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
 #include <workerd/jsg/jsg.h>
@@ -114,16 +117,29 @@ public:
   };
 
   // Hkdf
-  kj::Array<kj::byte> getHkdf(kj::String hash, kj::Array<kj::byte> key, kj::Array<kj::byte> salt,
-                              kj::Array<kj::byte> info, uint32_t length);
+  kj::Array<kj::byte> getHkdf(kj::String hash,
+                              kj::Array<const kj::byte> key,
+                              kj::Array<const kj::byte> salt,
+                              kj::Array<const kj::byte> info,
+                              uint32_t length);
 
   // Pbkdf2
   kj::Array<kj::byte> getPbkdf(jsg::Lock& js,
-                               kj::Array<kj::byte> password,
-                               kj::Array<kj::byte> salt,
+                               kj::Array<const kj::byte> password,
+                               kj::Array<const kj::byte> salt,
                                uint32_t num_iterations,
                                uint32_t keylen,
                                kj::String name);
+
+  // Scrypt
+  kj::Array<kj::byte> getScrypt(jsg::Lock& js,
+                                kj::Array<const kj::byte> password,
+                                kj::Array<const kj::byte> salt,
+                                uint32_t N,
+                                uint32_t r,
+                                uint32_t p,
+                                uint32_t maxmem,
+                                uint32_t keylen);
 
   // Keys
   struct KeyExportOptions {
@@ -210,6 +226,8 @@ public:
     JSG_METHOD(getHkdf);
     // Pbkdf2
     JSG_METHOD(getPbkdf);
+    // Scrypt
+    JSG_METHOD(getScrypt);
     // Keys
     JSG_METHOD(exportKey);
     JSG_METHOD(equals);

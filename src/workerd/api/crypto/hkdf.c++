@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
+#include "kdf.h"
 #include <openssl/crypto.h>
 #include <openssl/hkdf.h>
 
@@ -45,17 +46,8 @@ private:
 
     auto derivedLengthBytes = length / 8;
 
-    kj::Vector<kj::byte> result(derivedLengthBytes);
-    result.resize(derivedLengthBytes);
-
-    auto operationSucceed = HKDF(result.begin(), result.size(), hashType, keyData.begin(),
-        keyData.size(), salt.begin(), salt.size(), info.begin(), info.size());
-
-    if (operationSucceed != 1) {
-      JSG_FAIL_REQUIRE(DOMOperationError, "HKDF deriveBits failed.");
-    }
-
-    return result.releaseAsArray();
+    return JSG_REQUIRE_NONNULL(hkdf(derivedLengthBytes, hashType, keyData, salt, info),
+        DOMOperationError, "HKDF deriveBits failed.");
   }
 
   kj::StringPtr getAlgorithmName() const override { return "HKDF"; }
@@ -75,6 +67,18 @@ private:
 };
 
 }  // namespace
+
+kj::Maybe<kj::Array<kj::byte>> hkdf(size_t length, const EVP_MD* digest,
+                                    kj::ArrayPtr<const kj::byte> key,
+                                    kj::ArrayPtr<const kj::byte> salt,
+                                    kj::ArrayPtr<const kj::byte> info) {
+  auto buf = kj::heapArray<kj::byte>(length);
+  if (HKDF(buf.begin(), length, digest, key.begin(), key.size(), salt.begin(),
+            salt.size(), info.begin(), info.size()) != 1) {
+    return kj::none;
+  }
+  return kj::mv(buf);
+}
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHkdf(
     jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,

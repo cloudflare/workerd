@@ -13,11 +13,6 @@
 
 namespace workerd::api {
 namespace {
-
-std::unique_ptr<EVP_CIPHER_CTX, void(*)(EVP_CIPHER_CTX*)> makeCipherContext() {
-  return {EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free};
-}
-
 auto lookupAesCbcType(uint bitLength) {
   switch (bitLength) {
     case 128: return EVP_aes_128_cbc();
@@ -60,7 +55,7 @@ int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
   // throws an unhelpful opaque OperationError.
 
   // Clear the error queue; who knows what kind of junk is in there.
-  ERR_clear_error();
+  ClearErrorOnReturn clearErrorOnReturn;
 
   int finalPlainSize = 0;
   if (EVP_DecryptFinal_ex(cipherCtx, out, &finalPlainSize)) {
@@ -69,7 +64,7 @@ int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
 
   // Decryption failure! Let's figure out what exception to throw.
 
-  auto ec = ERR_peek_error();
+  auto ec = clearErrorOnReturn.peekError();
 
   // If the error code is anything other than zero or BAD_DECRYPT, just throw an opaque
   // OperationError for consistency with our OSSLCALL() macro. Notably, AES-GCM tag authentication
@@ -79,7 +74,7 @@ int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
       "Unexpected issue decrypting", internalDescribeOpensslErrors());
 
   // Consume the error since it's one we were expecting.
-  ERR_get_error();
+  clearErrorOnReturn.consumeError();
 
   // Otherwise, tell the script author they gave us garbage.
   JSG_FAIL_REQUIRE(DOMOperationError, "Decryption failed. This could be due "
@@ -196,7 +191,7 @@ private:
     int tagLength = algorithm.tagLength.orDefault(128);
     validateAesGcmTagLength(tagLength);
 
-    auto cipherCtx = makeCipherContext();
+    auto cipherCtx = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
     KJ_ASSERT(cipherCtx.get() != nullptr);
 
     auto type = lookupAesGcmType(keyData.size() * 8);
@@ -262,7 +257,7 @@ private:
 
     auto additionalData = algorithm.additionalData.orDefault(kj::Array<kj::byte>()).asPtr();
 
-    auto cipherCtx = makeCipherContext();
+    auto cipherCtx = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
     KJ_ASSERT(cipherCtx.get() != nullptr);
 
     auto type = lookupAesGcmType(keyData.size() * 8);
@@ -326,7 +321,8 @@ private:
     JSG_REQUIRE(iv.size() == 16, DOMOperationError, "AES-CBC IV must be 16 bytes long (provided ",
         iv.size(), " bytes).");
 
-    auto cipherCtx = makeCipherContext();
+    auto cipherCtx = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
+    KJ_ASSERT(cipherCtx.get() != nullptr);
     auto type = lookupAesCbcType(keyData.size() * 8);
 
     // Set up the cipher context with the initialization vector.
@@ -366,7 +362,7 @@ private:
     JSG_REQUIRE(iv.size() == 16, DOMOperationError,
         "AES-CBC IV must be 16 bytes long (provided ", iv.size(), ").");
 
-    auto cipherCtx = makeCipherContext();
+    auto cipherCtx = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
     KJ_ASSERT(cipherCtx.get() != nullptr);
 
     auto type = lookupAesCbcType(keyData.size() * 8);
@@ -556,7 +552,9 @@ private:
     // Workers are limited to 128MB so this isn't actually a realistic concern, but sanity check.
     JSG_REQUIRE(input.size() < INT_MAX, DOMOperationError, "Input is too large to encrypt.");
 
-    auto cipherContext = makeCipherContext();
+    auto cipherContext = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
+    KJ_ASSERT(cipherContext.get() != nullptr);
+
     // For CTR, it really does not matter whether we are encrypting or decrypting, so set enc to 0.
     JSG_REQUIRE(EVP_CipherInit_ex(cipherContext.get(), cipher, nullptr,
         keyData.asPtr().asBytes().begin(), counter.asBytes().begin(), 0),

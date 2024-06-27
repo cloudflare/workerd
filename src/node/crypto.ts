@@ -59,6 +59,11 @@ import {
 } from 'node-internal:crypto_pbkdf2';
 
 import {
+  scrypt,
+  scryptSync,
+} from 'node-internal:crypto_scrypt';
+
+import {
   KeyObject,
   PublicKeyObject,
   PrivateKeyObject,
@@ -105,6 +110,9 @@ export {
   // Pbkdf2
   pbkdf2,
   pbkdf2Sync,
+  // Scrypt
+  scrypt,
+  scryptSync,
   ArrayLike as arrayLike,
   // Keys
   KeyObject,
@@ -206,6 +214,9 @@ export default {
   // Pbkdf2
   pbkdf2,
   pbkdf2Sync,
+  // Scrypt
+  scrypt,
+  scryptSync,
   // Misc
   getCiphers,
   getCurves,
@@ -298,8 +309,8 @@ export default {
 //   * [.] crypto.hkdfSync(digest, ikm, salt, info, keylen) (* still needs KeyObject support)
 //   * [x] crypto.pbkdf2(password, salt, iterations, keylen, digest, callback)
 //   * [x] crypto.pbkdf2Sync(password, salt, iterations, keylen, digest)
-//   * [ ] crypto.scrypt(password, salt, keylen[, options], callback)
-//   * [ ] crypto.scryptSync(password, salt, keylen[, options])
+//   * [x] crypto.scrypt(password, salt, keylen[, options], callback)
+//   * [x] crypto.scryptSync(password, salt, keylen[, options])
 // * WebCrypto
 //   * [x] crypto.subtle
 //   * [x] crypto.webcrypto

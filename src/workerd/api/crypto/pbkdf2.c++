@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
+#include <workerd/api/crypto/kdf.h>
 #include <openssl/crypto.h>
 
 namespace workerd::api {
@@ -52,11 +53,8 @@ private:
     // wisest.
     checkPbkdfLimits(js, iterations);
 
-    auto output = kj::heapArray<kj::byte>(length / 8);
-    OSSLCALL(PKCS5_PBKDF2_HMAC(keyData.asPtr().asChars().begin(), keyData.size(),
-                               salt.begin(), salt.size(),
-                               iterations, hashType, output.size(), output.begin()));
-    return kj::mv(output);
+    return JSG_REQUIRE_NONNULL(pbkdf2(length / 8, iterations, hashType, keyData, salt),
+        Error, "PBKDF2 deriveBits failed.");
   }
 
   // TODO(bug): Possibly by mistake, PBKDF2 was historically not on the allow list of
@@ -88,6 +86,25 @@ private:
 };
 
 }  // namespace
+
+kj::Maybe<kj::Array<kj::byte>> pbkdf2(size_t length,
+                                      size_t iterations,
+                                      const EVP_MD* digest,
+                                      kj::ArrayPtr<const kj::byte> password,
+                                      kj::ArrayPtr<const kj::byte> salt) {
+  auto buf = kj::heapArray<kj::byte>(length);
+  if (PKCS5_PBKDF2_HMAC(password.asChars().begin(),
+                        password.size(),
+                        salt.begin(),
+                        salt.size(),
+                        iterations,
+                        digest,
+                        length,
+                        buf.begin()) != 1) {
+    return kj::none;
+  }
+  return kj::mv(buf);
+}
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importPbkdf2(
     jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
