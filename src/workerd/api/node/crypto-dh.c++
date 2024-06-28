@@ -11,7 +11,7 @@
 
 // Import DH primes if needed.
 #if WORKERD_BSSL_NEED_DH_PRIMES
-#include "dh_primes.h"
+#include <workerd/api/crypto/dh_primes.h>
 #endif // WORKERD_BSSL_NEED_DH_PRIMES
 
 #if !_WIN32
