@@ -3,8 +3,8 @@ interface Reader {
   read: (offset: number, dest: Uint8Array) => number;
 }
 
-interface FSInfo {
-  children: Map<string, FSInfo> | undefined;
+interface TarFSInfo {
+  children: Map<string, TarFSInfo> | undefined;
   mode: number;
   type: string;
   modtime: number;
@@ -16,59 +16,60 @@ interface FSInfo {
   reader?: Reader;
 }
 
-declare type MetadataFSInfo = Map<string, MetadataFSInfo>;
+declare type MetadataDirInfo = Map<string, MetadataDirInfo>;
+declare type MetadataFSInfo = MetadataDirInfo | number; // file infos are numbers and dir infos are maps
 
 interface FS {
   mkdir: (dirname: string) => void;
   mkdirTree: (dirname: string) => void;
   writeFile: (fname: string, contents: Uint8Array, options: object) => void;
-  mount: (fs: object, options: { info?: FSInfo }, path: string) => void;
-  createNode: (parent: FSNode | null, name: string, mode: number) => FSNode;
+  mount<Info>(fs: object, options: { info?: Info }, path: string): void;
+  createNode<Info>(parent: FSNode<Info> | null, name: string, mode: number): FSNode<Info>;
   isFile: (mode: number) => boolean;
   genericErrors: Error[];
 }
 
-interface FSOps {
-  getNodeMode: (parent: FSNode | null, name: string, info: any) => {
+interface FSOps<Info> {
+  getNodeMode: (parent: FSNode<Info> | null, name: string, info: Info) => {
     permissions: number;
     isDir: boolean;
   };
-  setNodeAttributes: (node: FSNode, info: any, isDir: boolean) => void;
-  readdir: (node: FSNode) => string[];
-  lookup: (parent: FSNode, name: string) => (FSInfo | MetadataFSInfo);
-  read: (stream: FSStream, position: number, buffer: Uint8Array) => number;
+  setNodeAttributes: (node: FSNode<Info>, info: Info, isDir: boolean) => void;
+  readdir: (node: FSNode<Info>) => string[];
+  lookup: (parent: FSNode<Info>, name: string) => Info;
+  read: (stream: FSStream<Info>, position: number, buffer: Uint8Array) => number;
 }
 
-interface MountOpts {
-  opts: { info: FSInfo }
+interface MountOpts<Info> {
+  opts: { info: Info }
 }
 
-interface FSNodeOps {
-  getattr: (node: FSNode) => FSAttr;
-  readdir: (node: FSNode) => string[];
-  lookup: (parent: FSNode, name: string) => FSNode;
+interface FSNodeOps<Info> {
+  getattr: (node: FSNode<Info>) => FSAttr;
+  readdir: (node: FSNode<Info>) => string[];
+  lookup: (parent: FSNode<Info>, name: string) => FSNode<Info>;
 }
 
-interface FSStream {
-  node: FSNode;
+interface FSStream<Info> {
+  node: FSNode<Info>;
   position: number;
 }
 
-interface FSStreamOps {
-  llseek: (stream: FSStream, offset: number, whence: number) => number;
-  read: (stream: FSStream, buffer: Uint8Array, offset: number, length: number, position: number) => number;
+interface FSStreamOps<Info> {
+  llseek: (stream: FSStream<Info>, offset: number, whence: number) => number;
+  read: (stream: FSStream<Info>, buffer: Uint8Array, offset: number, length: number, position: number) => number;
 }
 
-interface FSNode {
+interface FSNode<Info> {
   id: number;
   usedBytes: number;
   mode: number;
   modtime: number;
-  node_ops: FSNodeOps;
-  stream_ops: FSStreamOps;
-  info: FSInfo;
+  node_ops: FSNodeOps<Info>;
+  stream_ops: FSStreamOps<Info>;
+  info: Info;
   contentsOffset?: number;
-  tree?: MetadataFSInfo;
+  tree?: MetadataDirInfo;
   index?: number;
 }
 
@@ -88,9 +89,9 @@ interface FSAttr {
   blocks: number;
 }
 
-interface EmscriptenFS {
-  mount: (mount: MountOpts) => FSNode;
-  createNode: (parent: FSNode | null, name: string, info: FSInfo | MetadataFSInfo) => FSNode;
-  node_ops: FSNodeOps;
-  stream_ops: FSStreamOps;
+interface EmscriptenFS<Info> {
+  mount: (mount: MountOpts<Info>) => FSNode<Info>;
+  createNode: (parent: FSNode<Info> | null, name: string, info: Info) => FSNode<Info>;
+  node_ops: FSNodeOps<Info>;
+  stream_ops: FSStreamOps<Info>;
 }

@@ -25,7 +25,7 @@ export function createMetadataFS(Module: Module): object { // TODO: Make this ty
   const names = MetadataReader.getNames();
   const sizes = MetadataReader.getSizes();
   const rootInfo = createTree(names);
-  const FSOps: FSOps = {
+  const FSOps: FSOps<MetadataFSInfo> = {
     getNodeMode(parent, name, info) {
       return {
         permissions: 0o555, // read and execute but not write
@@ -39,17 +39,23 @@ export function createMetadataFS(Module: Module): object { // TODO: Make this ty
         info = rootInfo;
       }
       if (isDir) {
-        node.tree = info;
+        node.tree = info as MetadataDirInfo;
       } else {
-        node.index = info;
-        node.usedBytes = sizes[info];
+        node.index = info as number;
+        node.usedBytes = sizes[info as number];
       }
     },
     readdir(node) {
-      return Array.from(node.tree!.keys());
+      if (node.tree == undefined) {
+        throw new Error("cannot read directory, tree is undefined");
+      }
+      return Array.from(node.tree.keys());
     },
     lookup(parent, name) {
-      return parent.tree!.get(name)!;
+      if (parent.tree == undefined) {
+        throw new Error("cannot lookup directory, tree is undefined");
+      }
+      return parent.tree.get(name)!;
     },
     read(stream, position, buffer) {
       return MetadataReader.read(stream.node.index!, position, buffer);

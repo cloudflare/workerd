@@ -19,7 +19,7 @@ function decodeNumber(buf: Uint8Array, offset: number, size: number): number {
   return parseInt(decodeField(buf, offset, size), 8);
 }
 
-function decodeHeader(buf: Uint8Array, reader: Reader): FSInfo {
+function decodeHeader(buf: Uint8Array, reader: Reader): TarFSInfo {
   const nameBase = decodeField(buf, 0, 100);
   const namePrefix = decodeField(buf, 345, 155);
   let path = namePrefix + nameBase;
@@ -44,10 +44,10 @@ function decodeHeader(buf: Uint8Array, reader: Reader): FSInfo {
   };
 }
 
-export function parseTarInfo(reader = TarReader): [FSInfo, string[]] {
-  const directories: FSInfo[] = [];
+export function parseTarInfo(reader = TarReader): [TarFSInfo, string[]] {
+  const directories: TarFSInfo[] = [];
   const soFiles = [];
-  const root: FSInfo = {
+  const root: TarFSInfo = {
     children: new Map(),
     mode: 0o777,
     type: "5",
