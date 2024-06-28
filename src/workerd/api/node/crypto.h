@@ -212,6 +212,10 @@ public:
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
 
+  bool verifySpkac(kj::Array<const kj::byte> input);
+  kj::Maybe<kj::Array<kj::byte>> exportPublicKey(kj::Array<const kj::byte> input);
+  kj::Maybe<kj::Array<kj::byte>> exportChallenge(kj::Array<const kj::byte> input);
+
   JSG_RESOURCE_TYPE(CryptoImpl) {
     // DH
     JSG_NESTED_TYPE(DiffieHellmanHandle);
@@ -236,6 +240,10 @@ public:
     JSG_METHOD(createSecretKey);
     JSG_METHOD(createPrivateKey);
     JSG_METHOD(createPublicKey);
+    // Spkac
+    JSG_METHOD(verifySpkac);
+    JSG_METHOD(exportPublicKey);
+    JSG_METHOD(exportChallenge);
   }
 };
 

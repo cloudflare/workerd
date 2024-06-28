@@ -77,6 +77,8 @@ import {
   createSecretKey,
 } from 'node-internal:crypto_keys';
 
+import { Certificate } from 'node-internal:crypto_spkac';
+
 export {
   // DH
   DiffieHellman,
@@ -126,6 +128,8 @@ export {
   createPrivateKey,
   createPublicKey,
   createSecretKey,
+  // Spkac
+  Certificate,
 }
 
 export function getCiphers() {
@@ -234,7 +238,7 @@ export default {
 };
 
 // Classes
-//   * [ ] crypto.Certificate
+//   * [x] crypto.Certificate
 //   * [ ] crypto.Cipher
 //   * [ ] crypto.Decipher
 //   * [x] crypto.DiffieHellman

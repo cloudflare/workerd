@@ -5,6 +5,7 @@
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/crypto/kdf.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/api/crypto/spkac.h>
 
 namespace workerd::api::node {
 
@@ -84,4 +85,17 @@ kj::Array<kj::byte> CryptoImpl::getScrypt(jsg::Lock& js,
   return JSG_REQUIRE_NONNULL(scrypt(keylen, N, r, p, maxmem, password, salt),
       Error, "Scrypt failed");
 }
+
+bool CryptoImpl::verifySpkac(kj::Array<const kj::byte> input) {
+  return workerd::api::verifySpkac(input);
+}
+
+kj::Maybe<kj::Array<kj::byte>> CryptoImpl::exportPublicKey(kj::Array<const kj::byte> input) {
+  return workerd::api::exportPublicKey(input);
+}
+
+kj::Maybe<kj::Array<kj::byte>> CryptoImpl::exportChallenge(kj::Array<const kj::byte> input) {
+  return workerd::api::exportChallenge(input);
+}
+
 }  // namespace workerd::api::node

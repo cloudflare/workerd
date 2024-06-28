@@ -48,6 +48,11 @@ export function createSecretKey(key: ArrayBuffer | ArrayBufferView): CryptoKey;
 export function createPrivateKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;
 export function createPublicKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;
 
+// Spkac
+export function verifySpkac(input: ArrayBufferView|ArrayBuffer): boolean;
+export function exportPublicKey(input: ArrayBufferView|ArrayBuffer): null | ArrayBuffer;
+export function exportChallenge(input: ArrayBufferView|ArrayBuffer): null | ArrayBuffer;
+
 export type KeyData = string | ArrayBuffer | ArrayBufferView;
 
 export interface RsaKeyAlgorithm {
