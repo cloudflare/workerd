@@ -29,4 +29,59 @@ private:
   ZeroOnFree keyData;
 };
 
+// ======================================================================================
+// Keys
+
+enum class PkEncoding {
+  Object,
+  PKCS1,
+  PKCS8,
+  SPKI,
+  SEC1
+};
+
+enum class PkFormat {
+  DER,
+  PEM,
+  JWK
+};
+
+enum class KeyType {
+  Secret,
+  Public,
+  Private
+};
+
+struct ParsedKey {
+  KeyType type;
+  kj::Own<EVP_PKEY> key;
+};
+
+struct ParseKeyOptions {
+  PkEncoding encoding = PkEncoding::Object;
+  PkFormat format = PkFormat::DER;
+  kj::Maybe<kj::StringPtr> maybeCipherName;
+  kj::Maybe<kj::ArrayPtr<kj::byte>> maybePassphrase;
+};
+
+// Attempt to parse the given key data. The result may be a public key or private key.
+kj::Maybe<ParsedKey> tryParseKey(kj::ArrayPtr<const kj::byte> keyData,
+                                 kj::Maybe<ParseKeyOptions> options);
+
+// Attempt to parse the given key data. The result must be a private key.
+kj::Maybe<ParsedKey> tryParseKeyPrivate(kj::ArrayPtr<const kj::byte> keyData,
+                                        kj::Maybe<ParseKeyOptions> options);
+
+// Creates the correct CryptoKey::Impl for the given EVP_PKEY type or returns kj::none
+// if the key type is not supported.
+kj::Maybe<jsg::Ref<CryptoKey>> newCryptoKeyImpl(ParsedKey&& parsedKey);
+
+kj::Maybe<kj::Own<CryptoKey::Impl>> newRsaCryptoKeyImpl(KeyType type, kj::Own<EVP_PKEY> key);
+kj::Maybe<kj::Own<CryptoKey::Impl>> newRsaPssCryptoKeyImpl(KeyType type, kj::Own<EVP_PKEY> key);
+kj::Maybe<kj::Own<CryptoKey::Impl>> newEcCryptoKeyImpl(KeyType type, kj::Own<EVP_PKEY> key);
+kj::Maybe<kj::Own<CryptoKey::Impl>> newEd25519CryptoKeyImpl(KeyType type, kj::Own<EVP_PKEY> key);
+
+inline kj::Maybe<kj::Own<CryptoKey::Impl>> newDsaCryptoKeyImpl(KeyType type, kj::Own<EVP_PKEY> key) {
+  return kj::none;
+}
 }  // namespace workerd::api

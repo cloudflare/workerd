@@ -14,6 +14,7 @@
 #include <kj/function.h>
 #include <type_traits>
 #include <workerd/api/util.h>
+#include <workerd/api/crypto/keys.h>
 #include <workerd/io/features.h>
 
 namespace workerd::api {
@@ -2306,4 +2307,155 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
   // In X25519 we ignore the id-X25519 identifier, as with id-ecDH above.
   return kj::heap<EdDsaKey>(kj::mv(evpPkey), normalizedName, keyType, extractable, usages);
 }
+
+// ======================================================================================
+
+namespace {
+static constexpr uint16_t kMaxModulus = kj::maxValue;
+}  // namespace
+
+kj::Maybe<kj::Own<CryptoKey::Impl>> newRsaCryptoKeyImpl(KeyType type, kj::Own<EVP_PKEY> key) {
+  switch (type) {
+    case KeyType::Private: {
+      RSA* rsa = EVP_PKEY_get0_RSA(key.get());
+      KJ_ASSERT(rsa != nullptr);
+      const BIGNUM* n = RSA_get0_n(rsa);
+      const BIGNUM* d = RSA_get0_d(rsa);
+
+      uint64_t modulus = BN_get_word(n);
+      return kj::heap<RsassaPkcs1V15Key>(
+        kj::mv(key),
+        CryptoKey::RsaKeyAlgorithm {
+          .name = "RSA-PKCS1-v1_5"_kj,
+          .modulusLength = modulus >= (uint64_t)kMaxModulus ? kMaxModulus :
+              (uint16_t)modulus,
+          .publicExponent = KJ_ASSERT_NONNULL(bignumToArray(*d)),
+        },
+        "private"_kj, true, CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::decrypt()
+      );
+    }
+    case KeyType::Public: {
+      RSA* rsa = EVP_PKEY_get0_RSA(key.get());
+      KJ_ASSERT(rsa != nullptr);
+      const BIGNUM* n = RSA_get0_n(rsa);
+      const BIGNUM* e = RSA_get0_e(rsa);
+
+      uint64_t modulus = BN_get_word(n);
+      return kj::heap<RsassaPkcs1V15Key>(
+        kj::mv(key),
+        CryptoKey::RsaKeyAlgorithm {
+          .name = "RSA-PKCS1-v1_5"_kj,
+          .modulusLength = modulus >= (uint64_t)kMaxModulus ? kMaxModulus :
+              (uint16_t)modulus,
+          .publicExponent = KJ_ASSERT_NONNULL(bignumToArray(*e)),
+        },
+        "public"_kj, true, CryptoKeyUsageSet::verify() | CryptoKeyUsageSet::encrypt()
+      );
+    }
+    case KeyType::Secret: return kj::none;
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<kj::Own<CryptoKey::Impl>> newRsaPssCryptoKeyImpl(KeyType type, kj::Own<EVP_PKEY> key) {
+  switch (type) {
+    case KeyType::Private: {
+      RSA* rsa = EVP_PKEY_get0_RSA(key.get());
+      KJ_ASSERT(rsa != nullptr);
+      const BIGNUM* n = RSA_get0_n(rsa);
+      const BIGNUM* d = RSA_get0_d(rsa);
+      uint64_t modulus = BN_get_word(n);
+      return kj::heap<RsaPssKey>(
+        kj::mv(key),
+        CryptoKey::RsaKeyAlgorithm {
+          .name = "RSA-PSS"_kj,
+          .modulusLength = modulus >= (uint64_t)kMaxModulus ? kMaxModulus :
+              (uint16_t)modulus,
+          .publicExponent = KJ_ASSERT_NONNULL(bignumToArray(*d)),
+        },
+        "private"_kj, true, CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::decrypt()
+      );
+    }
+    case KeyType::Public: {
+      RSA* rsa = EVP_PKEY_get0_RSA(key.get());
+      KJ_ASSERT(rsa != nullptr);
+      const BIGNUM* n = RSA_get0_n(rsa);
+      const BIGNUM* e = RSA_get0_e(rsa);
+
+      uint64_t modulus = BN_get_word(n);
+      return kj::heap<RsaPssKey>(
+        kj::mv(key),
+        CryptoKey::RsaKeyAlgorithm {
+          .name = "RSA-PSS"_kj,
+          .modulusLength = modulus >= (uint64_t)kMaxModulus ? kMaxModulus :
+              (uint16_t)modulus,
+          .publicExponent = KJ_ASSERT_NONNULL(bignumToArray(*e)),
+        },
+        "public"_kj, true, CryptoKeyUsageSet::verify() | CryptoKeyUsageSet::encrypt()
+      );
+    }
+    case KeyType::Secret: return kj::none;
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<kj::Own<CryptoKey::Impl>> newEcCryptoKeyImpl(KeyType type, kj::Own<EVP_PKEY> key) {
+  static constexpr auto getCurveName = [&](int nid) -> kj::StringPtr {
+    switch (nid) {
+      case NID_X9_62_prime192v1: return "P-192"_kj;
+      case NID_secp224r1: return "P-224"_kj;
+      case NID_X9_62_prime256v1: return "P-256"_kj;
+      case NID_secp384r1: return "P-384"_kj;
+      case NID_secp521r1: return "P-521"_kj;
+      default: return nullptr;
+    }
+  };
+
+  switch (type) {
+    case KeyType::Private: {
+      const EC_KEY* ec = EVP_PKEY_get0_EC_KEY(key.get());
+      const EC_GROUP* group = EC_KEY_get0_group(ec);
+      return kj::heap<EllipticKey>(
+          kj::mv(key),
+          CryptoKey::EllipticKeyAlgorithm {
+            .name = "ECDSA"_kj,
+            .namedCurve = getCurveName(EC_GROUP_get_curve_name(group)),
+          },
+          // TODO(now): rsSize?
+          "private"_kj, 0, true, CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
+    }
+    case KeyType::Public: {
+      const EC_KEY* ec = EVP_PKEY_get0_EC_KEY(key.get());
+      const EC_GROUP* group = EC_KEY_get0_group(ec);
+      return kj::heap<EllipticKey>(
+          kj::mv(key),
+          CryptoKey::EllipticKeyAlgorithm {
+            .name = "ECDSA"_kj,
+            .namedCurve = getCurveName(EC_GROUP_get_curve_name(group)),
+          },
+          // TODO(now): rsSize?
+          "public"_kj, 0, true, CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
+    }
+    case KeyType::Secret: return kj::none;
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<kj::Own<CryptoKey::Impl>> newEd25519CryptoKeyImpl(KeyType type, kj::Own<EVP_PKEY> key) {
+  switch (type) {
+    case KeyType::Private: {
+      return kj::heap<EdDsaKey>(
+          kj::mv(key), "Ed25519"_kj, "private"_kj, true,
+          CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
+    }
+    case KeyType::Public: {
+      return kj::heap<EdDsaKey>(
+          kj::mv(key), "Ed25519"_kj, "public"_kj, true,
+          CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
+    }
+    case KeyType::Secret: return kj::none;
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace workerd::api
