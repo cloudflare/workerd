@@ -197,7 +197,7 @@ public:
   kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> exportKey(
       jsg::Lock& js,
       jsg::Ref<CryptoKey> key,
-      jsg::Optional<KeyExportOptions> options);
+      KeyExportOptions options);
 
   bool equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey);
 

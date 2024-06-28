@@ -5,6 +5,7 @@
 #include <workerd/api/crypto/digest.h>
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/crypto/kdf.h>
+#include <workerd/api/crypto/keys.h>
 #include <workerd/api/crypto/prime.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/crypto/spkac.h>
@@ -241,5 +242,93 @@ kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::generateKeys() {
 }
 
 int CryptoImpl::DiffieHellmanHandle::getVerifyError() { return verifyError; }
+
+// ======================================================================================
+// Keys
+
+kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
+    jsg::Lock& js,
+    jsg::Ref<CryptoKey> key,
+    KeyExportOptions options) {
+  JSG_REQUIRE(key->getExtractable(), TypeError, "Unable to export non-extractable key");
+
+  kj::StringPtr format = JSG_REQUIRE_NONNULL(options.format, TypeError, "Missing format option");
+  if (format == "jwk"_kj) {
+    // When format is jwk, all other options are ignored.
+    return key->impl->exportKey(format);
+  }
+
+  if (key->getType() == "secret"_kj) {
+    // For secret keys, we only pay attention to the format option, which will be
+    // one of either "buffer" or "jwk". The "buffer" option correlates to the "raw"
+    // format in Web Crypto. The "jwk" option is handled above.
+    JSG_REQUIRE(format == "buffer"_kj, TypeError, "Invalid format for secret key export: ", format);
+    return key->impl->exportKey("raw"_kj);
+  }
+
+  kj::StringPtr type = JSG_REQUIRE_NONNULL(options.type, TypeError, "Missing type option");
+  auto data = key->impl->exportKeyExt(format, type,
+                                      kj::mv(options.cipher),
+                                      kj::mv(options.passphrase));
+  if (format == "pem"_kj) {
+    return kj::String(data.releaseAsChars());
+  }
+  return kj::mv(data);
+}
+
+bool CryptoImpl::equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey) {
+  return *key == *otherKey;
+}
+
+CryptoKey::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
+    jsg::Lock& js, jsg::Ref<CryptoKey> key) {
+  JSG_REQUIRE(key->getType() != "secret"_kj, Error, "Secret keys do not have asymmetric details");
+  return key->getAsymmetricKeyDetails();
+}
+
+kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
+  JSG_REQUIRE(key->getType() != "secret"_kj, TypeError,
+      "Secret key does not have an asymmetric type");
+  auto name = key->getAlgorithmName();
+
+#define ALG_MAP(V)              \
+  V("RSASSA-PKCS1-v1_5", "rsa") \
+  V("RSA-PSS", "rsa")           \
+  V("RSA-OAEP", "rsa")          \
+  V("ECDSA", "ec")              \
+  V("Ed25519", "ed25519")       \
+  V("NODE-ED25519", "ed25519")  \
+  V("ECDH", "ecdh")             \
+  V("X25519", "x25519")
+
+#define V(a, b) if (name == a) return b##_kj;
+
+  ALG_MAP(V)
+
+#undef V
+#undef ALG_MAP
+
+  // If the algorithm is not in the map, return the algorithm name.
+  return key->getAlgorithmName();
+}
+
+jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, kj::Array<kj::byte> keyData) {
+  // We need to copy the key data because the received keyData will be from an
+  // ArrayBuffer that remains mutatable after this function returns. We do not
+  // want anyone to be able to modify the key data after it has been created.
+  return jsg::alloc<CryptoKey>(kj::heap<SecretKey>(kj::heapArray(keyData.asPtr())));
+}
+
+jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
+    jsg::Lock& js,
+    CreateAsymmetricKeyOptions options) {
+  KJ_UNIMPLEMENTED("not implemented");
+}
+
+jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(
+    jsg::Lock& js,
+    CreateAsymmetricKeyOptions options) {
+  KJ_UNIMPLEMENTED("not implemented");
+}
 
 }  // namespace workerd::api::node
