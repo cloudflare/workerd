@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 #include "crypto.h"
-#include <workerd/api/crypto/hmac.h>
+#include <workerd/api/crypto/digest.h>
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/crypto/kdf.h>
 #include <workerd/api/crypto/prime.h>
@@ -112,6 +112,7 @@ bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_che
   return workerd::api::checkPrime(bufferView.asPtr(), num_checks);
 }
 
+// ======================================================================================
 jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
     kj::String algorithm,
     kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
@@ -156,6 +157,38 @@ kj::Array<kj::byte> CryptoImpl::HmacHandle::oneshot(
 
 void CryptoImpl::HmacHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackFieldWithSize("digest", ctx.size());
+}
+
+// ======================================================================================
+jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::constructor(
+    kj::String algorithm, kj::Maybe<uint32_t> xofLen) {
+  return jsg::alloc<HashHandle>(HashContext(algorithm, xofLen));
+}
+
+int CryptoImpl::HashHandle::update(kj::Array<kj::byte> data) {
+  ctx.update(data);
+  return 1;
+}
+
+kj::ArrayPtr<kj::byte> CryptoImpl::HashHandle::digest() {
+  return ctx.digest();
+}
+
+jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::copy(kj::Maybe<uint32_t> xofLen) {
+  return jsg::alloc<HashHandle>(ctx.clone(kj::mv(xofLen)));
+}
+
+void CryptoImpl::HashHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackFieldWithSize("digest", ctx.size());
+}
+
+kj::Array<kj::byte> CryptoImpl::HashHandle::oneshot(
+    kj::String algorithm,
+    kj::Array<kj::byte> data,
+    kj::Maybe<uint32_t> xofLen) {
+  HashContext ctx(algorithm, xofLen);
+  ctx.update(data);
+  return kj::heapArray(ctx.digest());
 }
 
 }  // namespace workerd::api::node

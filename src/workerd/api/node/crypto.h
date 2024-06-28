@@ -65,31 +65,27 @@ public:
   // Hash
   class HashHandle final: public jsg::Object {
     public:
-      HashHandle(kj::String& algorithm, kj::Maybe<uint32_t> xofLen);
-      HashHandle(EVP_MD_CTX* in_ctx, kj::Maybe<uint32_t> xofLen);
+      HashHandle(HashContext ctx) : ctx(kj::mv(ctx)) {}
 
-      jsg::Ref<HashHandle> copy(jsg::Lock& js, kj::Maybe<uint32_t> xofLen);
-      int update(jsg::Lock& js, kj::Array<kj::byte> data);
-      kj::Array<kj::byte> digest(jsg::Lock& js);
-      static jsg::Ref<HashHandle> constructor(jsg::Lock& js, kj::String algorithm,
-                                              kj::Maybe<uint32_t> xofLen);
+      static jsg::Ref<HashHandle> constructor(kj::String algorithm, kj::Maybe<uint32_t> xofLen);
+      static kj::Array<kj::byte> oneshot(kj::String algorithm, kj::Array<kj::byte> data,
+                                         kj::Maybe<uint32_t> xofLen);
+
+      jsg::Ref<HashHandle> copy(kj::Maybe<uint32_t> xofLen);
+      int update(kj::Array<kj::byte> data);
+      kj::ArrayPtr<kj::byte> digest();
 
       JSG_RESOURCE_TYPE(HashHandle) {
         JSG_METHOD(update);
         JSG_METHOD(digest);
         JSG_METHOD(copy);
+        JSG_STATIC_METHOD(oneshot);
       };
 
-      void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-        tracker.trackField("digest", _digest);
-      }
+      void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
     private:
-      void checkDigestLength(const EVP_MD* md, kj::Maybe<uint32_t> xofLen);
-
-      jsg::Optional<kj::Array<kj::byte>> _digest;
-      kj::Own<EVP_MD_CTX> md_ctx;
-      unsigned md_len;
+      HashContext ctx;
   };
 
   // Hmac

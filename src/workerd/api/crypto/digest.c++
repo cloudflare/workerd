@@ -295,4 +295,110 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(
   return kj::heap<HmacKey>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages);
 }
 
+// ======================================================================================
+
+namespace {
+kj::Own<EVP_MD_CTX> initDigestCtx(kj::StringPtr algorithm) {
+  const EVP_MD* md = EVP_get_digestbyname(algorithm.begin());
+  JSG_REQUIRE(md != nullptr, Error, "Digest method not supported");
+  auto ctx = OSSL_NEW(EVP_MD_CTX);
+  OSSLCALL(EVP_DigestInit(ctx.get(), md));
+  return kj::mv(ctx);
+}
+
+void checkXofLen(EVP_MD_CTX* ctx, kj::Maybe<uint32_t>& maybeXof) {
+  KJ_IF_SOME(xof, maybeXof) {
+    auto md = EVP_MD_CTX_md(ctx);
+    if (xof != EVP_MD_size(md)) {
+      JSG_REQUIRE((EVP_MD_flags(md) & EVP_MD_FLAG_XOF) != 0, Error, "invalid digest size");
+    }
+  }
+}
+}  // namespace
+
+HashContext::HashContext(kj::OneOf<kj::Own<EVP_MD_CTX>, kj::Array<kj::byte>> state,
+                         kj::Maybe<uint32_t> maybeXof)
+    : state(kj::mv(state)), maybeXof(kj::mv(maybeXof)) {
+  checkXofLen(this->state.get<kj::Own<EVP_MD_CTX>>().get(), this->maybeXof);
+}
+
+HashContext::HashContext(kj::StringPtr algorithm, kj::Maybe<uint32_t> maybeXof)
+    : HashContext(initDigestCtx(algorithm), kj::mv(maybeXof)) {}
+
+void HashContext::update(kj::ArrayPtr<kj::byte> data) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(ctx, kj::Own<EVP_MD_CTX>) {
+      JSG_REQUIRE(data.size() <= INT_MAX, RangeError, "data is too long");
+      OSSLCALL(EVP_DigestUpdate(ctx.get(), data.begin(), data.size()));
+    }
+    KJ_CASE_ONEOF(digest, kj::Array<kj::byte>) {
+      JSG_FAIL_REQUIRE(DOMOperationError, "Hash context has already been finalized.");
+    }
+  }
+}
+
+kj::ArrayPtr<kj::byte> HashContext::digest() {
+  kj::ArrayPtr<kj::byte> ret = nullptr;
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(ctx, kj::Own<EVP_MD_CTX>) {
+      auto theCtx = kj::mv(ctx);
+      uint32_t len = EVP_MD_size(EVP_MD_CTX_md(theCtx.get()));
+      KJ_IF_SOME(xof, maybeXof) {
+        if (xof == len) {
+          auto digest = kj::heapArray<kj::byte>(len);
+          JSG_REQUIRE(EVP_DigestFinal_ex(theCtx.get(), digest.begin(), &len) == 1, Error,
+              "Failed to compute hash digest");
+          KJ_ASSERT(len == digest.size());
+          ret = digest.asPtr();
+          state = kj::mv(digest);
+        } else {
+          auto digest = kj::heapArray<kj::byte>(xof);
+          JSG_REQUIRE(EVP_DigestFinalXOF(theCtx.get(), digest.begin(), xof) == 1, Error,
+              "Failed to compute XOF hash digest");
+          ret = digest.asPtr();
+          state = kj::mv(digest);
+        }
+      } else {
+        uint32_t len = EVP_MD_size(EVP_MD_CTX_md(theCtx.get()));
+        auto digest = kj::heapArray<kj::byte>(len);
+        JSG_REQUIRE(EVP_DigestFinal_ex(theCtx.get(), digest.begin(), &len) == 1, Error,
+            "Failed to compute hash digest");
+        KJ_ASSERT(len == digest.size());
+        ret = digest.asPtr();
+        state = kj::mv(digest);
+      }
+    }
+    KJ_CASE_ONEOF(digest, kj::Array<kj::byte>) {
+      ret = digest.asPtr();
+    }
+  }
+  return ret;
+}
+
+HashContext HashContext::clone(kj::Maybe<uint32_t> xofLen) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(ctx, kj::Own<EVP_MD_CTX>) {
+      auto newCtx = OSSL_NEW(EVP_MD_CTX);
+      OSSLCALL(EVP_MD_CTX_copy_ex(newCtx, ctx.get()));
+      return HashContext(kj::mv(newCtx), kj::mv(xofLen));
+    }
+    KJ_CASE_ONEOF(digest, kj::Array<kj::byte>) {
+      return HashContext(kj::mv(digest), kj::mv(xofLen));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+size_t HashContext::size() const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(ctx, kj::Own<EVP_MD_CTX>) {
+      return 0;
+    }
+    KJ_CASE_ONEOF(digest, kj::Array<kj::byte>) {
+      return digest.size();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace workerd::api
