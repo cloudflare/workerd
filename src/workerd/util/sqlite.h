@@ -567,6 +567,11 @@ public:
   // There are exactly this many WAL-mode locks.
   static constexpr uint WAL_LOCK_COUNT = 8;
 
+  // Lock names as defined by https://www.sqlite.org/walformat.html#wal_locks
+  static constexpr uint WAL_WRITE_LOCK = 0;
+  static constexpr uint WAL_CKPT_LOCK = 1;
+  static constexpr uint WAL_RECOVER_LOCK = 2;
+
   // SQLite sets aside bytes [120, 128) of the first shared memory region for use by the WAL locking
   // implementation. SQLite will never touch these bytes. This may or may not be needed by your
   // implementation. SQLite's native implementation on Windows acquires locks on these specific
