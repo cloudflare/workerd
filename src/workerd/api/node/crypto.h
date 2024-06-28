@@ -5,6 +5,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/crypto/crypto.h>
+#include <workerd/api/crypto/digest.h>
 #include <openssl/evp.h>
 
 namespace workerd::api::node {
@@ -94,26 +95,30 @@ public:
   // Hmac
   class HmacHandle final: public jsg::Object {
     public:
-      HmacHandle(jsg::Lock& js, kj::String& algorithm, kj::OneOf<kj::Array<kj::byte>,
-                 jsg::Ref<CryptoKey>>&_key);
+      using KeyParam = kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>>;
 
-      int update(jsg::Lock& js, kj::Array<kj::byte> data);
-      kj::Array<kj::byte> digest(jsg::Lock& js);
-      static jsg::Ref<HmacHandle> constructor(jsg::Lock& js,
-          kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key);
+      HmacHandle(HmacContext ctx) : ctx(kj::mv(ctx)) {};
+
+      static jsg::Ref<HmacHandle> constructor(kj::String algorithm, KeyParam key);
+
+      // Efficiently implement one-shot hmac that avoids multiple calls
+      // across the C++/JS boundary.
+      static kj::Array<kj::byte> oneshot(kj::String algorithm, KeyParam key,
+                                         kj::Array<kj::byte> data);
+
+      int update(kj::Array<kj::byte> data);
+      kj::ArrayPtr<kj::byte> digest();
 
       JSG_RESOURCE_TYPE(HmacHandle) {
         JSG_METHOD(update);
         JSG_METHOD(digest);
+        JSG_STATIC_METHOD(oneshot);
       };
 
-      void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-        tracker.trackField("digest", _digest);
-      }
+      void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
     private:
-      jsg::Optional<kj::Array<kj::byte>> _digest;
-      kj::Own<HMAC_CTX> hmac_ctx;
+      HmacContext ctx;
   };
 
   // Hkdf

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
+#include "digest.h"
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/io/io-context.h>
 #include <openssl/hmac.h>
@@ -116,7 +117,87 @@ void zeroOutTrailingKeyBits(kj::Array<kj::byte>& keyDataArray, int keyBitLength)
   }
 }
 
+kj::Own<HMAC_CTX> initHmacContext(kj::StringPtr algorithm, HmacContext::KeyData& key) {
+  static constexpr auto handle = [](kj::StringPtr algorithm, kj::ArrayPtr<kj::byte> key) {
+    ClearErrorOnReturn clearErrorOnReturn;
+    JSG_REQUIRE(key.size() <= INT_MAX, RangeError, "key is too long");
+    const EVP_MD* md = EVP_get_digestbyname(algorithm.begin());
+    JSG_REQUIRE(md != nullptr, Error, "Digest method not supported");
+    static constexpr auto mt = ""_kjc;
+    auto hmac_ctx = OSSL_NEW(HMAC_CTX);
+    JSG_REQUIRE(HMAC_Init_ex(hmac_ctx.get(), key.size() ? key.asChars().begin() : mt.begin(),
+                            key.size(), md, nullptr), Error, "Failed to initalize HMAC");
+    return kj::mv(hmac_ctx);
+  };
+
+  KJ_SWITCH_ONEOF(key) {
+    KJ_CASE_ONEOF(buf, kj::ArrayPtr<kj::byte>) {
+      return handle(algorithm, buf);
+    }
+    KJ_CASE_ONEOF(key2, CryptoKey::Impl*) {
+      // We already checked that the key is a secret key, so the following should succeed.
+      SubtleCrypto::ExportKeyData keyData = key2->exportKey("raw"_kj);
+
+      KJ_SWITCH_ONEOF(keyData) {
+        KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
+          return handle(algorithm, key_data);
+        }
+        KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
+          KJ_UNREACHABLE;
+        }
+      }
+    }
+  }
+  KJ_UNREACHABLE;
+}
 }  // namespace
+
+HmacContext::HmacContext(kj::StringPtr algorithm, KeyData key)
+    : state(initHmacContext(algorithm, key)) {}
+
+void HmacContext::update(kj::ArrayPtr<kj::byte> data) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(ctx, kj::Own<HMAC_CTX>) {
+      JSG_REQUIRE(data.size() <= INT_MAX, RangeError, "data is too long");
+      KJ_ASSERT(HMAC_Update(ctx.get(), data.begin(), data.size()) == 1);
+    }
+    KJ_CASE_ONEOF(digest, kj::Array<kj::byte>) {
+      JSG_FAIL_REQUIRE(DOMOperationError, "HMAC context has already been finalized.");
+    }
+  }
+}
+
+kj::ArrayPtr<kj::byte> HmacContext::digest() {
+  kj::ArrayPtr<kj::byte> ret = nullptr;
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(ctx, kj::Own<HMAC_CTX>) {
+      auto theCtx = kj::mv(ctx);
+      unsigned len;
+      auto digest = kj::heapArray<kj::byte>(HMAC_size(theCtx.get()));
+      JSG_REQUIRE(HMAC_Final(theCtx.get(), digest.begin(), &len), Error,
+        "Failed to finalize HMAC");
+      KJ_ASSERT(len == digest.size());
+      ret = digest.asPtr();
+      state = kj::mv(digest);
+    }
+    KJ_CASE_ONEOF(digest, kj::Array<kj::byte>) {
+      ret = digest.asPtr();
+    }
+  }
+  return ret;
+}
+
+size_t HmacContext::size() const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(ctx, kj::Own<HMAC_CTX>) {
+      return 0;
+    }
+    KJ_CASE_ONEOF(digest, kj::Array<kj::byte>) {
+      return digest.size();
+    }
+  }
+  KJ_UNREACHABLE;
+}
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateHmac(
       jsg::Lock& js, kj::StringPtr normalizedName,
