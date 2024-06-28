@@ -191,4 +191,55 @@ kj::Array<kj::byte> CryptoImpl::HashHandle::oneshot(
   return kj::heapArray(ctx.digest());
 }
 
+// ======================================================================================
+// DiffieHellman
+
+jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanGroupHandle(kj::String name) {
+  return jsg::alloc<DiffieHellmanHandle>(DiffieHellman(name));
+}
+
+jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanHandle::constructor(
+    jsg::Lock &js, kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
+    kj::OneOf<kj::Array<kj::byte>, int> generator) {
+  return jsg::alloc<DiffieHellmanHandle>(DiffieHellman(sizeOrKey, generator));
+}
+
+CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(DiffieHellman dh) : dh(kj::mv(dh)) {
+  verifyError = JSG_REQUIRE_NONNULL(this->dh.check(), Error, "DiffieHellman init failed");
+};
+
+void CryptoImpl::DiffieHellmanHandle::setPrivateKey(kj::Array<kj::byte> key) {
+  dh.setPrivateKey(key);
+}
+
+void CryptoImpl::DiffieHellmanHandle::setPublicKey(kj::Array<kj::byte> key) {
+  dh.setPublicKey(key);
+}
+
+kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPublicKey() {
+  return dh.getPublicKey();
+}
+
+kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPrivateKey() {
+  return dh.getPrivateKey();
+}
+
+kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getGenerator() {
+  return dh.getGenerator();
+}
+
+kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPrime() {
+  return dh.getPrime();
+}
+
+kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::computeSecret(kj::Array<kj::byte> key) {
+  return dh.computeSecret(key);
+}
+
+kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::generateKeys() {
+  return dh.generateKeys();
+}
+
+int CryptoImpl::DiffieHellmanHandle::getVerifyError() { return verifyError; }
+
 }  // namespace workerd::api::node
