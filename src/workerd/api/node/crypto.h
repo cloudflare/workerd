@@ -11,7 +11,7 @@
 
 namespace workerd::api::node {
 
-class CryptoImpl final: public jsg::Object {
+class NodeCrypto final: public jsg::Object {
 public:
   // DH
   class DiffieHellmanHandle final: public jsg::Object {
@@ -191,8 +191,8 @@ public:
     JSG_STRUCT(key, format, type, passphrase);
   };
 
-  CryptoImpl() = default;
-  CryptoImpl(jsg::Lock&, const jsg::Url&) {}
+  NodeCrypto() = default;
+  NodeCrypto(jsg::Lock&, const jsg::Url&) {}
 
   kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> exportKey(
       jsg::Lock& js,
@@ -212,7 +212,7 @@ public:
   kj::Maybe<kj::Array<kj::byte>> exportPublicKey(kj::Array<const kj::byte> input);
   kj::Maybe<kj::Array<kj::byte>> exportChallenge(kj::Array<const kj::byte> input);
 
-  JSG_RESOURCE_TYPE(CryptoImpl) {
+  JSG_RESOURCE_TYPE(NodeCrypto) {
     // DH
     JSG_NESTED_TYPE(DiffieHellmanHandle);
     JSG_METHOD(DiffieHellmanGroupHandle);
@@ -244,12 +244,12 @@ public:
 };
 
 #define EW_NODE_CRYPTO_ISOLATE_TYPES                   \
-    api::node::CryptoImpl,                             \
-    api::node::CryptoImpl::DiffieHellmanHandle,        \
-    api::node::CryptoImpl::HashHandle,                 \
-    api::node::CryptoImpl::HmacHandle,                 \
-    api::node::CryptoImpl::KeyExportOptions,           \
-    api::node::CryptoImpl::GenerateKeyPairOptions,     \
-    api::node::CryptoImpl::CreateAsymmetricKeyOptions
+    api::node::NodeCrypto,                             \
+    api::node::NodeCrypto::DiffieHellmanHandle,        \
+    api::node::NodeCrypto::HashHandle,                 \
+    api::node::NodeCrypto::HmacHandle,                 \
+    api::node::NodeCrypto::KeyExportOptions,           \
+    api::node::NodeCrypto::GenerateKeyPairOptions,     \
+    api::node::NodeCrypto::CreateAsymmetricKeyOptions
 }  // namespace workerd::api::node
 

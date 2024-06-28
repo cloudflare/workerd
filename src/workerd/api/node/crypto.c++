@@ -12,7 +12,7 @@
 
 namespace workerd::api::node {
 
-kj::Array<kj::byte> CryptoImpl::getHkdf(kj::String hash,
+kj::Array<kj::byte> NodeCrypto::getHkdf(kj::String hash,
                                         kj::Array<const kj::byte> key,
                                         kj::Array<const kj::byte> salt,
                                         kj::Array<const kj::byte> info,
@@ -46,7 +46,7 @@ kj::Array<kj::byte> CryptoImpl::getHkdf(kj::String hash,
   return JSG_REQUIRE_NONNULL(hkdf(length, digest, key, salt, info), Error, "Hkdf failed");
 }
 
-kj::Array<kj::byte> CryptoImpl::getPbkdf(jsg::Lock& js,
+kj::Array<kj::byte> NodeCrypto::getPbkdf(jsg::Lock& js,
                                          kj::Array<const kj::byte> password,
                                          kj::Array<const kj::byte> salt,
                                          uint32_t num_iterations,
@@ -73,7 +73,7 @@ kj::Array<kj::byte> CryptoImpl::getPbkdf(jsg::Lock& js,
       Error, "Pbkdf2 failed");
 }
 
-kj::Array<kj::byte> CryptoImpl::getScrypt(jsg::Lock& js,
+kj::Array<kj::byte> NodeCrypto::getScrypt(jsg::Lock& js,
                                           kj::Array<const kj::byte> password,
                                           kj::Array<const kj::byte> salt,
                                           uint32_t N,
@@ -89,19 +89,19 @@ kj::Array<kj::byte> CryptoImpl::getScrypt(jsg::Lock& js,
       Error, "Scrypt failed");
 }
 
-bool CryptoImpl::verifySpkac(kj::Array<const kj::byte> input) {
+bool NodeCrypto::verifySpkac(kj::Array<const kj::byte> input) {
   return workerd::api::verifySpkac(input);
 }
 
-kj::Maybe<kj::Array<kj::byte>> CryptoImpl::exportPublicKey(kj::Array<const kj::byte> input) {
+kj::Maybe<kj::Array<kj::byte>> NodeCrypto::exportPublicKey(kj::Array<const kj::byte> input) {
   return workerd::api::exportPublicKey(input);
 }
 
-kj::Maybe<kj::Array<kj::byte>> CryptoImpl::exportChallenge(kj::Array<const kj::byte> input) {
+kj::Maybe<kj::Array<kj::byte>> NodeCrypto::exportChallenge(kj::Array<const kj::byte> input) {
   return workerd::api::exportChallenge(input);
 }
 
-kj::Array<kj::byte> CryptoImpl::randomPrime(uint32_t size, bool safe,
+kj::Array<kj::byte> NodeCrypto::randomPrime(uint32_t size, bool safe,
                                             jsg::Optional<kj::Array<kj::byte>> add_buf,
                                             jsg::Optional<kj::Array<kj::byte>> rem_buf) {
   return workerd::api::randomPrime(size, safe,
@@ -109,12 +109,12 @@ kj::Array<kj::byte> CryptoImpl::randomPrime(uint32_t size, bool safe,
       rem_buf.map([](kj::Array<kj::byte>& buf) { return buf.asPtr(); }));
 }
 
-bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks) {
+bool NodeCrypto::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks) {
   return workerd::api::checkPrime(bufferView.asPtr(), num_checks);
 }
 
 // ======================================================================================
-jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
+jsg::Ref<NodeCrypto::HmacHandle> NodeCrypto::HmacHandle::constructor(
     kj::String algorithm,
     kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
   KJ_SWITCH_ONEOF(key) {
@@ -128,18 +128,18 @@ jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
   KJ_UNREACHABLE;
 }
 
-int CryptoImpl::HmacHandle::update(kj::Array<kj::byte> data) {
+int NodeCrypto::HmacHandle::update(kj::Array<kj::byte> data) {
   ctx.update(data);
   return 1;  // This just always returns 1 no matter what.
 }
 
-kj::ArrayPtr<kj::byte> CryptoImpl::HmacHandle::digest() {
+kj::ArrayPtr<kj::byte> NodeCrypto::HmacHandle::digest() {
   return ctx.digest();
 }
 
-kj::Array<kj::byte> CryptoImpl::HmacHandle::oneshot(
+kj::Array<kj::byte> NodeCrypto::HmacHandle::oneshot(
     kj::String algorithm,
-    CryptoImpl::HmacHandle::KeyParam key,
+    NodeCrypto::HmacHandle::KeyParam key,
     kj::Array<kj::byte> data) {
   KJ_SWITCH_ONEOF(key) {
     KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
@@ -156,34 +156,34 @@ kj::Array<kj::byte> CryptoImpl::HmacHandle::oneshot(
   KJ_UNREACHABLE;
 }
 
-void CryptoImpl::HmacHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+void NodeCrypto::HmacHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackFieldWithSize("digest", ctx.size());
 }
 
 // ======================================================================================
-jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::constructor(
+jsg::Ref<NodeCrypto::HashHandle> NodeCrypto::HashHandle::constructor(
     kj::String algorithm, kj::Maybe<uint32_t> xofLen) {
   return jsg::alloc<HashHandle>(HashContext(algorithm, xofLen));
 }
 
-int CryptoImpl::HashHandle::update(kj::Array<kj::byte> data) {
+int NodeCrypto::HashHandle::update(kj::Array<kj::byte> data) {
   ctx.update(data);
   return 1;
 }
 
-kj::ArrayPtr<kj::byte> CryptoImpl::HashHandle::digest() {
+kj::ArrayPtr<kj::byte> NodeCrypto::HashHandle::digest() {
   return ctx.digest();
 }
 
-jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::copy(kj::Maybe<uint32_t> xofLen) {
+jsg::Ref<NodeCrypto::HashHandle> NodeCrypto::HashHandle::copy(kj::Maybe<uint32_t> xofLen) {
   return jsg::alloc<HashHandle>(ctx.clone(kj::mv(xofLen)));
 }
 
-void CryptoImpl::HashHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+void NodeCrypto::HashHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackFieldWithSize("digest", ctx.size());
 }
 
-kj::Array<kj::byte> CryptoImpl::HashHandle::oneshot(
+kj::Array<kj::byte> NodeCrypto::HashHandle::oneshot(
     kj::String algorithm,
     kj::Array<kj::byte> data,
     kj::Maybe<uint32_t> xofLen) {
@@ -195,58 +195,58 @@ kj::Array<kj::byte> CryptoImpl::HashHandle::oneshot(
 // ======================================================================================
 // DiffieHellman
 
-jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanGroupHandle(kj::String name) {
+jsg::Ref<NodeCrypto::DiffieHellmanHandle> NodeCrypto::DiffieHellmanGroupHandle(kj::String name) {
   return jsg::alloc<DiffieHellmanHandle>(DiffieHellman(name));
 }
 
-jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanHandle::constructor(
+jsg::Ref<NodeCrypto::DiffieHellmanHandle> NodeCrypto::DiffieHellmanHandle::constructor(
     jsg::Lock &js, kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
     kj::OneOf<kj::Array<kj::byte>, int> generator) {
   return jsg::alloc<DiffieHellmanHandle>(DiffieHellman(sizeOrKey, generator));
 }
 
-CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(DiffieHellman dh) : dh(kj::mv(dh)) {
+NodeCrypto::DiffieHellmanHandle::DiffieHellmanHandle(DiffieHellman dh) : dh(kj::mv(dh)) {
   verifyError = JSG_REQUIRE_NONNULL(this->dh.check(), Error, "DiffieHellman init failed");
 };
 
-void CryptoImpl::DiffieHellmanHandle::setPrivateKey(kj::Array<kj::byte> key) {
+void NodeCrypto::DiffieHellmanHandle::setPrivateKey(kj::Array<kj::byte> key) {
   dh.setPrivateKey(key);
 }
 
-void CryptoImpl::DiffieHellmanHandle::setPublicKey(kj::Array<kj::byte> key) {
+void NodeCrypto::DiffieHellmanHandle::setPublicKey(kj::Array<kj::byte> key) {
   dh.setPublicKey(key);
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPublicKey() {
+kj::Array<kj::byte> NodeCrypto::DiffieHellmanHandle::getPublicKey() {
   return dh.getPublicKey();
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPrivateKey() {
+kj::Array<kj::byte> NodeCrypto::DiffieHellmanHandle::getPrivateKey() {
   return dh.getPrivateKey();
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getGenerator() {
+kj::Array<kj::byte> NodeCrypto::DiffieHellmanHandle::getGenerator() {
   return dh.getGenerator();
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPrime() {
+kj::Array<kj::byte> NodeCrypto::DiffieHellmanHandle::getPrime() {
   return dh.getPrime();
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::computeSecret(kj::Array<kj::byte> key) {
+kj::Array<kj::byte> NodeCrypto::DiffieHellmanHandle::computeSecret(kj::Array<kj::byte> key) {
   return dh.computeSecret(key);
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::generateKeys() {
+kj::Array<kj::byte> NodeCrypto::DiffieHellmanHandle::generateKeys() {
   return dh.generateKeys();
 }
 
-int CryptoImpl::DiffieHellmanHandle::getVerifyError() { return verifyError; }
+int NodeCrypto::DiffieHellmanHandle::getVerifyError() { return verifyError; }
 
 // ======================================================================================
 // Keys
 
-kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
+kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> NodeCrypto::exportKey(
     jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
     KeyExportOptions options) {
@@ -276,17 +276,17 @@ kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> CryptoImpl:
   return kj::mv(data);
 }
 
-bool CryptoImpl::equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey) {
+bool NodeCrypto::equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey) {
   return *key == *otherKey;
 }
 
-CryptoKey::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
+CryptoKey::AsymmetricKeyDetails NodeCrypto::getAsymmetricKeyDetail(
     jsg::Lock& js, jsg::Ref<CryptoKey> key) {
   JSG_REQUIRE(key->getType() != "secret"_kj, Error, "Secret keys do not have asymmetric details");
   return key->getAsymmetricKeyDetails();
 }
 
-kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
+kj::StringPtr NodeCrypto::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
   JSG_REQUIRE(key->getType() != "secret"_kj, TypeError,
       "Secret key does not have an asymmetric type");
   auto name = key->getAlgorithmName();
@@ -312,20 +312,20 @@ kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey
   return key->getAlgorithmName();
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, kj::Array<kj::byte> keyData) {
+jsg::Ref<CryptoKey> NodeCrypto::createSecretKey(jsg::Lock& js, kj::Array<kj::byte> keyData) {
   // We need to copy the key data because the received keyData will be from an
   // ArrayBuffer that remains mutatable after this function returns. We do not
   // want anyone to be able to modify the key data after it has been created.
   return jsg::alloc<CryptoKey>(kj::heap<SecretKey>(kj::heapArray(keyData.asPtr())));
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
+jsg::Ref<CryptoKey> NodeCrypto::createPrivateKey(
     jsg::Lock& js,
     CreateAsymmetricKeyOptions options) {
   KJ_UNIMPLEMENTED("not implemented");
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(
+jsg::Ref<CryptoKey> NodeCrypto::createPublicKey(
     jsg::Lock& js,
     CreateAsymmetricKeyOptions options) {
   KJ_UNIMPLEMENTED("not implemented");

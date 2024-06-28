@@ -40,7 +40,7 @@ public:
   V(CompatibilityFlags, "workerd:compatibility-flags")                          \
   V(AsyncHooksModule, "node-internal:async_hooks")                              \
   V(BufferUtil, "node-internal:buffer")                                         \
-  V(CryptoImpl, "node-internal:crypto")                                         \
+  V(NodeCrypto, "node-internal:crypto")                                         \
   V(UtilModule, "node-internal:util")                                           \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")
 

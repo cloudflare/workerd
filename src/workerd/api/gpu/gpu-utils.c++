@@ -29,7 +29,7 @@ wgpu::LoadOp parseGPULoadOp(kj::StringPtr loadOp) {
 }
 
 // TODO(soon): use a static std::map for most of these functions, as seen
-// in kj::StringPtr CryptoImpl::getAsymmetricKeyType().
+// in kj::StringPtr NodeCrypto::getAsymmetricKeyType().
 wgpu::FeatureName parseFeatureName(GPUFeatureName& str) {
   if (str == "depth-clip-control") {
     return wgpu::FeatureName::DepthClipControl;
