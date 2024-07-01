@@ -1,5 +1,4 @@
-declare namespace TarReader {
-  const read: (offset: number, dest: Uint8Array) => void;
-}
+
+declare const TarReader: Reader;
 
 export default TarReader;

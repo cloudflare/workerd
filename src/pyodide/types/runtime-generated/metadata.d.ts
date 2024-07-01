@@ -14,6 +14,7 @@ declare namespace MetadataReader {
   ) => void;
   const getMemorySnapshotSize: () => number;
   const disposeMemorySnapshot: () => void;
+  const read: (index: number, position: number, buffer: Uint8Array) => number;
 }
 
 export default MetadataReader;

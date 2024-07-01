@@ -1,4 +1,3 @@
-// @ts-nocheck
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
@@ -24,7 +23,7 @@ import { default as Limiter } from "pyodide-internal:limiter";
 import { entropyBeforeRequest } from "pyodide-internal:topLevelEntropy/lib";
 import { loadPackages } from "pyodide-internal:loadPackage";
 
-function pyimportMainModule(pyodide) {
+function pyimportMainModule(pyodide: Pyodide): PyModule {
   if (!MAIN_MODULE_NAME.endsWith(".py")) {
     throw new Error("Main module needs to end with a .py file extension");
   }
@@ -32,8 +31,8 @@ function pyimportMainModule(pyodide) {
   return pyodide.pyimport(mainModuleName);
 }
 
-let pyodidePromise;
-function getPyodide() {
+let pyodidePromise: Promise<Pyodide> | undefined;
+function getPyodide(): Promise<Pyodide> {
   return enterJaegerSpan("get_pyodide", () => {
     if (pyodidePromise) {
       return pyodidePromise;
@@ -47,7 +46,7 @@ function getPyodide() {
  * Import the data from the data module es6 import called jsModName.py into a module called
  * pyModName.py. The site_packages directory is on the path.
  */
-async function injectSitePackagesModule(pyodide, jsModName, pyModName) {
+async function injectSitePackagesModule(pyodide: Pyodide, jsModName: string, pyModName: string): Promise<void> {
   const mod = await import(`pyodide-internal:${jsModName}.py`);
   pyodide.FS.writeFile(
     `${pyodide.site_packages}/${pyModName}.py`,
@@ -62,7 +61,7 @@ async function injectSitePackagesModule(pyodide, jsModName, pyModName) {
  * TODO: Ideally we should only import the patch lazily when the package that it patches is
  * imported. Or just apply the patch directly or upstream a fix.
  */
-async function applyPatch(pyodide, patchName) {
+async function applyPatch(pyodide: Pyodide, patchName: string): Promise<void> {
   await injectSitePackagesModule(
     pyodide,
     `patches/${patchName}`,
@@ -82,7 +81,7 @@ async function applyPatch(pyodide, patchName) {
  * TODO: move this into setupPackages.js. Can't now because the patch imports
  * fail from there for some reason.
  */
-export async function setupPackages(pyodide) {
+export async function setupPackages(pyodide: Pyodide): Promise<void> {
   return await enterJaegerSpan("setup_packages", async () => {
     patchLoadPackage(pyodide);
     await loadPackages(pyodide._module, TRANSITIVE_REQUIREMENTS);
@@ -103,8 +102,8 @@ export async function setupPackages(pyodide) {
   });
 }
 
-let mainModulePromise;
-function getMainModule() {
+let mainModulePromise: Promise<PyModule> | undefined;
+function getMainModule(): Promise<PyModule> {
   return enterJaegerSpan("get_main_module", async () => {
     if (mainModulePromise) {
       return mainModulePromise;
@@ -125,15 +124,15 @@ function getMainModule() {
   });
 }
 
-async function preparePython() {
+async function preparePython(): Promise<PyModule> {
   const pyodide = await getPyodide();
   const mainModule = await getMainModule();
   entropyBeforeRequest(pyodide._module);
   return mainModule;
 }
 
-function makeHandler(pyHandlerName) {
-  return async function (...args) {
+function makeHandler(pyHandlerName: string): Handler {
+  return async function (...args: any[]) {
     try {
       const mainModule = await enterJaegerSpan(
         "prep_python",
@@ -150,7 +149,9 @@ function makeHandler(pyHandlerName) {
     }
   };
 }
-const handlers = {};
+const handlers: {
+  [handlerName: string]: Handler
+} = {};
 
 try {
   // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing

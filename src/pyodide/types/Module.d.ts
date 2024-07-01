@@ -1,7 +1,3 @@
-interface Pyodide {
-  _module: Module;
-  registerJsModule: (handle: string, mod: object) => void;
-}
 
 interface ENV {
   HOME: string;

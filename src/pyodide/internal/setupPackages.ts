@@ -27,14 +27,14 @@ const STDLIB_PACKAGES: string[] = Object.values(LOCKFILE.packages)
  * directory generated for each worker.
  */
 class SitePackagesDir {
-  public rootInfo: FSInfo;
+  public rootInfo: TarFSInfo;
   public soFiles: string[][];
   public loadedRequirements: Set<string>;
   constructor() {
     this.rootInfo = {
       children: new Map(),
       mode: 0o777,
-      type: 5,
+      type: "5",
       modtime: 0,
       size: 0,
       path: "",
@@ -51,7 +51,7 @@ class SitePackagesDir {
    * If a file or directory already exists, an error is thrown.
    * @param {TarInfo} overlayInfo The directory that is to be "copied" into site-packages
    */
-  mountOverlay(overlayInfo: FSInfo): void {
+  mountOverlay(overlayInfo: TarFSInfo): void {
     overlayInfo.children!.forEach((val, key) => {
       if (this.rootInfo.children!.has(key)) {
         throw new Error(
@@ -70,7 +70,7 @@ class SitePackagesDir {
    * @param {String} requirement The canonicalized package name this small bundle corresponds to
    */
   addSmallBundle(
-    tarInfo: FSInfo,
+    tarInfo: TarFSInfo,
     soFiles: string[],
     requirement: string,
   ): void {
@@ -89,7 +89,7 @@ class SitePackagesDir {
    * @param {List<String>} requirements canonicalized list of packages to pick from the big bundle
    */
   addBigBundle(
-    tarInfo: FSInfo,
+    tarInfo: TarFSInfo,
     soFiles: string[],
     requirements: Set<string>,
   ): void {
@@ -147,12 +147,12 @@ export function buildSitePackages(
  *
  * TODO: stop using loadPackage in workerd.
  */
-export function patchLoadPackage(pyodide: { loadPackage: Function }): void {
+export function patchLoadPackage(pyodide: Pyodide): void {
   pyodide.loadPackage = disabledLoadPackage;
   return;
 }
 
-function disabledLoadPackage() {
+function disabledLoadPackage(): never {
   throw new Error(
     "pyodide.loadPackage is disabled because packages are encoded in the binary",
   );
@@ -182,7 +182,7 @@ export function getSitePackagesPath(Module: Module): string {
  * details, so even though we want these directories to be on sys.path, we
  * handle that separately in adjustSysPath.
  */
-export function mountLib(Module: Module, info: FSInfo): void {
+export function mountLib(Module: Module, info: TarFSInfo): void {
   const tarFS = createTarFS(Module);
   const mdFS = createMetadataFS(Module);
   const site_packages = getSitePackagesPath(Module);

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 
 // This is based on the info about the tar file format on wikipedia
@@ -6,21 +5,21 @@ import { default as TarReader } from "pyodide-internal:packages_tar_reader";
 // https://en.wikipedia.org/wiki/Tar_(computing)#File_format
 
 const decoder = new TextDecoder();
-function decodeString(buf) {
+function decodeString(buf: Uint8Array): string {
   const nullIdx = buf.indexOf(0);
   if (nullIdx >= 0) {
     buf = buf.subarray(0, nullIdx);
   }
   return decoder.decode(buf);
 }
-function decodeField(buf, offset, size) {
+function decodeField(buf: Uint8Array, offset: number, size: number): string {
   return decodeString(buf.subarray(offset, offset + size));
 }
-function decodeNumber(buf, offset, size) {
+function decodeNumber(buf: Uint8Array, offset: number, size: number): number {
   return parseInt(decodeField(buf, offset, size), 8);
 }
 
-function decodeHeader(buf, reader) {
+function decodeHeader(buf: Uint8Array, reader: Reader): TarFSInfo {
   const nameBase = decodeField(buf, 0, 100);
   const namePrefix = decodeField(buf, 345, 155);
   let path = namePrefix + nameBase;
@@ -45,13 +44,13 @@ function decodeHeader(buf, reader) {
   };
 }
 
-export function parseTarInfo(reader = TarReader): [FSInfo, string[]] {
-  const directories = [];
+export function parseTarInfo(reader = TarReader): [TarFSInfo, string[]] {
+  const directories: TarFSInfo[] = [];
   const soFiles = [];
-  const root = {
+  const root: TarFSInfo = {
     children: new Map(),
     mode: 0o777,
-    type: 5,
+    type: "5",
     modtime: 0,
     size: 0,
     path: "",
@@ -108,22 +107,22 @@ export function parseTarInfo(reader = TarReader): [FSInfo, string[]] {
 
     // go up to common ancestor
     while (directories.length && !info.name.startsWith(directory.path)) {
-      directory = directories.pop();
+      directory = directories.pop()!;
     }
     // go down to target (in many tar files this second loop body is evaluated 0
     // times)
     const parts = info.path.slice(0, -1).split("/");
     for (let i = directories.length; i < parts.length - 1; i++) {
       directories.push(directory);
-      directory = directory.children.get(parts[i]);
+      directory = directory.children!.get(parts[i])!;
     }
     if (info.type === "5") {
       // a directory
       directories.push(directory);
       info.parts = parts;
-      info.name = info.parts.at(-1);
+      info.name = info.parts.at(-1)!;
       info.children = new Map();
-      directory.children.set(info.name, info);
+      directory.children!.set(info.name, info);
       directory = info;
     } else if (info.type === "0") {
       // a normal file
@@ -132,7 +131,7 @@ export function parseTarInfo(reader = TarReader): [FSInfo, string[]] {
       if (info.name.endsWith(".so")) {
         soFiles.push(info.path);
       }
-      directory.children.set(info.name, info);
+      directory.children!.set(info.name, info);
     } else {
       // fail if we encounter other values of type (e.g., symlink, LongName, etc)
       throw new Error(`Python TarFS error: Unexpected type ${info.type}`);

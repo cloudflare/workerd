@@ -137,7 +137,7 @@ export function preloadDynamicLibs(Module: Module): void {
   try {
     const sitePackages = getSitePackagesPath(Module);
     for (const soFile of SO_FILES_TO_LOAD) {
-      let node: FSInfo | undefined = SITE_PACKAGES.rootInfo;
+      let node: TarFSInfo | undefined = SITE_PACKAGES.rootInfo;
       for (const part of soFile) {
         node = node?.children?.get(part);
       }
