@@ -367,7 +367,7 @@ void checkPbkdfLimits(jsg::Lock& js, size_t iterations);
 // Don't assume anything about the contents of |buffer| on error.
 // As a special case, |length == 0| can be used to check if the CSPRNG
 // is properly seeded without consuming entropy.
-bool CSPRNG(kj::ArrayPtr<kj::byte> bufer);
+bool CSPRNG(kj::ArrayPtr<kj::byte> buffer);
 
 }  // namespace workerd::api
 
