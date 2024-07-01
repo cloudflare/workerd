@@ -2,9 +2,12 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//:build/wd_test.bzl", "wd_test")
 
 def generate_import_py_file(imports):
-  res = "def test():\n"
+  res = ""
   for imp in imports:
-    res += "   import "+imp+"\n"
+    res += "import "+imp+"\n"
+
+  res += "def test():\n"
+  res += "   pass"
   return res
 
 WD_FILE_TEMPLATE = """

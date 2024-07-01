@@ -50,6 +50,8 @@ function shouldAllowBadEntropy(Module: Module) {
   return false;
 }
 
+let IN_REQUEST_CONTEXT = false;
+
 /**
  * Some packages need hash or random seeds at import time. We carefully track
  * how much bad entropy we're giving everyone so that hopefully none of it ends
@@ -62,23 +64,17 @@ function shouldAllowBadEntropy(Module: Module) {
  * out the bad entropy.
  */
 export function getRandomValues(Module: Module, arr: Uint8Array) {
-  try {
+  if (IN_REQUEST_CONTEXT) {
     return crypto.getRandomValues(arr);
-  } catch (e: any) {
-    if (
-      !e.message.includes("Disallowed operation called within global scope")
-    ) {
-      Module._dump_traceback();
-      throw e;
-    }
-    if (!shouldAllowBadEntropy(Module)) {
-      Module._dump_traceback();
-      throw e;
-    }
-    // "entropy" in the test suite is a bunch of 42's. Good to use a readily identifiable pattern
-    // here which is different than the test suite.
-    arr.fill(43);
   }
+  if (!shouldAllowBadEntropy(Module)) {
+    Module._dump_traceback();
+    throw new Error("Disallowed operation called within global scope");
+  }
+  // "entropy" in the test suite is a bunch of 42's. Good to use a readily identifiable pattern
+  // here which is different than the test suite.
+  arr.fill(43);
+  return;
 }
 
 /**
@@ -147,6 +143,7 @@ export function entropyBeforeRequest(Module: Module) {
     // I think this is only ever called once, but we guard it just to be sure.
     return;
   }
+  IN_REQUEST_CONTEXT = true;
   isReady = true;
   if (SHOULD_GATE_ENTROPY) {
     simpleRunPython(
