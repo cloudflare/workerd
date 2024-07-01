@@ -158,6 +158,10 @@ export abstract class KeyObject {
   }
 
   abstract get type() : KeyObjectType;
+
+  get [Symbol.toStringTag]() {
+    return "KeyObject"
+  }
 }
 
 abstract class AsymmetricKeyObject extends KeyObject {
