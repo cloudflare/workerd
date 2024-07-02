@@ -25,6 +25,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/kv.h>
+#include <workerd/api/basics.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/r2-admin.h>

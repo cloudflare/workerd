@@ -13,6 +13,7 @@
 #include <kj/function.h>
 #include <kj/map.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include "observable.h"
 
 namespace workerd::api {
 
@@ -267,7 +268,6 @@ public:
   using AddEventListenerOpts = kj::OneOf<AddEventListenerOptions, bool>;
   using EventListenerOpts = kj::OneOf<EventListenerOptions, bool>;
 
-  typedef jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<Event>)> HandlerFunction;
   struct HandlerObject {
     HandlerFunction handleEvent;
     JSG_STRUCT(handleEvent);
@@ -285,10 +285,20 @@ public:
                            jsg::Optional<EventListenerOpts> options);
   bool dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event);
 
+  jsg::Ref<Observable> on(
+      jsg::Lock& js, kj::String type,
+      jsg::Optional<ObservableEventListenerOptions> options,
+      const jsg::TypeHandler<HandlerFunction>& handler,
+      const jsg::TypeHandler<jsg::Ref<Observable>>& observableHandler,
+      const jsg::TypeHandler<jsg::Promise<jsg::JsRef<jsg::JsValue>>>& promiseHandler,
+      const jsg::TypeHandler<jsg::AsyncGenerator<jsg::JsRef<jsg::JsValue>>>& asyncGeneratorHandler,
+      const jsg::TypeHandler<jsg::Ref<Event>>& eventHandler);
+
   JSG_RESOURCE_TYPE(EventTarget) {
     JSG_METHOD(addEventListener);
     JSG_METHOD(removeEventListener);
     JSG_METHOD(dispatchEvent);
+    JSG_METHOD(on);
 
     JSG_TS_DEFINE(
       type EventListener<EventType extends Event = Event> = (event: EventType) => void;
@@ -491,7 +501,7 @@ public:
   static jsg::Ref<AbortSignal> any(
       jsg::Lock& js,
       kj::Array<jsg::Ref<AbortSignal>> signals,
-      const jsg::TypeHandler<EventTarget::HandlerFunction>& handler);
+      const jsg::TypeHandler<HandlerFunction>& handler);
 
   // While AbortSignal extends EventTarget, and our EventTarget implementation will
   // automatically support onabort being set as an own property, the spec defines
@@ -620,7 +630,19 @@ public:
 private:
 };
 
+jsg::Ref<Observable> addObservableHandler(
+    jsg::Lock& js,
+    jsg::Ref<EventTarget> eventTarget,
+    kj::String type,
+    jsg::Optional<ObservableEventListenerOptions> options,
+    const jsg::TypeHandler<HandlerFunction>& handler,
+    const jsg::TypeHandler<jsg::Ref<Observable>>& observableHandler,
+    const jsg::TypeHandler<jsg::Promise<jsg::JsRef<jsg::JsValue>>>& promiseHandler,
+    const jsg::TypeHandler<jsg::AsyncGenerator<jsg::JsRef<jsg::JsValue>>>& asyncGeneratorHandler,
+    const jsg::TypeHandler<jsg::Ref<Event>>& eventHandler);
+
 #define EW_BASICS_ISOLATE_TYPES                \
+    EW_OBSERVABLE_ISOLATE_TYPES,               \
     api::Event,                                \
     api::Event::Init,                          \
     api::EventTarget,                          \

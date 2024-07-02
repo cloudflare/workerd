@@ -10,6 +10,7 @@
 #include "http.h"
 #include "eventsource.h"
 #include "hibernation-event-params.h"
+#include "observable.h"
 #include <workerd/io/io-timers.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
@@ -525,6 +526,7 @@ public:
     JSG_NESTED_TYPE(ByteLengthQueuingStrategy);
     JSG_NESTED_TYPE(CountQueuingStrategy);
     JSG_NESTED_TYPE(ErrorEvent);
+    JSG_NESTED_TYPE(Observable);
 
     JSG_NESTED_TYPE(EventSource);
 

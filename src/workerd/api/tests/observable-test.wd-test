@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    ( name = "observable-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "observable-test.js")
+        ],
+        compatibilityDate = "2023-12-31",
+        compatibilityFlags = ["nodejs_compat_v2"],
+      )
+    ),
+  ],
+);
