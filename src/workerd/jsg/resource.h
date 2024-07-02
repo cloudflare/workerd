@@ -648,9 +648,6 @@ constexpr bool hasConstructorMethod(...) { return false; }
 //     };
 void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
-// Polyfill Symbol.dispose and Symbol.asyncDispose.
-void polyfillSymbols(jsg::Lock& js, v8::Local<v8::Context> context);
-
 v8::Local<v8::Symbol> getSymbolDispose(v8::Isolate* isolate);
 v8::Local<v8::Symbol> getSymbolAsyncDispose(v8::Isolate* isolate);
 
@@ -1349,7 +1346,6 @@ public:
     }
 
     return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
-      polyfillSymbols(js, context);
       setupJavascript(js);
       return JsContext<T>(context, kj::mv(ptr), kj::mv(maybeNewModuleRegistry));
     });

@@ -43,6 +43,10 @@ To update the version of V8 used by workerd, the steps are:
    git rebase --onto 11.4.183.8 HEAD~8
    ```
 
+   Note that `HEAD~8`, here and elsewhere, could be replaced with
+   `$(git describe --tags --abbrev=0)`, which prints the name of the tag on which the
+   branch is based.
+
    There is usually some minor patch editing required during a rebase.
 
    Ideally at this stage, you should be able to build and test the local V8 with the
