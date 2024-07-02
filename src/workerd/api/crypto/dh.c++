@@ -1,29 +1,25 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
-// Licensed under the Apache 2.0 license found in the LICENSE file or at:
-//     https://opensource.org/licenses/Apache-2.0
-// Copyright Joyent and Node contributors. All rights reserved. MIT license.
-
-#include "crypto.h"
+#include "dh.h"
+#include <workerd/io/io-context.h>
+#include <kj/string.h>
+#include <kj/one-of.h>
 #include <openssl/bn.h>
 #include <openssl/dh.h>
-#include <workerd/api/crypto/impl.h>
-#include <workerd/jsg/jsg.h>
 
-// Import DH primes if needed.
 #if WORKERD_BSSL_NEED_DH_PRIMES
-#include <workerd/api/crypto/dh_primes.h>
+#include <workerd/api/crypto/dh-primes.h>
 #endif // WORKERD_BSSL_NEED_DH_PRIMES
 
 #if !_WIN32
 #include <strings.h>
 #endif
 
-namespace workerd::api::node {
+namespace workerd::api {
 
 namespace {
+
 // Returns a function that can be used to create an instance of a standardized
 // Diffie-Hellman group.
-BIGNUM* (*FindDiffieHellmanGroup(const char* name))(BIGNUM*) {
+BIGNUM* (*findDiffieHellmanGroup(const char* name))(BIGNUM*) {
 #if _WIN32
 #define V(n, p) if (_strnicmp(name, n, 7) == 0) {return p;}
 #else
@@ -40,47 +36,18 @@ BIGNUM* (*FindDiffieHellmanGroup(const char* name))(BIGNUM*) {
 
   return nullptr;
 }
-} // namespace
 
-jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanGroupHandle(kj::String name) {
-  return jsg::alloc<DiffieHellmanHandle>(name);
-}
-
-jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanHandle::constructor(
-    jsg::Lock &js, kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
-    kj::OneOf<kj::Array<kj::byte>, int> generator) {
-  return jsg::alloc<DiffieHellmanHandle>(sizeOrKey, generator);
-}
-
-bool CryptoImpl::DiffieHellmanHandle::VerifyContext() {
-  int codes;
-  if (!DH_check(dh, &codes))
-    return false;
-  verifyError = codes;
-  return true;
-}
-
-CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(
-    kj::OneOf<kj::Array<kj::byte>, int> &sizeOrKey, kj::OneOf<kj::Array<kj::byte>,
-    int> &generator) : verifyError(0) {
-  JSG_REQUIRE(Init(sizeOrKey, generator), Error, "DiffieHellman init failed");
-}
-
-CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(kj::String& name) : verifyError(0) {
-  JSG_REQUIRE(InitGroup(name), Error, "DiffieHellman init failed");
-}
-
-bool CryptoImpl::DiffieHellmanHandle::InitGroup(kj::String& name) {
-  auto group = FindDiffieHellmanGroup(name.begin());
+kj::Own<DH> initDhGroup(kj::StringPtr name) {
+  auto group = findDiffieHellmanGroup(name.begin());
   JSG_REQUIRE(group != nullptr, Error, "Failed to init DiffieHellmanGroup: invalid group. Only "
               "groups {modp14, modp15, modp16, modp17, modp18} are supported.");
   auto groupKey = group(nullptr);
   KJ_ASSERT(groupKey != nullptr);
 
   const int kStandardizedGenerator = 2;
-  dh = OSSL_NEW(DH);
+  auto dh = OSSL_NEW(DH);
 
-  // Note: We're deliberately not using kj::Own/OSSL_NEW() here as  DH_set0_pqg() takes ownership
+  // Note: We're deliberately not using kj::Own/OSSL_NEW() here as DH_set0_pqg() takes ownership
   // of the key, so there is no need to free it if the operation succeeds.
   UniqueBignum bn_g(BN_new(), &BN_clear_free);
   if (!BN_set_word(bn_g.get(), kStandardizedGenerator) ||
@@ -88,32 +55,69 @@ bool CryptoImpl::DiffieHellmanHandle::InitGroup(kj::String& name) {
     JSG_FAIL_REQUIRE(Error, "DiffieHellmanGroup init failed: could not set keys");
   }
   bn_g.release();
-  return VerifyContext();
+  return kj::mv(dh);
 }
 
-bool CryptoImpl::DiffieHellmanHandle::Init(
-    kj::OneOf<kj::Array<kj::byte>, int> &sizeOrKey,
-    kj::OneOf<kj::Array<kj::byte>, int> &generator) {
+kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
+                   kj::OneOf<kj::Array<kj::byte>, int>& generator) {
   KJ_SWITCH_ONEOF(sizeOrKey) {
     KJ_CASE_ONEOF(size, int) {
       KJ_SWITCH_ONEOF(generator) {
         KJ_CASE_ONEOF(gen, int) {
-          // DH key generation is not supported at this time.
-          JSG_FAIL_REQUIRE(Error, "DiffieHellman init failed: key generation is not supported, "
-              "please provide a prime or use DiffieHellmanGroup instead.");
-          return VerifyContext();
+          // Generating a DH key with a reasonable size can be expensive.
+          // We will only allow it if there is an active IoContext so that
+          // we can enforce a timeout associate with the limit enforcer.
+          JSG_REQUIRE(IoContext::hasCurrent(), Error,
+                      "DiffieHellman key generation requires an active request");
+
+          struct Status {
+            IoContext& context;
+            kj::Maybe<EventOutcome> status;
+          } status {
+            .context = IoContext::current()
+          };
+
+          auto dh = OSSL_NEW(DH);
+          BN_GENCB cb;
+          cb.arg = &status;
+          // This callback is called many times during the key generation process.
+          // We use it because key generation is expensive and may run over the
+          // CPU limits for the request. As this method can itself contribute to
+          // running over the CPU limit, it is important to do as little as possible.
+          cb.callback = [](int a, int b, BN_GENCB* cb) -> int {
+            Status& status = *static_cast<Status*>(cb->arg);
+            KJ_IF_SOME(outcome, status.context.getLimitEnforcer().getLimitsExceeded()) {
+              status.status = outcome;
+              return 0;
+            }
+            return 1;
+          };
+          if (!DH_generate_parameters_ex(dh.get(), size, gen, &cb)) {
+            KJ_IF_SOME(outcome, status.status) {
+              if (outcome == EventOutcome::EXCEEDED_CPU) {
+                JSG_FAIL_REQUIRE(Error,
+                    "DiffieHellman init failed: key generation exceeded CPU limit");
+              } else if (outcome == EventOutcome::EXCEEDED_MEMORY) {
+                JSG_FAIL_REQUIRE(Error,
+                    "DiffieHellman init failed: key generation exceeded memory limit");
+              }
+            }
+            JSG_FAIL_REQUIRE(Error, "DiffieHellman init failed: could not generate parameters");
+          }
+          return kj::mv(dh);
         }
         KJ_CASE_ONEOF(gen, kj::Array<kj::byte>) {
-          // Node returns an error in this configuration, not sure why
+          // Node.js does not support generating Diffie-Hellman keys from an int prime
+          // and byte-array generator. This could change in the future.
           JSG_FAIL_REQUIRE(Error, "DiffieHellman init failed: invalid parameters");
         }
       }
     }
     KJ_CASE_ONEOF(key, kj::Array<kj::byte>) {
-      JSG_REQUIRE(key.size() <= INT32_MAX, RangeError, "DiffieHellman init failed: key "
-                  "is too large");
+      JSG_REQUIRE(key.size() <= INT32_MAX, RangeError,
+                  "DiffieHellman init failed: key is too large");
       JSG_REQUIRE(key.size() > 0, Error, "DiffieHellman init failed: invalid key");
-      dh = OSSL_NEW(DH);
+      auto dh = OSSL_NEW(DH);
 
       // We use a std::unique_ptr here instead of a kj::Own because DH_set0_pqg takes ownership
       // and we need to be able to release ownership if the operation succeeds but want the
@@ -147,51 +151,13 @@ bool CryptoImpl::DiffieHellmanHandle::Init(
                   Error, "DiffieHellman init failed: could not set keys");
       bn_g.release();
       bn_p.release();
-      return VerifyContext();
+      return kj::mv(dh);
     }
   }
-
   KJ_UNREACHABLE;
 }
 
-void CryptoImpl::DiffieHellmanHandle::setPrivateKey(kj::Array<kj::byte> key) {
-  OSSLCALL(DH_set0_key(dh, nullptr, toBignumUnowned(key)));
-}
-
-void CryptoImpl::DiffieHellmanHandle::setPublicKey(kj::Array<kj::byte> key) {
-  OSSLCALL(DH_set0_key(dh, toBignumUnowned(key), nullptr));
-}
-
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPublicKey() {
-  const BIGNUM *pub_key;
-  DH_get0_key(dh, &pub_key, nullptr);
-  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*pub_key), Error,
-      "Error while retrieving DiffieHellman public key");
-}
-
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPrivateKey() {
-  const BIGNUM *priv_key;
-  DH_get0_key(dh, nullptr, &priv_key);
-  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*priv_key), Error,
-      "Error while retrieving DiffieHellman private key");
-}
-
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getGenerator() {
-  const BIGNUM* g;
-  DH_get0_pqg(dh, nullptr, nullptr, &g);
-  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*g), Error,
-      "Error while retrieving DiffieHellman generator");
-}
-
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPrime() {
-  const BIGNUM* p;
-  DH_get0_pqg(dh, &p, nullptr, nullptr);
-  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*p), Error,
-      "Error while retrieving DiffieHellman prime");
-}
-
-namespace {
-void ZeroPadDiffieHellmanSecret(size_t remainder_size,
+void zeroPadDiffieHellmanSecret(size_t remainder_size,
                                 unsigned char* data,
                                 size_t prime_size) {
   // DH_size returns number of bytes in a prime number.
@@ -205,9 +171,60 @@ void ZeroPadDiffieHellmanSecret(size_t remainder_size,
     kj::arrayPtr(data, padding).fill(0);
   }
 }
-} // namespace
+}  // namespace
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::computeSecret(kj::Array<kj::byte> key) {
+DiffieHellman::DiffieHellman(kj::StringPtr group): dh(initDhGroup(group)) {}
+
+DiffieHellman::DiffieHellman(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
+                             kj::OneOf<kj::Array<kj::byte>, int>& generator)
+                             : dh(initDh(sizeOrKey, generator)) {}
+
+kj::Maybe<int> DiffieHellman::check() {
+  ClearErrorOnReturn clearErrorOnReturn;
+  int codes;
+  if (!DH_check(dh.get(), &codes)) {
+    return kj::none;
+  }
+  return codes;
+}
+
+void DiffieHellman::setPrivateKey(kj::ArrayPtr<kj::byte> key) {
+  OSSLCALL(DH_set0_key(dh, nullptr, toBignumUnowned(key)));
+}
+
+void DiffieHellman::setPublicKey(kj::ArrayPtr<kj::byte> key) {
+  OSSLCALL(DH_set0_key(dh, toBignumUnowned(key), nullptr));
+}
+
+kj::Array<kj::byte> DiffieHellman::getPublicKey() {
+  const BIGNUM* pub_key;
+  DH_get0_key(dh, &pub_key, nullptr);
+  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*pub_key), Error,
+      "Error while retrieving DiffieHellman public key");
+}
+
+kj::Array<kj::byte> DiffieHellman::getPrivateKey() {
+  const BIGNUM* priv_key;
+  DH_get0_key(dh, nullptr, &priv_key);
+  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*priv_key), Error,
+      "Error while retrieving DiffieHellman private key");
+}
+
+kj::Array<kj::byte> DiffieHellman::getGenerator() {
+  const BIGNUM* g;
+  DH_get0_pqg(dh, nullptr, nullptr, &g);
+  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*g), Error,
+      "Error while retrieving DiffieHellman generator");
+}
+
+kj::Array<kj::byte> DiffieHellman::getPrime() {
+  const BIGNUM* p;
+  DH_get0_pqg(dh, &p, nullptr, nullptr);
+  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*p), Error,
+      "Error while retrieving DiffieHellman prime");
+}
+
+kj::Array<kj::byte> DiffieHellman::computeSecret(kj::ArrayPtr<kj::byte> key) {
   JSG_REQUIRE(key.size() <= INT32_MAX, RangeError,
               "DiffieHellman computeSecret() failed: key is too large");
   JSG_REQUIRE(key.size() > 0, Error, "DiffieHellman computeSecret() failed: invalid key");
@@ -235,11 +252,12 @@ kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::computeSecret(kj::Array<kj:
   }
 
   KJ_ASSERT(size >= 0);
-  ZeroPadDiffieHellmanSecret(size, prime_enc.begin(), prime_size);
+  zeroPadDiffieHellmanSecret(size, prime_enc.begin(), prime_size);
   return prime_enc;
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::generateKeys() {
+kj::Array<kj::byte> DiffieHellman::generateKeys() {
+  ClearErrorOnReturn clear_error_on_return;
   OSSLCALL(DH_generate_key(dh));
   const BIGNUM* pub_key;
   DH_get0_key(dh, &pub_key, nullptr);
@@ -247,6 +265,4 @@ kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::generateKeys() {
       "Error while generating DiffieHellman keys");
 }
 
-int CryptoImpl::DiffieHellmanHandle::getVerifyError() { return verifyError; }
-
-} // namespace workerd::api::node
+}  // namespace workerd::api

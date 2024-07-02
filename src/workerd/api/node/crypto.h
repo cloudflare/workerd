@@ -6,6 +6,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/crypto/digest.h>
+#include <workerd/api/crypto/dh.h>
 #include <openssl/evp.h>
 
 namespace workerd::api::node {
@@ -15,13 +16,12 @@ public:
   // DH
   class DiffieHellmanHandle final: public jsg::Object {
     public:
-      DiffieHellmanHandle(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
-                          kj::OneOf<kj::Array<kj::byte>, int>& generator);
-      DiffieHellmanHandle(kj::String& name);
+      DiffieHellmanHandle(DiffieHellman dh);
 
-      static jsg::Ref<DiffieHellmanHandle> constructor(jsg::Lock& js,
-                                            kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
-                                            kj::OneOf<kj::Array<kj::byte>, int> generator);
+      static jsg::Ref<DiffieHellmanHandle> constructor(
+          jsg::Lock& js,
+          kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
+          kj::OneOf<kj::Array<kj::byte>, int> generator);
 
       void setPrivateKey(kj::Array<kj::byte> key);
       void setPublicKey(kj::Array<kj::byte> key);
@@ -46,13 +46,8 @@ public:
       };
 
     private:
-      kj::Own<DH> dh;
+      DiffieHellman dh;
       int verifyError;
-
-      bool VerifyContext();
-      bool Init(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey, kj::OneOf<kj::Array<kj::byte>,
-                int>& generator);
-      bool InitGroup(kj::String& name);
   };
 
   jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(kj::String name);
