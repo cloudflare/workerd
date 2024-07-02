@@ -372,7 +372,7 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2021",
-    versions = ["1.75.0"], # LLVM 17
+    versions = ["1.79.0", "nightly/2024-06-14"], # LLVM 18
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
