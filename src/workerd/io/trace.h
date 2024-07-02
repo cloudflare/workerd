@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "kj/debug.h"
 #include <kj/async.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
@@ -319,8 +320,8 @@ class WorkerTracer;
 class PipelineTracer final : public kj::Refcounted {
 public:
   // Creates a pipeline tracer (with a possible parent).
-  explicit PipelineTracer(kj::Maybe<kj::Own<PipelineTracer>> parentPipeline = kj::none)
-      : parentTracer(kj::mv(parentPipeline)) {}
+  explicit PipelineTracer(PipelineLogLevel logLevel, kj::Maybe<kj::Own<PipelineTracer>> parentPipeline = kj::none)
+      : parentTracer(kj::mv(parentPipeline)), logLevel(logLevel) { }
 
   ~PipelineTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
@@ -331,7 +332,7 @@ public:
 
   // Makes a tracer for a subpipeline.
   kj::Own<PipelineTracer> makePipelineSubtracer() {
-    return kj::refcounted<PipelineTracer>(kj::addRef(*this));
+    return kj::refcounted<PipelineTracer>(logLevel, kj::addRef(*this));
   }
 
   kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
@@ -344,11 +345,17 @@ public:
                                          kj::Maybe<kj::String> entrypoint);
   // Makes a tracer for a worker stage.
 
+  void setLogLevel(PipelineLogLevel newLogLevel) {
+    logLevel = newLogLevel;
+  }
+
 private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
 
   kj::Maybe<kj::Own<PipelineTracer>> parentTracer;
+
+  PipelineLogLevel logLevel;
 
   friend class WorkerTracer;
 };
