@@ -4,8 +4,8 @@
 #include "kj/debug.h"
 #include <kj/common.h>
 #include <kj/filesystem.h>
+#include <capnp/serialize.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
-#include <pyodide/pyodide.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
@@ -343,10 +343,18 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
   api::pyodide::DisabledInternalJaeger,\
   api::pyodide::SimplePythonLimiter
 
+#include <fcntl.h>
+
+static kj::Own<capnp::StreamFdMessageReader> reader;
+
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
   if (featureFlags.getPythonWorkers()) {
     // We add `pyodide:` packages here including python-entrypoint-helper.js.
-    registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
+    int fd = open("/home/rchatham/edgeworker/deps/workerd/bazel-bin/src/workerd/server/pyodide.capnp.bin", O_RDONLY);
+    constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {};
+    reader = kj::heap<capnp::StreamFdMessageReader>(fd, CONFIG_READER_OPTIONS);
+    auto bundle = reader->getRoot<jsg::Bundle>();
+    registry.addBuiltinBundle(bundle, kj::none);
     registry.template addBuiltinModule<PackagesTarReader>(
         "pyodide-internal:packages_tar_reader", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   }
