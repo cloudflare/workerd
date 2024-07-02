@@ -1,5 +1,6 @@
 #include <workerd/server/actor-id-impl.h>
-#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/exception.h>
+#include <workerd/util/thread-scopes.h>
 #include <openssl/rand.h>
 #include <openssl/hmac.h>
 #include <kj/encoding.h>

@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "worker-entrypoint.h"
-#include "io-context.h"
+#include <workerd/io/io-context.h>
 #include <capnp/message.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/global-scope.h>

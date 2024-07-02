@@ -4,7 +4,7 @@
 
 #include "actor-sqlite.h"
 #include <algorithm>
-#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/exception.h>
 #include "io-gate.h"
 
 namespace workerd {

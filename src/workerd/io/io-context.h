@@ -6,12 +6,12 @@
 
 #include <workerd/io/actor-id.h>
 #include <workerd/io/io-channels.h>
-#include "io-gate.h"
+#include <workerd/io/io-gate.h>
 #include "io-own.h"
 #include "io-timers.h"
 #include "io-thread-context.h"
 #include "limit-enforcer.h"
-#include "trace.h"
+#include <workerd/io/trace.h>
 #include "worker.h"
 #include <workerd/api/deferred-proxy.h>
 #include <workerd/jsg/async-context.h>

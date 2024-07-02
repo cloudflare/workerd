@@ -5,17 +5,20 @@ load("//:build/wd_cc_library.bzl", "wd_cc_library")
 wd_cc_library(
     name = "perfetto",
     srcs = ["perfetto-tracing.c++"],
-    hdrs = ["perfetto-tracing.h", "use-perfetto-categories.h"],
+    hdrs = [
+        "perfetto-tracing.h",
+        "use-perfetto-categories.h",
+    ],
+    defines = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["WORKERD_USE_PERFETTO"],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
     ] + select({
         "@platforms//os:windows": [],
         "//conditions:default": ["@perfetto//:libperfetto_client_experimental"],
-    }),
-    defines = select({
-        "@platforms//os:windows": [],
-        "//conditions:default": ["WORKERD_USE_PERFETTO"],
     }),
 )
 # TODO(later): Currently perfetto support is not enabled on Windows simply because the
@@ -28,26 +31,54 @@ wd_cc_library(
     srcs = [
         "mimetype.c++",
         "stream-utils.c++",
-        "uuid.c++",
         "wait-list.c++",
     ],
-    hdrs = glob(
-        ["*.h"],
-        exclude = [
-            "capnp-mock.h",
-            "sqlite*.h",
-            "own-util.h",
-            "thread-scopes.h",
-            "sentry.h",
-            "autogate.h",
-            "perfetto-tracing.h",
-            "use-perfetto-categories.h",
-        ],
-    ),
-    implementation_deps = ["@ssl"],
+    # This is verbose, but allows us to be intentional about what we include here and e.g. avoid
+    # accidentally including test headers or having targets depend on more than they need to.
+    # TODO (cleanup): Break this up entirely.
+    hdrs = [
+        "abortable.h",
+        "batch-queue.h",
+        "canceler.h",
+        "color-util.h",
+        "duration-exceeded-logger.h",
+        "http-util.h",
+        "mimetype.h",
+        "stream-utils.h",
+        "string-buffer.h",
+        "strings.h",
+        "uncaught-exception-source.h",
+        "wait-list.h",
+        "weak-refs.h",
+        "xthreadnotifier.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+wd_cc_library(
+    name = "uuid",
+    srcs = ["uuid.c++"],
+    hdrs = ["uuid.h"],
+    implementation_deps = [
         "@capnp-cpp//src/kj/compat:kj-http",
+        "@ssl",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "test",
+    hdrs = ["test.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj:kj-test",
     ],
 )
 
@@ -84,16 +115,16 @@ wd_cc_library(
 wd_cc_library(
     name = "symbolizer",
     srcs = ["symbolizer.c++"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":sentry",
         "@capnp-cpp//src/kj",
     ],
     alwayslink = 1,
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
 )
 
 wd_cc_library(
@@ -126,7 +157,11 @@ wd_cc_library(
     # Make missing string repr for an autogate into a hard error
     copts = ["-Werror=switch"],
     visibility = ["//visibility:public"],
-    deps = [":sentry", "@capnp-cpp//src/kj", "@capnp-cpp//src/capnp"],
+    deps = [
+        ":sentry",
+        "@capnp-cpp//src/capnp",
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(
@@ -142,10 +177,14 @@ exports_files(["autogate.h"])
     deps = [
         ":util",
     ],
-) for f in glob(
-    ["*-test.c++"],
-    exclude = ["sqlite-*.c++"],
-)]
+) for f in [
+    "batch-queue-test.c++",
+    "mimetype-test.c++",
+    "wait-list-test.c++",
+    "duration-exceeded-logger-test.c++",
+    "string-buffer-test.c++",
+    ]
+]
 
 kj_test(
     src = "sqlite-test.c++",
@@ -158,5 +197,19 @@ kj_test(
     src = "sqlite-kv-test.c++",
     deps = [
         ":sqlite",
+    ],
+)
+
+kj_test(
+    src = "test-test.c++",
+    deps = [
+        ":test",
+    ],
+)
+
+kj_test(
+    src = "uuid-test.c++",
+    deps = [
+        ":uuid",
     ],
 )
