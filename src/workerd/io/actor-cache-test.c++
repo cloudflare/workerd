@@ -229,6 +229,8 @@ struct ActorCacheTest: public ActorCacheConvenienceWrappers {
             : kj::Promise<void>(kj::READY_NOW)) {}
 
   ~ActorCacheTest() noexcept(false) {
+    cache.markPendingReadsAbsentForTest();
+
     // Make sure if the output gate has been broken, the exception was reported. This is important
     // to report errors thrown inside flush(), since those won't otherwise propagate into the test
     // body.
@@ -331,7 +333,7 @@ KJ_TEST("ActorCache multi-key basics") {
                                           ]))
           .expectReturns(CAPNP(), ws);
       stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    }).thenReturn(CAPNP());
 
     auto results = promise.wait(ws);
     KJ_ASSERT(results == kvs({{"bar", "456"}, {"foo", "123"}}));
@@ -502,7 +504,7 @@ KJ_TEST("ActorCache more multi-puts") {
                                           (key = "foo", value = "123")]))
           .expectReturns(CAPNP(), ws);
       stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    }).thenReturn(CAPNP());
 
     auto results = promise.wait(ws);
     KJ_ASSERT(results == kvs({{"bar", "456"}, {"foo", "123"}}));
@@ -532,11 +534,9 @@ KJ_TEST("ActorCache more multi-puts") {
         "foo"_kj, "bar"_kj, "baz"_kj, "qux"_kj, "corge"_kj, "grault"_kj}));
 
     // Only "grault" is not cached.
-    mockStorage->expectCall("getMultiple", ws)
-        .withParams(CAPNP(keys = ["grault"]), "stream"_kj)
-        .useCallback("stream", [&](MockClient stream) {
-      stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    mockStorage->expectCall("get", ws)
+        .withParams(CAPNP(key = "grault"))
+        .thenReturn(CAPNP());
 
     auto results = promise.wait(ws);
     KJ_ASSERT(results == kvs({
@@ -567,7 +567,7 @@ KJ_TEST("ActorCache more multi-deletes") {
                                           (key = "foo", value = "123")]))
           .expectReturns(CAPNP(), ws);
       stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    }).thenReturn(CAPNP());
 
     auto results = promise.wait(ws);
     KJ_ASSERT(results == kvs({{"bar", "456"}, {"foo", "123"}}));
@@ -603,13 +603,9 @@ KJ_TEST("ActorCache more multi-deletes") {
         "foo"_kj, "bar"_kj, "baz"_kj, "qux"_kj, "corge"_kj, "grault"_kj, "garply"_kj}));
 
     // Only "garply" is not cached.
-    mockStorage->expectCall("getMultiple", ws)
-        .withParams(CAPNP(keys = ["garply"]), "stream"_kj)
-        .useCallback("stream", [&](MockClient stream) {
-      stream.call("values", CAPNP(list = [(key = "garply", value = "abcd")]))
-          .expectReturns(CAPNP(), ws);
-      stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    mockStorage->expectCall("get", ws)
+        .withParams(CAPNP(key = "garply"))
+        .thenReturn(CAPNP(value = "abcd"));
 
     auto results = promise.wait(ws);
     KJ_ASSERT(results == kvs({
@@ -716,7 +712,7 @@ KJ_TEST("ActorCache deleteAll()") {
       stream.call("values", CAPNP(list = [(key = "corge", value = "555")]))
           .expectReturns(CAPNP(), ws);
       stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    }).thenReturn(CAPNP());
 
     auto results = promise.wait(ws);
     KJ_ASSERT(results == kvs({{"corge", "555"}}));
@@ -842,7 +838,7 @@ KJ_TEST("ActorCache deleteAll() again when previous one isn't done yet") {
       stream.call("values", CAPNP(list = [(key = "corge", value = "555")]))
           .expectReturns(CAPNP(), ws);
       stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    }).thenReturn(CAPNP());
 
     auto results = promise.wait(ws);
     KJ_ASSERT(results == kvs({{"corge", "555"}}));
@@ -916,7 +912,7 @@ KJ_TEST("ActorCache coalescing") {
                                           (key = "foo", value = "123")]))
           .expectReturns(CAPNP(), ws);
       stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    }).thenReturn(CAPNP());
 
     auto results = promise.wait(ws);
     KJ_ASSERT(results == kvs({{"bar", "456"}, {"foo", "123"}}));
@@ -1028,53 +1024,18 @@ KJ_TEST("ActorCache get-put ordering") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "123");
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("bar"))) == "456");
 
-  // Expect to receive the storage gets. But, don't return from them yet!
   KJ_ASSERT(!promise1.poll(ws));
-  auto mockGet1 = mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["bar", "baz", "foo"]), "stream"_kj);
-
   KJ_ASSERT(!promise2.poll(ws));
-  auto mockGet2 = mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["baz"]), "stream"_kj);
+  mockStorage->expectCall("getMultiple", ws)
+      .withParams(CAPNP(keys = ["bar", "baz", "foo"]), "stream"_kj)
+      .useCallback("stream", [&](MockClient stream) {
 
-  // No writes will be done until our reads finish!
-  mockStorage->expectNoActivity(ws);
-
-  // Let's have the second read complete first.
-  kj::mv(mockGet2).useCallback("stream", [&](MockClient stream) {
-    stream.call("values", CAPNP(list = [(key = "baz", value = "987")]))
-        .expectReturns(CAPNP(), ws);
-    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).expectCanceled();
-
-  // The completed read returns cached results as of when it was called, merged with what it
-  // read from disk.
-  KJ_ASSERT(promise2.wait(ws) == kvs({{"baz", "987"}, {"foo", "123"}}));
-
-  // The completed read brought "baz" into cache but didn't change "foo" or "bar".
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "123");
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("bar"))) == "456");
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("baz"))) == "987");
-
-  // Still no writes because the first read is still outstanding.
-  mockStorage->expectNoActivity(ws);
-
-  // Finally, have the first read complete.
-  kj::mv(mockGet1).useCallback("stream", [&](MockClient stream) {
     stream.call("values", CAPNP(list = [(key = "bar", value = "654"),
                                         (key = "baz", value = "987"),
                                         (key = "foo", value = "321")]))
         .expectReturns(CAPNP(), ws);
     stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).expectCanceled();
-
-  // This returns exactly what came off disk, not reflecting any later writes.
-  KJ_ASSERT(promise1.wait(ws) == kvs({{"bar", "654"}, {"baz", "987"}, {"foo", "321"}}));
-
-  // The completed read didn't mess with the cache.
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "123");
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("bar"))) == "456");
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("baz"))) == "987");
+  }).thenReturn(CAPNP());
 
   // Next up, the flush transaction proceeds.
   auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
@@ -1087,6 +1048,25 @@ KJ_TEST("ActorCache get-put ordering") {
       .thenReturn(CAPNP());
   mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
   mockTxn->expectDropped(ws);
+
+
+  // This returns exactly what came off disk, not reflecting any later writes.
+  KJ_ASSERT(promise1.wait(ws) == kvs({{"bar", "654"}, {"baz", "987"}, {"foo", "321"}}));
+
+  // The completed read returns cached results as of when it was called, merged with what it
+  // read from disk.
+  KJ_ASSERT(promise2.wait(ws) == kvs({{"baz", "987"}, {"foo", "123"}}));
+
+  // The completed read brought "baz" into cache but didn't change "foo" or "bar".
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "123");
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("bar"))) == "456");
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("baz"))) == "987");
+
+
+  // The completed read didn't mess with the cache.
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "123");
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("bar"))) == "456");
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("baz"))) == "987");
 
   // Our delete finally finished.
   KJ_ASSERT(deletePromise.wait(ws) == 1);
@@ -1484,27 +1464,74 @@ KJ_TEST("ActorCache read hard fail") {
   mockStorage->expectNoActivity(ws);
 }
 
+KJ_TEST("ActorCache read multiple hard fail") {
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  // Don't use expectCached() this time because we don't want eagerlyReportExceptions(), because
+  // we actually expect an exception.
+  auto promise = expectUncached(test.get({"foo"_kj, "garply"_kj}));
+  test.put("bar", "456");
+  test.delete_("baz");
+
+  auto mockGet = mockStorage->expectCall("getMultiple", ws)
+      .withParams(CAPNP(keys = ["foo", "garply"]), "stream"_kj)
+      .useCallback("stream", [&](MockClient stream) {});
+
+  // We won't write anything until the read completes.
+  mockStorage->expectNoActivity(ws);
+
+  // Fail out the read with non-disconnect.
+  // TODO(now): For some reason, although the client code (the test) is the same in the single-key
+  // get as in the multi-key get test, throwing here causes problems within the ActorCache code.
+  //
+  // Similarly, we set up our failed promise path the same way for single key as multi key in the
+  // ActorCache code, so it's really weird that this is causing issues there. I suspect the issue
+  // is that we're failing to correctly catch the exception somewhere in capnp rpc.
+  kj::mv(mockGet).thenThrow(KJ_EXCEPTION(FAILED, "read failed"));
+  KJ_EXPECT_THROW_MESSAGE("read failed", promise.wait(ws));
+
+  // The read is NOT retried, so expect the transaction to run now.
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
+  mockTxn->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["baz"]))
+      .thenReturn(CAPNP(numDeleted = 0));
+  mockTxn->expectCall("put", ws)
+      .withParams(CAPNP(entries = [(key = "bar", value = "456")]))
+      .thenReturn(CAPNP());
+  mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
+  mockTxn->expectDropped(ws);
+
+  // The read is NOT retried.
+  mockStorage->expectNoActivity(ws);
+}
+
 KJ_TEST("ActorCache read cancel") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
-  auto promise = expectUncached(test.get("foo"));
+  // Don't use expectCached() this time because we don't want eagerlyReportExceptions(), because
+  // we actually expect an exception.
+  auto promise = test.get("foo").get<kj::Promise<kj::Maybe<kj::String>>>();
   test.put("bar", "456");
   test.delete_("baz");
 
-  // Expect the get, but intentionally don't resolve it.
+  // Expect the get, but don't resolve yet.
   auto mockGet = mockStorage->expectCall("get", ws)
       .withParams(CAPNP(key = "foo"));
 
   // We won't write anything until the read completes.
   mockStorage->expectNoActivity(ws);
 
-  // Cancel the read.
-  promise = nullptr;
-  mockGet.expectCanceled();
+  // Fail out the read with non-disconnect.
+  kj::mv(mockGet).thenThrow(KJ_EXCEPTION(FAILED, "read failed"));
 
-  // The transaction proceeds.
+  // The read propagates the error.
+  KJ_EXPECT_THROW_MESSAGE("read failed", promise.wait(ws));
+
+  // The read is NOT retried, so expect the transaction to run now.
   auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
   mockTxn->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["baz"]))
@@ -1515,6 +1542,58 @@ KJ_TEST("ActorCache read cancel") {
 
   mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
   mockTxn->expectDropped(ws);
+
+  // The read is NOT retried.
+  mockStorage->expectNoActivity(ws);
+}
+
+KJ_TEST("ActorCache read overwrite") {
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  // Make some gets but overwrite them in the cache with puts.
+  auto promise1 = expectUncached(test.get("foo"));
+  auto promise2 = expectUncached(test.get("bar"));
+  (void)expectUncached(test.get("baz"));
+
+  test.put("foo", "456");
+  test.put("bar", "789");
+  test.put("baz", "123");
+
+  // Since we still have the promise for foo and bar, we do send a get for them. However, 'baz' will
+  // not be sent, since we dropped our GetWaiter when we dropped the get() promise. By dropping our
+  // GetWaiter, we remove the entry for `baz` from the dirtyList, so when it comes time to flush
+  // 'baz' isn't even considered for a storage get.
+  mockStorage->expectCall("getMultiple", ws)
+      .withParams(CAPNP(keys = ["foo", "bar"]), "stream"_kj)
+      .useCallback("stream", [&ws, promise = kj::mv(promise2)](MockClient stream) mutable {
+    // Cancel the read for bar while we're flushing.
+    promise = nullptr;
+    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
+  }).thenReturn(CAPNP());
+
+  // We've already replaced our dirty entries, so we don't see the previous value of foo.
+  KJ_EXPECT(expectCached(test.get("foo")).orDefault({}) == "456");
+  KJ_EXPECT(expectCached(test.get("bar")).orDefault({}) == "789");
+  KJ_EXPECT(expectCached(test.get("baz")).orDefault({}) == "123");
+
+  // The put proceeds.
+  mockStorage->expectCall("put", ws)
+      .withParams(CAPNP(entries = [
+          (key = "foo", value = "456"),
+          (key = "bar", value = "789"),
+          (key = "baz", value = "123")]))
+      .thenReturn(CAPNP());
+
+  // Our values are now clean but nothing changes about the cached state.
+  KJ_EXPECT(expectCached(test.get("foo")).orDefault({}) == "456");
+  KJ_EXPECT(expectCached(test.get("bar")).orDefault({}) == "789");
+  KJ_EXPECT(expectCached(test.get("baz")).orDefault({}) == "123");
+
+  // We saw the previously absent value even though we were overwritten.
+  auto val = promise1.wait(ws);
+  KJ_EXPECT(val == kj::none);
 }
 
 KJ_TEST("ActorCache get-multiple multiple blocks") {
@@ -1555,7 +1634,7 @@ KJ_TEST("ActorCache get-multiple multiple blocks") {
     KJ_ASSERT(expectCached(test.get("corge")) == nullptr);
     KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "789");
     KJ_ASSERT(expectCached(test.get("qux")) == nullptr);
-  }).expectCanceled();
+  }).thenReturn(CAPNP());
 
   KJ_ASSERT(promise.wait(ws) == kvs({{"baz", "456"}, {"foo", "789"}}));
 }
@@ -1574,6 +1653,8 @@ KJ_TEST("ActorCache get-multiple partial retry") {
         .expectReturns(CAPNP(), ws);
   }).thenThrow(KJ_EXCEPTION(DISCONNECTED, "read failed"));
 
+  ws.poll();
+
   mockStorage->expectCall("getMultiple", ws)
       // Since "baz" was received, the caller knows that it only has to retry keys after that.
       .withParams(CAPNP(keys = ["foo", "qux"]), "stream"_kj)
@@ -1581,7 +1662,7 @@ KJ_TEST("ActorCache get-multiple partial retry") {
     stream.call("values", CAPNP(list = [(key = "qux", value = "789")]))
         .expectReturns(CAPNP(), ws);
     stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).expectCanceled();
+  }).thenReturn(CAPNP());
 
   KJ_ASSERT(promise.wait(ws) == kvs({{"baz", "456"}, {"qux", "789"}}));
 }
@@ -1862,9 +1943,28 @@ KJ_TEST("ActorCache list() multiple ranges") {
   KJ_ASSERT(expectCached(test.list("a", "c")) == kvs({{"a", "1"}, {"b", "2"}}));
   KJ_ASSERT(expectCached(test.list("x", "z")) == kvs({{"y", "9"}}));
 
-  (void)expectUncached(test.get("w"));
-  (void)expectUncached(test.get("d"));
-  (void)expectUncached(test.get("c"));
+  // Test a few gets that read from storage.
+  // The key "w" is before "x", and we did a list starting at "x", so "w" is not in cache.
+  auto getProm1 = expectUncached(test.get("w"));
+  mockStorage->expectCall("get", ws)
+      .withParams(CAPNP(key = "w"))
+      .thenReturn(CAPNP());
+  KJ_ASSERT(getProm1.wait(ws) == nullptr);
+
+  // We did a list ending at "c", and since "d" is not in the list range, it shouldn't be in cache.
+  auto getProm2 = expectUncached(test.get("d"));
+  mockStorage->expectCall("get", ws)
+      .withParams(CAPNP(key = "d"))
+      .thenReturn(CAPNP());
+  KJ_ASSERT(getProm2.wait(ws) == nullptr);
+
+  // The key "c" is the end marker of a prior list(), so it's in cache, but its status is UNKNOWN.
+  // Since the value is UNKNOWN, we will read from storage!
+  auto getProm3 = expectUncached(test.get("c"));
+  mockStorage->expectCall("get", ws)
+      .withParams(CAPNP(key = "c"))
+      .thenReturn(CAPNP());
+  KJ_ASSERT(getProm3.wait(ws) == nullptr);
 }
 
 KJ_TEST("ActorCache list() with some already-cached keys in range") {
@@ -1877,12 +1977,15 @@ KJ_TEST("ActorCache list() with some already-cached keys in range") {
     auto promise1 = expectUncached(test.get("bbb"));
     auto promise2 = expectUncached(test.get("ccc"));
 
-    mockStorage->expectCall("get", ws)
-        .withParams(CAPNP(key = "bbb"))
-        .thenReturn(CAPNP());
-    mockStorage->expectCall("get", ws)
-        .withParams(CAPNP(key = "ccc"))
-        .thenReturn(CAPNP(value = "cval"));
+    // Following the read coalesce change, if we do the two requests without awaiting,
+    // mockStorage expects a single getMultiple() instead of two separate get()s.
+    mockStorage->expectCall("getMultiple", ws)
+        .withParams(CAPNP(keys = ["bbb", "ccc"]), "stream"_kj)
+        .useCallback("stream", [&](MockClient stream) {
+      stream.call("values", CAPNP(list = [(key = "ccc", value = "cval")]))
+          .expectReturns(CAPNP(), ws);
+      stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
+    }).thenReturn(CAPNP());
 
     KJ_ASSERT(promise1.wait(ws) == nullptr);
     KJ_ASSERT(KJ_ASSERT_NONNULL(promise2.wait(ws)) == "cval");
@@ -2441,7 +2544,7 @@ KJ_TEST("ActorCache list() interleave streaming with other ops") {
   auto& mockStorage = test.mockStorage;
 
   auto promise = expectUncached(test.list("bar", "qux"));
-
+  kj::Promise<kj::Maybe<kj::String>> promise2 = nullptr;
   mockStorage->expectCall("list", ws)
       .withParams(CAPNP(start = "bar", end = "qux"), "stream"_kj)
       .useCallback("stream", [&](MockClient stream) {
@@ -2451,11 +2554,7 @@ KJ_TEST("ActorCache list() interleave streaming with other ops") {
 
     KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("bar"))) == "123");
     KJ_ASSERT(expectCached(test.get("baz")) == nullptr);
-    auto promise2 = expectUncached(test.get("grault"));
-    mockStorage->expectCall("get", ws)
-        .withParams(CAPNP(key = "grault"))
-        .thenReturn(CAPNP());
-    KJ_ASSERT(promise2.wait(ws) == nullptr);
+    promise2 = expectUncached(test.get("grault"));
 
     test.put("foo", "987");
 
@@ -2476,16 +2575,16 @@ KJ_TEST("ActorCache list() interleave streaming with other ops") {
 
   // There will be two flushes waiting since the put of "foo" will have started before the
   // delete of "garply"
-  {
-    mockStorage->expectCall("put", ws)
-        .withParams(CAPNP(entries = [(key = "foo", value = "987")]))
-        .thenReturn(CAPNP());
-  }
-  {
-    mockStorage->expectCall("delete", ws)
-        .withParams(CAPNP(keys = ["garply"]))
-        .thenReturn(CAPNP());
-  }
+  mockStorage->expectCall("get", ws)
+      .withParams(CAPNP(key = "grault"))
+      .thenReturn(CAPNP());
+  mockStorage->expectCall("put", ws)
+      .withParams(CAPNP(entries = [(key = "foo", value = "987")]))
+      .thenReturn(CAPNP());
+  mockStorage->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["garply"]))
+      .thenReturn(CAPNP());
+  KJ_ASSERT(promise2.wait(ws) == nullptr);
 }
 
 KJ_TEST("ActorCache list() end of first block deleted at inopportune time") {
@@ -2879,12 +2978,13 @@ KJ_TEST("ActorCache listReverse() with some already-cached keys in range") {
     auto promise1 = expectUncached(test.get("bbb"));
     auto promise2 = expectUncached(test.get("ccc"));
 
-    mockStorage->expectCall("get", ws)
-        .withParams(CAPNP(key = "bbb"))
-        .thenReturn(CAPNP());
-    mockStorage->expectCall("get", ws)
-        .withParams(CAPNP(key = "ccc"))
-        .thenReturn(CAPNP(value = "cval"));
+    mockStorage->expectCall("getMultiple", ws)
+        .withParams(CAPNP(keys = ["bbb", "ccc"]), "stream"_kj)
+        .useCallback("stream", [&](MockClient stream) {
+      stream.call("values", CAPNP(list = [(key = "ccc", value = "cval")]))
+          .expectReturns(CAPNP(), ws);
+      stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
+    }).thenReturn(CAPNP());
 
     KJ_ASSERT(promise1.wait(ws) == nullptr);
     KJ_ASSERT(KJ_ASSERT_NONNULL(promise2.wait(ws)) == "cval");
@@ -3379,6 +3479,7 @@ KJ_TEST("ActorCache listReverse() interleave streaming with other ops") {
   auto& mockStorage = test.mockStorage;
 
   auto promise = expectUncached(test.listReverse("baa", "qux"));
+  kj::Promise<kj::Maybe<kj::String>> promise2 = nullptr;
 
   mockStorage->expectCall("list", ws)
       .withParams(CAPNP(start = "baa", end = "qux", reverse = true), "stream"_kj)
@@ -3390,11 +3491,7 @@ KJ_TEST("ActorCache listReverse() interleave streaming with other ops") {
     KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("garply"))) == "555");
     KJ_ASSERT(expectCached(test.get("grault")) == nullptr);
     KJ_ASSERT(expectCached(test.get("gah")) == nullptr);
-    auto promise2 = expectUncached(test.get("baz"));
-    mockStorage->expectCall("get", ws)
-        .withParams(CAPNP(key = "baz"))
-        .thenReturn(CAPNP());
-    KJ_ASSERT(promise2.wait(ws) == nullptr);
+    promise2 = expectUncached(test.get("baz"));
 
     test.put("corge", "987");
 
@@ -3416,6 +3513,12 @@ KJ_TEST("ActorCache listReverse() interleave streaming with other ops") {
   // There will be two flushes waiting since the put of "foo" will have started before the
   // delete of "garply"
   {
+    // Since we now flush reads along with writes, this moves outside of the callback.
+    mockStorage->expectCall("get", ws)
+        .withParams(CAPNP(key = "baz"))
+        .thenReturn(CAPNP());
+  }
+  {
     mockStorage->expectCall("put", ws)
         .withParams(CAPNP(entries = [(key = "corge", value = "987")]))
         .thenReturn(CAPNP());
@@ -3425,6 +3528,7 @@ KJ_TEST("ActorCache listReverse() interleave streaming with other ops") {
         .withParams(CAPNP(keys = ["bar"]))
         .thenReturn(CAPNP());
   }
+  KJ_ASSERT(promise2.wait(ws) == nullptr);
 }
 
 KJ_TEST("ActorCache listReverse() end of first block deleted at inopportune time") {
@@ -3500,7 +3604,7 @@ KJ_TEST("ActorCache listReverse() retry on failure") {
 // =======================================================================================
 // LRU purge
 
-constexpr size_t ENTRY_SIZE = 120;
+constexpr size_t ENTRY_SIZE = 150;
 KJ_TEST("ActorCache LRU purge") {
   ActorCacheTest test({.softLimit = 1 * ENTRY_SIZE});
   auto& ws = test.ws;
@@ -3527,7 +3631,11 @@ KJ_TEST("ActorCache LRU purge") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("bar"))) == "456");
 
   // But foo was evicted.
-  (void)expectUncached(test.get("foo"));
+  promise = expectUncached(test.get("foo"));
+  mockStorage->expectCall("get", ws)
+      .withParams(CAPNP(key = "foo"))
+      .thenReturn(CAPNP(value = "123"));
+  KJ_ASSERT(KJ_ASSERT_NONNULL(promise.wait(ws)) == "123");
 }
 
 KJ_TEST("ActorCache LRU purge ordering") {
@@ -3558,6 +3666,7 @@ KJ_TEST("ActorCache LRU purge ordering") {
 
   // Foo and qux live, bar and baz evicted.
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "123");
+  // Note: We are scheduling these to be read from storage.
   (void)expectUncached(test.get("bar"));
   (void)expectUncached(test.get("baz"));
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("qux"))) == "555");
@@ -3566,7 +3675,7 @@ KJ_TEST("ActorCache LRU purge ordering") {
 }
 
 KJ_TEST("ActorCache LRU purge larger") {
-  ActorCacheTest test({.softLimit = 32 * ENTRY_SIZE});
+  ActorCacheTest test({.softLimit = 30 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3640,7 +3749,7 @@ KJ_TEST("ActorCache LRU purge") {
                                         (key = "foo", value = "123")]))
         .expectReturns(CAPNP(), ws);
     stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).expectCanceled();
+  }).thenReturn(CAPNP());
 
   KJ_ASSERT(promise.wait(ws) == kvs({{"bar", "456"}, {"baz", "789"}, {"foo", "123"}}));
 
@@ -4239,6 +4348,8 @@ KJ_TEST("ActorCache skip cache") {
   (void)expectUncached(test.get("corge"));
   (void)expectUncached(test.get("grault"));
 
+  // We will leave the expectCall for later so that we don't cache these values now.
+
   // Again, but reverse list.
   {
     auto promise = expectUncached(test.listReverse("bar", "qux", kj::none, {.noCache = true}));
@@ -4306,7 +4417,7 @@ KJ_TEST("ActorCache transaction read-through") {
                                           (key = "qux", value = "789")]))
           .expectReturns(CAPNP(), ws);
       stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    }).thenReturn(CAPNP());
 
     KJ_ASSERT(promise.wait(ws) == kvs({{"baz", "456"}, {"qux", "789"}}));
 
@@ -4358,16 +4469,14 @@ KJ_TEST("ActorCache transaction overlay changes") {
       kvs({{"bar", "654"}, {"qux", "987"}}));
 
   // The deletes will force reads in order to compute counts.
-  mockStorage->expectCall("get", ws)
-      .withParams(CAPNP(key = "grault"))
-      .thenReturn(CAPNP(value = "555"));
   mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["baz", "garply"]), "stream"_kj)
+      .withParams(CAPNP(keys = ["grault", "baz", "garply"]), "stream"_kj)
       .useCallback("stream", [&](MockClient stream) {
-    stream.call("values", CAPNP(list = [(key = "baz", value = "456")]))
+    stream.call("values", CAPNP(list = [(key = "grault", value = "555"),
+                                        (key = "baz", value = "456")]))
         .expectReturns(CAPNP(), ws);
     stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).expectCanceled();
+  }).thenReturn(CAPNP());
 
   KJ_ASSERT(deletePromise1.wait(ws));
   KJ_ASSERT(deletePromise2.wait(ws) == 1);
@@ -4375,13 +4484,11 @@ KJ_TEST("ActorCache transaction overlay changes") {
   {
     auto promise = expectUncached(eztxn.get({"baz"_kj, "qux"_kj, "corge"_kj}));
 
-    mockStorage->expectCall("getMultiple", ws)
-        .withParams(CAPNP(keys = ["corge"]), "stream"_kj)
-        .useCallback("stream", [&](MockClient stream) {
-      stream.call("values", CAPNP(list = []))
-          .expectReturns(CAPNP(), ws);
-      stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-    }).expectCanceled();
+    // `baz` is ABSENT in cache (we deleted it above!), and `qux` is PRESENT,
+    // so only `corge` is added to our collection of keys to read.
+    mockStorage->expectCall("get", ws)
+        .withParams(CAPNP(key = "corge"))
+        .thenReturn(CAPNP());
 
     KJ_ASSERT(promise.wait(ws) == kvs({{"qux", "987"}}));
 
@@ -4656,18 +4763,22 @@ KJ_TEST("ActorCache transaction multiple counted delete batches") {
 
   mockStorage->expectCall("getMultiple", ws)
       // Note that this batch is smaller because "count2" was known to the actor cache.
-      .withParams(CAPNP(keys = ["count1"]), "stream"_kj)
+      .withParams(CAPNP(keys = ["count1", "count4"]), "stream"_kj)
       .useCallback("stream", [&](MockClient stream) {
     // Pretend that "count1" already exists but was not in the cache.
     stream.call("values", CAPNP(list = [(key = "count1", value = "1")]))
         .expectReturns(CAPNP(), ws);
     stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).expectCanceled();
+  }).thenReturn(CAPNP());
+
+  // "count5" is in a separate getMultiple because we set `maxKeysPerRpc = 2` above.
   mockStorage->expectCall("getMultiple", ws)
-      .withParams(CAPNP(keys = ["count4", "count5"]), "stream"_kj)
+      .withParams(CAPNP(keys = ["count5"]), "stream"_kj)
       .useCallback("stream", [&](MockClient stream) {
+    stream.call("values", CAPNP(list = []))
+        .expectReturns(CAPNP(), ws);
     stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
-  }).expectCanceled();
+  }).thenReturn(CAPNP());
 
   // For hacky reasons, we are able to observe the counted delete before we submit the
   // transaction.
