@@ -359,30 +359,26 @@ void BufferUtil::fillImpl(
     uint32_t start,
     uint32_t end,
     jsg::Optional<kj::String> encoding) {
+  end = kj::min(end, buffer.size());
   if (end <= start) return;
 
-  const auto fillFromBytes = [&](kj::ArrayPtr<kj::byte> source) {
-    if (source.size() == 0) return;
-    auto ptr = buffer.begin() + start;
-    auto src = source.begin();
-    auto remaining = end - start;
-    uint32_t offset = 0;
-    while (remaining > 0) {
-      auto amountToCopy = kj::min(remaining, source.size());
-      std::copy(src, src + amountToCopy, ptr + offset);
-      remaining -= amountToCopy;
-      offset += amountToCopy;
-    }
-  };
-
+  auto ptr = buffer.slice(start, end);
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(string, jsg::JsString) {
-      auto enc = kj::mv(encoding).orDefault(kj::str("utf8"));
+      auto enc = encoding.map([](kj::String& s) { return s.asPtr(); }).orDefault("utf8"_kj);
       auto decoded = decodeStringImpl(js, string, getEncoding(enc), true /* strict */);
-      fillFromBytes(decoded);
+      if (decoded.size() == 0) {
+        ptr.fill(0);
+        return;
+      }
+      ptr.fill(decoded);
     }
     KJ_CASE_ONEOF(source, jsg::BufferSource) {
-      fillFromBytes(source.asArrayPtr());
+      if (source.size() == 0) {
+        ptr.fill(0);
+        return;
+      }
+      ptr.fill(source.asArrayPtr());
     }
   }
 }
