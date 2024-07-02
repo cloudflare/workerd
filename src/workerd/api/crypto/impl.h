@@ -362,6 +362,13 @@ private:
 // be thrown. Otherwise the method will return normally.
 void checkPbkdfLimits(jsg::Lock& js, size_t iterations);
 
+// Either succeeds with exactly |length| bytes of cryptographically
+// strong pseudo-random data, or fails. This function may block.
+// Don't assume anything about the contents of |buffer| on error.
+// As a special case, |length == 0| can be used to check if the CSPRNG
+// is properly seeded without consuming entropy.
+bool CSPRNG(kj::ArrayPtr<kj::byte> buffer);
+
 }  // namespace workerd::api
 
 KJ_DECLARE_NON_POLYMORPHIC(DH);
