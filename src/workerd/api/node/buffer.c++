@@ -368,13 +368,15 @@ void BufferUtil::fillImpl(
       auto enc = encoding.map([](kj::String& s) { return s.asPtr(); }).orDefault("utf8"_kj);
       auto decoded = decodeStringImpl(js, string, getEncoding(enc), true /* strict */);
       if (decoded.size() == 0) {
-        return ptr.fill(0);
+        ptr.fill(0);
+        return;
       }
       ptr.fill(decoded);
     }
     KJ_CASE_ONEOF(source, jsg::BufferSource) {
       if (source.size() == 0) {
-        return ptr.fill(0);
+        ptr.fill(0);
+        return;
       }
       ptr.fill(source.asArrayPtr());
     }
