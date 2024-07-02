@@ -69,6 +69,10 @@ compat_dates = [
     ("2023-03-01", "2023-03-01"),
     # https://github.com/cloudflare/workerd/blob/fcb6f33d10c71975cb2ce68dbf1924a1eeadbd8a/src/workerd/io/compatibility-date.capnp#L307-L312 (urlsearchparams_delete_has_value_arg)
     ("2023-07-01", "2023-07-01"),
+    # https://developers.cloudflare.com/workers/configuration/compatibility-dates/#fetchers-no-longer-have-getputdelete-helper-methods (fetcher_no_get_put_delete)
+    # https://developers.cloudflare.com/workers/configuration/compatibility-dates/#queues-send-messages-in-json-format (no_queues_json_messages)
+    # https://developers.cloudflare.com/workers/configuration/compatibility-dates/#suppress-global-importscripts (no_global_importscripts)
+    ("2024-03-26", "2024-03-26"),
     # Latest compatibility date (note these types should be the same as the previous entry)
     (None, "experimental"),
 ]
