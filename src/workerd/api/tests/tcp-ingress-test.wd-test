@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "tcp-ingress-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tcp-ingress-test.js"),
+        ],
+        compatibilityDate = "2024-06-03",
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+      )
+    ),
+    ( name = "internet", network = ( allow = ["private"] ) )
+  ],
+  sockets = [
+    (name = "tcp", address = "*:8081", tcp = (), service = "tcp-ingress-test")
+  ]
+);
