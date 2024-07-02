@@ -1873,6 +1873,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
             .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
           if (exception.getDescription().startsWith("invalid Content-Length header value")) {
             return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
+          } else if (exception.getDescription().contains("NOSENTRY script not found")) {
+            return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
           }
           return kj::mv(exception);
         }),
