@@ -11,6 +11,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/buffersource.h>
 #include <openssl/err.h>
+
 #include "../streams.h"
 
 namespace workerd::api {
@@ -285,6 +286,9 @@ public:
   bool operator==(const CryptoKey& other) const;
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+  bool verifyX509Public(const X509* x509) const;
+  bool verifyX509Private(const X509* x509) const;
 
 private:
   kj::Own<Impl> impl;

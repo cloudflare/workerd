@@ -7,6 +7,7 @@
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/crypto/digest.h>
 #include <workerd/api/crypto/dh.h>
+#include <workerd/api/crypto/x509.h>
 #include <openssl/evp.h>
 
 namespace workerd::api::node {
@@ -240,6 +241,8 @@ public:
     JSG_METHOD(verifySpkac);
     JSG_METHOD(exportPublicKey);
     JSG_METHOD(exportChallenge);
+    // X509
+    JSG_NESTED_TYPE(X509Certificate);
   }
 };
 
@@ -250,6 +253,7 @@ public:
     api::node::CryptoImpl::HmacHandle,                 \
     api::node::CryptoImpl::KeyExportOptions,           \
     api::node::CryptoImpl::GenerateKeyPairOptions,     \
-    api::node::CryptoImpl::CreateAsymmetricKeyOptions
+    api::node::CryptoImpl::CreateAsymmetricKeyOptions, \
+    EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node
 

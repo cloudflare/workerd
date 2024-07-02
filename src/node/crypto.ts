@@ -79,6 +79,10 @@ import {
 
 import { Certificate } from 'node-internal:crypto_spkac';
 
+import {
+  X509Certificate,
+} from 'node-internal:crypto_x509';
+
 export {
   // DH
   DiffieHellman,
@@ -130,6 +134,8 @@ export {
   createSecretKey,
   // Spkac
   Certificate,
+  // X509
+  X509Certificate,
 }
 
 export function getCiphers() {
@@ -235,6 +241,8 @@ export default {
   // WebCrypto
   subtle,
   webcrypto,
+  // X509
+  X509Certificate,
 };
 
 // Classes
@@ -249,7 +257,7 @@ export default {
 //   * [ ] crypto.KeyObject
 //   * [ ] crypto.Sign
 //   * [ ] crypto.Verify
-//   * [ ] crypto.X509Certificate
+//   * [x] crypto.X509Certificate
 //   * [ ] crypto.constants
 //   * [ ] crypto.DEFAULT_ENCODING
 // * Primes

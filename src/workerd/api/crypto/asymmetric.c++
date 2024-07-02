@@ -2306,4 +2306,39 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
   // In X25519 we ignore the id-X25519 identifier, as with id-ecDH above.
   return kj::heap<EdDsaKey>(kj::mv(evpPkey), normalizedName, keyType, extractable, usages);
 }
+
+kj::Own<CryptoKey::Impl> fromRsaKey(kj::Own<EVP_PKEY> key) {
+  return kj::heap<RsassaPkcs1V15Key>(kj::mv(key),
+      CryptoKey::RsaKeyAlgorithm {.name = "RSA"_kj },
+      "public"_kj, true,
+      CryptoKeyUsageSet::decrypt() | CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
+}
+
+kj::Own<CryptoKey::Impl> fromEcKey(kj::Own<EVP_PKEY> key) {
+  auto nid = EVP_PKEY_id(key.get());
+  if (nid == NID_X25519 || nid == NID_ED25519) {
+    return fromEd25519Key(kj::mv(key));
+  }
+
+  auto curveName = OBJ_nid2sn(nid);
+  if (curveName == nullptr) {
+    curveName = "unknown";
+  }
+
+  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(curveName);
+
+  return kj::heap<EllipticKey>(kj::mv(key),
+      CryptoKey::EllipticKeyAlgorithm {
+        .name = "ECDSA"_kj,
+        .namedCurve = normalizedNamedCurve
+      },
+      "public"_kj, rsSize, true,
+      CryptoKeyUsageSet::verify());
+}
+
+kj::Own<CryptoKey::Impl> fromEd25519Key(kj::Own<EVP_PKEY> key) {
+  return kj::heap<EdDsaKey>(kj::mv(key), "Ed25519"_kj, "public"_kj, true,
+      CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
+}
+
 }  // namespace workerd::api
