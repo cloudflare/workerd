@@ -13,8 +13,8 @@ build --experimental_remote_cache_eviction_retries=3
 # Note that we use remote_download_minimal for test builds, which avoids fetching build outputs
 # where possible. While several previous BwoB bugs have been fixed, this is slower than it could be
 # due to https://github.com/bazelbuild/bazel/issues/20576.
-# Windows build is failing on some runs due to FileAccessException errors, appears to be
-# https://github.com/bazelbuild/bazel/issues/15010 happening again. Disable BwoB for now.
+# Windows build is failing on some runs due to FileAccessException errors, Bazel has had several
+# similar bugs in the past. Disable BwoB for now.
 build:windows --remote_download_all
 
 # Enable webgpu
