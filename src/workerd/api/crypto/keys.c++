@@ -18,14 +18,11 @@ kj::StringPtr toStringPtr(KeyType type) {
   KJ_UNREACHABLE;
 }
 
-AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(
-    kj::Own<EVP_PKEY> keyData,
-    KeyType keyType,
-    bool extractable,
-    CryptoKeyUsageSet usages)
-    : CryptoKey::Impl(extractable, usages),
-      keyData(kj::mv(keyData)),
-      keyType(keyType) {
+AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(ImportAsymmetricResult&& key,
+                                                       bool extractable)
+    : CryptoKey::Impl(extractable, key.usages),
+      keyData(kj::mv(key.evpPkey)),
+      keyType(key.keyType) {
   KJ_DASSERT(keyType != KeyType::SECRET);
 }
 
@@ -318,6 +315,169 @@ bool AsymmetricKeyCryptoKeyImpl::equals(const CryptoKey::Impl& other) const {
 
 kj::StringPtr AsymmetricKeyCryptoKeyImpl::getType() const {
   return toStringPtr(keyType);
+}
+
+// ======================================================================================
+
+ImportAsymmetricResult importAsymmetricForWebCrypto(
+    jsg::Lock& js,
+    kj::StringPtr format,
+    SubtleCrypto::ImportKeyData keyData,
+    kj::StringPtr normalizedName,
+    bool extractable,
+    kj::ArrayPtr<const kj::String> keyUsages,
+    kj::FunctionParam<kj::Own<EVP_PKEY>(SubtleCrypto::JsonWebKey)> readJwk,
+    CryptoKeyUsageSet allowedUsages) {
+  CryptoKeyUsageSet usages;
+  if (format == "jwk") {
+    // I found jww's SO answer immeasurably helpful while writing this:
+    // https://stackoverflow.com/questions/24093272/how-to-load-a-private-key-from-a-jwk-into-openssl
+
+    auto& keyDataJwk = JSG_REQUIRE_NONNULL(keyData.tryGet<SubtleCrypto::JsonWebKey>(),
+        DOMDataError, "JSON Web Key import requires a JSON Web Key object.");
+
+    KeyType keyType = KeyType::PRIVATE;
+    if (keyDataJwk.d != kj::none) {
+      // Private key (`d` is the private exponent, per RFC 7518).
+      keyType = KeyType::PRIVATE;
+      usages =
+          CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPrivate,
+              keyUsages, allowedUsages & CryptoKeyUsageSet::privateKeyMask());
+
+      // https://tools.ietf.org/html/rfc7518#section-6.3.2.7
+      // We don't support keys with > 2 primes, so error out.
+      JSG_REQUIRE(keyDataJwk.oth == kj::none, DOMNotSupportedError,
+          "Multi-prime private keys not supported.");
+    } else {
+      // Public key.
+      keyType = KeyType::PUBLIC;
+      auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();
+      // restrict key usages to public key usages. In the case of ECDH, usages must be empty, but
+      // if the strict crypto compat flag is not enabled allow the same usages as with private ECDH
+      // keys, i.e. derivationKeyMask().
+      usages =
+          CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
+                                      keyUsages, allowedUsages & (normalizedName == "ECDH" ?
+                                      strictCrypto ? CryptoKeyUsageSet():
+                                      CryptoKeyUsageSet::derivationKeyMask() :
+                                      CryptoKeyUsageSet::publicKeyMask()));
+    }
+
+    auto [expectedUse, op0, op1] = [&, normalizedName] {
+      if (normalizedName == "RSA-OAEP") {return std::make_tuple("enc", "encrypt", "wrapKey");}
+      if (normalizedName == "ECDH" || normalizedName == "X25519") {
+        return std::make_tuple("enc", "unused", "unused");
+      }
+      return std::make_tuple("sig", "sign", "verify");
+    }();
+
+    if (keyUsages.size() > 0) {
+      KJ_IF_SOME(use, keyDataJwk.use) {
+        JSG_REQUIRE(use == expectedUse, DOMDataError,
+            "Asymmetric \"jwk\" key import with usages requires a JSON Web Key with "
+            "Public Key Use parameter \"use\" (\"", use, "\") equal to \"sig\".");
+      }
+    }
+
+    KJ_IF_SOME(ops, keyDataJwk.key_ops) {
+      // TODO(cleanup): When we implement other JWK import functions, factor this part out into a
+      //   JWK validation function.
+
+      // "The key operation values are case-sensitive strings.  Duplicate key operation values MUST
+      // NOT be present in the array." -- RFC 7517, section 4.3
+      std::sort(ops.begin(), ops.end());
+      JSG_REQUIRE(std::adjacent_find(ops.begin(), ops.end()) == ops.end(), DOMDataError,
+          "A JSON Web Key's Key Operations parameter (\"key_ops\") "
+          "must not contain duplicates.");
+
+      KJ_IF_SOME(use, keyDataJwk.use) {
+        // "The "use" and "key_ops" JWK members SHOULD NOT be used together; however, if both are
+        // used, the information they convey MUST be consistent." -- RFC 7517, section 4.3.
+
+        JSG_REQUIRE(use == expectedUse, DOMDataError, "Asymmetric \"jwk\" import requires a JSON "
+            "Web Key with Public Key Use \"use\" (\"", use, "\") equal to \"", expectedUse, "\".");
+
+        for (const auto& op: ops) {
+          JSG_REQUIRE(normalizedName != "ECDH" && normalizedName != "X25519", DOMDataError,
+              "A JSON Web Key should have either a Public Key Use parameter (\"use\") or a Key "
+              "Operations parameter (\"key_ops\"); otherwise, the parameters must be consistent "
+              "with each other. For public ", normalizedName, " keys, there are no valid usages,"
+              "so keys with a non-empty \"key_ops\" parameter are not allowed.");
+
+          // TODO(conform): Can a JWK private key actually be used to verify? Not
+          //   using the Web Crypto API...
+          JSG_REQUIRE(op == op0 || op == op1, DOMDataError,
+              "A JSON Web Key should have either a Public Key Use parameter (\"use\") or a Key "
+              "Operations parameter (\"key_ops\"); otherwise, the parameters must be consistent "
+              "with each other. A Public Key Use for ", normalizedName, " would allow a Key "
+              "Operations array with only \"", op0, "\" and/or \"", op1, "\" values (not \"", op,
+              "\").");
+        }
+      }
+
+      // We're supposed to verify that `ops` contains all the values listed in `keyUsages`. For any
+      // of the supported algorithms, a key may have at most two distinct usages ('sig' type keys
+      // have at most one valid usage, but there may be two for e.g. ECDH). Test the first usage
+      // and the next usages. Test the first usage and the first usage distinct from the first, if
+      // present (i.e. the second allowed usage, even if there are duplicates).
+      if (keyUsages.size() > 0) {
+        JSG_REQUIRE(std::find(ops.begin(), ops.end(), keyUsages.front()) != ops.end(),
+            DOMDataError, "All specified key usages must be present in the JSON "
+            "Web Key's Key Operations parameter (\"key_ops\").");
+        auto secondUsage = std::find_end(keyUsages.begin(), keyUsages.end(), keyUsages.begin(),
+            keyUsages.begin() + 1) + 1;
+        if (secondUsage != keyUsages.end()) {
+          JSG_REQUIRE(std::find(ops.begin(), ops.end(), *secondUsage) != ops.end(),
+              DOMDataError, "All specified key usages must be present in the JSON "
+              "Web Key's Key Operations parameter (\"key_ops\").");
+        }
+      }
+    }
+
+    KJ_IF_SOME(ext, keyDataJwk.ext) {
+      // If the user requested this key to be extractable, make sure the JWK does not disallow it.
+      JSG_REQUIRE(!extractable || ext, DOMDataError,
+          "Cannot create an extractable CryptoKey from an unextractable JSON Web Key.");
+    }
+
+    return { readJwk(kj::mv(keyDataJwk)), keyType, usages };
+  } else if (format == "spki") {
+    kj::ArrayPtr<const kj::byte> keyBytes = JSG_REQUIRE_NONNULL(
+        keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
+        "SPKI import requires an ArrayBuffer.");
+    const kj::byte* ptr = keyBytes.begin();
+    auto evpPkey = OSSLCALL_OWN(EVP_PKEY, d2i_PUBKEY(nullptr, &ptr, keyBytes.size()), DOMDataError,
+        "Invalid SPKI input.");
+    if (ptr != keyBytes.end()) {
+      JSG_FAIL_REQUIRE(DOMDataError, "Invalid ", keyBytes.end() - ptr,
+          " trailing bytes after SPKI input.");
+    }
+
+    // usages must be empty for ECDH public keys, so use CryptoKeyUsageSet() when validating the
+    // usage set.
+    usages =
+        CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
+                                    keyUsages, allowedUsages & (normalizedName == "ECDH" ?
+                                    CryptoKeyUsageSet() : CryptoKeyUsageSet::publicKeyMask()));
+    return { kj::mv(evpPkey), KeyType::PUBLIC, usages };
+  } else if (format == "pkcs8") {
+    kj::ArrayPtr<const kj::byte> keyBytes = JSG_REQUIRE_NONNULL(
+        keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
+        "PKCS8 import requires an ArrayBuffer.");
+    const kj::byte* ptr = keyBytes.begin();
+    auto evpPkey = OSSLCALL_OWN(EVP_PKEY, d2i_AutoPrivateKey(nullptr, &ptr, keyBytes.size()),
+        DOMDataError, "Invalid PKCS8 input.");
+    if (ptr != keyBytes.end()) {
+      JSG_FAIL_REQUIRE(DOMDataError, "Invalid ", keyBytes.end() - ptr,
+          " trailing bytes after PKCS8 input.");
+    }
+    usages =
+        CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPrivate,
+                                    keyUsages, allowedUsages & CryptoKeyUsageSet::privateKeyMask());
+    return { kj::mv(evpPkey), KeyType::PRIVATE, usages };
+  } else {
+    JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized key import format \"", format, "\".");
+  }
 }
 
 }  // namespace workerd::api

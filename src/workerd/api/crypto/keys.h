@@ -20,10 +20,7 @@ struct ImportAsymmetricResult {
 
 class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
 public:
-  explicit AsymmetricKeyCryptoKeyImpl(kj::Own<EVP_PKEY> keyData,
-                                      KeyType keyType,
-                                      bool extractable,
-                                      CryptoKeyUsageSet usages);
+  explicit AsymmetricKeyCryptoKeyImpl(ImportAsymmetricResult&& key, bool extractable);
 
   // ---------------------------------------------------------------------------
   // Subclasses must implement these
@@ -88,5 +85,16 @@ private:
   // mutable because OpenSSL wants non-const pointers even when the object won't be modified...
   KeyType keyType;
 };
+
+// Performs asymmetric key import per the Web Crypto spec.
+ImportAsymmetricResult importAsymmetricForWebCrypto(
+    jsg::Lock& js,
+    kj::StringPtr format,
+    SubtleCrypto::ImportKeyData keyData,
+    kj::StringPtr normalizedName,
+    bool extractable,
+    kj::ArrayPtr<const kj::String> keyUsages,
+    kj::FunctionParam<kj::Own<EVP_PKEY>(SubtleCrypto::JsonWebKey)> readJwk,
+    CryptoKeyUsageSet allowedUsages);
 
 }  // namespace workerd::api
