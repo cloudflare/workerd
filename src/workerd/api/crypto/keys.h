@@ -4,12 +4,26 @@
 
 namespace workerd::api {
 
+enum class KeyType {
+  SECRET,
+  PUBLIC,
+  PRIVATE,
+};
+
+kj::StringPtr toStringPtr(KeyType type);
+
+struct ImportAsymmetricResult {
+  kj::Own<EVP_PKEY> evpPkey;
+  KeyType keyType;
+  CryptoKeyUsageSet usages;
+};
+
 class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
 public:
   explicit AsymmetricKeyCryptoKeyImpl(kj::Own<EVP_PKEY> keyData,
-                         kj::StringPtr keyType,
-                         bool extractable,
-                         CryptoKeyUsageSet usages);
+                                      KeyType keyType,
+                                      bool extractable,
+                                      CryptoKeyUsageSet usages);
 
   // ---------------------------------------------------------------------------
   // Subclasses must implement these
@@ -55,7 +69,8 @@ public:
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const override;
 
-  inline kj::StringPtr getType() const override { return keyType; }
+  kj::StringPtr getType() const override;
+  KeyType getTypeEnum() const { return keyType; }
 
   inline EVP_PKEY* getEvpPkey() const { return keyData.get(); }
 
@@ -71,7 +86,7 @@ private:
 
   mutable kj::Own<EVP_PKEY> keyData;
   // mutable because OpenSSL wants non-const pointers even when the object won't be modified...
-  kj::StringPtr keyType;
+  KeyType keyType;
 };
 
 }  // namespace workerd::api

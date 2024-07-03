@@ -9,13 +9,25 @@ namespace {
 static char EMPTY_PASSPHRASE[] = "";
 }  // namespace
 
-AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(kj::Own<EVP_PKEY> keyData,
-                             kj::StringPtr keyType,
-                             bool extractable,
-                             CryptoKeyUsageSet usages)
+kj::StringPtr toStringPtr(KeyType type) {
+  switch (type) {
+    case KeyType::SECRET: return "secret"_kj;
+    case KeyType::PUBLIC: return "public"_kj;
+    case KeyType::PRIVATE: return "private"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
+AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(
+    kj::Own<EVP_PKEY> keyData,
+    KeyType keyType,
+    bool extractable,
+    CryptoKeyUsageSet usages)
     : CryptoKey::Impl(extractable, usages),
       keyData(kj::mv(keyData)),
-      keyType(keyType) {}
+      keyType(keyType) {
+  KJ_DASSERT(keyType != KeyType::SECRET);
+}
 
 kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(kj::Array<kj::byte> signature) const {
   return kj::mv(signature);
@@ -36,16 +48,16 @@ SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(kj::StringPtr 
   size_t derLen;
   bssl::ScopedCBB cbb;
   if (format == "pkcs8"_kj) {
-    JSG_REQUIRE(keyType == "private"_kj, DOMInvalidAccessError,
-        "Asymmetric pkcs8 export requires private key (not \"", keyType, "\").");
+    JSG_REQUIRE(keyType == KeyType::PRIVATE, DOMInvalidAccessError,
+        "Asymmetric pkcs8 export requires private key (not \"", toStringPtr(keyType), "\").");
     if (!CBB_init(cbb.get(), 0) ||
         !EVP_marshal_private_key(cbb.get(), keyData.get()) ||
         !CBB_finish(cbb.get(), &der, &derLen)) {
       JSG_FAIL_REQUIRE(DOMOperationError, "Private key export failed.");
     }
   } else if (format == "spki"_kj) {
-      JSG_REQUIRE(keyType == "public"_kj, DOMInvalidAccessError,
-        "Asymmetric spki export requires public key (not \"", keyType, "\").");
+      JSG_REQUIRE(keyType == KeyType::PUBLIC, DOMInvalidAccessError,
+        "Asymmetric spki export requires public key (not \"", toStringPtr(keyType), "\").");
     if (!CBB_init(cbb.get(), 0) ||
         !EVP_marshal_public_key(cbb.get(), keyData.get()) ||
         !CBB_finish(cbb.get(), &der, &derLen)) {
@@ -215,7 +227,7 @@ kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::exportKeyExt(
 kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::sign(
     SubtleCrypto::SignAlgorithm&& algorithm,
     kj::ArrayPtr<const kj::byte> data) const {
-  JSG_REQUIRE(keyType == "private", DOMInvalidAccessError,
+  JSG_REQUIRE(keyType == KeyType::PRIVATE, DOMInvalidAccessError,
       "Asymmetric signing requires a private key.");
 
   auto type = lookupDigestAlgorithm(chooseHash(algorithm.hash)).second;
@@ -272,7 +284,7 @@ bool AsymmetricKeyCryptoKeyImpl::verify(
     kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const {
   ClearErrorOnReturn clearErrorOnReturn;
 
-  JSG_REQUIRE(keyType == "public", DOMInvalidAccessError,
+  JSG_REQUIRE(keyType == KeyType::PUBLIC, DOMInvalidAccessError,
       "Asymmetric verification requires a public key.");
 
   auto sslSignature = signatureWebCryptoToSsl(signature);
@@ -302,6 +314,10 @@ bool AsymmetricKeyCryptoKeyImpl::equals(const CryptoKey::Impl& other) const {
     return EVP_PKEY_cmp(keyData.get(), otherImpl.keyData.get()) == 1;
   }
   return false;
+}
+
+kj::StringPtr AsymmetricKeyCryptoKeyImpl::getType() const {
+  return toStringPtr(keyType);
 }
 
 }  // namespace workerd::api

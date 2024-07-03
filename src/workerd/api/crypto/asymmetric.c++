@@ -19,12 +19,6 @@
 namespace workerd::api {
 namespace {
 
-struct ImportAsymmetricResult {
-  kj::Own<EVP_PKEY> evpPkey;
-  kj::StringPtr keyType;
-  CryptoKeyUsageSet usages;
-};
-
 enum class UsageFamily {
   Derivation,
   SignVerify,
@@ -44,10 +38,10 @@ ImportAsymmetricResult importAsymmetric(jsg::Lock& js, kj::StringPtr format,
     auto& keyDataJwk = JSG_REQUIRE_NONNULL(keyData.tryGet<SubtleCrypto::JsonWebKey>(),
         DOMDataError, "JSON Web Key import requires a JSON Web Key object.");
 
-    kj::StringPtr keyType;
+    KeyType keyType = KeyType::PRIVATE;
     if (keyDataJwk.d != kj::none) {
       // Private key (`d` is the private exponent, per RFC 7518).
-      keyType = "private";
+      keyType = KeyType::PRIVATE;
       usages =
           CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPrivate,
               keyUsages, allowedUsages & CryptoKeyUsageSet::privateKeyMask());
@@ -58,7 +52,7 @@ ImportAsymmetricResult importAsymmetric(jsg::Lock& js, kj::StringPtr format,
           "Multi-prime private keys not supported.");
     } else {
       // Public key.
-      keyType = "public";
+      keyType = KeyType::PUBLIC;
       auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();
       // restrict key usages to public key usages. In the case of ECDH, usages must be empty, but
       // if the strict crypto compat flag is not enabled allow the same usages as with private ECDH
@@ -167,7 +161,7 @@ ImportAsymmetricResult importAsymmetric(jsg::Lock& js, kj::StringPtr format,
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
                                     keyUsages, allowedUsages & (normalizedName == "ECDH" ?
                                     CryptoKeyUsageSet() : CryptoKeyUsageSet::publicKeyMask()));
-    return { kj::mv(evpPkey), "public"_kj, usages };
+    return { kj::mv(evpPkey), KeyType::PUBLIC, usages };
   } else if (format == "pkcs8") {
     kj::ArrayPtr<const kj::byte> keyBytes = JSG_REQUIRE_NONNULL(
         keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
@@ -182,7 +176,7 @@ ImportAsymmetricResult importAsymmetric(jsg::Lock& js, kj::StringPtr format,
     usages =
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPrivate,
                                     keyUsages, allowedUsages & CryptoKeyUsageSet::privateKeyMask());
-    return { kj::mv(evpPkey), "private"_kj, usages };
+    return { kj::mv(evpPkey), KeyType::PRIVATE, usages };
   } else {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized key import format \"", format, "\".");
   }
@@ -198,7 +192,7 @@ namespace {
 class RsaBase: public AsymmetricKeyCryptoKeyImpl {
 public:
   explicit RsaBase(kj::Own<EVP_PKEY> keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm,
-      kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
+                   KeyType keyType, bool extractable, CryptoKeyUsageSet usages)
     : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), keyType, extractable, usages),
       keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
@@ -224,7 +218,7 @@ private:
     jwk.n = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.n))));
     jwk.e = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.e))));
 
-    if (getType() == "private"_kj) {
+    if (getTypeEnum() == KeyType::PRIVATE) {
       jwk.d = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.d))));
       jwk.p = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.p))));
       jwk.q = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.q))));
@@ -313,7 +307,7 @@ class RsassaPkcs1V15Key final: public RsaBase {
 public:
   explicit RsassaPkcs1V15Key(kj::Own<EVP_PKEY> keyData,
                              CryptoKey::RsaKeyAlgorithm keyAlgorithm,
-                             kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
+                             KeyType keyType, bool extractable, CryptoKeyUsageSet usages)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), keyType, extractable, usages) {}
 
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
@@ -338,8 +332,8 @@ private:
 class RsaPssKey final: public RsaBase {
 public:
   explicit RsaPssKey(kj::Own<EVP_PKEY> keyData,
-                    CryptoKey::RsaKeyAlgorithm keyAlgorithm,
-                    kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
+                     CryptoKey::RsaKeyAlgorithm keyAlgorithm,
+                     KeyType keyType, bool extractable, CryptoKeyUsageSet usages)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), keyType, extractable, usages) {}
 
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
@@ -377,7 +371,7 @@ class RsaOaepKey final : public RsaBase {
 public:
   explicit RsaOaepKey(kj::Own<EVP_PKEY> keyData,
                       CryptoKey::RsaKeyAlgorithm keyAlgorithm,
-                      kj::StringPtr keyType,
+                      KeyType keyType,
                       bool extractable, CryptoKeyUsageSet usages)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), keyType, extractable, usages) {}
 
@@ -396,7 +390,7 @@ public:
   kj::Array<kj::byte> encrypt(
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> plainText) const override {
-    JSG_REQUIRE(getType() == "public"_kj, DOMInvalidAccessError,
+    JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
         "Encryption/key wrapping only works with public keys, not \"", getType(), "\".");
     return commonEncryptDecrypt(kj::mv(algorithm), plainText, EVP_PKEY_encrypt_init,
         EVP_PKEY_encrypt);
@@ -405,7 +399,7 @@ public:
   kj::Array<kj::byte> decrypt(
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> cipherText) const override {
-    JSG_REQUIRE(getType() == "private"_kj, DOMInvalidAccessError,
+    JSG_REQUIRE(getTypeEnum() == KeyType::PRIVATE, DOMInvalidAccessError,
         "Decryption/key unwrapping only works with private keys, not \"", getType(), "\".");
     return commonEncryptDecrypt(kj::mv(algorithm), cipherText, EVP_PKEY_decrypt_init,
         EVP_PKEY_decrypt);
@@ -489,7 +483,7 @@ class RsaRawKey final: public RsaBase {
 public:
   explicit RsaRawKey(kj::Own<EVP_PKEY> keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                      bool extractable, CryptoKeyUsageSet usages)
-      : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), "private"_kj, extractable, usages) {}
+      : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), KeyType::PRIVATE, extractable, usages) {}
 
   kj::Array<kj::byte> sign(
       SubtleCrypto::SignAlgorithm&& algorithm,
@@ -569,21 +563,21 @@ CryptoKeyPair generateRsaPair(jsg::Lock& js, kj::StringPtr normalizedName,
   if (normalizedName == "RSASSA-PKCS1-v1_5") {
     return CryptoKeyPair {
       .publicKey =  jsg::alloc<CryptoKey>(kj::heap<RsassaPkcs1V15Key>(kj::mv(publicEvpPKey),
-          kj::mv(keyAlgorithm), "public"_kj, true, publicKeyUsages)),
+          kj::mv(keyAlgorithm), KeyType::PUBLIC, true, publicKeyUsages)),
       .privateKey = jsg::alloc<CryptoKey>(kj::heap<RsassaPkcs1V15Key>(kj::mv(privateEvpPKey),
-          kj::mv(privateKeyAlgorithm), "private"_kj, privateKeyExtractable, privateKeyUsages))};
+          kj::mv(privateKeyAlgorithm), KeyType::PRIVATE, privateKeyExtractable, privateKeyUsages))};
   } else if (normalizedName == "RSA-PSS") {
     return CryptoKeyPair {
       .publicKey =  jsg::alloc<CryptoKey>(kj::heap<RsaPssKey>(kj::mv(publicEvpPKey),
-          kj::mv(keyAlgorithm), "public"_kj, true, publicKeyUsages)),
+          kj::mv(keyAlgorithm), KeyType::PUBLIC, true, publicKeyUsages)),
       .privateKey = jsg::alloc<CryptoKey>(kj::heap<RsaPssKey>(kj::mv(privateEvpPKey),
-          kj::mv(privateKeyAlgorithm), "private"_kj, privateKeyExtractable, privateKeyUsages))};
+          kj::mv(privateKeyAlgorithm), KeyType::PRIVATE, privateKeyExtractable, privateKeyUsages))};
   } else if (normalizedName == "RSA-OAEP") {
     return CryptoKeyPair {
       .publicKey =  jsg::alloc<CryptoKey>(kj::heap<RsaOaepKey>(kj::mv(publicEvpPKey),
-          kj::mv(keyAlgorithm), "public"_kj, true, publicKeyUsages)),
+          kj::mv(keyAlgorithm), KeyType::PUBLIC, true, publicKeyUsages)),
       .privateKey = jsg::alloc<CryptoKey>(kj::heap<RsaOaepKey>(kj::mv(privateEvpPKey),
-          kj::mv(privateKeyAlgorithm), "private"_kj, privateKeyExtractable, privateKeyUsages))};
+          kj::mv(privateKeyAlgorithm), KeyType::PRIVATE, privateKeyExtractable, privateKeyUsages))};
   } else {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unimplemented RSA generation \"", normalizedName,
         "\".");
@@ -914,8 +908,8 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
     return rsaJwkReader(kj::mv(keyDataJwk));
   }, allowedUsages);
 
-  JSG_REQUIRE(keyType == "private", DOMDataError,
-      "RSA-RAW only supports private keys but requested \"", keyType, "\".");
+  JSG_REQUIRE(keyType == KeyType::PRIVATE, DOMDataError,
+      "RSA-RAW only supports private keys but requested \"", toStringPtr(keyType), "\".");
 
   // get0 avoids adding a refcount...
   RSA& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(evpPkey.get()), DOMDataError,
@@ -950,7 +944,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 public:
   explicit EllipticKey(kj::Own<EVP_PKEY> keyData,
                        CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
-                       kj::StringPtr keyType,
+                       KeyType keyType,
                        uint rsSize,
                        bool extractable, CryptoKeyUsageSet usages)
       : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), keyType, extractable, usages),
@@ -986,7 +980,7 @@ public:
     JSG_REQUIRE(keyAlgorithm.name == "ECDH", DOMNotSupportedError, ""
         "The deriveBits operation is not implemented for \"", keyAlgorithm.name, "\".");
 
-    JSG_REQUIRE(getType() == "private"_kj, DOMInvalidAccessError, ""
+    JSG_REQUIRE(getTypeEnum() == KeyType::PRIVATE, DOMInvalidAccessError, ""
         "The deriveBits operation is only valid for a private key, not \"", getType(), "\".");
 
     auto& publicKey = JSG_REQUIRE_NONNULL(algorithm.$public, TypeError,
@@ -1234,7 +1228,7 @@ private:
 
     jwk.x = kj::encodeBase64Url(xa);
     jwk.y = kj::encodeBase64Url(ya);
-    if (getType() == "private"_kj) {
+    if (getTypeEnum() == KeyType::PRIVATE) {
       const auto& privateKey = JSG_REQUIRE_NONNULL(EC_KEY_get0_private_key(&ec),
           InternalDOMOperationError, "Error getting private key material for JSON Web Key export",
           internalDescribeOpensslErrors());
@@ -1245,7 +1239,7 @@ private:
   }
 
   kj::Array<kj::byte> exportRaw() const override final {
-    JSG_REQUIRE(getType() == "public"_kj, DOMInvalidAccessError,
+    JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
         "Raw export of elliptic curve keys is only allowed for public keys.");
 
     const EC_KEY& ec = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(getEvpPkey()),
@@ -1348,9 +1342,9 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   OSSLCALL(EVP_PKEY_set1_EC_KEY(publicEvpPKey.get(), ecPublicKey.get()));
 
   auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EllipticKey>(kj::mv(privateEvpPKey),
-      keyAlgorithm, "private"_kj, rsSize, extractable, privateKeyUsages));
+      keyAlgorithm, KeyType::PRIVATE, rsSize, extractable, privateKeyUsages));
   auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EllipticKey>(kj::mv(publicEvpPKey),
-      keyAlgorithm, "public"_kj, rsSize, true, publicKeyUsages));
+      keyAlgorithm, KeyType::PUBLIC, rsSize, true, publicKeyUsages));
 
   return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
@@ -1376,7 +1370,7 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
 
     return { OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(evpId, nullptr,
         raw.begin(), raw.size()), InternalDOMOperationError, "Failed to import raw public EDDSA",
-        raw.size(), internalDescribeOpensslErrors()), "public"_kj, usages };
+        raw.size(), internalDescribeOpensslErrors()), KeyType::PUBLIC, usages };
   }
 
   auto ecKey = OSSLCALL_OWN(EC_KEY, EC_KEY_new_by_curve_name(curveId), DOMOperationError,
@@ -1395,7 +1389,7 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
   auto evpPkey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
 
-  return ImportAsymmetricResult{ kj::mv(evpPkey), "public"_kj, usages };
+  return ImportAsymmetricResult{ kj::mv(evpPkey), KeyType::PUBLIC, usages };
 }
 
 }  // namespace
@@ -1642,7 +1636,7 @@ namespace {
 class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
 public:
   explicit EdDsaKey(kj::Own<EVP_PKEY> keyData, kj::StringPtr keyAlgorithm,
-                    kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
+                    KeyType keyType, bool extractable, CryptoKeyUsageSet usages)
       : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), keyType, extractable, usages),
         keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
@@ -1677,7 +1671,7 @@ public:
   kj::Array<kj::byte> sign(
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data) const override {
-    JSG_REQUIRE(getType() == "private", DOMInvalidAccessError,
+    JSG_REQUIRE(getTypeEnum() == KeyType::PRIVATE, DOMInvalidAccessError,
         "Asymmetric signing requires a private key.");
 
     JSG_REQUIRE(getAlgorithmName() == "Ed25519" || getAlgorithmName() == "NODE-ED25519",
@@ -1712,7 +1706,7 @@ public:
       kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const override {
     ClearErrorOnReturn clearErrorOnReturn;
 
-    JSG_REQUIRE(getType() == "public", DOMInvalidAccessError,
+    JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
         "Asymmetric verification requires a public key.");
 
     JSG_REQUIRE(getAlgorithmName() == "Ed25519" || getAlgorithmName() == "NODE-ED25519",
@@ -1741,7 +1735,7 @@ public:
     JSG_REQUIRE(getAlgorithmName() == "X25519", DOMNotSupportedError, ""
         "The deriveBits operation is not implemented for \"", getAlgorithmName(), "\".");
 
-    JSG_REQUIRE(getType() == "private"_kj, DOMInvalidAccessError, ""
+    JSG_REQUIRE(getTypeEnum() == KeyType::PRIVATE, DOMInvalidAccessError, ""
         "The deriveBits operation is only valid for a private key, not \"", getType(), "\".");
 
     auto& publicKey = JSG_REQUIRE_NONNULL(algorithm.$public, TypeError,
@@ -1834,7 +1828,7 @@ private:
       jwk.alg = kj::str("EdDSA");
     }
 
-    if (getType() == "private"_kj) {
+    if (getTypeEnum() == KeyType::PRIVATE) {
       // Deliberately use ED25519_PUBLIC_KEY_LEN here.
       // boringssl defines ED25519_PRIVATE_KEY_LEN as 64B since it stores the private key together
       // with public key data in some functions, but in the EVP interface only the 32B private key
@@ -1854,7 +1848,7 @@ private:
   }
 
   kj::Array<kj::byte> exportRaw() const override final {
-    JSG_REQUIRE(getType() == "public"_kj, DOMInvalidAccessError,
+    JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
         "Raw export of ", getAlgorithmName(), " keys is only allowed for public keys.");
 
     kj::Vector<kj::byte> raw(ED25519_PUBLIC_KEY_LEN);
@@ -1904,9 +1898,9 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
       "public key", internalDescribeOpensslErrors());
 
   auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(privateEvpPKey),
-      normalizedName, "private"_kj, extractablePrivateKey, privateKeyUsages));
+      normalizedName, KeyType::PRIVATE, extractablePrivateKey, privateKeyUsages));
   auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(publicEvpPKey),
-      normalizedName, "public"_kj, true, publicKeyUsages));
+      normalizedName, KeyType::PUBLIC, true, publicKeyUsages));
 
   return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
