@@ -208,13 +208,13 @@ http_archive(
 #   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    commit = "8c54b7dae4c4692f32abe9b3e8113cdf0a8842b9",
+    commit = "bfe59c2726fda7494a800f7d0ee461f0564653b3",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
 git_repository(
     name = "fp16",
-    commit = "95163a75c51bc8dc29f72d0d7419ec50132984ff",
+    commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
     build_file_content = "exports_files(glob([\"**\"]))",
     remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git"
 )
