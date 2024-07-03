@@ -1,0 +1,164 @@
+From d09b3651c165455d2a742af166fb18e38ff07a15 Mon Sep 17 00:00:00 2001
+From: Harris Hancock <harris@cloudflare.com>
+Date: Wed, 3 Jul 2024 15:46:43 +0100
+Subject: Revert "heap: Add masm-specific unwinding annotations to GC
+ trampolines"
+
+This reverts commit 42bc7bfdf56cc7a8cd7757d96aa70b83ce82d9ff.
+
+This commit broke our build, because we patch V8 to build push_registers_asm.cc with clang-cl on Windows, and this commit makes it an error to compile that file on Windows with any compiler. Maybe clang-cl and masm can be used together? I'm not sure. In the meantime, I'm reverting this commit in the hope of getting our V8 upgrade unblocked.
+
+diff --git a/BUILD.gn b/BUILD.gn
+index a4faf8e7a87de572555122088798ae2bc5108592..1810ec29e5fd049823d23d24fc3c023cd0bab41a 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -4135,8 +4135,8 @@ v8_header_set("v8_internal_headers") {
+     "src/third_party/siphash/halfsiphash.h",
+     "src/third_party/utf8-decoder/utf8-decoder.h",
+     "src/torque/runtime-macro-shims.h",
+-    "src/tracing/trace-event-no-perfetto.h",
+     "src/tracing/trace-event.h",
++    "src/tracing/trace-event-no-perfetto.h",
+     "src/tracing/traced-value.h",
+     "src/tracing/tracing-category-observer.h",
+     "src/utils/address-map.h",
+@@ -6783,12 +6783,7 @@ v8_source_set("v8_heap_base") {
+ 
+   if (is_clang || !is_win) {
+     if (current_cpu == "x64") {
+-      if (is_win) {
+-        # Prefer a masm version with unwind directives.
+-        sources += [ "src/heap/base/asm/x64/push_registers_masm.asm" ]
+-      } else {
+-        sources += [ "src/heap/base/asm/x64/push_registers_asm.cc" ]
+-      }
++      sources += [ "src/heap/base/asm/x64/push_registers_asm.cc" ]
+     } else if (current_cpu == "x86") {
+       sources += [ "src/heap/base/asm/ia32/push_registers_asm.cc" ]
+     } else if (current_cpu == "arm") {
+diff --git a/src/heap/base/asm/x64/push_registers_asm.cc b/src/heap/base/asm/x64/push_registers_asm.cc
+index 554caddfa77ff91c907c377aa95cc6b1eb907e5c..73f8c4c078e091c378868de49b5254cc89a0a688 100644
+--- a/src/heap/base/asm/x64/push_registers_asm.cc
++++ b/src/heap/base/asm/x64/push_registers_asm.cc
+@@ -14,16 +14,61 @@
+ 
+ // Do not depend on V8_TARGET_OS_* defines as some embedders may override the
+ // GN toolchain (e.g. ChromeOS) and not provide them.
++// _WIN64 Defined as 1 when the compilation target is 64-bit ARM or x64.
++// Otherwise, undefined.
++#ifdef _WIN64
+ 
+ // We maintain 16-byte alignment at calls. There is an 8-byte return address
+-// on the stack and we push 56 bytes which maintains 16-byte stack alignment
++// on the stack and we push 232 bytes which maintains 16-byte stack alignment
+ // at the call.
+-// Source: https://github.com/hjl-tools/x86-psABI/wiki/x86-64-psABI-1.0.pdf
++// Source: https://docs.microsoft.com/en-us/cpp/build/x64-calling-convention
++asm(".att_syntax                                        \n"
++    ".globl PushAllRegistersAndIterateStack             \n"
++    "PushAllRegistersAndIterateStack:                   \n"
++    // rbp is callee-saved. Maintain proper frame pointer for debugging.
++    "  push %rbp                                        \n"
++    "  mov %rsp, %rbp                                   \n"
++    // Dummy for alignment.
++    "  push $0xCDCDCD                                   \n"
++    "  push %rsi                                        \n"
++    "  push %rdi                                        \n"
++    "  push %rbx                                        \n"
++    "  push %r12                                        \n"
++    "  push %r13                                        \n"
++    "  push %r14                                        \n"
++    "  push %r15                                        \n"
++    "  sub $160, %rsp                                   \n"
++    // Use aligned instrs as we are certain that the stack is properly aligned.
++    "  movdqa %xmm6, 144(%rsp)                          \n"
++    "  movdqa %xmm7, 128(%rsp)                          \n"
++    "  movdqa %xmm8, 112(%rsp)                          \n"
++    "  movdqa %xmm9, 96(%rsp)                           \n"
++    "  movdqa %xmm10, 80(%rsp)                          \n"
++    "  movdqa %xmm11, 64(%rsp)                          \n"
++    "  movdqa %xmm12, 48(%rsp)                          \n"
++    "  movdqa %xmm13, 32(%rsp)                          \n"
++    "  movdqa %xmm14, 16(%rsp)                          \n"
++    "  movdqa %xmm15, (%rsp)                            \n"
++    // Pass 1st parameter (rcx) unchanged (Stack*).
++    // Pass 2nd parameter (rdx) unchanged (StackVisitor*).
++    // Save 3rd parameter (r8; IterateStackCallback)
++    "  mov %r8, %r9                                     \n"
++    // Pass 3rd parameter as rsp (stack pointer).
++    "  mov %rsp, %r8                                    \n"
++    // Call the callback.
++    "  call *%r9                                        \n"
++    // Pop the callee-saved registers.
++    "  add $224, %rsp                                   \n"
++    // Restore rbp as it was used as frame pointer.
++    "  pop %rbp                                         \n"
++    "  ret                                              \n");
+ 
+-#ifdef _WIN64
+-#error "The masm based version must be used for Windows"
+-#endif
++#else  // !_WIN64
+ 
++// We maintain 16-byte alignment at calls. There is an 8-byte return address
++// on the stack and we push 56 bytes which maintains 16-byte stack alignment
++// at the call.
++// Source: https://github.com/hjl-tools/x86-psABI/wiki/x86-64-psABI-1.0.pdf
+ asm(
+ #ifdef __APPLE__
+     ".globl _PushAllRegistersAndIterateStack            \n"
+@@ -64,3 +109,5 @@ asm(
+     ".Lfunc_end0-PushAllRegistersAndIterateStack        \n"
+ #endif  // !defined(__APPLE__)
+     );
++
++#endif  // !_WIN64
+diff --git a/src/heap/base/asm/x64/push_registers_masm.asm b/src/heap/base/asm/x64/push_registers_masm.asm
+index d0d05632d26883316cb7b39f8e7e8143d2b24bc3..a32e193c2f132cdbe1d0730831d8659be996f8e2 100644
+--- a/src/heap/base/asm/x64/push_registers_masm.asm
++++ b/src/heap/base/asm/x64/push_registers_masm.asm
+@@ -8,7 +8,7 @@
+ public PushAllRegistersAndIterateStack
+ 
+ .code
+-PushAllRegistersAndIterateStack proc frame
++PushAllRegistersAndIterateStack:
+     ;; Push all callee-saved registers to get them on the stack for conservative
+     ;; stack scanning.
+     ;;
+@@ -19,28 +19,16 @@ PushAllRegistersAndIterateStack proc frame
+     ;;
+     ;; rbp is callee-saved. Maintain proper frame pointer for debugging.
+     push rbp
+-    .pushreg rbp
+     mov rbp, rsp
+-    .setframe rbp, 0
+     push 0CDCDCDh  ;; Dummy for alignment.
+-    .allocstack 8
+     push rsi
+-    .pushreg rsi
+     push rdi
+-    .pushreg rdi
+     push rbx
+-    .pushreg rbx
+     push r12
+-    .pushreg r12
+     push r13
+-    .pushreg r13
+     push r14
+-    .pushreg r14
+     push r15
+-    .pushreg r15
+     sub rsp, 160
+-    .allocstack 160
+-    .endprolog
+     ;; Use aligned instrs as we are certain that the stack is properly aligned.
+     movdqa  xmmword ptr [rsp + 144], xmm6
+     movdqa  xmmword ptr [rsp + 128], xmm7
+@@ -65,6 +53,5 @@ PushAllRegistersAndIterateStack proc frame
+     ;; Restore rbp as it was used as frame pointer.
+     pop rbp
+     ret
+-    PushAllRegistersAndIterateStack endp
+ 
+ end
