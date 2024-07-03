@@ -18,7 +18,7 @@ kj::StringPtr toStringPtr(KeyType type) {
   KJ_UNREACHABLE;
 }
 
-AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(ImportAsymmetricResult&& key,
+AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key,
                                                        bool extractable)
     : CryptoKey::Impl(extractable, key.usages),
       keyData(kj::mv(key.evpPkey)),
@@ -319,7 +319,7 @@ kj::StringPtr AsymmetricKeyCryptoKeyImpl::getType() const {
 
 // ======================================================================================
 
-ImportAsymmetricResult importAsymmetricForWebCrypto(
+AsymmetricKeyData importAsymmetricForWebCrypto(
     jsg::Lock& js,
     kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,

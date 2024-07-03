@@ -25,7 +25,7 @@ namespace {
 
 class RsaBase: public AsymmetricKeyCryptoKeyImpl {
 public:
-  explicit RsaBase(ImportAsymmetricResult keyData,
+  explicit RsaBase(AsymmetricKeyData keyData,
                    CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                    bool extractable)
     : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), extractable),
@@ -140,7 +140,7 @@ private:
 
 class RsassaPkcs1V15Key final: public RsaBase {
 public:
-  explicit RsassaPkcs1V15Key(ImportAsymmetricResult keyData,
+  explicit RsassaPkcs1V15Key(AsymmetricKeyData keyData,
                              CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                              bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -166,7 +166,7 @@ private:
 
 class RsaPssKey final: public RsaBase {
 public:
-  explicit RsaPssKey(ImportAsymmetricResult keyData,
+  explicit RsaPssKey(AsymmetricKeyData keyData,
                      CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                      bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -204,7 +204,7 @@ class RsaOaepKey final : public RsaBase {
   using EncryptDecryptFunction = decltype(EVP_PKEY_encrypt);
 
 public:
-  explicit RsaOaepKey(ImportAsymmetricResult keyData,
+  explicit RsaOaepKey(AsymmetricKeyData keyData,
                       CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                       bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -315,7 +315,7 @@ private:
 
 class RsaRawKey final: public RsaBase {
 public:
-  explicit RsaRawKey(ImportAsymmetricResult keyData,
+  explicit RsaRawKey(AsymmetricKeyData keyData,
                      CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                      bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -395,12 +395,12 @@ CryptoKeyPair generateRsaPair(jsg::Lock& js, kj::StringPtr normalizedName,
   CryptoKeyUsageSet publicKeyUsages = usages & CryptoKeyUsageSet::publicKeyMask();
   CryptoKeyUsageSet privateKeyUsages = usages & CryptoKeyUsageSet::privateKeyMask();
 
-  ImportAsymmetricResult publicKeyData {
+  AsymmetricKeyData publicKeyData {
     .evpPkey = kj::mv(publicEvpPKey),
     .keyType = KeyType::PUBLIC,
     .usages = publicKeyUsages,
   };
-  ImportAsymmetricResult privateKeyData {
+  AsymmetricKeyData privateKeyData {
     .evpPkey = kj::mv(privateEvpPKey),
     .keyType = KeyType::PRIVATE,
     .usages = privateKeyUsages,
@@ -788,7 +788,7 @@ namespace {
 
 class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 public:
-  explicit EllipticKey(ImportAsymmetricResult keyData,
+  explicit EllipticKey(AsymmetricKeyData keyData,
                        CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
                        uint rsSize,
                        bool extractable)
@@ -1186,12 +1186,12 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   auto publicEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_EC_KEY(publicEvpPKey.get(), ecPublicKey.get()));
 
-  ImportAsymmetricResult privateKeyData {
+  AsymmetricKeyData privateKeyData {
     .evpPkey = kj::mv(privateEvpPKey),
     .keyType = KeyType::PRIVATE,
     .usages = privateKeyUsages,
   };
-  ImportAsymmetricResult publicKeyData {
+  AsymmetricKeyData publicKeyData {
     .evpPkey = kj::mv(publicEvpPKey),
     .keyType = KeyType::PUBLIC,
     .usages = publicKeyUsages,
@@ -1205,7 +1205,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
 
-ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int curveId,
+AsymmetricKeyData importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int curveId,
     kj::StringPtr normalizedName, kj::ArrayPtr<const kj::String> keyUsages,
     CryptoKeyUsageSet allowedUsages) {
   // Import an elliptic key represented by raw data, only public keys are supported.
@@ -1245,7 +1245,7 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
   auto evpPkey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
 
-  return ImportAsymmetricResult{ kj::mv(evpPkey), KeyType::PUBLIC, usages };
+  return AsymmetricKeyData{ kj::mv(evpPkey), KeyType::PUBLIC, usages };
 }
 
 }  // namespace
@@ -1489,7 +1489,7 @@ namespace {
 // keeping track of the algorithm identifier and returning an algorithm struct based on that.
 class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
 public:
-  explicit EdDsaKey(ImportAsymmetricResult keyData,
+  explicit EdDsaKey(AsymmetricKeyData keyData,
                     kj::StringPtr keyAlgorithm,
                     bool extractable)
       : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), extractable),
@@ -1752,12 +1752,12 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
       rawPublicKey, keylen), InternalDOMOperationError, "Internal error construct ", curveName,
       "public key", internalDescribeOpensslErrors());
 
-  ImportAsymmetricResult privateKeyData {
+  AsymmetricKeyData privateKeyData {
     .evpPkey = kj::mv(privateEvpPKey),
     .keyType = KeyType::PRIVATE,
     .usages = privateKeyUsages,
   };
-  ImportAsymmetricResult publicKeyData {
+  AsymmetricKeyData publicKeyData {
     .evpPkey = kj::mv(publicEvpPKey),
     .keyType = KeyType::PUBLIC,
     .usages = publicKeyUsages,

@@ -12,7 +12,7 @@ enum class KeyType {
 
 kj::StringPtr toStringPtr(KeyType type);
 
-struct ImportAsymmetricResult {
+struct AsymmetricKeyData {
   kj::Own<EVP_PKEY> evpPkey;
   KeyType keyType;
   CryptoKeyUsageSet usages;
@@ -20,7 +20,7 @@ struct ImportAsymmetricResult {
 
 class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
 public:
-  explicit AsymmetricKeyCryptoKeyImpl(ImportAsymmetricResult&& key, bool extractable);
+  explicit AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key, bool extractable);
 
   // ---------------------------------------------------------------------------
   // Subclasses must implement these
@@ -87,7 +87,7 @@ private:
 };
 
 // Performs asymmetric key import per the Web Crypto spec.
-ImportAsymmetricResult importAsymmetricForWebCrypto(
+AsymmetricKeyData importAsymmetricForWebCrypto(
     jsg::Lock& js,
     kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
