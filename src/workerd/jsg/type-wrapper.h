@@ -391,6 +391,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public NonCoercibleWrapper<Self>,
                    public MemoizedIdentityWrapper<Self>,
                    public IdentifiedWrapper<Self>,
+                   public ThisWrapper<Self>,
                    public SelfRefWrapper<Self>,
                    public ExceptionWrapper<Self>,
                    public ObjectWrapper<Self>,
@@ -448,6 +449,7 @@ public:
   USING_WRAPPER(NonCoercibleWrapper<Self>);
   USING_WRAPPER(MemoizedIdentityWrapper<Self>);
   USING_WRAPPER(IdentifiedWrapper<Self>);
+  USING_WRAPPER(ThisWrapper<Self>);
   USING_WRAPPER(SelfRefWrapper<Self>);
   USING_WRAPPER(ExceptionWrapper<Self>);
   USING_WRAPPER(ObjectWrapper<Self>);
@@ -500,6 +502,8 @@ public:
 
     if constexpr(kj::isSameType<V, Varargs>()) {
       return Varargs(parameterIndex, args);
+    } else if constexpr(isThis<V>()) {
+      return KJ_ASSERT_NONNULL(this->tryUnwrap(context, args.This(), (V*)nullptr, kj::none));
     } else if constexpr(isArguments<V>()) {
       using E = typename V::ElementType;
       size_t size = args.Length() >= parameterIndex ? args.Length() - parameterIndex : 0;

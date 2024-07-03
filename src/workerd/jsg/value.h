@@ -901,7 +901,7 @@ public:
       return  v8::ArrayBuffer::New(isolate, 0);
     }
     byte* begin = value.begin();
-    
+
     auto ownerPtr = new kj::Array<byte>(kj::mv(value));
 
     std::unique_ptr<v8::BackingStore> backing =
@@ -1183,6 +1183,33 @@ public:
                                            v8::Local<v8::Value> handle,
                                            MemoizedIdentity<T>*,
                                            kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
+};
+
+// =======================================================================================
+template <typename TypeWrapper>
+class ThisWrapper {
+public:
+  template <typename T>
+  static auto getName(This<T>*) {
+    return TypeWrapper::getName((T*)nullptr);
+  }
+
+  template <typename T>
+  v8::Local<v8::Value> wrap(
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      This<T>& value) = delete;
+
+  template <typename T>
+  kj::Maybe<This<T>> tryUnwrap(v8::Local<v8::Context> context,
+                               v8::Local<v8::Value> handle,
+                               This<T>*,
+                               kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto& wrapper = static_cast<TypeWrapper&>(*this);
+    return This<T> {
+      .value = wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject),
+    };
+  }
 };
 
 // =======================================================================================

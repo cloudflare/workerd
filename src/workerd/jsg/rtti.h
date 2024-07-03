@@ -499,6 +499,12 @@ struct BuildRtti<Configuration, jsg::TypeHandler<T>> {
   }
 };
 
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::This<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    builder.initJsgImpl().setType(JsgImplType::Type::JSG_THIS_PLACEHOLDER);
+  }
+};
 
 // Functions
 

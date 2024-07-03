@@ -182,6 +182,8 @@ struct JsgImplType {
     v8PropertyCallbackInfo @8;
 
     jsgName @9;
+
+    jsgThisPlaceholder @10;
   }
 
   type @0 :Type;

@@ -428,16 +428,8 @@ struct DetachedMethodContext: public ContextGlobalObject {
   struct FooObject: public jsg::Object {
     static bool foo() { return true; }
 
-    // TODO(simplify): The baz() method here shows what is currently the only way to
-    // extract the `this` object that a detached or static method may have been bound
-    // to (using either bind(...) in JS or the .call(...) or .apply(...) methods).
-    // We could potentially simplify this by introducing a new `jsg::Self<T>` type of
-    // special placeholder argument that would be automatically filled in with the
-    // bound `this`, if any.
-    static bool baz(const v8::FunctionCallbackInfo<v8::Value>& info,
-                    const TypeHandler<Ref<FooObject>>& handler) {
-      auto& js = jsg::Lock::from(info.GetIsolate());
-      KJ_IF_SOME(self, handler.tryUnwrap(js, info.This())) {
+    static bool baz(This<jsg::Ref<FooObject>> self) {
+      KJ_IF_SOME(self, self.value) {
         return self->abc();
       }
       return false;

@@ -202,7 +202,7 @@ namespace workerd::jsg {
   } while (false)
 
 // Like JSG_METHOD, except that the JS method is expected to be detachable from the object
-// (using destructuring syntax). Unlike JSG_METHOD, these methods must be defined as static
+// (e.g. using destructuring syntax). Unlike JSG_METHOD, these methods must be defined as static
 // methods on the underlying C++ type.
 #define JSG_DETACHED_METHOD(name) \
   do { \
@@ -1305,6 +1305,25 @@ Ref<T> _jsgThis(T* obj) {
 }
 
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))
+
+// A helper placeholder type for extracting the `this` object from a method call. Use this in
+// cases where a function is being called that is not attached to a base object but still may
+// need to access the `this`. If the this cannot be successfully unwrapped to the given type,
+// then value will be kj::none. Typically this is only useful for static or detached methods.
+template <typename T>
+struct This {
+  kj::Maybe<T> value;
+};
+
+// Is `T` some specialization of `This<U>`?
+template <typename T> struct IsThis_ { static constexpr bool value = false; };
+
+// Is `T` some specialization of `This<U>`?
+template <typename T> struct IsThis_<This<T>> { static constexpr bool value = true; };
+
+// Is `T` some specialization of `This<U>`?
+template <typename T>
+constexpr bool isThis() { return IsThis_<T>::value; }
 
 // Holds a value of type `T` and allows it to be passed to JavaScript multiple times, resulting
 // in exactly the same JavaScript object each time (will compare equal using `===`). You may
