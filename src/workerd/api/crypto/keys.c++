@@ -9,7 +9,7 @@ namespace {
 static char EMPTY_PASSPHRASE[] = "";
 }  // namespace
 
-AsymmetricKey::AsymmetricKey(kj::Own<EVP_PKEY> keyData,
+AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(kj::Own<EVP_PKEY> keyData,
                              kj::StringPtr keyType,
                              bool extractable,
                              CryptoKeyUsageSet usages)
@@ -17,16 +17,16 @@ AsymmetricKey::AsymmetricKey(kj::Own<EVP_PKEY> keyData,
       keyData(kj::mv(keyData)),
       keyType(keyType) {}
 
-kj::Array<kj::byte> AsymmetricKey::signatureSslToWebCrypto(kj::Array<kj::byte> signature) const {
+kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(kj::Array<kj::byte> signature) const {
   return kj::mv(signature);
 }
 
-kj::Array<const kj::byte> AsymmetricKey::signatureWebCryptoToSsl(
+kj::Array<const kj::byte> AsymmetricKeyCryptoKeyImpl::signatureWebCryptoToSsl(
     kj::ArrayPtr<const kj::byte> signature) const {
   return { signature.begin(), signature.size(), kj::NullArrayDisposer::instance };
 }
 
-SubtleCrypto::ExportKeyData AsymmetricKey::exportKey(kj::StringPtr format) const {
+SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(kj::StringPtr format) const {
   // EVP_marshal_{public,private}_key() functions are BoringSSL
   // extensions which export asymmetric keys in DER format.
   // DER is the binary format which *should* work to export any EVP_PKEY.
@@ -68,7 +68,7 @@ SubtleCrypto::ExportKeyData AsymmetricKey::exportKey(kj::StringPtr format) const
   return kj::heapArray(der, derLen);
 }
 
-kj::Array<kj::byte> AsymmetricKey::exportKeyExt(
+kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::exportKeyExt(
     kj::StringPtr format,
     kj::StringPtr type,
     jsg::Optional<kj::String> cipher,
@@ -212,7 +212,7 @@ kj::Array<kj::byte> AsymmetricKey::exportKeyExt(
   JSG_FAIL_REQUIRE(TypeError, "Failed to encode private key");
 }
 
-kj::Array<kj::byte> AsymmetricKey::sign(
+kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::sign(
     SubtleCrypto::SignAlgorithm&& algorithm,
     kj::ArrayPtr<const kj::byte> data) const {
   JSG_REQUIRE(keyType == "private", DOMInvalidAccessError,
@@ -267,7 +267,7 @@ kj::Array<kj::byte> AsymmetricKey::sign(
   return signatureSslToWebCrypto(kj::mv(signature));
 }
 
-bool AsymmetricKey::verify(
+bool AsymmetricKeyCryptoKeyImpl::verify(
     SubtleCrypto::SignAlgorithm&& algorithm,
     kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const {
   ClearErrorOnReturn clearErrorOnReturn;
@@ -293,9 +293,9 @@ bool AsymmetricKey::verify(
   return !!result;
 }
 
-bool AsymmetricKey::equals(const CryptoKey::Impl& other) const {
+bool AsymmetricKeyCryptoKeyImpl::equals(const CryptoKey::Impl& other) const {
   if (this == &other) return true;
-  KJ_IF_SOME(otherImpl, kj::dynamicDowncastIfAvailable<const AsymmetricKey>(other)) {
+  KJ_IF_SOME(otherImpl, kj::dynamicDowncastIfAvailable<const AsymmetricKeyCryptoKeyImpl>(other)) {
     // EVP_PKEY_cmp will return 1 if the inputs match, 0 if they don't match,
     // -1 if the key types are different, and -2 if the operation is not supported.
     // We only really care about the first two cases.

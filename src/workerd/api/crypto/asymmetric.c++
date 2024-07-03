@@ -195,17 +195,17 @@ ImportAsymmetricResult importAsymmetric(jsg::Lock& js, kj::StringPtr format,
 
 namespace {
 
-class RsaBase: public AsymmetricKey {
+class RsaBase: public AsymmetricKeyCryptoKeyImpl {
 public:
   explicit RsaBase(kj::Own<EVP_PKEY> keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm,
       kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
-    : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
+    : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), keyType, extractable, usages),
       keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
   kj::StringPtr jsgGetMemoryName() const override { return "AsymmetricKey"; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(AsymmetricKey); }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(AsymmetricKeyCryptoKeyImpl); }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
-    AsymmetricKey::jsgGetMemoryInfo(tracker);
+    AsymmetricKeyCryptoKeyImpl::jsgGetMemoryInfo(tracker);
     tracker.trackField("keyAlgorithm", keyAlgorithm);
   }
 
@@ -946,14 +946,14 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
 
 namespace {
 
-class EllipticKey final: public AsymmetricKey {
+class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 public:
   explicit EllipticKey(kj::Own<EVP_PKEY> keyData,
                        CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
                        kj::StringPtr keyType,
                        uint rsSize,
                        bool extractable, CryptoKeyUsageSet usages)
-      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
+      : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), keyType, extractable, usages),
         keyAlgorithm(kj::mv(keyAlgorithm)), rsSize(rsSize) {}
 
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm; }
@@ -1193,7 +1193,7 @@ public:
   kj::StringPtr jsgGetMemoryName() const override { return "EllipticKey"; }
   size_t jsgGetMemorySelfSize() const override { return sizeof(EllipticKey); }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
-    AsymmetricKey::jsgGetMemoryInfo(tracker);
+    AsymmetricKeyCryptoKeyImpl::jsgGetMemoryInfo(tracker);
     tracker.trackField("keyAlgorithm", keyAlgorithm);
   }
 
@@ -1639,11 +1639,11 @@ namespace {
 // Abstract base class for EDDSA and EDDH. The legacy NODE-ED25519 identifier for EDDSA has a
 // namedCurve field whereas the algorithms in the Secure Curves spec do not. We handle this by
 // keeping track of the algorithm identifier and returning an algorithm struct based on that.
-class EdDsaKey final: public AsymmetricKey {
+class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
 public:
   explicit EdDsaKey(kj::Own<EVP_PKEY> keyData, kj::StringPtr keyAlgorithm,
                     kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
-      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
+      : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), keyType, extractable, usages),
         keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
   static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateKey(
@@ -1808,7 +1808,7 @@ public:
   kj::StringPtr jsgGetMemoryName() const override { return "EdDsaKey"; }
   size_t jsgGetMemorySelfSize() const override { return sizeof(EdDsaKey); }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
-    AsymmetricKey::jsgGetMemoryInfo(tracker);
+    AsymmetricKeyCryptoKeyImpl::jsgGetMemoryInfo(tracker);
   }
 
 private:

@@ -4,9 +4,9 @@
 
 namespace workerd::api {
 
-class AsymmetricKey: public CryptoKey::Impl {
+class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
 public:
-  explicit AsymmetricKey(kj::Own<EVP_PKEY> keyData,
+  explicit AsymmetricKeyCryptoKeyImpl(kj::Own<EVP_PKEY> keyData,
                          kj::StringPtr keyType,
                          bool extractable,
                          CryptoKeyUsageSet usages);
@@ -62,7 +62,7 @@ public:
   bool equals(const CryptoKey::Impl& other) const override final;
 
   kj::StringPtr jsgGetMemoryName() const override { return "AsymmetricKey"; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(AsymmetricKey); }
+  size_t jsgGetMemorySelfSize() const override { return sizeof(AsymmetricKeyCryptoKeyImpl); }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {}
 
 private:
