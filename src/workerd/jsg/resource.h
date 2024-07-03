@@ -846,6 +846,16 @@ struct ResourceTypeBuilder {
   }
 
   template<const char* name, typename Method, Method method>
+  inline void registerDetachedMethod() {
+    auto functionTemplate = v8::FunctionTemplate::New(isolate,
+        &StaticMethodCallback<TypeWrapper, name, Self, Method, method,
+                              ArgumentIndexes<Method>>::callback,
+        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
+    functionTemplate->RemovePrototype();
+    prototype->Set(v8StrIntern(isolate, name), functionTemplate);
+  }
+
+  template<const char* name, typename Method, Method method>
   inline void registerStaticMethod() {
     // Notably, we specify an empty signature because a static method invocation will have no holder
     // object.
@@ -1121,6 +1131,9 @@ struct JsSetup {
 
   template<const char* name, typename Method, Method method>
   inline void registerMethod() { }
+
+  template <const char* name, typename Method, Method method>
+  inline void registerDetachedMethod() { }
 
   template<const char* name, typename Method, Method method>
   inline void registerStaticMethod() { }

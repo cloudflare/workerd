@@ -201,6 +201,21 @@ namespace workerd::jsg {
     registry.template registerMethod<NAME, decltype(&Self::method), &Self::method>(); \
   } while (false)
 
+// Like JSG_METHOD, except that the JS method is expected to be detachable from the object
+// (using destructuring syntax). Unlike JSG_METHOD, these methods must be defined as static
+// methods on the underlying C++ type.
+#define JSG_DETACHED_METHOD(name) \
+  do { \
+    static const char NAME[] = #name; \
+    registry.template registerDetachedMethod<NAME, decltype(Self::name), &Self::name>(); \
+  } while (false)
+
+#define JSG_DETACHED_METHOD_NAMED(name, method) \
+  do { \
+    static const char NAME[] = #name; \
+    registry.template registerDetachedMethod<NAME, decltype(Self::method), &Self::method>(); \
+  } while (false)
+
 // Use inside a JSG_RESOURCE_TYPE block to declare that the given method should be callable from
 // JavaScript on the resource type's constructor.
 #define JSG_STATIC_METHOD(name) \
