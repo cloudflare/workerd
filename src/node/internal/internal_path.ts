@@ -182,6 +182,10 @@ const win32 = {
     throw new Error('path.win32.parse() is not implemented.');
   },
 
+  matchesGlob(_path: string, _pattern: string): boolean {
+    throw new Error('path.win32.matchesGlob() is not implemented.');
+  },
+
   sep: '\\',
   delimiter: ';',
   win32: null as Object|null,
@@ -625,6 +629,10 @@ const posix = {
       ret.dir = '/';
 
     return ret;
+  },
+
+  matchesGlob(_path: string, _pattern: string): boolean {
+    throw new Error('path.posix.matchesGlob() is not implemented.');
   },
 
   sep: '/',

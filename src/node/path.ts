@@ -24,6 +24,7 @@ const {
   parse,
   sep,
   delimiter,
+  matchesGlob,
 } = posix;
 
 export {
@@ -42,6 +43,7 @@ export {
   delimiter,
   posix,
   win32,
+  matchesGlob,
 };
 
 export { default } from 'node-internal:internal_path';
