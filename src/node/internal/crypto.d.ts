@@ -58,7 +58,7 @@ export class HashHandle {
 export type ArrayLike = ArrayBuffer|string|Buffer|ArrayBufferView;
 
 export class HmacHandle {
-  public constructor(algorithm: string, key: ArrayLike | CryptoKey);
+  public constructor(algorithm: string, key: ArrayLike | CryptoKey | SecretKeyObjectHandle);
   public update(data: Buffer | ArrayBufferView): number;
   public digest(): ArrayBuffer;
 }
@@ -76,13 +76,29 @@ export function getScrypt(password: ArrayLike, salt: ArrayLike, N: number, r: nu
                           maxmem: number, keylen: number): ArrayBuffer;
 
 // Keys
-export function exportKey(key: CryptoKey, options?: InnerExportOptions): KeyExportResult;
-export function equals(key: CryptoKey, otherKey: CryptoKey): boolean;
-export function getAsymmetricKeyDetail(key: CryptoKey): AsymmetricKeyDetails;
-export function getAsymmetricKeyType(key: CryptoKey): AsymmetricKeyType;
-export function createSecretKey(key: ArrayBuffer | ArrayBufferView): CryptoKey;
-export function createPrivateKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;
-export function createPublicKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;
+export class SecretKeyObjectHandle {
+  public constructor(key: ArrayBuffer | ArrayBufferView);
+  public export(options?: InnerExportOptions): KeyExportResult;
+  public equals(otherKey: SecretKeyObjectHandle): boolean;
+  public toCryptoKey(): CryptoKey | undefined;
+  static fromCryptoKey(key: CryptoKey): SecretKeyObjectHandle | undefined;
+}
+
+export interface AsymmetricKeyHandlePair {
+  publicKey: AsymmetricKeyObjectHandle;
+  privateKey: AsymmetricKeyObjectHandle;
+}
+
+export class AsymmetricKeyObjectHandle {
+  constructor(key: InnerCreateAsymmetricKeyOptions);
+  public export(options?: InnerExportOptions): KeyExportResult;
+  public equals(otherKey: AsymmetricKeyObjectHandle): boolean;
+  public getAsymmetricKeyType(): AsymmetricKeyType;
+  public getAsymmetricKeyDetail(): AsymmetricKeyDetails;
+  public toCryptoKey(): CryptoKey | undefined;
+  static fromCryptoKey(key: CryptoKey): AsymmetricKeyObjectHandle | undefined;
+  static generateKeyPair(options: GenerateKeyPairOptions): AsymmetricKeyHandlePair;
+}
 
 // Spkac
 export function verifySpkac(input: ArrayBufferView|ArrayBuffer): boolean;
@@ -234,7 +250,8 @@ export interface CreateAsymmetricKeyOptions {
 }
 
 export interface InnerCreateAsymmetricKeyOptions {
-  key?: ArrayBuffer | ArrayBufferView | JsonWebKey | CryptoKey;
+  isPublicKey?: boolean;
+  key?: ArrayBuffer | ArrayBufferView | JsonWebKey | CryptoKey | AsymmetricKeyObjectHandle;
   format?: AsymmetricKeyFormat;
   type?: PublicKeyEncoding | PrivateKeyEncoding;
   passphrase?: Uint8Array;

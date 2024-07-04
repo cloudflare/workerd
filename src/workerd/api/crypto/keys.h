@@ -10,17 +10,52 @@ enum class KeyType {
   PRIVATE,
 };
 
+enum class KeyEncoding {
+  PKCS1,
+  PKCS8,
+  SPKI,
+  SEC1,
+};
+
+enum class KeyFormat {
+  PEM,
+  DER,
+  JWK,
+};
+
+kj::Maybe<KeyEncoding> tryGetKeyEncoding(const kj::Maybe<kj::String>& encoding);
+kj::Maybe<KeyFormat> tryGetKeyFormat(const kj::Maybe<kj::String>& format);
+
 kj::StringPtr toStringPtr(KeyType type);
 
-struct AsymmetricKeyData {
+struct AsymmetricKeyData : public kj::Refcounted {
+  enum class Kind {
+    UNKNOWN = EVP_PKEY_NONE,
+    RSA = EVP_PKEY_RSA,
+    RSA_PSS = EVP_PKEY_RSA_PSS,
+    DH = EVP_PKEY_DH,
+    DSA = EVP_PKEY_DSA,
+    EC = EVP_PKEY_EC,
+    ED25519 = EVP_PKEY_ED25519,
+    X25519 = EVP_PKEY_X25519,
+  };
+
   kj::Own<EVP_PKEY> evpPkey;
   KeyType keyType;
   CryptoKeyUsageSet usages;
+  AsymmetricKeyData(kj::Own<EVP_PKEY> evpPkey, KeyType keyType, CryptoKeyUsageSet usages)
+      : evpPkey(kj::mv(evpPkey)), keyType(keyType), usages(usages) {}
+
+  bool equals(const kj::Rc<AsymmetricKeyData>& other) const;
+
+  Kind getKind() const;
+  kj::StringPtr getKindName() const;
+  KJ_DISALLOW_COPY_AND_MOVE(AsymmetricKeyData);
 };
 
 class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
 public:
-  explicit AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key, bool extractable);
+  explicit AsymmetricKeyCryptoKeyImpl(kj::Rc<AsymmetricKeyData> key, bool extractable);
 
   // ---------------------------------------------------------------------------
   // Subclasses must implement these
@@ -52,12 +87,6 @@ public:
 
   SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override final;
 
-  virtual kj::Array<kj::byte> exportKeyExt(
-      kj::StringPtr format,
-      kj::StringPtr type,
-      jsg::Optional<kj::String> cipher = kj::none,
-      jsg::Optional<kj::Array<kj::byte>> passphrase = kj::none) const override final;
-
   kj::Array<kj::byte> sign(
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data) const override;
@@ -67,9 +96,14 @@ public:
       kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const override;
 
   kj::StringPtr getType() const override;
-  KeyType getTypeEnum() const { return keyType; }
+  KeyType getTypeEnum() const { return keyData->keyType; }
 
-  inline EVP_PKEY* getEvpPkey() const { return keyData.get(); }
+  inline EVP_PKEY* getEvpPkey() const {
+    return const_cast<EVP_PKEY*>(keyData->evpPkey.get());
+  }
+  kj::Maybe<kj::Rc<AsymmetricKeyData>> getAsymmetricKeyData() override {
+    return keyData.addRef();
+  }
 
   bool equals(const CryptoKey::Impl& other) const override final;
 
@@ -84,13 +118,11 @@ private:
   virtual SubtleCrypto::JsonWebKey exportJwk() const = 0;
   virtual kj::Array<kj::byte> exportRaw() const = 0;
 
-  mutable kj::Own<EVP_PKEY> keyData;
-  // mutable because OpenSSL wants non-const pointers even when the object won't be modified...
-  KeyType keyType;
+  kj::Rc<AsymmetricKeyData> keyData;
 };
 
 // Performs asymmetric key import per the Web Crypto spec.
-AsymmetricKeyData importAsymmetricForWebCrypto(
+kj::Rc<AsymmetricKeyData> importAsymmetricForWebCrypto(
     jsg::Lock& js,
     kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
@@ -99,5 +131,20 @@ AsymmetricKeyData importAsymmetricForWebCrypto(
     kj::ArrayPtr<const kj::String> keyUsages,
     kj::FunctionParam<kj::Own<EVP_PKEY>(SubtleCrypto::JsonWebKey)> readJwk,
     CryptoKeyUsageSet allowedUsages);
+
+kj::Maybe<kj::Rc<AsymmetricKeyData>> importAsymmetricPrivateKeyForNodeJs(
+    kj::ArrayPtr<const kj::byte> keyData,
+    KeyFormat format,
+    const kj::Maybe<KeyEncoding>& encoding,
+    kj::Maybe<kj::Array<kj::byte>>& passphrase);
+
+kj::Maybe<kj::Rc<AsymmetricKeyData>> importAsymmetricPublicKeyForNodeJs(
+    kj::ArrayPtr<const kj::byte> keyData,
+    KeyFormat format,
+    const kj::Maybe<KeyEncoding>& encoding,
+    kj::Maybe<kj::Array<kj::byte>>& passphrase);
+
+kj::Maybe<kj::Rc<AsymmetricKeyData>> derivePublicKeyFromPrivateKey(
+    kj::Rc<AsymmetricKeyData> privateKeyData);
 
 }  // namespace workerd::api

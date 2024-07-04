@@ -30,13 +30,12 @@ import { Buffer } from 'node-internal:internal_buffer';
 
 import {
   CryptoKey,
+  SecretKeyObjectHandle,
+  AsymmetricKeyObjectHandle,
   KeyData,
   KeyObjectType,
   KeyExportResult,
   SecretKeyType,
-  SecretKeyExportOptions,
-  PublicKeyExportOptions,
-  PrivateKeyExportOptions,
   ExportOptions,
   AsymmetricKeyDetails,
   AsymmetricKeyType,
@@ -44,15 +43,12 @@ import {
   GenerateKeyOptions,
   GenerateKeyPairOptions,
   InnerExportOptions,
-  // TODO(soon): Uncomment these once createPrivateKey/createPublicKey are implemented.
-  // JsonWebKey,
-  // InnerCreateAsymmetricKeyOptions,
-  default as cryptoImpl
+  JsonWebKey,
+  InnerCreateAsymmetricKeyOptions,
 } from 'node-internal:crypto';
 
 import {
   arrayBufferToUnsignedBigInt,
-  kHandle,
 } from 'node-internal:crypto_util';
 
 import {
@@ -60,15 +56,13 @@ import {
   isArrayBuffer,
   isArrayBufferView,
   isUint8Array,
-  // TODO(soon): Uncomment these once createPrivateKey/createPublicKey are implemented.
-  // isSharedArrayBuffer,
+  isSharedArrayBuffer,
 } from 'node-internal:internal_types';
 
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_METHOD_NOT_IMPLEMENTED,
-  // TODO(soon): Uncomment these once createPrivateKey/createPublicKey are implemented.
-  // ERR_INVALID_ARG_VALUE,
+  ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 
 import {
@@ -76,43 +70,79 @@ import {
   validateString,
 } from 'node-internal:validators';
 
+const kSkipThrow = Symbol('kSkipThrow');
+const kKeyObjectTag = Symbol('kKeyObjectTag');
+const kSecretKeyTag = Symbol('kSecretKeyTag');
+const kAsymmetricKeyTag = Symbol('kAsymmetricKeyTag');
+const kPublicKeyTag = Symbol('kPublicKeyTag');
+const kPrivateKeyTag = Symbol('kPrivateKeyTag');
+export const kHandle = Symbol('handle');
+
 // In Node.js, the definition of KeyObject is a bit complicated because
 // KeyObject instances in Node.js can be transferred via postMessage() and
 // structuredClone(), etc, allowing instances to be shared across multiple
 // worker threads. We do not implement that model so we're essentially
 // re-implementing the Node.js API here instead of just taking their code.
-// Also in Node.js, CryptoKey is layered on top of KeyObject since KeyObject
-// existed first. We're, however, going to layer our KeyObject on top of
-// CryptoKey with a few augmentations.
 
 export abstract class KeyObject {
-  [kHandle]: CryptoKey;
-
-  constructor() {
-    // KeyObjects cannot be created with new ... use one of the
-    // create or generate methods, or use from to get from a
-    // CryptoKey.
-    throw new Error('Illegal constructor');
-  }
-
+  [kKeyObjectTag] = kKeyObjectTag;
   static from(key: CryptoKey) : KeyObject {
     if (!(key instanceof CryptoKey)) {
       throw new ERR_INVALID_ARG_TYPE('key', 'CryptoKey', key);
     }
     switch (key.type) {
       case 'secret':
-        return Reflect.construct(function(this: SecretKeyObject) {
-          this[kHandle] = key;
-        }, [], SecretKeyObject);
+        return new SecretKeyObject(kSkipThrow, SecretKeyObjectHandle.fromCryptoKey(key));
       case 'private':
-        return Reflect.construct(function(this: PrivateKeyObject) {
-          this[kHandle] = key;
-        }, [], PrivateKeyObject);
+        return new PrivateKeyObject(kSkipThrow, AsymmetricKeyObjectHandle.fromCryptoKey(key));
       case 'public':
-        return Reflect.construct(function(this: PublicKeyObject) {
-          this[kHandle] = key;
-        }, [], PublicKeyObject);
+        return new PublicKeyObject(kSkipThrow, AsymmetricKeyObjectHandle.fromCryptoKey(key));
     }
+  }
+
+  abstract export(options: ExportOptions) : KeyExportResult;
+  abstract equals(otherKeyObject: KeyObject) : boolean;
+  abstract get type() : KeyObjectType;
+  abstract get [kHandle]() : SecretKeyObjectHandle | AsymmetricKeyObjectHandle;
+
+  get [Symbol.toStringTag]() {
+    return "KeyObject"
+  }
+}
+
+abstract class AsymmetricKeyObject extends KeyObject {
+  [kAsymmetricKeyTag] = kAsymmetricKeyTag;
+  #handle: AsymmetricKeyObjectHandle;
+  #details: AsymmetricKeyDetails | undefined = undefined;
+
+  constructor(skipThrow?: typeof kSkipThrow, handle?: AsymmetricKeyObjectHandle) {
+    if (skipThrow !== kSkipThrow) {
+      // KeyObjects cannot be created with new ... use one of the
+      // create or generate methods, or use from to get from a
+      // CryptoKey.
+      throw new Error('Illegal constructor');
+    }
+    super();
+    this.#handle = handle!;
+  }
+
+  get [kHandle]() : AsymmetricKeyObjectHandle {
+    return this.#handle;
+  }
+
+  get asymmetricKeyDetails() : AsymmetricKeyDetails {
+    this.#details ??= (() => {
+      const detail = this.#handle.getAsymmetricKeyDetail();
+      if (isArrayBuffer(detail.publicExponent)) {
+        detail.publicExponent = arrayBufferToUnsignedBigInt(detail.publicExponent as any);
+      }
+      return detail;
+    })();
+    return this.#details;
+  };
+
+  get asymmetricKeyType() : AsymmetricKeyType {
+    return this.#handle.getAsymmetricKeyType();
   }
 
   export(options: ExportOptions = {}) : KeyExportResult {
@@ -137,70 +167,89 @@ export abstract class KeyObject {
       }
     }
 
-    const ret = cryptoImpl.exportKey(this[kHandle], options as InnerExportOptions);
+    const ret = this.#handle.export(options as InnerExportOptions);
     if (typeof ret === 'string') return ret;
     if (isUint8Array(ret)) {
-      return Buffer.from((ret as Uint8Array).buffer, ret.byteOffset, ret.byteLength) as KeyExportResult;
+      return Buffer.from((ret as Uint8Array).buffer,
+                         ret.byteOffset, ret.byteLength) as KeyExportResult;
     } else if (isArrayBuffer(ret)) {
       return Buffer.from(ret as ArrayBuffer, 0, (ret as ArrayBuffer).byteLength);
     }
     return ret;
   }
 
-  equals(otherKeyObject: KeyObject) : boolean {
+  equals(otherKeyObject: AsymmetricKeyObject) : boolean {
+    if (otherKeyObject[kAsymmetricKeyTag] !== kAsymmetricKeyTag) return false;
     if (this === otherKeyObject ||
-        this[kHandle] === otherKeyObject[kHandle]) return true;
+        this.#handle === otherKeyObject.#handle) return true;
     if (this.type !== otherKeyObject.type) return false;
-    if (!(otherKeyObject[kHandle] instanceof CryptoKey)) {
-      throw new ERR_INVALID_ARG_TYPE('otherKeyObject', 'KeyObject', otherKeyObject);
-    }
-    return cryptoImpl.equals(this[kHandle], otherKeyObject[kHandle]);
-  }
-
-  abstract get type() : KeyObjectType;
-
-  get [Symbol.toStringTag]() {
-    return "KeyObject"
-  }
-}
-
-abstract class AsymmetricKeyObject extends KeyObject {
-  get asymmetricKeyDetails() : AsymmetricKeyDetails {
-    let detail = cryptoImpl.getAsymmetricKeyDetail(this[kHandle]);
-    if (isArrayBuffer(detail.publicExponent)) {
-      detail.publicExponent = arrayBufferToUnsignedBigInt(detail.publicExponent as any);
-    }
-    return detail;
-  }
-
-  get asymmetricKeyType() : AsymmetricKeyType {
-    return cryptoImpl.getAsymmetricKeyType(this[kHandle]);
+    return this.#handle.equals(otherKeyObject.#handle);
   }
 }
 
 export class PublicKeyObject extends AsymmetricKeyObject {
-  override export(options?: PublicKeyExportOptions) : KeyExportResult {
-    return super.export(options);
-  }
-
+  [kPublicKeyTag] = kPublicKeyTag;
   get type() : KeyObjectType { return 'public'; }
 }
 
 export class PrivateKeyObject extends AsymmetricKeyObject {
-  override export(options?: PrivateKeyExportOptions) : KeyExportResult {
-    return super.export(options);
-  }
-
+  [kPrivateKeyTag] = kPrivateKeyTag
   get type() : KeyObjectType { return 'private'; }
 }
 
 export class SecretKeyObject extends KeyObject {
-  get symmetricKeySize() : number {
-    return (this[kHandle].algorithm as any).length | 0
+  [kSecretKeyTag] = kSecretKeyTag;
+  #handle: SecretKeyObjectHandle;
+  #length: number;
+
+  constructor(skipThrow?: typeof kSkipThrow,
+              handle?: SecretKeyObjectHandle,
+              length?: number) {
+    if (skipThrow !== kSkipThrow) {
+      // KeyObjects cannot be created with new ... use one of the
+      // create or generate methods, or use from to get from a
+      // CryptoKey.
+      throw new Error('Illegal constructor');
+    }
+    super();
+    this.#handle = handle!;
+    this.#length = length!;
   }
 
-  override export(options?: SecretKeyExportOptions) : KeyExportResult {
-    return super.export(options);
+  get [kHandle]() : SecretKeyObjectHandle {
+    return this.#handle;
+  }
+
+  get symmetricKeySize() {
+    return this.#length;
+  }
+
+  export(options: ExportOptions = {}) : KeyExportResult {
+    validateObject(options, 'options', {});
+
+    // Yes, converting to any is a bit of a cheat, but it allows us to check
+    // each option individually without having to do a bunch of type guards.
+    const opts = options as any;
+    if (opts.format !== undefined) validateString(opts.format, 'options.format');
+    if (opts.type !== undefined) validateString(opts.type, 'options.type');
+
+    const ret = this.#handle.export(options as InnerExportOptions);
+    if (typeof ret === 'string') return ret;
+    if (isUint8Array(ret)) {
+      return Buffer.from((ret as Uint8Array).buffer,
+                         ret.byteOffset, ret.byteLength) as KeyExportResult;
+    } else if (isArrayBuffer(ret)) {
+      return Buffer.from(ret as ArrayBuffer, 0, (ret as ArrayBuffer).byteLength);
+    }
+    return ret;
+  }
+
+  equals(otherKeyObject: SecretKeyObject) : boolean {
+    if (otherKeyObject[kSecretKeyTag] !== kSecretKeyTag) return false;
+    if (this === otherKeyObject ||
+        this.#handle === otherKeyObject.#handle) return true;
+    if (this.type !== otherKeyObject.type) return false;
+    return this.#handle.equals(otherKeyObject.#handle);
   }
 
   get type() : KeyObjectType { return 'secret'; }
@@ -233,124 +282,136 @@ export function createSecretKey(key: ArrayBuffer | ArrayBufferView) : SecretKeyO
 export function createSecretKey(key: KeyData, encoding?: string) : SecretKeyObject {
   validateKeyData(key, 'key');
   if (typeof key === 'string') key = Buffer.from(key as string, encoding);
-  return KeyObject.from(cryptoImpl.createSecretKey(key)) as SecretKeyObject;
+  return new SecretKeyObject(kSkipThrow,
+                             new SecretKeyObjectHandle(key),
+                             key.byteLength);
 }
 
-// TODO(soon): Fully implement createPrivateKey/createPublicKey. These are the
-// equivalent of the WebCrypto API's importKey() method but operate synchronously
-// and support a range of options not currently supported by WebCrypto. Implementing
-// these will require either duplicating or significantly refactoring the current
-// import key logic that supports Web Crypto now as the import logic is spread out
-// over several locations and makes a number of assumptions that Web Crypto is being
-// used.
-//
-// For now, users can use Web Crypto to import a CryptoKey then convert that into
-// a KeyObject using KeyObject.from().
-//
-// const kPrivateKey = Symbol('privateKey');
-// const kPublicKey = Symbol('publicKey');
+export function isKeyObject(key: any) : boolean {
+  return key != null && key[kKeyObjectTag] === kKeyObjectTag;
+}
 
-// function validateAsymmetricKeyOptions(
-//     key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject,
-//     type: Symbol) {
-//   validateKeyData(key, 'key', { allowObject: true });
-//   let inner : InnerCreateAsymmetricKeyOptions = {};
-//   inner.format = 'pem';
-//   if (typeof key === 'string') {
-//     inner.key = Buffer.from(key as string);
-//   } else if (isArrayBufferView(key)) {
-//     inner.key = key as ArrayBufferView;
-//   } else if (isArrayBuffer(key)) {
-//     inner.key = key as ArrayBuffer;
-//   } else if (isSharedArrayBuffer(key)) {
-//     inner.key = key as SharedArrayBuffer;
-//   } else if (type === kPublicKey && key instanceof KeyObject) {
-//     // Covers deriving public key from a private key.
-//     if (key.type !== 'private') {
-//       throw new ERR_INVALID_ARG_VALUE('key', key, 'must be a private key');
-//     }
-//     inner.key = (key as KeyObject)[kHandle];
-//   } else if (type === kPublicKey && key instanceof CryptoKey) {
-//     // Covers deriving public key from a private key.
-//     if ((key as CryptoKey).type !== 'private') {
-//       throw new ERR_INVALID_ARG_VALUE('key', key, 'must be a private key');
-//     }
-//     inner.key = key as CryptoKey;
-//   } else {
-//     const options = key as CreateAsymmetricKeyOptions;
-//     if (typeof options.key === 'string') {
-//       inner.key = Buffer.from(options.key as string, options.encoding);
-//     } else if (isArrayBufferView(options.key)) {
-//       inner.key = options.key as ArrayBufferView;
-//     } else if (isArrayBuffer(options.key)) {
-//       inner.key = options.key as ArrayBuffer;
-//     } else if (isSharedArrayBuffer(options.key)) {
-//       inner.key = options.key as SharedArrayBuffer;
-//     } else if (type === kPublicKey && key instanceof KeyObject) {
-//       if ((options.key as KeyObject).type !== 'private') {
-//         throw new ERR_INVALID_ARG_VALUE('options.key', options.key, 'must be a private key');
-//       }
-//       inner.key = (options.key as KeyObject)[kHandle];
-//     } else if (type === kPublicKey && key instanceof CryptoKey) {
-//       if ((options.key as CryptoKey).type !== 'private') {
-//         throw new ERR_INVALID_ARG_VALUE('options.key', options.key, 'must be a private key');
-//       }
-//       inner.key = options.key as CryptoKey;
-//     } else {
-//       inner.key = key as JsonWebKey;
-//     }
-//     validateKeyData(inner.key, 'options.key', { allowObject: true });
+export function isSecretKeyObject(key: any) : boolean {
+  return key != null && key[kSecretKeyTag] === kSecretKeyTag;
+}
 
-//     if (options.format !== undefined) {
-//       validateString(options.format, 'options.format');
-//       inner.format = options.format;
-//     }
-//     if (options.type !== undefined) {
-//       validateString(options.type, 'options.type');
-//       inner.type = options.type;
-//     }
-//     if (options.passphrase !== undefined) {
-//       if (typeof options.passphrase === 'string') {
-//         inner.passphrase = Buffer.from(options.passphrase, options.encoding);
-//       } else {
-//         if (!isUint8Array(options.passphrase)) {
-//           throw new ERR_INVALID_ARG_TYPE('options.passphrase', [
-//             'string', 'Uint8Array'
-//           ], options.passphrase);
-//         }
-//         inner.passphrase = options.passphrase;
-//       }
-//       if (inner.passphrase.byteLength > 1024) {
-//         throw new ERR_INVALID_ARG_VALUE('options.passphrase', options.passphrase.length, '<= 1024');
-//       }
-//     }
-//   }
-//   return inner;
-// }
+export function isAsymmetricKeyObject(key: any) : boolean {
+  return key != null && key[kAsymmetricKeyTag] === kAsymmetricKeyTag;
+}
+
+export function isPrivateKeyObject(key: any) : boolean {
+  return key != null && key[kPrivateKeyTag] === kPrivateKeyTag;
+}
+
+export function isPublicKeyObject(key: any) : boolean {
+  return key != null && key[kPublicKeyTag] === kPublicKeyTag;
+}
+
+type KeyDataToValidate = CreateAsymmetricKeyOptions | KeyData | CryptoKey | PrivateKeyObject;
+
+function validateAsymmetricKeyOptions(
+    key: KeyDataToValidate,
+    type = kPrivateKeyTag) {
+  validateKeyData(key, 'key', { allowObject: true });
+  let inner : InnerCreateAsymmetricKeyOptions = {};
+  inner.isPublicKey = type === kPublicKeyTag;
+  inner.format = 'pem';
+  if (typeof key === 'string') {
+    inner.key = Buffer.from(key as string);
+  } else if (isArrayBufferView(key)) {
+    inner.key = key as ArrayBufferView;
+  } else if (isArrayBuffer(key)) {
+    inner.key = key as ArrayBuffer;
+  } else if (isSharedArrayBuffer(key)) {
+    inner.key = key as SharedArrayBuffer;
+  } else if (type === kPublicKeyTag && isKeyObject(key)) {
+    // Covers deriving public key from a private key.
+    if (!isPrivateKeyObject(key)) {
+      throw new ERR_INVALID_ARG_VALUE('key', key, 'must be a private key');
+    }
+    inner.key = (key as PrivateKeyObject)[kHandle];
+  } else if (type === kPublicKeyTag && key instanceof CryptoKey) {
+    // Covers deriving public key from a private key.
+    if ((key as CryptoKey).type !== 'private') {
+      throw new ERR_INVALID_ARG_VALUE('key', key, 'must be a private key');
+    }
+    inner.key = key as CryptoKey;
+  } else {
+    const options = key as CreateAsymmetricKeyOptions;
+    if (typeof options.key === 'string') {
+      inner.key = Buffer.from(options.key as string, options.encoding);
+    } else if (isArrayBufferView(options.key)) {
+      inner.key = options.key as ArrayBufferView;
+    } else if (isArrayBuffer(options.key)) {
+      inner.key = options.key as ArrayBuffer;
+    } else if (isSharedArrayBuffer(options.key)) {
+      inner.key = options.key as SharedArrayBuffer;
+    } else if (type === kPublicKeyTag && isKeyObject(key)) {
+      if (!isPrivateKeyObject(key)) {
+        throw new ERR_INVALID_ARG_VALUE('options.key', options.key, 'must be a private key');
+      }
+      inner.key = (options.key as PrivateKeyObject)[kHandle];
+    } else if (type === kPublicKeyTag && key instanceof CryptoKey) {
+      if ((options.key as CryptoKey).type !== 'private') {
+        throw new ERR_INVALID_ARG_VALUE('options.key', options.key, 'must be a private key');
+      }
+      inner.key = options.key as CryptoKey;
+    } else {
+      inner.key = key as JsonWebKey;
+    }
+    validateKeyData(inner.key, 'options.key', { allowObject: true });
+
+    if (options.format !== undefined) {
+      validateString(options.format, 'options.format');
+      inner.format = options.format;
+    }
+    if (options.type !== undefined) {
+      validateString(options.type, 'options.type');
+      inner.type = options.type;
+    }
+    if (options.passphrase !== undefined) {
+      if (typeof options.passphrase === 'string') {
+        inner.passphrase = Buffer.from(options.passphrase, options.encoding);
+      } else {
+        if (!isUint8Array(options.passphrase)) {
+          throw new ERR_INVALID_ARG_TYPE('options.passphrase', [
+            'string', 'Uint8Array'
+          ], options.passphrase);
+        }
+        inner.passphrase = options.passphrase;
+      }
+      if (inner.passphrase.byteLength > 1024) {
+        throw new ERR_INVALID_ARG_VALUE('options.passphrase', options.passphrase.length, '<= 1024');
+      }
+    }
+  }
+  return inner;
+}
 
 export function createPrivateKey(key: string) : PrivateKeyObject;
 export function createPrivateKey(key: ArrayBuffer | ArrayBufferView) : PrivateKeyObject;
 export function createPrivateKey(key: CreateAsymmetricKeyOptions) : PrivateKeyObject;
-export function createPrivateKey(_key: CreateAsymmetricKeyOptions | KeyData) : PrivateKeyObject {
+export function createPrivateKey(key: CreateAsymmetricKeyOptions | KeyData) : PrivateKeyObject {
   // The options here are fairly complex. The key data can be a string,
   // ArrayBuffer, or ArrayBufferView. The first argument can be one of
   // these or an object with a key property that is one of these. If the
   // key data is a string, then it will be decoded using an encoding
   // (defaults to UTF8).
-  throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.createPrivateKey');
-  // return KeyObject.from(cryptoImpl.createPrivateKey(
-  //     validateAsymmetricKeyOptions(key, kPrivateKey))) as PrivateKeyObject;
+  const inner = validateAsymmetricKeyOptions(key, kPrivateKeyTag);
+  return new PrivateKeyObject(kSkipThrow, new AsymmetricKeyObjectHandle(inner));
 }
 
 export function createPublicKey(key: string) : PublicKeyObject;
 export function createPublicKey(key: ArrayBuffer) : PublicKeyObject;
 export function createPublicKey(key: ArrayBufferView) : PublicKeyObject;
 
-export function createPublicKey(key: KeyObject) : PublicKeyObject;
+export function createPublicKey(key: PrivateKeyObject | PublicKeyObject) : PublicKeyObject;
 export function createPublicKey(key: CryptoKey) : PublicKeyObject;
 export function createPublicKey(key: CreateAsymmetricKeyOptions) : PublicKeyObject;
-export function createPublicKey(_key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject)
+export function createPublicKey(key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | PrivateKeyObject | PublicKeyObject)
     : PublicKeyObject {
+  if ((key as any)?.[kPublicKeyTag] === kPublicKeyTag) return key as PublicKeyObject;
+
   // The options here are a bit complicated. The key material itself can
   // either be a string, ArrayBuffer, or ArrayBufferView. It is also
   // possible to pass a private key in the form of either a CryptoKey
@@ -359,9 +420,8 @@ export function createPublicKey(_key: CreateAsymmetricKeyOptions | KeyData | Cry
   // it will be decoded using an encoding (defaults to UTF8). If a
   // CryptoKey or KeyObject is passed, it will be used to derived the
   // public key.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.createPublicKey');
-  // return KeyObject.from(cryptoImpl.createPublicKey(
-  //     validateAsymmetricKeyOptions(key, kPublicKey))) as PublicKeyObject;
+  const inner = validateAsymmetricKeyOptions(key as KeyDataToValidate, kPublicKeyTag);
+  return new PublicKeyObject(kSkipThrow, new AsymmetricKeyObjectHandle(inner));
 }
 
 // ======================================================================================

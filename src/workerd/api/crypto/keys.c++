@@ -1,14 +1,33 @@
 #include "keys.h"
+#include <openssl/evp.h>
 #include <openssl/ec_key.h>
 #include <openssl/crypto.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
+KJ_DECLARE_NON_POLYMORPHIC(X509);
+KJ_DECLARE_NON_POLYMORPHIC(PKCS8_PRIV_KEY_INFO);
+
 namespace workerd::api {
 
-namespace {
-static char EMPTY_PASSPHRASE[] = "";
-}  // namespace
+kj::Maybe<KeyEncoding> tryGetKeyEncoding(const kj::Maybe<kj::String>& encoding) {
+  KJ_IF_SOME(enc, encoding) {
+    if (enc == "pkcs1"_kj) return KeyEncoding::PKCS1;
+    else if (enc == "pkcs8"_kj) return KeyEncoding::PKCS8;
+    else if (enc == "spki"_kj) return KeyEncoding::SPKI;
+    else if (enc == "sec1"_kj) return KeyEncoding::SEC1;
+  }
+  return kj::none;
+}
+
+kj::Maybe<KeyFormat> tryGetKeyFormat(const kj::Maybe<kj::String>& format) {
+  KJ_IF_SOME(form, format) {
+    if (form == "pem"_kj) return KeyFormat::PEM;
+    else if (form == "der"_kj) return KeyFormat::DER;
+    else if (form == "jwk"_kj) return KeyFormat::JWK;
+  }
+  return kj::none;
+}
 
 kj::StringPtr toStringPtr(KeyType type) {
   switch (type) {
@@ -19,15 +38,15 @@ kj::StringPtr toStringPtr(KeyType type) {
   KJ_UNREACHABLE;
 }
 
-AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key,
+AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(kj::Rc<AsymmetricKeyData> key,
                                                        bool extractable)
-    : CryptoKey::Impl(extractable, key.usages),
-      keyData(kj::mv(key.evpPkey)),
-      keyType(key.keyType) {
-  KJ_DASSERT(keyType != KeyType::SECRET);
+    : CryptoKey::Impl(extractable, key->usages),
+      keyData(kj::mv(key)) {
+  KJ_DASSERT(keyData->keyType != KeyType::SECRET);
 }
 
-kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(kj::Array<kj::byte> signature) const {
+kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(
+    kj::Array<kj::byte> signature) const {
   return kj::mv(signature);
 }
 
@@ -45,11 +64,12 @@ SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(kj::StringPtr 
   KJ_DEFER(if (der != nullptr) { OPENSSL_free(der); });
   size_t derLen;
   bssl::ScopedCBB cbb;
+  auto keyType = keyData->keyType;
   if (format == "pkcs8"_kj) {
     JSG_REQUIRE(keyType == KeyType::PRIVATE, DOMInvalidAccessError,
         "Asymmetric pkcs8 export requires private key (not \"", toStringPtr(keyType), "\").");
     if (!CBB_init(cbb.get(), 0) ||
-        !EVP_marshal_private_key(cbb.get(), keyData.get()) ||
+        !EVP_marshal_private_key(cbb.get(), getEvpPkey()) ||
         !CBB_finish(cbb.get(), &der, &derLen)) {
       JSG_FAIL_REQUIRE(DOMOperationError, "Private key export failed.");
     }
@@ -57,7 +77,7 @@ SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(kj::StringPtr 
       JSG_REQUIRE(keyType == KeyType::PUBLIC, DOMInvalidAccessError,
         "Asymmetric spki export requires public key (not \"", toStringPtr(keyType), "\").");
     if (!CBB_init(cbb.get(), 0) ||
-        !EVP_marshal_public_key(cbb.get(), keyData.get()) ||
+        !EVP_marshal_public_key(cbb.get(), getEvpPkey()) ||
         !CBB_finish(cbb.get(), &der, &derLen)) {
       JSG_FAIL_REQUIRE(DOMOperationError, "Public key export failed.");
     }
@@ -78,154 +98,10 @@ SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(kj::StringPtr 
   return kj::heapArray(der, derLen);
 }
 
-kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::exportKeyExt(
-    kj::StringPtr format,
-    kj::StringPtr type,
-    jsg::Optional<kj::String> cipher,
-    jsg::Optional<kj::Array<kj::byte>> passphrase) const {
-  KJ_REQUIRE(isExtractable(), "Key is not extractable.");
-  MarkPopErrorOnReturn mark_pop_error_on_return;
-  KJ_REQUIRE(format != "jwk", "jwk export not supported for exportKeyExt");
-  auto pkey = getEvpPkey();
-  auto bio = OSSL_BIO_MEM();
-
-  struct EncDetail {
-    char* pass = &EMPTY_PASSPHRASE[0];
-    size_t pass_len = 0;
-    const EVP_CIPHER* cipher = nullptr;
-  };
-
-  const auto getEncDetail = [&] {
-    EncDetail detail;
-    KJ_IF_SOME(pw, passphrase) {
-      detail.pass = reinterpret_cast<char*>(pw.begin());
-      detail.pass_len = pw.size();
-    }
-    KJ_IF_SOME(ciph, cipher) {
-      detail.cipher = EVP_get_cipherbyname(ciph.cStr());
-      JSG_REQUIRE(detail.cipher != nullptr, TypeError, "Unknown cipher ", ciph);
-      KJ_REQUIRE(detail.pass != nullptr);
-    }
-    return detail;
-  };
-
-  const auto fromBio = [&](kj::StringPtr format) {
-    BUF_MEM* bptr;
-    BIO_get_mem_ptr(bio.get(), &bptr);
-    auto result = kj::heapArray<kj::byte>(bptr->length);
-    memcpy(result.begin(), bptr->data, bptr->length);
-    return kj::mv(result);
-  };
-
-  if (getType() == "public"_kj) {
-    // Here we only care about the format and the type.
-    if (type == "pkcs1"_kj) {
-      // PKCS#1 is only for RSA keys.
-      JSG_REQUIRE(EVP_PKEY_id(pkey) == EVP_PKEY_RSA, TypeError,
-          "The pkcs1 type is only valid for RSA keys.");
-      auto rsa = EVP_PKEY_get1_RSA(pkey);
-      KJ_DEFER(RSA_free(rsa));
-      if (format == "pem"_kj) {
-        if (PEM_write_bio_RSAPublicKey(bio.get(), rsa) == 1) {
-          return fromBio(format);
-        }
-      } else if (format == "der"_kj) {
-        if (i2d_RSAPublicKey_bio(bio.get(), rsa) == 1) {
-          return fromBio(format);
-        }
-      }
-    } else if (type == "spki"_kj) {
-      if (format == "pem"_kj) {
-        if (PEM_write_bio_PUBKEY(bio.get(), pkey) == 1) {
-          return fromBio(format);
-        }
-      } else if (format == "der"_kj) {
-        if (i2d_PUBKEY_bio(bio.get(), pkey) == 1) {
-          return fromBio(format);
-        }
-      }
-    }
-    JSG_FAIL_REQUIRE(TypeError, "Failed to encode public key");
-  }
-
-  // Otherwise it's a private key.
-  KJ_REQUIRE(getType() == "private"_kj);
-
-  if (type == "pkcs1"_kj) {
-    // PKCS#1 is only for RSA keys.
-    JSG_REQUIRE(EVP_PKEY_id(pkey) == EVP_PKEY_RSA, TypeError,
-        "The pkcs1 type is only valid for RSA keys.");
-    auto rsa = EVP_PKEY_get1_RSA(pkey);
-    KJ_DEFER(RSA_free(rsa));
-    if (format == "pem"_kj) {
-      auto enc = getEncDetail();
-      if (PEM_write_bio_RSAPrivateKey(
-              bio.get(),
-              rsa,
-              enc.cipher,
-              reinterpret_cast<unsigned char*>(enc.pass),
-              enc.pass_len,
-              nullptr, nullptr) == 1) {
-        return fromBio(format);
-      }
-    } else if (format == "der"_kj) {
-      // The cipher and passphrase are ignored for DER with PKCS#1.
-      if (i2d_RSAPrivateKey_bio(bio.get(), rsa) == 1) {
-        return fromBio(format);
-      }
-    }
-  } else if (type == "pkcs8"_kj) {
-    auto enc = getEncDetail();
-    if (format == "pem"_kj) {
-      if (PEM_write_bio_PKCS8PrivateKey(
-              bio.get(), pkey,
-              enc.cipher,
-              enc.pass,
-              enc.pass_len,
-              nullptr, nullptr) == 1) {
-        return fromBio(format);
-      }
-    } else if (format == "der"_kj) {
-      if (i2d_PKCS8PrivateKey_bio(
-              bio.get(), pkey,
-              enc.cipher,
-              enc.pass,
-              enc.pass_len,
-              nullptr, nullptr) == 1) {
-        return fromBio(format);
-      }
-    }
-  } else if (type == "sec1"_kj) {
-    // SEC1 is only used for EC keys.
-    JSG_REQUIRE(EVP_PKEY_id(pkey) == EVP_PKEY_EC, TypeError,
-        "The sec1 type is only valid for EC keys.");
-    auto ec = EVP_PKEY_get1_EC_KEY(pkey);
-    KJ_DEFER(EC_KEY_free(ec));
-    if (format == "pem"_kj) {
-      auto enc = getEncDetail();
-      if (PEM_write_bio_ECPrivateKey(
-                bio.get(), ec,
-                enc.cipher,
-                reinterpret_cast<unsigned char*>(enc.pass),
-                enc.pass_len,
-                nullptr, nullptr) == 1) {
-        return fromBio(format);
-      }
-    } else if (format == "der"_kj) {
-      // The cipher and passphrase are ignored for DER with SEC1
-      if (i2d_ECPrivateKey_bio(bio.get(), ec) == 1) {
-        return fromBio(format);
-      }
-    }
-  }
-
-  JSG_FAIL_REQUIRE(TypeError, "Failed to encode private key");
-}
-
 kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::sign(
     SubtleCrypto::SignAlgorithm&& algorithm,
     kj::ArrayPtr<const kj::byte> data) const {
-  JSG_REQUIRE(keyType == KeyType::PRIVATE, DOMInvalidAccessError,
+  JSG_REQUIRE(getTypeEnum() == KeyType::PRIVATE, DOMInvalidAccessError,
       "Asymmetric signing requires a private key.");
 
   auto type = lookupDigestAlgorithm(chooseHash(algorithm.hash)).second;
@@ -259,7 +135,7 @@ kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::sign(
 
   auto digestCtx = OSSL_NEW(EVP_MD_CTX);
 
-  OSSLCALL(EVP_DigestSignInit(digestCtx.get(), nullptr, type, nullptr, keyData.get()));
+  OSSLCALL(EVP_DigestSignInit(digestCtx.get(), nullptr, type, nullptr, getEvpPkey()));
   addSalt(digestCtx->pctx, algorithm);
   // No-op call unless CryptoKey is RsaPss
   OSSLCALL(EVP_DigestSignUpdate(digestCtx.get(), data.begin(), data.size()));
@@ -282,7 +158,7 @@ bool AsymmetricKeyCryptoKeyImpl::verify(
     kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const {
   ClearErrorOnReturn clearErrorOnReturn;
 
-  JSG_REQUIRE(keyType == KeyType::PUBLIC, DOMInvalidAccessError,
+  JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
       "Asymmetric verification requires a public key.");
 
   auto sslSignature = signatureWebCryptoToSsl(signature);
@@ -291,7 +167,7 @@ bool AsymmetricKeyCryptoKeyImpl::verify(
 
   auto digestCtx = OSSL_NEW(EVP_MD_CTX);
 
-  OSSLCALL(EVP_DigestVerifyInit(digestCtx.get(), nullptr, type, nullptr, keyData.get()));
+  OSSLCALL(EVP_DigestVerifyInit(digestCtx.get(), nullptr, type, nullptr, getEvpPkey()));
   addSalt(digestCtx->pctx, algorithm);
   // No-op call unless CryptoKey is RsaPss
   OSSLCALL(EVP_DigestVerifyUpdate(digestCtx.get(), data.begin(), data.size()));
@@ -309,13 +185,45 @@ bool AsymmetricKeyCryptoKeyImpl::equals(const CryptoKey::Impl& other) const {
     // EVP_PKEY_cmp will return 1 if the inputs match, 0 if they don't match,
     // -1 if the key types are different, and -2 if the operation is not supported.
     // We only really care about the first two cases.
-    return EVP_PKEY_cmp(keyData.get(), otherImpl.keyData.get()) == 1;
+    return EVP_PKEY_cmp(getEvpPkey(), otherImpl.getEvpPkey()) == 1;
   }
   return false;
 }
 
 kj::StringPtr AsymmetricKeyCryptoKeyImpl::getType() const {
-  return toStringPtr(keyType);
+  return toStringPtr(keyData->keyType);
+}
+AsymmetricKeyData::Kind AsymmetricKeyData::getKind() const {
+  switch (EVP_PKEY_id(evpPkey.get())) {
+    case EVP_PKEY_RSA: return Kind::RSA;
+    case EVP_PKEY_EC: return Kind::EC;
+    case EVP_PKEY_DSA: return Kind::DSA;
+    case EVP_PKEY_DH: return Kind::DH;
+    case EVP_PKEY_ED25519: return Kind::ED25519;
+    case EVP_PKEY_X25519: return Kind::X25519;
+  }
+  return Kind::UNKNOWN;
+}
+
+kj::StringPtr AsymmetricKeyData::getKindName() const {
+  switch (getKind()) {
+    case Kind::RSA: return "rsa"_kj;
+    case Kind::RSA_PSS: return "rsa-pss"_kj;
+    case Kind::DSA: return "dsa"_kj;
+    case Kind::EC: return "ec"_kj;
+    case Kind::X25519: return "x25519"_kj;
+    case Kind::ED25519: return "ed25519"_kj;
+    case Kind::DH: return "dh"_kj;
+    default: return nullptr;
+  }
+  KJ_UNREACHABLE;
+}
+
+bool AsymmetricKeyData::equals(const kj::Rc<AsymmetricKeyData>& other) const {
+  ClearErrorOnReturn clearErrorOnReturn;
+  auto ret = EVP_PKEY_cmp(evpPkey.get(), other->evpPkey.get());
+  if (ret < 0) throwOpensslError(__FILE__, __LINE__, "Asymmetric key comparison");
+  return ret == 1;
 }
 
 bool AsymmetricKeyCryptoKeyImpl::verifyX509Public(const X509* cert) const {
@@ -330,7 +238,7 @@ bool AsymmetricKeyCryptoKeyImpl::verifyX509Private(const X509* cert) const{
 
 // ======================================================================================
 
-AsymmetricKeyData importAsymmetricForWebCrypto(
+kj::Rc<AsymmetricKeyData> importAsymmetricForWebCrypto(
     jsg::Lock& js,
     kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
@@ -451,7 +359,7 @@ AsymmetricKeyData importAsymmetricForWebCrypto(
           "Cannot create an extractable CryptoKey from an unextractable JSON Web Key.");
     }
 
-    return { readJwk(kj::mv(keyDataJwk)), keyType, usages };
+    return kj::rc<AsymmetricKeyData>(readJwk(kj::mv(keyDataJwk)), keyType, usages);
   } else if (format == "spki") {
     kj::ArrayPtr<const kj::byte> keyBytes = JSG_REQUIRE_NONNULL(
         keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
@@ -470,7 +378,7 @@ AsymmetricKeyData importAsymmetricForWebCrypto(
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
                                     keyUsages, allowedUsages & (normalizedName == "ECDH" ?
                                     CryptoKeyUsageSet() : CryptoKeyUsageSet::publicKeyMask()));
-    return { kj::mv(evpPkey), KeyType::PUBLIC, usages };
+    return kj::rc<AsymmetricKeyData>(kj::mv(evpPkey), KeyType::PUBLIC, usages);
   } else if (format == "pkcs8") {
     kj::ArrayPtr<const kj::byte> keyBytes = JSG_REQUIRE_NONNULL(
         keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
@@ -485,10 +393,271 @@ AsymmetricKeyData importAsymmetricForWebCrypto(
     usages =
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPrivate,
                                     keyUsages, allowedUsages & CryptoKeyUsageSet::privateKeyMask());
-    return { kj::mv(evpPkey), KeyType::PRIVATE, usages };
+    return kj::rc<AsymmetricKeyData>(kj::mv(evpPkey), KeyType::PRIVATE, usages);
   } else {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized key import format \"", format, "\".");
   }
+}
+
+// ======================================================================================
+namespace {
+int passwordCallback(char* buf, int size, int rwflag, void* u) {
+  KJ_IF_SOME(passphrase, *reinterpret_cast<kj::Maybe<kj::Array<kj::byte>>*>(u)) {
+    auto dest = kj::arrayPtr<char>(buf, size);
+    if (dest.size() >= passphrase.size()) {
+      dest.first(passphrase.size()).copyFrom(passphrase.asChars());
+      return passphrase.size();
+    }
+  }
+  return -1;
+}
+
+kj::Maybe<kj::ArrayPtr<const kj::byte>> isASN1Sequence(kj::ArrayPtr<const kj::byte> data) {
+  if (data.size() < 2 || data[0] != 0x30)
+    return kj::none;
+
+  if (data[1] & 0x80) {
+    // Long form.
+    size_t n_bytes = data[1] & ~0x80;
+    if (n_bytes + 2 > data.size() || n_bytes > sizeof(size_t))
+      return kj::none;
+    size_t length = 0;
+    for (size_t i = 0; i < n_bytes; i++)
+      length = (length << 8) | data[i + 2];
+    size_t start = 2 + n_bytes;
+    size_t end = start + kj::min(data.size() - start, length);
+    return data.slice(start, end);
+  }
+
+  // Short form.
+  size_t start = 2;
+  size_t end = start + std::min<size_t>(data.size() - 2, data[1]);
+  return data.slice(start, end);
+}
+
+bool isRSAPrivateKey(kj::ArrayPtr<const kj::byte> data) {
+  // Both RSAPrivateKey and RSAPublicKey structures start with a SEQUENCE.
+  KJ_IF_SOME(view, isASN1Sequence(data)) {
+    // An RSAPrivateKey sequence always starts with a single-byte integer whose
+    // value is either 0 or 1, whereas an RSAPublicKey starts with the modulus
+    // (which is the product of two primes and therefore at least 4), so we can
+    // decide the type of the structure based on the first three bytes of the
+    // sequence.
+    return view.size() >= 3 && data[0] == 2 && data[1] == 1 && !(data[2] & 0xfe);
+  }
+  return false;
+}
+
+bool isEncryptedPrivateKeyInfo(kj::ArrayPtr<const kj::byte> data) {
+  // Both PrivateKeyInfo and EncryptedPrivateKeyInfo start with a SEQUENCE.
+  KJ_IF_SOME(view, isASN1Sequence(data)) {
+    // An EncryptedPrivateKeyInfo sequence always starts with an AlgorithmIdentifier
+    // whereas a PrivateKeyInfo starts with an integer.
+    return view.size() >= 1 && data[0] != 2;
+  }
+  return false;
+}
+
+template <typename Func>
+kj::Maybe<kj::Own<EVP_PKEY>> tryParsePublicKey(BIO* bp, const char* name, Func parse) {
+  kj::byte* der_data;
+  long der_len;  // NOLINT(runtime/int)
+  KJ_DEFER(OPENSSL_clear_free(der_data, der_len));
+
+  // This skips surrounding data and decodes PEM to DER.
+  {
+    MarkPopErrorOnReturn mark_pop_error_on_return;
+    if (PEM_bytes_read_bio(&der_data, &der_len, nullptr, name, bp, nullptr, nullptr) != 1)
+      return kj::none;
+  }
+
+  // OpenSSL might modify the pointer, so we need to make a copy before parsing.
+  const kj::byte* p = der_data;
+  auto ptr = parse(&p, der_len);
+  if (ptr == nullptr || p != der_data + der_len) {
+    return kj::none;
+  }
+  return kj::disposeWith<EVP_PKEY_free>(ptr);
+}
+
+kj::Maybe<kj::Own<EVP_PKEY>> parsePublicKeyPEM(kj::ArrayPtr<const kj::byte> keyData) {
+  auto ptr = BIO_new_mem_buf(keyData.asChars().begin(), keyData.size());
+  if (ptr == nullptr) {
+    return kj::none;
+  }
+  auto bio = kj::disposeWith<BIO_free_all>(ptr);
+
+  // Try parsing as a SubjectPublicKeyInfo first.
+  KJ_IF_SOME(pkey, tryParsePublicKey(bio.get(), "PUBLIC KEY",
+      [](const unsigned char** p, long l) -> EVP_PKEY* {
+        return d2i_PUBKEY(nullptr, p, l);
+      })) {
+    return kj::mv(pkey);
+  }
+
+  // Maybe it is PKCS#1.
+  KJ_ASSERT(BIO_reset(bio.get()));
+  KJ_IF_SOME(pkey, tryParsePublicKey(bio.get(), "RSA PUBLIC KEY",
+      [](const unsigned char** p, long l) -> EVP_PKEY* {
+        return d2i_PublicKey(EVP_PKEY_RSA, nullptr, p, l);
+      })) {
+    return kj::mv(pkey);
+  }
+
+  // X.509 fallback.
+  KJ_ASSERT(BIO_reset(bio.get()));
+  return tryParsePublicKey(bio.get(), "CERTIFICATE",
+      [](const unsigned char** p, long l) -> EVP_PKEY* {
+        auto ptr = d2i_X509(nullptr, p, l);
+        if (ptr == nullptr) {
+          return nullptr;
+        }
+        auto x509 = kj::disposeWith<X509_free>(ptr);
+        return x509 ? X509_get_pubkey(x509.get()) : nullptr;
+      });
+}
+
+kj::Maybe<kj::Own<EVP_PKEY>> parsePublicKey(kj::ArrayPtr<const kj::byte> keyData,
+                                            KeyFormat format,
+                                            KeyEncoding encoding) {
+  if (format == KeyFormat::PEM) {
+    return parsePublicKeyPEM(keyData);
+  }
+
+  KJ_ASSERT(format == KeyFormat::DER);
+
+  auto p = keyData.begin();
+  if (encoding == KeyEncoding::PKCS1) {
+    auto ptr = d2i_PublicKey(EVP_PKEY_RSA, nullptr, &p, keyData.size());
+    if (ptr == nullptr) {
+      return kj::none;
+    }
+  }
+
+  KJ_ASSERT(encoding == KeyEncoding::SPKI);
+  auto ptr = d2i_PUBKEY(nullptr, &p, keyData.size());
+  if (ptr == nullptr) {
+    return kj::none;
+  }
+  return kj::disposeWith<EVP_PKEY_free>(ptr);
+}
+}  // namespace
+
+kj::Maybe<kj::Rc<AsymmetricKeyData>> importAsymmetricPrivateKeyForNodeJs(
+    kj::ArrayPtr<const kj::byte> keyData,
+    KeyFormat format,
+    const kj::Maybe<KeyEncoding>& maybeEncoding,
+    kj::Maybe<kj::Array<kj::byte>>& passphrase) {
+  ClearErrorOnReturn clearErrorOnReturn;
+
+  const auto checkAndReturn = [&](EVP_PKEY* pkey) {
+    JSG_REQUIRE(pkey != nullptr, Error, "Failed to create private key");
+        int err = clearErrorOnReturn.peekError();
+    if (pkey == nullptr || err != 0) {
+      if (ERR_GET_LIB(err) == ERR_LIB_PEM && ERR_GET_REASON(err) == PEM_R_BAD_PASSWORD_READ) {
+        JSG_FAIL_REQUIRE(Error, "Failed to read private key due to incorrect passphrase");
+      }
+      JSG_FAIL_REQUIRE(Error, "Failed to read private key");
+    }
+    return kj::rc<AsymmetricKeyData>(kj::disposeWith<EVP_PKEY_free>(pkey),
+                                    KeyType::PRIVATE,
+                                    CryptoKeyUsageSet::privateKeyMask());
+  };
+
+  if (format == KeyFormat::PEM) {
+    auto ptr = BIO_new_mem_buf(keyData.begin(), keyData.size());
+    JSG_REQUIRE(ptr != nullptr, Error, "Failed to create private key");
+    auto bio = kj::disposeWith<BIO_free_all>(ptr);
+    return checkAndReturn(PEM_read_bio_PrivateKey(bio.get(), nullptr,
+                          passwordCallback, &passphrase));
+  }
+
+  KJ_ASSERT(format == KeyFormat::DER);
+  switch (KJ_ASSERT_NONNULL(maybeEncoding)) {
+    case KeyEncoding::PKCS1: {
+      auto p = keyData.begin();
+      return checkAndReturn(d2i_PrivateKey(EVP_PKEY_RSA, nullptr, &p, keyData.size()));
+    }
+    case KeyEncoding::PKCS8: {
+      auto ptr = BIO_new_mem_buf(keyData.begin(), keyData.size());
+      JSG_REQUIRE(ptr != nullptr, Error, "Failed to create private key");
+      auto bio = kj::disposeWith<BIO_free_all>(ptr);
+
+      if (isEncryptedPrivateKeyInfo(keyData)) {
+        return checkAndReturn(d2i_PKCS8PrivateKey_bio(bio.get(), nullptr,
+                                                      passwordCallback, &passphrase));
+      } else {
+        auto ptr = d2i_PKCS8_PRIV_KEY_INFO_bio(bio.get(), nullptr);
+        JSG_REQUIRE(ptr != nullptr, Error, "Failed to create private key");
+        auto p8inf = kj::disposeWith<PKCS8_PRIV_KEY_INFO_free>(ptr);
+        return checkAndReturn(EVP_PKCS82PKEY(p8inf.get()));
+      }
+    }
+    case KeyEncoding::SEC1: {
+      auto p = keyData.begin();
+      return checkAndReturn(d2i_PrivateKey(EVP_PKEY_EC, nullptr, &p, keyData.size()));
+    }
+    default: JSG_FAIL_REQUIRE(Error, "Failed to read private key due to unsupported format");
+  }
+
+  return kj::none;
+}
+
+kj::Maybe<kj::Rc<AsymmetricKeyData>> importAsymmetricPublicKeyForNodeJs(
+    kj::ArrayPtr<const kj::byte> keyData,
+    KeyFormat format,
+    const kj::Maybe<KeyEncoding>& maybeEncoding,
+    kj::Maybe<kj::Array<kj::byte>>& passphrase) {
+  if (format == KeyFormat::PEM) {
+      // For PEM, we can easily determine whether it is a public or private key
+      // by looking for the respective PEM tags.
+      KJ_IF_SOME(pkey, parsePublicKeyPEM(keyData)) {
+        return kj::rc<AsymmetricKeyData>(kj::mv(pkey), KeyType::PUBLIC,
+                                         CryptoKeyUsageSet::publicKeyMask());
+      }
+      return importAsymmetricPrivateKeyForNodeJs(keyData, format, maybeEncoding, passphrase);
+  }
+
+  // For DER, the type determines how to parse it. SPKI, PKCS#8 and SEC1 are
+  // easy, but PKCS#1 can be a public key or a private key.
+  auto key = ([&]() -> kj::Maybe<kj::Rc<AsymmetricKeyData>> {
+    switch (KJ_ASSERT_NONNULL(maybeEncoding)) {
+      case KeyEncoding::PKCS1: {
+        if (isRSAPrivateKey(keyData)) {
+          return importAsymmetricPrivateKeyForNodeJs(keyData, format, maybeEncoding, passphrase);
+        }
+        KJ_IF_SOME(pkey, parsePublicKey(keyData, format, KeyEncoding::PKCS1)) {
+          return kj::rc<AsymmetricKeyData>(kj::mv(pkey), KeyType::PUBLIC,
+                                           CryptoKeyUsageSet::publicKeyMask());
+        }
+        return kj::none;
+      }
+      case KeyEncoding::SPKI: {
+        KJ_IF_SOME(pkey, parsePublicKey(keyData, format, KeyEncoding::SPKI)) {
+          return kj::rc<AsymmetricKeyData>(kj::mv(pkey), KeyType::PUBLIC,
+                                           CryptoKeyUsageSet::publicKeyMask());
+        }
+        return kj::none;
+      }
+      case KeyEncoding::PKCS8: {
+        return importAsymmetricPrivateKeyForNodeJs(keyData, format, maybeEncoding, passphrase);
+      }
+      case KeyEncoding::SEC1: {
+        return importAsymmetricPrivateKeyForNodeJs(keyData, format, maybeEncoding, passphrase);
+      }
+    }
+    KJ_UNREACHABLE;
+  })();
+
+  KJ_IF_SOME(k, key) {
+    return derivePublicKeyFromPrivateKey(kj::mv(k));
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Rc<AsymmetricKeyData>> derivePublicKeyFromPrivateKey(
+    kj::Rc<AsymmetricKeyData> privateKeyData) {
+  return kj::mv(privateKeyData);
 }
 
 }  // namespace workerd::api

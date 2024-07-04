@@ -71,7 +71,9 @@ import {
 } from 'node-internal:streams_transform';
 
 import {
-  KeyObject,
+  kHandle as kCryptoKeyHandle,
+  isSecretKeyObject,
+  SecretKeyObject,
 } from 'node-internal:crypto_keys';
 
 export interface HashOptions extends TransformOptions {
@@ -190,12 +192,13 @@ interface Hmac extends Transform {
   [kState]: _kState;
 }
 
-export function createHmac(hmac: string, key: ArrayLike | KeyObject | CryptoKey,
+export function createHmac(hmac: string, key: ArrayLike | SecretKeyObject | CryptoKey,
                            options?: TransformOptions): Hmac {
   return new Hmac(hmac, key, options);
 }
 
-let Hmac = function(this: Hmac, hmac: string, key: ArrayLike | KeyObject | cryptoImpl.CryptoKey,
+let Hmac = function(this: Hmac, hmac: string,
+                    key: ArrayLike | SecretKeyObject | cryptoImpl.CryptoKey,
                     options?: TransformOptions): Hmac {
   if (!(this instanceof Hmac)) {
     return new Hmac(hmac, key, options);
@@ -203,16 +206,13 @@ let Hmac = function(this: Hmac, hmac: string, key: ArrayLike | KeyObject | crypt
   validateString(hmac, 'hmac');
   const encoding = getStringOption(options, 'encoding');
 
-  if (key instanceof KeyObject) {
-    if (key.type !== 'secret') {
-      throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(key.type, 'secret');
-    }
-    this[kHandle] = new cryptoImpl.HmacHandle(hmac, key[kHandle]);
+  if (isSecretKeyObject(key)) {
+    this[kHandle] = new cryptoImpl.HmacHandle(hmac, (key as any)[kCryptoKeyHandle]);
   } else if (isCryptoKey(key)) {
     if ((key as cryptoImpl.CryptoKey).type !== 'secret') {
       throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE((key as cryptoImpl.CryptoKey).type, 'secret');
     }
-    this[kHandle] = new cryptoImpl.HmacHandle(hmac, key);
+    this[kHandle] = new cryptoImpl.HmacHandle(hmac, key as any);
   } else if (typeof key !== 'string' &&
   !isArrayBufferView(key) &&
   !isAnyArrayBuffer(key)) {
@@ -230,7 +230,8 @@ let Hmac = function(this: Hmac, hmac: string, key: ArrayLike | KeyObject | crypt
   };
   Transform.call(this, options);
   return this;
-} as any as { new (hmac: string, key: ArrayLike | KeyObject | CryptoKey,
+} as any as { new (hmac: string,
+                   key: ArrayLike | SecretKeyObject | CryptoKey,
                    options?: TransformOptions): Hmac; };
 
 Object.setPrototypeOf(Hmac.prototype, Transform.prototype);

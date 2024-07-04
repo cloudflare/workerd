@@ -18,6 +18,17 @@
 
 namespace workerd::api {
 
+namespace {
+kj::Maybe<int> getOKPCurveFromName(kj::StringPtr name) {
+  if (name == "Ed25519"_kj) {
+    return EVP_PKEY_ED25519;
+  } else if (name == "X25519"_kj) {
+    return EVP_PKEY_X25519;
+  }
+  return kj::none;
+}
+}  // namespace
+
 Ec::Ec(EC_KEY* key) : key(key), x(OSSL_NEW(BIGNUM)), y(OSSL_NEW(BIGNUM)) {
   KJ_ASSERT(key != nullptr);
   group = EC_KEY_get0_group(key);
@@ -28,6 +39,10 @@ Ec::Ec(EC_KEY* key) : key(key), x(OSSL_NEW(BIGNUM)), y(OSSL_NEW(BIGNUM)) {
 
 int Ec::getCurveName() const {
   return EC_GROUP_get_curve_name(group);
+}
+
+kj::String Ec::getCurveNameString() const {
+  return kj::str(OBJ_nid2sn(getCurveName()));
 }
 
 uint32_t Ec::getDegree() const {
@@ -123,6 +138,158 @@ kj::Maybe<Ec> Ec::tryGetEc(const EVP_PKEY* key) {
   return Ec(ec);
 }
 
+kj::Maybe<kj::Rc<AsymmetricKeyData>> Ec::importFromJwk(KeyType keyType,
+                                                        const SubtleCrypto::JsonWebKey& jwk) {
+  ClearErrorOnReturn clearErrorOnReturn;
+
+  if (jwk.kty != "EC"_kj) return kj::none;
+  auto curveName = JSG_REQUIRE_NONNULL(jwk.crv.map([](auto& str) { return str.asPtr(); }),
+                                       Error, "Missing field \"crv\" in JWK");
+  JSG_REQUIRE(curveName == "P-256"_kj ||
+              curveName == "P-384"_kj ||
+              curveName == "P-521"_kj ||
+              curveName == "secp256k1"_kj, Error, "Unsupported curve \"", curveName, "\"");
+
+  int curveNid = EC_curve_nist2nid(curveName.begin());
+  JSG_REQUIRE(curveNid != NID_undef, Error, "Unsupported curve \"", curveName, "\"");
+
+  auto x = JSG_REQUIRE_NONNULL(jwk.x.map([](auto& str) { return str.asPtr(); }), Error,
+                               "Invalid EC key in JSON Web Key; missing or invalid X "
+                               "parameter (\"x\").");
+  auto y = JSG_REQUIRE_NONNULL(jwk.y.map([](auto& str) { return str.asPtr(); }), Error,
+                               "Invalid EC key in JSON Web Key; missing or invalid Y "
+                               "parameter (\"y\").");
+
+  auto ecRaw = EC_KEY_new_by_curve_name(curveNid);
+  JSG_REQUIRE(ecRaw != nullptr, Error, "Failed to create EC key", tryDescribeOpensslErrors());
+  auto ec = kj::disposeWith<EC_KEY_free>(EC_KEY_new_by_curve_name(curveNid));
+
+  auto xEncoded = KJ_ASSERT_NONNULL(toBignum(kj::decodeBase64(x)));
+  auto yEncoded = KJ_ASSERT_NONNULL(toBignum(kj::decodeBase64(y)));
+  JSG_REQUIRE(EC_KEY_set_public_key_affine_coordinates(ec.get(), xEncoded.get(),
+      yEncoded.get())  == 1, Error, "Failed to set public key", tryDescribeOpensslErrors());
+
+  if (keyType == KeyType::PRIVATE) {
+    auto d = JSG_REQUIRE_NONNULL(jwk.d.map([](auto& str) { return str.asPtr(); }), Error,
+                                "Invalid EC key in JSON Web Key; missing or invalid D "
+                                "parameter (\"d\").");
+    auto dEncoded = KJ_ASSERT_NONNULL(toBignum(kj::decodeBase64(d)));
+    JSG_REQUIRE(EC_KEY_set_private_key(ec.get(), dEncoded.get()) == 1, Error,
+                "Failed to set private key", tryDescribeOpensslErrors());
+  }
+
+  auto evpPkey = OSSL_NEW(EVP_PKEY);
+  KJ_ASSERT(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ec.get()) == 1);
+
+  auto usages = keyType == KeyType::PRIVATE ? CryptoKeyUsageSet::privateKeyMask()
+                                            : CryptoKeyUsageSet::publicKeyMask();
+  return kj::rc<AsymmetricKeyData>(
+    kj::mv(evpPkey),
+    keyType,
+    usages);
+}
+
+// =====================================================================================
+kj::Maybe<EdDsa> EdDsa::tryGetEdDsa(const EVP_PKEY* key) {
+  int type = EVP_PKEY_id(key);
+  if (type != EVP_PKEY_ED25519 && type != EVP_PKEY_X25519) return kj::none;
+  return EdDsa(key);
+}
+
+SubtleCrypto::JsonWebKey EdDsa::toJwk(KeyType keyType) const {
+  uint8_t rawPublicKey[ED25519_PUBLIC_KEY_LEN]{};
+  size_t publicKeyLen = sizeof(rawPublicKey);
+  JSG_REQUIRE(1 == EVP_PKEY_get_raw_public_key(key, rawPublicKey, &publicKeyLen),
+      InternalDOMOperationError, "Failed to retrieve public key",
+      internalDescribeOpensslErrors());
+
+  KJ_DASSERT(publicKeyLen == 32, publicKeyLen);
+
+  int type = EVP_PKEY_id(key);
+
+  SubtleCrypto::JsonWebKey jwk;
+  jwk.kty = kj::str("OKP");
+  jwk.crv = kj::str(type == EVP_PKEY_X25519 ? "X25519"_kj : "Ed25519"_kj);
+  jwk.x = kj::encodeBase64Url(kj::arrayPtr(rawPublicKey, publicKeyLen));
+  if (type == EVP_PKEY_ED25519) {
+    jwk.alg = kj::str("EdDSA");
+  }
+
+  if (keyType == KeyType::PRIVATE) {
+    // Deliberately use ED25519_PUBLIC_KEY_LEN here.
+    // boringssl defines ED25519_PRIVATE_KEY_LEN as 64B since it stores the private key together
+    // with public key data in some functions, but in the EVP interface only the 32B private key
+    // itself is returned.
+    uint8_t rawPrivateKey[ED25519_PUBLIC_KEY_LEN]{};
+    size_t privateKeyLen = ED25519_PUBLIC_KEY_LEN;
+    JSG_REQUIRE(1 == EVP_PKEY_get_raw_private_key(key, rawPrivateKey, &privateKeyLen),
+        InternalDOMOperationError, "Failed to retrieve private key",
+        internalDescribeOpensslErrors());
+
+    KJ_DASSERT(privateKeyLen == 32, privateKeyLen);
+    jwk.d = kj::encodeBase64Url(kj::arrayPtr(rawPrivateKey, privateKeyLen));
+  }
+
+  return jwk;
+}
+
+kj::Maybe<kj::Rc<AsymmetricKeyData>> EdDsa::importFromJwk(KeyType keyType,
+                                                        const SubtleCrypto::JsonWebKey& jwk) {
+  ClearErrorOnReturn clearErrorOnReturn;
+
+  if (jwk.kty != "OKP"_kj) return kj::none;
+  auto curveName = JSG_REQUIRE_NONNULL(jwk.crv.map([](auto& str) { return str.asPtr(); }),
+                                       Error, "Missing field \"crv\" in JWK");
+  JSG_REQUIRE(curveName == "Ed25519"_kj ||
+              curveName == "X25519"_kj, Error, "Unsupported curve \"", curveName, "\"");
+
+  auto curveNid = JSG_REQUIRE_NONNULL(getOKPCurveFromName(curveName), Error,
+                                      "Unsupported curve \"", curveName, "\"");
+
+  switch (keyType) {
+    case KeyType::PRIVATE: {
+      auto d = JSG_REQUIRE_NONNULL(jwk.d.map([](auto& str) { return str.asPtr(); }), Error,
+                                   "Invalid OKP key in JSON Web Key; missing or invalid D");
+      auto dDecoded = kj::decodeBase64(d);
+      JSG_REQUIRE(dDecoded.size() == 32, Error,
+                  "Invalid OKP key in JSON Web Key; D has invalid length");
+      auto res = EVP_PKEY_new_raw_private_key(curveNid, nullptr, dDecoded.begin(), dDecoded.size());
+      JSG_REQUIRE(res != nullptr, Error, "Failed to create private key",
+                  internalDescribeOpensslErrors());
+      return kj::rc<AsymmetricKeyData>(
+          kj::disposeWith<EVP_PKEY_free>(res),
+          keyType,
+          CryptoKeyUsageSet::privateKeyMask());
+    }
+    case KeyType::PUBLIC: {
+      auto x = JSG_REQUIRE_NONNULL(jwk.x.map([](auto& str) { return str.asPtr(); }), Error,
+                                   "Invalid OKP key in JSON Web Key; missing or invalid X");
+      auto xDecoded = kj::decodeBase64(x);
+      JSG_REQUIRE(xDecoded.size() == 32, Error,
+                  "Invalid OKP key in JSON Web Key; X has invalid length");
+      auto res = EVP_PKEY_new_raw_public_key(curveNid, nullptr, xDecoded.begin(), xDecoded.size());
+      JSG_REQUIRE(res != nullptr, Error, "Failed to create public key",
+                  internalDescribeOpensslErrors());
+      return kj::rc<AsymmetricKeyData>(
+          kj::disposeWith<EVP_PKEY_free>(res),
+          keyType,
+          CryptoKeyUsageSet::publicKeyMask());
+    }
+    default: KJ_UNREACHABLE;
+  }
+}
+
+kj::Array<kj::byte> EdDsa::getRawPublicKey() const {
+  auto raw = kj::heapArray<kj::byte>(ED25519_PUBLIC_KEY_LEN);
+  size_t exportedLength = raw.size();
+  JSG_REQUIRE(1 == EVP_PKEY_get_raw_public_key(key, raw.begin(), &exportedLength),
+      InternalDOMOperationError, "Failed to retrieve public key",
+      internalDescribeOpensslErrors());
+  JSG_REQUIRE(exportedLength == raw.size(), InternalDOMOperationError,
+      "Unexpected change in size", raw.size(), exportedLength);
+  return kj::mv(raw);
+}
+
 // =====================================================================================
 // ECDSA & ECDH
 
@@ -130,7 +297,7 @@ namespace {
 
 class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 public:
-  explicit EllipticKey(AsymmetricKeyData keyData,
+  explicit EllipticKey(kj::Rc<AsymmetricKeyData> keyData,
                        CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
                        uint rsSize,
                        bool extractable)
@@ -458,16 +625,14 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   auto publicEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_EC_KEY(publicEvpPKey.get(), ecPublicKey.get()));
 
-  AsymmetricKeyData privateKeyData {
-    .evpPkey = kj::mv(privateEvpPKey),
-    .keyType = KeyType::PRIVATE,
-    .usages = privateKeyUsages,
-  };
-  AsymmetricKeyData publicKeyData {
-    .evpPkey = kj::mv(publicEvpPKey),
-    .keyType = KeyType::PUBLIC,
-    .usages = publicKeyUsages,
-  };
+  auto privateKeyData = kj::rc<AsymmetricKeyData>(
+    kj::mv(privateEvpPKey),
+    KeyType::PRIVATE,
+    privateKeyUsages);
+  auto publicKeyData = kj::rc<AsymmetricKeyData>(
+    kj::mv(publicEvpPKey),
+    KeyType::PUBLIC,
+    publicKeyUsages);
 
   auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EllipticKey>(kj::mv(privateKeyData),
       keyAlgorithm, rsSize, extractable));
@@ -480,7 +645,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   };
 }
 
-AsymmetricKeyData importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int curveId,
+kj::Rc<AsymmetricKeyData> importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int curveId,
     kj::StringPtr normalizedName, kj::ArrayPtr<const kj::String> keyUsages,
     CryptoKeyUsageSet allowedUsages) {
   // Import an elliptic key represented by raw data, only public keys are supported.
@@ -499,9 +664,10 @@ AsymmetricKeyData importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int cur
     JSG_REQUIRE(raw.size() == 32, DOMDataError, curveName, " raw keys must be exactly 32-bytes "
         "(provided ", raw.size(), ").");
 
-    return { OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(evpId, nullptr,
+    return kj::rc<AsymmetricKeyData>(
+        OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(evpId, nullptr,
         raw.begin(), raw.size()), InternalDOMOperationError, "Failed to import raw public EDDSA",
-        raw.size(), internalDescribeOpensslErrors()), KeyType::PUBLIC, usages };
+        raw.size(), internalDescribeOpensslErrors()), KeyType::PUBLIC, usages);
   }
 
   auto ecKey = OSSLCALL_OWN(EC_KEY, EC_KEY_new_by_curve_name(curveId), DOMOperationError,
@@ -520,7 +686,7 @@ AsymmetricKeyData importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int cur
   auto evpPkey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
 
-  return AsymmetricKeyData{ kj::mv(evpPkey), KeyType::PUBLIC, usages };
+  return kj::rc<AsymmetricKeyData>(kj::mv(evpPkey), KeyType::PUBLIC, usages);
 }
 
 kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyDataJwk,
@@ -675,7 +841,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(
   }();
 
   // get0 avoids adding a refcount...
-  auto ecKey = JSG_REQUIRE_NONNULL(Ec::tryGetEc(importedKey.evpPkey.get()), DOMDataError,
+  auto ecKey = JSG_REQUIRE_NONNULL(Ec::tryGetEc(importedKey->evpPkey.get()), DOMDataError,
                                    "Input was not an EC key",
                                    tryDescribeOpensslErrors());
 
@@ -730,7 +896,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
     }
   }();
 
-  auto ecKey = JSG_REQUIRE_NONNULL(Ec::tryGetEc(importedKey.evpPkey.get()), DOMDataError,
+  auto ecKey = JSG_REQUIRE_NONNULL(Ec::tryGetEc(importedKey->evpPkey.get()), DOMDataError,
                                    "Input was not an EC public key nor a DH key",
                                    tryDescribeOpensslErrors());
 
@@ -762,7 +928,7 @@ namespace {
 // keeping track of the algorithm identifier and returning an algorithm struct based on that.
 class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
 public:
-  explicit EdDsaKey(AsymmetricKeyData keyData,
+  explicit EdDsaKey(kj::Rc<AsymmetricKeyData> keyData,
                     kj::StringPtr keyAlgorithm,
                     bool extractable)
       : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), extractable),
@@ -937,62 +1103,14 @@ private:
   kj::StringPtr keyAlgorithm;
 
   SubtleCrypto::JsonWebKey exportJwk() const override final {
-    KJ_ASSERT(getAlgorithmName() == "X25519"_kj || getAlgorithmName() == "Ed25519"_kj ||
-        getAlgorithmName() == "NODE-ED25519"_kj);
-
-    uint8_t rawPublicKey[ED25519_PUBLIC_KEY_LEN]{};
-    size_t publicKeyLen = sizeof(rawPublicKey);
-    JSG_REQUIRE(1 == EVP_PKEY_get_raw_public_key(getEvpPkey(), rawPublicKey, &publicKeyLen),
-        InternalDOMOperationError, "Failed to retrieve public key",
-        internalDescribeOpensslErrors());
-
-    KJ_ASSERT(publicKeyLen == 32, publicKeyLen);
-
-    SubtleCrypto::JsonWebKey jwk;
-    jwk.kty = kj::str("OKP");
-    jwk.crv = kj::str(getAlgorithmName() == "X25519"_kj ? "X25519"_kj : "Ed25519"_kj);
-    jwk.x = kj::encodeBase64Url(kj::arrayPtr(rawPublicKey, publicKeyLen));
-    if (getAlgorithmName() == "Ed25519"_kj) {
-      jwk.alg = kj::str("EdDSA");
-    }
-
-    if (getTypeEnum() == KeyType::PRIVATE) {
-      // Deliberately use ED25519_PUBLIC_KEY_LEN here.
-      // boringssl defines ED25519_PRIVATE_KEY_LEN as 64B since it stores the private key together
-      // with public key data in some functions, but in the EVP interface only the 32B private key
-      // itself is returned.
-      uint8_t rawPrivateKey[ED25519_PUBLIC_KEY_LEN]{};
-      size_t privateKeyLen = ED25519_PUBLIC_KEY_LEN;
-      JSG_REQUIRE(1 == EVP_PKEY_get_raw_private_key(getEvpPkey(), rawPrivateKey, &privateKeyLen),
-          InternalDOMOperationError, "Failed to retrieve private key",
-          internalDescribeOpensslErrors());
-
-      KJ_ASSERT(privateKeyLen == 32, privateKeyLen);
-
-      jwk.d = kj::encodeBase64Url(kj::arrayPtr(rawPrivateKey, privateKeyLen));
-    }
-
-    return jwk;
+    return KJ_ASSERT_NONNULL(EdDsa::tryGetEdDsa(getEvpPkey())).toJwk(getTypeEnum());
   }
 
   kj::Array<kj::byte> exportRaw() const override final {
     JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
         "Raw export of ", getAlgorithmName(), " keys is only allowed for public keys.");
-
-    kj::Vector<kj::byte> raw(ED25519_PUBLIC_KEY_LEN);
-    raw.resize(ED25519_PUBLIC_KEY_LEN);
-    size_t exportedLength = raw.size();
-
-    JSG_REQUIRE(1 == EVP_PKEY_get_raw_public_key(getEvpPkey(), raw.begin(), &exportedLength),
-        InternalDOMOperationError, "Failed to retrieve public key",
-        internalDescribeOpensslErrors());
-
-    JSG_REQUIRE(exportedLength == raw.size(), InternalDOMOperationError,
-        "Unexpected change in size", raw.size(), exportedLength);
-
-    return raw.releaseAsArray();
+    return KJ_ASSERT_NONNULL(EdDsa::tryGetEdDsa(getEvpPkey())).getRawPublicKey();
   }
-
 };
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
@@ -1025,16 +1143,14 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
       rawPublicKey, keylen), InternalDOMOperationError, "Internal error construct ", curveName,
       "public key", internalDescribeOpensslErrors());
 
-  AsymmetricKeyData privateKeyData {
-    .evpPkey = kj::mv(privateEvpPKey),
-    .keyType = KeyType::PRIVATE,
-    .usages = privateKeyUsages,
-  };
-  AsymmetricKeyData publicKeyData {
-    .evpPkey = kj::mv(publicEvpPKey),
-    .keyType = KeyType::PUBLIC,
-    .usages = publicKeyUsages,
-  };
+  auto privateKeyData = kj::rc<AsymmetricKeyData>(
+    kj::mv(privateEvpPKey),
+    KeyType::PRIVATE,
+    privateKeyUsages);
+  auto publicKeyData  = kj::rc<AsymmetricKeyData>(
+    kj::mv(publicEvpPKey),
+    KeyType::PUBLIC,
+    publicKeyUsages);
 
   auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(privateKeyData),
       normalizedName, extractablePrivateKey));

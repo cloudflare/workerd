@@ -3,11 +3,14 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "crypto.h"
 #include <workerd/api/crypto/digest.h>
+#include <workerd/api/crypto/ec.h>
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/crypto/kdf.h>
 #include <workerd/api/crypto/prime.h>
+#include <workerd/api/crypto/rsa.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/crypto/spkac.h>
+#include <openssl/crypto.h>
 
 namespace workerd::api::node {
 
@@ -114,14 +117,16 @@ bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_che
 
 // ======================================================================================
 jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
-    kj::String algorithm,
-    kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
+    kj::String algorithm, KeyParam key) {
   KJ_SWITCH_ONEOF(key) {
     KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
-      return jsg::alloc<HmacHandle>(HmacContext(algorithm, key_data.asPtr()));
+      return jsg::alloc<HmacHandle>(HmacContext(algorithm, key_data.asPtr().asConst()));
     }
     KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
       return jsg::alloc<HmacHandle>(HmacContext(algorithm, key->impl.get()));
+    }
+    KJ_CASE_ONEOF(key, jsg::Ref<SecretKeyObjectHandle>) {
+      return jsg::alloc<HmacHandle>(HmacContext(algorithm, key->asPtr()));
     }
   }
   KJ_UNREACHABLE;
@@ -142,12 +147,17 @@ kj::Array<kj::byte> CryptoImpl::HmacHandle::oneshot(
     kj::Array<kj::byte> data) {
   KJ_SWITCH_ONEOF(key) {
     KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
-      HmacContext ctx(algorithm, key_data.asPtr());
+      HmacContext ctx(algorithm, key_data.asPtr().asConst());
       ctx.update(data);
       return kj::heapArray(ctx.digest());
     }
     KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
       HmacContext ctx(algorithm, key->impl.get());
+      ctx.update(data);
+      return kj::heapArray(ctx.digest());
+    }
+    KJ_CASE_ONEOF(key, jsg::Ref<SecretKeyObjectHandle>) {
+      HmacContext ctx(algorithm, key->asPtr());
       ctx.update(data);
       return kj::heapArray(ctx.digest());
     }
@@ -241,5 +251,305 @@ kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::generateKeys() {
 }
 
 int CryptoImpl::DiffieHellmanHandle::getVerifyError() { return verifyError; }
+
+// ======================================================================================
+
+jsg::Ref<CryptoImpl::SecretKeyObjectHandle> CryptoImpl::SecretKeyObjectHandle::constructor(
+    kj::Array<kj::byte> keyData) {
+  // Copy the key data into a new buffer.
+  return jsg::alloc<CryptoImpl::SecretKeyObjectHandle>(kj::heapArray<kj::byte>(keyData));
+}
+
+bool CryptoImpl::SecretKeyObjectHandle::equals(
+    jsg::Ref<CryptoImpl::SecretKeyObjectHandle> other) {
+  if (data.size() != other->data.size()) {
+    return false;
+  }
+  return CRYPTO_memcmp(data.begin(), other->data.begin(), data.size()) == 0;
+}
+
+CryptoImpl::ExportedKey CryptoImpl::SecretKeyObjectHandle::export_(
+    jsg::Lock& js, KeyExportOptions options) {
+  kj::StringPtr format = JSG_REQUIRE_NONNULL(options.format, TypeError, "Missing format option");
+  if (format == "jwk"_kj) {
+    SubtleCrypto::JsonWebKey jwk;
+    jwk.kty = kj::str("oct");
+    jwk.k = kj::encodeBase64Url(data);
+    jwk.ext = true;
+    return jwk;
+  }
+  JSG_REQUIRE(format == "buffer"_kj, TypeError, "Invalid format for secret key export: ", format);
+  return kj::heapArray<kj::byte>(data.asPtr());
+}
+
+kj::Maybe<jsg::Ref<CryptoImpl::SecretKeyObjectHandle>>
+CryptoImpl::SecretKeyObjectHandle::fromCryptoKey(jsg::Ref<CryptoKey> key) {
+  if (key->getType() != "secret"_kj) return kj::none;
+  SubtleCrypto::ExportKeyData data = key->impl->exportKey("raw"_kj);
+  KJ_SWITCH_ONEOF(data) {
+    KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+      return jsg::alloc<CryptoImpl::SecretKeyObjectHandle>(kj::mv(data));
+    }
+    KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
+      // Fall-through
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<jsg::Ref<CryptoKey>> CryptoImpl::SecretKeyObjectHandle::toCryptoKey(
+    jsg::Lock& js,
+    SubtleCrypto::ImportKeyAlgorithm algorithm,
+    bool extractable,
+    kj::Array<kj::String> usages) {
+  return SubtleCrypto().importKeySync(js, "raw"_kj,
+      kj::heapArray<kj::byte>(data.asPtr()),
+      kj::mv(algorithm),
+      extractable,
+      usages.asPtr());
+}
+
+void CryptoImpl::SecretKeyObjectHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackFieldWithSize("data", data.size());
+}
+
+// ======================================================================================
+
+kj::Maybe<kj::Rc<AsymmetricKeyData>> CryptoImpl::getAsymmetricKeyDataFromCryptoKey(
+    jsg::Ref<CryptoKey> key) {
+  // Since Node.js' API unconditionally allows for key export, let's make sure the
+  // key is extractable.
+  JSG_REQUIRE(key->getExtractable(), TypeError, "Key is not extractable");
+  return key->impl->getAsymmetricKeyData();
+}
+
+jsg::Ref<CryptoImpl::AsymmetricKeyObjectHandle> CryptoImpl::AsymmetricKeyObjectHandle::constructor(
+    CreateAsymmetricKeyOptions options) {
+
+  auto format = tryGetKeyFormat(options.format).orDefault(KeyFormat::PEM);
+  auto type = tryGetKeyEncoding(options.type);
+  if (format == KeyFormat::DER) {
+    JSG_REQUIRE(type != kj::none, Error, "The 'type' option is required for DER format");
+  }
+
+  if (options.isPublicKey) {
+    KJ_SWITCH_ONEOF(options.key) {
+      KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+        // The key data in this case might be a public key or private key. If it
+        // is a private key, then the public key will be derived from it.
+        auto key = JSG_REQUIRE_NONNULL(
+            importAsymmetricPublicKeyForNodeJs(data, format, type, options.passphrase),
+            Error, "Failed to create public key");
+        return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(key));
+      }
+      KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
+        JSG_REQUIRE(format == KeyFormat::JWK, Error, "Invalid format for public key");
+        // When creating a key from a JWK, the key type must be one of `RSA`, `EC`, or `OKP`.
+        // The remaining options are ignored.
+        if (jwk.kty == "RSA"_kj) {
+          auto key = JSG_REQUIRE_NONNULL(Rsa::importFromJwk(KeyType::PUBLIC, jwk),
+                                        Error, "Invalid JWK");
+          return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(key));
+        } else if (jwk.kty == "EC"_kj) {
+          auto key = JSG_REQUIRE_NONNULL(Ec::importFromJwk(KeyType::PUBLIC, jwk),
+                                        Error, "Invalid JWK");
+          return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(key));
+        } else if (jwk.kty == "OKP"_kj) {
+          auto key = JSG_REQUIRE_NONNULL(EdDsa::importFromJwk(KeyType::PUBLIC, jwk),
+                                        Error, "Invalid JWK");
+          return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(key));
+        }
+        JSG_FAIL_REQUIRE(Error, "Unsupported JWK key type");
+      }
+      KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
+        JSG_REQUIRE(key->getType() == "private"_kj, Error, "Invalid key type");
+        auto inner = KJ_ASSERT_NONNULL(getAsymmetricKeyDataFromCryptoKey(kj::mv(key)));
+        auto derived = JSG_REQUIRE_NONNULL(derivePublicKeyFromPrivateKey(kj::mv(inner)),
+            Error, "Unable to derive public key from given private key");
+        return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(derived));
+      }
+      KJ_CASE_ONEOF(key, jsg::Ref<AsymmetricKeyObjectHandle>) {
+        JSG_REQUIRE(key->getTypeEnum() == KeyType::PRIVATE, Error, "Invalid key type");
+        auto derived = JSG_REQUIRE_NONNULL(derivePublicKeyFromPrivateKey(key->getKeyData()),
+            Error, "Unable to derive public key from given private key");
+        return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(derived));
+      }
+    }
+    JSG_FAIL_REQUIRE(Error, "Failed to create public key");
+  }
+
+  // Create private key.
+  KJ_SWITCH_ONEOF(options.key) {
+    KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+      auto key = JSG_REQUIRE_NONNULL(
+          importAsymmetricPrivateKeyForNodeJs(data, format, type, options.passphrase),
+          Error, "Failed to create private key");
+      return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(key));
+    }
+    KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
+      JSG_REQUIRE(format == KeyFormat::JWK, Error, "Invalid format for public key");
+      // When creating a key from a JWK, the key type must be one of `RSA`, `EC`, or `OKP`.
+      // The remaining options are ignored.
+      if (jwk.kty == "RSA"_kj) {
+        auto key = JSG_REQUIRE_NONNULL(Rsa::importFromJwk(KeyType::PRIVATE, jwk),
+                                       Error, "Invalid JWK");
+        return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(key));
+      } else if (jwk.kty == "EC"_kj) {
+        auto key = JSG_REQUIRE_NONNULL(Ec::importFromJwk(KeyType::PRIVATE, jwk),
+                                      Error, "Invalid JWK");
+        return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(key));
+      } else if (jwk.kty == "OKP"_kj) {
+        auto key = JSG_REQUIRE_NONNULL(EdDsa::importFromJwk(KeyType::PRIVATE, jwk),
+                                      Error, "Invalid JWK");
+        return jsg::alloc<AsymmetricKeyObjectHandle>(kj::mv(key));
+      }
+      JSG_FAIL_REQUIRE(Error, "Unsupported JWK key type");
+    }
+    KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
+      KJ_UNREACHABLE;
+    }
+    KJ_CASE_ONEOF(key, jsg::Ref<AsymmetricKeyObjectHandle>) {
+      KJ_UNREACHABLE;
+    }
+  }
+  JSG_FAIL_REQUIRE(Error, "Failed to create private key");
+}
+
+CryptoImpl::AsymmetricKeyObjectHandle::Kind CryptoImpl::AsymmetricKeyObjectHandle::getKind() const {
+  return keyData->getKind();
+}
+
+CryptoImpl::ExportedKey CryptoImpl::AsymmetricKeyObjectHandle::export_(
+    jsg::Lock& js, KeyExportOptions options) {
+  ClearErrorOnReturn clearErrorOnReturn;
+
+  // Do some validations.
+  // Per Node.js, for public keys, the type must be one of `pkcs1` or `spki`,
+  // For private keys, the type must be one of `pkcs1`, `pkcs8`, or `sec1`.
+  // For both kinds, the format must be one of `pem`, `der`, or `jwk`.
+
+  auto keyType = getTypeEnum();
+
+  auto kind = getKind();
+  auto format = JSG_REQUIRE_NONNULL(tryGetKeyFormat(options.format), Error,
+      "Unsupported format for key export");
+  auto type = JSG_REQUIRE_NONNULL(tryGetKeyEncoding(options.type), Error,
+      "Unsupported encoding for key export");
+
+  switch (keyType) {
+    case KeyType::PUBLIC: {
+      // PKCS1 is only valid for RSA keys.
+      if ((type == KeyEncoding::PKCS1 && kind == Kind::RSA && kind == Kind::RSA_PSS) ||
+          type == KeyEncoding::SPKI) {
+        break;
+      }
+      JSG_FAIL_REQUIRE(Error, "Unsupported type for public key export");
+    }
+    case KeyType::PRIVATE: {
+      if ((type == KeyEncoding::PKCS1 && kind == Kind::RSA && kind == Kind::RSA_PSS) ||
+          type == KeyEncoding::PKCS8 ||
+          type == KeyEncoding::SEC1) {
+        break;
+      }
+      JSG_FAIL_REQUIRE(Error, "Unsupported type for private key export");
+    }
+    case KeyType::SECRET: KJ_UNREACHABLE;
+  }
+
+
+  switch (getKind()) {
+    case Kind::RSA: KJ_FALLTHROUGH;
+    case Kind::RSA_PSS: {
+      auto rsa = KJ_ASSERT_NONNULL(Rsa::tryGetRsa(getEvpPkey()));
+      switch (format) {
+        case KeyFormat::PEM: return rsa.toPem(type, keyType);
+        case KeyFormat::DER: return rsa.toDer(type, keyType);
+        case KeyFormat::JWK: return rsa.toJwk(keyType, kj::none);
+      }
+      break;
+    }
+    case Kind::EC: {
+      auto ec = KJ_ASSERT_NONNULL(Ec::tryGetEc(getEvpPkey()));
+      auto curveName = ec.getCurveNameString();
+      switch (format) {
+        case KeyFormat::PEM: return ec.toPem(type, keyType);
+        case KeyFormat::DER: return ec.toDer(type, keyType);
+        case KeyFormat::JWK: return ec.toJwk(keyType, curveName.asPtr());
+      }
+      break;
+    }
+    case Kind::ED25519: KJ_FALLTHROUGH;
+    case Kind::X25519: {
+      auto eddsa = KJ_ASSERT_NONNULL(EdDsa::tryGetEdDsa(getEvpPkey()));
+      switch (format) {
+        case KeyFormat::PEM: return eddsa.toPem(type, keyType);
+        case KeyFormat::DER: return eddsa.toDer(type, keyType);
+        case KeyFormat::JWK: return eddsa.toJwk(keyType);
+      }
+      break;
+    };
+    case Kind::DH: KJ_FALLTHROUGH;
+    case Kind::DSA: KJ_FALLTHROUGH;
+    case Kind::UNKNOWN: {
+      // TODO(now): Implement the above key exports
+      JSG_FAIL_REQUIRE(Error, "Unsupported key type for export");
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+bool CryptoImpl::AsymmetricKeyObjectHandle::equals(jsg::Ref<AsymmetricKeyObjectHandle> other) {
+  return keyData->equals(other->keyData);
+}
+
+CryptoKey::AsymmetricKeyDetails CryptoImpl::AsymmetricKeyObjectHandle::getAsymmetricKeyDetail() {
+  switch (getKind()) {
+    case Kind::RSA: {
+      return KJ_ASSERT_NONNULL(Rsa::tryGetRsa(getEvpPkey())).getAsymmetricKeyDetail();
+    }
+    case Kind::RSA_PSS: {
+      return KJ_ASSERT_NONNULL(Rsa::tryGetRsa(getEvpPkey())).getAsymmetricKeyDetail();
+    }
+    case Kind::EC: {
+      return KJ_ASSERT_NONNULL(Ec::tryGetEc(getEvpPkey())).getAsymmetricKeyDetail();
+    }
+    case Kind::DSA: {
+      // TODO(soon): Implement DSA keys
+      KJ_FALLTHROUGH;
+    }
+    case Kind::ED25519: {
+      KJ_FALLTHROUGH;
+    }
+    case Kind::X25519: {
+       KJ_FALLTHROUGH;
+    }
+    default: return CryptoKey::AsymmetricKeyDetails {};
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::StringPtr CryptoImpl::AsymmetricKeyObjectHandle::getAsymmetricKeyType() {
+  return keyData->getKindName();
+}
+
+jsg::Ref<CryptoImpl::AsymmetricKeyObjectHandle>
+CryptoImpl::AsymmetricKeyObjectHandle::fromCryptoKey(jsg::Ref<CryptoKey> key) {
+  return jsg::alloc<AsymmetricKeyObjectHandle>(
+      JSG_REQUIRE_NONNULL(getAsymmetricKeyDataFromCryptoKey(kj::mv(key)), Error,
+          "Unable to extract key data from CryptoKey"));
+}
+
+kj::Maybe<jsg::Ref<CryptoKey>> CryptoImpl::AsymmetricKeyObjectHandle::toCryptoKey(
+    jsg::Lock& js,
+    CryptoKey::AlgorithmVariant algorithm,
+    bool extractable) {
+  KJ_UNIMPLEMENTED("...");
+}
+
+kj::Maybe<CryptoImpl::AsymmetricKeyObjectHandle::Pair>
+CryptoImpl::AsymmetricKeyObjectHandle::generateKeyPair(
+    CryptoImpl::GenerateKeyPairOptions options) {
+  KJ_UNIMPLEMENTED("...");
+}
 
 }  // namespace workerd::api::node

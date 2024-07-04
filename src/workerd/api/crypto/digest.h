@@ -8,7 +8,8 @@ KJ_DECLARE_NON_POLYMORPHIC(HMAC_CTX)
 namespace workerd::api {
 class HmacContext final {
 public:
-  using KeyData = kj::OneOf<kj::ArrayPtr<kj::byte>, CryptoKey::Impl*>;
+  using KeyData = kj::OneOf<kj::ArrayPtr<const kj::byte>,
+                            CryptoKey::Impl*>;
 
   HmacContext(kj::StringPtr algorithm, KeyData key);
   HmacContext(HmacContext&&) = default;
