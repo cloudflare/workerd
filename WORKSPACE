@@ -44,10 +44,10 @@ bazel_features_deps()
 
 http_archive(
     name = "capnp-cpp",
-    integrity = "sha256-r2LCeW0nWWzS72WLQaFpzbJ+f/F191Mze1PllHWGV6E=",
-    strip_prefix = "capnproto-capnproto-b343a79/c++",
+    integrity = "sha256-u4TajPQnM3yQIcLUghhNnEUslu0o3q0VdY3jRoPq7yM=",
+    strip_prefix = "capnproto-capnproto-6446b72/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/b343a799317e6a4b83d2a27bf712498fd5346985"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/6446b721a9860eebccf9d3c73b27610491359b5a"],
 )
 
 http_archive(
