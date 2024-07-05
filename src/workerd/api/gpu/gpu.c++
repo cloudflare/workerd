@@ -22,7 +22,7 @@ void initialize() {
   dawnProcSetProcs(&dawn::native::GetProcs());
 }
 
-GPU::GPU() {}
+GPU::GPU() : async_(kj::refcounted<AsyncRunner>(instance_.Get())) {}
 
 kj::String parseAdapterType(wgpu::AdapterType type) {
   switch (type) {
@@ -71,7 +71,7 @@ GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> optio
   }
 
   KJ_IF_SOME(a, adapter) {
-    kj::Maybe<jsg::Ref<GPUAdapter>> gpuAdapter = jsg::alloc<GPUAdapter>(a);
+    kj::Maybe<jsg::Ref<GPUAdapter>> gpuAdapter = jsg::alloc<GPUAdapter>(a, kj::addRef(*async_));
     return js.resolvedPromise(kj::mv(gpuAdapter));
   }
 

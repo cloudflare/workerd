@@ -703,8 +703,8 @@ kj::String parseDeviceLostReason(WGPUDeviceLostReason reason) {
   }
 }
 
-GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d)
-    : device_(d), lost_promise_(nullptr), async_(kj::refcounted<AsyncRunner>(d)) {
+GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async)
+    : device_(d), lost_promise_(nullptr), async_(kj::mv(async)) {
   auto& context = IoContext::current();
   auto paf = kj::newPromiseAndFulfiller<jsg::Ref<GPUDeviceLostInfo>>();
   lost_promise_fulfiller_ = kj::mv(paf.fulfiller);

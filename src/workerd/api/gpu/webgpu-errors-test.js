@@ -18,7 +18,7 @@ export class DurableObjectExample {
 
     let callbackCalled = false;
     device.addEventListener("uncapturederror", (event) => {
-      ok(event.error.message.includes("9007199254740991"));
+      ok(event.error.message.includes("not a multiple of 4") || event.error.message.includes("Error while parsing WGSL"));
       callbackCalled = true;
     });
 

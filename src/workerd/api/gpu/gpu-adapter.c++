@@ -110,7 +110,8 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
 
   KJ_ASSERT(userData.requestEnded);
 
-  jsg::Ref<GPUDevice> gpuDevice = jsg::alloc<GPUDevice>(js, kj::mv(userData.device));
+  jsg::Ref<GPUDevice> gpuDevice =
+      jsg::alloc<GPUDevice>(js, kj::mv(userData.device), kj::addRef(*async_));
   return js.resolvedPromise(kj::mv(gpuDevice));
 }
 

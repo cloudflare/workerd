@@ -30,7 +30,7 @@ namespace workerd::api::gpu {
 
 class GPUDevice : public EventTarget {
 public:
-  explicit GPUDevice(jsg::Lock& js, wgpu::Device d);
+  explicit GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async);
   ~GPUDevice();
   JSG_RESOURCE_TYPE(GPUDevice) {
     JSG_INHERIT(EventTarget);
