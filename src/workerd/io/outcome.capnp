@@ -25,4 +25,5 @@ enum EventOutcome {
   scriptNotFound @6;
   canceled @7;
   exceededMemory @8;
+  unavailable @9;
 }
