@@ -61,6 +61,17 @@ build:v8-codegen-opt --per_file_copt=v8/src/objects@-O2
 build:v8-codegen-opt --per_file_copt=v8/src/wasm@-O2
 build:v8-codegen-opt --per_file_copt=v8/src/base@-O2
 
+# Disable relaxing all jumps during LLVM codegen under -O0, which previously led to build
+# performance improvements but makes code size worse. This will be the default in LLVM19.
+# https://maskray.me/blog/2024-04-27-clang-o0-output-branch-displacement-and-size-increase
+build:unix --copt="-mno-relax-all" --host_copt="-mno-relax-all"
+
+# Limit transitive header includes within libc++. This improves compliance with IWYU, helps avoid
+# errors with downstream projects that implicitly define this already and reduces total include size.
+https://libcxx.llvm.org/DesignDocs/HeaderRemovalPolicy.html
+build:unix --cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
+build:unix --host_cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
+
 # Need to redefine _WIN32_WINNT to build dawn on Windows
 build:windows --per_file_copt='external/dawn@-Wno-macro-redefined'
 build:windows --host_per_file_copt='external/dawn@-Wno-macro-redefined'
