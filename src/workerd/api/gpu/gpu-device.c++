@@ -694,8 +694,12 @@ kj::String parseDeviceLostReason(WGPUDeviceLostReason reason) {
     KJ_UNREACHABLE
   case WGPUDeviceLostReason_Destroyed:
     return kj::str("destroyed");
-  case WGPUDeviceLostReason_Undefined:
-    return kj::str("undefined");
+  case WGPUDeviceLostReason_Unknown:
+    return kj::str("unknown");
+  case WGPUDeviceLostReason_InstanceDropped:
+    return kj::str("dropped");
+  case WGPUDeviceLostReason_FailedCreation:
+    return kj::str("failed_creation");
   }
 }
 

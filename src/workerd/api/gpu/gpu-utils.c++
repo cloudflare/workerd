@@ -77,9 +77,9 @@ GPUTextureDimension getTextureDimension(wgpu::TextureDimension& dimension) {
     return kj::str("2d");
   case wgpu::TextureDimension::e3D:
     return kj::str("3d");
+  default:
+    KJ_UNREACHABLE
   }
-
-  KJ_UNREACHABLE
 }
 
 GPUTextureFormat getTextureFormat(wgpu::TextureFormat& format) {

@@ -158,6 +158,7 @@ jsg::Promise<void> GPUBuffer::mapAsync(jsg::Lock& js, GPUFlagsConstant mode,
           break;
         case WGPUBufferMapAsyncStatus_Unknown:
         case WGPUBufferMapAsyncStatus_DeviceLost:
+        case WGPUBufferMapAsyncStatus_InstanceDropped:
           c->fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, TypeError, "unknown error or device lost"));
           break;
         case WGPUBufferMapAsyncStatus_MappingAlreadyPending:

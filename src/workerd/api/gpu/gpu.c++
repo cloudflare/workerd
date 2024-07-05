@@ -58,14 +58,14 @@ GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> optio
 
   kj::Maybe<dawn::native::Adapter> adapter;
   for (auto& a : adapters) {
-    wgpu::AdapterProperties props;
-    a.GetProperties(&props);
-    if (props.backendType != defaultBackendType) {
+    wgpu::AdapterInfo info;
+    a.GetInfo(&info);
+    if (info.backendType != defaultBackendType) {
       continue;
     }
 
-    KJ_LOG(INFO, kj::str("found webgpu device '", props.name, "' of type ",
-                         parseAdapterType(props.adapterType)));
+    KJ_LOG(INFO, kj::str("found webgpu device '", info.device, "' of type ",
+                         parseAdapterType(info.adapterType)));
     adapter = a;
     break;
   }
