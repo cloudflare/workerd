@@ -71,6 +71,7 @@ public:
         return *this;
       }
     };
+    // Here?
     struct KvNamespace {
       uint subrequestChannel;
 
@@ -159,6 +160,7 @@ public:
         return *this;
       }
     };
+    //here?
     struct Wrapped {
       // data carrier for configured WrappedBinding
       kj::String moduleName;
