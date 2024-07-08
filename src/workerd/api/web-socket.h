@@ -254,14 +254,15 @@ public:
   void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket>);
 
   // Pumps messages from this WebSocket to `other`, and from `other` to this, making sure to
-  // register pending events as appropriate. Used to implement FetchEvent.respondWith().
+  // register pending events as appropriate. Used to connect a websocket to a client via an HTTP
+  // response.
   //
   // Only one of this or accept() is allowed to be invoked.
   //
   // As an exception to the usual KJ convention, it is not necessary for the JavaScript `WebSocket`
   // object to be kept live while waiting for the promise returned by couple() to complete. Instead,
   // the promise takes direct ownership of the underlying KJ-native WebSocket (as well as `other`).
-  kj::Promise<DeferredProxy<void>> couple(kj::Own<kj::WebSocket> other);
+  kj::Promise<DeferredProxy<void>> couple(kj::Own<kj::WebSocket> other, RequestObserver& request);
 
   // Extract the kj::WebSocket from this api::WebSocket (if applicable). The kj::WebSocket will be
   // owned elsewhere, but the api::WebSocket will retain a reference.
@@ -585,6 +586,8 @@ private:
 
   AutoResponse autoResponseStatus;
 
+  kj::Maybe<kj::Own<WebSocketObserver>> observer;
+
   // Contains a websocket and possibly some data from the WebSocketResponse headers.
   struct PackedWebSocket {
     kj::Own<kj::WebSocket> ws;
@@ -620,7 +623,7 @@ private:
   // owned by the `IoContext` so it'll be canceled if the `IoContext` is destroyed.
   static kj::Promise<void> pump(
       IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native,
-      AutoResponse& autoResponse);
+      AutoResponse& autoResponse, kj::Maybe<kj::Own<WebSocketObserver>>& observer);
 
   kj::Promise<kj::Maybe<kj::Exception>> readLoop(kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
 
