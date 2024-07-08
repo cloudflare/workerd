@@ -31,5 +31,8 @@ const helloWorld :Workerd.Worker = (
     (name = "worker", esModule = embed "worker.js")
   ],
   compatibilityDate = "2023-02-28",
-  compatibilityFlags = ["nodejs_compat"]
+  # Only ask for workerd's implementation of `node:async_hooks`'s AsyncLocalStorage, 
+  # instead of all of the node compatibility APIs, provided by `nodejs_compat`. See:
+  # https://developers.cloudflare.com/workers/configuration/compatibility-dates/#nodejs-compatibility-flag
+  compatibilityFlags = ["nodejs_als"]
 );
