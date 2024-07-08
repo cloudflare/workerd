@@ -65,15 +65,14 @@ http_archive(
     ],
     sha256 = "ab9aae38a11b931f35d8d1c6d62826d215579892e6ffbf89f20bdce106a9c8c5",
     strip_prefix = "sqlite-src-3440000",
-    type = "zip",
     url = "https://sqlite.org/2023/sqlite-src-3440000.zip",
 )
 
 http_archive(
     name = "rules_python",
-    integrity = "sha256-SRLO1w3BoqjkuGzsIzsZLKBT6CvHLYd7mOEmFW6PIo0=",
-    strip_prefix = "rules_python-0.32.2",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.32.2/rules_python-0.32.2.tar.gz",
+    integrity = "sha256-d4quqz5s/VbWgcifXBDXrWv40vGnLeneVbIwgbLTFhg=",
+    strip_prefix = "rules_python-0.34.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.34.0/rules_python-0.34.0.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
@@ -102,8 +101,6 @@ http_archive(
 http_archive(
     name = "ada-url",
     build_file = "//:build/BUILD.ada-url",
-    patch_args = ["-p1"],
-    patches = [],
     sha256 = "20b09948cf58362abe4de20b8e709d5041477fb798350fd1a02cde6aad121e08",
     type = "zip",
     url = "https://github.com/ada-url/ada/releases/download/v2.9.0/singleheader.zip",
@@ -112,8 +109,6 @@ http_archive(
 http_archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    patch_args = ["-p1"],
-    patches = [],
     sha256 = "7867c118a11bb7ccaea0f999a28684b06040027506b424b706146cc912b80ff6",
     type = "zip",
     url = "https://github.com/simdutf/simdutf/releases/download/v5.2.8/singleheader.zip",
@@ -123,7 +118,6 @@ http_archive(
     name = "pyodide",
     build_file = "//:build/BUILD.pyodide",
     sha256 = "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
-    type = "tar.bz2",
     urls = ["https://github.com/pyodide/pyodide/releases/download/0.26.0a2/pyodide-core-0.26.0a2.tar.bz2"],
 )
 
@@ -131,7 +125,6 @@ http_archive(
     name = "pyodide_packages",
     build_file = "//:build/BUILD.pyodide_packages",
     sha256 = "c4a4e0c1cb658a39abc0435cc07df902e5a2ecffc091e0528b96b0c295e309ea",
-    type = "zip",
     urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-stdlib/pyodide_packages.tar.zip"],
 )
 
@@ -367,7 +360,9 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2021",
-    versions = ["1.75.0"], # LLVM 17
+    versions = ["1.77.0"], # LLVM 17
+    # Rust registers wasm targets by default which we don't need, workerd is only built for its native platform.
+    extra_target_triples = [],
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
@@ -390,23 +385,23 @@ rust_analyzer_dependencies()
 # Fetch rules_nodejs before aspect_rules_js, otherwise we'll get an outdated rules_nodejs version.
 http_archive(
     name = "rules_nodejs",
-    integrity = "sha256-PoNpJWrWMZeVnSJTxHOp3MV8KEHRdhkOWbkdJdT+nmc=",
-    strip_prefix = "rules_nodejs-6.1.1",
-    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.1.1/rules_nodejs-v6.1.1.tar.gz",
+    integrity = "sha256-h8YXHFvntpU41Gldne0priYmxe12qa3u3ON7Y8c772c=",
+    strip_prefix = "rules_nodejs-6.2.0",
+    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.2.0/rules_nodejs-v6.2.0.tar.gz",
 )
 
 http_archive(
     name = "aspect_rules_js",
-    sha256 = "eaa18e412822eacf2a98b62630ba0e8d638c6468917ea35bcd5ffb4b12c59fdf",
-    strip_prefix = "rules_js-1.42.0",
-    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.42.0.tar.gz",
+    integrity = "sha256-/GiHCR7jJDZh+1Mv0yRCMLbhk8IlZqA4yf10jKaPuIA=",
+    strip_prefix = "rules_js-1.42.3",
+    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.42.3.tar.gz",
 )
 
 http_archive(
     name = "aspect_rules_ts",
-    sha256 = "c77f0dfa78c407893806491223c1264c289074feefbf706721743a3556fa7cea",
-    strip_prefix = "rules_ts-2.2.0",
-    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v2.2.0.tar.gz",
+    integrity = "sha256-9ppkUrEp052bBfPf+LEFcYW7GVtNrwz/QZmI3nV8bDE=",
+    strip_prefix = "rules_ts-2.4.2",
+    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v2.4.2.tar.gz",
 )
 
 load("@aspect_rules_js//js:repositories.bzl", "rules_js_dependencies")
@@ -422,7 +417,7 @@ nodejs_register_toolchains(
         # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
         "https://nodejs.org/dist/v{version}/{filename}",
     ],
-    node_version = "20.13.1",
+    node_version = "20.14.0",
 )
 
 load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies", TS_LATEST_VERSION = "LATEST_TYPESCRIPT_VERSION")
