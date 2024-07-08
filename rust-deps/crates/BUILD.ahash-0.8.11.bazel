@@ -45,7 +45,7 @@ rust_library(
     deps = [
         "@crates_vendor__ahash-0.8.11//:build_script_build",
         "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-        "@crates_vendor__zerocopy-0.7.34//:zerocopy",
+        "@crates_vendor__zerocopy-0.7.35//:zerocopy",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
             "@crates_vendor__once_cell-1.19.0//:once_cell",  # cfg(not(all(target_arch = "arm", target_os = "none")))
