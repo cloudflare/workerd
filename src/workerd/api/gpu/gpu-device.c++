@@ -674,10 +674,10 @@ GPUDevice::~GPUDevice() {
 }
 
 void GPUDevice::destroy() {
-  if (lost_promise_fulfiller_->isWaiting()) {
+  if (dlc_->lost_promise_fulfiller_->isWaiting()) {
     auto lostInfo =
         jsg::alloc<GPUDeviceLostInfo>(kj::str("destroyed"), kj::str("device was destroyed"));
-    lost_promise_fulfiller_->fulfill(kj::mv(lostInfo));
+    dlc_->lost_promise_fulfiller_->fulfill(kj::mv(lostInfo));
   }
 
   device_.Destroy();
@@ -685,31 +685,12 @@ void GPUDevice::destroy() {
 }
 
 jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>& GPUDevice::getLost() {
-  return lost_promise_;
+  return dlc_->lost_promise_;
 }
 
-kj::String parseDeviceLostReason(WGPUDeviceLostReason reason) {
-  switch (reason) {
-  case WGPUDeviceLostReason_Force32:
-    KJ_UNREACHABLE
-  case WGPUDeviceLostReason_Destroyed:
-    return kj::str("destroyed");
-  case WGPUDeviceLostReason_Unknown:
-    return kj::str("unknown");
-  case WGPUDeviceLostReason_InstanceDropped:
-    return kj::str("dropped");
-  case WGPUDeviceLostReason_FailedCreation:
-    return kj::str("failed_creation");
-  }
-}
-
-GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async)
-    : device_(d), lost_promise_(nullptr), async_(kj::mv(async)) {
-  auto& context = IoContext::current();
-  auto paf = kj::newPromiseAndFulfiller<jsg::Ref<GPUDeviceLostInfo>>();
-  lost_promise_fulfiller_ = kj::mv(paf.fulfiller);
-  lost_promise_ = context.awaitIo(js, kj::mv(paf.promise));
-
+GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async,
+                     kj::Own<GPUDeviceLostContext> dlc)
+    : device_(d), dlc_(kj::mv(dlc)), async_(kj::mv(async)) {
   device_.SetLoggingCallback(
       [](WGPULoggingType type, char const* message, void* userdata) {
         KJ_LOG(INFO, "WebGPU logging", kj::str(type), message);
@@ -746,17 +727,6 @@ GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async)
 
         // no "uncapturederror" handler
         KJ_LOG(INFO, "WebGPU uncaptured error", kj::str(type), message);
-      },
-      this);
-
-  device_.SetDeviceLostCallback(
-      [](WGPUDeviceLostReason reason, char const* message, void* userdata) {
-        auto r = parseDeviceLostReason(reason);
-        auto* self = static_cast<GPUDevice*>(userdata);
-        if (self->lost_promise_fulfiller_->isWaiting()) {
-          auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
-          self->lost_promise_fulfiller_->fulfill(kj::mv(lostInfo));
-        }
       },
       this);
 };
@@ -811,6 +781,13 @@ jsg::Ref<GPUSupportedLimits> GPUDevice::getLimits() {
   wgpu::SupportedLimits limits{};
   JSG_REQUIRE(device_.GetLimits(&limits), TypeError, "failed to get device limits");
   return jsg::alloc<GPUSupportedLimits>(kj::mv(limits));
+}
+
+GPUDeviceLostContext::GPUDeviceLostContext(jsg::Lock& js) : lost_promise_(nullptr) {
+  auto& context = IoContext::current();
+  auto paf = kj::newPromiseAndFulfiller<jsg::Ref<GPUDeviceLostInfo>>();
+  lost_promise_fulfiller_ = kj::mv(paf.fulfiller);
+  lost_promise_ = context.awaitIo(js, kj::mv(paf.promise));
 }
 
 } // namespace workerd::api::gpu
