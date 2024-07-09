@@ -211,17 +211,21 @@ private:
 };
 JSG_DECLARE_ISOLATE_TYPE(ProtoIsolate, ProtoContext, NumberBox, BoxBox, ExtendedNumberBox);
 
+const auto kIllegalInvocation =
+    "TypeError: Illegal invocation: function called with incorrect `this` reference. "
+    "See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details."_kj;
+
 KJ_TEST("can't invoke builtin methods with alternative 'this'") {
   Evaluator<ProtoContext, ProtoIsolate> e(v8System);
   e.expectEval(
       "NumberBox.prototype.getValue.call(123)",
-      "throws", "TypeError: Illegal invocation");
+      "throws", kIllegalInvocation);
   e.expectEval(
       "NumberBox.prototype.getValue.call(new BoxBox(new NumberBox(123), 123))",
-      "throws", "TypeError: Illegal invocation");
+      "throws", kIllegalInvocation);
   e.expectEval(
       "getContextProperty.call(new NumberBox(123))",
-      "throws", "TypeError: Illegal invocation");
+      "throws", kIllegalInvocation);
 }
 
 KJ_TEST("can't use builtin as prototype") {
@@ -230,27 +234,27 @@ KJ_TEST("can't use builtin as prototype") {
       "function JsType() {}\n"
       "JsType.prototype = new NumberBox(123);\n"
       "new JsType().getValue()",
-      "throws", "TypeError: Illegal invocation");
+      "throws", kIllegalInvocation);
   e.expectEval(
       "function JsType() {}\n"
       "JsType.prototype = new ExtendedNumberBox(123, 'foo');\n"
       "new JsType().getValue()",
-      "throws", "TypeError: Illegal invocation");
+      "throws", kIllegalInvocation);
   e.expectEval(
       "function JsType() {}\n"
       "JsType.prototype = new NumberBox(123);\n"
       "new JsType().value",
-      "throws", "TypeError: Illegal invocation");
+      "throws", kIllegalInvocation);
   e.expectEval(
       "function JsType() {}\n"
       "JsType.prototype = new ExtendedNumberBox(123, 'foo');\n"
       "new JsType().value",
-      "throws", "TypeError: Illegal invocation");
+      "throws", kIllegalInvocation);
   e.expectEval(
       "function JsType() {}\n"
       "JsType.prototype = this;\n"
       "new JsType().getContextProperty()",
-      "throws", "TypeError: Illegal invocation");
+      "throws", kIllegalInvocation);
 
   // For historical reasons, we allow using the global object as a prototype and accessing
   // properties through a derived object. Our accessor implementations for global object properties

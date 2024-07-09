@@ -1,0 +1,21 @@
+From ce2599232e1fbe059e64df5a4d6feb8fa5894af6 Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Tue, 9 Jul 2024 08:37:05 -0700
+Subject: Update illegal invocation error message in v8
+
+
+diff --git a/src/common/message-template.h b/src/common/message-template.h
+index 56fd240ac5145b26b43edf9e1c1d24b5f44c1031..f240b3b70fb97e8786dc2f3c665481125defb327 100644
+--- a/src/common/message-template.h
++++ b/src/common/message-template.h
+@@ -112,7 +112,9 @@ namespace internal {
+     "First argument to % must not be a regular expression")                    \
+   T(FunctionBind, "Bind must be called on a function")                         \
+   T(GeneratorRunning, "Generator is already running")                          \
+-  T(IllegalInvocation, "Illegal invocation")                                   \
++  T(IllegalInvocation,                                                         \
++    "Illegal invocation: function called with incorrect `this` reference. "    \
++    "See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details.") \
+   T(ImmutablePrototypeSet,                                                     \
+     "Immutable prototype object '%' cannot have their prototype set")          \
+   T(ImportAssertDeprecated,                                                    \
