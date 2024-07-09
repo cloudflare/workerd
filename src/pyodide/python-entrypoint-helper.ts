@@ -186,6 +186,8 @@ try {
       }
     }
   }
+
+  throw new Error("test");
   /**
    * Store the memory snapshot in the ArtifactBundler so that the validator can
    * read it out. Needs to happen at the top level because the validator does

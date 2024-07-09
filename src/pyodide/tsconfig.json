@@ -17,7 +17,8 @@
     "declaration": true,
     "noEmit": false,
     "noEmitOnError": false,
-    "allowArbitraryExtensions": true
+    "allowArbitraryExtensions": true,
+    "inlineSourceMap": true
   },
   "include": ["./**/*"],
   "exclude": ["./generated/**/*"]
