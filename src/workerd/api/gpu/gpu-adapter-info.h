@@ -11,7 +11,7 @@ namespace workerd::api::gpu {
 
 class GPUAdapterInfo : public jsg::Object {
 public:
-  explicit GPUAdapterInfo(WGPUAdapterProperties);
+  explicit GPUAdapterInfo(wgpu::AdapterInfo);
   JSG_RESOURCE_TYPE(GPUAdapterInfo) {
     JSG_READONLY_PROTOTYPE_PROPERTY(vendor, getVendor);
     JSG_READONLY_PROTOTYPE_PROPERTY(architecture, getArchitecture);

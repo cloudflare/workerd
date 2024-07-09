@@ -7,6 +7,7 @@
 
 #include <kj/timer.h>
 #include <webgpu/webgpu_cpp.h>
+#include <workerd/io/io-context.h>
 #include <workerd/io/io-timers.h>
 
 namespace workerd::api::gpu {
@@ -37,25 +38,35 @@ private:
 };
 
 // AsyncTask is a RAII helper for calling AsyncRunner::Begin() on construction,
-// and AsyncRunner::End() on destruction.
-class AsyncTask {
+// and AsyncRunner::End() on destruction, that also encapsulates the promise generally
+// associated with any async task.
+template <typename T> class AsyncContext : public kj::Refcounted {
 public:
-  inline AsyncTask(AsyncTask&&) = default;
+  inline AsyncContext(AsyncContext&&) = default;
 
   // Constructor.
   // Calls AsyncRunner::Begin()
-  explicit inline AsyncTask(kj::Own<AsyncRunner> runner) : runner_(std::move(runner)) {
+  explicit inline AsyncContext(jsg::Lock& js, kj::Own<AsyncRunner> runner)
+      : promise_(nullptr), runner_(kj::mv(runner)) {
+    auto& context = IoContext::current();
+    auto paf = kj::newPromiseAndFulfiller<T>();
+    fulfiller_ = kj::mv(paf.fulfiller);
+    promise_ = context.awaitIo(js, kj::mv(paf.promise));
+
     runner_->Begin();
   }
 
   // Destructor.
   // Calls AsyncRunner::End()
-  inline ~AsyncTask() {
+  inline ~AsyncContext() {
     runner_->End();
   }
 
+  kj::Own<kj::PromiseFulfiller<T>> fulfiller_;
+  jsg::Promise<T> promise_;
+
 private:
-  KJ_DISALLOW_COPY(AsyncTask);
+  KJ_DISALLOW_COPY(AsyncContext);
   kj::Own<AsyncRunner> runner_;
 };
 
