@@ -1808,7 +1808,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
               jsRequest->getMethodEnum(), kj::mv(urlList),
               response.statusCode, response.statusText, *response.headers,
               newNullInputStream(),
-              jsg::alloc<WebSocket>(kj::mv(webSocket), WebSocket::REMOTE),
+              jsg::alloc<WebSocket>(kj::mv(webSocket)),
               Response::BodyEncoding::AUTO,
               kj::mv(signal)));
         }

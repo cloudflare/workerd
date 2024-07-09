@@ -191,15 +191,6 @@ private:
   struct PackedWebSocket;
   struct Native;
 public:
-  enum Locality {
-    // This is one end of a local WebSocketPair. Do not use IoContext::registerPendingEvent()
-    // when waiting on this WebSocket.
-    LOCAL,
-
-    // This is a remote WebSocket. Use IoContext::registerPendingEvent() when waiting.
-    REMOTE
-  };
-
   // WebSocket ready states.
   static constexpr int READY_STATE_CONNECTING = 0;
   static constexpr int READY_STATE_OPEN = 1;
@@ -250,12 +241,12 @@ public:
   // The JS WebSocket constructor needs to initiate a connection, but we need to return the
   // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
   // to the `initConnection` method.
-  WebSocket(kj::Own<kj::WebSocket> native, Locality locality);
+  WebSocket(kj::Own<kj::WebSocket> native);
 
   // The JS WebSocket constructor needs to initiate a connection, but we need to return the
   // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
   // to the `initConnection` method.
-  WebSocket(kj::String url, Locality locality);
+  WebSocket(kj::String url);
 
   // We initiate a `new WebSocket()` connection and set up a continuation that handles the
   // response once it's available. This includes assigning the native websocket and dispatching the
@@ -300,15 +291,10 @@ public:
 
   bool awaitingHibernatableRelease();
 
-  // Can only be called on one end of a WebSocketPair.
-  // Relevant for WebSocket Hibernation: `couple()` will only allow IoContext to
-  // go away if the end returned in the Response is REMOTE.
-  void setRemoteOnPair();
-
   // Should only be called on one end of a WebSocketPair.
   // Relevant for WebSocket Hibernation: the end we return in the Response must be in the
   // AwaitingAcceptanceOrCoupling state.
-  bool pairIsAwaitingCoupling();
+  bool peerIsAwaitingCoupling();
 
   HibernationPackage buildPackageForHibernation();
 
@@ -555,8 +541,8 @@ private:
   // The underlying native WebSocket (or a promise that will emplace one).
   //
   // The state transitions look like so:
-  // - Starts as `AwaitingConnection` if the `WebSocket(url, locality, ...)` ctor is used.
-  // - Starts as `AwaitingAcceptanceOrCoupling` if the `WebSocket(native, locality)` ctor is used.
+  // - Starts as `AwaitingConnection` if the `WebSocket(url ...)` ctor is used.
+  // - Starts as `AwaitingAcceptanceOrCoupling` if the `WebSocket(native)` ctor is used.
   // - Transitions from `AwaitingConnection` to `AwaitingAcceptanceOrCoupling` when the native
   //   connection is established and to `Accepted` once the read loop starts.
   // - Transitions from `AwaitingConnection` to `Released` when connection establishment fails.
@@ -599,8 +585,6 @@ private:
 
   AutoResponse autoResponseStatus;
 
-  Locality locality;
-
   // Contains a websocket and possibly some data from the WebSocketResponse headers.
   struct PackedWebSocket {
     kj::Own<kj::WebSocket> ws;
@@ -608,18 +592,18 @@ private:
     kj::Maybe<kj::String> extensions;
   };
 
-  // So that each end of a WebSocketPair can keep track of its pair.
-  // We use a weak ref to track the pair to avoid having a strong ref cycle
+  // So that each end of a WebSocketPair can keep track of its peer.
+  // We use a weak ref to track the peer to avoid having a strong ref cycle
   // between the two WebSocket instances that would cause them to leak. This
-  // can mean, however, that it's possible for one side of the pair to be garbage
+  // can mean, however, that it's possible for one of the peers to be garbage
   // collected while the other still exists. This should be fairly unusual tho.
-  kj::Maybe<kj::Own<WeakRef<WebSocket>>> maybePair;
+  kj::Maybe<kj::Own<WeakRef<WebSocket>>> peer;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(error);
   }
 
-  void setMaybePair(kj::Own<WeakRef<WebSocket>> other);
+  void setPeer(kj::Own<WeakRef<WebSocket>> peer);
 
   friend jsg::Ref<WebSocketPair> WebSocketPair::constructor();
 
