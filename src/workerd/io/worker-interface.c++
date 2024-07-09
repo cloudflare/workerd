@@ -131,11 +131,10 @@ public:
     return wrap<void>(getInner().close(code, reason));
   }
 
-  kj::Promise<void> disconnect() override {
+  void disconnect() override {
     KJ_IF_SOME(ws, this->ws.tryGet<kj::Own<kj::WebSocket>>()) {
-      return wrap<void>((ws)->disconnect());
+      return (ws)->disconnect();
     }
-    return kj::READY_NOW;
   }
 
   void abort() override {

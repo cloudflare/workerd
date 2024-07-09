@@ -36,6 +36,10 @@ public:
     return *(KJ_ASSERT_NONNULL(inner));
   }
 
+  kj::Maybe<T&> tryGetInner() {
+    return inner;
+  }
+
 private:
   kj::Own<RefcountedCanceler> canceler;
   kj::Maybe<kj::Own<T>> inner;
@@ -102,12 +106,16 @@ public:
     return impl.wrap(&kj::WebSocket::close, code, reason);
   }
 
-  kj::Promise<void> disconnect() override {
-    return impl.wrap(&kj::WebSocket::disconnect);
+  void disconnect() override {
+    KJ_IF_SOME(inner, impl.tryGetInner()) {
+      inner.disconnect();
+    }
   }
 
   void abort() override {
-    impl.getInner().abort();
+    KJ_IF_SOME(inner, impl.tryGetInner()) {
+      inner.abort();
+    }
   }
 
   kj::Promise<void> whenAborted() override {
