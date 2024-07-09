@@ -142,7 +142,7 @@ export class DurableObjectExample {
     gpuReadBuffer.unmap();
 
     device.queue.writeBuffer(
-      gpuWriteBuffer,
+      gpuReadBuffer,
       0,
       new Uint16Array([0, 1, 2, 3]),
       0,

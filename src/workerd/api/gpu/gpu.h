@@ -52,6 +52,7 @@ private:
   jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
   requestAdapter(jsg::Lock&, jsg::Optional<GPURequestAdapterOptions>);
   dawn::native::Instance instance_;
+  kj::Own<AsyncRunner> async_;
 };
 
 #define EW_WEBGPU_ISOLATE_TYPES                                                                    \

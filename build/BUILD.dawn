@@ -10,9 +10,9 @@ COPTS_UNIX = [
 # these flags are not supported by clang-cl and cause warnings there – explore enabling the
 # corresponding flags '/GX-', '/GR-' on Windows after confirming they are safe.
 COPTS = select({
-        "@platforms//os:osx": COPTS_UNIX,
-        "@platforms//os:linux": COPTS_UNIX,
-        "//conditions:default": [],
+    "@platforms//os:osx": COPTS_UNIX,
+    "@platforms//os:linux": COPTS_UNIX,
+    "//conditions:default": [],
 })
 
 py_binary(
@@ -39,17 +39,17 @@ genrule(
         "generator/templates/api_cpp_chained_struct.h",
         "generator/templates/api_cpp_print.h",
         "generator/templates/BSD_LICENSE",
-        "dawn.json",
-        "dawn_wire.json",
+        "src/dawn/dawn.json",
+        "src/dawn/dawn_wire.json",
     ],
     outs = [
         "include/dawn/webgpu_cpp.h",
         "include/dawn/webgpu_cpp_print.h",
-        "include/dawn/webgpu_cpp_chained_struct.h",
+        "include/webgpu/webgpu_cpp_chained_struct.h",
     ],
     cmd = "$(location :dawn_json_generator) " +
-          "--dawn-json $(location dawn.json) " +
-          "--wire-json $(location dawn_wire.json) " +
+          "--dawn-json $(location src/dawn/dawn.json) " +
+          "--wire-json $(location src/dawn/dawn_wire.json) " +
           "--template-dir $$(dirname $(location generator/templates/api_cpp.h)) " +
           "--targets cpp_headers " +
           "--output-dir $(RULEDIR)",
@@ -62,16 +62,17 @@ genrule(
         "generator/templates/api.h",
         "generator/templates/dawn_proc_table.h",
         "generator/templates/BSD_LICENSE",
-        "dawn.json",
-        "dawn_wire.json",
+        "generator/templates/dawn/wire/client/api.h",
+        "src/dawn/dawn.json",
+        "src/dawn/dawn_wire.json",
     ],
     outs = [
         "include/dawn/webgpu.h",
         "include/dawn/dawn_proc_table.h",
     ],
     cmd = "$(location :dawn_json_generator) " +
-          "--dawn-json $(location dawn.json) " +
-          "--wire-json $(location dawn_wire.json) " +
+          "--dawn-json $(location src/dawn/dawn.json) " +
+          "--wire-json $(location src/dawn/dawn_wire.json) " +
           "--template-dir $$(dirname $(location generator/templates/api.h)) " +
           "--targets headers " +
           "--output-dir $(RULEDIR)",
@@ -81,19 +82,19 @@ genrule(
 genrule(
     name = "generate_proc",
     srcs = [
-        "dawn.json",
-        "dawn_wire.json",
+        "src/dawn/dawn.json",
+        "src/dawn/dawn_wire.json",
         "generator/templates/BSD_LICENSE",
-        "generator/templates/dawn_proc.c",
+        "generator/templates/dawn_proc.cpp",
         "generator/templates/dawn_thread_dispatch_proc.cpp",
     ],
     outs = [
-        "src/dawn/dawn_proc.c",
+        "src/dawn/dawn_proc.cpp",
         "src/dawn/dawn_thread_dispatch_proc.cpp",
     ],
     cmd = "$(location :dawn_json_generator) " +
-          "--dawn-json $(location dawn.json) " +
-          "--wire-json $(location dawn_wire.json) " +
+          "--dawn-json $(location src/dawn/dawn.json) " +
+          "--wire-json $(location src/dawn/dawn_wire.json) " +
           "--template-dir $$(dirname $(location generator/templates/BSD_LICENSE)) " +
           "--targets proc " +
           "--output-dir $(RULEDIR)",
@@ -103,8 +104,8 @@ genrule(
 genrule(
     name = "generate_wire",
     srcs = [
-        "dawn.json",
-        "dawn_wire.json",
+        "src/dawn/dawn.json",
+        "src/dawn/dawn_wire.json",
         "generator/templates/BSD_LICENSE",
         "generator/templates/dawn/wire/ObjectType.h",
         "generator/templates/dawn/wire/WireCmd.h",
@@ -134,8 +135,8 @@ genrule(
         "src/dawn/wire/server/ServerPrototypes_autogen.inc",
     ],
     cmd = "$(location :dawn_json_generator) " +
-          "--dawn-json $(location dawn.json) " +
-          "--wire-json $(location dawn_wire.json) " +
+          "--dawn-json $(location src/dawn/dawn.json) " +
+          "--wire-json $(location src/dawn/dawn_wire.json) " +
           "--template-dir $$(dirname $(location generator/templates/BSD_LICENSE)) " +
           "--targets wire " +
           "--output-dir $(RULEDIR)",
@@ -143,30 +144,10 @@ genrule(
 )
 
 genrule(
-    name = "generate_dawn_cpp",
-    srcs = [
-        "dawn.json",
-        "dawn_wire.json",
-        "generator/templates/BSD_LICENSE",
-        "generator/templates/api_cpp.cpp",
-    ],
-    outs = [
-        "src/dawn/webgpu_cpp.cpp",
-    ],
-    cmd = "$(location :dawn_json_generator) " +
-          "--dawn-json $(location dawn.json) " +
-          "--wire-json $(location dawn_wire.json) " +
-          "--template-dir $$(dirname $(location generator/templates/BSD_LICENSE)) " +
-          "--targets cpp " +
-          "--output-dir $(RULEDIR)",
-    tools = [":dawn_json_generator"],
-)
-
-genrule(
     name = "generate_utils",
     srcs = [
-        "dawn.json",
-        "dawn_wire.json",
+        "src/dawn/dawn.json",
+        "src/dawn/dawn_wire.json",
         "generator/templates/BSD_LICENSE",
         "generator/templates/dawn/native/ChainUtils.cpp",
         "generator/templates/dawn/native/ChainUtils.h",
@@ -202,8 +183,8 @@ genrule(
         "src/dawn/native/wgpu_structs_autogen.h",
     ],
     cmd = "$(location :dawn_json_generator) " +
-          "--dawn-json $(location dawn.json) " +
-          "--wire-json $(location dawn_wire.json) " +
+          "--dawn-json $(location src/dawn/dawn.json) " +
+          "--wire-json $(location src/dawn/dawn_wire.json) " +
           "--template-dir $$(dirname $(location generator/templates/BSD_LICENSE)) " +
           "--targets native_utils " +
           "--output-dir $(RULEDIR)",
@@ -285,7 +266,6 @@ genrule(
 )
 
 DAWN_HDRS = [
-    "include/dawn/EnumClassBitmasks.h",
     "include/dawn/dawn_proc.h",
     "include/dawn/dawn_thread_dispatch_proc.h",
     "include/dawn/native/D3D12Backend.h",
@@ -297,31 +277,35 @@ DAWN_HDRS = [
     "include/dawn/native/dawn_native_export.h",
     "include/dawn/platform/DawnPlatform.h",
     "include/dawn/platform/dawn_platform_export.h",
-    "include/dawn/webgpu_cpp_chained_struct.h",
+    "include/webgpu/webgpu_cpp_chained_struct.h",
     "include/dawn/wire/Wire.h",
     "include/dawn/wire/WireClient.h",
     "include/dawn/wire/WireServer.h",
     "include/dawn/wire/dawn_wire_export.h",
     "include/webgpu/webgpu.h",
     "include/webgpu/webgpu_cpp.h",
+    "include/webgpu/webgpu_enum_class_bitmasks.h",
     "src/dawn/native/Features_autogen.inl",
     "src/dawn/native/ChainUtilsImpl.inl",
 ]
 
 DAWN_COMMON_SRCS = [
     # From dawn/src/dawn/common/BUILD.gn:common
+    "src/dawn/common/AlignedAlloc.cpp",
+    "src/dawn/common/AlignedAlloc.h",
     "src/dawn/common/Alloc.h",
     "src/dawn/common/Assert.cpp",
     "src/dawn/common/Assert.h",
     "src/dawn/common/BitSetIterator.h",
     "src/dawn/common/Compiler.h",
-    "src/dawn/common/ConcurrentCache.h",
     "src/dawn/common/Constants.h",
     "src/dawn/common/ContentLessObjectCache.h",
     "src/dawn/common/ContentLessObjectCacheable.h",
     "src/dawn/common/CoreFoundationRef.h",
     "src/dawn/common/DynamicLib.cpp",
     "src/dawn/common/DynamicLib.h",
+    "src/dawn/common/Enumerator.h",
+    "src/dawn/common/FutureUtils.cpp",
     "src/dawn/common/FutureUtils.h",
     "src/dawn/common/GPUInfo.cpp",
     "src/dawn/common/GPUInfo.h",
@@ -330,6 +314,7 @@ DAWN_COMMON_SRCS = [
     "src/dawn/common/LinkedList.h",
     "src/dawn/common/Log.cpp",
     "src/dawn/common/Log.h",
+    "src/dawn/common/MatchVariant.h",
     "src/dawn/common/Math.cpp",
     "src/dawn/common/Math.h",
     "src/dawn/common/Mutex.cpp",
@@ -337,10 +322,12 @@ DAWN_COMMON_SRCS = [
     "src/dawn/common/MutexProtected.h",
     "src/dawn/common/NSRef.h",
     "src/dawn/common/NonCopyable.h",
+    "src/dawn/common/NonMovable.h",
     "src/dawn/common/Numeric.h",
     "src/dawn/common/PlacementAllocated.h",
     "src/dawn/common/Platform.h",
     "src/dawn/common/Preprocessor.h",
+    "src/dawn/common/Range.h",
     "src/dawn/common/Ref.h",
     "src/dawn/common/RefBase.h",
     "src/dawn/common/RefCounted.cpp",
@@ -352,7 +339,7 @@ DAWN_COMMON_SRCS = [
     "src/dawn/common/SerialStorage.h",
     "src/dawn/common/SlabAllocator.cpp",
     "src/dawn/common/SlabAllocator.h",
-    "src/dawn/common/StackContainer.h",
+    "src/dawn/common/StackAllocated.h",
     "src/dawn/common/SystemUtils.cpp",
     "src/dawn/common/SystemUtils.h",
     "src/dawn/common/TypeTraits.h",
@@ -361,6 +348,7 @@ DAWN_COMMON_SRCS = [
     "src/dawn/common/WeakRef.h",
     "src/dawn/common/WeakRefSupport.cpp",
     "src/dawn/common/WeakRefSupport.h",
+    "src/dawn/common/WGSLFeatureMapping.h",
     "src/dawn/common/ityp_array.h",
     "src/dawn/common/ityp_bitset.h",
     "src/dawn/common/ityp_span.h",
@@ -368,6 +356,9 @@ DAWN_COMMON_SRCS = [
     "src/dawn/common/ityp_vector.h",
     "src/dawn/common/vulkan_platform.h",
     "src/dawn/common/xlib_with_undefs.h",
+    "src/dawn/partition_alloc/partition_alloc/pointers/raw_ptr_exclusion.h",
+    "src/dawn/partition_alloc/partition_alloc/pointers/raw_ptr.h",
+    "src/dawn/partition_alloc/partition_alloc/pointers/raw_ref.h",
     # Generated files in dawn/src/dawn/common/BUILD.gn
     "src/dawn/common/GPUInfo_autogen.cpp",
     "src/dawn/common/GPUInfo_autogen.h",
@@ -375,7 +366,7 @@ DAWN_COMMON_SRCS = [
     # Generated files
     "include/dawn/webgpu.h",
     "include/dawn/webgpu_cpp.h",
-    "include/dawn/webgpu_cpp_chained_struct.h",
+    "include/webgpu/webgpu_cpp_chained_struct.h",
     "include/dawn/dawn_proc_table.h",
 ]
 
@@ -449,8 +440,8 @@ DAWN_SRCS = DAWN_COMMON_SRCS + [
     "src/dawn/native/ComputePipeline.h",
     "src/dawn/native/CopyTextureForBrowserHelper.cpp",
     "src/dawn/native/CopyTextureForBrowserHelper.h",
-    "src/dawn/native/CreatePipelineAsyncTask.cpp",
-    "src/dawn/native/CreatePipelineAsyncTask.h",
+    "src/dawn/native/CreatePipelineAsyncEvent.cpp",
+    "src/dawn/native/CreatePipelineAsyncEvent.h",
     "src/dawn/native/Device.cpp",
     "src/dawn/native/Device.h",
     "src/dawn/native/DynamicUploader.cpp",
@@ -467,6 +458,7 @@ DAWN_SRCS = DAWN_COMMON_SRCS + [
     "src/dawn/native/ErrorInjector.h",
     "src/dawn/native/ErrorScope.cpp",
     "src/dawn/native/ErrorScope.h",
+    "src/dawn/native/ErrorSink.h",
     "src/dawn/native/EventManager.cpp",
     "src/dawn/native/EventManager.h",
     "src/dawn/native/ExecutionQueue.cpp",
@@ -517,7 +509,6 @@ DAWN_SRCS = DAWN_COMMON_SRCS + [
     "src/dawn/native/QuerySet.h",
     "src/dawn/native/Queue.cpp",
     "src/dawn/native/Queue.h",
-    "src/dawn/native/RefCountedWithExternalCount.cpp",
     "src/dawn/native/RefCountedWithExternalCount.h",
     "src/dawn/native/RenderBundle.cpp",
     "src/dawn/native/RenderBundle.h",
@@ -527,6 +518,8 @@ DAWN_SRCS = DAWN_COMMON_SRCS + [
     "src/dawn/native/RenderEncoderBase.h",
     "src/dawn/native/RenderPassEncoder.cpp",
     "src/dawn/native/RenderPassEncoder.h",
+    "src/dawn/native/RenderPassWorkaroundsHelper.cpp",
+    "src/dawn/native/RenderPassWorkaroundsHelper.h",
     "src/dawn/native/RenderPipeline.cpp",
     "src/dawn/native/RenderPipeline.h",
     "src/dawn/native/ResourceHeap.h",
@@ -542,8 +535,12 @@ DAWN_SRCS = DAWN_COMMON_SRCS + [
     "src/dawn/native/Serializable.h",
     "src/dawn/native/ShaderModule.cpp",
     "src/dawn/native/ShaderModule.h",
+    "src/dawn/native/SharedBufferMemory.cpp",
+    "src/dawn/native/SharedBufferMemory.h",
     "src/dawn/native/SharedFence.cpp",
     "src/dawn/native/SharedFence.h",
+    "src/dawn/native/SharedResourceMemory.cpp",
+    "src/dawn/native/SharedResourceMemory.h",
     "src/dawn/native/SharedTextureMemory.cpp",
     "src/dawn/native/SharedTextureMemory.h",
     "src/dawn/native/Subresource.cpp",
@@ -630,6 +627,8 @@ DAWN_METAL_SRCS = [
     "src/dawn/native/metal/Forward.h",
     "src/dawn/native/metal/PipelineLayoutMTL.h",
     "src/dawn/native/metal/PipelineLayoutMTL.mm",
+    "src/dawn/native/metal/PhysicalDeviceMTL.mm",
+    "src/dawn/native/metal/PhysicalDeviceMTL.h",
     "src/dawn/native/metal/QuerySetMTL.h",
     "src/dawn/native/metal/QuerySetMTL.mm",
     "src/dawn/native/metal/QueueMTL.h",
@@ -673,15 +672,15 @@ DAWN_DIRECTX_SRCS = [
     "src/dawn/native/d3d/D3DError.h",
     "src/dawn/native/d3d/DeviceD3D.cpp",
     "src/dawn/native/d3d/DeviceD3D.h",
-    "src/dawn/native/d3d/ExternalImageDXGIImpl.cpp",
-    "src/dawn/native/d3d/ExternalImageDXGIImpl.h",
-    "src/dawn/native/d3d/Fence.cpp",
-    "src/dawn/native/d3d/Fence.h",
     "src/dawn/native/d3d/Forward.h",
+    "src/dawn/native/d3d/KeyedMutex.cpp",
+    "src/dawn/native/d3d/KeyedMutex.h",
     "src/dawn/native/d3d/PhysicalDeviceD3D.cpp",
     "src/dawn/native/d3d/PhysicalDeviceD3D.h",
     "src/dawn/native/d3d/PlatformFunctions.cpp",
     "src/dawn/native/d3d/PlatformFunctions.h",
+    "src/dawn/native/d3d/QueueD3D.cpp",
+    "src/dawn/native/d3d/QueueD3D.h",
     "src/dawn/native/d3d/ShaderUtils.cpp",
     "src/dawn/native/d3d/ShaderUtils.h",
     "src/dawn/native/d3d/SharedFenceD3D.cpp",
@@ -706,8 +705,6 @@ DAWN_DIRECTX_SRCS = [
     "src/dawn/native/d3d12/BufferD3D12.h",
     "src/dawn/native/d3d12/CPUDescriptorHeapAllocationD3D12.cpp",
     "src/dawn/native/d3d12/CPUDescriptorHeapAllocationD3D12.h",
-    "src/dawn/native/d3d12/CommandAllocatorManager.cpp",
-    "src/dawn/native/d3d12/CommandAllocatorManager.h",
     "src/dawn/native/d3d12/CommandBufferD3D12.cpp",
     "src/dawn/native/d3d12/CommandBufferD3D12.h",
     "src/dawn/native/d3d12/CommandRecordingContext.cpp",
@@ -718,8 +715,6 @@ DAWN_DIRECTX_SRCS = [
     "src/dawn/native/d3d12/D3D12Info.h",
     "src/dawn/native/d3d12/DeviceD3D12.cpp",
     "src/dawn/native/d3d12/DeviceD3D12.h",
-    "src/dawn/native/d3d12/FenceD3D12.cpp",
-    "src/dawn/native/d3d12/FenceD3D12.h",
     "src/dawn/native/d3d12/Forward.h",
     "src/dawn/native/d3d12/GPUDescriptorHeapAllocationD3D12.cpp",
     "src/dawn/native/d3d12/GPUDescriptorHeapAllocationD3D12.h",
@@ -758,6 +753,8 @@ DAWN_DIRECTX_SRCS = [
     "src/dawn/native/d3d12/ShaderModuleD3D12.h",
     "src/dawn/native/d3d12/ShaderVisibleDescriptorAllocatorD3D12.cpp",
     "src/dawn/native/d3d12/ShaderVisibleDescriptorAllocatorD3D12.h",
+    "src/dawn/native/d3d12/SharedBufferMemoryD3D12.cpp",
+    "src/dawn/native/d3d12/SharedBufferMemoryD3D12.h",
     "src/dawn/native/d3d12/SharedFenceD3D12.cpp",
     "src/dawn/native/d3d12/SharedFenceD3D12.h",
     "src/dawn/native/d3d12/SharedTextureMemoryD3D12.cpp",
@@ -816,10 +813,13 @@ DAWN_VULKAN_SRCS = [
     "src/dawn/native/vulkan/QuerySetVk.h",
     "src/dawn/native/vulkan/QueueVk.cpp",
     "src/dawn/native/vulkan/QueueVk.h",
+    "src/dawn/native/vulkan/RefCountedVkHandle.h",
     "src/dawn/native/vulkan/RenderPassCache.cpp",
     "src/dawn/native/vulkan/RenderPassCache.h",
     "src/dawn/native/vulkan/RenderPipelineVk.cpp",
     "src/dawn/native/vulkan/RenderPipelineVk.h",
+    "src/dawn/native/vulkan/ResolveTextureLoadingUtilsVk.cpp",
+    "src/dawn/native/vulkan/ResolveTextureLoadingUtilsVk.h",
     "src/dawn/native/vulkan/ResourceHeapVk.cpp",
     "src/dawn/native/vulkan/ResourceHeapVk.h",
     "src/dawn/native/vulkan/ResourceMemoryAllocatorVk.cpp",
@@ -828,6 +828,10 @@ DAWN_VULKAN_SRCS = [
     "src/dawn/native/vulkan/SamplerVk.h",
     "src/dawn/native/vulkan/ShaderModuleVk.cpp",
     "src/dawn/native/vulkan/ShaderModuleVk.h",
+    "src/dawn/native/vulkan/SharedFenceVk.cpp",
+    "src/dawn/native/vulkan/SharedFenceVk.h",
+    "src/dawn/native/vulkan/SharedTextureMemoryVk.cpp",
+    "src/dawn/native/vulkan/SharedTextureMemoryVk.h",
     "src/dawn/native/vulkan/SwapChainVk.cpp",
     "src/dawn/native/vulkan/SwapChainVk.h",
     "src/dawn/native/vulkan/TextureVk.cpp",
@@ -880,6 +884,7 @@ objc_library(
     includes = [
         "include",
         "src",
+        "src/dawn/partition_alloc",
     ],
     sdk_frameworks = [
         "IOKit",
@@ -896,6 +901,8 @@ objc_library(
         # Dawn specifically depends on dawn/src/tint:libtint
         ":tint",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
     ],
 )
 
@@ -907,6 +914,7 @@ cc_library(
     includes = [
         "include",
         "src",
+        "src/dawn/partition_alloc",
     ],
     linkopts = ["dxguid.lib"],
     local_defines = [
@@ -923,6 +931,8 @@ cc_library(
         # Dawn specifically depends on dawn/src/tint:libtint
         ":tint",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
     ],
 )
 
@@ -939,6 +949,7 @@ cc_library(
     includes = [
         "include",
         "src",
+        "src/dawn/partition_alloc",
     ],
     local_defines = [
         # From dawn/src/dawn/common/BUILD.gn:internal_config
@@ -953,6 +964,8 @@ cc_library(
         # Dawn specifically depends on dawn/src/tint:libtint
         ":tint",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@vulkan_headers",
         "@vulkan_utility_libraries",
     ],
@@ -963,10 +976,8 @@ cc_library(
     srcs = [
         # From dawn/src/dawn/BUILD.gn#cpp
         "include/dawn/webgpu.h",
-        "include/dawn/EnumClassBitmasks.h",
         "include/dawn/webgpu_cpp.h",
-        "include/dawn/webgpu_cpp_chained_struct.h",
-        "src/dawn/webgpu_cpp.cpp",
+        "include/webgpu/webgpu_cpp_chained_struct.h",
     ],
     copts = COPTS,
     includes = [
@@ -983,12 +994,15 @@ cc_library(
         "include/dawn/dawn_proc.h",
         "include/dawn/dawn_thread_dispatch_proc.h",
         "include/dawn/dawn_proc_table.h",
-        "src/dawn/dawn_proc.c",
+        "src/dawn/common/Compiler.h",
+        "src/dawn/common/Log.h",
+        "src/dawn/dawn_proc.cpp",
         "src/dawn/dawn_thread_dispatch_proc.cpp",
     ],
     copts = COPTS,
     includes = [
         "include",
+        "src",
     ],
     visibility = ["//visibility:public"],
 )

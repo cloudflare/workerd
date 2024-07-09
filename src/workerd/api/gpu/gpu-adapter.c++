@@ -4,6 +4,7 @@
 
 #include "gpu-adapter.h"
 #include "gpu-adapter-info.h"
+#include "gpu-device.h"
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
 #include "workerd/jsg/exception.h"
@@ -64,6 +65,19 @@ GPUAdapter::requestAdapterInfo(jsg::Lock& js, jsg::Optional<kj::Array<kj::String
   return js.resolvedPromise(kj::mv(info));
 }
 
+kj::String parseDeviceLostReason(wgpu::DeviceLostReason reason) {
+  switch (reason) {
+  case wgpu::DeviceLostReason::Destroyed:
+    return kj::str("destroyed");
+  case wgpu::DeviceLostReason::Unknown:
+    return kj::str("unknown");
+  case wgpu::DeviceLostReason::InstanceDropped:
+    return kj::str("dropped");
+  case wgpu::DeviceLostReason::FailedCreation:
+    return kj::str("failed_creation");
+  }
+}
+
 jsg::Promise<jsg::Ref<GPUDevice>>
 GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> descriptor) {
   wgpu::DeviceDescriptor desc{};
@@ -110,7 +124,21 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
 
   KJ_ASSERT(userData.requestEnded);
 
-  jsg::Ref<GPUDevice> gpuDevice = jsg::alloc<GPUDevice>(js, kj::mv(userData.device));
+  auto dLostContext = kj::heap<GPUDeviceLostContext>(js);
+  desc.SetDeviceLostCallback(
+      wgpu::CallbackMode::AllowSpontaneous,
+      [](const wgpu::Device&, wgpu::DeviceLostReason reason, const char* message,
+         GPUDeviceLostContext* device_lost_ctx) {
+        auto r = parseDeviceLostReason(reason);
+        if (device_lost_ctx->lost_promise_fulfiller_->isWaiting()) {
+          auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
+          device_lost_ctx->lost_promise_fulfiller_->fulfill(kj::mv(lostInfo));
+        }
+      },
+      dLostContext.get());
+
+  jsg::Ref<GPUDevice> gpuDevice =
+      jsg::alloc<GPUDevice>(js, kj::mv(userData.device), kj::addRef(*async_), kj::mv(dLostContext));
   return js.resolvedPromise(kj::mv(gpuDevice));
 }
 

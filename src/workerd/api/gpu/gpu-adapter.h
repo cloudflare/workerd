@@ -17,7 +17,8 @@ namespace workerd::api::gpu {
 
 class GPUAdapter : public jsg::Object {
 public:
-  explicit GPUAdapter(dawn::native::Adapter a) : adapter_(a){};
+  explicit GPUAdapter(dawn::native::Adapter a, kj::Own<AsyncRunner> async)
+      : adapter_(a), async_(kj::mv(async)){};
   JSG_RESOURCE_TYPE(GPUAdapter) {
     JSG_METHOD(requestDevice);
     JSG_METHOD(requestAdapterInfo);
@@ -28,6 +29,7 @@ public:
 private:
   jsg::Promise<jsg::Ref<GPUDevice>> requestDevice(jsg::Lock&, jsg::Optional<GPUDeviceDescriptor>);
   dawn::native::Adapter adapter_;
+  kj::Own<AsyncRunner> async_;
   jsg::Promise<jsg::Ref<GPUAdapterInfo>>
   requestAdapterInfo(jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints);
   jsg::Ref<GPUSupportedFeatures> getFeatures();

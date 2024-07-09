@@ -34,7 +34,7 @@ void AsyncRunner::QueueTick() {
       [this](jsg::Lock& js) mutable {
         this->tick_queued_ = false;
         if (this->count_ > 0) {
-          this->device_.Tick();
+          this->instance_.ProcessEvents();
           QueueTick();
         }
       },
