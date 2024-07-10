@@ -144,32 +144,32 @@ test("generateDefinitions: only includes referenced types from roots", () => {
   initAsReferencedType(20, prop.initType());
 
   const referencedInterfaces = Array.from(Array(19))
-    .map((_, i) => `export interface Thing${i} {\n}`)
+    .map((_, i) => `interface Thing${i} {\n}`)
     .join("\n");
-  const nodes = generateDefinitions(root);
+  const { nodes } = generateDefinitions(root);
   assert.strictEqual(
     printNodeList(nodes),
     `${referencedInterfaces}
-export declare abstract class Thing19 {
+declare abstract class Thing19 {
 }
-export interface Root1 {
+interface Root1 {
     promise: Promise<Thing0>;
     structure: Thing1;
     array: Thing2[];
     maybe?: Thing3;
     dict: Record<Thing4, Thing5>;
     variants: Thing6 | Thing7 | Thing8;
-    function: (param0: Thing9) => Thing10;
+    function: (arg0: Thing9) => Thing10;
 }
-export declare abstract class Nested {
+declare abstract class Nested {
     nestedProp: Thing11;
 }
-export declare class Root2 extends Thing19 {
-    constructor(param0: Thing14);
-    method(param0: Thing12): Thing13;
+declare class Root2 extends Thing19 {
+    constructor(arg0: Thing14);
+    method(arg0: Thing12): Thing13;
     Nested: typeof Nested;
-    [Symbol.iterator](param0: Thing15): Thing16;
-    [Symbol.asyncIterator](param0: Thing17): Thing18;
+    [Symbol.iterator](arg0: Thing15): Thing16;
+    [Symbol.asyncIterator](arg0: Thing17): Thing18;
 }
 `
   );
@@ -229,23 +229,23 @@ test("generateDefinitions: only generates classes if required", () => {
   // Thing1 should be a class as its inherited
   initAsReferencedType(1, root4.initExtends());
 
-  const nodes = generateDefinitions(root);
+  const { nodes } = generateDefinitions(root);
   assert.strictEqual(
     printNodeList(nodes),
-    `export declare abstract class Thing0 {
+    `declare abstract class Thing0 {
 }
-export declare abstract class Thing1 {
+declare abstract class Thing1 {
 }
-export interface Root1 {
+interface Root1 {
     Thing0: typeof Thing0;
 }
-export declare class Root2 {
+declare class Root2 {
     constructor();
 }
-export declare abstract class Root3 {
+declare abstract class Root3 {
     static method(): void;
 }
-export interface Root4 extends Thing1 {
+interface Root4 extends Thing1 {
 }
 `
   );
