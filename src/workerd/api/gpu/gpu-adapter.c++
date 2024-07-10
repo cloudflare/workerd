@@ -59,10 +59,10 @@ void setLimit(wgpu::RequiredLimits& limits, kj::StringPtr name, unsigned long lo
 jsg::Promise<jsg::Ref<GPUAdapterInfo>>
 GPUAdapter::requestAdapterInfo(jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints) {
 
-  WGPUAdapterProperties adapterProperties = {};
-  adapter_.GetProperties(&adapterProperties);
-  auto info = jsg::alloc<GPUAdapterInfo>(adapterProperties);
-  return js.resolvedPromise(kj::mv(info));
+  wgpu::AdapterInfo info = {};
+  adapter_.GetInfo(&info);
+  auto gpuInfo = jsg::alloc<GPUAdapterInfo>(kj::mv(info));
+  return js.resolvedPromise(kj::mv(gpuInfo));
 }
 
 kj::String parseDeviceLostReason(wgpu::DeviceLostReason reason) {
@@ -105,6 +105,19 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
     }
   }
 
+  using DeviceLostContext = AsyncContext<jsg::Ref<GPUDeviceLostInfo>>;
+  auto ctx = kj::refcounted<DeviceLostContext>(js, kj::addRef(*async_));
+  desc.SetDeviceLostCallback(
+      wgpu::CallbackMode::AllowSpontaneous,
+      [ctx = kj::addRef(*ctx)](const wgpu::Device&, wgpu::DeviceLostReason reason,
+                               const char* message) mutable {
+        auto r = parseDeviceLostReason(reason);
+        if (ctx->fulfiller_->isWaiting()) {
+          auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
+          ctx->fulfiller_->fulfill(kj::mv(lostInfo));
+        }
+      });
+
   struct UserData {
     wgpu::Device device = nullptr;
     bool requestEnded = false;
@@ -124,21 +137,8 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
 
   KJ_ASSERT(userData.requestEnded);
 
-  auto dLostContext = kj::heap<GPUDeviceLostContext>(js);
-  desc.SetDeviceLostCallback(
-      wgpu::CallbackMode::AllowSpontaneous,
-      [](const wgpu::Device&, wgpu::DeviceLostReason reason, const char* message,
-         GPUDeviceLostContext* device_lost_ctx) {
-        auto r = parseDeviceLostReason(reason);
-        if (device_lost_ctx->lost_promise_fulfiller_->isWaiting()) {
-          auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
-          device_lost_ctx->lost_promise_fulfiller_->fulfill(kj::mv(lostInfo));
-        }
-      },
-      dLostContext.get());
-
   jsg::Ref<GPUDevice> gpuDevice =
-      jsg::alloc<GPUDevice>(js, kj::mv(userData.device), kj::addRef(*async_), kj::mv(dLostContext));
+      jsg::alloc<GPUDevice>(js, kj::mv(userData.device), kj::addRef(*async_), kj::mv(ctx));
   return js.resolvedPromise(kj::mv(gpuDevice));
 }
 

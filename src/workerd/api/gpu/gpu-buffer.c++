@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-buffer.h"
-#include "workerd/io/io-context.h"
 #include "workerd/jsg/exception.h"
 #include "workerd/jsg/jsg.h"
 
@@ -115,60 +114,42 @@ jsg::Promise<void> GPUBuffer::mapAsync(jsg::Lock& js, GPUFlagsConstant mode,
   uint64_t o = offset.orDefault(0);
   uint64_t s = size.orDefault(desc_.size - o);
 
-  struct Context {
-    kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-    State& state;
-    AsyncTask task;
-  };
-  auto paf = kj::newPromiseAndFulfiller<void>();
   // This context object will hold information for the callback, including the
-  // fullfiller to signal the caller with the result, and an async task that
+  // fulfiller to signal the caller with the result, and an async task that
   // will ensure the device's Tick() function is called periodically. It will be
   // deallocated at the end of the callback function.
-  auto ctx = new Context{kj::mv(paf.fulfiller), state_, AsyncTask(kj::addRef(*async_))};
+  using MapAsyncContext = AsyncContext<void>;
+  auto ctx = kj::heap<MapAsyncContext>(js, kj::addRef(*async_));
+  auto promise = kj::mv(ctx->promise_);
 
   state_ = State::MappingPending;
 
-  buffer_.MapAsync(
-      md, o, s,
-      [](WGPUBufferMapAsyncStatus status, void* userdata) {
-        // Note: this is invoked outside the JS isolate lock
-        auto c = std::unique_ptr<Context>(static_cast<Context*>(userdata));
-        c->state = State::Unmapped;
+  buffer_.MapAsync(md, o, s, wgpu::CallbackMode::AllowProcessEvents,
+                   [ctx = kj::mv(ctx), this](wgpu::MapAsyncStatus status, char const*) mutable {
+                     // Note: this is invoked outside the JS isolate lock
+                     state_ = State::Unmapped;
 
-        JSG_REQUIRE(c->fulfiller->isWaiting(), TypeError, "async operation has been canceled");
+                     JSG_REQUIRE(ctx->fulfiller_->isWaiting(), TypeError,
+                                 "async operation has been canceled");
 
-        switch (status) {
-        case WGPUBufferMapAsyncStatus_Force32:
-          KJ_UNREACHABLE
-        case WGPUBufferMapAsyncStatus_Success:
-          c->fulfiller->fulfill();
-          c->state = State::Mapped;
-          break;
-        case WGPUBufferMapAsyncStatus_OffsetOutOfRange:
-        case WGPUBufferMapAsyncStatus_SizeOutOfRange:
-        case WGPUBufferMapAsyncStatus_ValidationError:
-          c->fulfiller->reject(
-              JSG_KJ_EXCEPTION(FAILED, TypeError, "validation failed or out of range"));
-          break;
-        case WGPUBufferMapAsyncStatus_UnmappedBeforeCallback:
-        case WGPUBufferMapAsyncStatus_DestroyedBeforeCallback:
-          c->fulfiller->reject(
-              JSG_KJ_EXCEPTION(FAILED, TypeError, "unmapped or destroyed before callback"));
-          break;
-        case WGPUBufferMapAsyncStatus_Unknown:
-        case WGPUBufferMapAsyncStatus_DeviceLost:
-        case WGPUBufferMapAsyncStatus_InstanceDropped:
-          c->fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, TypeError, "unknown error or device lost"));
-          break;
-        case WGPUBufferMapAsyncStatus_MappingAlreadyPending:
-          break;
-        }
-      },
-      ctx);
+                     switch (status) {
+                     case wgpu::MapAsyncStatus::Success:
+                       ctx->fulfiller_->fulfill();
+                       state_ = State::Mapped;
+                       break;
+                     case wgpu::MapAsyncStatus::Aborted:
+                       ctx->fulfiller_->reject(JSG_KJ_EXCEPTION(FAILED, TypeError, "aborted"));
+                       break;
+                     case wgpu::MapAsyncStatus::Unknown:
+                     case wgpu::MapAsyncStatus::Error:
+                     case wgpu::MapAsyncStatus::InstanceDropped:
+                       ctx->fulfiller_->reject(
+                           JSG_KJ_EXCEPTION(FAILED, TypeError, "unknown error or device lost"));
+                       break;
+                     }
+                   });
 
-  auto& context = IoContext::current();
-  return context.awaitIo(js, kj::mv(paf.promise));
+  return promise;
 }
 
 } // namespace workerd::api::gpu

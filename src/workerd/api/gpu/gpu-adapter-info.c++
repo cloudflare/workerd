@@ -3,12 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-adapter-info.h"
-#include "workerd/jsg/exception.h"
 
 namespace workerd::api::gpu {
 
-GPUAdapterInfo::GPUAdapterInfo(WGPUAdapterProperties properties)
-    : vendor_(kj::str(properties.vendorName)), architecture_(kj::str(properties.architecture)),
-      device_(kj::str(properties.name)), description_(kj::str(properties.driverDescription)) {}
+GPUAdapterInfo::GPUAdapterInfo(wgpu::AdapterInfo info)
+    : vendor_(kj::str(info.vendor)), architecture_(kj::str(info.architecture)),
+      device_(kj::str(info.device)), description_(kj::str(info.description)) {}
 
 } // namespace workerd::api::gpu
