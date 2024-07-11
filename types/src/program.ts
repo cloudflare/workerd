@@ -15,10 +15,13 @@ const defaultCompilerOpts = ts.getDefaultCompilerOptions();
 export function createMemoryProgram(
   sources: SourcesMap,
   host?: ts.CompilerHost,
-  compilerOpts = defaultCompilerOpts
+  compilerOpts = defaultCompilerOpts,
+  // Provide additional lib files to TypeScript. These should all be prefixed with
+  // `/node_modules/typescript/lib` (e.g. `/node_modules/typescript/lib/lib.esnext.d.ts`)
+  lib?: SourcesMap
 ): ts.Program {
   const sourceFiles = new Map<string, ts.SourceFile>();
-  for (const [sourcePath, source] of sources) {
+  for (const [sourcePath, source] of [...sources, ...(lib ?? [])]) {
     const sourceFile = ts.createSourceFile(
       sourcePath,
       source,
@@ -39,17 +42,20 @@ export function createMemoryProgram(
     getDefaultLibFileName(_options: ts.CompilerOptions): string {
       return "";
     },
+    getDefaultLibLocation() {
+      return "/node_modules/typescript/lib";
+    },
     getNewLine(): string {
       return "\n";
     },
     useCaseSensitiveFileNames(): boolean {
       return true;
     },
-    fileExists(_fileName: string): boolean {
-      return true;
+    fileExists(fileName: string): boolean {
+      return sourceFiles.has(fileName);
     },
     readFile(_path: string): string | undefined {
-      return undefined;
+      assert.fail("readFile() not implemented");
     },
     writeFile(
       _path: string,
