@@ -1,0 +1,4 @@
+exports_files([
+    "helloworld/config.capnp",
+    "helloworld/worker.js",
+])

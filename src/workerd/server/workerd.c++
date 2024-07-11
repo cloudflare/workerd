@@ -635,7 +635,7 @@ public:
       KJ_ASSERT(size > sizeof(COMPILED_MAGIC_SUFFIX) + sizeof(uint64_t));
       kj::byte magic[sizeof(COMPILED_MAGIC_SUFFIX)]{};
       exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX), magic);
-      if (memcmp(magic, COMPILED_MAGIC_SUFFIX, sizeof(COMPILED_MAGIC_SUFFIX)) == 0) {
+      if (kj::arrayPtr(magic) == kj::arrayPtr(COMPILED_MAGIC_SUFFIX).asBytes()) {
         // Oh! It appears we are running a compiled binary, it has a config appended to the end.
         uint64_t configSize;
         exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX) - sizeof(uint64_t),

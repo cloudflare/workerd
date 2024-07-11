@@ -110,8 +110,8 @@ wd_cc_library(
     }),
     visibility = ["//visibility:public"],
     deps = [
-        ":alarm-scheduler",
         ":actor-id-impl",
+        ":alarm-scheduler",
         ":workerd_capnp",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:pyodide",
@@ -136,6 +136,24 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
     deps = [
         ":workerd_capnp",
+    ],
+)
+
+sh_test(
+    name = "helloworld_compile_test",
+    size = "small",
+    srcs = ["tests/compile-tests/compile-test.sh"],
+    args = [
+        "$(location :workerd)",
+        "$(location //samples:helloworld/config.capnp)",
+        "8080",
+        "$(location tests/compile-tests/compile-helloworld-test.ok)",
+    ],
+    data = [
+        "tests/compile-tests/compile-helloworld-test.ok",
+        ":workerd",
+        "//samples:helloworld/config.capnp",
+        "//samples:helloworld/worker.js",
     ],
 )
 
