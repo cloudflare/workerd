@@ -130,6 +130,8 @@ public:
 
   Impl(bool extractable, CryptoKeyUsageSet usages) : extractable(extractable), usages(usages) {}
 
+  static kj::Own<CryptoKey::Impl> from(kj::Own<EVP_PKEY> key);
+
   bool isExtractable() const { return extractable; }
   CryptoKeyUsageSet getUsages() const { return usages; }
 
@@ -223,6 +225,8 @@ public:
   virtual size_t jsgGetMemorySelfSize() const { return sizeof(Impl); }
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {}
 
+  virtual bool verifyX509Public(const X509* cert) const { return false; }
+  virtual bool verifyX509Private(const X509* cert) const { return false; }
 private:
   const bool extractable;
   const CryptoKeyUsageSet usages;
@@ -364,6 +368,10 @@ void checkPbkdfLimits(jsg::Lock& js, size_t iterations);
 // As a special case, |length == 0| can be used to check if the CSPRNG
 // is properly seeded without consuming entropy.
 bool CSPRNG(kj::ArrayPtr<kj::byte> buffer);
+
+kj::Own<CryptoKey::Impl> fromRsaKey(kj::Own<EVP_PKEY> key);
+kj::Own<CryptoKey::Impl> fromEcKey(kj::Own<EVP_PKEY> key);
+kj::Own<CryptoKey::Impl> fromEd25519Key(kj::Own<EVP_PKEY> key);
 
 }  // namespace workerd::api
 

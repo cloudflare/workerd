@@ -287,6 +287,16 @@ CryptoKey::AsymmetricKeyDetails CryptoKey::getAsymmetricKeyDetails() const {
   return impl->getAsymmetricKeyDetail();
 }
 
+bool CryptoKey::verifyX509Public(const X509* cert) const {
+  if (this->getType() != "public"_kj) return false;
+  return impl->verifyX509Public(cert);
+}
+
+bool CryptoKey::verifyX509Private(const X509* cert) const {
+  if (this->getType() != "private"_kj) return false;
+  return impl->verifyX509Private(cert);
+}
+
 jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::encrypt(
     jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,
