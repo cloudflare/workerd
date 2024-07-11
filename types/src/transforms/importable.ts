@@ -5,7 +5,21 @@
 import ts from "typescript";
 import { ensureStatementModifiers } from "./helpers";
 
-// This ensures that all nodes have the `export` keyword (and, where relevant, `export declare`)
+// This ensures that all top-level nodes are `export`ed, and removes
+// `declare module` blocks.
+//
+// ```ts
+// declare class A { ... }
+// declare module "thing" {
+//   class B { ... }
+// }
+// ```
+//
+// --- transforms to --->
+//
+// ```ts
+// export declare class A { ... }
+// ```
 export function createImportableTransformer(): ts.TransformerFactory<ts.SourceFile> {
   return (ctx) => {
     return (node) => {
@@ -15,7 +29,7 @@ export function createImportableTransformer(): ts.TransformerFactory<ts.SourceFi
   };
 }
 
-function createVisitor(ctx: ts.TransformationContext) {
+function createVisitor(ctx: ts.TransformationContext): ts.Visitor {
   return (node: ts.Node) => {
     // Remove `module` declarations (e.g. `declare module "assets:*" {...}`) as
     // these can't be `export`ed, and don't really make sense in non-ambient
@@ -26,7 +40,6 @@ function createVisitor(ctx: ts.TransformationContext) {
     ) {
       return;
     }
-
-    return ensureStatementModifiers(ctx, node);
+    return ensureStatementModifiers(ctx, node, { export: true });
   };
 }
