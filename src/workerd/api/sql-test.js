@@ -200,6 +200,10 @@ async function test(storage) {
   assert.throws(() => sql.exec('SELECT ;'), /syntax error at offset 7/)
   assert.throws(() => sql.exec('SELECT -;'), /syntax error at offset 8/)
 
+  sql.exec(`CREATE TABLE test_error_codes (name TEXT);`)
+  assert.throws(() => sql.exec(`INSERT INTO test_error_codes(rowid, name) values ('yeah','nah');`), /Error: datatype mismatch/)
+  sql.exec(`DROP TABLE test_error_codes;`)
+
   // Incorrect number of binding values
   assert.throws(
     () => sql.exec('SELECT ?'),
