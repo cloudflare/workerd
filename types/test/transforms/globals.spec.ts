@@ -11,29 +11,29 @@ import { createMemoryProgram } from "../../src/program";
 import { createGlobalScopeTransformer } from "../../src/transforms";
 
 test("createGlobalScopeTransformer: extracts global scope", () => {
-  const source = `export type WorkerGlobalScopeEventMap = {
+  const source = `type WorkerGlobalScopeEventMap = {
     fetch: Event;
     scheduled: Event;
 };
-export declare class EventTarget<EventMap extends Record<string, Event> = Record<string, Event>> {
+declare class EventTarget<EventMap extends Record<string, Event> = Record<string, Event>> {
     constructor();
     addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void; // MethodDeclaration
     removeEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void; // MethodDeclaration
     dispatchEvent(event: EventMap[keyof EventMap]): void; // MethodDeclaration
 }
-export declare class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
+declare class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
     thing: string; // PropertyDeclaration
     static readonly CONSTANT: 42; // PropertyDeclaration
     get property(): number; // GetAccessorDeclaration
     set property(value: number); // GetAccessorDeclaration
 }
-export declare class DOMException {
+declare class DOMException {
 }
-export declare abstract class Crypto {
+declare abstract class Crypto {
 }
-export declare abstract class Console {
+declare abstract class Console {
 }
-export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
+interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
     DOMException: typeof DOMException; // PropertySignature
     btoa(value: string): string; // MethodSignature
     crypto: Crypto; // PropertySignature
@@ -58,26 +58,26 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
     output,
     // Extracted global nodes inserted after ServiceWorkerGlobalScope
     source +
-      `export declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
-export declare function removeEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
-export declare function dispatchEvent(event: WorkerGlobalScopeEventMap[keyof WorkerGlobalScopeEventMap]): void;
-export declare const thing: string;
-export declare const CONSTANT: 42;
-export declare const property: number;
-export declare function btoa(value: string): string;
-export declare const crypto: Crypto;
-export declare const console: Console;
+      `declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
+declare function removeEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
+declare function dispatchEvent(event: WorkerGlobalScopeEventMap[keyof WorkerGlobalScopeEventMap]): void;
+declare const thing: string;
+declare const CONSTANT: 42;
+declare const property: number;
+declare function btoa(value: string): string;
+declare const crypto: Crypto;
+declare const console: Console;
 `
   );
 });
 
 test("createGlobalScopeTransformer: inlining type parameters in heritage", () => {
-  const source = `export declare class A<T> {
+  const source = `declare class A<T> {
     thing: T;
 }
-export declare class B<T> extends A<T> {
+declare class B<T> extends A<T> {
 }
-export declare class ServiceWorkerGlobalScope extends B<string> {
+declare class ServiceWorkerGlobalScope extends B<string> {
 }
 `;
 
@@ -97,7 +97,7 @@ export declare class ServiceWorkerGlobalScope extends B<string> {
   assert.strictEqual(
     output,
     source +
-      `export declare const thing: string;
+      `declare const thing: string;
 `
   );
 });

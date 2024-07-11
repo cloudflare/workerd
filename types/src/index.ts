@@ -1,26 +1,30 @@
 #!/usr/bin/env node
-import assert from "assert";
 import { readFileSync, readdirSync } from "fs";
 import { mkdir, readFile, readdir, writeFile } from "fs/promises";
+import assert from "node:assert";
 import path from "path";
 import util from "util";
 import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
 import { Message } from "capnp-ts";
 import prettier from "prettier";
 import ts from "typescript";
-import { generateDefinitions, parseApiAstDump } from "./generator";
+import { collectTypeScriptModules, generateDefinitions } from "./generator";
+import { parseApiAstDump } from "./generator/parameter-names";
 import { printNodeList, printer } from "./print";
 import { SourcesMap, createMemoryProgram } from "./program";
 import { ParsedTypeDefinition, collateStandards } from "./standards";
 import {
   compileOverridesDefines,
+  createAmbientTransformer,
   createCommentsTransformer,
   createGlobalScopeTransformer,
+  createImportResolveTransformer,
+  createImportableTransformer,
+  createInternalNamespaceTransformer,
   createIteratorTransformer,
   createOverrideDefineTransformer,
 } from "./transforms";
-import { createAmbientTransformer } from "./transforms/ambient";
-import { createImportableTransformer } from "./transforms/importable";
+
 const definitionsHeader = `/*! *****************************************************************************
 Copyright (c) Cloudflare. All rights reserved.
 Copyright (c) Microsoft Corporation. All rights reserved.
@@ -142,14 +146,14 @@ function printDefinitions(
   extraDefinitions: string
 ): { ambient: string; importable: string } {
   // Generate TypeScript nodes from capnp request
-  const nodes = generateDefinitions(root);
+  const { nodes, structureMap } = generateDefinitions(root);
 
   // Assemble partial overrides and defines to valid TypeScript source files
   const [sources, replacements] = compileOverridesDefines(root);
   // Add source file containing generated nodes
   const sourcePath = "/$virtual/source.ts";
   let source = printNodeList(nodes);
-  sources.set(sourcePath, source);
+  sources.set(sourcePath, printNodeList(nodes));
 
   // Run post-processing transforms on program
   source = transform(sources, sourcePath, (program, checker) => [
@@ -157,25 +161,24 @@ function printDefinitions(
     // still removed if they're replaced in overrides
     createIteratorTransformer(checker),
     createOverrideDefineTransformer(program, replacements),
+    // Run global scope transformer after overrides so members added in
+    // overrides are extracted
+    createGlobalScopeTransformer(checker),
+    createInternalNamespaceTransformer(root, structureMap),
+    createCommentsTransformer(standards),
   ]);
-  source += extraDefinitions;
+
+  console.error(collectTypeScriptModules(root));
+  source += collectTypeScriptModules(root) + extraDefinitions;
 
   // We need the type checker to respect our updated definitions after applying
   // overrides (e.g. to find the correct nodes when traversing heritage), so
   // rebuild the program to re-run type checking. We also want to include our
   // additional definitions.
-  source = transform(
-    new SourcesMap([[sourcePath, source]]),
-    sourcePath,
-    (program, checker) => [
-      // Run global scope transformer after overrides so members added in
-      // overrides are extracted
-      createGlobalScopeTransformer(checker),
-      createCommentsTransformer(standards),
-      createAmbientTransformer(),
-      // TODO(polish): maybe flatten union types?
-    ]
-  );
+  source = transform(new SourcesMap([[sourcePath, source]]), sourcePath, () => [
+    createImportResolveTransformer(),
+    createAmbientTransformer(),
+  ]);
 
   checkDiagnostics(new SourcesMap([[sourcePath, source]]));
 

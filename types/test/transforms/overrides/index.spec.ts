@@ -21,7 +21,7 @@ import {
 } from "../../../src/transforms";
 
 function printDefinitionsWithOverrides(root: StructureGroups): string {
-  const nodes = generateDefinitions(root);
+  const { nodes } = generateDefinitions(root);
 
   const [sources, replacements] = compileOverridesDefines(root);
   const sourcePath = path.resolve(__dirname, "source.ts");
@@ -81,9 +81,9 @@ test("createOverrideDefineTransformer: applies type renames", () => {
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
-    `export declare abstract class RenamedThing {
+    `declare abstract class RenamedThing {
 }
-export interface Root1 {
+interface Root1 {
     prop: RenamedThing;
     method(param0: RenamedThing): RenamedThing;
     Thing: typeof RenamedThing;
@@ -150,7 +150,7 @@ test("createOverrideDefineTransformer: applies property overrides", () => {
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
-    `export interface Root1 {
+    `interface Root1 {
     prop1?: "thing";
     readonly prop2: true;
     get prop3(): false;
@@ -228,13 +228,13 @@ test("createOverrideDefineTransformer: applies method overrides", () => {
     get(key: string, type: "arrayBuffer"): Promise<ArrayBuffer | null>;
 
     deleteAll: never;
-    
+
     get<T>(key: string, type: "json"): Promise<T | null>;
   }`);
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
-    `export declare abstract class Root1 {
+    `declare abstract class Root1 {
     one(): number;
     static one(): 1;
     two(): 2;
@@ -289,10 +289,10 @@ test("createOverrideDefineTransformer: applies type parameter overrides", () => 
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
-    `export interface RenamedStruct<Type extends string = string> {
+    `interface RenamedStruct<Type extends string = string> {
     type: Type;
 }
-export interface Root1<R> {
+interface Root1<R> {
     get(): RenamedStruct;
     read(): Promise<R>;
 }
@@ -349,13 +349,13 @@ test("createOverrideDefineTransformer: applies heritage overrides", () => {
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
-    `export declare abstract class Superclass<T, U = unknown> {
+    `declare abstract class Superclass<T, U = unknown> {
 }
-export interface Root1 extends Superclass<ArrayBuffer | ArrayBufferView, Uint8Array> {
+interface Root1 extends Superclass<ArrayBuffer | ArrayBufferView, Uint8Array> {
 }
-export interface Root2<T> implements Superclass<T> {
+interface Root2<T> implements Superclass<T> {
 }
-export interface Root3 extends Superclass<boolean> {
+interface Root3 extends Superclass<boolean> {
     prop: 1 | 2 | 3;
 }
 `
@@ -398,18 +398,18 @@ test("createOverrideDefineTransformer: applies full type replacements", () => {
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
-    `export declare const Root1 = {
+    `declare const Root1 = {
     new(): {
         0: Root2;
         1: RenamedRoot3;
     };
 };
-export declare enum Root2 {
+declare enum Root2 {
     ONE,
     TWO,
     THREE
 }
-export type RenamedRoot3<T = any> = {
+type RenamedRoot3<T = any> = {
     done: false;
     value: T;
 } | {
@@ -439,7 +439,7 @@ test("createOverrideDefineTransformer: applies overrides with literals", () => {
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
-    `export interface Root1 {
+    `interface Root1 {
     literalString: "hello";
     literalNumber: 42;
     literalArray: [
@@ -476,12 +476,12 @@ test("createOverrideDefineTransformer: inserts extra defines", () => {
   // Check defines inserted before structure
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
-    `export interface Root1 {
+    `interface Root1 {
 }
-export interface Root2Extra<Type> {
+interface Root2Extra<Type> {
     prop: Type;
 }
-export interface RenamedRoot2 {
+interface RenamedRoot2 {
 }
 `
   );
