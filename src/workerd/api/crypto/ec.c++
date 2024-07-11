@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
+#include "ec.h"
 #include "keys.h"
-#include <openssl/rsa.h>
 #include <openssl/ec_key.h>
 #include <openssl/bn.h>
 #include <openssl/x509.h>
@@ -18,767 +18,109 @@
 
 namespace workerd::api {
 
-// =====================================================================================
-// RSASSA-PKCS1-V1_5, RSA-PSS, RSA-OEAP, RSA-RAW
-
-namespace {
-
-class RsaBase: public AsymmetricKeyCryptoKeyImpl {
-public:
-  explicit RsaBase(AsymmetricKeyData keyData,
-                   CryptoKey::RsaKeyAlgorithm keyAlgorithm,
-                   bool extractable)
-    : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), extractable),
-      keyAlgorithm(kj::mv(keyAlgorithm)) {}
-
-  kj::StringPtr jsgGetMemoryName() const override { return "AsymmetricKey"; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(AsymmetricKeyCryptoKeyImpl); }
-  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
-    AsymmetricKeyCryptoKeyImpl::jsgGetMemoryInfo(tracker);
-    tracker.trackField("keyAlgorithm", keyAlgorithm);
-  }
-
-protected:
-  CryptoKey::RsaKeyAlgorithm keyAlgorithm;
-
-private:
-  SubtleCrypto::JsonWebKey exportJwk() const override final {
-    const auto& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(getEvpPkey()), DOMOperationError,
-        "No RSA data backing key", tryDescribeOpensslErrors());
-
-    SubtleCrypto::JsonWebKey jwk;
-    jwk.kty = kj::str("RSA");
-    jwk.alg = jwkHashAlgorithmName();
-
-    jwk.n = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.n))));
-    jwk.e = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.e))));
-
-    if (getTypeEnum() == KeyType::PRIVATE) {
-      jwk.d = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.d))));
-      jwk.p = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.p))));
-      jwk.q = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.q))));
-      jwk.dp = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.dmp1))));
-      jwk.dq = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.dmq1))));
-      jwk.qi = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa.iqmp))));
-    }
-
-    return jwk;
-  }
-
-  kj::Array<kj::byte> exportRaw() const override final {
-    JSG_FAIL_REQUIRE(DOMInvalidAccessError, "Cannot export \"", getAlgorithmName(),
-        "\" in \"raw\" format.");
-  }
-
-  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
-    // Adapted from the Node.js implementation of GetRsaKeyDetail
-    const BIGNUM* e;  // Public Exponent
-    const BIGNUM* n;  // Modulus
-
-    int type = EVP_PKEY_id(getEvpPkey());
-    KJ_REQUIRE(type == EVP_PKEY_RSA || type == EVP_PKEY_RSA_PSS);
-
-    const RSA* rsa = EVP_PKEY_get0_RSA(getEvpPkey());
-    KJ_ASSERT(rsa != nullptr);
-    RSA_get0_key(rsa, &n, &e, nullptr);
-
-    CryptoKey::AsymmetricKeyDetails details;
-    details.modulusLength = BN_num_bits(n);
-
-    details.publicExponent = JSG_REQUIRE_NONNULL(bignumToArrayPadded(*e), Error,
-        "Failed to extract public exponent");
-
-    // TODO(soon): Does BoringSSL not support retrieving RSA_PSS params?
-    // if (type == EVP_PKEY_RSA_PSS) {
-    //   // Due to the way ASN.1 encoding works, default values are omitted when
-    //   // encoding the data structure. However, there are also RSA-PSS keys for
-    //   // which no parameters are set. In that case, the ASN.1 RSASSA-PSS-params
-    //   // sequence will be missing entirely and RSA_get0_pss_params will return
-    //   // nullptr. If parameters are present but all parameters are set to their
-    //   // default values, an empty sequence will be stored in the ASN.1 structure.
-    //   // In that case, RSA_get0_pss_params does not return nullptr but all fields
-    //   // of the returned RSA_PSS_PARAMS will be set to nullptr.
-
-    //   const RSA_PSS_PARAMS* params = RSA_get0_pss_params(rsa);
-    //   if (params != nullptr) {
-    //     int hash_nid = NID_sha1;
-    //     int mgf_nid = NID_mgf1;
-    //     int mgf1_hash_nid = NID_sha1;
-    //     int64_t salt_length = 20;
-
-    //     if (params->hashAlgorithm != nullptr) {
-    //       hash_nid = OBJ_obj2nid(params->hashAlgorithm->algorithm);
-    //     }
-    //     details.hashAlgorithm = kj::str(OBJ_nid2ln(hash_nid));
-
-    //     if (params->maskGenAlgorithm != nullptr) {
-    //       mgf_nid = OBJ_obj2nid(params->maskGenAlgorithm->algorithm);
-    //       if (mgf_nid == NID_mgf1) {
-    //         mgf1_hash_nid = OBJ_obj2nid(params->maskHash->algorithm);
-    //       }
-    //     }
-
-    //     // If, for some reason, the MGF is not MGF1, then the MGF1 hash function
-    //     // is intentionally not added to the object.
-    //     if (mgf_nid == NID_mgf1) {
-    //       details.mgf1HashAlgorithm = kj::str(OBJ_nid2ln(mgf1_hash_nid));
-    //     }
-
-    //     if (params->saltLength != nullptr) {
-    //       JSG_REQUIRE(ASN1_INTEGER_get_int64(&salt_length, params->saltLength) == 1,
-    //                   Error, "Unable to get salt length from RSA-PSS parameters");
-    //     }
-    //     details.saltLength = static_cast<double>(salt_length);
-    //   }
-    // }
-
-    return kj::mv(details);
-  }
-
-  virtual kj::String jwkHashAlgorithmName() const = 0;
-};
-
-class RsassaPkcs1V15Key final: public RsaBase {
-public:
-  explicit RsassaPkcs1V15Key(AsymmetricKeyData keyData,
-                             CryptoKey::RsaKeyAlgorithm keyAlgorithm,
-                             bool extractable)
-      : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
-
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
-  kj::StringPtr getAlgorithmName() const override { return "RSASSA-PKCS1-v1_5"; }
-
-  kj::StringPtr chooseHash(
-      const kj::Maybe<kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>>& callTimeHash)
-      const override {
-    // RSASSA-PKCS1-v1_5 attaches the hash to the key, ignoring whatever is specified at call time.
-    return KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
-  }
-
-private:
-  kj::String jwkHashAlgorithmName() const override {
-    const auto& hashName = KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
-    JSG_REQUIRE(hashName.startsWith("SHA"), DOMNotSupportedError,
-        "JWK export not supported for hash algorithm \"", hashName, "\".");
-    return kj::str("RS", hashName.slice(4, hashName.size()));
-  }
-};
-
-class RsaPssKey final: public RsaBase {
-public:
-  explicit RsaPssKey(AsymmetricKeyData keyData,
-                     CryptoKey::RsaKeyAlgorithm keyAlgorithm,
-                     bool extractable)
-      : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
-
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
-  kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
-
-  kj::StringPtr chooseHash(
-      const kj::Maybe<kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>>& callTimeHash)
-      const override {
-    // RSA-PSS attaches the hash to the key, ignoring whatever is specified at call time.
-    return KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
-  }
-
-  void addSalt(EVP_PKEY_CTX* pctx, const SubtleCrypto::SignAlgorithm& algorithm) const override {
-    auto salt = JSG_REQUIRE_NONNULL(algorithm.saltLength, TypeError,
-        "Failed to provide salt for RSA-PSS key operation which requires a salt");
-    JSG_REQUIRE(salt >= 0, DOMDataError, "SaltLength for RSA-PSS must be non-negative (provided ",
-        salt, ").");
-    OSSLCALL(EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING));
-    OSSLCALL(EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, salt));
-  }
-
-private:
-  kj::String jwkHashAlgorithmName() const override {
-    const auto& hashName = KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
-    JSG_REQUIRE(hashName.startsWith("SHA"), DOMNotSupportedError,
-        "JWK export not supported for hash algorithm \"", hashName, "\".");
-    return kj::str("PS", hashName.slice(4, hashName.size()));
-  }
-};
-
-class RsaOaepKey final : public RsaBase {
-  using InitFunction = decltype(EVP_PKEY_encrypt_init);
-  using EncryptDecryptFunction = decltype(EVP_PKEY_encrypt);
-
-public:
-  explicit RsaOaepKey(AsymmetricKeyData keyData,
-                      CryptoKey::RsaKeyAlgorithm keyAlgorithm,
-                      bool extractable)
-      : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
-
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
-  kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
-
-  kj::StringPtr chooseHash(
-      const kj::Maybe<kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>>& callTimeHash)
-      const override {
-    // RSA-OAEP is for encryption/decryption, not signing, but this method is called by the
-    // parent class when performing sign() or verify().
-    JSG_FAIL_REQUIRE(DOMNotSupportedError,
-        "The sign and verify operations are not implemented for \"", keyAlgorithm.name, "\".");
-  }
-
-  kj::Array<kj::byte> encrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> plainText) const override {
-    JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
-        "Encryption/key wrapping only works with public keys, not \"", getType(), "\".");
-    return commonEncryptDecrypt(kj::mv(algorithm), plainText, EVP_PKEY_encrypt_init,
-        EVP_PKEY_encrypt);
-  }
-
-  kj::Array<kj::byte> decrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> cipherText) const override {
-    JSG_REQUIRE(getTypeEnum() == KeyType::PRIVATE, DOMInvalidAccessError,
-        "Decryption/key unwrapping only works with private keys, not \"", getType(), "\".");
-    return commonEncryptDecrypt(kj::mv(algorithm), cipherText, EVP_PKEY_decrypt_init,
-        EVP_PKEY_decrypt);
-  }
-
-private:
-  kj::Array<kj::byte> commonEncryptDecrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> data, InitFunction init,
-      EncryptDecryptFunction encryptDecrypt) const {
-    auto digest = lookupDigestAlgorithm(KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name).second;
-
-    auto pkey = getEvpPkey();
-    auto ctx = OSSL_NEW(EVP_PKEY_CTX, pkey, nullptr);
-
-    JSG_REQUIRE(1 == init(ctx.get()), DOMOperationError, "RSA-OAEP failed to initialize",
-        tryDescribeOpensslErrors());
-    JSG_REQUIRE(1 == EVP_PKEY_CTX_set_rsa_padding(ctx.get(), RSA_PKCS1_OAEP_PADDING),
-        InternalDOMOperationError, "Error doing RSA OAEP encrypt/decrypt (", "padding", ")",
-        internalDescribeOpensslErrors());
-    JSG_REQUIRE(1 == EVP_PKEY_CTX_set_rsa_oaep_md(ctx.get(), digest), InternalDOMOperationError,
-        "Error doing RSA OAEP encrypt/decrypt (", "message digest", ")",
-        internalDescribeOpensslErrors());
-    JSG_REQUIRE(1 == EVP_PKEY_CTX_set_rsa_mgf1_md(ctx.get(), digest), InternalDOMOperationError,
-        "Error doing RSA OAEP encrypt/decrypt (", "MGF1 digest", ")",
-        internalDescribeOpensslErrors());
-
-    KJ_IF_SOME(l, algorithm.label) {
-      auto labelCopy = reinterpret_cast<uint8_t*>(OPENSSL_malloc(l.size()));
-      KJ_DEFER(OPENSSL_free(labelCopy));
-      // If setting the label fails we need to remember to destroy the buffer. In practice it can't
-      // actually happen since we set RSA_PKCS1_OAEP_PADDING above & that appears to be the only way
-      // this API call can fail.
-
-      JSG_REQUIRE(labelCopy != nullptr, DOMOperationError,
-          "Failed to allocate space for RSA-OAEP label copy",
-          tryDescribeOpensslErrors());
-      std::copy(l.begin(), l.end(), labelCopy);
-
-      // EVP_PKEY_CTX_set0_rsa_oaep_label below takes ownership of the buffer passed in (must have
-      // been OPENSSL_malloc-allocated).
-      JSG_REQUIRE(1 == EVP_PKEY_CTX_set0_rsa_oaep_label(ctx.get(), labelCopy, l.size()),
-          DOMOperationError, "Failed to set RSA-OAEP label",
-          tryDescribeOpensslErrors());
-
-      // Ownership has now been transferred. The chromium WebCrypto code technically has a potential
-      // memory leak here in that they check the error for EVP_PKEY_CTX_set0_rsa_oaep_label after
-      // releasing. It's not actually possible though because the padding mode is set unconditionally
-      // to RSA_PKCS1_OAEP_PADDING which seems to be the only way setting the label will fail.
-      labelCopy = nullptr;
-    }
-
-    size_t maxResultLength = 0;
-    // First compute an upper bound on the amount of space we need to store the encrypted/decrypted
-    // result. Then we actually apply the encryption & finally resize to the actual correct length.
-    JSG_REQUIRE(1 == encryptDecrypt(ctx.get(), nullptr, &maxResultLength, data.begin(),
-          data.size()), DOMOperationError, "Failed to compute length of RSA-OAEP result",
-          tryDescribeOpensslErrors());
-
-    kj::Vector<kj::byte> result(maxResultLength);
-    auto err = encryptDecrypt(ctx.get(), result.begin(), &maxResultLength, data.begin(),
-        data.size());
-    JSG_REQUIRE(1 == err, DOMOperationError, "RSA-OAEP failed encrypt/decrypt",
-        tryDescribeOpensslErrors());
-    result.resize(maxResultLength);
-
-    return result.releaseAsArray();
-  }
-
-  kj::String jwkHashAlgorithmName() const override {
-    const auto& hashName = KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
-    JSG_REQUIRE(hashName.startsWith("SHA"), DOMNotSupportedError,
-        "JWK export not supported for hash algorithm \"", hashName, "\".");
-    if (hashName == "SHA-1") {
-      return kj::str("RSA-OAEP");
-    }
-    return kj::str("RSA-OAEP-", hashName.slice(4, hashName.size()));
-  }
-};
-
-class RsaRawKey final: public RsaBase {
-public:
-  explicit RsaRawKey(AsymmetricKeyData keyData,
-                     CryptoKey::RsaKeyAlgorithm keyAlgorithm,
-                     bool extractable)
-      : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
-
-  kj::Array<kj::byte> sign(
-      SubtleCrypto::SignAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> data) const override {
-
-    RSA* rsa = EVP_PKEY_get0_RSA(getEvpPkey());
-    if (rsa == nullptr) {
-      JSG_FAIL_REQUIRE(DOMDataError, "Missing RSA key");
-    }
-
-    auto size = RSA_size(rsa);
-
-    // RSA encryption/decryption requires the key value to be strictly larger than the value to be
-    // signed. Ideally we would enforce this by checking that the key size is larger than the input
-    // size – having both the same size makes it highly likely that some values are higher than the
-    // key value – but there are scripts and test cases that depend on signing data with keys of
-    // the same size.
-    JSG_REQUIRE(data.size() <= size, DOMDataError,
-        "Blind Signing requires presigned data (", data.size(), " bytes) to be smaller than "
-        "the key (", size, " bytes).");
-    if (data.size() == size) {
-      auto dataVal = JSG_REQUIRE_NONNULL(toBignum(data), InternalDOMOperationError,
-          "Error converting presigned data", internalDescribeOpensslErrors());
-      JSG_REQUIRE(BN_ucmp(dataVal, rsa->n) < 0, DOMDataError,
-          "Blind Signing requires presigned data value to be strictly smaller than RSA key"
-          "modulus, consider using a larger key size.");
-    }
-
-    auto signature = kj::heapArray<kj::byte>(size);
-    size_t signatureSize = 0;
-
-    // Use raw RSA, no padding
-    OSSLCALL(RSA_decrypt(rsa, &signatureSize, signature.begin(), size, data.begin(), data.size(),
-        RSA_NO_PADDING));
-
-    KJ_ASSERT(signatureSize <= signature.size());
-    if (signatureSize < signature.size()) {
-      signature = kj::heapArray<kj::byte>(signature.slice(0, signatureSize));
-    }
-
-    return kj::mv(signature);
-  }
-
-  bool verify(
-      SubtleCrypto::SignAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const override {
-    KJ_UNIMPLEMENTED("RawRsa Verification currently unsupported");
-  }
-
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
-  kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
-
-  kj::StringPtr chooseHash(
-      const kj::Maybe<kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>>& callTimeHash)
-      const override {
-    KJ_UNIMPLEMENTED("this should not be called since we overrode sign() and verify()");
-  }
-
-private:
-  kj::String jwkHashAlgorithmName() const override {
-    const auto& hashName = KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
-    JSG_REQUIRE(hashName.startsWith("SHA"), DOMNotSupportedError,
-        "JWK export not supported for hash algorithm \"", hashName, "\".");
-    return kj::str("RS", hashName.slice(4, hashName.size()));
-  }
-};
-
-CryptoKeyPair generateRsaPair(jsg::Lock& js, kj::StringPtr normalizedName,
-    kj::Own<EVP_PKEY> privateEvpPKey, kj::Own<EVP_PKEY> publicEvpPKey,
-    CryptoKey::RsaKeyAlgorithm&& keyAlgorithm, bool privateKeyExtractable,
-    CryptoKeyUsageSet usages) {
-  auto privateKeyAlgorithm = keyAlgorithm.clone(js);
-
-  CryptoKeyUsageSet publicKeyUsages = usages & CryptoKeyUsageSet::publicKeyMask();
-  CryptoKeyUsageSet privateKeyUsages = usages & CryptoKeyUsageSet::privateKeyMask();
-
-  AsymmetricKeyData publicKeyData {
-    .evpPkey = kj::mv(publicEvpPKey),
-    .keyType = KeyType::PUBLIC,
-    .usages = publicKeyUsages,
-  };
-  AsymmetricKeyData privateKeyData {
-    .evpPkey = kj::mv(privateEvpPKey),
-    .keyType = KeyType::PRIVATE,
-    .usages = privateKeyUsages,
+Ec::Ec(EC_KEY* key) : key(key), x(OSSL_NEW(BIGNUM)), y(OSSL_NEW(BIGNUM)) {
+  KJ_ASSERT(key != nullptr);
+  group = EC_KEY_get0_group(key);
+  JSG_REQUIRE(1 == EC_POINT_get_affine_coordinates(group, getPublicKey(), x.get(), y.get(), nullptr),
+      InternalDOMOperationError, "Error getting affine coordinates for export",
+      internalDescribeOpensslErrors());
+}
+
+int Ec::getCurveName() const {
+  return EC_GROUP_get_curve_name(group);
+}
+
+uint32_t Ec::getDegree() const {
+  return EC_GROUP_get_degree(getGroup());
+}
+
+const EC_POINT* Ec::getPublicKey() const {
+  return EC_KEY_get0_public_key(key);
+}
+
+const BIGNUM* Ec::getPrivateKey() const {
+  return EC_KEY_get0_private_key(key);
+}
+
+SubtleCrypto::JsonWebKey Ec::toJwk(KeyType keyType, kj::StringPtr curveName) const {
+  JSG_REQUIRE(group != nullptr, DOMOperationError,
+      "No elliptic curve group in this key", tryDescribeOpensslErrors());
+  JSG_REQUIRE(getPublicKey() != nullptr, DOMOperationError,
+      "No public elliptic curve key data in this key",
+      tryDescribeOpensslErrors());
+
+  auto groupDegreeInBytes = integerCeilDivision(getDegree(), 8u);
+  // EC_GROUP_get_degree returns number of bits. We need this because x, y, & d need to match the
+  // group degree according to JWK.
+
+  SubtleCrypto::JsonWebKey jwk;
+  jwk.kty = kj::str("EC");
+  jwk.crv = kj::str(curveName);
+
+  static constexpr auto handleBn = [](const BIGNUM& bn, size_t size) {
+    return JSG_REQUIRE_NONNULL(bignumToArrayPadded(bn, size),
+      InternalDOMOperationError, "Error converting EC affine co-ordinates to padded array",
+      internalDescribeOpensslErrors());
   };
 
-  if (normalizedName == "RSASSA-PKCS1-v1_5") {
-    return CryptoKeyPair {
-      .publicKey =  jsg::alloc<CryptoKey>(kj::heap<RsassaPkcs1V15Key>(kj::mv(publicKeyData),
-          kj::mv(keyAlgorithm), true)),
-      .privateKey = jsg::alloc<CryptoKey>(kj::heap<RsassaPkcs1V15Key>(kj::mv(privateKeyData),
-          kj::mv(privateKeyAlgorithm), privateKeyExtractable))};
-  } else if (normalizedName == "RSA-PSS") {
-    return CryptoKeyPair {
-      .publicKey =  jsg::alloc<CryptoKey>(kj::heap<RsaPssKey>(kj::mv(publicKeyData),
-          kj::mv(keyAlgorithm), true)),
-      .privateKey = jsg::alloc<CryptoKey>(kj::heap<RsaPssKey>(kj::mv(privateKeyData),
-          kj::mv(privateKeyAlgorithm), privateKeyExtractable))};
-  } else if (normalizedName == "RSA-OAEP") {
-    return CryptoKeyPair {
-      .publicKey =  jsg::alloc<CryptoKey>(kj::heap<RsaOaepKey>(kj::mv(publicKeyData),
-          kj::mv(keyAlgorithm), true)),
-      .privateKey = jsg::alloc<CryptoKey>(kj::heap<RsaOaepKey>(kj::mv(privateKeyData),
-          kj::mv(privateKeyAlgorithm), privateKeyExtractable))};
-  } else {
-    JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unimplemented RSA generation \"", normalizedName,
-        "\".");
+  auto xa = handleBn(*x, groupDegreeInBytes);
+  auto ya = handleBn(*y, groupDegreeInBytes);
+
+  jwk.x = kj::encodeBase64Url(xa);
+  jwk.y = kj::encodeBase64Url(ya);
+
+  if (keyType == KeyType::PRIVATE) {
+    const auto privateKey = getPrivateKey();
+    JSG_REQUIRE(privateKey != nullptr, InternalDOMOperationError,
+                "Error getting private key material for JSON Web Key export",
+                internalDescribeOpensslErrors());
+    auto pk = handleBn(*privateKey, groupDegreeInBytes);
+    jwk.d = kj::encodeBase64Url(pk);
   }
-}
-}  // namespace
-
-template <typename T>
-kj::Maybe<T> fromBignum(kj::ArrayPtr<kj::byte> value) {
-  static_assert(std::is_unsigned_v<T>, "This can only be invoked when the return type is unsigned");
-
-  T asUnsigned = 0;
-  for (size_t i = 0; i < value.size(); ++i) {
-    size_t bitShift = value.size() - i - 1;
-    if (bitShift >= sizeof(T) && value[i]) {
-      // Too large for desired type.
-      return kj::none;
-    }
-
-    asUnsigned |= value[i] << 8 * bitShift;
-  }
-
-  return asUnsigned;
+  return jwk;
 }
 
-namespace {
+kj::Array<kj::byte> Ec::getRawPublicKey() const {
+  JSG_REQUIRE_NONNULL(group, InternalDOMOperationError,
+                      "No elliptic curve group in this key",
+                      tryDescribeOpensslErrors());
+  auto publicKey = getPublicKey();
+  JSG_REQUIRE(publicKey != nullptr, InternalDOMOperationError,
+              "No public elliptic curve key data in this key",
+              tryDescribeOpensslErrors());
 
-// The W3C standard itself doesn't describe any parameter validation but the conformance tests
-// do test "bad" exponents, likely because everyone uses OpenSSL that suffers from poor behavior
-// with these bad exponents (e.g. if an exponent < 3 or 65535 generates an infinite loop, a
-// library might be expected to handle such cases on its own, no?).
-void validateRsaParams(jsg::Lock& js, int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
-                       bool isImport = false) {
-  // Use Chromium's limits for RSA keygen to avoid infinite loops:
-  // * Key sizes a multiple of 8 bits.
-  // * Key sizes must be in [256, 16k] bits.
-  auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();
-  JSG_REQUIRE(!(strictCrypto || !isImport) || (modulusLength % 8 == 0 && modulusLength >= 256 &&
-      modulusLength <= 16384), DOMOperationError, "The modulus length must be a multiple of 8 and "
-      "between 256 and 16k, but ", modulusLength, " was requested.");
+  // Serialize the public key as an uncompressed point in X9.62 form.
+  uint8_t* raw;
+  size_t raw_len;
+  CBB cbb;
 
-  // Now check the public exponent for allow-listed values.
-  // First see if we can convert the public exponent to an unsigned number. Unfortunately OpenSSL
-  // doesn't have convenient APIs to do this (since these are bignums) so we have to do it by hand.
-  // Since the problematic BIGNUMs are within the range of an unsigned int (& technicall an
-  // unsigned short) we can treat an out-of-range issue as valid input.
-  KJ_IF_SOME(v, fromBignum<unsigned>(publicExponent)) {
-    if (!isImport) {
-      JSG_REQUIRE(v == 3 || v == 65537, DOMOperationError,
-          "The \"publicExponent\" must be either 3 or 65537, but got ", v, ".");
-    } else if (strictCrypto) {
-      // While we have long required the exponent to be 3 or 65537 when generating keys, handle
-      // imported keys more permissively and allow additional exponents that are considered safe
-      // and commonly used.
-      JSG_REQUIRE(v == 3 || v == 17 || v == 37 || v == 65537, DOMOperationError,
-          "Imported RSA key has invalid publicExponent ", v, ".");
-    }
-  } else {
-    JSG_FAIL_REQUIRE(DOMOperationError, "The \"publicExponent\" must be either 3 or 65537, but "
-        "got a number larger than 2^32.");
-  }
+  JSG_REQUIRE(1 == CBB_init(&cbb, 0), InternalDOMOperationError, "Failed to init CBB",
+      internalDescribeOpensslErrors());
+  KJ_DEFER(CBB_cleanup(&cbb));
+
+  JSG_REQUIRE(1 == EC_POINT_point2cbb(&cbb, group, publicKey, POINT_CONVERSION_UNCOMPRESSED,
+      nullptr), InternalDOMOperationError, "Failed to convert to serialize EC key",
+      internalDescribeOpensslErrors());
+
+  JSG_REQUIRE(1 == CBB_finish(&cbb, &raw, &raw_len), InternalDOMOperationError,
+      "Failed to finish CBB", internalDescribeOpensslErrors());
+
+  return kj::Array<kj::byte>(raw, raw_len, SslArrayDisposer::INSTANCE);
 }
 
-} // namespace
-
-kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
-    jsg::Lock& js, kj::StringPtr normalizedName,
-    SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
-    kj::ArrayPtr<const kj::String> keyUsages) {
-
-  KJ_ASSERT(normalizedName == "RSASSA-PKCS1-v1_5" || normalizedName == "RSA-PSS" ||
-      normalizedName == "RSA-OAEP", "generateRsa called on non-RSA cryptoKey", normalizedName);
-
-  auto publicExponent = JSG_REQUIRE_NONNULL(kj::mv(algorithm.publicExponent), TypeError,
-        "Missing field \"publicExponent\" in \"algorithm\".");
-  kj::StringPtr hash = api::getAlgorithmName(JSG_REQUIRE_NONNULL(algorithm.hash, TypeError,
-        "Missing field \"hash\" in \"algorithm\"."));
-  int modulusLength = JSG_REQUIRE_NONNULL(algorithm.modulusLength, TypeError,
-      "Missing field \"modulusLength\" in \"algorithm\".");
-  JSG_REQUIRE(modulusLength > 0, DOMOperationError, "modulusLength must be greater than zero "
-      "(requested ", modulusLength, ").");
-  auto [normalizedHashName, hashEvpMd] = lookupDigestAlgorithm(hash);
-
-  CryptoKeyUsageSet validUsages = (normalizedName == "RSA-OAEP") ?
-      (CryptoKeyUsageSet::encrypt() | CryptoKeyUsageSet::decrypt() |
-       CryptoKeyUsageSet::wrapKey() | CryptoKeyUsageSet::unwrapKey()) :
-      (CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
-  auto usages = CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::generate,
-                                            keyUsages, validUsages);
-
-  validateRsaParams(js, modulusLength, publicExponent.asPtr());
-  // boringssl silently uses (modulusLength & ~127) for the key size, i.e. it rounds down to the
-  // closest multiple of 128 bits. This can easily cause confusion when non-standard key sizes are
-  // requested.
-  // The `modulusLength` field of the resulting CryptoKey will be incorrect when the compat flag
-  // is disabled and the key size is rounded down, but since it is not currently used this is
-  // acceptable.
-  JSG_REQUIRE(!(FeatureFlags::get(js).getStrictCrypto() && (modulusLength & 127)), DOMOperationError,
-      "Can't generate key: RSA key size is required to be a multiple of 128");
-
-  auto bnExponent = JSG_REQUIRE_NONNULL(toBignum(publicExponent), InternalDOMOperationError,
-      "Error setting up RSA keygen.");
-
-  auto rsaPrivateKey = OSSL_NEW(RSA);
-  OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), 0));
-  auto privateEvpPKey = OSSL_NEW(EVP_PKEY);
-  OSSLCALL(EVP_PKEY_set1_RSA(privateEvpPKey.get(), rsaPrivateKey.get()));
-  kj::Own<RSA> rsaPublicKey = OSSLCALL_OWN(RSA, RSAPublicKey_dup(rsaPrivateKey.get()),
-      InternalDOMOperationError, "Error finalizing RSA keygen", internalDescribeOpensslErrors());
-  auto publicEvpPKey = OSSL_NEW(EVP_PKEY);
-  OSSLCALL(EVP_PKEY_set1_RSA(publicEvpPKey.get(), rsaPublicKey));
-
-  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {
-    .name = normalizedName,
-    .modulusLength = static_cast<uint16_t>(modulusLength),
-    .publicExponent = kj::mv(publicExponent),
-    .hash = KeyAlgorithm { normalizedHashName }
+CryptoKey::AsymmetricKeyDetails Ec::getAsymmetricKeyDetail() const {
+  // Adapted from Node.js' GetEcKeyDetail
+  return CryptoKey::AsymmetricKeyDetails {
+    .namedCurve = kj::str(OBJ_nid2sn(EC_GROUP_get_curve_name(group)))
   };
-
-  return generateRsaPair(js, normalizedName, kj::mv(privateEvpPKey), kj::mv(publicEvpPKey),
-      kj::mv(keyAlgorithm), extractable, usages);
 }
 
-kj::Own<EVP_PKEY> rsaJwkReader(SubtleCrypto::JsonWebKey&& keyDataJwk) {
-  auto rsaKey = OSSL_NEW(RSA);
-
-  auto modulus = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.n),
-      DOMDataError, "Invalid RSA key in JSON Web Key; missing or invalid Modulus "
-      "parameter (\"n\").");
-  auto publicExponent = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.e),
-      DOMDataError, "Invalid RSA key in JSON Web Key; missing or invalid "
-      "Exponent parameter (\"e\").");
-
-  // RSA_set0_*() transfers BIGNUM ownership to the RSA key, so we don't need to worry about
-  // calling BN_free().
-  OSSLCALL(RSA_set0_key(rsaKey.get(),
-      toBignumUnowned(modulus),
-      toBignumUnowned(publicExponent),
-      nullptr));
-
-  if (keyDataJwk.d != kj::none) {
-    // This is a private key.
-
-    auto privateExponent = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.d),
-        DOMDataError, "Invalid RSA key in JSON Web Key; missing or invalid "
-        "Private Exponent parameter (\"d\").");
-
-    OSSLCALL(RSA_set0_key(rsaKey.get(), nullptr, nullptr, toBignumUnowned(privateExponent)));
-
-    auto presence = (keyDataJwk.p != kj::none) + (keyDataJwk.q != kj::none) +
-                    (keyDataJwk.dp != kj::none) + (keyDataJwk.dq != kj::none) +
-                    (keyDataJwk.qi != kj::none);
-
-    if (presence == 5) {
-      auto firstPrimeFactor = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.p),
-          DOMDataError, "Invalid RSA key in JSON Web Key; invalid First Prime "
-          "Factor parameter (\"p\").");
-      auto secondPrimeFactor = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.q),
-          DOMDataError, "Invalid RSA key in JSON Web Key; invalid Second Prime "
-          "Factor parameter (\"q\").");
-      auto firstFactorCrtExponent = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.dp),
-          DOMDataError, "Invalid RSA key in JSON Web Key; invalid First Factor "
-          "CRT Exponent parameter (\"dp\").");
-      auto secondFactorCrtExponent = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.dq),
-          DOMDataError, "Invalid RSA key in JSON Web Key; invalid Second Factor "
-          "CRT Exponent parameter (\"dq\").");
-      auto firstCrtCoefficient = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.qi),
-          DOMDataError, "Invalid RSA key in JSON Web Key; invalid First CRT "
-          "Coefficient parameter (\"qi\").");
-
-      OSSLCALL(RSA_set0_factors(rsaKey.get(),
-          toBignumUnowned(firstPrimeFactor),
-          toBignumUnowned(secondPrimeFactor)));
-      OSSLCALL(RSA_set0_crt_params(rsaKey.get(),
-          toBignumUnowned(firstFactorCrtExponent),
-          toBignumUnowned(secondFactorCrtExponent),
-          toBignumUnowned(firstCrtCoefficient)));
-    } else {
-      JSG_REQUIRE(presence == 0, DOMDataError,
-          "Invalid RSA private key in JSON Web Key; if one Prime "
-          "Factor or CRT Exponent/Coefficient parameter is present, then they must all be "
-          "present (\"p\", \"q\", \"dp\", \"dq\", \"qi\").");
-    }
-  }
-
-  auto evpPkey = OSSL_NEW(EVP_PKEY);
-  OSSLCALL(EVP_PKEY_set1_RSA(evpPkey.get(), rsaKey.get()));
-  return evpPkey;
-}
-
-kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
-    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
-    SubtleCrypto::ImportKeyData keyData,
-    SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
-    kj::ArrayPtr<const kj::String> keyUsages) {
-  kj::StringPtr hash = api::getAlgorithmName(JSG_REQUIRE_NONNULL(algorithm.hash, TypeError,
-      "Missing field \"hash\" in \"algorithm\"."));
-
-  CryptoKeyUsageSet allowedUsages = (normalizedName == "RSA-OAEP") ?
-      (CryptoKeyUsageSet::encrypt() | CryptoKeyUsageSet::decrypt() |
-       CryptoKeyUsageSet::wrapKey() | CryptoKeyUsageSet::unwrapKey()) :
-      (CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
-
-  auto [normalizedHashName, hashEvpMd] = lookupDigestAlgorithm(hash);
-
-  auto importedKey = importAsymmetricForWebCrypto(
-      js, kj::mv(format), kj::mv(keyData), normalizedName, extractable, keyUsages,
-      // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
-      [hashEvpMd = hashEvpMd, &algorithm](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
-    JSG_REQUIRE(keyDataJwk.kty == "RSA", DOMDataError,
-        "RSASSA-PKCS1-v1_5 \"jwk\" key import requires a JSON Web Key with Key Type parameter "
-        "\"kty\" (\"", keyDataJwk.kty, "\") equal to \"RSA\".");
-
-    KJ_IF_SOME(alg, keyDataJwk.alg) {
-      // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
-      // importKey().
-      static std::map<kj::StringPtr, const EVP_MD*> rsaShaAlgorithms{
-        {"RS1", EVP_sha1()},
-        {"RS256", EVP_sha256()},
-        {"RS384", EVP_sha384()},
-        {"RS512", EVP_sha512()},
-      };
-      static std::map<kj::StringPtr, const EVP_MD*> rsaPssAlgorithms{
-        {"PS1", EVP_sha1()},
-        {"PS256", EVP_sha256()},
-        {"PS384", EVP_sha384()},
-        {"PS512", EVP_sha512()},
-      };
-      static std::map<kj::StringPtr, const EVP_MD*> rsaOaepAlgorithms{
-        {"RSA-OAEP", EVP_sha1()},
-        {"RSA-OAEP-256", EVP_sha256()},
-        {"RSA-OAEP-384", EVP_sha384()},
-        {"RSA-OAEP-512", EVP_sha512()},
-      };
-      const auto& validAlgorithms = [&] {
-        if (algorithm.name == "RSASSA-PKCS1-v1_5") {
-          return rsaShaAlgorithms;
-        } else if (algorithm.name == "RSA-PSS") {
-          return rsaPssAlgorithms;
-        } else if (algorithm.name == "RSA-OAEP") {
-          return rsaOaepAlgorithms;
-        } else {
-          JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized RSA variant \"", algorithm.name,
-              "\".");
-        }
-      }();
-      auto jwkHash = validAlgorithms.find(alg);
-      JSG_REQUIRE(jwkHash != rsaPssAlgorithms.end(), DOMNotSupportedError,
-          "Unrecognized or unimplemented algorithm \"", alg, "\" listed in JSON Web Key Algorithm "
-          "parameter.");
-
-      JSG_REQUIRE(jwkHash->second == hashEvpMd, DOMDataError,
-          "JSON Web Key Algorithm parameter \"alg\" (\"", alg, "\") does not match requested hash "
-          "algorithm \"", jwkHash->first, "\".");
-    }
-
-    return rsaJwkReader(kj::mv(keyDataJwk));
-  }, allowedUsages);
-
-  // get0 avoids adding a refcount...
-  RSA& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(importedKey.evpPkey.get()), DOMDataError,
-      "Input was not an RSA key", tryDescribeOpensslErrors());
-
-  // TODO(conform): We're supposed to check if PKCS8/SPKI input specified a hash and, if so,
-  //   compare it against the hash requested in `algorithm`. But, I can't find the OpenSSL
-  //   interface to extract the hash from the ASN.1. Oh well...
-
-  auto modulusLength = RSA_size(&rsa) * 8;
-  KJ_ASSERT(modulusLength <= ~uint16_t(0));
-
-  const BIGNUM *n, *e, *d;
-  RSA_get0_key(&rsa, &n, &e, &d);
-
-  auto publicExponent = KJ_REQUIRE_NONNULL(bignumToArray(*e));
-
-  // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
-  validateRsaParams(js, modulusLength, publicExponent, true);
-
-  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {
-    .name = normalizedName,
-    .modulusLength = static_cast<uint16_t>(modulusLength),
-    .publicExponent = kj::mv(publicExponent),
-    .hash = KeyAlgorithm { normalizedHashName }
-  };
-  if (normalizedName == "RSASSA-PKCS1-v1_5") {
-    return kj::heap<RsassaPkcs1V15Key>(
-        kj::mv(importedKey), kj::mv(keyAlgorithm), extractable);
-  } else if (normalizedName == "RSA-PSS") {
-    return kj::heap<RsaPssKey>(kj::mv(importedKey), kj::mv(keyAlgorithm), extractable);
-  } else if (normalizedName == "RSA-OAEP") {
-    return kj::heap<RsaOaepKey>(kj::mv(importedKey), kj::mv(keyAlgorithm), extractable);
-  } else {
-    JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized RSA variant \"", normalizedName, "\".");
-  }
-}
-
-kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
-    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
-    SubtleCrypto::ImportKeyData keyData,
-    SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
-    kj::ArrayPtr<const kj::String> keyUsages) {
-  // Note that in this context raw refers to the RSA-RAW algorithm, not to keys represented by raw
-  // data. Importing raw keys is currently not supported for this algorithm.
-  CryptoKeyUsageSet allowedUsages = CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify();
-  auto importedKey = importAsymmetricForWebCrypto(
-      js, kj::mv(format), kj::mv(keyData), normalizedName, extractable, keyUsages,
-      // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
-      [](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
-    JSG_REQUIRE(keyDataJwk.kty == "RSA", DOMDataError,
-        "RSA-RAW \"jwk\" key import requires a JSON Web Key with Key Type parameter "
-        "\"kty\" (\"", keyDataJwk.kty, "\") equal to \"RSA\".");
-
-    KJ_IF_SOME(alg, keyDataJwk.alg) {
-      // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
-      // importKey().
-      static std::map<kj::StringPtr, const EVP_MD*> rsaAlgorithms{
-        {"RS1", EVP_sha1()},
-        {"RS256", EVP_sha256()},
-        {"RS384", EVP_sha384()},
-        {"RS512", EVP_sha512()},
-      };
-      auto jwkHash = rsaAlgorithms.find(alg);
-      JSG_REQUIRE(jwkHash != rsaAlgorithms.end(), DOMNotSupportedError,
-          "Unrecognized or unimplemented algorithm \"", alg,
-          "\" listed in JSON Web Key Algorithm parameter.");
-    }
-    return rsaJwkReader(kj::mv(keyDataJwk));
-  }, allowedUsages);
-
-  JSG_REQUIRE(importedKey.keyType == KeyType::PRIVATE, DOMDataError,
-      "RSA-RAW only supports private keys but requested \"",
-      toStringPtr(importedKey.keyType), "\".");
-
-  // get0 avoids adding a refcount...
-  RSA& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(importedKey.evpPkey.get()), DOMDataError,
-      "Input was not an RSA key", tryDescribeOpensslErrors());
-
-  auto modulusLength = RSA_size(&rsa) * 8;
-  KJ_ASSERT(modulusLength <= ~uint16_t(0));
-
-  const BIGNUM *n, *e, *d;
-  RSA_get0_key(&rsa, &n, &e, &d);
-
-  auto publicExponent = KJ_REQUIRE_NONNULL(bignumToArray(*e));
-
-  // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
-  validateRsaParams(js, modulusLength, publicExponent, true);
-
-  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {
-    .name = "RSA-RAW"_kj,
-    .modulusLength = static_cast<uint16_t>(modulusLength),
-    .publicExponent = kj::mv(publicExponent)
-  };
-
-  return kj::heap<RsaRawKey>(kj::mv(importedKey), kj::mv(keyAlgorithm), extractable);
+kj::Maybe<Ec> Ec::tryGetEc(const EVP_PKEY* key) {
+  int type = EVP_PKEY_id(key);
+  if (type != EVP_PKEY_EC) return kj::none;
+  auto ec = EVP_PKEY_get0_EC_KEY(key);
+  if (ec == nullptr) return kj::none;
+  return Ec(ec);
 }
 
 // =====================================================================================
@@ -854,16 +196,16 @@ public:
     auto& publicKeyImpl = kj::downcast<EllipticKey>(*publicKey->impl);
 
     // Adapted from https://wiki.openssl.org/index.php/Elliptic_Curve_Diffie_Hellman:
-    auto& privateEcKey = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(getEvpPkey()),
+    auto privateEcKey = JSG_REQUIRE_NONNULL(Ec::tryGetEc(getEvpPkey()),
         InternalDOMOperationError, "No elliptic curve data backing key",
         tryDescribeOpensslErrors());
-    auto& publicEcKey = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(publicKeyImpl.getEvpPkey()),
+    auto publicEcKey = JSG_REQUIRE_NONNULL(Ec::tryGetEc(publicKeyImpl.getEvpPkey()),
         InternalDOMOperationError, "No elliptic curve data backing key",
         tryDescribeOpensslErrors());
-    auto& publicEcPoint = JSG_REQUIRE_NONNULL(EC_KEY_get0_public_key(&publicEcKey),
-        DOMOperationError, "No public elliptic curve key data in this key",
-        tryDescribeOpensslErrors());
-    auto fieldSize = EC_GROUP_get_degree(EC_KEY_get0_group(&privateEcKey));
+    JSG_REQUIRE(publicEcKey.getPublicKey() != nullptr, DOMOperationError,
+                "No public elliptic curve key data in this key",
+                tryDescribeOpensslErrors());
+    auto fieldSize = privateEcKey.getDegree();
 
     // Assuming that `fieldSize` will always be a sane value since it's related to the keys we
     // construct in C++ (i.e. not untrusted user input).
@@ -871,8 +213,11 @@ public:
     kj::Vector<kj::byte> sharedSecret;
     sharedSecret.resize(
         integerCeilDivision<std::make_unsigned<decltype(fieldSize)>::type>(fieldSize, 8u));
-    auto written = ECDH_compute_key(sharedSecret.begin(), sharedSecret.capacity(),
-        &publicEcPoint, &privateEcKey, nullptr);
+    auto written = ECDH_compute_key(sharedSecret.begin(),
+                                    sharedSecret.capacity(),
+                                    publicEcKey.getPublicKey(),
+                                    privateEcKey.getKey(),
+                                    nullptr);
     JSG_REQUIRE(written > 0, DOMOperationError, "Failed to generate shared ECDH secret",
         tryDescribeOpensslErrors());
 
@@ -1038,95 +383,22 @@ public:
 
 private:
   SubtleCrypto::JsonWebKey exportJwk() const override final {
-    const EC_KEY& ec = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(getEvpPkey()), DOMOperationError,
+    auto ec = JSG_REQUIRE_NONNULL(Ec::tryGetEc(getEvpPkey()), DOMOperationError,
         "No elliptic curve data backing key", tryDescribeOpensslErrors());
-
-    const auto& group = JSG_REQUIRE_NONNULL(EC_KEY_get0_group(&ec), DOMOperationError,
-        "No elliptic curve group in this key", tryDescribeOpensslErrors());
-    const auto& point = JSG_REQUIRE_NONNULL(EC_KEY_get0_public_key(&ec), DOMOperationError,
-        "No public elliptic curve key data in this key",
-        tryDescribeOpensslErrors());
-
-    auto groupDegreeInBytes = integerCeilDivision(EC_GROUP_get_degree(&group), 8u);
-    // EC_GROUP_get_degree returns number of bits. We need this because x, y, & d need to match the
-    // group degree according to JWK.
-
-    BIGNUM x = {0};
-    BIGNUM y = {0};
-
-    JSG_REQUIRE(1 == EC_POINT_get_affine_coordinates_GFp(&group, &point, &x, &y, nullptr),
-        InternalDOMOperationError, "Error getting affine coordinates for export",
-        internalDescribeOpensslErrors());
-
-    SubtleCrypto::JsonWebKey jwk;
-    jwk.kty = kj::str("EC");
-    jwk.crv = kj::str(keyAlgorithm.namedCurve);
-
-    static constexpr auto handleBn = [](const BIGNUM& bn, size_t size) {
-      return JSG_REQUIRE_NONNULL(bignumToArrayPadded(bn, size),
-        InternalDOMOperationError, "Error converting EC affine co-ordinates to padded array",
-        internalDescribeOpensslErrors());
-    };
-
-    auto xa = handleBn(x, groupDegreeInBytes);
-    auto ya = handleBn(y, groupDegreeInBytes);
-
-    jwk.x = kj::encodeBase64Url(xa);
-    jwk.y = kj::encodeBase64Url(ya);
-    if (getTypeEnum() == KeyType::PRIVATE) {
-      const auto& privateKey = JSG_REQUIRE_NONNULL(EC_KEY_get0_private_key(&ec),
-          InternalDOMOperationError, "Error getting private key material for JSON Web Key export",
-          internalDescribeOpensslErrors());
-      auto pk = handleBn(privateKey, groupDegreeInBytes);
-      jwk.d = kj::encodeBase64Url(pk);
-    }
-    return jwk;
+    return ec.toJwk(getTypeEnum(), kj::str(keyAlgorithm.namedCurve));
   }
 
   kj::Array<kj::byte> exportRaw() const override final {
     JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
         "Raw export of elliptic curve keys is only allowed for public keys.");
-
-    const EC_KEY& ec = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(getEvpPkey()),
-        InternalDOMOperationError, "No elliptic curve data backing key",
-        tryDescribeOpensslErrors());
-    const auto& group = JSG_REQUIRE_NONNULL(EC_KEY_get0_group(&ec), InternalDOMOperationError,
-        "No elliptic curve group in this key", tryDescribeOpensslErrors());
-    const auto& point = JSG_REQUIRE_NONNULL(EC_KEY_get0_public_key(&ec), InternalDOMOperationError,
-        "No public elliptic curve key data in this key",
-        tryDescribeOpensslErrors());
-
-    // Serialize the public key as an uncompressed point in X9.62 form.
-    uint8_t* raw;
-    size_t raw_len;
-    CBB cbb;
-
-    JSG_REQUIRE(1 == CBB_init(&cbb, 0), InternalDOMOperationError, "Failed to init CBB",
-        internalDescribeOpensslErrors());
-    KJ_DEFER(CBB_cleanup(&cbb));
-
-    JSG_REQUIRE(1 == EC_POINT_point2cbb(&cbb, &group, &point, POINT_CONVERSION_UNCOMPRESSED,
-        nullptr), InternalDOMOperationError, "Failed to convert to serialize EC key",
-        internalDescribeOpensslErrors());
-
-    JSG_REQUIRE(1 == CBB_finish(&cbb, &raw, &raw_len), InternalDOMOperationError,
-        "Failed to finish CBB", internalDescribeOpensslErrors());
-
-    return kj::Array<kj::byte>(raw, raw_len, SslArrayDisposer::INSTANCE);
+    return JSG_REQUIRE_NONNULL(Ec::tryGetEc(getEvpPkey()), InternalDOMOperationError,
+                                  "No elliptic curve data backing key",
+                                  tryDescribeOpensslErrors()).getRawPublicKey();
   }
 
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
     // Adapted from Node.js' GetEcKeyDetail
-    KJ_REQUIRE(EVP_PKEY_id(getEvpPkey()) == EVP_PKEY_EC);
-    const EC_KEY* ec = EVP_PKEY_get0_EC_KEY(getEvpPkey());
-    KJ_ASSERT(ec != nullptr);
-
-    const EC_GROUP* group = EC_KEY_get0_group(ec);
-    int nid = EC_GROUP_get_curve_name(group);
-
-    return CryptoKey::AsymmetricKeyDetails {
-      .namedCurve = kj::str(OBJ_nid2sn(nid))
-    };
+    return KJ_ASSERT_NONNULL(Ec::tryGetEc(getEvpPkey())).getAsymmetricKeyDetail();
   }
 
   CryptoKey::EllipticKeyAlgorithm keyAlgorithm;
@@ -1202,7 +474,10 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EllipticKey>(kj::mv(publicKeyData),
       keyAlgorithm, rsSize, true));
 
-  return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
+  return CryptoKeyPair {
+    .publicKey =  kj::mv(publicKey),
+    .privateKey = kj::mv(privateKey)
+  };
 }
 
 AsymmetricKeyData importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int curveId,
@@ -1247,8 +522,6 @@ AsymmetricKeyData importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int cur
 
   return AsymmetricKeyData{ kj::mv(evpPkey), KeyType::PUBLIC, usages };
 }
-
-}  // namespace
 
 kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyDataJwk,
                                     kj::StringPtr normalizedName) {
@@ -1360,6 +633,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyD
   OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
   return evpPkey;
 }
+}  // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdsa(
     jsg::Lock& js, kj::StringPtr normalizedName,
@@ -1401,12 +675,12 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(
   }();
 
   // get0 avoids adding a refcount...
-  EC_KEY& ecKey = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(importedKey.evpPkey.get()), DOMDataError,
-      "Input was not an EC key", tryDescribeOpensslErrors());
+  auto ecKey = JSG_REQUIRE_NONNULL(Ec::tryGetEc(importedKey.evpPkey.get()), DOMDataError,
+                                   "Input was not an EC key",
+                                   tryDescribeOpensslErrors());
 
   // Verify namedCurve matches what was specified in the key data.
-  const EC_GROUP* group = EC_KEY_get0_group(&ecKey);
-  JSG_REQUIRE(group != nullptr && EC_GROUP_get_curve_name(group) == curveId, DOMDataError,
+  JSG_REQUIRE(ecKey.getGroup() != nullptr && ecKey.getCurveName() == curveId, DOMDataError,
       "\"algorithm.namedCurve\" \"", namedCurve, "\" does not match the curve specified by the "
       "input key data", tryDescribeOpensslErrors());
 
@@ -1456,20 +730,19 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
     }
   }();
 
-  EC_KEY& ecKey = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(importedKey.evpPkey.get()), DOMDataError,
-      "Input was not an EC public key nor a DH key",
-      tryDescribeOpensslErrors());
-  // get0 avoids adding a refcount...
+  auto ecKey = JSG_REQUIRE_NONNULL(Ec::tryGetEc(importedKey.evpPkey.get()), DOMDataError,
+                                   "Input was not an EC public key nor a DH key",
+                                   tryDescribeOpensslErrors());
 
   // We ignore id-ecDH because BoringSSL doesn't implement this.
   // https://bugs.chromium.org/p/chromium/issues/detail?id=532728
   // https://bugs.chromium.org/p/chromium/issues/detail?id=389400
 
   // Verify namedCurve matches what was specified in the key data.
-  const EC_GROUP* group = EC_KEY_get0_group(&ecKey);
-  JSG_REQUIRE(group != nullptr && EC_GROUP_get_curve_name(group) == curveId, DOMDataError,
-      "\"algorithm.namedCurve\" \"", namedCurve, "\", does not match the curve specified by the "
-      "input key data", tryDescribeOpensslErrors());
+  JSG_REQUIRE(ecKey.getGroup() != nullptr && ecKey.getCurveName() == curveId, DOMDataError,
+              "\"algorithm.namedCurve\" \"", namedCurve, "\", does not match the curve "
+              "specified by the input key data",
+              tryDescribeOpensslErrors());
 
   auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
     normalizedName,
