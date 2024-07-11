@@ -809,4 +809,12 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
   return kj::heap<RsaRawKey>(kj::mv(importedKey), kj::mv(keyAlgorithm), extractable);
 }
 
+kj::Own<CryptoKey::Impl> fromRsaKey(kj::Own<EVP_PKEY> key) {
+  return kj::heap<RsassaPkcs1V15Key>(AsymmetricKeyData {
+    .evpPkey = kj::mv(key),
+    .keyType = KeyType::PUBLIC,
+    .usages = CryptoKeyUsageSet::decrypt() | CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify()
+  }, CryptoKey::RsaKeyAlgorithm {.name = "RSA"_kj }, true);
+}
+
 }  // namespace workerd::api

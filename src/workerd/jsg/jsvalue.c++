@@ -183,6 +183,10 @@ JsValue JsArray::get(Lock& js, uint32_t i) const {
   return JsValue(check(inner->Get(js.v8Context(), i)));
 }
 
+void JsArray::add(Lock& js, const JsValue& value) {
+  check(inner->Set(js.v8Context(), size(), value.inner));
+}
+
 JsArray::operator JsObject() const { return JsObject(inner.As<v8::Object>()); }
 
 int JsString::length(jsg::Lock& js) const {

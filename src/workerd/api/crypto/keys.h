@@ -77,6 +77,9 @@ public:
   size_t jsgGetMemorySelfSize() const override { return sizeof(AsymmetricKeyCryptoKeyImpl); }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {}
 
+  bool verifyX509Public(const X509* cert) const override;
+  bool verifyX509Private(const X509* cert) const override;
+
 private:
   virtual SubtleCrypto::JsonWebKey exportJwk() const = 0;
   virtual kj::Array<kj::byte> exportRaw() const = 0;

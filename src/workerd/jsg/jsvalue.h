@@ -207,6 +207,7 @@ public:
   operator JsObject() const;
   uint32_t size() const KJ_WARN_UNUSED_RESULT;
   JsValue get(Lock& js, uint32_t i) const KJ_WARN_UNUSED_RESULT;
+  void add(Lock& js, const JsValue& value);
 
   using JsBase<v8::Array, JsArray>::JsBase;
 };

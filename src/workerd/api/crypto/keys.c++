@@ -2,6 +2,7 @@
 #include <openssl/ec_key.h>
 #include <openssl/crypto.h>
 #include <openssl/pem.h>
+#include <openssl/x509.h>
 
 namespace workerd::api {
 
@@ -315,6 +316,16 @@ bool AsymmetricKeyCryptoKeyImpl::equals(const CryptoKey::Impl& other) const {
 
 kj::StringPtr AsymmetricKeyCryptoKeyImpl::getType() const {
   return toStringPtr(keyType);
+}
+
+bool AsymmetricKeyCryptoKeyImpl::verifyX509Public(const X509* cert) const {
+  ClearErrorOnReturn clearErrorOnReturn;
+  return X509_verify(const_cast<X509*>(cert), getEvpPkey()) > 0;
+}
+
+bool AsymmetricKeyCryptoKeyImpl::verifyX509Private(const X509* cert) const{
+  ClearErrorOnReturn clearErrorOnReturn;
+  return X509_check_private_key(const_cast<X509*>(cert), getEvpPkey()) == 1;
 }
 
 // ======================================================================================

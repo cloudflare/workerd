@@ -209,6 +209,20 @@ bool CryptoKey::Impl::equals(const kj::Array<kj::byte>& other) const {
   KJ_FAIL_REQUIRE("Unable to compare raw key material for this key");
 }
 
+kj::Own<CryptoKey::Impl> CryptoKey::Impl::from(kj::Own<EVP_PKEY> key) {
+  switch (EVP_PKEY_id(key.get())) {
+    case EVP_PKEY_RSA:
+      return fromRsaKey(kj::mv(key));
+    case EVP_PKEY_EC:
+      return fromEcKey(kj::mv(key));
+    case EVP_PKEY_ED25519:
+      return fromEd25519Key(kj::mv(key));
+    default:
+      JSG_FAIL_REQUIRE(TypeError, "Unsupported key type");
+  }
+  KJ_UNREACHABLE;
+}
+
 ZeroOnFree::~ZeroOnFree() noexcept(false) {
   OPENSSL_cleanse(inner.begin(), inner.size());
 }

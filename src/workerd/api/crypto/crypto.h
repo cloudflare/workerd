@@ -286,6 +286,9 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
+  bool verifyX509Public(const X509* x509) const;
+  bool verifyX509Private(const X509* x509) const;
+
 private:
   kj::Own<Impl> impl;
 
