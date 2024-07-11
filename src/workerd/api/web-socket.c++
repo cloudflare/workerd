@@ -58,8 +58,7 @@ WebSocket::WebSocket(jsg::Lock& js,
               ws,
               kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
               package.closedOutgoingConnection)),
-      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
-      locality(LOCAL) {}
+      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {}
   // This constructor is used when reinstantiating a websocket that had been hibernating, which is
   // why we can go straight to the Accepted state. However, note that we are actually in the
   // `Hibernatable` "sub-state"!
@@ -71,23 +70,21 @@ jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
   return jsg::alloc<WebSocket>(js, IoContext::current(), ws, kj::mv(package));
 }
 
-WebSocket::WebSocket(kj::Own<kj::WebSocket> native, Locality locality)
+WebSocket::WebSocket(kj::Own<kj::WebSocket> native)
     : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket> {}, *this)),
       url(kj::none),
       farNative(nullptr),
-      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
-      locality(locality) {
+      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<AwaitingAcceptanceOrCoupling>(kj::mv(native));
   farNative = IoContext::current().addObject(kj::mv(nativeObj));
 }
 
-WebSocket::WebSocket(kj::String url, Locality locality)
+WebSocket::WebSocket(kj::String url)
     : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket> {}, *this)),
       url(kj::mv(url)),
       farNative(nullptr),
-      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
-      locality(locality) {
+      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<AwaitingConnection>();
   farNative = IoContext::current().addObject(kj::mv(nativeObj));
@@ -251,7 +248,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   }
 
   auto connUrl = urlRecord.toString();
-  auto ws = jsg::alloc<WebSocket>(kj::mv(url), Locality::REMOTE);
+  auto ws = jsg::alloc<WebSocket>(kj::mv(url));
 
   headers.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, kj::str("permessage-deflate"));
   // By default, browsers set the compression extension header for `new WebSocket()`.
@@ -332,7 +329,19 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other)
   auto upstream = other->pumpTo(*self);
   auto downstream = self->pumpTo(*other);
 
-  if (locality == LOCAL) {
+  auto tryGetPeer = [&]() -> kj::Maybe<WebSocket&> {
+    KJ_IF_SOME(p, peer) {
+      return p->tryGet();
+    }
+    return kj::none;
+  };
+  auto isHibernatable = [&](workerd::api::WebSocket& ws) {
+    KJ_IF_SOME(state, ws.farNative->state.tryGet<Accepted>()) {
+      return state.isHibernatable();
+    }
+    return false;
+  };
+  if (tryGetPeer() != kj::none) {
     // We're terminating the WebSocket in this worker, so the upstream promise (which pumps
     // messages from the client to this worker) counts as something the request is waiting for.
     upstream = upstream.attach(context.registerPendingEvent());
@@ -344,23 +353,31 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other)
                                           downstream.eagerlyEvaluate(nullptr)))
       .attach(kj::mv(self), kj::mv(other));
 
-  if (locality == LOCAL) {
-    // Since the WebSocket is terminated locally, we need the IoContext to stay live while
-    // it is active.
-    co_await promise;
-    co_return;
-  } else {
-    // Since the WebSocket is just proxying through, we can do the pump in a deferred proxy task.
-    // Note that we don't need to (and can't) register any pending events in this case since the
-    // IoContext is free to go away at this point.
-
-    // To begin deferred proxying, we can use this magic `KJ_CO_MAGIC` expression, which fulfills
-    // our outer promise for a DeferredProxy<void>, which wraps a promise for the rest of this
-    // coroutine.
-    KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
-
-    co_return co_await promise;
+  KJ_IF_SOME(peer, tryGetPeer()) {
+    // Since the WebSocket is terminated locally, we generally want the request and associated
+    // IoContext to stay alive until the WebSocket connection has terminated.
+    //
+    // However, there is one exception to this: when the WebSocket is hibernatable, we don't want
+    // the existence of this connection to prevent the actor from being evicted, so we fall through
+    // to deferred proxying in this case.
+    if (!isHibernatable(peer)) {
+      co_await promise;
+      co_return;
+    }
   }
+
+  // Either:
+  // 1. This websocket is just proxying through, in which case we can allow the IoContext to go
+  // away while still being able to successfully pump the websocket connection.
+  // 2. This is a hibernatable websocket and we are falling through to deferred proxying to
+  // potentially allow for hibernation to occur.
+
+  // To begin deferred proxying, we can use this magic `KJ_CO_MAGIC` expression, which fulfills
+  // our outer promise for a DeferredProxy<void>, which wraps a promise for the rest of this
+  // coroutine.
+  KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+
+  co_return co_await promise;
 }
 
 void WebSocket::accept(jsg::Lock& js) {
@@ -464,7 +481,15 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
 
   auto& context = IoContext::current();
 
-  if (locality == REMOTE) {
+  auto hasLocalPeer = [&]() {
+    KJ_IF_SOME(p, peer) {
+      if (p->isValid()) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!hasLocalPeer()) {
     promise = promise.attach(context.registerPendingEvent());
   }
 
@@ -966,13 +991,13 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
 jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
   auto pipe = kj::newWebSocketPipe();
   auto pair = jsg::alloc<WebSocketPair>(
-      jsg::alloc<WebSocket>(kj::mv(pipe.ends[0]), WebSocket::LOCAL),
-      jsg::alloc<WebSocket>(kj::mv(pipe.ends[1]), WebSocket::LOCAL));
+      jsg::alloc<WebSocket>(kj::mv(pipe.ends[0])),
+      jsg::alloc<WebSocket>(kj::mv(pipe.ends[1])));
   auto first = pair->getFirst();
   auto second = pair->getSecond();
 
-  first->setMaybePair(second->addWeakRef());
-  second->setMaybePair(first->addWeakRef());
+  first->setPeer(second->addWeakRef());
+  second->setPeer(first->addWeakRef());
   return kj::mv(pair);
 }
 
@@ -1018,8 +1043,8 @@ void WebSocket::assertNoError(jsg::Lock& js) {
   }
 }
 
-void WebSocket::setMaybePair(kj::Own<WeakRef<WebSocket>> other) {
-  maybePair = kj::mv(other);
+void WebSocket::setPeer(kj::Own<WeakRef<WebSocket>> other) {
+  peer = kj::mv(other);
 }
 
 kj::Own<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::StringPtr> tags) {
@@ -1044,8 +1069,7 @@ void WebSocket::initiateHibernatableRelease(jsg::Lock& js,
     kj::Array<kj::String> tags,
     HibernatableReleaseState releaseState) {
   // TODO(soon): We probably want this to be an assert, since this is meant to be called once
-  // at the end of a websocket connection and if it doesn't run then it's likely that no close
-  // or error event will get dispatched.
+  // at the end of a websocket connection>
   KJ_IF_SOME(state, farNative->state.tryGet<Accepted>()) {
     KJ_REQUIRE(state.isHibernatable(),
         "tried to initiate hibernatable release but websocket wasn't hibernatable");
@@ -1070,17 +1094,11 @@ bool WebSocket::awaitingHibernatableRelease() {
   return false;
 }
 
-void WebSocket::setRemoteOnPair() {
-  auto& ref = JSG_REQUIRE_NONNULL(maybePair, Error,
-      "this WebSocket is not one end of a WebSocketPair");
-  ref->runIfAlive([](WebSocket& ref) { ref.locality = REMOTE; });
-}
-
-bool WebSocket::pairIsAwaitingCoupling() {
+bool WebSocket::peerIsAwaitingCoupling() {
   bool answer = false;
-  KJ_IF_SOME(pair, maybePair) {
-    pair->runIfAlive([&answer](WebSocket& pair) {
-      answer = pair.farNative->state.is<AwaitingAcceptanceOrCoupling>();
+  KJ_IF_SOME(p, peer) {
+    p->runIfAlive([&answer](WebSocket& ws) {
+      answer = ws.farNative->state.is<AwaitingAcceptanceOrCoupling>();
     });
   }
   return answer;

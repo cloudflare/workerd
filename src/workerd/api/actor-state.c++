@@ -849,13 +849,9 @@ void DurableObjectState::acceptWebSocket(
     jsg::Optional<kj::Array<kj::String>> tags) {
   JSG_ASSERT(!ws->isAccepted(), Error,
       "Cannot call `acceptWebSocket()` if the WebSocket was already accepted via `accept()`");
-  JSG_ASSERT(ws->pairIsAwaitingCoupling(), Error,
+  JSG_ASSERT(ws->peerIsAwaitingCoupling(), Error,
       "Cannot call `acceptWebSocket()` on this WebSocket because its pair has already been "\
       "accepted or used in a Response.");
-  // WebSocket::couple() will keep the IoContext around if the websocket we return in the Response
-  // is `LOCAL`, so we have to set it to remote. Note that `setRemoteOnPair()` will throw if
-  // `ws` is not an end of a WebSocketPair.
-  ws->setRemoteOnPair();
 
   // We need to get a HibernationManager to give the websocket to.
   auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
