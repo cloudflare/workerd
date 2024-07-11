@@ -2,11 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
-import path from "path";
+import assert from "node:assert";
+import path from "node:path";
 import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
 import ts from "typescript";
 import { getTypeName } from "../../generator";
+import { SourcesMap } from "../../program";
 
 // If an override matches this RegExp, it will replace the existing definition
 const keywordReplace =
@@ -58,15 +59,15 @@ function compileOverride(
   return [override, false];
 }
 
-const overridesPath = path.resolve(__dirname, "overrides");
-const definesPath = path.resolve(__dirname, "defines");
+const overridesPath = "/$virtual/overrides";
+const definesPath = "/$virtual/defines";
 
 // Converts and collects all overrides and defines as TypeScript source files.
 // Also returns a set of definitions that should be replaced by their override.
 export function compileOverridesDefines(
   root: StructureGroups
-): [sources: Map<string, string>, replacements: Set<string>] {
-  const sources = new Map<string, string>();
+): [sources: SourcesMap, replacements: Set<string>] {
+  const sources = new SourcesMap();
   // Types that need their definition completely replaced by their override
   const replacements = new Set<string>();
 
