@@ -5,6 +5,7 @@
 #include "sqlite.h"
 #include <kj/debug.h>
 #include <kj/refcount.h>
+#include <kj/string-tree.h>
 #include <workerd/util/sentry.h>
 
 #if _WIN32
@@ -30,6 +31,62 @@
 
 namespace workerd {
 
+namespace {
+
+// SQLite has a function like this in its internals, but it's not exposed to library consumers.
+//
+// These error codes come from https://www.sqlite.org/rescode.html#primary_result_code_list.
+kj::String namedErrorCode(int errorCode) {
+#define LITERAL(name) case name: return kj::str(#name);
+  switch (errorCode) {
+    LITERAL(SQLITE_OK)
+    LITERAL(SQLITE_ERROR)
+    LITERAL(SQLITE_INTERNAL)
+    LITERAL(SQLITE_PERM)
+    LITERAL(SQLITE_ABORT)
+    LITERAL(SQLITE_BUSY)
+    LITERAL(SQLITE_LOCKED)
+    LITERAL(SQLITE_NOMEM)
+    LITERAL(SQLITE_READONLY)
+    LITERAL(SQLITE_INTERRUPT)
+    LITERAL(SQLITE_IOERR)
+    LITERAL(SQLITE_CORRUPT)
+    LITERAL(SQLITE_NOTFOUND)
+    LITERAL(SQLITE_FULL)
+    LITERAL(SQLITE_CANTOPEN)
+    LITERAL(SQLITE_PROTOCOL)
+    LITERAL(SQLITE_EMPTY)
+    LITERAL(SQLITE_SCHEMA)
+    LITERAL(SQLITE_TOOBIG)
+    LITERAL(SQLITE_CONSTRAINT)
+    LITERAL(SQLITE_MISMATCH)
+    LITERAL(SQLITE_MISUSE)
+    LITERAL(SQLITE_NOLFS)
+    LITERAL(SQLITE_AUTH)
+    LITERAL(SQLITE_FORMAT)
+    LITERAL(SQLITE_RANGE)
+    LITERAL(SQLITE_NOTADB)
+    LITERAL(SQLITE_NOTICE)
+    LITERAL(SQLITE_WARNING)
+    LITERAL(SQLITE_ROW)
+    LITERAL(SQLITE_DONE)
+  default:
+    return kj::str("SQLITE_UNKNOWN_ERROR_CODE(", errorCode, ")");
+  }
+#undef LITERAL
+}
+
+kj::String dbErrorMessage(int errorCode, sqlite3* db) {
+  kj::StringTree msg = kj::strTree(sqlite3_errmsg(db));
+  if (int offset = sqlite3_error_offset(db); offset != -1) {
+    msg = kj::strTree(kj::mv(msg), " at offset ", offset);
+  }
+  msg = kj::strTree(kj::mv(msg), ": ", namedErrorCode(errorCode));
+  return msg.flatten();
+}
+
+} // namespace
+
 // Like KJ_REQUIRE() but give the Regulator a chance to report the error. `errorMessage` is either
 // the return value of sqlite3_errmsg() or a string literal containing a similarly
 // application-approriate error message. A reference called `regulator` must be in-scope.
@@ -43,7 +100,8 @@ namespace workerd {
 // associated with an open DB connection.
 #define SQLITE_CALL_NODB(code, ...) do { \
     int _ec = code; \
-    KJ_ASSERT(_ec == SQLITE_OK, sqlite3_errstr(_ec), " " #code, ##__VA_ARGS__); \
+    KJ_ASSERT(_ec == SQLITE_OK, kj::str(sqlite3_errstr(_ec), ": ", namedErrorCode(_ec)), \
+              ##__VA_ARGS__); \
   } while (false)
 
 // This version requires the scope to contain a variable named `db` which is of type sqlite3*, or
@@ -52,24 +110,14 @@ namespace workerd {
     int _ec = code; \
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */ \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__); \
-    kj::String msg = kj::str(sqlite3_errmsg(db)); \
-    int offset = sqlite3_error_offset(db); \
-    if (offset != -1) { \
-      msg = kj::str(msg, " at offset ", offset); \
-    } \
-    SQLITE_REQUIRE(_ec == SQLITE_OK, msg, " " #code, ##__VA_ARGS__); \
+    SQLITE_REQUIRE(_ec == SQLITE_OK, dbErrorMessage(_ec, db), ##__VA_ARGS__); \
   } while (false)
 
 // Version of `SQLITE_CALL` that can be called after inspecting the error code, in case some codes
 // aren't really errors.
 #define SQLITE_CALL_FAILED(code, error, ...) do { \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__); \
-    kj::String msg = kj::str(sqlite3_errmsg(db)); \
-    int offset = sqlite3_error_offset(db); \
-    if (offset != -1) { \
-      msg = kj::str(msg, " at offset ", offset); \
-    } \
-    SQLITE_REQUIRE(error == SQLITE_OK, msg, " " code, ##__VA_ARGS__); \
+    SQLITE_REQUIRE(error == SQLITE_OK, dbErrorMessage(error, db), ##__VA_ARGS__); \
   } while (false);
 
 namespace {

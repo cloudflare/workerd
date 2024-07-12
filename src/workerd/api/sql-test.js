@@ -200,6 +200,11 @@ async function test(storage) {
   assert.throws(() => sql.exec('SELECT ;'), /syntax error at offset 7/)
   assert.throws(() => sql.exec('SELECT -;'), /syntax error at offset 8/)
 
+  // Data type mismatch
+  sql.exec(`CREATE TABLE test_error_codes (name TEXT);`)
+  assert.throws(() => sql.exec(`INSERT INTO test_error_codes(rowid, name) values ('yeah','nah');`), /Error: datatype mismatch: SQLITE_MISMATCH/)
+  sql.exec(`DROP TABLE test_error_codes;`)
+
   // Incorrect number of binding values
   assert.throws(
     () => sql.exec('SELECT ?'),
@@ -277,12 +282,12 @@ async function test(storage) {
   }
 
   // Trying to write to read-only pragmas is not allowed
-  assert.throws(() => sql.exec('PRAGMA data_version = 5'), /not authorized/)
+  assert.throws(() => sql.exec('PRAGMA data_version = 5'), /not authorized: SQLITE_AUTH/)
   assert.throws(
     () => sql.exec('PRAGMA max_page_count = 65536'),
     /not authorized/
   )
-  assert.throws(() => sql.exec('PRAGMA page_size = 8192'), /not authorized/)
+  assert.throws(() => sql.exec('PRAGMA page_size = 8192'), /not authorized: SQLITE_AUTH/)
 
   // PRAGMA table_info and PRAGMA table_xinfo are allowed.
   sql.exec('CREATE TABLE myTable (foo TEXT, bar INTEGER)')
