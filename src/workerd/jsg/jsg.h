@@ -2448,6 +2448,7 @@ private:
   ~Lock() noexcept(false);
 
   v8::Locker locker;
+  v8::Isolate::Scope isolateScope;
 
   void* previousData;
 

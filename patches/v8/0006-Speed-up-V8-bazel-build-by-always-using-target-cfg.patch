@@ -1,4 +1,4 @@
-From 926c7dee011fa9d95ca75cc8a54f121cb9368749 Mon Sep 17 00:00:00 2001
+From 278a7759097eecc930167cad67457aac7dadbb02 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg
@@ -12,7 +12,7 @@ generated files as the output set. While unrelated to the build cfg change,
 this also improves build times.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index da6f29728c28433ab9824f7b171b1c221739dc6d..f714fdb21097394d87f29f692fdbaa597a2f0145 100644
+index 338e21dfa9d6aa88711526dece59fb792e84bff7..5aeac1aa629fcb2879a33e242bf96f5a8fe1ff13 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -70,10 +70,10 @@ index da6f29728c28433ab9824f7b171b1c221739dc6d..f714fdb21097394d87f29f692fdbaa59
      ],
  )
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index f2061f089ecf365aa8654cea400673905eb05d87..7c587522187c26326b4598149842c7e792cdcfce 100644
+index a81ec956ddd4e985cc6257fc015983baf593f19d..f8dfd9b5eb9c65547db3b17814c84e4fbc312d07 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -338,6 +338,15 @@ def v8_library(
+@@ -340,6 +340,15 @@ def v8_library(
              **kwargs
          )
  
@@ -89,7 +89,7 @@ index f2061f089ecf365aa8654cea400673905eb05d87..7c587522187c26326b4598149842c7e7
  # Use a single generator target for torque definitions and initializers. We can
  # split the set of outputs by using OutputGroupInfo, that way we do not need to
  # run the torque generator twice.
-@@ -402,7 +411,7 @@ _v8_torque_files = rule(
+@@ -404,7 +413,7 @@ _v8_torque_files = rule(
          "tool": attr.label(
              allow_files = True,
              executable = True,
@@ -98,7 +98,7 @@ index f2061f089ecf365aa8654cea400673905eb05d87..7c587522187c26326b4598149842c7e7
          ),
          "args": attr.string_list(),
      },
-@@ -503,13 +512,16 @@ _v8_mksnapshot = rule(
+@@ -505,13 +514,16 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
@@ -117,7 +117,7 @@ index f2061f089ecf365aa8654cea400673905eb05d87..7c587522187c26326b4598149842c7e7
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -633,3 +645,34 @@ def v8_build_config(name, arch):
+@@ -635,3 +647,34 @@ def v8_build_config(name, arch):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )

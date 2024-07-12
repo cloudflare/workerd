@@ -208,13 +208,13 @@ http_archive(
 #   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    commit = "8c54b7dae4c4692f32abe9b3e8113cdf0a8842b9",
+    commit = "bfe59c2726fda7494a800f7d0ee461f0564653b3",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
 git_repository(
     name = "fp16",
-    commit = "95163a75c51bc8dc29f72d0d7419ec50132984ff",
+    commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
     build_file_content = "exports_files(glob([\"**\"]))",
     remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git"
 )
@@ -471,23 +471,24 @@ http_archive(
         "//:patches/v8/0003-Add-ArrayBuffer-MaybeNew.patch",
         "//:patches/v8/0004-Allow-Windows-builds-under-Bazel.patch",
         "//:patches/v8/0005-Disable-bazel-whole-archive-build.patch",
-        "//:patches/v8/0006-Make-v8-Locker-automatically-call-isolate-Enter.patch",
-        "//:patches/v8/0007-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
-        "//:patches/v8/0008-Implement-Promise-Context-Tagging.patch",
-        "//:patches/v8/0009-Enable-V8-shared-linkage.patch",
-        "//:patches/v8/0010-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
-        "//:patches/v8/0011-Always-enable-continuation-preserved-data-in-the-bui.patch",
-        "//:patches/v8/0012-increase-visibility-of-virtual-method.patch",
-        "//:patches/v8/0013-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
-        "//:patches/v8/0014-Set-torque-generator-path-to-external-v8.-This-allow.patch",
-        "//:patches/v8/0015-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-        "//:patches/v8/0016-Expose-v8-Symbol-GetDispose.patch",
-        "//:patches/v8/0017-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE-V8_COMPR.patch",
-        "//:patches/v8/0018-Update-illegal-invocation-error-message-in-v8.patch",
+        "//:patches/v8/0006-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
+        "//:patches/v8/0007-Implement-Promise-Context-Tagging.patch",
+        "//:patches/v8/0008-Enable-V8-shared-linkage.patch",
+        "//:patches/v8/0009-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
+        "//:patches/v8/0010-Always-enable-continuation-preserved-data-in-the-bui.patch",
+        "//:patches/v8/0011-increase-visibility-of-virtual-method.patch",
+        "//:patches/v8/0012-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
+        "//:patches/v8/0013-Set-torque-generator-path-to-external-v8.-This-allow.patch",
+        "//:patches/v8/0014-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
+        "//:patches/v8/0015-Expose-v8-Symbol-GetDispose.patch",
+        "//:patches/v8/0016-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE-V8_COMPR.patch",
+        "//:patches/v8/0017-Revert-TracedReference-deref-API-removal.patch",
+        "//:patches/v8/0018-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
+        "//:patches/v8/0019-Update-illegal-invocation-error-message-in-v8.patch",
     ],
-    integrity = "sha256-5gW+N4R+oVxzMZexrqgp14gU42bsFBc5RHPN2oOrTTw=",
-    strip_prefix = "v8-12.6.228.9",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.6.228.9.tar.gz",
+    integrity = "sha256-TKEA0q6AADxlgXHIprTaw/CgQDBB6Vhug3JWlXmFKrg=",
+    strip_prefix = "v8-12.7.224.13",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.7.224.13.tar.gz",
 )
 
 git_repository(

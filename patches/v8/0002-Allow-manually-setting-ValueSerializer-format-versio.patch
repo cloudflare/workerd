@@ -1,4 +1,4 @@
-From 0117f549047b40f62bef917da9d1b93e3799ea93 Mon Sep 17 00:00:00 2001
+From 3253a1204a2c8403ae3d6ed74099275d0ade9541 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
@@ -22,10 +22,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 708f4e27a580c670b9e4e86c283a88b3fd607790..f8f0cba9227702298240030f765d36ca776c7bc3 100644
+index cfb628582eda59cee9426fb8f286f8e5892b0536..e2c3f310a8d85823e5873d3682122eec8f3d441c 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3433,6 +3433,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3438,6 +3438,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  
@@ -37,7 +37,7 @@ index 708f4e27a580c670b9e4e86c283a88b3fd607790..f8f0cba9227702298240030f765d36ca
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index e0315c836fce8047f4abf954af1120f0370b19cc..92a3810498dd8347ac5ac12facb2dbbd24722919 100644
+index 3c6ed8f827a126701b212526f9603832ddb2bce8..2e574704650c3b5d860fc21d083e9e6fed9ddfcf 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -291,6 +291,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
@@ -83,7 +83,7 @@ index e0315c836fce8047f4abf954af1120f0370b19cc..92a3810498dd8347ac5ac12facb2dbbd
  }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index a67079eeb80bc41d7276f9fe4941ab11d4425f0b..dbee8f93f8d7405bab17b5edda204d2d0ebbfac3 100644
+index 4e1fbcb160f7f89740a490ddbc448bce2ae6e3a3..c3a44e9f64f944641eea417584429a0b147ef654 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -54,6 +54,11 @@ class ValueSerializer {
@@ -98,7 +98,7 @@ index a67079eeb80bc41d7276f9fe4941ab11d4425f0b..dbee8f93f8d7405bab17b5edda204d2d
    /*
     * Writes out a header, which includes the format version.
     */
-@@ -178,6 +183,7 @@ class ValueSerializer {
+@@ -179,6 +184,7 @@ class ValueSerializer {
    bool treat_array_buffer_views_as_host_objects_ = false;
    bool out_of_memory_ = false;
    Zone zone_;

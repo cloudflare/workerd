@@ -1,0 +1,29 @@
+From 97f6fcebc3b908c0cbc918bcf47591fd18e2cba0 Mon Sep 17 00:00:00 2001
+From: Harris Hancock <harris@cloudflare.com>
+Date: Fri, 28 Jun 2024 14:19:25 +0100
+Subject: Revert TracedReference deref API removal
+
+This previously-deprecated API was removed in 7cd2b0c434bd5ea7bd253a97958c7348557fd72e, but we don't know how to safely replace our usage of it yet.
+
+diff --git a/include/v8-traced-handle.h b/include/v8-traced-handle.h
+index 04752c4f2aeed025364326fb0a0d85c03ba3347c..f1a41b1d8cd756358b536ee90ca9bd8c6b601e69 100644
+--- a/include/v8-traced-handle.h
++++ b/include/v8-traced-handle.h
+@@ -135,6 +135,17 @@ class BasicTracedReference : public TracedReferenceBase {
+         const_cast<BasicTracedReference<T>&>(*this));
+   }
+ 
++  V8_DEPRECATED("Use Get to convert to Local instead")
++  V8_INLINE T* operator->() const {
++#ifdef V8_ENABLE_CHECKS
++    CheckValue();
++#endif  // V8_ENABLE_CHECKS
++    return this->template value<T>();
++  }
++
++  V8_DEPRECATED("Use Get to convert to Local instead")
++  V8_INLINE T* operator*() const { return this->operator->(); }
++
+  private:
+   /**
+    * An empty BasicTracedReference without storage cell.
