@@ -302,6 +302,8 @@ export function collectTypeScriptModules(root: StructureGroups): string {
     if (!module.isTsDeclarations()) return;
     const declarations = module
       .getTsDeclarations()
+      // Looks for any lines starting with `///`, which indicates a TypeScript
+      // Triple-Slash Directive (https://www.typescriptlang.org/docs/handbook/triple-slash-directives.html)
       .replaceAll(/^\/\/\/.+$/gm, (match) => {
         assert.strictEqual(
           match,

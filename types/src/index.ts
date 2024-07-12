@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync } from "fs";
-import { mkdir, readFile, readdir, writeFile } from "fs/promises";
 import assert from "node:assert";
-import path from "path";
-import util from "util";
+import { readFileSync, readdirSync } from "node:fs";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import util from "node:util";
 import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
 import { Message } from "capnp-ts";
 import prettier from "prettier";
@@ -168,7 +168,6 @@ function printDefinitions(
     createCommentsTransformer(standards),
   ]);
 
-  console.error(collectTypeScriptModules(root));
   source += collectTypeScriptModules(root) + extraDefinitions;
 
   // We need the type checker to respect our updated definitions after applying
