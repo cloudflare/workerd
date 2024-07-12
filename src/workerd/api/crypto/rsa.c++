@@ -6,7 +6,9 @@
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <openssl/pem.h>
 #include <map>
+#include "simdutf.h"
 
 namespace workerd::api {
 
@@ -27,6 +29,32 @@ kj::Maybe<T> fromBignum(kj::ArrayPtr<kj::byte> value) {
   }
 
   return asUnsigned;
+}
+
+kj::Array<kj::byte> bioToArray(BIO* bio) {
+  BUF_MEM* bptr;
+  BIO_get_mem_ptr(bio, &bptr);
+  auto buf = kj::heapArray<char>(bptr->length);
+  auto aptr = kj::arrayPtr(bptr->data, bptr->length);
+  buf.asPtr().copyFrom(aptr);
+  return buf.releaseAsBytes();
+}
+
+kj::Maybe<kj::Array<kj::byte>> simdutfBase64UrlDecode(kj::StringPtr input) {
+  auto size = simdutf::maximal_binary_length_from_base64(input.begin(), input.size());
+  auto buf = kj::heapArray<kj::byte>(size);
+  auto result = simdutf::base64_to_binary(input.begin(),
+                                          input.size(),
+                                          buf.asChars().begin(),
+                                          simdutf::base64_url);
+  if (result.error != simdutf::SUCCESS) return kj::none;
+  KJ_ASSERT(result.count <= size);
+  return buf.first(result.count).attach(kj::mv(buf));
+}
+
+kj::Array<kj::byte> simdutfBase64UrlDecodeChecked(kj::StringPtr input,
+                                                  kj::StringPtr error) {
+  return JSG_REQUIRE_NONNULL(simdutfBase64UrlDecode(input), Error, error);
 }
 }  // namespace
 
@@ -225,6 +253,196 @@ SubtleCrypto::JsonWebKey Rsa::toJwk(KeyType keyType,
   return jwk;
 }
 
+kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(KeyType keyType,
+                                          const SubtleCrypto::JsonWebKey& jwk) {
+  ClearErrorOnReturn clearErrorOnReturn;
+
+  if (jwk.kty != "RSA"_kj) return kj::none;
+  auto n = JSG_REQUIRE_NONNULL(jwk.n.map([](auto& str) { return str.asPtr(); }), Error,
+                               "Invalid RSA key in JSON Web Key; missing or invalid "
+                               "Modulus parameter (\"n\").");
+  auto e = JSG_REQUIRE_NONNULL(jwk.e.map([](auto& str) { return str.asPtr(); }), Error,
+                               "Invalid RSA key in JSON Web Key; missing or invalid "
+                               "Exponent parameter (\"e\").");
+
+  auto rsa = OSSL_NEW(RSA);
+
+  static constexpr auto kInvalidBase64Error = "Invalid RSA key in JSON Web Key; invalid base64."_kj;
+
+  // TODO(now): Use a decodeBase64Url variant
+  auto nDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(n, kInvalidBase64Error));
+  auto eDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(e, kInvalidBase64Error));
+  JSG_REQUIRE(RSA_set0_key(rsa.get(), nDecoded, eDecoded, nullptr) == 1, Error,
+              "Invalid RSA key in JSON Web Key; failed to set key parameters");
+
+  if (keyType == KeyType::PRIVATE) {
+    auto d = JSG_REQUIRE_NONNULL(jwk.d.map([](auto& str) { return str.asPtr(); }), Error,
+                                 "Invalid RSA key in JSON Web Key; missing or invalid "
+                                 "Private Exponent parameter (\"d\").");
+    auto p = JSG_REQUIRE_NONNULL(jwk.p.map([](auto& str) { return str.asPtr(); }), Error,
+                                 "Invalid RSA key in JSON Web Key; missing or invalid "
+                                 "First Prime Factor parameter (\"p\").");
+    auto q = JSG_REQUIRE_NONNULL(jwk.q.map([](auto& str) { return str.asPtr(); }), Error,
+                                 "Invalid RSA key in JSON Web Key; missing or invalid "
+                                 "Second Prime Factor parameter (\"q\").");
+    auto dp = JSG_REQUIRE_NONNULL(jwk.dp.map([](auto& str) { return str.asPtr(); }), Error,
+                                  "Invalid RSA key in JSON Web Key; missing or invalid "
+                                  "First Factor CRT Exponent parameter (\"dp\").");
+    auto dq = JSG_REQUIRE_NONNULL(jwk.dq.map([](auto& str) { return str.asPtr(); }), Error,
+                                  "Invalid RSA key in JSON Web Key; missing or invalid "
+                                  "Second Factor CRT Exponent parameter (\"dq\").");
+    auto qi = JSG_REQUIRE_NONNULL(jwk.qi.map([](auto& str) { return str.asPtr(); }), Error,
+                                  "Invalid RSA key in JSON Web Key; missing or invalid "
+                                  "First CRT Coefficient parameter (\"qi\").");
+    auto dDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(d,
+        "Invalid RSA key in JSON Web Key"_kj));
+    auto pDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(p, kInvalidBase64Error));
+    auto qDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(q, kInvalidBase64Error));
+    auto dpDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(dp, kInvalidBase64Error));
+    auto dqDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(dq, kInvalidBase64Error));
+    auto qiDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(qi, kInvalidBase64Error));
+
+    JSG_REQUIRE(RSA_set0_key(rsa.get(), nullptr, nullptr, dDecoded) == 1, Error,
+                "Invalid RSA key in JSON Web Key; failed to set private exponent");
+    JSG_REQUIRE(RSA_set0_factors(rsa.get(), pDecoded, qDecoded) == 1, Error,
+                "Invalid RSA key in JSON Web Key; failed to set prime factors");
+    JSG_REQUIRE(RSA_set0_crt_params(rsa.get(), dpDecoded, dqDecoded, qiDecoded) == 1, Error,
+                "Invalid RSA key in JSON Web Key; failed to set CRT parameters");
+  }
+
+  auto evpPkey = OSSL_NEW(EVP_PKEY);
+  KJ_ASSERT(EVP_PKEY_set1_RSA(evpPkey.get(), rsa.get()) == 1);
+
+  auto usages = keyType == KeyType::PRIVATE ? CryptoKeyUsageSet::privateKeyMask()
+                                            : CryptoKeyUsageSet::publicKeyMask();
+  return AsymmetricKeyData {
+    kj::mv(evpPkey),
+    keyType,
+    usages
+  };
+}
+
+kj::String Rsa::toPem(KeyEncoding encoding,
+                      KeyType keyType,
+                      kj::Maybe<CipherOptions> options) const {
+  ClearErrorOnReturn clearErrorOnReturn;
+  auto bio = OSSL_BIO_MEM();
+  switch (keyType) {
+    case KeyType::PUBLIC: {
+      switch (encoding) {
+        case KeyEncoding::PKCS1: {
+          JSG_REQUIRE(PEM_write_bio_RSAPublicKey(bio.get(), rsa) == 1, Error,
+              "Failed to write RSA public key to PEM", tryDescribeOpensslErrors());
+          break;
+        }
+        case workerd::api::KeyEncoding::SPKI: {
+          JSG_REQUIRE(PEM_write_bio_RSA_PUBKEY(bio.get(), rsa) == 1, Error,
+              "Failed to write RSA public key to PEM", tryDescribeOpensslErrors());
+          break;
+        }
+        default: {
+          JSG_FAIL_REQUIRE(Error, "Unsupported RSA public key encoding: ", encoding);
+        }
+      }
+      break;
+    }
+    case KeyType::PRIVATE: {
+      kj::byte* passphrase = nullptr;
+      size_t passLen = 0;
+      const EVP_CIPHER* cipher = nullptr;
+      KJ_IF_SOME(opts, options) {
+        passphrase = const_cast<kj::byte*>(opts.passphrase.begin());
+        passLen = opts.passphrase.size();
+        cipher = opts.cipher;
+      }
+      switch (encoding) {
+        case KeyEncoding::PKCS1: {
+          JSG_REQUIRE(PEM_write_bio_RSAPrivateKey(
+              bio.get(), rsa, cipher, passphrase, passLen, nullptr, nullptr) == 1, Error,
+              "Failed to write RSA private key to PEM", tryDescribeOpensslErrors());
+          break;
+        }
+        case KeyEncoding::PKCS8: {
+          auto evpPkey = OSSL_NEW(EVP_PKEY);
+          EVP_PKEY_set1_RSA(evpPkey.get(), rsa);
+          JSG_REQUIRE(PEM_write_bio_PKCS8PrivateKey(
+              bio.get(), evpPkey.get(), cipher, reinterpret_cast<char*>(passphrase),
+              passLen, nullptr, nullptr) == 1, Error,
+              "Failed to write RSA private key to PKCS8 PEM", tryDescribeOpensslErrors());
+          break;
+        }
+        default: {
+          JSG_FAIL_REQUIRE(Error, "Unsupported RSA private key encoding: ", encoding);
+        }
+      }
+      break;
+    }
+    default: KJ_UNREACHABLE;
+  }
+  return kj::String(bioToArray(bio.get()).releaseAsChars());
+}
+
+kj::Array<const kj::byte> Rsa::toDer(KeyEncoding encoding,
+                                     KeyType keyType,
+                                     kj::Maybe<CipherOptions> options) const {
+  ClearErrorOnReturn clearErrorOnReturn;
+  auto bio = OSSL_BIO_MEM();
+  switch (keyType) {
+    case KeyType::PUBLIC: {
+      switch (encoding) {
+        case KeyEncoding::PKCS1: {
+          JSG_REQUIRE(i2d_RSAPublicKey_bio(bio.get(), rsa) == 1, Error,
+              "Failed to write RSA public key to PEM", tryDescribeOpensslErrors());
+          break;
+        }
+        case workerd::api::KeyEncoding::SPKI: {
+          auto evpPkey = OSSL_NEW(EVP_PKEY);
+          EVP_PKEY_set1_RSA(evpPkey.get(), rsa);
+          JSG_REQUIRE(i2d_PUBKEY_bio(bio.get(), evpPkey.get()) == 1, Error,
+              "Failed to write RSA public key to PEM", tryDescribeOpensslErrors());
+          break;
+        }
+        default: {
+          JSG_FAIL_REQUIRE(Error, "Unsupported RSA public key encoding: ", encoding);
+        }
+      }
+      break;
+    }
+    case KeyType::PRIVATE: {
+      kj::byte* passphrase = nullptr;
+      size_t passLen = 0;
+      const EVP_CIPHER* cipher = nullptr;
+      KJ_IF_SOME(opts, options) {
+        passphrase = const_cast<kj::byte*>(opts.passphrase.begin());
+        passLen = opts.passphrase.size();
+        cipher = opts.cipher;
+      }
+      switch (encoding) {
+        case KeyEncoding::PKCS1: {
+          // Does not permit encryption
+          JSG_REQUIRE(i2d_RSAPrivateKey_bio(bio.get(), rsa), Error,
+              "Failed to write RSA private key to PEM", tryDescribeOpensslErrors());
+          break;
+        }
+        case KeyEncoding::PKCS8: {
+          auto evpPkey = OSSL_NEW(EVP_PKEY);
+          EVP_PKEY_set1_RSA(evpPkey.get(), rsa);
+          JSG_REQUIRE(i2d_PKCS8PrivateKey_bio(bio.get(), evpPkey.get(),
+                cipher, reinterpret_cast<char*>(passphrase), passLen, nullptr, nullptr) == 1, Error,
+              "Failed to write RSA private key to PKCS8 PEM", tryDescribeOpensslErrors());
+          break;
+        }
+        default: {
+          JSG_FAIL_REQUIRE(Error, "Unsupported RSA private key encoding: ", encoding);
+        }
+      }
+      break;
+    }
+    default: KJ_UNREACHABLE;
+  }
+  return bioToArray(bio.get());
+}
+
 void Rsa::validateRsaParams(jsg::Lock& js,
                             size_t modulusLength,
                             kj::ArrayPtr<kj::byte> publicExponent,
@@ -258,6 +476,13 @@ void Rsa::validateRsaParams(jsg::Lock& js,
     JSG_FAIL_REQUIRE(DOMOperationError, "The \"publicExponent\" must be either 3 or 65537, but "
         "got a number larger than 2^32.");
   }
+}
+
+bool Rsa::isRSAPrivateKey(kj::ArrayPtr<const kj::byte> keyData) {
+  KJ_IF_SOME(rem, tryGetAsn1Sequence(keyData)) {
+  return rem.size() >= 3 && rem[0] == 2 && rem[1] == 1 && !(rem[2] & 0xfe);
+  }
+  return false;
 }
 
 // ======================================================================================

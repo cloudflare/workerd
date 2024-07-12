@@ -4,6 +4,29 @@
 
 namespace workerd::api {
 
+enum class KeyEncoding {
+  PKCS1,
+  PKCS8,
+  SPKI,
+  SEC1,
+};
+
+inline kj::StringPtr KJ_STRINGIFY(KeyEncoding encoding) {
+  switch (encoding) {
+    case KeyEncoding::PKCS1: return "pkcs1";
+    case KeyEncoding::PKCS8: return "pkcs8";
+    case KeyEncoding::SPKI: return "spki";
+    case KeyEncoding::SEC1: return "sec1";
+  }
+  KJ_UNREACHABLE;
+}
+
+enum class KeyFormat {
+  PEM,
+  DER,
+  JWK,
+};
+
 enum class KeyType {
   SECRET,
   PUBLIC,

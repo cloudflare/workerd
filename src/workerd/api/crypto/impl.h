@@ -373,6 +373,8 @@ kj::Own<CryptoKey::Impl> fromRsaKey(kj::Own<EVP_PKEY> key);
 kj::Own<CryptoKey::Impl> fromEcKey(kj::Own<EVP_PKEY> key);
 kj::Own<CryptoKey::Impl> fromEd25519Key(kj::Own<EVP_PKEY> key);
 
+ // If the input bytes are a valid ASN.1 sequence, return them minus the prefix.
+kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetAsn1Sequence(kj::ArrayPtr<const kj::byte> data);
 }  // namespace workerd::api
 
 KJ_DECLARE_NON_POLYMORPHIC(DH);
