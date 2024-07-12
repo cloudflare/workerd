@@ -67,8 +67,9 @@ genrule(
         "src/dawn/dawn_wire.json",
     ],
     outs = [
-        "include/dawn/webgpu.h",
         "include/dawn/dawn_proc_table.h",
+        "include/dawn/webgpu.h",
+        "include/dawn/wire/client/webgpu.h"
     ],
     cmd = "$(location :dawn_json_generator) " +
           "--dawn-json $(location src/dawn/dawn.json) " +
@@ -114,11 +115,12 @@ genrule(
         "generator/templates/dawn/wire/client/ApiProcs.cpp",
         "generator/templates/dawn/wire/client/ClientBase.h",
         "generator/templates/dawn/wire/client/ClientHandlers.cpp",
+        "generator/templates/dawn/wire/client/ClientPrototypes.inc",
         "generator/templates/dawn/wire/server/ServerBase.h",
         "generator/templates/dawn/wire/server/ServerDoers.cpp",
         "generator/templates/dawn/wire/server/ServerHandlers.cpp",
         "generator/templates/dawn/wire/server/ServerPrototypes.inc",
-        "generator/templates/dawn/wire/client/ClientPrototypes.inc",
+        "generator/templates/dawn/wire/server/WGPUTraits.h",
     ],
     outs = [
         "src/dawn/wire/ObjectType_autogen.h",
@@ -133,6 +135,7 @@ genrule(
         "src/dawn/wire/server/ServerDoers_autogen.cpp",
         "src/dawn/wire/server/ServerHandlers_autogen.cpp",
         "src/dawn/wire/server/ServerPrototypes_autogen.inc",
+        "src/dawn/wire/server/WGPUTraits_autogen.h",
     ],
     cmd = "$(location :dawn_json_generator) " +
           "--dawn-json $(location src/dawn/dawn.json) " +
@@ -1011,6 +1014,8 @@ cc_library(
     name = "dawn_wire",
     srcs = DAWN_COMMON_SRCS + [
         # Generated files
+        "include/webgpu/webgpu.h",
+        "include/dawn/wire/client/webgpu.h",
         "src/dawn/wire/ObjectType_autogen.h",
         "src/dawn/wire/WireCmd_autogen.h",
         "src/dawn/wire/WireCmd_autogen.cpp",
@@ -1023,6 +1028,7 @@ cc_library(
         "src/dawn/wire/server/ServerDoers_autogen.cpp",
         "src/dawn/wire/server/ServerHandlers_autogen.cpp",
         "src/dawn/wire/server/ServerPrototypes_autogen.inc",
+        "src/dawn/wire/server/WGPUTraits_autogen.h",
         # From dawn/src/dawn/wire/BUILD.gn
         "src/dawn/wire/BufferConsumer.h",
         "src/dawn/wire/BufferConsumer_impl.h",
@@ -1065,9 +1071,10 @@ cc_library(
         "src/dawn/wire/client/QuerySet.h",
         "src/dawn/wire/client/Queue.cpp",
         "src/dawn/wire/client/Queue.h",
-        "src/dawn/wire/client/RequestTracker.h",
         "src/dawn/wire/client/ShaderModule.cpp",
         "src/dawn/wire/client/ShaderModule.h",
+        "src/dawn/wire/client/Surface.cpp",
+        "src/dawn/wire/client/Surface.h",
         "src/dawn/wire/client/SwapChain.cpp",
         "src/dawn/wire/client/SwapChain.h",
         "src/dawn/wire/client/Texture.cpp",
@@ -1089,10 +1096,15 @@ cc_library(
         "include/dawn/wire/WireServer.h",
         "include/dawn/wire/dawn_wire_export.h",
     ],
-    copts = COPTS,
     includes = [
         "include",
         "src",
+        "src/dawn/partition_alloc",
+    ],
+    deps = [
+        "@dawn//src/tint/lang/wgsl/features",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
     ],
     visibility = ["//visibility:public"],
 )
