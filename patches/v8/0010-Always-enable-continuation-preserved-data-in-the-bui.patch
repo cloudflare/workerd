@@ -1,4 +1,4 @@
-From 67c035ec42816c9ac345a9a80304294ac4fe21ab Mon Sep 17 00:00:00 2001
+From 3088caad9c85b24f245b47ada63cb56ed6b78b0f Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Thu, 18 Jan 2024 10:19:14 -0800
 Subject: Always enable continuation preserved data in the build

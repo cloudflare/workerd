@@ -1,4 +1,4 @@
-From 7ca2f4f9b8f240d926f944844b7178b21145a6eb Mon Sep 17 00:00:00 2001
+From 5563f8c04c3cdf380f92312873bc487c39e28d7b Mon Sep 17 00:00:00 2001
 From: Jon Phillips <jphillips@cloudflare.com>
 Date: Tue, 30 Apr 2024 00:06:33 +0100
 Subject: Expose v8::Symbol::GetDispose().

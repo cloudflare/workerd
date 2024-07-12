@@ -484,6 +484,7 @@ http_archive(
         "//:patches/v8/0016-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE-V8_COMPR.patch",
         "//:patches/v8/0017-Revert-TracedReference-deref-API-removal.patch",
         "//:patches/v8/0018-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
+        "//:patches/v8/0019-Update-illegal-invocation-error-message-in-v8.patch",
     ],
     integrity = "sha256-TKEA0q6AADxlgXHIprTaw/CgQDBB6Vhug3JWlXmFKrg=",
     strip_prefix = "v8-12.7.224.13",
