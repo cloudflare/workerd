@@ -485,9 +485,9 @@ http_archive(
         "//:patches/v8/0017-Revert-TracedReference-deref-API-removal.patch",
         "//:patches/v8/0018-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
     ],
-    integrity = "sha256-Z3A246m2hhvfgj4vuEXt6LIAiXcw/Mb70pRLz7UtcIw=",
-    strip_prefix = "v8-12.7.224.12",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.7.224.12.tar.gz",
+    integrity = "sha256-TKEA0q6AADxlgXHIprTaw/CgQDBB6Vhug3JWlXmFKrg=",
+    strip_prefix = "v8-12.7.224.13",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.7.224.13.tar.gz",
 )
 
 git_repository(

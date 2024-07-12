@@ -1,4 +1,4 @@
-From 5b20b840b2e0ee84fabd44044bc0aac8b2a37ad2 Mon Sep 17 00:00:00 2001
+From de8ec2c160f304af057d9182ea034149d29960b1 Mon Sep 17 00:00:00 2001
 From: Mike Aizatsky <maizatskyi@cloudflare.com>
 Date: Tue, 6 Feb 2024 12:55:07 -0800
 Subject: increase visibility of virtual method
