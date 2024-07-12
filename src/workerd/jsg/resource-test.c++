@@ -143,6 +143,10 @@ private:
 };
 JSG_DECLARE_ISOLATE_TYPE(PropIsolate, PropContext, PrototypePropertyObject);
 
+const auto kIllegalInvocation =
+    "TypeError: Illegal invocation: function called with incorrect `this` reference. "
+    "See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details."_kj;
+
 KJ_TEST("context methods and properties") {
   Evaluator<PropContext, PropIsolate> e(v8System);
   e.expectEval(
@@ -173,14 +177,14 @@ KJ_TEST("context methods and properties") {
       "o.__proto__ = p.__proto__;\n"
       "o.value",
       "throws",
-      "TypeError: Illegal invocation");
+      kIllegalInvocation);
   e.expectEval(
       "let p = new PrototypePropertyObject(123);\n"
       "let o = {};\n"
       "o.__proto__ = p.__proto__;\n"
       "o.value = 123",
       "throws",
-      "TypeError: Illegal invocation");
+      kIllegalInvocation);
 
   e.expectEval(
       "class P2 extends PrototypePropertyObject {\n"
