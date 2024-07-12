@@ -19,7 +19,10 @@ To continue working with workerd, simply add the following code to your NixOS co
 ```
 
 **References**:
+
 [official nixos documentation](https://nix.dev/guides/faq#how-to-run-non-nix-executables)
+
 [nix-ld](https://github.com/Mic92/nix-ld)
+
 [cloudflare/workerd/issue#1515](https://github.com/cloudflare/workerd/discussions/1515)
 
