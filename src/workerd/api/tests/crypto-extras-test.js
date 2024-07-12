@@ -137,3 +137,60 @@ export const cryptoZeroLength = {
   }
 };
 
+export const deriveBitsNullLength = {
+  async test() {
+
+    // Tests that deriveBits can take a null or undefined length
+    // argument and still return the correct number of bits if
+    // the algorithm supports it. This is a recent spec change.
+
+    const pair = await crypto.subtle.generateKey(
+      {
+        name: "ECDH",
+        namedCurve: "P-384",
+      },
+      false,
+      ["deriveBits"],
+    );
+
+    {
+      const bits = await crypto.subtle.deriveBits(
+        {
+          name: 'ECDH',
+          namedCurve: 'P-384',
+          public: pair.publicKey,
+        },
+        pair.privateKey, undefined
+      );
+
+      strictEqual(bits.byteLength, 48);
+    }
+
+    {
+      const bits = await crypto.subtle.deriveBits(
+        {
+          name: 'ECDH',
+          namedCurve: 'P-384',
+          public: pair.publicKey,
+        },
+        pair.privateKey, null
+      );
+
+      strictEqual(bits.byteLength, 48);
+    }
+
+    {
+      const bits = await crypto.subtle.deriveBits(
+        {
+          name: 'ECDH',
+          namedCurve: 'P-384',
+          public: pair.publicKey,
+        },
+        pair.privateKey
+      );
+
+      strictEqual(bits.byteLength, 48);
+    }
+
+  }
+};

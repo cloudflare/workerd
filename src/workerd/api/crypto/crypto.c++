@@ -447,16 +447,18 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::deriveBits(
     jsg::Lock& js,
     kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithmParam,
     const CryptoKey& baseKey,
-    kj::Maybe<int> lengthParam) {
+    jsg::Optional<kj::Maybe<int>> lengthParam) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
-  auto length = lengthParam.map([&](int l) {
-    // TODO(cleanup): Use the type jsg wrapper for uint32_t?
-    JSG_REQUIRE(l >= 0, TypeError, "deriveBits length must be an unsigned long integer.");
-    return uint32_t(l);
-  });
+  kj::Maybe<uint32_t> length = kj::none;
+  KJ_IF_SOME(maybeLength, lengthParam) {
+    KJ_IF_SOME(l, maybeLength) {
+      JSG_REQUIRE(l >= 0, TypeError, "deriveBits length must be an unsigned long integer.");
+      length = uint32_t(l);
+    }
+  }
 
   return js.evalNow([&] {
     validateOperation(baseKey, algorithm.name, CryptoKeyUsageSet::deriveBits());
