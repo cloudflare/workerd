@@ -143,7 +143,7 @@ and limitations under the License.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event)
  */
-declare interface Event {
+interface Event {
 }
 declare class EventTarget<EventMap extends Record<string, Event> = Record<string, Event>> {
     constructor();
@@ -166,7 +166,7 @@ declare class EventTarget<EventMap extends Record<string, Event> = Record<string
          */
     addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void;
 }
-declare type WorkerGlobalScopeEventMap = {
+type WorkerGlobalScopeEventMap = {
     fetch: Event;
     scheduled: Event;
 };
@@ -177,7 +177,7 @@ declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEv
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ServiceWorkerGlobalScope)
  */
-declare interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
+interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
     things(param0: boolean): IterableIterator<string>;
     get prop(): Promise<number>;
 }
@@ -213,7 +213,7 @@ and limitations under the License.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event)
  */
-declare interface Event {}
+interface Event {}
 declare class EventTarget<
   EventMap extends Record<string, Event> = Record<string, Event>,
 > {
@@ -240,7 +240,7 @@ declare class EventTarget<
     handler: (event: EventMap[Type]) => void,
   ): void;
 }
-declare type WorkerGlobalScopeEventMap = {
+type WorkerGlobalScopeEventMap = {
   fetch: Event;
   scheduled: Event;
 };
@@ -250,7 +250,7 @@ declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEv
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ServiceWorkerGlobalScope)
  */
-declare interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
+interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   things(param0: boolean): IterableIterator<string>;
   get prop(): Promise<number>;
 }

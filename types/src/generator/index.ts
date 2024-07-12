@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
+import assert from "node:assert";
 import {
   FunctionType,
   Member,
@@ -13,13 +13,13 @@ import {
   Type,
   Type_Which,
 } from "@workerd/jsg/rtti.capnp.js";
-import ts from "typescript";
+import ts, { factory as f } from "typescript";
 import { createStructureNode } from "./structure";
+import { getTypeName } from "./type";
 
 export { getTypeName } from "./type";
-export { parseApiAstDump } from "./parameter-names";
 
-type StructureMap = Map<string, Structure>;
+export type StructureMap = Map<string, Structure>;
 // Builds a lookup table mapping type names to structures
 function collectStructureMap(root: StructureGroups): StructureMap {
   const map = new Map<string, Structure>();
@@ -40,7 +40,7 @@ function collectStructureMap(root: StructureGroups): StructureMap {
 // when certain compatibility flags are enabled (e.g. `Navigator`,
 // standards-compliant `URL`). However, these types are always included in
 // the `*_TYPES` macros.
-function collectIncluded(map: StructureMap): Set<string> {
+function collectIncluded(map: StructureMap, root?: string): Set<string> {
   const included = new Set<string>();
 
   function visitType(type: Type): void {
@@ -101,9 +101,17 @@ function collectIncluded(map: StructureMap): Set<string> {
     }
   }
 
-  // Visit all structures with `JSG_(STRUCT_)TS_ROOT` macros
-  for (const structure of map.values()) {
-    if (structure.getTsRoot()) visitStructure(structure);
+  if (root === undefined) {
+    // If no root was specified, visit all structures with
+    // `JSG_(STRUCT_)TS_ROOT` macros
+    for (const structure of map.values()) {
+      if (structure.getTsRoot()) visitStructure(structure);
+    }
+  } else {
+    // Otherwise, visit just that root
+    const structure = map.get(root);
+    assert(structure !== undefined, `Unknown root: ${root}`);
+    visitStructure(structure);
   }
 
   return included;
@@ -144,39 +152,169 @@ function collectClasses(map: StructureMap): Set<string> {
   return classes;
 }
 
-export function generateDefinitions(root: StructureGroups): ts.Node[] {
-  const map = collectStructureMap(root);
-  const included = collectIncluded(map);
-  const classes = collectClasses(map);
+// Builds a map mapping structure names that are top-level nested types of
+// module structures to the names of those modules. Essentially, a map of which
+// modules export which types (e.g. "workerd::api::node::AsyncLocalStorage" =>
+// "node-internal:async_hooks"). We use this to make sure we don't include
+// duplicate definitions if an internal module references a type from another
+// internal module. In this case, we'll include the definition in the one that
+// exported it.
+function collectModuleTypeExports(
+  root: StructureGroups,
+  map: StructureMap
+): Map</* structureName */ string, /* moduleSpecifier */ string> {
+  const typeExports = new Map<string, string>();
+  root.getModules().forEach((module) => {
+    if (!module.isStructureName()) return;
 
-  // Record a list of ignored structures to make sure we haven't missed any
-  // `JSG_TS_ROOT()` macros
-  const ignored: string[] = [];
+    // Get module root type
+    const specifier = module.getSpecifier();
+    const moduleRootName = module.getStructureName();
+    const moduleRoot = map.get(moduleRootName);
+    assert(moduleRoot !== undefined);
+
+    // Add all nested types in module root
+    moduleRoot.getMembers().forEach((member) => {
+      if (!member.isNested()) return;
+      const nested = member.getNested();
+      typeExports.set(nested.getStructure().getFullyQualifiedName(), specifier);
+    });
+  });
+
+  return typeExports;
+}
+
+export function generateDefinitions(root: StructureGroups): {
+  nodes: ts.Statement[];
+  structureMap: StructureMap;
+} {
+  const structureMap = collectStructureMap(root);
+  const globalIncluded = collectIncluded(structureMap);
+  const classes = collectClasses(structureMap);
+
   // Can't use `flatMap()` here as `getGroups()` returns a `capnp.List`
   const nodes = root.getGroups().map((group) => {
-    const structureNodes: ts.Node[] = [];
+    const structureNodes: ts.Statement[] = [];
     group.getStructures().forEach((structure) => {
       const name = structure.getFullyQualifiedName();
-
-      if (included.has(name)) {
+      if (globalIncluded.has(name)) {
         const asClass = classes.has(name);
-        structureNodes.push(createStructureNode(structure, asClass));
-      } else {
-        ignored.push(name);
+        structureNodes.push(createStructureNode(structure, { asClass }));
+      }
+    });
+    return structureNodes;
+  });
+  const flatNodes = nodes.flat();
+
+  const typeExports = collectModuleTypeExports(root, structureMap);
+  root.getModules().forEach((module) => {
+    if (!module.isStructureName()) return;
+
+    // Get module root type
+    const specifier = module.getSpecifier();
+    const moduleRootName = module.getStructureName();
+    const moduleRoot = structureMap.get(moduleRootName);
+    assert(moduleRoot !== undefined);
+
+    // Build a set of nested types exported by this module. These will always
+    // be included in the module, even if they're referenced globally.
+    const nestedTypeNames = new Set<string>();
+    moduleRoot.getMembers().forEach((member) => {
+      if (member.isNested()) {
+        const nested = member.getNested();
+        nestedTypeNames.add(nested.getStructure().getFullyQualifiedName());
       }
     });
 
-    return structureNodes;
+    // Add all types required by this module, but not the top level or another
+    // internal module.
+    const moduleIncluded = collectIncluded(structureMap, moduleRootName);
+    const statements: ts.Statement[] = [];
+
+    let nextImportId = 1;
+    for (const name of moduleIncluded) {
+      // If this structure was already included globally, ignore it,
+      // unless it's explicitly declared a nested type of this module
+      if (globalIncluded.has(name) && !nestedTypeNames.has(name)) continue;
+
+      // If this structure was exported by another module, import it. Note we
+      // don't need to check whether we've already imported the type as
+      // `moduleIncluded` is a `Set`.
+      const maybeOwningModule = typeExports.get(name);
+      if (maybeOwningModule !== undefined && maybeOwningModule !== specifier) {
+        // Internal modules only have default exports, so we generate something
+        // that looks like this:
+        // ```
+        // import _internal1 from "node-internal:async_hooks";
+        // import AsyncLocalStorage = _internal1.AsyncLocalStorage; // (type & value alias)
+        // ```
+        const identifier = f.createIdentifier(`_internal${nextImportId++}`);
+        const importClause = f.createImportClause(
+          false,
+          /* name */ identifier,
+          /* namedBindings */ undefined
+        );
+        const importDeclaration = f.createImportDeclaration(
+          /* modifiers */ undefined,
+          importClause,
+          f.createStringLiteral(maybeOwningModule)
+        );
+        const typeName = getTypeName(name);
+        const importEqualsDeclaration = f.createImportEqualsDeclaration(
+          /* modifiers */ undefined,
+          /* isTypeOnly */ false,
+          typeName,
+          f.createQualifiedName(identifier, typeName)
+        );
+        statements.unshift(importDeclaration, importEqualsDeclaration);
+
+        continue;
+      }
+
+      // Otherwise, just include the structure in the module
+      const structure = structureMap.get(name);
+      assert(structure !== undefined);
+      const asClass = classes.has(name);
+      const statement = createStructureNode(structure, {
+        asClass,
+        ambientContext: true,
+        // nameOverride: nestedNameOverrides.get(name), // TODO: remove
+      });
+      statements.push(statement);
+    }
+
+    const moduleBody = f.createModuleBlock(statements);
+    const moduleDeclaration = f.createModuleDeclaration(
+      [f.createToken(ts.SyntaxKind.DeclareKeyword)],
+      f.createStringLiteral(specifier),
+      moduleBody
+    );
+    flatNodes.push(moduleDeclaration);
   });
 
-  // Log ignored types to make sure we didn't forget anything
-  if (ignored.length > 0) {
-    console.warn(
-      "WARNING: The following types were not referenced from any `JSG_TS_ROOT()`ed type and have been omitted from the output. " +
-        "This could be because of disabled compatibility flags."
-    );
-    for (const name of ignored) console.warn(`- ${name}`);
-  }
+  return { nodes: flatNodes, structureMap };
+}
 
-  return nodes.flat();
+export function collectTypeScriptModules(root: StructureGroups): string {
+  let result = "";
+
+  root.getModules().forEach((module) => {
+    if (!module.isTsDeclarations()) return;
+    const declarations = module
+      .getTsDeclarations()
+      // Looks for any lines starting with `///`, which indicates a TypeScript
+      // Triple-Slash Directive (https://www.typescriptlang.org/docs/handbook/triple-slash-directives.html)
+      .replaceAll(/^\/\/\/.+$/gm, (match) => {
+        assert.strictEqual(
+          match,
+          '/// <reference types="@workerd/types-internal" />',
+          `Unexpected triple-slash directive, got ${match}`
+        );
+        return "";
+      });
+
+    result += `declare module "${module.getSpecifier()}" {\n${declarations}\n}\n`;
+  });
+
+  return result;
 }

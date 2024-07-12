@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
+import assert from "node:assert";
 import ts from "typescript";
 import { ParsedTypeDefinition } from "../standards";
 import { hasModifier } from "./helpers";
@@ -92,13 +92,15 @@ function createVisitor(standards: ParsedTypeDefinition) {
       if (standardsVersion) {
         attachComments(standardsVersion, node, standards.source);
         node.members.forEach((member) => {
-          const n = member.name?.getText();
-          assert(n !== undefined);
-          const standardsEquivalent = standardsVersion.members.find(
-            (m) => m.name?.getText() === n
-          );
-          if (standardsEquivalent)
-            attachComments(standardsEquivalent, member, standards.source);
+          try {
+            const n = member.name?.getText();
+            assert(n !== undefined);
+            const standardsEquivalent = standardsVersion.members.find(
+              (m) => m.name?.getText() === n
+            );
+            if (standardsEquivalent)
+              attachComments(standardsEquivalent, member, standards.source);
+          } catch {}
         });
       }
     } else if (ts.isTypeAliasDeclaration(node)) {

@@ -45,8 +45,8 @@ test("createStructureNode: method members", () => {
 
   // Note method with unimplemented return is omitted
   assert.strictEqual(
-    printNode(createStructureNode(structure, false)),
-    `export interface Methods {
+    printNode(createStructureNode(structure, { asClass: false })),
+    `interface Methods {
     one(param0: boolean, param1: Promise<any>, param2?: number): void;
     three(...param0: any[]): boolean;
 }`
@@ -54,8 +54,8 @@ test("createStructureNode: method members", () => {
 
   method.setStatic(true);
   assert.strictEqual(
-    printNode(createStructureNode(structure, true)),
-    `export declare abstract class Methods {
+    printNode(createStructureNode(structure, { asClass: true })),
+    `declare abstract class Methods {
     one(param0: boolean, param1: Promise<any>, param2?: number): void;
     static three(...param0: any[]): boolean;
 }`
@@ -121,8 +121,8 @@ test("createStructureNode: property members", () => {
 
   // Note unimplemented properties omitted
   assert.strictEqual(
-    printNode(createStructureNode(structure, false)),
-    `export interface Properties {
+    printNode(createStructureNode(structure, { asClass: false })),
+    `interface Properties {
     one: boolean;
     readonly two: number;
     readonly three?: boolean;
@@ -133,8 +133,8 @@ test("createStructureNode: property members", () => {
 }`
   );
   assert.strictEqual(
-    printNode(createStructureNode(structure, true)),
-    `export declare abstract class Properties {
+    printNode(createStructureNode(structure, { asClass: true })),
+    `declare abstract class Properties {
     one: boolean;
     readonly two: number;
     readonly three?: boolean;
@@ -165,15 +165,15 @@ test("createStructureNode: nested type members", () => {
   nested.setName("RenamedThing");
 
   assert.strictEqual(
-    printNode(createStructureNode(structure, false)),
-    `export interface Nested {
+    printNode(createStructureNode(structure, { asClass: false })),
+    `interface Nested {
     Thing: typeof Thing;
     RenamedThing: typeof OtherThing;
 }`
   );
   assert.strictEqual(
-    printNode(createStructureNode(structure, true)),
-    `export declare abstract class Nested {
+    printNode(createStructureNode(structure, { asClass: true })),
+    `declare abstract class Nested {
     Thing: typeof Thing;
     RenamedThing: typeof OtherThing;
 }`
@@ -192,8 +192,8 @@ test("createStructureNode: constant members", () => {
   constant.setValue(Int64.fromNumber(42));
 
   assert.strictEqual(
-    printNode(createStructureNode(structure, true)),
-    `export declare abstract class Constants {
+    printNode(createStructureNode(structure, { asClass: true })),
+    `declare abstract class Constants {
     static readonly THING: number;
 }`
   );
@@ -233,15 +233,15 @@ test("createStructureNode: iterator members", () => {
   returnStructure.setFullyQualifiedName("workerd::api::AsyncThingIterator");
 
   assert.strictEqual(
-    printNode(createStructureNode(structure, false)),
-    `export interface Iterators {
+    printNode(createStructureNode(structure, { asClass: false })),
+    `interface Iterators {
     [Symbol.iterator](param0?: ThingOptions): ThingIterator;
     [Symbol.asyncIterator](param0?: AsyncThingOptions): AsyncThingIterator;
 }`
   );
   assert.strictEqual(
-    printNode(createStructureNode(structure, true)),
-    `export declare abstract class Iterators {
+    printNode(createStructureNode(structure, { asClass: true })),
+    `declare abstract class Iterators {
     [Symbol.iterator](param0?: ThingOptions): ThingIterator;
     [Symbol.asyncIterator](param0?: AsyncThingOptions): AsyncThingIterator;
 }`
@@ -269,8 +269,8 @@ test("createStructureNode: constructors", () => {
   }
 
   assert.strictEqual(
-    printNode(createStructureNode(structure, true)),
-    `export declare class Constructor {
+    printNode(createStructureNode(structure, { asClass: true })),
+    `declare class Constructor {
     constructor(param0: boolean | undefined, param1: string, param2: Promise<any>, param3?: number);
 }`
   );
@@ -286,8 +286,8 @@ test("createStructureNode: extends", () => {
   extendsStructure.setFullyQualifiedName("workerd::api::Base");
 
   assert.strictEqual(
-    printNode(createStructureNode(structure, true)),
-    `export declare abstract class Extends extends Base {
+    printNode(createStructureNode(structure, { asClass: true })),
+    `declare abstract class Extends extends Base {
 }`
   );
 });

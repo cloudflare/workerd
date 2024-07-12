@@ -1,25 +1,30 @@
 #!/usr/bin/env node
-import assert from "assert";
-import { mkdir, readFile, readdir, writeFile } from "fs/promises";
-import path from "path";
-import util from "util";
+import assert from "node:assert";
+import { readFileSync, readdirSync } from "node:fs";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import util from "node:util";
 import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
 import { Message } from "capnp-ts";
 import prettier from "prettier";
 import ts from "typescript";
-import { generateDefinitions, parseApiAstDump } from "./generator";
+import { collectTypeScriptModules, generateDefinitions } from "./generator";
+import { parseApiAstDump } from "./generator/parameter-names";
 import { printNodeList, printer } from "./print";
-import { createMemoryProgram } from "./program";
+import { SourcesMap, createMemoryProgram } from "./program";
 import { ParsedTypeDefinition, collateStandards } from "./standards";
 import {
   compileOverridesDefines,
+  createAmbientTransformer,
   createCommentsTransformer,
   createGlobalScopeTransformer,
+  createImportResolveTransformer,
+  createImportableTransformer,
+  createInternalNamespaceTransformer,
   createIteratorTransformer,
   createOverrideDefineTransformer,
 } from "./transforms";
-import { createAmbientTransformer } from "./transforms/ambient";
-import { createImportableTransformer } from "./transforms/importable";
+
 const definitionsHeader = `/*! *****************************************************************************
 Copyright (c) Cloudflare. All rights reserved.
 Copyright (c) Microsoft Corporation. All rights reserved.
@@ -56,18 +61,39 @@ async function collateExtraDefinitions(definitionsDir?: string) {
   return (await Promise.all(files)).join("\n");
 }
 
-function checkDiagnostics(sources: Map<string, string>) {
-  const host = ts.createCompilerHost(
-    { noEmit: true },
-    /* setParentNodes */ true
+/**
+ * Copy all TS lib files into the memory filesystem. We only use lib.esnext
+ * but since TS lib files all reference each other to various extents it's
+ * easier to add them all and let TS figure out which ones it actually needs to load.
+ * This function uses the current local installation of TS as a source for lib files
+ */
+function loadLibFiles(): SourcesMap {
+  const libLocation = path.dirname(require.resolve("typescript"));
+  const libFiles = readdirSync(libLocation).filter(
+    (file) => file.startsWith("lib.") && file.endsWith(".d.ts")
+  );
+  const lib: SourcesMap = new Map();
+  for (const file of libFiles) {
+    lib.set(
+      `/node_modules/typescript/lib/${file}`,
+      readFileSync(path.join(libLocation, file), "utf-8")
+    );
+  }
+  return lib;
+}
+
+function checkDiagnostics(sources: SourcesMap) {
+  const program = createMemoryProgram(
+    sources,
+    undefined,
+    {
+      noEmit: true,
+      lib: ["lib.esnext.d.ts"],
+      types: [],
+    },
+    loadLibFiles()
   );
 
-  host.getDefaultLibLocation = () =>
-    path.dirname(require.resolve("typescript"));
-  const program = createMemoryProgram(sources, host, {
-    lib: ["lib.esnext.d.ts"],
-    types: [], // Make sure not to include @types/node from dependencies
-  });
   const emitResult = program.emit();
 
   const allDiagnostics = ts
@@ -98,7 +124,7 @@ function checkDiagnostics(sources: Map<string, string>) {
 }
 
 function transform(
-  sources: Map<string, string>,
+  sources: SourcesMap,
   sourcePath: string,
   transforms: (
     program: ts.Program,
@@ -120,14 +146,14 @@ function printDefinitions(
   extraDefinitions: string
 ): { ambient: string; importable: string } {
   // Generate TypeScript nodes from capnp request
-  const nodes = generateDefinitions(root);
+  const { nodes, structureMap } = generateDefinitions(root);
 
   // Assemble partial overrides and defines to valid TypeScript source files
   const [sources, replacements] = compileOverridesDefines(root);
   // Add source file containing generated nodes
-  const sourcePath = path.resolve(__dirname, "source.ts");
+  const sourcePath = "/$virtual/source.ts";
   let source = printNodeList(nodes);
-  sources.set(sourcePath, source);
+  sources.set(sourcePath, printNodeList(nodes));
 
   // Run post-processing transforms on program
   source = transform(sources, sourcePath, (program, checker) => [
@@ -135,35 +161,33 @@ function printDefinitions(
     // still removed if they're replaced in overrides
     createIteratorTransformer(checker),
     createOverrideDefineTransformer(program, replacements),
+    // Run global scope transformer after overrides so members added in
+    // overrides are extracted
+    createGlobalScopeTransformer(checker),
+    createInternalNamespaceTransformer(root, structureMap),
+    createCommentsTransformer(standards),
   ]);
-  source += extraDefinitions;
+
+  source += collectTypeScriptModules(root) + extraDefinitions;
 
   // We need the type checker to respect our updated definitions after applying
   // overrides (e.g. to find the correct nodes when traversing heritage), so
   // rebuild the program to re-run type checking. We also want to include our
   // additional definitions.
-  source = transform(
-    new Map([[sourcePath, source]]),
-    sourcePath,
-    (program, checker) => [
-      // Run global scope transformer after overrides so members added in
-      // overrides are extracted
-      createGlobalScopeTransformer(checker),
-      createCommentsTransformer(standards),
-      createAmbientTransformer(),
-      // TODO(polish): maybe flatten union types?
-    ]
-  );
+  source = transform(new SourcesMap([[sourcePath, source]]), sourcePath, () => [
+    createImportResolveTransformer(),
+    createAmbientTransformer(),
+  ]);
 
-  checkDiagnostics(new Map([[sourcePath, source]]));
+  checkDiagnostics(new SourcesMap([[sourcePath, source]]));
 
   const importable = transform(
-    new Map([[sourcePath, source]]),
+    new SourcesMap([[sourcePath, source]]),
     sourcePath,
     () => [createImportableTransformer()]
   );
 
-  checkDiagnostics(new Map([[sourcePath, importable]]));
+  checkDiagnostics(new SourcesMap([[sourcePath, importable]]));
 
   // Print program to string
   return {
