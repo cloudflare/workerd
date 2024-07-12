@@ -146,7 +146,7 @@ sh_test(
     args = [
         "$(location :workerd)",
         "$(location //samples:helloworld/config.capnp)",
-        "8080",
+        "10702",
         "$(location tests/compile-tests/compile-helloworld-test.ok)",
     ],
     data = [

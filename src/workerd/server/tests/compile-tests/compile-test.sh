@@ -44,7 +44,7 @@ CAPNP_BINARY=$(mktemp)
 $WORKERD_BINARY compile $CAPNP_SOURCE > $CAPNP_BINARY
 
 # Run the app
-$CAPNP_BINARY &
+$CAPNP_BINARY -shttp=localhost:$PORT &
 KILL=$!
 OUTPUT=$(mktemp)
 FIXED_OUTPUT=$(mktemp)
