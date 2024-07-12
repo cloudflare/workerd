@@ -32,7 +32,7 @@ public:
 
   SubtleCrypto::JsonWebKey toJwk(KeyType keytype,
                                  kj::Maybe<kj::String> maybeHashAlgorithm) const
-                                KJ_WARN_UNUSED_RESULT;
+                                 KJ_WARN_UNUSED_RESULT;
 
   struct CipherOptions {
     const EVP_CIPHER* cipher;
