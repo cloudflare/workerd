@@ -104,9 +104,9 @@ http_archive(
     build_file = "//:build/BUILD.ada-url",
     patch_args = ["-p1"],
     patches = [],
-    sha256 = "b621bdc61655c44e018c936a925fe87a01b1aaa18ea199ed19738b123f600c6d",
+    sha256 = "20b09948cf58362abe4de20b8e709d5041477fb798350fd1a02cde6aad121e08",
     type = "zip",
-    url = "https://github.com/ada-url/ada/releases/download/v2.8.0/singleheader.zip",
+    url = "https://github.com/ada-url/ada/releases/download/v2.9.0/singleheader.zip",
 )
 
 http_archive(
