@@ -28,10 +28,15 @@
 
 namespace workerd::api::gpu {
 
+struct UncapturedErrorContext {
+  kj::Maybe<EventTarget*> target;
+};
+
 class GPUDevice : public EventTarget {
 public:
   explicit GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async,
-                     kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> deviceLostCtx);
+                     kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> deviceLostCtx,
+                     kj::Own<UncapturedErrorContext> uErrorCtx);
   ~GPUDevice();
   JSG_RESOURCE_TYPE(GPUDevice) {
     JSG_INHERIT(EventTarget);
@@ -63,6 +68,7 @@ private:
   wgpu::Device device_;
   kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> dlc_;
   jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>> lost_promise_;
+  kj::Own<UncapturedErrorContext> uec_;
   kj::Own<AsyncRunner> async_;
   bool destroyed_ = false;
   jsg::Ref<GPUBuffer> createBuffer(jsg::Lock&, GPUBufferDescriptor);

@@ -677,45 +677,14 @@ jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>& GPUDevice::get
 }
 
 GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async,
-                     kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> deviceLostCtx)
+                     kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> deviceLostCtx,
+                     kj::Own<UncapturedErrorContext> uErrorCtx)
     : device_(d), dlc_(kj::mv(deviceLostCtx)), lost_promise_(kj::mv(dlc_->promise_)),
-      async_(kj::mv(async)) {
+      uec_(kj::mv(uErrorCtx)), async_(kj::mv(async)) {
+  uec_->target = this;
   device_.SetLoggingCallback(
       [](WGPULoggingType type, char const* message, void* userdata) {
         KJ_LOG(INFO, "WebGPU logging", kj::str(type), message);
-      },
-      this);
-
-  device_.SetUncapturedErrorCallback(
-      [](WGPUErrorType type, char const* message, void* userdata) {
-        auto* self = static_cast<GPUDevice*>(userdata);
-        if (self->getHandlerCount("uncapturederror") > 0) {
-          jsg::Ref<GPUError> error = nullptr;
-          switch (type) {
-          case WGPUErrorType_Validation:
-            error = jsg::alloc<GPUValidationError>(kj::str(message));
-            break;
-          case WGPUErrorType_NoError:
-          case WGPUErrorType_Force32:
-            KJ_UNREACHABLE;
-          case WGPUErrorType_OutOfMemory:
-            error = jsg::alloc<GPUOutOfMemoryError>(kj::str(message));
-            break;
-          case WGPUErrorType_Internal:
-          case WGPUErrorType_DeviceLost:
-          case WGPUErrorType_Unknown:
-            error = jsg::alloc<GPUInternalError>(kj::str(message));
-            break;
-          }
-
-          auto init = GPUUncapturedErrorEventInit{kj::mv(error)};
-          auto ev = jsg::alloc<GPUUncapturedErrorEvent>("uncapturederror"_kj, kj::mv(init));
-          self->dispatchEventImpl(IoContext::current().getCurrentLock(), kj::mv(ev));
-          return;
-        }
-
-        // no "uncapturederror" handler
-        KJ_LOG(INFO, "WebGPU uncaptured error", kj::str(type), message);
       },
       this);
 };
