@@ -146,7 +146,6 @@ sh_test(
     args = [
         "$(location :workerd)",
         "$(location //samples:helloworld/config.capnp)",
-        "10702",
         "$(location tests/compile-tests/compile-helloworld-test.ok)",
     ],
     data = [
@@ -155,6 +154,7 @@ sh_test(
         "//samples:helloworld/config.capnp",
         "//samples:helloworld/worker.js",
     ],
+    tags = ["no-qemu"],
 )
 
 [kj_test(
