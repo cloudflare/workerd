@@ -74,7 +74,7 @@ To build `workerd`, you need:
 * On Linux:
   * We use the clang/LLVM toolchain to build workerd and support version 15 and higher. Earlier versions of clang may still work, but are not officially supported.
   * Clang 15+ (e.g. package `clang-15` on Debian Bookworm). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--action_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
-  
+
   * libc++ 15+ (e.g. packages `libc++-15-dev` and `libc++abi-15-dev`)
   * LLD 15+ (e.g. package `lld-15`). The build may still succeed if a recent version of GNU gold or the system linker is installed, but lld is highly recommended for link performance.
   * `python3`, `python3-distutils`, and `tcl8.6`
@@ -182,6 +182,11 @@ Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these.
 * On macOS:
   * macOS 11.5 or higher
   * The Xcode command line tools, which can be installed with `xcode-select --install`
+
+<details>
+  <summary>Note for NixOS users</summary>
+* Since NixOS does not allow execution of dynamically linked binaries, one can't run workerd on NixOS, refer to the <a href="./docs/nixos.md">fix</a> for development on NixOS
+</details>
 
 ### Local Worker development with `wrangler`
 
