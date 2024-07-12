@@ -118,6 +118,9 @@ void requireValidHeaderValue(kj::StringPtr value) {
 Headers::Headers(jsg::Dict<jsg::ByteString, jsg::ByteString> dict)
     : guard(Guard::NONE) {
   for (auto& field: dict.fields) {
+    KJ_DBG("FIELD");
+    KJ_DBG(kj::str(field.name));
+    KJ_DBG(kj::str(field.value));
     append(kj::mv(field.name), kj::mv(field.value));
   }
 }
@@ -1769,7 +1772,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
       ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc));
 
   kj::HttpHeaders headers(ioContext.getHeaderTable());
+  // No headers here.
+  KJ_DBG(headers);
   jsRequest->shallowCopyHeadersTo(headers);
+  // Headers added here
+  KJ_DBG("HEREAFTER2");
+  KJ_DBG(headers);
 
   kj::String url = uriEncodeControlChars(
       urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
@@ -1826,6 +1834,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
       if (maybeLength.orDefault(1) == 0 &&
           headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
           headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
+        KJ_DBG("DONTEXPECTTHIS");
         // Request has a non-null but explicitly empty body, and has neither a Content-Length nor
         // a Transfer-Encoding header. If we don't set one of those two, and the receiving end is
         // another worker (especially within a pipeline or reached via RPC, not real HTTP), then
@@ -1866,11 +1875,16 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
                   jsBody->pumpTo(js, kj::mv(stream), true))),
           jsBody.addRef()));
     } else {
+      KJ_DBG("EXPECTHERE");
+      KJ_DBG(headers);
+      // I even see accountExample!
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, uint64_t(0));
+      //KJ_DBG(nativeRequest);
     }
     return ioContext.awaitIo(js,
         AbortSignal::maybeCancelWrap(signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
             .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
+              KJ_DBG("NOTEXPECTED");
           if (exception.getDescription().startsWith("invalid Content-Length header value")) {
             return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
           } else if (exception.getDescription().contains("NOSENTRY script not found")) {
@@ -1883,6 +1897,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
         (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
             -> jsg::Promise<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(client));
+      KJ_DBG("COULDBE");
+      KJ_DBG(response.headers);
+      // 3080bfe265a0 ?
       return handleHttpResponse(
           js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response));
     });
@@ -2135,6 +2152,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
         }));
     }
 
+    KJ_DBG("HERE!!");
     urlList.add(actualFetcher->parseUrl(js, jsRequest->getUrl()));
     return fetchImplNoOutputLock(js, kj::mv(actualFetcher), kj::mv(jsRequest), kj::mv(urlList));
   });
@@ -2169,6 +2187,7 @@ jsg::Ref<Socket> Fetcher::connect(
 jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(
     jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
     jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit) {
+    //KJ_DBG(requestInit);
   return fetchImpl(js, JSG_THIS, kj::mv(requestOrUrl), kj::mv(requestInit));
 }
 

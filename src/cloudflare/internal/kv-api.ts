@@ -21,15 +21,18 @@ class KV {
 
   public async get(key: string) {
     const url = `https://fake-host/${encodeURIComponent(key)}?urlencoded=true`;
-    const response = await this.target.fetch(url, {
+    const fetchOptions = {
       method: "GET",
       headers: {
         "CF-KV-FLPROD-405": url,
         "cf-kv-account-id": `${this.accountId}`,
         "cf-kv-caller-stable-id": `${this.stableId}`,
         "cf-kv-caller-stable-id-is-user": `${this.stableIdIsUser}` ? "1" : "0",
-      }
-    });
+      },
+    };
+    // Confirmed working hereconsole
+    console.log(fetchOptions);
+    const response = await this.target.fetch(url, fetchOptions);
     return response.text();
   }
 }

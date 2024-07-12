@@ -1048,6 +1048,7 @@ Result throwOrReturnResult(jsg::Lock& js, IoContext::ExceptionOr<Result>&& excep
 template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
     jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func) {
+  KJ_DBG("PROBHERE");
   // WARNING: The fact that `promise` has been passed by value whereas `func` is by reference is
   // actually important, because this means that if we throw an exception here in the function
   // body, `promise` will be destroyed first, before `func`. That's important as often `func`

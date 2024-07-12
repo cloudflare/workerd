@@ -810,6 +810,7 @@ kj::Date IoContext::now() {
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
     SubrequestOptions options) {
+  KJ_DBG("MAYBEEVENEHERE");
   SpanBuilder span = nullptr;
   KJ_IF_SOME(n, options.operationName) {
     span = makeTraceSpan(kj::mv(n));
