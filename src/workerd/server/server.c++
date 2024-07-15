@@ -1231,7 +1231,7 @@ public:
               if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
                 // This likely just means that the inspector client was closed.
                 // Nothing to do here but move along.
-                KJ_LOG(INFO, kj::str("Inspector client detached [", id, "]"));
+                KJ_LOG(INFO, "Inspector client detached"_kj);
                 co_return;
               } else {
                 // If it's any other kind of error, propagate it!
