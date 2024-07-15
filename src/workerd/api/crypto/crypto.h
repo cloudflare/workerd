@@ -540,7 +540,12 @@ public:
       jsg::Lock& js,
       kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithm,
       const CryptoKey& baseKey,
-      kj::Maybe<int> length);
+      // The operation needs to be able to take both undefined and null
+      // and handle them equivalently... if we just used jsg::Optional<int>
+      // here, null would be coerced to 0. If we just used kj::Maybe<int>
+      // here, undefined would be an error. So we need to use an optional
+      // maybe int in order to treat undefined and null as being equivalent.
+      jsg::Optional<kj::Maybe<int>> length);
 
   jsg::Promise<jsg::Ref<CryptoKey>> importKey(
       jsg::Lock& js,
