@@ -292,6 +292,7 @@ public:
   kj::Duration cpuTime;
   kj::Duration wallTime;
 
+  bool truncated = false;
   bool exceededLogLimit = false;
   bool exceededExceptionLimit = false;
   bool exceededDiagnosticChannelEventLimit = false;

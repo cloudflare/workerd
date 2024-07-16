@@ -201,7 +201,8 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       scriptTags(getTraceScriptTags(trace)),
       outcome(getTraceOutcome(trace)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
-      wallTime(trace.wallTime / kj::MILLISECONDS) {}
+      wallTime(trace.wallTime / kj::MILLISECONDS),
+      truncated(trace.truncated) {}
 
 kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
   return eventInfo.map([](auto& info) -> TraceItem::EventInfo {
@@ -259,6 +260,8 @@ jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
 }
 
 kj::StringPtr TraceItem::getOutcome() { return outcome; }
+
+bool TraceItem::getTruncated() { return truncated; }
 
 uint TraceItem::getCpuTime() { return cpuTime; }
 

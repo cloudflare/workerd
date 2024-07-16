@@ -135,6 +135,9 @@ struct Trace @0x8e8d911203762d34 {
     channel @1 :Text;
     message @2 :Data;
   }
+
+  truncated @24 :Bool;
+  # Indicates that the trace was truncated due to reaching the maximum size limit.
 }
 
 struct ScheduledRun @0xd98fc1ae5c8095d0 {
