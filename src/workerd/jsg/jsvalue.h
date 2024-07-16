@@ -359,7 +359,7 @@ public:
   // Note that when called on a class constructor, this does NOT return `.prototype`, it still
   // returns `.__proto__`. Usefully, though, a class constructor's `__proto__` is always the
   // parent class's constructor.
-  inline JsValue getPrototype() { return JsValue(inner->GetPrototype()); }
+  inline JsValue getPrototype() { return JsValue(inner->GetPrototypeV2()); }
 
   using JsBase<v8::Object, JsObject>::JsBase;
 
