@@ -8,12 +8,14 @@ import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
 import { Message } from "capnp-ts";
 import prettier from "prettier";
 import ts from "typescript";
+import cloudflareComments from "./cloudflare";
 import { collectTypeScriptModules, generateDefinitions } from "./generator";
 import { parseApiAstDump } from "./generator/parameter-names";
 import { printNodeList, printer } from "./print";
 import { SourcesMap, createMemoryProgram } from "./program";
-import { ParsedTypeDefinition, collateStandards } from "./standards";
+import { collateStandardComments } from "./standards";
 import {
+  CommentsData,
   compileOverridesDefines,
   createAmbientTransformer,
   createCommentsTransformer,
@@ -142,7 +144,7 @@ function transform(
 
 function printDefinitions(
   root: StructureGroups,
-  standards: ParsedTypeDefinition,
+  commentData: CommentsData,
   extraDefinitions: string
 ): { ambient: string; importable: string } {
   // Generate TypeScript nodes from capnp request
@@ -165,7 +167,7 @@ function printDefinitions(
     // overrides are extracted
     createGlobalScopeTransformer(checker),
     createInternalNamespaceTransformer(root, structureMap),
-    createCommentsTransformer(standards),
+    createCommentsTransformer(commentData),
   ]);
 
   source += collectTypeScriptModules(root) + extraDefinitions;
@@ -269,7 +271,7 @@ export async function main(args?: string[]) {
     );
   }
 
-  const standards = await collateStandards(
+  const comments = collateStandardComments(
     path.join(
       path.dirname(require.resolve("typescript")),
       "lib.webworker.d.ts"
@@ -280,11 +282,21 @@ export async function main(args?: string[]) {
     )
   );
 
+  // We want to deep merge here so that our comment overrides can be very targeted
+  for (const [name, members] of Object.entries(cloudflareComments)) {
+    comments[name] ??= {};
+    for (const [member, comment] of Object.entries(members)) {
+      const apiEntry = comments[name];
+      assert(apiEntry !== undefined);
+      apiEntry[member] = comment;
+    }
+  }
+
   for (const file of capnpFiles) {
     const buffer = await readFile(file);
     const message = new Message(buffer, /* packed */ false);
     const root = message.getRoot(StructureGroups);
-    let { ambient, importable } = printDefinitions(root, standards, extra);
+    let { ambient, importable } = printDefinitions(root, comments, extra);
     if (options.format) {
       // Strip `// prettier-ignore` comments. TypeScript will reformat all
       // defines anyway, and Prettier's formatting is nicer.
