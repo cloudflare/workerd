@@ -457,11 +457,23 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
         outcome = status;
       }
 
+      kj::String actorId;
+      KJ_SWITCH_ONEOF(actor.getId()) {
+        KJ_CASE_ONEOF(f, kj::Own<ActorIdFactory::ActorId>) {
+          actorId = f->toString();
+        }
+        KJ_CASE_ONEOF(s, kj::String) {
+          actorId = kj::str(s);
+        }
+      }
+
       // We want to alert if we aren't going to count this alarm retry against limits
       if (auto desc = e.getDescription();
           !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)
           && context.isOutputGateBroken()) {
-        LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", e);
+        LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", actorId, e);
+      } else if (context.isOutputGateBroken()) {
+        LOG_NOSENTRY(ERROR, "output lock broke during alarm execution without an erro description", actorId);
       }
       return WorkerInterface::AlarmResult {
         .retry = true,
@@ -472,14 +484,26 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
     .then([&context](WorkerInterface::AlarmResult result) -> kj::Promise<WorkerInterface::AlarmResult> {
       return context.waitForOutputLocks().then([result]() {
         return kj::mv(result);
-      }, [](kj::Exception&& e) {
+      }, [&context](kj::Exception&& e) {
+        auto& actor = KJ_ASSERT_NONNULL(context.getActor());
+        kj::String actorId;
+        KJ_SWITCH_ONEOF(actor.getId()) {
+          KJ_CASE_ONEOF(f, kj::Own<ActorIdFactory::ActorId>) {
+            actorId = f->toString();
+          }
+          KJ_CASE_ONEOF(s, kj::String) {
+            actorId = kj::str(s);
+          }
+        }
         if (auto desc = e.getDescription();
             !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
           if (isInterestingException(e)) {
             LOG_EXCEPTION("alarmOutputLock"_kj, e);
           } else {
-            LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", e);
+            LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", actorId, e);
           }
+        } else {
+          LOG_NOSENTRY(ERROR, "output lock broke after executing alarm without an error description", actorId);
         }
         return WorkerInterface::AlarmResult {
           .retry = true,
