@@ -17,12 +17,14 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include "server.h"
+#include "workerd/jsg/jsg.h"
 #include <workerd/jsg/setup.h>
 #include <openssl/rand.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/supported-compatibility-date.capnp.h>
 #include <workerd/util/autogate.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
+#include <workerd/server/workerd-api.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
@@ -63,6 +65,12 @@
 #endif
 
 #include <workerd/util/use-perfetto-categories.h>
+
+
+#define REPRL_CRFD 100
+#define REPRL_CWFD 101
+#define REPRL_DRFD 102
+#define REPRL_DWFD 103
 
 namespace workerd::server {
 
@@ -676,6 +684,8 @@ public:
               "run unit tests")
           .addSubCommand("pyodide-lock", KJ_BIND_METHOD(*this, getPyodideLock),
               "outputs the package lock file used by Pyodide")
+          .addSubCommand("reprl", KJ_BIND_METHOD(*this, getReprl),
+              "launch a REPRL used for interfacing with Fuzilli")
           .build();
       // TODO(someday):
       // "validate": Loads the config and parses all the code to report errors, but then exits
@@ -767,6 +777,124 @@ public:
     return builder.callAfterParsing([] () -> kj::MainBuilder::Validity {
       printf("%s\n", PYODIDE_LOCK->cStr());
       fflush(stdout);
+      return true;
+    }).build();
+  }
+
+  void reprl() {
+    char helo[] = "HELO";
+    if (write(REPRL_CWFD, helo, 4) != 4 || read(REPRL_CRFD, helo, 4) != 4) {
+        printf("Invalid HELO response from parent\n");
+    }
+
+    if (memcmp(helo, "HELO", 4) != 0) {
+        printf("Invalid response from parent\n");
+    }
+
+    capnp::MallocMessageBuilder message;
+    auto config = message.initRoot<config::Config>();
+    this->config = config.asReader();
+
+    serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) -> kj::Promise<void> {
+        printf("Here\n");
+        using api::pyodide::PythonConfig;
+
+        // IsolateLimitEnforcer that enforces no limits.
+        class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
+        public:
+          v8::Isolate::CreateParams getCreateParams() override { return {}; }
+          void customizeIsolate(v8::Isolate* isolate) override {}
+          ActorCacheSharedLruOptions getActorCacheLruOptions() override {
+            // TODO(someday): Make this configurable?
+            return {
+              .softLimit = 16 * (1ull << 20), // 16 MiB
+              .hardLimit = 128 * (1ull << 20), // 128 MiB
+              .staleTimeout = 30 * kj::SECONDS,
+              .dirtyListByteLimit = 8 * (1ull << 20), // 8 MiB
+              .maxKeysPerRpc = 128,
+
+              // For now, we use `neverFlush` to implement in-memory-only actors.
+              // See WorkerService::getActor().
+              .neverFlush = true
+            };
+          }
+          kj::Own<void> enterStartupJs(
+              jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+            return {};
+          }
+          kj::Own<void> enterStartupPython(
+              jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+            return {};
+          }
+          kj::Own<void> enterDynamicImportJs(
+              jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+            return {};
+          }
+          kj::Own<void> enterLoggingJs(
+              jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+            return {};
+          }
+          kj::Own<void> enterInspectorJs(
+              jsg::Lock& loc, kj::Maybe<kj::Exception>& error) const override {
+            return {};
+          }
+          void completedRequest(kj::StringPtr id) const override {}
+          bool exitJs(jsg::Lock& lock) const override { return false; }
+          void reportMetrics(IsolateObserver& isolateMetrics) const override {}
+          kj::Maybe<size_t> checkPbkdfIterations(jsg::Lock& lock, size_t iterations) const override {
+            // No limit on the number of iterations in workerd
+            return kj::none;
+          }
+        };
+
+        auto observer = kj::atomicRefcounted<IsolateObserver>();
+        auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
+        capnp::MallocMessageBuilder arena;
+        auto featureFlags = arena.initRoot<CompatibilityFlags>();
+        auto memoryCacheProvider = kj::heap<api::MemoryCacheProvider>();
+        auto pythonConfig = PythonConfig {
+          .diskCacheRoot = kj::none,
+          .createSnapshot = false,
+          .createBaselineSnapshot = false
+        };
+        auto api = kj::heap<WorkerdApi>(v8System,
+                                        featureFlags.asReader(),
+                                        *limitEnforcer,
+                                        kj::atomicAddRef(*observer),
+                                        *memoryCacheProvider,
+                                        pythonConfig,
+                                        kj::none
+                                        );
+        auto isolate = kj::atomicRefcounted<Worker::Isolate>(
+            kj::mv(api),
+            kj::mv(observer),
+            "reprl",
+            kj::mv(limitEnforcer),
+            Worker::Isolate::InspectorPolicy::DISALLOW,
+            Worker::ConsoleMode::STDOUT);
+
+        jsg::runInV8Stack([&](jsg::V8StackScope &stackScope) {
+
+          auto js = isolate->getApi().lock(stackScope);
+          js->withinHandleScope([&] {
+            js->setAllowEval(true);
+            printf("%p\n", js->v8Isolate);
+            auto compiled = jsg::NonModuleScript::compile("console.log('hello from js')", *js, "eval");
+            auto val = jsg::JsValue(compiled.runAndReturn(js->v8Context()));
+
+            printf("%s\n", val.toJson(*js).cStr());
+          });
+        });
+
+         co_return;
+    });
+  }
+
+  kj::MainFunc getReprl() {
+    auto builder = kj::MainBuilder(context, getVersionString(),
+      "Launches a REPRL for interfacing with Fuzilli.");
+    return builder.callAfterParsing([this] () -> kj::MainBuilder::Validity {
+      reprl();
       return true;
     }).build();
   }
