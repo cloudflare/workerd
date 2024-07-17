@@ -7,6 +7,7 @@
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <map>
+#include "simdutf.h"
 
 namespace workerd::api {
 
@@ -225,6 +226,71 @@ SubtleCrypto::JsonWebKey Rsa::toJwk(KeyType keyType,
   return jwk;
 }
 
+kj::Maybe<kj::Rc<AsymmetricKeyData>> Rsa::importFromJwk(KeyType keyType,
+                                                        const SubtleCrypto::JsonWebKey& jwk) {
+  ClearErrorOnReturn clearErrorOnReturn;
+
+  if (jwk.kty != "RSA"_kj) return kj::none;
+  auto n = JSG_REQUIRE_NONNULL(jwk.n.map([](auto& str) { return str.asPtr(); }), Error,
+                               "Invalid RSA key in JSON Web Key; missing or invalid "
+                               "Modulus parameter (\"n\").");
+  auto e = JSG_REQUIRE_NONNULL(jwk.e.map([](auto& str) { return str.asPtr(); }), Error,
+                               "Invalid RSA key in JSON Web Key; missing or invalid "
+                               "Exponent parameter (\"e\").");
+
+  auto rsa = OSSL_NEW(RSA);
+
+  // TODO(now): Use a decodeBase64Url variant
+  auto nDecoded = toBignumUnowned(kj::decodeBase64(n));
+  auto eDecoded = toBignumUnowned(kj::decodeBase64(e));
+  JSG_REQUIRE(RSA_set0_key(rsa.get(), nDecoded, eDecoded, nullptr) == 1, Error,
+              "Invalid RSA key in JSON Web Key; failed to set key parameters");
+
+  if (keyType == KeyType::PRIVATE) {
+    auto d = JSG_REQUIRE_NONNULL(jwk.d.map([](auto& str) { return str.asPtr(); }), Error,
+                                 "Invalid RSA key in JSON Web Key; missing or invalid "
+                                 "Private Exponent parameter (\"d\").");
+    auto p = JSG_REQUIRE_NONNULL(jwk.p.map([](auto& str) { return str.asPtr(); }), Error,
+                                 "Invalid RSA key in JSON Web Key; missing or invalid "
+                                 "First Prime Factor parameter (\"p\").");
+    auto q = JSG_REQUIRE_NONNULL(jwk.q.map([](auto& str) { return str.asPtr(); }), Error,
+                                 "Invalid RSA key in JSON Web Key; missing or invalid "
+                                 "Second Prime Factor parameter (\"q\").");
+    auto dp = JSG_REQUIRE_NONNULL(jwk.dp.map([](auto& str) { return str.asPtr(); }), Error,
+                                  "Invalid RSA key in JSON Web Key; missing or invalid "
+                                  "First Factor CRT Exponent parameter (\"dp\").");
+    auto dq = JSG_REQUIRE_NONNULL(jwk.dq.map([](auto& str) { return str.asPtr(); }), Error,
+                                  "Invalid RSA key in JSON Web Key; missing or invalid "
+                                  "Second Factor CRT Exponent parameter (\"dq\").");
+    auto qi = JSG_REQUIRE_NONNULL(jwk.qi.map([](auto& str) { return str.asPtr(); }), Error,
+                                  "Invalid RSA key in JSON Web Key; missing or invalid "
+                                  "First CRT Coefficient parameter (\"qi\").");
+    auto dDecoded = toBignumUnowned(kj::decodeBase64(d));
+    auto pDecoded = toBignumUnowned(kj::decodeBase64(p));
+    auto qDecoded = toBignumUnowned(kj::decodeBase64(q));
+    auto dpDecoded = toBignumUnowned(kj::decodeBase64(dp));
+    auto dqDecoded = toBignumUnowned(kj::decodeBase64(dq));
+    auto qiDecoded = toBignumUnowned(kj::decodeBase64(qi));
+
+    JSG_REQUIRE(RSA_set0_key(rsa.get(), nullptr, nullptr, dDecoded) == 1, Error,
+                "Invalid RSA key in JSON Web Key; failed to set private exponent");
+    JSG_REQUIRE(RSA_set0_factors(rsa.get(), pDecoded, qDecoded) == 1, Error,
+                "Invalid RSA key in JSON Web Key; failed to set prime factors");
+    JSG_REQUIRE(RSA_set0_crt_params(rsa.get(), dpDecoded, dqDecoded, qiDecoded) == 1, Error,
+                "Invalid RSA key in JSON Web Key; failed to set CRT parameters");
+  }
+
+  auto evpPkey = OSSL_NEW(EVP_PKEY);
+  KJ_ASSERT(EVP_PKEY_set1_RSA(evpPkey.get(), rsa.get()) == 1);
+
+  auto usages = keyType == KeyType::PRIVATE ? CryptoKeyUsageSet::privateKeyMask()
+                                            : CryptoKeyUsageSet::publicKeyMask();
+  return kj::rc<AsymmetricKeyData>(
+    kj::mv(evpPkey),
+    keyType,
+    usages);
+}
+
 void Rsa::validateRsaParams(jsg::Lock& js,
                             size_t modulusLength,
                             kj::ArrayPtr<kj::byte> publicExponent,
@@ -266,7 +332,7 @@ void Rsa::validateRsaParams(jsg::Lock& js,
 namespace {
 class RsaBase: public AsymmetricKeyCryptoKeyImpl {
 public:
-  explicit RsaBase(AsymmetricKeyData keyData,
+  explicit RsaBase(kj::Rc<AsymmetricKeyData> keyData,
                    CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                    bool extractable)
     : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), extractable),
@@ -303,7 +369,7 @@ private:
 
 class RsassaPkcs1V15Key final: public RsaBase {
 public:
-  explicit RsassaPkcs1V15Key(AsymmetricKeyData keyData,
+  explicit RsassaPkcs1V15Key(kj::Rc<AsymmetricKeyData> keyData,
                              CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                              bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -331,7 +397,7 @@ private:
 
 class RsaPssKey final: public RsaBase {
 public:
-  explicit RsaPssKey(AsymmetricKeyData keyData,
+  explicit RsaPssKey(kj::Rc<AsymmetricKeyData> keyData,
                      CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                      bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -371,7 +437,7 @@ class RsaOaepKey final : public RsaBase {
   using EncryptDecryptFunction = decltype(EVP_PKEY_encrypt);
 
 public:
-  explicit RsaOaepKey(AsymmetricKeyData keyData,
+  explicit RsaOaepKey(kj::Rc<AsymmetricKeyData> keyData,
                       CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                       bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -434,7 +500,7 @@ private:
 
 class RsaRawKey final: public RsaBase {
 public:
-  explicit RsaRawKey(AsymmetricKeyData keyData,
+  explicit RsaRawKey(kj::Rc<AsymmetricKeyData> keyData,
                      CryptoKey::RsaKeyAlgorithm keyAlgorithm,
                      bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -482,16 +548,14 @@ CryptoKeyPair generateRsaPair(jsg::Lock& js,
                               CryptoKeyUsageSet usages) {
   auto privateKeyAlgorithm = keyAlgorithm.clone(js);
 
-  AsymmetricKeyData publicKeyData {
-    .evpPkey = kj::mv(publicEvpPKey),
-    .keyType = KeyType::PUBLIC,
-    .usages = usages & CryptoKeyUsageSet::publicKeyMask(),
-  };
-  AsymmetricKeyData privateKeyData {
-    .evpPkey = kj::mv(privateEvpPKey),
-    .keyType = KeyType::PRIVATE,
-    .usages = usages & CryptoKeyUsageSet::privateKeyMask(),
-  };
+  auto publicKeyData  = kj::rc<AsymmetricKeyData>(
+    kj::mv(publicEvpPKey),
+    KeyType::PUBLIC,
+    usages & CryptoKeyUsageSet::publicKeyMask());
+  auto privateKeyData  = kj::rc<AsymmetricKeyData>(
+    kj::mv(privateEvpPKey),
+    KeyType::PRIVATE,
+    usages & CryptoKeyUsageSet::privateKeyMask());
 
   static constexpr auto createPair = [](kj::Own<CryptoKey::Impl> publicKey,
                                         kj::Own<CryptoKey::Impl> privateKey) {
@@ -722,7 +786,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
   }, allowedUsages);
 
   // get0 avoids adding a refcount...
-  auto rsa = JSG_REQUIRE_NONNULL(Rsa::tryGetRsa(importedKey.evpPkey.get()), DOMDataError,
+  auto rsa = JSG_REQUIRE_NONNULL(Rsa::tryGetRsa(importedKey->evpPkey.get()), DOMDataError,
       "Input was not an RSA key", tryDescribeOpensslErrors());
 
   // TODO(conform): We're supposed to check if PKCS8/SPKI input specified a hash and, if so,
@@ -786,12 +850,12 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
     return rsaJwkReader(kj::mv(keyDataJwk));
   }, allowedUsages);
 
-  JSG_REQUIRE(importedKey.keyType == KeyType::PRIVATE, DOMDataError,
+  JSG_REQUIRE(importedKey->keyType == KeyType::PRIVATE, DOMDataError,
       "RSA-RAW only supports private keys but requested \"",
-      toStringPtr(importedKey.keyType), "\".");
+      toStringPtr(importedKey->keyType), "\".");
 
   // get0 avoids adding a refcount...
-  auto rsa = JSG_REQUIRE_NONNULL(Rsa::tryGetRsa(importedKey.evpPkey.get()), DOMDataError,
+  auto rsa = JSG_REQUIRE_NONNULL(Rsa::tryGetRsa(importedKey->evpPkey.get()), DOMDataError,
       "Input was not an RSA key", tryDescribeOpensslErrors());
 
   size_t modulusLength = rsa.getModulusBits();

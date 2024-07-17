@@ -118,7 +118,7 @@ void zeroOutTrailingKeyBits(kj::Array<kj::byte>& keyDataArray, int keyBitLength)
 }
 
 kj::Own<HMAC_CTX> initHmacContext(kj::StringPtr algorithm, HmacContext::KeyData& key) {
-  static constexpr auto handle = [](kj::StringPtr algorithm, kj::ArrayPtr<kj::byte> key) {
+  static constexpr auto handle = [](kj::StringPtr algorithm, kj::ArrayPtr<const kj::byte> key) {
     ClearErrorOnReturn clearErrorOnReturn;
     JSG_REQUIRE(key.size() <= INT_MAX, RangeError, "key is too long");
     const EVP_MD* md = EVP_get_digestbyname(algorithm.begin());
@@ -131,7 +131,7 @@ kj::Own<HMAC_CTX> initHmacContext(kj::StringPtr algorithm, HmacContext::KeyData&
   };
 
   KJ_SWITCH_ONEOF(key) {
-    KJ_CASE_ONEOF(buf, kj::ArrayPtr<kj::byte>) {
+    KJ_CASE_ONEOF(buf, kj::ArrayPtr<const kj::byte>) {
       return handle(algorithm, buf);
     }
     KJ_CASE_ONEOF(key2, CryptoKey::Impl*) {

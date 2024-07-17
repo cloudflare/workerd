@@ -26,6 +26,9 @@ typedef struct bignum_st BIGNUM;
 
 namespace workerd::api {
 
+struct AsymmetricKeyData;
+KJ_DECLARE_NON_POLYMORPHIC(AsymmetricKeyData);
+
 struct OpensslUntranslatedError {
   kj::StringPtr library;
   kj::StringPtr reasonName;
@@ -132,6 +135,8 @@ public:
 
   static kj::Own<CryptoKey::Impl> from(kj::Own<EVP_PKEY> key);
 
+  virtual kj::Maybe<kj::Rc<AsymmetricKeyData>> getAsymmetricKeyData() { return kj::none; }
+
   bool isExtractable() const { return extractable; }
   CryptoKeyUsageSet getUsages() const { return usages; }
 
@@ -184,23 +189,6 @@ public:
   }
 
   virtual SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const {
-    JSG_FAIL_REQUIRE(DOMNotSupportedError,
-        "Unrecognized or unsupported export of \"", getAlgorithmName(), "\" requested.");
-  }
-
-  // The exportKeyExt variant is used by the Node.js crypto module. It allows the caller to
-  // specify a broader range of export formats and types that are not supported by Web
-  // Crypto. For instance, Web Crypto limits the export of public keys to only the spki or
-  // jwk formats, while Node.js allows pkcs1 or spki formatted as either pem, der, or jwk.
-  // For private keys, Node.js allows optionally encrypting the private key using a given
-  // cipher and passphrase.
-  // Rather than modify the existing exportKey API, we add this new variant to support the
-  // Node.js implementation without risking breaking the Web Crypto impl.
-  virtual kj::Array<kj::byte> exportKeyExt(
-      kj::StringPtr format,
-      kj::StringPtr type,
-      jsg::Optional<kj::String> cipher = kj::none,
-      jsg::Optional<kj::Array<kj::byte>> passphrase = kj::none) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError,
         "Unrecognized or unsupported export of \"", getAlgorithmName(), "\" requested.");
   }

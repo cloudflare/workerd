@@ -29,6 +29,9 @@ public:
   SubtleCrypto::JsonWebKey toJwk(KeyType keytype,
                                  kj::Maybe<kj::String> maybeHashAlgorithm) const;
 
+  kj::String toPem(KeyEncoding encoding, KeyType keyType) const;
+  kj::Array<kj::byte> toDer(KeyEncoding encoding, KeyType keyType) const;
+
   using EncryptDecryptFunction = decltype(EVP_PKEY_encrypt);
   kj::Array<kj::byte> cipher(EVP_PKEY_CTX* ctx,
                              SubtleCrypto::EncryptAlgorithm&& algorithm,
@@ -44,6 +47,11 @@ public:
                                 size_t modulusLength,
                                 kj::ArrayPtr<kj::byte> publicExponent,
                                 bool isImport = false);
+
+
+  static kj::Maybe<kj::Rc<AsymmetricKeyData>> importFromJwk(
+      KeyType keyType,
+      const SubtleCrypto::JsonWebKey& jwk);
 
 private:
   RSA* rsa;

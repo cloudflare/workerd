@@ -17,6 +17,8 @@ public:
   inline const EC_GROUP* getGroup() const { return group; }
   int getCurveName() const;
 
+  kj::String getCurveNameString() const;
+
   const EC_POINT* getPublicKey() const;
   const BIGNUM* getPrivateKey() const;
   uint32_t getDegree() const;
@@ -27,15 +29,41 @@ public:
   SubtleCrypto::JsonWebKey toJwk(KeyType keyType, kj::StringPtr curveName) const
       KJ_WARN_UNUSED_RESULT;
 
+  kj::String toPem(KeyEncoding encoding, KeyType keyType) const;
+  kj::Array<kj::byte> toDer(KeyEncoding encoding, KeyType keyType) const;
+
   kj::Array<kj::byte> getRawPublicKey() const KJ_WARN_UNUSED_RESULT;
 
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const;
+
+  static kj::Maybe<kj::Rc<AsymmetricKeyData>> importFromJwk(
+      KeyType keyType,
+      const SubtleCrypto::JsonWebKey& jwk);
 
 private:
   EC_KEY* key;
   const EC_GROUP* group = nullptr;
   kj::Own<BIGNUM> x;
   kj::Own<BIGNUM> y;
+};
+
+class EdDsa final {
+public:
+  static kj::Maybe<EdDsa> tryGetEdDsa(const EVP_PKEY* key);
+  EdDsa(const EVP_PKEY* key);
+
+  SubtleCrypto::JsonWebKey toJwk(KeyType keyType) const KJ_WARN_UNUSED_RESULT;
+  kj::String toPem(KeyEncoding encoding, KeyType keyType) const;
+  kj::Array<kj::byte> toDer(KeyEncoding encoding, KeyType keyType) const;
+
+  kj::Array<kj::byte> getRawPublicKey() const KJ_WARN_UNUSED_RESULT;
+
+  static kj::Maybe<kj::Rc<AsymmetricKeyData>> importFromJwk(
+      KeyType keyType,
+      const SubtleCrypto::JsonWebKey& jwk);
+
+private:
+  const EVP_PKEY* key;
 };
 
 }  // namespace workerd::api

@@ -8,12 +8,16 @@
 #include <workerd/api/crypto/digest.h>
 #include <workerd/api/crypto/dh.h>
 #include <workerd/api/crypto/x509.h>
+#include <workerd/api/crypto/keys.h>
 #include <openssl/evp.h>
 
 namespace workerd::api::node {
 
 class CryptoImpl final: public jsg::Object {
 public:
+  class AsymmetricKeyObjectHandle;
+  class SecretKeyObjectHandle;
+
   // DH
   class DiffieHellmanHandle final: public jsg::Object {
     public:
@@ -87,7 +91,9 @@ public:
   // Hmac
   class HmacHandle final: public jsg::Object {
     public:
-      using KeyParam = kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>>;
+      using KeyParam = kj::OneOf<kj::Array<kj::byte>,
+                                 jsg::Ref<CryptoKey>,
+                                 jsg::Ref<SecretKeyObjectHandle>>;
 
       HmacHandle(HmacContext ctx) : ctx(kj::mv(ctx)) {};
 
@@ -180,34 +186,111 @@ public:
   };
 
   struct CreateAsymmetricKeyOptions {
-    kj::OneOf<kj::Array<kj::byte>, SubtleCrypto::JsonWebKey, jsg::Ref<CryptoKey>> key;
+    bool isPublicKey;
+    kj::OneOf<kj::Array<kj::byte>,
+              SubtleCrypto::JsonWebKey,
+              jsg::Ref<CryptoKey>,
+              jsg::Ref<AsymmetricKeyObjectHandle>> key;
     // For a PrivateKey, the key is one of either kj::Array<kj::byte> or
     // SubtleCrypto::JsonWebKey. For a PublicKey it can also be a CryptoKey
-    // containing a private key from which the public key will be derived.
+    // or AsymmetricKeyObjectHandle containing a private key from which the
+    // public key will be derived.
     jsg::Optional<kj::String> format;
     jsg::Optional<kj::String> type;
     jsg::Optional<kj::Array<kj::byte>> passphrase;
     // The passphrase is only used for private keys. The format, type, and passphrase
     // options are only used if the key is a kj::Array<kj::byte>.
-    JSG_STRUCT(key, format, type, passphrase);
+    JSG_STRUCT(isPublicKey, key, format, type, passphrase);
+  };
+
+  using ExportedKey = kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey>;
+
+  // The distinctive difference between a Web Crypto CryptoKey and a Node.js style
+  // KeyObject is that the former is created to be algorithm specific and can include
+  // details about the algorithm, while the latter is a more generic object that is
+  // largely agnostic to the algorithm.
+  class SecretKeyObjectHandle final: public jsg::Object {
+  public:
+    SecretKeyObjectHandle(kj::Array<kj::byte> data) : data(kj::mv(data)) {}
+
+    jsg::Ref<SecretKeyObjectHandle> constructor(kj::Array<kj::byte> keyData);
+
+    ExportedKey export_(jsg::Lock& js, KeyExportOptions options);
+    bool equals(jsg::Ref<SecretKeyObjectHandle> other);
+
+    static kj::Maybe<jsg::Ref<SecretKeyObjectHandle>> fromCryptoKey(jsg::Ref<CryptoKey> key);
+    kj::Maybe<jsg::Ref<CryptoKey>> toCryptoKey(jsg::Lock& js,
+                                               SubtleCrypto::ImportKeyAlgorithm algorithm,
+                                               bool extractable,
+                                               kj::Array<kj::String> usages);
+
+    inline kj::ArrayPtr<const kj::byte> asPtr() const { return data.asPtr(); }
+
+    JSG_RESOURCE_TYPE(SecretKeyObjectHandle) {
+      JSG_METHOD_NAMED(export, export_);
+      JSG_METHOD(equals);
+      JSG_METHOD(toCryptoKey);
+      JSG_STATIC_METHOD(fromCryptoKey);
+    }
+
+    void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+  private:
+    // TODO(soon): This externally-held data is not reflected in the isolate
+    // external memory tracking.
+    ZeroOnFree data;
+  };
+
+  class AsymmetricKeyObjectHandle final: public jsg::Object {
+  public:
+    using Kind = AsymmetricKeyData::Kind;
+
+    AsymmetricKeyObjectHandle(kj::Rc<AsymmetricKeyData> keyData): keyData(kj::mv(keyData)) {};
+
+    static jsg::Ref<AsymmetricKeyObjectHandle> constructor(CreateAsymmetricKeyOptions options);
+
+    Kind getKind() const;
+
+    inline kj::StringPtr getType() const { return toStringPtr(keyData->keyType); }
+    inline KeyType getTypeEnum() const { return keyData->keyType; }
+
+    ExportedKey export_(jsg::Lock& js, KeyExportOptions options);
+    bool equals(jsg::Ref<AsymmetricKeyObjectHandle> other);
+
+    CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail();
+    kj::StringPtr getAsymmetricKeyType();
+
+    static jsg::Ref<AsymmetricKeyObjectHandle> fromCryptoKey(jsg::Ref<CryptoKey> key);
+    kj::Maybe<jsg::Ref<CryptoKey>> toCryptoKey(jsg::Lock& js,
+                                               CryptoKey::AlgorithmVariant algorithm,
+                                               bool extractable);
+
+    struct Pair {
+      jsg::Ref<AsymmetricKeyObjectHandle> publicKey;
+      jsg::Ref<AsymmetricKeyObjectHandle> privateKey;
+      JSG_STRUCT(publicKey, privateKey);
+    };
+    static kj::Maybe<Pair> generateKeyPair(GenerateKeyPairOptions options);
+
+    JSG_RESOURCE_TYPE(AsymmetricKeyObjectHandle) {
+      JSG_METHOD_NAMED(export, export_);
+      JSG_METHOD(equals);
+      JSG_METHOD(getAsymmetricKeyDetail);
+      JSG_METHOD(getAsymmetricKeyType);
+      JSG_METHOD(toCryptoKey);
+      JSG_STATIC_METHOD(generateKeyPair);
+    }
+
+    const EVP_PKEY* getEvpPkey() const { return keyData->evpPkey.get(); }
+
+    kj::Rc<AsymmetricKeyData> getKeyData() { return keyData.addRef(); }
+
+  private:
+    kj::Rc<AsymmetricKeyData> keyData;
   };
 
   CryptoImpl() = default;
   CryptoImpl(jsg::Lock&, const jsg::Url&) {}
-
-  kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> exportKey(
-      jsg::Lock& js,
-      jsg::Ref<CryptoKey> key,
-      jsg::Optional<KeyExportOptions> options);
-
-  bool equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey);
-
-  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js, jsg::Ref<CryptoKey> key);
-  kj::StringPtr getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key);
-
-  jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, kj::Array<kj::byte>);
-  jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
-  jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
 
   bool verifySpkac(kj::Array<const kj::byte> input);
   kj::Maybe<kj::Array<kj::byte>> exportPublicKey(kj::Array<const kj::byte> input);
@@ -230,13 +313,8 @@ public:
     // Scrypt
     JSG_METHOD(getScrypt);
     // Keys
-    JSG_METHOD(exportKey);
-    JSG_METHOD(equals);
-    JSG_METHOD(getAsymmetricKeyDetail);
-    JSG_METHOD(getAsymmetricKeyType);
-    JSG_METHOD(createSecretKey);
-    JSG_METHOD(createPrivateKey);
-    JSG_METHOD(createPublicKey);
+    JSG_NESTED_TYPE(SecretKeyObjectHandle);
+    JSG_NESTED_TYPE(AsymmetricKeyObjectHandle);
     // Spkac
     JSG_METHOD(verifySpkac);
     JSG_METHOD(exportPublicKey);
@@ -244,6 +322,9 @@ public:
     // X509
     JSG_NESTED_TYPE(X509Certificate);
   }
+
+  static kj::Maybe<kj::Rc<AsymmetricKeyData>> getAsymmetricKeyDataFromCryptoKey(
+      jsg::Ref<CryptoKey> key);
 };
 
 #define EW_NODE_CRYPTO_ISOLATE_TYPES                   \
@@ -254,6 +335,9 @@ public:
     api::node::CryptoImpl::KeyExportOptions,           \
     api::node::CryptoImpl::GenerateKeyPairOptions,     \
     api::node::CryptoImpl::CreateAsymmetricKeyOptions, \
+    api::node::CryptoImpl::CreateAsymmetricKeyOptions, \
+    api::node::CryptoImpl::SecretKeyObjectHandle,      \
+    api::node::CryptoImpl::AsymmetricKeyObjectHandle, \
     EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node
 
