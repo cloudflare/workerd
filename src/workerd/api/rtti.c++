@@ -29,6 +29,11 @@
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/node/node.h>
 #include <workerd/jsg/modules.capnp.h>
+#include <workerd/api/hyperdrive.h>
+#include <workerd/api/eventsource.h>
+#include <workerd/api/unsafe.h>
+#include <workerd/api/memory-cache.h>
+#include <workerd/api/worker-rpc.h>
 
 #include <cloudflare/cloudflare.capnp.h>
 
@@ -53,6 +58,10 @@
   F("form-data", EW_FORMDATA_ISOLATE_TYPES)                                    \
   F("html-rewriter", EW_HTML_REWRITER_ISOLATE_TYPES)                           \
   F("http", EW_HTTP_ISOLATE_TYPES)                                             \
+  F("hyperdrive", EW_HYPERDRIVE_ISOLATE_TYPES)                                 \
+  F("unsafe", EW_UNSAFE_ISOLATE_TYPES)                                         \
+  F("memory-cache", EW_MEMORY_CACHE_ISOLATE_TYPES)                             \
+  F("pyodide", EW_PYODIDE_ISOLATE_TYPES)                                       \
   F("kv", EW_KV_ISOLATE_TYPES)                                                 \
   F("queue", EW_QUEUE_ISOLATE_TYPES)                                           \
   F("r2-admin", EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES)                         \
@@ -69,7 +78,8 @@
   F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                       \
   F("node", EW_NODE_ISOLATE_TYPES)                                             \
   F("rtti", EW_RTTI_ISOLATE_TYPES)                                             \
-  F("webgpu", EW_WEBGPU_ISOLATE_TYPES)
+  F("webgpu", EW_WEBGPU_ISOLATE_TYPES)                                         \
+  F("eventsource", EW_EVENTSOURCE_ISOLATE_TYPES)
 
 namespace workerd::api {
 
@@ -148,14 +158,44 @@ CompatibilityFlags::Reader compileFlags(capnp::MessageBuilder &message, kj::Stri
   return kj::mv(reader);
 }
 
+CompatibilityFlags::Reader compileAllFlags(capnp::MessageBuilder &message) {
+  auto output = message.initRoot<CompatibilityFlags>();
+  auto schema = capnp::Schema::from<CompatibilityFlags>();
+  auto dynamicOutput = capnp::toDynamic(output);
+  for (auto field: schema.getFields()) {
+    bool isNode = false;
+
+    kj::StringPtr enableFlagName;
+
+    for (auto annotation: field.getProto().getAnnotations()) {
+      if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+        enableFlagName = annotation.getValue().getText();
+        // Exclude nodejs_compat, since the type generation scripts don't support node:* imports
+        // TODO: Figure out typing for node compat
+        isNode = enableFlagName == "nodejs_compat" ||
+                  enableFlagName == "nodejs_compat_v2";
+      }
+    }
+
+    dynamicOutput.set(field, !isNode);
+  }
+  auto reader = output.asReader();
+  return kj::mv(reader);
+}
+
 struct TypesEncoder {
 public:
+  TypesEncoder(): compatFlags(kj::heapArray<kj::String>(0)) {}
   TypesEncoder(kj::String compatDate, kj::Array<kj::String> compatFlags): compatDate(kj::mv(compatDate)), compatFlags(kj::mv(compatFlags)) {}
 
   kj::Array<byte> encode() {
     capnp::MallocMessageBuilder flagsMessage;
-    CompatibilityFlags::Reader flags = compileFlags(flagsMessage, compatDate, false, compatFlags);
-
+    CompatibilityFlags::Reader flags;
+    KJ_IF_SOME(date, compatDate) {
+      flags = compileFlags(flagsMessage, date, true, compatFlags);
+    } else {
+      flags = compileAllFlags(flagsMessage);
+    }
     capnp::MallocMessageBuilder message;
     auto root = message.initRoot<jsg::rtti::StructureGroups>();
 
@@ -221,7 +261,7 @@ private:
     KJ_ASSERT(structureIndex == structuresSize);
   }
 
-  kj::String compatDate;
+  kj::Maybe<kj::String> compatDate;
   kj::Array<kj::String> compatFlags;
 
   unsigned int groupsIndex = 0;
@@ -232,6 +272,11 @@ private:
 
 kj::Array<byte> RTTIModule::exportTypes(kj::String compatDate, kj::Array<kj::String> compatFlags) {
   TypesEncoder encoder(kj::mv(compatDate), kj::mv(compatFlags));
+  return encoder.encode();
+}
+
+kj::Array<byte> RTTIModule::exportExperimentalTypes() {
+  TypesEncoder encoder;
   return encoder.encode();
 }
 

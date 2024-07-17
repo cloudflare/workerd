@@ -47,8 +47,8 @@ test("createStructureNode: method members", () => {
   assert.strictEqual(
     printNode(createStructureNode(structure, { asClass: false })),
     `interface Methods {
-    one(param0: boolean, param1: Promise<any>, param2?: number): void;
-    three(...param0: any[]): boolean;
+    one(arg0: boolean, arg1: Promise<any>, arg2?: number): void;
+    three(...arg0: any[]): boolean;
 }`
   );
 
@@ -56,8 +56,8 @@ test("createStructureNode: method members", () => {
   assert.strictEqual(
     printNode(createStructureNode(structure, { asClass: true })),
     `declare abstract class Methods {
-    one(param0: boolean, param1: Promise<any>, param2?: number): void;
-    static three(...param0: any[]): boolean;
+    one(arg0: boolean, arg1: Promise<any>, arg2?: number): void;
+    static three(...arg0: any[]): boolean;
 }`
   );
 });
@@ -235,15 +235,15 @@ test("createStructureNode: iterator members", () => {
   assert.strictEqual(
     printNode(createStructureNode(structure, { asClass: false })),
     `interface Iterators {
-    [Symbol.iterator](param0?: ThingOptions): ThingIterator;
-    [Symbol.asyncIterator](param0?: AsyncThingOptions): AsyncThingIterator;
+    [Symbol.iterator](arg0?: ThingOptions): ThingIterator;
+    [Symbol.asyncIterator](arg0?: AsyncThingOptions): AsyncThingIterator;
 }`
   );
   assert.strictEqual(
     printNode(createStructureNode(structure, { asClass: true })),
     `declare abstract class Iterators {
-    [Symbol.iterator](param0?: ThingOptions): ThingIterator;
-    [Symbol.asyncIterator](param0?: AsyncThingOptions): AsyncThingIterator;
+    [Symbol.iterator](arg0?: ThingOptions): ThingIterator;
+    [Symbol.asyncIterator](arg0?: AsyncThingOptions): AsyncThingIterator;
 }`
   );
 });
@@ -271,7 +271,7 @@ test("createStructureNode: constructors", () => {
   assert.strictEqual(
     printNode(createStructureNode(structure, { asClass: true })),
     `declare class Constructor {
-    constructor(param0: boolean | undefined, param1: string, param2: Promise<any>, param3?: number);
+    constructor(arg0: boolean | undefined, arg1: string, arg2: Promise<any>, arg3?: number);
 }`
   );
 });

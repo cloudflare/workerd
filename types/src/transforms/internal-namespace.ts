@@ -89,7 +89,7 @@ function collectInternalModuleStructures(
   root.getModules().forEach((module) => {
     if (!module.isStructureName()) return;
     const structure = structureMap.get(module.getStructureName());
-    assert(structure !== undefined);
+    assert(structure !== undefined, "Structure is undefined");
     const specifier = module.getSpecifier();
     moduleRoots.set(specifier, structure);
   });

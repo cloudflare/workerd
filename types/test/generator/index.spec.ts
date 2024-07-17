@@ -159,17 +159,17 @@ interface Root1 {
     maybe?: Thing3;
     dict: Record<Thing4, Thing5>;
     variants: Thing6 | Thing7 | Thing8;
-    function: (param0: Thing9) => Thing10;
+    function: (arg0: Thing9) => Thing10;
 }
 declare abstract class Nested {
     nestedProp: Thing11;
 }
 declare class Root2 extends Thing19 {
-    constructor(param0: Thing14);
-    method(param0: Thing12): Thing13;
+    constructor(arg0: Thing14);
+    method(arg0: Thing12): Thing13;
     Nested: typeof Nested;
-    [Symbol.iterator](param0: Thing15): Thing16;
-    [Symbol.asyncIterator](param0: Thing17): Thing18;
+    [Symbol.iterator](arg0: Thing15): Thing16;
+    [Symbol.asyncIterator](arg0: Thing17): Thing18;
 }
 `
   );

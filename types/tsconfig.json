@@ -16,13 +16,9 @@
     },
     "checkJs": true,
     "allowJs": true,
-    "composite": true
+    "composite": true,
+    "skipLibCheck": true
   },
-  "include": [
-    "src/**/*.ts",
-    "test/**/*.ts"
-  ],
-  "exclude": [
-    "test/types/**/*.ts"
-  ]
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["test/types/**/*.ts", "src/worker/**"]
 }

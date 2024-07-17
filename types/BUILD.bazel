@@ -5,9 +5,10 @@ load("//:build/wd_ts_type_test.bzl", "wd_ts_type_test")
 
 wd_ts_project(
     name = "types_lib",
-    srcs = glob(["src/**/*"]),
+    srcs = glob(["src/**/*", "scripts/*.ts"], exclude = ["src/worker/**/*"]),
     deps = [
         "//:node_modules/@types",
+        "//:node_modules/esbuild",
         "//:node_modules/@workerd/jsg",
         "//:node_modules/capnp-ts",
         "//:node_modules/prettier",
@@ -16,32 +17,53 @@ wd_ts_project(
 )
 
 js_binary(
-    name = "types_bin",
+    name = "build_types_bin",
     data = [
         ":types_lib",
     ],
-    entry_point = "src/index.js",
-    node_options = ["--enable-source-maps"],
+    entry_point = "scripts/build-types.js",
 )
 
 js_run_binary(
     name = "types",
     srcs = [
-        "//src/workerd/tools:api_encoder",
-        "//src/workerd/tools:param_extractor",
-    ] + glob(["defines/**/*.ts"]),
-    args = [
-        "--input-dir",
-        "src/workerd/tools",
-        "--defines-dir",
-        "types/defines",
-        "--output-dir",
-        "types/definitions",
-        "--format",
+        "scripts/config.capnp",
+        ":types_worker",
+        "//src/workerd/server:workerd",
+        "//:node_modules/prettier",
+
     ],
     out_dirs = ["definitions"],
     silent_on_success = False,  # Always enable logging for debugging
-    tool = ":types_bin",
+    tool = ":build_types_bin",
+)
+
+js_binary(
+    name = "build_worker_bin",
+    data = [
+        ":types_lib",
+    ],
+    entry_point = "scripts/build-worker.js",
+    node_options = ["--enable-source-maps"],
+)
+
+js_run_binary(
+    name = "types_worker",
+    srcs = [
+        "//:node_modules/esbuild",
+        "//:node_modules/@workerd/jsg",
+        "//:node_modules/capnp-ts",
+        "//:node_modules/typescript",
+        "//src/workerd/tools:param_extractor",
+    ] + glob(
+        [
+            "src/**/*.ts",
+            "defines/**/*.ts",
+        ],
+        exclude = ["src/cli/**/*"],
+    ),
+    outs = ["dist/index.mjs"],
+    tool = ":build_worker_bin",
 )
 
 [
