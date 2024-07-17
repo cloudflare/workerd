@@ -272,6 +272,7 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
     }
   }
 
+  builder.setTruncated(truncated);
   builder.setOutcome(outcome);
   builder.setCpuTime(cpuTime / kj::MILLISECONDS);
   builder.setWallTime(wallTime / kj::MILLISECONDS);
@@ -571,6 +572,7 @@ void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message
   size_t newSize = trace->bytesUsed + sizeof(Trace::Log) + message.size();
   if (newSize > MAX_TRACE_BYTES) {
     trace->exceededLogLimit = true;
+    trace->truncated = true;
     // We use a JSON encoded array/string to match other console.log() recordings:
     trace->logs.add(
         timestamp, LogLevel::WARN,
@@ -598,6 +600,7 @@ void WorkerTracer::addException(kj::Date timestamp, kj::String name, kj::String 
   }
   if (newSize > MAX_TRACE_BYTES) {
     trace->exceededExceptionLimit = true;
+    trace->truncated = true;
     trace->exceptions.add(
         timestamp, kj::str("Error"),
         kj::str("Trace resource limit exceeded; subsequent exceptions not recorded."),
@@ -621,6 +624,7 @@ void WorkerTracer::addDiagnosticChannelEvent(kj::Date timestamp,
                    message.size();
   if (newSize > MAX_TRACE_BYTES) {
     trace->exceededDiagnosticChannelEventLimit = true;
+    trace->truncated = true;
     trace->diagnosticChannelEvents.add(timestamp, kj::str("workerd.LimitExceeded"),
                                        kj::Array<kj::byte>());
     return;
@@ -652,6 +656,7 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
       }
       newSize += fetch.cfJson.size();
       if (newSize > MAX_TRACE_BYTES) {
+        trace->truncated = true;
         trace->logs.add(
             timestamp, LogLevel::WARN,
             kj::str("[\"Trace resource limit exceeded; could not capture event info.\"]"));
