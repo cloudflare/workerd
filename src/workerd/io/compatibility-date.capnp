@@ -504,4 +504,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("legacy_module_registry")
       $experimental;
   # Enables of the new module registry implementation.
+
+  cacheHeaderEnabled @53 :Bool
+    $compatEnableFlag("cache_header_enabled")
+    $compatDisableFlag("cache_header_disabled")
+    $experimental;
+  # Enables the use of no-cache and no-store headers from requests
 }
