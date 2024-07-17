@@ -995,53 +995,62 @@ private:
 
 };
 
-kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
-    kj::StringPtr normalizedName, int nid, CryptoKeyUsageSet privateKeyUsages,
-    CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey) {
-  auto [curveName, keypair, keylen] = [nid, normalizedName] {
-    switch (nid) {
-      // BoringSSL doesn't support ED448/X448.
-      case NID_ED25519:
-        return std::make_tuple("Ed25519"_kj, ED25519_keypair, ED25519_PUBLIC_KEY_LEN);
-      case NID_X25519:
-        return std::make_tuple("X25519"_kj, X25519_keypair, X25519_PUBLIC_VALUE_LEN);
-    }
-
-    KJ_FAIL_REQUIRE("ED ", normalizedName, " unimplemented", nid);
-  }();
-
-  uint8_t rawPublicKey[keylen];
-  uint8_t rawPrivateKey[keylen * 2];
-  keypair(rawPublicKey, rawPrivateKey);
+template <size_t keySize, void (*KeypairInit)(uint8_t[keySize], uint8_t[keySize*2])>
+CryptoKeyPair generateKeyImpl(kj::StringPtr normalizedName, int nid,
+                              CryptoKeyUsageSet privateKeyUsages, CryptoKeyUsageSet publicKeyUsages,
+                              bool extractablePrivateKey, kj::StringPtr curveName) {
+  uint8_t rawPublicKey[keySize];
+  uint8_t rawPrivateKey[keySize * 2];
+  KeypairInit(rawPublicKey, rawPrivateKey);
 
   // The private key technically also contains the public key. Why does the keypair function bother
   // writing out the public key to a separate buffer?
 
-  auto privateEvpPKey = OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_private_key(nid, nullptr,
-      rawPrivateKey, keylen), InternalDOMOperationError, "Error constructing ", curveName,
-      " private key", internalDescribeOpensslErrors());
+  auto privateEvpPKey =
+      OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_private_key(nid, nullptr, rawPrivateKey, keySize),
+                   InternalDOMOperationError, "Error constructing ", curveName, " private key",
+                   internalDescribeOpensslErrors());
 
-  auto publicEvpPKey = OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(nid, nullptr,
-      rawPublicKey, keylen), InternalDOMOperationError, "Internal error construct ", curveName,
-      "public key", internalDescribeOpensslErrors());
+  auto publicEvpPKey =
+      OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(nid, nullptr, rawPublicKey, keySize),
+                   InternalDOMOperationError, "Internal error construct ", curveName, "public key",
+                   internalDescribeOpensslErrors());
 
-  AsymmetricKeyData privateKeyData {
-    .evpPkey = kj::mv(privateEvpPKey),
-    .keyType = KeyType::PRIVATE,
-    .usages = privateKeyUsages,
+  AsymmetricKeyData privateKeyData{
+      .evpPkey = kj::mv(privateEvpPKey),
+      .keyType = KeyType::PRIVATE,
+      .usages = privateKeyUsages,
   };
-  AsymmetricKeyData publicKeyData {
-    .evpPkey = kj::mv(publicEvpPKey),
-    .keyType = KeyType::PUBLIC,
-    .usages = publicKeyUsages,
+  AsymmetricKeyData publicKeyData{
+      .evpPkey = kj::mv(publicEvpPKey),
+      .keyType = KeyType::PUBLIC,
+      .usages = publicKeyUsages,
   };
 
-  auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(privateKeyData),
-      normalizedName, extractablePrivateKey));
-  auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(publicKeyData),
-      normalizedName, true));
+  auto privateKey = jsg::alloc<CryptoKey>(
+      kj::heap<EdDsaKey>(kj::mv(privateKeyData), normalizedName, extractablePrivateKey));
+  auto publicKey =
+      jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(publicKeyData), normalizedName, true));
 
-  return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
+  return CryptoKeyPair{.publicKey = kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
+}
+
+kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
+    kj::StringPtr normalizedName, int nid, CryptoKeyUsageSet privateKeyUsages,
+    CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey) {
+    switch (nid) {
+      // BoringSSL doesn't support ED448/X448.
+      case NID_ED25519:
+        return generateKeyImpl<ED25519_PUBLIC_KEY_LEN, ED25519_keypair>(
+          normalizedName, nid, privateKeyUsages, publicKeyUsages, extractablePrivateKey,
+          "Ed25519"_kj);
+      case NID_X25519:
+        return generateKeyImpl<X25519_PUBLIC_VALUE_LEN, X25519_keypair>(
+          normalizedName, nid, privateKeyUsages, publicKeyUsages, extractablePrivateKey,
+          "X25519"_kj);
+    }
+
+    KJ_FAIL_REQUIRE("ED ", normalizedName, " unimplemented", nid);
 }
 
 }  // namespace
