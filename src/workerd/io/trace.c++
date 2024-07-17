@@ -375,6 +375,7 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
     diagnosticChannelEvents.addAll(reader.getDiagnosticChannelEvents());
   }
 
+  truncated = reader.getTruncated();
   outcome = reader.getOutcome();
   cpuTime = reader.getCpuTime() * kj::MILLISECONDS;
   wallTime = reader.getWallTime() * kj::MILLISECONDS;
