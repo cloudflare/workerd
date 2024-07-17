@@ -20,11 +20,27 @@ class WorkerInterface;
 class LimitEnforcer;
 class TimerChannel;
 
+class WebSocketObserver: public kj::Refcounted {
+public:
+  // Called when a worker sends a message on this WebSocket (includes close messages).
+  virtual void sentMessage(size_t bytes) { };
+  // Called when a worker receives a message on this WebSocket (includes close messages).
+  virtual void receivedMessage(size_t bytes) { };
+};
+
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
 //
 // Observing anything is optional. Default implementations of all methods observe nothing.
 class RequestObserver: public kj::Refcounted {
 public:
+  // This is called when the request is converted to a WebSocket connection terminating in a worker.
+  // An optional WebSocket observer may be returned to observe events on the worker's end of the
+  // WebSocket connection.
+  //
+  // This means that, when the returned observer observes a message being sent, the message is being
+  // sent from the worker to the client making the request.
+  virtual kj::Maybe<kj::Own<WebSocketObserver>> tryCreateWebSocketObserver() { return kj::none; };
+
   // Invoked when the request is actually delivered.
   //
   // If, for some reason, this is not invoked before the object is destroyed, this indicate that

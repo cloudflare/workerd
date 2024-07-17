@@ -302,7 +302,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   return ws;
 }
 
-kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other) {
+kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other, RequestObserver& request) {
   auto& native = *farNative;
   JSG_REQUIRE(!native.state.is<AwaitingConnection>(), TypeError,
       "Can't return WebSocket in a Response if it was created with `new WebSocket()`");
@@ -341,10 +341,16 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other)
     }
     return false;
   };
-  if (tryGetPeer() != kj::none) {
+  KJ_IF_SOME(p, tryGetPeer()) {
     // We're terminating the WebSocket in this worker, so the upstream promise (which pumps
     // messages from the client to this worker) counts as something the request is waiting for.
     upstream = upstream.attach(context.registerPendingEvent());
+
+    // We can observe websocket traffic in both directions by attaching an observer to the peer
+    // websocket which terminates in the worker.
+    KJ_IF_SOME(observer, request.tryCreateWebSocketObserver()) {
+      p.observer = kj::mv(observer);
+    }
   }
 
   // We need to use `eagerlyEvaluate()` on both inputs to `joinPromises` to work around the awkward
@@ -745,7 +751,7 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
     auto& accepted = KJ_ASSERT_NONNULL(native.state.tryGet<Accepted>());
     auto promise = kj::evalNow([&]() {
       return accepted.canceler.wrap(pump(context, *outgoingMessages,
-        *accepted.ws, native, autoResponseStatus));
+        *accepted.ws, native, autoResponseStatus, observer));
     });
 
     // TODO(cleanup): We use awaitIoLegacy() here because we don't want this to count as a pending
@@ -840,7 +846,7 @@ size_t countBytesFromMessage(const kj::WebSocket::Message& message) {
 
 kj::Promise<void> WebSocket::pump(
     IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native,
-    AutoResponse& autoResponse) {
+    AutoResponse& autoResponse, kj::Maybe<kj::Own<WebSocketObserver>>& observer) {
   KJ_ASSERT(!native.isPumping);
   native.isPumping = true;
   autoResponse.isPumping = true;
@@ -899,6 +905,10 @@ kj::Promise<void> WebSocket::pump(
       }
     }
 
+    KJ_IF_SOME(o, observer) {
+      o->sentMessage(size);
+    }
+
     KJ_IF_SOME(a, context.getActor()) {
       a.getMetrics().sentWebSocketMessage(size);
     }
@@ -941,9 +951,13 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
     while (true) {
       auto message = co_await ws.receive();
 
+      auto size = countBytesFromMessage(message);
+      KJ_IF_SOME(o, observer) {
+        o->receivedMessage(size);
+      }
+
       context.getLimitEnforcer().topUpActor();
       KJ_IF_SOME(a, context.getActor()) {
-        auto size = countBytesFromMessage(message);
         a.getMetrics().receivedWebSocketMessage(size);
       }
 
