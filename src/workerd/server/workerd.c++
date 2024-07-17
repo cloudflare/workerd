@@ -872,21 +872,40 @@ public:
             kj::mv(limitEnforcer),
             Worker::Isolate::InspectorPolicy::DISALLOW,
             Worker::ConsoleMode::STDOUT);
+        auto script = isolate->newScript("reprl", Worker::Script::ScriptSource {
+          "console.log('hi from script')"_kjc,
+          "reprl"_kjc,
+          [](jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer)
+              -> kj::Array<Worker::Script::CompiledGlobal> {
+            return nullptr;
+          }
+        }, IsolateObserver::StartType::COLD, false);
 
-        jsg::runInV8Stack([&](jsg::V8StackScope &stackScope) {
+        auto worker = kj::atomicRefcounted<Worker>(
+          kj::mv(script),
+          kj::atomicRefcounted<WorkerObserver>(),
+          [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
+            return;
+          },
+          IsolateObserver::StartType::COLD,
+          nullptr,
+          Worker::Lock::TakeSynchronously(kj::none));
 
-          auto js = isolate->getApi().lock(stackScope);
-          js->withinHandleScope([&] {
-            js->setAllowEval(true);
-            printf("%p\n", js->v8Isolate);
-            auto compiled = jsg::NonModuleScript::compile("console.log('hello from js')", *js, "eval");
-            auto val = jsg::JsValue(compiled.runAndReturn(js->v8Context()));
+        Worker::AsyncLock asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
 
-            printf("%s\n", val.toJson(*js).cStr());
-          });
+        worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+          JSG_WITHIN_CONTEXT_SCOPE(lock,
+            lock.template newContext<Worker>().getHandle(lock.v8Isolate),
+            [&](jsg::Lock& js) {
+              js->setAllowEval(true);
+              auto compiled = jsg::NonModuleScript::compile("console.log('hello from js')", *js, "eval");
+              auto val = jsg::JsValue(compiled.runAndReturn(js->v8Context()));
+
+              printf("%s\n", val.toJson(*js).cStr());
+            });
         });
 
-         co_return;
+        co_return;
     });
   }
 
