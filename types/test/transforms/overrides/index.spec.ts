@@ -85,7 +85,7 @@ test("createOverrideDefineTransformer: applies type renames", () => {
 }
 interface Root1 {
     prop: RenamedThing;
-    method(arg0: RenamedThing): RenamedThing;
+    method(param0: RenamedThing): RenamedThing;
     Thing: typeof RenamedThing;
     newProp: RenamedThing;
 }
@@ -242,7 +242,7 @@ test("createOverrideDefineTransformer: applies method overrides", () => {
     get(key: string, type: "text"): Promise<string | null>;
     get(key: string, type: "arrayBuffer"): Promise<ArrayBuffer | null>;
     get<T>(key: string, type: "json"): Promise<T | null>;
-    thing(arg0: boolean): boolean;
+    thing(param0: boolean): boolean;
 }
 `
   );

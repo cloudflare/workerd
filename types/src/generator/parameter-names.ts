@@ -22,7 +22,7 @@ export function getParameterName(
   // `constructor` is a reserved property name
   if (functionName === "constructor") functionName = `$${functionName}`;
   const name = data?.[fullyQualifiedParentName]?.[functionName]?.[index];
-  if (name === undefined) return `arg${index}`;
+  if (name === undefined) return `param${index}`;
   if (reservedKeywords.includes(name)) return `$${name}`;
   return name;
 }

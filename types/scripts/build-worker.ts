@@ -23,15 +23,24 @@ async function readPath(rootPath: string): Promise<string> {
 }
 
 async function readParamNames() {
+  // Support methods defined in parent classes
+  const additionalClassNames: [string, string][] = [
+    ["DurableObjectStorageOperations", "DurableObjectStorage"],
+    ["DurableObjectStorageOperations", "DurableObjectTransaction"],
+  ];
+
   const data = await fs.readFile("src/workerd/tools/param-names.json", "utf8");
-  const recordArray = JSON.parse(data);
+  const recordArray = JSON.parse(data) as {
+    fully_qualified_parent_name: string[];
+    function_like_name: string;
+    index: number;
+    name: string;
+  }[];
 
-  const result: Record<string, Record<string, string[]>> = {};
-  for (const record of recordArray) {
-    const structureName: string = record.fully_qualified_parent_name
-      .filter(Boolean)
-      .join("::");
-
+  function registerApi(
+    structureName: string,
+    record: (typeof recordArray)[number]
+  ) {
     let functionName: string = record.function_like_name;
     if (functionName.endsWith("_")) functionName = functionName.slice(0, -1);
     // `constructor` is a reserved property name
@@ -44,7 +53,22 @@ async function readParamNames() {
     const functionArray = structureRecord[functionName];
     functionArray[record.index] = record.name;
   }
-  return recordArray;
+
+  const result: Record<string, Record<string, string[]>> = {};
+  for (const record of recordArray) {
+    const structureName: string = record.fully_qualified_parent_name
+      .filter(Boolean)
+      .join("::");
+
+    registerApi(structureName, record);
+
+    for (const [className, renamedClass] of additionalClassNames) {
+      if (structureName.includes(className)) {
+        registerApi(structureName.replace(className, renamedClass), record);
+      }
+    }
+  }
+  return result;
 }
 
 export async function readComments(): Promise<CommentsData> {

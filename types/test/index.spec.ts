@@ -190,11 +190,11 @@ declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEv
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ServiceWorkerGlobalScope)
  */
 interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
-    things(arg0: boolean): IterableIterator<string>;
+    things(param0: boolean): IterableIterator<string>;
     get prop(): Promise<number>;
 }
 declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
-declare function things(arg0: boolean): IterableIterator<string>;
+declare function things(param0: boolean): IterableIterator<string>;
 declare const prop: Promise<number>;
 `
   );
