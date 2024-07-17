@@ -912,6 +912,7 @@ public:
       // JSG_READONLY_PROTOTYPE_PROPERTY(credentials, getCredentials);
       JSG_READONLY_PROTOTYPE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
+      JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
 
       JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
         constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
@@ -944,7 +945,6 @@ public:
         readonly cf?: Cf;
       });
     }
-    JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
   }
 
   void serialize(
