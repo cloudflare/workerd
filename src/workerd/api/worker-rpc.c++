@@ -1164,7 +1164,7 @@ private:
       jsg::JsObject object,
       rpc::JsRpcTarget::CallParams::Reader callParams,
       bool allowInstanceProperties) {
-    auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype().tryCast<jsg::JsObject>());
+    auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
 
     // Get the named property of `object`.
     auto getProperty = [&](kj::StringPtr kjName) {
@@ -1231,7 +1231,7 @@ private:
             }
 
             // Decide whether the new object is a suitable RPC target.
-            if (object.getPrototype() == prototypeOfObject) {
+            if (object.getPrototype(js) == prototypeOfObject) {
               // Yes. It's a simple object.
               allowInstanceProperties = true;
             } else if (object.isInstanceOf<JsRpcTarget>(js)) {
@@ -1506,7 +1506,7 @@ static MakeCallPipeline::Result makeCallPipeline(jsg::Lock& js, jsg::JsValue val
       return MakeCallPipeline::NonPipelinable();
     });
 
-    if (obj.getPrototype() == js.obj().getPrototype()) {
+    if (obj.getPrototype(js) == js.obj().getPrototype(js)) {
       // It's a plain object.
       kj::Maybe<v8::Local<v8::Function>> maybeDispose;
       jsg::JsValue disposeProperty = obj.get(js, js.symbolDispose());

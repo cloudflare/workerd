@@ -1548,7 +1548,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                               return;
                             }
 
-                            handle = KJ_UNWRAP_OR(handle.getPrototype().tryCast<jsg::JsObject>(), {
+                            handle = KJ_UNWRAP_OR(handle.getPrototype(js).tryCast<jsg::JsObject>(), {
                               // Reached end of prototype chain.
 
                               // For historical reasons, we assume a class is a Durable Object
@@ -2047,7 +2047,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         js.withinHandleScope([&]() {
           // Find the prototype for `Object` by creating one.
           auto obj = js.obj();
-          jsg::JsValue prototypeOfObject = obj.getPrototype();
+          jsg::JsValue prototypeOfObject = obj.getPrototype(js);
 
           // Walk the prototype chain.
           jsg::JsObject ctor(KJ_ASSERT_NONNULL(entry.value.tryGetHandle(js.v8Isolate)));
@@ -2084,7 +2084,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
               }
             }
 
-            proto = protoObj.getPrototype();
+            proto = protoObj.getPrototype(js);
           }
         });
       }
