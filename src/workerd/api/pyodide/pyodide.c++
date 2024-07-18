@@ -63,11 +63,11 @@ int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> bu
   return readToTarget(KJ_REQUIRE_NONNULL(memorySnapshot), offset, buf);
 }
 
-int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
-  if (existingSnapshot == kj::none) {
+int SnapshotDownloader::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
+  if (snapshot == kj::none) {
     return 0;
   }
-  return readToTarget(KJ_REQUIRE_NONNULL(existingSnapshot), offset, buf);
+  return readToTarget(KJ_REQUIRE_NONNULL(snapshot), offset, buf);
 }
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf, const PythonConfig& pythonConfig) {

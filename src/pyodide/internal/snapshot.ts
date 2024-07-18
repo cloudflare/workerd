@@ -1,4 +1,4 @@
-import { default as ArtifactBundler } from "pyodide-internal:artifacts";
+import { default as Artifacts } from "pyodide-internal:artifacts";
 import { default as UnsafeEval } from "internal:unsafe-eval";
 import { default as DiskCache } from "pyodide-internal:disk_cache";
 import {
@@ -25,9 +25,9 @@ let LOADED_BASELINE_SNAPSHOT: number;
  */
 
 const TOP_LEVEL_SNAPSHOT =
-  ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
+  !!Artifacts.validatorSnapshotUploader || SHOULD_SNAPSHOT_TO_DISK;
 const SHOULD_UPLOAD_SNAPSHOT =
-  ArtifactBundler.isEnabled() || TOP_LEVEL_SNAPSHOT;
+  !!Artifacts.runtimeSnapshotUploader || TOP_LEVEL_SNAPSHOT;
 
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of
@@ -306,7 +306,7 @@ function setUploadFunction(toUpload: Uint8Array): void {
   }
   DEFERRED_UPLOAD_FUNCTION = async () => {
     try {
-      const success = await ArtifactBundler.uploadMemorySnapshot(toUpload);
+      const success = await Artifacts.runtimeSnapshotUploader!.uploadMemorySnapshot(toUpload);
       // Free memory
       // @ts-ignore
       toUpload = undefined;
@@ -446,8 +446,8 @@ export function finishSnapshotSetup(pyodide: Pyodide): void {
 }
 
 export function maybeStoreMemorySnapshot() {
-  if (ArtifactBundler.isEwValidating()) {
-    ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
+  if (Artifacts.validatorSnapshotUploader) {
+    Artifacts.validatorSnapshotUploader.storeMemorySnapshot(getMemoryToUpload());
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
     DiskCache.put("snapshot.bin", getMemoryToUpload());
     console.log("Saved snapshot to disk");

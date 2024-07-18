@@ -134,46 +134,41 @@ public:
   }
 };
 
-// A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
-// CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
-class ArtifactBundler : public jsg::Object {
+class ValidatorSnapshotUploader : public jsg::Object {
 public:
-  kj::Maybe<kj::Array<kj::byte>> storedSnapshot;
-
-  ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot,
-      kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)> uploadMemorySnapshotCb)
+  ValidatorSnapshotUploader()
       :
-        storedSnapshot(kj::none),
-        existingSnapshot(kj::mv(existingSnapshot)),
+        storedSnapshot(kj::none) {}
+
+
+  void storeMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
+    storedSnapshot = kj::mv(snapshot);
+  }
+
+  JSG_RESOURCE_TYPE(ValidatorSnapshotUploader) {
+    JSG_METHOD(storeMemorySnapshot);
+  }
+  // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
+  // up cold starts.
+  kj::Maybe<kj::Array<kj::byte>> storedSnapshot;
+};
+
+class RuntimeSnapshotUploader : public jsg::Object {
+public:
+  RuntimeSnapshotUploader(kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)> uploadMemorySnapshotCb)
+      :
         uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
-        hasUploaded(false),
-        isValidating(false) {};
-
-  ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
-      : storedSnapshot(kj::none),
-        existingSnapshot(kj::mv(existingSnapshot)),
-        uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false),
-        isValidating(false){};
-
-  ArtifactBundler(bool isValidating = false)
-      : storedSnapshot(kj::none),
-        existingSnapshot(kj::none),
-        uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false),
-        isValidating(isValidating){};
+        hasUploaded(false) {};
 
   jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
     // Prevent multiple uploads.
     if (hasUploaded) {
       return js.rejectedPromise<bool>(
-          js.typeError("This ArtifactBundle has already uploaded a memory snapshot"));
+          js.typeError("This RuntimeArtifactUploader has already uploaded a memory snapshot"));
     }
 
-    // TODO(later): Only upload if `snapshot` isn't identical to `existingSnapshot`.
-
     if (uploadMemorySnapshotCb == kj::none) {
-      return js.rejectedPromise<bool>(js.typeError("ArtifactBundler is disabled"));
+      return js.rejectedPromise<bool>(js.typeError("RuntimeArtifactUploader is disabled"));
     }
     auto& cb = KJ_REQUIRE_NONNULL(uploadMemorySnapshotCb);
     hasUploaded = true;
@@ -181,68 +176,90 @@ public:
     return context.awaitIo(js, cb(kj::mv(snapshot)));
   };
 
-  void storeMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
-    KJ_REQUIRE(isValidating);
-    storedSnapshot = kj::mv(snapshot);
+  JSG_RESOURCE_TYPE(RuntimeSnapshotUploader) {
+    JSG_METHOD(uploadMemorySnapshot);
   }
+private:
+  // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
+  // up cold starts.
+  kj::Maybe<kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)>> uploadMemorySnapshotCb;
+  bool hasUploaded;
+};
 
-  bool isEnabled() {
-    return uploadMemorySnapshotCb != kj::none;
-  }
+// A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
+// CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
+class SnapshotDownloader : public jsg::Object {
+public:
+  SnapshotDownloader(kj::Maybe<kj::Array<kj::byte>> snapshot)
+      :
+        snapshot(kj::mv(snapshot)) {};
+
 
   bool hasMemorySnapshot() {
-    return existingSnapshot != kj::none;
+    return snapshot != kj::none;
   }
 
   int getMemorySnapshotSize() {
-    if (existingSnapshot == kj::none) {
+    if (snapshot == kj::none) {
       return 0;
     }
-    return KJ_REQUIRE_NONNULL(existingSnapshot).size();
+    return KJ_REQUIRE_NONNULL(snapshot).size();
   }
 
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
   void disposeMemorySnapshot() {
-    existingSnapshot = kj::none;
-  }
-
-
-  // Determines whether this ArtifactBundler was created inside the validator.
-  bool isEwValidating() {
-    return isValidating;
-  }
-
-  static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
-    return jsg::alloc<ArtifactBundler>();
+    snapshot = kj::none;
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    if (existingSnapshot == kj::none) {
+    if (snapshot == kj::none) {
       return;
     }
-    tracker.trackFieldWithSize("snapshot", KJ_REQUIRE_NONNULL(existingSnapshot).size());
+    tracker.trackFieldWithSize("snapshot", KJ_REQUIRE_NONNULL(snapshot).size());
   }
 
-  JSG_RESOURCE_TYPE(ArtifactBundler) {
-    JSG_METHOD(uploadMemorySnapshot);
+  JSG_RESOURCE_TYPE(SnapshotDownloader) {
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
-    JSG_METHOD(isEnabled);
-    JSG_METHOD(isEwValidating);
-    JSG_METHOD(storeMemorySnapshot);
   }
 
 private:
   // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
   // up cold starts.
-  kj::Maybe<kj::Array<kj::byte>> existingSnapshot;
-  kj::Maybe<kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)>> uploadMemorySnapshotCb;
-  bool hasUploaded;
-  bool isValidating;
+  kj::Maybe<kj::Array<kj::byte>> snapshot;
 };
 
+struct Artifacts {
+  kj::Maybe<jsg::Ref<SnapshotDownloader>> snapshotDownloader;
+  kj::Maybe<jsg::Ref<RuntimeSnapshotUploader>> runtimeSnapshotUploader;
+  kj::Maybe<jsg::Ref<ValidatorSnapshotUploader>> validatorSnapshotUploader;
+  JSG_STRUCT(snapshotDownloader, runtimeSnapshotUploader, validatorSnapshotUploader);
+
+private:
+  Artifacts(kj::Maybe<jsg::Ref<SnapshotDownloader>> snapshotDownloader, kj::Maybe<jsg::Ref<RuntimeSnapshotUploader>> runtimeSnapshotUploader, kj::Maybe<jsg::Ref<ValidatorSnapshotUploader>> validatorSnapshotUploader) :
+    snapshotDownloader(kj::mv(snapshotDownloader)),
+    runtimeSnapshotUploader(kj::mv(runtimeSnapshotUploader)),
+    validatorSnapshotUploader(kj::mv(validatorSnapshotUploader)) {}
+
+public:
+  Artifacts(Artifacts const& copy) = delete;
+  Artifacts(Artifacts&& copy) = default;
+
+  static Artifacts disabled() {
+    return Artifacts(kj::none, kj::none, kj::none);
+  }
+
+  static Artifacts validator(jsg::Ref<ValidatorSnapshotUploader> uploader) {
+    return Artifacts(kj::none, kj::none, kj::mv(uploader));
+  }
+
+  static Artifacts runtimeSnapshotHandler(jsg::Ref<SnapshotDownloader> snapshotDownloader, kj::Maybe<jsg::Ref<RuntimeSnapshotUploader>> snapshotUploader) {
+    return Artifacts(kj::mv(snapshotDownloader), kj::mv(snapshotUploader), kj::none);
+  }
+
+};
 
 class DisabledInternalJaeger : public jsg::Object {
 public:
@@ -338,7 +355,10 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
 #define EW_PYODIDE_ISOLATE_TYPES       \
   api::pyodide::PackagesTarReader,     \
   api::pyodide::PyodideMetadataReader, \
-  api::pyodide::ArtifactBundler,       \
+  api::pyodide::Artifacts, \
+  api::pyodide::ValidatorSnapshotUploader,       \
+  api::pyodide::RuntimeSnapshotUploader,       \
+  api::pyodide::SnapshotDownloader,       \
   api::pyodide::DiskCache,             \
   api::pyodide::DisabledInternalJaeger,\
   api::pyodide::SimplePythonLimiter

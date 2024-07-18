@@ -474,20 +474,20 @@ void WorkerdApi::compileModules(
             jsg::ModuleRegistry::Type::INTERNAL);
       }
       // Inject artifact bundler.
-      {
-        using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
-        using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
-        using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
-        auto specifier = "pyodide-internal:artifacts";
-        modules->addBuiltinModule(specifier,
-            [specifier = kj::str(specifier)](
-                jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-          auto wrap = wrapper.wrap(js.v8Context(), kj::none, ArtifactBundler::makeDisabledBundler());
-          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-        },
-            jsg::ModuleRegistry::Type::INTERNAL);
-      }
+      // {
+      //   using ModuleInfo = jsg::ModuleRegistry::ModuleInfo;
+      //   using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
+      //   using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
+      //   auto specifier = "pyodide-internal:artifacts";
+      //   modules->addBuiltinModule(specifier,
+      //       [specifier = kj::str(specifier)](
+      //           jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+      //     auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+      //     auto wrap = wrapper.wrap(js.v8Context(), kj::none, Artifacts::disabled());
+      //     return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+      //   },
+      //       jsg::ModuleRegistry::Type::INTERNAL);
+      // }
 
       // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
       {
@@ -915,13 +915,13 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       return metadataReader.addRef();
     }));
     // Inject artifact bundler.
-    pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<
-            ArtifactBundler,
-            JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable
-                -> jsg::Ref<ArtifactBundler> {
-      return ArtifactBundler::makeDisabledBundler();
-    }));
+    // pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
+    //     jsg::modules::Module::newJsgObjectModuleHandler<
+    //         Artifacts,
+    //         JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable
+    //             -> Artifacts {
+    //   return Artifacts::disabled();
+    // }));
     // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
     pyodideBundleBuilder.addSynthetic(internalJaegerSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<
