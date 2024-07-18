@@ -102,8 +102,7 @@ if (require.main === module)
     target: "esnext",
     external: ["node:*", "workerd:*"],
     bundle: true,
-    // TODO(soon): enable minification before deploying worker
-    // minify: true,
+    minify: true,
     outdir: "types/dist",
     outExtension: { ".js": ".mjs" },
     entryPoints: ["types/src/worker/index.ts"],
