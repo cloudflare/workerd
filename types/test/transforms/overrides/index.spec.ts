@@ -248,7 +248,7 @@ test("createOverrideDefineTransformer: applies method overrides", () => {
   );
 });
 
-test("createOverrideDefineTransformer: applies type argeter overrides", () => {
+test("createOverrideDefineTransformer: applies type parameter overrides", () => {
   const root = new Message().initRoot(StructureGroups);
   const group = root.initGroups(1).get(0);
   const structures = group.initStructures(2);
