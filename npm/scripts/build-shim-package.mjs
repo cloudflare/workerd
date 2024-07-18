@@ -17,14 +17,17 @@ function buildNeutralLib() {
     '@cloudflare/workerd-darwin-64': process.env.WORKERD_VERSION,
     '@cloudflare/workerd-linux-arm64': process.env.WORKERD_VERSION,
     '@cloudflare/workerd-linux-64': process.env.WORKERD_VERSION,
-    '@cloudflare/workerd-windows-64': process.env.WORKERD_VERSION
+    '@cloudflare/workerd-windows-64': process.env.WORKERD_VERSION,
   };
   fs.writeFileSync(pjPath, JSON.stringify(package_json, null, 2) + '\n');
 
   const capnpPath = path.join('src', 'workerd', 'server', 'workerd.capnp');
 
-  fs.copyFileSync(capnpPath, path.join('npm', 'workerd', 'workerd.capnp'))
+  fs.copyFileSync(capnpPath, path.join('npm', 'workerd', 'workerd.capnp'));
 
+  const typeWorkerPath = path.join('bazel-bin', 'types', 'dist', 'index.mjs');
+
+  fs.copyFileSync(typeWorkerPath, path.join('npm', 'workerd', 'worker.mjs'));
 }
 
 buildNeutralLib();

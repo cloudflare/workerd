@@ -2,76 +2,27 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import fs from "node:fs";
+export type ParameterNamesData = Record<
+  /* fullyQualifiedParentName */ string,
+  Record</* functionName */ string, string[] | undefined> | undefined
+>;
 
-let paramNameData: Map<string, Parameter> = new Map();
-
-interface Parameter {
-  fullyQualifiedParentName: string;
-  methodName: string;
-  parameterIndex: number;
-  name: string;
+let data: ParameterNamesData | undefined;
+export function installParameterNames(newData: ParameterNamesData) {
+  data = newData;
 }
 
-// Support methods defined in parent classes
-const additionalClassNames: Record<string, string[]> = {
-  DurableObjectStorageOperations: [
-    "DurableObjectStorage",
-    "DurableObjectTransaction",
-  ],
-};
+const reservedKeywords = ["function", "number", "string"];
+
 export function getParameterName(
   fullyQualifiedParentName: string,
-  methodName: string,
-  parameterIndex: number
+  functionName: string,
+  index: number
 ): string {
-  const path = `${fullyQualifiedParentName}.${methodName}[${parameterIndex}]`;
-
-  const name = paramNameData.get(path)?.name;
-  // Some parameter names are reserved TypeScript words, which break later down the pipeline
-  if (name === "function" || name === "number" || name === "string") {
-    return `$${name}`;
-  }
-  if (name && name !== "undefined") {
-    return name;
-  }
-  return `param${parameterIndex}`;
-}
-
-export function parseApiAstDump(astDumpPath: string) {
-  paramNameData = new Map(
-    JSON.parse(fs.readFileSync(astDumpPath, { encoding: "utf-8" }))
-      .flatMap((p: any) => {
-        const shouldRename = p.fully_qualified_parent_name.find(
-          (n: string) => !!additionalClassNames[n]
-        );
-        const renameOptions = additionalClassNames[shouldRename] ?? [];
-        const methodName = p.function_like_name.endsWith("_")
-          ? p.function_like_name.slice(0, -1)
-          : p.function_like_name;
-        return [
-          ...renameOptions.map((r) => ({
-            fullyQualifiedParentName: p.fully_qualified_parent_name
-              .filter((n: any) => !!n)
-              .map((n: string) => (n === shouldRename ? r : n))
-              .join("::"),
-            methodName,
-            parameterIndex: p.index,
-            name: p.name,
-          })),
-          {
-            fullyQualifiedParentName: p.fully_qualified_parent_name
-              .filter((n: any) => !!n)
-              .join("::"),
-            methodName,
-            parameterIndex: p.index,
-            name: p.name,
-          },
-        ];
-      })
-      .map((p: Parameter) => [
-        `${p.fullyQualifiedParentName}.${p.methodName}[${p.parameterIndex}]`,
-        p,
-      ]) as [string, Parameter][]
-  );
+  // `constructor` is a reserved property name
+  if (functionName === "constructor") functionName = `$${functionName}`;
+  const name = data?.[fullyQualifiedParentName]?.[functionName]?.[index];
+  if (name === undefined) return `param${index}`;
+  if (reservedKeywords.includes(name)) return `$${name}`;
+  return name;
 }

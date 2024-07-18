@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "lib": ["esnext"],
+    // We're typing this Worker against the type definitions that it generates! 😱
+    // This works because we use `esbuild` to build the Worker, which only does type-stripping
+    // These types are only really helpful in IDEs when developing the Worker
+    "types": ["../../../bazel-bin/types/definitions/experimental"],
+    "paths": {
+      "@workerd/*": ["../../../bazel-bin/src/workerd/*"]
+    }
+  },
+  "include": ["*.ts"]
+}

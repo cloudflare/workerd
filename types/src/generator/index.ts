@@ -152,38 +152,6 @@ function collectClasses(map: StructureMap): Set<string> {
   return classes;
 }
 
-// Builds a map mapping structure names that are top-level nested types of
-// module structures to the names of those modules. Essentially, a map of which
-// modules export which types (e.g. "workerd::api::node::AsyncLocalStorage" =>
-// "node-internal:async_hooks"). We use this to make sure we don't include
-// duplicate definitions if an internal module references a type from another
-// internal module. In this case, we'll include the definition in the one that
-// exported it.
-function collectModuleTypeExports(
-  root: StructureGroups,
-  map: StructureMap
-): Map</* structureName */ string, /* moduleSpecifier */ string> {
-  const typeExports = new Map<string, string>();
-  root.getModules().forEach((module) => {
-    if (!module.isStructureName()) return;
-
-    // Get module root type
-    const specifier = module.getSpecifier();
-    const moduleRootName = module.getStructureName();
-    const moduleRoot = map.get(moduleRootName);
-    assert(moduleRoot !== undefined);
-
-    // Add all nested types in module root
-    moduleRoot.getMembers().forEach((member) => {
-      if (!member.isNested()) return;
-      const nested = member.getNested();
-      typeExports.set(nested.getStructure().getFullyQualifiedName(), specifier);
-    });
-  });
-
-  return typeExports;
-}
-
 export function generateDefinitions(root: StructureGroups): {
   nodes: ts.Statement[];
   structureMap: StructureMap;
@@ -205,92 +173,6 @@ export function generateDefinitions(root: StructureGroups): {
     return structureNodes;
   });
   const flatNodes = nodes.flat();
-
-  const typeExports = collectModuleTypeExports(root, structureMap);
-  root.getModules().forEach((module) => {
-    if (!module.isStructureName()) return;
-
-    // Get module root type
-    const specifier = module.getSpecifier();
-    const moduleRootName = module.getStructureName();
-    const moduleRoot = structureMap.get(moduleRootName);
-    assert(moduleRoot !== undefined);
-
-    // Build a set of nested types exported by this module. These will always
-    // be included in the module, even if they're referenced globally.
-    const nestedTypeNames = new Set<string>();
-    moduleRoot.getMembers().forEach((member) => {
-      if (member.isNested()) {
-        const nested = member.getNested();
-        nestedTypeNames.add(nested.getStructure().getFullyQualifiedName());
-      }
-    });
-
-    // Add all types required by this module, but not the top level or another
-    // internal module.
-    const moduleIncluded = collectIncluded(structureMap, moduleRootName);
-    const statements: ts.Statement[] = [];
-
-    let nextImportId = 1;
-    for (const name of moduleIncluded) {
-      // If this structure was already included globally, ignore it,
-      // unless it's explicitly declared a nested type of this module
-      if (globalIncluded.has(name) && !nestedTypeNames.has(name)) continue;
-
-      // If this structure was exported by another module, import it. Note we
-      // don't need to check whether we've already imported the type as
-      // `moduleIncluded` is a `Set`.
-      const maybeOwningModule = typeExports.get(name);
-      if (maybeOwningModule !== undefined && maybeOwningModule !== specifier) {
-        // Internal modules only have default exports, so we generate something
-        // that looks like this:
-        // ```
-        // import _internal1 from "node-internal:async_hooks";
-        // import AsyncLocalStorage = _internal1.AsyncLocalStorage; // (type & value alias)
-        // ```
-        const identifier = f.createIdentifier(`_internal${nextImportId++}`);
-        const importClause = f.createImportClause(
-          false,
-          /* name */ identifier,
-          /* namedBindings */ undefined
-        );
-        const importDeclaration = f.createImportDeclaration(
-          /* modifiers */ undefined,
-          importClause,
-          f.createStringLiteral(maybeOwningModule)
-        );
-        const typeName = getTypeName(name);
-        const importEqualsDeclaration = f.createImportEqualsDeclaration(
-          /* modifiers */ undefined,
-          /* isTypeOnly */ false,
-          typeName,
-          f.createQualifiedName(identifier, typeName)
-        );
-        statements.unshift(importDeclaration, importEqualsDeclaration);
-
-        continue;
-      }
-
-      // Otherwise, just include the structure in the module
-      const structure = structureMap.get(name);
-      assert(structure !== undefined);
-      const asClass = classes.has(name);
-      const statement = createStructureNode(structure, {
-        asClass,
-        ambientContext: true,
-        // nameOverride: nestedNameOverrides.get(name), // TODO: remove
-      });
-      statements.push(statement);
-    }
-
-    const moduleBody = f.createModuleBlock(statements);
-    const moduleDeclaration = f.createModuleDeclaration(
-      [f.createToken(ts.SyntaxKind.DeclareKeyword)],
-      f.createStringLiteral(specifier),
-      moduleBody
-    );
-    flatNodes.push(moduleDeclaration);
-  });
 
   return { nodes: flatNodes, structureMap };
 }
