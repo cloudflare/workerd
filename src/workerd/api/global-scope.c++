@@ -473,7 +473,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
           && context.isOutputGateBroken()) {
         LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", actorId, e);
       } else if (context.isOutputGateBroken()) {
-        LOG_NOSENTRY(ERROR, "output lock broke during alarm execution without an erro description", actorId);
+        // We don't usually log these messages, but it's useful to know the real reason we failed
+        // to correctly investigate stuck alarms.
+        LOG_NOSENTRY(ERROR, "output lock broke during alarm execution without an interesting error description", actorId, e);
       }
       return WorkerInterface::AlarmResult {
         .retry = true,
@@ -503,7 +505,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
             LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", actorId, e);
           }
         } else {
-          LOG_NOSENTRY(ERROR, "output lock broke after executing alarm without an error description", actorId);
+        // We don't usually log these messages, but it's useful to know the real reason we failed
+        // to correctly investigate stuck alarms.
+          LOG_NOSENTRY(ERROR, "output lock broke after executing alarm without an interesting error description", actorId, e);
         }
         return WorkerInterface::AlarmResult {
           .retry = true,
