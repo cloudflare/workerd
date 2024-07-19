@@ -134,6 +134,19 @@ private:
 class WebSocket;
 
 class WebSocketPair: public jsg::Object {
+private:
+  struct IteratorState final {
+    jsg::Ref<WebSocketPair> pair;
+    size_t index = 0;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(pair);
+    }
+
+    JSG_MEMORY_INFO(IteratorState) {
+      tracker.trackField("pair", pair);
+    }
+  };
 public:
   WebSocketPair(jsg::Ref<WebSocket> first, jsg::Ref<WebSocket> second)
       : sockets { kj::mv(first), kj::mv(second) } {}
@@ -143,11 +156,14 @@ public:
   jsg::Ref<WebSocket> getFirst() { return sockets[0].addRef(); }
   jsg::Ref<WebSocket> getSecond() { return sockets[1].addRef(); }
 
+  JSG_ITERATOR(PairIterator, entries, jsg::Ref<WebSocket>, IteratorState, iteratorNext);
+
   JSG_RESOURCE_TYPE(WebSocketPair) {
     // TODO(soon): These really should be using an indexed property handler rather
     // than named instance properties but jsg does not yet have support for that.
     JSG_READONLY_INSTANCE_PROPERTY(0, getFirst);
     JSG_READONLY_INSTANCE_PROPERTY(1, getSecond);
+    JSG_ITERABLE(entries);
 
     JSG_TS_OVERRIDE(const WebSocketPair: {
       new (): { 0: WebSocket; 1: WebSocket };
@@ -178,6 +194,13 @@ public:
 
 private:
   jsg::Ref<WebSocket> sockets[2];
+
+  static kj::Maybe<jsg::Ref<WebSocket>> iteratorNext(jsg::Lock& js, IteratorState& state) {
+    if (state.index >= 2) {
+      return kj::none;
+    }
+    return state.pair->sockets[state.index++].addRef();
+  }
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(sockets[0]);
@@ -633,13 +656,15 @@ private:
   void assertNoError(jsg::Lock& js);
 };
 
-#define EW_WEBSOCKET_ISOLATE_TYPES \
-  api::CloseEvent,                 \
-  api::CloseEvent::Initializer,    \
-  api::MessageEvent,               \
-  api::MessageEvent::Initializer,  \
-  api::WebSocket,                  \
-  api::WebSocketPair
+#define EW_WEBSOCKET_ISOLATE_TYPES       \
+  api::CloseEvent,                       \
+  api::CloseEvent::Initializer,          \
+  api::MessageEvent,                     \
+  api::MessageEvent::Initializer,        \
+  api::WebSocket,                        \
+  api::WebSocketPair,                    \
+  api::WebSocketPair::PairIterator,      \
+  api::WebSocketPair::PairIterator::Next \
 // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

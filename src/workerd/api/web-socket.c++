@@ -1015,6 +1015,13 @@ jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
   return kj::mv(pair);
 }
 
+jsg::Ref<WebSocketPair::PairIterator> WebSocketPair::entries(jsg::Lock&) {
+  return jsg::alloc<PairIterator>(IteratorState {
+    .pair = JSG_THIS,
+    .index = 0,
+   });
+}
+
 void WebSocket::reportError(jsg::Lock& js, kj::Exception&& e) {
   reportError(js, js.exceptionToJsValue(kj::cp(e)));
 }

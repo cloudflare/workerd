@@ -570,3 +570,11 @@ export const base64 = {
     generate_tests(testAtob, tests);
   }
 };
+
+export const webSocketPairIterable = {
+  test() {
+    const [a, b] = new WebSocketPair();
+    ok(a instanceof WebSocket);
+    ok(b instanceof WebSocket);
+  }
+};
