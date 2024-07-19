@@ -41,6 +41,12 @@ interface ForwardableEmailMessage extends EmailMessage {
    * @returns A promise that resolves when the email message is forwarded.
    */
   forward(rcptTo: string, headers?: Headers): Promise<void>;
+  /**
+   * Reply to the sender of this email message with a new EmailMessage object.
+   * @param message The reply message.
+   * @returns A promise that resolves when the email message is replied.
+   */
+  reply(message: EmailMessage): Promise<void>;
 }
 
 /**
