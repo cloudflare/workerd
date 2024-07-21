@@ -269,7 +269,6 @@ kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(KeyType keyType,
 
   static constexpr auto kInvalidBase64Error = "Invalid RSA key in JSON Web Key; invalid base64."_kj;
 
-  // TODO(now): Use a decodeBase64Url variant
   auto nDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(n, kInvalidBase64Error));
   auto eDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(e, kInvalidBase64Error));
   JSG_REQUIRE(RSA_set0_key(rsa.get(), nDecoded, eDecoded, nullptr) == 1, Error,
@@ -392,14 +391,14 @@ kj::Array<const kj::byte> Rsa::toDer(KeyEncoding encoding,
       switch (encoding) {
         case KeyEncoding::PKCS1: {
           JSG_REQUIRE(i2d_RSAPublicKey_bio(bio.get(), rsa) == 1, Error,
-              "Failed to write RSA public key to PEM", tryDescribeOpensslErrors());
+              "Failed to write RSA public key to DER", tryDescribeOpensslErrors());
           break;
         }
         case workerd::api::KeyEncoding::SPKI: {
           auto evpPkey = OSSL_NEW(EVP_PKEY);
           EVP_PKEY_set1_RSA(evpPkey.get(), rsa);
           JSG_REQUIRE(i2d_PUBKEY_bio(bio.get(), evpPkey.get()) == 1, Error,
-              "Failed to write RSA public key to PEM", tryDescribeOpensslErrors());
+              "Failed to write RSA public key to SPKI", tryDescribeOpensslErrors());
           break;
         }
         default: {
