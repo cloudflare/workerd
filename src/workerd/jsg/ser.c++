@@ -20,7 +20,7 @@ Serializer::Serializer(Lock& js, Options options)
   kj::requireOnStack(this, "jsg::Serializer must be allocated on the stack");
 #endif
   if (!treatClassInstancesAsPlainObjects) {
-    prototypeOfObject = js.obj().getPrototype();
+    prototypeOfObject = js.obj().getPrototype(js);
   }
   if (externalHandler != kj::none) {
     // If we have an ExternalHandler, we'll ask it to serialize host objects.

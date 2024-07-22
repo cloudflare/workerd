@@ -137,6 +137,44 @@ JsObject JsObject::jsonClone(Lock& js) {
   return JsObject(obj);
 }
 
+JsValue JsObject::getPrototype(Lock& js) {
+  if (inner->IsProxy()) {
+    // Here we emulate the behavior of v8's GetPrototypeV2() function for proxies.
+    // If the proxy has a getPrototypeOf trap, we call it and return the result.
+    // Otherwise we return the prototype of the target object.
+    // Note that we do not check if the target object is extensible or not, or
+    // if the returned prototype is consistent with the target's prototype if
+    // the target is not extensible. See the comment below for more details.
+    auto proxy = inner.As<v8::Proxy>();
+    JSG_REQUIRE(!proxy->IsRevoked(), TypeError, "Proxy is revoked");
+    auto handler = proxy->GetHandler();
+    JSG_REQUIRE(handler->IsObject(), TypeError, "Proxy handler is not an object");
+    auto jsHandler = JsObject(handler.As<v8::Object>());
+    auto trap = jsHandler.get(js, "getPrototypeOf"_kj);
+    auto target = proxy->GetTarget();
+    if (trap.isUndefined()) {
+      JSG_REQUIRE(target->IsObject(), TypeError, "Proxy target is not an object");
+      // Run this through getPrototype to handle the case where the target is also a proxy.
+      return JsObject(target.As<v8::Object>()).getPrototype(js);
+    }
+    JSG_REQUIRE(trap.isFunction(), TypeError, "Proxy getPrototypeOf trap is not a function");
+    v8::Local<v8::Function> fn = ((v8::Local<v8::Value>)trap).As<v8::Function>();
+    v8::Local<v8::Value> args[] = { target };
+    auto ret = JsValue(check(fn->Call(js.v8Context(), jsHandler.inner, 1, args)));
+    JSG_REQUIRE(ret.isObject() || ret.isNull(), TypeError,
+                "Proxy getPrototypeOf trap did not return an object or null");
+    // TODO(maybe): V8 performs additional checks on the returned value to
+    // see if the proxy and the target are extensible or not, and if the
+    // returned prototype is consistent with the target's prototype if they
+    // are not extensible. To strictly match v8's behavior we should do the
+    // same but (a) v8 does not expose the necessary APIs to do so, and (b)
+    // it is not clear if we actually need to perform the additional check
+    // given how we are currently using this function.
+    return ret;
+  }
+  return JsValue(inner->GetPrototypeV2());
+}
+
 bool JsValue::isTruthy(Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   return inner->BooleanValue(js.v8Isolate);

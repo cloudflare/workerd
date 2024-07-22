@@ -74,6 +74,16 @@ struct JsValueContext: public ContextGlobalObject {
     return js.date(0);
   }
 
+  struct Foo: public Object {
+    JSG_RESOURCE_TYPE(Foo) {}
+  };
+
+  JsValue checkProxyPrototype(Lock& js, JsValue value) {
+    JSG_REQUIRE(value.isProxy(), TypeError, "not a proxy");
+    auto obj = KJ_ASSERT_NONNULL(value.tryCast<JsObject>());
+    return obj.getPrototype(js);
+  }
+
   JSG_RESOURCE_TYPE(JsValueContext) {
     JSG_METHOD(takeJsValue);
     JSG_METHOD(takeJsString);
@@ -88,9 +98,11 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(setRef);
     JSG_METHOD(getRef);
     JSG_METHOD(getDate);
+    JSG_METHOD(checkProxyPrototype);
+    JSG_NESTED_TYPE(Foo);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(JsValueIsolate, JsValueContext);
+JSG_DECLARE_ISOLATE_TYPE(JsValueIsolate, JsValueContext, JsValueContext::Foo);
 
 KJ_TEST("simple") {
   Evaluator<JsValueContext, JsValueIsolate> e(v8System);
@@ -113,6 +125,12 @@ KJ_TEST("simple") {
                "TypeError: Failed to execute 'takeJsObject' on 'JsValueContext': parameter 1 "
                "is not of type 'JsObject'.");
   e.expectEval("getDate() instanceof Date", "boolean", "true");
+  e.expectEval("checkProxyPrototype(new Proxy(class extends Foo{}, {})) === Foo",
+               "boolean", "true");
+  e.expectEval("checkProxyPrototype(new Proxy({}, { getPrototypeOf() { return Foo; } } )) === Foo",
+               "boolean", "true");
+  e.expectEval("checkProxyPrototype(new Proxy({}, { getPrototypeOf() { return String; } } )) "
+               "=== Foo", "boolean", "false");
 }
 
 }  // namespace
