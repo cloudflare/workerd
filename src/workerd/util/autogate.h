@@ -14,6 +14,7 @@ namespace workerd::util {
 enum class AutogateKey {
   TEST_WORKERD,
   PYODIDE_LOAD_EXTERNAL,
+  HTTP_REQUEST_CACHE,
   NumOfKeys // Reserved for iteration.
 };
 

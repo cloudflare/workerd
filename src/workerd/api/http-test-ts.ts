@@ -46,7 +46,17 @@ export const cacheMode = {
         await assertFetchCacheRejectsError(cacheMode);
       }
     } else {
-      for(var cacheMode of allowedCacheModes) {
+      {
+        const req = new Request('https://example.org', {cache : "no-cache"});
+        assert.strictEqual(req.cache, "no-cache");
+      }
+      {
+        const req = new Request('https://example.org', {cache : "no-store"});
+        assert.strictEqual(req.cache, "no-store");
+      }
+      let failureCacheModes: Array<RequestCache> =
+        ["default", "force-cache", "only-if-cached", "reload"];
+      for(var cacheMode of failureCacheModes) {
         await assertRequestCacheThrowsError(cacheMode,
           'TypeError',
           'Unsupported cache mode: ' + cacheMode);
