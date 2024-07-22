@@ -298,4 +298,28 @@ bool CSPRNG(kj::ArrayPtr<kj::byte> buffer) {
 
   return false;
 }
+
+
+kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetAsn1Sequence(kj::ArrayPtr<const kj::byte> data) {
+  if (data.size() < 2 || data[0] != 0x30)
+    return kj::none;
+
+  if (data[1] & 0x80) {
+    // Long form.
+    size_t n_bytes = data[1] & ~0x80;
+    if (n_bytes + 2 > data.size() || n_bytes > sizeof(size_t))
+      return kj::none;
+    size_t length = 0;
+    for (size_t i = 0; i < n_bytes; i++)
+      length = (length << 8) | data[i + 2];
+    auto start = 2 + n_bytes;
+    auto end = start + kj::min(data.size() - 2 - n_bytes, length);
+    return data.slice(start, end);
+  }
+
+  // Short form.
+  auto start = 2;
+  auto end = start + kj::min(data.size() - 2, data[1]);
+  return data.slice(start, end);
+}
 }  // namespace workerd::api
