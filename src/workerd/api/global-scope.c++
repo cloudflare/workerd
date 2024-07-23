@@ -467,6 +467,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
         }
       }
 
+      // We only want to retry against limits if it's a user error. By default let's check if the
+      // output gate is broken.
+      auto shouldRetryCountsAgainstLimits = !context.isOutputGateBroken();
+
       // We want to alert if we aren't going to count this alarm retry against limits
       if (auto desc = e.getDescription();
           !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)
@@ -476,10 +480,15 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
         // We don't usually log these messages, but it's useful to know the real reason we failed
         // to correctly investigate stuck alarms.
         LOG_NOSENTRY(ERROR, "output lock broke during alarm execution without an interesting error description", actorId, e);
+        if (e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none) {
+          // The handler failed because the user overloaded the object. It's their fault, we'll not
+          // retry forever.
+          shouldRetryCountsAgainstLimits = true;
+        }
       }
       return WorkerInterface::AlarmResult {
         .retry = true,
-        .retryCountsAgainstLimit = !context.isOutputGateBroken(),
+        .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
         .outcome = outcome
       };
     })
@@ -497,6 +506,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
             actorId = kj::str(s);
           }
         }
+        // We only want to retry against limits if it's a user error. By default let's assume it's our
+        // fault.
+        auto shouldRetryCountsAgainstLimits = false;
         if (auto desc = e.getDescription();
             !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
           if (isInterestingException(e)) {
@@ -505,13 +517,18 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
             LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", actorId, e);
           }
         } else {
-        // We don't usually log these messages, but it's useful to know the real reason we failed
-        // to correctly investigate stuck alarms.
+          // We don't usually log these messages, but it's useful to know the real reason we failed
+          // to correctly investigate stuck alarms.
           LOG_NOSENTRY(ERROR, "output lock broke after executing alarm without an interesting error description", actorId, e);
+          if (e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none) {
+            // The handler failed because the user overloaded the object. It's their fault, we'll not
+            // retry forever.
+            shouldRetryCountsAgainstLimits = true;
+          }
         }
         return WorkerInterface::AlarmResult {
           .retry = true,
-          .retryCountsAgainstLimit = false,
+          .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
           .outcome = EventOutcome::EXCEPTION
         };
       });
