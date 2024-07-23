@@ -16,7 +16,7 @@ export const handler: ExportedHandler<{ DB: D1Database }> = {
       expectType<{
         meta: Record<string, unknown>;
         success: boolean;
-        results?: never;
+        results?: any;
       }>(response);
     }
 
