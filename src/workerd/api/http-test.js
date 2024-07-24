@@ -205,3 +205,45 @@ export const inspect = {
     await messagePromise;
   }
 };
+
+export const cacheMode = {
+  async test() {
+    assert.strictEqual("cache" in Request.prototype, false);
+    {
+      const req = new Request('https://example.org', { });
+      assert.strictEqual(req.cache, undefined);
+    }
+    {
+      assert.throws(() => {
+        new Request('https://example.org', { cache: 'no-store' });
+      }, {
+        name: 'Error',
+        message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
+      });
+    }
+    {
+      assert.throws(() => {
+        new Request('https://example.org', { cache: 'no-cache' });
+      }, {
+        name: 'Error',
+        message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
+      });
+    }
+    {
+      assert.throws(() => {
+        new Request('https://example.org', { cache: 'unsupported' });
+      }, {
+        name: 'Error',
+        message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
+      });
+    }
+    {
+      await assert.rejects((async () => {
+        await fetch('http://example.org', { cache: 'no-transform' });
+      })(), {
+        name: 'Error',
+        message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
+      });
+    }
+  }
+}
