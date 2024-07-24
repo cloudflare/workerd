@@ -61,11 +61,6 @@ build:v8-codegen-opt --per_file_copt=v8/src/objects@-O2
 build:v8-codegen-opt --per_file_copt=v8/src/wasm@-O2
 build:v8-codegen-opt --per_file_copt=v8/src/base@-O2
 
-# Enable C++20 to support std::unordered_map::contains(). Not sure why this is needed here, V8
-# is supposed to work with C++14.
-build:unix --per_file_copt='external/v8/src/compiler/graph-visualizer.cc@-std=c++20'
-build:windows --per_file_copt='external/v8/src/compiler/graph-visualizer.cc@/std:c++20'
-
 # Need to redefine _WIN32_WINNT to build dawn on Windows
 build:windows --per_file_copt='external/dawn@-Wno-macro-redefined'
 build:windows --host_per_file_copt='external/dawn@-Wno-macro-redefined'
