@@ -33,6 +33,7 @@
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/api/worker-rpc.h>
 #include "workerd-api.h"
+#include "workerd/api/pyodide/pyodide.h"
 #include "workerd/io/hibernation-manager.h"
 #include <stdlib.h>
 
@@ -2565,6 +2566,36 @@ void Server::abortAllActors() {
   }
 }
 
+void Server::fetchPyodideBundle() {
+  {
+    kj::Thread([] () {
+      kj::AsyncIoContext io = kj::setupAsyncIo();
+      kj::HttpHeaderTable table;
+
+      kj::TlsContext::Options options;
+      options.useSystemTrustStore = true;
+
+      kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
+      auto &network = io.provider->getNetwork();
+      auto tlsNetwork = tls->wrapNetwork(network);
+      auto &timer = io.provider->getTimer();
+
+      auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
+
+      kj::HttpHeaders headers(table);
+
+      auto req = client->request(kj::HttpMethod::GET, "https://pyodide.runtime-playground.workers.dev/python-runtime-capnp-bin/pyodide-1.capnp.bin", headers);
+
+      auto res = req.response.wait(io.waitScope);
+      auto body = res.body->readAllBytes().wait(io.waitScope);
+
+      api::pyodide::setPyodideBundleData(kj::mv(body));
+
+    });
+  }
+
+}
+
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
   TRACE_EVENT("workerd", "Server::makeWorker()", "name", name.cStr());
@@ -2687,6 +2718,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
         *observer, conf, featureFlags.asReader(), pythonConfig);
   }
+
+  // Get the pyodide bundle and register it in memory.
+  // After this, the pyodide bundle is accessible at pyodideBundleGlobal
+  fetchPyodideBundle();
 
   auto api = kj::heap<WorkerdApi>(globalContext->v8System,
                                   featureFlags.asReader(),
