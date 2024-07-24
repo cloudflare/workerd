@@ -125,7 +125,8 @@ export const inspect = {
       headers: { "Content-Type": "text/plain" }
     });
     assert.strictEqual(util.inspect(request),
-      `Request {
+`Request {
+  cache: undefined,
   keepalive: false,
   integrity: '',
   cf: undefined,
