@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-/** @type {Array<VectorizeMatch>} */
+/** @type {Array<VectorizeQueryMatch>} */
 const exampleVectorMatches = [
   {
     id: "b0daca4a-ffd8-4865-926b-e24800af2a2d",
@@ -130,7 +130,7 @@ export default {
       } else if (request.method === "POST" && pathname.endsWith("/insert")) {
         /** @type {{vectors: Array<VectorizeVector>}} */
         const data = await request.json();
-        if (data.vectors.find((v) => v.id == "fail-with-test-error")) {
+        if (data.vectors.find((v) => v.id === "fail-with-test-error")) {
           return Response.json(
             {
               code: 9999,
@@ -142,34 +142,34 @@ export default {
           );
         }
 
-        return Response.json({
-          ids: [
-            ...data.vectors.map(({ id }) => id),
-            ...exampleVectors.map(({ id }) => id),
-          ],
-          count: data.vectors.length + exampleVectors.length,
-        });
+        /** @type {VectorizeAsyncMutation} */
+        const res = {
+          // fudge a bit and set the mutation id to some internals so our asserts can check more
+          mutationId: `total vectors: ${data.vectors.length + exampleVectors.length}`,
+        };
+        return Response.json(res);
       } else if (request.method === "POST" && pathname.endsWith("/upsert")) {
         /** @type {{vectors: Array<VectorizeVector>}} */
         let data = await request.json();
         if (data.vectors.length > 1) data.vectors.splice(-1);
-        return Response.json({
-          ids: [
-            ...data.vectors.map(({ id }) => id),
-            ...exampleVectors.map(({ id }) => id),
-          ],
-          count: data.vectors.length + exampleVectors.length,
-        });
+        /** @type {VectorizeAsyncMutation} */
+        const res = {
+          // fudge a bit and set the mutation id to some internals so our asserts can check more
+          mutationId: `total vectors: ${data.vectors.length + exampleVectors.length}`,
+        };
+        return Response.json(res);
       } else if (
         request.method === "POST" &&
         pathname.endsWith("/deleteByIds")
       ) {
         /** @type {{ids: Array<string>}} */
         const body = await request.json();
-        return Response.json({
-          ids: body.ids,
-          count: body.ids.length,
-        });
+        /** @type {VectorizeAsyncMutation} */
+        const res = {
+          // fudge a bit and set the mutation id to some internals so our asserts can check more
+          mutationId: `deleted vectors: ${body.ids.length}`,
+        };
+        return Response.json(res);
       } else if (request.method === "POST" && pathname.endsWith("/getByIds")) {
         /** @type {{ids: Array<string>}} */
         const body = await request.json();

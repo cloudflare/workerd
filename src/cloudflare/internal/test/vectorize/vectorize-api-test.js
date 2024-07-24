@@ -7,7 +7,7 @@ import * as assert from "node:assert";
 import { KnownModel, DistanceMetric } from "cloudflare:vectorize";
 
 /**
- * @typedef {{'vector-search': VectorizeIndex}} Env
+ * @typedef {{'vector-search': Vectorize}} Env
  *
  */
 
@@ -23,10 +23,10 @@ export const test_vector_search_vector_query = {
       const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
         topK: 3,
         returnValues: true,
-        returnMetadata: true,
+        returnMetadata: "indexed",
       });
       assert.equal(true, results.count > 0);
-      /** @type {VectorizeMatches}  */
+      /** @type {VectorizeQueryMatches}  */
       const expected = {
         matches: [
           {
@@ -130,7 +130,7 @@ export const test_vector_search_vector_insert = {
         },
       ];
       const results = await IDX.insert(newVectors);
-      assert.equal(results.count, 5);
+      assert.equal(results.mutationId, `total vectors: 5`);
     }
   },
 };
@@ -189,7 +189,7 @@ export const test_vector_search_vector_upsert = {
         },
       ];
       const results = await IDX.upsert(newVectors);
-      assert.equal(results.count, 4);
+      assert.equal(results.mutationId, `total vectors: 4`);
     }
   },
 };
@@ -207,10 +207,7 @@ export const test_vector_search_vector_delete_ids = {
         "vector-b",
         "vector-c",
       ]);
-      assert.deepStrictEqual(results, {
-        ids: ["vector-a", "vector-b", "vector-c"],
-        count: 3,
-      });
+      assert.equal(results.mutationId, `deleted vectors: 3`);
     }
   },
 };
