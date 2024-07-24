@@ -23,8 +23,8 @@ bazel_skylib_workspace()
 
 http_archive(
     name = "build_bazel_apple_support",
-    sha256 = "c4bb2b7367c484382300aee75be598b92f847896fb31bbd22f3a2346adf66a80",
-    url = "https://github.com/bazelbuild/apple_support/releases/download/1.15.1/apple_support.1.15.1.tar.gz",
+    sha256 = "c31ce8e531b50ef1338392ee29dd3db3689668701ec3237b9c61e26a1937ab07",
+    url = "https://github.com/bazelbuild/apple_support/releases/download/1.16.0/apple_support.1.16.0.tar.gz",
 )
 
 load(
@@ -33,6 +33,11 @@ load(
 )
 
 apple_support_dependencies()
+
+# apple_support now requires bazel_features, pull in its dependencies too.
+load("@bazel_features//:deps.bzl", "bazel_features_deps")
+
+bazel_features_deps()
 
 # ========================================================================================
 # Simple dependencies
@@ -253,10 +258,10 @@ rules_fuzzing_init()
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
-    sha256 = "1003d34b60c337e2d4168a55da6b3658e74b944e5ace46136fd7ba5e32c4d544",
-    strip_prefix = "google-tcmalloc-d67d394",
+    sha256 = "81f285cb337f445276f37c308cb90120f8ba4311d1be9daf3b93dccf4bfdba7d",
+    strip_prefix = "google-tcmalloc-69c409c",
     type = "tgz",
-    url = "https://github.com/google/tcmalloc/tarball/d67d3949c45ae9b4017db8b1c61fdf37a3b0d645",
+    url = "https://github.com/google/tcmalloc/tarball/69c409c344bdf894fc7aab83e2d9e280b009b2f3",
 )
 
 # ========================================================================================
