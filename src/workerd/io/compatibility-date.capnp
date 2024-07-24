@@ -510,4 +510,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatDisableFlag("cache_option_disabled")
     $experimental;
   # Enables the use of no-cache and no-store headers from requests
+
+  kvDirectBinding @54 :Bool
+      $compatEnableFlag("kv_direct_binding")
+      $experimental;
+  # Enables bypassing FL by translating pipeline tunnel configuration to subpipeline.
+  # This flag is used only by the internal repo and not directly by workerd.
+
 }
