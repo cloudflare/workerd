@@ -1076,9 +1076,10 @@ jsg::Ref<Request> Request::constructor(
         }
 
         KJ_IF_SOME(c, initDict.cache) {
+          const bool flagsHelp = (c == "no-store" || c == "no-cache");
           JSG_REQUIRE(FeatureFlags::get(js).getCacheOptionEnabled(), TypeError, kj::str(
             "Unsupported cache mode: ", c,
-            "\nYou may need to enable the cache_option_enabled compatability flag."));
+            flagsHelp ? "\nYou may need to enable the cache_option_enabled compatibility flag." : ""));
           cacheMode = getCacheModeFromName(c);
         }
 
