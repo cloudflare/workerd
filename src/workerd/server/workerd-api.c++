@@ -43,6 +43,7 @@
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
+#include <kj/compat/http.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
 #else
@@ -447,7 +448,7 @@ void WorkerdApi::compileModules(
       KJ_REQUIRE(featureFlags.getPythonWorkers(),
           "The python_workers compatibility flag is required to use Python.");
       // Inject Pyodide bundle
-      modules->addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
+      modules->addBuiltinBundle(KJ_ASSERT_NONNULL(pyodideBundleGlobal), kj::none);
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
       {
         auto mainModule = confModules.begin();
