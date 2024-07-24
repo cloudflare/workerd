@@ -85,6 +85,7 @@ export default {
 
 export const inspect = {
   async test(ctrl, env, ctx) {
+    const cacheEnabled = env.cacheEnabled === "true"
     // Check URL with duplicate search param keys
     const url = new URL("http://user:pass@placeholder:8787/path?a=1&a=2&b=3");
     assert.strictEqual(util.inspect(url),
@@ -124,7 +125,8 @@ export const inspect = {
       body: "message",
       headers: { "Content-Type": "text/plain" }
     });
-    assert.strictEqual(util.inspect(request),
+    if(cacheEnabled) {
+      assert.strictEqual(util.inspect(request),
 `Request {
   cache: undefined,
   keepalive: false,
@@ -144,7 +146,29 @@ export const inspect = {
     [length]: 7n
   }
 }`
-    );
+      );
+    } else {
+      assert.strictEqual(util.inspect(request),
+`Request {
+  keepalive: false,
+  integrity: '',
+  cf: undefined,
+  signal: AbortSignal { reason: undefined, aborted: false, onabort: null },
+  fetcher: null,
+  redirect: 'follow',
+  headers: Headers(1) { 'content-type' => 'text/plain', [immutable]: false },
+  url: 'http://placeholder',
+  method: 'POST',
+  bodyUsed: false,
+  body: ReadableStream {
+    locked: false,
+    [state]: 'readable',
+    [supportsBYOB]: true,
+    [length]: 7n
+  }
+}`
+      );
+    }
 
     // Check response with immutable headers
     const response = await env.SERVICE.fetch("http://placeholder/not-found");
@@ -230,20 +254,90 @@ async function assertFetchCacheRejectsError(cacheHeader,
 }
 
 export const cacheMode = {
-
-  async test() {
-    assert.strictEqual("cache" in Request.prototype, false);
+  async test(ctrl, env, ctx) {
+    const cacheEnabled = env.cacheEnabled === "true";
+    assert.strictEqual("cache" in Request.prototype, cacheEnabled);
     {
       const req = new Request('https://example.org', {});
       assert.strictEqual(req.cache, undefined);
     }
-    await assertRequestCacheThrowsError('no-store');
-    await assertRequestCacheThrowsError('no-cache');
-    await assertRequestCacheThrowsError('no-transform');
-    await assertRequestCacheThrowsError('unsupported');
-    await assertFetchCacheRejectsError('no-store');
-    await assertFetchCacheRejectsError('no-cache');
-    await assertFetchCacheRejectsError('no-transform');
-    await assertFetchCacheRejectsError('unsupported');
+    {
+      if(!cacheEnabled) {
+        assert.throws(() => {
+          new Request('https://example.org', { cache: 'no-store' });
+        }, {
+          name: 'Error',
+          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
+        });
+      } else {
+        const req = new Request('https://example.org', { cache: 'no-store' });
+        assert.strictEqual(req.cache, 'no-store');
+      }
+    }
+    {
+      if(!cacheEnabled) {
+        assert.throws(() => {
+          new Request('https://example.org', { cache: 'no-cache' });
+        }, {
+          name: 'Error',
+          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
+        });
+      } else {
+        const req = new Request('https://example.org', { cache: 'no-cache' });
+        assert.strictEqual(req.cache, 'no-cache');
+      }
+    }
+    {
+      if(!cacheEnabled) {
+        assert.throws(() => {
+          new Request('https://example.org', { cache: 'unsupported' });
+        }, {
+          name: 'Error',
+          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
+        });
+      } else {
+        assert.throws(() => {
+          new Request('https://example.org', { cache: 'unsupported' });
+        }, {
+          name: 'TypeError',
+          message: "Unsupported cache mode: unsupported",
+        });
+
+      }
+    }
+    {
+      if(!cacheEnabled) {
+        await assert.rejects((async () => {
+          await fetch('http://example.org', { cache: 'no-cache' });
+        })(), {
+          name: 'Error',
+          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
+        });
+      } else {
+        await assert.rejects((async () => {
+          await fetch('http://example.org', { cache: 'no-cache' });
+        })(), {
+          name: 'TypeError',
+          message: "Unsupported cache mode: no-cache",
+        });
+      }
+    }
+    {
+      if(!cacheEnabled) {
+        await assert.rejects((async () => {
+          await fetch('http://example.org', { cache: 'no-transform' });
+        })(), {
+          name: 'Error',
+          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
+        });
+      } else {
+        await assert.rejects((async () => {
+          await fetch('http://example.org', { cache: 'no-transform' });
+        })(), {
+          name: 'TypeError',
+          message: "Unsupported cache mode: no-transform",
+        });
+      }
+    }
   }
 }

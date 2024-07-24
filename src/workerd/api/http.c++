@@ -1076,9 +1076,8 @@ jsg::Ref<Request> Request::constructor(
         }
 
         KJ_IF_SOME(c, initDict.cache) {
-          JSG_REQUIRE(FeatureFlags::get(js).getCacheOptionEnabled(), TypeError, kj::str(
-            "Unsupported cache mode: ", c,
-            "\nYou may need to enable the cache_option_enabled compatability flag."));
+          JSG_REQUIRE(FeatureFlags::get(js).getCacheOptionEnabled(), Error, kj::str(
+            "The 'cache' field on 'RequestInitializerDict' is not implemented."));
           cacheMode = getCacheModeFromName(c);
         }
 
@@ -1811,6 +1810,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
   // Currently, the only cache mode we support is undefined, but we will soon support
   // no-cache and no-store. These additional modes will be hidden behind an autogate.
   if (jsRequest->getCacheMode() != Request::CacheMode::NONE) {
+    JSG_REQUIRE(FeatureFlags::get(js).getCacheOptionEnabled(), Error, kj::str(
++            "The 'cache' field on 'RequestInitializerDict' is not implemented."));
     return js.rejectedPromise<jsg::Ref<Response>>(
         js.typeError(kj::str("Unsupported cache mode: ",
             KJ_ASSERT_NONNULL(jsRequest->getCache(js)))));
