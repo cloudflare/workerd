@@ -241,8 +241,7 @@ Hmac.prototype.update = Hash.prototype.update;
 Hmac.prototype.digest = function(this: Hmac, outputEncoding?: string): Buffer | string {
   const state = this[kState];
   if (state[kFinalized]) {
-    const buf = Buffer.from('');
-    return outputEncoding === 'buffer' ? buf : buf.toString(outputEncoding);
+    return !outputEncoding || outputEncoding === 'buffer' ? Buffer.from('') : '';
   }
 
   // Explicit conversion for backward compatibility.
