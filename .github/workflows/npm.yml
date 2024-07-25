@@ -101,10 +101,10 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 15
-          sudo apt-get install -y --no-install-recommends clang-15 lld-15 libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-15/bin/clang --action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-15/bin/clang --host_action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
+          sudo ./llvm.sh 16
+          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
       - name: Build type generating Worker
         run: |
           bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=release_linux //types:types_worker
