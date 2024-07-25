@@ -517,4 +517,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables bypassing FL by translating pipeline tunnel configuration to subpipeline.
   # This flag is used only by the internal repo and not directly by workerd.
 
+  allowCustomPorts @55 :Bool
+      $compatEnableFlag("allow_custom_ports")
+      $experimental;
+  # Enables fetching hosts with a custom port from workers.
+  # For orange clouded sites only standard ports are allowed (https://developers.cloudflare.com/fundamentals/reference/network-ports/#network-ports-compatible-with-cloudflares-proxy).
+  # For grey clouded sites all ports are allowed.
 }
