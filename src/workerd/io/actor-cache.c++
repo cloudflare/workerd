@@ -243,6 +243,9 @@ void ActorCache::evictOrOomIfNeeded(Lock& lock) {
     // Add trace info sufficient to tell us which operation caused the failure.
     exception.addTraceHere();
     exception.addTrace(__builtin_return_address(0));
+    // We know this exeption happens due to user error. Let's add an exception detail so we can
+    // parse it later.
+    exception.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<byte>(0));
 
     if (maybeTerminalException == kj::none) {
       maybeTerminalException.emplace(kj::cp(exception));

@@ -146,4 +146,6 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
 // Annotate an internal message with the corresponding brokenness reason.
 kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennessReason);
 
+constexpr kj::Exception::DetailTypeId EXCEPTION_IS_USER_ERROR = 0x82aff7d637c30e47ull;
+
 }  // namespace workerd::jsg
