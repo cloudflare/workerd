@@ -1,4 +1,4 @@
-From b413a9f57e487688c37ef3e92632292571a59596 Mon Sep 17 00:00:00 2001
+From 06de20cf51080e17afe7984ca98458a3653e18c9 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 2 Mar 2024 09:00:18 -0600
 Subject: Add ValueSerializer::SetTreatFunctionsAsHostObjects().
@@ -28,10 +28,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index a0988b509630a854c167cb634dde5b059ec9c0c1..9954e6a9182d1908b2e92150fba14c31dc23455f 100644
+index 8b8633b5e35ddc1a3c6eab202116c68bdf4cb56b..dc1044ba427c5bd2bd7ac995adccd2472afbcfe2 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3448,6 +3448,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3477,6 +3477,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  
@@ -43,7 +43,7 @@ index a0988b509630a854c167cb634dde5b059ec9c0c1..9954e6a9182d1908b2e92150fba14c31
                                          Local<Value> value) {
    auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 2e574704650c3b5d860fc21d083e9e6fed9ddfcf..0c82ae8299f2f45bee34177c3d1b663cede0c02e 100644
+index 96ad656a42173b66974539472467c497b89dc587..95ba1aa83f71dd34c63230899840081cf555042d 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -328,6 +328,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
@@ -65,7 +65,7 @@ index 2e574704650c3b5d860fc21d083e9e6fed9ddfcf..0c82ae8299f2f45bee34177c3d1b663c
 -                                instance_type != JS_SPECIAL_API_OBJECT_TYPE)) {
 +  if (IsCallable(*receiver)) {
 +    if (treat_functions_as_host_objects_) {
-+      return WriteHostObject(Handle<JSObject>::cast(receiver));
++      return WriteHostObject(Cast<JSObject>(receiver));
 +    }
 +    return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
 +  } else if (IsSpecialReceiverInstanceType(instance_type) &&
@@ -74,7 +74,7 @@ index 2e574704650c3b5d860fc21d083e9e6fed9ddfcf..0c82ae8299f2f45bee34177c3d1b663c
    }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index c3a44e9f64f944641eea417584429a0b147ef654..fcf6e66d44508c2c29889354f3794d37cc22b52d 100644
+index 27d5d03518e7bfecde240b658f63456c899f378c..faeb7879130b3d32feeb3a0435b3c21e9be44a14 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -102,6 +102,15 @@ class ValueSerializer {

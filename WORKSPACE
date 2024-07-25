@@ -214,7 +214,7 @@ http_archive(
 #   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    commit = "bfe59c2726fda7494a800f7d0ee461f0564653b3",
+    commit = "9d1552f25c3d9e9114b7d7aed55790570a99bc4d",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
@@ -483,26 +483,25 @@ http_archive(
         "//:patches/v8/0007-Implement-Promise-Context-Tagging.patch",
         "//:patches/v8/0008-Enable-V8-shared-linkage.patch",
         "//:patches/v8/0009-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
-        "//:patches/v8/0010-Always-enable-continuation-preserved-data-in-the-bui.patch",
-        "//:patches/v8/0011-increase-visibility-of-virtual-method.patch",
-        "//:patches/v8/0012-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
-        "//:patches/v8/0013-Set-torque-generator-path-to-external-v8.-This-allow.patch",
-        "//:patches/v8/0014-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-        "//:patches/v8/0015-Expose-v8-Symbol-GetDispose.patch",
-        "//:patches/v8/0016-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE-V8_COMPR.patch",
-        "//:patches/v8/0017-Revert-TracedReference-deref-API-removal.patch",
-        "//:patches/v8/0018-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
-        "//:patches/v8/0019-Update-illegal-invocation-error-message-in-v8.patch",
+        "//:patches/v8/0010-increase-visibility-of-virtual-method.patch",
+        "//:patches/v8/0011-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
+        "//:patches/v8/0012-Set-torque-generator-path-to-external-v8.-This-allow.patch",
+        "//:patches/v8/0013-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
+        "//:patches/v8/0014-Expose-v8-Symbol-GetDispose.patch",
+        "//:patches/v8/0015-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE-V8_COMPR.patch",
+        "//:patches/v8/0016-Revert-TracedReference-deref-API-removal.patch",
+        "//:patches/v8/0017-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
+        "//:patches/v8/0018-Update-illegal-invocation-error-message-in-v8.patch",
     ],
-    integrity = "sha256-TKEA0q6AADxlgXHIprTaw/CgQDBB6Vhug3JWlXmFKrg=",
-    strip_prefix = "v8-12.7.224.13",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.7.224.13.tar.gz",
+    integrity = "sha256-yoLczQj1XEZL4EHVRjAwpVjgr9/q0YlRGnNX47Ke2ws=",
+    strip_prefix = "v8-12.8.374.10",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.8.374.10.tar.gz",
 )
 
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "98f2494518c2dbb9c488e83e507b070ea5910e95",
+    commit = "9408c6fd4a39e6fef0e1c4077602e1c83b15f3fb",
     patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
     patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
