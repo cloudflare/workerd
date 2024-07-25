@@ -26,7 +26,7 @@ export const test_vector_search_vector_query = {
         returnMetadata: "indexed",
       });
       assert.equal(true, results.count > 0);
-      /** @type {VectorizeQueryMatches}  */
+      /** @type {VectorizeMatches}  */
       const expected = {
         matches: [
           {
