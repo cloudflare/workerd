@@ -7,6 +7,16 @@
 
 namespace workerd::api::pyodide {
 
+kj::Maybe<kj::Array<unsigned char>> pyodideBundleDataGlobal = kj::none;
+kj::Maybe<kj::Own<capnp::FlatArrayMessageReader>> pyodideBundleReaderGlobal = kj::none;
+kj::Maybe<jsg::Bundle::Reader> pyodideBundleGlobal = kj::none;
+
+void setPyodideBundleData(kj::Array<unsigned char> data) {
+  pyodideBundleReaderGlobal = kj::heap<capnp::FlatArrayMessageReader>(kj::arrayPtr(
+        reinterpret_cast<const capnp::word*>(data.begin()), data.size() / sizeof(capnp::word))).attach(kj::mv(data));
+  pyodideBundleGlobal = KJ_REQUIRE_NONNULL(pyodideBundleReaderGlobal)->getRoot<jsg::Bundle>();
+}
+
 static int readToTarget(kj::ArrayPtr<const kj::byte> source, int offset, kj::ArrayPtr<kj::byte> buf) {
   int size = source.size();
   if (offset >= size || offset < 0) {

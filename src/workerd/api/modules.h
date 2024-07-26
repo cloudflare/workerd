@@ -20,7 +20,9 @@ namespace workerd::api {
 template <class Registry>
 void registerModules(Registry& registry, auto featureFlags) {
   node::registerNodeJsCompatModules(registry, featureFlags);
-  pyodide::registerPyodideModules(registry, featureFlags);
+  if (featureFlags.getPythonWorkers()) {
+    pyodide::registerPyodideModules(registry, featureFlags);
+  }
   registerUnsafeModules(registry, featureFlags);
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);

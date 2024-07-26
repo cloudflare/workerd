@@ -11,8 +11,16 @@
 #include <workerd/jsg/url.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/autogate.h>
+#include "capnp/serialize.h"
 
 namespace workerd::api::pyodide {
+
+// singleton that owns bundle
+extern kj::Maybe<jsg::Bundle::Reader> pyodideBundleGlobal;
+
+void setPyodideBundleData(kj::Array<unsigned char> data);
+
 
 struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> diskCacheRoot;
@@ -344,25 +352,29 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
   api::pyodide::SimplePythonLimiter
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
-  if (featureFlags.getPythonWorkers()) {
-    // We add `pyodide:` packages here including python-entrypoint-helper.js.
+  // We add `pyodide:` packages here including python-entrypoint-helper.js.
+  if (!util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
     registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
-    registry.template addBuiltinModule<PackagesTarReader>(
-        "pyodide-internal:packages_tar_reader", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   }
+  registry.template addBuiltinModule<PackagesTarReader>(
+      "pyodide-internal:packages_tar_reader", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 kj::Own<jsg::modules::ModuleBundle> getInternalPyodideModuleBundle(auto featureFlags) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
-  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  if (!util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  }
   return builder.finish();
 }
 
 kj::Own<jsg::modules::ModuleBundle> getExternalPyodideModuleBundle(auto featureFlags) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
-  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  if (!util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  }
   return builder.finish();
 }
 
