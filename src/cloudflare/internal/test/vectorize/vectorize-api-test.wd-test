@@ -16,7 +16,9 @@ const unitTests :Workerd.Config = (
               innerBindings = [(
                 name = "fetcher",
                 service = "vector-search-mock"
-              )],
+              ),
+              (name = "indexId", text = "an-index"),
+              (name = "indexVersion", text = "v2")],
             )
           )
         ],

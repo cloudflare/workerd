@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-/** @type {Array<VectorizeQueryMatch>} */
+/** @type {Array<VectorizeMatch>} */
 const exampleVectorMatches = [
   {
     id: "b0daca4a-ffd8-4865-926b-e24800af2a2d",
@@ -97,13 +97,8 @@ export default {
       ) {
         return Response.json({});
       } else if (request.method === "POST" && pathname.endsWith("/query")) {
-        /** @type {VectorizeQueryOptions & {vector: number[], compat: { queryMetadataOptional: boolean }}} */
+        /** @type {VectorizeQueryOptions<VectorizeMetadataRetrievalLevel> & {vector: number[]}} */
         const body = await request.json();
-        // check that the compatibility flags are set
-        if (!body.compat.queryMetadataOptional)
-          throw Error(
-            "expected to get `queryMetadataOptional` compat flag with a value of true"
-          );
         let returnSet = structuredClone(exampleVectorMatches);
         if (
           body?.filter?.["text"] &&
