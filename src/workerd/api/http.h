@@ -752,6 +752,8 @@ struct RequestInitializerDict {
   // jsg::Optional<kj::String> priority;
   // TODO(conform): Might support later?
 
+  void validate();
+
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, mode, credentials, cache,
              referrer, referrerPolicy, integrity, signal);
   JSG_STRUCT_TS_OVERRIDE(RequestInit<Cf = CfProperties> {

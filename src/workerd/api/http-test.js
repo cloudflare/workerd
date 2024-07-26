@@ -85,7 +85,6 @@ export default {
 
 export const inspect = {
   async test(ctrl, env, ctx) {
-    const cacheEnabled = env.cacheEnabled === "true"
     // Check URL with duplicate search param keys
     const url = new URL("http://user:pass@placeholder:8787/path?a=1&a=2&b=3");
     assert.strictEqual(util.inspect(url),
@@ -125,7 +124,7 @@ export const inspect = {
       body: "message",
       headers: { "Content-Type": "text/plain" }
     });
-    if(cacheEnabled) {
+    if(env.CACHE_ENABLED) {
       assert.strictEqual(util.inspect(request),
 `Request {
   cache: undefined,
@@ -255,14 +254,13 @@ async function assertFetchCacheRejectsError(cacheHeader,
 
 export const cacheMode = {
   async test(ctrl, env, ctx) {
-    const cacheEnabled = env.cacheEnabled === "true";
-    assert.strictEqual("cache" in Request.prototype, cacheEnabled);
+    assert.strictEqual("cache" in Request.prototype, env.CACHE_ENABLED);
     {
       const req = new Request('https://example.org', {});
       assert.strictEqual(req.cache, undefined);
     }
     {
-      if(!cacheEnabled) {
+      if(!env.CACHE_ENABLED) {
         assert.throws(() => {
           new Request('https://example.org', { cache: 'no-store' });
         }, {
@@ -275,7 +273,7 @@ export const cacheMode = {
       }
     }
     {
-      if(!cacheEnabled) {
+      if(!env.CACHE_ENABLED) {
         assert.throws(() => {
           new Request('https://example.org', { cache: 'no-cache' });
         }, {
@@ -288,7 +286,7 @@ export const cacheMode = {
       }
     }
     {
-      if(!cacheEnabled) {
+      if(!env.CACHE_ENABLED) {
         assert.throws(() => {
           new Request('https://example.org', { cache: 'unsupported' });
         }, {
@@ -306,7 +304,7 @@ export const cacheMode = {
       }
     }
     {
-      if(!cacheEnabled) {
+      if(!env.CACHE_ENABLED) {
         await assert.rejects((async () => {
           await fetch('http://example.org', { cache: 'no-cache' });
         })(), {
@@ -323,7 +321,7 @@ export const cacheMode = {
       }
     }
     {
-      if(!cacheEnabled) {
+      if(!env.CACHE_ENABLED) {
         await assert.rejects((async () => {
           await fetch('http://example.org', { cache: 'no-transform' });
         })(), {

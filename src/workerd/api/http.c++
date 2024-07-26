@@ -1076,8 +1076,6 @@ jsg::Ref<Request> Request::constructor(
         }
 
         KJ_IF_SOME(c, initDict.cache) {
-          JSG_REQUIRE(FeatureFlags::get(js).getCacheOptionEnabled(), Error, kj::str(
-            "The 'cache' field on 'RequestInitializerDict' is not implemented."));
           cacheMode = getCacheModeFromName(c);
         }
 
@@ -1198,6 +1196,13 @@ void Request::shallowCopyHeadersTo(kj::HttpHeaders& out) {
 
 kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   return cf.serialize(js);
+}
+
+void RequestInitializerDict::validate() {
+  if(cache != kj::none) {
+    JSG_REQUIRE(Worker::Api::current().getFeatureFlags().getCacheOptionEnabled(), Error, kj::str(
+      "The 'cache' field on 'RequestInitializerDict' is not implemented."));
+  }
 }
 
 void Request::serialize(

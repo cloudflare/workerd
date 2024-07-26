@@ -118,10 +118,15 @@ public:
     //   it prescribes lexicographically-ordered member initialization, with base members ordered
     //   before derived members. Objects with mutating getters might be broken by this, but it
     //   doesn't seem worth fixing absent a compelling use case.
-
-    return T {
+    auto t = T {
       kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), isolate, context, in)...
     };
+
+    if constexpr (requires { t.validate(); }) {
+      t.validate();
+    }
+
+    return t;
   }
 
   void newContext() = delete;
