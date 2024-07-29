@@ -16,10 +16,10 @@
 
 namespace workerd::api::pyodide {
 
-// singleton that owns bundle
-extern kj::Maybe<jsg::Bundle::Reader> pyodideBundleGlobal;
+bool hasPyodideBundle(kj::StringPtr version);
 
-void setPyodideBundleData(kj::Array<unsigned char> data);
+void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data);
+jsg::Bundle::Reader getPyodideBundle(kj::StringPtr version);
 
 
 struct PythonConfig {
