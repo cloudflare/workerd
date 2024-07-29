@@ -285,24 +285,29 @@ private:
     // write without reading, which will continue to fill the internal buffer.
     KJ_ASSERT(flush == Z_FINISH || state.template is<Open>());
     Context::Result result;
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([this, flush, &result]() {
-      result = context.pumpOnce(flush);
-    })) {
-      cancelInternal(kj::cp(exception));
-      return kj::mv(exception);
-    }
 
-    if (result.buffer.size() == 0) {
-      if (result.success) {
-        return writeInternal(flush);
+    while (true) {
+      KJ_IF_SOME(exception, kj::runCatchingExceptions([this, flush, &result]() {
+        result = context.pumpOnce(flush);
+      })) {
+        cancelInternal(kj::cp(exception));
+        return kj::mv(exception);
       }
-      return maybeFulfillRead();
-    }
 
-    if (result.buffer.size() > 0) {
+      if (result.buffer.size() == 0) {
+        if (result.success) {
+          // No output produced but input data has been processed based on zlib return code, call
+          // pumpOnce again.
+          continue;
+        }
+        return maybeFulfillRead();
+      }
+
+      // Output has been produced, copy it to result buffer and continue loop to call pumpOnce
+      // again.
       std::copy(result.buffer.begin(), result.buffer.end(), std::back_inserter(output));
     }
-    return writeInternal(flush);
+    KJ_UNREACHABLE;
   }
 
   // Fulfill as many pending reads as we can from the output buffer.
