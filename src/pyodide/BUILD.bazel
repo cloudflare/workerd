@@ -3,7 +3,7 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
-load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
+load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle_capnp")
 
 copy_file(
     name = "pyodide_packages_archive",
@@ -146,8 +146,8 @@ expand_template(
     template = "@pyodide//:pyodide/pyodide.asm.js",
 )
 
-wd_ts_bundle(
-    name = "pyodide",
+data = wd_ts_bundle_capnp(
+    name = "pyodide.capnp",
     modules = ["python-entrypoint-helper.ts"],
     import_name = "pyodide",
     internal_data_modules = ["generated/python_stdlib.zip"] + glob([
@@ -178,4 +178,35 @@ wd_ts_bundle(
         "python_stdlib.zip@rule",
         "pyodide-bucket.json@rule",
     ],
+)
+
+cc_capnp_library(
+    name = "pyodide",
+    srcs = ["pyodide.capnp"],
+    strip_include_prefix = "",
+    visibility = ["//visibility:public"],
+    data = data,
+    deps = ["@workerd//src/workerd/jsg:modules_capnp"],
+    include_prefix = "pyodide",
+)
+
+
+genrule(
+    name = "pyodide.capnp.bin@rule",
+    tools = ["@capnp-cpp//src/capnp:capnp_tool"],
+    srcs = ["pyodide.capnp", "//src/workerd/jsg:modules.capnp"] + data,
+    outs = ["pyodide.capnp.bin"],
+    visibility = ["//visibility:public"],
+    cmd = " ".join([
+        # Annoying logic to deal with different paths in workerd vs downstream.
+        # Either need "-I src" in workerd or -I external/workerd/src downstream
+        "INCLUDE=$$(stat src > /dev/null 2>&1 && echo src || echo external/workerd/src);",
+        "$(execpath @capnp-cpp//src/capnp:capnp_tool)",
+        "eval",
+        "$(location :pyodide.capnp)",
+        "pyodideBundle",
+        "-I $$INCLUDE",
+        "-o binary",
+        "> $@",
+    ])
 )
