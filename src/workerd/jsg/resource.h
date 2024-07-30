@@ -383,7 +383,7 @@ struct GetterCallback;
           auto obj = info.This(); \
           auto& wrapper = TypeWrapper::from(isolate); \
           /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */\
-          if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
+          if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
             throwTypeError(isolate, kIllegalInvocation); \
           } \
           auto& self = extractInternalPointer<T, isContext>(context, obj); \
@@ -409,7 +409,7 @@ struct GetterCallback;
           auto obj = info.This(); \
           auto& wrapper = TypeWrapper::from(isolate); \
           /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */\
-          if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
+          if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
             throwTypeError(isolate, kIllegalInvocation); \
           } \
           auto& self = extractInternalPointer<T, isContext>(context, obj); \
@@ -451,7 +451,7 @@ struct PropertyGetterCallback;
           auto obj = info.This(); \
           auto& wrapper = TypeWrapper::from(isolate); \
           /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */\
-          if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
+          if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
             throwTypeError(isolate, kIllegalInvocation); \
           } \
           auto& self = extractInternalPointer<T, isContext>(context, obj); \
@@ -477,7 +477,7 @@ struct PropertyGetterCallback;
           auto obj = info.This(); \
           auto& wrapper = TypeWrapper::from(isolate); \
           /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */\
-          if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
+          if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
             throwTypeError(isolate, kIllegalInvocation); \
           } \
           auto& self = extractInternalPointer<T, isContext>(context, obj); \
@@ -516,7 +516,7 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isConte
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -539,7 +539,7 @@ struct SetterCallback<TypeWrapper, methodName,
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -563,7 +563,7 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method,
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -585,7 +585,7 @@ struct PropertySetterCallback<TypeWrapper, methodName,
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -760,7 +760,7 @@ struct WildcardPropertyCallbacks<
       auto context = isolate->GetCurrentContext();
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
-      if (!wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, false>(context, obj);
