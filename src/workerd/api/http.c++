@@ -1199,9 +1199,13 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
 }
 
 void RequestInitializerDict::validate() {
-  if(cache != kj::none) {
+  KJ_IF_SOME(c, cache){
+    // Check compatability
     JSG_REQUIRE(Worker::Api::current().getFeatureFlags().getCacheOptionEnabled(), Error, kj::str(
       "The 'cache' field on 'RequestInitializerDict' is not implemented."));
+
+    // Check that the string is a supported type
+    auto cacheStruct = getCacheModeFromName(c);
   }
 }
 
