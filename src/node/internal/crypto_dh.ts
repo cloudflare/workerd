@@ -84,7 +84,7 @@ let DiffieHellman = function (this: DiffieHellman, sizeOrKey: number|ArrayLike,
   if (typeof sizeOrKey === 'number')
     validateInt32(sizeOrKey, 'sizeOrKey');
 
-  if (keyEncoding && !Buffer.isEncoding(keyEncoding) && keyEncoding !== 'buffer') {
+  if (keyEncoding && keyEncoding !== 'buffer' && !Buffer.isEncoding(keyEncoding)) {
     genEncoding = generator as any;
     generator = keyEncoding;
     keyEncoding = "utf-8"; // default encoding

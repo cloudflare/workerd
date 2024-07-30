@@ -41,6 +41,7 @@ import {
   constants,
   isAscii,
   isUtf8,
+  transcode,
 } from 'node:buffer';
 
 import * as buffer from 'node:buffer';
@@ -5703,5 +5704,91 @@ export const isUtf8Test = {
         () => isUtf8(input),
       );
     });
+  }
+};
+
+// Adapted from test/parallel/test-icu-transcode.js
+export const transcodeTest = {
+  test(ctrl, env, ctx) {
+    const orig = Buffer.from('těst ☕', 'utf8');
+    const tests = {
+      'latin1': [0x74, 0x3f, 0x73, 0x74, 0x20, 0x3f],
+      'ascii': [0x74, 0x3f, 0x73, 0x74, 0x20, 0x3f],
+      'ucs2': [0x74, 0x00, 0x1b, 0x01, 0x73,
+               0x00, 0x74, 0x00, 0x20, 0x00,
+               0x15, 0x26]
+    };
+
+    for (const test in tests) {
+      const dest = transcode(orig, 'utf8', test);
+      strictEqual(dest.length, tests[test].length, `utf8->${test} length`);
+      for (let n = 0; n < tests[test].length; n++) {
+        strictEqual(dest[n], tests[test][n], `utf8->${test} char ${n}`);
+      }
+    }
+
+    {
+      const dest = transcode(Buffer.from(tests.ucs2), 'ucs2', 'utf8');
+      strictEqual(dest.toString(), orig.toString());
+    }
+
+    {
+      const utf8 = Buffer.from('€'.repeat(4000), 'utf8');
+      const ucs2 = Buffer.from('€'.repeat(4000), 'ucs2');
+      const utf8_to_ucs2 = transcode(utf8, 'utf8', 'ucs2');
+      const ucs2_to_utf8 = transcode(ucs2, 'ucs2', 'utf8');
+      deepStrictEqual(utf8, ucs2_to_utf8);
+      deepStrictEqual(ucs2, utf8_to_ucs2);
+      strictEqual(ucs2_to_utf8.toString('utf8'), utf8_to_ucs2.toString('ucs2'));
+    }
+
+    {
+      deepStrictEqual(
+        transcode(Buffer.from('hi', 'ascii'), 'ascii', 'utf16le'),
+        Buffer.from('hi', 'utf16le'));
+      deepStrictEqual(
+        transcode(Buffer.from('hi', 'latin1'), 'latin1', 'utf16le'),
+        Buffer.from('hi', 'utf16le'));
+      deepStrictEqual(
+        transcode(Buffer.from('hä', 'latin1'), 'latin1', 'utf16le'),
+        Buffer.from('hä', 'utf16le'));
+    }
+
+    {
+      const dest = transcode(new Uint8Array(), 'utf8', 'latin1');
+      strictEqual(dest.length, 0);
+    }
+
+    // Test that Uint8Array arguments are okay.
+    {
+      const uint8array = new Uint8Array([...Buffer.from('hä', 'latin1')]);
+      deepStrictEqual(
+        transcode(uint8array, 'latin1', 'utf16le'),
+        Buffer.from('hä', 'utf16le'));
+    }
+
+    // Invalid arguments should fail
+    throws(() => transcode(null, 'utf8', 'ascii'));
+    throws(() => transcode(Buffer.from('a'), 'b', 'utf8'));
+    throws(() => transcode(Buffer.from('a'), 'uf8', 'b'));
+
+    // Throws error for buffer bigger than 128mb.
+    {
+      const ISOLATE_MAX_SIZE = 134217728;
+      const val = Buffer.from('a'.repeat(ISOLATE_MAX_SIZE));
+
+      throws(() => transcode(val, 'utf16le', 'utf8'));
+      throws(() => transcode(val, 'latin1', 'utf16le'));
+    }
+
+    // Make sure same fromEncoding and toEncoding results in copy.
+    {
+      const original = Buffer.from('a');
+      const copied_value = transcode(original, 'utf8', 'utf8');
+      // Let's detach the copied_value
+      const _ = copied_value.buffer.transfer();
+      ok(copied_value.buffer.detached);
+      ok(!original.buffer.detached);
+    }
   }
 };

@@ -10,6 +10,7 @@ import {
   SlowBuffer,
   isAscii,
   isUtf8,
+  transcode,
 } from 'node-internal:internal_buffer';
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -30,6 +31,7 @@ export {
   SlowBuffer,
   isAscii,
   isUtf8,
+  transcode,
 };
 
 export default {
@@ -46,4 +48,5 @@ export default {
   SlowBuffer,
   isAscii,
   isUtf8,
+  transcode,
 };
