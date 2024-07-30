@@ -448,7 +448,9 @@ void WorkerdApi::compileModules(
       KJ_REQUIRE(featureFlags.getPythonWorkers(),
           "The python_workers compatibility flag is required to use Python.");
       // Inject Pyodide bundle
-      modules->addBuiltinBundle(KJ_ASSERT_NONNULL(pyodideBundleGlobal), kj::none);
+      if(util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
+          modules->addBuiltinBundle(KJ_ASSERT_NONNULL(pyodideBundleGlobal), kj::none);
+      }
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
       {
         auto mainModule = confModules.begin();
