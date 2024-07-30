@@ -129,7 +129,7 @@ private:
 
   Mode mode;
   z_stream ctx = {};
-  kj::byte buffer[4096];
+  kj::byte buffer[16384];
 
   // For the eponymous compatibility flag
   ContextFlags strictCompression;
