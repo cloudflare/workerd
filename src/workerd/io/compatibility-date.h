@@ -58,5 +58,6 @@ static constexpr uint64_t COMPAT_ENABLE_ALL_DATES_ANNOTATION_ID = 0x9a1d37c8030d
 static constexpr uint64_t EXPERIMENTAl_ANNOTATION_ID = 0xe3e5a63e76284d88;
 static constexpr uint64_t IMPLIED_BY_AFTER_DATE_ANNOTATION_ID = 0xe3e5a63e76284d89;
 static constexpr uint64_t NEEDED_BY_FL = 0xbd23aff9deefc308ull;
+static constexpr uint64_t PYTHON_SNAPSHOT_RELEASE_ANNOTATION_ID = 0xef74c0cc5d18cc0cull;
 
 }  // namespace workerd
