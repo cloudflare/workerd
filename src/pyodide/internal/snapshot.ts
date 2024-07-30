@@ -59,8 +59,8 @@ export async function uploadArtifacts(): Promise<void> {
 /**
  * Used to hold the memory that needs to be uploaded for the validator.
  */
-let MEMORY_TO_UPLOAD: Uint8Array | undefined = undefined;
-function getMemoryToUpload(): Uint8Array {
+let MEMORY_TO_UPLOAD: ArtifactBundler.MemorySnapshotResult | undefined = undefined;
+function getMemoryToUpload(): ArtifactBundler.MemorySnapshotResult {
   if (!MEMORY_TO_UPLOAD) {
     throw new TypeError("Expected MEMORY_TO_UPLOAD to be set");
   }
@@ -238,14 +238,16 @@ const SNAPSHOT_IMPORTS = [
  * If we are doing a baseline snapshot, just import everything from
  * SNAPSHOT_IMPORTS. These will all succeed.
  *
- * If doing a script-specific "dedicated" snap shot, also try to import each
- * user import.
+ * If doing a more dedicated "package" snap shot, also try to import each
+ * user import that is importing non-vendored modules.
  *
  * All of this is being done in the __main__ global scope, so be careful not to
  * pollute it with extra included-by-default names (user code is executed in its
  * own separate module scope though so it's not _that_ important).
+ *
+ * This function returns a list of modules that have been imported.
  */
-function memorySnapshotDoImports(Module: Module): void {
+function memorySnapshotDoImports(Module: Module): Array<string> {
   const toImport = SNAPSHOT_IMPORTS.join(",");
   const toDelete = Array.from(
     new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".", 1)[0])),
@@ -256,15 +258,24 @@ function memorySnapshotDoImports(Module: Module): void {
   simpleRunPython(Module, `del ${toDelete}`);
   if (IS_CREATING_BASELINE_SNAPSHOT) {
     // We've done all the imports for the baseline snapshot.
-    return;
+    return [];
   }
-  // Script-specific imports: collect all import nodes from user scripts and try
-  // to import them, catching and throwing away all failures.
-  // see process_script_imports.py.
+
+  // Process the Python modules in the user worker looking for imports of packages which are not
+  // vendored. Vendored packages are skipped because they may contain sensitive information which
+  // we do not want to include in the package snapshot.
+  //
+  // See process_script_imports.py.
   const processScriptImportsString = new TextDecoder().decode(
     new Uint8Array(processScriptImports),
   );
   simpleRunPython(Module, processScriptImportsString);
+
+  const importedModules: Array<string> = JSON.parse(simpleRunPython(
+    Module, "import sys, json; print(json.dumps(CF_LOADED_MODULES), file=sys.stderr)"
+  ));
+
+  return importedModules;
 }
 
 function checkLoadedSoFiles(dsoJSON: DylinkInfo): void {
@@ -287,29 +298,29 @@ function checkLoadedSoFiles(dsoJSON: DylinkInfo): void {
  * are initialized in the linear memory snapshot and then saving a copy of the
  * linear memory into MEMORY.
  */
-function makeLinearMemorySnapshot(Module: Module): Uint8Array {
-  memorySnapshotDoImports(Module);
+function makeLinearMemorySnapshot(Module: Module): ArtifactBundler.MemorySnapshotResult {
+  const importedModulesList = memorySnapshotDoImports(Module);
   const dsoJSON = recordDsoHandles(Module);
   if (IS_CREATING_BASELINE_SNAPSHOT) {
     // checkLoadedSoFiles(dsoJSON);
   }
-  return encodeSnapshot(Module.HEAP8, dsoJSON);
+  return { snapshot: encodeSnapshot(Module.HEAP8, dsoJSON), importedModulesList };
 }
 
-function setUploadFunction(toUpload: Uint8Array): void {
-  if (toUpload.constructor.name !== "Uint8Array") {
+function setUploadFunction(snapshot: Uint8Array, importedModulesList: Array<string>): void {
+  if (snapshot.constructor.name !== "Uint8Array") {
     throw new TypeError("Expected TO_UPLOAD to be a Uint8Array");
   }
   if (TOP_LEVEL_SNAPSHOT) {
-    MEMORY_TO_UPLOAD = toUpload;
+    MEMORY_TO_UPLOAD = { snapshot, importedModulesList };
     return;
   }
   DEFERRED_UPLOAD_FUNCTION = async () => {
     try {
-      const success = await ArtifactBundler.uploadMemorySnapshot(toUpload);
+      const success = await ArtifactBundler.uploadMemorySnapshot(snapshot);
       // Free memory
       // @ts-ignore
-      toUpload = undefined;
+      snapshot = undefined;
       if (!success) {
         console.warn("Memory snapshot upload failed.");
       }
@@ -324,7 +335,8 @@ export function maybeSetupSnapshotUpload(Module: Module): void {
   if (!SHOULD_UPLOAD_SNAPSHOT) {
     return;
   }
-  setUploadFunction(makeLinearMemorySnapshot(Module));
+  const { snapshot, importedModulesList } = makeLinearMemorySnapshot(Module);
+  setUploadFunction(snapshot, importedModulesList);
 }
 
 // "\x00snp"
@@ -449,7 +461,7 @@ export function maybeStoreMemorySnapshot() {
   if (ArtifactBundler.isEwValidating()) {
     ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
-    DiskCache.put("snapshot.bin", getMemoryToUpload());
+    DiskCache.put("snapshot.bin", getMemoryToUpload().snapshot);
     console.log("Saved snapshot to disk");
   }
 }

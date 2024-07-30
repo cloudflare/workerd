@@ -142,14 +142,20 @@ public:
   }
 };
 
+struct MemorySnapshotResult {
+  kj::Array<kj::byte> snapshot;
+  kj::Array<kj::String> importedModulesList;
+  JSG_STRUCT(snapshot, importedModulesList);
+};
+
 // A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler : public jsg::Object {
 public:
-  kj::Maybe<kj::Array<kj::byte>> storedSnapshot;
+  kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot,
-      kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)> uploadMemorySnapshotCb)
+      kj::Function<kj::Promise<bool>(MemorySnapshotResult snapshot)> uploadMemorySnapshotCb)
       :
         storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
@@ -172,6 +178,8 @@ public:
         isValidating(isValidating){};
 
   jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
+    // TODO(later): Remove upload code.
+
     // Prevent multiple uploads.
     if (hasUploaded) {
       return js.rejectedPromise<bool>(
@@ -186,10 +194,10 @@ public:
     auto& cb = KJ_REQUIRE_NONNULL(uploadMemorySnapshotCb);
     hasUploaded = true;
     auto& context = IoContext::current();
-    return context.awaitIo(js, cb(kj::mv(snapshot)));
+    return context.awaitIo(js, cb({ .snapshot = kj::mv(snapshot), .importedModulesList = {}}));
   };
 
-  void storeMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
+  void storeMemorySnapshot(jsg::Lock& js, MemorySnapshotResult snapshot) {
     KJ_REQUIRE(isValidating);
     storedSnapshot = kj::mv(snapshot);
   }
@@ -246,7 +254,7 @@ private:
   // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
   // up cold starts.
   kj::Maybe<kj::Array<kj::byte>> existingSnapshot;
-  kj::Maybe<kj::Function<kj::Promise<bool>(kj::Array<kj::byte> snapshot)>> uploadMemorySnapshotCb;
+  kj::Maybe<kj::Function<kj::Promise<bool>(MemorySnapshotResult snapshot)>> uploadMemorySnapshotCb;
   bool hasUploaded;
   bool isValidating;
 };
@@ -349,7 +357,8 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
   api::pyodide::ArtifactBundler,       \
   api::pyodide::DiskCache,             \
   api::pyodide::DisabledInternalJaeger,\
-  api::pyodide::SimplePythonLimiter
+  api::pyodide::SimplePythonLimiter,   \
+  api::pyodide::MemorySnapshotResult
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
   // We add `pyodide:` packages here including python-entrypoint-helper.js.
