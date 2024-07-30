@@ -641,6 +641,9 @@ namespace {
 // all in JavaScript when the optional is null in C++ (as opposed to the field being present but
 // assigned the value `undefined`).
 //
+// Note that if a `validate` function is provided, then it will be called after the struct is
+// unwrapped from v8. This would be an appropriate time to throw an error.
+//
 // Fields with a starting '$' will have that dollar sign prefix stripped in the JS binding. A
 // motivating example to enact that change was WebCrypto which has a field in a dictionary called
 // "public". '$' was chosen as a token we can use because it's a character for a C++ identifier. If
