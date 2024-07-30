@@ -640,6 +640,23 @@ the necessary mapping between the C++ struct and the JavaScript object. Only the
 properties listed in the macro are mapped. (In this case, `onlyInternal` is not
 included in the JavaScript object.)
 
+If the struct has a validate() method, it is called when the struct is unwrapped from v8.
+This is an opportunity for it to throw a TypeError based on some custom logic.
+
+```cpp
+struct ValdiatingFoo {
+  kj::String abc;
+
+  void validate() {
+    JSG_REQUIRE(abc.size() != 0, TypeError, "Field 'abc' had no length in 'ValidatingFoo'.");
+  }
+
+  JSG_STRUCT(abc);
+};
+```
+
+In this example the validate method would throw a `TypeError` if the size of the `abc` field was zero.
+
 ```cpp
 Foo someFunction(Foo foo) {
   KJ_DBG(foo.abc);  // a
