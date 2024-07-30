@@ -485,7 +485,7 @@ public:
     jsg::JsObject getConstructor(v8::Local<v8::Context> context) {
       v8::EscapableHandleScope scope(v8Isolate);
       v8::Local<v8::FunctionTemplate> tpl =
-          jsgIsolate.wrapper->template getTemplate(v8Isolate, (T*)nullptr);
+          jsgIsolate.wrapper->getTemplate(v8Isolate, (T*)nullptr);
       v8::Local<v8::Object> prototype = check(tpl->GetFunction(context));
       return jsg::JsObject(scope.Escape(prototype));
     }
