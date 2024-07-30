@@ -8,8 +8,11 @@
 #include "buffer-string-search.h"
 #include <workerd/jsg/buffersource.h>
 #include <kj/encoding.h>
-#include <algorithm>
+#include <kj/array.h>
 #include "simdutf.h"
+#include "i18n.h"
+
+#include <algorithm>
 
 // These are defined by <sys/byteorder.h> or <netinet/in.h> on some systems.
 // To avoid warnings, undefine them before redefining them.
@@ -85,34 +88,24 @@ void SwapBytes(kj::ArrayPtr<kj::byte> bytes) {
   }
 }
 
-enum class Encoding {
-  ASCII,
-  LATIN1,
-  UTF8,
-  UTF16LE,
-  BASE64,
-  BASE64URL,
-  HEX,
-};
-
-Encoding getEncoding(kj::StringPtr encoding) {
-  if (encoding == "utf8"_kj) {
+inline Encoding getEncoding(kj::StringPtr input) {
+  if (input == "utf8"_kj) {
     return Encoding::UTF8;
-  } else if (encoding == "ascii") {
+  } else if (input == "ascii"_kj) {
     return Encoding::ASCII;
-  } else if (encoding == "latin1") {
+  } else if (input == "latin1"_kj) {
     return Encoding::LATIN1;
-  } else if (encoding == "utf16le") {
+  } else if (input == "utf16le"_kj) {
     return Encoding::UTF16LE;
-  } else if (encoding == "base64") {
+  } else if (input == "base64"_kj) {
     return Encoding::BASE64;
-  } else if (encoding == "base64url") {
+  } else if (input == "base64url"_kj) {
     return Encoding::BASE64URL;
-  } else if (encoding == "hex") {
+  } else if (input == "hex"_kj) {
     return Encoding::HEX;
   }
 
-  KJ_UNREACHABLE;
+  JSG_FAIL_REQUIRE(Error, kj::str("Invalid encoding: ", input));
 }
 
 kj::Maybe<uint> tryFromHexDigit(char c) {
@@ -137,7 +130,7 @@ kj::Array<byte> decodeHexTruncated(kj::ArrayPtr<kj::byte> text, bool strict = fa
     }
     text = text.slice(0, text.size() - 1);
   }
-  kj::Vector vec = kj::Vector<kj::byte>(text.size() / 2);
+  auto vec = kj::Vector<kj::byte>(text.size() / 2);
 
   for (size_t i = 0; i < text.size(); i += 2) {
     byte b = 0;
@@ -216,8 +209,9 @@ uint32_t writeInto(
       dest.first(amountToCopy).copyFrom(bytes.first(amountToCopy));
       return amountToCopy;
     }
+    default:
+      KJ_UNREACHABLE;
   }
-  KJ_UNREACHABLE;
 }
 
 kj::Array<kj::byte> decodeStringImpl(
@@ -272,8 +266,9 @@ kj::Array<kj::byte> decodeStringImpl(
       string.writeInto(js, buf, options);
       return decodeHexTruncated(buf, strict);
     }
+    default:
+      KJ_UNREACHABLE;
   }
-  KJ_UNREACHABLE;
 }
 }  // namespace
 
@@ -561,8 +556,9 @@ jsg::JsString toStringImpl(
     case Encoding::HEX: {
       return js.str(kj::encodeHex(slice));
     }
+    default:
+      KJ_UNREACHABLE;
   }
-  KJ_UNREACHABLE;
 }
 
 }  // namespace
@@ -874,6 +870,17 @@ bool BufferUtil::isAscii(kj::Array<kj::byte> buffer) {
 bool BufferUtil::isUtf8(kj::Array<kj::byte> buffer) {
   if (buffer.size() == 0) return true;
   return simdutf::validate_utf8(buffer.asChars().begin(), buffer.size());
+}
+
+kj::Array<kj::byte> BufferUtil::transcode(kj::Array<kj::byte> source, kj::String rawFromEncoding, kj::String rawToEncoding) {
+  auto fromEncoding = getEncoding(rawFromEncoding);
+  auto toEncoding = getEncoding(rawToEncoding);
+
+  JSG_REQUIRE(i18n::canBeTranscoded(fromEncoding) &&
+              i18n::canBeTranscoded(toEncoding), Error,
+              "Unable to transcode buffer due to unsupported encoding");
+
+  return i18n::transcode(source, fromEncoding, toEncoding);
 }
 
 }  // namespace workerd::api::node {

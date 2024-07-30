@@ -440,7 +440,7 @@ export function compare(a: Buffer|Uint8Array, b: Buffer|Uint8Array) {
 
 Buffer.compare = compare;
 
-export function isEncoding(encoding: unknown) {
+export function isEncoding(encoding: unknown): encoding is string {
   return typeof encoding === "string" &&
     encoding.length !== 0 &&
     normalizeEncoding(encoding) !== undefined;
@@ -2292,6 +2292,22 @@ export function isUtf8(value: ArrayBufferView) {
     throw new Error('Unable to determine if buffer is UTF8 when it is detached');
   }
   return bufferUtil.isUtf8(value);
+}
+
+export function transcode(source: ArrayBufferView, fromEncoding: string, toEncoding: string) {
+  if (!isArrayBufferView(source)) {
+    throw new ERR_INVALID_ARG_TYPE('source', 'ArrayBufferView', typeof source);
+  }
+  const normalizedFromEncoding = normalizeEncoding(fromEncoding);
+  if (!Buffer.isEncoding(normalizedFromEncoding)) {
+    throw new ERR_UNKNOWN_ENCODING(fromEncoding);
+  }
+  const normalizedToEncoding = normalizeEncoding(toEncoding);
+  if (!Buffer.isEncoding(normalizedToEncoding)) {
+    throw new ERR_UNKNOWN_ENCODING(toEncoding);
+  }
+  // TODO(soon): Optimization opportunity: Pass int encoding values instead of strings.
+  return Buffer.from(bufferUtil.transcode(source, normalizedFromEncoding, normalizedToEncoding));
 }
 
 export default {
