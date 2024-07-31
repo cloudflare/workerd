@@ -562,4 +562,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # For local development purposes only, increase the message size limit to 128MB.
   # This is not expected ever to be made available in production, as large messages are inefficient.
 
+  internalWritableStreamAbortClearsQueue @57 :Bool
+      $compatEnableFlag("internal_writable_stream_abort_clears_queue")
+      $compatDisableFlag("internal_writable_stream_abort_does_not_clear_queue")
+      $compatEnableDate("2024-09-02");
+  # When using the original WritableStream implementation ("internal" streams), the
+  # abort() operation would be handled lazily, meaning that the queue of pending writes
+  # would not be cleared until the next time the queue was processed. This behavior leads
+  # to a situtation where the stream can hang if the consumer stops consuming. When set,
+  # this flag changes the behavior to clear the queue immediately upon abort.
 }
