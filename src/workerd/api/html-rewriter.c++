@@ -227,7 +227,7 @@ public:
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override;
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override;
   kj::Promise<void> end() override;
-  void abort(kj::Exception reason) override;
+  void abort(kj::Exception reason, AbortOption option = AbortOption::NONE) override;
 
   // Implementation for `Element::onEndTag` to avoid exposing private details of Rewriter.
   void onEndTag(lol_html_element_t *element, ElementCallbackFunction&& callback);
@@ -472,11 +472,11 @@ kj::Promise<void> Rewriter::end() {
   });
 }
 
-void Rewriter::abort(kj::Exception reason) {
+void Rewriter::abort(kj::Exception reason, AbortOption option) {
   // End the rewriter and forward the error to the wrapped output stream.
   maybeException = kj::cp(reason);
 
-  inner->abort(kj::mv(reason));
+  inner->abort(kj::mv(reason), option);
 }
 
 kj::Promise<void> Rewriter::finishWrite() {

@@ -1162,6 +1162,20 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
 
   KJ_IF_SOME(writable, state.tryGet<Writable>()) {
     auto exception = js.exceptionToKj(js.v8Ref(reason));
+
+    if (FeatureFlags::get(js).getInternalWritableStreamAbortClearsQueue()) {
+      // If this flag is set, we will clear the queue proactively and immediately
+      // error the stream rather than handling the abort lazily. In this case, the
+      // stream will be put into an errored state immediately after draining the
+      // queue. All pending writes and other operations in the queue will be rejected
+      // immediately and an immediately resolved or rejected promise will be returned.
+      writable->abort(kj::cp(exception), WritableStreamSink::AbortOption::DRAIN);
+      drain(js, reason);
+      return options.reject ?
+          rejectedMaybeHandledPromise<void>(js, reason, options.handled) :
+          js.resolvedPromise();
+    }
+
     if (queue.empty()) {
       writable->abort(kj::cp(exception));
       doError(js, reason);
@@ -2324,7 +2338,7 @@ kj::Promise<void> IdentityTransformStreamImpl::end() {
   return writeHelper(kj::ArrayPtr<const kj::byte>());
 }
 
-void IdentityTransformStreamImpl::abort(kj::Exception reason) {
+void IdentityTransformStreamImpl::abort(kj::Exception reason, AbortOption option) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(idle, Idle) {
       // This is fine.
@@ -2333,14 +2347,24 @@ void IdentityTransformStreamImpl::abort(kj::Exception reason) {
       request.fulfiller->reject(kj::cp(reason));
     }
     KJ_CASE_ONEOF(request, WriteRequest) {
-      KJ_FAIL_ASSERT("abort() is supposed to wait for any pending write() to finish");
+      switch (option) {
+        case AbortOption::NONE: {
+          KJ_FAIL_ASSERT("abort() is supposed to wait for any pending write() to finish");
+        }
+        case AbortOption::DRAIN: {
+          request.fulfiller->reject(kj::cp(reason));
+          break;
+        }
+      }
     }
     KJ_CASE_ONEOF(exception, kj::Exception) {
       // Already errored.
       return;
     }
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      KJ_FAIL_ASSERT("abort() is supposed to wait for any pending close() to finish");
+      if (option == AbortOption::NONE) {
+        KJ_FAIL_ASSERT("abort() is supposed to wait for any pending close() to finish");
+      }
     }
   }
 

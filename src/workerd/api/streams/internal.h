@@ -405,7 +405,7 @@ public:
 
   kj::Promise<void> end() override;
 
-  void abort(kj::Exception reason) override;
+  void abort(kj::Exception reason, AbortOption option = AbortOption::NONE) override;
 
 private:
   kj::Promise<size_t> readHelper(kj::ArrayPtr<kj::byte> bytes);

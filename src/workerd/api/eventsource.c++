@@ -79,7 +79,7 @@ public:
     return kj::READY_NOW;
   }
 
-  void abort(kj::Exception reason) override {
+  void abort(kj::Exception reason, AbortOption option = AbortOption::NONE) override {
     // There's really nothing to do here.
     clear();
   }

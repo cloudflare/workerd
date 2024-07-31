@@ -200,7 +200,14 @@ public:
   virtual kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
       ReadableStreamSource& input, bool end);
 
-  virtual void abort(kj::Exception reason) = 0;
+  enum class AbortOption {
+    NONE,
+    // Instructs the sink to reject pending writes when aborting. This is used when
+    // the InternalWritableStreamAbortClearsQueue flag is set.
+    DRAIN,
+  };
+
+  virtual void abort(kj::Exception reason, AbortOption option = AbortOption::NONE) = 0;
   // TODO(conform): abort() should return a promise after which closed fulfillers should be
   //   rejected. This may necessitate an "erroring" state.
 

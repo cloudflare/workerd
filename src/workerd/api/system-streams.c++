@@ -159,7 +159,7 @@ public:
 
   kj::Promise<void> end() override;
 
-  void abort(kj::Exception reason) override;
+  void abort(kj::Exception reason, AbortOption option = AbortOption::NONE) override;
 
   StreamEncoding disownEncodingResponsibility() override;
 
@@ -299,7 +299,7 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
   return promise.attach(ioContext.registerPendingEvent());
 }
 
-void EncodedAsyncOutputStream::abort(kj::Exception reason) {
+void EncodedAsyncOutputStream::abort(kj::Exception reason, AbortOption ignored) {
   inner.init<Ended>();
 }
 

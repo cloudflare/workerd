@@ -204,7 +204,7 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
       return kj::READY_NOW;
     }
     kj::Promise<void> end() override { return kj::READY_NOW; }
-    void abort(kj::Exception reason) override {}
+    void abort(kj::Exception reason, AbortOption option = AbortOption::NONE) override {}
   };
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {

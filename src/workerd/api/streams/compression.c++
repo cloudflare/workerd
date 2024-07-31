@@ -188,7 +188,7 @@ public:
     return writeInternal(Z_FINISH);
   }
 
-  void abort(kj::Exception reason) override {
+  void abort(kj::Exception reason, AbortOption ignored) override {
     cancelInternal(kj::mv(reason));
   }
 
