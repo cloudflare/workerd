@@ -122,8 +122,12 @@ public:
       kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), isolate, context, in)...
     };
 
-    if constexpr (requires { t.validate(); }) {
-      t.validate();
+    // Note that if a `validate` function is provided, then it will be called after the struct is
+    // unwrapped from v8. This would be an appropriate time to throw an error.
+    // Signature: void validate(jsg::Lock& js);
+    if constexpr (requires (jsg::Lock& js) { t.validate(js); }) {
+      jsg::Lock& js = jsg::Lock::from(isolate);
+      t.validate(js);
     }
 
     return t;

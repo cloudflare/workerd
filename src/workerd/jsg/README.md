@@ -642,12 +642,13 @@ included in the JavaScript object.)
 
 If the struct has a validate() method, it is called when the struct is unwrapped from v8.
 This is an opportunity for it to throw a TypeError based on some custom logic.
+The signature for this method is `void validate(jsg::Lock&);`
 
 ```cpp
 struct ValdiatingFoo {
   kj::String abc;
 
-  void validate() {
+  void validate(jsg::Lock& lock) {
     JSG_REQUIRE(abc.size() != 0, TypeError, "Field 'abc' had no length in 'ValidatingFoo'.");
   }
 

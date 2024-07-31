@@ -259,83 +259,40 @@ export const cacheMode = {
       const req = new Request('https://example.org', {});
       assert.strictEqual(req.cache, undefined);
     }
-    {
-      if(!env.CACHE_ENABLED) {
-        assert.throws(() => {
-          new Request('https://example.org', { cache: 'no-store' });
-        }, {
-          name: 'Error',
-          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
-        });
-      } else {
-        const req = new Request('https://example.org', { cache: 'no-store' });
-        assert.strictEqual(req.cache, 'no-store');
-      }
-    }
-    {
-      if(!env.CACHE_ENABLED) {
-        assert.throws(() => {
-          new Request('https://example.org', { cache: 'no-cache' });
-        }, {
-          name: 'Error',
-          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
-        });
-      } else {
-        const req = new Request('https://example.org', { cache: 'no-cache' });
-        assert.strictEqual(req.cache, 'no-cache');
-      }
-    }
-    {
-      if(!env.CACHE_ENABLED) {
-        assert.throws(() => {
-          new Request('https://example.org', { cache: 'unsupported' });
-        }, {
-          name: 'Error',
-          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
-        });
-      } else {
-        assert.throws(() => {
-          new Request('https://example.org', { cache: 'unsupported' });
-        }, {
-          name: 'TypeError',
-          message: "Unsupported cache mode: unsupported",
-        });
-
-      }
-    }
-    {
-      if(!env.CACHE_ENABLED) {
-        await assert.rejects((async () => {
-          await fetch('http://example.org', { cache: 'no-cache' });
-        })(), {
-          name: 'Error',
-          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
-        });
-      } else {
-        await assert.rejects((async () => {
-          await fetch('http://example.org', { cache: 'no-cache' });
-        })(), {
-          name: 'TypeError',
-          message: "Unsupported cache mode: no-cache",
-        });
-      }
-    }
-    {
-      if(!env.CACHE_ENABLED) {
-        await assert.rejects((async () => {
-          await fetch('http://example.org', { cache: 'no-transform' });
-        })(), {
-          name: 'Error',
-          message: "The 'cache' field on 'RequestInitializerDict' is not implemented.",
-        });
-      } else {
-        await assert.rejects((async () => {
-          await fetch('http://example.org', { cache: 'no-transform' });
-        })(), {
-          name: 'TypeError',
-          message: "Unsupported cache mode: no-transform",
-        });
-      }
+    if(!env.CACHE_ENABLED) {
+      assertRequestCacheThrowsError('no-store');
+      assertRequestCacheThrowsError('no-cache');
+      assertRequestCacheThrowsError('no-transform');
+      assertRequestCacheThrowsError('unsupported');
+      assertFetchCacheRejectsError('no-store');
+      assertFetchCacheRejectsError('no-cache');
+      assertFetchCacheRejectsError('no-transform');
+      assertFetchCacheRejectsError('unsupported');
+    } else {
+      assertRequestCacheThrowsError('no-store',
+        'TypeError',
+        "Unsupported cache mode: no-store");
+      assertRequestCacheThrowsError('no-cache',
+        'TypeError',
+        "Unsupported cache mode: no-cache");
+      assertRequestCacheThrowsError('no-transform',
+        'TypeError',
+        "Unsupported cache mode: no-transform");
+      assertRequestCacheThrowsError('unsupported',
+        'TypeError',
+        "Unsupported cache mode: unsupported");
+      assertFetchCacheRejectsError('no-store',
+        'TypeError',
+        "Unsupported cache mode: no-store");
+      assertFetchCacheRejectsError('no-cache',
+        'TypeError',
+        "Unsupported cache mode: no-cache");
+      assertFetchCacheRejectsError('no-transform',
+        'TypeError',
+        "Unsupported cache mode: no-transform");
+      assertFetchCacheRejectsError('unsupported',
+        'TypeError',
+        "Unsupported cache mode: unsupported");
     }
   }
 }
