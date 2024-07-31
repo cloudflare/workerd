@@ -214,7 +214,7 @@ public:
 
 class ReadableStreamSource {
 public:
-  virtual kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) = 0;
+  virtual kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) = 0;
 
   // The ReadableStreamSource version of pumpTo() has no `amount` parameter, since the Streams spec
   // only defines pumping everything.

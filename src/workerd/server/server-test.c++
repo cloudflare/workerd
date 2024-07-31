@@ -156,8 +156,8 @@ public:
       return false;
     }
 
-    char c;
-    auto promise = stream->tryRead(&c, 1, 1);
+    byte c[1]{};
+    auto promise = stream->tryRead(c, 1);
     if (!promise.poll(ws)) {
       // Read didn't complete immediately. We have no data available, but we're not at EOF.
       return false;
@@ -170,7 +170,7 @@ public:
       // Oops, the stream had data available and we accidentally read a byte of it. Store that off
       // to the side.
       KJ_ASSERT(n == 1);
-      premature = c;
+      premature = c[0];
       return false;
     }
   }
@@ -202,7 +202,7 @@ private:
   kj::Maybe<char> premature;
 
   kj::String readAllAvailable() {
-    kj::Vector<char> buffer(256);
+    kj::Vector<byte> buffer(256);
     KJ_IF_SOME(p, premature) {
       buffer.add(p);
     }
@@ -213,7 +213,7 @@ private:
       size_t pos = buffer.size();
       buffer.resize(kj::max(buffer.size() + 256, buffer.capacity()));
 
-      auto promise = stream->tryRead(buffer.begin() + pos, 1, buffer.size() - pos);
+      auto promise = stream->tryRead(buffer.asPtr().slice(pos), 1);
       if (!promise.poll(ws)) {
         // A tryRead() of 1 byte didn't resolve, there must be no data to read.
         buffer.resize(pos);
@@ -235,7 +235,7 @@ private:
     };
 
     buffer.add('\0');
-    return kj::String(buffer.releaseAsArray());
+    return kj::String(buffer.releaseAsArray().releaseAsChars());
   }
 
   kj::String readWebSocketMessage(size_t maxMessageSize = 1 << 24) {
@@ -291,7 +291,7 @@ private:
     size_t bytesRead = 0;
     buffer.resize(buffer.size() + bytesToRead);
     while (bytesRead < bytesToRead) {
-      auto promise = stream->tryRead(buffer.begin() + pos, 1, buffer.size() - pos);
+      auto promise = stream->tryRead(buffer.asPtr().asBytes().slice(pos), 1);
       KJ_REQUIRE(promise.poll(ws), kj::str("No data available while ", what));
         // A tryRead() of 1 byte didn't resolve, there must be no data to read.
 

@@ -387,9 +387,9 @@ public:
 
   // ReadableStreamSource implementation -------------------------------------------------
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override;
 
-  kj::Promise<size_t> tryReadInternal(void* buffer, size_t maxBytes);
+  kj::Promise<size_t> tryReadInternal(kj::ArrayPtr<kj::byte> buffer);
 
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override;
 

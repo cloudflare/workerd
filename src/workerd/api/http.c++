@@ -576,10 +576,10 @@ public:
       : unread(buffer.view),
         ownBytes(kj::mv(buffer.ownBytes)) {}
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t amount = kj::min(maxBytes, unread.size());
-    memcpy(buffer, unread.begin(), amount);
-    unread = unread.slice(amount, unread.size());
+  kj::Promise<size_t> tryRead(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+    size_t amount = kj::min(buffer.size(), unread.size());
+    buffer.first(amount).copyFrom(unread.first(amount));
+    unread = unread.slice(amount);
     return amount;
   }
 
