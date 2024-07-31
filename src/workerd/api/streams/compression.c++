@@ -255,7 +255,7 @@ public:
         // There might still be data in the output buffer remaining to read.
         if (output.empty()) return size_t(0);
         return tryReadInternal(
-            kj::ArrayPtr<kj::byte>(reinterpret_cast<kj::byte*>(buffer), maxBytes),
+            kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes),
             minBytes);
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
@@ -263,7 +263,7 @@ public:
       }
       KJ_CASE_ONEOF(open, Open) {
         return tryReadInternal(
-            kj::ArrayPtr<kj::byte>(reinterpret_cast<kj::byte*>(buffer), maxBytes),
+            kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes),
             minBytes);
       }
     }
