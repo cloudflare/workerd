@@ -752,8 +752,6 @@ struct RequestInitializerDict {
   // jsg::Optional<kj::String> priority;
   // TODO(conform): Might support later?
 
-  void validate();
-
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, mode, credentials, cache,
              referrer, referrerPolicy, integrity, signal);
   JSG_STRUCT_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
@@ -761,6 +759,10 @@ struct RequestInitializerDict {
     body?: BodyInit | null;
     cf?: Cf;
   });
+
+  // This method is called within tryUnwrap() when the type is unpacked from v8.
+  // See jsg Readme for more details.
+  void validate(jsg::Lock&);
 };
 
 class Request: public Body {

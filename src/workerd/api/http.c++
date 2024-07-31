@@ -1198,14 +1198,13 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   return cf.serialize(js);
 }
 
-void RequestInitializerDict::validate() {
+void RequestInitializerDict::validate(jsg::Lock& js) {
   KJ_IF_SOME(c, cache){
-    // Check compatability
-    JSG_REQUIRE(Worker::Api::current().getFeatureFlags().getCacheOptionEnabled(), Error, kj::str(
+    // Check compatability flag
+    JSG_REQUIRE(FeatureFlags::get(js).getCacheOptionEnabled(), Error, kj::str(
       "The 'cache' field on 'RequestInitializerDict' is not implemented."));
 
-    // Check that the string is a supported type
-    auto cacheStruct = getCacheModeFromName(c);
+    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported cache mode: ", c));
   }
 }
 
@@ -1247,7 +1246,6 @@ void Request::serialize(
 
     // .mode is unimplemented
     // .credentials is unimplemented
-    // .cache is unimplemented
     // .referrer is unimplemented
     // .referrerPolicy is unimplemented
     // .integrity is required to be empty
@@ -1818,13 +1816,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
   // If the jsRequest has a CacheMode, we need to handle that here.
   // Currently, the only cache mode we support is undefined, but we will soon support
   // no-cache and no-store. These additional modes will be hidden behind an autogate.
-  if (jsRequest->getCacheMode() != Request::CacheMode::NONE) {
-    JSG_REQUIRE(FeatureFlags::get(js).getCacheOptionEnabled(), Error, kj::str(
-+            "The 'cache' field on 'RequestInitializerDict' is not implemented."));
-    return js.rejectedPromise<jsg::Ref<Response>>(
-        js.typeError(kj::str("Unsupported cache mode: ",
-            KJ_ASSERT_NONNULL(jsRequest->getCache(js)))));
-  }
+  KJ_ASSERT(jsRequest->getCacheMode() == Request::CacheMode::NONE);
 
   kj::String url = uriEncodeControlChars(
       urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());

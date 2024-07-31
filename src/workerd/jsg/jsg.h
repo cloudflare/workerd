@@ -643,6 +643,17 @@ namespace {
 //
 // Note that if a `validate` function is provided, then it will be called after the struct is
 // unwrapped from v8. This would be an appropriate time to throw an error.
+// Signature: void validate(jsg::Lock& js);
+// Example:
+// struct ValdiatingFoo {
+//  kj::String abc;
+//  void validate(jsg::Lock& js) {
+//    JSG_REQUIRE(abc.size() != 0, TypeError, "Field 'abc' had no length in 'ValidatingFoo'.");
+//  }
+//  JSG_STRUCT(abc);
+// };
+//
+// In this example the validate method would throw a `TypeError` if the size of the `abc` field was zero.
 //
 // Fields with a starting '$' will have that dollar sign prefix stripped in the JS binding. A
 // motivating example to enact that change was WebCrypto which has a field in a dictionary called
