@@ -2107,6 +2107,9 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         .map([](kj::String&& str) mutable {
       // It's silly but the URL spec always includes the : suffix in the value,
       // while the URLPattern spec always omits it. Silly specs.
+      if (!str.size()) {
+        return kj::mv(str);
+      }
       return stripSuffixFromProtocol(str.asPtr());
     })) {
       result.protocol = kj::mv(protocol);
