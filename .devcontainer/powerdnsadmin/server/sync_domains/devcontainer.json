@@ -6,7 +6,7 @@
 	"postStartCommand": "npm i",
 	"customizations": {
 		// Configure properties specific to VS Code.
-		"vscode": {
+		"com.microsoft.VSCode": {
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [
 				"BazelBuild.vscode-bazel",
@@ -15,7 +15,7 @@
 				"llvm-vs-code-extensions.vscode-clangd",
 				"ms-vscode.cpptools",
 				"abronan.capnproto-syntax",
-				"DavidAnson.vscode-markdownlint"
+				"com.github.ios"
 			],
 			"settings": {
 				// The Microsoft C/C++ extension has IntelliSense support that is not compatible with the clangd extension.
