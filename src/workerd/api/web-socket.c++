@@ -476,6 +476,11 @@ WebSocket::Accepted::~Accepted() noexcept(false) {
 }
 
 void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
+  size_t maxMessageSize = kj::WebSocket::SUGGESTED_MAX_MESSAGE_SIZE;
+  if (FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
+    maxMessageSize = 128u << 20;
+  }
+
   // If the kj::WebSocket happens to be an AbortableWebSocket (see util/abortable.h), then
   // calling readLoop here could throw synchronously if the canceler has already been tripped.
   // Using kj::evalNow() here let's us capture that and handle correctly.
@@ -483,7 +488,7 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
   // We catch exceptions and return Maybe<Exception> instead since we want to handle the exceptions
   // in awaitIo() below, but we don't want the KJ exception converted to JavaScript before we can
   // examine it.
-  kj::Promise<kj::Maybe<kj::Exception>> promise = readLoop(kj::mv(cs));
+  kj::Promise<kj::Maybe<kj::Exception>> promise = readLoop(kj::mv(cs), maxMessageSize);
 
   auto& context = IoContext::current();
 
@@ -942,14 +947,15 @@ kj::Array<kj::StringPtr> WebSocket::getHibernatableTags() {
 }
 
 kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
-    kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
+    kj::Maybe<kj::Own<InputGate::CriticalSection>> cs,
+    size_t maxMessageSize) {
   try {
     // Note that we'll throw if the websocket has enabled hibernation.
     auto& ws = *KJ_REQUIRE_NONNULL(
         KJ_ASSERT_NONNULL(farNative->state.tryGet<Accepted>()).ws.getIfNotHibernatable());
     auto& context = IoContext::current();
     while (true) {
-      auto message = co_await ws.receive();
+      auto message = co_await ws.receive(maxMessageSize);
 
       auto size = countBytesFromMessage(message);
       KJ_IF_SOME(o, observer) {

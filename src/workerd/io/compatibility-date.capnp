@@ -523,4 +523,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables fetching hosts with a custom port from workers.
   # For orange clouded sites only standard ports are allowed (https://developers.cloudflare.com/fundamentals/reference/network-ports/#network-ports-compatible-with-cloudflares-proxy).
   # For grey clouded sites all ports are allowed.
+
+  increaseWebsocketMessageSize @56 :Bool
+      $compatEnableFlag("increase_websocket_message_size")
+      $experimental;
+  # For local development purposes only, increase the message size limit to 128MB.
+  # This is not expected ever to be made available in production, as large messages are inefficient.
+
 }
