@@ -445,6 +445,9 @@ private:
   // `close()`, thereby preventing calls to `send()` even after we wake from hibernation.
   bool closedOutgoingForHib = false;
 
+  // Maximum allowed size for WebSocket messages
+  inline static const size_t SUGGESTED_MAX_MESSAGE_SIZE = 1u << 20;
+
   // Maximum size of a WebSocket attachment.
   inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 2;
 
@@ -648,7 +651,7 @@ private:
       IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native,
       AutoResponse& autoResponse, kj::Maybe<kj::Own<WebSocketObserver>>& observer);
 
-  kj::Promise<kj::Maybe<kj::Exception>> readLoop(kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
+  kj::Promise<kj::Maybe<kj::Exception>> readLoop(kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize);
 
   void reportError(jsg::Lock& js, kj::Exception&& e);
   void reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err);
