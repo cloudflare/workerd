@@ -5,6 +5,7 @@
 #include "blob.h"
 #include "streams.h"
 #include "util.h"
+#include "workerd/io/io-context.h"
 #include <workerd/io/observer.h>
 #include <workerd/util/mimetype.h>
 

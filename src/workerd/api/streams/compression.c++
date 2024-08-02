@@ -4,6 +4,7 @@
 
 #include "compression.h"
 #include <workerd/io/features.h>
+#include <workerd/io/io-context.h>
 #include <zlib.h>
 #include <deque>
 #include <vector>

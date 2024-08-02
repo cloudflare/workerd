@@ -6,6 +6,7 @@
 #include <kj/debug.h>
 #include "readable.h"
 #include "writable.h"
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/buffersource.h>
 #include <workerd/util/weak-refs.h>
 #include <kj/vector.h>

@@ -9,6 +9,7 @@
 #include "events.h"
 #include "http.h"
 #include "eventsource.h"
+#include "streams/transform.h"
 #include "hibernation-event-params.h"
 #include <workerd/io/io-timers.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU

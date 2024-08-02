@@ -5,8 +5,8 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
-#include <workerd/io/io-context.h>
 #include "../basics.h"
+#include <workerd/api/deferred-proxy.h>
 #include <workerd/io/worker-interface.capnp.h>
 
 #if _MSC_VER
@@ -893,11 +893,7 @@ jsg::Promise<T> rejectedMaybeHandledPromise(
   return kj::mv(prp.promise);
 }
 
-inline kj::Maybe<IoContext&> tryGetIoContext() {
-  if (IoContext::hasCurrent()) {
-    return IoContext::current();
-  }
-  return kj::none;
-}
+// Generic helper method. Defined in readable.c++ to avoid having to include io-context.h here.
+inline kj::Maybe<IoContext&> tryGetIoContext();
 
 }  // namespace workerd::api

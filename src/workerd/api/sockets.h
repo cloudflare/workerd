@@ -8,7 +8,9 @@
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
-#include "streams.h"
+#include <workerd/io/io-context.h>
+#include "streams/readable.h"
+#include "streams/writable.h"
 
 namespace workerd::api {
 

@@ -4,6 +4,7 @@
 
 #include "impl.h"
 #include <workerd/api/util.h>
+#include <workerd/io/worker.h>
 #include <algorithm>
 #include <map>
 #include <openssl/bn.h>

@@ -9,6 +9,7 @@
 
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/io/worker.h>
 #include <workerd/api/basics.h>
 #include <workerd/api/web-socket.h>
 #include <workerd/api/hibernation-event-params.h>

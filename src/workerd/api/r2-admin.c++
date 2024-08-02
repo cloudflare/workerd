@@ -9,6 +9,7 @@
 #include <capnp/compat/json.h>
 #include <workerd/util/http-util.h>
 #include <workerd/api/r2-api.capnp.h>
+#include "workerd/io/io-context.h"
 
 namespace workerd::api::public_beta {
 jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {

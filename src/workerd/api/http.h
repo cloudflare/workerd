@@ -11,7 +11,6 @@
 #include <map>
 #include "basics.h"
 #include "cf-property.h"
-#include "streams.h"
 #include "form-data.h"
 #include "web-socket.h"
 #include "url.h"
@@ -20,6 +19,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include "worker-rpc.h"
 #include "queue.h"
+#include "streams/readable.h"
 
 namespace workerd::api {
 

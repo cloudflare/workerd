@@ -5,8 +5,9 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
-#include "streams.h"
 #include <workerd/io/limit-enforcer.h>
+#include "streams/readable.h"
+#include <kj/compat/http.h>
 
 namespace workerd { class IoContext; }
 namespace workerd::api {

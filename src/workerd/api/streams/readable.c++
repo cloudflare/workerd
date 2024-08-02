@@ -772,4 +772,11 @@ void ReadableStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("eofResolverPair", eofResolverPair);
 }
 
+inline kj::Maybe<IoContext&> tryGetIoContext() {
+  if (IoContext::hasCurrent()) {
+    return IoContext::current();
+  }
+  return kj::none;
+}
+
 }  // namespace workerd::api

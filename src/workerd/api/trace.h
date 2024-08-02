@@ -10,6 +10,7 @@
 
 #include <workerd/api/basics.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
 #include <kj/async.h>
 
