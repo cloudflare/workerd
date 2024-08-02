@@ -19,7 +19,7 @@ export const test_vector_search_vector_query = {
   async test(_, env) {
     const IDX = env["vector-search"];
     {
-      // with returnValues = true, returnMetadata = true
+      // with returnValues = true, returnMetadata = "indexed"
       const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
         topK: 3,
         returnValues: true,
@@ -58,7 +58,7 @@ export const test_vector_search_vector_query = {
     }
 
     {
-      // with returnValues = unset (false), returnMetadata = unset (false)
+      // with returnValues = unset (false), returnMetadata = unset (none)
       const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
         topK: 3,
       });
@@ -85,7 +85,7 @@ export const test_vector_search_vector_query = {
     }
 
     {
-      // with returnValues = unset (false), returnMetadata = unset (false), filter = "Peter Piper picked a peck of pickled peppers"
+      // with returnValues = unset (false), returnMetadata = unset (none), filter = "Peter Piper picked a peck of pickled peppers"
       const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
         topK: 1,
         filter: {
