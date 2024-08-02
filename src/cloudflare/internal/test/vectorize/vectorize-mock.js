@@ -97,7 +97,7 @@ export default {
       ) {
         return Response.json({});
       } else if (request.method === "POST" && pathname.endsWith("/query")) {
-        /** @type {VectorizeQueryOptions<VectorizeMetadataRetrievalLevel> & {vector: number[]}} */
+        /** @type {VectorizeQueryOptions & {vector: number[]}} */
         const body = await request.json();
         let returnSet = structuredClone(exampleVectorMatches);
         if (
@@ -114,7 +114,7 @@ export default {
           returnSet.forEach((v) => {
             delete v.values;
           });
-        if (!body?.returnMetadata)
+        if (!body?.returnMetadata || body?.returnMetadata === "none")
           returnSet.forEach((v) => {
             delete v.metadata;
           });
