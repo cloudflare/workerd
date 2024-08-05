@@ -326,6 +326,7 @@ enum class PragmaSignature {
   NO_ARG,
   BOOLEAN,
   OBJECT_NAME,
+  OPTIONAL_OBJECT_NAME,
   NULL_NUMBER_OR_OBJECT_NAME
 };
 struct PragmaInfo {
@@ -350,7 +351,7 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
   { "reverse_unordered_selects"_kj, PragmaSignature::BOOLEAN },
 
   // Takes an argument of table name or index name, returns info about it.
-  { "foreign_key_check"_kj, PragmaSignature::OBJECT_NAME },
+  { "foreign_key_check"_kj, PragmaSignature::OPTIONAL_OBJECT_NAME },
   { "foreign_key_list"_kj, PragmaSignature::OBJECT_NAME },
   { "index_info"_kj, PragmaSignature::OBJECT_NAME },
   { "index_list"_kj, PragmaSignature::OBJECT_NAME },
@@ -701,6 +702,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           case PragmaSignature::OBJECT_NAME: {
             // Argument is required.
             auto val = KJ_UNWRAP_OR(param2, return false);
+            return regulator.isAllowedName(val);
+          }
+          case PragmaSignature::OPTIONAL_OBJECT_NAME: {
+            auto val = KJ_UNWRAP_OR(param2, return true);
             return regulator.isAllowedName(val);
           }
           case PragmaSignature::NULL_NUMBER_OR_OBJECT_NAME: {
