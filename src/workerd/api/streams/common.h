@@ -204,7 +204,7 @@ public:
     NONE,
     // Instructs the sink to reject pending writes when aborting. This is used when
     // the InternalWritableStreamAbortClearsQueue flag is set.
-    DRAIN,
+    ABORT_QUEUED_WRITES,
   };
 
   virtual void abort(kj::Exception reason, AbortOption option = AbortOption::NONE) = 0;
