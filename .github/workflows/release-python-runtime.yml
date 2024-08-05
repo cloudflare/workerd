@@ -1,0 +1,57 @@
+name: Build Python Runtime
+
+permissions:
+    id-token: write # This is required for requesting the JWT
+    contents: read  # This is required for actions/checkout
+
+on:
+    workflow_dispatch:
+        inputs:
+            pyodide:
+                description: The Pyodide version
+            pyodideRevision:
+                description: The Pyodide revision date
+            backport:
+                description: The Pyodide release backport number
+            dry-run:
+                description: Actually upload or just test build step?
+                default: false
+                type: boolean
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    name: build Python runtime
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - name: Setup Linux
+        if: runner.os == 'Linux'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          wget https://apt.llvm.org/llvm.sh
+          sed -i '/apt-get install/d' llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 15
+          sudo apt-get install -y --no-install-recommends clang-15 lld-15 libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-15/bin/clang --action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-15/bin/clang --host_action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
+      - name: Configure download mirrors
+        shell: bash
+        run: |
+          if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
+            # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
+            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
+          fi
+      - name: Bazel build
+        run: |
+          bazelisk build --config=release_linux //src/pyodide:pyodide.capnp.bin@rule
+          cp bazel-bin/src/pyodide/pyodide.capnp.bin .
+      - name: Upload Pyodide capnproto bundle
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.PYODIDE_CAPNP_R2_SECRET_ACCESS_KEY }}
+        run: |
+          pip install boto3
+          python3 src/pyodide/upload_bundle.py pyodide.capnp.bin pyodide_${{ inputs.pyodide }}_${{ inputs.pyodideRevision }}_${{ inputs.backport }}.capnp.bin
