@@ -117,7 +117,8 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 
 
 static PythonConfig defaultConfig {
-  .diskCacheRoot = kj::none,
+  .packageDiskCacheRoot = kj::none,
+  .pyodideDiskCacheRoot = kj::none,
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
@@ -449,7 +450,7 @@ void WorkerdApi::compileModules(
           "The python_workers compatibility flag is required to use Python.");
       // Inject Pyodide bundle
       if(util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
-          modules->addBuiltinBundle(KJ_ASSERT_NONNULL(pyodideBundleGlobal), kj::none);
+          modules->addBuiltinBundle(getPyodideBundle(kj::str("2")), kj::none);
       }
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
       {
@@ -517,7 +518,7 @@ void WorkerdApi::compileModules(
         using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
         using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
         auto specifier = "pyodide-internal:disk_cache";
-        auto diskCache = jsg::alloc<DiskCache>(impl->pythonConfig.diskCacheRoot);
+        auto diskCache = jsg::alloc<DiskCache>(impl->pythonConfig.packageDiskCacheRoot);
         modules->addBuiltinModule(
           specifier,
           [specifier = kj::str(specifier), diskCache = kj::mv(diskCache)](
@@ -940,9 +941,9 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         jsg::modules::Module::newJsgObjectModuleHandler<
             DiskCache,
             JsgWorkerdIsolate_TypeWrapper>(
-                [diskCache=jsg::alloc<DiskCache>(pythonConfig.diskCacheRoot)]
+                [packageDiskCache=jsg::alloc<DiskCache>(pythonConfig.packageDiskCacheRoot)]
                 (jsg::Lock& js) mutable -> jsg::Ref<DiskCache> {
-      return diskCache.addRef();
+      return packageDiskCache.addRef();
     }));
     // Inject a (disabled) SimplePythonLimiter
     pyodideBundleBuilder.addSynthetic(limiterSpecifier,

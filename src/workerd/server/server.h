@@ -61,8 +61,11 @@ public:
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
   }
-  void setPythonDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>> &&dkr) {
-    pythonConfig.diskCacheRoot = kj::mv(dkr);
+  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>> &&dkr) {
+    pythonConfig.packageDiskCacheRoot = kj::mv(dkr);
+  }
+  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>> &&dkr) {
+    pythonConfig.pyodideDiskCacheRoot = kj::mv(dkr);
   }
   void setPythonCreateSnapshot() {
     pythonConfig.createSnapshot = true;
@@ -103,7 +106,8 @@ private:
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
   PythonConfig pythonConfig = PythonConfig {
-    .diskCacheRoot = kj::none,
+    .packageDiskCacheRoot = kj::none,
+    .pyodideDiskCacheRoot = kj::none,
     .createSnapshot = false,
     .createBaselineSnapshot = false
   };
@@ -228,7 +232,7 @@ private:
                                     kj::ForkedPromise<void>& forkedDrainWhen,
                                     bool forTest = false);
 
-  void fetchPyodideBundle();
+  void fetchPyodideBundle(PythonConfig& pyConfig);
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,

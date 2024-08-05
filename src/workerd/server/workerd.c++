@@ -731,8 +731,10 @@ public:
         .addOption({"experimental"}, [this]() { server->allowExperimental(); return true; },
                    "Permit the use of experimental features which may break backwards "
                    "compatibility in a future release.")
-        .addOptionWithArg({"disk-cache-dir"}, CLI_METHOD(setPythonDiskCacheDir), "<path>",
+        .addOptionWithArg({"pyodide-package-disk-cache-dir"}, CLI_METHOD(setPackageDiskCacheDir), "<path>",
                   "Use <path> as a disk cache to avoid repeatedly fetching packages from the internet. ")
+        .addOptionWithArg({"pyodide-bundle-disk-cache-dir"}, CLI_METHOD(setPyodideDiskCacheDir), "<path>",
+                  "Use <path> as a disk cache to avoid repeatedly fetching Pyodide bundles from the internet. ")
         .addOption({"python-save-snapshot"}, [this]() { server->setPythonCreateSnapshot();  return true; },
                   "Save a dedicated snapshot to the disk cache")
         .addOption({"python-save-baseline-snapshot"}, [this]() { server->setPythonCreateBaselineSnapshot();  return true; },
@@ -937,10 +939,16 @@ public:
     server->enableControl(fd);
   }
 
-  void setPythonDiskCacheDir(kj::StringPtr pathStr) {
+  void setPackageDiskCacheDir(kj::StringPtr pathStr) {
     kj::Path path = fs->getCurrentPath().eval(pathStr);
     kj::Maybe<kj::Own<const kj::Directory>> dir = fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
-    server->setPythonDiskCacheRoot(kj::mv(dir));
+    server->setPackageDiskCacheRoot(kj::mv(dir));
+  }
+
+  void setPyodideDiskCacheDir(kj::StringPtr pathStr) {
+    kj::Path path = fs->getCurrentPath().eval(pathStr);
+    kj::Maybe<kj::Own<const kj::Directory>> dir = fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
+    server->setPyodideDiskCacheRoot(kj::mv(dir));
   }
 
   void watch() {

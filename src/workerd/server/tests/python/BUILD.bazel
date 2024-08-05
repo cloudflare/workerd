@@ -1,42 +1,50 @@
 load("//:build/wd_test.bzl", "wd_test")
 
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+
+copy_file(
+    name = "pyodide-2.capnp.bin@rule",
+    src = "//src/pyodide:pyodide.capnp.bin",
+    out = "pyodide-bundle-cache/pyodide-2.capnp.bin"
+)
+
 wd_test(
     src = "hello/hello.wd-test",
-    args = ["--experimental"],
+    args = ["--experimental", "--pyodide-bundle-disk-cache-dir", "$(location pyodide-2.capnp.bin@rule)/.."],
     data = glob(
         [
             "hello/*",
         ],
         exclude = ["**/*.wd-test"],
-    ),
+    ) + ["pyodide-2.capnp.bin@rule"],
 )
 
 wd_test(
     src = "env-param/env.wd-test",
-    args = ["--experimental"],
+    args = ["--experimental", "--pyodide-bundle-disk-cache-dir", "$(location pyodide-2.capnp.bin@rule)/.."],
     data = glob(
         [
             "env-param/*",
         ],
         exclude = ["**/*.wd-test"],
-    ),
+    ) + ["pyodide-2.capnp.bin@rule"],
 )
 
 wd_test(
     src = "random/random.wd-test",
-    args = ["--experimental"],
+    args = ["--experimental", "--pyodide-bundle-disk-cache-dir", "$(location pyodide-2.capnp.bin@rule)/.."],
     data = glob(
         [
             "random/*",
         ],
         exclude = ["**/*.wd-test"],
-    ),
+    ) + ["pyodide-2.capnp.bin@rule"],
 )
 
 # Disabled because it tests the same thing as the import test defined in import_tests.bzl
 # wd_test(
 #     src = "langchain/langchain.wd-test",
-#     args = ["--experimental", "--disk-cache-dir", "../all_pyodide_wheels"],
+#     args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels"],
 #     data = glob(
 #         [
 #             "langchain/*",
@@ -47,13 +55,13 @@ wd_test(
 
 wd_test(
     src = "subdirectory/subdirectory.wd-test",
-    args = ["--experimental"],
+    args = ["--experimental", "--pyodide-bundle-disk-cache-dir", "$(location pyodide-2.capnp.bin@rule)/.."],
     data = glob(
         [
             "subdirectory/**",
         ],
         exclude = ["**/*.wd-test"],
-    ),
+    ) + ["pyodide-2.capnp.bin@rule"],
 )
 
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")

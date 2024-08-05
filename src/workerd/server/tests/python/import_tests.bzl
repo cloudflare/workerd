@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+
 load("//:build/wd_test.bzl", "wd_test")
 
 def generate_import_py_file(imports):
@@ -51,7 +52,7 @@ def gen_import_tests(to_test):
 
     wd_test(
       src = wd_test_fname,
-      args = ["--experimental", "--disk-cache-dir", "../all_pyodide_wheels"],
-      data = [worker_py_fname, "@all_pyodide_wheels//:whls"],
+      args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels", "--pyodide-bundle-disk-cache-dir", "$(location pyodide-2.capnp.bin@rule)/.."],
+      data = [worker_py_fname, "@all_pyodide_wheels//:whls", "pyodide-2.capnp.bin@rule"],
       tags = ["slow"],
     )
