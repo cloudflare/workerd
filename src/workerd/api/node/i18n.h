@@ -1,24 +1,29 @@
 // Copyright (c) 2017-2022 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
+#pragma once
 
 #include <kj/common.h>
 #include <kj/debug.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
 
+#include <stdint.h>
+
 struct UConverter;
 
 namespace workerd::api::node {
 
-enum class Encoding {
-  ASCII,
-  LATIN1,
-  UTF8,
-  UTF16LE,
-  BASE64,
-  BASE64URL,
-  HEX,
+using EncodingValue = uint8_t;
+
+enum Encoding : EncodingValue {
+  ASCII = 0,
+  LATIN1 = 1,
+  UTF8 = 2,
+  UTF16LE = 3,
+  BASE64 = 4,
+  BASE64URL = 5,
+  HEX = 6,
 };
 
 namespace i18n {
