@@ -1,0 +1,50 @@
+name: Build Python Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      pyodide:
+        description: The Pyodide version
+      pyodideRevision:
+        description: The Pyodide revision date
+      backport:
+        description: The Pyodide release backport number
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    name: build Python runtime
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - name: Setup Linux
+        if: runner.os == 'Linux'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          wget https://apt.llvm.org/llvm.sh
+          sed -i '/apt-get install/d' llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
+          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+      - name: Configure download mirrors
+        shell: bash
+        run: |
+          if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
+            # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
+            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
+          fi
+      - name: Bazel build
+        run: |
+          bazel build //src/pyodide:pyodide.capnp.bin@rule --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux
+          cp bazel-bin/src/pyodide/pyodide.capnp.bin .
+      - name: Upload Pyodide capnproto bundle
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.PYODIDE_CAPNP_R2_SECRET_ACCESS_KEY }}
+        run: |
+          pip install boto3
+          python3 src/pyodide/upload_bundle.py pyodide.capnp.bin pyodide_${{ inputs.pyodide }}_${{ inputs.pyodideRevision }}_${{ inputs.backport }}.capnp.bin
