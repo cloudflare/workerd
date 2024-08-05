@@ -26,7 +26,7 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import { Buffer, isEncoding } from 'node-internal:internal_buffer';
+import { Buffer } from 'node-internal:internal_buffer';
 import { normalizeEncoding } from 'node-internal:internal_utils';
 import {
   ERR_INVALID_ARG_TYPE,
@@ -43,15 +43,18 @@ const kBufferedBytes = 5;
 const kEncoding = 6;
 const kSize = 7;
 
-const encodings : Record<string,number> = {
-  ascii: 0,
-  latin1: 1,
-  utf8: 2,
-  utf16le: 3,
-  base64: 4,
-  base64url: 5,
-  hex: 6,
-};
+// The order of this array should be in sync with i18n.h
+// Encoding enum. Index of this array defines the uint8_t
+// value of an encoding.
+const encodings = [
+  'ascii',
+  'latin1',
+  'utf8',
+  'utf16le',
+  'base64',
+  'base64url',
+  'hex',
+];
 
 const kNativeDecoder = Symbol('kNativeDecoder');
 
@@ -73,12 +76,12 @@ interface InternalDecoder extends StringDecoder {
 
 export function StringDecoder(this: StringDecoder, encoding: string = 'utf8') {
   const normalizedEncoding = normalizeEncoding(encoding);
-  if (!isEncoding(normalizedEncoding)) {
+  if (normalizedEncoding === undefined) {
     throw new ERR_UNKNOWN_ENCODING(encoding);
   }
   (this as InternalDecoder)[kNativeDecoder] = Buffer.alloc(kSize);
-  (this as InternalDecoder)[kNativeDecoder][kEncoding] = encodings[normalizedEncoding!]!;
-  this.encoding = normalizedEncoding!;
+  (this as InternalDecoder)[kNativeDecoder][kEncoding] = normalizedEncoding;
+  this.encoding = encodings[normalizedEncoding]!;
 }
 
 function write(this: StringDecoder, buf: ArrayBufferView|DataView|string): string {

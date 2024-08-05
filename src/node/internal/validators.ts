@@ -36,6 +36,7 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_OUT_OF_RANGE,
 } from "node-internal:internal_errors";
+import { default as bufferUtil } from 'node-internal:buffer';
 
 // TODO(someday): Not current implementing parseFileMode, validatePort
 
@@ -166,7 +167,7 @@ export function validateEncoding(data: unknown, encoding: string): void {
   const normalizedEncoding = normalizeEncoding(encoding);
   const length = (data as any).length;
 
-  if (normalizedEncoding === "hex" && length % 2 !== 0) {
+  if (normalizedEncoding === bufferUtil.HEX && length % 2 !== 0) {
     throw new ERR_INVALID_ARG_VALUE(
       "encoding",
       encoding,

@@ -10,7 +10,6 @@
 #include <kj/encoding.h>
 #include <kj/array.h>
 #include "simdutf.h"
-#include "i18n.h"
 
 #include <algorithm>
 
@@ -86,26 +85,6 @@ void SwapBytes(kj::ArrayPtr<kj::byte> bytes) {
       data[i] = BSWAP_8(data[i]);
     }
   }
-}
-
-inline Encoding getEncoding(kj::StringPtr input) {
-  if (input == "utf8"_kj) {
-    return Encoding::UTF8;
-  } else if (input == "ascii"_kj) {
-    return Encoding::ASCII;
-  } else if (input == "latin1"_kj) {
-    return Encoding::LATIN1;
-  } else if (input == "utf16le"_kj) {
-    return Encoding::UTF16LE;
-  } else if (input == "base64"_kj) {
-    return Encoding::BASE64;
-  } else if (input == "base64url"_kj) {
-    return Encoding::BASE64URL;
-  } else if (input == "hex"_kj) {
-    return Encoding::HEX;
-  }
-
-  JSG_FAIL_REQUIRE(Error, kj::str("Invalid encoding: ", input));
 }
 
 kj::Maybe<uint> tryFromHexDigit(char c) {
@@ -343,8 +322,8 @@ kj::Array<kj::byte> BufferUtil::concat(
 kj::Array<kj::byte> BufferUtil::decodeString(
     jsg::Lock& js,
     jsg::JsString string,
-    kj::String encoding) {
-  return decodeStringImpl(js, string, getEncoding(encoding));
+    EncodingValue encoding) {
+  return decodeStringImpl(js, string, static_cast<Encoding>(encoding));
 }
 
 void BufferUtil::fillImpl(
@@ -353,15 +332,15 @@ void BufferUtil::fillImpl(
     kj::OneOf<jsg::JsString, jsg::BufferSource> value,
     uint32_t start,
     uint32_t end,
-    jsg::Optional<kj::String> encoding) {
+    jsg::Optional<EncodingValue> encoding) {
   end = kj::min(end, buffer.size());
   if (end <= start) return;
 
   auto ptr = buffer.slice(start, end);
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(string, jsg::JsString) {
-      auto enc = encoding.map([](kj::String& s) { return s.asPtr(); }).orDefault("utf8"_kj);
-      auto decoded = decodeStringImpl(js, string, getEncoding(enc), true /* strict */);
+      auto enc = encoding.orDefault(Encoding::UTF8);
+      auto decoded = decodeStringImpl(js, string, static_cast<Encoding>(enc), true /* strict */);
       if (decoded.size() == 0) {
         ptr.fill(0);
         return;
@@ -422,9 +401,9 @@ jsg::Optional<uint32_t> indexOfBuffer(
     kj::ArrayPtr<kj::byte> hayStack,
     jsg::BufferSource needle,
     int32_t byteOffset,
-    kj::String encoding,
+    EncodingValue encoding,
     bool isForward) {
-  auto enc = getEncoding(encoding);
+  auto enc = static_cast<Encoding>(encoding);
   auto optOffset = indexOfOffset(hayStack.size(), byteOffset, needle.size(), isForward);
 
   if (needle.size() == 0) return optOffset;
@@ -468,10 +447,10 @@ jsg::Optional<uint32_t> indexOfString(
     kj::ArrayPtr<kj::byte> hayStack,
     const jsg::JsString& needle,
     int32_t byteOffset,
-    kj::String encoding,
+    EncodingValue encoding,
     bool isForward) {
 
-  auto enc = getEncoding(encoding);
+  auto enc = static_cast<Encoding>(encoding);
   auto decodedNeedle = decodeStringImpl(js, needle, enc);
 
   // Round down to the nearest multiple of 2 in case of UCS2
@@ -568,15 +547,15 @@ jsg::Optional<uint32_t> BufferUtil::indexOf(
     kj::Array<kj::byte> buffer,
     kj::OneOf<jsg::JsString, jsg::BufferSource> value,
     int32_t byteOffset,
-    kj::String encoding,
+    EncodingValue encoding,
     bool isForward) {
 
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(string, jsg::JsString) {
-      return indexOfString(js, buffer, string, byteOffset, kj::mv(encoding), isForward);
+      return indexOfString(js, buffer, string, byteOffset, encoding, isForward);
     }
     KJ_CASE_ONEOF(source, jsg::BufferSource) {
-      return indexOfBuffer(js, buffer, kj::mv(source), byteOffset, kj::mv(encoding), isForward);
+      return indexOfBuffer(js, buffer, kj::mv(source), byteOffset, encoding, isForward);
     }
   }
   KJ_UNREACHABLE;
@@ -597,8 +576,8 @@ jsg::JsString BufferUtil::toString(
     kj::Array<kj::byte> bytes,
     uint32_t start,
     uint32_t end,
-    kj::String encoding) {
-  return toStringImpl(js, bytes, start, end, getEncoding(encoding));
+    EncodingValue encoding) {
+  return toStringImpl(js, bytes, start, end, static_cast<Encoding>(encoding));
 }
 
 uint32_t BufferUtil::write(
@@ -607,8 +586,8 @@ uint32_t BufferUtil::write(
     jsg::JsString string,
     uint32_t offset,
     uint32_t length,
-    kj::String encoding) {
-  return writeInto(js, buffer, string, offset, length, getEncoding(encoding));
+    EncodingValue encoding) {
+  return writeInto(js, buffer, string, offset, length, static_cast<Encoding>(encoding));
 }
 
 // ======================================================================================
@@ -872,9 +851,9 @@ bool BufferUtil::isUtf8(kj::Array<kj::byte> buffer) {
   return simdutf::validate_utf8(buffer.asChars().begin(), buffer.size());
 }
 
-kj::Array<kj::byte> BufferUtil::transcode(kj::Array<kj::byte> source, kj::String rawFromEncoding, kj::String rawToEncoding) {
-  auto fromEncoding = getEncoding(rawFromEncoding);
-  auto toEncoding = getEncoding(rawToEncoding);
+kj::Array<kj::byte> BufferUtil::transcode(kj::Array<kj::byte> source, EncodingValue rawFromEncoding, EncodingValue rawToEncoding) {
+  auto fromEncoding = static_cast<Encoding>(rawFromEncoding);
+  auto toEncoding = static_cast<Encoding>(rawToEncoding);
 
   JSG_REQUIRE(i18n::canBeTranscoded(fromEncoding) &&
               i18n::canBeTranscoded(toEncoding), Error,

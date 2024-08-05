@@ -49,14 +49,9 @@ import {
 } from 'node-internal:internal_errors';
 
 import {
-  validateEncoding,
   validateString,
   validateUint32,
 } from 'node-internal:validators';
-
-import {
-  normalizeEncoding
-} from 'node-internal:internal_utils';
 
 import {
   isArrayBufferView,
@@ -129,9 +124,6 @@ Hash.prototype.copy = function(this: Hash, options?: HashOptions): Hash {
 Hash.prototype._transform = function(this: Hash | Hmac, chunk: string | Buffer | ArrayBufferView,
                                      encoding: string, callback: TransformCallback): void {
   if (typeof chunk === 'string') {
-    encoding ??= 'utf-8';
-    validateEncoding(chunk, encoding);
-    encoding = normalizeEncoding(encoding)!;
     chunk = Buffer.from(chunk, encoding);
   }
   this[kHandle].update(chunk);
@@ -155,8 +147,6 @@ Hash.prototype.update = function(this: Hash | Hmac, data: string | Buffer | Arra
     throw new ERR_CRYPTO_HASH_FINALIZED();
 
   if (typeof data === 'string') {
-    validateEncoding(data, encoding!);
-    encoding = normalizeEncoding(encoding);
     data = Buffer.from(data, encoding);
   } else if (!isArrayBufferView(data)) {
     throw new ERR_INVALID_ARG_TYPE(

@@ -27,59 +27,63 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 /* eslint-disable */
+import { default as bufferUtil } from 'node-internal:buffer';
+import type { Encoding } from 'node-internal:buffer';
 
-export function normalizeEncoding(enc?: string) : string | undefined {
+const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;
+
+export function normalizeEncoding(enc?: string) : Encoding | undefined {
   if (enc == null ||
       enc === "utf8" ||
       enc === "utf-8" ||
       enc === "UTF8" ||
-      enc === "UTF-8") return "utf8";
+      enc === "UTF-8") return UTF8;
   return slowCases(enc);
 }
 
-export function slowCases(enc: string) : string | undefined {
+export function slowCases(enc: string) : Encoding | undefined {
   switch (enc.length) {
     case 4:
-      if (enc === "UTF8") return "utf8";
-      if (enc === "ucs2" || enc === "UCS2") return "utf16le";
+      if (enc === "UTF8") return UTF8;
+      if (enc === "ucs2" || enc === "UCS2") return UTF16LE;
       enc = `${enc}`.toLowerCase();
-      if (enc === "utf8") return "utf8";
-      if (enc === "ucs2") return "utf16le";
+      if (enc === "utf8") return UTF8;
+      if (enc === "ucs2") return UTF16LE;
       break;
     case 3:
       if (
         enc === "hex" || enc === "HEX" ||
         `${enc}`.toLowerCase() === "hex"
       ) {
-        return "hex";
+        return HEX;
       }
       break;
     case 5:
-      if (enc === "ascii") return "ascii";
-      if (enc === "ucs-2") return "utf16le";
-      if (enc === "UTF-8") return "utf8";
-      if (enc === "ASCII") return "ascii";
-      if (enc === "UCS-2") return "utf16le";
+      if (enc === "ascii") return ASCII;
+      if (enc === "ucs-2") return UTF16LE;
+      if (enc === "UTF-8") return UTF8;
+      if (enc === "ASCII") return ASCII;
+      if (enc === "UCS-2") return UTF16LE;
       enc = `${enc}`.toLowerCase();
-      if (enc === "utf-8") return "utf8";
-      if (enc === "ascii") return "ascii";
-      if (enc === "ucs-2") return "utf16le";
+      if (enc === "utf-8") return UTF8;
+      if (enc === "ascii") return ASCII;
+      if (enc === "ucs-2") return UTF16LE;
       break;
     case 6:
-      if (enc === "base64") return "base64";
-      if (enc === "latin1" || enc === "binary") return "latin1";
-      if (enc === "BASE64") return "base64";
-      if (enc === "LATIN1" || enc === "BINARY") return "latin1";
+      if (enc === "base64") return BASE64;
+      if (enc === "latin1" || enc === "binary") return LATIN1;
+      if (enc === "BASE64") return BASE64;
+      if (enc === "LATIN1" || enc === "BINARY") return LATIN1;
       enc = `${enc}`.toLowerCase();
-      if (enc === "base64") return "base64";
-      if (enc === "latin1" || enc === "binary") return "latin1";
+      if (enc === "base64") return BASE64;
+      if (enc === "latin1" || enc === "binary") return LATIN1;
       break;
     case 7:
       if (
         enc === "utf16le" || enc === "UTF16LE" ||
         `${enc}`.toLowerCase() === "utf16le"
       ) {
-        return "utf16le";
+        return UTF16LE;
       }
       break;
     case 8:
@@ -87,7 +91,7 @@ export function slowCases(enc: string) : string | undefined {
         enc === "utf-16le" || enc === "UTF-16LE" ||
         `${enc}`.toLowerCase() === "utf-16le"
       ) {
-        return "utf16le";
+        return UTF16LE;
       }
       break;
     case 9:
@@ -95,11 +99,11 @@ export function slowCases(enc: string) : string | undefined {
         enc === "base64url" || enc === "BASE64URL" ||
         `${enc}`.toLowerCase() === "base64url"
       ) {
-        return "base64url";
+        return BASE64URL;
       }
       break;
     default:
-      if (enc === "") return "utf8";
+      if (enc === "") return UTF8;
   }
   return undefined;
 }
