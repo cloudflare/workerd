@@ -36,6 +36,7 @@ js_run_binary(
     out_dirs = ["definitions"],
     silent_on_success = False,  # Always enable logging for debugging
     tool = ":build_types_bin",
+    visibility = ["//visibility:public"],
 )
 
 js_binary(

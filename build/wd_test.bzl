@@ -1,3 +1,5 @@
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+
 def wd_test(
         src,
         data = [],
@@ -11,12 +13,32 @@ def wd_test(
         specified.) The extension `.wd-test` is also permitted instead of `.capnp`, in order to
         avoid confusing other build systems that may assume a `.capnp` file should be compiled. As
         an extension, `.gpu-wd-test` is supported to enable special handling for GPU tests.
-     data: Files which the .capnp config file may embed. Typically JavaScript files.
+     data: Additional files which the .capnp config file may embed. All TypeScript files will be compiled,
+     their resulting files will be passed to the test as well. Usually TypeScript or Javascript source files.
      args: Additional arguments to pass to `workerd`. Typically used to pass `--experimental`.
     """
 
     # Add workerd binary to "data" dependencies.
     data = data + [src, "//src/workerd/server:workerd"]
+
+    ts_srcs = [src for src in data if src.endswith(".ts")]
+
+    # Default name based on src.
+    if name == None:
+        name = src.removesuffix(".capnp").removesuffix(".wd-test").removesuffix(".gpu-wd-test").removesuffix(".ts-wd-test")
+
+    if len(ts_srcs) != 0:
+        # TODO When TypeScript 5.6 comes out use noCheck so the test fails throwing a type error.
+        ts_project(
+            name = name + "@ts_project",
+            srcs = ts_srcs,
+            tsconfig = "tsconfig.json",
+            allow_js = True,
+            source_map = True,
+            composite = True,
+            deps = ["//src/node:node.capnp@tsproject"],
+        )
+        data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
 
     # Add initial arguments for `workerd test` command.
     args = [
@@ -25,9 +47,6 @@ def wd_test(
         "$(location {})".format(src),
     ] + args
 
-    # Default name based on src.
-    if name == None:
-        name = src.removesuffix(".capnp").removesuffix(".wd-test").removesuffix(".gpu-wd-test")
 
     _wd_test(
         name = name,

@@ -227,6 +227,14 @@ wd_test(
     data = ["tests/js-rpc-test.js"],
 )
 
+[wd_test(
+    src = f,
+    data = [f.removesuffix(".ts-wd-test") + ".ts"],
+    args = ["--experimental"],
+) for f in glob(
+    ["**/*.ts-wd-test"],
+)]
+
 # Enable GPU tests if experimental GPU support is enabled. Unfortunately, this depends on the right
 # drivers being available on Linux and macOS, so turn it off by default. Run GPU tests with
 # `bazel test //src/workerd/api:gpu/<test name>`.
