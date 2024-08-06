@@ -304,7 +304,7 @@ jsg::Ref<File> File::constructor(jsg::Lock& js, jsg::Optional<Bits> bits,
 
   double lastModified;
   KJ_IF_SOME(m, maybeLastModified) {
-    lastModified = m;
+    lastModified = kj::isNaN(m) ? 0 : m;
   } else {
     lastModified = dateNow();
   }

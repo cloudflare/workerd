@@ -42,6 +42,7 @@ import {
   isAscii,
   isUtf8,
   transcode,
+  File,
 } from 'node:buffer';
 
 import * as buffer from 'node:buffer';
@@ -5792,3 +5793,104 @@ export const transcodeTest = {
     }
   }
 };
+
+// Tests are taken from Node.js
+// https://github.com/nodejs/node/blob/a4f609fa/test/parallel/test-file.js
+export const fileTest = {
+  test() {
+    throws(() => new File(), TypeError);
+    throws(() => new File([]), TypeError);
+    throws(() => File.prototype.name, TypeError);
+    throws(() => File.prototype.lastModified, TypeError);
+
+    {
+      const keys = Object.keys(File.prototype).sort();
+      deepStrictEqual(keys, ['lastModified', 'name']);
+    }
+
+    {
+      const file = new File([], 'dummy.txt.exe');
+      strictEqual(file.name, 'dummy.txt.exe');
+      strictEqual(file.size, 0);
+      strictEqual(typeof file.lastModified, 'number');
+      ok(file.lastModified <= Date.now());
+    }
+
+    {
+      const toPrimitive = {
+        [Symbol.toPrimitive]() {
+          return 'NaN';
+        }
+      };
+
+      const invalidLastModified = [
+        null,
+        'string',
+        false,
+        toPrimitive,
+      ];
+
+      for (const lastModified of invalidLastModified) {
+        const file = new File([], '', { lastModified });
+        strictEqual(file.lastModified, 0);
+      }
+    }
+
+    {
+      const file = new File([], '', { lastModified: undefined });
+      notStrictEqual(file.lastModified, 0);
+    }
+
+    {
+      const toPrimitive = {
+        [Symbol.toPrimitive]() {
+          throw new TypeError('boom');
+        }
+      };
+
+      const throwValues = [
+        BigInt(3n),
+        toPrimitive,
+      ];
+
+      for (const lastModified of throwValues) {
+        throws(() => new File([], '', { lastModified }), TypeError);
+      }
+    }
+
+    {
+      const valid = [
+        {
+          [Symbol.toPrimitive]() {
+            return 10;
+          }
+        },
+        new Number(10),
+        10,
+      ];
+
+      for (const lastModified of valid) {
+        strictEqual(new File([], '', { lastModified }).lastModified, 10);
+      }
+    }
+
+    {
+      function MyClass() {}
+      MyClass.prototype.lastModified = 10;
+
+      const file = new File([], '', new MyClass());
+      strictEqual(file.lastModified, 10);
+    }
+
+    {
+      let counter = 0;
+      new File([], '', {
+        get lastModified() {
+          counter++;
+          return 10;
+        }
+      });
+      strictEqual(counter, 1);
+    }
+  }
+}

@@ -70,7 +70,7 @@ export function randomBytes(size: number, callback?: RandomBytesCallback) : Uint
 }
 
 export function randomFillSync(
-    buffer: ArrayBufferView|ArrayBuffer,
+    buffer: NodeJS.ArrayBufferView,
     offset?: number,
     size?: number) {
   if (!isAnyArrayBuffer(buffer) && !isArrayBufferView(buffer)) {
@@ -79,7 +79,7 @@ export function randomFillSync(
       'DataView',
       'ArrayBuffer',
       'SharedArrayBuffer'
-    ],buffer);
+    ], buffer);
   }
   const maxLength = (buffer as Uint8Array).length;
   if (offset !== undefined) {
@@ -89,23 +89,23 @@ export function randomFillSync(
     validateInteger(size!, 'size', 0, maxLength - offset);
   } else size = maxLength;
   if (isAnyArrayBuffer(buffer)) {
-    buffer = Buffer.from(buffer as ArrayBuffer);
+    buffer = Buffer.from(buffer);
   }
   buffer = (buffer as Buffer).subarray(offset, offset + size);
-  return crypto.getRandomValues(buffer as ArrayBufferView);
+  return crypto.getRandomValues(buffer);
 }
 
-export type RandomFillCallback = (err: any|null, buf?: ArrayBufferView|ArrayBuffer) => void;
-export function randomFill(buffer: ArrayBufferView|ArrayBuffer,
+export type RandomFillCallback = (err: any|null, buf?: NodeJS.ArrayBufferView) => void;
+export function randomFill(buffer: NodeJS.ArrayBufferView,
                            callback?: RandomFillCallback) : void;
-export function randomFill(buffer: ArrayBufferView|ArrayBuffer,
+export function randomFill(buffer: NodeJS.ArrayBufferView,
                            offset: number,
                            callback?: RandomFillCallback) : void;
-                           export function randomFill(buffer: ArrayBufferView|ArrayBuffer,
+                           export function randomFill(buffer: NodeJS.ArrayBufferView,
                            offset: number,
                            size: number,
                            callback?: RandomFillCallback) : void;
-export function randomFill(buffer: ArrayBufferView|ArrayBuffer,
+export function randomFill(buffer: NodeJS.ArrayBufferView,
                            offsetOrCallback?: number|RandomFillCallback,
                            sizeOrCallback?: number|RandomFillCallback,
                            callback?: RandomFillCallback) {
@@ -115,7 +115,7 @@ export function randomFill(buffer: ArrayBufferView|ArrayBuffer,
       'DataView',
       'ArrayBuffer',
       'SharedArrayBuffer'
-    ],buffer);
+    ], buffer);
   }
 
   let offset = 0;
@@ -203,17 +203,17 @@ export function randomInt(minOrMax: number,
   if (typeof callback === 'function') {
     validateInteger(minOrMax, 'min');
     validateInteger(maxOrCallback, 'max');
-    min = minOrMax as number;
+    min = minOrMax;
     max = maxOrCallback as number;
   } else if (typeof maxOrCallback === 'function') {
     min = 0;
     validateInteger(minOrMax, 'max');
-    max = minOrMax as number;
+    max = minOrMax;
     callback = maxOrCallback as RandomIntCallback;
   } else if (arguments.length === 2) {
     validateInteger(minOrMax, 'min');
     validateInteger(maxOrCallback, 'max');
-    min = minOrMax as number;
+    min = minOrMax;
     max = maxOrCallback as number;
   } else {
     min = 0;
