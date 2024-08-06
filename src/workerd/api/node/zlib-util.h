@@ -12,10 +12,10 @@ public:
   ZlibUtil() = default;
   ZlibUtil(jsg::Lock&, const jsg::Url&) {}
 
-  uint32_t crc32(kj::Array<kj::byte> data, uint32_t value);
+  uint32_t crc32Sync(kj::Array<kj::byte> data, uint32_t value);
 
   JSG_RESOURCE_TYPE(ZlibUtil) {
-    JSG_METHOD(crc32);
+    JSG_METHOD_NAMED(crc32, crc32Sync);
   }
 };
 
