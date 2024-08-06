@@ -15,6 +15,30 @@ struct ImpliedByAfterDate @0x8f8c1b68151b6cff {
   date @1 :Text;
 }
 
+struct PythonSnapshotRelease @0x89c66fb883cb6975 {
+  # Used to indicate a specific Python release that introduces a change which likely breaks
+  # existing memory snapshots.
+  #
+  # The versions/dates specified here are used to generate a filename for the package memory
+  # snapshots created by the validator. They are also used to generate a filename of the Pyodide
+  # and package bundle that gets downloaded for Python Workers.
+  pyodide @0 :Text;
+  # The Pyodide version, for example "0.26.0a2".
+  pyodideRevision @1 :Text;
+  # A date identifying a revision of the above Pyodide version. A change in this field but not
+  # the `pyodide` version field may indicate that changes to the workerd Pyodide integration code
+  # were made with the Pyodide version remaining the same.
+  #
+  # For example "2024-05-25".
+  packages @2 :Text;
+  # A date identifying a revision of the Python package bundle.
+  #
+  # For example "2024-02-18".
+  backport @3 :Int64;
+  # A number that is incremented each time we need to backport a fix to an existing Python release.
+}
+
+
 struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Flags that change the basic behavior of the runtime API, especially for
   # backwards-compatibility with old bugs.
@@ -68,6 +92,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # members.
 
   annotation impliedByAfterDate @0xe3e5a63e76284d89 (field) :ImpliedByAfterDate;
+
+  annotation pythonSnapshotRelease @0xef74c0cc5d18cc0c (field) :PythonSnapshotRelease;
+  # This annotation marks a compat flag as introducing a potentially breaking change to Python
+  # memory snapshots. See the doc comment for the `PythonSnapshotRelease` struct above for more
+  # details.
 
   formDataParserSupportsFiles @0 :Bool
       $compatEnableFlag("formdata_parser_supports_files")
@@ -393,7 +422,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Queues bindings serialize messages to JSON format by default (the previous default was v8 format)
 
   pythonWorkers @43 :Bool
-      $compatEnableFlag("python_workers");
+      $compatEnableFlag("python_workers")
+      $pythonSnapshotRelease(pyodide = "0.26.0a2", pyodideRevision = "2024-03-01",
+          packages = "2024-03-01", backport = 0);
   # Enables Python Workers. Access to this flag is not restricted, instead bundles containing
   # Python modules are restricted in EWC.
   #
@@ -519,6 +550,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   allowCustomPorts @55 :Bool
       $compatEnableFlag("allow_custom_ports")
+      $neededByFl
       $experimental;
   # Enables fetching hosts with a custom port from workers.
   # For orange clouded sites only standard ports are allowed (https://developers.cloudflare.com/fundamentals/reference/network-ports/#network-ports-compatible-with-cloudflares-proxy).
