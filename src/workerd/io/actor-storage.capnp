@@ -29,6 +29,10 @@ interface ActorStorage @0xd7759d7fc87c08e4 {
     delete @2 (keys :List(Data)) -> (numDeleted :Int32);
 
     getMultiple @4 (keys :List(Data), stream :ListStream);
+    # `stream` will be provided with a `KeyValue` for each key in `keys` that is present in storage
+    # in order. So if we had `keys = [c, b, a]` and b was absent, `stream` would be provided with
+    # [(c, 2), (a, 1)].
+
     deleteAll @5 () -> (numDeleted :Int32);
 
     rename @9 (entries :List(KeyRename)) -> (renamed :List(Data));
