@@ -550,6 +550,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   allowCustomPorts @55 :Bool
       $compatEnableFlag("allow_custom_ports")
+      $neededByFl
       $experimental;
   # Enables fetching hosts with a custom port from workers.
   # For orange clouded sites only standard ports are allowed (https://developers.cloudflare.com/fundamentals/reference/network-ports/#network-ports-compatible-with-cloudflares-proxy).
