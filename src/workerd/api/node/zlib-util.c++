@@ -7,16 +7,9 @@
 
 namespace workerd::api::node {
 
-namespace {
-// This function is required to avoid function name clash.
-uint32_t crc32Impl(uint32_t value, unsigned char* bytes, size_t size) {
+uint32_t ZlibUtil::crc32Sync(kj::Array<kj::byte> data, uint32_t value) {
   // Note: Bytef is defined in zlib.h
-  return crc32(value, reinterpret_cast<const Bytef*>(bytes), size);
-}
-} // namespace
-
-uint32_t ZlibUtil::crc32(kj::Array<kj::byte> data, uint32_t value) {
-  return crc32Impl(value, data.begin(), data.size());
+  return crc32(value, reinterpret_cast<const Bytef*>(data.begin()), data.size());
 }
 
 } // namespace workerd::api::node
