@@ -52,7 +52,7 @@ def gen_import_tests(to_test):
 
     wd_test(
       src = wd_test_fname,
-      args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels", "--pyodide-bundle-disk-cache-dir", "$(location pyodide-2.capnp.bin@rule)/.."],
-      data = [worker_py_fname, "@all_pyodide_wheels//:whls", "pyodide-2.capnp.bin@rule"],
+      args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels", "--pyodide-bundle-disk-cache-dir", "$(location pyodide-dev.capnp.bin@rule)/.."],
+      data = [worker_py_fname, "@all_pyodide_wheels//:whls", "pyodide-dev.capnp.bin@rule"],
       tags = ["slow"],
     )

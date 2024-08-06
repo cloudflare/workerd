@@ -231,8 +231,6 @@ private:
                                     kj::HttpHeaderTable::Builder& headerTableBuilder,
                                     kj::ForkedPromise<void>& forkedDrainWhen,
                                     bool forTest = false);
-
-  void fetchPyodideBundle(PythonConfig& pyConfig);
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,

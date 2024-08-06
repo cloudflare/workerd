@@ -44,6 +44,8 @@
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <kj/compat/http.h>
+#include <kj/compat/tls.h>
+#include <kj/compat/url.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
 #else
@@ -434,6 +436,89 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
   KJ_UNREACHABLE;
 }
 
+kj::Path getPyodideBundleFileName(kj::StringPtr version) {
+  return kj::Path(kj::str("pyodide-", version, ".capnp.bin"));
+}
+
+kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(const kj::Maybe<kj::Own<const kj::Directory>> &maybeDir, kj::StringPtr version) {
+  KJ_IF_SOME(dir, maybeDir) {
+    kj::Path filename = getPyodideBundleFileName(version);
+    auto file = dir->tryOpenFile(filename);
+
+    return file;
+  }
+
+  return kj::none;
+}
+
+void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>> &maybeDir, kj::StringPtr version, kj::ArrayPtr<byte> bytes) {
+  KJ_IF_SOME(dir, maybeDir) {
+    kj::Path filename = getPyodideBundleFileName(version);
+    auto replacer = dir->replaceFile(filename, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+    replacer->get().writeAll(bytes);
+    replacer->commit();
+  }
+}
+
+bool fetchPyodideBundle(const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
+  if(api::pyodide::hasPyodideBundle(version)) {
+    KJ_LOG(WARNING, "Pyodide version ", version, " already exists in pyodide bundle table");
+    return true;
+  }
+
+  auto maybePyodideBundleFile = getPyodideBundleFile(pyConfig.pyodideDiskCacheRoot, version);
+  KJ_IF_SOME(pyodideBundleFile, maybePyodideBundleFile) {
+    auto body = pyodideBundleFile->readAllBytes();
+    api::pyodide::setPyodideBundleData(kj::str(version), kj::mv(body));
+
+    return true;
+  }
+
+  if (version == "dev") {
+    // the "dev" version is special and indicates we're using the tip-of-tree version built for testing
+    // so we shouldn't fetch it from the internet, only check for its existence in the disk cache
+    return false;
+  }
+
+  {
+    KJ_LOG(INFO, "Loading Pyodide package from internet...");
+    kj::Thread([&] () {
+      kj::AsyncIoContext io = kj::setupAsyncIo();
+      kj::HttpHeaderTable table;
+
+      kj::TlsContext::Options options;
+      options.useSystemTrustStore = true;
+
+      kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
+      auto &network = io.provider->getNetwork();
+      auto tlsNetwork = tls->wrapNetwork(network);
+      auto &timer = io.provider->getTimer();
+
+      auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
+
+      kj::HttpHeaders headers(table);
+
+      kj::String url = kj::str("https://pyodide.runtime-playground.workers.dev/python-runtime-capnp-bin/pyodide-", version, ".capnp.bin");
+
+      auto req = client->request(kj::HttpMethod::GET, kj::StringPtr(url), headers);
+
+      auto res = req.response.wait(io.waitScope);
+      auto body = res.body->readAllBytes().wait(io.waitScope);
+
+      writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
+
+      api::pyodide::setPyodideBundleData(kj::str(version), kj::mv(body));
+
+    });
+  }
+
+  KJ_LOG(INFO, "Loaded Pyodide package from internet");
+
+  return true;
+
+}
+
 void WorkerdApi::compileModules(
     jsg::Lock& lockParam, config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
@@ -450,7 +535,13 @@ void WorkerdApi::compileModules(
           "The python_workers compatibility flag is required to use Python.");
       // Inject Pyodide bundle
       if(util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
-          modules->addBuiltinBundle(getPyodideBundle(kj::str("2")), kj::none);
+          if (fetchPyodideBundle(impl->pythonConfig, "dev"_kj)) {
+            modules->addBuiltinBundle(getPyodideBundle("dev"_kj), kj::none);
+          } else {
+            // TODO: hardcoded version number
+            KJ_REQUIRE(fetchPyodideBundle(impl->pythonConfig, "2"_kj), "Failed to get both dev and hardcoded Pyodide version");
+            modules->addBuiltinBundle(getPyodideBundle("2"_kj), kj::none);
+          }
       }
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
       {

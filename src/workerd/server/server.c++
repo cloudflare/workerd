@@ -2566,83 +2566,6 @@ void Server::abortAllActors() {
   }
 }
 
-kj::Path getPyodideBundlePath(kj::String &version) {
-  return kj::Path(kj::str("pyodide-", version, ".capnp.bin"));
-}
-
-kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(kj::Maybe<kj::Own<const kj::Directory>> &maybeDir, kj::String &version) {
-  KJ_IF_SOME(dir, maybeDir) {
-    kj::Path filename = getPyodideBundlePath(version);
-    auto file = dir->tryOpenFile(filename);
-
-    return file;
-  }
-
-  return kj::none;
-}
-
-void writePyodideBundleFileToDisk(kj::Maybe<kj::Own<const kj::Directory>> &maybeDir, kj::String &version, kj::ArrayPtr<byte> bytes) {
-  KJ_IF_SOME(dir, maybeDir) {
-    kj::Path filename = getPyodideBundlePath(version);
-    auto replacer = dir->replaceFile(filename, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
-
-    replacer->get().writeAll(bytes);
-    replacer->commit();
-  }
-}
-
-void Server::fetchPyodideBundle(api::pyodide::PythonConfig& pyConfig) {
-  auto version = kj::str("2"); //TODO: hardcoded version number, should probably get this from pyConfig eventually
-
-  if(api::pyodide::hasPyodideBundle(kj::str(version))) {
-    KJ_LOG(WARNING, "Pyodide version ", kj::str(version), " already exists in pyodide bundle table");
-    return;
-  }
-
-  auto maybePyodideBundleFile = getPyodideBundleFile(pyConfig.pyodideDiskCacheRoot, version);
-  KJ_IF_SOME(pyodideBundleFile, maybePyodideBundleFile) {
-    auto body = pyodideBundleFile->readAllBytes();
-    api::pyodide::setPyodideBundleData(kj::str(version), kj::mv(body));
-
-    return;
-  }
-
-  {
-    KJ_LOG(INFO, "Loading Pyodide package from internet...");
-    kj::Thread([&] () {
-      kj::AsyncIoContext io = kj::setupAsyncIo();
-      kj::HttpHeaderTable table;
-
-      kj::TlsContext::Options options;
-      options.useSystemTrustStore = true;
-
-      kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
-      auto &network = io.provider->getNetwork();
-      auto tlsNetwork = tls->wrapNetwork(network);
-      auto &timer = io.provider->getTimer();
-
-      auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
-
-      kj::HttpHeaders headers(table);
-
-      kj::String url = kj::str("https://pyodide.runtime-playground.workers.dev/python-runtime-capnp-bin/pyodide-", version, ".capnp.bin");
-
-      auto req = client->request(kj::HttpMethod::GET, kj::StringPtr(url), headers);
-
-      auto res = req.response.wait(io.waitScope);
-      auto body = res.body->readAllBytes().wait(io.waitScope);
-
-      writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
-
-      api::pyodide::setPyodideBundleData(kj::str(version), kj::mv(body));
-
-    });
-  }
-
-  KJ_LOG(INFO, "Loaded Pyodide package from internet");
-
-}
-
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
   TRACE_EVENT("workerd", "Server::makeWorker()", "name", name.cStr());
@@ -2765,10 +2688,6 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
         *observer, conf, featureFlags.asReader(), pythonConfig);
   }
-
-  // Get the pyodide bundle and register it in memory.
-  // After this, the pyodide bundle is accessible through getPyodideBundle
-  fetchPyodideBundle(pythonConfig);
 
   auto api = kj::heap<WorkerdApi>(globalContext->v8System,
                                   featureFlags.asReader(),
