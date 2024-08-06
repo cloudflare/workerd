@@ -58,6 +58,7 @@ def wd_ts_bundle_capnp(
         declaration = True,
         tsconfig = name + "@tsconfig",
         deps = deps,
+        visibility = ["//visibility:public"],
     )
 
     data = wd_js_bundle_capnp(
