@@ -296,4 +296,64 @@ kj::Maybe<kj::String> normalizeCompatDate(kj::StringPtr date) {
   return CompatDate::parse(date).map([](auto v) { return v.toString(); });
 }
 
+struct PythonSnapshotParsedField {
+  PythonSnapshotRelease::Reader pythonSnapshotRelease;
+  capnp::StructSchema::Field field;
+};
+
+kj::Array<const PythonSnapshotParsedField> makePythonSnapshotFieldTable(
+    capnp::StructSchema::FieldList fields) {
+  kj::Vector<PythonSnapshotParsedField> table(fields.size());
+
+  for (auto field: fields) {
+    kj::Maybe<PythonSnapshotRelease::Reader> maybePythonSnapshotRelease;
+
+    for (auto annotation: field.getProto().getAnnotations()) {
+      if (annotation.getId() == PYTHON_SNAPSHOT_RELEASE_ANNOTATION_ID) {
+        maybePythonSnapshotRelease =
+            annotation.getValue().getStruct().getAs<workerd::PythonSnapshotRelease>();
+      }
+    }
+
+    KJ_IF_SOME(pythonSnapshotRelease, maybePythonSnapshotRelease) {
+      table.add(PythonSnapshotParsedField{
+        .pythonSnapshotRelease = pythonSnapshotRelease,
+        .field = field,
+      });
+    }
+  }
+
+  return table.releaseAsArray();
+}
+
+kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
+    CompatibilityFlags::Reader featureFlags) {
+  uint latestFieldOrdinal = 0;
+  kj::Maybe<PythonSnapshotRelease::Reader> result;
+
+  static auto fieldTable =
+      makePythonSnapshotFieldTable(capnp::Schema::from<CompatibilityFlags>().getFields());
+
+  for (auto field: fieldTable) {
+    bool isEnabled = capnp::toDynamic(featureFlags).get(field.field).as<bool>();
+    if (!isEnabled) {
+      continue;
+    }
+
+    // We pick the flag with the highest ordinal value that is enabled and has a
+    // pythonSnapshotRelease annotation.
+    //
+    // The fieldTable is probably ordered by the ordinal anyway, but doesn't hurt to be explicit
+    // here.
+    //
+    // TODO(later): make sure this is well tested once we have more than one compat flag.
+    if (latestFieldOrdinal < field.field.getIndex()) {
+      latestFieldOrdinal = field.field.getIndex();
+      result = field.pythonSnapshotRelease;
+    }
+  }
+
+  return result;
+}
+
 }  // namespace workerd

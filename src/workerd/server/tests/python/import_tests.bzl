@@ -27,6 +27,10 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
+
+  autogates = [
+    "workerd-autogate-pyodide-load-external",
+  ]
 );"""
 
 def generate_wd_test_file(requirement):

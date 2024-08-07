@@ -14,5 +14,9 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
+
+  autogates = [
+    "workerd-autogate-pyodide-load-external",
+  ]
 );
 

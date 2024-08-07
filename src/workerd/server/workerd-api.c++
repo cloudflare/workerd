@@ -499,7 +499,7 @@ bool fetchPyodideBundle(const api::pyodide::PythonConfig& pyConfig, kj::StringPt
 
       kj::HttpHeaders headers(table);
 
-      kj::String url = kj::str("https://pyodide.runtime-playground.workers.dev/python-runtime-capnp-bin/pyodide-", version, ".capnp.bin");
+      kj::String url = kj::str("https://pyodide.runtime-playground.workers.dev/pyodide-capnp-bin/pyodide-", version, ".capnp.bin");
 
       auto req = client->request(kj::HttpMethod::GET, kj::StringPtr(url), headers);
 
@@ -538,9 +538,10 @@ void WorkerdApi::compileModules(
           if (fetchPyodideBundle(impl->pythonConfig, "dev"_kj)) {
             modules->addBuiltinBundle(getPyodideBundle("dev"_kj), kj::none);
           } else {
-            // TODO: hardcoded version number
-            KJ_REQUIRE(fetchPyodideBundle(impl->pythonConfig, "2"_kj), "Failed to get both dev and hardcoded Pyodide version");
-            modules->addBuiltinBundle(getPyodideBundle("2"_kj), kj::none);
+            auto version = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags)).getPyodide();
+
+            KJ_REQUIRE(fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+            modules->addBuiltinBundle(getPyodideBundle(version), kj::none);
           }
       }
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
