@@ -4,7 +4,8 @@
 
 import * as assert from 'node:assert'
 
-async function test(storage) {
+async function test(state) {
+  const storage = state.storage
   const sql = storage.sql
   // Test numeric results
   const resultNumber = [...sql.exec('SELECT 123')]
@@ -889,6 +890,36 @@ async function test(storage) {
   `),
     'Error: not authorized'
   )
+
+  // Assert foreign keys can be truly turned off, not just deferred
+  await state.blockConcurrencyWhile(async () => {
+    sql.exec(`PRAGMA foreign_keys = OFF;`)
+  })
+  storage.transactionSync(() => {
+    sql.exec(`
+      CREATE TABLE A (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        bId INTEGER NOT NULL REFERENCES B (id) ON DELETE RESTRICT ON UPDATE CASCADE
+      );
+      INSERT INTO A VALUES(1,1); -- this would throw a parse error with foreign keys on
+      CREATE TABLE B (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT
+      );
+    `)
+  })
+
+  // Until we've inserted the row into B, we can detect our
+  // foreign key violation (even with foreign_keys=OFF)
+  assert.deepEqual(Array.from(sql.exec(`pragma foreign_key_check;`)), [
+    { table: 'A', rowid: 1, parent: 'B', fkid: 0 },
+  ])
+  sql.exec(`INSERT INTO B VALUES (1);`)
+  assert.deepEqual(Array.from(sql.exec(`pragma foreign_key_check;`)), [])
+
+  // Restore foreign keys for the rest of the tests
+  await state.blockConcurrencyWhile(async () => {
+    sql.exec(`PRAGMA foreign_keys = ON;`)
+  })
 }
 
 async function testIoStats(storage) {
@@ -1097,7 +1128,7 @@ export class DurableObjectExample {
 
   async fetch(req) {
     if (req.url.endsWith('/sql-test')) {
-      await test(this.state.storage)
+      await test(this.state)
       return Response.json({ ok: true })
     } else if (req.url.endsWith('/sql-test-foreign-keys')) {
       await testForeignKeys(this.state.storage)
