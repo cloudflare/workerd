@@ -33,22 +33,15 @@ async function assertFetchCacheRejectsError(cacheHeader: RequestCache,
 export const cacheMode = {
 
   async test() {
+    let cacheModes: Array<RequestCache> = ['default', 'force-cache', 'no-cache', 'no-store', 'only-if-cached', 'reload'];
     assert.strictEqual("cache" in Request.prototype, false);
     {
       const req = new Request('https://example.org', {});
       assert.strictEqual(req.cache, undefined);
     }
-    assertRequestCacheThrowsError('default');
-    assertRequestCacheThrowsError('force-cache');
-    assertRequestCacheThrowsError('no-cache');
-    assertRequestCacheThrowsError('no-store');
-    assertRequestCacheThrowsError('only-if-cached');
-    assertRequestCacheThrowsError('reload');
-    assertFetchCacheRejectsError('default');
-    assertFetchCacheRejectsError('force-cache');
-    assertFetchCacheRejectsError('no-cache');
-    assertFetchCacheRejectsError('no-store');
-    assertFetchCacheRejectsError('only-if-cached');
-    assertFetchCacheRejectsError('reload');
+    for(var cacheMode of cacheModes) {
+      await assertRequestCacheThrowsError(cacheMode);
+      await assertFetchCacheRejectsError(cacheMode);
+    }
   }
 }
