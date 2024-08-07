@@ -112,6 +112,14 @@ http_archive(
 )
 
 http_archive(
+    name = "nbytes",
+    build_file = "//:build/BUILD.nbytes",
+    sha256 = "34be48071c86add2f8d14fd4a238c47230965fd743a51b8a1dd0b2f0210f0171",
+    strip_prefix = "nbytes-0.1.1",
+    url = "https://github.com/nodejs/nbytes/archive/refs/tags/v0.1.1.tar.gz",
+)
+
+http_archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
     sha256 = "7867c118a11bb7ccaea0f999a28684b06040027506b424b706146cc912b80ff6",
