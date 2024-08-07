@@ -236,13 +236,13 @@ export const cacheMode = {
       const req = new Request('https://example.org', {});
       assert.strictEqual(req.cache, undefined);
     }
-    assertRequestCacheThrowsError('no-store');
-    assertRequestCacheThrowsError('no-cache');
-    assertRequestCacheThrowsError('no-transform');
-    assertRequestCacheThrowsError('unsupported');
-    assertFetchCacheRejectsError('no-store');
-    assertFetchCacheRejectsError('no-cache');
-    assertFetchCacheRejectsError('no-transform');
-    assertFetchCacheRejectsError('unsupported');
+    await assertRequestCacheThrowsError('no-store');
+    await assertRequestCacheThrowsError('no-cache');
+    await assertRequestCacheThrowsError('no-transform');
+    await assertRequestCacheThrowsError('unsupported');
+    await assertFetchCacheRejectsError('no-store');
+    await assertFetchCacheRejectsError('no-cache');
+    await assertFetchCacheRejectsError('no-transform');
+    await assertFetchCacheRejectsError('unsupported');
   }
 }
