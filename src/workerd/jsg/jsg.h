@@ -645,7 +645,7 @@ namespace {
 // unwrapped from v8. This would be an appropriate time to throw an error.
 // Signature: void validate(jsg::Lock& js);
 // Example:
-// struct ValdiatingFoo {
+// struct ValidatingFoo {
 //  kj::String abc;
 //  void validate(jsg::Lock& js) {
 //    JSG_REQUIRE(abc.size() != 0, TypeError, "Field 'abc' had no length in 'ValidatingFoo'.");

@@ -645,7 +645,7 @@ This is an opportunity for it to throw a TypeError based on some custom logic.
 The signature for this method is `void validate(jsg::Lock&);`
 
 ```cpp
-struct ValdiatingFoo {
+struct ValidatingFoo {
   kj::String abc;
 
   void validate(jsg::Lock& lock) {
