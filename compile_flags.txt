@@ -8,6 +8,7 @@
 -Iexternal/perfetto-sdk/sdk/
 -Iexternal/ada-url/
 -Iexternal/simdutf/
+-Iexternal/nbytes/include/
 -Iexternal/com_google_benchmark/include/
 -Iexternal/dawn/include
 -Iexternal/perfetto/include/

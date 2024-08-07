@@ -1,0 +1,7 @@
+cc_library(
+    name = "nbytes",
+    srcs = ["src/nbytes.cpp"],
+    hdrs = ["include/nbytes.h"],
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+)
