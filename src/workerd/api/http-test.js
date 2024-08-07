@@ -260,37 +260,37 @@ export const cacheMode = {
       assert.strictEqual(req.cache, undefined);
     }
     if(!env.CACHE_ENABLED) {
-      assertRequestCacheThrowsError('no-store');
-      assertRequestCacheThrowsError('no-cache');
-      assertRequestCacheThrowsError('no-transform');
-      assertRequestCacheThrowsError('unsupported');
-      assertFetchCacheRejectsError('no-store');
-      assertFetchCacheRejectsError('no-cache');
-      assertFetchCacheRejectsError('no-transform');
-      assertFetchCacheRejectsError('unsupported');
+      await assertRequestCacheThrowsError('no-store');
+      await assertRequestCacheThrowsError('no-cache');
+      await assertRequestCacheThrowsError('no-transform');
+      await assertRequestCacheThrowsError('unsupported');
+      await assertFetchCacheRejectsError('no-store');
+      await assertFetchCacheRejectsError('no-cache');
+      await assertFetchCacheRejectsError('no-transform');
+      await assertFetchCacheRejectsError('unsupported');
     } else {
-      assertRequestCacheThrowsError('no-store',
+      await assertRequestCacheThrowsError('no-store',
         'TypeError',
         "Unsupported cache mode: no-store");
-      assertRequestCacheThrowsError('no-cache',
+      await assertRequestCacheThrowsError('no-cache',
         'TypeError',
         "Unsupported cache mode: no-cache");
-      assertRequestCacheThrowsError('no-transform',
+      await assertRequestCacheThrowsError('no-transform',
         'TypeError',
         "Unsupported cache mode: no-transform");
-      assertRequestCacheThrowsError('unsupported',
+      await assertRequestCacheThrowsError('unsupported',
         'TypeError',
         "Unsupported cache mode: unsupported");
-      assertFetchCacheRejectsError('no-store',
+      await assertFetchCacheRejectsError('no-store',
         'TypeError',
         "Unsupported cache mode: no-store");
-      assertFetchCacheRejectsError('no-cache',
+      await assertFetchCacheRejectsError('no-cache',
         'TypeError',
         "Unsupported cache mode: no-cache");
-      assertFetchCacheRejectsError('no-transform',
+      await assertFetchCacheRejectsError('no-transform',
         'TypeError',
         "Unsupported cache mode: no-transform");
-      assertFetchCacheRejectsError('unsupported',
+      await assertFetchCacheRejectsError('unsupported',
         'TypeError',
         "Unsupported cache mode: unsupported");
     }
