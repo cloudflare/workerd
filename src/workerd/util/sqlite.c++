@@ -809,7 +809,9 @@ void SqliteDatabase::setupSecurity() {
   // https://www.sqlite.org/limits.html#max_compound_select
   sqlite3_limit(db, SQLITE_LIMIT_COMPOUND_SELECT, 5);
   sqlite3_limit(db, SQLITE_LIMIT_VDBE_OP, 25000);
-  sqlite3_limit(db, SQLITE_LIMIT_FUNCTION_ARG, 32);
+  // For SQLITE_LIMIT_FUNCTION_ARG we use the default instead of the "security" recommendation
+  // because there are too many valid use cases for large argument lists, especially json_object.
+  sqlite3_limit(db, SQLITE_LIMIT_FUNCTION_ARG, 127);
   sqlite3_limit(db, SQLITE_LIMIT_ATTACHED, 0);
   sqlite3_limit(db, SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 50);
   sqlite3_limit(db, SQLITE_LIMIT_VARIABLE_NUMBER, 100);
