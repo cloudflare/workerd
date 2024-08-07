@@ -200,8 +200,8 @@ declare module "cloudflare:workers" {
   export type SleepDuration = `${number} ${DurationLabel}${'s' | ''}` | number;
 
 
-  type WorkflowFunctions = {
-    run: <T extends Serializable>(name: string, callback: () => T) => T | Promise<T>;
+  type WorkflowStep = {
+    do: <T extends Serializable>(name: string, callback: () => T) => T | Promise<T>;
     sleep:(name: string, duration: SleepDuration) => void | Promise<void>;
   }
 
@@ -214,12 +214,11 @@ declare module "cloudflare:workers" {
     protected env: Env;
 
     run(
-      batch: {
-        events: Array<{
-          params: T
-        }>
-      },
-      fns: WorkflowFunctions
+      events: Array<{
+        payload: T,
+        timestamp: Date
+      }>,
+      step: WorkflowStep
     ): unknown | Promise<unknown>;
   }
 }
