@@ -440,7 +440,8 @@ kj::Path getPyodideBundleFileName(kj::StringPtr version) {
   return kj::Path(kj::str("pyodide-", version, ".capnp.bin"));
 }
 
-kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(const kj::Maybe<kj::Own<const kj::Directory>> &maybeDir, kj::StringPtr version) {
+kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(
+  const kj::Maybe<kj::Own<const kj::Directory>> &maybeDir, kj::StringPtr version) {
   KJ_IF_SOME(dir, maybeDir) {
     kj::Path filename = getPyodideBundleFileName(version);
     auto file = dir->tryOpenFile(filename);
@@ -451,7 +452,10 @@ kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(const kj::Maybe<
   return kj::none;
 }
 
-void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>> &maybeDir, kj::StringPtr version, kj::ArrayPtr<byte> bytes) {
+void writePyodideBundleFileToDisk(
+  const kj::Maybe<kj::Own<const kj::Directory>> &maybeDir,
+  kj::StringPtr version,
+  kj::ArrayPtr<byte> bytes) {
   KJ_IF_SOME(dir, maybeDir) {
     kj::Path filename = getPyodideBundleFileName(version);
     auto replacer = dir->replaceFile(filename, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
@@ -462,7 +466,7 @@ void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>> 
 }
 
 bool fetchPyodideBundle(const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
-  if(api::pyodide::hasPyodideBundle(version)) {
+  if (api::pyodide::hasPyodideBundle(version)) {
     KJ_LOG(WARNING, "Pyodide version ", version, " already exists in pyodide bundle table");
     return true;
   }
@@ -538,7 +542,12 @@ void WorkerdApi::compileModules(
           if (fetchPyodideBundle(impl->pythonConfig, "dev"_kj)) {
             modules->addBuiltinBundle(getPyodideBundle("dev"_kj), kj::none);
           } else {
-            auto version = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags)).getPyodide();
+            auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+            auto pyodide = pythonRelease.getPyodide();
+            auto pyodideRevision = pythonRelease.getPyodideRevision();
+            auto backport = pythonRelease.getBackport();
+
+            auto version = kj::str(pyodide, "_", pyodideRevision, "_", backport);
 
             KJ_REQUIRE(fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
             modules->addBuiltinBundle(getPyodideBundle(version), kj::none);

@@ -13,6 +13,10 @@ const config :Workerd.Config = (
       service = "main"
     ),
   ],
+
+  autogates = [
+    "workerd-autogate-pyodide-load-external",
+  ]
 );
 
 const mainWorker :Workerd.Worker = (
