@@ -18,7 +18,7 @@ namespace workerd::api::public_beta {
     api::public_beta::R2Bucket::GetResult, \
     api::public_beta::R2Bucket::Range, \
     api::public_beta::R2Bucket::Conditional, \
-		api::public_beta::R2Bucket::SSECOptions, \
+    api::public_beta::R2Bucket::SSECOptions, \
     api::public_beta::R2Bucket::GetOptions, \
     api::public_beta::R2Bucket::PutOptions, \
     api::public_beta::R2Bucket::MultipartOptions, \
