@@ -2653,23 +2653,23 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       };
     }
     kj::Own<void> enterStartupJs(
-        jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+        jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
       return {};
     }
     kj::Own<void> enterStartupPython(
-        jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+        jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
       return {};
     }
     kj::Own<void> enterDynamicImportJs(
-        jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+        jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
       return {};
     }
     kj::Own<void> enterLoggingJs(
-        jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
+        jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
       return {};
     }
     kj::Own<void> enterInspectorJs(
-        jsg::Lock& loc, kj::Maybe<kj::Exception>& error) const override {
+        jsg::Lock& loc, kj::OneOf<kj::Exception, kj::Duration>&) const override {
       return {};
     }
     void completedRequest(kj::StringPtr id) const override {}

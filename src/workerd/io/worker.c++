@@ -118,6 +118,8 @@ const capnp::JsonCodec& getCdpJsonCodec() {
 
 namespace {
 
+using ExceptionOrDuration = kj::OneOf<kj::Exception, kj::Duration>;
+
 // Inform the inspector of an exception thrown.
 //
 // Passes `source` as the exception's short message. Reconstructs `message` from `exception` if
@@ -216,69 +218,74 @@ void reportStartupError(
     jsg::Lock& js,
     const kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>>& inspector,
     const IsolateLimitEnforcer& limitEnforcer,
-    kj::Maybe<kj::Exception> maybeLimitError,
+    ExceptionOrDuration limitErrorOrTime,
     v8::TryCatch& catcher,
     kj::Maybe<Worker::ValidationErrorReporter&> errorReporter,
     kj::Maybe<kj::Exception>& permanentException) {
   v8::TryCatch catcher2(js.v8Isolate);
-  kj::Maybe<kj::Exception> maybeLimitError2;
+  ExceptionOrDuration limitErrorOrTime2 = 0 * kj::NANOSECONDS;
   try {
-    KJ_IF_SOME(limitError, maybeLimitError) {
-      auto description = jsg::extractTunneledExceptionDescription(limitError.getDescription());
+    KJ_SWITCH_ONEOF(limitErrorOrTime) {
+      KJ_CASE_ONEOF(limitError, kj::Exception) {
+        auto description = jsg::extractTunneledExceptionDescription(limitError.getDescription());
 
-      auto& ex = permanentException.emplace(kj::mv(limitError));
-      KJ_IF_SOME(e, errorReporter) {
-        e.addError(kj::heapString(description));
-      } else KJ_IF_SOME(i, inspector) {
-        // We want to extend just enough cpu time as is necessary to report the exception
-        // to the inspector here. 10 milliseconds should be more than enough.
-        auto limitScope = limitEnforcer.enterLoggingJs(js, maybeLimitError2);
-        jsg::sendExceptionToInspector(js, *i.get(), description);
-        // When the inspector is active, we don't want to throw here because then the inspector
-        // won't be able to connect and the developer will never know what happened.
-      } else {
-        // We should never get here in production if we've validated scripts before deployment.
-        KJ_LOG(ERROR, "script startup exceeded resource limits", id, ex);
-        kj::throwFatalException(kj::cp(ex));
-      }
-    } else if (catcher.HasCaught()) {
-      js.withinHandleScope([&] {
-        auto exception = catcher.Exception();
-
-        permanentException = js.exceptionToKj(js.v8Ref(exception));
-
+        auto& ex = permanentException.emplace(kj::mv(limitError));
         KJ_IF_SOME(e, errorReporter) {
-          auto limitScope = limitEnforcer.enterLoggingJs(js, maybeLimitError2);
-
-          kj::Vector<kj::String> lines;
-          lines.add(kj::str("Uncaught ", jsg::extractTunneledExceptionDescription(
-              KJ_ASSERT_NONNULL(permanentException).getDescription())));
-          jsg::JsMessage message(catcher.Message());
-          message.addJsStackTrace(js, lines);
-          e.addError(kj::strArray(lines, "\n"));
-
+          e.addError(kj::heapString(description));
         } else KJ_IF_SOME(i, inspector) {
-          auto limitScope = limitEnforcer.enterLoggingJs(js, maybeLimitError2);
-          sendExceptionToInspector(js, *i.get(),
-                                   UncaughtExceptionSource::INTERNAL,
-                                   jsg::JsValue(exception),
-                                   jsg::JsMessage(catcher.Message()));
+          // We want to extend just enough cpu time as is necessary to report the exception
+          // to the inspector here. 10 milliseconds should be more than enough.
+          auto limitScope = limitEnforcer.enterLoggingJs(js, limitErrorOrTime2);
+          jsg::sendExceptionToInspector(js, *i.get(), description);
           // When the inspector is active, we don't want to throw here because then the inspector
           // won't be able to connect and the developer will never know what happened.
         } else {
           // We should never get here in production if we've validated scripts before deployment.
-          kj::Vector<kj::String> lines;
-          jsg::JsMessage message(catcher.Message());
-          message.addJsStackTrace(js, lines);
-          auto trace = kj::strArray(lines, "; ");
-          auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
-          KJ_LOG(ERROR, "script startup threw exception", id, description, trace);
-          KJ_FAIL_REQUIRE("script startup threw exception");
+          KJ_LOG(ERROR, "script startup exceeded resource limits", id, ex);
+          kj::throwFatalException(kj::cp(ex));
         }
-      });
-    } else {
-      kj::throwFatalException(kj::cp(permanentException.emplace(
-          KJ_EXCEPTION(FAILED, "returned empty handle but didn't throw exception?", id))));
+      }
+      KJ_CASE_ONEOF_DEFAULT {
+        if (catcher.HasCaught()) {
+          js.withinHandleScope([&] {
+            auto exception = catcher.Exception();
+
+            permanentException = js.exceptionToKj(js.v8Ref(exception));
+
+            KJ_IF_SOME(e, errorReporter) {
+              auto limitScope = limitEnforcer.enterLoggingJs(js, limitErrorOrTime2);
+
+              kj::Vector<kj::String> lines;
+              lines.add(kj::str("Uncaught ", jsg::extractTunneledExceptionDescription(
+                  KJ_ASSERT_NONNULL(permanentException).getDescription())));
+              jsg::JsMessage message(catcher.Message());
+              message.addJsStackTrace(js, lines);
+              e.addError(kj::strArray(lines, "\n"));
+
+            } else KJ_IF_SOME(i, inspector) {
+              auto limitScope = limitEnforcer.enterLoggingJs(js, limitErrorOrTime2);
+              sendExceptionToInspector(js, *i.get(),
+                                      UncaughtExceptionSource::INTERNAL,
+                                      jsg::JsValue(exception),
+                                      jsg::JsMessage(catcher.Message()));
+              // When the inspector is active, we don't want to throw here because then the inspector
+              // won't be able to connect and the developer will never know what happened.
+            } else {
+              // We should never get here in production if we've validated scripts before deployment.
+              kj::Vector<kj::String> lines;
+              jsg::JsMessage message(catcher.Message());
+              message.addJsStackTrace(js, lines);
+              auto trace = kj::strArray(lines, "; ");
+              auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
+              KJ_LOG(ERROR, "script startup threw exception", id, description, trace);
+              KJ_FAIL_REQUIRE("script startup threw exception");
+            }
+          });
+        } else {
+          kj::throwFatalException(kj::cp(permanentException.emplace(
+              KJ_EXCEPTION(FAILED, "returned empty handle but didn't throw exception?", id))));
+        }
+      }
     }
   } catch (const jsg::JsExceptionThrown&) {
 #define LOG_AND_SET_PERM_EXCEPTION(...) \
@@ -287,21 +294,26 @@ void reportStartupError(
       permanentException = KJ_EXCEPTION(FAILED, __VA_ARGS__); \
     }
 
-    KJ_IF_SOME(limitError2, maybeLimitError2) {
-      // TODO(cleanup): If we see this error show up in production, stop logging it, because I
-      //   guess it's not necessarily an error? The other two cases below are more worrying though.
-      KJ_LOG(ERROR, limitError2);
-      if (permanentException == kj::none) {
-        permanentException = kj::mv(limitError2);
+    KJ_SWITCH_ONEOF(limitErrorOrTime2) {
+      KJ_CASE_ONEOF(limitError2, kj::Exception) {
+        // TODO(cleanup): If we see this error show up in production, stop logging it, because I
+        //   guess it's not necessarily an error? The other two cases below are more worrying though.
+        KJ_LOG(ERROR, limitError2);
+        if (permanentException == kj::none) {
+          permanentException = kj::mv(limitError2);
+        }
       }
-    } else if (catcher2.HasTerminated()) {
-      LOG_AND_SET_PERM_EXCEPTION(
-          "script startup threw exception; during our attempt to stringify the exception, "
-          "the script apparently was terminated for non-resource-limit reasons.", id);
-    } else {
-      LOG_AND_SET_PERM_EXCEPTION(
-          "script startup threw exception; furthermore, an attempt to stringify the exception "
-          "threw another exception, which shouldn't be possible?", id);
+      KJ_CASE_ONEOF_DEFAULT {
+        if (catcher2.HasTerminated()) {
+          LOG_AND_SET_PERM_EXCEPTION(
+              "script startup threw exception; during our attempt to stringify the exception, "
+              "the script apparently was terminated for non-resource-limit reasons.", id);
+        } else {
+          LOG_AND_SET_PERM_EXCEPTION(
+              "script startup threw exception; furthermore, an attempt to stringify the exception "
+              "threw another exception, which shouldn't be possible?", id);
+        }
+      }
     }
 #undef LOG_AND_SET_PERM_EXCEPTION
   }
@@ -835,10 +847,10 @@ struct Worker::Script::Impl {
           // We have to wrap the call to handler in a try catch here because
           // we have to tunnel any jsg::JsExceptionThrown instances back.
           v8::TryCatch tryCatch(js.v8Isolate);
-          kj::Maybe<kj::Exception> maybeLimitError;
+          ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
           try {
             auto limitScope = worker->getIsolate().getLimitEnforcer()
-                .enterDynamicImportJs(lock, maybeLimitError);
+                .enterDynamicImportJs(lock, limitErrorOrTime);
             return DynamicImportResult(handler());
           } catch (jsg::JsExceptionThrown&) {
             // Handled below...
@@ -849,11 +861,14 @@ struct Worker::Script::Impl {
           KJ_ASSERT(tryCatch.HasCaught());
           if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
             // There's nothing else we can do here but throw a generic fatal exception.
-            KJ_IF_SOME(limitError, maybeLimitError) {
-              kj::throwFatalException(kj::mv(limitError));
-            } else {
-              kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
-                  "Failed to load dynamic module."));
+            KJ_SWITCH_ONEOF(limitErrorOrTime) {
+              KJ_CASE_ONEOF(limitError, kj::Exception) {
+                kj::throwFatalException(kj::mv(limitError));
+              }
+              KJ_CASE_ONEOF_DEFAULT {
+                kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
+                    "Failed to load dynamic module."));
+              }
             }
           }
           return DynamicImportResult(js.v8Ref(tryCatch.Exception()), true);
@@ -1227,7 +1242,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
         });
 
         v8::TryCatch catcher(lock.v8Isolate);
-        kj::Maybe<kj::Exception> maybeLimitError;
+        ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
 
         try {
           try {
@@ -1239,7 +1254,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
                   // It's unclear to me if CompileUnboundScript() can get trapped in any infinite loops or
                   // excessively-expensive computation requiring a time limit. We'll go ahead and apply a time
                   // limit just to be safe. Don't add it to the rollover bank, though.
-                  auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
+                  auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
                   impl->unboundScriptOrMainModule =
                       jsg::NonModuleScript::compile(script.mainScript, lock, script.mainScriptName);
                 }
@@ -1250,7 +1265,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
                 this->isPython = modulesSource.isPython;
                 if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
-                  auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
+                  auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
                   auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
                   impl->configureDynamicImports(lock, modules);
                   modulesSource.compileModules(lock, isolate->getApi());
@@ -1271,7 +1286,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
                             lock,
                             isolate->impl->inspector,
                             isolate->getLimitEnforcer(),
-                            kj::mv(maybeLimitError),
+                            kj::mv(limitErrorOrTime),
                             catcher,
                             errorReporter,
                             impl->permanentException);
@@ -1363,18 +1378,18 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(
     const kj::Path& mainModule,
     jsg::JsContext<api::ServiceWorkerGlobalScope>& jsContext,
     const Worker::Script& script,
-    kj::Maybe<kj::Exception>& maybeLimitError) {
+    ExceptionOrDuration& limitErrorOrTime) {
   kj::Own<void> limitScope;
   if (script.isPython) {
     limitScope = script.getIsolate().getLimitEnforcer().enterStartupPython(
-        js, maybeLimitError);
+        js, limitErrorOrTime);
   } else {
     limitScope =
-        script.getIsolate().getLimitEnforcer().enterStartupJs(js, maybeLimitError);
+        script.getIsolate().getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
   }
   if (script.getIsolate().getApi().getFeatureFlags().getNewModuleRegistry()) {
     KJ_DEFER({
-      if (maybeLimitError != kj::none) {
+      if (limitErrorOrTime.is<kj::Exception>()) {
         // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
         // thrown an exception.
         throw jsg::JsExceptionThrown();
@@ -1395,7 +1410,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(
       auto module = entry.module.getHandle(js);
       jsg::instantiateModule(js, module);
 
-      if (maybeLimitError != kj::none) {
+      if (limitErrorOrTime.is<kj::Exception>()) {
         // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
         // thrown an exception.
         throw jsg::JsExceptionThrown();
@@ -1422,7 +1437,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                       v8::Local<v8::Object> target)> compileBindings,
                IsolateObserver::StartType startType,
                SpanParent parentSpan, LockType lockType,
-               kj::Maybe<ValidationErrorReporter&> errorReporter)
+               kj::Maybe<ValidationErrorReporter&> errorReporter,
+               kj::Maybe<kj::Duration&> startupTime)
     : script(kj::mv(scriptParam)),
       metrics(kj::mv(metricsParam)),
       impl(kj::heap<Impl>()){
@@ -1484,7 +1500,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // Enter the context for compiling and running the script.
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
         v8::TryCatch catcher(lock.v8Isolate);
-        kj::Maybe<kj::Exception> maybeLimitError;
+        ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
 
         try {
           try {
@@ -1512,12 +1528,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
-                auto limitScope = script->isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
+                auto limitScope = script->isolate->getLimitEnforcer().enterStartupJs(lock,
+                    limitErrorOrTime);
                 unboundScript.run(lock.v8Context());
               }
               KJ_CASE_ONEOF(mainModule, kj::Path) {
                 KJ_IF_SOME(ns, tryResolveMainModule(lock, mainModule, *jsContext, *script,
-                                                    maybeLimitError)) {
+                                                    limitErrorOrTime)) {
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
 
                   auto& api = script->isolate->getApi();
@@ -1572,6 +1589,14 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               }
             }
 
+            KJ_IF_SOME(s, startupTime) {
+              KJ_SWITCH_ONEOF(limitErrorOrTime) {
+                KJ_CASE_ONEOF(startupTimeElapsed, kj::Duration) {
+                  s = startupTimeElapsed;
+                }
+                KJ_CASE_ONEOF(limitError, kj::Exception) { }
+              }
+            }
             startupMetrics->done();
           } catch (const kj::Exception& e) {
             lock.throwException(kj::cp(e));
@@ -1583,7 +1608,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                             lock,
                             script->isolate->impl->inspector,
                             script->isolate->getLimitEnforcer(),
-                            kj::mv(maybeLimitError),
+                            kj::mv(limitErrorOrTime),
                             catcher,
                             errorReporter,
                             impl->permanentException);
@@ -2438,15 +2463,15 @@ public:
     // a big deal to just permit those background threads.
     AllowV8BackgroundThreadsScope allowBackgroundThreads;
 
-    kj::Maybe<kj::Exception> maybeLimitError;
+    ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
     {
-      auto limitScope = isolate.getLimitEnforcer().enterInspectorJs(*lock, maybeLimitError);
+      auto limitScope = isolate.getLimitEnforcer().enterInspectorJs(*lock, limitErrorOrTime);
       session.dispatchProtocolMessage(jsg::toInspectorStringView(message));
     }
 
     // Run microtasks in case the user made an async call.
-    if (maybeLimitError == kj::none) {
-      auto limitScope = isolate.getLimitEnforcer().enterInspectorJs(*lock, maybeLimitError);
+    if (!limitErrorOrTime.is<kj::Exception>()) {
+      auto limitScope = isolate.getLimitEnforcer().enterInspectorJs(*lock, limitErrorOrTime);
       lock->runMicrotasks();
     } else {
       // Oops, we already exceeded the limit, so force the microtask queue to be thrown away.
@@ -2454,22 +2479,25 @@ public:
       lock->runMicrotasks();
     }
 
-    KJ_IF_SOME(limitError, maybeLimitError) {
-      lock->withinHandleScope([&] {
-        // HACK: We want to print the error, but we need a context to do that.
-        //   We don't know which contexts exist in this isolate, so I guess we have to
-        //   create one. Ugh.
-        auto dummyContext = v8::Context::New(lock->v8Isolate);
-        auto& inspector = *KJ_ASSERT_NONNULL(isolate.impl->inspector);
-        inspector.contextCreated(
-            v8_inspector::V8ContextInfo(dummyContext, 1, v8_inspector::StringView(
-                reinterpret_cast<const uint8_t*>("Worker"), 6)));
-        JSG_WITHIN_CONTEXT_SCOPE(*lock, dummyContext, [&](jsg::Lock& js) {
-          jsg::sendExceptionToInspector(js, inspector,
-              jsg::extractTunneledExceptionDescription(limitError.getDescription()));
+    KJ_SWITCH_ONEOF(limitErrorOrTime) {
+      KJ_CASE_ONEOF(limitError, kj::Exception) {
+        lock->withinHandleScope([&] {
+          // HACK: We want to print the error, but we need a context to do that.
+          //   We don't know which contexts exist in this isolate, so I guess we have to
+          //   create one. Ugh.
+          auto dummyContext = v8::Context::New(lock->v8Isolate);
+          auto& inspector = *KJ_ASSERT_NONNULL(isolate.impl->inspector);
+          inspector.contextCreated(
+              v8_inspector::V8ContextInfo(dummyContext, 1, v8_inspector::StringView(
+                  reinterpret_cast<const uint8_t*>("Worker"), 6)));
+          JSG_WITHIN_CONTEXT_SCOPE(*lock, dummyContext, [&](jsg::Lock& js) {
+            jsg::sendExceptionToInspector(js, inspector,
+                jsg::extractTunneledExceptionDescription(limitError.getDescription()));
+          });
+          inspector.contextDestroyed(dummyContext);
         });
-        inspector.contextDestroyed(dummyContext);
-      });
+      }
+      KJ_CASE_ONEOF(startupTimeElapsed, kj::Duration) {}
     }
 
     if (recordedLock.checkInWithLimitEnforcer(isolate)) {
