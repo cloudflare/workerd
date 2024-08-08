@@ -320,7 +320,9 @@ public:
           }
         }),
         fakeDate(kj::UNIX_EPOCH),
-        mockNetwork(*this, {}, {}) {}
+        mockNetwork(*this, {}, {}) {
+          //workerd::util::Autogate::initAutogate({});
+        }
 
   ~TestServer() noexcept(false) {
     for (auto& subq: subrequests) {

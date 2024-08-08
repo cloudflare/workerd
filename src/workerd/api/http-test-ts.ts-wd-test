@@ -29,4 +29,7 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
+  autogates = [
+    "workerd-autogate-http-request-cache",
+  ]
 );

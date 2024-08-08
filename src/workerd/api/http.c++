@@ -15,6 +15,7 @@
 #include <kj/parse/char.h>
 #include <workerd/io/features.h>
 #include <workerd/util/http-util.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
@@ -1195,6 +1196,16 @@ void Request::shallowCopyHeadersTo(kj::HttpHeaders& out) {
 }
 
 kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
+  if(cacheMode != CacheMode::NONE &&
+    util::Autogate::isEnabled(util::AutogateKey::HTTP_REQUEST_CACHE)) {
+    auto clone = cf.deepClone(js);
+    auto obj = KJ_ASSERT_NONNULL(clone.get(js));
+    // Works because of the fact there are only two non-none cache modes
+    auto ttl = (CacheMode::NOSTORE == cacheMode) ? -1 : 0;
+
+    obj.set(js, "cacheTtl", js.num(ttl));
+    return clone.serialize(js);
+  }
   return cf.serialize(js);
 }
 
@@ -1204,7 +1215,9 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
     JSG_REQUIRE(FeatureFlags::get(js).getCacheOptionEnabled(), Error, kj::str(
       "The 'cache' field on 'RequestInitializerDict' is not implemented."));
 
-    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported cache mode: ", c));
+    JSG_REQUIRE(util::Autogate::isEnabled(util::AutogateKey::HTTP_REQUEST_CACHE), TypeError, kj::str("Unsupported cache mode: ", c));
+    // Validate that the cache type is valid
+    getCacheModeFromName(c);
   }
 }
 
@@ -1816,7 +1829,29 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
   // If the jsRequest has a CacheMode, we need to handle that here.
   // Currently, the only cache mode we support is undefined, but we will soon support
   // no-cache and no-store. These additional modes will be hidden behind an autogate.
-  KJ_ASSERT(jsRequest->getCacheMode() == Request::CacheMode::NONE);
+  auto headerIds = ioContext.getHeaderIds();
+  const auto cacheMode = jsRequest->getCacheMode();
+  if(util::Autogate::isEnabled(util::AutogateKey::HTTP_REQUEST_CACHE)) {
+    switch(cacheMode) {
+      case Request::CacheMode::NOSTORE:
+      case Request::CacheMode::NOCACHE:
+      if(headers.get(headerIds.cacheControl) == kj::none) {
+        headers.set(headerIds.cacheControl, "no-cache");
+      }
+      if(headers.get(headerIds.pragma) == kj::none) {
+        headers.set(headerIds.pragma, "no-cache");
+      }
+      case Request::CacheMode::NONE:
+      if(headers.get(headerIds.cfCacheLevel) == kj::none) {
+        headers.set(headerIds.cfCacheLevel, "byc");
+      }
+      break;
+      default:
+        KJ_UNREACHABLE;
+    }
+  } else {
+    KJ_ASSERT(cacheMode == Request::CacheMode::NONE);
+  }
 
   kj::String url = uriEncodeControlChars(
       urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());

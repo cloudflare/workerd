@@ -17,6 +17,7 @@ public:
     const kj::HttpHeaderId contentEncoding;
     const kj::HttpHeaderId cfCacheStatus;         // used by cache API implementation
     const kj::HttpHeaderId cacheControl;
+    const kj::HttpHeaderId pragma;
     const kj::HttpHeaderId cfCacheNamespace;       // used by Cache binding implementation
     const kj::HttpHeaderId cfKvMetadata;          // used by KV binding implementation
     const kj::HttpHeaderId cfR2ErrorHeader;       // used by R2 binding implementation
@@ -24,6 +25,7 @@ public:
     const kj::HttpHeaderId cfBlobRequest;         // used by R2 binding implementation
     const kj::HttpHeaderId authorization;         // used by R2 binding implementation
     const kj::HttpHeaderId secWebSocketProtocol;
+    const kj::HttpHeaderId cfCacheLevel;
   };
 
   ThreadContext(
