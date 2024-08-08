@@ -1836,7 +1836,7 @@ jsg::Ref<Workflow> Workflow::constructor(
     jsg::Ref<ExecutionContext> ctx, jsg::JsObject env) {
   // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
   //   `This()`. There ought to be a better way to get access to `this` in a constructor.
-  //   We *also* delcare `ctx` and `env` params more explicitly just for the sake of type checking.
+  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
 
   jsg::JsObject self(args.This());
