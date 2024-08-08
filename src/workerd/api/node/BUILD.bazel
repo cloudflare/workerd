@@ -1,0 +1,23 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+
+wd_cc_library(
+    name = "node",
+    srcs = glob(["**/*.c++"], exclude = ["**/*-test.c++"]),
+    hdrs = glob(["**/*.h"]),
+    implementation_deps = [
+        "//src/workerd/util:perfetto",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@simdutf",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+kj_test(
+    src = "buffer-test.c++",
+    deps = ["//src/workerd/tests:test-fixture"],
+)
