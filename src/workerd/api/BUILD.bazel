@@ -74,6 +74,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
         "//src/workerd/server:workerd_capnp",
+        "//src/workerd/api/node",
     ],
 )
 
@@ -189,11 +190,6 @@ kj_test(
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
     ],
-)
-
-kj_test(
-    src = "node/buffer-test.c++",
-    deps = ["//src/workerd/tests:test-fixture"],
 )
 
 kj_test(
