@@ -206,7 +206,7 @@ declare module "cloudflare:workers" {
   export type SleepDuration = `${number} ${DurationLabel}${"s" | ""}` | number;
 
   type WorkflowStep = {
-    do: <T extends Serializable>(
+    do: <T extends Rpc.Serializable>(
       name: string,
       callback: () => T
     ) => T | Promise<T>;
@@ -215,7 +215,7 @@ declare module "cloudflare:workers" {
 
   export abstract class Workflow<
     Env = unknown,
-    T extends Serializable | unknown = unknown,
+    T extends Rpc.Serializable | unknown = unknown,
   > implements Rpc.WorkflowBranded
   {
     [Rpc.__WORKFLOW_BRAND]: never;
