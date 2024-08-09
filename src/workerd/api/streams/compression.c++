@@ -13,6 +13,13 @@ namespace workerd::api {
 
 namespace {
 
+// zlib decompression is slightly faster when an output buffer larger than the 32KiB window size
+// of zlib is provided as this enables writing to the output instead of an internal buffer in many
+// cases. It also reduces the number of limit enforcer checks we need to perform.
+// zlib compression streams use ~256KiB of memory internally when using default settings, so this
+// does affect memory usage significantly.
+constexpr size_t ZLIB_OUT_BUF_SIZE = 40 * 1024;
+
 class Context {
 public:
   enum class Mode {
@@ -129,7 +136,7 @@ private:
 
   Mode mode;
   z_stream ctx = {};
-  kj::byte buffer[16384];
+  kj::byte buffer[ZLIB_OUT_BUF_SIZE];
 
   // For the eponymous compatibility flag
   ContextFlags strictCompression;
@@ -342,6 +349,21 @@ private:
     while (true) {
       KJ_IF_SOME(exception, kj::runCatchingExceptions([this, flush, &result]() {
         result = context.pumpOnce(flush);
+        // we only want to apply limit checks on calls where there may be a large amount of data
+        // being processed. Only check limits when we have filled the entire output buffer,
+        // indicating that there is more data to be (de)compressed.
+        if (result.buffer.size() == ZLIB_OUT_BUF_SIZE) {
+          // Note: We check for both memory and CPU limit violations here, but the compression
+          // buffer size is not being tracked by V8 so far – the memory check is not very effective
+          // yet.
+          KJ_IF_SOME(outcome, IoContext::current().getLimitEnforcer().getLimitsExceeded()) {
+            if (outcome == EventOutcome::EXCEEDED_CPU) {
+              JSG_FAIL_REQUIRE(Error, "Compression Stream write failed: Exceeded CPU limit");
+            } else if (outcome == EventOutcome::EXCEEDED_MEMORY) {
+              JSG_FAIL_REQUIRE(Error, "Compression Stream write failed: Exceeded memory limit");
+            }
+          }
+        }
       })) {
         cancelInternal(kj::cp(exception));
         return kj::mv(exception);
