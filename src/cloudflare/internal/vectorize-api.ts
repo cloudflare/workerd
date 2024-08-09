@@ -42,13 +42,18 @@ class VectorizeIndexImpl implements Vectorize {
 
   public async query(
     vector: VectorFloatArray | number[],
-    options: VectorizeQueryOptions<VectorizeMetadataRetrievalLevel>
+    options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches> {
     if (this.indexVersion === "v2") {
+      if (options && options.returnMetadata && !isVectorizeMetadataRetrievalLevel(options.returnMetadata) ) {
+        throw new Error(
+          `Invalid returnMetadata option. Expected: "none", "indexed" or "all"; got: ${options.returnMetadata}`
+        );
+      }
       const res = await this._send(Operation.VECTOR_QUERY, `query`, {
         method: "POST",
         body: JSON.stringify({
-          ...options,
+          ...(options ?? {}),
           vector: Array.isArray(vector) ? vector : Array.from(vector),
         }),
         headers: {
@@ -59,6 +64,11 @@ class VectorizeIndexImpl implements Vectorize {
 
       return await toJson<VectorizeMatches>(res);
     } else {
+      if (options && options.returnMetadata && typeof options.returnMetadata !== 'boolean') {
+        throw new Error(
+          `Invalid returnMetadata option. Expected boolean; got: ${options.returnMetadata}`
+        );
+      }
       const compat = {
         queryMetadataOptional: flags.vectorizeQueryMetadataOptional,
       };
@@ -68,7 +78,7 @@ class VectorizeIndexImpl implements Vectorize {
         {
           method: "POST",
           body: JSON.stringify({
-            ...options,
+            ...(options ?? {}),
             vector: Array.isArray(vector) ? vector : Array.from(vector),
             compat,
           }),
@@ -218,6 +228,10 @@ class VectorizeIndexImpl implements Vectorize {
 
     return res;
   }
+}
+
+function isVectorizeMetadataRetrievalLevel(value: any): value is VectorizeMetadataRetrievalLevel {
+  return value === 'all' || value === 'indexed' || value === 'none';
 }
 
 const maxBodyLogChars = 1_000;
