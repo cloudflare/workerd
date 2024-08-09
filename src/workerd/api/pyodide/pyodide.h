@@ -16,10 +16,8 @@
 
 namespace workerd::api::pyodide {
 
-bool hasPyodideBundle(kj::StringPtr version);
-
 void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data);
-jsg::Bundle::Reader getPyodideBundle(kj::StringPtr version);
+const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version);
 
 
 struct PythonConfig {
