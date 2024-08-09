@@ -56,11 +56,20 @@ public:
   // the prewarm metric will be incremented.
   virtual void setIsPrewarm() {}
 
+  // Describes the source of a failure
+  enum class FailureSource: uint8_t {
+    // Failure occurred during deferred proxying
+    DEFERRED_PROXY,
+
+    // Failure occurred elsewhere
+    OTHER,
+  };
+
   // Report that the request failed with the given exception. This only needs to be called in
   // cases where the wrapper created with wrapWorkerInterface() wouldn't otherwise see the
   // exception, e.g. because it has been replaced with an HTTP error response or because it
   // occurred asynchronously.
-  virtual void reportFailure(const kj::Exception& e) {}
+  virtual void reportFailure(const kj::Exception& e, FailureSource source = FailureSource::OTHER) {}
 
   // Wrap the given WorkerInterface with a version that collects metrics. This method may only be
   // called once, and only one method call may be made to the returned interface.
