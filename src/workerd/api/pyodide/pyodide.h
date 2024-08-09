@@ -23,7 +23,8 @@ jsg::Bundle::Reader getPyodideBundle(kj::StringPtr version);
 
 
 struct PythonConfig {
-  kj::Maybe<kj::Own<const kj::Directory>> diskCacheRoot;
+  kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
+  kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
   bool createSnapshot;
   bool createBaselineSnapshot;
 };

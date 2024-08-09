@@ -1,5 +1,6 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("//:build/wd_test.bzl", "wd_test")
+
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
 def generate_import_py_file(imports):
   res = ""
@@ -26,6 +27,10 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
+
+  autogates = [
+    "workerd-autogate-pyodide-load-external",
+  ]
 );"""
 
 def generate_wd_test_file(requirement):
@@ -49,9 +54,9 @@ def gen_import_tests(to_test):
       tags = ["slow"],
     )
 
-    wd_test(
+    py_wd_test(
       src = wd_test_fname,
-      args = ["--experimental", "--disk-cache-dir", "../all_pyodide_wheels"],
+      args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels"],
       data = [worker_py_fname, "@all_pyodide_wheels//:whls"],
       tags = ["slow"],
     )

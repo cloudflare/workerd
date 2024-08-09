@@ -1,6 +1,20 @@
 load("//:build/wd_test.bzl", "wd_test")
 
-wd_test(
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
+
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+
+# pyodide-dev.capnp.bin represents a custom pyodide version "dev" that is generated
+# at build time using the latest contents of the src/pyodide directory.
+# This is used to run tests to ensure that they are always run against the latest build of
+# the Pyodide bundle.
+copy_file(
+    name = "pyodide-dev.capnp.bin@rule",
+    src = "//src/pyodide:pyodide.capnp.bin",
+    out = "pyodide-bundle-cache/pyodide-dev.capnp.bin"
+)
+
+py_wd_test(
     src = "hello/hello.wd-test",
     args = ["--experimental"],
     data = glob(
@@ -11,7 +25,7 @@ wd_test(
     ),
 )
 
-wd_test(
+py_wd_test(
     src = "env-param/env.wd-test",
     args = ["--experimental"],
     data = glob(
@@ -22,7 +36,7 @@ wd_test(
     ),
 )
 
-wd_test(
+py_wd_test(
     src = "random/random.wd-test",
     args = ["--experimental"],
     data = glob(
@@ -33,19 +47,7 @@ wd_test(
     ),
 )
 
-# Disabled because it tests the same thing as the import test defined in import_tests.bzl
-# wd_test(
-#     src = "langchain/langchain.wd-test",
-#     args = ["--experimental", "--disk-cache-dir", "../all_pyodide_wheels"],
-#     data = glob(
-#         [
-#             "langchain/*",
-#         ],
-#         exclude = ["**/*.wd-test"],
-#     ) + ["@all_pyodide_wheels//:whls"],
-# )
-
-wd_test(
+py_wd_test(
     src = "subdirectory/subdirectory.wd-test",
     args = ["--experimental"],
     data = glob(
