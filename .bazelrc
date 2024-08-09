@@ -220,7 +220,7 @@ build:linux --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
 build:linux --linkopt='-l:libc++.a' --linkopt='-lm' --linkopt='-static-libgcc'
 # We don't expect to distribute host tools, no need to statically link libgcc.
 # TODO(cleanup): Ideally we'd also use shared libc++ here, we'd just need to install the
-# libunwind-15-dev and libc++abi-15-dev packages on CI to have all of shared libc++ available.
+# libunwind-18-dev and libc++abi-18-dev packages on CI to have all of shared libc++ available.
 build:linux --host_linkopt='-l:libc++.a' --host_linkopt='-lm'
 
 # On Linux, enable PIC. In macos pic is the default, and the objc_library rule does not work

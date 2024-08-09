@@ -72,14 +72,14 @@ To build `workerd`, you need:
 * [Bazel](https://bazel.build/)
   * If you use [Bazelisk](https://github.com/bazelbuild/bazelisk) (recommended), it will automatically download and use the right version of Bazel for building workerd.
 * On Linux:
-  * We use the clang/LLVM toolchain to build workerd and support version 15 and higher. Earlier versions of clang may still work, but are not officially supported.
-  * Clang 15+ (e.g. package `clang-15` on Debian Bookworm). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--action_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
-  
-  * libc++ 15+ (e.g. packages `libc++-15-dev` and `libc++abi-15-dev`)
-  * LLD 15+ (e.g. package `lld-15`). The build may still succeed if a recent version of GNU gold or the system linker is installed, but lld is highly recommended for link performance.
+  * We use the clang/LLVM toolchain to build workerd and support version 18 and higher. Earlier versions of clang may still work, but are not officially supported.
+  * Clang 18+ (e.g. package `clang-18` on Debian Bookworm). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--action_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
+
+  * libc++ 18+ (e.g. packages `libc++-18-dev` and `libc++abi-18-dev`)
+  * LLD 18+ (e.g. package `lld-18`). The build may still succeed if a recent version of GNU gold or the system linker is installed, but lld is highly recommended for link performance.
   * `python3`, `python3-distutils`, and `tcl8.6`
 * On macOS:
-  * Xcode 15 installation (available on macOS 13 and higher)
+  * Homebrew installed LLVM 18 package (brew install llvm@18)
   * Homebrew installed `tcl-tk` package (provides Tcl 8.6)
 * On Windows:
   * Install [App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget)

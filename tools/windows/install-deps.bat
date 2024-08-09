@@ -73,11 +73,10 @@ call :AddToUserPathInEnvironment C:\msys64\usr\bin
 
 echo.
 echo.* Step 7: Install LLVM compiler toolchain.
-@rem workerd is tied to 16.0.6 for the time being (https://github.com/cloudflare/workerd/pull/1092).
-winget install "LLVM" --version 16.0.6
+winget install "LLVM" --version 18.1.7
 @rem Work around for clang / bazel not agreeing on install location, will be fixed by
 @rem https://github.com/bazelbuild/bazel/pull/1939.
-move "C:\Program Files\LLVM\lib\clang\16" "C:\Program Files\LLVM\lib\clang\16.0.6"
+move "C:\Program Files\LLVM\lib\clang\18" "C:\Program Files\LLVM\lib\clang\18.1.7"
 
 echo.
 echo.* Step 8: Install bazelisk as %LOCALAPPDATA%\Programs\bazelisk\bazel.exe.
