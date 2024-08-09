@@ -7,6 +7,8 @@
 // the 'node:' prefix.
 import { default as assert } from 'node:assert';
 import { default as assert2 } from 'assert';
+import { AsyncLocalStorage } from 'async_hooks';
+
 const assert3 = (await import('node:assert')).default;
 const assert4 = (await import('assert')).default;
 
@@ -84,5 +86,29 @@ export const nodeJsBufferExports = {
     assert.strictEqual(btoa, globalThis.btoa);
     assert.notEqual(Blob, undefined);
     assert.strictEqual(Blob, globalThis.Blob);
+  }
+};
+
+export const nodeJsSetImmediate = {
+  async test() {
+    const als = new AsyncLocalStorage();
+    const { promise, resolve } = Promise.withResolvers();
+    als.run('abc', () => setImmediate((a) => {
+      assert.strictEqual(als.getStore(), 'abc');
+      resolve(a);
+    }, 1));
+    assert.strictEqual(await promise, 1);
+
+    const i = setImmediate(() => {
+      throw new Error('should not have fired');
+    });
+    i[Symbol.dispose]();  // Calls clear immediate
+    i[Symbol.dispose]();  // Should be a no-op
+
+    const i2 = setImmediate(() => {
+      throw new Error('should not have fired');
+    });
+    clearImmediate(i2);
+    clearImmediate(i2); // clearing twice works fine
   }
 };
