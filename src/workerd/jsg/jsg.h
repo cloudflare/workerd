@@ -2085,6 +2085,20 @@ public:
     return *reinterpret_cast<Lock*>(v8Isolate->GetData(2));
   }
 
+  // Manually make adjustments to the amount of external memory reported to V8.
+  // This is useful when we have a large amount of external memory allocated that
+  // typically would not be visible to v8's memory tracking. In the future we hope
+  // to make most memory accounting automatic, making most direct uses of this
+  // API unnecessary but there will always be times when manual adjustments are
+  // necessary.
+  void adjustExternalMemory(ssize_t amount);
+
+  // Reports amount of external memory to be manually attributed to the isolate.
+  // When the returned kj::Own<void> is dropped, the amount will be subtracted
+  // from the isolate's external memory accounting. It is important that these
+  // be held onto only during the lifetime of the isolate.
+  kj::Own<void> getExternalMemoryAdjuster(size_t amount);
+
   Value parseJson(kj::ArrayPtr<const char> data);
   Value parseJson(v8::Local<v8::String> text);
   template <typename T>

@@ -278,6 +278,29 @@ JsSymbol Lock::symbolAsyncDispose() {
   return IsolateBase::from(v8Isolate).getSymbolAsyncDispose();
 }
 
+void Lock::adjustExternalMemory(ssize_t amount) {
+  v8Isolate->AdjustAmountOfExternalAllocatedMemory(static_cast<int64_t>(amount));
+}
+
+namespace {
+struct ExternalMemoryAdjuster {
+  int64_t size;
+  v8::Isolate* isolate;
+  ExternalMemoryAdjuster(v8::Isolate* isolate, size_t size)
+      : size(static_cast<int64_t>(size)), isolate(isolate) {
+    isolate->AdjustAmountOfExternalAllocatedMemory(size);
+  }
+
+  ~ExternalMemoryAdjuster() noexcept(false) {
+    isolate->AdjustAmountOfExternalAllocatedMemory(-size);
+  }
+};
+}  // namespace
+
+kj::Own<void> Lock::getExternalMemoryAdjuster(size_t amount) {
+  return kj::heap<ExternalMemoryAdjuster>(v8Isolate, amount);
+}
+
 Name::Name(kj::String string)
     : hash(kj::hashCode(string)),
       inner(kj::mv(string)) {}
