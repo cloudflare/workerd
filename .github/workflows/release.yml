@@ -95,7 +95,7 @@ jobs:
       - name: Setup macOS
         if: runner.os == 'macOS'
         run: |
-          sudo brew install llvm@18
+          brew install llvm@18
           export PATH="$(brew --prefix llvm@18)/bin/bin:$PATH"
       - name: Setup Windows
         if: runner.os == 'Windows'
