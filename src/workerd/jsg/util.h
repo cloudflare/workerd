@@ -69,22 +69,22 @@ constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe80272921
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle);
 
 struct TypeErrorContext {
-  enum Kind: uint8_t {
-    METHOD_ARGUMENT,      // has type name, member (method) name, and argument index
-    CONSTRUCTOR_ARGUMENT, // has type name, argument index
-    SETTER_ARGUMENT,      // has type name and member (property) name
-    STRUCT_FIELD,         // has type name and member (field) name
-    ARRAY_ELEMENT,        // has argument (element) index
-                          // TODO(someday): Capture where the array itself was declared?
-    CALLBACK_ARGUMENT,    // has argument index
-                          // TODO(someday): Track where callback was introduced for better errors.
-    CALLBACK_RETURN,      // has nothing
-                          // TODO(someday): Track where callback was introduced for better errors.
-    DICT_KEY,             // has member (key) name
-    DICT_FIELD,           // has member (field) name
-    PROMISE_RESOLUTION,   // has nothing
-                          // TODO(someday): Track where the promise was introduced.
-    OTHER,                // has nothing
+  enum Kind : uint8_t {
+    METHOD_ARGUMENT,       // has type name, member (method) name, and argument index
+    CONSTRUCTOR_ARGUMENT,  // has type name, argument index
+    SETTER_ARGUMENT,       // has type name and member (property) name
+    STRUCT_FIELD,          // has type name and member (field) name
+    ARRAY_ELEMENT,         // has argument (element) index
+                           // TODO(someday): Capture where the array itself was declared?
+    CALLBACK_ARGUMENT,     // has argument index
+                           // TODO(someday): Track where callback was introduced for better errors.
+    CALLBACK_RETURN,       // has nothing
+                           // TODO(someday): Track where callback was introduced for better errors.
+    DICT_KEY,              // has member (key) name
+    DICT_FIELD,            // has member (field) name
+    PROMISE_RESOLUTION,    // has nothing
+                           // TODO(someday): Track where the promise was introduced.
+    OTHER,                 // has nothing
   };
 
   Kind kind;
@@ -94,57 +94,56 @@ struct TypeErrorContext {
 
   static inline TypeErrorContext methodArgument(
       const std::type_info& type, const char* methodName, uint argumentIndex) {
-    return { METHOD_ARGUMENT, argumentIndex, type, methodName };
+    return {METHOD_ARGUMENT, argumentIndex, type, methodName};
   }
   static inline TypeErrorContext constructorArgument(
       const std::type_info& type, uint argumentIndex) {
-    return { CONSTRUCTOR_ARGUMENT, argumentIndex, type, nullptr };
+    return {CONSTRUCTOR_ARGUMENT, argumentIndex, type, nullptr};
   }
   static inline TypeErrorContext setterArgument(
       const std::type_info& type, const char* propertyName) {
-    return { SETTER_ARGUMENT, 0, type, propertyName };
+    return {SETTER_ARGUMENT, 0, type, propertyName};
   }
   static inline TypeErrorContext structField(const std::type_info& type, const char* fieldName) {
-    return { STRUCT_FIELD, 0, type, fieldName };
+    return {STRUCT_FIELD, 0, type, fieldName};
   }
   static inline TypeErrorContext arrayElement(uint index) {
-    return { ARRAY_ELEMENT, index, kj::none, nullptr };
+    return {ARRAY_ELEMENT, index, kj::none, nullptr};
   }
   static inline TypeErrorContext callbackArgument(uint argumentIndex) {
-    return { CALLBACK_ARGUMENT, argumentIndex, kj::none, nullptr };
+    return {CALLBACK_ARGUMENT, argumentIndex, kj::none, nullptr};
   }
   static inline TypeErrorContext callbackReturn() {
-    return { CALLBACK_RETURN, 0, kj::none, nullptr };
+    return {CALLBACK_RETURN, 0, kj::none, nullptr};
   }
   static inline TypeErrorContext dictKey(const char* keyName) {
-    return { DICT_KEY, 0, kj::none, keyName };
+    return {DICT_KEY, 0, kj::none, keyName};
   }
   static inline TypeErrorContext dictField(const char* fieldName) {
-    return { DICT_FIELD, 0, kj::none, fieldName };
+    return {DICT_FIELD, 0, kj::none, fieldName};
   }
   static inline TypeErrorContext promiseResolution() {
-    return { PROMISE_RESOLUTION, 0, kj::none, nullptr };
+    return {PROMISE_RESOLUTION, 0, kj::none, nullptr};
   }
   static inline TypeErrorContext other() {
-    return { OTHER, 0, kj::none, nullptr };
+    return {OTHER, 0, kj::none, nullptr};
   }
 };
 
 // Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
 // of type JsExceptionThrown, which will be caught by liftKj().
-[[noreturn]] void throwTypeError(v8::Isolate* isolate,
-    TypeErrorContext errorContext, const char* expectedType);
+[[noreturn]] void throwTypeError(
+    v8::Isolate* isolate, TypeErrorContext errorContext, const char* expectedType);
 
 // Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
 // of type JsExceptionThrown, which will be caught by liftKj().
-[[noreturn]] void throwTypeError(v8::Isolate* isolate,
-    TypeErrorContext errorContext, const std::type_info& expectedType);
+[[noreturn]] void throwTypeError(
+    v8::Isolate* isolate, TypeErrorContext errorContext, const std::type_info& expectedType);
 
 // Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
 // of type JsExceptionThrown, which will be caught by liftKj().
-[[noreturn]] void throwTypeError(v8::Isolate* isolate,
-    TypeErrorContext errorContext,
-    kj::String expectedType);
+[[noreturn]] void throwTypeError(
+    v8::Isolate* isolate, TypeErrorContext errorContext, kj::String expectedType);
 
 // Throw a JavaScript TypeError with a free-form message.
 [[noreturn]] void throwTypeError(v8::Isolate* isolate, kj::StringPtr message);
@@ -213,20 +212,15 @@ v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Val
 // rather than calling v8Str directly. Once the migration is a big further along, v8Str
 // and it's variants will be explicitly marked deprecated.
 template <typename T>
-v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<T> ptr,
-           v8::NewStringType newType = v8::NewStringType::kNormal) {
+v8::Local<v8::String> v8Str(v8::Isolate* isolate,
+    kj::ArrayPtr<T> ptr,
+    v8::NewStringType newType = v8::NewStringType::kNormal) {
   if constexpr (kj::isSameType<char16_t, T>()) {
     return check(v8::String::NewFromTwoByte(
-        isolate,
-        reinterpret_cast<uint16_t*>(ptr.begin()),
-        newType,
-        ptr.size()));
+        isolate, reinterpret_cast<uint16_t*>(ptr.begin()), newType, ptr.size()));
   } else if constexpr (kj::isSameType<const char16_t, T>()) {
     return check(v8::String::NewFromTwoByte(
-        isolate,
-        reinterpret_cast<const uint16_t*>(ptr.begin()),
-        newType,
-        ptr.size()));
+        isolate, reinterpret_cast<const uint16_t*>(ptr.begin()), newType, ptr.size()));
   } else if constexpr (kj::isSameType<uint16_t, T>()) {
     return check(v8::String::NewFromTwoByte(isolate, ptr.begin(), newType, ptr.size()));
   } else if constexpr (kj::isSameType<const char, T>()) {
@@ -239,14 +233,14 @@ v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<T> ptr,
 }
 
 // Make a JavaScript String in v8's Heap with the kj::StringPtr interpreted as UTF-8.
-inline v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::StringPtr str,
-           v8::NewStringType newType = v8::NewStringType::kNormal) {
+inline v8::Local<v8::String> v8Str(v8::Isolate* isolate,
+    kj::StringPtr str,
+    v8::NewStringType newType = v8::NewStringType::kNormal) {
   return v8Str(isolate, str.asArray(), newType);
 }
 
 // Make a JavaScript String in v8's Heap with the kj::ArrayPtr interpreted as Latin1.
-inline v8::Local<v8::String> v8StrFromLatin1(
-    v8::Isolate* isolate,
+inline v8::Local<v8::String> v8StrFromLatin1(v8::Isolate* isolate,
     kj::ArrayPtr<const kj::byte> ptr,
     v8::NewStringType newType = v8::NewStringType::kNormal) {
   return check(v8::String::NewFromOneByte(isolate, ptr.begin(), newType, ptr.size()));
@@ -256,22 +250,36 @@ inline v8::Local<v8::String> v8StrIntern(v8::Isolate* isolate, kj::StringPtr str
   return v8Str(isolate, str, v8::NewStringType::kInternalized);
 }
 
-template <typename T> constexpr bool isVoid() { return false; }
-template <> constexpr bool isVoid<void>() { return true; }
+template <typename T>
+constexpr bool isVoid() {
+  return false;
+}
+template <>
+constexpr bool isVoid<void>() {
+  return true;
+}
 
-template <typename T> struct RemoveMaybe_;
-template <typename T> struct RemoveMaybe_<kj::Maybe<T>> { typedef T Type; };
-template <typename T> using RemoveMaybe = typename RemoveMaybe_<T>::Type;
-
-template <typename T> struct RemoveRvalueRef_ { typedef T Type; };
-template <typename T> struct RemoveRvalueRef_<T&&> { typedef T Type; };
-template <typename T> using RemoveRvalueRef = typename RemoveRvalueRef_<T>::Type;
-
-enum class JsgKind {
-  RESOURCE,
-  STRUCT,
-  EXTENSION
+template <typename T>
+struct RemoveMaybe_;
+template <typename T>
+struct RemoveMaybe_<kj::Maybe<T>> {
+  typedef T Type;
 };
+template <typename T>
+using RemoveMaybe = typename RemoveMaybe_<T>::Type;
+
+template <typename T>
+struct RemoveRvalueRef_ {
+  typedef T Type;
+};
+template <typename T>
+struct RemoveRvalueRef_<T&&> {
+  typedef T Type;
+};
+template <typename T>
+using RemoveRvalueRef = typename RemoveRvalueRef_<T>::Type;
+
+enum class JsgKind { RESOURCE, STRUCT, EXTENSION };
 
 template <typename T>
 struct LiftKj_ {
@@ -281,7 +289,7 @@ struct LiftKj_ {
     try {
       try {
         v8::HandleScope scope(isolate);
-        if constexpr(isVoid<T>()) {
+        if constexpr (isVoid<T>()) {
           func();
           if constexpr (!kj::canConvert<Info&, v8::PropertyCallbackInfo<void>&>()) {
             info.GetReturnValue().SetUndefined();
@@ -301,19 +309,17 @@ struct LiftKj_ {
     } catch (std::exception& exception) {
       throwInternalError(isolate, exception.what());
     } catch (...) {
-      throwInternalError(isolate, kj::str("caught unknown exception of type: ",
-                                          kj::getCaughtExceptionType()));
+      throwInternalError(
+          isolate, kj::str("caught unknown exception of type: ", kj::getCaughtExceptionType()));
     }
   }
 };
 
-void returnRejectedPromise(
-    const v8::FunctionCallbackInfo<v8::Value>& info,
+void returnRejectedPromise(const v8::FunctionCallbackInfo<v8::Value>& info,
     v8::Local<v8::Value> exception,
     v8::TryCatch& tryCatch);
 
-void returnRejectedPromise(
-    const v8::PropertyCallbackInfo<v8::Value>& info,
+void returnRejectedPromise(const v8::PropertyCallbackInfo<v8::Value>& info,
     v8::Local<v8::Value> exception,
     v8::TryCatch& tryCatch);
 
@@ -349,8 +355,8 @@ struct LiftKj_<v8::Local<v8::Promise>> {
     } catch (std::exception& exception) {
       throwInternalError(isolate, exception.what());
     } catch (...) {
-      throwInternalError(isolate, kj::str("caught unknown exception of type: ",
-                                          kj::getCaughtExceptionType()));
+      throwInternalError(
+          isolate, kj::str("caught unknown exception of type: ", kj::getCaughtExceptionType()));
     }
   }
 };
@@ -391,7 +397,7 @@ struct Detector<Default, kj::VoidSfinae<Op<Args...>>, Op, Args...> {
   static constexpr bool value = true;
 };
 
-}  // namespace _ (private)
+}  // namespace _
 
 // A typedef for `Op<Args...>` if that template is instantiable, otherwise `Default`.
 template <typename Default, template <typename...> class Op, typename... Args>
@@ -402,14 +408,18 @@ using DetectedOr = typename _::Detector<Default, void, Op, Args...>::Type;
 //   http://en.cppreference.com/w/cpp/experimental/is_detected
 //
 template <template <typename...> class Op, typename... Args>
-constexpr bool isDetected() { return _::Detector<_::NoneDetected, void, Op, Args...>::value; }
+constexpr bool isDetected() {
+  return _::Detector<_::NoneDetected, void, Op, Args...>::value;
+}
 // TODO(cleanup): Should live in kj?
 
 // SFINAE-friendly accessor for a resource type's configuration parameter.
-template <typename Arg> auto getParameterType(void (*)(Arg)) -> Arg;
+template <typename Arg>
+auto getParameterType(void (*)(Arg)) -> Arg;
 
 // SFINAE-friendly accessor for a resource type's configuration parameter.
-template <typename T> using GetConfiguration = decltype(getParameterType(&T::jsgConfiguration));
+template <typename T>
+using GetConfiguration = decltype(getParameterType(&T::jsgConfiguration));
 
 inline bool isFinite(double value) {
   return !(kj::isNaN(value) || value == kj::inf() || value == -kj::inf());

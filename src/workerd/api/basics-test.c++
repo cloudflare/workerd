@@ -30,24 +30,18 @@ struct BasicsContext: public jsg::Object, public jsg::ContextGlobal {
     bool onceCalled = false;
 
     // Should be invoked multiple times.
-    auto handler = target->newNativeHandler(
-        js,
-        kj::str("foo"),
-        [&called](jsg::Lock& js, jsg::Ref<api::Event> event) {
-          called++;
-        }, false);
+    auto handler = target->newNativeHandler(js, kj::str("foo"),
+        [&called](jsg::Lock& js, jsg::Ref<api::Event> event) { called++; }, false);
 
     // Should only be invoked once.
     auto handlerOnce = target->newNativeHandler(
-        js,
-        kj::str("foo"),
-        [&](jsg::Lock& js, jsg::Ref<api::Event> event) {
-          KJ_ASSERT(!onceCalled);
-          onceCalled = true;
-          // Recursively dispatching the event here should not cause this handler to
-          // be invoked again.
-          target->dispatchEventImpl(js, jsg::alloc<api::Event>(kj::str("foo")));
-        }, true);
+        js, kj::str("foo"), [&](jsg::Lock& js, jsg::Ref<api::Event> event) {
+      KJ_ASSERT(!onceCalled);
+      onceCalled = true;
+      // Recursively dispatching the event here should not cause this handler to
+      // be invoked again.
+      target->dispatchEventImpl(js, jsg::alloc<api::Event>(kj::str("foo")));
+    }, true);
 
     KJ_ASSERT(target->dispatchEventImpl(js, jsg::alloc<api::Event>(kj::str("foo"))));
     KJ_ASSERT(target->dispatchEventImpl(js, jsg::alloc<api::Event>(kj::str("foo"))));
@@ -59,15 +53,13 @@ struct BasicsContext: public jsg::Object, public jsg::ContextGlobal {
     JSG_METHOD(test);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(
-  BasicsIsolate,
-  BasicsContext,
-  EW_BASICS_ISOLATE_TYPES,
-  jsg::TypeWrapperExtension<PromiseWrapper>);
+JSG_DECLARE_ISOLATE_TYPE(BasicsIsolate,
+    BasicsContext,
+    EW_BASICS_ISOLATE_TYPES,
+    jsg::TypeWrapperExtension<PromiseWrapper>);
 
 KJ_TEST("EventTarget native listeners work") {
-  jsg::test::Evaluator<BasicsContext, BasicsIsolate,
-      CompatibilityFlags::Reader> e(v8System);
+  jsg::test::Evaluator<BasicsContext, BasicsIsolate, CompatibilityFlags::Reader> e(v8System);
   e.expectEval("test()", "boolean", "true");
 }
 

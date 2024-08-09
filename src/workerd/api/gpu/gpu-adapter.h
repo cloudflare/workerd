@@ -15,10 +15,11 @@
 
 namespace workerd::api::gpu {
 
-class GPUAdapter : public jsg::Object {
+class GPUAdapter: public jsg::Object {
 public:
   explicit GPUAdapter(dawn::native::Adapter a, kj::Own<AsyncRunner> async)
-      : adapter_(a), async_(kj::mv(async)){};
+      : adapter_(a),
+        async_(kj::mv(async)) {};
   JSG_RESOURCE_TYPE(GPUAdapter) {
     JSG_METHOD(requestDevice);
     JSG_METHOD(requestAdapterInfo);
@@ -30,10 +31,10 @@ private:
   jsg::Promise<jsg::Ref<GPUDevice>> requestDevice(jsg::Lock&, jsg::Optional<GPUDeviceDescriptor>);
   dawn::native::Adapter adapter_;
   kj::Own<AsyncRunner> async_;
-  jsg::Promise<jsg::Ref<GPUAdapterInfo>>
-  requestAdapterInfo(jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints);
+  jsg::Promise<jsg::Ref<GPUAdapterInfo>> requestAdapterInfo(
+      jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints);
   jsg::Ref<GPUSupportedFeatures> getFeatures();
   jsg::Ref<GPUSupportedLimits> getLimits();
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

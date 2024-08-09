@@ -2,7 +2,7 @@
 #include <kj/hash.h>
 
 extern "C" {
-  #include "ada_c.h"
+#include "ada_c.h"
 }
 #include "ada.h"
 #include <string>
@@ -20,16 +20,17 @@ extern "C" {
 namespace workerd::jsg {
 
 namespace {
-class AdaOwnedStringDisposer : public kj::ArrayDisposer {
+class AdaOwnedStringDisposer: public kj::ArrayDisposer {
 public:
   static const AdaOwnedStringDisposer INSTANCE;
 
 protected:
-  void disposeImpl(void* firstElement, size_t elementSize, size_t elementCount,
-                   size_t capacity, void (*destroyElement)(void*)) const {
-    ada_owned_string data = {
-      static_cast<const char*>(firstElement),
-      elementCount };
+  void disposeImpl(void* firstElement,
+      size_t elementSize,
+      size_t elementCount,
+      size_t capacity,
+      void (*destroyElement)(void*)) const {
+    ada_owned_string data = {static_cast<const char*>(firstElement), elementCount};
     ada_free_owned_string(data);
   }
 };
@@ -53,11 +54,10 @@ kj::Array<const char> normalizePathEncoding(kj::ArrayPtr<const char> pathname) {
   // through ourselves. This is simple enough, tho. We'll percent decode as we go,
   // re-encode the pieces and then join them back together with %2F.
 
-  static constexpr auto findNext = [](std::string_view input)
-      -> kj::Maybe<size_t> {
+  static constexpr auto findNext = [](std::string_view input) -> kj::Maybe<size_t> {
     size_t pos = input.find("%2", 0);
     if (pos != std::string_view::npos) {
-      if (input[pos+2] == 'f' || input[pos+2] == 'F') {
+      if (input[pos + 2] == 'f' || input[pos + 2] == 'F') {
         return pos;
       }
     }
@@ -85,10 +85,12 @@ kj::Array<const char> normalizePathEncoding(kj::ArrayPtr<const char> pathname) {
 
   std::string res;
   bool first = true;
-  for (auto& part : parts) {
+  for (auto& part: parts) {
     auto encoded = ada::unicode::percent_encode(part, ada::character_sets::PATH_PERCENT_ENCODE);
-    if (!first) res += "%2F";
-    else first = false;
+    if (!first)
+      res += "%2F";
+    else
+      first = false;
     res += encoded;
   }
 
@@ -99,7 +101,7 @@ kj::Array<const char> normalizePathEncoding(kj::ArrayPtr<const char> pathname) {
 
 }  // namespace
 
-Url::Url(kj::Own<void> inner) : inner(kj::mv(inner)) {}
+Url::Url(kj::Own<void> inner): inner(kj::mv(inner)) {}
 
 bool Url::operator==(const Url& other) const {
   return getHref() == other.getHref();
@@ -123,41 +125,37 @@ bool Url::equal(const Url& other, EquivalenceOption option) const {
   }
 
   // If we are ignoring fragments, we'll compare each component separately:
-  return (other.getProtocol() == getProtocol()) &&
-         (other.getHost() == getHost()) &&
-         (other.getUsername() == getUsername()) &&
-         (other.getPassword() == getPassword()) &&
-         (otherPathname == thisPathname) &&
-         (((option & EquivalenceOption::IGNORE_SEARCH) == EquivalenceOption::IGNORE_SEARCH) ?
-           true :  other.getSearch() == getSearch()) &&
-         (((option & EquivalenceOption::IGNORE_FRAGMENTS) == EquivalenceOption::IGNORE_FRAGMENTS) ?
-            true : other.getHash() == getHash());
- }
+  return (other.getProtocol() == getProtocol()) && (other.getHost() == getHost()) &&
+      (other.getUsername() == getUsername()) && (other.getPassword() == getPassword()) &&
+      (otherPathname == thisPathname) &&
+      (((option & EquivalenceOption::IGNORE_SEARCH) == EquivalenceOption::IGNORE_SEARCH)
+              ? true
+              : other.getSearch() == getSearch()) &&
+      (((option & EquivalenceOption::IGNORE_FRAGMENTS) == EquivalenceOption::IGNORE_FRAGMENTS)
+              ? true
+              : other.getHash() == getHash());
+}
 
 bool Url::canParse(kj::StringPtr input, kj::Maybe<kj::StringPtr> base) {
   return canParse(kj::ArrayPtr<const char>(input), base);
 }
 
-bool Url::canParse(kj::ArrayPtr<const char> input,
-                   kj::Maybe<kj::ArrayPtr<const char>> base) {
+bool Url::canParse(kj::ArrayPtr<const char> input, kj::Maybe<kj::ArrayPtr<const char>> base) {
   KJ_IF_SOME(b, base) {
-    return ada_can_parse_with_base(input.begin(), input.size(),
-                                   b.begin(), b.size());
+    return ada_can_parse_with_base(input.begin(), input.size(), b.begin(), b.size());
   }
   return ada_can_parse(input.begin(), input.size());
 }
 
-kj::Maybe<Url> Url::tryParse(kj::StringPtr input,
-                             kj::Maybe<kj::StringPtr> base) {
+kj::Maybe<Url> Url::tryParse(kj::StringPtr input, kj::Maybe<kj::StringPtr> base) {
   return tryParse(kj::ArrayPtr<const char>(input), base);
 }
 
-kj::Maybe<Url> Url::tryParse(kj::ArrayPtr<const char> input,
-                             kj::Maybe<kj::ArrayPtr<const char>> base) {
+kj::Maybe<Url> Url::tryParse(
+    kj::ArrayPtr<const char> input, kj::Maybe<kj::ArrayPtr<const char>> base) {
   ada_url result = nullptr;
   KJ_IF_SOME(b, base) {
-    result = ada_parse_with_base(input.begin(), input.size(),
-                                 b.begin(), b.size());
+    result = ada_parse_with_base(input.begin(), input.size(), b.begin(), b.size());
   } else {
     result = ada_parse(input.begin(), input.size());
   }
@@ -225,9 +223,7 @@ kj::ArrayPtr<const char> Url::getProtocol() const {
 kj::Array<const char> Url::getOrigin() const {
   ada_owned_string result = ada_get_origin(getInner<ada_url>(inner));
   return kj::Array<const char>(
-      const_cast<char*>(result.data),
-      result.length,
-      AdaOwnedStringDisposer::INSTANCE);
+      const_cast<char*>(result.data), result.length, AdaOwnedStringDisposer::INSTANCE);
 }
 
 bool Url::setHref(kj::ArrayPtr<const char> value) {
@@ -309,18 +305,12 @@ Url Url::clone(EquivalenceOption option) const {
 
 kj::Array<const char> Url::idnToUnicode(kj::ArrayPtr<const char> value) {
   ada_owned_string result = ada_idna_to_unicode(value.begin(), value.size());
-  return kj::Array<const char>(
-      result.data,
-      result.length,
-      AdaOwnedStringDisposer::INSTANCE);
+  return kj::Array<const char>(result.data, result.length, AdaOwnedStringDisposer::INSTANCE);
 }
 
 kj::Array<const char> Url::idnToAscii(kj::ArrayPtr<const char> value) {
   ada_owned_string result = ada_idna_to_ascii(value.begin(), value.size());
-  return kj::Array<const char>(
-      result.data,
-      result.length,
-      AdaOwnedStringDisposer::INSTANCE);
+  return kj::Array<const char>(result.data, result.length, AdaOwnedStringDisposer::INSTANCE);
 }
 
 kj::Maybe<Url> Url::tryResolve(kj::ArrayPtr<const char> input) const {
@@ -349,9 +339,9 @@ kj::Own<void> emptySearchParams() {
 }
 }  // namespace
 
-UrlSearchParams::UrlSearchParams() : inner(emptySearchParams()) {}
+UrlSearchParams::UrlSearchParams(): inner(emptySearchParams()) {}
 
-UrlSearchParams::UrlSearchParams(kj::Own<void> inner) : inner(kj::mv(inner)) {}
+UrlSearchParams::UrlSearchParams(kj::Own<void> inner): inner(kj::mv(inner)) {}
 
 bool UrlSearchParams::operator==(const UrlSearchParams& other) const {
   return toStr() == other.toStr();
@@ -368,55 +358,52 @@ size_t UrlSearchParams::size() const {
 }
 
 void UrlSearchParams::append(kj::ArrayPtr<const char> key, kj::ArrayPtr<const char> value) {
-  ada_search_params_append(getInner<ada_url_search_params>(inner),
-                           key.begin(), key.size(),
-                           value.begin(), value.size());
+  ada_search_params_append(
+      getInner<ada_url_search_params>(inner), key.begin(), key.size(), value.begin(), value.size());
 }
 
 void UrlSearchParams::set(kj::ArrayPtr<const char> key, kj::ArrayPtr<const char> value) {
-  ada_search_params_set(getInner<ada_url_search_params>(inner),
-                        key.begin(), key.size(),
-                        value.begin(), value.size());
+  ada_search_params_set(
+      getInner<ada_url_search_params>(inner), key.begin(), key.size(), value.begin(), value.size());
 }
 
-void UrlSearchParams::delete_(kj::ArrayPtr<const char> key,
-                              kj::Maybe<kj::ArrayPtr<const char>> maybeValue) {
+void UrlSearchParams::delete_(
+    kj::ArrayPtr<const char> key, kj::Maybe<kj::ArrayPtr<const char>> maybeValue) {
   KJ_IF_SOME(value, maybeValue) {
-    ada_search_params_remove_value(getInner<ada_url_search_params>(inner),
-                                   key.begin(), key.size(),
-                                   value.begin(), value.size());
+    ada_search_params_remove_value(getInner<ada_url_search_params>(inner), key.begin(), key.size(),
+        value.begin(), value.size());
   } else {
     ada_search_params_remove(getInner<ada_url_search_params>(inner), key.begin(), key.size());
   }
 }
 
-bool UrlSearchParams::has(kj::ArrayPtr<const char> key,
-                          kj::Maybe<kj::ArrayPtr<const char>> maybeValue) const {
+bool UrlSearchParams::has(
+    kj::ArrayPtr<const char> key, kj::Maybe<kj::ArrayPtr<const char>> maybeValue) const {
   KJ_IF_SOME(value, maybeValue) {
-    return ada_search_params_has_value(getInner<ada_url_search_params>(inner),
-                                       key.begin(), key.size(),
-                                       value.begin(), value.size());
+    return ada_search_params_has_value(getInner<ada_url_search_params>(inner), key.begin(),
+        key.size(), value.begin(), value.size());
   } else {
     return ada_search_params_has(getInner<ada_url_search_params>(inner), key.begin(), key.size());
   }
 }
 
 kj::Maybe<kj::ArrayPtr<const char>> UrlSearchParams::get(kj::ArrayPtr<const char> key) const {
-  auto result = ada_search_params_get(getInner<ada_url_search_params>(inner), key.begin(), key.size());
+  auto result =
+      ada_search_params_get(getInner<ada_url_search_params>(inner), key.begin(), key.size());
   if (result.data == nullptr) return kj::none;
   return kj::ArrayPtr<const char>(result.data, result.length);
 }
 
 kj::Array<kj::ArrayPtr<const char>> UrlSearchParams::getAll(kj::ArrayPtr<const char> key) const {
-  ada_strings results = ada_search_params_get_all(getInner<ada_url_search_params>(inner),
-                                                  key.begin(), key.size());
+  ada_strings results =
+      ada_search_params_get_all(getInner<ada_url_search_params>(inner), key.begin(), key.size());
   size_t size = ada_strings_size(results);
   kj::Vector<kj::ArrayPtr<const char>> items(size);
   for (size_t n = 0; n < size; n++) {
     auto item = ada_strings_get(results, n);
     items.add(kj::ArrayPtr<const char>(item.data, item.length));
   }
-  return items.releaseAsArray().attach(kj::defer([results](){ada_free_strings(results);}));
+  return items.releaseAsArray().attach(kj::defer([results]() { ada_free_strings(results); }));
 }
 
 void UrlSearchParams::sort() {
@@ -425,56 +412,50 @@ void UrlSearchParams::sort() {
 
 UrlSearchParams::KeyIterator UrlSearchParams::getKeys() const {
   return KeyIterator(kj::disposeWith<ada_free_search_params_keys_iter>(
-    ada_search_params_get_keys(getInner<ada_url_search_params>(inner))));
+      ada_search_params_get_keys(getInner<ada_url_search_params>(inner))));
 }
 
 UrlSearchParams::ValueIterator UrlSearchParams::getValues() const {
   return ValueIterator(kj::disposeWith<ada_free_search_params_values_iter>(
-    ada_search_params_get_values(getInner<ada_url_search_params>(inner))));
+      ada_search_params_get_values(getInner<ada_url_search_params>(inner))));
 }
 
 UrlSearchParams::EntryIterator UrlSearchParams::getEntries() const {
   return EntryIterator(kj::disposeWith<ada_free_search_params_entries_iter>(
-    ada_search_params_get_entries(getInner<ada_url_search_params>(inner))));
+      ada_search_params_get_entries(getInner<ada_url_search_params>(inner))));
 }
 
 kj::Array<const char> UrlSearchParams::toStr() const {
   ada_owned_string result = ada_search_params_to_string(getInner<ada_url_search_params>(inner));
-  return kj::Array<const char>(
-      result.data,
-      result.length,
-      AdaOwnedStringDisposer::INSTANCE);
+  return kj::Array<const char>(result.data, result.length, AdaOwnedStringDisposer::INSTANCE);
 }
 
-UrlSearchParams::KeyIterator::KeyIterator(kj::Own<void> inner) : inner(kj::mv(inner)) {}
+UrlSearchParams::KeyIterator::KeyIterator(kj::Own<void> inner): inner(kj::mv(inner)) {}
 
 bool UrlSearchParams::KeyIterator::hasNext() const {
-  return ada_search_params_keys_iter_has_next(
-      getInner<ada_url_search_params_keys_iter>(inner));
+  return ada_search_params_keys_iter_has_next(getInner<ada_url_search_params_keys_iter>(inner));
 }
 
 kj::Maybe<kj::ArrayPtr<const char>> UrlSearchParams::KeyIterator::next() const {
   if (!hasNext()) return kj::none;
-  auto next = ada_search_params_keys_iter_next(
-      getInner<ada_url_search_params_keys_iter>(inner));
+  auto next = ada_search_params_keys_iter_next(getInner<ada_url_search_params_keys_iter>(inner));
   return kj::ArrayPtr<const char>(next.data, next.length);
 }
 
-UrlSearchParams::ValueIterator::ValueIterator(kj::Own<void> inner) : inner(kj::mv(inner)) {}
+UrlSearchParams::ValueIterator::ValueIterator(kj::Own<void> inner): inner(kj::mv(inner)) {}
 
 bool UrlSearchParams::ValueIterator::hasNext() const {
-  return ada_search_params_values_iter_has_next(
-      getInner<ada_url_search_params_values_iter>(inner));
+  return ada_search_params_values_iter_has_next(getInner<ada_url_search_params_values_iter>(inner));
 }
 
 kj::Maybe<kj::ArrayPtr<const char>> UrlSearchParams::ValueIterator::next() const {
   if (!hasNext()) return kj::none;
-  auto next = ada_search_params_values_iter_next(
-      getInner<ada_url_search_params_values_iter>(inner));
+  auto next =
+      ada_search_params_values_iter_next(getInner<ada_url_search_params_values_iter>(inner));
   return kj::ArrayPtr<const char>(next.data, next.length);
 }
 
-UrlSearchParams::EntryIterator::EntryIterator(kj::Own<void> inner) : inner(kj::mv(inner)) {}
+UrlSearchParams::EntryIterator::EntryIterator(kj::Own<void> inner): inner(kj::mv(inner)) {}
 
 bool UrlSearchParams::EntryIterator::hasNext() const {
   return ada_search_params_entries_iter_has_next(
@@ -483,9 +464,9 @@ bool UrlSearchParams::EntryIterator::hasNext() const {
 
 kj::Maybe<UrlSearchParams::EntryIterator::Entry> UrlSearchParams::EntryIterator::next() const {
   if (!hasNext()) return kj::none;
-  auto next = ada_search_params_entries_iter_next(
-      getInner<ada_url_search_params_entries_iter>(inner));
-  return Entry {
+  auto next =
+      ada_search_params_entries_iter_next(getInner<ada_url_search_params_entries_iter>(inner));
+  return Entry{
     .key = kj::ArrayPtr<const char>(next.key.data, next.key.length),
     .value = kj::ArrayPtr<const char>(next.value.data, next.value.length),
   };
@@ -500,20 +481,23 @@ constexpr auto MODIFIER_OPTIONAL = "?"_kjc;
 constexpr auto MODIFIER_ZERO_OR_MORE = "*"_kjc;
 constexpr auto MODIFIER_ONE_OR_MORE = "+"_kjc;
 
-inline bool isAsciiDigit(char c) { return c >= '0' && c <= '9'; };
+inline bool isAsciiDigit(char c) {
+  return c >= '0' && c <= '9';
+};
 
 inline bool isHexDigit(char c) {
   // Check if `c` is the ASCII code of a hexadecimal digit.
   return isAsciiDigit(c) || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F');
 }
 
-inline bool isAscii(char codepoint) { return codepoint >= 0x00 && codepoint <= 0x7f; };
+inline bool isAscii(char codepoint) {
+  return codepoint >= 0x00 && codepoint <= 0x7f;
+};
 
 inline bool isForbiddenHostCodepoint(char c) {
-  return c == 0x00 || c == 0x09 /* Tab */ || c == 0x0a /* LF */ || c == 0x0d /* CR */ ||
-         c == ' ' || c == '#' || c == '%' || c == '/' || c == ':' ||
-         c == '<' || c == '>' || c == '?' || c == '@' || c == '[' || c == '\\' || c == ']' ||
-         c == '^' || c == '|';
+  return c == 0x00 || c == 0x09 /* Tab */ || c == 0x0a /* LF */ || c == 0x0d /* CR */ || c == ' ' ||
+      c == '#' || c == '%' || c == '/' || c == ':' || c == '<' || c == '>' || c == '?' ||
+      c == '@' || c == '[' || c == '\\' || c == ']' || c == '^' || c == '|';
 };
 
 // This is not meant to be a comprehensive validation that the hostname is
@@ -535,14 +519,11 @@ inline bool isValidHostnameInput(kj::StringPtr input) {
 inline bool isValidCodepoint(uint32_t codepoint, bool first) {
   // https://tc39.es/ecma262/#prod-IdentifierStart
   if (first) {
-    return codepoint == '$' ||
-           codepoint == '_' ||
-           u_hasBinaryProperty(codepoint, UCHAR_ID_START);
+    return codepoint == '$' || codepoint == '_' || u_hasBinaryProperty(codepoint, UCHAR_ID_START);
   }
-  return codepoint == '$' ||
-         codepoint == 0x200C || // Zero-width non-joiner
-         codepoint == 0x200D || // Zero-width joiner
-         u_hasBinaryProperty(codepoint, UCHAR_ID_CONTINUE);
+  return codepoint == '$' || codepoint == 0x200C ||  // Zero-width non-joiner
+      codepoint == 0x200D ||                         // Zero-width joiner
+      u_hasBinaryProperty(codepoint, UCHAR_ID_CONTINUE);
 };
 
 inline kj::Maybe<kj::String> strFromMaybePtr(const kj::Maybe<kj::StringPtr>& ptr) {
@@ -551,8 +532,8 @@ inline kj::Maybe<kj::String> strFromMaybePtr(const kj::Maybe<kj::StringPtr>& ptr
 
 using Canonicalizer = kj::Maybe<kj::String>(kj::StringPtr, kj::Maybe<kj::StringPtr>);
 
-kj::Maybe<kj::String> canonicalizeProtocol(kj::StringPtr protocol,
-                                           kj::Maybe<kj::StringPtr> = kj::none) {
+kj::Maybe<kj::String> canonicalizeProtocol(
+    kj::StringPtr protocol, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-protocol
   if (protocol.size() == 0) return kj::str();
   auto input = kj::str(protocol, "://dummy.test");
@@ -563,8 +544,8 @@ kj::Maybe<kj::String> canonicalizeProtocol(kj::StringPtr protocol,
   return kj::none;
 }
 
-kj::Maybe<kj::String> canonicalizeUsername(kj::StringPtr username,
-                                           kj::Maybe<kj::StringPtr> = kj::none) {
+kj::Maybe<kj::String> canonicalizeUsername(
+    kj::StringPtr username, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-username
   if (username.size() == 0) return kj::str();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
@@ -572,8 +553,8 @@ kj::Maybe<kj::String> canonicalizeUsername(kj::StringPtr username,
   return kj::str(url.getUsername());
 }
 
-kj::Maybe<kj::String> canonicalizePassword(kj::StringPtr password,
-                                           kj::Maybe<kj::StringPtr> = kj::none) {
+kj::Maybe<kj::String> canonicalizePassword(
+    kj::StringPtr password, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-password
   if (password.size() == 0) return kj::str();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
@@ -581,8 +562,8 @@ kj::Maybe<kj::String> canonicalizePassword(kj::StringPtr password,
   return kj::str(url.getPassword());
 }
 
-kj::Maybe<kj::String> canonicalizeHostname(kj::StringPtr hostname,
-                                           kj::Maybe<kj::StringPtr> = kj::none) {
+kj::Maybe<kj::String> canonicalizeHostname(
+    kj::StringPtr hostname, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-hostname
   if (hostname.size() == 0) return kj::str();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
@@ -591,12 +572,11 @@ kj::Maybe<kj::String> canonicalizeHostname(kj::StringPtr hostname,
   return kj::str(url.getHostname());
 }
 
-kj::Maybe<kj::String> canonicalizeIpv6Hostname(kj::StringPtr hostname,
-                                               kj::Maybe<kj::StringPtr> = kj::none) {
+kj::Maybe<kj::String> canonicalizeIpv6Hostname(
+    kj::StringPtr hostname, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-an-ipv6-hostname
-  if (!std::all_of(hostname.begin(), hostname.end(), [](char c) {
-    return isHexDigit(c) || c == '[' || c == ']' || c == ':';
-  })) {
+  if (!std::all_of(hostname.begin(), hostname.end(),
+          [](char c) { return isHexDigit(c) || c == '[' || c == ']' || c == ':'; })) {
     return kj::none;
   }
   return kj::str(hostname);
@@ -613,8 +593,8 @@ kj::Maybe<kj::String> canonicalizePort(kj::StringPtr port, kj::Maybe<kj::StringP
   return kj::none;
 }
 
-kj::Maybe<kj::String> canonicalizePathname(kj::StringPtr pathname,
-                                           kj::Maybe<kj::StringPtr> = kj::none) {
+kj::Maybe<kj::String> canonicalizePathname(
+    kj::StringPtr pathname, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-pathname
   if (pathname.size() == 0) return kj::str();
   bool leadingSlash = pathname[0] == '/';
@@ -626,8 +606,8 @@ kj::Maybe<kj::String> canonicalizePathname(kj::StringPtr pathname,
   return kj::none;
 }
 
-kj::Maybe<kj::String> canonicalizeOpaquePathname(kj::StringPtr pathname,
-                                                 kj::Maybe<kj::StringPtr> = kj::none) {
+kj::Maybe<kj::String> canonicalizeOpaquePathname(
+    kj::StringPtr pathname, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-an-opaque-pathname
   if (pathname.size() == 0) return kj::str();
   auto str = kj::str("fake:", pathname);
@@ -635,8 +615,8 @@ kj::Maybe<kj::String> canonicalizeOpaquePathname(kj::StringPtr pathname,
   return kj::str(url.getPathname());
 }
 
-kj::Maybe<kj::String> canonicalizeSearch(kj::StringPtr search,
-                                         kj::Maybe<kj::StringPtr> = kj::none) {
+kj::Maybe<kj::String> canonicalizeSearch(
+    kj::StringPtr search, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-search
   if (search.size() == 0) return kj::str();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
@@ -644,8 +624,7 @@ kj::Maybe<kj::String> canonicalizeSearch(kj::StringPtr search,
   return url.getSearch().size() > 0 ? kj::str(url.getSearch().slice(1)) : kj::str();
 }
 
-kj::Maybe<kj::String> canonicalizeHash(kj::StringPtr hash,
-                                       kj::Maybe<kj::StringPtr> = kj::none) {
+kj::Maybe<kj::String> canonicalizeHash(kj::StringPtr hash, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-hash
   if (hash.size() == 0) return kj::str();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
@@ -685,17 +664,16 @@ kj::String escape(kj::ArrayPtr<const char> str, auto predicate) {
 
 kj::String escapeRegexString(kj::ArrayPtr<const char> str) {
   return escape(str, [](auto c) {
-    return c == '.' || c == '+' || c == '*' || c == '?' || c == '^' ||
-           c == '$' || c == '{' || c == '}' || c == '(' || c == ')' ||
-           c == '[' || c == ']' || c == '|' || c == '/' || c == '\\';
+    return c == '.' || c == '+' || c == '*' || c == '?' || c == '^' || c == '$' || c == '{' ||
+        c == '}' || c == '(' || c == ')' || c == '[' || c == ']' || c == '|' || c == '/' ||
+        c == '\\';
   });
 }
 
 kj::String escapePatternString(kj::ArrayPtr<const char> str) {
   return escape(str, [](auto c) {
-    return c == '+' || c == '*' || c == '?' || c == ':' ||
-        c == '{' || c == '}' || c == '(' || c == ')' ||
-        c == '\\';
+    return c == '+' || c == '*' || c == '?' || c == ':' || c == '{' || c == '}' || c == '(' ||
+        c == ')' || c == '\\';
   });
 }
 
@@ -752,10 +730,14 @@ struct Part {
 
 kj::Maybe<kj::StringPtr> modifierToString(const Part::Modifier& modifier) {
   switch (modifier) {
-    case Part::Modifier::NONE: return kj::none;
-    case Part::Modifier::OPTIONAL: return MODIFIER_OPTIONAL;
-    case Part::Modifier::ZERO_OR_MORE: return MODIFIER_ZERO_OR_MORE;
-    case Part::Modifier::ONE_OR_MORE: return MODIFIER_ONE_OR_MORE;
+    case Part::Modifier::NONE:
+      return kj::none;
+    case Part::Modifier::OPTIONAL:
+      return MODIFIER_OPTIONAL;
+    case Part::Modifier::ZERO_OR_MORE:
+      return MODIFIER_ZERO_OR_MORE;
+    case Part::Modifier::ONE_OR_MORE:
+      return MODIFIER_ONE_OR_MORE;
   }
   KJ_UNREACHABLE;
 }
@@ -795,7 +777,7 @@ struct Token {
 
   Type type = Type::INVALID_CHAR;
   size_t index = 0;
-  kj::OneOf<char, kj::ArrayPtr<const char>> value = (char) 0;
+  kj::OneOf<char, kj::ArrayPtr<const char>> value = (char)0;
   Part::Modifier modifier = Part::Modifier::NONE;
 
   operator kj::String() const {
@@ -1136,9 +1118,7 @@ UrlPattern::Result<kj::Array<Token>> tokenize(kj::StringPtr input, Token::Policy
 }
 
 UrlPattern::Result<kj::Array<Part>> parsePattern(
-    kj::StringPtr input,
-    Canonicalizer canonicalizer,
-    const CompileComponentOptions& options) {
+    kj::StringPtr input, Canonicalizer canonicalizer, const CompileComponentOptions& options) {
   kj::Array<Token> tokens = nullptr;
   KJ_SWITCH_ONEOF(tokenize(input, Token::Policy::STRICT)) {
     KJ_CASE_ONEOF(err, kj::String) {
@@ -1171,7 +1151,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       pendingFixedValue = kj::none;
       if (value.size() == 0) return true;
       KJ_IF_SOME(canonical, canonicalizer(value, kj::none)) {
-        partList.add(Part {
+        partList.add(Part{
           .type = Part::Type::FIXED_TEXT,
           .modifier = Part::Modifier::NONE,
           .value = kj::mv(canonical),
@@ -1223,28 +1203,23 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
   };
 
   auto isDuplicateName = [&](kj::StringPtr name) -> bool {
-    return std::any_of(partList.begin(), partList.end(),
-        [&name](Part& part) { return part.name == name; });
+    return std::any_of(
+        partList.begin(), partList.end(), [&name](Part& part) { return part.name == name; });
   };
 
   auto maybeTokenToModifier = [](kj::Maybe<Token&> modifierToken) -> Part::Modifier {
     KJ_IF_SOME(token, modifierToken) {
-      KJ_DASSERT(token.type == Token::Type::OTHER_MODIFIER ||
-                 token.type == Token::Type::ASTERISK);
+      KJ_DASSERT(token.type == Token::Type::OTHER_MODIFIER || token.type == Token::Type::ASTERISK);
       return token.modifier;
     }
     return Part::Modifier::NONE;
   };
 
-  auto addPart = [&]
-       (kj::Maybe<kj::String> maybePrefix,
-        kj::Maybe<Token&> nameToken,
-        kj::Maybe<Token&> regexOrWildcardToken,
-        kj::Maybe<kj::String> suffix,
-        kj::Maybe<Token&> modifierToken) mutable -> kj::Maybe<kj::String> {
+  auto addPart = [&](kj::Maybe<kj::String> maybePrefix, kj::Maybe<Token&> nameToken,
+                     kj::Maybe<Token&> regexOrWildcardToken, kj::Maybe<kj::String> suffix,
+                     kj::Maybe<Token&> modifierToken) mutable -> kj::Maybe<kj::String> {
     auto modifier = maybeTokenToModifier(modifierToken);
-    if (nameToken == kj::none &&
-        regexOrWildcardToken == kj::none &&
+    if (nameToken == kj::none && regexOrWildcardToken == kj::none &&
         modifier == Part::Modifier::NONE) {
       KJ_IF_SOME(prefix, maybePrefix) {
         appendToPendingFixedValue(prefix);
@@ -1259,7 +1234,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       KJ_IF_SOME(prefix, maybePrefix) {
         if (prefix.size() > 0) {
           KJ_IF_SOME(canonical, canonicalizer(prefix, kj::none)) {
-            partList.add(Part {
+            partList.add(Part{
               .type = Part::Type::FIXED_TEXT,
               .modifier = modifier,
               .value = kj::mv(canonical),
@@ -1317,7 +1292,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       }
     }
 
-    partList.add(Part {
+    partList.add(Part{
       .type = type,
       .modifier = modifier,
       .value = kj::mv(regexValue),
@@ -1335,9 +1310,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
     auto regexOrWildcardToken = tryConsumeRegexOrWildcardToken(nameToken);
 
     if (nameToken != kj::none || regexOrWildcardToken != kj::none) {
-      auto maybePrefix = charToken.map([](Token& token) {
-        return kj::String(token);
-      });
+      auto maybePrefix = charToken.map([](Token& token) { return kj::String(token); });
 
       KJ_IF_SOME(prefix, maybePrefix) {
         if (prefix.size() > 0) {
@@ -1361,8 +1334,8 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
         return kj::str("Syntax error in URL Pattern");
       }
       auto modifierToken = tryConsumeModifierToken();
-      KJ_IF_SOME(err, addPart(kj::mv(maybePrefix), nameToken, regexOrWildcardToken,
-                              kj::none, modifierToken)) {
+      KJ_IF_SOME(err,
+          addPart(kj::mv(maybePrefix), nameToken, regexOrWildcardToken, kj::none, modifierToken)) {
         return kj::mv(err);
       }
       continue;
@@ -1385,8 +1358,9 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
         return kj::str("Syntax error in URL Pattern: Missing required close token");
       }
       auto modifierToken = tryConsumeModifierToken();
-      KJ_IF_SOME(err, addPart(kj::mv(maybePrefix), nameToken, regexOrWildcardToken,
-                              kj::mv(suffix), modifierToken)) {
+      KJ_IF_SOME(err,
+          addPart(kj::mv(maybePrefix), nameToken, regexOrWildcardToken, kj::mv(suffix),
+              modifierToken)) {
         return kj::mv(err);
       }
       continue;
@@ -1404,14 +1378,13 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
 }
 
 RegexAndNameList generateRegexAndNameList(
-    kj::ArrayPtr<Part> partList,
-    const CompileComponentOptions& options) {
+    kj::ArrayPtr<Part> partList, const CompileComponentOptions& options) {
   // Worst case is that the nameList is equal to partList, although that will almost never
   // be the case, so let's be more conservative in what we reserve.
   kj::Vector<kj::String> nameList(partList.size() / 2);
   auto regex = kj::strTree("^");
 
-  for (auto& part : partList) {
+  for (auto& part: partList) {
     if (part.type == Part::Type::FIXED_TEXT) {
       auto escaped = escapeRegexString(part.value);
       if (part.modifier == Part::Modifier::NONE) {
@@ -1427,10 +1400,9 @@ RegexAndNameList generateRegexAndNameList(
 
     KJ_DASSERT(part.name.size() > 0);
     nameList.add(kj::mv(part.name));
-    auto value = part.type == Part::Type::SEGMENT_WILDCARD ?
-        kj::str(options.segmentWildcardRegexp) :
-        part.type == Part::Type::FULL_WILDCARD ?
-            kj::str(".*") : kj::mv(part.value);
+    auto value = part.type == Part::Type::SEGMENT_WILDCARD ? kj::str(options.segmentWildcardRegexp)
+        : part.type == Part::Type::FULL_WILDCARD           ? kj::str(".*")
+                                                           : kj::mv(part.value);
 
     if (part.prefix == kj::none && part.suffix == kj::none) {
       if (part.modifier == Part::Modifier::NONE || part.modifier == Part::Modifier::OPTIONAL) {
@@ -1465,7 +1437,7 @@ RegexAndNameList generateRegexAndNameList(
     }
 
     regex = kj::strTree(kj::mv(regex), "(?:", escapedPrefix, "((?:", value, ")(?:", escapedSuffix,
-                        escapedPrefix, "(?:", value, "))*)", escapedSuffix, ")");
+        escapedPrefix, "(?:", value, "))*)", escapedSuffix, ")");
     if (part.modifier == Part::Modifier::ZERO_OR_MORE) {
       regex = kj::strTree(kj::mv(regex), MODIFIER_ZERO_OR_MORE);
     }
@@ -1473,14 +1445,14 @@ RegexAndNameList generateRegexAndNameList(
 
   regex = kj::strTree(kj::mv(regex), "$");
 
-  return RegexAndNameList {
+  return RegexAndNameList{
     .regex = regex.flatten(),
     .names = nameList.releaseAsArray(),
   };
 }
 
-kj::String generatePatternString(kj::ArrayPtr<Part> partList,
-                                 const CompileComponentOptions& options) {
+kj::String generatePatternString(
+    kj::ArrayPtr<Part> partList, const CompileComponentOptions& options) {
   auto pattern = kj::strTree();
   Part* previousPart = nullptr;
   Part* nextPart = nullptr;
@@ -1521,14 +1493,9 @@ kj::String generatePatternString(kj::ArrayPtr<Part> partList,
         }
       }
     }
-    if (!needsGrouping &&
-        prefixIsEmpty &&
-        customName &&
-        part.type == Part::Type::SEGMENT_WILDCARD &&
-        part.modifier == Part::Modifier::NONE &&
-        nextPart != nullptr &&
-        partPrefixEmpty(nextPart) &&
-        partSuffixEmpty(nextPart)) {
+    if (!needsGrouping && prefixIsEmpty && customName &&
+        part.type == Part::Type::SEGMENT_WILDCARD && part.modifier == Part::Modifier::NONE &&
+        nextPart != nullptr && partPrefixEmpty(nextPart) && partSuffixEmpty(nextPart)) {
       if (nextPart->type == Part::Type::FIXED_TEXT) {
         return nextPart->name.size() > 0 && isValidCodepoint(nextPart->name[0], false);
       } else {
@@ -1567,8 +1534,8 @@ kj::String generatePatternString(kj::ArrayPtr<Part> partList,
       // if because in some cases, they may be evaluated before the previousPart != nullptr
       // check.
       if (previousPart->type == Part::Type::FIXED_TEXT &&
-          (previousPart->value.size() >0 &&
-           previousPart->value[previousPart->value.size() - 1] == options.prefix.orDefault(0))) {
+          (previousPart->value.size() > 0 &&
+              previousPart->value[previousPart->value.size() - 1] == options.prefix.orDefault(0))) {
         needsGrouping = true;
       }
     }
@@ -1587,20 +1554,14 @@ kj::String generatePatternString(kj::ArrayPtr<Part> partList,
       subPattern = kj::strTree(kj::mv(subPattern), "(", options.segmentWildcardRegexp, ")");
     } else if (part.type == Part::Type::FULL_WILDCARD) {
       if (!customName &&
-          (
-            previousPart == nullptr ||
-            previousPart->type == Part::Type::FIXED_TEXT ||
-            previousPart->modifier != Part::Modifier::NONE ||
-            needsGrouping ||
-            !prefixIsEmpty)) {
+          (previousPart == nullptr || previousPart->type == Part::Type::FIXED_TEXT ||
+              previousPart->modifier != Part::Modifier::NONE || needsGrouping || !prefixIsEmpty)) {
         subPattern = kj::strTree(kj::mv(subPattern), MODIFIER_ZERO_OR_MORE);
       } else {
         subPattern = kj::strTree(kj::mv(subPattern), "(.*)");
       }
     }
-    if (part.type == Part::Type::SEGMENT_WILDCARD &&
-        customName &&
-        partSuffixIsValid(&part)) {
+    if (part.type == Part::Type::SEGMENT_WILDCARD && customName && partSuffixIsValid(&part)) {
       subPattern = kj::strTree(kj::mv(subPattern), "\\");
     }
 
@@ -1621,8 +1582,7 @@ kj::String generatePatternString(kj::ArrayPtr<Part> partList,
   return pattern.flatten();
 }
 
-UrlPattern::Result<UrlPattern::Component> tryCompileComponent(
-    kj::Maybe<kj::String>& input,
+UrlPattern::Result<UrlPattern::Component> tryCompileComponent(kj::Maybe<kj::String>& input,
     Canonicalizer canonicalizer,
     const CompileComponentOptions& options) {
   auto pattern = kj::mv(input).orDefault([] { return kj::str(MODIFIER_ZERO_OR_MORE); });
@@ -1633,28 +1593,24 @@ UrlPattern::Result<UrlPattern::Component> tryCompileComponent(
     KJ_CASE_ONEOF(partList, kj::Array<Part>) {
       auto pattern = generatePatternString(partList, options);
       auto regexAndNameList = generateRegexAndNameList(partList, options);
-      return UrlPattern::Component(kj::mv(pattern),
-                                   kj::mv(regexAndNameList.regex),
-                                   kj::mv(regexAndNameList.names));
+      return UrlPattern::Component(
+          kj::mv(pattern), kj::mv(regexAndNameList.regex), kj::mv(regexAndNameList.names));
     }
   }
   KJ_UNREACHABLE;
 }
 
-bool protocolComponentMatchesSpecialScheme(kj::StringPtr regex,
-                                           const UrlPattern::CompileOptions& options) {
+bool protocolComponentMatchesSpecialScheme(
+    kj::StringPtr regex, const UrlPattern::CompileOptions& options) {
   std::regex rx(regex.begin(), regex.size());
   std::cmatch cmatch;
-  return std::regex_match("http", cmatch, rx) ||
-         std::regex_match("https", cmatch, rx) ||
-         std::regex_match("ws", cmatch, rx) ||
-         std::regex_match("wss", cmatch, rx) ||
-         std::regex_match("ftp", cmatch, rx);
+  return std::regex_match("http", cmatch, rx) || std::regex_match("https", cmatch, rx) ||
+      std::regex_match("ws", cmatch, rx) || std::regex_match("wss", cmatch, rx) ||
+      std::regex_match("ftp", cmatch, rx);
 }
 
 UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
-    kj::StringPtr input,
-    const UrlPattern::CompileOptions& options) {
+    kj::StringPtr input, const UrlPattern::CompileOptions& options) {
   enum class State {
     INIT,
     PROTOCOL,
@@ -1675,7 +1631,7 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
   size_t ipv6Depth = 0;
   bool protocolMatchesSpecialScheme = false;
 
-  UrlPattern::Init result {
+  UrlPattern::Init result{
     .baseUrl = strFromMaybePtr(options.baseUrl),
   };
 
@@ -1769,35 +1725,24 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
   const auto isNonSpecialPatternChar = [&](auto iter, char c) {
     KJ_DASSERT(tokens.begin() <= iter && iter < tokens.end());
     Token& token = *iter;
-    return (token.type == Token::Type::CHAR ||
-            token.type == Token::Type::ESCAPED_CHAR ||
-            token.type == Token::Type::INVALID_CHAR) &&
-            token == c;
+    return (token.type == Token::Type::CHAR || token.type == Token::Type::ESCAPED_CHAR ||
+               token.type == Token::Type::INVALID_CHAR) &&
+        token == c;
   };
 
-  const auto isProtocolSuffix = [&]() {
-    return isNonSpecialPatternChar(it, ':');
-  };
+  const auto isProtocolSuffix = [&]() { return isNonSpecialPatternChar(it, ':'); };
 
   const auto nextIsAuthoritySlashes = [&]() {
     return isNonSpecialPatternChar(it + 1, '/') && isNonSpecialPatternChar(it + 2, '/');
   };
 
-  const auto isIdentityTerminator = [&]() {
-    return isNonSpecialPatternChar(it, '@');
-  };
+  const auto isIdentityTerminator = [&]() { return isNonSpecialPatternChar(it, '@'); };
 
-  const auto isPasswordPrefix = [&]() {
-    return isNonSpecialPatternChar(it, ':');
-  };
+  const auto isPasswordPrefix = [&]() { return isNonSpecialPatternChar(it, ':'); };
 
-  const auto isPortPrefix = [&]() {
-    return isNonSpecialPatternChar(it, ':');
-  };
+  const auto isPortPrefix = [&]() { return isNonSpecialPatternChar(it, ':'); };
 
-  const auto isPathnameStart = [&]() {
-    return isNonSpecialPatternChar(it, '/');
-  };
+  const auto isPathnameStart = [&]() { return isNonSpecialPatternChar(it, '/'); };
 
   const auto isSearchPrefix = [&]() {
     if (isNonSpecialPatternChar(it, '?')) {
@@ -1809,36 +1754,24 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
     if (it == tokens.begin()) return true;
 
     auto& previousToken = *(it - 1);
-    return previousToken.type != Token::Type::NAME &&
-           previousToken.type != Token::Type::REGEXP &&
-           previousToken.type != Token::Type::CLOSE &&
-           previousToken.type != Token::Type::ASTERISK;
+    return previousToken.type != Token::Type::NAME && previousToken.type != Token::Type::REGEXP &&
+        previousToken.type != Token::Type::CLOSE && previousToken.type != Token::Type::ASTERISK;
   };
 
-  const auto isHashPrefix = [&]() {
-    return isNonSpecialPatternChar(it, '#');
-  };
+  const auto isHashPrefix = [&]() { return isNonSpecialPatternChar(it, '#'); };
 
-  const auto isGroupOpen = [&]() {
-    return it->type == Token::Type::OPEN;
-  };
+  const auto isGroupOpen = [&]() { return it->type == Token::Type::OPEN; };
 
-  const auto isGroupClose = [&]() {
-    return it->type == Token::Type::CLOSE;
-  };
+  const auto isGroupClose = [&]() { return it->type == Token::Type::CLOSE; };
 
-  const auto isIPv6Open = [&]() {
-    return isNonSpecialPatternChar(it, '[');
-  };
+  const auto isIPv6Open = [&]() { return isNonSpecialPatternChar(it, '['); };
 
-  const auto isIPv6Close = [&]() {
-    return isNonSpecialPatternChar(it, ']');
-  };
+  const auto isIPv6Close = [&]() { return isNonSpecialPatternChar(it, ']'); };
 
   const auto computeMatchesSpecialScheme = [&] {
     kj::Maybe<kj::String> input = makeComponentString();
-    KJ_SWITCH_ONEOF(tryCompileComponent(input, &canonicalizeProtocol,
-                                        CompileComponentOptions::DEFAULT)) {
+    KJ_SWITCH_ONEOF(tryCompileComponent(
+                        input, &canonicalizeProtocol, CompileComponentOptions::DEFAULT)) {
       KJ_CASE_ONEOF(err, kj::String) {
         // Ignore any errors at this point. If the component is invalid we'll
         // catch it later.
@@ -1915,20 +1848,27 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
         if (isProtocolSuffix()) {
           computeMatchesSpecialScheme();
           if (protocolMatchesSpecialScheme) result.pathname = kj::str("/");
-          if (nextIsAuthoritySlashes()) changeState(State::AUTHORITY, 3);
-          else if (protocolMatchesSpecialScheme) changeState(State::AUTHORITY, 1);
-          else changeState(State::PATHNAME, 1);
+          if (nextIsAuthoritySlashes())
+            changeState(State::AUTHORITY, 3);
+          else if (protocolMatchesSpecialScheme)
+            changeState(State::AUTHORITY, 1);
+          else
+            changeState(State::PATHNAME, 1);
         }
         break;
       }
       case State::AUTHORITY: {
-        if (isIdentityTerminator()) rewind(State::USERNAME);
-        else if (isPathnameStart() || isSearchPrefix() || isHashPrefix()) rewind(State::HOSTNAME);
+        if (isIdentityTerminator())
+          rewind(State::USERNAME);
+        else if (isPathnameStart() || isSearchPrefix() || isHashPrefix())
+          rewind(State::HOSTNAME);
         break;
       }
       case State::USERNAME: {
-        if (isPasswordPrefix()) changeState(State::PASSWORD, 1);
-        else if (isIdentityTerminator()) changeState(State::HOSTNAME, 1);
+        if (isPasswordPrefix())
+          changeState(State::PASSWORD, 1);
+        else if (isIdentityTerminator())
+          changeState(State::HOSTNAME, 1);
         break;
       }
       case State::PASSWORD: {
@@ -1936,23 +1876,34 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
         break;
       }
       case State::HOSTNAME: {
-        if (isIPv6Open()) ipv6Depth++;
-        else if (isIPv6Close()) ipv6Depth--;
-        else if (isPortPrefix() && ipv6Depth == 0) changeState(State::PORT, 1);
-        else if (isPathnameStart()) changeState(State::PATHNAME, 0);
-        else if (isSearchPrefix()) changeState(State::SEARCH, 1);
-        else if (isHashPrefix()) changeState(State::HASH, 1);
+        if (isIPv6Open())
+          ipv6Depth++;
+        else if (isIPv6Close())
+          ipv6Depth--;
+        else if (isPortPrefix() && ipv6Depth == 0)
+          changeState(State::PORT, 1);
+        else if (isPathnameStart())
+          changeState(State::PATHNAME, 0);
+        else if (isSearchPrefix())
+          changeState(State::SEARCH, 1);
+        else if (isHashPrefix())
+          changeState(State::HASH, 1);
         break;
       }
       case State::PORT: {
-        if (isPathnameStart()) changeState(State::PATHNAME, 0);
-        else if (isSearchPrefix()) changeState(State::SEARCH, 1);
-        else if (isHashPrefix()) changeState(State::HASH, 1);
+        if (isPathnameStart())
+          changeState(State::PATHNAME, 0);
+        else if (isSearchPrefix())
+          changeState(State::SEARCH, 1);
+        else if (isHashPrefix())
+          changeState(State::HASH, 1);
         break;
       }
       case State::PATHNAME: {
-        if (isSearchPrefix()) changeState(State::SEARCH, 1);
-        else if (isHashPrefix()) changeState(State::HASH, 1);
+        if (isSearchPrefix())
+          changeState(State::SEARCH, 1);
+        else if (isHashPrefix())
+          changeState(State::HASH, 1);
         break;
       }
       case State::SEARCH: {
@@ -1979,22 +1930,19 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
 }
 }  // namespace
 
-UrlPattern::Component::Component(kj::String pattern,
-                                 kj::String regex,
-                                 kj::Array<kj::String> names)
+UrlPattern::Component::Component(kj::String pattern, kj::String regex, kj::Array<kj::String> names)
     : pattern(kj::mv(pattern)),
       regex(kj::mv(regex)),
       names(kj::mv(names)) {}
 
 UrlPattern::Result<UrlPattern> UrlPattern::tryCompileInit(
-    UrlPattern::Init init,
-    const UrlPattern::CompileOptions& options) {
+    UrlPattern::Init init, const UrlPattern::CompileOptions& options) {
   kj::Vector<UrlPattern::Component> components(7);
 
   bool matchesSpecialScheme = false;
 
-  KJ_SWITCH_ONEOF(tryCompileComponent(init.protocol, &canonicalizeProtocol,
-                                      CompileComponentOptions::DEFAULT)) {
+  KJ_SWITCH_ONEOF(tryCompileComponent(
+                      init.protocol, &canonicalizeProtocol, CompileComponentOptions::DEFAULT)) {
     KJ_CASE_ONEOF(err, kj::String) {
       return kj::mv(err);
     }
@@ -2004,9 +1952,9 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompileInit(
     }
   }
 
-  const auto handleComponent = [&](auto& input, Canonicalizer canonicalizer,
-                                   const CompileComponentOptions& options)
-      -> kj::Maybe<kj::String> {
+  const auto handleComponent =
+      [&](auto& input, Canonicalizer canonicalizer,
+          const CompileComponentOptions& options) -> kj::Maybe<kj::String> {
     KJ_SWITCH_ONEOF(tryCompileComponent(input, canonicalizer, options)) {
       KJ_CASE_ONEOF(err, kj::String) {
         return kj::mv(err);
@@ -2019,13 +1967,12 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompileInit(
     KJ_UNREACHABLE;
   };
 
-  KJ_IF_SOME(err, handleComponent(init.username, &canonicalizeUsername,
-                                  CompileComponentOptions::DEFAULT)) {
+  KJ_IF_SOME(err,
+      handleComponent(init.username, &canonicalizeUsername, CompileComponentOptions::DEFAULT)) {
     return kj::mv(err);
   }
-  KJ_IF_SOME(err, handleComponent(init.password,
-                                  &canonicalizePassword,
-                                  CompileComponentOptions::DEFAULT)) {
+  KJ_IF_SOME(err,
+      handleComponent(init.password, &canonicalizePassword, CompileComponentOptions::DEFAULT)) {
     return kj::mv(err);
   }
 
@@ -2035,8 +1982,8 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompileInit(
       hostnameCanonicalizer = &canonicalizeIpv6Hostname;
     }
   }
-  KJ_IF_SOME(err, handleComponent(init.hostname, hostnameCanonicalizer,
-                                  CompileComponentOptions::HOSTNAME)) {
+  KJ_IF_SOME(err,
+      handleComponent(init.hostname, hostnameCanonicalizer, CompileComponentOptions::HOSTNAME)) {
     return kj::mv(err);
   }
 
@@ -2044,26 +1991,25 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompileInit(
     return kj::mv(err);
   }
 
-  KJ_IF_SOME(err, handleComponent(init.pathname,
-                       matchesSpecialScheme ? &canonicalizePathname : &canonicalizeOpaquePathname,
-                       matchesSpecialScheme ? CompileComponentOptions::PATHNAME :
-                                              CompileComponentOptions::DEFAULT)) {
+  KJ_IF_SOME(err,
+      handleComponent(init.pathname,
+          matchesSpecialScheme ? &canonicalizePathname : &canonicalizeOpaquePathname,
+          matchesSpecialScheme ? CompileComponentOptions::PATHNAME
+                               : CompileComponentOptions::DEFAULT)) {
     return kj::mv(err);
   }
-  KJ_IF_SOME(err, handleComponent(init.search, &canonicalizeSearch,
-                                  CompileComponentOptions::DEFAULT)) {
+  KJ_IF_SOME(err,
+      handleComponent(init.search, &canonicalizeSearch, CompileComponentOptions::DEFAULT)) {
     return kj::mv(err);
   }
-  KJ_IF_SOME(err, handleComponent(init.hash, &canonicalizeHash,
-                                  CompileComponentOptions::DEFAULT)) {
+  KJ_IF_SOME(err, handleComponent(init.hash, &canonicalizeHash, CompileComponentOptions::DEFAULT)) {
     return kj::mv(err);
   }
   return UrlPattern(components.releaseAsArray(), options.ignoreCase);
 }
 
 UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
-    UrlPattern::Init init,
-    kj::Maybe<UrlPattern::ProcessInitOptions> maybeOptions) {
+    UrlPattern::Init init, kj::Maybe<UrlPattern::ProcessInitOptions> maybeOptions) {
   auto options = maybeOptions.orDefault({});
 
   Init result;
@@ -2103,8 +2049,8 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
   }
 
   if (options.mode == ProcessInitOptions::Mode::PATTERN) {
-    KJ_IF_SOME(protocol, chooseStr(kj::mv(init.protocol), options.protocol)
-        .map([](kj::String&& str) mutable {
+    KJ_IF_SOME(protocol,
+        chooseStr(kj::mv(init.protocol), options.protocol).map([](kj::String&& str) mutable {
       // It's silly but the URL spec always includes the : suffix in the value,
       // while the URLPattern spec always omits it. Silly specs.
       return stripSuffixFromProtocol(str.asPtr());
@@ -2173,8 +2119,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
       // attempting to use it to parse a URL.
       bool emptyProtocol = protocol == "";
       auto str = kj::str((emptyProtocol ? "fake:"_kj : protocol.asPtr()),
-                         (emptyProtocol || protocol.asArray().back() == ':') ? "" : ":",
-                         "//a:b@fake-url");
+          (emptyProtocol || protocol.asArray().back() == ':') ? "" : ":", "//a:b@fake-url");
       KJ_IF_SOME(parsed, Url::tryParse(str.asPtr())) {
         // Nice. We have a good protocol component. Let's set the normalized version
         // on the result and return the parsed URL to use as our temporary.
@@ -2225,8 +2170,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         result.password = kj::str(url.getPassword());
       }
       KJ_IF_SOME(hostname, chooseStr(kj::mv(init.hostname), options.hostname)) {
-        if (!isValidHostnameInput(hostname) ||
-            !url.setHostname(hostname.asPtr())) {
+        if (!isValidHostnameInput(hostname) || !url.setHostname(hostname.asPtr())) {
           return kj::str("Invalid URL hostname component");
         }
         result.hostname = kj::str(url.getHostname());
@@ -2237,7 +2181,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         }
         if (port.size() == 0) {
           url.setPort(kj::none);
-        } else if(!url.setPort(kj::Maybe(port.asPtr()))) {
+        } else if (!url.setPort(kj::Maybe(port.asPtr()))) {
           return kj::str("Invalid URL port component");
         }
         result.port = kj::str(url.getPort());
@@ -2297,8 +2241,8 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
   KJ_UNREACHABLE;
 }
 
-UrlPattern::Result<UrlPattern> UrlPattern::tryCompile(Init init,
-                                                      kj::Maybe<CompileOptions> maybeOptions) {
+UrlPattern::Result<UrlPattern> UrlPattern::tryCompile(
+    Init init, kj::Maybe<CompileOptions> maybeOptions) {
   auto options = maybeOptions.orDefault({});
   KJ_SWITCH_ONEOF(processInit(kj::mv(init))) {
     KJ_CASE_ONEOF(err, kj::String) {
@@ -2311,8 +2255,8 @@ UrlPattern::Result<UrlPattern> UrlPattern::tryCompile(Init init,
   KJ_UNREACHABLE;
 }
 
-UrlPattern::Result<UrlPattern> UrlPattern::tryCompile(kj::StringPtr input,
-                                                      kj::Maybe<CompileOptions> maybeOptions) {
+UrlPattern::Result<UrlPattern> UrlPattern::tryCompile(
+    kj::StringPtr input, kj::Maybe<CompileOptions> maybeOptions) {
   auto options = maybeOptions.orDefault({});
   KJ_SWITCH_ONEOF(tryParseConstructorString(input, options)) {
     KJ_CASE_ONEOF(err, kj::String) {
@@ -2345,6 +2289,6 @@ UrlPattern::UrlPattern(kj::Array<Component> components, bool ignoreCase)
 
 }  // namespace workerd::jsg
 
-const workerd::jsg::Url operator "" _url(const char* str, size_t size) {
+const workerd::jsg::Url operator"" _url(const char* str, size_t size) {
   return KJ_ASSERT_NONNULL(workerd::jsg::Url::tryParse(kj::ArrayPtr<const char>(str, size)));
 }

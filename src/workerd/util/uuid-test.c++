@@ -20,12 +20,12 @@ namespace {
   } while (false)
 
 KJ_TEST("Valid UUIDs") {
-  ASSERT_VALID_AND_EQUAL(72340172838076673ull, 1157442765409226768ull,
-                         "01010101-0101-0101-1010-101010101010");
-  ASSERT_VALID_AND_EQUAL(81985529216486895ull, 81985529216486895ull,
-                         "01234567-89ab-cdef-0123-456789abcdef");
-  ASSERT_VALID_AND_EQUAL(16045690984833335023ull, 16045690984833335023ull,
-                         "deadbeef-dead-beef-dead-beefdeadbeef");
+  ASSERT_VALID_AND_EQUAL(
+      72340172838076673ull, 1157442765409226768ull, "01010101-0101-0101-1010-101010101010");
+  ASSERT_VALID_AND_EQUAL(
+      81985529216486895ull, 81985529216486895ull, "01234567-89ab-cdef-0123-456789abcdef");
+  ASSERT_VALID_AND_EQUAL(
+      16045690984833335023ull, 16045690984833335023ull, "deadbeef-dead-beef-dead-beefdeadbeef");
 }
 
 KJ_TEST("Null UUIDs") {
@@ -48,5 +48,5 @@ KJ_TEST("Invalid UUIDs") {
   KJ_EXPECT(UUID::fromString("0123456789abcdef0123456789abcdef") == kj::none);
 }
 
-} // namespace
-} // namespace workerd
+}  // namespace
+}  // namespace workerd

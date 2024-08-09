@@ -12,21 +12,22 @@
 namespace workerd::jsg::test {
 
 // Checks the evaluation of a blob of JS code under the given context and isolate types.
-template <typename ContextType, typename IsolateType,
-          typename ConfigurationType = decltype(nullptr),
-         // HACK: We allow passing another parameter here to set the template type of
-         // ModuleRegistryImpl correctly in expectEvalModule(). This type needs to be
-         // IsolateType##_TypeWrapper, but this is difficult to derive from the IsolateType
-         // typename and only a few tests use expectEvalModule(), so providing it is optional.
-         // Previously we always provided ContextType here, which causes a subtle UBSan/vptr
-         // violation.
-         typename IsolateType_TypeWrapper = ContextType>
+template <typename ContextType,
+    typename IsolateType,
+    typename ConfigurationType = decltype(nullptr),
+    // HACK: We allow passing another parameter here to set the template type of
+    // ModuleRegistryImpl correctly in expectEvalModule(). This type needs to be
+    // IsolateType##_TypeWrapper, but this is difficult to derive from the IsolateType
+    // typename and only a few tests use expectEvalModule(), so providing it is optional.
+    // Previously we always provided ContextType here, which causes a subtle UBSan/vptr
+    // violation.
+    typename IsolateType_TypeWrapper = ContextType>
 class Evaluator {
   // TODO(cleanup): `ConfigurationType` currently can optionally be specified to fix the build
   //   in cases that the isolate includes types that require configuration, but currently the
   //   type is always default-constructed. What if you want to specify a test config?
 public:
-  explicit Evaluator(V8System& v8System) : v8System(v8System) {}
+  explicit Evaluator(V8System& v8System): v8System(v8System) {}
 
   IsolateType& getIsolate() {
     // Slightly more efficient to only instantiate each isolate type once (17s vs. 20s):
@@ -34,19 +35,18 @@ public:
     return isolate;
   }
 
-  void expectEvalModule(kj::StringPtr code,
-                        kj::StringPtr expectedType,
-                        kj::StringPtr expectedValue) {
+  void expectEvalModule(
+      kj::StringPtr code, kj::StringPtr expectedType, kj::StringPtr expectedValue) {
     getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
       JSG_WITHIN_CONTEXT_SCOPE(lock,
-          lock.template newContext<ContextType>().getHandle(lock.v8Isolate),
-          [&](jsg::Lock& js) {
+          lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
         // Compile code as "main" module
         CompilationObserver observer;
         auto modules = ModuleRegistryImpl<IsolateType_TypeWrapper>::from(js);
         auto p = kj::Path::parse("main");
-        modules->add(p, jsg::ModuleRegistry::ModuleInfo(
-            lock, "main", code, ModuleInfoCompileOption::BUNDLE, observer));
+        modules->add(p,
+            jsg::ModuleRegistry::ModuleInfo(
+                lock, "main", code, ModuleInfoCompileOption::BUNDLE, observer));
 
         // Instantiate the module
         auto& moduleInfo = KJ_REQUIRE_NONNULL(modules->resolve(js, p));
@@ -61,9 +61,8 @@ public:
 
         // Run the function to get the result.
         v8::Local<v8::Value> result;
-        if (v8::Function::Cast(*runValue)->Call(
-            js.v8Context(),
-            js.v8Context()->Global(), 0, nullptr)
+        if (v8::Function::Cast(*runValue)
+                ->Call(js.v8Context(), js.v8Context()->Global(), 0, nullptr)
                 .ToLocal(&result)) {
           v8::String::Utf8Value type(js.v8Isolate, result->TypeOf(js.v8Isolate));
           v8::String::Utf8Value value(js.v8Isolate, result);
@@ -85,8 +84,7 @@ public:
   void expectEval(kj::StringPtr code, kj::StringPtr expectedType, kj::StringPtr expectedValue) {
     getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
       JSG_WITHIN_CONTEXT_SCOPE(lock,
-          lock.template newContext<ContextType>().getHandle(lock.v8Isolate),
-          [&](jsg::Lock& js) {
+          lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
         // Create a string containing the JavaScript source code.
         v8::Local<v8::String> source = jsg::v8Str(js.v8Isolate, code);
 
@@ -120,21 +118,16 @@ public:
   }
 
   void setAllowEval(bool b) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
-      lock.setAllowEval(b);
-    });
+    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) { lock.setAllowEval(b); });
   }
 
   void setCaptureThrowsAsRejections(bool b) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
-      lock.setCaptureThrowsAsRejections(b);
-    });
+    getIsolate().runInLockScope(
+        [&](typename IsolateType::Lock& lock) { lock.setCaptureThrowsAsRejections(b); });
   }
 
   void runMicrotasks() {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
-      lock.runMicrotasks();
-    });
+    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) { lock.runMicrotasks(); });
   }
 
   void runMicrotasks(typename IsolateType::Lock& lock) {
@@ -155,22 +148,42 @@ struct NumberBox: public Object {
     return jsg::alloc<NumberBox>(value);
   }
 
-  void increment() { value += 1; }
-  void incrementBy(double amount) { value += amount; }
-  void incrementByBox(NumberBox& amount) { value += amount.value; }
+  void increment() {
+    value += 1;
+  }
+  void incrementBy(double amount) {
+    value += amount;
+  }
+  void incrementByBox(NumberBox& amount) {
+    value += amount.value;
+  }
 
-  double add(double other) { return value + other; }
-  double addBox(NumberBox& other) { return value + other.value; }
-  Ref<NumberBox> addReturnBox(double other) { return jsg::alloc<NumberBox>(value + other); }
+  double add(double other) {
+    return value + other;
+  }
+  double addBox(NumberBox& other) {
+    return value + other.value;
+  }
+  Ref<NumberBox> addReturnBox(double other) {
+    return jsg::alloc<NumberBox>(value + other);
+  }
   double addMultiple(NumberBox& a, double b, NumberBox& c) {
     return value + a.value + b + c.value;
   }
 
-  double getValue() { return value; }
-  void setValue(double newValue) { value = newValue; }
+  double getValue() {
+    return value;
+  }
+  void setValue(double newValue) {
+    value = newValue;
+  }
 
-  Ref<NumberBox> getBoxed() { return jsg::alloc<NumberBox>(value); }
-  void setBoxed(NumberBox& newValue) { value = newValue.value; }
+  Ref<NumberBox> getBoxed() {
+    return jsg::alloc<NumberBox>(value);
+  }
+  void setBoxed(NumberBox& newValue) {
+    value = newValue.value;
+  }
 
   v8::Local<v8::Value> getBoxedFromTypeHandler(
       jsg::Lock& js, v8::Isolate*, const TypeHandler<Ref<NumberBox>>& numberBoxTypeHandler) {
@@ -208,7 +221,9 @@ public:
     return jsg::alloc<BoxBox>(jsg::alloc<NumberBox>(inner.value + add));
   }
 
-  Ref<NumberBox> getInner() { return inner.addRef(); }
+  Ref<NumberBox> getInner() {
+    return inner.addRef();
+  }
 
   JSG_RESOURCE_TYPE(BoxBox) {
     JSG_READONLY_INSTANCE_PROPERTY(inner, getInner);
@@ -228,8 +243,12 @@ struct ExtendedNumberBox: public NumberBox {
     return result;
   }
 
-  kj::StringPtr getText() { return text; }
-  void setText(kj::String newText) { text = kj::mv(newText); }
+  kj::StringPtr getText() {
+    return text;
+  }
+  void setText(kj::String newText) {
+    text = kj::mv(newText);
+  }
 
   kj::String text;
 

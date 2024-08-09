@@ -17,13 +17,14 @@ namespace {
 class SecretKey final: public CryptoKey::Impl {
 public:
   explicit SecretKey(kj::Array<kj::byte> keyData)
-      : Impl(true, CryptoKeyUsageSet::privateKeyMask() |
-                   CryptoKeyUsageSet::publicKeyMask()),
+      : Impl(true, CryptoKeyUsageSet::privateKeyMask() | CryptoKeyUsageSet::publicKeyMask()),
         keyData(kj::mv(keyData)) {}
 
-  kj::StringPtr getAlgorithmName() const override { return "secret"_kj; }
+  kj::StringPtr getAlgorithmName() const override {
+    return "secret"_kj;
+  }
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
-    return CryptoKey::KeyAlgorithm { .name = "secret"_kj };
+    return CryptoKey::KeyAlgorithm{.name = "secret"_kj};
   }
 
   bool equals(const CryptoKey::Impl& other) const override final {
@@ -32,13 +33,12 @@ public:
 
   bool equals(const kj::Array<kj::byte>& other) const override final {
     return keyData.size() == other.size() &&
-           CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
+        CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
   SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override final {
-    JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError,
-        getAlgorithmName(), " key only supports exporting \"raw\" & \"jwk\", not \"", format,
-        "\".");
+    JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError, getAlgorithmName(),
+        " key only supports exporting \"raw\" & \"jwk\", not \"", format, "\".");
 
     if (format == "jwk") {
       SubtleCrypto::JsonWebKey jwk;
@@ -51,8 +51,12 @@ public:
     return kj::heapArray(keyData.asPtr());
   }
 
-  kj::StringPtr jsgGetMemoryName() const override { return "SecretKey"; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(SecretKey); }
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "SecretKey";
+  }
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(SecretKey);
+  }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
     tracker.trackFieldWithSize("keyData", keyData.size());
   }
@@ -63,9 +67,7 @@ private:
 }  // namespace
 
 kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
-    jsg::Lock& js,
-    jsg::Ref<CryptoKey> key,
-    jsg::Optional<KeyExportOptions> options) {
+    jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options) {
   JSG_REQUIRE(key->getExtractable(), TypeError, "Unable to export non-extractable key");
   auto& opts = JSG_REQUIRE_NONNULL(options, TypeError, "Options must be an object");
 
@@ -113,8 +115,8 @@ kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey
     {"ECDH", "ecdh"},
     {"X25519", "x25519"},
   };
-  JSG_REQUIRE(key->getType() != "secret"_kj, TypeError,
-      "Secret key does not have an asymmetric type");
+  JSG_REQUIRE(
+      key->getType() != "secret"_kj, TypeError, "Secret key does not have an asymmetric type");
   auto found = mapping.find(key->getAlgorithmName());
   if (found != mapping.end()) {
     return found->second;
@@ -127,14 +129,11 @@ jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, kj::Array<kj::byt
 }
 
 jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
-    jsg::Lock& js,
-    CreateAsymmetricKeyOptions options) {
+    jsg::Lock& js, CreateAsymmetricKeyOptions options) {
   KJ_UNIMPLEMENTED("not implemented");
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(
-    jsg::Lock& js,
-    CreateAsymmetricKeyOptions options) {
+jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options) {
   KJ_UNIMPLEMENTED("not implemented");
 }
 

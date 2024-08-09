@@ -14,8 +14,7 @@ struct GlobalScopeBenchmark: public benchmark::Fixture {
   virtual ~GlobalScopeBenchmark() noexcept(true) {}
 
   void SetUp(benchmark::State& state) noexcept(true) override {
-    TestFixture::SetupParams params = {
-      .mainModuleSource = R"(
+    TestFixture::SetupParams params = {.mainModuleSource = R"(
         export default {
           async fetch(request) {
             return new Response("OK");
@@ -33,11 +32,11 @@ struct GlobalScopeBenchmark: public benchmark::Fixture {
 };
 
 BENCHMARK_F(GlobalScopeBenchmark, request)(benchmark::State& state) {
-  for (auto _ : state) {
+  for (auto _: state) {
     auto result = fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "TEST"_kj);
     KJ_EXPECT(result.statusCode == 200);
   }
 }
 
-} // namespace
-} // namespace workerd
+}  // namespace
+}  // namespace workerd

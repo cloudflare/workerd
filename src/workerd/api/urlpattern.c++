@@ -8,14 +8,13 @@
 namespace workerd::api {
 
 namespace {
-jsg::JsRef<jsg::JsRegExp> compileRegex(jsg::Lock& js,
-                                       const jsg::UrlPattern::Component& component,
-                                       bool ignoreCase) {
+jsg::JsRef<jsg::JsRegExp> compileRegex(
+    jsg::Lock& js, const jsg::UrlPattern::Component& component, bool ignoreCase) {
   return js.tryCatch([&] {
     jsg::Lock::RegExpFlags flags = jsg::Lock::RegExpFlags::kUNICODE;
     if (ignoreCase) {
-      flags = static_cast<jsg::Lock::RegExpFlags>(flags |
-          static_cast<int>(jsg::Lock::RegExpFlags::kIGNORE_CASE));
+      flags = static_cast<jsg::Lock::RegExpFlags>(
+          flags | static_cast<int>(jsg::Lock::RegExpFlags::kIGNORE_CASE));
     }
     return jsg::JsRef<jsg::JsRegExp>(js, js.regexp(component.getRegex(), flags));
   }, [&](auto reason) -> jsg::JsRef<jsg::JsRegExp> {
@@ -36,13 +35,11 @@ jsg::Ref<URLPattern> create(jsg::Lock& js, jsg::UrlPattern pattern) {
 #undef V
 
 #define V(_, var) , kj::mv(var)
-  return jsg::alloc<URLPattern>(kj::mv(pattern)
-                                URL_PATTERN_COMPONENTS(V));
+  return jsg::alloc<URLPattern>(kj::mv(pattern) URL_PATTERN_COMPONENTS(V));
 #undef V
 }
 
-kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
-    jsg::Lock& js,
+kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(jsg::Lock& js,
     jsg::JsRef<jsg::JsRegExp>& regex,
     kj::ArrayPtr<const kj::String> nameList,
     kj::StringPtr input) {
@@ -57,16 +54,16 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
 
     while (index < length) {
       auto value = array.get(js, index);
-      fields.add(Groups::Field {
+      fields.add(Groups::Field{
         .name = kj::str(nameList[index - 1]),
         .value = value.isUndefined() ? kj::str() : kj::str(value),
       });
       index++;
     }
 
-    return URLPattern::URLPatternComponentResult {
+    return URLPattern::URLPatternComponentResult{
       .input = kj::str(input),
-      .groups = Groups { .fields = fields.releaseAsArray() },
+      .groups = Groups{.fields = fields.releaseAsArray()},
     };
   }
 
@@ -74,8 +71,7 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
 }
 }  // namespace
 
-URLPattern::URLPattern(
-    jsg::UrlPattern inner,
+URLPattern::URLPattern(jsg::UrlPattern inner,
     jsg::JsRef<jsg::JsRegExp> protocolRegex,
     jsg::JsRef<jsg::JsRegExp> usernameRegex,
     jsg::JsRef<jsg::JsRegExp> passwordRegex,
@@ -95,18 +91,34 @@ URLPattern::URLPattern(
       hashRegex(kj::mv(hashRegex)) {}
 
 void URLPattern::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(protocolRegex, usernameRegex, passwordRegex, hostnameRegex,
-                portRegex, pathnameRegex, searchRegex, hashRegex);
+  visitor.visit(protocolRegex, usernameRegex, passwordRegex, hostnameRegex, portRegex,
+      pathnameRegex, searchRegex, hashRegex);
 }
 
-kj::StringPtr URLPattern::getProtocol() { return inner.getProtocol().getPattern(); }
-kj::StringPtr URLPattern::getUsername() { return inner.getUsername().getPattern(); }
-kj::StringPtr URLPattern::getPassword() { return inner.getPassword().getPattern(); }
-kj::StringPtr URLPattern::getHostname() { return inner.getHostname().getPattern(); }
-kj::StringPtr URLPattern::getPort() { return inner.getPort().getPattern(); }
-kj::StringPtr URLPattern::getPathname() { return inner.getPathname().getPattern(); }
-kj::StringPtr URLPattern::getSearch() { return inner.getSearch().getPattern(); }
-kj::StringPtr URLPattern::getHash() { return inner.getHash().getPattern(); }
+kj::StringPtr URLPattern::getProtocol() {
+  return inner.getProtocol().getPattern();
+}
+kj::StringPtr URLPattern::getUsername() {
+  return inner.getUsername().getPattern();
+}
+kj::StringPtr URLPattern::getPassword() {
+  return inner.getPassword().getPattern();
+}
+kj::StringPtr URLPattern::getHostname() {
+  return inner.getHostname().getPattern();
+}
+kj::StringPtr URLPattern::getPort() {
+  return inner.getPort().getPattern();
+}
+kj::StringPtr URLPattern::getPathname() {
+  return inner.getPathname().getPattern();
+}
+kj::StringPtr URLPattern::getSearch() {
+  return inner.getSearch().getPattern();
+}
+kj::StringPtr URLPattern::getHash() {
+  return inner.getHash().getPattern();
+}
 
 URLPattern::URLPatternInit::operator jsg::UrlPattern::Init() {
   return {
@@ -122,18 +134,18 @@ URLPattern::URLPatternInit::operator jsg::UrlPattern::Init() {
   };
 }
 
-jsg::Ref<URLPattern> URLPattern::constructor(
-    jsg::Lock& js,
+jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
     jsg::Optional<URLPatternInput> input,
     jsg::Optional<kj::String> baseURL,
     jsg::Optional<URLPatternOptions> patternOptions) {
   auto options = patternOptions.orDefault({});
-  KJ_SWITCH_ONEOF(kj::mv(input).orDefault(URLPatternInit {})) {
+  KJ_SWITCH_ONEOF(kj::mv(input).orDefault(URLPatternInit{})) {
     KJ_CASE_ONEOF(str, kj::String) {
-      KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(str.asPtr(), jsg::UrlPattern::CompileOptions {
-        .baseUrl = baseURL.map([](kj::String& str) { return str.asPtr(); }),
-        .ignoreCase = options.ignoreCase.orDefault(false),
-      })) {
+      KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(str.asPtr(),
+                          jsg::UrlPattern::CompileOptions{
+                            .baseUrl = baseURL.map([](kj::String& str) { return str.asPtr(); }),
+                            .ignoreCase = options.ignoreCase.orDefault(false),
+                          })) {
         KJ_CASE_ONEOF(err, kj::String) {
           JSG_FAIL_REQUIRE(TypeError, kj::mv(err));
         }
@@ -143,9 +155,10 @@ jsg::Ref<URLPattern> URLPattern::constructor(
       }
     }
     KJ_CASE_ONEOF(init, URLPatternInit) {
-      KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(init, jsg::UrlPattern::CompileOptions {
-        .ignoreCase = options.ignoreCase.orDefault(false),
-      })) {
+      KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(init,
+                          jsg::UrlPattern::CompileOptions{
+                            .ignoreCase = options.ignoreCase.orDefault(false),
+                          })) {
         KJ_CASE_ONEOF(err, kj::String) {
           JSG_FAIL_REQUIRE(TypeError, kj::mv(err));
         }
@@ -159,16 +172,12 @@ jsg::Ref<URLPattern> URLPattern::constructor(
 }
 
 bool URLPattern::test(
-    jsg::Lock& js,
-    jsg::Optional<URLPatternInput> input,
-    jsg::Optional<kj::String> baseURL) {
+    jsg::Lock& js, jsg::Optional<URLPatternInput> input, jsg::Optional<kj::String> baseURL) {
   return exec(js, kj::mv(input), kj::mv(baseURL)) != kj::none;
 }
 
 kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
-    jsg::Lock& js,
-    jsg::Optional<URLPatternInput> maybeInput,
-    jsg::Optional<kj::String> maybeBase) {
+    jsg::Lock& js, jsg::Optional<URLPatternInput> maybeInput, jsg::Optional<kj::String> maybeBase) {
   auto input = kj::mv(maybeInput).orDefault(URLPattern::URLPatternInit());
   kj::Vector<URLPattern::URLPatternInput> inputs(2);
 
@@ -183,8 +192,9 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
 
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(string, kj::String) {
-      KJ_IF_SOME(url, jsg::Url::tryParse(string.asPtr(),
-                                         maybeBase.map([](kj::String& s) { return s.asPtr(); }))) {
+      KJ_IF_SOME(url, jsg::Url::tryParse(string.asPtr(), maybeBase.map([](kj::String& s) {
+        return s.asPtr();
+      }))) {
         auto p = url.getProtocol();
         protocol = kj::str(p.slice(0, p.size() - 1));
         username = kj::str(url.getUsername());
@@ -198,12 +208,14 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
         return kj::none;
       }
       inputs.add(kj::mv(string));
-      KJ_IF_SOME(base, maybeBase) { inputs.add(kj::mv(base)); }
+      KJ_IF_SOME(base, maybeBase) {
+        inputs.add(kj::mv(base));
+      }
     }
     KJ_CASE_ONEOF(i, URLPattern::URLPatternInit) {
-      JSG_REQUIRE(maybeBase == kj::none, TypeError,
-                  "A baseURL is not allowed when input is an object.");
-      inputs.add(URLPattern::URLPatternInit {
+      JSG_REQUIRE(
+          maybeBase == kj::none, TypeError, "A baseURL is not allowed when input is an object.");
+      inputs.add(URLPattern::URLPatternInit{
         .protocol = i.protocol.map([](kj::String& str) { return kj::str(str); }),
         .username = i.username.map([](kj::String& str) { return kj::str(str); }),
         .password = i.password.map([](kj::String& str) { return kj::str(str); }),
@@ -228,8 +240,7 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
       };
 
       jsg::UrlPattern::ProcessInitOptions options = {
-        .mode = jsg::UrlPattern::ProcessInitOptions::Mode::URL
-      };
+        .mode = jsg::UrlPattern::ProcessInitOptions::Mode::URL};
 
       KJ_SWITCH_ONEOF(jsg::UrlPattern::processInit(kj::mv(init), kj::mv(options))) {
         KJ_CASE_ONEOF(err, kj::String) {
@@ -258,18 +269,14 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
   auto searchExecResult = execRegex(js, searchRegex, inner.getSearch().getNames(), search);
   auto hashExecResult = execRegex(js, hashRegex, inner.getHash().getNames(), hash);
 
-  if (protocolExecResult == kj::none ||
-      usernameExecResult == kj::none ||
-      passwordExecResult == kj::none ||
-      hostnameExecResult == kj::none ||
-      portExecResult == kj::none ||
-      pathnameExecResult == kj::none ||
-      searchExecResult == kj::none ||
-      hashExecResult == kj::none) {
+  if (protocolExecResult == kj::none || usernameExecResult == kj::none ||
+      passwordExecResult == kj::none || hostnameExecResult == kj::none ||
+      portExecResult == kj::none || pathnameExecResult == kj::none ||
+      searchExecResult == kj::none || hashExecResult == kj::none) {
     return kj::none;
   }
 
-  return URLPattern::URLPatternResult {
+  return URLPattern::URLPatternResult{
     .inputs = inputs.releaseAsArray(),
     .protocol = kj::mv(KJ_REQUIRE_NONNULL(protocolExecResult)),
     .username = kj::mv(KJ_REQUIRE_NONNULL(usernameExecResult)),

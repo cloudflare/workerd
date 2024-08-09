@@ -21,9 +21,7 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: early co_return implicitly fulfills oute
   }
   {
     // Explicit void co_return.
-    auto coro = []() -> kj::Promise<DeferredProxy<void>> {
-      co_return;
-    };
+    auto coro = []() -> kj::Promise<DeferredProxy<void>> { co_return; };
     auto promise = coro();
     KJ_EXPECT(promise.poll(waitScope));
     auto proxyTask = promise.wait(waitScope).proxyTask;
@@ -32,9 +30,7 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: early co_return implicitly fulfills oute
   }
   {
     // Valueful co_return.
-    auto coro = []() -> kj::Promise<DeferredProxy<int>> {
-      co_return 123;
-    };
+    auto coro = []() -> kj::Promise<DeferredProxy<int>> { co_return 123; };
     auto promise = coro();
     KJ_EXPECT(promise.poll(waitScope));
     auto proxyTask = promise.wait(waitScope).proxyTask;
@@ -44,7 +40,7 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: early co_return implicitly fulfills oute
 }
 
 KJ_TEST("kj::Promise<DeferredProxy<T>>: `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING` fulfills outer "
-    "promise") {
+        "promise") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -77,7 +73,7 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING` fu
 }
 
 KJ_TEST("kj::Promise<DeferredProxy<T>>: unhandled exception before "
-    "`KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`") {
+        "`KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -100,7 +96,7 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: unhandled exception before "
 }
 
 KJ_TEST("kj::Promise<DeferredProxy<T>>: unhandled exception after "
-    "`KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`") {
+        "`KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -173,13 +169,16 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: can be `co_await`ed from another corouti
 struct Counter {
   size_t& wind;
   size_t& unwind;
-  Counter(size_t& wind, size_t& unwind): wind(wind), unwind(unwind) { ++wind; }
-  ~Counter() { ++unwind; }
+  Counter(size_t& wind, size_t& unwind): wind(wind), unwind(unwind) {
+    ++wind;
+  }
+  ~Counter() {
+    ++unwind;
+  }
   KJ_DISALLOW_COPY_AND_MOVE(Counter);
 };
 
-kj::Promise<DeferredProxy<void>> cancellationTester(
-    kj::Promise<void> preDeferredProxying,
+kj::Promise<DeferredProxy<void>> cancellationTester(kj::Promise<void> preDeferredProxying,
     kj::Promise<void> postDeferredProxying,
     size_t& wind,
     size_t& unwind) {
@@ -230,7 +229,7 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: can be canceled while suspended after de
 }
 
 KJ_TEST("kj::Promise<DeferredProxy<T>>: destroying inner PromiseNode before outer does not "
-    "segfault") {
+        "segfault") {
   // Destroy the inner promise before the outer promise to test our safeguard against incorrect
   // destruction order causing segfaults.
 

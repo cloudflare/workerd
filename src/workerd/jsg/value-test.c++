@@ -30,9 +30,9 @@ KJ_TEST("bool") {
   e.expectEval("takeBool('false')", "string", "true");
   e.expectEval("takeBool(null)", "string", "false");
   e.expectEval("takeBool(undefined)", "string", "false");
-  e.expectEval("takeBool()",
-               "throws", "TypeError: Failed to execute 'takeBool' on 'BoolContext': parameter 1 is "
-                         "not of type 'boolean'.");
+  e.expectEval("takeBool()", "throws",
+      "TypeError: Failed to execute 'takeBool' on 'BoolContext': parameter 1 is "
+      "not of type 'boolean'.");
 }
 
 // ========================================================================================
@@ -66,26 +66,32 @@ struct OptionalContext: public ContextGlobalObject {
     return kj::mv(arg).orDefault(kj::str("(absent)")).orDefault(kj::str("(null)"));
   }
   Optional<Ref<NumberBox>> returnOptional(double value) {
-    if (value == 321) return kj::none; else return jsg::alloc<NumberBox>(value);
+    if (value == 321)
+      return kj::none;
+    else
+      return jsg::alloc<NumberBox>(value);
   }
   kj::Maybe<Ref<NumberBox>> returnMaybe(double value) {
-    if (value == 321) return kj::none; else return jsg::alloc<NumberBox>(value);
+    if (value == 321)
+      return kj::none;
+    else
+      return jsg::alloc<NumberBox>(value);
   }
 
   kj::String readTestOptionalFields(TestOptionalFields s) {
     return kj::str(kj::mv(s.optional).orDefault(kj::str("(absent)")), ", ",
-                   kj::mv(s.lenient).orDefault(kj::str("(absent)")), ", ",
-                   kj::mv(s.nullable).orDefault(kj::str("(absent)")));
+        kj::mv(s.lenient).orDefault(kj::str("(absent)")), ", ",
+        kj::mv(s.nullable).orDefault(kj::str("(absent)")));
   }
   TestOptionalFields makeTestOptionalFields(Optional<kj::String> optional,
-                                            LenientOptional<kj::String> lenient,
-                                            kj::Maybe<kj::String> nullable) {
-    return { kj::mv(optional), kj::mv(lenient), kj::mv(nullable) };
+      LenientOptional<kj::String> lenient,
+      kj::Maybe<kj::String> nullable) {
+    return {kj::mv(optional), kj::mv(lenient), kj::mv(nullable)};
   }
 
   kj::String readTestAllOptionalFields(TestAllOptionalFields s) {
     return kj::str(kj::mv(s.optString).orDefault(kj::str("(absent)")), ", ",
-                   kj::mv(s.optDouble).orDefault(321));
+        kj::mv(s.optDouble).orDefault(321));
   }
 
   JSG_RESOURCE_TYPE(OptionalContext) {
@@ -101,8 +107,11 @@ struct OptionalContext: public ContextGlobalObject {
     JSG_METHOD(readTestAllOptionalFields);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(OptionalIsolate, OptionalContext, OptionalContext::TestOptionalFields,
-    OptionalContext::TestAllOptionalFields, NumberBox);
+JSG_DECLARE_ISOLATE_TYPE(OptionalIsolate,
+    OptionalContext,
+    OptionalContext::TestOptionalFields,
+    OptionalContext::TestAllOptionalFields,
+    NumberBox);
 
 KJ_TEST("optionals and maybes") {
   Evaluator<OptionalContext, OptionalIsolate> e(v8System);
@@ -118,12 +127,12 @@ KJ_TEST("optionals and maybes") {
   e.expectEval("returnMaybe(123).value", "number", "123");
   e.expectEval("returnMaybe(321)", "object", "null");
 
-  e.expectEval("takeMaybe()",
-      "throws", "TypeError: Failed to execute 'takeMaybe' on 'OptionalContext': parameter 1 is not "
-                "of type 'NumberBox'.");
-  e.expectEval("takeOptional(null)",
-      "throws", "TypeError: Failed to execute 'takeOptional' on 'OptionalContext': parameter 1 is not "
-                "of type 'NumberBox'.");
+  e.expectEval("takeMaybe()", "throws",
+      "TypeError: Failed to execute 'takeMaybe' on 'OptionalContext': parameter 1 is not "
+      "of type 'NumberBox'.");
+  e.expectEval("takeOptional(null)", "throws",
+      "TypeError: Failed to execute 'takeOptional' on 'OptionalContext': parameter 1 is not "
+      "of type 'NumberBox'.");
 
   e.expectEval("takeLenientOptional(new NumberBox(123))", "number", "123");
   e.expectEval("takeLenientOptional()", "number", "321");
@@ -136,43 +145,38 @@ KJ_TEST("optionals and maybes") {
   e.expectEval("takeOptionalMaybe(undefined)", "string", "(absent)");
   e.expectEval("takeOptionalMaybe('a string')", "string", "a string");
 
-  e.expectEval("readTestOptionalFields({nullable: null})", "string", "(absent), (absent), (absent)");
+  e.expectEval(
+      "readTestOptionalFields({nullable: null})", "string", "(absent), (absent), (absent)");
   e.expectEval("readTestOptionalFields({optional: 'foo', lenient: 'bar', nullable: null})",
-             "string", "foo, bar, (absent)");
+      "string", "foo, bar, (absent)");
   e.expectEval("readTestOptionalFields({optional: 'foo', lenient: 'bar', nullable: 'baz'})",
-             "string", "foo, bar, baz");
+      "string", "foo, bar, baz");
 
-#define ENUMERATE_OBJECT \
-      "var items = [];\n" \
-      "for (var key in object) {\n" \
-      "  items.push(key + ': ' + object[key]);\n" \
-      "}\n" \
-      "items.join(', ')"
+#define ENUMERATE_OBJECT                                                                           \
+  "var items = [];\n"                                                                              \
+  "for (var key in object) {\n"                                                                    \
+  "  items.push(key + ': ' + object[key]);\n"                                                      \
+  "}\n"                                                                                            \
+  "items.join(', ')"
 
   e.expectEval(
-      "var object = makeTestOptionalFields(undefined, undefined, null);\n"
-      ENUMERATE_OBJECT,
+      "var object = makeTestOptionalFields(undefined, undefined, null);\n" ENUMERATE_OBJECT,
       "string", "nullable: null");
-  e.expectEval(
-      "var object = makeTestOptionalFields('foo', 'bar', null);\n"
-      ENUMERATE_OBJECT,
+  e.expectEval("var object = makeTestOptionalFields('foo', 'bar', null);\n" ENUMERATE_OBJECT,
       "string", "optional: foo, lenient: bar, nullable: null");
-  e.expectEval(
-      "var object = makeTestOptionalFields('foo', 'bar', 'baz');\n"
-      ENUMERATE_OBJECT,
+  e.expectEval("var object = makeTestOptionalFields('foo', 'bar', 'baz');\n" ENUMERATE_OBJECT,
       "string", "optional: foo, lenient: bar, nullable: baz");
   e.expectEval(
-      "var object = makeTestOptionalFields(undefined, undefined, 'bar');\n"
-      ENUMERATE_OBJECT,
+      "var object = makeTestOptionalFields(undefined, undefined, 'bar');\n" ENUMERATE_OBJECT,
       "string", "nullable: bar");
 #undef ENUMERATE_OBJECT
 
   e.expectEval("readTestAllOptionalFields({})", "string", "(absent), 321");
   e.expectEval("readTestAllOptionalFields(null)", "string", "(absent), 321");
   e.expectEval("readTestAllOptionalFields(undefined)", "string", "(absent), 321");
-  e.expectEval("readTestAllOptionalFields()",
-      "throws", "TypeError: Failed to execute 'readTestAllOptionalFields' on 'OptionalContext': "
-                "parameter 1 is not of type 'TestAllOptionalFields'.");
+  e.expectEval("readTestAllOptionalFields()", "throws",
+      "TypeError: Failed to execute 'readTestAllOptionalFields' on 'OptionalContext': "
+      "parameter 1 is not of type 'TestAllOptionalFields'.");
 }
 
 // ========================================================================================
@@ -188,19 +192,21 @@ JSG_DECLARE_ISOLATE_TYPE(MaybeIsolate, MaybeContext);
 
 KJ_TEST("maybes - don't substitute null") {
 
-  static const auto config = JsgConfig {
+  static const auto config = JsgConfig{
     .noSubstituteNull = true,
   };
 
   struct MaybeConfig {
-    operator const JsgConfig&() const { return config; }
+    operator const JsgConfig&() const {
+      return config;
+    }
   };
 
   // This version uses the MaybeConfig above that sets noSubstituteNull = true.
   Evaluator<MaybeContext, MaybeIsolate, MaybeConfig> e(v8System);
   e.expectEval("test({})", "throws",
-               "TypeError: Failed to execute 'test' on 'MaybeContext': parameter 1 is not "
-               "of type 'string'.");
+      "TypeError: Failed to execute 'test' on 'MaybeContext': parameter 1 is not "
+      "of type 'string'.");
 
   // This version uses the default JsgConfig with the noSubstituteNull = false.
   Evaluator<MaybeContext, MaybeIsolate, JsgConfig> e2(v8System);
@@ -317,24 +323,24 @@ KJ_TEST("OneOf") {
   e.expectEval("returnOneOf(null, null, new NumberBox(321)).value", "number", "321");
   e.expectEval("returnOneOf(null, null, null)", "undefined", "undefined");
 
-  e.expectEval("takeStringOrBool(123)",     "string", "kj::String: 123");
-  e.expectEval("takeStringOrBool('123')",   "string", "kj::String: 123");
-  e.expectEval("takeStringOrBool(true)",    "string", "bool: true");
+  e.expectEval("takeStringOrBool(123)", "string", "kj::String: 123");
+  e.expectEval("takeStringOrBool('123')", "string", "kj::String: 123");
+  e.expectEval("takeStringOrBool(true)", "string", "bool: true");
 
-  e.expectEval("takeNumberOrBool(123)",     "string", "double: 123");
-  e.expectEval("takeNumberOrBool('123')",   "string", "double: 123");
-  e.expectEval("takeNumberOrBool(true)",    "string", "bool: true");
+  e.expectEval("takeNumberOrBool(123)", "string", "double: 123");
+  e.expectEval("takeNumberOrBool('123')", "string", "double: 123");
+  e.expectEval("takeNumberOrBool(true)", "string", "bool: true");
 
-  e.expectEval("takeStringOrNumber(123)",   "string", "double: 123");
+  e.expectEval("takeStringOrNumber(123)", "string", "double: 123");
   e.expectEval("takeStringOrNumber('123')", "string", "kj::String: 123");
-  e.expectEval("takeStringOrNumber(true)",  "string", "kj::String: true");
+  e.expectEval("takeStringOrNumber(true)", "string", "kj::String: true");
 
-  e.expectEval("takeNestedOneOf(123)",       "string", "double: 123");
-  e.expectEval("takeNestedOneOf('123')",     "string", "kj::String: 123");
-  e.expectEval("takeNestedOneOf(true)",      "string", "bool: true");
+  e.expectEval("takeNestedOneOf(123)", "string", "double: 123");
+  e.expectEval("takeNestedOneOf('123')", "string", "kj::String: 123");
+  e.expectEval("takeNestedOneOf(true)", "string", "bool: true");
   e.expectEval("takeNestedOneOf(undefined)", "string", "kj::String: undefined");
-  e.expectEval("takeNestedOneOf(null)",      "string", "kj::String: null");
-  e.expectEval("takeNestedOneOf({})",        "string", "kj::String: [object Object]");
+  e.expectEval("takeNestedOneOf(null)", "string", "kj::String: null");
+  e.expectEval("takeNestedOneOf({})", "string", "kj::String: [object Object]");
 }
 
 // ========================================================================================
@@ -350,10 +356,10 @@ struct DictContext: public ContextGlobalObject {
   }
   Dict<Ref<NumberBox>> returnDict() {
     auto builder = kj::heapArrayBuilder<Dict<Ref<NumberBox>>::Field>(3);
-    builder.add(Dict<Ref<NumberBox>>::Field {kj::str("foo"), jsg::alloc<NumberBox>(123)});
-    builder.add(Dict<Ref<NumberBox>>::Field {kj::str("bar"), jsg::alloc<NumberBox>(456)});
-    builder.add(Dict<Ref<NumberBox>>::Field {kj::str("baz"), jsg::alloc<NumberBox>(789)});
-    return { builder.finish() };
+    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("foo"), jsg::alloc<NumberBox>(123)});
+    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("bar"), jsg::alloc<NumberBox>(456)});
+    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("baz"), jsg::alloc<NumberBox>(789)});
+    return {builder.finish()};
   }
 
   JSG_RESOURCE_TYPE(DictContext) {
@@ -370,22 +376,18 @@ KJ_TEST("dicts") {
   e.expectEval(
       "takeDict({foo: new NumberBox(123), bar: new NumberBox(456), baz: new NumberBox(789)})",
       "string", "foo: 123, bar: 456, baz: 789");
-  e.expectEval(
-      "var dict = returnDict();\n"
-      "[dict.foo.value, dict.bar.value, dict.baz.value].join(', ')",
+  e.expectEval("var dict = returnDict();\n"
+               "[dict.foo.value, dict.bar.value, dict.baz.value].join(', ')",
       "string", "123, 456, 789");
 
-  e.expectEval(
-      "takeDict({foo: new NumberBox(123), bar: 456, baz: new NumberBox(789)})",
-      "throws",
+  e.expectEval("takeDict({foo: new NumberBox(123), bar: 456, baz: new NumberBox(789)})", "throws",
       "TypeError: Incorrect type for map entry 'bar': the provided value is not of type "
       "'NumberBox'.");
 
-  e.expectEval(
-      "takeDictOfFunctions({\n"
-      "  foo() { return this.bar() + 123; },\n"
-      "  bar() { return 456; }\n"
-      "})",
+  e.expectEval("takeDictOfFunctions({\n"
+               "  foo() { return this.bar() + 123; },\n"
+               "  bar() { return 456; }\n"
+               "})",
       "string", "foo: 579, bar: 456");
 }
 
@@ -424,17 +426,17 @@ KJ_TEST("integers") {
   e.expectEval("takeInt(-2147483648)", "string", "int: -2147483648");
 
   e.expectEval("takeInt(2147483648)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-2147483648 and 2147483647 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-2147483648 and 2147483647 (inclusive).");
   e.expectEval("takeInt(-2147483649)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-2147483648 and 2147483647 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-2147483648 and 2147483647 (inclusive).");
   e.expectEval("takeInt(Number.MAX_SAFE_INTEGER)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-2147483648 and 2147483647 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-2147483648 and 2147483647 (inclusive).");
   e.expectEval("takeInt(-Number.MAX_SAFE_INTEGER)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-2147483648 and 2147483647 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-2147483648 and 2147483647 (inclusive).");
 }
 
 // ========================================================================================
@@ -475,32 +477,26 @@ KJ_TEST("unsigned integers") {
 
   e.expectEval("takeOneOfUint32(1)", "number", "1");
 
-  e.expectEval("takeUint32(-1)",
-               "throws",
-               "TypeError: The value cannot be converted because it is negative and this "
-               "API expects a positive number.");
-  e.expectEval("takeUint32({})",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeUint32(undefined)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeUint32(Number.NaN)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeUint32(Number.POSITIVE_INFINITY)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeUint32(Number.NEGATIVE_INFINITY)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint32(-1)", "throws",
+      "TypeError: The value cannot be converted because it is negative and this "
+      "API expects a positive number.");
+  e.expectEval("takeUint32({})", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint32(undefined)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint32(Number.NaN)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint32(Number.POSITIVE_INFINITY)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint32(Number.NEGATIVE_INFINITY)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
 
   e.expectEval("takeUint32(4294967295)", "string", "uint32_t: 4294967295");
 
   e.expectEval("takeUint32(4294967296)", "throws",
-               "TypeError: Value out of range. Must be less than or equal to 4294967295.");
+      "TypeError: Value out of range. Must be less than or equal to 4294967295.");
   e.expectEval("takeUint32(Number.MAX_SAFE_INTEGER)", "throws",
-               "TypeError: Value out of range. Must be less than or equal to 4294967295.");
+      "TypeError: Value out of range. Must be less than or equal to 4294967295.");
 }
 
 // ========================================================================================
@@ -580,62 +576,48 @@ KJ_TEST("bigints") {
   e.expectEval("returnUint64()", "bigint", "123");
   e.expectEval("returnInt64()", "bigint", "123");
 
-  e.expectEval("takeUint64(-1)",
-               "throws",
-               "TypeError: The value cannot be converted because it is negative and this "
-               "API expects a positive bigint.");
-  e.expectEval("takeUint64(-1n)",
-               "throws",
-               "TypeError: The value cannot be converted because it is either negative and "
-               "this API expects a positive bigint, or the value would be truncated.");
+  e.expectEval("takeUint64(-1)", "throws",
+      "TypeError: The value cannot be converted because it is negative and this "
+      "API expects a positive bigint.");
+  e.expectEval("takeUint64(-1n)", "throws",
+      "TypeError: The value cannot be converted because it is either negative and "
+      "this API expects a positive bigint, or the value would be truncated.");
 
-  e.expectEval("takeUint64(undefined)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeInt64(undefined)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeInt64('hello')",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeInt64({})",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeInt64(Number.NaN)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeInt64(Number.POSITIVE_INFINITY)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeInt64(Number.NEGATIVE_INFINITY)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint64(undefined)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeInt64(undefined)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeInt64('hello')", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeInt64({})", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeInt64(Number.NaN)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeInt64(Number.POSITIVE_INFINITY)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeInt64(Number.NEGATIVE_INFINITY)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
 
-  e.expectEval("takeUint64('hello')",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeUint64({})",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeUint64(Number.NaN)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeUint64(Number.POSITIVE_INFINITY)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
-  e.expectEval("takeUint64(Number.NEGATIVE_INFINITY)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint64('hello')", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint64({})", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint64(Number.NaN)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint64(Number.POSITIVE_INFINITY)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
+  e.expectEval("takeUint64(Number.NEGATIVE_INFINITY)", "throws",
+      "TypeError: The value cannot be converted because it is not an integer.");
 
   e.expectEval("takeUint64(18446744073709551615n)", "string", "uint64_t: 18446744073709551615");
 
   e.expectEval("takeUint64(18446744073709551616n)", "throws",
-               "TypeError: The value cannot be converted because it is either negative "
-               "and this API expects a positive bigint, or the value would be truncated.");
+      "TypeError: The value cannot be converted because it is either negative "
+      "and this API expects a positive bigint, or the value would be truncated.");
 
   e.expectEval("takeInt64(9223372036854775807n)", "string", "int64_t: 9223372036854775807");
   e.expectEval("takeInt64(9223372036854775808n)", "throws",
-               "TypeError: The value cannot be converted because it would be truncated.");
+      "TypeError: The value cannot be converted because it would be truncated.");
 }
 
 // ========================================================================================
@@ -678,20 +660,20 @@ KJ_TEST("int8 integers") {
   e.expectEval("takeUint8(255)", "string", "uint8_t: 255");
 
   e.expectEval("takeUint8(-1)", "throws",
-               "TypeError: The value cannot be converted because it is negative and this "
-               "API expects a positive number.");
+      "TypeError: The value cannot be converted because it is negative and this "
+      "API expects a positive number.");
   e.expectEval("takeInt8(32768)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-128 and 127 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-128 and 127 (inclusive).");
   e.expectEval("takeInt8(-32769)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-128 and 127 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-128 and 127 (inclusive).");
   e.expectEval("takeInt8(Number.MAX_SAFE_INTEGER)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-128 and 127 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-128 and 127 (inclusive).");
   e.expectEval("takeInt8(-Number.MAX_SAFE_INTEGER)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-128 and 127 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-128 and 127 (inclusive).");
 }
 
 // ========================================================================================
@@ -734,20 +716,20 @@ KJ_TEST("int16 integers") {
   e.expectEval("takeUint16(65535)", "string", "uint16_t: 65535");
 
   e.expectEval("takeUint16(-1)", "throws",
-               "TypeError: The value cannot be converted because it is negative and this "
-               "API expects a positive number.");
+      "TypeError: The value cannot be converted because it is negative and this "
+      "API expects a positive number.");
   e.expectEval("takeInt16(32768)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-32768 and 32767 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-32768 and 32767 (inclusive).");
   e.expectEval("takeInt16(-32769)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-32768 and 32767 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-32768 and 32767 (inclusive).");
   e.expectEval("takeInt16(Number.MAX_SAFE_INTEGER)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-32768 and 32767 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-32768 and 32767 (inclusive).");
   e.expectEval("takeInt16(-Number.MAX_SAFE_INTEGER)", "throws",
-               "TypeError: Value out of range. Must be between "
-               "-32768 and 32767 (inclusive).");
+      "TypeError: Value out of range. Must be between "
+      "-32768 and 32767 (inclusive).");
 }
 
 // ========================================================================================
@@ -780,8 +762,8 @@ KJ_TEST("floating points") {
   e.expectEval("takeDouble({ valueOf: function() { return 456.7; } })", "string", "double: 456.7");
   e.expectEval("returnDouble()", "number", "123.5");
 
-  e.expectEval("takeDouble([Symbol.iterator])",
-      "throws", "TypeError: Cannot convert a Symbol value to a string");
+  e.expectEval("takeDouble([Symbol.iterator])", "throws",
+      "TypeError: Cannot convert a Symbol value to a string");
   e.expectEval("takeDouble('123asdf')", "string", "double: nan");
   e.expectEval("takeDouble('asdf123')", "string", "double: nan");
   e.expectEval("takeDouble(null)", "string", "double: 0");
@@ -815,8 +797,8 @@ KJ_TEST("kj::Strings") {
   e.expectEval("takeString(null)", "string", "null");
   e.expectEval("takeString(undefined)", "string", "undefined");
   e.expectEval("takeString('an actual string')", "string", "an actual string");
-  e.expectEval("takeString({ toString: function() { return 'toString()ed'; } })",
-               "string", "toString()ed");
+  e.expectEval(
+      "takeString({ toString: function() { return 'toString()ed'; } })", "string", "toString()ed");
 }
 
 // ========================================================================================
@@ -849,7 +831,7 @@ struct RawContext: public ContextGlobalObject {
     JSG_STRUCT($foo, $bar);
   };
   TwoValues twoValues(Value foo, Value bar) {
-    return { kj::mv(foo), kj::mv(bar) };
+    return {kj::mv(foo), kj::mv(bar)};
   }
   JSG_RESOURCE_TYPE(RawContext) {
     JSG_METHOD(twoValues);
@@ -859,11 +841,9 @@ JSG_DECLARE_ISOLATE_TYPE(RawIsolate, RawContext, RawContext::TwoValues);
 
 KJ_TEST("Raw Values") {
   Evaluator<RawContext, RawIsolate> e(v8System);
-  e.expectEval(
-      "JSON.stringify(twoValues({baz: 123}, 'abcd'))",
+  e.expectEval("JSON.stringify(twoValues({baz: 123}, 'abcd'))",
 
-      "string", "{\"foo\":{\"baz\":123},\"bar\":\"abcd\"}"
-  );
+      "string", "{\"foo\":{\"baz\":123},\"bar\":\"abcd\"}");
 }
 
 // ========================================================================================
@@ -880,31 +860,22 @@ JSG_DECLARE_ISOLATE_TYPE(DateIsolate, DateContext);
 
 KJ_TEST("Date Values") {
   Evaluator<DateContext, DateIsolate> e(v8System);
-  e.expectEval("takeDate(new Date('2022-01-22T00:54:57.893Z')).toUTCString()",
-               "string",
-               "Sat, 22 Jan 2022 00:54:57 GMT");
-  e.expectEval("takeDate(12345).valueOf()",
-               "number",
-               "12345");
-  e.expectEval("takeDate(8640000000000000).valueOf()",
-               "throws",
-               "TypeError: This API doesn't support dates after 2189."),
-  e.expectEval("takeDate(-8640000000000000).valueOf()",
-               "throws",
-               "TypeError: This API doesn't support dates before 1687."),
-  e.expectEval("takeDate(1/0)",
-               "throws",
-               "TypeError: The value cannot be converted because it is not a valid Date."),
-  e.expectEval("takeDate(new Date(1/0))",
-               "throws",
-               "TypeError: The value cannot be converted because it is not a valid Date."),
-  e.expectEval("takeDate(new Date('1800-01-22T00:54:57.893Z')).toUTCString()",
-               "string",
-               "Wed, 22 Jan 1800 00:54:57 GMT");
-  e.expectEval("takeDate('2022-01-22T00:54:57.893Z')",
-               "throws",
-               "TypeError: Failed to execute 'takeDate' on 'DateContext': parameter "
-               "1 is not of type 'date'.");
+  e.expectEval("takeDate(new Date('2022-01-22T00:54:57.893Z')).toUTCString()", "string",
+      "Sat, 22 Jan 2022 00:54:57 GMT");
+  e.expectEval("takeDate(12345).valueOf()", "number", "12345");
+  e.expectEval("takeDate(8640000000000000).valueOf()", "throws",
+      "TypeError: This API doesn't support dates after 2189."),
+      e.expectEval("takeDate(-8640000000000000).valueOf()", "throws",
+          "TypeError: This API doesn't support dates before 1687."),
+      e.expectEval("takeDate(1/0)", "throws",
+          "TypeError: The value cannot be converted because it is not a valid Date."),
+      e.expectEval("takeDate(new Date(1/0))", "throws",
+          "TypeError: The value cannot be converted because it is not a valid Date."),
+      e.expectEval("takeDate(new Date('1800-01-22T00:54:57.893Z')).toUTCString()", "string",
+          "Wed, 22 Jan 1800 00:54:57 GMT");
+  e.expectEval("takeDate('2022-01-22T00:54:57.893Z')", "throws",
+      "TypeError: Failed to execute 'takeDate' on 'DateContext': parameter "
+      "1 is not of type 'date'.");
 }
 
 // ========================================================================================
@@ -990,9 +961,9 @@ JSG_DECLARE_ISOLATE_TYPE(SequenceIsolate, SequenceContext, SequenceContext::Foo)
 KJ_TEST("Sequence Values") {
   Evaluator<SequenceContext, SequenceIsolate> e(v8System);
   e.expectEval("testSequence(['a', 'b']).join('')", "string", "ab");
-  e.expectEval(
-    "const val = {*[Symbol.iterator]() { yield 'a'; yield 'b'; }};"
-    "testSequence(val).join('')", "string", "ab");
+  e.expectEval("const val = {*[Symbol.iterator]() { yield 'a'; yield 'b'; }};"
+               "testSequence(val).join('')",
+      "string", "ab");
   e.expectEval("testInt([1,2]).join('')", "string", "12");
   e.expectEval("testInt([1,'2']).join('')", "string", "12");
   e.expectEval("testInt([1,'a']).join('')", "string", "10");
@@ -1001,7 +972,8 @@ KJ_TEST("Sequence Values") {
   e.expectEval("testFoo([{a:'a'}])[0].a", "string", "a");
   e.expectEval("oneof('aa')", "boolean", "true");
   e.expectEval("oneof(['b', 'b'])", "boolean", "true");
-  e.expectEval("testFoo({a:'a'})", "throws", "TypeError: Failed to execute 'testFoo' on 'SequenceContext': parameter 1 is not of type 'Sequence'.");
+  e.expectEval("testFoo({a:'a'})", "throws",
+      "TypeError: Failed to execute 'testFoo' on 'SequenceContext': parameter 1 is not of type 'Sequence'.");
 }
 
 // ========================================================================================
@@ -1051,14 +1023,14 @@ KJ_TEST("NonCoercible Values") {
   Evaluator<NonCoercibleContext, NonCoercibleIsolate> e(v8System);
   e.expectEval("testString('')", "boolean", "true");
   e.expectEval("testString(null)", "throws",
-               "TypeError: Failed to execute 'testString' on 'NonCoercibleContext': parameter 1 is "
-               "not of type 'string'.");
+      "TypeError: Failed to execute 'testString' on 'NonCoercibleContext': parameter 1 is "
+      "not of type 'string'.");
   e.expectEval("testString({})", "throws",
-               "TypeError: Failed to execute 'testString' on 'NonCoercibleContext': parameter 1 is "
-               "not of type 'string'.");
+      "TypeError: Failed to execute 'testString' on 'NonCoercibleContext': parameter 1 is "
+      "not of type 'string'.");
   e.expectEval("testString(1)", "throws",
-               "TypeError: Failed to execute 'testString' on 'NonCoercibleContext': parameter 1 is "
-               "not of type 'string'.");
+      "TypeError: Failed to execute 'testString' on 'NonCoercibleContext': parameter 1 is "
+      "not of type 'string'.");
   e.expectEval("testStringCoerced('')", "boolean", "true");
   e.expectEval("testStringCoerced(null)", "boolean", "true");
   e.expectEval("testStringCoerced({})", "boolean", "true");
@@ -1066,8 +1038,8 @@ KJ_TEST("NonCoercible Values") {
 
   e.expectEval("testBoolean(true)", "boolean", "true");
   e.expectEval("testBoolean(null)", "throws",
-               "TypeError: Failed to execute 'testBoolean' on 'NonCoercibleContext': parameter 1 is"
-               " not of type 'boolean'.");
+      "TypeError: Failed to execute 'testBoolean' on 'NonCoercibleContext': parameter 1 is"
+      " not of type 'boolean'.");
   e.expectEval("testBooleanCoerced(true)", "boolean", "true");
   e.expectEval("testBooleanCoerced(null)", "boolean", "true");
 
@@ -1075,27 +1047,27 @@ KJ_TEST("NonCoercible Values") {
   e.expectEval("testDouble(Infinity)", "boolean", "true");
   e.expectEval("testDouble(NaN)", "boolean", "true");
   e.expectEval("testDouble(null)", "throws",
-               "TypeError: Failed to execute 'testDouble' on 'NonCoercibleContext': parameter 1 is"
-               " not of type 'number'.");
+      "TypeError: Failed to execute 'testDouble' on 'NonCoercibleContext': parameter 1 is"
+      " not of type 'number'.");
   e.expectEval("testDoubleCoerced(1.1)", "boolean", "true");
   e.expectEval("testDoubleCoerced(null)", "boolean", "true");
 
   e.expectEval("testMaybeString('')", "boolean", "true");
   e.expectEval("testMaybeString(undefined)", "boolean", "true");
   e.expectEval("testMaybeString(null)", "throws",
-               "TypeError: Failed to execute 'testMaybeString' on 'NonCoercibleContext': parameter"
-               " 1 is not of type 'string'.");
+      "TypeError: Failed to execute 'testMaybeString' on 'NonCoercibleContext': parameter"
+      " 1 is not of type 'string'.");
   e.expectEval("testMaybeString(1)", "throws",
-               "TypeError: Failed to execute 'testMaybeString' on 'NonCoercibleContext': parameter"
-               " 1 is not of type 'string'.");
+      "TypeError: Failed to execute 'testMaybeString' on 'NonCoercibleContext': parameter"
+      " 1 is not of type 'string'.");
 
   e.expectEval("testMaybeStringCoerced(null)", "boolean", "true");
 
   e.expectEval("testOneOf(false)", "boolean", "true");
   e.expectEval("testOneOf('')", "boolean", "true");
   e.expectEval("testOneOf(new String(''))", "throws",
-               "TypeError: Failed to execute 'testOneOf' on 'NonCoercibleContext': parameter 1 is"
-               " not of type 'boolean or string'.");
+      "TypeError: Failed to execute 'testOneOf' on 'NonCoercibleContext': parameter 1 is"
+      " not of type 'boolean or string'.");
 }
 
 // ========================================================================================
@@ -1135,10 +1107,10 @@ struct IdentifiedContext: public ContextGlobalObject {
     if (result) {
       KJ_EXPECT(a.identity.hashCode() == b.identity.hashCode());
     }
-    KJ_EXPECT(a.identity.hashCode() ==
-        kj::hashCode(a.identity.getHandle(isolate)->GetIdentityHash()));
-    KJ_EXPECT(b.identity.hashCode() ==
-        kj::hashCode(b.identity.getHandle(isolate)->GetIdentityHash()));
+    KJ_EXPECT(
+        a.identity.hashCode() == kj::hashCode(a.identity.getHandle(isolate)->GetIdentityHash()));
+    KJ_EXPECT(
+        b.identity.hashCode() == kj::hashCode(b.identity.getHandle(isolate)->GetIdentityHash()));
 
     return kj::str(result, ' ', a.unwrapped - b.unwrapped);
   }
@@ -1187,13 +1159,10 @@ KJ_TEST("kj::Exception wrapper works") {
   Evaluator<ExceptionContext, ExceptionIsolate> e(v8System);
 
   e.expectEval("testToException(new DOMException('boom', 'AbortError'))", "string",
-               "jsg.DOMException(AbortError): boom");
-  e.expectEval("testToException(new SyntaxError('boom'))", "string",
-               "jsg.SyntaxError: boom");
-  e.expectEval("testToException(undefined)", "string",
-               "jsg.Error: undefined");
-  e.expectEval("testToException(1)", "string",
-               "jsg.Error: 1");
+      "jsg.DOMException(AbortError): boom");
+  e.expectEval("testToException(new SyntaxError('boom'))", "string", "jsg.SyntaxError: boom");
+  e.expectEval("testToException(undefined)", "string", "jsg.Error: undefined");
+  e.expectEval("testToException(1)", "string", "jsg.Error: 1");
 
   e.expectEval("testFromException(1)", "object", "TypeError: boom");
   e.expectEval("testFromException(2)", "object", "AbortError: boom");

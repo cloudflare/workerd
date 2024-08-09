@@ -37,5 +37,5 @@ KJ_TEST("ServiceWorkerGlobalScope") {
   KJ_EXPECT(builder.structure("workerd::api::DurableObjectId"_kj) != kj::none);
 }
 
-} // namespace
-} // namespace workerd::api
+}  // namespace
+}  // namespace workerd::api

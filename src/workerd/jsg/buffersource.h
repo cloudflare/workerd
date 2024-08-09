@@ -8,7 +8,7 @@
 
 namespace workerd::jsg {
 
-#define JSG_ARRAY_BUFFER_VIEW_TYPES(V)                                                            \
+#define JSG_ARRAY_BUFFER_VIEW_TYPES(V)                                                             \
   V(Uint8Array, 1, true)                                                                           \
   V(Uint8ClampedArray, 1, true)                                                                    \
   V(Uint16Array, 2, true)                                                                          \
@@ -28,16 +28,16 @@ concept BufferSourceType = requires(T a) {
 
 template <BufferSourceType T>
 static constexpr size_t getBufferSourceElementSize() {
-  if constexpr (kj::isSameType<v8::Uint8Array, T>() ||
-                kj::isSameType<v8::Uint8ClampedArray, T>() ||
-                kj::isSameType<v8::Int8Array, T>() ||
-                kj::isSameType<v8::DataView, T>() ||
-                kj::isSameType<v8::ArrayBuffer, T>() ||
-                kj::isSameType<v8::ArrayBufferView, T>() ||
-                kj::isSameType<v8::TypedArray, T>()) {
+  if constexpr (kj::isSameType<v8::Uint8Array, T>() || kj::isSameType<v8::Uint8ClampedArray, T>() ||
+      kj::isSameType<v8::Int8Array, T>() || kj::isSameType<v8::DataView, T>() ||
+      kj::isSameType<v8::ArrayBuffer, T>() || kj::isSameType<v8::ArrayBufferView, T>() ||
+      kj::isSameType<v8::TypedArray, T>()) {
     return 1;
   }
-#define V(Type, size, _) else if constexpr (kj::isSameType<v8::Type, T>()) { return size; }
+#define V(Type, size, _)                                                                           \
+  else if constexpr (kj::isSameType<v8::Type, T>()) {                                              \
+    return size;                                                                                   \
+  }
   JSG_ARRAY_BUFFER_VIEW_TYPES(V)
 #undef V
   asm("no_matching_buffer_view_type\n");
@@ -45,14 +45,16 @@ static constexpr size_t getBufferSourceElementSize() {
 
 template <BufferSourceType T>
 static constexpr size_t checkIsIntegerType() {
-  if constexpr (kj::isSameType<v8::ArrayBuffer, T>() ||
-                kj::isSameType<v8::DataView, T>() ||
-                kj::isSameType<v8::ArrayBufferView, T>()) {
+  if constexpr (kj::isSameType<v8::ArrayBuffer, T>() || kj::isSameType<v8::DataView, T>() ||
+      kj::isSameType<v8::ArrayBufferView, T>()) {
     return false;
   } else if constexpr (kj::isSameType<v8::TypedArray, T>()) {
     return true;
   }
-#define V(Type, _, res) else if constexpr (kj::isSameType<v8::Type, T>()) { return res; }
+#define V(Type, _, res)                                                                            \
+  else if constexpr (kj::isSameType<v8::Type, T>()) {                                              \
+    return res;                                                                                    \
+  }
   JSG_ARRAY_BUFFER_VIEW_TYPES(V)
 #undef V
   asm("no_matching_buffer_view_type\n");
@@ -60,7 +62,7 @@ static constexpr size_t checkIsIntegerType() {
 
 class BufferSource;
 class BackingStore;
-using BufferSourceViewConstructor = v8::Local<v8::Value>(*)(Lock&, BackingStore&);
+using BufferSourceViewConstructor = v8::Local<v8::Value> (*)(Lock&, BackingStore&);
 
 // The jsg::BackingStore wraps a v8::BackingStore and retains information about the
 // type of ArrayBuffer or ArrayBufferView to which it is associated. Namely, it records
@@ -77,41 +79,29 @@ public:
     size_t size = data.size();
     auto ptr = new kj::Array<byte>(kj::mv(data));
     return BackingStore(
-        v8::ArrayBuffer::NewBackingStore(
-            ptr->begin(), size,
-            [](void*, size_t, void* ptr) {
-              delete reinterpret_cast<kj::Array<byte>*>(ptr);
-            }, ptr),
-        size, 0,
-        getBufferSourceElementSize<T>(), construct<T>,
-        checkIsIntegerType<T>());
+        v8::ArrayBuffer::NewBackingStore(ptr->begin(), size,
+            [](void*, size_t, void* ptr) { delete reinterpret_cast<kj::Array<byte>*>(ptr); }, ptr),
+        size, 0, getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
   }
 
   // Creates a new BackingStore of the given size.
   template <BufferSourceType T = v8::Uint8Array>
   static BackingStore alloc(Lock& js, size_t size) {
-    return BackingStore(
-        v8::ArrayBuffer::NewBackingStore(js.v8Isolate, size),
-        size, 0,
-        getBufferSourceElementSize<T>(), construct<T>,
-        checkIsIntegerType<T>());
+    return BackingStore(v8::ArrayBuffer::NewBackingStore(js.v8Isolate, size), size, 0,
+        getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
   }
 
-  using Disposer = void(void*,size_t,void*);
+  using Disposer = void(void*, size_t, void*);
 
   // Creates and returns a BackingStore that wraps an external data pointer
   // with a custom disposer.
   template <BufferSourceType T = v8::Uint8Array>
   static BackingStore wrap(void* data, size_t size, Disposer disposer, void* ctx) {
-    return BackingStore(
-        v8::ArrayBuffer::NewBackingStore(data, size, disposer, ctx),
-        size, 0,
-        getBufferSourceElementSize<T>(), construct<T>,
-        checkIsIntegerType<T>());
+    return BackingStore(v8::ArrayBuffer::NewBackingStore(data, size, disposer, ctx), size, 0,
+        getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
   }
 
-  explicit BackingStore(
-      std::shared_ptr<v8::BackingStore> backingStore,
+  explicit BackingStore(std::shared_ptr<v8::BackingStore> backingStore,
       size_t byteLength,
       size_t byteOffset,
       size_t elementSize,
@@ -125,29 +115,37 @@ public:
   inline kj::ArrayPtr<kj::byte> asArrayPtr() KJ_LIFETIMEBOUND {
     KJ_ASSERT(backingStore != nullptr, "Invalid access after move.");
     return kj::ArrayPtr<kj::byte>(
-        static_cast<kj::byte*>(backingStore->Data()) + byteOffset,
-        byteLength);
+        static_cast<kj::byte*>(backingStore->Data()) + byteOffset, byteLength);
   }
 
-  inline operator kj::ArrayPtr<kj::byte>() KJ_LIFETIMEBOUND { return asArrayPtr(); }
+  inline operator kj::ArrayPtr<kj::byte>() KJ_LIFETIMEBOUND {
+    return asArrayPtr();
+  }
 
   bool operator==(const BackingStore& other);
 
   inline const kj::ArrayPtr<const kj::byte> asArrayPtr() const KJ_LIFETIMEBOUND {
     KJ_ASSERT(backingStore != nullptr, "Invalid access after move.");
     return kj::ArrayPtr<kj::byte>(
-        static_cast<kj::byte*>(backingStore->Data()) + byteOffset,
-        byteLength);
+        static_cast<kj::byte*>(backingStore->Data()) + byteOffset, byteLength);
   }
 
   inline operator const kj::ArrayPtr<const kj::byte>() const KJ_LIFETIMEBOUND {
     return asArrayPtr();
   }
 
-  inline size_t size() const { return byteLength; };
-  inline size_t getOffset() const { return byteOffset; }
-  inline size_t getElementSize() const { return elementSize; }
-  inline bool isIntegerType() const { return integerType; }
+  inline size_t size() const {
+    return byteLength;
+  };
+  inline size_t getOffset() const {
+    return byteOffset;
+  }
+  inline size_t getElementSize() const {
+    return elementSize;
+  }
+  inline bool isIntegerType() const {
+    return integerType;
+  }
 
   // Creates a new BackingStore as a view over the same underlying v8::BackingStore
   // but with different handle type information. This is required, for instance, in
@@ -156,13 +154,8 @@ public:
   // type information to recreate the original type of view once the read is complete.
   template <BufferSourceType T = v8::Uint8Array>
   BackingStore getTypedView() {
-    return BackingStore(
-        backingStore,
-        byteLength,
-        byteOffset,
-        getBufferSourceElementSize<T>(),
-        construct<T>,
-        checkIsIntegerType<T>());
+    return BackingStore(backingStore, byteLength, byteOffset, getBufferSourceElementSize<T>(),
+        construct<T>, checkIsIntegerType<T>());
   }
 
   template <BufferSourceType T = v8::Uint8Array>
@@ -173,13 +166,8 @@ public:
     KJ_ASSERT(length <= byteLength);
     KJ_ASSERT(startOffset <= backingStore->ByteLength());
     KJ_ASSERT(startOffset + length <= backingStore->ByteLength());
-    return BackingStore(
-        backingStore,
-        length,
-        startOffset,
-        getBufferSourceElementSize<T>(),
-        construct<T>,
-        checkIsIntegerType<T>());
+    return BackingStore(backingStore, length, startOffset, getBufferSourceElementSize<T>(),
+        construct<T>, checkIsIntegerType<T>());
   }
 
   inline v8::Local<v8::Value> createHandle(Lock& js) {
@@ -231,17 +219,13 @@ private:
     if constexpr (kj::isSameType<v8::ArrayBuffer, T>()) {
       return v8::ArrayBuffer::New(js.v8Isolate, store.backingStore);
     } else if constexpr (kj::isSameType<v8::ArrayBufferView, T>()) {
-      return v8::DataView::New(
-          v8::ArrayBuffer::New(js.v8Isolate, store.backingStore),
+      return v8::DataView::New(v8::ArrayBuffer::New(js.v8Isolate, store.backingStore),
           store.byteOffset, store.byteLength);
     } else if constexpr (kj::isSameType<v8::TypedArray, T>()) {
-      return v8::Uint8Array::New(
-          v8::ArrayBuffer::New(js.v8Isolate, store.backingStore),
+      return v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, store.backingStore),
           store.byteOffset, store.byteLength);
     } else {
-      return T::New(
-          v8::ArrayBuffer::New(js.v8Isolate, store.backingStore),
-          store.byteOffset,
+      return T::New(v8::ArrayBuffer::New(js.v8Isolate, store.backingStore), store.byteOffset,
           store.byteLength / store.elementSize);
     }
   }
@@ -289,8 +273,8 @@ private:
 class BufferSource {
 public:
   static kj::Maybe<BufferSource> tryAlloc(Lock& js, size_t size);
-  static BufferSource wrap(Lock& js, void* data, size_t size,
-                           BackingStore::Disposer disposer, void* ctx);
+  static BufferSource wrap(
+      Lock& js, void* data, size_t size, BackingStore::Disposer disposer, void* ctx);
 
   // Create a new BufferSource that takes over ownership of the given BackingStore.
   explicit BufferSource(Lock& js, BackingStore&& backingStore);
@@ -304,7 +288,9 @@ public:
   KJ_DISALLOW_COPY(BufferSource);
 
   // True if the BackingStore has been removed from this BufferSource.
-  inline bool isDetached() const { return maybeBackingStore == kj::none; }
+  inline bool isDetached() const {
+    return maybeBackingStore == kj::none;
+  }
 
   bool canDetach(Lock& js);
 
@@ -321,7 +307,9 @@ public:
     return KJ_ASSERT_NONNULL(maybeBackingStore).asArrayPtr();
   }
 
-  inline operator kj::ArrayPtr<kj::byte>() KJ_LIFETIMEBOUND { return asArrayPtr(); }
+  inline operator kj::ArrayPtr<kj::byte>() KJ_LIFETIMEBOUND {
+    return asArrayPtr();
+  }
 
   inline const kj::ArrayPtr<const kj::byte> asArrayPtr() const KJ_LIFETIMEBOUND {
     return KJ_ASSERT_NONNULL(maybeBackingStore).asArrayPtr();
@@ -417,17 +405,17 @@ private:
 template <typename TypeWrapper>
 class BufferSourceWrapper {
 public:
-  static constexpr const char* getName(BufferSource*) { return "BufferSource"; }
+  static constexpr const char* getName(BufferSource*) {
+    return "BufferSource";
+  }
 
-  v8::Local<v8::Value> wrap(
-      v8::Local<v8::Context> context,
+  v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       BufferSource bufferSource) {
     return bufferSource.getHandle(Lock::from(context->GetIsolate()));
   }
 
-  kj::Maybe<BufferSource> tryUnwrap(
-      v8::Local<v8::Context> context,
+  kj::Maybe<BufferSource> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       BufferSource*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {

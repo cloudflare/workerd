@@ -15,9 +15,12 @@ ThreadContext::HeaderIdBundle::HeaderIdBundle(kj::HttpHeaderTable::Builder& buil
       authorization(builder.add("Authorization")),
       secWebSocketProtocol(builder.add("Sec-WebSocket-Protocol")) {}
 
-ThreadContext::ThreadContext(
-    kj::Timer& timer, kj::EntropySource& entropySource,
-    HeaderIdBundle headerIds, capnp::HttpOverCapnpFactory& httpOverCapnpFactory, capnp::ByteStreamFactory& byteStreamFactory, bool fiddle)
+ThreadContext::ThreadContext(kj::Timer& timer,
+    kj::EntropySource& entropySource,
+    HeaderIdBundle headerIds,
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+    capnp::ByteStreamFactory& byteStreamFactory,
+    bool fiddle)
     : timer(timer),
       entropySource(entropySource),
       headerIds(headerIds),

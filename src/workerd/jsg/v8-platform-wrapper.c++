@@ -12,9 +12,7 @@ V8PlatformWrapper::JobTaskWrapper::JobTaskWrapper(std::unique_ptr<v8::JobTask> i
     : inner(kj::mv(inner)) {}
 
 void V8PlatformWrapper::JobTaskWrapper::Run(v8::JobDelegate* delegate) {
-  runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    inner->Run(delegate);
-  });
+  runInV8Stack([&](jsg::V8StackScope& stackScope) { inner->Run(delegate); });
 }
 
 }  // namespace workerd::jsg

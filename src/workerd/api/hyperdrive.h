@@ -15,12 +15,15 @@ class Socket;
 //
 // Provides the same interface as Hyperdrive while sending connection
 // traffic directly to postgres
-class Hyperdrive : public jsg::Object {
+class Hyperdrive: public jsg::Object {
 public:
   // `clientIndex` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
-  explicit Hyperdrive(uint clientIndex, kj::String database,
-                      kj::String user, kj::String password, kj::String scheme);
+  explicit Hyperdrive(uint clientIndex,
+      kj::String database,
+      kj::String user,
+      kj::String password,
+      kj::String scheme);
   jsg::Ref<Socket> connect(jsg::Lock& js);
   kj::StringPtr getDatabase();
   kj::StringPtr getUser();
@@ -62,6 +65,5 @@ private:
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> connectToDb();
 };
-#define EW_HYPERDRIVE_ISOLATE_TYPES \
-  api::Hyperdrive
-} // namespace workerd::api
+#define EW_HYPERDRIVE_ISOLATE_TYPES api::Hyperdrive
+}  // namespace workerd::api

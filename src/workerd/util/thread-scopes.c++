@@ -65,8 +65,8 @@ ThreadProgressCounter::ThreadProgressCounter(uint64_t& counter)
 }
 
 ThreadProgressCounter::~ThreadProgressCounter() noexcept(false) {
-  auto& self = KJ_ASSERT_NONNULL(activeProgressCounter,
-      "~ProgressCounter() with no active progress counter.");
+  auto& self = KJ_ASSERT_NONNULL(
+      activeProgressCounter, "~ProgressCounter() with no active progress counter.");
   if (&self == this) {
     // Acquire compiler barrier to prevent any teardown from leaking above this nullification.
     KJ_DEFER({

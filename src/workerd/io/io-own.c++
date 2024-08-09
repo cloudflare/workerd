@@ -38,8 +38,8 @@ void DeleteQueue::checkFarGet(const DeleteQueue* deleteQueue, const std::type_in
 
 void DeleteQueue::checkWeakGet(workerd::WeakRef<IoContext>& weak) {
   if (!weak.isValid()) {
-    JSG_FAIL_REQUIRE(Error,
-        kj::str("Couldn't complete operation because the execution context has ended."));
+    JSG_FAIL_REQUIRE(
+        Error, kj::str("Couldn't complete operation because the execution context has ended."));
   }
 }
 
@@ -66,7 +66,7 @@ void OwnedObjectList::link(kj::Own<OwnedObject> object) {
   KJ_IF_SOME(f, object->finalizer) {
     if (finalizersRan) {
       KJ_LOG(ERROR, "somehow new objects are being added after finalizers already ran",
-             kj::getStackTrace());
+          kj::getStackTrace());
       f.finalize();
     }
   }

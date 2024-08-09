@@ -67,9 +67,9 @@ private:
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaGetMaxPageCount;
 
   template <size_t size, typename... Params>
-  SqliteDatabase::Query execMemoized(
-      kj::Maybe<IoOwn<SqliteDatabase::Statement>>& slot,
-      const char (&sqlCode)[size], Params&&... params) {
+  SqliteDatabase::Query execMemoized(kj::Maybe<IoOwn<SqliteDatabase::Statement>>& slot,
+      const char (&sqlCode)[size],
+      Params&&... params) {
     // Run a (trusted) statement, preparing it on the first call and reusing the prepared version
     // for future calls.
 
@@ -77,8 +77,7 @@ private:
     KJ_IF_SOME(s, slot) {
       stmt = &*s;
     } else {
-      stmt = &*slot.emplace(IoContext::current().addObject(
-          kj::heap(sqlite->prepare(sqlCode))));
+      stmt = &*slot.emplace(IoContext::current().addObject(kj::heap(sqlite->prepare(sqlCode))));
     }
     return stmt->run(kj::fwd<Params>(params)...);
   }
@@ -94,6 +93,7 @@ private:
 
 class SqlStorage::Cursor final: public jsg::Object {
   class CachedColumnNames;
+
 public:
   template <typename... Params>
   Cursor(Params&&... params)
@@ -144,13 +144,15 @@ private:
     // TODO(perf): Can we further cache the V8 object layout information for a row?
   public:
     // Get the cached names. ensureInitialized() must have been called previously.
-    kj::ArrayPtr<jsg::JsRef<jsg::JsString>> get() { return KJ_REQUIRE_NONNULL(names); }
+    kj::ArrayPtr<jsg::JsRef<jsg::JsString>> get() {
+      return KJ_REQUIRE_NONNULL(names);
+    }
 
     void ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source);
 
     JSG_MEMORY_INFO(cachedColumnNames) {
       KJ_IF_SOME(list, names) {
-        for (const auto& name : list) {
+        for (const auto& name: list) {
           tracker.trackField(nullptr, name);
         }
       }
@@ -161,7 +163,7 @@ private:
   };
 
   struct State {
-      // Refcount on the SqliteDatabase::Statement underlying the query, if any.
+    // Refcount on the SqliteDatabase::Statement underlying the query, if any.
     kj::Own<void> dependency;
 
     // The bindings that were used to construct `query`. We have to keep these alive until the query
@@ -173,9 +175,11 @@ private:
     bool isFirst = true;
 
     State(kj::RefcountedWrapper<SqliteDatabase::Statement>& statement,
-          kj::Array<BindingValue> bindings);
-    State(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
-          kj::StringPtr sqlCode, kj::Array<BindingValue> bindings);
+        kj::Array<BindingValue> bindings);
+    State(SqliteDatabase& db,
+        SqliteDatabase::Regulator& regulator,
+        kj::StringPtr sqlCode,
+        kj::Array<BindingValue> bindings);
   };
 
   // Nulled out when query is done or canceled.
@@ -214,8 +218,8 @@ private:
   static kj::Maybe<kj::Array<Value>> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
   template <typename Func>
   static auto iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
-      -> kj::Maybe<kj::Array<
-          decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>>;
+      -> kj::Maybe<
+          kj::Array<decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>>;
 
   friend class Statement;
 };
@@ -231,8 +235,7 @@ public:
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackFieldWithSize(
-        "IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>>",
+    tracker.trackFieldWithSize("IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>>",
         sizeof(IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>>));
     tracker.trackField("cachedColumnNames", cachedColumnNames);
   }
@@ -252,8 +255,10 @@ private:
 
 struct SqlStorage::IngestResult {
   IngestResult(kj::String remainder, double rowsRead, double rowsWritten, double statementCount)
-    : remainder(kj::mv(remainder)), rowsRead(rowsRead), rowsWritten(rowsWritten),
-      statementCount(statementCount) {}
+      : remainder(kj::mv(remainder)),
+        rowsRead(rowsRead),
+        rowsWritten(rowsWritten),
+        statementCount(statementCount) {}
 
   kj::String remainder;
   double rowsRead;
@@ -263,16 +268,11 @@ struct SqlStorage::IngestResult {
   JSG_STRUCT(remainder, rowsRead, rowsWritten, statementCount);
 };
 
-
-#define EW_SQL_ISOLATE_TYPES                    \
-  api::SqlStorage,                              \
-  api::SqlStorage::Statement,                   \
-  api::SqlStorage::Cursor,                      \
-  api::SqlStorage::IngestResult,                \
-  api::SqlStorage::Cursor::RowIterator,         \
-  api::SqlStorage::Cursor::RowIterator::Next,   \
-  api::SqlStorage::Cursor::RawIterator,         \
-  api::SqlStorage::Cursor::RawIterator::Next
+#define EW_SQL_ISOLATE_TYPES                                                                       \
+  api::SqlStorage, api::SqlStorage::Statement, api::SqlStorage::Cursor,                            \
+      api::SqlStorage::IngestResult, api::SqlStorage::Cursor::RowIterator,                         \
+      api::SqlStorage::Cursor::RowIterator::Next, api::SqlStorage::Cursor::RawIterator,            \
+      api::SqlStorage::Cursor::RawIterator::Next
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

@@ -13,19 +13,27 @@ public:
   static kj::Maybe<Ec> tryGetEc(const EVP_PKEY* key);
   Ec(EC_KEY* key);
 
-  inline const EC_KEY* getKey() { return key; }
-  inline const EC_GROUP* getGroup() const { return group; }
+  inline const EC_KEY* getKey() {
+    return key;
+  }
+  inline const EC_GROUP* getGroup() const {
+    return group;
+  }
   int getCurveName() const;
 
   const EC_POINT* getPublicKey() const;
   const BIGNUM* getPrivateKey() const;
   uint32_t getDegree() const;
 
-  inline const BIGNUM& getX() const { return *x; }
-  inline const BIGNUM& getY() const { return *y; }
+  inline const BIGNUM& getX() const {
+    return *x;
+  }
+  inline const BIGNUM& getY() const {
+    return *y;
+  }
 
-  SubtleCrypto::JsonWebKey toJwk(KeyType keyType, kj::StringPtr curveName) const
-      KJ_WARN_UNUSED_RESULT;
+  SubtleCrypto::JsonWebKey toJwk(
+      KeyType keyType, kj::StringPtr curveName) const KJ_WARN_UNUSED_RESULT;
 
   kj::Array<kj::byte> getRawPublicKey() const KJ_WARN_UNUSED_RESULT;
 

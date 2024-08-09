@@ -15,21 +15,29 @@ namespace workerd::api {
 namespace {
 auto lookupAesCbcType(uint bitLength) {
   switch (bitLength) {
-    case 128: return EVP_aes_128_cbc();
-    case 192: return EVP_aes_192_cbc();
-    case 256: return EVP_aes_256_cbc();
-    default: KJ_FAIL_ASSERT("CryptoKey has invalid data length", bitLength);
-    // Assert because the data length must have come from a key we created!
+    case 128:
+      return EVP_aes_128_cbc();
+    case 192:
+      return EVP_aes_192_cbc();
+    case 256:
+      return EVP_aes_256_cbc();
+    default:
+      KJ_FAIL_ASSERT("CryptoKey has invalid data length", bitLength);
+      // Assert because the data length must have come from a key we created!
   }
 }
 
 auto lookupAesGcmType(uint bitLength) {
   switch (bitLength) {
-    case 128: return EVP_aes_128_gcm();
-    case 192: return EVP_aes_192_gcm();
-    case 256: return EVP_aes_256_gcm();
-    default: KJ_FAIL_ASSERT("CryptoKey has invalid data length", bitLength);
-    // Assert because the data length must have come from a key we created!
+    case 128:
+      return EVP_aes_128_gcm();
+    case 192:
+      return EVP_aes_192_gcm();
+    case 256:
+      return EVP_aes_256_gcm();
+    default:
+      KJ_FAIL_ASSERT("CryptoKey has invalid data length", bitLength);
+      // Assert because the data length must have come from a key we created!
   }
 }
 
@@ -42,14 +50,18 @@ void validateAesGcmTagLength(int tagLength) {
     case 104:
     case 112:
     case 120:
-    case 128: break;
+    case 128:
+      break;
     default:
       JSG_FAIL_REQUIRE(DOMOperationError, "Invalid AES-GCM tag length ", tagLength, ".");
   }
 }
 
-int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
-    size_t outputLength, EVP_CIPHER_CTX* cipherCtx, kj::byte* out) {
+int decryptFinalHelper(kj::StringPtr algorithm,
+    size_t inputLength,
+    size_t outputLength,
+    EVP_CIPHER_CTX* cipherCtx,
+    kj::byte* out) {
   // EVP_DecryptFinal_ex() failures can mean a mundane decryption failure, so we have to be careful
   // with error handling when calling it. We can't use our usual OSSLCALL() macro, because that
   // throws an unhelpful opaque OperationError.
@@ -70,17 +82,18 @@ int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
   // OperationError for consistency with our OSSLCALL() macro. Notably, AES-GCM tag authentication
   // failures don't produce any error code, though they should probably be BAD_DECRYPT.
   JSG_REQUIRE(ec == 0 || ec == ERR_PACK(ERR_LIB_CIPHER, CIPHER_R_BAD_DECRYPT) ||
-      ec == ERR_PACK(ERR_LIB_CIPHER, CIPHER_R_WRONG_FINAL_BLOCK_LENGTH), InternalDOMOperationError,
-      "Unexpected issue decrypting", internalDescribeOpensslErrors());
+          ec == ERR_PACK(ERR_LIB_CIPHER, CIPHER_R_WRONG_FINAL_BLOCK_LENGTH),
+      InternalDOMOperationError, "Unexpected issue decrypting", internalDescribeOpensslErrors());
 
   // Consume the error since it's one we were expecting.
   clearErrorOnReturn.consumeError();
 
   // Otherwise, tell the script author they gave us garbage.
-  JSG_FAIL_REQUIRE(DOMOperationError, "Decryption failed. This could be due "
+  JSG_FAIL_REQUIRE(DOMOperationError,
+      "Decryption failed. This could be due "
       "to a ciphertext authentication failure, bad padding, incorrect CryptoKey, or another "
-      "algorithm-specific reason. Input length was ", inputLength,", output length expected to be ",
-      outputLength, " for ", algorithm);
+      "algorithm-specific reason. Input length was ",
+      inputLength, ", output length expected to be ", outputLength, " for ", algorithm);
 }
 
 // NOTE: The OpenSSL calls to implement AES-GCM and AES-CBC are quite similar. If you update one
@@ -91,10 +104,13 @@ int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
 // concrete implementations to only define encrypt/decrypt.
 class AesKeyBase: public CryptoKey::Impl {
 public:
-  explicit AesKeyBase(kj::Array<kj::byte> keyData, CryptoKey::AesKeyAlgorithm keyAlgorithm,
-                      bool extractable, CryptoKeyUsageSet usages)
+  explicit AesKeyBase(kj::Array<kj::byte> keyData,
+      CryptoKey::AesKeyAlgorithm keyAlgorithm,
+      bool extractable,
+      CryptoKeyUsageSet usages)
       : CryptoKey::Impl(extractable, usages),
-        keyData(kj::mv(keyData)), keyAlgorithm(kj::mv(keyAlgorithm)) {}
+        keyData(kj::mv(keyData)),
+        keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
 protected:
   kj::StringPtr getAlgorithmName() const override final {
@@ -109,23 +125,28 @@ protected:
 
   bool equals(const kj::Array<kj::byte>& other) const override final {
     return keyData.size() == other.size() &&
-           CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
+        CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
-  kj::StringPtr jsgGetMemoryName() const override { return "AesKeyBase"_kjc; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(AesKeyBase); }
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "AesKeyBase"_kjc;
+  }
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(AesKeyBase);
+  }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
     tracker.trackFieldWithSize("keyData", keyData.size());
     tracker.trackField("keyAlgorithm", keyAlgorithm);
   }
 
 private:
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override final { return keyAlgorithm; }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override final {
+    return keyAlgorithm;
+  }
 
   SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override final {
-    JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError,
-        getAlgorithmName(), " key only supports exporting \"raw\" & \"jwk\", not \"", format,
-        "\".");
+    JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError, getAlgorithmName(),
+        " key only supports exporting \"raw\" & \"jwk\", not \"", format, "\".");
 
     if (format == "jwk") {
       auto lengthInBytes = keyData.size();
@@ -135,8 +156,8 @@ private:
 
 #ifdef KJ_DEBUG
       static constexpr auto expectedModes = {"GCM", "KW", "CTR", "CBC"};
-      KJ_DASSERT(expectedModes.end() != std::find(
-          expectedModes.begin(), expectedModes.end(), aesMode));
+      KJ_DASSERT(
+          expectedModes.end() != std::find(expectedModes.begin(), expectedModes.end(), aesMode));
 #endif
 
       SubtleCrypto::JsonWebKey jwk;
@@ -168,16 +189,17 @@ protected:
 
 class AesGcmKey final: public AesKeyBase {
 public:
-  explicit AesGcmKey(kj::Array<kj::byte> keyData, CryptoKey::AesKeyAlgorithm keyAlgorithm,
-                     bool extractable, CryptoKeyUsageSet usages)
+  explicit AesGcmKey(kj::Array<kj::byte> keyData,
+      CryptoKey::AesKeyAlgorithm keyAlgorithm,
+      bool extractable,
+      CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
 
 private:
-  kj::Array<kj::byte> encrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
+  kj::Array<kj::byte> encrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> plainText) const override {
-    kj::ArrayPtr<kj::byte> iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError,
-        "Missing field \"iv\" in \"algorithm\".");
+    kj::ArrayPtr<kj::byte> iv =
+        JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".");
     JSG_REQUIRE(iv.size() != 0, DOMOperationError, "AES-GCM IV must not be empty.");
 
     auto additionalData = algorithm.additionalData.orDefault(kj::Array<kj::byte>()).asPtr();
@@ -199,18 +221,16 @@ private:
     // Set up the cipher context with the initialization vector. We pass nullptrs for the key data
     // and initialization vector because we may need to override the default IV length.
     OSSLCALL(EVP_EncryptInit_ex(cipherCtx.get(), type, nullptr, nullptr, nullptr));
-    OSSLCALL(EVP_CIPHER_CTX_ctrl(cipherCtx.get(), EVP_CTRL_GCM_SET_IVLEN,
-                                 iv.size(), nullptr));
-    OSSLCALL(EVP_EncryptInit_ex(cipherCtx.get(), nullptr, nullptr, keyData.begin(),
-                                iv.begin()));
+    OSSLCALL(EVP_CIPHER_CTX_ctrl(cipherCtx.get(), EVP_CTRL_GCM_SET_IVLEN, iv.size(), nullptr));
+    OSSLCALL(EVP_EncryptInit_ex(cipherCtx.get(), nullptr, nullptr, keyData.begin(), iv.begin()));
 
     if (additionalData.size() > 0) {
       // Run the engine with the additional data, which will presumably be transmitted alongside the
       // cipher text in plain text. I noticed that if I call EncryptUpdate with 0-length AAD here,
       // the subsequent call to EncryptUpdate will fail, thus the if-check.
       int dummy;
-      OSSLCALL(EVP_EncryptUpdate(cipherCtx.get(), nullptr, &dummy,
-                                 additionalData.begin(), additionalData.size()));
+      OSSLCALL(EVP_EncryptUpdate(
+          cipherCtx.get(), nullptr, &dummy, additionalData.begin(), additionalData.size()));
     }
 
     // We make two cipher calls: EVP_EncryptUpdate() and EVP_EncryptFinal_ex(). AES-GCM behaves like
@@ -222,38 +242,39 @@ private:
     // Perform the actual encryption.
 
     int cipherSize = 0;
-    OSSLCALL(EVP_EncryptUpdate(cipherCtx.get(), cipherText.begin(), &cipherSize,
-                               plainText.begin(), plainText.size()));
+    OSSLCALL(EVP_EncryptUpdate(
+        cipherCtx.get(), cipherText.begin(), &cipherSize, plainText.begin(), plainText.size()));
     KJ_ASSERT(cipherSize == plainText.size(), "EVP_EncryptUpdate should encrypt all at once");
 
     int finalCipherSize = 0;
-    OSSLCALL(EVP_EncryptFinal_ex(cipherCtx.get(), cipherText.begin() + cipherSize,
-                                 &finalCipherSize));
+    OSSLCALL(
+        EVP_EncryptFinal_ex(cipherCtx.get(), cipherText.begin() + cipherSize, &finalCipherSize));
     KJ_ASSERT(finalCipherSize == 0, "EVP_EncryptFinal_ex should not output any data");
 
     // Concatenate the tag onto the cipher text.
     KJ_ASSERT(cipherSize + tagByteSize == cipherText.size(), "imminent buffer overrun");
-    OSSLCALL(EVP_CIPHER_CTX_ctrl(cipherCtx.get(), EVP_CTRL_GCM_GET_TAG,
-                                 tagByteSize, cipherText.begin() + cipherSize));
+    OSSLCALL(EVP_CIPHER_CTX_ctrl(
+        cipherCtx.get(), EVP_CTRL_GCM_GET_TAG, tagByteSize, cipherText.begin() + cipherSize));
     cipherSize += tagByteSize;
     KJ_ASSERT(cipherSize == cipherText.size(), "buffer overrun");
 
     return cipherText;
   }
 
-  kj::Array<kj::byte> decrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
+  kj::Array<kj::byte> decrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> cipherText) const override {
-    kj::ArrayPtr<kj::byte> iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError,
-        "Missing field \"iv\" in \"algorithm\".");
+    kj::ArrayPtr<kj::byte> iv =
+        JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".");
     JSG_REQUIRE(iv.size() != 0, DOMOperationError, "AES-GCM IV must not be empty.");
 
     int tagLength = algorithm.tagLength.orDefault(128);
     validateAesGcmTagLength(tagLength);
 
-    JSG_REQUIRE(cipherText.size() >= tagLength / 8, DOMOperationError,
-        "Ciphertext length of ", cipherText.size() * 8, " bits must be greater than or equal to "
-        "the size of the AES-GCM tag length of ", tagLength, " bits.");
+    JSG_REQUIRE(cipherText.size() >= tagLength / 8, DOMOperationError, "Ciphertext length of ",
+        cipherText.size() * 8,
+        " bits must be greater than or equal to "
+        "the size of the AES-GCM tag length of ",
+        tagLength, " bits.");
 
     auto additionalData = algorithm.additionalData.orDefault(kj::Array<kj::byte>()).asPtr();
 
@@ -263,16 +284,14 @@ private:
     auto type = lookupAesGcmType(keyData.size() * 8);
 
     OSSLCALL(EVP_DecryptInit_ex(cipherCtx.get(), type, nullptr, nullptr, nullptr));
-    OSSLCALL(EVP_CIPHER_CTX_ctrl(cipherCtx.get(), EVP_CTRL_GCM_SET_IVLEN,
-                                 iv.size(), nullptr));
-    OSSLCALL(EVP_DecryptInit_ex(cipherCtx.get(), nullptr, nullptr, keyData.begin(),
-                                iv.begin()));
+    OSSLCALL(EVP_CIPHER_CTX_ctrl(cipherCtx.get(), EVP_CTRL_GCM_SET_IVLEN, iv.size(), nullptr));
+    OSSLCALL(EVP_DecryptInit_ex(cipherCtx.get(), nullptr, nullptr, keyData.begin(), iv.begin()));
 
     int plainSize = 0;
 
     if (additionalData.size() > 0) {
-      OSSLCALL(EVP_DecryptUpdate(cipherCtx.get(), nullptr, &plainSize,
-                                 additionalData.begin(), additionalData.size()));
+      OSSLCALL(EVP_DecryptUpdate(
+          cipherCtx.get(), nullptr, &plainSize, additionalData.begin(), additionalData.size()));
       plainSize = 0;
     }
 
@@ -283,7 +302,7 @@ private:
 
     // Perform the actual decryption.
     OSSLCALL(EVP_DecryptUpdate(cipherCtx.get(), plainText.begin(), &plainSize,
-                               actualCipherText.begin(), actualCipherText.size()));
+        actualCipherText.begin(), actualCipherText.size()));
     KJ_ASSERT(plainSize == plainText.size());
 
     // NOTE: We const_cast tagText here. EVP_CIPHER_CTX_ctrl() is used to set various
@@ -295,7 +314,7 @@ private:
     //   This little hack seems like a lesser evil than accepting the plaintext as mutable in every
     //   decrypt implementation function interface.
     OSSLCALL(EVP_CIPHER_CTX_ctrl(cipherCtx.get(), EVP_CTRL_GCM_SET_TAG, tagLength / 8,
-                                 const_cast<kj::byte*>(tagText.begin())));
+        const_cast<kj::byte*>(tagText.begin())));
 
     plainSize += decryptFinalHelper(getAlgorithmName(), actualCipherText.size(), plainSize,
         cipherCtx.get(), plainText.begin() + plainSize);
@@ -307,16 +326,17 @@ private:
 
 class AesCbcKey final: public AesKeyBase {
 public:
-  explicit AesCbcKey(kj::Array<kj::byte> keyData, CryptoKey::AesKeyAlgorithm keyAlgorithm,
-                     bool extractable, CryptoKeyUsageSet usages)
+  explicit AesCbcKey(kj::Array<kj::byte> keyData,
+      CryptoKey::AesKeyAlgorithm keyAlgorithm,
+      bool extractable,
+      CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
 
 private:
-  kj::Array<kj::byte> encrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
+  kj::Array<kj::byte> encrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> plainText) const override {
-    kj::ArrayPtr<kj::byte> iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError,
-        "Missing field \"iv\" in \"algorithm\".");
+    kj::ArrayPtr<kj::byte> iv =
+        JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".");
 
     JSG_REQUIRE(iv.size() == 16, DOMOperationError, "AES-CBC IV must be 16 bytes long (provided ",
         iv.size(), " bytes).");
@@ -326,8 +346,7 @@ private:
     auto type = lookupAesCbcType(keyData.size() * 8);
 
     // Set up the cipher context with the initialization vector.
-    OSSLCALL(EVP_EncryptInit_ex(cipherCtx.get(), type, nullptr, keyData.begin(),
-                                iv.begin()));
+    OSSLCALL(EVP_EncryptInit_ex(cipherCtx.get(), type, nullptr, keyData.begin(), iv.begin()));
 
     auto blockSize = EVP_CIPHER_CTX_block_size(cipherCtx.get());
     size_t paddingSize = blockSize - (plainText.size() % blockSize);
@@ -339,28 +358,27 @@ private:
     //   takes care of it for us by default in EVP_EncryptFinal_ex().
 
     int cipherSize = 0;
-    OSSLCALL(EVP_EncryptUpdate(cipherCtx.get(), cipherText.begin(), &cipherSize,
-                               plainText.begin(), plainText.size()));
+    OSSLCALL(EVP_EncryptUpdate(
+        cipherCtx.get(), cipherText.begin(), &cipherSize, plainText.begin(), plainText.size()));
     KJ_ASSERT(cipherSize <= cipherText.size(), "buffer overrun");
 
     KJ_ASSERT(cipherSize + blockSize <= cipherText.size(), "imminent buffer overrun");
     int finalCipherSize = 0;
-    OSSLCALL(EVP_EncryptFinal_ex(cipherCtx.get(), cipherText.begin() + cipherSize,
-                                 &finalCipherSize));
+    OSSLCALL(
+        EVP_EncryptFinal_ex(cipherCtx.get(), cipherText.begin() + cipherSize, &finalCipherSize));
     cipherSize += finalCipherSize;
     KJ_ASSERT(cipherSize == cipherText.size(), "buffer overrun");
 
     return cipherText;
   }
 
-  kj::Array<kj::byte> decrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
+  kj::Array<kj::byte> decrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> cipherText) const override {
-    kj::ArrayPtr<kj::byte> iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError,
-        "Missing field \"iv\" in \"algorithm\".");
+    kj::ArrayPtr<kj::byte> iv =
+        JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".");
 
-    JSG_REQUIRE(iv.size() == 16, DOMOperationError,
-        "AES-CBC IV must be 16 bytes long (provided ", iv.size(), ").");
+    JSG_REQUIRE(iv.size() == 16, DOMOperationError, "AES-CBC IV must be 16 bytes long (provided ",
+        iv.size(), ").");
 
     auto cipherCtx = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
     KJ_ASSERT(cipherCtx.get() != nullptr);
@@ -368,8 +386,7 @@ private:
     auto type = lookupAesCbcType(keyData.size() * 8);
 
     // Set up the cipher context with the initialization vector.
-    OSSLCALL(EVP_DecryptInit_ex(cipherCtx.get(), type, nullptr, keyData.begin(),
-                                iv.begin()));
+    OSSLCALL(EVP_DecryptInit_ex(cipherCtx.get(), type, nullptr, keyData.begin(), iv.begin()));
 
     int plainSize = 0;
     auto blockSize = EVP_CIPHER_CTX_block_size(cipherCtx.get());
@@ -377,8 +394,8 @@ private:
     auto plainText = kj::heapArray<kj::byte>(cipherText.size() + ((blockSize > 1) ? blockSize : 0));
 
     // Perform the actual decryption.
-    OSSLCALL(EVP_DecryptUpdate(cipherCtx.get(), plainText.begin(), &plainSize,
-                               cipherText.begin(), cipherText.size()));
+    OSSLCALL(EVP_DecryptUpdate(
+        cipherCtx.get(), plainText.begin(), &plainSize, cipherText.begin(), cipherText.size()));
     KJ_ASSERT(plainSize + ((blockSize > 1) ? blockSize : 0) <= plainText.size());
 
     plainSize += decryptFinalHelper(getAlgorithmName(), cipherText.size(), plainSize,
@@ -394,18 +411,18 @@ class AesCtrKey final: public AesKeyBase {
   static constexpr size_t expectedCounterByteSize = 16;
 
 public:
-  explicit AesCtrKey(kj::Array<kj::byte> keyData, CryptoKey::AesKeyAlgorithm keyAlgorithm,
-                     bool extractable, CryptoKeyUsageSet usages)
+  explicit AesCtrKey(kj::Array<kj::byte> keyData,
+      CryptoKey::AesKeyAlgorithm keyAlgorithm,
+      bool extractable,
+      CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
 
-  kj::Array<kj::byte> encrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
+  kj::Array<kj::byte> encrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> plainText) const override {
     return encryptOrDecrypt(kj::mv(algorithm), plainText);
   }
 
-  kj::Array<kj::byte> decrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
+  kj::Array<kj::byte> decrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> cipherText) const override {
     return encryptOrDecrypt(kj::mv(algorithm), cipherText);
   }
@@ -413,25 +430,28 @@ public:
 protected:
   static const EVP_CIPHER& lookupAesType(size_t keyLengthBytes) {
     switch (keyLengthBytes) {
-      case 16: return *EVP_aes_128_ctr();
+      case 16:
+        return *EVP_aes_128_ctr();
       // NOTE: FWIW Chrome intentionally doesn't support 192 (http://crbug.com/533699) & at one
       //   point in removal of the 192 variant was scheduled for removal from BoringSSL. However, we
       //   do support it for completeness (as does Firefox).
-      case 24: return *EVP_aes_192_ctr();
-      case 32: return *EVP_aes_256_ctr();
+      case 24:
+        return *EVP_aes_192_ctr();
+      case 32:
+        return *EVP_aes_256_ctr();
     }
     KJ_FAIL_ASSERT("CryptoKey has invalid data length");
   }
 
   kj::Array<kj::byte> encryptOrDecrypt(
       SubtleCrypto::EncryptAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const {
-    auto& counter = JSG_REQUIRE_NONNULL(algorithm.counter, TypeError,
-        "Missing \"counter\" member in \"algorithm\".");
+    auto& counter = JSG_REQUIRE_NONNULL(
+        algorithm.counter, TypeError, "Missing \"counter\" member in \"algorithm\".");
     JSG_REQUIRE(counter.size() == expectedCounterByteSize, DOMOperationError,
         "Counter must have length of 16 bytes (provided ", counter.size(), ").");
 
-    auto& counterBitLength = JSG_REQUIRE_NONNULL(algorithm.length, TypeError,
-        "Missing \"length\" member in \"algorithm\".");
+    auto& counterBitLength = JSG_REQUIRE_NONNULL(
+        algorithm.length, TypeError, "Missing \"length\" member in \"algorithm\".");
 
     // Web IDL defines an octet as [0, 255] which explains why the spec here only calls out != 0 and
     // <= 128, which implies the intended range must be [1, 128] which is what we enforce here.
@@ -442,8 +462,8 @@ protected:
     //   * https://heycam.github.io/webidl/#EnforceRange,
     //   * https://heycam.github.io/webidl/#es-octet
     //   * https://heycam.github.io/webidl/#abstract-opdef-converttoint
-    JSG_REQUIRE(counterBitLength > 0 && counterBitLength <= 128,
-        DOMOperationError, "Invalid counter of ", counterBitLength, " bits length provided.");
+    JSG_REQUIRE(counterBitLength > 0 && counterBitLength <= 128, DOMOperationError,
+        "Invalid counter of ", counterBitLength, " bits length provided.");
 
     const auto& cipher = lookupAesType(keyData.size());
 
@@ -460,12 +480,13 @@ protected:
 
     // Now figure out how many AES blocks we'll process/how many times to increment the counter.
     auto numOutputBlocks = newBignum();
-    JSG_REQUIRE(BN_set_word(numOutputBlocks.get(), integerCeilDivision(result.size(),
-        static_cast<size_t>(AES_BLOCK_SIZE))), InternalDOMOperationError, "Error doing ",
-        getAlgorithmName(), " encrypt/decrypt", internalDescribeOpensslErrors());
+    JSG_REQUIRE(BN_set_word(numOutputBlocks.get(),
+                    integerCeilDivision(result.size(), static_cast<size_t>(AES_BLOCK_SIZE))),
+        InternalDOMOperationError, "Error doing ", getAlgorithmName(), " encrypt/decrypt",
+        internalDescribeOpensslErrors());
 
-    JSG_REQUIRE(BN_cmp(numOutputBlocks.get(), numCounterValues.get()) <= 0,
-        DOMOperationError, "Counter block values will repeat", tryDescribeOpensslErrors());
+    JSG_REQUIRE(BN_cmp(numOutputBlocks.get(), numCounterValues.get()) <= 0, DOMOperationError,
+        "Counter block values will repeat", tryDescribeOpensslErrors());
 
     auto numBlocksUntilReset = newBignum();
     // The number of blocks that can be encrypted without overflowing the counter. Subsequent
@@ -501,15 +522,15 @@ protected:
       }
     }
 
-    process(&cipher, data.slice(inputSizePart1, data.size()), counter, result.slice(
-        inputSizePart1, result.size()));
+    process(&cipher, data.slice(inputSizePart1, data.size()), counter,
+        result.slice(inputSizePart1, result.size()));
 
     return result.releaseAsArray();
   }
 
 private:
-  kj::Own<BIGNUM> getCounter(kj::ArrayPtr<kj::byte> counterBlock,
-      const unsigned counterBitLength) const {
+  kj::Own<BIGNUM> getCounter(
+      kj::ArrayPtr<kj::byte> counterBlock, const unsigned counterBitLength) const {
     // See GetCounter from https://chromium.googlesource.com/chromium/src/+/refs/tags/91.0.4458.2/components/webcrypto/algorithms/aes_ctr.cc#86
     // The counter is the rightmost "counterBitLength" of the block as a big-endian number.
     KJ_DASSERT(counterBlock.size() == expectedCounterByteSize);
@@ -518,12 +539,11 @@ private:
     if (remainderBits == 0) {
       // Multiple of 8 bits, then can pass the remainder to BN_bin2bn (binary to bignum).
       auto byteLength = counterBitLength / 8;
-      auto remainingCounter = counterBlock.slice(expectedCounterByteSize - byteLength,
-          counterBlock.size());
+      auto remainingCounter =
+          counterBlock.slice(expectedCounterByteSize - byteLength, counterBlock.size());
 
-      return JSG_REQUIRE_NONNULL(toBignum(remainingCounter.asBytes()),
-          InternalDOMOperationError, "Error doing ", getAlgorithmName(),
-          " encrypt/decrypt", internalDescribeOpensslErrors());
+      return JSG_REQUIRE_NONNULL(toBignum(remainingCounter.asBytes()), InternalDOMOperationError,
+          "Error doing ", getAlgorithmName(), " encrypt/decrypt", internalDescribeOpensslErrors());
     }
 
     // Convert the counter but zero out the topmost bits so that we can convert to bignum from a
@@ -534,8 +554,8 @@ private:
     KJ_DASSERT(byteLength > 0, counterBitLength, remainderBits);
     KJ_DASSERT(byteLength <= expectedCounterByteSize, counterBitLength, counterBlock.size());
 
-    auto counterToProcess = counterBlock.slice(expectedCounterByteSize - byteLength,
-        counterBlock.size());
+    auto counterToProcess =
+        counterBlock.slice(expectedCounterByteSize - byteLength, counterBlock.size());
     auto previous = counterToProcess[0];
     counterToProcess[0] &= ~(0xFF << remainderBits);
     KJ_DEFER(counterToProcess[0] = previous);
@@ -547,8 +567,10 @@ private:
         "Error doing ", getAlgorithmName(), " encrypt/decrypt", internalDescribeOpensslErrors());
   }
 
-  void process(const EVP_CIPHER* cipher, kj::ArrayPtr<const kj::byte> input,
-      kj::ArrayPtr<kj::byte> counter, kj::ArrayPtr<kj::byte> output) const {
+  void process(const EVP_CIPHER* cipher,
+      kj::ArrayPtr<const kj::byte> input,
+      kj::ArrayPtr<kj::byte> counter,
+      kj::ArrayPtr<kj::byte> output) const {
     // Workers are limited to 128MB so this isn't actually a realistic concern, but sanity check.
     JSG_REQUIRE(input.size() < INT_MAX, DOMOperationError, "Input is too large to encrypt.");
 
@@ -557,36 +579,40 @@ private:
 
     // For CTR, it really does not matter whether we are encrypting or decrypting, so set enc to 0.
     JSG_REQUIRE(EVP_CipherInit_ex(cipherContext.get(), cipher, nullptr,
-        keyData.asPtr().asBytes().begin(), counter.asBytes().begin(), 0),
+                    keyData.asPtr().asBytes().begin(), counter.asBytes().begin(), 0),
         InternalDOMOperationError, "Error doing ", getAlgorithmName(), " encrypt/decrypt",
         internalDescribeOpensslErrors());
 
     int outputLength = 0;
     JSG_REQUIRE(EVP_CipherUpdate(cipherContext.get(), output.begin(), &outputLength,
-        input.asBytes().begin(), input.size()), InternalDOMOperationError, "Error doing ",
-        getAlgorithmName(), " encrypt/decrypt", internalDescribeOpensslErrors());
+                    input.asBytes().begin(), input.size()),
+        InternalDOMOperationError, "Error doing ", getAlgorithmName(), " encrypt/decrypt",
+        internalDescribeOpensslErrors());
 
     KJ_DASSERT(outputLength >= 0 && outputLength <= output.size(), outputLength, output.size());
 
     int finalOutputChunkLength = 0;
     auto finalizationBuffer = output.slice(outputLength, output.size()).asBytes().begin();
-    JSG_REQUIRE(EVP_CipherFinal_ex(cipherContext.get(), finalizationBuffer,
-        &finalOutputChunkLength), InternalDOMOperationError, "Error doing ", getAlgorithmName(),
-        " encrypt/decrypt", internalDescribeOpensslErrors());
+    JSG_REQUIRE(
+        EVP_CipherFinal_ex(cipherContext.get(), finalizationBuffer, &finalOutputChunkLength),
+        InternalDOMOperationError, "Error doing ", getAlgorithmName(), " encrypt/decrypt",
+        internalDescribeOpensslErrors());
 
     KJ_DASSERT(finalOutputChunkLength >= 0 && finalOutputChunkLength <= output.size(),
         finalOutputChunkLength, output.size());
 
     JSG_REQUIRE(static_cast<size_t>(outputLength) + static_cast<size_t>(finalOutputChunkLength) ==
-        input.size(), InternalDOMOperationError, "Error doing ", getAlgorithmName(),
-        " encrypt/decrypt.");
+            input.size(),
+        InternalDOMOperationError, "Error doing ", getAlgorithmName(), " encrypt/decrypt.");
   }
 };
 
 class AesKwKey final: public AesKeyBase {
 public:
-  explicit AesKwKey(kj::Array<kj::byte> keyData, CryptoKey::AesKeyAlgorithm keyAlgorithm,
-                    bool extractable, CryptoKeyUsageSet usages)
+  explicit AesKwKey(kj::Array<kj::byte> keyData,
+      CryptoKey::AesKeyAlgorithm keyAlgorithm,
+      bool extractable,
+      CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
 
   kj::Array<kj::byte> wrapKey(SubtleCrypto::EncryptAlgorithm&& algorithm,
@@ -600,8 +626,10 @@ public:
         unwrappedKey.size() * 8, " bits.");
 
     JSG_REQUIRE(unwrappedKey.size() >= 16 && unwrappedKey.size() <= SIZE_MAX - 8, DOMOperationError,
-        "Unwrapped key has length ", unwrappedKey.size(), " bytes but it should be greater than or "
-        "equal to 16 and less than or equal to ", SIZE_MAX - 8);
+        "Unwrapped key has length ", unwrappedKey.size(),
+        " bytes but it should be greater than or "
+        "equal to 16 and less than or equal to ",
+        SIZE_MAX - 8);
 
     kj::Vector<kj::byte> wrapped(unwrappedKey.size() + 8);
     wrapped.resize(unwrappedKey.size() + 8);
@@ -612,9 +640,10 @@ public:
         InternalDOMOperationError, "Error doing ", getAlgorithmName(), " key wrapping",
         internalDescribeOpensslErrors());
 
-    JSG_REQUIRE(wrapped.size() == AES_wrap_key(&aesKey, nullptr, wrapped.begin(),
-        unwrappedKey.begin(), unwrappedKey.size()), DOMOperationError, getAlgorithmName(),
-        " key wrapping failed", tryDescribeOpensslErrors());
+    JSG_REQUIRE(wrapped.size() ==
+            AES_wrap_key(
+                &aesKey, nullptr, wrapped.begin(), unwrappedKey.begin(), unwrappedKey.size()),
+        DOMOperationError, getAlgorithmName(), " key wrapping failed", tryDescribeOpensslErrors());
 
     return wrapped.releaseAsArray();
   }
@@ -644,16 +673,19 @@ public:
 
     // null for the IV value here will tell OpenSSL to validate using the default IV from RFC3394.
     // https://github.com/openssl/openssl/blob/13a574d8bb2523181f8150de49bc041c9841f59d/crypto/modes/wrap128.c
-    JSG_REQUIRE(unwrapped.size() == AES_unwrap_key(&aesKey, nullptr, unwrapped.begin(),
-        wrappedKey.begin(), wrappedKey.size()), DOMOperationError, getAlgorithmName(),
-        " key unwrapping failed", tryDescribeOpensslErrors());
+    JSG_REQUIRE(unwrapped.size() ==
+            AES_unwrap_key(
+                &aesKey, nullptr, unwrapped.begin(), wrappedKey.begin(), wrappedKey.size()),
+        DOMOperationError, getAlgorithmName(), " key unwrapping failed",
+        tryDescribeOpensslErrors());
 
     return unwrapped.releaseAsArray();
   }
 };
 
-CryptoKeyUsageSet validateAesUsages(CryptoKeyUsageSet::Context ctx, kj::StringPtr normalizedName,
-                                    kj::ArrayPtr<const kj::String> keyUsages) {
+CryptoKeyUsageSet validateAesUsages(CryptoKeyUsageSet::Context ctx,
+    kj::StringPtr normalizedName,
+    kj::ArrayPtr<const kj::String> keyUsages) {
   // AES-CTR, AES-CBC, AES-GCM, and AES-KW all share the same logic for operations, with the only
   // difference being the valid usages.
   CryptoKeyUsageSet validUsages = CryptoKeyUsageSet::wrapKey() | CryptoKeyUsageSet::unwrapKey();
@@ -665,20 +697,22 @@ CryptoKeyUsageSet validateAesUsages(CryptoKeyUsageSet::Context ctx, kj::StringPt
 
 }  // namespace
 
-kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateAes(
-      jsg::Lock& js, kj::StringPtr normalizedName,
-      SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
-      kj::ArrayPtr<const kj::String> keyUsages) {
+kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateAes(jsg::Lock& js,
+    kj::StringPtr normalizedName,
+    SubtleCrypto::GenerateKeyAlgorithm&& algorithm,
+    bool extractable,
+    kj::ArrayPtr<const kj::String> keyUsages) {
   CryptoKeyUsageSet usages =
       validateAesUsages(CryptoKeyUsageSet::Context::generate, normalizedName, keyUsages);
 
-  auto length = JSG_REQUIRE_NONNULL(algorithm.length, TypeError,
-      "Missing field \"length\" in \"algorithm\".");
+  auto length = JSG_REQUIRE_NONNULL(
+      algorithm.length, TypeError, "Missing field \"length\" in \"algorithm\".");
 
   switch (length) {
     case 128:
     case 192:
-    case 256: break;
+    case 256:
+      break;
     default:
       JSG_FAIL_REQUIRE(DOMOperationError,
           "Generated AES key length must be 128, 192, or 256 bits but requested ", length, ".");
@@ -706,10 +740,12 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateAes(
   return jsg::alloc<CryptoKey>(kj::mv(keyImpl));
 }
 
-kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(
-    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
+kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(jsg::Lock& js,
+    kj::StringPtr normalizedName,
+    kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
-    SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
+    SubtleCrypto::ImportKeyAlgorithm&& algorithm,
+    bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
   CryptoKeyUsageSet usages =
       validateAesUsages(CryptoKeyUsageSet::Context::importSecret, normalizedName, keyUsages);
@@ -722,7 +758,8 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(
     switch (keyDataArray.size() * 8) {
       case 128:
       case 192:
-      case 256: break;
+      case 256:
+        break;
       default:
         JSG_FAIL_REQUIRE(DOMDataError,
             "Imported AES key length must be 128, 192, or 256 bits but provided ",
@@ -734,7 +771,8 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(
     auto& keyDataJwk = keyData.get<SubtleCrypto::JsonWebKey>();
     JSG_REQUIRE(keyDataJwk.kty == "oct", DOMDataError,
         "Symmetric \"jwk\" key import requires a JSON Web Key with Key Type parameter "
-        "\"kty\" equal to \"oct\" (encountered \"", keyDataJwk.kty, "\").");
+        "\"kty\" equal to \"oct\" (encountered \"",
+        keyDataJwk.kty, "\").");
     // https://www.rfc-editor.org/rfc/rfc7518.txt Section 6.1
     keyDataArray = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.k), DOMDataError,
         "Symmetric \"jwk\" key import requires a base64Url encoding of the key.");
@@ -788,9 +826,10 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(
     //   must be the value for `use'? Or is there something else?
 
     KJ_IF_SOME(e, keyDataJwk.ext) {
-      JSG_REQUIRE(e || !extractable, DOMDataError,
-          "\"jwk\" key has value \"", e ? "true" : "false", "\", for \"ext\" that is incompatible "
-          "with import extractability value \"", extractable ? "true" : "false", "\".");
+      JSG_REQUIRE(e || !extractable, DOMDataError, "\"jwk\" key has value \"", e ? "true" : "false",
+          "\", for \"ext\" that is incompatible "
+          "with import extractability value \"",
+          extractable ? "true" : "false", "\".");
     }
   } else {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized key import format \"", format, "\".");
@@ -811,8 +850,8 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(
     return kj::heap<AesKwKey>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages);
   }
 
-  JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unsupported algorithm \"", normalizedName,
-      "\" to import.");
+  JSG_FAIL_REQUIRE(
+      DOMNotSupportedError, "Unsupported algorithm \"", normalizedName, "\" to import.");
 }
 
 }  // namespace workerd::api

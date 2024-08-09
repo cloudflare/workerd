@@ -14,50 +14,50 @@ inline void requireOnStack(void* self) {
 // The types listed in the JS_IS_TYPES macro are translated into is{Name}()
 // methods on the JsValue type. These correspond directly to equivalent v8::Value
 // types and therefore must be kept in sync.
-#define JS_IS_TYPES(V) \
-  V(Undefined) \
-  V(Null) \
-  V(NullOrUndefined) \
-  V(True) \
-  V(False) \
-  V(ArgumentsObject) \
-  V(NativeError) \
-  V(Name) \
-  V(Function) \
-  V(AsyncFunction) \
-  V(GeneratorFunction) \
-  V(GeneratorObject) \
-  V(WeakMap) \
-  V(WeakSet) \
-  V(WeakRef) \
-  V(WasmNull) \
-  V(ModuleNamespaceObject) \
-  V(MapIterator) \
-  V(SetIterator) \
-  V(External) \
-  V(BigIntObject) \
-  V(BooleanObject) \
-  V(NumberObject) \
-  V(StringObject) \
-  V(SymbolObject) \
-  V(ArrayBuffer) \
-  V(ArrayBufferView) \
-  V(TypedArray) \
-  V(Uint8Array) \
-  V(Uint8ClampedArray) \
-  V(Int8Array) \
-  V(Uint16Array) \
-  V(Int16Array) \
-  V(Uint32Array) \
-  V(Int32Array) \
-  V(Float32Array) \
-  V(Float64Array) \
-  V(BigInt64Array) \
-  V(BigUint64Array) \
-  V(DataView) \
-  V(SharedArrayBuffer) \
-  V(WasmMemoryObject) \
-  V(WasmModuleObject) \
+#define JS_IS_TYPES(V)                                                                             \
+  V(Undefined)                                                                                     \
+  V(Null)                                                                                          \
+  V(NullOrUndefined)                                                                               \
+  V(True)                                                                                          \
+  V(False)                                                                                         \
+  V(ArgumentsObject)                                                                               \
+  V(NativeError)                                                                                   \
+  V(Name)                                                                                          \
+  V(Function)                                                                                      \
+  V(AsyncFunction)                                                                                 \
+  V(GeneratorFunction)                                                                             \
+  V(GeneratorObject)                                                                               \
+  V(WeakMap)                                                                                       \
+  V(WeakSet)                                                                                       \
+  V(WeakRef)                                                                                       \
+  V(WasmNull)                                                                                      \
+  V(ModuleNamespaceObject)                                                                         \
+  V(MapIterator)                                                                                   \
+  V(SetIterator)                                                                                   \
+  V(External)                                                                                      \
+  V(BigIntObject)                                                                                  \
+  V(BooleanObject)                                                                                 \
+  V(NumberObject)                                                                                  \
+  V(StringObject)                                                                                  \
+  V(SymbolObject)                                                                                  \
+  V(ArrayBuffer)                                                                                   \
+  V(ArrayBufferView)                                                                               \
+  V(TypedArray)                                                                                    \
+  V(Uint8Array)                                                                                    \
+  V(Uint8ClampedArray)                                                                             \
+  V(Int8Array)                                                                                     \
+  V(Uint16Array)                                                                                   \
+  V(Int16Array)                                                                                    \
+  V(Uint32Array)                                                                                   \
+  V(Int32Array)                                                                                    \
+  V(Float32Array)                                                                                  \
+  V(Float64Array)                                                                                  \
+  V(BigInt64Array)                                                                                 \
+  V(BigUint64Array)                                                                                \
+  V(DataView)                                                                                      \
+  V(SharedArrayBuffer)                                                                             \
+  V(WasmMemoryObject)                                                                              \
+  V(WasmModuleObject)                                                                              \
   JS_TYPE_CLASSES(V)
 
 template <typename TypeWrapper>
@@ -130,7 +130,9 @@ public:
   template <typename T>
   kj::Maybe<T> tryCast() const KJ_WARN_UNUSED_RESULT;
 
-  operator v8::Local<v8::Value>() const { return inner; }
+  operator v8::Local<v8::Value>() const {
+    return inner;
+  }
 
   bool operator==(const JsValue& other) const;
   bool strictEquals(const JsValue& other) const;
@@ -150,8 +152,8 @@ public:
 
   JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
-  JsValue structuredClone(Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers = kj::none)
-      KJ_WARN_UNUSED_RESULT;
+  JsValue structuredClone(
+      Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers = kj::none) KJ_WARN_UNUSED_RESULT;
 
   template <typename T>
   static kj::Maybe<T&> tryGetExternal(Lock& js, const JsValue& value) KJ_WARN_UNUSED_RESULT;
@@ -161,9 +163,12 @@ public:
 private:
   v8::Local<v8::Value> inner;
   friend class Lock;
-  template <typename TypeWrapper> friend struct JsValueWrapper;
-  template <typename T, typename Self> friend class JsBase;
-  template <typename T> friend class JsRef;
+  template <typename TypeWrapper>
+  friend struct JsValueWrapper;
+  template <typename T, typename Self>
+  friend class JsBase;
+  template <typename T>
+  friend class JsRef;
 
 #define V(Name) friend class Js##Name;
   JS_TYPE_CLASSES(V)
@@ -173,17 +178,26 @@ private:
 template <typename T, typename Self>
 class JsBase {
 public:
-  operator v8::Local<v8::Value>() const { return inner; }
-  operator v8::Local<T>() const { return inner; }
-  operator JsValue() const { return JsValue(inner.template As<v8::Value>()); }
+  operator v8::Local<v8::Value>() const {
+    return inner;
+  }
+  operator v8::Local<T>() const {
+    return inner;
+  }
+  operator JsValue() const {
+    return JsValue(inner.template As<v8::Value>());
+  }
   bool operator==(const JsValue& other) const KJ_WARN_UNUSED_RESULT {
     return inner == other.inner;
   }
   bool operator==(const JsBase& other) const KJ_WARN_UNUSED_RESULT {
     return inner == other.inner;
   }
-  explicit JsBase(v8::Local<T> inner) : inner(inner) { requireOnStack(this); }
+  explicit JsBase(v8::Local<T> inner): inner(inner) {
+    requireOnStack(this);
+  }
   JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+
 private:
   v8::Local<T> inner;
   friend class Lock;
@@ -191,18 +205,20 @@ private:
 #define V(Name) friend class Js##Name;
   JS_TYPE_CLASSES(V)
 #undef V
-  template <typename TypeWrapper> friend struct JsValueWrapper;
-  template <typename U> friend class JsRef;
+  template <typename TypeWrapper>
+  friend struct JsValueWrapper;
+  template <typename U>
+  friend class JsRef;
 };
 
-class JsBoolean final : public JsBase<v8::Boolean, JsBoolean> {
+class JsBoolean final: public JsBase<v8::Boolean, JsBoolean> {
 public:
   bool value(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   using JsBase<v8::Boolean, JsBoolean>::JsBase;
 };
 
-class JsArray final : public JsBase<v8::Array, JsArray> {
+class JsArray final: public JsBase<v8::Array, JsArray> {
 public:
   operator JsObject() const;
   uint32_t size() const KJ_WARN_UNUSED_RESULT;
@@ -212,7 +228,7 @@ public:
   using JsBase<v8::Array, JsArray>::JsBase;
 };
 
-class JsString final : public JsBase<v8::String, JsString> {
+class JsString final: public JsBase<v8::String, JsString> {
 public:
   int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   int utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
@@ -223,8 +239,7 @@ public:
 
   bool operator==(const JsString& other) const;
 
-  static JsString concat(Lock& js, const JsString& one, const JsString& two)
-      KJ_WARN_UNUSED_RESULT;
+  static JsString concat(Lock& js, const JsString& one, const JsString& two) KJ_WARN_UNUSED_RESULT;
 
   enum WriteOptions {
     NONE = v8::String::NO_OPTIONS,
@@ -236,8 +251,7 @@ public:
 
   template <typename T>
   kj::Array<T> toArray(
-      Lock& js,
-      WriteOptions options = WriteOptions::NONE) const KJ_WARN_UNUSED_RESULT;
+      Lock& js, WriteOptions options = WriteOptions::NONE) const KJ_WARN_UNUSED_RESULT;
 
   struct WriteIntoStatus {
     // The number of elements (e.g. char, byte, uint16_t) read from this string.
@@ -245,27 +259,24 @@ public:
     // The number of elements (e.g. char, byte, uint16_t) written to the buffer.
     int written;
   };
-  WriteIntoStatus writeInto(Lock& js,
-                            kj::ArrayPtr<char> buffer,
-                            WriteOptions options = WriteOptions::NONE) const;
-  WriteIntoStatus writeInto(Lock& js,
-                            kj::ArrayPtr<kj::byte> buffer,
-                            WriteOptions options = WriteOptions::NONE) const;
-  WriteIntoStatus writeInto(Lock& js,
-                            kj::ArrayPtr<uint16_t> buffer,
-                            WriteOptions options = WriteOptions::NONE) const;
+  WriteIntoStatus writeInto(
+      Lock& js, kj::ArrayPtr<char> buffer, WriteOptions options = WriteOptions::NONE) const;
+  WriteIntoStatus writeInto(
+      Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteOptions options = WriteOptions::NONE) const;
+  WriteIntoStatus writeInto(
+      Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteOptions options = WriteOptions::NONE) const;
 
   using JsBase<v8::String, JsString>::JsBase;
 };
 
-class JsRegExp final : public JsBase<v8::RegExp, JsRegExp> {
+class JsRegExp final: public JsBase<v8::RegExp, JsRegExp> {
 public:
   kj::Maybe<JsArray> operator()(Lock& js, const JsString& input) const KJ_WARN_UNUSED_RESULT;
   kj::Maybe<JsArray> operator()(Lock& js, kj::StringPtr input) const KJ_WARN_UNUSED_RESULT;
   using JsBase<v8::RegExp, JsRegExp>::JsBase;
 };
 
-class JsDate final : public JsBase<v8::Date, JsDate> {
+class JsDate final: public JsBase<v8::Date, JsDate> {
 public:
   jsg::ByteString toUTCString(Lock& js) const;
   operator kj::Date() const;
@@ -283,36 +294,36 @@ public:
 //
 // You'll usually want to use `jsg::Promise<T>`. `jsg::JsPromise` should only be used when you need
 // direct access to the promise state (e.g. the promise state or its fulfilled value).
-class JsPromise final : public JsBase<v8::Promise, JsPromise> {
+class JsPromise final: public JsBase<v8::Promise, JsPromise> {
 public:
   PromiseState state();
   JsValue result();
   using JsBase<v8::Promise, JsPromise>::JsBase;
 };
 
-class JsProxy final : public JsBase<v8::Proxy, JsProxy> {
+class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
 public:
   JsValue target();
   JsValue handler();
   using JsBase<v8::Proxy, JsProxy>::JsBase;
 };
 
-#define V(Name) \
-  class Js##Name final : public JsBase<v8::Name, Js##Name> { \
-  public: \
-    using JsBase<v8::Name, Js##Name>::JsBase; \
+#define V(Name)                                                                                    \
+  class Js##Name final: public JsBase<v8::Name, Js##Name> {                                        \
+  public:                                                                                          \
+    using JsBase<v8::Name, Js##Name>::JsBase;                                                      \
   };
 
-  V(Symbol)
-  V(BigInt)
-  V(Number)
-  V(Int32)
-  V(Uint32)
-  V(Set)
+V(Symbol)
+V(BigInt)
+V(Number)
+V(Int32)
+V(Uint32)
+V(Set)
 
 #undef V
 
-class JsObject final : public JsBase<v8::Object, JsObject> {
+class JsObject final: public JsBase<v8::Object, JsObject> {
 public:
   template <typename T>
   bool isInstanceOf(Lock& js) {
@@ -350,8 +361,10 @@ public:
   int hashCode() const;
 
   kj::String getConstructorName() KJ_WARN_UNUSED_RESULT;
-  JsArray getPropertyNames(Lock& js, KeyCollectionFilter keyFilter, PropertyFilter propertyFilter,
-                             IndexFilter indexFilter) KJ_WARN_UNUSED_RESULT;
+  JsArray getPropertyNames(Lock& js,
+      KeyCollectionFilter keyFilter,
+      PropertyFilter propertyFilter,
+      IndexFilter indexFilter) KJ_WARN_UNUSED_RESULT;
   JsArray previewEntries(bool* isKeyValue) KJ_WARN_UNUSED_RESULT;
 
   // Returns the object's prototype, i.e. the property `__proto__`.
@@ -367,7 +380,7 @@ public:
   JsObject jsonClone(Lock&);
 };
 
-class JsMap final : public JsBase<v8::Map, JsMap> {
+class JsMap final: public JsBase<v8::Map, JsMap> {
 public:
   operator JsObject();
 
@@ -387,15 +400,19 @@ public:
 
 template <typename T>
 inline kj::Maybe<T> JsValue::tryCast() const {
-  if constexpr (kj::isSameType<T, JsValue>()) { return JsValue(inner); }
-#define V(Name) \
-  else if constexpr (kj::isSameType<T, Js##Name>()) { \
-    if (!inner->Is##Name()) return kj::none; \
-    return T(inner.template As<v8::Name>()); \
+  if constexpr (kj::isSameType<T, JsValue>()) {
+    return JsValue(inner);
+  }
+#define V(Name)                                                                                    \
+  else if constexpr (kj::isSameType<T, Js##Name>()) {                                              \
+    if (!inner->Is##Name()) return kj::none;                                                       \
+    return T(inner.template As<v8::Name>());                                                       \
   }
   JS_TYPE_CLASSES(V)
 #undef V
-  else { return kj::none; }
+  else {
+    return kj::none;
+  }
 }
 
 template <typename T>
@@ -418,14 +435,16 @@ inline kj::Array<T> JsString::toArray(Lock& js, WriteOptions options) const {
   }
 }
 
-template <typename...Args> requires (std::assignable_from<JsValue&, Args> && ...)
+template <typename... Args>
+  requires(std::assignable_from<JsValue&, Args> && ...)
 inline JsArray Lock::arr(const Args&... args) {
-  v8::Local<v8::Value> values[] = { args... };
+  v8::Local<v8::Value> values[] = {args...};
   return JsArray(v8::Array::New(v8Isolate, &values[0], sizeof...(Args)));
 }
 
-template <typename...Args> requires (std::assignable_from<JsValue&, Args> && ...)
-inline JsSet Lock::set(const Args&...args) {
+template <typename... Args>
+  requires(std::assignable_from<JsValue&, Args> && ...)
+inline JsSet Lock::set(const Args&... args) {
   auto set = v8::Set::New(v8Isolate);
   (check(set->Add(v8Context(), args.inner)), ...);
   return JsSet(set);
@@ -454,10 +473,11 @@ inline JsSet Lock::set(const Args&...args) {
 template <typename T>
 class JsRef final {
   static_assert(std::is_assignable_v<JsValue, T>, "JsRef<T>, T must be assignable to type JsValue");
+
 public:
   JsRef(): JsRef(nullptr) {}
   JsRef(decltype(nullptr)): value(nullptr) {}
-  JsRef(Lock& js, const T& value) : value(js.v8Isolate, value.inner) {}
+  JsRef(Lock& js, const T& value): value(js.v8Isolate, value.inner) {}
   JsRef(JsRef<T>& other) = delete;
   JsRef(JsRef<T>&& other) = default;
   template <typename U>
@@ -486,13 +506,16 @@ public:
   // Supported only to allow for an easier transition for code that still
   // requires V8Ref types.
   template <typename U>
-  V8Ref<U> addV8Ref(Lock& js) KJ_WARN_UNUSED_RESULT { return value.addRef(js); }
+  V8Ref<U> addV8Ref(Lock& js) KJ_WARN_UNUSED_RESULT {
+    return value.addRef(js);
+  }
 
   // Supported only to allow for an easier transition for code that still
   // requires V8Ref types.
   template <typename U>
-  operator V8Ref<U>() && { return kj::mv(value).template cast<U>(
-      Lock::from(v8::Isolate::GetCurrent())); }
+  operator V8Ref<U>() && {
+    return kj::mv(value).template cast<U>(Lock::from(v8::Isolate::GetCurrent()));
+  }
 
   JSG_MEMORY_INFO(JsRef) {
     tracker.trackField("value", value);
@@ -509,7 +532,7 @@ private:
 };
 
 template <typename T, typename Self>
-inline JsRef<Self> JsBase<T,Self>::addRef(Lock& js) {
+inline JsRef<Self> JsBase<T, Self>::addRef(Lock& js) {
   return JsRef<Self>(js, *static_cast<Self*>(this));
 }
 
@@ -519,26 +542,28 @@ inline kj::String KJ_STRINGIFY(const JsValue& value) {
 
 template <typename TypeWrapper>
 struct JsValueWrapper {
-#define TYPES_TO_WRAP(V) \
-  V(Value) \
+#define TYPES_TO_WRAP(V)                                                                           \
+  V(Value)                                                                                         \
   JS_TYPE_CLASSES(V)
 
   template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
-  static constexpr const std::type_info& getName(T*) { return typeid(T); }
+  static constexpr const std::type_info& getName(T*) {
+    return typeid(T);
+  }
 
   template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
-  static constexpr const std::type_info& getName(JsRef<T>*) { return typeid(T); }
+  static constexpr const std::type_info& getName(JsRef<T>*) {
+    return typeid(T);
+  }
 
-#define V(Name) \
-  v8::Local<v8::Name> wrap(v8::Local<v8::Context> context, \
-                           kj::Maybe<v8::Local<v8::Object>> creator, \
-                           Js##Name value) { \
-    return value; \
-  } \
-  v8::Local<v8::Name> wrap(v8::Local<v8::Context> context, \
-                           kj::Maybe<v8::Local<v8::Object>> creator, \
-                           JsRef<Js##Name> value) { \
-    return value.getHandle(Lock::from(context->GetIsolate())); \
+#define V(Name)                                                                                    \
+  v8::Local<v8::Name> wrap(                                                                        \
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, Js##Name value) {  \
+    return value;                                                                                  \
+  }                                                                                                \
+  v8::Local<v8::Name> wrap(v8::Local<v8::Context> context,                                         \
+      kj::Maybe<v8::Local<v8::Object>> creator, JsRef<Js##Name> value) {                           \
+    return value.getHandle(Lock::from(context->GetIsolate()));                                     \
   }
 
   TYPES_TO_WRAP(V)
@@ -546,8 +571,9 @@ struct JsValueWrapper {
 
   template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
   kj::Maybe<T> tryUnwrap(v8::Local<v8::Context> context,
-                         v8::Local<v8::Value> handle,
-                         T*, kj::Maybe<v8::Local<v8::Object>> parentObject) {
+      v8::Local<v8::Value> handle,
+      T*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if constexpr (kj::isSameType<T, JsString>()) {
       return T(check(handle->ToString(context)));
     } else if constexpr (kj::isSameType<T, JsBoolean>()) {
@@ -563,13 +589,13 @@ struct JsValueWrapper {
 
   template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
   kj::Maybe<JsRef<T>> tryUnwrap(v8::Local<v8::Context> context,
-                                v8::Local<v8::Value> handle,
-                                JsRef<T>*,
-                                kj::Maybe<v8::Local<v8::Object>> parentObject) {
+      v8::Local<v8::Value> handle,
+      JsRef<T>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto isolate = context->GetIsolate();
     auto& js = Lock::from(isolate);
-    KJ_IF_SOME(result, TypeWrapper::from(isolate)
-        .tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
+    KJ_IF_SOME(result,
+        TypeWrapper::from(isolate).tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
       return JsRef(js, result);
     }
     return kj::none;
@@ -579,17 +605,21 @@ struct JsValueWrapper {
 class JsMessage final {
 public:
   static JsMessage create(Lock& js, const JsValue& exception);
-  explicit inline JsMessage() : inner(v8::Local<v8::Message>()) {
+  explicit inline JsMessage(): inner(v8::Local<v8::Message>()) {
     requireOnStack(this);
   }
-  explicit inline JsMessage(v8::Local<v8::Message> inner) : inner(inner) {
+  explicit inline JsMessage(v8::Local<v8::Message> inner): inner(inner) {
     requireOnStack(this);
   }
-  operator v8::Local<v8::Message>() const { return inner; }
+  operator v8::Local<v8::Message>() const {
+    return inner;
+  }
 
   // Is it possible for the underlying v8::Local<v8::Message> to be
   // empty, in which case the bool() operator will return false.
-  operator bool() const { return !inner.IsEmpty(); }
+  operator bool() const {
+    return !inner.IsEmpty();
+  }
 
   // Adds the JS Stack associated with this JsMessage to the given
   // kj::Vector.

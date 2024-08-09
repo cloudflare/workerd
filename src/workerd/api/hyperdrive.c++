@@ -11,21 +11,25 @@
 #include <kj/string.h>
 
 namespace workerd::api {
-Hyperdrive::Hyperdrive(uint clientIndex, kj::String database,
-                       kj::String user, kj::String password, kj::String scheme)
-    : clientIndex(clientIndex), database(kj::mv(database)),
-      user(kj::mv(user)), password(kj::mv(password)), scheme(kj::mv(scheme)) {
-        kj::byte randomBytes[16]{};
-        KJ_ASSERT(RAND_bytes(randomBytes, sizeof(randomBytes)) == 1);
-        randomHost = kj::str(kj::encodeHex(randomBytes), ".hyperdrive.local");
-      }
+Hyperdrive::Hyperdrive(
+    uint clientIndex, kj::String database, kj::String user, kj::String password, kj::String scheme)
+    : clientIndex(clientIndex),
+      database(kj::mv(database)),
+      user(kj::mv(user)),
+      password(kj::mv(password)),
+      scheme(kj::mv(scheme)) {
+  kj::byte randomBytes[16]{};
+  KJ_ASSERT(RAND_bytes(randomBytes, sizeof(randomBytes)) == 1);
+  randomHost = kj::str(kj::encodeHex(randomBytes), ".hyperdrive.local");
+}
 
 jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
   auto connPromise = connectToDb();
 
   auto paf = kj::newPromiseAndFulfiller<kj::Maybe<kj::Exception>>();
-  auto conn = kj::newPromisedStream(connPromise.then(
-      [&f = *paf.fulfiller](kj::Own<kj::AsyncIoStream> stream) {
+  auto conn =
+      kj::newPromisedStream(connPromise
+                                .then([&f = *paf.fulfiller](kj::Own<kj::AsyncIoStream> stream) {
     f.fulfill(kj::none);
     return kj::mv(stream);
   }, [&f = *paf.fulfiller](kj::Exception e) {
@@ -37,9 +41,8 @@ jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
   // TODO(someday): Support TLS? It's not at all necessary since we're connecting locally, but
   // some users may want it anyway.
   auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
-  auto sock = setupSocket(js, kj::mv(conn), kj::str(getHost(), ":", getPort()),
-                          kj::none, kj::mv(nullTlsStarter), false,
-                          kj::str(this->randomHost), false);
+  auto sock = setupSocket(js, kj::mv(conn), kj::str(getHost(), ":", getPort()), kj::none,
+      kj::mv(nullTlsStarter), false, kj::str(this->randomHost), false);
   sock->handleProxyStatus(js, kj::mv(paf.promise));
   return sock;
 }
@@ -75,19 +78,19 @@ uint16_t Hyperdrive::getPort() {
 
 kj::String Hyperdrive::getConnectionString() {
   return kj::str(getScheme(), "://", getUser(), ":", getPassword(), "@", getHost(), ":", getPort(),
-                 "/", getDatabase(), "?sslmode=disable");
+      "/", getDatabase(), "?sslmode=disable");
 }
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
   auto& context = IoContext::current();
-  auto service = context.getSubrequestChannel(this->clientIndex,
-            true, kj::none, "hyperdrive_dev"_kjc);
+  auto service =
+      context.getSubrequestChannel(this->clientIndex, true, kj::none, "hyperdrive_dev"_kjc);
 
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
 
   auto connectReq = kj::newHttpClient(*service)->connect(
-    kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
+      kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
 
   auto status = co_await connectReq.status;
 
@@ -98,18 +101,17 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
   KJ_IF_SOME(e, status.errorBody) {
     try {
       auto errorBody = co_await e->readAllText();
-      kj::throwFatalException(KJ_EXCEPTION(
-          FAILED, kj::str("unexpected error connecting to database: ", errorBody)));
-    } catch (const kj::Exception& e) {
       kj::throwFatalException(
-          KJ_EXCEPTION(FAILED, kj::str("unexpected error connecting to database "
-                                       "and couldn't read error details: ", e)));
+          KJ_EXCEPTION(FAILED, kj::str("unexpected error connecting to database: ", errorBody)));
+    } catch (const kj::Exception& e) {
+      kj::throwFatalException(KJ_EXCEPTION(FAILED,
+          kj::str("unexpected error connecting to database "
+                  "and couldn't read error details: ",
+              e)));
     }
-  }
-  else {
-    kj::throwFatalException(
-        KJ_EXCEPTION(FAILED, kj::str("unexpected error connecting to database: ",
-                                     status.statusText)));
+  } else {
+    kj::throwFatalException(KJ_EXCEPTION(
+        FAILED, kj::str("unexpected error connecting to database: ", status.statusText)));
   }
 }
-} // namespace workerd::api::public_beta
+}  // namespace workerd::api

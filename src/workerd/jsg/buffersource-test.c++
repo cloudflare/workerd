@@ -68,65 +68,35 @@ KJ_TEST("BufferSource works") {
   Evaluator<BufferSourceContext, BufferSourceIsolate> e(v8System);
 
   // By default, a BufferSource handle is created as a DataView
-  e.expectEval(
-      "makeBufferSource() instanceof Uint8Array",
-      "boolean",
-      "true");
+  e.expectEval("makeBufferSource() instanceof Uint8Array", "boolean", "true");
 
   // ... but can be other types also
-  e.expectEval(
-      "makeArrayBuffer() instanceof ArrayBuffer",
-      "boolean",
-      "true");
+  e.expectEval("makeArrayBuffer() instanceof ArrayBuffer", "boolean", "true");
 
   e.expectEval(
       "const ab = new ArrayBuffer(9); takeBufferSource(new Uint8Array(ab, 1, 8)).byteLength === 8",
-      "boolean",
-      "true");
+      "boolean", "true");
 
-  e.expectEval(
-      "const ab = new ArrayBuffer(8); takeBufferSource(ab) === ab",
-      "boolean",
-      "true");
+  e.expectEval("const ab = new ArrayBuffer(8); takeBufferSource(ab) === ab", "boolean", "true");
 
-  e.expectEval(
-      "const ab = new Uint8Array(8); takeBufferSource(ab) === ab",
-      "boolean",
-      "true");
+  e.expectEval("const ab = new Uint8Array(8); takeBufferSource(ab) === ab", "boolean", "true");
 
-  e.expectEval(
-      "const ab = new Uint16Array(4); takeBufferSource(ab) === ab",
-      "boolean",
-      "true");
+  e.expectEval("const ab = new Uint16Array(4); takeBufferSource(ab) === ab", "boolean", "true");
 
-  e.expectEval(
-      "const ab = new Uint32Array(2); takeBufferSource(ab) === ab",
-      "boolean",
-      "true");
+  e.expectEval("const ab = new Uint32Array(2); takeBufferSource(ab) === ab", "boolean", "true");
 
-  e.expectEval(
-      "const ab = new BigInt64Array(1); takeBufferSource(ab) === ab",
-      "boolean",
-      "true");
+  e.expectEval("const ab = new BigInt64Array(1); takeBufferSource(ab) === ab", "boolean", "true");
 
-  e.expectEval(
-      "const ab = new Float32Array(2); takeBufferSource(ab) === ab",
-      "boolean",
-      "true");
+  e.expectEval("const ab = new Float32Array(2); takeBufferSource(ab) === ab", "boolean", "true");
 
-  e.expectEval(
-      "const ab = new Float64Array(1); takeBufferSource(ab) === ab",
-      "boolean",
-      "true");
+  e.expectEval("const ab = new Float64Array(1); takeBufferSource(ab) === ab", "boolean", "true");
 
-  e.expectEval(
-      "const ab = new ArrayBuffer(4); "
-      "const u8 = new Uint8Array(ab, 1, 1);"
-      "const u2 = takeUint8Array(u8);"
-      "u8.byteLength === 0 && u2.byteLength === 1 && u2 instanceof Uint8Array && "
-      "u2.buffer.byteLength === 4 && u2.byteOffset === 1 && u8 !== u2",
-      "boolean",
-      "true");
+  e.expectEval("const ab = new ArrayBuffer(4); "
+               "const u8 = new Uint8Array(ab, 1, 1);"
+               "const u2 = takeUint8Array(u8);"
+               "u8.byteLength === 0 && u2.byteLength === 1 && u2 instanceof Uint8Array && "
+               "u2.buffer.byteLength === 4 && u2.byteOffset === 1 && u8 !== u2",
+      "boolean", "true");
 }
 
 }  // namespace

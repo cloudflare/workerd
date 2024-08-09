@@ -32,11 +32,13 @@ struct UncapturedErrorContext {
   kj::Maybe<EventTarget*> target;
 };
 
-class GPUDevice : public EventTarget {
+class GPUDevice: public EventTarget {
 public:
-  explicit GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async,
-                     kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> deviceLostCtx,
-                     kj::Own<UncapturedErrorContext> uErrorCtx);
+  explicit GPUDevice(jsg::Lock& js,
+      wgpu::Device d,
+      kj::Own<AsyncRunner> async,
+      kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> deviceLostCtx,
+      kj::Own<UncapturedErrorContext> uErrorCtx);
   ~GPUDevice();
   JSG_RESOURCE_TYPE(GPUDevice) {
     JSG_INHERIT(EventTarget);
@@ -80,10 +82,10 @@ private:
   jsg::Ref<GPUPipelineLayout> createPipelineLayout(GPUPipelineLayoutDescriptor descriptor);
   jsg::Ref<GPUComputePipeline> createComputePipeline(GPUComputePipelineDescriptor descriptor);
   jsg::Ref<GPURenderPipeline> createRenderPipeline(GPURenderPipelineDescriptor descriptor);
-  jsg::Promise<jsg::Ref<GPUComputePipeline>>
-  createComputePipelineAsync(jsg::Lock& js, GPUComputePipelineDescriptor descriptor);
-  jsg::Ref<GPUCommandEncoder>
-  createCommandEncoder(jsg::Optional<GPUCommandEncoderDescriptor> descriptor);
+  jsg::Promise<jsg::Ref<GPUComputePipeline>> createComputePipelineAsync(
+      jsg::Lock& js, GPUComputePipelineDescriptor descriptor);
+  jsg::Ref<GPUCommandEncoder> createCommandEncoder(
+      jsg::Optional<GPUCommandEncoderDescriptor> descriptor);
   jsg::Ref<GPUQueue> getQueue();
   void destroy();
   jsg::Ref<GPUQuerySet> createQuerySet(GPUQuerySetDescriptor descriptor);
@@ -114,11 +116,12 @@ struct GPUUncapturedErrorEventInit {
   JSG_STRUCT(error);
 };
 
-class GPUUncapturedErrorEvent : public Event {
+class GPUUncapturedErrorEvent: public Event {
 public:
-  GPUUncapturedErrorEvent(kj::StringPtr type,
-                          GPUUncapturedErrorEventInit gpuUncapturedErrorEventInitDict)
-      : Event(kj::mv(type)), error_(kj::mv(gpuUncapturedErrorEventInitDict.error)){};
+  GPUUncapturedErrorEvent(
+      kj::StringPtr type, GPUUncapturedErrorEventInit gpuUncapturedErrorEventInitDict)
+      : Event(kj::mv(type)),
+        error_(kj::mv(gpuUncapturedErrorEventInitDict.error)) {};
 
   static jsg::Ref<GPUUncapturedErrorEvent> constructor() = delete;
 
@@ -142,4 +145,4 @@ private:
   }
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

@@ -16,27 +16,22 @@ JSG_DECLARE_ISOLATE_TYPE(EvalIsolate, EvalContext);
 
 KJ_TEST("eval() is blocked") {
   Evaluator<EvalContext, EvalIsolate> e(v8System);
-  e.expectEval("eval('123')",
-      "throws", "EvalError: Code generation from strings disallowed for this context");
-  e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)",
-      "throws", "EvalError: Code generation from strings disallowed for this context");
+  e.expectEval("eval('123')", "throws",
+      "EvalError: Code generation from strings disallowed for this context");
+  e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)", "throws",
+      "EvalError: Code generation from strings disallowed for this context");
 
-  e.getIsolate().runInLockScope([&](EvalIsolate::Lock& lock) {
-    lock.setAllowEval(true);
-  });
+  e.getIsolate().runInLockScope([&](EvalIsolate::Lock& lock) { lock.setAllowEval(true); });
 
   e.expectEval("eval('123')", "number", "123");
   e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)", "number", "444");
 
-  e.getIsolate().runInLockScope([&](EvalIsolate::Lock& lock) {
-    lock.setAllowEval(false);
-  });
+  e.getIsolate().runInLockScope([&](EvalIsolate::Lock& lock) { lock.setAllowEval(false); });
 
-
-  e.expectEval("eval('123')",
-      "throws", "EvalError: Code generation from strings disallowed for this context");
-  e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)",
-      "throws", "EvalError: Code generation from strings disallowed for this context");
+  e.expectEval("eval('123')", "throws",
+      "EvalError: Code generation from strings disallowed for this context");
+  e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)", "throws",
+      "EvalError: Code generation from strings disallowed for this context");
 
   // Note: It would be nice to test as well that WebAssembly is blocked, but that requires
   //   setting up an event loop since the WebAssembly calls are all async. We'll test this
@@ -60,17 +55,15 @@ struct ConfigContext: public Object, public ContextGlobal {
     JSG_NESTED_TYPE(OtherNested);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(ConfigIsolate, ConfigContext, ConfigContext::Nested,
-    ConfigContext::OtherNested);
+JSG_DECLARE_ISOLATE_TYPE(
+    ConfigIsolate, ConfigContext, ConfigContext::Nested, ConfigContext::OtherNested);
 
 KJ_TEST("configuration values reach nested type declarations") {
   {
     ConfigIsolate isolate(v8System, 123, kj::heap<IsolateObserver>());
     isolate.runInLockScope([&](ConfigIsolate::Lock& lock) {
       jsg::Lock& js = lock;
-      js.withinHandleScope([&] {
-        lock.newContext<ConfigContext>().getHandle(lock);
-      });
+      js.withinHandleScope([&] { lock.newContext<ConfigContext>().getHandle(lock); });
     });
   }
   {
@@ -78,9 +71,7 @@ KJ_TEST("configuration values reach nested type declarations") {
     ConfigIsolate isolate(v8System, 456, kj::heap<IsolateObserver>());
     isolate.runInLockScope([&](ConfigIsolate::Lock& lock) {
       jsg::Lock& js = lock;
-      js.withinHandleScope([&] {
-        lock.newContext<ConfigContext>().getHandle(lock);
-      });
+      js.withinHandleScope([&] { lock.newContext<ConfigContext>().getHandle(lock); });
     });
   }
 }

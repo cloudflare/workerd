@@ -14,9 +14,9 @@ namespace workerd::api::gpu {
 
 // AsyncRunner is used to poll a wgpu::Instance with calls to ProcessEvents() while there
 // are asynchronous tasks in flight.
-class AsyncRunner : public kj::Refcounted {
+class AsyncRunner: public kj::Refcounted {
 public:
-  AsyncRunner(wgpu::Instance instance) : instance_(instance){};
+  AsyncRunner(wgpu::Instance instance): instance_(instance) {};
 
   // Begin() should be called when a new asynchronous task is started.
   // If the number of executing asynchronous tasks transitions from 0 to 1, then
@@ -40,14 +40,16 @@ private:
 // AsyncTask is a RAII helper for calling AsyncRunner::Begin() on construction,
 // and AsyncRunner::End() on destruction, that also encapsulates the promise generally
 // associated with any async task.
-template <typename T> class AsyncContext : public kj::Refcounted {
+template <typename T>
+class AsyncContext: public kj::Refcounted {
 public:
   inline AsyncContext(AsyncContext&&) = default;
 
   // Constructor.
   // Calls AsyncRunner::Begin()
   explicit inline AsyncContext(jsg::Lock& js, kj::Own<AsyncRunner> runner)
-      : promise_(nullptr), runner_(kj::mv(runner)) {
+      : promise_(nullptr),
+        runner_(kj::mv(runner)) {
     auto& context = IoContext::current();
     auto paf = kj::newPromiseAndFulfiller<T>();
     fulfiller_ = kj::mv(paf.fulfiller);
@@ -70,4 +72,4 @@ private:
   kj::Own<AsyncRunner> runner_;
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

@@ -34,9 +34,7 @@ public:
     kj::Array<kj::String> tags;
 
     explicit ItemsForRelease(
-        jsg::Ref<WebSocket> ref,
-        kj::Own<kj::WebSocket> owned,
-        kj::Array<kj::String> tags);
+        jsg::Ref<WebSocket> ref, kj::Own<kj::WebSocket> owned, kj::Array<kj::String> tags);
   };
 
   // Call this when transferring ownership of the kj::WebSocket and tags to the api::WebSocket.
@@ -51,31 +49,28 @@ public:
   JSG_RESOURCE_TYPE(HibernatableWebSocketEvent) {
     JSG_INHERIT(ExtendableEvent);
   }
+
 private:
   Worker::Actor::HibernationManager& getHibernationManager(jsg::Lock& lock);
 };
 
 class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::CustomEvent,
-    public kj::Refcounted {
+                                                  public kj::Refcounted {
 public:
-  HibernatableWebSocketCustomEventImpl(
-      uint16_t typeId,
+  HibernatableWebSocketCustomEventImpl(uint16_t typeId,
       kj::TaskSet& waitUntilTasks,
       kj::Own<HibernationReader> params,
-      kj::Maybe<Worker::Actor::HibernationManager&> manager=kj::none);
-  HibernatableWebSocketCustomEventImpl(
-      uint16_t typeId,
+      kj::Maybe<Worker::Actor::HibernationManager&> manager = kj::none);
+  HibernatableWebSocketCustomEventImpl(uint16_t typeId,
       kj::TaskSet& waitUntilTasks,
       HibernatableSocketParams params,
       Worker::Actor::HibernationManager& manager);
 
-  kj::Promise<Result> run(
-      kj::Own<IoContext_IncomingRequest> incomingRequest,
+  kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
       kj::TaskSet& waitUntilTasks) override;
 
-  kj::Promise<Result> sendRpc(
-      capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+  kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
       kj::TaskSet& waitUntilTasks,
       rpc::EventDispatcher::Client dispatcher) override;
@@ -95,7 +90,6 @@ private:
   kj::Maybe<Worker::Actor::HibernationManager&> manager;
 };
 
-#define EW_WEB_SOCKET_MESSAGE_ISOLATE_TYPES      \
-  api::HibernatableWebSocketEvent,       \
-  api::HibernatableWebSocketExportedHandler
+#define EW_WEB_SOCKET_MESSAGE_ISOLATE_TYPES                                                        \
+  api::HibernatableWebSocketEvent, api::HibernatableWebSocketExportedHandler
 }  // namespace workerd::api

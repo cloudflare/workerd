@@ -28,14 +28,14 @@ struct Subprocess {
     // Since this is used during error handling we do not to try to free resources in
     // case of errors.
 
-    int in[2]{}; // process stdin pipe
-    int out[2]{}; // process stdout pipe
+    int in[2]{};   // process stdin pipe
+    int out[2]{};  // process stdout pipe
 
     if (pipe(in)) {
       KJ_LOG(ERROR, "can't allocate in pipe", strerror(errno));
       return kj::none;
     }
-    if (pipe(out)){
+    if (pipe(out)) {
       KJ_LOG(ERROR, "can't allocate out pipe", strerror(errno));
       return kj::none;
     }
@@ -45,7 +45,7 @@ struct Subprocess {
       // parent
       close(in[0]);
       close(out[1]);
-      return Subprocess({ .pid = pid, .in = in[1], .out = out[0] });
+      return Subprocess({.pid = pid, .in = in[1], .out = out[0]});
     } else {
       // child
       close(in[1]);
@@ -53,13 +53,13 @@ struct Subprocess {
 
       // redirect stdin
       close(0);
-      if(dup(in[0]) < 0) {
+      if (dup(in[0]) < 0) {
         _exit(2 * errno);
       }
 
       // redirect stdout
       close(1);
-      if(dup(out[1]) < 0) {
+      if (dup(out[1]) < 0) {
         _exit(3 * errno);
       }
 
@@ -86,23 +86,19 @@ struct Subprocess {
   int out;
 };
 
-} // namespace
+}  // namespace
 
 String stringifyStackTrace(ArrayPtr<void* const> trace) {
   const char* llvmSymbolizer = getenv("LLVM_SYMBOLIZER");
   if (llvmSymbolizer == nullptr) {
-    LOG_WARNING_ONCE("Not symbolizing stack traces because $LLVM_SYMBOLIZER is not set. "
+    LOG_WARNING_ONCE(
+        "Not symbolizing stack traces because $LLVM_SYMBOLIZER is not set. "
         "To symbolize stack traces, set $LLVM_SYMBOLIZER to the location of the llvm-symbolizer "
         "binary. When running tests under bazel, use `--test_env=LLVM_SYMBOLIZER=<path>`.");
     return nullptr;
   }
 
-  const char* argv[] = {
-    llvmSymbolizer,
-    "--pretty-print",
-    "--relativenames",
-    nullptr
-  };
+  const char* argv[] = {llvmSymbolizer, "--pretty-print", "--relativenames", nullptr};
 
   bool disableSigpipeOnce KJ_UNUSED = []() {
     // Just in case for some reason SIGPIPE is not already disabled in this process, disable it
@@ -117,8 +113,8 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
     auto addrs = strArray(KJ_MAP(addr, trace) {
       Dl_info info;
       if (dladdr(addr, &info)) {
-        uintptr_t offset = reinterpret_cast<uintptr_t>(addr) -
-                            reinterpret_cast<uintptr_t>(info.dli_fbase);
+        uintptr_t offset =
+            reinterpret_cast<uintptr_t>(addr) - reinterpret_cast<uintptr_t>(info.dli_fbase);
         return kj::str("CODE ", info.dli_fname, " 0x", reinterpret_cast<void*>(offset));
       } else {
         return kj::str("CODE 0x", reinterpret_cast<void*>(addr));
@@ -151,7 +147,8 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
     if (WIFEXITED(status)) {
       if (WEXITSTATUS(status) != 0) {
         if (WEXITSTATUS(status) == 2) {
-          LOG_WARNING_ONCE(kj::str(llvmSymbolizer, " was not found. "
+          LOG_WARNING_ONCE(kj::str(llvmSymbolizer,
+              " was not found. "
               "To symbolize stack traces, install it in your $PATH or set $LLVM_SYMBOLIZER to the "
               "location of the binary. When running tests under bazel, use "
               "`--test_env=LLVM_SYMBOLIZER=<path>`."));
@@ -170,5 +167,4 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
   }
 }
 
-} // kj
-
+}  // namespace kj

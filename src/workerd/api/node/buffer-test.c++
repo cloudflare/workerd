@@ -12,8 +12,7 @@ KJ_TEST("node:buffer import without capability") {
   KJ_EXPECT_LOG(ERROR, "script startup threw exception");
 
   try {
-    TestFixture fixture({
-      .mainModuleSource = R"SCRIPT(
+    TestFixture fixture({.mainModuleSource = R"SCRIPT(
         import { Buffer } from 'node:buffer';
 
         export default {
@@ -35,9 +34,7 @@ KJ_TEST("Verify maximum Buffer size") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer, kMaxLength } from 'node:buffer';
 
       try {
@@ -67,9 +64,7 @@ KJ_TEST("Create 0-length buffers") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
       export default {
         fetch(request) {
@@ -100,9 +95,7 @@ KJ_TEST("new Buffer(string)") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
       export default {
         fetch(request) {
@@ -124,9 +117,7 @@ KJ_TEST("Buffer.allocUnsafe(), Buffer.alloc(), Buffer.allocUnsafeSlow()") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -183,9 +174,7 @@ KJ_TEST("Buffer.from(string)") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -207,9 +196,7 @@ KJ_TEST("Buffer.from(string, 'utf8')") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -231,9 +218,7 @@ KJ_TEST("Buffer.from(string, 'ucs2')") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -255,9 +240,7 @@ KJ_TEST("Buffer.from(string, 'hex')") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -285,9 +268,7 @@ KJ_TEST("Buffer.from(string, 'base64')") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -310,9 +291,7 @@ KJ_TEST("new Buffer(string, 'base64')") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -334,9 +313,7 @@ KJ_TEST("Buffer.from(string, 'base64url')") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -358,9 +335,7 @@ KJ_TEST("Buffer.from(Uint8Array)") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -391,9 +366,7 @@ KJ_TEST("new Buffer(Uint8Array)") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -424,9 +397,7 @@ KJ_TEST("Buffer.from(Uint32Array)") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -457,9 +428,7 @@ KJ_TEST("Buffer.from(ArrayBuffer)") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -489,9 +458,7 @@ KJ_TEST("new Buffer(ArrayBuffer)") {
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -515,16 +482,13 @@ KJ_TEST("new Buffer(ArrayBuffer)") {
   KJ_EXPECT(response.body == "test");
 }
 
-
 KJ_TEST("Buffer.prototype.indexOf/lastIndexOf") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
   flags.setWorkerdExperimental(true);
 
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.featureFlags = flags.asReader(), .mainModuleSource = R"SCRIPT(
       import { Buffer } from 'node:buffer';
 
       export default {
@@ -563,7 +527,5 @@ KJ_TEST("Buffer.prototype.indexOf/lastIndexOf") {
   KJ_EXPECT(response.body == "test");
 }
 
-
 }  // namespace
 }  // namespace workerd::api
-

@@ -79,14 +79,15 @@ public:
   explicit TraceItem(jsg::Lock& js, const Trace& trace);
 
   typedef kj::OneOf<jsg::Ref<FetchEventInfo>,
-                    jsg::Ref<JsRpcEventInfo>,
-                    jsg::Ref<ScheduledEventInfo>,
-                    jsg::Ref<AlarmEventInfo>,
-                    jsg::Ref<QueueEventInfo>,
-                    jsg::Ref<EmailEventInfo>,
-                    jsg::Ref<TailEventInfo>,
-                    jsg::Ref<CustomEventInfo>,
-                    jsg::Ref<HibernatableWebSocketEventInfo>> EventInfo;
+      jsg::Ref<JsRpcEventInfo>,
+      jsg::Ref<ScheduledEventInfo>,
+      jsg::Ref<AlarmEventInfo>,
+      jsg::Ref<QueueEventInfo>,
+      jsg::Ref<EmailEventInfo>,
+      jsg::Ref<TailEventInfo>,
+      jsg::Ref<CustomEventInfo>,
+      jsg::Ref<HibernatableWebSocketEventInfo>>
+      EventInfo;
   kj::Maybe<EventInfo> getEvent(jsg::Lock& js);
   kj::Maybe<double> getEventTimestamp();
 
@@ -161,9 +162,9 @@ public:
   class Response;
 
   explicit FetchEventInfo(jsg::Lock& js,
-                          const Trace& trace,
-                          const Trace::FetchEventInfo& eventInfo,
-                          kj::Maybe<const Trace::FetchResponseInfo&> responseInfo);
+      const Trace& trace,
+      const Trace::FetchEventInfo& eventInfo,
+      kj::Maybe<const Trace::FetchResponseInfo&> responseInfo);
 
   jsg::Ref<Request> getRequest();
   jsg::Optional<jsg::Ref<Response>> getResponse();
@@ -183,20 +184,20 @@ private:
 
 class TraceItem::FetchEventInfo::Request final: public jsg::Object {
 public:
-  struct Detail : public kj::Refcounted {
+  struct Detail: public kj::Refcounted {
     jsg::Optional<jsg::V8Ref<v8::Object>> cf;
     kj::Array<Trace::FetchEventInfo::Header> headers;
     kj::String method;
     kj::String url;
 
     Detail(jsg::Optional<jsg::V8Ref<v8::Object>> cf,
-           kj::Array<Trace::FetchEventInfo::Header> headers,
-           kj::String method,
-           kj::String url);
+        kj::Array<Trace::FetchEventInfo::Header> headers,
+        kj::String method,
+        kj::String url);
 
     JSG_MEMORY_INFO(Detail) {
       tracker.trackField("cf", cf);
-      for (const auto& header : headers) {
+      for (const auto& header: headers) {
         tracker.trackField(nullptr, header);
       }
       tracker.trackField("method", method);
@@ -395,12 +396,12 @@ public:
   class Close;
   class Error;
 
-  explicit HibernatableWebSocketEventInfo(const Trace& trace,
-      const Trace::HibernatableWebSocketEventInfo::Message& eventInfo);
-  explicit HibernatableWebSocketEventInfo(const Trace& trace,
-      const Trace::HibernatableWebSocketEventInfo::Close& eventInfo);
-  explicit HibernatableWebSocketEventInfo(const Trace& trace,
-      const Trace::HibernatableWebSocketEventInfo::Error& eventInfo);
+  explicit HibernatableWebSocketEventInfo(
+      const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Message& eventInfo);
+  explicit HibernatableWebSocketEventInfo(
+      const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Close& eventInfo);
+  explicit HibernatableWebSocketEventInfo(
+      const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Error& eventInfo);
 
   using Type = kj::OneOf<jsg::Ref<Message>, jsg::Ref<Close>, jsg::Ref<Error>>;
 
@@ -418,11 +419,14 @@ private:
 
 class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Object {
 public:
-  explicit Message(const Trace& trace,
-      const Trace::HibernatableWebSocketEventInfo::Message& eventInfo): eventInfo(eventInfo) {}
+  explicit Message(
+      const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Message& eventInfo)
+      : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "message"_kj;
-  kj::StringPtr getWebSocketEventType() { return webSocketEventType; }
+  kj::StringPtr getWebSocketEventType() {
+    return webSocketEventType;
+  }
 
   JSG_RESOURCE_TYPE(Message) {
     JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
@@ -434,11 +438,13 @@ private:
 
 class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object {
 public:
-  explicit Close(const Trace& trace,
-      const Trace::HibernatableWebSocketEventInfo::Close& eventInfo): eventInfo(eventInfo) {}
+  explicit Close(const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Close& eventInfo)
+      : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "close"_kj;
-  kj::StringPtr getWebSocketEventType() { return webSocketEventType; }
+  kj::StringPtr getWebSocketEventType() {
+    return webSocketEventType;
+  }
 
   uint16_t getCode();
   bool getWasClean();
@@ -455,11 +461,13 @@ private:
 
 class TraceItem::HibernatableWebSocketEventInfo::Error final: public jsg::Object {
 public:
-  explicit Error(const Trace& trace,
-      const Trace::HibernatableWebSocketEventInfo::Error& eventInfo): eventInfo(eventInfo) {}
+  explicit Error(const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Error& eventInfo)
+      : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "error"_kj;
-  kj::StringPtr getWebSocketEventType() { return webSocketEventType; }
+  kj::StringPtr getWebSocketEventType() {
+    return webSocketEventType;
+  }
 
   JSG_RESOURCE_TYPE(Error) {
     JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
@@ -482,8 +490,7 @@ private:
 class TraceDiagnosticChannelEvent final: public jsg::Object {
 public:
   explicit TraceDiagnosticChannelEvent(
-      const Trace& trace,
-      const Trace::DiagnosticChannelEvent& eventInfo);
+      const Trace& trace, const Trace::DiagnosticChannelEvent& eventInfo);
 
   double getTimestamp();
   kj::StringPtr getChannel();
@@ -559,12 +566,16 @@ private:
   kj::Maybe<kj::String> stack;
 };
 
-class TraceMetrics final : public jsg::Object {
+class TraceMetrics final: public jsg::Object {
 public:
   explicit TraceMetrics(uint cpuTime, uint wallTime);
 
-  uint getCPUTime() { return cpuTime; };
-  uint getWallTime() { return wallTime; };
+  uint getCPUTime() {
+    return cpuTime;
+  };
+  uint getWallTime() {
+    return wallTime;
+  };
 
   JSG_RESOURCE_TYPE(TraceMetrics) {
     JSG_READONLY_INSTANCE_PROPERTY(cpuTime, getCPUTime);
@@ -572,6 +583,7 @@ public:
 
     JSG_TS_ROOT();
   }
+
 private:
   uint cpuTime;
   uint wallTime;
@@ -592,15 +604,14 @@ class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
 public:
   TraceCustomEventImpl(
       uint16_t typeId, kj::TaskSet& waitUntilTasks, kj::Array<kj::Own<Trace>> traces)
-    : typeId(typeId), traces(kj::mv(traces)) {}
+      : typeId(typeId),
+        traces(kj::mv(traces)) {}
 
-  kj::Promise<Result> run(
-      kj::Own<IoContext::IncomingRequest> incomingRequest,
+  kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
       kj::TaskSet& waitUntilTasks) override;
 
-  kj::Promise<Result> sendRpc(
-      capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+  kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
       kj::TaskSet& waitUntilTasks,
       rpc::EventDispatcher::Client dispatcher) override;
@@ -614,30 +625,18 @@ private:
   kj::Array<kj::Own<workerd::Trace>> traces;
 };
 
-#define EW_TRACE_ISOLATE_TYPES                                    \
-  api::ScriptVersion,                                             \
-  api::TailEvent,                                                 \
-  api::TraceItem,                                                 \
-  api::TraceItem::AlarmEventInfo,                                 \
-  api::TraceItem::CustomEventInfo,                                \
-  api::TraceItem::ScheduledEventInfo,                             \
-  api::TraceItem::QueueEventInfo,                                 \
-  api::TraceItem::EmailEventInfo,                                 \
-  api::TraceItem::TailEventInfo,                                  \
-  api::TraceItem::TailEventInfo::TailItem,                        \
-  api::TraceItem::FetchEventInfo,                                 \
-  api::TraceItem::FetchEventInfo::Request,                        \
-  api::TraceItem::FetchEventInfo::Response,                       \
-  api::TraceItem::JsRpcEventInfo,                                 \
-  api::TraceItem::HibernatableWebSocketEventInfo,                 \
-  api::TraceItem::HibernatableWebSocketEventInfo::Message,        \
-  api::TraceItem::HibernatableWebSocketEventInfo::Close,          \
-  api::TraceItem::HibernatableWebSocketEventInfo::Error,          \
-  api::TraceLog,                                                  \
-  api::TraceException,                                            \
-  api::TraceDiagnosticChannelEvent,                               \
-  api::TraceMetrics,                                              \
-  api::UnsafeTraceMetrics
+#define EW_TRACE_ISOLATE_TYPES                                                                     \
+  api::ScriptVersion, api::TailEvent, api::TraceItem, api::TraceItem::AlarmEventInfo,              \
+      api::TraceItem::CustomEventInfo, api::TraceItem::ScheduledEventInfo,                         \
+      api::TraceItem::QueueEventInfo, api::TraceItem::EmailEventInfo,                              \
+      api::TraceItem::TailEventInfo, api::TraceItem::TailEventInfo::TailItem,                      \
+      api::TraceItem::FetchEventInfo, api::TraceItem::FetchEventInfo::Request,                     \
+      api::TraceItem::FetchEventInfo::Response, api::TraceItem::JsRpcEventInfo,                    \
+      api::TraceItem::HibernatableWebSocketEventInfo,                                              \
+      api::TraceItem::HibernatableWebSocketEventInfo::Message,                                     \
+      api::TraceItem::HibernatableWebSocketEventInfo::Close,                                       \
+      api::TraceItem::HibernatableWebSocketEventInfo::Error, api::TraceLog, api::TraceException,   \
+      api::TraceDiagnosticChannelEvent, api::TraceMetrics, api::UnsafeTraceMetrics
 // The list of trace.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

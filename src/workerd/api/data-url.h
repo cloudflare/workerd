@@ -15,14 +15,21 @@ public:
   DataUrl& operator=(DataUrl&&) = default;
   KJ_DISALLOW_COPY(DataUrl);
 
-  const MimeType& getMimeType() const { return mimeType; }
-  kj::ArrayPtr<const kj::byte> getData() const { return data.asPtr(); }
+  const MimeType& getMimeType() const {
+    return mimeType;
+  }
+  kj::ArrayPtr<const kj::byte> getData() const {
+    return data.asPtr();
+  }
 
-  kj::Array<kj::byte> releaseData() { return data.releaseAsBytes(); }
+  kj::Array<kj::byte> releaseData() {
+    return data.releaseAsBytes();
+  }
 
 private:
   DataUrl(MimeType mimeType, kj::Array<kj::byte> data)
-      : mimeType(kj::mv(mimeType)), data(kj::mv(data)) {}
+      : mimeType(kj::mv(mimeType)),
+        data(kj::mv(data)) {}
 
   MimeType mimeType;
   kj::Array<kj::byte> data;

@@ -7,7 +7,7 @@
 namespace workerd::api::node {
 
 // Implements utilities in support of the Node.js Zlib
-class ZlibUtil final : public jsg::Object {
+class ZlibUtil final: public jsg::Object {
 public:
   ZlibUtil() = default;
   ZlibUtil(jsg::Lock&, const jsg::Url&) {}
@@ -21,4 +21,4 @@ public:
 
 #define EW_NODE_ZLIB_ISOLATE_TYPES api::node::ZlibUtil
 
-} // namespace workerd::api::node
+}  // namespace workerd::api::node

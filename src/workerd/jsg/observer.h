@@ -11,7 +11,7 @@
 // Forward declare v8::Isolate here, this allows us to avoid including the V8 header and compile
 // some targets without depending on V8.
 namespace v8 {
-  class Isolate;
+class Isolate;
 }
 
 namespace workerd::jsg {
@@ -19,7 +19,7 @@ namespace workerd::jsg {
 class Url;
 
 struct ResolveObserver {
-  virtual ~ResolveObserver() noexcept(false) { }
+  virtual ~ResolveObserver() noexcept(false) {}
 
   // Identifies the context in which a module resolution is being performed.
   enum class Context {
@@ -71,26 +71,24 @@ struct ResolveObserver {
   // Called when a module is being resolved. The returned ResolveStatus
   // object will be used to report the result of the resolution.
   // It is guaranteed that isolate lock is not held during invocation.
-  virtual kj::Own<ResolveStatus> onResolveModule(const Url& specifier,
-                                                 Context context,
-                                                 Source source) const {
+  virtual kj::Own<ResolveStatus> onResolveModule(
+      const Url& specifier, Context context, Source source) const {
     static ResolveStatus nonopStatus;
-    return { &nonopStatus, kj::NullDisposer::instance };
+    return {&nonopStatus, kj::NullDisposer::instance};
   }
 
   // Called when a module is being resolved. The returned ResolveStatus
   // object will be used to report the result of the resolution.
   // It is guaranteed that isolate lock is not held during invocation.
-  virtual kj::Own<ResolveStatus> onResolveModule(kj::StringPtr specifier,
-                                                 Context context,
-                                                 Source source) const {
+  virtual kj::Own<ResolveStatus> onResolveModule(
+      kj::StringPtr specifier, Context context, Source source) const {
     static ResolveStatus nonopStatus;
-    return { &nonopStatus, kj::NullDisposer::instance };
+    return {&nonopStatus, kj::NullDisposer::instance};
   }
 };
 
 struct CompilationObserver {
-  virtual ~CompilationObserver() noexcept(false) { }
+  virtual ~CompilationObserver() noexcept(false) {}
 
   // see ModuleInfoCompileOption
   enum class Option { BUNDLE, BUILTIN };
@@ -101,7 +99,9 @@ struct CompilationObserver {
   // Returned value will be destroyed when module compilation finishes.
   // It is guaranteed that isolate lock is held during invocation.
   virtual kj::Own<void> onEsmCompilationStart(
-      v8::Isolate* isolate, kj::StringPtr name, Option option) const { return kj::Own<void>(); }
+      v8::Isolate* isolate, kj::StringPtr name, Option option) const {
+    return kj::Own<void>();
+  }
 
   // Called at the start of Script (e.g. non-ESM) compilation.
   // Returned value will be destroyed when module compilation finishes.
@@ -134,24 +134,23 @@ struct CompilationObserver {
 };
 
 struct InternalExceptionObserver {
-  virtual ~InternalExceptionObserver() noexcept(false) { }
+  virtual ~InternalExceptionObserver() noexcept(false) {}
 
-struct Detail {
-  bool isInternal;
-  bool isFromRemote;
-  bool isDurableObjectReset;
-};
+  struct Detail {
+    bool isInternal;
+    bool isFromRemote;
+    bool isDurableObjectReset;
+  };
 
   // Called when an internal exception is created (see makeInternalError).
   // Used to collect metrics on various internal error conditions.
-  virtual void reportInternalException(const kj::Exception&, Detail detail) { }
+  virtual void reportInternalException(const kj::Exception&, Detail detail) {}
 };
 
-struct IsolateObserver : public CompilationObserver,
-                         public InternalExceptionObserver,
-                         public ResolveObserver {
-  virtual ~IsolateObserver() noexcept(false) { }
+struct IsolateObserver: public CompilationObserver,
+                        public InternalExceptionObserver,
+                        public ResolveObserver {
+  virtual ~IsolateObserver() noexcept(false) {}
 };
 
-
-} // namespace workerd::jsg
+}  // namespace workerd::jsg

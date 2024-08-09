@@ -4,7 +4,6 @@
 
 #include "jsg-test.h"
 
-
 namespace workerd::jsg::test {
 namespace {
 
@@ -15,11 +14,12 @@ kj::String catchTestResult;
 
 struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
   Promise<kj::String> makePromise(jsg::Lock& js) {
-    auto [ p, r ] = js.newPromiseAndResolver<int>();
+    auto [p, r] = js.newPromiseAndResolver<int>();
     resolver = kj::mv(r);
     return p.then(js, [](jsg::Lock&, int i) { return i * 2; })
-        .then(js, [](jsg::Lock& js, int i) { return js.resolvedPromise(i + 2); })
-        .then(js, [](jsg::Lock& js, int i) { return kj::str(i); });
+        .then(js, [](jsg::Lock& js, int i) {
+      return js.resolvedPromise(i + 2);
+    }).then(js, [](jsg::Lock& js, int i) { return kj::str(i); });
   }
 
   void resolvePromise(Lock& js, int i) {
@@ -30,22 +30,21 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     // Throwing away the result of `.then()` doesn't cancel it!
     promise.then(js, [](jsg::Lock&, kj::String str) {
       promiseTestResult = str.parseAs<int>();
-    }).then(js, [](jsg::Lock&) {
-      promiseTestResult += 60000;
-    });
+    }).then(js, [](jsg::Lock&) { promiseTestResult += 60000; });
   }
 
   void catchIt(jsg::Lock& js, Promise<int> promise) {
-    promise.catch_(js, [](jsg::Lock& js, Value value) -> int {
+    promise
+        .catch_(js,
+            [](jsg::Lock& js, Value value) -> int {
       JSG_FAIL_REQUIRE(Error, kj::str(value.getHandle(js)));
-    }).then(js, [](jsg::Lock& js, int i) {
+    })
+        .then(js, [](jsg::Lock& js, int i) {
       KJ_FAIL_REQUIRE("shouldn't get here");
       return kj::str("nope");
     }, [](jsg::Lock& js, Value value) {
       return kj::str(value.getHandle(js));
-    }).then(js, [](jsg::Lock&, kj::String s) {
-      catchTestResult = kj::mv(s);
-    });
+    }).then(js, [](jsg::Lock&, kj::String s) { catchTestResult = kj::mv(s); });
   }
 
   Promise<kj::String> makeRejected(jsg::Lock& js, jsg::Value exception) {
@@ -57,13 +56,14 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
   }
 
   void testConsumeResolved(jsg::Lock& js) {
-    auto [ promise, resolver ] = js.newPromiseAndResolver<int>();
+    auto [promise, resolver] = js.newPromiseAndResolver<int>();
     KJ_EXPECT(promise.tryConsumeResolved(js) == kj::none);
     resolver.resolve(js, 123);
     KJ_EXPECT(KJ_ASSERT_NONNULL(promise.tryConsumeResolved(js)) == 123);
 
-    KJ_EXPECT(js.rejectedPromise<kj::String>(v8StrIntern(js.v8Isolate, "foo"))
-        .tryConsumeResolved(js) == kj::none);
+    KJ_EXPECT(
+        js.rejectedPromise<kj::String>(v8StrIntern(js.v8Isolate, "foo")).tryConsumeResolved(js) ==
+        kj::none);
   }
 
   void whenResolved(jsg::Lock& js, jsg::Promise<int> promise) {
@@ -120,9 +120,9 @@ JSG_DECLARE_ISOLATE_TYPE(PromiseIsolate, PromiseContext);
 KJ_TEST("jsg::Promise<T>") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
 
-  e.expectEval(
-      "setResult(promise.then(i => i + 1 /* oops, i is a string */));\n"
-      "resolvePromise(123)", "undefined", "undefined");
+  e.expectEval("setResult(promise.then(i => i + 1 /* oops, i is a string */));\n"
+               "resolvePromise(123)",
+      "undefined", "undefined");
 
   KJ_EXPECT(promiseTestResult == 0);
 
@@ -135,8 +135,7 @@ KJ_TEST("jsg::Promise<T> exception catching") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
 
   {
-    e.expectEval(
-        "catchIt(Promise.reject('foo'))", "undefined", "undefined");
+    e.expectEval("catchIt(Promise.reject('foo'))", "undefined", "undefined");
 
     KJ_EXPECT(catchTestResult == nullptr);
 
@@ -147,8 +146,7 @@ KJ_TEST("jsg::Promise<T> exception catching") {
   }
 
   {
-    e.expectEval(
-        "catchIt(makeRejected(123))", "undefined", "undefined");
+    e.expectEval("catchIt(makeRejected(123))", "undefined", "undefined");
 
     KJ_EXPECT(catchTestResult == nullptr);
 
@@ -159,8 +157,7 @@ KJ_TEST("jsg::Promise<T> exception catching") {
   }
 
   {
-    e.expectEval(
-        "catchIt(makeRejectedKj())", "undefined", "undefined");
+    e.expectEval("catchIt(makeRejectedKj())", "undefined", "undefined");
 
     KJ_EXPECT(catchTestResult == nullptr);
 
@@ -170,9 +167,7 @@ KJ_TEST("jsg::Promise<T> exception catching") {
     catchTestResult = nullptr;
   }
 
-  {
-    e.expectEval("testConsumeResolved()", "undefined", "undefined");
-  }
+  { e.expectEval("testConsumeResolved()", "undefined", "undefined"); }
 }
 
 KJ_TEST("whenResolved") {
@@ -182,12 +177,14 @@ KJ_TEST("whenResolved") {
 }
 
 KJ_TEST("thenable") {
-  static const auto config = JsgConfig {
+  static const auto config = JsgConfig{
     .unwrapCustomThenables = true,
   };
 
   struct ThenableConfig {
-    operator const JsgConfig&() const { return config; }
+    operator const JsgConfig&() const {
+      return config;
+    }
   };
 
   Evaluator<PromiseContext, PromiseIsolate, ThenableConfig> e(v8System);

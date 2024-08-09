@@ -17,13 +17,13 @@ namespace {
 using workerd::TestFixture;
 
 bool contains(kj::StringPtr haystack, kj::StringPtr needle) {
-  return std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end())
-    != haystack.end();
+  return std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end()) !=
+      haystack.end();
 }
 
-class MockActorId : public ActorIdFactory::ActorId {
+class MockActorId: public ActorIdFactory::ActorId {
 public:
-  MockActorId(kj::String id) : id(kj::mv(id)) {}
+  MockActorId(kj::String id): id(kj::mv(id)) {}
   kj::String toString() const override {
     return kj::str("MockActorId<", id, ">");
   }
@@ -41,6 +41,7 @@ public:
   }
 
   virtual ~MockActorId() {};
+
 private:
   kj::String id;
 };
@@ -63,9 +64,9 @@ void runBadDeserialization(jsg::Lock& lock, kj::StringPtr expectedId) {
 
 void runBadDeserializationInIoContext(TestFixture& fixture, kj::StringPtr expectedId) {
   fixture.runInIoContext(
-    [expectedId](const workerd::TestFixture::Environment& env) -> kj::Promise<void> {
-      runBadDeserialization(env.lock, expectedId);
-      return kj::READY_NOW;
+      [expectedId](const workerd::TestFixture::Environment& env) -> kj::Promise<void> {
+    runBadDeserialization(env.lock, expectedId);
+    return kj::READY_NOW;
   });
 }
 
@@ -88,10 +89,10 @@ KJ_TEST("actor specified with ActorId object") {
   kj::Own<ActorIdFactory::ActorId> mockActorId = kj::heap<MockActorId>(kj::str("testActorId"));
   Worker::Actor::Id id = kj::mv(mockActorId);
   TestFixture fixture(TestFixture::SetupParams{
-      .actorId = kj::mv(id),
+    .actorId = kj::mv(id),
   });
   runBadDeserializationInIoContext(fixture, "actorId = MockActorId<testActorId>;"_kj);
 }
 
-} // namespace
-} // namespace workerd::api
+}  // namespace
+}  // namespace workerd::api

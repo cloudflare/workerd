@@ -35,8 +35,7 @@ static bool hasExpired(const kj::Maybe<double>& expiration, bool allowOutsideIoC
   return false;
 }
 
-SharedMemoryCache::SharedMemoryCache(
-    kj::Maybe<const MemoryCacheProvider&> provider,
+SharedMemoryCache::SharedMemoryCache(kj::Maybe<const MemoryCacheProvider&> provider,
     kj::StringPtr id,
     kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler)
     : data(),
@@ -183,8 +182,7 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
 }
 
 void SharedMemoryCache::evictNextWhileLocked(
-    ThreadUnsafeData& data,
-    bool allowOutsideIoContext) const {
+    ThreadUnsafeData& data, bool allowOutsideIoContext) const {
   // The caller is responsible for ensuring that the cache is not empty already.
   KJ_REQUIRE(data.cache.size() > 0);
 
@@ -205,8 +203,7 @@ void SharedMemoryCache::evictNextWhileLocked(
 }
 
 void SharedMemoryCache::removeIfExistsWhileLocked(
-    ThreadUnsafeData& data,
-    const kj::String& key) const {
+    ThreadUnsafeData& data, const kj::String& key) const {
   KJ_IF_SOME(entry, data.cache.find(key)) {
     // This DOES NOT count as an eviction because it might happen while
     // replacing the existing cache entry with a new one, when the new one is
@@ -226,7 +223,8 @@ kj::Own<const SharedMemoryCache> SharedMemoryCache::create(
 }
 
 SharedMemoryCache::Use::Use(kj::Own<const SharedMemoryCache> cache, const Limits& limits)
-    : cache(kj::mv(cache)), limits(limits) {
+    : cache(kj::mv(cache)),
+      limits(limits) {
   this->cache->suggest(limits);
 }
 
@@ -404,8 +402,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
                   JSG_REQUIRE(
                       !kj::isNaN(expiration), TypeError, "Expiration time must not be NaN.");
                 }
-                (*callback)(SharedMemoryCache::Use::FallbackResult{
-                  kj::mv(serialized), result.expiration});
+                (*callback)(
+                    SharedMemoryCache::Use::FallbackResult{kj::mv(serialized), result.expiration});
                 return kj::mv(result.value);
               })
                   .catch_(js,
@@ -450,8 +448,8 @@ kj::Own<const SharedMemoryCache> MemoryCacheProvider::getInstance(
 
   const auto makeCache = [this](kj::Maybe<const MemoryCacheProvider&> provider, kj::StringPtr id) {
     // The cache doesn't exist in the map. Let's create it.
-    auto handler = additionalResizeMemoryLimitHandler.map([](
-        const SharedMemoryCache::AdditionalResizeMemoryLimitHandler& handler)
+    auto handler = additionalResizeMemoryLimitHandler.map(
+        [](const SharedMemoryCache::AdditionalResizeMemoryLimitHandler& handler)
             -> SharedMemoryCache::AdditionalResizeMemoryLimitHandler& {
       return const_cast<SharedMemoryCache::AdditionalResizeMemoryLimitHandler&>(handler);
     });

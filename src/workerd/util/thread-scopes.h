@@ -112,6 +112,7 @@ public:
   void release();
 
   static void maybeWarn();
+
 private:
   bool released = false;
 };

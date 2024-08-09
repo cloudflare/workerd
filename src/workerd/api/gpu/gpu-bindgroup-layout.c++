@@ -95,8 +95,8 @@ wgpu::TextureBindingLayout parseTextureBindingLayout(GPUTextureBindingLayout& te
   return kj::mv(layout);
 }
 
-wgpu::StorageTextureBindingLayout
-parseStorageTextureBindingLayout(GPUStorageTextureBindingLayout& storage) {
+wgpu::StorageTextureBindingLayout parseStorageTextureBindingLayout(
+    GPUStorageTextureBindingLayout& storage) {
 
   wgpu::StorageTextureBindingLayout layout;
   layout.access = parseStorageAccess(storage.access.orDefault([] { return "write-only"_kj; }));
@@ -131,4 +131,4 @@ wgpu::BindGroupLayoutEntry parseBindGroupLayoutEntry(GPUBindGroupLayoutEntry& en
   return kj::mv(layoutEntry);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

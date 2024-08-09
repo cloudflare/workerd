@@ -10,14 +10,14 @@
 
 namespace workerd::api::gpu {
 
-class GPUBuffer : public jsg::Object {
+class GPUBuffer: public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::Buffer&() const {
     return buffer_;
   }
-  explicit GPUBuffer(jsg::Lock& js, wgpu::Buffer, wgpu::BufferDescriptor, wgpu::Device,
-                     kj::Own<AsyncRunner>);
+  explicit GPUBuffer(
+      jsg::Lock& js, wgpu::Buffer, wgpu::BufferDescriptor, wgpu::Device, kj::Own<AsyncRunner>);
 
   JSG_RESOURCE_TYPE(GPUBuffer) {
     JSG_METHOD(getMappedRange);
@@ -30,7 +30,7 @@ public:
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    for (const auto& mapping : mapped_) {
+    for (const auto& mapping: mapped_) {
       tracker.trackField(nullptr, mapping);
     }
     tracker.trackField("detachKey", detachKey_);
@@ -66,8 +66,8 @@ private:
   kj::Vector<Mapping> mapped_;
   jsg::V8Ref<v8::Object> detachKey_;
 
-  v8::Local<v8::ArrayBuffer> getMappedRange(jsg::Lock&, jsg::Optional<GPUSize64> offset,
-                                            jsg::Optional<GPUSize64> size);
+  v8::Local<v8::ArrayBuffer> getMappedRange(
+      jsg::Lock&, jsg::Optional<GPUSize64> offset, jsg::Optional<GPUSize64> size);
 
   GPUSize64 getSize() {
     return buffer_.GetSize();
@@ -79,12 +79,12 @@ private:
 
   GPUBufferMapState getMapState() {
     switch (buffer_.GetMapState()) {
-    case wgpu::BufferMapState::Unmapped:
-      return kj::str("unmapped");
-    case wgpu::BufferMapState::Pending:
-      return kj::str("pending");
-    case wgpu::BufferMapState::Mapped:
-      return kj::str("mapped");
+      case wgpu::BufferMapState::Unmapped:
+        return kj::str("unmapped");
+      case wgpu::BufferMapState::Pending:
+        return kj::str("pending");
+      case wgpu::BufferMapState::Mapped:
+        return kj::str("mapped");
     };
 
     KJ_UNREACHABLE;
@@ -92,8 +92,10 @@ private:
 
   void unmap(jsg::Lock& js);
   void destroy(jsg::Lock& js);
-  jsg::Promise<void> mapAsync(jsg::Lock&, GPUFlagsConstant mode, jsg::Optional<GPUSize64> offset,
-                              jsg::Optional<GPUSize64> size);
+  jsg::Promise<void> mapAsync(jsg::Lock&,
+      GPUFlagsConstant mode,
+      jsg::Optional<GPUSize64> offset,
+      jsg::Optional<GPUSize64> size);
   void DetachMappings(jsg::Lock& js);
 };
 
@@ -105,4 +107,4 @@ struct GPUBufferDescriptor {
   JSG_STRUCT(label, size, usage, mappedAtCreation);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

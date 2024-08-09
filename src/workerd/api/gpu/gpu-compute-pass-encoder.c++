@@ -11,8 +11,8 @@ void GPUComputePassEncoder::setPipeline(jsg::Ref<GPUComputePipeline> pipeline) {
 }
 
 void GPUComputePassEncoder::dispatchWorkgroups(GPUSize32 workgroupCountX,
-                                               jsg::Optional<GPUSize32> workgroupCountY,
-                                               jsg::Optional<GPUSize32> workgroupCountZ) {
+    jsg::Optional<GPUSize32> workgroupCountY,
+    jsg::Optional<GPUSize32> workgroupCountZ) {
 
   GPUSize32 countY = workgroupCountY.orDefault(1);
   GPUSize32 countZ = workgroupCountZ.orDefault(1);
@@ -24,8 +24,8 @@ void GPUComputePassEncoder::end() {
   encoder_.End();
 }
 
-void GPUComputePassEncoder::setBindGroup(
-    GPUIndex32 index, kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
+void GPUComputePassEncoder::setBindGroup(GPUIndex32 index,
+    kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
     jsg::Optional<jsg::Sequence<GPUBufferDynamicOffset>> dynamicOffsets) {
   wgpu::BindGroup bg = nullptr;
 
@@ -44,4 +44,4 @@ void GPUComputePassEncoder::setBindGroup(
   encoder_.SetBindGroup(index, bg, num_offsets, offsets);
 }
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

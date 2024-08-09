@@ -11,9 +11,9 @@
 
 namespace workerd::api::gpu {
 
-class GPUCompilationMessage : public jsg::Object {
+class GPUCompilationMessage: public jsg::Object {
 public:
-  explicit GPUCompilationMessage(const WGPUCompilationMessage& m) : message(m) {}
+  explicit GPUCompilationMessage(const WGPUCompilationMessage& m): message(m) {}
 
   JSG_RESOURCE_TYPE(GPUCompilationMessage) {
     JSG_READONLY_PROTOTYPE_PROPERTY(message, getMessage);
@@ -32,14 +32,14 @@ private:
   }
   GPUCompilationMessageType getType() {
     switch (message.type) {
-    case WGPUCompilationMessageType_Error:
-      return kj::str("error");
-    case WGPUCompilationMessageType_Warning:
-      return kj::str("warning");
-    case WGPUCompilationMessageType_Info:
-      return kj::str("info");
-    default:
-      KJ_UNREACHABLE
+      case WGPUCompilationMessageType_Error:
+        return kj::str("error");
+      case WGPUCompilationMessageType_Warning:
+        return kj::str("warning");
+      case WGPUCompilationMessageType_Info:
+        return kj::str("info");
+      default:
+        KJ_UNREACHABLE
     }
   }
   double getLineNum() {
@@ -56,16 +56,16 @@ private:
   }
 };
 
-class GPUCompilationInfo : public jsg::Object {
+class GPUCompilationInfo: public jsg::Object {
 public:
   explicit GPUCompilationInfo(kj::Vector<jsg::Ref<GPUCompilationMessage>> messages)
-      : messages_(kj::mv(messages)){};
+      : messages_(kj::mv(messages)) {};
   JSG_RESOURCE_TYPE(GPUCompilationInfo) {
     JSG_READONLY_PROTOTYPE_PROPERTY(messages, getMessages);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    for (const auto& message : messages_) {
+    for (const auto& message: messages_) {
       tracker.trackField(nullptr, message);
     }
   }
@@ -80,14 +80,15 @@ private:
   }
 };
 
-class GPUShaderModule : public jsg::Object {
+class GPUShaderModule: public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::ShaderModule&() const {
     return shader_;
   }
   explicit GPUShaderModule(wgpu::ShaderModule s, kj::Own<AsyncRunner> async)
-      : shader_(kj::mv(s)), async_(kj::mv(async)){};
+      : shader_(kj::mv(s)),
+        async_(kj::mv(async)) {};
   JSG_RESOURCE_TYPE(GPUShaderModule) {
     JSG_METHOD(getCompilationInfo);
   }
@@ -113,4 +114,4 @@ struct GPUProgrammableStage {
   JSG_STRUCT(module, entryPoint, constants);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

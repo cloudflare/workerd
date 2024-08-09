@@ -13,14 +13,15 @@
 namespace workerd::api::public_beta {
 jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {
   KJ_IF_SOME(j, jwt) {
-    return jsg::alloc<R2Bucket>(featureFlags, subrequestChannel, kj::mv(bucketName),
-                                kj::str(j), R2Bucket::friend_tag_t{});
+    return jsg::alloc<R2Bucket>(
+        featureFlags, subrequestChannel, kj::mv(bucketName), kj::str(j), R2Bucket::friend_tag_t{});
   }
-  return jsg::alloc<R2Bucket>(featureFlags, subrequestChannel, kj::mv(bucketName), R2Bucket::friend_tag_t{});
+  return jsg::alloc<R2Bucket>(
+      featureFlags, subrequestChannel, kj::mv(bucketName), R2Bucket::friend_tag_t{});
 }
 
-jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(jsg::Lock& js, kj::String name,
-    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(
+    jsg::Lock& js, kj::String name, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   auto& context = IoContext::current();
   auto client = context.getHttpClient(subrequestChannel, true, kj::none, "r2_delete"_kjc);
 
@@ -35,22 +36,23 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(jsg::Lock& js, kj::String name,
   createBucketBuilder.setBucket(name);
 
   auto requestJson = json.encode(requestBuilder);
-  auto promise = doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none,
-                                    kj::mv(requestJson), nullptr, jwt);
+  auto promise =
+      doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), nullptr, jwt);
 
   return context.awaitIo(js, kj::mv(promise),
-      [this, subrequestChannel = subrequestChannel, name = kj::mv(name), &errorType]
-      (jsg::Lock&, R2Result r2Result) mutable {
+      [this, subrequestChannel = subrequestChannel, name = kj::mv(name), &errorType](
+          jsg::Lock&, R2Result r2Result) mutable {
     r2Result.throwIfError("createBucket", errorType);
-    return jsg::alloc<R2Bucket>(featureFlags, subrequestChannel, kj::mv(name),
-        R2Bucket::friend_tag_t{});
+    return jsg::alloc<R2Bucket>(
+        featureFlags, subrequestChannel, kj::mv(name), R2Bucket::friend_tag_t{});
   });
 }
 
 jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
     jsg::Optional<ListOptions> options,
     const jsg::TypeHandler<jsg::Ref<RetrievedBucket>>& retrievedBucketType,
-    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags) {
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+    CompatibilityFlags::Reader flags) {
   auto& context = IoContext::current();
   auto client = context.getHttpClient(subrequestChannel, true, kj::none, "r2_delete"_kjc);
 
@@ -86,14 +88,14 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
     json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
 
     auto buckets = js.map();
-    for(auto b: responseBuilder.getBuckets()) {
-      auto bucket = jsg::alloc<RetrievedBucket>(featureFlags, subrequestChannel,
-          kj::str(b.getName()),
-          kj::UNIX_EPOCH + b.getCreatedMillisecondsSinceEpoch() * kj::MILLISECONDS);
+    for (auto b: responseBuilder.getBuckets()) {
+      auto bucket =
+          jsg::alloc<RetrievedBucket>(featureFlags, subrequestChannel, kj::str(b.getName()),
+              kj::UNIX_EPOCH + b.getCreatedMillisecondsSinceEpoch() * kj::MILLISECONDS);
       buckets.set(js, b.getName(), jsg::JsValue(retrievedBucketType.wrap(js, kj::mv(bucket))));
     }
 
-    ListResult result {
+    ListResult result{
       .buckets = buckets.addRef(js),
       .truncated = responseBuilder.getTruncated(),
     };
@@ -105,8 +107,8 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
   });
 }
 
-jsg::Promise<void> R2Admin::delete_(jsg::Lock& js, kj::String name,
-    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+jsg::Promise<void> R2Admin::delete_(
+    jsg::Lock& js, kj::String name, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   auto& context = IoContext::current();
   auto client = context.getHttpClient(subrequestChannel, true, kj::none, "r2_delete"_kjc);
 
@@ -121,12 +123,12 @@ jsg::Promise<void> R2Admin::delete_(jsg::Lock& js, kj::String name,
   deleteBucketBuilder.setBucket(name);
 
   auto requestJson = json.encode(requestBuilder);
-  auto promise = doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none,
-                                    kj::mv(requestJson), nullptr, jwt);
+  auto promise =
+      doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), nullptr, jwt);
 
   return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock&, R2Result r2Result) mutable {
     r2Result.throwIfError("deleteBucket", errorType);
   });
 }
 
-} // namespace workerd::api
+}  // namespace workerd::api::public_beta

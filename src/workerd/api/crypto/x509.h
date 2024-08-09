@@ -88,6 +88,4 @@ private:
 
 KJ_DECLARE_NON_POLYMORPHIC(X509);
 
-#define EW_CRYPTO_X509_ISOLATE_TYPES                  \
-  api::X509Certificate,                               \
-  api::X509Certificate::CheckOptions
+#define EW_CRYPTO_X509_ISOLATE_TYPES api::X509Certificate, api::X509Certificate::CheckOptions

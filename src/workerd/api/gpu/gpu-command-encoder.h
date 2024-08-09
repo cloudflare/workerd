@@ -37,10 +37,11 @@ struct GPUImageCopyBuffer {
   JSG_STRUCT(buffer, offset, bytesPerRow, rowsPerImage);
 };
 
-class GPUCommandEncoder : public jsg::Object {
+class GPUCommandEncoder: public jsg::Object {
 public:
   explicit GPUCommandEncoder(wgpu::CommandEncoder e, kj::String label)
-      : encoder_(kj::mv(e)), label_(kj::mv(label)){};
+      : encoder_(kj::mv(e)),
+        label_(kj::mv(label)) {};
   JSG_RESOURCE_TYPE(GPUCommandEncoder) {
     JSG_READONLY_PROTOTYPE_PROPERTY(label, getLabel);
     JSG_METHOD(beginComputePass);
@@ -64,21 +65,23 @@ private:
     return label_;
   }
 
-  jsg::Ref<GPUComputePassEncoder>
-  beginComputePass(jsg::Optional<GPUComputePassDescriptor> descriptor);
+  jsg::Ref<GPUComputePassEncoder> beginComputePass(
+      jsg::Optional<GPUComputePassDescriptor> descriptor);
   jsg::Ref<GPURenderPassEncoder> beginRenderPass(GPURenderPassDescriptor descriptor);
   jsg::Ref<GPUCommandBuffer> finish(jsg::Optional<GPUCommandBufferDescriptor>);
-  void copyBufferToBuffer(jsg::Ref<GPUBuffer> source, GPUSize64 sourceOffset,
-                          jsg::Ref<GPUBuffer> destination, GPUSize64 destinationOffset,
-                          GPUSize64 size);
-  void copyTextureToBuffer(GPUImageCopyTexture source, GPUImageCopyBuffer destination,
-                           GPUExtent3D copySize);
-  void copyBufferToTexture(GPUImageCopyBuffer source, GPUImageCopyTexture destination,
-                           GPUExtent3D copySize);
-  void copyTextureToTexture(GPUImageCopyTexture source, GPUImageCopyTexture destination,
-                            GPUExtent3D copySize);
-  void clearBuffer(jsg::Ref<GPUBuffer> buffer, jsg::Optional<GPUSize64> offset,
-                   jsg::Optional<GPUSize64> size);
+  void copyBufferToBuffer(jsg::Ref<GPUBuffer> source,
+      GPUSize64 sourceOffset,
+      jsg::Ref<GPUBuffer> destination,
+      GPUSize64 destinationOffset,
+      GPUSize64 size);
+  void copyTextureToBuffer(
+      GPUImageCopyTexture source, GPUImageCopyBuffer destination, GPUExtent3D copySize);
+  void copyBufferToTexture(
+      GPUImageCopyBuffer source, GPUImageCopyTexture destination, GPUExtent3D copySize);
+  void copyTextureToTexture(
+      GPUImageCopyTexture source, GPUImageCopyTexture destination, GPUExtent3D copySize);
+  void clearBuffer(
+      jsg::Ref<GPUBuffer> buffer, jsg::Optional<GPUSize64> offset, jsg::Optional<GPUSize64> size);
 };
 
 struct GPUCommandEncoderDescriptor {
@@ -87,4 +90,4 @@ struct GPUCommandEncoderDescriptor {
   JSG_STRUCT(label);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

@@ -31,8 +31,7 @@ public:
   //
   // When the returned scope object is dropped, if a limit was exceeded, then `error` will be
   // filled in to indicate what happened, otherwise it is left null.
-  virtual kj::Own<void> enterStartupJs(
-      jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const = 0;
+  virtual kj::Own<void> enterStartupJs(jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const = 0;
 
   // used to enforce limits on Python script startup.
   virtual kj::Own<void> enterStartupPython(
@@ -44,8 +43,7 @@ public:
 
   // Like enterStartupJs(), but used to enforce tight limits in cases where we just intend
   // to log an error to the inspector or the like.
-  virtual kj::Own<void> enterLoggingJs(
-      jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const = 0;
+  virtual kj::Own<void> enterLoggingJs(jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const = 0;
 
   // Like enterStartupJs(), but used when receiving commands via the inspector protocol.
   virtual kj::Own<void> enterInspectorJs(
@@ -86,7 +84,7 @@ public:
 };
 
 // Abstract interface that enforces resource limits on a IoContext.
-class LimitEnforcer  {
+class LimitEnforcer {
 public:
   // Called just after taking the isolate lock, before executing JavaScript code, to enforce
   // limits on that code execution, particularly the CPU limit. The returned `Own<void>` should

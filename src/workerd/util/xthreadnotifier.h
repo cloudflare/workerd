@@ -23,7 +23,7 @@ public:
     return kj::atomicRefcounted<XThreadNotifier>();
   }
 
-  XThreadNotifier() : paf(kj::newPromiseAndCrossThreadFulfiller<void>()) { }
+  XThreadNotifier(): paf(kj::newPromiseAndCrossThreadFulfiller<void>()) {}
 
   kj::Promise<void> awaitNotification() {
     auto promise = kj::mv(paf.lockExclusive()->promise);

@@ -18,7 +18,7 @@ struct TestExtensionType {
 
 struct ExtensionContext: public ContextGlobalObject {
   TestExtensionType toExtensionType(double value) {
-    return { static_cast<int32_t>(value) };
+    return {static_cast<int32_t>(value)};
   }
   double fromExtensionType(TestExtensionType value) {
     return value.value;
@@ -39,18 +39,19 @@ public:
     return "TestExtensionTypeName";
   }
 
-  v8::Local<v8::Number> wrap(
-      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator,
+  v8::Local<v8::Number> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
       TestExtensionType value) {
     return v8::Number::New(context->GetIsolate(), value.value);
   }
 
   v8::Local<v8::Context> newContext(v8::Isolate* isolate, TestExtensionType value) = delete;
 
-  kj::Maybe<TestExtensionType> tryUnwrap(
-        v8::Local<v8::Context> context, v8::Local<v8::Value> handle, TestExtensionType*,
-        kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return TestExtensionType { handle->Int32Value(context).ToChecked() };
+  kj::Maybe<TestExtensionType> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      TestExtensionType*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return TestExtensionType{handle->Int32Value(context).ToChecked()};
   }
 
   template <bool isContext = false>
@@ -67,20 +68,19 @@ KJ_TEST("extensions") {
 // ========================================================================================
 
 struct TypeHandlerContext: public ContextGlobalObject {
-  v8::Local<v8::Value> newNumberBox(jsg::Lock& js,
-      double value, const TypeHandler<Ref<NumberBox>>& handler) {
+  v8::Local<v8::Value> newNumberBox(
+      jsg::Lock& js, double value, const TypeHandler<Ref<NumberBox>>& handler) {
     return handler.wrap(js, alloc<NumberBox>(value));
   }
-  double openNumberBox(jsg::Lock& js,
-      v8::Local<v8::Value> handle, const TypeHandler<Ref<NumberBox>>& handler) {
+  double openNumberBox(
+      jsg::Lock& js, v8::Local<v8::Value> handle, const TypeHandler<Ref<NumberBox>>& handler) {
     return KJ_REQUIRE_NONNULL(handler.tryUnwrap(js, handle))->value;
   }
-  v8::Local<v8::Value> wrapNumber(jsg::Lock& js,
-      double value, const TypeHandler<double>& handler) {
+  v8::Local<v8::Value> wrapNumber(jsg::Lock& js, double value, const TypeHandler<double>& handler) {
     return handler.wrap(js, value);
   }
-  double unwrapNumber(jsg::Lock& js,
-      v8::Local<v8::Value> handle, const TypeHandler<double>& handler) {
+  double unwrapNumber(
+      jsg::Lock& js, v8::Local<v8::Value> handle, const TypeHandler<double>& handler) {
     return KJ_REQUIRE_NONNULL(handler.tryUnwrap(js, handle));
   }
 
@@ -118,7 +118,7 @@ struct ArrayContext: public ContextGlobalObject {
     return builder.finish();
   }
   kj::ArrayPtr<const double> returnArrayPtr() {
-    static const double VALUES[3] = { 123, 456, 789 };
+    static const double VALUES[3] = {123, 456, 789};
     return VALUES;
   }
   JSG_RESOURCE_TYPE(ArrayContext) {
@@ -160,24 +160,20 @@ JSG_DECLARE_ISOLATE_TYPE(Uint8Isolate, Uint8Context);
 
 KJ_TEST("Uint8Arrays") {
   Evaluator<Uint8Context, Uint8Isolate> e(v8System);
-  uint byteSequence[] = { 'f', 'o', 'o', ' ', 0xf0, 0x9f, 0x98, 0xba };
+  uint byteSequence[] = {'f', 'o', 'o', ' ', 0xf0, 0x9f, 0x98, 0xba};
   auto byteSequenceStr = kj::strArray(kj::ArrayPtr<uint>(byteSequence), ", ");
 
   e.expectEval("new Uint8Array(encodeUtf8('foo 😺')).join(', ')", "string", byteSequenceStr);
+  e.expectEval(kj::str("decodeUtf8(new Uint8Array([", byteSequenceStr, "]))"), "string", "foo 😺");
   e.expectEval(
-      kj::str("decodeUtf8(new Uint8Array([", byteSequenceStr, "]))"),
-      "string", "foo 😺");
-  e.expectEval(
-      kj::str("decodeUtf8(new Uint8Array([", byteSequenceStr, "]).buffer)"),
-      "string", "foo 😺");
-  e.expectEval(
-      kj::str("var buf = new Uint8Array([", byteSequenceStr, "]).buffer;\n"
-              "decodeUtf8(new Uint8Array(buf, 1, 3))"),
+      kj::str("decodeUtf8(new Uint8Array([", byteSequenceStr, "]).buffer)"), "string", "foo 😺");
+  e.expectEval(kj::str("var buf = new Uint8Array([", byteSequenceStr,
+                   "]).buffer;\n"
+                   "decodeUtf8(new Uint8Array(buf, 1, 3))"),
       "string", "oo ");
 
   e.expectEval(
-      kj::str("decodeUtf8Const(new Uint8Array([", byteSequenceStr, "]))"),
-      "string", "foo 😺");
+      kj::str("decodeUtf8Const(new Uint8Array([", byteSequenceStr, "]))"), "string", "foo 😺");
 }
 
 // ========================================================================================
@@ -198,10 +194,9 @@ JSG_DECLARE_ISOLATE_TYPE(UnwrappingIsolate, UnwrappingContext);
 
 KJ_TEST("v8::Value subclass unwrapping") {
   Evaluator<UnwrappingContext, UnwrappingIsolate> e(v8System);
-  e.expectEval(
-      "let abv = new Uint8Array([0, 1, 2]);\n"
-      "let abv2 = mutateArrayBufferView(abv);\n"
-      "abv === abv2 && abv[0] === 123",
+  e.expectEval("let abv = new Uint8Array([0, 1, 2]);\n"
+               "let abv2 = mutateArrayBufferView(abv);\n"
+               "abv === abv2 && abv[0] === 123",
       "boolean", "true");
 }
 
@@ -210,7 +205,9 @@ KJ_TEST("v8::Value subclass unwrapping") {
 struct UnimplementedContext: public ContextGlobalObject {
   class UnimplementedConstructor: public Object {
   public:
-    static Unimplemented constructor() { return Unimplemented(); }
+    static Unimplemented constructor() {
+      return Unimplemented();
+    }
     JSG_RESOURCE_TYPE(UnimplementedConstructor) {}
   };
   class UnimplementedConstructorParam: public Object {
@@ -219,22 +216,32 @@ struct UnimplementedContext: public ContextGlobalObject {
     static Ref<UnimplementedConstructorParam> constructor(int i, Unimplemented) {
       return jsg::alloc<UnimplementedConstructorParam>(i);
     }
-    int getI() { return i; }
+    int getI() {
+      return i;
+    }
     int i;
     JSG_RESOURCE_TYPE(UnimplementedConstructorParam) {
       JSG_READONLY_INSTANCE_PROPERTY(i, getI);
     }
   };
-  Unimplemented unimplementedMethod() { return Unimplemented(); }
-  int unimplementedParam(int i, Unimplemented) { return i; }
-  Unimplemented getUnimplemented() { return Unimplemented(); }
+  Unimplemented unimplementedMethod() {
+    return Unimplemented();
+  }
+  int unimplementedParam(int i, Unimplemented) {
+    return i;
+  }
+  Unimplemented getUnimplemented() {
+    return Unimplemented();
+  }
   void setUnimplemented(Unimplemented) {}
   struct UnimplementedField {
     int i;
     Unimplemented unimplemented;
     JSG_STRUCT(i, unimplemented);
   };
-  int unimplementedField(UnimplementedField s) { return s.i; }
+  int unimplementedField(UnimplementedField s) {
+    return s.i;
+  }
   auto unimplementedCallbackArgument() {
     return [](Lock&, int i, Unimplemented) { return i; };
   }
@@ -245,14 +252,24 @@ struct UnimplementedContext: public ContextGlobalObject {
       return jsg::alloc<UnimplementedProperties>();
     }
 
-    int getNumber() { return 123; }
+    int getNumber() {
+      return 123;
+    }
 
-    Unimplemented getUnimplemented1() { return Unimplemented(); }
+    Unimplemented getUnimplemented1() {
+      return Unimplemented();
+    }
     void setUnimplemented1(Unimplemented) {}
-    Unimplemented getUnimplemented2() { return Unimplemented(); }
+    Unimplemented getUnimplemented2() {
+      return Unimplemented();
+    }
 
-    int implementedMethod() { return 123; }
-    Unimplemented unimplementedMethod() { return Unimplemented(); }
+    int implementedMethod() {
+      return 123;
+    }
+    Unimplemented unimplementedMethod() {
+      return Unimplemented();
+    }
 
     JSG_RESOURCE_TYPE(UnimplementedProperties) {
       JSG_READONLY_INSTANCE_PROPERTY(number, getNumber);
@@ -284,69 +301,53 @@ struct UnimplementedContext: public ContextGlobalObject {
     JSG_METHOD(takeStructWithUnimplementedMembers);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(UnimplementedIsolate, UnimplementedContext,
-    UnimplementedContext::UnimplementedConstructor, UnimplementedContext::UnimplementedConstructorParam,
-    UnimplementedContext::UnimplementedField, UnimplementedContext::UnimplementedProperties,
-    UnimplementedContext::StructWithUnimplementedMembers
-    );
+JSG_DECLARE_ISOLATE_TYPE(UnimplementedIsolate,
+    UnimplementedContext,
+    UnimplementedContext::UnimplementedConstructor,
+    UnimplementedContext::UnimplementedConstructorParam,
+    UnimplementedContext::UnimplementedField,
+    UnimplementedContext::UnimplementedProperties,
+    UnimplementedContext::StructWithUnimplementedMembers);
 
 KJ_TEST("unimplemented errors") {
   Evaluator<UnimplementedContext, UnimplementedIsolate> e(v8System);
-  e.expectEval(
-      "new UnimplementedConstructor()",
-      "throws", "Error: Failed to construct 'UnimplementedConstructor': "
-                "the constructor is not implemented.");
+  e.expectEval("new UnimplementedConstructor()", "throws",
+      "Error: Failed to construct 'UnimplementedConstructor': "
+      "the constructor is not implemented.");
 
-  e.expectEval(
-      "new UnimplementedConstructorParam(123).i",
-      "number", "123");
-  e.expectEval(
-      "new UnimplementedConstructorParam(123, 456)",
-      "throws", "Error: Failed to construct 'UnimplementedConstructorParam': "
-                "constructor parameter 2 is not implemented.");
+  e.expectEval("new UnimplementedConstructorParam(123).i", "number", "123");
+  e.expectEval("new UnimplementedConstructorParam(123, 456)", "throws",
+      "Error: Failed to construct 'UnimplementedConstructorParam': "
+      "constructor parameter 2 is not implemented.");
 
-  e.expectEval(
-      "unimplementedMethod()",
-      "throws", "Error: Failed to execute 'unimplementedMethod' on 'UnimplementedContext': "
-                "the method is not implemented.");
+  e.expectEval("unimplementedMethod()", "throws",
+      "Error: Failed to execute 'unimplementedMethod' on 'UnimplementedContext': "
+      "the method is not implemented.");
 
-  e.expectEval(
-      "unimplementedParam(123)",
-      "number", "123");
-  e.expectEval(
-      "unimplementedParam(123, 456)",
-      "throws", "Error: Failed to execute 'unimplementedParam' on 'UnimplementedContext': "
-                "parameter 2 is not implemented.");
+  e.expectEval("unimplementedParam(123)", "number", "123");
+  e.expectEval("unimplementedParam(123, 456)", "throws",
+      "Error: Failed to execute 'unimplementedParam' on 'UnimplementedContext': "
+      "parameter 2 is not implemented.");
 
-  e.expectEval(
-      "unimplemented",
-      "throws", "Error: Failed to get the 'unimplemented' property on 'UnimplementedContext': "
-                "the property is not implemented.");
-  e.expectEval(
-      "unimplemented = 123",
-      "throws", "Error: Failed to set the 'unimplemented' property on 'UnimplementedContext': "
-                "the ability to set this property is not implemented.");
+  e.expectEval("unimplemented", "throws",
+      "Error: Failed to get the 'unimplemented' property on 'UnimplementedContext': "
+      "the property is not implemented.");
+  e.expectEval("unimplemented = 123", "throws",
+      "Error: Failed to set the 'unimplemented' property on 'UnimplementedContext': "
+      "the ability to set this property is not implemented.");
 
-  e.expectEval(
-      "unimplementedField({i: 123})",
-      "number", "123");
-  e.expectEval(
-      "unimplementedField({i: 123, unimplemented: 456})",
-      "throws", "Error: The 'unimplemented' field on 'UnimplementedField' is not implemented.");
+  e.expectEval("unimplementedField({i: 123})", "number", "123");
+  e.expectEval("unimplementedField({i: 123, unimplemented: 456})", "throws",
+      "Error: The 'unimplemented' field on 'UnimplementedField' is not implemented.");
 
-  e.expectEval(
-      "unimplementedCallbackArgument()(123)",
-      "number", "123");
-  e.expectEval(
-      "unimplementedCallbackArgument()(123, 456)",
-      "throws", "Error: Failed to execute function: parameter 2 is not implemented.");
+  e.expectEval("unimplementedCallbackArgument()(123)", "number", "123");
+  e.expectEval("unimplementedCallbackArgument()(123, 456)", "throws",
+      "Error: Failed to execute function: parameter 2 is not implemented.");
 
   // Verify that unimplemented properties are not enumerable by attempting to JSON-encode a class
   // that has them. If they are enumerable, the encoder will try to access them and throw
   // exceptions.
-  e.expectEval(
-      "JSON.stringify(new UnimplementedProperties)",
-      "string", "{\"number\":123}");
+  e.expectEval("JSON.stringify(new UnimplementedProperties)", "string", "{\"number\":123}");
 
   // Verify that structs with unimplemented/wont-implement members can still be initialized from
   // null/undefined values.

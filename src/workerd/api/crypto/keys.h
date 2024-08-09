@@ -13,10 +13,14 @@ enum class KeyEncoding {
 
 inline kj::StringPtr KJ_STRINGIFY(KeyEncoding encoding) {
   switch (encoding) {
-    case KeyEncoding::PKCS1: return "pkcs1";
-    case KeyEncoding::PKCS8: return "pkcs8";
-    case KeyEncoding::SPKI: return "spki";
-    case KeyEncoding::SEC1: return "sec1";
+    case KeyEncoding::PKCS1:
+      return "pkcs1";
+    case KeyEncoding::PKCS8:
+      return "pkcs8";
+    case KeyEncoding::SPKI:
+      return "spki";
+    case KeyEncoding::SEC1:
+      return "sec1";
   }
   KJ_UNREACHABLE;
 }
@@ -67,37 +71,43 @@ public:
 
   // Add salt to digest context in order to generate or verify salted signature.
   // Currently only used for RSA-PSS sign and verify operations.
-  virtual void addSalt(EVP_PKEY_CTX* digestCtx,
-                       const SubtleCrypto::SignAlgorithm& algorithm) const {}
+  virtual void addSalt(
+      EVP_PKEY_CTX* digestCtx, const SubtleCrypto::SignAlgorithm& algorithm) const {}
 
   // ---------------------------------------------------------------------------
   // Implementation of CryptoKey
 
   SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override final;
 
-  virtual kj::Array<kj::byte> exportKeyExt(
-      kj::StringPtr format,
+  virtual kj::Array<kj::byte> exportKeyExt(kj::StringPtr format,
       kj::StringPtr type,
       jsg::Optional<kj::String> cipher = kj::none,
       jsg::Optional<kj::Array<kj::byte>> passphrase = kj::none) const override final;
 
   kj::Array<kj::byte> sign(
-      SubtleCrypto::SignAlgorithm&& algorithm,
+      SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const override;
+
+  bool verify(SubtleCrypto::SignAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> signature,
       kj::ArrayPtr<const kj::byte> data) const override;
 
-  bool verify(
-      SubtleCrypto::SignAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const override;
-
   kj::StringPtr getType() const override;
-  KeyType getTypeEnum() const { return keyType; }
+  KeyType getTypeEnum() const {
+    return keyType;
+  }
 
-  inline EVP_PKEY* getEvpPkey() const { return keyData.get(); }
+  inline EVP_PKEY* getEvpPkey() const {
+    return keyData.get();
+  }
 
   bool equals(const CryptoKey::Impl& other) const override final;
 
-  kj::StringPtr jsgGetMemoryName() const override { return "AsymmetricKey"; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(AsymmetricKeyCryptoKeyImpl); }
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "AsymmetricKey";
+  }
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(AsymmetricKeyCryptoKeyImpl);
+  }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {}
 
   bool verifyX509Public(const X509* cert) const override;
@@ -113,8 +123,7 @@ private:
 };
 
 // Performs asymmetric key import per the Web Crypto spec.
-AsymmetricKeyData importAsymmetricForWebCrypto(
-    jsg::Lock& js,
+AsymmetricKeyData importAsymmetricForWebCrypto(jsg::Lock& js,
     kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
     kj::StringPtr normalizedName,

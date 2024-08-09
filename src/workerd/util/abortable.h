@@ -16,8 +16,8 @@ public:
         inner(kj::mv(inner)),
         onCancel(*(this->canceler), [this]() { this->inner = kj::none; }) {}
 
-  template <typename V, typename... Args, typename...ArgsT>
-  kj::Promise<V> wrap(kj::Promise<V>(T::*fn)(ArgsT...), Args&&...args) {
+  template <typename V, typename... Args, typename... ArgsT>
+  kj::Promise<V> wrap(kj::Promise<V> (T::*fn)(ArgsT...), Args&&... args) {
     return wrap([&](T& inner) { return (inner.*fn)(kj::fwd<ArgsT>(args)...); });
   }
 
@@ -54,8 +54,7 @@ private:
 // which will be triggered when the AbortSignal is triggered.
 // TODO(later): It would be good to see if both this and NeuterableInputStream
 // could be combined into a single utility.
-class AbortableInputStream final: public kj::AsyncInputStream,
-                                  public kj::Refcounted {
+class AbortableInputStream final: public kj::AsyncInputStream, public kj::Refcounted {
 public:
   AbortableInputStream(kj::Own<kj::AsyncInputStream> inner, RefcountedCanceler& canceler)
       : impl(kj::mv(inner), canceler) {}
@@ -84,22 +83,22 @@ private:
 // This is currently only used when opening a WebSocket with a fetch() request that
 // is using an AbortSignal. The AbortableWebSocket is created using the AbortSignal's
 // RefcountedCanceler, which will be triggered when the AbortSignal is triggered.
-class AbortableWebSocket final: public kj::WebSocket,
-                                public kj::Refcounted {
+class AbortableWebSocket final: public kj::WebSocket, public kj::Refcounted {
 public:
   AbortableWebSocket(kj::Own<kj::WebSocket> inner, RefcountedCanceler& canceler)
       : impl(kj::mv(inner), canceler) {}
 
   kj::Promise<void> send(kj::ArrayPtr<const kj::byte> message) override {
     return impl.wrap(
-        static_cast<kj::Promise<void>(kj::WebSocket::*)(kj::ArrayPtr<const kj::byte>)>(
-            &kj::WebSocket::send), message);
+        static_cast<kj::Promise<void> (kj::WebSocket::*)(kj::ArrayPtr<const kj::byte>)>(
+            &kj::WebSocket::send),
+        message);
   }
 
   kj::Promise<void> send(kj::ArrayPtr<const char> message) override {
-    return impl.wrap(
-        static_cast<kj::Promise<void>(kj::WebSocket::*)(kj::ArrayPtr<const char>)>(
-            &kj::WebSocket::send), message);
+    return impl.wrap(static_cast<kj::Promise<void> (kj::WebSocket::*)(kj::ArrayPtr<const char>)>(
+                         &kj::WebSocket::send),
+        message);
   }
 
   kj::Promise<void> close(uint16_t code, kj::StringPtr reason) override {
@@ -146,9 +145,8 @@ public:
     return impl.getInner().getPreferredExtensions(ctx);
   };
 
-
 private:
   AbortableImpl<kj::WebSocket> impl;
 };
 
-} // namespace workerd
+}  // namespace workerd

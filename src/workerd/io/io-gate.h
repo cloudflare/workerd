@@ -63,12 +63,18 @@ public:
   class Lock {
   public:
     KJ_DISALLOW_COPY(Lock);
-    Lock(Lock&& other): gate(other.gate), cs(kj::mv(other.cs)) { other.gate = nullptr; }
-    ~Lock() noexcept(false) { if (gate != nullptr) gate->releaseLock(); }
+    Lock(Lock&& other): gate(other.gate), cs(kj::mv(other.cs)) {
+      other.gate = nullptr;
+    }
+    ~Lock() noexcept(false) {
+      if (gate != nullptr) gate->releaseLock();
+    }
 
     // Increments the lock's refcount, returning a duplicate `Lock`. All `Lock`s must be dropped
     // before the gate is unlocked.
-    Lock addRef() { return Lock(*gate); }
+    Lock addRef() {
+      return Lock(*gate);
+    }
 
     // Start a new critical section from this lock. After `wait()` has been called on the returned
     // critical section for the first time, no further Locks will be handed out by
@@ -84,7 +90,9 @@ public:
 
     bool isFor(const InputGate& gate) const;
 
-    inline bool operator==(const Lock& other) const { return gate == other.gate; }
+    inline bool operator==(const Lock& other) const {
+      return gate == other.gate;
+    }
 
   private:
     // Becomes null on move.
@@ -225,7 +233,9 @@ public:
     // Optionally make a promise which should be exclusiveJoin()ed with the lock promise to
     // implement a timeout. The returned promise should be something that throws an exception
     // after some timeout has expired.
-    virtual kj::Promise<void> makeTimeoutPromise() { return kj::NEVER_DONE; }
+    virtual kj::Promise<void> makeTimeoutPromise() {
+      return kj::NEVER_DONE;
+    }
 
     // Optionally track metrics. In practice these are implemented by MetricsCollector::Actor, but
     // we don't want to depend on that class from here.
@@ -283,12 +293,11 @@ kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise) {
   if constexpr (std::is_void_v<T>) {
     promise = promise.exclusiveJoin(hooks.makeTimeoutPromise());
   } else {
-    promise = promise.exclusiveJoin(hooks.makeTimeoutPromise()
-        .then([]() -> T { KJ_UNREACHABLE; }));
+    promise = promise.exclusiveJoin(hooks.makeTimeoutPromise().then([]() -> T { KJ_UNREACHABLE; }));
   }
 
   hooks.outputGateLocked();
-  auto rejectIfCanceled = kj::defer([this, &fulfiller](){
+  auto rejectIfCanceled = kj::defer([this, &fulfiller]() {
     hooks.outputGateReleased();
     if (fulfiller->isWaiting()) {
       auto e = makeUnfulfilledException();

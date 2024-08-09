@@ -21,10 +21,14 @@ class CommonJsModuleContext;
 
 class CommonJsModuleObject: public jsg::Object {
 public:
-  CommonJsModuleObject(jsg::Lock& js) : exports(js.v8Isolate, v8::Object::New(js.v8Isolate)) {}
+  CommonJsModuleObject(jsg::Lock& js): exports(js.v8Isolate, v8::Object::New(js.v8Isolate)) {}
 
-  v8::Local<v8::Value> getExports(jsg::Lock& js) { return exports.getHandle(js); }
-  void setExports(jsg::Value value) { exports = kj::mv(value); }
+  v8::Local<v8::Value> getExports(jsg::Lock& js) {
+    return exports.getHandle(js);
+  }
+  void setExports(jsg::Value value) {
+    exports = kj::mv(value);
+  }
 
   JSG_RESOURCE_TYPE(CommonJsModuleObject) {
     JSG_INSTANCE_PROPERTY(exports, getExports, setExports);
@@ -47,10 +51,16 @@ public:
 
   v8::Local<v8::Value> require(jsg::Lock& js, kj::String specifier);
 
-  jsg::Ref<CommonJsModuleObject> getModule(jsg::Lock& js) { return module.addRef(); }
+  jsg::Ref<CommonJsModuleObject> getModule(jsg::Lock& js) {
+    return module.addRef();
+  }
 
-  v8::Local<v8::Value> getExports(jsg::Lock& js) { return exports.getHandle(js); }
-  void setExports(jsg::Value value) { exports = kj::mv(value); }
+  v8::Local<v8::Value> getExports(jsg::Lock& js) {
+    return exports.getHandle(js);
+  }
+  void setExports(jsg::Value value) {
+    exports = kj::mv(value);
+  }
 
   JSG_RESOURCE_TYPE(CommonJsModuleContext) {
     JSG_METHOD(require);
@@ -176,7 +186,8 @@ public:
 
   v8::Local<v8::Value> runAndReturn(v8::Local<v8::Context> context) const;
 
-  static jsg::NonModuleScript compile(kj::StringPtr code, jsg::Lock& js, kj::StringPtr name = "worker.js");
+  static jsg::NonModuleScript compile(
+      kj::StringPtr code, jsg::Lock& js, kj::StringPtr name = "worker.js");
 
 private:
   v8::Global<v8::UnboundScript> unboundScript;
@@ -196,9 +207,8 @@ enum class ModuleInfoCompileOption {
   BUILTIN,
 };
 
-v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
-    kj::ArrayPtr<const uint8_t> code,
-    const CompilationObserver& observer);
+v8::Local<v8::WasmModuleObject> compileWasmModule(
+    jsg::Lock& js, kj::ArrayPtr<const uint8_t> code, const CompilationObserver& observer);
 
 // The ModuleRegistry maintains the collection of modules known to a script that can be
 // required or imported.
@@ -206,7 +216,7 @@ class ModuleRegistry {
 public:
   KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistry);
 
-  ModuleRegistry() { }
+  ModuleRegistry() {}
 
   using Type = ModuleType;
 
@@ -224,16 +234,14 @@ public:
   };
 
   static inline ModuleRegistry* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistry*>(
-        js.v8Context()->GetAlignedPointerFromEmbedderData(2));
+    return static_cast<ModuleRegistry*>(js.v8Context()->GetAlignedPointerFromEmbedderData(2));
   }
 
   struct CapnpModuleInfo {
-    Value fileScope;  // default import
+    Value fileScope;                                       // default import
     kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls;  // named imports
 
-    CapnpModuleInfo(Value fileScope,
-                    kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls);
+    CapnpModuleInfo(Value fileScope, kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls);
     CapnpModuleInfo(CapnpModuleInfo&&) = default;
     CapnpModuleInfo& operator=(CapnpModuleInfo&&) = default;
   };
@@ -249,18 +257,14 @@ public:
     NodeJsModuleInfo(NodeJsModuleInfo&&) = default;
     NodeJsModuleInfo& operator=(NodeJsModuleInfo&&) = default;
 
-    static jsg::Ref<jsg::Object> initModuleContext(
-        jsg::Lock& js,
-        kj::StringPtr name);
+    static jsg::Ref<jsg::Object> initModuleContext(jsg::Lock& js, kj::StringPtr name);
 
-    static v8::MaybeLocal<v8::Value> evaluate(
-        jsg::Lock& js,
+    static v8::MaybeLocal<v8::Value> evaluate(jsg::Lock& js,
         NodeJsModuleInfo& info,
         v8::Local<v8::Module> module,
         const kj::Maybe<kj::Array<kj::String>>& maybeExports);
 
-    jsg::Function<void()> initEvalFunc(
-        auto& lock,
+    jsg::Function<void()> initEvalFunc(auto& lock,
         jsg::Ref<jsg::Object>& moduleContext,
         kj::StringPtr name,
         kj::StringPtr content) {
@@ -268,11 +272,8 @@ public:
       v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
       auto context = lock.v8Context();
       auto handle = lock.wrap(context, moduleContext.addRef());
-      auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
-          context,
-          &source,
-          0, nullptr,
-          1, &handle));
+      auto fn =
+          jsg::check(v8::ScriptCompiler::CompileFunction(context, &source, 0, nullptr, 1, &handle));
       return lock.template unwrap<jsg::Function<void()>>(context, fn);
     }
   };
@@ -288,12 +289,9 @@ public:
     CommonJsModuleInfo(CommonJsModuleInfo&&) = default;
     CommonJsModuleInfo& operator=(CommonJsModuleInfo&&) = default;
 
-    static Ref<CommonJsModuleContext> initModuleContext(
-        jsg::Lock& js,
-        kj::StringPtr name);
+    static Ref<CommonJsModuleContext> initModuleContext(jsg::Lock& js, kj::StringPtr name);
 
-    static jsg::Function<void()> initEvalFunc(
-        auto& lock,
+    static jsg::Function<void()> initEvalFunc(auto& lock,
         Ref<CommonJsModuleContext>& moduleContext,
         kj::StringPtr name,
         kj::StringPtr content) {
@@ -301,11 +299,8 @@ public:
       v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
       auto context = lock.v8Context();
       auto handle = lock.wrap(context, moduleContext.addRef());
-      auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
-          context,
-          &source,
-          0, nullptr,
-          1, &handle));
+      auto fn =
+          jsg::check(v8::ScriptCompiler::CompileFunction(context, &source, 0, nullptr, 1, &handle));
       return lock.template unwrap<jsg::Function<void()>>(context, fn);
     }
   };
@@ -314,7 +309,7 @@ public:
   struct ValueModuleInfo {
     jsg::V8Ref<T> value;
 
-    ValueModuleInfo(jsg::Lock& js, v8::Local<T> value) : value(js.v8Isolate, value) {}
+    ValueModuleInfo(jsg::Lock& js, v8::Local<T> value): value(js.v8Isolate, value) {}
 
     ValueModuleInfo(ValueModuleInfo&&) = default;
     ValueModuleInfo& operator=(ValueModuleInfo&&) = default;
@@ -330,34 +325,37 @@ public:
     HashableV8Ref<v8::Module> module;
 
     using SyntheticModuleInfo = kj::OneOf<CapnpModuleInfo,
-                                          CommonJsModuleInfo,
-                                          DataModuleInfo,
-                                          TextModuleInfo,
-                                          WasmModuleInfo,
-                                          JsonModuleInfo,
-                                          ObjectModuleInfo,
-                                          NodeJsModuleInfo>;
+        CommonJsModuleInfo,
+        DataModuleInfo,
+        TextModuleInfo,
+        WasmModuleInfo,
+        JsonModuleInfo,
+        ObjectModuleInfo,
+        NodeJsModuleInfo>;
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
     kj::Maybe<kj::Array<kj::String>> maybeNamedExports;
 
     ModuleInfo(jsg::Lock& js,
-               v8::Local<v8::Module> module,
-               kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
+        v8::Local<v8::Module> module,
+        kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
 
     ModuleInfo(jsg::Lock& js,
-               kj::StringPtr name,
-               kj::ArrayPtr<const char> content,
-               ModuleInfoCompileOption flags,
-               const CompilationObserver& observer);
+        kj::StringPtr name,
+        kj::ArrayPtr<const char> content,
+        ModuleInfoCompileOption flags,
+        const CompilationObserver& observer);
 
-    ModuleInfo(jsg::Lock& js, kj::StringPtr name,
-               kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
-               SyntheticModuleInfo synthetic);
+    ModuleInfo(jsg::Lock& js,
+        kj::StringPtr name,
+        kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
+        SyntheticModuleInfo synthetic);
 
     ModuleInfo(ModuleInfo&&) = default;
     ModuleInfo& operator=(ModuleInfo&&) = default;
 
-    uint hashCode() const { return module.hashCode(); }
+    uint hashCode() const {
+      return module.hashCode();
+    }
   };
 
   struct ModuleRef {
@@ -377,18 +375,18 @@ public:
       kj::Function<kj::Maybe<ModuleInfo>(Lock&, ResolveMethod, kj::Maybe<const kj::Path&>&)>;
 
   virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
-                                         const kj::Path& specifier,
-                                         kj::Maybe<const kj::Path&> referrer = kj::none,
-                                         ResolveOption option = ResolveOption::DEFAULT,
-                                         ResolveMethod method = ResolveMethod::IMPORT,
-                                         kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) = 0;
+      const kj::Path& specifier,
+      kj::Maybe<const kj::Path&> referrer = kj::none,
+      ResolveOption option = ResolveOption::DEFAULT,
+      ResolveMethod method = ResolveMethod::IMPORT,
+      kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) = 0;
 
   virtual kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) = 0;
 
   virtual Promise<Value> resolveDynamicImport(jsg::Lock& js,
-                                              const kj::Path& specifier,
-                                              const kj::Path& referrer,
-                                              kj::StringPtr rawSpecifier) = 0;
+      const kj::Path& specifier,
+      const kj::Path& referrer,
+      kj::StringPtr rawSpecifier) = 0;
 
   virtual Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) = 0;
 
@@ -402,13 +400,13 @@ public:
 
 template <typename TypeWrapper>
 v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context,
-                                                  v8::Local<v8::Data> host_defined_options,
-                                                  v8::Local<v8::Value> resource_name,
-                                                  v8::Local<v8::String> specifier,
-                                                  v8::Local<v8::FixedArray> import_assertions);
+    v8::Local<v8::Data> host_defined_options,
+    v8::Local<v8::Value> resource_name,
+    v8::Local<v8::String> specifier,
+    v8::Local<v8::FixedArray> import_assertions);
 
-kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallbackService(
-    Lock& js, const kj::Path& specifier,
+kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallbackService(Lock& js,
+    const kj::Path& specifier,
     kj::Maybe<const kj::Path&>& referrer,
     CompilationObserver& observer,
     ModuleRegistry::ResolveMethod method,
@@ -419,12 +417,10 @@ class ModuleRegistryImpl final: public ModuleRegistry {
 public:
   KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistryImpl);
 
-  ModuleRegistryImpl(CompilationObserver& observer) : observer(observer) { }
+  ModuleRegistryImpl(CompilationObserver& observer): observer(observer) {}
 
   static kj::Own<ModuleRegistryImpl<TypeWrapper>> install(
-      v8::Isolate* isolate,
-      v8::Local<v8::Context> context,
-      CompilationObserver& observer) {
+      v8::Isolate* isolate, v8::Local<v8::Context> context, CompilationObserver& observer) {
     auto registry = kj::heap<ModuleRegistryImpl<TypeWrapper>>(observer);
     context->SetAlignedPointerInEmbedderData(2, registry.get());
     isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
@@ -432,10 +428,8 @@ public:
   }
 
   static inline ModuleRegistryImpl* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistryImpl*>(
-        js.v8Context()->GetAlignedPointerFromEmbedderData(2));
+    return static_cast<ModuleRegistryImpl*>(js.v8Context()->GetAlignedPointerFromEmbedderData(2));
   }
-
 
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
     dynamicImportHandler = kj::mv(func);
@@ -450,52 +444,45 @@ public:
       auto specifier = module.getName();
       auto path = kj::Path::parse(specifier);
       switch (module.which()) {
-      case Module::WASM:
-        // The body of this callback is copied from `compileWasmGlobal` in
-        // src/workerd/server/workerd-api.c++.
-        addBuiltinModule(
-            specifier,
-            [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-              lock.setAllowEval(true);
-              KJ_DEFER(lock.setAllowEval(false));
+        case Module::WASM:
+          // The body of this callback is copied from `compileWasmGlobal` in
+          // src/workerd/server/workerd-api.c++.
+          addBuiltinModule(specifier,
+              [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+            lock.setAllowEval(true);
+            KJ_DEFER(lock.setAllowEval(false));
 
-              // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
-              // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
-              // is way too slow. Until tier-up finishes, requests will be handled using
-              // Liftoff-generated code, which compiles fast but runs slower.
-              AllowV8BackgroundThreadsScope scope;
-              auto wasmModule =
-                  jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
-              return jsg::ModuleRegistry::ModuleInfo(
-                  lock, specifier, kj::none,
-                  jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
-            },
-            module.getType());
-        return;
-      case Module::DATA:
-        addBuiltinModule(
-            specifier,
-            [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-              v8::Local<v8::ArrayBuffer> data =
-                  lock.wrapBytes(kj::heapArray(module.getData().asBytes()));
-              return jsg::ModuleRegistry::ModuleInfo(
-                  lock, specifier, kj::none, jsg::ModuleRegistry::DataModuleInfo(lock, data));
-            },
-            module.getType());
-        return;
-      case Module::JSON:
-        addBuiltinModule(
-            specifier,
-            [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
-              auto data = jsg::check(
-                  v8::JSON::Parse(lock.v8Context(), lock.wrapString(module.getJson())));
-              return jsg::ModuleRegistry::ModuleInfo(
-                  lock, specifier, kj::none, jsg::ModuleRegistry::JsonModuleInfo(lock, data));
-            },
-            module.getType());
-        return;
-      case Module::SRC:
-        KJ_UNREACHABLE
+            // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
+            // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
+            // is way too slow. Until tier-up finishes, requests will be handled using
+            // Liftoff-generated code, which compiles fast but runs slower.
+            AllowV8BackgroundThreadsScope scope;
+            auto wasmModule =
+                jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
+            return jsg::ModuleRegistry::ModuleInfo(
+                lock, specifier, kj::none, jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+          }, module.getType());
+          return;
+        case Module::DATA:
+          addBuiltinModule(specifier,
+              [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+            v8::Local<v8::ArrayBuffer> data =
+                lock.wrapBytes(kj::heapArray(module.getData().asBytes()));
+            return jsg::ModuleRegistry::ModuleInfo(
+                lock, specifier, kj::none, jsg::ModuleRegistry::DataModuleInfo(lock, data));
+          }, module.getType());
+          return;
+        case Module::JSON:
+          addBuiltinModule(specifier,
+              [specifier, module](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+            auto data =
+                jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapString(module.getJson())));
+            return jsg::ModuleRegistry::ModuleInfo(
+                lock, specifier, kj::none, jsg::ModuleRegistry::JsonModuleInfo(lock, data));
+          }, module.getType());
+          return;
+        case Module::SRC:
+          KJ_UNREACHABLE
       }
     }
     // TODO: asChars() might be wrong for wide characters
@@ -514,17 +501,15 @@ public:
   // sourceCode has to exist while this ModuleRegistry exists.
   // The expectation is for this method to be called during the assembly of worker global context
   // after registering all user modules.
-  void addBuiltinModule(kj::StringPtr specifier,
-                        kj::ArrayPtr<const char> sourceCode,
-                        Type type = Type::BUILTIN) {
+  void addBuiltinModule(
+      kj::StringPtr specifier, kj::ArrayPtr<const char> sourceCode, Type type = Type::BUILTIN) {
     KJ_ASSERT(type != Type::BUNDLE);
     auto path = kj::Path::parse(specifier);
     entries.insert(kj::heap<Entry>(path, type, sourceCode));
   }
 
-  void addBuiltinModule(kj::StringPtr specifier,
-                        ModuleCallback factory,
-                        Type type = Type::BUILTIN) {
+  void addBuiltinModule(
+      kj::StringPtr specifier, ModuleCallback factory, Type type = Type::BUILTIN) {
     KJ_ASSERT(type != Type::BUNDLE);
     auto path = kj::Path::parse(specifier);
     entries.insert(kj::heap<Entry>(path, type, kj::mv(factory)));
@@ -532,21 +517,22 @@ public:
 
   template <typename T>
   void addBuiltinModule(kj::StringPtr specifier, Type type = Type::BUILTIN) {
-    addBuiltinModule(specifier, [specifier=kj::str(specifier)]
-        (Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&)
-        -> kj::Maybe<ModuleInfo> {
+    addBuiltinModule(specifier,
+        [specifier = kj::str(specifier)](
+            Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) -> kj::Maybe<ModuleInfo> {
       auto& wrapper = TypeWrapper::from(js.v8Isolate);
       auto wrap = wrapper.wrap(js.v8Context(), kj::none, alloc<T>());
       return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-    }, type);
+    },
+        type);
   }
 
   kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
-                                 const kj::Path& specifier,
-                                 kj::Maybe<const kj::Path&> referrer = kj::none,
-                                 ResolveOption option = ResolveOption::DEFAULT,
-                                 ResolveMethod method = ResolveMethod::IMPORT,
-                                 kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) override {
+      const kj::Path& specifier,
+      kj::Maybe<const kj::Path&> referrer = kj::none,
+      ResolveOption option = ResolveOption::DEFAULT,
+      ResolveMethod method = ResolveMethod::IMPORT,
+      kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) override {
     using Key = typename Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
@@ -583,16 +569,15 @@ public:
       option = ResolveOption::DEFAULT;
       return resolve(js, specifier.parent().eval(found), referrer, option, method, rawSpecifier);
     }
-    KJ_IF_SOME(info, tryResolveFromFallbackService(js, specifier, referrer, observer,
-                                                   method, rawSpecifier)) {
+    KJ_IF_SOME(info,
+        tryResolveFromFallbackService(js, specifier, referrer, observer, method, rawSpecifier)) {
       // If we resolved a module from the fallback service, we have to be sure
       // to add it to the registry...
       KJ_SWITCH_ONEOF(info) {
         KJ_CASE_ONEOF(i, ModuleInfo) {
           auto type = Type::BUNDLE;
           if (option == ResolveOption::BUILTIN_ONLY) {
-            if (str.startsWith("/node:") ||
-                str.startsWith("/cloudflare:") ||
+            if (str.startsWith("/node:") || str.startsWith("/cloudflare:") ||
                 str.startsWith("/workerd:")) {
               type = Type::BUILTIN;
             }
@@ -619,13 +604,13 @@ public:
   }
 
   kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) override {
-    for (const kj::Own<Entry>& entry : entries) {
+    for (const kj::Own<Entry>& entry: entries) {
       // Unfortunately we cannot use entries.find(...) in here because the module info can
       // be initialized lazily at any point after the entry is indexed, making the lookup
       // by module a bit problematic. Iterating through the entries is slower but it works.
       KJ_IF_SOME(info, entry->info.template tryGet<ModuleInfo>()) {
         if (info.module == module) {
-          return ModuleRef {
+          return ModuleRef{
             .specifier = entry->specifier,
             .type = entry->type,
             .module = const_cast<ModuleInfo&>(info),
@@ -636,12 +621,14 @@ public:
     return kj::none;
   }
 
-  size_t size() const { return entries.size(); }
+  size_t size() const {
+    return entries.size();
+  }
 
   Promise<Value> resolveDynamicImport(jsg::Lock& js,
-                                      const kj::Path& specifier,
-                                      const kj::Path& referrer,
-                                      kj::StringPtr rawSpecifier) override {
+      const kj::Path& specifier,
+      const kj::Path& referrer,
+      kj::StringPtr rawSpecifier) override {
     // Here, we first need to determine if the referrer is a built-in module
     // or not. If it is a built-in, then we are only permitted to resolve
     // internal modules. If the worker bundle provided an override for the
@@ -653,8 +640,8 @@ public:
       resolveOption = ModuleRegistry::ResolveOption::INTERNAL_ONLY;
     }
 
-    KJ_IF_SOME(info, resolve(js, specifier, referrer, resolveOption,
-                             ResolveMethod::IMPORT, rawSpecifier)) {
+    KJ_IF_SOME(info,
+        resolve(js, specifier, referrer, resolveOption, ResolveMethod::IMPORT, rawSpecifier)) {
       KJ_IF_SOME(func, dynamicImportHandler) {
         auto handler = [&info, isolate = js.v8Isolate]() -> Value {
           auto& js = Lock::from(isolate);
@@ -676,15 +663,17 @@ public:
   Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) override {
     auto specifierPath = kj::Path(specifier);
     auto resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
-    auto maybeModuleInfo = resolve(js, specifierPath, kj::none, resolveOption,
-                                   ResolveMethod::IMPORT, specifier);
+    auto maybeModuleInfo =
+        resolve(js, specifierPath, kj::none, resolveOption, ResolveMethod::IMPORT, specifier);
     auto moduleInfo = &KJ_REQUIRE_NONNULL(maybeModuleInfo, "No such module \"", specifier, "\".");
     auto handle = moduleInfo->module.getHandle(js);
     jsg::instantiateModule(js, handle);
     return js.v8Ref(handle->GetModuleNamespace());
   }
 
-  CompilationObserver& getObserver() { return observer; }
+  CompilationObserver& getObserver() {
+    return observer;
+  }
 
 private:
   CompilationObserver& observer;
@@ -708,7 +697,9 @@ private:
             type(type),
             hash(kj::hashCode(specifier, type)) {}
 
-      uint hashCode() const { return hash; }
+      uint hashCode() const {
+        return hash;
+      }
     };
 
     kj::Path specifier;
@@ -722,7 +713,7 @@ private:
           type(type),
           info(kj::mv(info)) {}
 
-    Entry(const kj::Path& specifier,Type type, kj::ArrayPtr<const char> src)
+    Entry(const kj::Path& specifier, Type type, kj::ArrayPtr<const char> src)
         : specifier(specifier.clone()),
           type(type),
           info(src) {}
@@ -737,16 +728,16 @@ private:
 
     // Lazily instantiate module from source code if needed
     kj::Maybe<ModuleInfo&> module(jsg::Lock& js,
-                                  CompilationObserver& observer,
-                                  kj::Maybe<const kj::Path&> referrer,
-                                  ModuleRegistry::ResolveMethod method =
-                                      ModuleRegistry::ResolveMethod::IMPORT) {
+        CompilationObserver& observer,
+        kj::Maybe<const kj::Path&> referrer,
+        ModuleRegistry::ResolveMethod method = ModuleRegistry::ResolveMethod::IMPORT) {
       KJ_SWITCH_ONEOF(info) {
         KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
           return kj::Maybe<ModuleInfo&>(moduleInfo);
         }
         KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          info = ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileOption::BUILTIN, observer);
+          info =
+              ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileOption::BUILTIN, observer);
           return info.tryGet<ModuleInfo>();
         }
         KJ_CASE_ONEOF(src, ModuleCallback) {
@@ -782,10 +773,10 @@ private:
 
 template <typename TypeWrapper>
 v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context,
-                                                  v8::Local<v8::Data> host_defined_options,
-                                                  v8::Local<v8::Value> resource_name,
-                                                  v8::Local<v8::String> specifier,
-                                                  v8::Local<v8::FixedArray> import_assertions) {
+    v8::Local<v8::Data> host_defined_options,
+    v8::Local<v8::Value> resource_name,
+    v8::Local<v8::String> specifier,
+    v8::Local<v8::FixedArray> import_assertions) {
   auto& js = Lock::from(context->GetIsolate());
   auto registry = ModuleRegistry::from(js);
   auto& wrapper = TypeWrapper::from(js.v8Isolate);
@@ -831,9 +822,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   auto maybeSpecifierPath = ([&]() -> kj::Maybe<kj::Path> {
     // If the specifier begins with one of our known prefixes, let's not resolve
     // it against the referrer.
-    if (spec.startsWith("node:") ||
-        spec.startsWith("cloudflare:") ||
-        spec.startsWith("workerd:")) {
+    if (spec.startsWith("node:") || spec.startsWith("cloudflare:") || spec.startsWith("workerd:")) {
       return kj::Path::parse(spec);
     }
     KJ_IF_SOME(referrerPath, maybeReferrerPath) {
@@ -857,8 +846,8 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   auto& specifierPath = KJ_ASSERT_NONNULL(maybeSpecifierPath);
 
   try {
-    return wrapper.wrap(context, kj::none,
-        registry->resolveDynamicImport(js, specifierPath, referrerPath, spec));
+    return wrapper.wrap(
+        context, kj::none, registry->resolveDynamicImport(js, specifierPath, referrerPath, spec));
   } catch (JsExceptionThrown&) {
     // If the tryCatch.Exception().IsEmpty() here is true, no JavaScript error
     // was scheduled which can happen in a few edge cases. Treat it as if

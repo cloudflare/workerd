@@ -7,7 +7,7 @@
 
 namespace workerd::api::node {
 
-class Channel : public jsg::Object {
+class Channel: public jsg::Object {
 public:
   using MessageCallback = jsg::Function<void(jsg::Value, jsg::Name)>;
   using TransformCallback = jsg::Function<jsg::Value(jsg::Value)>;
@@ -20,11 +20,11 @@ public:
   void publish(jsg::Lock& js, jsg::Value message);
   void subscribe(jsg::Lock& js, jsg::Identified<MessageCallback> callback);
   void unsubscribe(jsg::Lock& js, jsg::Identified<MessageCallback> callback);
-  void bindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als,
-                 jsg::Optional<TransformCallback> maybeTransform);
+  void bindStore(jsg::Lock& js,
+      jsg::Ref<AsyncLocalStorage> als,
+      jsg::Optional<TransformCallback> maybeTransform);
   void unbindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als);
-  v8::Local<v8::Value> runStores(
-      jsg::Lock& js,
+  v8::Local<v8::Value> runStores(jsg::Lock& js,
       jsg::Value message,
       jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
       jsg::Optional<v8::Local<v8::Value>> maybeReceiver,
@@ -45,7 +45,6 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-
   struct StoreEntry {
     kj::Own<jsg::AsyncContextFrame::StorageKey> key;
     TransformCallback transform;
@@ -75,7 +74,7 @@ private:
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
-class DiagnosticsChannelModule : public jsg::Object {
+class DiagnosticsChannelModule: public jsg::Object {
 public:
   DiagnosticsChannelModule() = default;
   DiagnosticsChannelModule(jsg::Lock&, const jsg::Url&) {}
@@ -83,7 +82,8 @@ public:
   bool hasSubscribers(jsg::Lock& js, jsg::Name name);
   jsg::Ref<Channel> channel(jsg::Lock& js, jsg::Name name);
   void subscribe(jsg::Lock& js, jsg::Name name, jsg::Identified<Channel::MessageCallback> callback);
-  void unsubscribe(jsg::Lock& js, jsg::Name name, jsg::Identified<Channel::MessageCallback> callback);
+  void unsubscribe(
+      jsg::Lock& js, jsg::Name name, jsg::Identified<Channel::MessageCallback> callback);
   // TODO: Support tracing channels
 
   JSG_RESOURCE_TYPE(DiagnosticsChannelModule) {
@@ -104,8 +104,7 @@ private:
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
-#define EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES        \
-    api::node::Channel,                                \
-    api::node::DiagnosticsChannelModule
+#define EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES                                                    \
+  api::node::Channel, api::node::DiagnosticsChannelModule
 
 }  // namespace workerd::api::node

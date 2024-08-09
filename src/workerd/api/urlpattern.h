@@ -9,14 +9,14 @@
 
 namespace workerd::api {
 
-#define URL_PATTERN_COMPONENTS(V) \
-  V(Protocol, protocol)           \
-  V(Username, username)           \
-  V(Password, password)           \
-  V(Hostname, hostname)           \
-  V(Port, port)                   \
-  V(Pathname, pathname)           \
-  V(Search, search)               \
+#define URL_PATTERN_COMPONENTS(V)                                                                  \
+  V(Protocol, protocol)                                                                            \
+  V(Username, username)                                                                            \
+  V(Password, password)                                                                            \
+  V(Hostname, hostname)                                                                            \
+  V(Port, port)                                                                                    \
+  V(Pathname, pathname)                                                                            \
+  V(Search, search)                                                                                \
   V(Hash, hash)
 
 // URLPattern is a Web Platform standard API for matching URLs against a
@@ -75,28 +75,21 @@ public:
     JSG_STRUCT(ignoreCase);
   };
 
-  explicit URLPattern(
-      jsg::UrlPattern inner
-#define V(_, name) ,jsg::JsRef<jsg::JsRegExp> name##Regex
-      URL_PATTERN_COMPONENTS(V)
+  explicit URLPattern(jsg::UrlPattern inner
+#define V(_, name) , jsg::JsRef<jsg::JsRegExp> name##Regex
+          URL_PATTERN_COMPONENTS(V)
 #undef V
-      );
+  );
 
-  static jsg::Ref<URLPattern> constructor(
-      jsg::Lock& js,
+  static jsg::Ref<URLPattern> constructor(jsg::Lock& js,
       jsg::Optional<URLPatternInput> input,
       jsg::Optional<kj::String> baseURL,
       jsg::Optional<URLPatternOptions> patternOptions);
 
   kj::Maybe<URLPatternResult> exec(
-      jsg::Lock& js,
-      jsg::Optional<URLPatternInput> input,
-      jsg::Optional<kj::String> baseURL);
+      jsg::Lock& js, jsg::Optional<URLPatternInput> input, jsg::Optional<kj::String> baseURL);
 
-  bool test(
-      jsg::Lock& js,
-      jsg::Optional<URLPatternInput> input,
-      jsg::Optional<kj::String> baseURL);
+  bool test(jsg::Lock& js, jsg::Optional<URLPatternInput> input, jsg::Optional<kj::String> baseURL);
 
 #define V(name, _) kj::StringPtr get##name();
   URL_PATTERN_COMPONENTS(V)
@@ -123,11 +116,8 @@ private:
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
-#define EW_URLPATTERN_ISOLATE_TYPES           \
-  api::URLPattern,                            \
-  api::URLPattern::URLPatternInit,            \
-  api::URLPattern::URLPatternComponentResult, \
-  api::URLPattern::URLPatternResult,          \
-  api::URLPattern::URLPatternOptions
+#define EW_URLPATTERN_ISOLATE_TYPES                                                                \
+  api::URLPattern, api::URLPattern::URLPatternInit, api::URLPattern::URLPatternComponentResult,    \
+      api::URLPattern::URLPatternResult, api::URLPattern::URLPatternOptions
 
 }  // namespace workerd::api

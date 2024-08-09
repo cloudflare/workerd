@@ -9,32 +9,32 @@
 #include <workerd/jsg/exception.h>
 #include <openssl/hmac.h>
 
-
-constexpr kj::byte zero32[SHA256_DIGEST_LENGTH] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+constexpr kj::byte zero32[SHA256_DIGEST_LENGTH] = {
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 KJ_TEST("ActorIdImpl equals test") {
   using ActorIdImpl = workerd::server::ActorIdFactoryImpl::ActorIdImpl;
   struct ActorEqualsTest {
-    ActorIdImpl actorLeft= {zero32, kj::none};
+    ActorIdImpl actorLeft = {zero32, kj::none};
     ActorIdImpl actorRight = {zero32, kj::none};
     bool expectedResult;
     ActorEqualsTest(kj::byte leftFill,
-      const char* leftString,
-      kj::byte rightFill,
-      const char* rightString, bool expectedResult) : expectedResult(expectedResult) {
+        const char* leftString,
+        kj::byte rightFill,
+        const char* rightString,
+        bool expectedResult)
+        : expectedResult(expectedResult) {
       kj::byte idParamCopier[SHA256_DIGEST_LENGTH];
       memset(idParamCopier, leftFill, SHA256_DIGEST_LENGTH);
-      if(leftString == nullptr) {
+      if (leftString == nullptr) {
         actorLeft = ActorIdImpl(idParamCopier, kj::none);
       } else {
-        actorLeft = ActorIdImpl(idParamCopier,
-          kj::heapString(leftString));
+        actorLeft = ActorIdImpl(idParamCopier, kj::heapString(leftString));
       }
       memset(idParamCopier, rightFill, SHA256_DIGEST_LENGTH);
-      if(rightString == nullptr) {
+      if (rightString == nullptr) {
         actorRight = ActorIdImpl(idParamCopier, kj::none);
       } else {
-        actorRight = ActorIdImpl(idParamCopier,
-          kj::heapString(rightString));
+        actorRight = ActorIdImpl(idParamCopier, kj::heapString(rightString));
       }
     }
   };
@@ -47,13 +47,13 @@ KJ_TEST("ActorIdImpl equals test") {
     {0, "hello", 0, nullptr, true},
     {0, "hello", 1, nullptr, false},
   };
-  for(const auto& testCase : testCases) {
+  for (const auto& testCase: testCases) {
     KJ_EXPECT(testCase.actorLeft.equals(testCase.actorRight) == testCase.expectedResult);
   }
 }
 
 constexpr size_t BASE_LENGTH = SHA256_DIGEST_LENGTH / 2;
-kj::String computeProperTestMac(const char * strId, const char* strKey) {
+kj::String computeProperTestMac(const char* strId, const char* strKey) {
   auto id = kj::decodeHex(kj::heapString(strId));
   KJ_ASSERT(!id.hadErrors);
   KJ_ASSERT(id.size() == SHA256_DIGEST_LENGTH);
@@ -70,26 +70,32 @@ kj::String computeProperTestMac(const char * strId, const char* strKey) {
   return kj::encodeHex(ret);
 }
 
-constexpr const char deadbeef64[] = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+constexpr const char deadbeef64[] =
+    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 KJ_TEST("ActorIdImplFactory idFromString test") {
   using ActorIdFactoryImpl = workerd::server::ActorIdFactoryImpl;
   struct ActorFactoryFromStringTest {
     ActorIdFactoryImpl actor;
     kj::String string;
     bool isFatal;
-    ActorFactoryFromStringTest(const char* actorString, const char* string, bool isFatal):
-      actor(actorString), string(kj::heapString(string)), isFatal(isFatal) {}
-    ActorFactoryFromStringTest(const char* actorString, kj::String string, bool isFatal) :
-      actor(actorString), string(kj::mv(string)), isFatal(isFatal) {}
+    ActorFactoryFromStringTest(const char* actorString, const char* string, bool isFatal)
+        : actor(actorString),
+          string(kj::heapString(string)),
+          isFatal(isFatal) {}
+    ActorFactoryFromStringTest(const char* actorString, kj::String string, bool isFatal)
+        : actor(actorString),
+          string(kj::mv(string)),
+          isFatal(isFatal) {}
   };
   using Test = ActorFactoryFromStringTest;
   Test testCases[] = {
-    {"hello", "goodbye", true}, // a random string of the wrong length
-    {"hello", deadbeef64, true}, //Gets past the first assert
-    {deadbeef64, computeProperTestMac(deadbeef64, deadbeef64), false}, //Gets past the second assert
+    {"hello", "goodbye", true},   // a random string of the wrong length
+    {"hello", deadbeef64, true},  //Gets past the first assert
+    {deadbeef64, computeProperTestMac(deadbeef64, deadbeef64),
+      false},  //Gets past the second assert
   };
-  for(auto& testCase : testCases) {
-    if(testCase.isFatal) {
+  for (auto& testCase: testCases) {
+    if (testCase.isFatal) {
       KJ_EXPECT_THROW(FAILED, testCase.actor.idFromString(kj::heapString(testCase.string)));
     } else {
       auto result = testCase.actor.idFromString(kj::heapString(testCase.string));

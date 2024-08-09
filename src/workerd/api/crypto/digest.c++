@@ -14,13 +14,20 @@ namespace {
 
 class HmacKey final: public CryptoKey::Impl {
 public:
-  explicit HmacKey(kj::Array<kj::byte> keyData, CryptoKey::HmacKeyAlgorithm keyAlgorithm,
-                   bool extractable, CryptoKeyUsageSet usages)
+  explicit HmacKey(kj::Array<kj::byte> keyData,
+      CryptoKey::HmacKeyAlgorithm keyAlgorithm,
+      bool extractable,
+      CryptoKeyUsageSet usages)
       : CryptoKey::Impl(extractable, usages),
-        keyData(kj::mv(keyData)), keyAlgorithm(kj::mv(keyAlgorithm)) {}
+        keyData(kj::mv(keyData)),
+        keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
-  kj::StringPtr jsgGetMemoryName() const override { return "HmacKey"; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(HmacKey); }
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "HmacKey";
+  }
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(HmacKey);
+  }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
     tracker.trackFieldWithSize("keyData", keyData.size());
     tracker.trackField("keyAlgorithm", keyAlgorithm);
@@ -28,30 +35,27 @@ public:
 
 private:
   kj::Array<kj::byte> sign(
-      SubtleCrypto::SignAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> data) const override {
+      SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const override {
     return computeHmac(kj::mv(algorithm), data);
   }
 
-  bool verify(
-      SubtleCrypto::SignAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> signature, kj::ArrayPtr<const kj::byte> data) const override {
+  bool verify(SubtleCrypto::SignAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> signature,
+      kj::ArrayPtr<const kj::byte> data) const override {
     auto messageDigest = computeHmac(kj::mv(algorithm), data);
     return messageDigest.size() == signature.size() &&
         CRYPTO_memcmp(messageDigest.begin(), signature.begin(), signature.size()) == 0;
   }
 
   kj::Array<kj::byte> computeHmac(
-      SubtleCrypto::SignAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> data) const {
+      SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const {
     // For HMAC, the hash is specified when creating the key, not at call time.
     auto type = lookupDigestAlgorithm(keyAlgorithm.hash.name).second;
     auto messageDigest = kj::heapArray<kj::byte>(EVP_MD_size(type));
 
     uint messageDigestSize = 0;
-    auto ptr = HMAC(type, keyData.begin(), keyData.size(),
-                    data.begin(), data.size(),
-                    messageDigest.begin(), &messageDigestSize);
+    auto ptr = HMAC(type, keyData.begin(), keyData.size(), data.begin(), data.size(),
+        messageDigest.begin(), &messageDigestSize);
     JSG_REQUIRE(ptr != nullptr, DOMOperationError, "HMAC computation failed.");
 
     KJ_ASSERT(messageDigestSize == messageDigest.size());
@@ -65,7 +69,8 @@ private:
     if (format == "jwk") {
       // This assert enforces that the slice logic to fill in `.alg` below is safe.
       JSG_REQUIRE(keyAlgorithm.hash.name.slice(0, 4) == "SHA-"_kj, DOMNotSupportedError,
-          "Unimplemented JWK key export format for key algorithm \"", keyAlgorithm.hash.name, "\".");
+          "Unimplemented JWK key export format for key algorithm \"", keyAlgorithm.hash.name,
+          "\".");
 
       SubtleCrypto::JsonWebKey jwk;
       jwk.kty = kj::str("oct");
@@ -89,8 +94,12 @@ private:
     return kj::heapArray(keyData.asPtr());
   }
 
-  kj::StringPtr getAlgorithmName() const override { return "HMAC"; }
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm; }
+  kj::StringPtr getAlgorithmName() const override {
+    return "HMAC";
+  }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
+    return keyAlgorithm;
+  }
 
   bool equals(const CryptoKey::Impl& other) const override final {
     return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
@@ -98,7 +107,7 @@ private:
 
   bool equals(const kj::Array<kj::byte>& other) const override final {
     return keyData.size() == other.size() &&
-           CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
+        CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
   ZeroOnFree keyData;
@@ -126,7 +135,8 @@ kj::Own<HMAC_CTX> initHmacContext(kj::StringPtr algorithm, HmacContext::KeyData&
     static constexpr auto mt = ""_kjc;
     auto hmac_ctx = OSSL_NEW(HMAC_CTX);
     JSG_REQUIRE(HMAC_Init_ex(hmac_ctx.get(), key.size() ? key.asChars().begin() : mt.begin(),
-                            key.size(), md, nullptr), Error, "Failed to initalize HMAC");
+                    key.size(), md, nullptr),
+        Error, "Failed to initalize HMAC");
     return kj::mv(hmac_ctx);
   };
 
@@ -174,8 +184,7 @@ kj::ArrayPtr<kj::byte> HmacContext::digest() {
       auto theCtx = kj::mv(ctx);
       unsigned len;
       auto digest = kj::heapArray<kj::byte>(HMAC_size(theCtx.get()));
-      JSG_REQUIRE(HMAC_Final(theCtx.get(), digest.begin(), &len), Error,
-        "Failed to finalize HMAC");
+      JSG_REQUIRE(HMAC_Final(theCtx.get(), digest.begin(), &len), Error, "Failed to finalize HMAC");
       KJ_ASSERT(len == digest.size());
       ret = digest.asPtr();
       state = kj::mv(digest);
@@ -199,18 +208,18 @@ size_t HmacContext::size() const {
   KJ_UNREACHABLE;
 }
 
-kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateHmac(
-      jsg::Lock& js, kj::StringPtr normalizedName,
-      SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
-      kj::ArrayPtr<const kj::String> keyUsages) {
+kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateHmac(jsg::Lock& js,
+    kj::StringPtr normalizedName,
+    SubtleCrypto::GenerateKeyAlgorithm&& algorithm,
+    bool extractable,
+    kj::ArrayPtr<const kj::String> keyUsages) {
   KJ_REQUIRE(normalizedName == "HMAC");
-  kj::StringPtr hash = api::getAlgorithmName(JSG_REQUIRE_NONNULL(algorithm.hash, TypeError,
-      "Missing field \"hash\" in \"algorithm\"."));
+  kj::StringPtr hash = api::getAlgorithmName(
+      JSG_REQUIRE_NONNULL(algorithm.hash, TypeError, "Missing field \"hash\" in \"algorithm\"."));
 
   auto [normalizedHashName, hashEvpMd] = lookupDigestAlgorithm(hash);
-  auto usages =
-      CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::generate, keyUsages,
-                                  CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
+  auto usages = CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::generate,
+      keyUsages, CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
 
   // If the user requested a specific HMAC key length, honor it.
   auto length = algorithm.length.orDefault(EVP_MD_block_size(hashEvpMd) * 8);
@@ -222,25 +231,27 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateHmac(
   IoContext::current().getEntropySource().generate(keyDataArray);
   zeroOutTrailingKeyBits(keyDataArray, length);
 
-  auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm{normalizedName, {normalizedHashName},
-                                                  static_cast<uint16_t>(length)};
+  auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm{
+    normalizedName, {normalizedHashName}, static_cast<uint16_t>(length)};
 
-  return jsg::alloc<CryptoKey>(kj::heap<HmacKey>(kj::mv(keyDataArray),
-      kj::mv(keyAlgorithm), extractable, usages));
+  return jsg::alloc<CryptoKey>(
+      kj::heap<HmacKey>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages));
 }
 
-kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(
-    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
+kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(jsg::Lock& js,
+    kj::StringPtr normalizedName,
+    kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
-    SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
+    SubtleCrypto::ImportKeyAlgorithm&& algorithm,
+    bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
       CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importSecret,
           keyUsages, CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
 
   kj::Array<kj::byte> keyDataArray;
-  kj::StringPtr hash = api::getAlgorithmName(JSG_REQUIRE_NONNULL(algorithm.hash, TypeError,
-      "Missing field \"hash\" in \"algorithm\"."));
+  kj::StringPtr hash = api::getAlgorithmName(
+      JSG_REQUIRE_NONNULL(algorithm.hash, TypeError, "Missing field \"hash\" in \"algorithm\"."));
 
   if (format == "raw") {
     // NOTE: Checked in SubtleCrypto::importKey().
@@ -249,7 +260,8 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(
     auto& keyDataJwk = keyData.get<SubtleCrypto::JsonWebKey>();
     JSG_REQUIRE(keyDataJwk.kty == "oct", DOMDataError,
         "HMAC \"jwk\" key import requires a JSON Web Key with Key Type parameter "
-        "(\"kty\") equal to \"oct\" (encountered \"", keyDataJwk.kty, "\").");
+        "(\"kty\") equal to \"oct\" (encountered \"",
+        keyDataJwk.kty, "\").");
     // https://www.rfc-editor.org/rfc/rfc7518.txt Section 6.1
     keyDataArray = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.k), DOMDataError,
         "HMAC \"jwk\" key import requires a base64Url encoding of the key");
@@ -259,15 +271,16 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(
         auto expectedAlg = kj::str("HS", hash.slice(4));
         JSG_REQUIRE(alg == expectedAlg, DOMDataError,
             "HMAC \"jwk\" key import specifies \"alg\" that is incompatible with the hash name "
-            "(encountered \"", alg, "\", expected \"", expectedAlg, "\").");
+            "(encountered \"",
+            alg, "\", expected \"", expectedAlg, "\").");
       } else {
         // TODO(conform): Spec says this for non-SHA hashes:
         //     > Perform any key import steps defined by other applicable specifications, passing
         //     > format, jwk and hash and obtaining hash.
         //   What other hashes should be supported (if any)? For example, technically we support MD5
         //   below in `lookupDigestAlgorithm` for "raw" keys...
-        JSG_FAIL_REQUIRE(DOMNotSupportedError,
-            "Unrecognized or unimplemented hash algorithm requested", alg);
+        JSG_FAIL_REQUIRE(
+            DOMNotSupportedError, "Unrecognized or unimplemented hash algorithm requested", alg);
       }
     }
   } else {
@@ -281,17 +294,18 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(
   auto keySize = keyDataArray.size() * 8;
   auto length = algorithm.length.orDefault(keySize);
   if (length == 0 || length > keySize || length <= keySize - 8) {
-    JSG_FAIL_REQUIRE(DOMDataError,
-        "Imported HMAC key length (", length, ") must be a non-zero value up to 7 bits less than, "
-        "and no greater than, the bit length of the raw key data (", keySize, ").");
+    JSG_FAIL_REQUIRE(DOMDataError, "Imported HMAC key length (", length,
+        ") must be a non-zero value up to 7 bits less than, "
+        "and no greater than, the bit length of the raw key data (",
+        keySize, ").");
   }
 
   // Not required by the spec, but zeroing out the unused bits makes me feel better.
   zeroOutTrailingKeyBits(keyDataArray, length);
 
   auto normalizedHashName = lookupDigestAlgorithm(hash).first;
-  auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm{normalizedName, {normalizedHashName},
-                                                  static_cast<uint16_t>(length)};
+  auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm{
+    normalizedName, {normalizedHashName}, static_cast<uint16_t>(length)};
   return kj::heap<HmacKey>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages);
 }
 
@@ -316,9 +330,10 @@ void checkXofLen(EVP_MD_CTX* ctx, kj::Maybe<uint32_t>& maybeXof) {
 }
 }  // namespace
 
-HashContext::HashContext(kj::OneOf<kj::Own<EVP_MD_CTX>, kj::Array<kj::byte>> state,
-                         kj::Maybe<uint32_t> maybeXof)
-    : state(kj::mv(state)), maybeXof(kj::mv(maybeXof)) {
+HashContext::HashContext(
+    kj::OneOf<kj::Own<EVP_MD_CTX>, kj::Array<kj::byte>> state, kj::Maybe<uint32_t> maybeXof)
+    : state(kj::mv(state)),
+      maybeXof(kj::mv(maybeXof)) {
   checkXofLen(this->state.get<kj::Own<EVP_MD_CTX>>().get(), this->maybeXof);
 }
 

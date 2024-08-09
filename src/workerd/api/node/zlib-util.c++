@@ -12,4 +12,4 @@ uint32_t ZlibUtil::crc32Sync(kj::Array<kj::byte> data, uint32_t value) {
   return crc32(value, reinterpret_cast<const Bytef*>(data.begin()), data.size());
 }
 
-} // namespace workerd::api::node
+}  // namespace workerd::api::node

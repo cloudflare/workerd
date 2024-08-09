@@ -425,8 +425,7 @@ public:
     JSG_METHOD(append);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
-      append(content: string, options?: ContentOptions): DocumentEnd;
+    JSG_TS_OVERRIDE({ append(content : string, options ?: ContentOptions): DocumentEnd;
     });
     // Require content to be a string
   }
@@ -437,18 +436,10 @@ private:
   void htmlContentScopeEnd() override;
 };
 
-#define EW_HTML_REWRITER_ISOLATE_TYPES          \
-  api::ContentOptions,                          \
-  api::HTMLRewriter,                            \
-  api::HTMLRewriter::ElementContentHandlers,    \
-  api::HTMLRewriter::DocumentContentHandlers,   \
-  api::Doctype,                                 \
-  api::Element,                                 \
-  api::EndTag,                                  \
-  api::Comment,                                 \
-  api::Text,                                    \
-  api::DocumentEnd,                             \
-  api::Element::AttributesIterator,             \
-  api::Element::AttributesIterator::Next
+#define EW_HTML_REWRITER_ISOLATE_TYPES                                                             \
+  api::ContentOptions, api::HTMLRewriter, api::HTMLRewriter::ElementContentHandlers,               \
+      api::HTMLRewriter::DocumentContentHandlers, api::Doctype, api::Element, api::EndTag,         \
+      api::Comment, api::Text, api::DocumentEnd, api::Element::AttributesIterator,                 \
+      api::Element::AttributesIterator::Next
 
 }  // namespace workerd::api

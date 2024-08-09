@@ -10,4 +10,4 @@ kj::Maybe<kj::Array<kj::byte>> exportPublicKey(kj::ArrayPtr<const kj::byte> inpu
 
 kj::Maybe<kj::Array<kj::byte>> exportChallenge(kj::ArrayPtr<const kj::byte> input);
 
-}
+}  // namespace workerd::api

@@ -8,8 +8,9 @@
 
 namespace workerd::server {
 
-ActorIdFactoryImpl::ActorIdImpl::ActorIdImpl(const kj::byte idParam[SHA256_DIGEST_LENGTH], kj::Maybe<kj::String> name)
-  : name(kj::mv(name)) {
+ActorIdFactoryImpl::ActorIdImpl::ActorIdImpl(
+    const kj::byte idParam[SHA256_DIGEST_LENGTH], kj::Maybe<kj::String> name)
+    : name(kj::mv(name)) {
   memcpy(id, idParam, sizeof(id));
 }
 
@@ -33,9 +34,10 @@ ActorIdFactoryImpl::ActorIdFactoryImpl(kj::StringPtr uniqueKey) {
   KJ_ASSERT(SHA256(uniqueKey.asBytes().begin(), uniqueKey.size(), key) == key);
 }
 
-kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::newUniqueId(kj::Maybe<kj::StringPtr> jurisdiction) {
-  JSG_REQUIRE(jurisdiction == kj::none, Error,
-      "Jurisdiction restrictions are not implemented in workerd.");
+kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::newUniqueId(
+    kj::Maybe<kj::StringPtr> jurisdiction) {
+  JSG_REQUIRE(
+      jurisdiction == kj::none, Error, "Jurisdiction restrictions are not implemented in workerd.");
 
   // We want to randomly-generate the first 16 bytes, then HMAC those to produce the latter
   // 16 bytes. But the HMAC will produce 32 bytes, so we're only taking a prefix of it. We'll
@@ -61,8 +63,8 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromName(kj::String name)
   // Compute the first half of the ID by HMACing the name itself. We're using HMAC as a keyed
   // hash here, not actually for authentication, but it works.
   unsigned int len = SHA256_DIGEST_LENGTH;
-  KJ_ASSERT(HMAC(EVP_sha256(), key, sizeof(key), name.asBytes().begin(), name.size(), id, &len)
-                  == id);
+  KJ_ASSERT(
+      HMAC(EVP_sha256(), key, sizeof(key), name.asBytes().begin(), name.size(), id, &len) == id);
   KJ_ASSERT(len == SHA256_DIGEST_LENGTH);
 
   computeMac(id);
@@ -72,8 +74,8 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromName(kj::String name)
 kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromString(kj::String str) {
   auto decoded = kj::decodeHex(str);
   JSG_REQUIRE(str.size() == SHA256_DIGEST_LENGTH * 2 && !decoded.hadErrors &&
-              decoded.size() == SHA256_DIGEST_LENGTH,
-              TypeError, "Invalid Durable Object ID: must be 64 hex digits");
+          decoded.size() == SHA256_DIGEST_LENGTH,
+      TypeError, "Invalid Durable Object ID: must be 64 hex digits");
 
   kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENGTH]{};
   memcpy(id, decoded.begin(), BASE_LENGTH);
@@ -81,7 +83,7 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromString(kj::String str
 
   // Verify that the computed mac matches the input.
   JSG_REQUIRE(kj::arrayPtr(id).slice(BASE_LENGTH).startsWith(decoded.asPtr().slice(BASE_LENGTH)),
-              TypeError, "Durable Object ID is not valid for this namespace.");
+      TypeError, "Durable Object ID is not valid for this namespace.");
 
   return kj::heap<ActorIdImpl>(id, kj::none);
 }
@@ -106,4 +108,4 @@ void ActorIdFactoryImpl::computeMac(kj::byte id[BASE_LENGTH + SHA256_DIGEST_LENG
   KJ_ASSERT(len == SHA256_DIGEST_LENGTH);
 }
 
-} //namespace workerd::server
+}  //namespace workerd::server

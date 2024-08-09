@@ -41,9 +41,12 @@ public:
   kj::Promise<void> addWaiter() const;
 
   // Wake all current *and future* waiters.
-  void fulfill() const { KJ_IREQUIRE(!createdFulfiller); state->fulfill(); }
+  void fulfill() const {
+    KJ_IREQUIRE(!createdFulfiller);
+    state->fulfill();
+  }
 
-    // Causes all past and future `addWaiter()` calls to reject with the given exception.
+  // Causes all past and future `addWaiter()` calls to reject with the given exception.
   void reject(kj::Exception&& e) const {
     KJ_IREQUIRE(!createdFulfiller);
     state->reject(kj::mv(e));
@@ -51,7 +54,9 @@ public:
 
   // Has `fulfill()` or `reject()` been called? Of course, the caller should consider if
   // `fulfill()` might be called in another thread concurrently.
-  bool isDone() const { return __atomic_load_n(&state->done, __ATOMIC_ACQUIRE); }
+  bool isDone() const {
+    return __atomic_load_n(&state->done, __ATOMIC_ACQUIRE);
+  }
 
   // Creates a PromiseFulfiller that will fulfill this wait list. Once this is called, it is no
   // longer the CrossThreadWaitList's responsibility to fulfill the waiters.

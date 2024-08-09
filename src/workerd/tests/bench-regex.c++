@@ -16,8 +16,7 @@ struct RegExpBenchmark: public benchmark::Fixture {
   virtual ~RegExpBenchmark() noexcept(true) {}
 
   void SetUp(benchmark::State& state) noexcept(true) override {
-    TestFixture::SetupParams params = {
-      .mainModuleSource = R"(
+    TestFixture::SetupParams params = {.mainModuleSource = R"(
         export default {
           async fetch(request, env, ctx) {
             const body = await request.text();
@@ -30,8 +29,7 @@ struct RegExpBenchmark: public benchmark::Fixture {
             return new Response("error: word not found", {status: 400});
           }
         }
-      )"_kj
-    };
+      )"_kj};
     fixture = kj::heap<TestFixture>(kj::mv(params));
   }
 
@@ -43,13 +41,15 @@ struct RegExpBenchmark: public benchmark::Fixture {
 };
 
 BENCHMARK_F(RegExpBenchmark, request)(benchmark::State& state) {
-  for (auto _ : state) {
-    auto result = fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "accepted"_kj);
+  for (auto _: state) {
+    auto result =
+        fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "accepted"_kj);
     KJ_EXPECT(result.statusCode == 200 && result.body == "word found in dictionary"_kj);
-    auto result2 = fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "invalid"_kj);
+    auto result2 =
+        fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "invalid"_kj);
     KJ_EXPECT(result2.statusCode == 400 && result2.body == "error: word not found"_kj);
   }
 }
 
-} // namespace
-} // namespace workerd
+}  // namespace
+}  // namespace workerd

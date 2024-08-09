@@ -57,16 +57,23 @@ struct TlsOptions {
 
 class Socket: public jsg::Object {
 public:
-  Socket(jsg::Lock& js, IoContext& context,
+  Socket(jsg::Lock& js,
+      IoContext& context,
       kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
-      kj::String remoteAddress, jsg::Ref<ReadableStream> readableParam,
-      jsg::Ref<WritableStream> writable, jsg::PromiseResolverPair<void> closedPrPair,
-      kj::Promise<void> watchForDisconnectTask, jsg::Optional<SocketOptions> options,
-      kj::Own<kj::TlsStarterCallback> tlsStarter, bool isSecureSocket,
-      kj::String domain, bool isDefaultFetchPort,
+      kj::String remoteAddress,
+      jsg::Ref<ReadableStream> readableParam,
+      jsg::Ref<WritableStream> writable,
+      jsg::PromiseResolverPair<void> closedPrPair,
+      kj::Promise<void> watchForDisconnectTask,
+      jsg::Optional<SocketOptions> options,
+      kj::Own<kj::TlsStarterCallback> tlsStarter,
+      bool isSecureSocket,
+      kj::String domain,
+      bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
       : connectionStream(context.addObject(kj::mv(connectionStream))),
-        readable(kj::mv(readableParam)), writable(kj::mv(writable)),
+        readable(kj::mv(readableParam)),
+        writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),
         closedPromiseCopy(closedPrPair.promise.whenResolved(js)),
         closedPromise(kj::mv(closedPrPair.promise)),
@@ -80,10 +87,14 @@ public:
         openedResolver(kj::mv(openedPrPair.resolver)),
         openedPromiseCopy(openedPrPair.promise.whenResolved(js)),
         openedPromise(kj::mv(openedPrPair.promise)),
-        isClosing(false) { };
+        isClosing(false) {};
 
-  jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
-  jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
+  jsg::Ref<ReadableStream> getReadable() {
+    return readable.addRef();
+  }
+  jsg::Ref<WritableStream> getWritable() {
+    return writable.addRef();
+  }
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed() {
     return closedPromise;
   }
@@ -107,8 +118,7 @@ public:
   // The first variant is useful for connections established using HTTP connect. The latter is for
   // connections established any other way, where the lack of an exception indicates we connected
   // successfully.
-  void handleProxyStatus(
-      jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status);
+  void handleProxyStatus(jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status);
 
   // Sets up relevant callbacks to handle the case when the proxy rejects our connection.
   // The first variant is useful for connections established using HTTP connect. The latter is for
@@ -129,12 +139,10 @@ public:
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackFieldWithSize("connectionStream",
-        sizeof(IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>>));
-    tracker.trackFieldWithSize("tlsStarter",
-        sizeof(IoOwn<kj::TlsStarterCallback>));
-    tracker.trackFieldWithSize("watchForDisconnectTask",
-        sizeof(IoOwn<kj::Promise<void>>));
+    tracker.trackFieldWithSize(
+        "connectionStream", sizeof(IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>>));
+    tracker.trackFieldWithSize("tlsStarter", sizeof(IoOwn<kj::TlsStarterCallback>));
+    tracker.trackFieldWithSize("watchForDisconnectTask", sizeof(IoOwn<kj::Promise<void>>));
     tracker.trackField("readable", readable);
     tracker.trackField("writable", writable);
     tracker.trackField("closedResolver", closedResolver);
@@ -202,25 +210,28 @@ private:
   };
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(readable, writable, closedResolver,
-                  closedPromiseCopy, closedPromise,
-                  openedResolver, openedPromiseCopy,
-                  openedPromise);
+    visitor.visit(readable, writable, closedResolver, closedPromiseCopy, closedPromise,
+        openedResolver, openedPromiseCopy, openedPromise);
   }
 };
 
-jsg::Ref<Socket> setupSocket(
-    jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection,
+jsg::Ref<Socket> setupSocket(jsg::Lock& js,
+    kj::Own<kj::AsyncIoStream> connection,
     kj::String remoteAddress,
-    jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
-    bool isSecureSocket, kj::String domain, bool isDefaultFetchPort);
+    jsg::Optional<SocketOptions> options,
+    kj::Own<kj::TlsStarterCallback> tlsStarter,
+    bool isSecureSocket,
+    kj::String domain,
+    bool isDefaultFetchPort);
 
-jsg::Ref<Socket> connectImplNoOutputLock(
-    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
+jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
+    kj::Maybe<jsg::Ref<Fetcher>> fetcher,
+    AnySocketAddress address,
     jsg::Optional<SocketOptions> options);
 
-jsg::Ref<Socket> connectImpl(
-    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
+jsg::Ref<Socket> connectImpl(jsg::Lock& js,
+    kj::Maybe<jsg::Ref<Fetcher>> fetcher,
+    AnySocketAddress address,
     jsg::Optional<SocketOptions> options);
 
 class SocketsModule final: public jsg::Object {
@@ -228,8 +239,8 @@ public:
   SocketsModule() = default;
   SocketsModule(jsg::Lock&, const jsg::Url&) {}
 
-  jsg::Ref<Socket> connect(jsg::Lock& js, AnySocketAddress address,
-    jsg::Optional<SocketOptions> options) {
+  jsg::Ref<Socket> connect(
+      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options) {
     return connectImpl(js, kj::none, kj::mv(address), kj::mv(options));
   }
 
@@ -239,10 +250,9 @@ public:
 };
 
 template <class Registry>
-void registerSocketsModule(
-    Registry& registry, auto featureFlags) {
-  registry.template addBuiltinModule<SocketsModule>("cloudflare-internal:sockets",
-    workerd::jsg::ModuleRegistry::Type::INTERNAL);
+void registerSocketsModule(Registry& registry, auto featureFlags) {
+  registry.template addBuiltinModule<SocketsModule>(
+      "cloudflare-internal:sockets", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 template <typename TypeWrapper>
@@ -254,13 +264,9 @@ kj::Own<jsg::modules::ModuleBundle> getInternalSocketModuleBundle(auto featureFl
   return builder.finish();
 }
 
-#define EW_SOCKETS_ISOLATE_TYPES     \
-  api::Socket,                       \
-  api::SocketOptions,                \
-  api::SocketAddress,                \
-  api::TlsOptions,                   \
-  api::SocketsModule,                \
-  api::SocketInfo
+#define EW_SOCKETS_ISOLATE_TYPES                                                                   \
+  api::Socket, api::SocketOptions, api::SocketAddress, api::TlsOptions, api::SocketsModule,        \
+      api::SocketInfo
 
 // The list of sockets.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

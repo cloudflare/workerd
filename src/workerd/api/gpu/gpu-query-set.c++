@@ -19,4 +19,4 @@ wgpu::QueryType parseQueryType(kj::StringPtr type) {
   JSG_FAIL_REQUIRE(TypeError, "unknown Query type", type);
 }
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

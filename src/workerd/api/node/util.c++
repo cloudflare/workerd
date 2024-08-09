@@ -7,7 +7,7 @@
 
 namespace workerd::api::node {
 
-MIMEParams::MIMEParams(kj::Maybe<MimeType&> mimeType) : mimeType(mimeType) {}
+MIMEParams::MIMEParams(kj::Maybe<MimeType&> mimeType): mimeType(mimeType) {}
 
 // Oddly, Node.js allows creating MIMEParams directly but it's not actually
 // functional. But, to match, we'll go ahead and allow it.
@@ -37,8 +37,7 @@ bool MIMEParams::has(kj::String name) {
 
 void MIMEParams::set(kj::String name, kj::String value) {
   KJ_IF_SOME(inner, mimeType) {
-    JSG_REQUIRE(inner.addParam(name, value), TypeError,
-        "Not a valid MIME parameter");
+    JSG_REQUIRE(inner.addParam(name, value), TypeError, "Not a valid MIME parameter");
   }
 }
 
@@ -52,37 +51,31 @@ kj::String MIMEParams::toString() {
 jsg::Ref<MIMEParams::EntryIterator> MIMEParams::entries(jsg::Lock&) {
   kj::Vector<kj::Array<kj::String>> vec;
   KJ_IF_SOME(inner, mimeType) {
-    for (const auto& entry : inner.params()) {
+    for (const auto& entry: inner.params()) {
       vec.add(kj::arr(kj::str(entry.key), kj::str(entry.value)));
     }
   }
-  return jsg::alloc<EntryIterator>(IteratorState<kj::Array<kj::String>> {
-    vec.releaseAsArray()
-  });
+  return jsg::alloc<EntryIterator>(IteratorState<kj::Array<kj::String>>{vec.releaseAsArray()});
 }
 
 jsg::Ref<MIMEParams::KeyIterator> MIMEParams::keys(jsg::Lock&) {
   kj::Vector<kj::String> vec;
   KJ_IF_SOME(inner, mimeType) {
-    for (const auto& entry : inner.params()) {
+    for (const auto& entry: inner.params()) {
       vec.add(kj::str(entry.key));
     }
   }
-  return jsg::alloc<KeyIterator>(IteratorState<kj::String> {
-    vec.releaseAsArray()
-  });
+  return jsg::alloc<KeyIterator>(IteratorState<kj::String>{vec.releaseAsArray()});
 }
 
 jsg::Ref<MIMEParams::ValueIterator> MIMEParams::values(jsg::Lock&) {
   kj::Vector<kj::String> vec;
   KJ_IF_SOME(inner, mimeType) {
-    for (const auto& entry : inner.params()) {
+    for (const auto& entry: inner.params()) {
       vec.add(kj::str(entry.value));
     }
   }
-  return jsg::alloc<ValueIterator>(IteratorState<kj::String> {
-    vec.releaseAsArray()
-  });
+  return jsg::alloc<ValueIterator>(IteratorState<kj::String>{vec.releaseAsArray()});
 }
 
 MIMEType::MIMEType(MimeType inner)
@@ -95,8 +88,8 @@ MIMEType::~MIMEType() noexcept(false) {
 }
 
 jsg::Ref<MIMEType> MIMEType::constructor(kj::String input) {
-  auto parsed = JSG_REQUIRE_NONNULL(MimeType::tryParse(input), TypeError,
-      "Not a valid MIME type: ", input);
+  auto parsed =
+      JSG_REQUIRE_NONNULL(MimeType::tryParse(input), TypeError, "Not a valid MIME type: ", input);
   return jsg::alloc<MIMEType>(kj::mv(parsed));
 }
 
@@ -128,11 +121,10 @@ kj::String MIMEType::toString() {
   return inner.toString();
 }
 
-jsg::JsArray UtilModule::getOwnNonIndexProperties(jsg::Lock& js, jsg::JsObject value,
-                                                       int filter) {
+jsg::JsArray UtilModule::getOwnNonIndexProperties(jsg::Lock& js, jsg::JsObject value, int filter) {
   auto propertyFilter = static_cast<jsg::PropertyFilter>(filter);
-  return value.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY, propertyFilter,
-                                  jsg::IndexFilter::SKIP_INDICES);
+  return value.getPropertyNames(
+      js, jsg::KeyCollectionFilter::OWN_ONLY, propertyFilter, jsg::IndexFilter::SKIP_INDICES);
 }
 
 jsg::Optional<UtilModule::PromiseDetails> UtilModule::getPromiseDetails(jsg::JsValue value) {
@@ -140,9 +132,9 @@ jsg::Optional<UtilModule::PromiseDetails> UtilModule::getPromiseDetails(jsg::JsV
   auto state = promise.state();
   if (state != jsg::PromiseState::PENDING) {
     auto result = promise.result();
-    return PromiseDetails { .state = state, .result = result };
+    return PromiseDetails{.state = state, .result = result};
   } else {
-    return PromiseDetails { .state = state, .result = kj::none };
+    return PromiseDetails{.state = state, .result = kj::none};
   }
 }
 
@@ -150,32 +142,32 @@ jsg::Optional<UtilModule::ProxyDetails> UtilModule::getProxyDetails(jsg::JsValue
   auto proxy = KJ_UNWRAP_OR_RETURN(value.tryCast<jsg::JsProxy>(), kj::none);
   auto target = proxy.target();
   auto handler = proxy.handler();
-  return ProxyDetails { .target = target, .handler = handler };
+  return ProxyDetails{.target = target, .handler = handler};
 }
 
 jsg::Optional<UtilModule::PreviewedEntries> UtilModule::previewEntries(jsg::JsValue value) {
   auto object = KJ_UNWRAP_OR_RETURN(value.tryCast<jsg::JsObject>(), kj::none);
   bool isKeyValue;
   auto entries = object.previewEntries(&isKeyValue);
-  return PreviewedEntries { .entries = entries, .isKeyValue = isKeyValue };
+  return PreviewedEntries{.entries = entries, .isKeyValue = isKeyValue};
 }
 
 jsg::JsString UtilModule::getConstructorName(jsg::Lock& js, jsg::JsObject value) {
   return js.str(value.getConstructorName());
 }
 
-#define V(Type) bool UtilModule::is##Type(jsg::JsValue value) { return value.is##Type(); };
-  JS_UTIL_IS_TYPES(V)
+#define V(Type)                                                                                    \
+  bool UtilModule::is##Type(jsg::JsValue value) {                                                  \
+    return value.is##Type();                                                                       \
+  };
+JS_UTIL_IS_TYPES(V)
 #undef V
 bool UtilModule::isAnyArrayBuffer(jsg::JsValue value) {
   return value.isArrayBuffer() || value.isSharedArrayBuffer();
 }
 bool UtilModule::isBoxedPrimitive(jsg::JsValue value) {
-  return value.isNumberObject() ||
-         value.isStringObject() ||
-         value.isBooleanObject() ||
-         value.isBigIntObject() ||
-         value.isSymbolObject();
+  return value.isNumberObject() || value.isStringObject() || value.isBooleanObject() ||
+      value.isBigIntObject() || value.isSymbolObject();
 }
 
 jsg::Name UtilModule::getResourceTypeInspect(jsg::Lock& js) {
@@ -194,10 +186,9 @@ jsg::JsValue UtilModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
   if (registry == nullptr) return js.undefined();
   auto path = kj::Path::parse(specifier);
 
-  KJ_IF_SOME(info, registry->resolve(js, path, kj::none,
-      jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY,
-      jsg::ModuleRegistry::ResolveMethod::IMPORT,
-      rawSpecifier.asPtr())) {
+  KJ_IF_SOME(info,
+      registry->resolve(js, path, kj::none, jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY,
+          jsg::ModuleRegistry::ResolveMethod::IMPORT, rawSpecifier.asPtr())) {
     auto module = info.module.getHandle(js);
     jsg::instantiateModule(js, module);
     auto handle = jsg::check(module->Evaluate(js.v8Context()));

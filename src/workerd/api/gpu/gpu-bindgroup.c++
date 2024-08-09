@@ -13,10 +13,10 @@ wgpu::BindGroupEntry parseBindGroupEntry(GPUBindGroupEntry& entry) {
   KJ_SWITCH_ONEOF(entry.resource) {
     KJ_CASE_ONEOF(buffer, GPUBufferBinding) {
       e.buffer = *buffer.buffer;
-      KJ_IF_SOME (offset, buffer.offset) {
+      KJ_IF_SOME(offset, buffer.offset) {
         e.offset = offset;
       }
-      KJ_IF_SOME (size, buffer.size) {
+      KJ_IF_SOME(size, buffer.size) {
         e.size = size;
       }
     }
@@ -28,4 +28,4 @@ wgpu::BindGroupEntry parseBindGroupEntry(GPUBindGroupEntry& entry) {
   return kj::mv(e);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

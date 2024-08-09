@@ -10,7 +10,7 @@
 
 namespace workerd {
 
-template<size_t>
+template <size_t>
 class StringBuffer;
 
 class MimeType final {
@@ -25,17 +25,15 @@ public:
   // Returning nullptr implies that the input is not a valid mime type construction.
   // If the ParseOptions::IGNORE_PARAMS option is set then the mime type parameters
   // will be ignored and will not be included in the parsed result.
-  static kj::Maybe<MimeType> tryParse(kj::ArrayPtr<const char> input,
-                                      ParseOptions options = ParseOptions::DEFAULT);
+  static kj::Maybe<MimeType> tryParse(
+      kj::ArrayPtr<const char> input, ParseOptions options = ParseOptions::DEFAULT);
 
   // Asserts if the input could not be parsed as a valid MimeType. tryParse should
   // be preferred for most cases.
-  static MimeType parse(kj::StringPtr input,
-                        ParseOptions options = ParseOptions::DEFAULT);
+  static MimeType parse(kj::StringPtr input, ParseOptions options = ParseOptions::DEFAULT);
 
-  explicit MimeType(kj::StringPtr type,
-                    kj::StringPtr subtype,
-                    kj::Maybe<MimeParams> params = kj::none);
+  explicit MimeType(
+      kj::StringPtr type, kj::StringPtr subtype, kj::Maybe<MimeParams> params = kj::none);
 
   MimeType(MimeType&&) = default;
   MimeType& operator=(MimeType&&) = default;
@@ -114,8 +112,8 @@ private:
 
   void paramsToString(ToStringBuffer& buffer) const;
 
-  static kj::Maybe<MimeType> tryParseImpl(kj::ArrayPtr<const char> input,
-                                          ParseOptions options = ParseOptions::DEFAULT);
+  static kj::Maybe<MimeType> tryParseImpl(
+      kj::ArrayPtr<const char> input, ParseOptions options = ParseOptions::DEFAULT);
 };
 
 kj::String KJ_STRINGIFY(const MimeType& state);

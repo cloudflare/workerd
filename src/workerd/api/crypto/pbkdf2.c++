@@ -11,32 +11,39 @@ namespace {
 
 class Pbkdf2Key final: public CryptoKey::Impl {
 public:
-  explicit Pbkdf2Key(kj::Array<kj::byte> keyData, CryptoKey::KeyAlgorithm keyAlgorithm,
-                     bool extractable, CryptoKeyUsageSet usages)
+  explicit Pbkdf2Key(kj::Array<kj::byte> keyData,
+      CryptoKey::KeyAlgorithm keyAlgorithm,
+      bool extractable,
+      CryptoKeyUsageSet usages)
       : CryptoKey::Impl(extractable, usages),
-        keyData(kj::mv(keyData)), keyAlgorithm(kj::mv(keyAlgorithm)) {}
+        keyData(kj::mv(keyData)),
+        keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
-  kj::StringPtr jsgGetMemoryName() const override { return "Pbkdf2Key"; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(Pbkdf2Key); }
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "Pbkdf2Key";
+  }
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(Pbkdf2Key);
+  }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
     tracker.trackFieldWithSize("keyData", keyData.size());
     tracker.trackField("keyAlgorithm", keyAlgorithm);
   }
 
 private:
-  kj::Array<kj::byte> deriveBits(
-      jsg::Lock& js, SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
+  kj::Array<kj::byte> deriveBits(jsg::Lock& js,
+      SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> maybeLength) const override {
-    kj::StringPtr hashName = api::getAlgorithmName(JSG_REQUIRE_NONNULL(algorithm.hash, TypeError,
-        "Missing field \"hash\" in \"algorithm\"."));
+    kj::StringPtr hashName = api::getAlgorithmName(
+        JSG_REQUIRE_NONNULL(algorithm.hash, TypeError, "Missing field \"hash\" in \"algorithm\"."));
     auto hashType = lookupDigestAlgorithm(hashName).second;
-    kj::ArrayPtr<kj::byte> salt = JSG_REQUIRE_NONNULL(algorithm.salt, TypeError,
-        "Missing field \"salt\" in \"algorithm\".");
-    int iterations = JSG_REQUIRE_NONNULL(algorithm.iterations, TypeError,
-        "Missing field \"iterations\" in \"algorithm\".");
+    kj::ArrayPtr<kj::byte> salt =
+        JSG_REQUIRE_NONNULL(algorithm.salt, TypeError, "Missing field \"salt\" in \"algorithm\".");
+    int iterations = JSG_REQUIRE_NONNULL(
+        algorithm.iterations, TypeError, "Missing field \"iterations\" in \"algorithm\".");
 
-    uint32_t length = JSG_REQUIRE_NONNULL(maybeLength, DOMOperationError,
-        "PBKDF2 cannot derive a key with null length.");
+    uint32_t length = JSG_REQUIRE_NONNULL(
+        maybeLength, DOMOperationError, "PBKDF2 cannot derive a key with null length.");
 
     JSG_REQUIRE(length != 0 && (length & 0b111) == 0, DOMOperationError,
         "PBKDF2 requires a derived key length that is a non-zero multiple of eight (requested ",
@@ -53,8 +60,8 @@ private:
     // wisest.
     checkPbkdfLimits(js, iterations);
 
-    return JSG_REQUIRE_NONNULL(pbkdf2(length / 8, iterations, hashType, keyData, salt),
-        Error, "PBKDF2 deriveBits failed.");
+    return JSG_REQUIRE_NONNULL(pbkdf2(length / 8, iterations, hashType, keyData, salt), Error,
+        "PBKDF2 deriveBits failed.");
   }
 
   // TODO(bug): Possibly by mistake, PBKDF2 was historically not on the allow list of
@@ -63,14 +70,18 @@ private:
   //   preexisting behavior, then, this implementation had to be commented out. If disallowing this
   //   was a mistake, we can un-comment this method, but we would need to make sure to add tests
   //   when we do.
-//   SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override {
-//     JSG_REQUIRE(format == "raw", DOMNotSupportedError,
-//         "Unimplemented key export format \"", format, "\".");
-//     return kj::heapArray(keyData.asPtr());
-//   }
+  //   SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override {
+  //     JSG_REQUIRE(format == "raw", DOMNotSupportedError,
+  //         "Unimplemented key export format \"", format, "\".");
+  //     return kj::heapArray(keyData.asPtr());
+  //   }
 
-  kj::StringPtr getAlgorithmName() const override { return "PBKDF2"; }
-  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm; }
+  kj::StringPtr getAlgorithmName() const override {
+    return "PBKDF2";
+  }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
+    return keyAlgorithm;
+  }
 
   bool equals(const CryptoKey::Impl& other) const override final {
     return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
@@ -78,7 +89,7 @@ private:
 
   bool equals(const kj::Array<kj::byte>& other) const override final {
     return keyData.size() == other.size() &&
-           CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
+        CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
   ZeroOnFree keyData;
@@ -88,32 +99,27 @@ private:
 }  // namespace
 
 kj::Maybe<kj::Array<kj::byte>> pbkdf2(size_t length,
-                                      size_t iterations,
-                                      const EVP_MD* digest,
-                                      kj::ArrayPtr<const kj::byte> password,
-                                      kj::ArrayPtr<const kj::byte> salt) {
+    size_t iterations,
+    const EVP_MD* digest,
+    kj::ArrayPtr<const kj::byte> password,
+    kj::ArrayPtr<const kj::byte> salt) {
   auto buf = kj::heapArray<kj::byte>(length);
-  if (PKCS5_PBKDF2_HMAC(password.asChars().begin(),
-                        password.size(),
-                        salt.begin(),
-                        salt.size(),
-                        iterations,
-                        digest,
-                        length,
-                        buf.begin()) != 1) {
+  if (PKCS5_PBKDF2_HMAC(password.asChars().begin(), password.size(), salt.begin(), salt.size(),
+          iterations, digest, length, buf.begin()) != 1) {
     return kj::none;
   }
   return kj::mv(buf);
 }
 
-kj::Own<CryptoKey::Impl> CryptoKey::Impl::importPbkdf2(
-    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
+kj::Own<CryptoKey::Impl> CryptoKey::Impl::importPbkdf2(jsg::Lock& js,
+    kj::StringPtr normalizedName,
+    kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
-    SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
+    SubtleCrypto::ImportKeyAlgorithm&& algorithm,
+    bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
-  auto usages =
-      CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importSecret,
-          keyUsages, CryptoKeyUsageSet::derivationKeyMask());
+  auto usages = CryptoKeyUsageSet::validate(normalizedName,
+      CryptoKeyUsageSet::Context::importSecret, keyUsages, CryptoKeyUsageSet::derivationKeyMask());
 
   JSG_REQUIRE(!extractable, DOMSyntaxError, "PBKDF2 key cannot be extractable.");
   JSG_REQUIRE(format == "raw", DOMNotSupportedError,

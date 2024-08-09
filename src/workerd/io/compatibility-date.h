@@ -32,11 +32,12 @@ enum class CompatibilityDateValidation {
   FUTURE_FOR_TEST
 };
 
-void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text>::Reader compatFlags,
-                         CompatibilityFlags::Builder output,
-                         Worker::ValidationErrorReporter& errorReporter,
-                         bool allowExperimentalFeatures,
-                         CompatibilityDateValidation dateValidation);
+void compileCompatibilityFlags(kj::StringPtr compatDate,
+    capnp::List<capnp::Text>::Reader compatFlags,
+    CompatibilityFlags::Builder output,
+    Worker::ValidationErrorReporter& errorReporter,
+    bool allowExperimentalFeatures,
+    CompatibilityDateValidation dateValidation);
 
 // Return an array of compatibility enable-flags which express the given FeatureFlags. The returned
 // StringPtrs point to FeatureFlags annotation parameters, which live in static storage.

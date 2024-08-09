@@ -22,14 +22,11 @@ namespace workerd::api {
 // the TransformStream implements standardized behavior.
 class TransformStream: public jsg::Object {
 public:
-  explicit TransformStream(
-      jsg::Ref<ReadableStream> readable,
-      jsg::Ref<WritableStream> writable)
+  explicit TransformStream(jsg::Ref<ReadableStream> readable, jsg::Ref<WritableStream> writable)
       : readable(kj::mv(readable)),
         writable(kj::mv(writable)) {}
 
-  static jsg::Ref<TransformStream> constructor(
-      jsg::Lock& js,
+  static jsg::Ref<TransformStream> constructor(jsg::Lock& js,
       jsg::Optional<Transformer> maybeTransformer,
       jsg::Optional<StreamQueuingStrategy> maybeWritableStrategy,
       jsg::Optional<StreamQueuingStrategy> maybeReadableStrategy);
@@ -92,8 +89,7 @@ public:
   };
 
   static jsg::Ref<IdentityTransformStream> constructor(
-      jsg::Lock& js,
-      jsg::Optional<QueuingStrategy> queuingStrategy = kj::none);
+      jsg::Lock& js, jsg::Optional<QueuingStrategy> queuingStrategy = kj::none);
 
   JSG_RESOURCE_TYPE(IdentityTransformStream) {
     JSG_INHERIT(TransformStream);
@@ -109,8 +105,7 @@ class FixedLengthStream: public IdentityTransformStream {
 public:
   using IdentityTransformStream::IdentityTransformStream;
 
-  static jsg::Ref<FixedLengthStream> constructor(
-      jsg::Lock& js,
+  static jsg::Ref<FixedLengthStream> constructor(jsg::Lock& js,
       uint64_t expectedLength,
       jsg::Optional<QueuingStrategy> queuingStrategy = kj::none);
 

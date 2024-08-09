@@ -43,19 +43,23 @@ public:
   jsg::Promise<jsg::Optional<jsg::Ref<Response>>> match(
       jsg::Lock& js, Request::Info request, jsg::Optional<CacheQueryOptions> options);
 
-  jsg::Promise<void> put(jsg::Lock& js, Request::Info request, jsg::Ref<Response> response,
+  jsg::Promise<void> put(jsg::Lock& js,
+      Request::Info request,
+      jsg::Ref<Response> response,
       CompatibilityFlags::Reader flags);
 
   jsg::Promise<bool> delete_(
       jsg::Lock& js, Request::Info request, jsg::Optional<CacheQueryOptions> options);
 
   // Our cache does not support one-to-many matching, so this is not possible to implement.
-  jsg::WontImplement matchAll(
-      jsg::Optional<Request::Info>, jsg::Optional<CacheQueryOptions>) { return {}; }
+  jsg::WontImplement matchAll(jsg::Optional<Request::Info>, jsg::Optional<CacheQueryOptions>) {
+    return {};
+  }
 
   // Our cache does not support cache item enumeration, so this is not possible to implement.
-  jsg::WontImplement keys(
-      jsg::Optional<Request::Info>, jsg::Optional<CacheQueryOptions>) { return {}; }
+  jsg::WontImplement keys(jsg::Optional<Request::Info>, jsg::Optional<CacheQueryOptions>) {
+    return {};
+  }
 
   JSG_RESOURCE_TYPE(Cache) {
     JSG_METHOD(add);
@@ -81,8 +85,8 @@ public:
 private:
   kj::Maybe<kj::String> cacheName;
 
-  kj::Own<kj::HttpClient> getHttpClient(IoContext& context,
-      kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName);
+  kj::Own<kj::HttpClient> getHttpClient(
+      IoContext& context, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName);
 };
 
 // =======================================================================================
@@ -94,14 +98,24 @@ public:
 
   jsg::Promise<jsg::Ref<Cache>> open(jsg::Lock& js, kj::String cacheName);
 
-  jsg::Ref<Cache> getDefault() { return default_.addRef(); }
+  jsg::Ref<Cache> getDefault() {
+    return default_.addRef();
+  }
 
   // Our cache does not support namespace enumeration, so none of these are possible to implement.
 
-  jsg::WontImplement match(Request::Info, jsg::Optional<CacheQueryOptions>) { return {}; }
-  jsg::WontImplement has(kj::String) { return {}; }
-  jsg::WontImplement delete_(kj::String) { return {}; }
-  jsg::WontImplement keys() { return {}; }
+  jsg::WontImplement match(Request::Info, jsg::Optional<CacheQueryOptions>) {
+    return {};
+  }
+  jsg::WontImplement has(kj::String) {
+    return {};
+  }
+  jsg::WontImplement delete_(kj::String) {
+    return {};
+  }
+  jsg::WontImplement keys() {
+    return {};
+  }
 
   JSG_RESOURCE_TYPE(CacheStorage) {
     JSG_METHOD(open);
@@ -121,9 +135,6 @@ private:
   jsg::Ref<Cache> default_;
 };
 
-#define EW_CACHE_ISOLATE_TYPES \
-  api::CacheStorage,           \
-  api::Cache,                  \
-  api::CacheQueryOptions
+#define EW_CACHE_ISOLATE_TYPES api::CacheStorage, api::Cache, api::CacheQueryOptions
 
 }  // namespace workerd::api

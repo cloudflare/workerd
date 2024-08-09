@@ -16,7 +16,9 @@
 #include <v8-context.h>
 #include <v8-object.h>
 
-namespace cppgc { class Visitor; }
+namespace cppgc {
+class Visitor;
+}
 
 namespace workerd::jsg {
 
@@ -49,7 +51,6 @@ class HeapTracer;
 // Wrappable and are not visible to GC tracing.
 class Wrappable: public kj::Refcounted {
 public:
-
   enum InternalFields : int {
     // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`. This is a workerd-specific
     // tag that helps us to identify a v8 API object as one of our own.
@@ -62,8 +63,7 @@ public:
     INTERNAL_FIELD_COUNT,
   };
 
-  static constexpr v8::CppHeapPointerTag WRAPPABLE_TAG =
-      v8::CppHeapPointerTag::kDefaultTag;
+  static constexpr v8::CppHeapPointerTag WRAPPABLE_TAG = v8::CppHeapPointerTag::kDefaultTag;
 
   // The value pointed to by the internal field field `WRAPPABLE_TAG_FIELD_INDEX`.
   //
@@ -86,9 +86,7 @@ public:
   v8::Local<v8::Object> getHandle(v8::Isolate* isolate);
 
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) {
-    return wrapper.map([&](v8::TracedReference<v8::Object>& ref) {
-      return ref.Get(isolate);
-    });
+    return wrapper.map([&](v8::TracedReference<v8::Object>& ref) { return ref.Get(isolate); });
   }
 
   // Visits a Ref<T> pointing at this Wrappable. `refParent` and `refStrong` are the members of
@@ -133,7 +131,9 @@ public:
 
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-  virtual bool jsgGetMemoryInfoIsRootNode() const { return strongRefcount > 0; }
+  virtual bool jsgGetMemoryInfoIsRootNode() const {
+    return strongRefcount > 0;
+  }
 
   virtual v8::Local<v8::Object> jsgGetMemoryInfoWrapperObject(v8::Isolate* isolate) {
     KJ_IF_SOME(handle, tryGetHandle(isolate)) {
@@ -209,8 +209,12 @@ public:
   // object, which implies that we are collecting unreachable objects.
   static bool isInCppgcDestructor();
 
-  void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.add(wrappable); }
-  void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.remove(wrappable); }
+  void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
+    wrappers.add(wrappable);
+  }
+  void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) {
+    wrappers.remove(wrappable);
+  }
   void clearWrappers();
 
   void addToFreelist(Wrappable::CppgcShim& shim);
@@ -222,10 +226,16 @@ public:
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
   bool TryResetRoot(const v8::TracedReference<v8::Value>& handle) override;
 
-  kj::StringPtr jsgGetMemoryName() const { return "HeapTracer"_kjc; }
-  size_t jsgGetMemorySelfSize() const { return sizeof(*this); }
+  kj::StringPtr jsgGetMemoryName() const {
+    return "HeapTracer"_kjc;
+  }
+  size_t jsgGetMemorySelfSize() const {
+    return sizeof(*this);
+  }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
-  bool jsgGetMemoryInfoIsRootNode() const { return false; }
+  bool jsgGetMemoryInfoIsRootNode() const {
+    return false;
+  }
 
 private:
   v8::Isolate* isolate;
@@ -246,16 +256,16 @@ private:
 // they don't hold disallowed references to KJ I/O objects. IoOwn's destructor will explicitly
 // create AllowAsyncDestructorsScope to permit holding such objects via IoOwn. This is meant to
 // help catch bugs.
-#define DISALLOW_KJ_IO_DESTRUCTORS_SCOPE \
-  kj::DisallowAsyncDestructorsScope disallow( \
+#define DISALLOW_KJ_IO_DESTRUCTORS_SCOPE                                                           \
+  kj::DisallowAsyncDestructorsScope disallow(                                                      \
       "JavaScript heap objects must not contain KJ I/O objects without a IoOwn")
 // TODO(soon):
 // - Track memory usage of native objects.
 
 // Given a handle to a resource type, extract the raw C++ object pointer.
 template <typename T, bool isContext>
-T& extractInternalPointer(const v8::Local<v8::Context>& context,
-                          const v8::Local<v8::Object>& object) {
+T& extractInternalPointer(
+    const v8::Local<v8::Context>& context, const v8::Local<v8::Object>& object) {
   // Due to bugs in V8, we can't use internal fields on the global object:
   //   https://groups.google.com/d/msg/v8-users/RET5b3KOa5E/3EvpRBzwAQAJ
   //
@@ -267,8 +277,8 @@ T& extractInternalPointer(const v8::Local<v8::Context>& context,
     return *reinterpret_cast<T*>(context->GetAlignedPointerFromEmbedderData(1));
   } else {
     KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-    return *reinterpret_cast<T*>(object->GetAlignedPointerFromInternalField(
-        Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+    return *reinterpret_cast<T*>(
+        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
   }
 }
 
