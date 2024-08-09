@@ -271,11 +271,29 @@ struct Worker {
       # A Python package that is required by this bundle. The package must be supported by
       # Pyodide (https://pyodide.org/en/stable/usage/packages-in-pyodide.html). All packages listed
       # will be installed prior to the execution of the worker.
+
+      wrapped: @10: WrappedModule;
     }
 
     namedExports @10 :List(Text);
     # For commonJsModule and nodeJsCompatModule, this is a list of named exports that the
     # module expects to be exported once the evaluation is complete.
+  }
+
+  struct WrappedModule {
+      moduleName @0 :Text;
+      # Wrapper module name.
+      # The module must be an internal one (provided by extension or registered in the c++ code).
+      # Module will be instantitated during binding initialization phase.
+
+      entrypoint @1 :Text = "default";
+      # Module needs to export a function with a given name (default export gets "default" name).
+      # The function needs to accept a single argument - a list of inner module namespace
+      # objects.
+
+      innerModules @2 :Module;
+      # Original modules to be wrapped. These module namespace objects array will be used as
+      # entry point parameter.
   }
 
   compatibilityDate @3 :Text;
@@ -621,7 +639,6 @@ struct Worker {
   #   local to one instance of the runtime.
 
   moduleFallback @13 :Text;
-
 }
 
 struct ExternalServer {
