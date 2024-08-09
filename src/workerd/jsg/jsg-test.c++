@@ -426,6 +426,42 @@ KJ_TEST("jsg::Lock getUuid") {
   KJ_ASSERT(called);
 }
 
+KJ_TEST("External memory adjustment") {
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    // Creating with a specific amount works as expected
+    auto adjuster = lock.getExternalMemoryAdjustment(100);
+    KJ_ASSERT(adjuster.getAmount() == 100);
+
+    // Adjusting up works as expected
+    adjuster.adjust(lock, 10);
+    KJ_ASSERT(adjuster.getAmount() == 110);
+
+    // Adjusting down works as expected
+    adjuster.adjust(lock, -10);
+    KJ_ASSERT(adjuster.getAmount() == 100);
+
+    // Setting an explicit value just works
+    adjuster.set(lock, 50);
+    KJ_ASSERT(adjuster.getAmount() == 50);
+
+    // Decrementing by more than the amount just sets to 0
+    adjuster.adjust(lock, -200);
+    KJ_ASSERT(adjuster.getAmount() == 0);
+
+    adjuster.set(lock, 100);
+    auto adjuster2 = kj::mv(adjuster);
+    KJ_ASSERT(adjuster2.getAmount() == 100);
+    KJ_ASSERT(adjuster.getAmount() == 0);
+
+    // Note that we are not testing the actual effect on the isolate itself here.
+    // While we have added a getExternalMemory() API to the isolate via a patch in
+    // the internal repo, we have not added that patch to workerd so testing the
+    // specific external memory reported by the isolate is possible but a bit
+    // more cumbersome here.
+  });
+}
+
 }  // namespace
 
 }  // namespace workerd::jsg::test

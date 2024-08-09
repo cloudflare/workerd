@@ -234,6 +234,7 @@ private:
     DESTRUCTION_QUEUE_INITIAL_SIZE,
     DESTRUCTION_QUEUE_MAX_CAPACITY
   };
+  std::atomic<int64_t> pendingExternalMemoryDecrement = {0};
 
   struct CodeBlockInfo {
     size_t size = 0;
@@ -264,9 +265,11 @@ private:
 
   // Add an item to the deferred destruction queue. Safe to call from any thread at any time.
   void deferDestruction(Item item);
+  void deferExternalMemoryDecrement(int64_t size);
 
   // Destroy everything in the deferred destruction queue. Must be called under the isolate lock.
   void clearDestructionQueue();
+  void clearPendingExternalMemoryDecrement();
 
   static void fatalError(const char* location, const char* message);
   static void oomError(const char* location, const v8::OOMDetails& details);
@@ -286,6 +289,7 @@ private:
   friend class Data;
   friend class Wrappable;
   friend class HeapTracer;
+  friend class ExternalMemoryAdjustment;
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
   friend bool getCommonJsExportDefault(v8::Isolate* isolate);
@@ -411,6 +415,7 @@ public:
     Lock(const Isolate& isolate, V8StackScope&)
         : jsg::Lock(isolate.ptr), jsgIsolate(const_cast<Isolate&>(isolate)) {
       jsgIsolate.clearDestructionQueue();
+      jsgIsolate.clearPendingExternalMemoryDecrement();
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
     KJ_DISALLOW_AS_COROUTINE_PARAM;

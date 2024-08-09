@@ -278,27 +278,60 @@ JsSymbol Lock::symbolAsyncDispose() {
   return IsolateBase::from(v8Isolate).getSymbolAsyncDispose();
 }
 
-void Lock::adjustExternalMemory(ssize_t amount) {
-  v8Isolate->AdjustAmountOfExternalAllocatedMemory(static_cast<int64_t>(amount));
+void ExternalMemoryAdjustment::maybeDeferAdjustment(v8::Isolate* isolate, size_t amount) {
+  if (isolate == nullptr) return;
+  if (v8::Locker::IsLocked(isolate)) {
+    isolate->AdjustAmountOfExternalAllocatedMemory(static_cast<int64_t>(-amount));
+  } else {
+    // Otherwise, if we don't have the isolate locked, defer the adjustment to the next
+    // time that we do.
+    auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+    jsgIsolate.deferExternalMemoryDecrement(static_cast<int64_t>(amount));
+  }
 }
 
-namespace {
-struct ExternalMemoryAdjuster {
-  int64_t size;
-  v8::Isolate* isolate;
-  ExternalMemoryAdjuster(v8::Isolate* isolate, size_t size)
-      : size(static_cast<int64_t>(size)), isolate(isolate) {
-    isolate->AdjustAmountOfExternalAllocatedMemory(size);
-  }
+ExternalMemoryAdjustment::ExternalMemoryAdjustment(v8::Isolate* isolate, size_t amount)
+    : amount(amount), isolate(isolate) {
+  KJ_DASSERT(isolate != nullptr);
+  isolate->AdjustAmountOfExternalAllocatedMemory(amount);
+}
 
-  ~ExternalMemoryAdjuster() noexcept(false) {
-    isolate->AdjustAmountOfExternalAllocatedMemory(-size);
-  }
-};
-}  // namespace
+ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other) :
+    amount(other.amount), isolate(other.isolate) {
+  other.amount = 0;
+  other.isolate = nullptr;
+}
 
-kj::Own<void> Lock::getExternalMemoryAdjuster(size_t amount) {
-  return kj::heap<ExternalMemoryAdjuster>(v8Isolate, amount);
+ExternalMemoryAdjustment& ExternalMemoryAdjustment::operator=(ExternalMemoryAdjustment&& other) {
+  // If we currently have an amount, adjust it back to zero.
+  // In the case we don't have the isolate lock here, the adjustment
+  // will be deferred until the next time we do.
+  if (amount > 0) maybeDeferAdjustment(isolate, amount);
+  amount = other.amount;
+  isolate = other.isolate;
+  other.amount = 0;
+  other.isolate = nullptr;
+  return *this;
+}
+
+ExternalMemoryAdjustment::~ExternalMemoryAdjustment() noexcept(false) {
+  if (amount != 0) {
+    maybeDeferAdjustment(isolate, amount);
+  }
+}
+
+void ExternalMemoryAdjustment::adjust(Lock& js, ssize_t amount) {
+  amount = kj::max(amount, -static_cast<ssize_t>(this->amount));
+  this->amount += amount;
+  isolate->AdjustAmountOfExternalAllocatedMemory(amount);
+}
+
+void ExternalMemoryAdjustment::set(Lock& js, size_t amount) {
+  adjust(js, amount - this->amount);
+}
+
+ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
+  return ExternalMemoryAdjustment(v8Isolate, amount);
 }
 
 Name::Name(kj::String string)

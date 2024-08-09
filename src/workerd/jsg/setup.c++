@@ -185,6 +185,15 @@ void IsolateBase::deferDestruction(Item item) {
   queue.lockExclusive()->push(kj::mv(item));
 }
 
+void IsolateBase::deferExternalMemoryDecrement(int64_t size) {
+  pendingExternalMemoryDecrement.fetch_add(size, std::memory_order_relaxed);
+}
+void IsolateBase::clearPendingExternalMemoryDecrement() {
+  KJ_ASSERT(v8::Locker::IsLocked(ptr));
+  int64_t amount = pendingExternalMemoryDecrement.exchange(0, std::memory_order_relaxed);
+  if (amount > 0) ptr->AdjustAmountOfExternalAllocatedMemory(-amount);
+}
+
 void IsolateBase::terminateExecution() const {
   ptr->TerminateExecution();
 }
@@ -400,6 +409,7 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
 
     // Make sure everything in the deferred destruction queue is dropped.
     clearDestructionQueue();
+    clearPendingExternalMemoryDecrement();
 
     // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
     // may call into the heap tracer.

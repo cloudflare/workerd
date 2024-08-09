@@ -25,6 +25,10 @@
 using kj::byte;
 using kj::uint;
 
+#if _MSC_VER
+typedef long long ssize_t;
+#endif
+
 namespace workerd::jsg {
   kj::String stringifyHandle(v8::Local<v8::Value> value);
 }
@@ -2042,6 +2046,36 @@ class JsMessage;
 
 class DOMException;
 
+// RAII class to adjust the amount of external memory attributed to an isolate.
+// The adjustment will be automatically decremented when the object is destroyed.
+// The allocation amount can be adjusted up or down during the lifetime of an object.
+class ExternalMemoryAdjustment final {
+public:
+  ExternalMemoryAdjustment() = default;
+  ExternalMemoryAdjustment(v8::Isolate* isolate, size_t amount);
+  ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other);
+  ExternalMemoryAdjustment& operator=(ExternalMemoryAdjustment&& other);
+  KJ_DISALLOW_COPY(ExternalMemoryAdjustment);
+  ~ExternalMemoryAdjustment() noexcept(false);
+
+  // Adjust the amount of external memory report up or down.
+  void adjust(Lock&, ssize_t amount);
+
+  // Set a specific amount of external memory to be attributed, overriding
+  // the previous amount.
+  void set(Lock&, size_t amount);
+
+  inline v8::Isolate* getIsolate() const { return isolate; }
+
+  inline size_t getAmount() const { return amount; }
+
+private:
+  size_t amount = 0;
+  v8::Isolate* isolate = nullptr;
+
+  static void maybeDeferAdjustment(v8::Isolate* isolate, size_t amount);
+};
+
 // Represents an isolate lock, which allows the current thread to execute JavaScript code within
 // an isolate. A thread must lock an isolate -- obtaining an instance of `Lock` -- before it can
 // manipulate JavaScript objects or execute JavaScript code inside the isolate.
@@ -2085,19 +2119,14 @@ public:
     return *reinterpret_cast<Lock*>(v8Isolate->GetData(2));
   }
 
-  // Manually make adjustments to the amount of external memory reported to V8.
-  // This is useful when we have a large amount of external memory allocated that
-  // typically would not be visible to v8's memory tracking. In the future we hope
-  // to make most memory accounting automatic, making most direct uses of this
-  // API unnecessary but there will always be times when manual adjustments are
-  // necessary.
-  void adjustExternalMemory(ssize_t amount);
-
-  // Reports amount of external memory to be manually attributed to the isolate.
-  // When the returned kj::Own<void> is dropped, the amount will be subtracted
-  // from the isolate's external memory accounting. It is important that these
-  // be held onto only during the lifetime of the isolate.
-  kj::Own<void> getExternalMemoryAdjuster(size_t amount);
+  // RAII construct that reports amount of external memory to be manually attributed to
+  // the isolate. When the returned ExtrernalMemoryAdjuster is dropped, the amount will
+  // be subtracted from the isolate's external memory accounting. If the adjuster is
+  // dropped while the isolate lock is not being held, the adjustment will be deferred
+  // until the next time the lock is held. The ExternalMemoryAdjustment itself can be
+  // moved and can be used to increment or decrement the amount of external memory
+  // held.
+  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount);
 
   Value parseJson(kj::ArrayPtr<const char> data);
   Value parseJson(v8::Local<v8::String> text);
