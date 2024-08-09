@@ -16,15 +16,23 @@
 
 namespace workerd::api::pyodide {
 
-bool hasPyodideBundle(kj::StringPtr version);
+class PyodideBundleManager {
+public:
+  void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
+  const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version) const;
 
-void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data);
-jsg::Bundle::Reader getPyodideBundle(kj::StringPtr version);
-
+private:
+  struct MessageBundlePair {
+    kj::Own<capnp::FlatArrayMessageReader> messageReader;
+    jsg::Bundle::Reader bundle;
+  };
+  const kj::MutexGuarded<kj::HashMap<kj::String, MessageBundlePair>> bundles;
+};
 
 struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
+  const PyodideBundleManager pyodideBundleManager;
   bool createSnapshot;
   bool createBaselineSnapshot;
 };
