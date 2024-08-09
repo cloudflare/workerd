@@ -149,6 +149,7 @@ jsg::Promise<void> GPUBuffer::mapAsync(jsg::Lock& js, GPUFlagsConstant mode,
                      }
                    });
 
+  async_->MaybeFlush();
   return promise;
 }
 

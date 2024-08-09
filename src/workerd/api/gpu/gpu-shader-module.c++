@@ -29,6 +29,7 @@ jsg::Promise<jsg::Ref<GPUCompilationInfo>> GPUShaderModule::getCompilationInfo(j
         ctx->fulfiller_->fulfill(jsg::alloc<GPUCompilationInfo>(kj::mv(messages)));
       });
 
+  async_->MaybeFlush();
   return promise;
 }
 

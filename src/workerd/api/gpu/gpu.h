@@ -6,12 +6,14 @@
 
 #include "gpu-adapter-info.h"
 #include "gpu-adapter.h"
+#include "gpu-async-runner.h"
 #include "gpu-bindgroup-layout.h"
 #include "gpu-bindgroup.h"
 #include "gpu-command-buffer.h"
 #include "gpu-command-encoder.h"
 #include "gpu-compute-pass-encoder.h"
 #include "gpu-compute-pipeline.h"
+#include "gpu-container.h"
 #include "gpu-device.h"
 #include "gpu-errors.h"
 #include "gpu-pipeline-layout.h"
@@ -26,7 +28,6 @@
 #include "gpu-texture-view.h"
 #include "gpu-texture.h"
 #include "gpu-utils.h"
-#include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 
@@ -51,7 +52,8 @@ public:
 private:
   jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
   requestAdapter(jsg::Lock&, jsg::Optional<GPURequestAdapterOptions>);
-  dawn::native::Instance instance_;
+  kj::Own<DawnContainer> dawnContainer_;
+  wgpu::Instance instance_;
   kj::Own<AsyncRunner> async_;
 };
 

@@ -67,6 +67,10 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
     KJ_FAIL_ASSERT("no subrequests");
   }
 
+  kj::Own<kj::AsyncIoStream> getGPUConnection() override {
+    KJ_FAIL_ASSERT("no remote gpu");
+  }
+
   capnp::Capability::Client getCapability(uint channel) override {
     KJ_FAIL_ASSERT("no capabilities");
   }

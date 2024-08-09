@@ -84,6 +84,19 @@ struct Config {
   # A list of gates which are enabled.
   # These are used to gate features/changes in workerd and in our internal repo. See the equivalent
   # config definition in our internal repo for more details.
+
+  webgpuBackend :union {
+    # Specifies what webgpu backend to use.
+
+    native @5 :Void;
+    # Default. Uses the Vulkan API to access a local GPU directly.
+
+    localUnixSocket @6 :Text;
+    # We will connect to local UNIX socket and expect that a server is listening which implements
+    # our serialization for the Dawn wire protocol. This will allow us to talk to a GPU via a
+    # separate process, which is needed if the main process is prevented from accessing a GPU
+    # directly.
+  }
 }
 
 # ========================================================================================

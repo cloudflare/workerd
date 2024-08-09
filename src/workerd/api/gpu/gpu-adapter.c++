@@ -78,6 +78,13 @@ kj::String parseDeviceLostReason(wgpu::DeviceLostReason reason) {
   }
 }
 
+kj::Promise<void> dispatchEventTask(IoContext& ctx, jsg::Ref<GPUUncapturedErrorEvent> event, EventTarget& target) {
+    co_await ctx.run([&](jsg::Lock& js) -> kj::Promise<void> {
+      target.dispatchEventImpl(js, kj::mv(event));
+      return kj::READY_NOW;
+    }, kj::Maybe<InputGate::Lock>(kj::none));
+}
+
 jsg::Promise<jsg::Ref<GPUDevice>>
 GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> descriptor) {
   wgpu::DeviceDescriptor desc{};
@@ -118,12 +125,12 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
         }
       });
 
-  auto uErrorCtx = kj::heap<UncapturedErrorContext>();
+  auto uErrorCtx = kj::heap<UncapturedErrorContext>(IoContext::current());
   desc.SetUncapturedErrorCallback(
       [](const wgpu::Device&, wgpu::ErrorType type, const char* message, void* userdata) {
-        auto maybeTarget = static_cast<kj::Maybe<EventTarget*>*>(userdata);
+        auto uec = static_cast<UncapturedErrorContext*>(userdata);
 
-        KJ_IF_SOME(target, *maybeTarget) {
+        KJ_IF_SOME(target, uec->target) {
           if (target->getHandlerCount("uncapturederror") > 0) {
             jsg::Ref<GPUError> error = nullptr;
             switch (type) {
@@ -144,7 +151,7 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
 
             auto init = GPUUncapturedErrorEventInit{kj::mv(error)};
             auto ev = jsg::alloc<GPUUncapturedErrorEvent>("uncapturederror"_kj, kj::mv(init));
-            target->dispatchEventImpl(IoContext::current().getCurrentLock(), kj::mv(ev));
+            uec->context.addTask(dispatchEventTask(uec->context, kj::mv(ev), *target));
             return;
           }
         }
@@ -152,30 +159,25 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
         // no "uncapturederror" handler
         KJ_LOG(INFO, "WebGPU uncaptured error", kj::str((uint32_t)type), message);
       },
-      (void*)&uErrorCtx->target);
+      (void*)uErrorCtx);
 
-  struct UserData {
-    wgpu::Device device = nullptr;
-    bool requestEnded = false;
-  };
-  UserData userData;
-
+  using RequestDeviceContext = AsyncContext<jsg::Ref<GPUDevice>>;
+  auto ctx = kj::heap<RequestDeviceContext>(js, kj::addRef(*async_));
+  auto promise = kj::mv(ctx->promise_);
   adapter_.RequestDevice(
-      &desc,
-      [](WGPURequestDeviceStatus status, WGPUDevice cDevice, const char* message, void* pUserData) {
-        JSG_REQUIRE(status == WGPURequestDeviceStatus_Success, Error, message);
+      &desc, wgpu::CallbackMode::AllowProcessEvents,
+      [ctx = kj::mv(ctx), uErrorCtx = kj::mv(uErrorCtx), deviceLostCtx = kj::mv(deviceLostCtx),
+       async_ = kj::addRef(*async_)](wgpu::RequestDeviceStatus status, wgpu::Device device,
+                                     const char* message) mutable {
+        JSG_REQUIRE(status == wgpu::RequestDeviceStatus::Success, Error, message);
 
-        UserData& userData = *reinterpret_cast<UserData*>(pUserData);
-        userData.device = wgpu::Device::Acquire(cDevice);
-        userData.requestEnded = true;
-      },
-      (void*)&userData);
+        jsg::Ref<GPUDevice> gpuDevice = jsg::alloc<GPUDevice>(
+            kj::mv(device), kj::mv(async_), kj::mv(deviceLostCtx), kj::mv(uErrorCtx));
 
-  KJ_ASSERT(userData.requestEnded);
-
-  jsg::Ref<GPUDevice> gpuDevice = jsg::alloc<GPUDevice>(
-      js, kj::mv(userData.device), kj::addRef(*async_), kj::mv(deviceLostCtx), kj::mv(uErrorCtx));
-  return js.resolvedPromise(kj::mv(gpuDevice));
+        ctx->fulfiller_->fulfill(kj::mv(gpuDevice));
+      });
+  async_->MaybeFlush();
+  return promise;
 }
 
 jsg::Ref<GPUSupportedFeatures> GPUAdapter::getFeatures() {
@@ -189,7 +191,7 @@ jsg::Ref<GPUSupportedFeatures> GPUAdapter::getFeatures() {
 }
 
 jsg::Ref<GPUSupportedLimits> GPUAdapter::getLimits() {
-  WGPUSupportedLimits limits{};
+  wgpu::SupportedLimits limits{};
   JSG_REQUIRE(adapter_.GetLimits(&limits), TypeError, "failed to get adapter limits");
 
   // need to copy to the C++ version of the object
