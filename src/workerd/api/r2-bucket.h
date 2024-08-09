@@ -8,6 +8,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include "streams.h"
+#include "workerd/jsg/value.h"
 #include <workerd/api/r2-api.capnp.h>
 #include <capnp/compat/json.h>
 #include <workerd/util/http-util.h>
@@ -70,11 +71,18 @@ public:
     JSG_STRUCT_TS_OVERRIDE(R2Conditional);
   };
 
+  struct SSECOptions {
+    kj::OneOf<kj::Array<byte>, kj::String> key;
+    JSG_STRUCT(key);
+    JSG_STRUCT_TS_OVERRIDE(R2SSECOptions);
+  };
+
   struct GetOptions {
     jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
     jsg::Optional<kj::OneOf<Range, jsg::Ref<Headers>>> range;
+    jsg::Optional<SSECOptions> ssec;
 
-    JSG_STRUCT(onlyIf, range);
+    JSG_STRUCT(onlyIf, range, ssec);
     JSG_STRUCT_TS_OVERRIDE(R2GetOptions);
   };
 
@@ -172,8 +180,9 @@ public:
     jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha384;
     jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha512;
     jsg::Optional<kj::String> storageClass;
+    jsg::Optional<SSECOptions> ssec;
 
-    JSG_STRUCT(onlyIf, httpMetadata, customMetadata, md5, sha1, sha256, sha384, sha512, storageClass);
+    JSG_STRUCT(onlyIf, httpMetadata, customMetadata, md5, sha1, sha256, sha384, sha512, storageClass, ssec);
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
@@ -181,6 +190,7 @@ public:
     jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
     jsg::Optional<kj::String> storageClass;
+    jsg::Optional<SSECOptions> ssec;
 
     JSG_STRUCT(httpMetadata, customMetadata, storageClass);
     JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
