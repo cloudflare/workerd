@@ -519,4 +519,9 @@ template <> constexpr bool isGcVisitor<GcVisitor&>() { return true; }
     } \
   })
 
+// Clang format encounters a segfault when JSG_VISITABLE_LAMBDA is called from inside of a 
+// JSG_VISITABLE_LAMBDA, if we call JSG_VISITABLE_LAMBDA through JSG_VISITABLE_LAMBDA2 it works.
+#define JSG_VISITABLE_LAMBDA2(CAPTURES, VISITS, ...) JSG_VISITABLE_LAMBDA(CAPTURES, VISITS, __VA_ARGS__)
+
+
 }  // namespace workerd::jsg

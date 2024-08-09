@@ -3638,12 +3638,12 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
       return pipeLoop(js);
     }
 
-    auto onSuccess = JSG_VISITABLE_LAMBDA(
+    auto onSuccess = JSG_VISITABLE_LAMBDA2(
         (this, ref=addRef()), (ref), (jsg::Lock& js) {
       return pipeLoop(js);
     });
 
-    auto onFailure = JSG_VISITABLE_LAMBDA(
+    auto onFailure = JSG_VISITABLE_LAMBDA2(
         (ref=addRef(),&source, preventCancel, pipeThrough),
         (ref), (jsg::Lock& js, jsg::Value value) {
       // The write failed. We handle it here because the pipe lock will have been released.

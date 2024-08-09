@@ -10,3 +10,43 @@ then
   echo -e "To commit anyway, use --no-verify\n"
   exit 1
 fi
+
+clang_format_check() {
+  source "$(dirname -- $BASH_SOURCE)/../tools/unix/find-python3.sh"
+  PYTHON_PATH=$(get_python3)
+  if [[ -z "$PYTHON_PATH" ]]; then
+    echo
+    echo "python3 is required for formatting and was not found"
+    echo
+    echo "ERROR: you must either install python3 and try pushing again or run `git push` with `--no-verify`"
+    return 1
+  fi
+
+  set +e
+  $PYTHON_PATH "$(dirname -- $BASH_SOURCE)/../tools/cross/format.py" --check git --staged
+  EXIT_CODE=$?
+  set -e
+  case $EXIT_CODE in
+    0)
+      # No lint.
+      return 0
+      ;;
+    1)
+      echo
+      echo "ERROR: changes staged for commit have lint. Pass '--no-verify' or '-n' to skip."
+      echo
+      echo "To fix lint:"
+      echo "  python3 ./tools/cross/format.py"
+      echo
+      return 1
+      ;;
+    2)
+      echo
+      echo "ERROR: failed to run format.py, Pass '--no-verify' or '-n' to skip."
+      echo
+      return 1
+      ;;
+  esac
+}
+
+clang_format_check
