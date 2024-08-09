@@ -34,7 +34,6 @@ private:
   wgpu::Instance const instance_;
   uint64_t count_ = 0;
   bool tick_queued_ = false;
-  TimeoutId::Generator timeoutIdGenerator;
 };
 
 // AsyncTask is a RAII helper for calling AsyncRunner::Begin() on construction,
