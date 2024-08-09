@@ -7,13 +7,13 @@ wd_cc_library(
     hdrs = glob(["**/*.h"]),
     implementation_deps = [
         "//src/workerd/util:perfetto",
-        "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@simdutf",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
     ],
 )
 
