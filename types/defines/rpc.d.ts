@@ -10,6 +10,7 @@ declare namespace Rpc {
   export const __RPC_TARGET_BRAND: "__RPC_TARGET_BRAND";
   export const __WORKER_ENTRYPOINT_BRAND: "__WORKER_ENTRYPOINT_BRAND";
   export const __DURABLE_OBJECT_BRAND: "__DURABLE_OBJECT_BRAND";
+  export const __WORKFLOW_BRAND: "__WORKFLOW_BRAND";
   export interface RpcTargetBranded {
     [__RPC_TARGET_BRAND]: never;
   }
@@ -19,9 +20,13 @@ declare namespace Rpc {
   export interface DurableObjectBranded {
     [__DURABLE_OBJECT_BRAND]: never;
   }
+  export interface WorkflowBranded {
+    [__WORKFLOW_BRAND]: never;
+  }
   export type EntrypointBranded =
     | WorkerEntrypointBranded
-    | DurableObjectBranded;
+    | DurableObjectBranded
+    | WorkflowBranded;
 
   // Types that can be used through `Stub`s
   export type Stubable = RpcTargetBranded | ((...args: any[]) => any);
@@ -150,7 +155,8 @@ declare module "cloudflare:workers" {
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
 
   export abstract class WorkerEntrypoint<Env = unknown>
-    implements Rpc.WorkerEntrypointBranded {
+    implements Rpc.WorkerEntrypointBranded
+  {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
     protected ctx: ExecutionContext;
@@ -166,7 +172,8 @@ declare module "cloudflare:workers" {
   }
 
   export abstract class DurableObject<Env = unknown>
-    implements Rpc.DurableObjectBranded {
+    implements Rpc.DurableObjectBranded
+  {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 
     protected ctx: DurableObjectState;
@@ -186,5 +193,42 @@ declare module "cloudflare:workers" {
       wasClean: boolean
     ): void | Promise<void>;
     webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
+  }
+
+  export type DurationLabel =
+    | "second"
+    | "minute"
+    | "hour"
+    | "day"
+    | "week"
+    | "month"
+    | "year";
+  export type SleepDuration = `${number} ${DurationLabel}${"s" | ""}` | number;
+
+  type WorkflowStep = {
+    do: <T extends Rpc.Serializable>(
+      name: string,
+      callback: () => T
+    ) => T | Promise<T>;
+    sleep: (name: string, duration: SleepDuration) => void | Promise<void>;
+  };
+
+  export abstract class Workflow<
+    Env = unknown,
+    T extends Rpc.Serializable | unknown = unknown,
+  > implements Rpc.WorkflowBranded
+  {
+    [Rpc.__WORKFLOW_BRAND]: never;
+
+    protected ctx: ExecutionContext;
+    protected env: Env;
+
+    run(
+      events: Array<{
+        payload: T;
+        timestamp: Date;
+      }>,
+      step: WorkflowStep
+    ): unknown | Promise<unknown>;
   }
 }

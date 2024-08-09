@@ -1831,4 +1831,18 @@ jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
   return jsg::alloc<DurableObjectBase>();
 }
 
+jsg::Ref<Workflow> Workflow::constructor(
+    const v8::FunctionCallbackInfo<v8::Value>& args,
+    jsg::Ref<ExecutionContext> ctx, jsg::JsObject env) {
+  // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
+  //   `This()`. There ought to be a better way to get access to `this` in a constructor.
+  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
+  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
+
+  jsg::JsObject self(args.This());
+  self.set(js, "ctx", jsg::JsValue(args[0]));
+  self.set(js, "env", jsg::JsValue(args[1]));
+  return jsg::alloc<Workflow>();
+}
+
 }; // namespace workerd::api
