@@ -465,24 +465,22 @@ void writePyodideBundleFileToDisk(
   }
 }
 
-bool fetchPyodideBundle(const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
-  if (api::pyodide::hasPyodideBundle(version)) {
-    KJ_LOG(WARNING, "Pyodide version ", version, " already exists in pyodide bundle table");
-    return true;
+kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
+  KJ_IF_SOME (version, api::pyodide::getPyodideBundle(version)) {
+    return version;
   }
 
   auto maybePyodideBundleFile = getPyodideBundleFile(pyConfig.pyodideDiskCacheRoot, version);
   KJ_IF_SOME(pyodideBundleFile, maybePyodideBundleFile) {
     auto body = pyodideBundleFile->readAllBytes();
     api::pyodide::setPyodideBundleData(kj::str(version), kj::mv(body));
-
-    return true;
+    return api::pyodide::getPyodideBundle(version);
   }
 
   if (version == "dev") {
     // the "dev" version is special and indicates we're using the tip-of-tree version built for testing
     // so we shouldn't fetch it from the internet, only check for its existence in the disk cache
-    return false;
+    return kj::none;
   }
 
   {
@@ -518,9 +516,7 @@ bool fetchPyodideBundle(const api::pyodide::PythonConfig& pyConfig, kj::StringPt
   }
 
   KJ_LOG(INFO, "Loaded Pyodide package from internet");
-
-  return true;
-
+  return api::pyodide::getPyodideBundle(version);
 }
 
 void WorkerdApi::compileModules(
@@ -539,8 +535,8 @@ void WorkerdApi::compileModules(
           "The python_workers compatibility flag is required to use Python.");
       // Inject Pyodide bundle
       if(util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
-          if (fetchPyodideBundle(impl->pythonConfig, "dev"_kj)) {
-            modules->addBuiltinBundle(getPyodideBundle("dev"_kj), kj::none);
+          KJ_IF_SOME(bundle, fetchPyodideBundle(impl->pythonConfig, "dev"_kj)) {
+            modules->addBuiltinBundle(bundle, kj::none);
           } else {
             auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
             auto pyodide = pythonRelease.getPyodide();
@@ -548,9 +544,8 @@ void WorkerdApi::compileModules(
             auto backport = pythonRelease.getBackport();
 
             auto version = kj::str(pyodide, "_", pyodideRevision, "_", backport);
-
-            KJ_REQUIRE(fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
-            modules->addBuiltinBundle(getPyodideBundle(version), kj::none);
+            auto bundle = KJ_ASSERT_NONNULL(fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+            modules->addBuiltinBundle(bundle, kj::none);
           }
       }
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
