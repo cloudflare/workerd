@@ -915,4 +915,55 @@ bool Navigator::sendBeacon(jsg::Lock& js, kj::String url,
   return false;
 }
 
+// ======================================================================================
+
+Immediate::Immediate(IoContext& context, TimeoutId timeoutId)
+    : contextRef(context.getWeakRef()),
+      timeoutId(timeoutId) {}
+
+void Immediate::dispose() {
+  contextRef->runIfAlive([&](IoContext& context) {
+    context.clearTimeoutImpl(timeoutId);
+  });
+}
+
+jsg::Ref<Immediate> ServiceWorkerGlobalScope::setImmediate(
+    jsg::Lock& js,
+    jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
+    jsg::Arguments<jsg::Value> args) {
+
+  // This is an approximation of the Node.js setImmediate global API.
+  // We implement it in terms of setting a 0 ms timeout. This is not
+  // how Node.js does it so there will be some edge cases where the
+  // timing of the callback will differ relative to the equivalent
+  // operations in Node.js. For the vast majority of cases, users
+  // really shouldn't be able to tell a difference. It would likely
+  // only be somewhat pathological edge cases that could be affected
+  // by the differences. Unfortunately, changing this later to match
+  // Node.js would likely be a breaking change for some users that
+  // would require a compat flag... but that's ok for now?
+
+  auto& context = IoContext::current();
+  auto fn = [function=kj::mv(function),
+             args=kj::mv(args),
+             context=jsg::AsyncContextFrame::currentRef(js)](jsg::Lock& js) mutable {
+    jsg::AsyncContextFrame::Scope scope(js, context);
+    function(js, kj::mv(args));
+  };
+  auto timeoutId = context.setTimeoutImpl(
+      timeoutIdGenerator,
+      /* repeats = */ false,
+      [function = kj::mv(fn)](jsg::Lock& js) mutable {
+    function(js);
+  }, 0);
+  return jsg::alloc<Immediate>(context, timeoutId);
+}
+
+void ServiceWorkerGlobalScope::clearImmediate(
+    kj::Maybe<jsg::Ref<Immediate>> maybeImmediate) {
+  KJ_IF_SOME(immediate, maybeImmediate) {
+    immediate->dispose();
+  }
+}
+
 } // namespace workerd::api

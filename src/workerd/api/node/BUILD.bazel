@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_test.bzl", "wd_test")
 
 wd_cc_library(
     name = "node",
@@ -21,3 +22,11 @@ kj_test(
     src = "buffer-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
 )
+
+[wd_test(
+    src = f,
+    args = ["--experimental"],
+    data = [f.removesuffix(".wd-test") + ".js"],
+) for f in glob(
+    ["**/*.wd-test"],
+)]
