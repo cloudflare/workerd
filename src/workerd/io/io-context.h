@@ -95,7 +95,7 @@ private:
 // heuristic approximation, we attribute each subrequest (and all other forms of resource
 // usage) to the "current" incoming request, which is defined as the newest request that hasn't
 // already completed.
-class IoContext_IncomingRequest {
+class IoContext_IncomingRequest final {
 public:
   IoContext_IncomingRequest(kj::Own<IoContext> context,
                             kj::Own<IoChannelFactory> ioChannelFactory,

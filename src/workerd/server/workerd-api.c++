@@ -56,6 +56,7 @@ namespace workerd::server {
 
 using api::pyodide::PythonConfig;
 
+namespace {
 JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   // Declares the listing of host object types and structs that the jsg
   // automatic type mapping will understand. Each of the various
@@ -124,8 +125,9 @@ static PythonConfig defaultConfig {
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
+}
 
-struct WorkerdApi::Impl {
+struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
   JsgWorkerdIsolate jsgIsolate;
@@ -436,6 +438,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
   KJ_UNREACHABLE;
 }
 
+namespace {
 kj::Path getPyodideBundleFileName(kj::StringPtr version) {
   return kj::Path(kj::str("pyodide-", version, ".capnp.bin"));
 }
@@ -521,6 +524,7 @@ bool fetchPyodideBundle(const api::pyodide::PythonConfig& pyConfig, kj::StringPt
 
   return true;
 
+}
 }
 
 void WorkerdApi::compileModules(

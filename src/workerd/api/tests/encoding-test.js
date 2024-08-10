@@ -5,8 +5,8 @@ import {
   ok,
 } from 'node:assert';
 
-// Test for the Event and EventTarget standard Web API implementations.
-// The implementation for these are in api/basics.{h|c++}
+// Test for the Encoding standard Web API implementation.
+// The implementation for these are in api/encoding.{h|c++}
 
 function decodeStreaming(decoder, input) {
   // Test truncation behavior while streaming by feeding the decoder a single byte at a time.

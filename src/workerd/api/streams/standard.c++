@@ -15,8 +15,10 @@ namespace workerd::api {
 using DefaultController = jsg::Ref<ReadableStreamDefaultController>;
 using ByobController = jsg::Ref<ReadableByteStreamController>;
 
+namespace {
 struct ValueReadable;
 struct ByteReadable;
+}
 
 // =======================================================================================
 // The Unlocked, Locked, ReaderLocked, and WriterLocked structs
@@ -80,7 +82,7 @@ public:
   }
 
 private:
-  class PipeLocked: public PipeController {
+  class PipeLocked final: public PipeController {
   public:
     explicit PipeLocked(Controller& inner, jsg::Ref<WritableStream> ref)
         : inner(inner), writableStreamRef(kj::mv(ref)) {}
@@ -652,7 +654,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(
 // jsg::Ref<ReadableStreamDefaultController> or jsg::Ref<ReadableByteStreamController>.
 // These are the objects that are actually passed on to the user-code's Underlying Source
 // implementation.
-class ReadableStreamJsController: public ReadableStreamController {
+class ReadableStreamJsController final: public ReadableStreamController {
 public:
   using ReadableLockImpl = ReadableLockImpl<ReadableStreamJsController>;
 
@@ -791,7 +793,7 @@ private:
 // The WritableStreamJsController provides the implementation of custom
 // WritableStream's backed by a user-code provided Underlying Sink. The implementation
 // is fairly complicated and defined entirely by the streams specification.
-class WritableStreamJsController: public WritableStreamController {
+class WritableStreamJsController final: public WritableStreamController {
 public:
   using WritableLockImpl = WritableLockImpl<WritableStreamJsController>;
 
@@ -1680,7 +1682,6 @@ struct ReadableState {
     return ReadableState(controller.addRef(), consumer->clone(js, listener), owner);
   }
 };
-}  // namespace
 
 struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener {
 
@@ -1952,6 +1953,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     return state.map([](State& state) { return state.controller.addRef(); });
   }
 };
+}  // namespace
 
 // =======================================================================================
 

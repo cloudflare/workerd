@@ -48,7 +48,7 @@ kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output
 }
 
 // Modified from AllReader in kj/async-io.c++.
-class AllReader {
+class AllReader final {
 public:
   explicit AllReader(ReadableStreamSource& input, uint64_t limit)
       : input(input), limit(limit) {
