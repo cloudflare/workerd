@@ -264,6 +264,7 @@ async function test(state) {
     () => sql.exec('CREATE TABLE _cf_invalid (name TEXT)'),
     /not authorized/
   )
+  storage.put("blah", 123);  // force creation of _cf_KV table
   assert.throws(
     () => sql.exec('SELECT * FROM _cf_KV'),
     /access to _cf_KV.key is prohibited/
