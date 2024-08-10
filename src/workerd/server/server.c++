@@ -1862,6 +1862,10 @@ public:
                 auto db = kj::heap<SqliteDatabase>(*as,
                     kj::Path({d.uniqueKey, kj::str(idPtr, ".sqlite")}),
                     kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
+
+                // Before we do anything, make sure the database is in WAL mode.
+                db->run("PRAGMA journal_mode=WAL;");
+
                 return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
                     []() -> kj::Promise<void> { return kj::READY_NOW; },
                     *sqliteHooks).attach(kj::mv(sqliteHooks));

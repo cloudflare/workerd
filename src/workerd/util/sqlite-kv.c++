@@ -9,9 +9,6 @@ namespace workerd {
 SqliteKv::SqliteKv(SqliteDatabase& db, bool): db(db) {}
 
 SqliteDatabase& SqliteKv::ensureInitialized(SqliteDatabase& db) {
-  // TODO(sqlite): Do this automatically at a lower layer?
-  db.run("PRAGMA journal_mode=WAL;");
-
   db.run(R"(
     CREATE TABLE IF NOT EXISTS _cf_KV (
       key TEXT PRIMARY KEY,
