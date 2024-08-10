@@ -12,7 +12,7 @@ namespace workerd::api {
 class ReadableStreamDefaultReader;
 class ReadableStreamBYOBReader;
 
-class ReaderImpl {
+class ReaderImpl final {
 public:
   ReaderImpl(ReadableStreamController::Reader& reader);
 

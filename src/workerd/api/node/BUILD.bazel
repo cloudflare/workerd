@@ -7,7 +7,6 @@ wd_cc_library(
     srcs = glob(["**/*.c++"], exclude = ["**/*-test.c++"]),
     hdrs = glob(["**/*.h"]),
     implementation_deps = [
-        "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@simdutf",
         "@nbytes",
