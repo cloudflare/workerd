@@ -141,6 +141,14 @@ http_archive(
     urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-stdlib/pyodide_packages.tar.zip"],
 )
 
+http_archive(
+    name = "wpt",
+    integrity = "sha256-HKJw1DE6gI5cLeRaKu9ZYUmSA0w2gMH9Q/uA9X///Ho=",
+    strip_prefix = "wpt-merge_pr_47559",
+    url = "https://github.com/web-platform-tests/wpt/archive/refs/tags/merge_pr_47559.tar.gz",
+    build_file_content = "exports_files(glob([\"**\"]))",
+)
+
 load("//:build/pyodide_bucket.bzl", "PYODIDE_LOCK_SHA256", "PYODIDE_GITHUB_RELEASE_URL", "PYODIDE_ALL_WHEELS_ZIP_SHA256")
 
 http_file(

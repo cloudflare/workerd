@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "url-canparse",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "url-canparse.js"),
+          (name = "wpt", esModule = embed "wpt/url/url-statics-canparse.any.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+      )
+    ),
+  ],
+);

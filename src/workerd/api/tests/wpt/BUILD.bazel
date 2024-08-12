@@ -1,0 +1,9 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+[wd_test(
+    src = f,
+    args = ["--experimental"],
+    data = [f.removesuffix(".wd-test") + ".js", "@wpt//:url/url-statics-canparse.any.js"],
+) for f in glob(
+    ["*.wd-test"],
+)]
