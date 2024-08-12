@@ -236,6 +236,7 @@ KJ_TEST("compatibility flag parsing") {
       " nodeJsCompatV2 = true,"
       " globalFetchStrictlyPublic = false,"
       " newModuleRegistry = false,"
+      " allowCustomPorts = true,"
       " internalWritableStreamAbortClearsQueue = true)", {},
       CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
   expectCompileCompatibilityFlags("2024-09-01", {"nodejs_compat"},
