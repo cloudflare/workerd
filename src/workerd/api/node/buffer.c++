@@ -4,88 +4,18 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 #include "buffer.h"
-#include "buffer-base64.h"
 #include "buffer-string-search.h"
-#include <workerd/jsg/buffersource.h>
-#include <kj/encoding.h>
-#include <kj/array.h>
+#include "nbytes.h"
 #include "simdutf.h"
+#include <kj/array.h>
+#include <kj/encoding.h>
+#include <workerd/jsg/buffersource.h>
 
 #include <algorithm>
 
-// These are defined by <sys/byteorder.h> or <netinet/in.h> on some systems.
-// To avoid warnings, undefine them before redefining them.
-#ifdef BSWAP_2
-# undef BSWAP_2
-#endif
-#ifdef BSWAP_4
-# undef BSWAP_4
-#endif
-#ifdef BSWAP_8
-# undef BSWAP_8
-#endif
-
-#if defined(_MSC_VER)
-#include <intrin.h>
-#define BSWAP_2(x) _byteswap_ushort(x)
-#define BSWAP_4(x) _byteswap_ulong(x)
-#define BSWAP_8(x) _byteswap_uint64(x)
-#else
-#define BSWAP_2(x) ((x) << 8) | ((x) >> 8)
-#define BSWAP_4(x)                                                            \
-  (((x) & 0xFF) << 24)  |                                                     \
-  (((x) & 0xFF00) << 8) |                                                     \
-  (((x) >> 8) & 0xFF00) |                                                     \
-  (((x) >> 24) & 0xFF)
-#define BSWAP_8(x)                                                            \
-  (((x) & 0xFF00000000000000ull) >> 56) |                                     \
-  (((x) & 0x00FF000000000000ull) >> 40) |                                     \
-  (((x) & 0x0000FF0000000000ull) >> 24) |                                     \
-  (((x) & 0x000000FF00000000ull) >> 8)  |                                     \
-  (((x) & 0x00000000FF000000ull) << 8)  |                                     \
-  (((x) & 0x0000000000FF0000ull) << 24) |                                     \
-  (((x) & 0x000000000000FF00ull) << 40) |                                     \
-  (((x) & 0x00000000000000FFull) << 56)
-#endif
-
 namespace workerd::api::node {
 
-const int8_t unbase64_table[256] =
-  { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, -1, -1, -2, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, 62, -1, 63,
-    52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1,
-    -1,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14,
-    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1, 63,
-    -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
-    41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
-  };
-
 namespace {
-
-template <typename T>
-void SwapBytes(kj::ArrayPtr<kj::byte> bytes) {
-  KJ_DASSERT((bytes.size() % sizeof(T)) == 0);
-  uint32_t len = bytes.size() / sizeof(T);
-  T* data = reinterpret_cast<T*>(bytes.begin());
-  for (uint32_t i = 0; i < len; i++) {
-    if constexpr (kj::isSameType<T, uint16_t>()) {
-      data[i] = BSWAP_2(data[i]);
-    } else if constexpr (kj::isSameType<T, uint32_t>()) {
-      data[i] = BSWAP_4(data[i]);
-    } else {
-      data[i] = BSWAP_8(data[i]);
-    }
-  }
-}
 
 kj::Maybe<uint> tryFromHexDigit(char c) {
   if ('0' <= c && c <= '9') {
@@ -171,7 +101,7 @@ uint32_t writeInto(
       // Fall-through
     case Encoding::BASE64URL: {
       auto str = kj::str(string);
-      return base64_decode(
+      return nbytes::Base64Decode(
           dest.asChars().begin(),
           dest.size(),
           str.begin(),
@@ -227,13 +157,14 @@ kj::Array<kj::byte> decodeStringImpl(
     case Encoding::BASE64:
       // Fall-through
     case Encoding::BASE64URL: {
+      // TODO(soon): Use simdutf for faster decoding for BASE64 and BASE64URL.
       // We do not use the kj::String conversion here because inline null-characters
       // need to be ignored.
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
       auto result = string.writeInto(js, buf, options);
       auto len = result.written;
-      auto dest = kj::heapArray<kj::byte>(base64_decoded_size(buf.begin(), len));
-      len = base64_decode(
+      auto dest = kj::heapArray<kj::byte>(nbytes::Base64DecodedSize(buf.begin(), len));
+      len = nbytes::Base64Decode(
         dest.asChars().begin(),
         dest.size(),
         buf.begin(),
@@ -564,11 +495,21 @@ jsg::Optional<uint32_t> BufferUtil::indexOf(
 void BufferUtil::swap(jsg::Lock& js, kj::Array<kj::byte> buffer, int size) {
   if (buffer.size() <= 1) return;
   switch (size) {
-    case 16: return SwapBytes<uint16_t>(buffer);
-    case 32: return SwapBytes<uint32_t>(buffer);
-    case 64: return SwapBytes<uint64_t>(buffer);
+  case 16: {
+    JSG_REQUIRE(nbytes::SwapBytes16(buffer.asChars().begin(), buffer.size()), Error, "Swap bytes failed");
+    break;
   }
-  KJ_UNREACHABLE;
+  case 32: {
+    JSG_REQUIRE(nbytes::SwapBytes32(buffer.asChars().begin(), buffer.size()), Error, "Swap bytes failed");
+    break;
+  }
+  case 64: {
+    JSG_REQUIRE(nbytes::SwapBytes64(buffer.asChars().begin(), buffer.size()), Error, "Swap bytes failed");
+    break;
+  }
+  default:
+    JSG_FAIL_REQUIRE(Error, "Unreachable");
+  }
 }
 
 jsg::JsString BufferUtil::toString(
