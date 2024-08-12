@@ -1,3 +1,5 @@
+import { owner_symbol, type Zlib } from 'node-internal:internal_zlib_base';
+
 export function crc32(data: ArrayBufferView, value: number): number;
 
 // zlib.constants (part of the API contract for node:zlib)
@@ -113,3 +115,57 @@ export const CONST_BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_1: number;
 export const CONST_BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2: number;
 export const CONST_BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES: number;
 export const CONST_BROTLI_DECODER_ERROR_UNREACHABLE: number;
+
+export interface ZlibOptions {
+  flush?: number | undefined;
+  finishFlush?: number | undefined;
+  chunkSize?: number | undefined;
+  windowBits?: number | undefined;
+  level?: number | undefined; // compression only
+  memLevel?: number | undefined; // compression only
+  strategy?: number | undefined; // compression only
+  dictionary?: ArrayBufferView | undefined; // deflate/inflate only, empty dictionary by default
+  info?: boolean | undefined;
+  maxOutputLength?: number | undefined;
+}
+
+type ErrorHandler = (errno: number, code: string, message: string) => void;
+type ProcessHandler = () => void;
+
+export class ZlibStream {
+  public [owner_symbol]: Zlib;
+
+  // Not used by C++ implementation but required to be Node.js compatible.
+  public inOff: number;
+  /* eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents */
+  public buffer: NodeJS.TypedArray | null;
+  public cb: () => void;
+  public availOutBefore: number;
+  public availInBefore: number;
+  public flushFlag: number;
+
+  public constructor(mode: number);
+  public initialize(
+    windowBits: number,
+    level: number,
+    memLevel: number,
+    strategy: number,
+    writeState: NodeJS.TypedArray,
+    processCallback: ProcessHandler,
+    dictionary: ZlibOptions['dictionary']
+  ): void;
+  public close(): void;
+  public write(
+    flushFlag: number,
+    inputBuffer: NodeJS.TypedArray,
+    inputOffset: number,
+    inputLength: number,
+    outputBuffer: NodeJS.TypedArray,
+    outputOffset: number,
+    outputLength: number
+  ): void;
+  public params(level: number, strategy: number): void;
+  public reset(): void;
+
+  public setErrorHandler(cb: ErrorHandler): void;
+}

@@ -77,7 +77,9 @@ function assert(actual: unknown, message?: string | Error): asserts actual {
     } as AssertionErrorConstructorOptions);
   }
 }
-export const ok = assert;
+
+type Assert = (actual: unknown, message?: string | Error) => asserts actual;
+export const ok: Assert = assert;
 
 export function throws(
   fn: () => void,

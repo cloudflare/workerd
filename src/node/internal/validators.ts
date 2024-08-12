@@ -209,6 +209,67 @@ export function validateArray(value: unknown, name: string, minLength = 0) {
   }
 }
 
+// 1. Returns false for undefined and NaN
+// 2. Returns true for finite numbers
+// 3. Throws ERR_INVALID_ARG_TYPE for non-numbers
+// 4. Throws ERR_OUT_OF_RANGE for infinite numbers
+export function checkFiniteNumber(
+  number: unknown,
+  name: string
+): number is number {
+  // Common case
+  if (number === undefined) {
+    return false;
+  }
+
+  if (Number.isFinite(number)) {
+    return true; // Is a valid number
+  }
+
+  if (Number.isNaN(number)) {
+    return false;
+  }
+
+  validateNumber(number, name);
+
+  // Infinite numbers
+  throw new ERR_OUT_OF_RANGE(name, 'a finite number', number);
+}
+
+// 1. Returns def for number when it's undefined or NaN
+// 2. Returns number for finite numbers >= lower and <= upper
+// 3. Throws ERR_INVALID_ARG_TYPE for non-numbers
+// 4. Throws ERR_OUT_OF_RANGE for infinite numbers or numbers > upper or < lower
+export function checkRangesOrGetDefault(
+  number: unknown,
+  name: string,
+  lower: number,
+  upper: number,
+  def: number
+): number;
+export function checkRangesOrGetDefault(
+  number: unknown,
+  name: string,
+  lower: number,
+  upper: number,
+  def?: number | undefined
+): number | undefined;
+export function checkRangesOrGetDefault(
+  number: unknown,
+  name: string,
+  lower: number,
+  upper: number,
+  def: number | undefined = undefined
+): number | undefined {
+  if (!checkFiniteNumber(number, name)) {
+    return def;
+  }
+  if (number < lower || number > upper) {
+    throw new ERR_OUT_OF_RANGE(name, `>= ${lower} and <= ${upper}`, number);
+  }
+  return number;
+}
+
 export default {
   isInt32,
   isUint32,
@@ -224,4 +285,8 @@ export default {
   validateOneOf,
   validateString,
   validateUint32,
+
+  // Zlib specific
+  checkFiniteNumber,
+  checkRangesOrGetDefault,
 };

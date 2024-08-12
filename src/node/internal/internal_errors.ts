@@ -526,6 +526,15 @@ export class ERR_STREAM_UNSHIFT_AFTER_END_EVENT extends NodeError {
   }
 }
 
+export class ERR_BUFFER_TOO_LARGE extends NodeRangeError {
+  constructor(value: number) {
+    super(
+      'ERR_BUFFER_TOO_LARGE',
+      `Cannot create a Buffer larger than ${value} bytes`
+    );
+  }
+}
+
 export function aggregateTwoErrors(innerError: any, outerError: any) {
   if (innerError && outerError && innerError !== outerError) {
     if (Array.isArray(outerError.errors)) {
