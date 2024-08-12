@@ -97,7 +97,8 @@ public:
                       v8::Local<v8::Object> target)> compileBindings,
                   IsolateObserver::StartType startType,
                   SpanParent parentSpan, LockType lockType,
-                  kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none);
+                  kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
+                  kj::Maybe<kj::Duration&> startupTime = kj::none);
   // `compileBindings()` is a callback that constructs all of the bindings and adds them as
   // properties to `target`.
 
