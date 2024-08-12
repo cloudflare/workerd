@@ -757,6 +757,7 @@ struct RequestInitializerDict {
   JSG_STRUCT_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
     headers?: HeadersInit;
     body?: BodyInit | null;
+    cache?: 'no-store';
     cf?: Cf;
   });
 
@@ -923,6 +924,7 @@ public:
       JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
         constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
         clone(): Request<CfHostMetadata, Cf>;
+        cache?: "no-store";
         get cf(): Cf | undefined;
       });
       // Use `RequestInfo` and `RequestInit` type aliases in constructor instead of inlining.
