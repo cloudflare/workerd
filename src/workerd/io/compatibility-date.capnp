@@ -58,7 +58,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #
   # A disable-flag is used when a worker needs to keep long-term backwards compatibility with one
   # bug but doesn't want to hold back everything else. This is hopefully rare! Most features
-  # should not have a disable-flag defined unless we get requests from customers.
+  # should have a disable-flag defined.
 
   annotation compatEnableDate @0x91a5d5d7244cf6d0 (field) :Text;
   # The compatibility date (date string, like "2021-05-17") after which this flag should always
@@ -550,6 +550,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   allowCustomPorts @55 :Bool
       $compatEnableFlag("allow_custom_ports")
+      $compatDisableFlag("ignore_custom_ports")
       $compatEnableDate("2024-09-02")
       $neededByFl;
   # Enables fetching hosts with a custom port from workers.
