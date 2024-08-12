@@ -565,7 +565,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   internalWritableStreamAbortClearsQueue @57 :Bool
       $compatEnableFlag("internal_writable_stream_abort_clears_queue")
-      $compatDisableFlag("internal_writable_stream_abort_does_not_clear_queue");
+      $compatDisableFlag("internal_writable_stream_abort_does_not_clear_queue")
+      $compatEnableDate("2024-09-02");
   # When using the original WritableStream implementation ("internal" streams), the
   # abort() operation would be handled lazily, meaning that the queue of pending writes
   # would not be cleared until the next time the queue was processed. This behavior leads

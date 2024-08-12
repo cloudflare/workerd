@@ -168,17 +168,23 @@ private:
 
 class WritableStreamInternalController: public WritableStreamController {
 public:
-  using Writable = IoOwn<WritableStreamSink>;
+  struct Writable {
+    kj::Own<WritableStreamSink> sink;
+    kj::Canceler canceler;
+    Writable(kj::Own<WritableStreamSink> sink) : sink(kj::mv(sink)) {}
+    void abort(kj::Exception&& ex);
+  };
 
   explicit WritableStreamInternalController(StreamStates::Closed closed)
       : state(closed) {}
   explicit WritableStreamInternalController(StreamStates::Errored errored)
       : state(kj::mv(errored)) {}
-  explicit WritableStreamInternalController(Writable writable,
+  explicit WritableStreamInternalController(kj::Own<WritableStreamSink> writable,
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
-      kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none) : state(kj::mv(writable)),
-          maybeHighWaterMark(maybeHighWaterMark),
-          maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {
+      kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none)
+      : state(IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable)))),
+        maybeHighWaterMark(maybeHighWaterMark),
+        maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {
 }
 
   WritableStreamInternalController(WritableStreamInternalController&& other) = default;
@@ -269,7 +275,7 @@ private:
   };
 
   kj::Maybe<WritableStream&> owner;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Writable> state;
+  kj::OneOf<StreamStates::Closed, StreamStates::Errored, IoOwn<Writable>> state;
   kj::OneOf<Unlocked, Locked, PipeLocked, WriterLocked> writeState = Unlocked();
 
   kj::Maybe<PendingAbort> maybePendingAbort;
