@@ -171,8 +171,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `FixedLengthStream {
-  writable: WritableStream { locked: false, [state]: 'writable', [expectsBytes]: true },
-  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: 5n }
+  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: 5n },
+  writable: WritableStream { locked: false, [state]: 'writable', [expectsBytes]: true }
 }`
       );
 
@@ -181,8 +181,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `FixedLengthStream {
-  writable: WritableStream { locked: true, [state]: 'writable', [expectsBytes]: true },
-  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: 5n }
+  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: 5n },
+  writable: WritableStream { locked: true, [state]: 'writable', [expectsBytes]: true }
 }`
       );
 
@@ -191,8 +191,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `FixedLengthStream {
-  writable: WritableStream { locked: true, [state]: 'writable', [expectsBytes]: true },
-  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: 5n }
+  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: 5n },
+  writable: WritableStream { locked: true, [state]: 'writable', [expectsBytes]: true }
 }`
       );
 
@@ -200,8 +200,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `FixedLengthStream {
-  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true },
-  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: 5n }
+  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: 5n },
+  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true }
 }`
       );
 
@@ -209,8 +209,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `FixedLengthStream {
-  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true },
-  readable: ReadableStream { locked: true, [state]: 'readable', [supportsBYOB]: true, [length]: 5n }
+  readable: ReadableStream { locked: true, [state]: 'readable', [supportsBYOB]: true, [length]: 5n },
+  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true }
 }`
       );
 
@@ -218,8 +218,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `FixedLengthStream {
-  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true },
-  readable: ReadableStream { locked: true, [state]: 'readable', [supportsBYOB]: true, [length]: 2n }
+  readable: ReadableStream { locked: true, [state]: 'readable', [supportsBYOB]: true, [length]: 2n },
+  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true }
 }`
       );
 
@@ -227,8 +227,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `FixedLengthStream {
-  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true },
-  readable: ReadableStream { locked: true, [state]: 'readable', [supportsBYOB]: true, [length]: 0n }
+  readable: ReadableStream { locked: true, [state]: 'readable', [supportsBYOB]: true, [length]: 0n },
+  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true }
 }`
       );
 
@@ -236,8 +236,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `FixedLengthStream {
-  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true },
-  readable: ReadableStream { locked: true, [state]: 'closed', [supportsBYOB]: true, [length]: 0n }
+  readable: ReadableStream { locked: true, [state]: 'closed', [supportsBYOB]: true, [length]: 0n },
+  writable: WritableStream { locked: true, [state]: 'closed', [expectsBytes]: true }
 }`
       );
     }
@@ -249,8 +249,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `IdentityTransformStream {
-  writable: WritableStream { locked: false, [state]: 'writable', [expectsBytes]: true },
-  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: undefined }
+  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: undefined },
+  writable: WritableStream { locked: false, [state]: 'writable', [expectsBytes]: true }
 }`
       );
 
@@ -260,8 +260,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `IdentityTransformStream {
-  writable: WritableStream { locked: true, [state]: 'errored', [expectsBytes]: true },
-  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: undefined }
+  readable: ReadableStream { locked: false, [state]: 'readable', [supportsBYOB]: true, [length]: undefined },
+  writable: WritableStream { locked: true, [state]: 'errored', [expectsBytes]: true }
 }`
       );
 
@@ -269,8 +269,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `IdentityTransformStream {
-  writable: WritableStream { locked: true, [state]: 'errored', [expectsBytes]: true },
-  readable: ReadableStream { locked: true, [state]: 'readable', [supportsBYOB]: true, [length]: undefined }
+  readable: ReadableStream { locked: true, [state]: 'readable', [supportsBYOB]: true, [length]: undefined },
+  writable: WritableStream { locked: true, [state]: 'errored', [expectsBytes]: true }
 }`
       );
 
@@ -278,8 +278,8 @@ export const inspect = {
       assert.strictEqual(
         util.inspect(transformStream, inspectOpts),
 `IdentityTransformStream {
-  writable: WritableStream { locked: true, [state]: 'errored', [expectsBytes]: true },
-  readable: ReadableStream { locked: true, [state]: 'errored', [supportsBYOB]: true, [length]: undefined }
+  readable: ReadableStream { locked: true, [state]: 'errored', [supportsBYOB]: true, [length]: undefined },
+  writable: WritableStream { locked: true, [state]: 'errored', [expectsBytes]: true }
 }`
       );
     }
