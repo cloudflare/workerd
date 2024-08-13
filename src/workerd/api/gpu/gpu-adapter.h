@@ -9,7 +9,6 @@
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
 #include "gpu-utils.h"
-#include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 
@@ -17,7 +16,7 @@ namespace workerd::api::gpu {
 
 class GPUAdapter : public jsg::Object {
 public:
-  explicit GPUAdapter(dawn::native::Adapter a, kj::Own<AsyncRunner> async)
+  explicit GPUAdapter(wgpu::Adapter a, kj::Own<AsyncRunner> async)
       : adapter_(a), async_(kj::mv(async)){};
   JSG_RESOURCE_TYPE(GPUAdapter) {
     JSG_METHOD(requestDevice);
@@ -28,7 +27,7 @@ public:
 
 private:
   jsg::Promise<jsg::Ref<GPUDevice>> requestDevice(jsg::Lock&, jsg::Optional<GPUDeviceDescriptor>);
-  dawn::native::Adapter adapter_;
+  wgpu::Adapter adapter_;
   kj::Own<AsyncRunner> async_;
   jsg::Promise<jsg::Ref<GPUAdapterInfo>>
   requestAdapterInfo(jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints);

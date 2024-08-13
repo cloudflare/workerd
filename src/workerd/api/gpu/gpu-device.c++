@@ -26,6 +26,13 @@ jsg::Ref<GPUBuffer> GPUDevice::createBuffer(jsg::Lock& js, GPUBufferDescriptor d
   desc.size = descriptor.size;
   desc.usage = static_cast<wgpu::BufferUsage>(descriptor.usage);
   auto buffer = device_.CreateBuffer(&desc);
+  // dawn_wire::client will return nullptr when mappedAtCreation == true and
+  // dawn_wire::client fails to allocate memory for initializing an active
+  // buffer mapping, which is required by latest WebGPU SPEC.
+  JSG_REQUIRE(buffer != nullptr, RangeError,
+              "Failed to execute 'createBuffer' on 'GPUDevice': createBuffer failed, size is too "
+              "large for the implementation when mappedAtCreation == true");
+
   return jsg::alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_, kj::addRef(*async_));
 }
 
@@ -580,7 +587,6 @@ GPUDevice::createComputePipeline(GPUComputePipelineDescriptor descriptor) {
 }
 
 jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope(jsg::Lock& js) {
-  auto paf = kj::newPromiseAndFulfiller<kj::Maybe<jsg::Ref<GPUError>>>();
   // This context object will hold information for the callback, including the
   // fullfiller to signal the caller with the result, and an async task that
   // will ensure the device's Tick() function is called periodically. It will be
@@ -616,6 +622,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope(jsg::Lock& 
         }
       });
 
+  async_->MaybeFlush();
   return promise;
 }
 
@@ -646,6 +653,7 @@ GPUDevice::createComputePipelineAsync(jsg::Lock& js, GPUComputePipelineDescripto
         }
       });
 
+  async_->MaybeFlush();
   return promise;
 }
 
@@ -676,7 +684,7 @@ jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>& GPUDevice::get
   return lost_promise_;
 }
 
-GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async,
+GPUDevice::GPUDevice(wgpu::Device d, kj::Own<AsyncRunner> async,
                      kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> deviceLostCtx,
                      kj::Own<UncapturedErrorContext> uErrorCtx)
     : device_(d), dlc_(kj::mv(deviceLostCtx)), lost_promise_(kj::mv(dlc_->promise_)),

@@ -24,7 +24,7 @@ export class DurableObjectExample {
 
     device.createBuffer({
       mappedAtCreation: true,
-      size: Number.MAX_SAFE_INTEGER,
+      size: 1,
       usage: GPUBufferUsage.STORAGE,
     });
 
@@ -32,7 +32,7 @@ export class DurableObjectExample {
 
     device.createBuffer({
       mappedAtCreation: true,
-      size: Number.MAX_SAFE_INTEGER,
+      size: 1,
       usage: GPUBufferUsage.STORAGE,
     });
 

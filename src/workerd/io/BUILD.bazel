@@ -10,9 +10,20 @@ bool_flag(
     build_setting_default = False,
 )
 
+# Flag to enable remote WebGPU support via the Dawn wire protocol
+bool_flag(
+    name = "enable_experimental_webgpu_remote",
+    build_setting_default = False,
+)
+
 config_setting(
     name = "set_enable_experimental_webgpu",
     flag_values = {"enable_experimental_webgpu": "True"},
+)
+
+config_setting(
+    name = "set_enable_experimental_webgpu_remote",
+    flag_values = {"enable_experimental_webgpu_remote": "True"},
 )
 
 wd_cc_library(
@@ -53,6 +64,9 @@ wd_cc_library(
     defines = select({
         ":set_enable_experimental_webgpu": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU"],
         "//conditions:default": [],
+    }) + select({
+        ":set_enable_experimental_webgpu_remote": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU_REMOTE"],
+        "//conditions:default": [],
     }),
     implementation_deps = [
         "//src/workerd/util:perfetto",
@@ -87,7 +101,14 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async",
         "@ssl",
     ] + select({
-        ":set_enable_experimental_webgpu": ["@dawn"],
+        ":set_enable_experimental_webgpu": [
+            "@dawn",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        ":set_enable_experimental_webgpu_remote": [
+            "//src/workerd/api:voodoo",
+        ],
         "//conditions:default": [],
     }),
 )

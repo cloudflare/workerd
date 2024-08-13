@@ -104,6 +104,12 @@ public:
 
   virtual kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) = 0;
 
+  // Get a connection to a Dawn server
+  //
+  // This Dawn server implementation will talk directly to the GPU which is
+  // not possible if the worker process is running inside some sandbox.
+  virtual kj::Own<kj::AsyncIoStream> getGPUConnection() = 0;
+
   // Get a Cap'n Proto RPC capability. Various binding types are backed by capabilities.
   //
   // Note that some other channel types, like actor channels, may actually be wrappers around
