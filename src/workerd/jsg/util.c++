@@ -6,7 +6,7 @@
 #include "setup.h"
 #include "ser.h"
 #include <kj/debug.h>
-#include <stdlib.h>
+#include <cstdlib>
 
 #if !_WIN32
 #include <cxxabi.h>

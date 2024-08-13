@@ -34,7 +34,7 @@
 #include <v8-inspector.h>
 #include <v8-profiler.h>
 #include <map>
-#include <time.h>
+#include <ctime>
 #include <numeric>
 
 #if _WIN32

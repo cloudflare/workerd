@@ -20,7 +20,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
-#include <time.h>
+#include <ctime>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <workerd/io/actor-cache.h>
@@ -33,9 +33,9 @@
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/api/worker-rpc.h>
 #include "workerd-api.h"
-#include "workerd/api/pyodide/pyodide.h"
-#include "workerd/io/hibernation-manager.h"
-#include <stdlib.h>
+#include <workerd/api/pyodide/pyodide.h>
+#include <workerd/io/hibernation-manager.h>
+#include <cstdlib>
 
 namespace workerd::server {
 

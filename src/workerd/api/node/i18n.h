@@ -8,7 +8,7 @@
 #include <kj/one-of.h>
 #include <kj/string.h>
 
-#include <stdint.h>
+#include <cstdint>
 
 struct UConverter;
 

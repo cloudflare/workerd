@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-async-runner.h"
-#include "workerd/io/io-context.h"
+#include <workerd/io/io-context.h>
 #include <kj/common.h>
 #include <kj/debug.h>
 

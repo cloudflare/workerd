@@ -6,8 +6,8 @@
 #include <cstdint>
 #include <kj/test.h>
 #include <kj/thread.h>
-#include <stdlib.h>
-#include <errno.h>
+#include <cstdlib>
+#include <cerrno>
 #include <fcntl.h>
 #include <atomic>
 

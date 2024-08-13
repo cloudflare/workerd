@@ -1,9 +1,9 @@
 #include "pyodide.h"
 #include <kj/string.h>
 #include <workerd/util/string-buffer.h>
-#include "kj/array.h"
-#include "kj/common.h"
-#include "kj/debug.h"
+#include <kj/array.h>
+#include <kj/common.h>
+#include <kj/debug.h>
 
 namespace workerd::api::pyodide {
 

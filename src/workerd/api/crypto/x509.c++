@@ -1,8 +1,8 @@
 #include "impl.h"
 #include "x509.h"
-#include "openssl/bio.h"
-#include "openssl/pem.h"
-#include "openssl/x509v3.h"
+#include <openssl/bio.h>
+#include <openssl/pem.h>
+#include <openssl/x509v3.h>
 
 KJ_DECLARE_NON_POLYMORPHIC(STACK_OF(ASN1_OBJECT));
 

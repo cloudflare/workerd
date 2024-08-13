@@ -9,7 +9,7 @@
 #include "basics.h"
 #include <workerd/io/io-context.h>
 #include <workerd/util/weak-refs.h>
-#include <stdlib.h>
+#include <cstdlib>
 
 namespace workerd {
   class ActorObserver;
