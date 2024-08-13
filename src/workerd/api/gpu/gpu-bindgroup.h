@@ -8,18 +8,19 @@
 #include "gpu-buffer.h"
 #include "gpu-sampler.h"
 #include "gpu-utils.h"
+
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
 
-class GPUBindGroup : public jsg::Object {
+class GPUBindGroup: public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::BindGroup&() const {
     return group_;
   }
-  explicit GPUBindGroup(wgpu::BindGroup g) : group_(kj::mv(g)){};
+  explicit GPUBindGroup(wgpu::BindGroup g): group_(kj::mv(g)) {};
   JSG_RESOURCE_TYPE(GPUBindGroup) {}
 
 private:
@@ -54,4 +55,4 @@ struct GPUBindGroupDescriptor {
 
 wgpu::BindGroupEntry parseBindGroupEntry(GPUBindGroupEntry&);
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

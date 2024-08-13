@@ -6,12 +6,12 @@
 
 namespace workerd {
 
-RequestTracker::RequestTracker(Hooks& hooksImpl) : hooks(hooksImpl) {};
+RequestTracker::RequestTracker(Hooks& hooksImpl): hooks(hooksImpl) {};
 
 RequestTracker::~RequestTracker() noexcept(false) {}
 
 RequestTracker::ActiveRequest::ActiveRequest(kj::Badge<RequestTracker>, RequestTracker& parent)
-  : maybeParent(kj::addRef(parent)) {
+    : maybeParent(kj::addRef(parent)) {
   parent.requestActive();
 }
 RequestTracker::ActiveRequest::~ActiveRequest() noexcept(false) {
@@ -40,4 +40,4 @@ RequestTracker::ActiveRequest RequestTracker::startRequest() {
   return ActiveRequest({}, *this);
 }
 
-} // namespace workerd
+}  // namespace workerd

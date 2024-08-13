@@ -4,12 +4,13 @@
 
 #pragma once
 
-#include <cstdint>
-#include <kj/string.h>
 #include <kj/hash.h>
+#include <kj/string.h>
+
+#include <cstdint>
 
 namespace kj {
-  class EntropySource;
+class EntropySource;
 }
 
 namespace workerd {
@@ -66,8 +67,7 @@ private:
   uint64_t upper;
   uint64_t lower;
 
-  UUID(uint64_t upper, uint64_t lower) : upper(upper), lower(lower) {}
+  UUID(uint64_t upper, uint64_t lower): upper(upper), lower(lower) {}
 };
 
-
-} // namespace workerd
+}  // namespace workerd

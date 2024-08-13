@@ -5,8 +5,9 @@
 #pragma once
 // INTERNAL IMPLEMENTATION FILE
 
-#include <kj/tuple.h>
 #include <v8-function-callback.h>
+
+#include <kj/tuple.h>
 
 namespace workerd::jsg {
 

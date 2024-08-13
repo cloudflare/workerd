@@ -3,12 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
+#include <stdint.h>
+
 #include <kj/common.h>
 #include <kj/debug.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
-
-#include <stdint.h>
 
 struct UConverter;
 
@@ -31,13 +31,13 @@ namespace i18n {
 // Used by BufferUtil::transcode.
 constexpr bool canBeTranscoded(Encoding encoding) noexcept {
   switch (encoding) {
-  case Encoding::ASCII:
-  case Encoding::LATIN1:
-  case Encoding::UTF16LE:
-  case Encoding::UTF8:
-    return true;
-  default:
-    return false;
+    case Encoding::ASCII:
+    case Encoding::LATIN1:
+    case Encoding::UTF16LE:
+    case Encoding::UTF8:
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -56,11 +56,11 @@ private:
   kj::Own<UConverter> conv_;
 };
 
-kj::Array<kj::byte> transcode(kj::ArrayPtr<kj::byte> source, Encoding fromEncoding,
-                              Encoding toEncoding);
+kj::Array<kj::byte> transcode(
+    kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding);
 
-} // namespace i18n
+}  // namespace i18n
 
-} // namespace workerd::api::node
+}  // namespace workerd::api::node
 
 KJ_DECLARE_NON_POLYMORPHIC(UConverter)

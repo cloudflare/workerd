@@ -2,10 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 #include "autogate.h"
+
+#include "kj/debug.h"
+
 #include <workerd/util/sentry.h>
+
 #include <capnp/message.h>
 #include <kj/common.h>
-#include "kj/debug.h"
 
 namespace workerd::util {
 
@@ -28,7 +31,7 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
     gates[(unsigned long)i] = false;
   }
 
-  for (auto name : autogates) {
+  for (auto name: autogates) {
     if (!name.startsWith("workerd-autogate-")) {
       LOG_ERROR_ONCE("Autogate configuration includes gate with invalid prefix.");
       continue;
@@ -58,7 +61,9 @@ void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates) {
   globalAutogate = Autogate(gates);
 }
 
-void Autogate::deinitAutogate() { globalAutogate = kj::none; }
+void Autogate::deinitAutogate() {
+  globalAutogate = kj::none;
+}
 
 void Autogate::initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames) {
   capnp::MallocMessageBuilder message;

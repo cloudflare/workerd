@@ -6,18 +6,19 @@
 
 #include "gpu-pipeline-layout.h"
 #include "gpu-shader-module.h"
+
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
 
-class GPURenderPipeline : public jsg::Object {
+class GPURenderPipeline: public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::RenderPipeline&() const {
     return pipeline_;
   }
-  explicit GPURenderPipeline(wgpu::RenderPipeline p) : pipeline_(kj::mv(p)){};
+  explicit GPURenderPipeline(wgpu::RenderPipeline p): pipeline_(kj::mv(p)) {};
   JSG_RESOURCE_TYPE(GPURenderPipeline) {}
 
 private:
@@ -112,8 +113,16 @@ struct GPUDepthStencilState {
   jsg::Optional<double> depthBiasSlopeScale;
   jsg::Optional<double> depthBiasClamp;
 
-  JSG_STRUCT(format, depthWriteEnabled, depthCompare, stencilFront, stencilBack, stencilReadMask,
-             stencilWriteMask, depthBias, depthBiasSlopeScale, depthBiasClamp);
+  JSG_STRUCT(format,
+      depthWriteEnabled,
+      depthCompare,
+      stencilFront,
+      stencilBack,
+      stencilReadMask,
+      stencilWriteMask,
+      depthBias,
+      depthBiasSlopeScale,
+      depthBiasClamp);
 };
 
 struct GPUMultisampleState {
@@ -136,4 +145,4 @@ struct GPURenderPipelineDescriptor {
   JSG_STRUCT(label, layout, vertex, primitive, depthStencil, multisample, fragment);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

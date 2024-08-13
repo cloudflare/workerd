@@ -21,10 +21,18 @@ class R2Error: public jsg::Object {
 public:
   R2Error(uint v4Code, kj::String message): v4Code(v4Code), message(kj::mv(message)) {}
 
-  constexpr kj::StringPtr getName() const { return "R2Error"_kj; }
-  uint getV4Code() const { return v4Code; }
-  kj::StringPtr getMessage() const { return message; }
-  kj::StringPtr getAction() const { return KJ_ASSERT_NONNULL(action); }
+  constexpr kj::StringPtr getName() const {
+    return "R2Error"_kj;
+  }
+  uint getV4Code() const {
+    return v4Code;
+  }
+  kj::StringPtr getMessage() const {
+    return message;
+  }
+  kj::StringPtr getAction() const {
+    return KJ_ASSERT_NONNULL(action);
+  }
   jsg::JsValue getStack(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(R2Error) {
@@ -53,8 +61,10 @@ private:
   friend struct R2Result;
 };
 
-using R2PutValue = kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<kj::byte>,
-                             jsg::NonCoercible<kj::String>, jsg::Ref<Blob>>;
+using R2PutValue = kj::OneOf<jsg::Ref<ReadableStream>,
+    kj::Array<kj::byte>,
+    jsg::NonCoercible<kj::String>,
+    jsg::Ref<Blob>>;
 
 struct R2Result {
   uint httpStatus;
@@ -78,14 +88,13 @@ struct R2Result {
   void throwIfError(kj::StringPtr action, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 };
 
-kj::Promise<R2Result> doR2HTTPGetRequest(
-    kj::Own<kj::HttpClient> client,
+kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     kj::String metadataPayload,
     kj::ArrayPtr<kj::StringPtr> path,
-    kj::Maybe<kj::StringPtr> jwt, CompatibilityFlags::Reader flags);
+    kj::Maybe<kj::StringPtr> jwt,
+    CompatibilityFlags::Reader flags);
 
-kj::Promise<R2Result> doR2HTTPPutRequest(
-    kj::Own<kj::HttpClient> client,
+kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
     kj::Maybe<R2PutValue> value,
     kj::Maybe<uint64_t> streamSize,
     // Deprecated. For internal beta API only.
@@ -93,4 +102,4 @@ kj::Promise<R2Result> doR2HTTPPutRequest(
     kj::ArrayPtr<kj::StringPtr> path,
     kj::Maybe<kj::StringPtr> jwt);
 
-} // namespace workerd::api
+}  // namespace workerd::api

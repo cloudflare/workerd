@@ -2,11 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <benchmark/benchmark.h>
-#include <workerd/tests/bench-tools.h>
-#include <workerd/api/r2-api.capnp.h>
-#include <capnp/message.h>
 #include "capnp/compat/json.h"
+
+#include <benchmark/benchmark.h>
+#include <workerd/api/r2-api.capnp.h>
+#include <workerd/tests/bench-tools.h>
+
+#include <capnp/message.h>
 #include <kj/string.h>
 #include <kj/test.h>
 
@@ -15,7 +17,7 @@ static void Test_JSON_ENC(benchmark::State& state) {
   capnp::JsonCodec json;
   // Perform setup here
 
-  for (auto _ : state) {
+  for (auto _: state) {
     // This code gets timed
     KJ_EXPECT(json.encode(capnp::VOID) == "null");
     KJ_EXPECT(json.encode(true) == "true");
@@ -39,9 +41,10 @@ static void Test_JSON_DEC(benchmark::State& state) {
   capnp::JsonCodec json;
   capnp::MallocMessageBuilder responseMessage;
   json.handleByAnnotation<workerd::api::public_beta::R2BindingRequest>();
-  kj::StringPtr dummy = "{\"version\":1,\"method\":\"completeMultipartUpload\",\"object\":\"multipart_object_name4\",\"uploadId\":\"uploadId\",\"parts\":[{\"etag\":\"1234\",\"part\":1},{\"etag\":\"56789\",\"part\":2}]}"_kj;
+  kj::StringPtr dummy =
+      "{\"version\":1,\"method\":\"completeMultipartUpload\",\"object\":\"multipart_object_name4\",\"uploadId\":\"uploadId\",\"parts\":[{\"etag\":\"1234\",\"part\":1},{\"etag\":\"56789\",\"part\":2}]}"_kj;
 
-  for (auto _ : state) {
+  for (auto _: state) {
     auto responseBuilder = responseMessage.initRoot<workerd::api::public_beta::R2BindingRequest>();
     json.decode(dummy, responseBuilder);
   }

@@ -4,8 +4,10 @@
 #pragma once
 
 #include "kj/string.h"
+
 #include <capnp/blob.h>
 #include <capnp/list.h>
+
 #include <initializer_list>
 
 namespace workerd::util {
@@ -14,7 +16,7 @@ namespace workerd::util {
 enum class AutogateKey {
   TEST_WORKERD,
   PYODIDE_LOAD_EXTERNAL,
-  NumOfKeys // Reserved for iteration.
+  NumOfKeys  // Reserved for iteration.
 };
 
 // This class allows code changes to be rolled out independent of full binary releases. It enables
@@ -38,14 +40,14 @@ public:
   //
   // This function is not thread safe, it should be called exactly once close to the start of the
   // process before any threads are created.
-  static void initAutogate(
-      capnp::List<capnp::Text>::Reader autogates);
+  static void initAutogate(capnp::List<capnp::Text>::Reader autogates);
 
   // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
   static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames);
 
   // Destroys an initialised global Autogate instance. Used only for testing.
   static void deinitAutogate();
+
 private:
   bool gates[(unsigned long)AutogateKey::NumOfKeys];
 

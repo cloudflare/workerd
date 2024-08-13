@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "workerd/util/string-buffer.h"
+
 #include <kj/test.h>
 
 namespace workerd {
@@ -38,11 +39,11 @@ KJ_TEST("overflow") {
   }
   KJ_EXPECT(buffer.toString().size() == 300);
   KJ_EXPECT(
-    "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
-    "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
-    "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
-    "abcabcabcabcabcabcabc"_kj == buffer.toString());
+      "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+      "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+      "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+      "abcabcabcabcabcabcabc"_kj == buffer.toString());
 }
 
-} // namespace
-} // namespace workerd
+}  // namespace
+}  // namespace workerd

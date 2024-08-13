@@ -5,19 +5,20 @@
 #pragma once
 
 #include "gpu-utils.h"
+
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
 
-class GPUSampler : public jsg::Object {
+class GPUSampler: public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::Sampler&() const {
     return sampler_;
   }
 
-  explicit GPUSampler(wgpu::Sampler s) : sampler_(kj::mv(s)){};
+  explicit GPUSampler(wgpu::Sampler s): sampler_(kj::mv(s)) {};
   JSG_RESOURCE_TYPE(GPUSampler) {}
 
 private:
@@ -37,8 +38,17 @@ struct GPUSamplerDescriptor {
   GPUCompareFunction compare;
   jsg::Optional<uint16_t> maxAnisotropy;
 
-  JSG_STRUCT(label, addressModeU, addressModeV, addressModeW, magFilter, minFilter, mipmapFilter,
-             lodMinClamp, lodMaxClamp, compare, maxAnisotropy);
+  JSG_STRUCT(label,
+      addressModeU,
+      addressModeV,
+      addressModeW,
+      magFilter,
+      minFilter,
+      mipmapFilter,
+      lodMinClamp,
+      lodMaxClamp,
+      compare,
+      maxAnisotropy);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

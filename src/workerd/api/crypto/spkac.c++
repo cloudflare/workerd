@@ -1,9 +1,11 @@
 #include "spkac.h"
+
 #include "impl.h"
-#include <workerd/jsg/jsg.h>
-#include <workerd/io/io-context.h>
-#include <openssl/x509.h>
+
 #include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <workerd/io/io-context.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 namespace {
@@ -97,10 +99,8 @@ kj::Maybe<kj::Array<kj::byte>> exportChallenge(kj::ArrayPtr<const kj::byte> inpu
     int buf_size = ASN1_STRING_to_UTF8(&buf, spki->spkac->challenge);
     if (buf_size < 0 || buf == nullptr) return kj::none;
     // Pay attention to how the buffer is freed below...
-    return kj::arrayPtr(buf, buf_size).attach(kj::defer([buf]() {
-      OPENSSL_free(buf);
-    }));
+    return kj::arrayPtr(buf, buf_size).attach(kj::defer([buf]() { OPENSSL_free(buf); }));
   }
   return kj::none;
 }
-}
+}  // namespace workerd::api

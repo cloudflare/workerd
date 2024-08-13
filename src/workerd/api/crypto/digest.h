@@ -1,6 +1,7 @@
 #pragma once
 
 #include "impl.h"
+
 #include <workerd/api/crypto/crypto.h>
 
 KJ_DECLARE_NON_POLYMORPHIC(HMAC_CTX)
@@ -40,8 +41,7 @@ public:
   size_t size() const;
 
 private:
-  HashContext(kj::OneOf<kj::Own<EVP_MD_CTX>, kj::Array<kj::byte>>,
-              kj::Maybe<uint32_t> maybeXof);
+  HashContext(kj::OneOf<kj::Own<EVP_MD_CTX>, kj::Array<kj::byte>>, kj::Maybe<uint32_t> maybeXof);
 
   // Will be kj::Own<EVP_MD_CTX> while the hash data is being updated,
   // and kj::Array<kj::byte> after the digest() has been called.
@@ -49,4 +49,3 @@ private:
   kj::Maybe<uint32_t> maybeXof;
 };
 }  // namespace workerd::api
-

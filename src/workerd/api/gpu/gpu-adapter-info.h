@@ -9,7 +9,7 @@
 
 namespace workerd::api::gpu {
 
-class GPUAdapterInfo : public jsg::Object {
+class GPUAdapterInfo: public jsg::Object {
 public:
   explicit GPUAdapterInfo(wgpu::AdapterInfo);
   JSG_RESOURCE_TYPE(GPUAdapterInfo) {
@@ -45,4 +45,4 @@ private:
   };
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

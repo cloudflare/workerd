@@ -4,14 +4,15 @@
 
 #pragma once
 
-#include <kj/common.h>
 #include <v8-platform.h>
+
+#include <kj/common.h>
 
 namespace workerd::jsg {
 
-class V8PlatformWrapper : public v8::Platform {
+class V8PlatformWrapper: public v8::Platform {
 public:
-  explicit V8PlatformWrapper(v8::Platform& inner) : inner(inner) {}
+  explicit V8PlatformWrapper(v8::Platform& inner): inner(inner) {}
 
   v8::PageAllocator* GetPageAllocator() override {
     return inner.GetPageAllocator();
@@ -25,24 +26,24 @@ public:
     return inner.GetForegroundTaskRunner(isolate);
   }
 
-  void PostTaskOnWorkerThreadImpl(v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
-                                  const v8::SourceLocation& location) override {
-    inner.PostTaskOnWorkerThreadImpl(priority, kj::mv(task),
-                                     location);
+  void PostTaskOnWorkerThreadImpl(v8::TaskPriority priority,
+      std::unique_ptr<v8::Task> task,
+      const v8::SourceLocation& location) override {
+    inner.PostTaskOnWorkerThreadImpl(priority, kj::mv(task), location);
   }
 
-  void PostDelayedTaskOnWorkerThreadImpl(v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
-                                         double delay_in_seconds,
-                                         const v8::SourceLocation& location) override {
-    inner.PostDelayedTaskOnWorkerThreadImpl(priority, kj::mv(task),
-                                            delay_in_seconds, location);
+  void PostDelayedTaskOnWorkerThreadImpl(v8::TaskPriority priority,
+      std::unique_ptr<v8::Task> task,
+      double delay_in_seconds,
+      const v8::SourceLocation& location) override {
+    inner.PostDelayedTaskOnWorkerThreadImpl(priority, kj::mv(task), delay_in_seconds, location);
   }
 
   std::unique_ptr<v8::JobHandle> CreateJobImpl(v8::TaskPriority priority,
-                                               std::unique_ptr<v8::JobTask> job_task,
-                                               const v8::SourceLocation& location) override {
-    return inner.CreateJobImpl(priority, std::make_unique<JobTaskWrapper>(kj::mv(job_task)),
-                               location);
+      std::unique_ptr<v8::JobTask> job_task,
+      const v8::SourceLocation& location) override {
+    return inner.CreateJobImpl(
+        priority, std::make_unique<JobTaskWrapper>(kj::mv(job_task)), location);
   }
 
   bool IdleTasksEnabled(v8::Isolate* isolate) override {
@@ -72,7 +73,7 @@ public:
 private:
   v8::Platform& inner;
 
-  class JobTaskWrapper : public v8::JobTask {
+  class JobTaskWrapper: public v8::JobTask {
   public:
     JobTaskWrapper(std::unique_ptr<v8::JobTask> inner);
 
@@ -87,4 +88,4 @@ private:
   };
 };
 
-} // namespace workerd::jsg
+}  // namespace workerd::jsg

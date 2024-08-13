@@ -1,7 +1,8 @@
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include "basics.h"
+
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 
@@ -19,9 +20,7 @@ public:
   ErrorEvent(kj::String type, ErrorEventInit init);
 
   static jsg::Ref<ErrorEvent> constructor(
-      jsg::Lock& js,
-      kj::String type,
-      jsg::Optional<ErrorEventInit> init);
+      jsg::Lock& js, kj::String type, jsg::Optional<ErrorEventInit> init);
 
   kj::StringPtr getFilename();
   kj::StringPtr getMessage();
@@ -49,8 +48,6 @@ private:
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
-#define EW_EVENTS_ISOLATE_TYPES                                                \
-  api::ErrorEvent,                                                             \
-  api::ErrorEvent::ErrorEventInit
+#define EW_EVENTS_ISOLATE_TYPES api::ErrorEvent, api::ErrorEvent::ErrorEventInit
 
 }  // namespace workerd::api

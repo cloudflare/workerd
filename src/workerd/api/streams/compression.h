@@ -5,6 +5,7 @@
 #pragma once
 
 #include "transform.h"
+
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
@@ -18,8 +19,8 @@ public:
   JSG_RESOURCE_TYPE(CompressionStream) {
     JSG_INHERIT(TransformStream);
 
-    JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> {
-      constructor(format: "gzip" | "deflate" | "deflate-raw");
+    JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format
+                                 : "gzip" | "deflate" | "deflate-raw");
     });
   }
 };
@@ -33,8 +34,8 @@ public:
   JSG_RESOURCE_TYPE(DecompressionStream) {
     JSG_INHERIT(TransformStream);
 
-    JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> {
-      constructor(format: "gzip" | "deflate" | "deflate-raw");
+    JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format
+                                 : "gzip" | "deflate" | "deflate-raw");
     });
   }
 };

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-texture.h"
+
 #include "workerd/api/gpu/gpu-texture-view.h"
 #include "workerd/api/gpu/gpu-utils.h"
 #include "workerd/jsg/exception.h"
@@ -10,8 +11,8 @@
 
 namespace workerd::api::gpu {
 
-jsg::Ref<GPUTextureView>
-GPUTexture::createView(jsg::Optional<GPUTextureViewDescriptor> descriptor) {
+jsg::Ref<GPUTextureView> GPUTexture::createView(
+    jsg::Optional<GPUTextureViewDescriptor> descriptor) {
   wgpu::TextureViewDescriptor desc{};
   KJ_IF_SOME(d, descriptor) {
     desc.label = d.label.cStr();
@@ -28,4 +29,4 @@ GPUTexture::createView(jsg::Optional<GPUTextureViewDescriptor> descriptor) {
   return jsg::alloc<GPUTextureView>(kj::mv(textureView));
 }
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "features.h"
+
 #include "worker.h"
 
 namespace workerd {

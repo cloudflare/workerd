@@ -5,7 +5,9 @@
 #pragma once
 
 #include "common.h"
+
 #include <workerd/io/io-context.h>
+
 #include <deque>
 
 namespace workerd::api {
@@ -35,12 +37,10 @@ class ReadableStreamInternalController: public ReadableStreamController {
 public:
   using Readable = IoOwn<ReadableStreamSource>;
 
-  explicit ReadableStreamInternalController(StreamStates::Closed closed)
-      : state(closed) {}
+  explicit ReadableStreamInternalController(StreamStates::Closed closed): state(closed) {}
   explicit ReadableStreamInternalController(StreamStates::Errored errored)
       : state(kj::mv(errored)) {}
-  explicit ReadableStreamInternalController(Readable readable)
-      : state(kj::mv(readable)) {}
+  explicit ReadableStreamInternalController(Readable readable): state(kj::mv(readable)) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamInternalController);
 
@@ -52,22 +52,22 @@ public:
 
   jsg::Ref<ReadableStream> addRef() override;
 
-  bool isByteOriented() const override { return true; }
+  bool isByteOriented() const override {
+    return true;
+  }
 
   kj::Maybe<jsg::Promise<ReadResult>> read(
-      jsg::Lock& js,
-      kj::Maybe<ByobOptions> byobOptions) override;
+      jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) override;
 
-  jsg::Promise<void> pipeTo(jsg::Lock& js,
-                             WritableStreamController& destination,
-                             PipeToOptions options) override;
+  jsg::Promise<void> pipeTo(
+      jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) override;
 
-  jsg::Promise<void> cancel(jsg::Lock& js,
-                             jsg::Optional<v8::Local<v8::Value>> reason) override;
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) override;
 
   Tee tee(jsg::Lock& js) override;
 
-  kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(jsg::Lock& js, bool ignoreDisturbed=false);
+  kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(
+      jsg::Lock& js, bool ignoreDisturbed = false);
 
   bool isClosedOrErrored() const override {
     return state.is<StreamStates::Closed>() || state.is<StreamStates::Errored>();
@@ -77,9 +77,13 @@ public:
     return state.is<StreamStates::Closed>();
   }
 
-  bool isDisturbed() override { return disturbed; }
+  bool isDisturbed() override {
+    return disturbed;
+  }
 
-  bool isLockedToReader() const override { return !readState.is<Unlocked>(); }
+  bool isLockedToReader() const override {
+    return !readState.is<Unlocked>();
+  }
 
   bool lockReader(jsg::Lock& js, Reader& reader) override;
 
@@ -95,9 +99,8 @@ public:
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
-  kj::Promise<DeferredProxy<void>> pumpTo(jsg::Lock& js,
-                                          kj::Own<WritableStreamSink> sink,
-                                          bool end) override;
+  kj::Promise<DeferredProxy<void>> pumpTo(
+      jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) override;
 
   StreamEncoding getPreferredEncoding() override;
 
@@ -116,11 +119,9 @@ private:
   void doClose(jsg::Lock& js);
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
-  class PipeLocked : public PipeController {
+  class PipeLocked: public PipeController {
   public:
-    PipeLocked(
-        ReadableStreamInternalController& inner,
-        jsg::Ref<WritableStream> ref)
+    PipeLocked(ReadableStreamInternalController& inner, jsg::Ref<WritableStream> ref)
         : inner(inner),
           ref(kj::mv(ref)) {}
 
@@ -140,7 +141,9 @@ private:
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
-    void visitForGc(jsg::GcVisitor& visitor) { visitor.visit(ref); }
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(ref);
+    }
 
     kj::StringPtr jsgGetMemoryName() const;
     size_t jsgGetMemorySelfSize() const;
@@ -170,16 +173,15 @@ class WritableStreamInternalController: public WritableStreamController {
 public:
   using Writable = IoOwn<WritableStreamSink>;
 
-  explicit WritableStreamInternalController(StreamStates::Closed closed)
-      : state(closed) {}
+  explicit WritableStreamInternalController(StreamStates::Closed closed): state(closed) {}
   explicit WritableStreamInternalController(StreamStates::Errored errored)
       : state(kj::mv(errored)) {}
   explicit WritableStreamInternalController(Writable writable,
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
-      kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none) : state(kj::mv(writable)),
-          maybeHighWaterMark(maybeHighWaterMark),
-          maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {
-}
+      kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none)
+      : state(kj::mv(writable)),
+        maybeHighWaterMark(maybeHighWaterMark),
+        maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {}
 
   WritableStreamInternalController(WritableStreamInternalController&& other) = default;
   WritableStreamInternalController& operator=(WritableStreamInternalController&& other) = default;
@@ -201,16 +203,16 @@ public:
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) override;
 
   kj::Maybe<jsg::Promise<void>> tryPipeFrom(
-      jsg::Lock& js,
-      jsg::Ref<ReadableStream> source,
-      PipeToOptions options) override;
+      jsg::Lock& js, jsg::Ref<ReadableStream> source, PipeToOptions options) override;
 
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
   void detach(jsg::Lock& js) override;
 
   kj::Maybe<int> getDesiredSize() override;
 
-  bool isLockedToWriter() const override { return !writeState.is<Unlocked>(); }
+  bool isLockedToWriter() const override {
+    return !writeState.is<Unlocked>();
+  }
 
   bool lockWriter(jsg::Lock& js, Writer& writer) override;
 
@@ -231,7 +233,9 @@ public:
   bool isPiping();
   bool isErrored() override;
 
-  inline bool isByteOriented() const override { return true; }
+  inline bool isByteOriented() const override {
+    return true;
+  }
 
   void setPendingClosure() override {
     isPendingClosure = true;
@@ -240,19 +244,16 @@ public:
   kj::StringPtr jsgGetMemoryName() const override;
   size_t jsgGetMemorySelfSize() const override;
   void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
-private:
 
+private:
   struct AbortOptions {
     bool reject = false;
     bool handled = false;
   };
 
   jsg::Promise<void> doAbort(jsg::Lock& js,
-                              v8::Local<v8::Value> reason,
-                              AbortOptions options = {
-                                .reject = false,
-                                .handled = false
-                              });
+      v8::Local<v8::Value> reason,
+      AbortOptions options = {.reject = false, .handled = false});
   void doClose(jsg::Lock& js);
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
   void ensureWriting(jsg::Lock& js);
@@ -346,14 +347,21 @@ private:
 
     JSG_MEMORY_INFO(WriteEvent) {
       if (outputLock != kj::none) {
-        tracker.trackFieldWithSize("outputLock",
-            sizeof(IoOwn<kj::Promise<void>>));
+        tracker.trackFieldWithSize("outputLock", sizeof(IoOwn<kj::Promise<void>>));
       }
       KJ_SWITCH_ONEOF(event) {
-        KJ_CASE_ONEOF(w, Write) { tracker.trackField("inner", w); }
-        KJ_CASE_ONEOF(p, Pipe) { tracker.trackField("inner", p); }
-        KJ_CASE_ONEOF(c, Close) { tracker.trackField("inner", c); }
-        KJ_CASE_ONEOF(f, Flush) { tracker.trackField("inner", f); }
+        KJ_CASE_ONEOF(w, Write) {
+          tracker.trackField("inner", w);
+        }
+        KJ_CASE_ONEOF(p, Pipe) {
+          tracker.trackField("inner", p);
+        }
+        KJ_CASE_ONEOF(c, Close) {
+          tracker.trackField("inner", c);
+        }
+        KJ_CASE_ONEOF(f, Flush) {
+          tracker.trackField("inner", f);
+        }
       }
     }
   };
@@ -372,8 +380,7 @@ class IdentityTransformStreamImpl: public kj::Refcounted,
   // TODO(soon): Reimplement this in terms of kj::OneWayPipe, so we can optimize pumpTo().
 
 public:
-  explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = kj::none)
-      : limit(limit) {}
+  explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = kj::none): limit(limit) {}
 
   ~IdentityTransformStreamImpl() noexcept(false) {
     // Due to the different natures of JS and C++ disposal, there is no point in enforcing the limit

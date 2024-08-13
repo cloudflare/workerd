@@ -6,18 +6,19 @@
 
 #include "gpu-pipeline-layout.h"
 #include "gpu-shader-module.h"
+
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
 
-class GPUComputePipeline : public jsg::Object {
+class GPUComputePipeline: public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::ComputePipeline&() const {
     return pipeline_;
   }
-  explicit GPUComputePipeline(wgpu::ComputePipeline p) : pipeline_(kj::mv(p)){};
+  explicit GPUComputePipeline(wgpu::ComputePipeline p): pipeline_(kj::mv(p)) {};
   JSG_RESOURCE_TYPE(GPUComputePipeline) {
     JSG_METHOD(getBindGroupLayout);
   }
@@ -35,4 +36,4 @@ struct GPUComputePipelineDescriptor {
   JSG_STRUCT(label, compute, layout);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

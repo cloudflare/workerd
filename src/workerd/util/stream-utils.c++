@@ -1,8 +1,9 @@
 #include "stream-utils.h"
+
 #include <kj/common.h>
+#include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/one-of.h>
-#include <kj/debug.h>
 
 namespace workerd {
 
@@ -36,8 +37,7 @@ public:
 
 class MemoryInputStream final: public kj::AsyncInputStream {
 public:
-  MemoryInputStream(kj::ArrayPtr<const kj::byte> data)
-      : data(data) { }
+  MemoryInputStream(kj::ArrayPtr<const kj::byte> data): data(data) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     size_t toRead = kj::min(data.size(), maxBytes);

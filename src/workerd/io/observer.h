@@ -6,13 +6,14 @@
 // Defines abstract interfaces for observing the activity of various components of the system,
 // e.g. to collect logs and metrics.
 
-#include <kj/string.h>
-#include <kj/refcount.h>
-#include <kj/exception.h>
-#include <kj/time.h>
-#include <workerd/io/trace.h>
 #include <workerd/io/features.capnp.h>
+#include <workerd/io/trace.h>
 #include <workerd/jsg/observer.h>
+
+#include <kj/exception.h>
+#include <kj/refcount.h>
+#include <kj/string.h>
+#include <kj/time.h>
 
 namespace workerd {
 
@@ -23,9 +24,9 @@ class TimerChannel;
 class WebSocketObserver: public kj::Refcounted {
 public:
   // Called when a worker sends a message on this WebSocket (includes close messages).
-  virtual void sentMessage(size_t bytes) { };
+  virtual void sentMessage(size_t bytes) {};
   // Called when a worker receives a message on this WebSocket (includes close messages).
-  virtual void receivedMessage(size_t bytes) { };
+  virtual void receivedMessage(size_t bytes) {};
 };
 
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
@@ -39,7 +40,9 @@ public:
   //
   // This means that, when the returned observer observes a message being sent, the message is being
   // sent from the worker to the client making the request.
-  virtual kj::Maybe<kj::Own<WebSocketObserver>> tryCreateWebSocketObserver() { return kj::none; };
+  virtual kj::Maybe<kj::Own<WebSocketObserver>> tryCreateWebSocketObserver() {
+    return kj::none;
+  };
 
   // Invoked when the request is actually delivered.
   //
@@ -66,7 +69,9 @@ public:
   // called once, and only one method call may be made to the returned interface.
   //
   // The returned reference remains valid as long as the observer and `worker` both remain live.
-  virtual WorkerInterface& wrapWorkerInterface(WorkerInterface& worker) { return worker; }
+  virtual WorkerInterface& wrapWorkerInterface(WorkerInterface& worker) {
+    return worker;
+  }
 
   // Wrap an HttpClient so that its usage is counted in the request's subrequest stats.
   virtual kj::Own<WorkerInterface> wrapSubrequestClient(kj::Own<WorkerInterface> client) {
@@ -81,7 +86,9 @@ public:
   // Used to record when a worker has used a dynamic dispatch binding.
   virtual void setHasDispatched() {};
 
-  virtual SpanParent getSpan() { return nullptr; }
+  virtual SpanParent getSpan() {
+    return nullptr;
+  }
 
   virtual void addedContextTask() {}
   virtual void finishedContextTask() {}
@@ -90,12 +97,14 @@ public:
 
   virtual void setFailedOpen(bool value) {}
 
-  virtual uint64_t clockRead() { return 0; }
+  virtual uint64_t clockRead() {
+    return 0;
+  }
 };
 
 class IsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver {
 public:
-  virtual ~IsolateObserver() noexcept(false) { }
+  virtual ~IsolateObserver() noexcept(false) {}
 
   // Called when Worker::Isolate is created.
   virtual void created() {};
@@ -109,7 +118,7 @@ public:
   virtual void teardownFinished() {}
 
   // Describes why a worker was started.
-  enum class StartType: uint8_t {
+  enum class StartType : uint8_t {
     // Cold start with active request waiting.
     COLD,
 
@@ -139,8 +148,8 @@ public:
     virtual void waitingForOtherIsolate(kj::StringPtr id) {}
 
     // Call if this is an async lock attempt, before constructing LockRecord.
-    virtual void reportAsyncInfo(uint currentLoad, bool threadWaitingSameLock,
-        uint threadWaitingDifferentLockCount) {}
+    virtual void reportAsyncInfo(
+        uint currentLoad, bool threadWaitingSameLock, uint threadWaitingDifferentLockCount) {}
     // TODO(cleanup): Should be able to get this data at `tryCreateLockTiming()` time. It'd be
     //   easier if IsolateObserver were an AOP class, and thus had access to the real isolate.
 
@@ -155,7 +164,9 @@ public:
   // Construct a LockTiming if config.reportScriptLockTiming is true, or if the
   // request (if any) is being traced.
   virtual kj::Maybe<kj::Own<LockTiming>> tryCreateLockTiming(
-      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>> parentOrRequest) const { return kj::none; }
+      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>> parentOrRequest) const {
+    return kj::none;
+  }
 
   // Use like so:
   //
@@ -183,9 +194,15 @@ public:
     }
     KJ_DISALLOW_COPY_AND_MOVE(LockRecord);
 
-    void locked() { KJ_IF_SOME(l, lockTiming) l.get()->locked(); }
-    void gcPrologue() { KJ_IF_SOME(l, lockTiming) l.get()->gcPrologue(); }
-    void gcEpilogue() { KJ_IF_SOME(l, lockTiming) l.get()->gcEpilogue(); }
+    void locked() {
+      KJ_IF_SOME(l, lockTiming) l.get()->locked();
+    }
+    void gcPrologue() {
+      KJ_IF_SOME(l, lockTiming) l.get()->gcPrologue();
+    }
+    void gcEpilogue() {
+      KJ_IF_SOME(l, lockTiming) l.get()->gcEpilogue();
+    }
 
   private:
     // The presence of `lockTiming` determines whether or not we need to record timing data. If

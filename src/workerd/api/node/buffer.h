@@ -3,8 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include "i18n.h"
+
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api::node {
 
@@ -26,46 +27,42 @@ public:
   };
 
   int compare(jsg::Lock& js,
-              kj::Array<kj::byte> one,
-              kj::Array<kj::byte> two,
-              jsg::Optional<CompareOptions> maybeOptions);
+      kj::Array<kj::byte> one,
+      kj::Array<kj::byte> two,
+      jsg::Optional<CompareOptions> maybeOptions);
 
-  kj::Array<kj::byte> concat(jsg::Lock& js,
-                             kj::Array<kj::Array<kj::byte>> list,
-                             uint32_t length);
+  kj::Array<kj::byte> concat(jsg::Lock& js, kj::Array<kj::Array<kj::byte>> list, uint32_t length);
 
-  kj::Array<kj::byte> decodeString(jsg::Lock& js,
-                                   jsg::JsString string,
-                                   EncodingValue encoding);
+  kj::Array<kj::byte> decodeString(jsg::Lock& js, jsg::JsString string, EncodingValue encoding);
 
   void fillImpl(jsg::Lock& js,
-                kj::Array<kj::byte> buffer,
-                kj::OneOf<jsg::JsString, jsg::BufferSource> value,
-                uint32_t start,
-                uint32_t end,
-                jsg::Optional<EncodingValue> encoding);
+      kj::Array<kj::byte> buffer,
+      kj::OneOf<jsg::JsString, jsg::BufferSource> value,
+      uint32_t start,
+      uint32_t end,
+      jsg::Optional<EncodingValue> encoding);
 
   jsg::Optional<uint32_t> indexOf(jsg::Lock& js,
-                                  kj::Array<kj::byte> buffer,
-                                  kj::OneOf<jsg::JsString, jsg::BufferSource> value,
-                                  int32_t byteOffset,
-                                  EncodingValue encoding,
-                                  bool isForward);
+      kj::Array<kj::byte> buffer,
+      kj::OneOf<jsg::JsString, jsg::BufferSource> value,
+      int32_t byteOffset,
+      EncodingValue encoding,
+      bool isForward);
 
   void swap(jsg::Lock& js, kj::Array<kj::byte> buffer, int size);
 
   jsg::JsString toString(jsg::Lock& js,
-                         kj::Array<kj::byte> bytes,
-                         uint32_t start,
-                         uint32_t end,
-                         EncodingValue encoding);
+      kj::Array<kj::byte> bytes,
+      uint32_t start,
+      uint32_t end,
+      EncodingValue encoding);
 
   uint32_t write(jsg::Lock& js,
-                 kj::Array<kj::byte> buffer,
-                 jsg::JsString string,
-                 uint32_t offset,
-                 uint32_t length,
-                 EncodingValue encoding);
+      kj::Array<kj::byte> buffer,
+      jsg::JsString string,
+      uint32_t offset,
+      uint32_t length,
+      EncodingValue encoding);
 
   enum NativeDecoderFields {
     kIncompleteCharactersStart = 0,
@@ -76,15 +73,12 @@ public:
     kSize = 7,
   };
 
-  jsg::JsString decode(jsg::Lock& js,
-                        kj::Array<kj::byte> bytes,
-                        kj::Array<kj::byte> state);
+  jsg::JsString decode(jsg::Lock& js, kj::Array<kj::byte> bytes, kj::Array<kj::byte> state);
   jsg::JsString flush(jsg::Lock& js, kj::Array<kj::byte> state);
   bool isAscii(kj::Array<kj::byte> bytes);
   bool isUtf8(kj::Array<kj::byte> bytes);
-  kj::Array<kj::byte> transcode(kj::Array<kj::byte> source,
-                                EncodingValue rawFromEncoding,
-                                EncodingValue rawToEncoding);
+  kj::Array<kj::byte> transcode(
+      kj::Array<kj::byte> source, EncodingValue rawFromEncoding, EncodingValue rawToEncoding);
 
   JSG_RESOURCE_TYPE(BufferUtil) {
     JSG_METHOD(byteLength);
@@ -114,8 +108,6 @@ public:
   }
 };
 
-#define EW_NODE_BUFFER_ISOLATE_TYPES       \
-    api::node::BufferUtil,                 \
-    api::node::BufferUtil::CompareOptions
+#define EW_NODE_BUFFER_ISOLATE_TYPES api::node::BufferUtil, api::node::BufferUtil::CompareOptions
 
 }  // namespace workerd::api::node

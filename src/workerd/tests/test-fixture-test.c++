@@ -2,23 +2,22 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <kj/test.h>
 #include "test-fixture.h"
+
+#include <kj/test.h>
 
 namespace workerd {
 namespace {
 
 KJ_TEST("setup/destroy") {
-   TestFixture fixture;
+  TestFixture fixture;
 }
 
 KJ_TEST("single void runInIoContext run") {
   TestFixture fixture;
   uint runCount = 0;
 
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    runCount++;
-  });
+  fixture.runInIoContext([&](const TestFixture::Environment& env) { runCount++; });
 
   KJ_EXPECT(runCount == 1);
 }
@@ -54,9 +53,7 @@ KJ_TEST("3 runInIoContext runs") {
   uint runCount = 0;
 
   for (uint i = 0; i < 3; i++) {
-    fixture.runInIoContext([&](const TestFixture::Environment& env) {
-      runCount++;
-    });
+    fixture.runInIoContext([&](const TestFixture::Environment& env) { runCount++; });
 
     KJ_EXPECT(runCount == i + 1);
   }
@@ -67,9 +64,7 @@ KJ_TEST("2 fixtures in a row with single runInIoContext run") {
 
   for (uint i = 0; i < 2; i++) {
     TestFixture fixture;
-    fixture.runInIoContext([&](const TestFixture::Environment& env) {
-      runCount++;
-    });
+    fixture.runInIoContext([&](const TestFixture::Environment& env) { runCount++; });
 
     KJ_EXPECT(runCount == i + 1);
   }
@@ -138,8 +133,7 @@ KJ_TEST("runInIoContext consuming ignored js exception") {
 }
 
 KJ_TEST("runRequest") {
-  TestFixture fixture({
-    .mainModuleSource = R"SCRIPT(
+  TestFixture fixture({.mainModuleSource = R"SCRIPT(
       export default {
         async fetch(request) {
           const body = await(await request.blob()).text();
@@ -157,8 +151,7 @@ KJ_TEST("module import failure") {
   KJ_EXPECT_LOG(ERROR, "script startup threw exception");
 
   try {
-    TestFixture fixture({
-      .mainModuleSource = R"SCRIPT(
+    TestFixture fixture({.mainModuleSource = R"SCRIPT(
         import * from "bad-module";
 
         export default {
@@ -174,6 +167,5 @@ KJ_TEST("module import failure") {
   }
 }
 
-
-} // namespace
-} // namespace workerd
+}  // namespace
+}  // namespace workerd

@@ -23,7 +23,7 @@ public:
     return kj::atomicRefcounted<XThreadNotifier>();
   }
 
-  XThreadNotifier() : paf(kj::newPromiseAndCrossThreadFulfiller<void>()) { }
+  XThreadNotifier(): paf(kj::newPromiseAndCrossThreadFulfiller<void>()) {}
 
   kj::Promise<void> awaitNotification() {
     auto promise = kj::mv(paf.lockExclusive()->promise);
@@ -41,7 +41,6 @@ public:
 private:
   kj::MutexGuarded<kj::PromiseCrossThreadFulfillerPair<void>> paf;
 };
-
 
 // Convenience struct for creating and passing around a kj::Executor and XThreadNotifier. The
 // default constructor creates a pair of the objects which are both tied to the current thread.

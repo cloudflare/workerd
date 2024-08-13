@@ -23,8 +23,7 @@ class WorkerTracer;
 // - Catching exceptions and converting them to HTTP error responses.
 //   - Or, falling back to proxying if passThroughOnException() was used.
 // - Finish waitUntil() tasks.
-kj::Own<WorkerInterface> newWorkerEntrypoint(
-    ThreadContext& threadContext,
+kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Own<const Worker> worker,
     kj::Maybe<kj::StringPtr> entrypointName,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -37,4 +36,4 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson);
 
-} // namespace workerd
+}  // namespace workerd

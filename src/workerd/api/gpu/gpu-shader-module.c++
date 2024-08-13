@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-shader-module.h"
+
 #include <workerd/io/io-context.h>
 
 namespace workerd::api::gpu {
@@ -16,20 +17,19 @@ jsg::Promise<jsg::Ref<GPUCompilationInfo>> GPUShaderModule::getCompilationInfo(j
   using MapAsyncContext = AsyncContext<jsg::Ref<GPUCompilationInfo>>;
   auto ctx = kj::heap<MapAsyncContext>(js, kj::addRef(*async_));
   auto promise = kj::mv(ctx->promise_);
-  shader_.GetCompilationInfo(
-      wgpu::CallbackMode::AllowProcessEvents,
+  shader_.GetCompilationInfo(wgpu::CallbackMode::AllowProcessEvents,
       [ctx = kj::mv(ctx)](wgpu::CompilationInfoRequestStatus status,
-                          wgpu::CompilationInfo const* compilationInfo) mutable {
-        kj::Vector<jsg::Ref<GPUCompilationMessage>> messages(compilationInfo->messageCount);
-        for (uint32_t i = 0; i < compilationInfo->messageCount; i++) {
-          auto& msg = compilationInfo->messages[i];
-          messages.add(jsg::alloc<GPUCompilationMessage>(msg));
-        }
+          wgpu::CompilationInfo const* compilationInfo) mutable {
+    kj::Vector<jsg::Ref<GPUCompilationMessage>> messages(compilationInfo->messageCount);
+    for (uint32_t i = 0; i < compilationInfo->messageCount; i++) {
+      auto& msg = compilationInfo->messages[i];
+      messages.add(jsg::alloc<GPUCompilationMessage>(msg));
+    }
 
-        ctx->fulfiller_->fulfill(jsg::alloc<GPUCompilationInfo>(kj::mv(messages)));
-      });
+    ctx->fulfiller_->fulfill(jsg::alloc<GPUCompilationInfo>(kj::mv(messages)));
+  });
 
   return promise;
 }
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

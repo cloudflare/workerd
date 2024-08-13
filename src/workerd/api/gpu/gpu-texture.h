@@ -7,19 +7,20 @@
 #include "gpu-texture-view.h"
 #include "gpu-utils.h"
 #include "workerd/jsg/iterator.h"
+
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
 
-class GPUTexture : public jsg::Object {
+class GPUTexture: public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::Texture&() const {
     return texture_;
   }
-  explicit GPUTexture(wgpu::Texture t) : texture_(kj::mv(t)){};
+  explicit GPUTexture(wgpu::Texture t): texture_(kj::mv(t)) {};
   JSG_RESOURCE_TYPE(GPUTexture) {
     JSG_METHOD(createView);
     JSG_METHOD(destroy);
@@ -97,4 +98,4 @@ struct GPUTextureDescriptor {
   JSG_STRUCT(label, size, mipLevelCount, sampleCount, dimension, format, usage, viewFormats);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

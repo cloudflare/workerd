@@ -1,5 +1,6 @@
 #include "observer.h"
 #include "worker-interface.h"
+
 #include <kj/test.h>
 
 namespace workerd {

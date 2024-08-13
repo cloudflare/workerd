@@ -6,6 +6,7 @@
 
 #include <kj/debug.h>
 #include <kj/vector.h>
+
 #include <utility>
 
 namespace workerd {
@@ -50,12 +51,14 @@ public:
     KJ_DISALLOW_COPY(Batch);
 
     operator kj::ArrayPtr<T>() {
-      return batchQueue
-          .map([](auto& bq) -> kj::ArrayPtr<T> { return bq.popBuffer; })
-          .orDefault(nullptr);
+      return batchQueue.map([](auto& bq) -> kj::ArrayPtr<T> {
+        return bq.popBuffer;
+      }).orDefault(nullptr);
     }
 
-    kj::ArrayPtr<T> asArrayPtr() { return *this; }
+    kj::ArrayPtr<T> asArrayPtr() {
+      return *this;
+    }
 
   private:
     explicit Batch(BatchQueue& batchQueue): batchQueue(batchQueue) {}
@@ -94,8 +97,12 @@ public:
     pushBuffer.add(kj::fwd<U>(value));
   }
 
-  auto empty() const { return pushBuffer.empty(); }
-  auto size() const { return pushBuffer.size(); }
+  auto empty() const {
+    return pushBuffer.empty();
+  }
+  auto size() const {
+    return pushBuffer.size();
+  }
 
 private:
   kj::Vector<T> pushBuffer;

@@ -12,8 +12,9 @@
 // This is an anti-pattern and these should be considered HORRIBLE HACKS... but they get their jobs
 // done for the time being.
 
-#include <kj/common.h>
 #include <inttypes.h>
+
+#include <kj/common.h>
 
 namespace workerd {
 
@@ -112,6 +113,7 @@ public:
   void release();
 
   static void maybeWarn();
+
 private:
   bool released = false;
 };
