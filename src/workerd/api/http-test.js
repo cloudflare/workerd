@@ -89,7 +89,6 @@ export const inspect = {
     const url = new URL("http://user:pass@placeholder:8787/path?a=1&a=2&b=3");
     assert.strictEqual(util.inspect(url),
       `URL {
-  searchParams: URLSearchParams(3) { 'a' => '1', 'a' => '2', 'b' => '3' },
   origin: 'http://placeholder:8787',
   href: 'http://user:pass@placeholder:8787/path?a=1&a=2&b=3',
   protocol: 'http:',
@@ -100,7 +99,8 @@ export const inspect = {
   port: '8787',
   pathname: '/path',
   search: '?a=1&a=2&b=3',
-  hash: ''
+  hash: '',
+  searchParams: URLSearchParams(3) { 'a' => '1', 'a' => '2', 'b' => '3' }
 }`
     );
 
@@ -126,22 +126,22 @@ export const inspect = {
     });
     assert.strictEqual(util.inspect(request),
       `Request {
-  keepalive: false,
-  integrity: '',
-  cf: undefined,
-  signal: AbortSignal { reason: undefined, aborted: false, onabort: null },
-  fetcher: null,
-  redirect: 'follow',
-  headers: Headers(1) { 'content-type' => 'text/plain', [immutable]: false },
-  url: 'http://placeholder',
   method: 'POST',
-  bodyUsed: false,
+  url: 'http://placeholder',
+  headers: Headers(1) { 'content-type' => 'text/plain', [immutable]: false },
+  redirect: 'follow',
+  fetcher: null,
+  signal: AbortSignal { aborted: false, reason: undefined, onabort: null },
+  cf: undefined,
+  integrity: '',
+  keepalive: false,
   body: ReadableStream {
     locked: false,
     [state]: 'readable',
     [supportsBYOB]: true,
     [length]: 7n
-  }
+  },
+  bodyUsed: false
 }`
     );
 
@@ -149,21 +149,21 @@ export const inspect = {
     const response = await env.SERVICE.fetch("http://placeholder/not-found");
     assert.strictEqual(util.inspect(response),
       `Response {
-  cf: undefined,
-  webSocket: null,
-  url: 'http://placeholder/not-found',
-  redirected: false,
-  ok: false,
-  headers: Headers(0) { [immutable]: true },
-  statusText: 'Not Found',
   status: 404,
-  bodyUsed: false,
+  statusText: 'Not Found',
+  headers: Headers(0) { [immutable]: true },
+  ok: false,
+  redirected: false,
+  url: 'http://placeholder/not-found',
+  webSocket: null,
+  cf: undefined,
   body: ReadableStream {
     locked: false,
     [state]: 'readable',
     [supportsBYOB]: true,
     [length]: 0n
-  }
+  },
+  bodyUsed: false
 }`
     );
 
@@ -178,17 +178,17 @@ export const inspect = {
         assert.strictEqual(event.data,
           `MessageEvent {
   data: 'data',
-  isTrusted: true,
-  timeStamp: 0,
-  srcElement: WebSocket { extensions: '', protocol: '', url: null, readyState: 1 },
-  currentTarget: WebSocket { extensions: '', protocol: '', url: null, readyState: 1 },
-  returnValue: true,
-  defaultPrevented: false,
-  cancelable: false,
-  bubbles: false,
-  composed: false,
-  eventPhase: 2,
   type: 'message',
+  eventPhase: 2,
+  composed: false,
+  bubbles: false,
+  cancelable: false,
+  defaultPrevented: false,
+  returnValue: true,
+  currentTarget: WebSocket { readyState: 1, url: null, protocol: '', extensions: '' },
+  srcElement: WebSocket { readyState: 1, url: null, protocol: '', extensions: '' },
+  timeStamp: 0,
+  isTrusted: true,
   cancelBubble: false,
   NONE: 0,
   CAPTURING_PHASE: 1,
