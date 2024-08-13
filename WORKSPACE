@@ -492,6 +492,11 @@ http_archive(
         "//:patches/v8/0016-Revert-TracedReference-deref-API-removal.patch",
         "//:patches/v8/0017-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
         "//:patches/v8/0018-Update-illegal-invocation-error-message-in-v8.patch",
+        # TODO(cleanup): Patches backported from V8 12.9 – adding these fixes a race condition
+        # leading to a segfault in several wasm-related tests under ASan. These are already included
+        # in 12.9 so remove the patches when updating to that version.
+        "//:patches/v8/0019-wasm-Fix-more-code-logging-races.patch",
+        "//:patches/v8/0020-wasm-Remove-destructor-of-LogCodesTask.patch",
     ],
     integrity = "sha256-yoLczQj1XEZL4EHVRjAwpVjgr9/q0YlRGnNX47Ke2ws=",
     strip_prefix = "v8-12.8.374.10",
