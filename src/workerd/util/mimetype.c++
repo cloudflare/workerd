@@ -6,24 +6,64 @@
 #include <kj/debug.h>
 #include <kj/string-tree.h>
 #include <workerd/util/string-buffer.h>
+#include <array>
 
 namespace workerd {
 
 namespace {
 
-bool isWhitespace(const char c) {
+constexpr bool isWhitespace(const char c) noexcept {
   return (c == '\r' || c == '\n' || c == '\t' || c == ' ');
 }
 
-bool isTokenChar(const unsigned char c) {
-  return c == '!' || c == '#' || c == '$' || c == '%' || c == '&' || c == '\'' ||
-         c == '*' || c == '+' || c == '\\' || c == '-' || c == '.' || c == '^' ||
-         c == '_' || c == '`' || c == '|' || c == '~' || (c >= 'A' && c <= 'Z') ||
-         (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+constexpr std::array<uint8_t, 256> token_table = []() consteval {
+  std::array<uint8_t, 256> result{};
+
+  for (uint8_t c : { '!' ,  '#' ,  '$' ,  '%' ,  '&' ,  '\'' ,
+          '*' ,  '+' ,  '\\' ,  '-' ,  '.' ,  '^' ,
+          '_' ,  '`' ,  '|' ,  '~'}) {
+    result[c] = true;
+  }
+
+  // (c >= 'A' && c <= 'Z')
+  for (uint8_t c = 'A'; c <= 'Z'; c++) {
+    result[c] = true;
+  }
+
+  // (c >= 'a' && c <= 'z')
+  for (uint8_t c = 'a'; c <= 'z'; c++) {
+    result[c] = true;
+  }
+
+  // (c >= '0' && c <= '9')
+  for (uint8_t c = '0'; c <= '9'; c++) {
+    result[c] = true;
+  }
+
+  return result;
+}();
+
+constexpr bool isTokenChar(const uint8_t c) noexcept {
+  return token_table[c];
 }
 
-bool isQuotedStringTokenChar(const unsigned char c) {
-  return (c == '\t') || (c >= 0x20 && c <= 0x7e) || (c >= 0x80);
+constexpr std::array<uint8_t, 256> quoted_string_token_table = []() consteval {
+  std::array<uint8_t, 256> result{};
+  result['\t'] = true;
+
+  for (uint8_t c = 0x20; c <= 0x7e; c++) {
+    result[c] = true;
+  }
+
+  for (uint8_t c = 0x80; c < 255; c++) {
+    result[c] = true;
+  }
+
+  return result;
+}();
+
+constexpr bool isQuotedStringTokenChar(const uint8_t c) noexcept {
+  return quoted_string_token_table[c];
 }
 
 kj::ArrayPtr<const char> skipWhitespace(kj::ArrayPtr<const char> str) {
@@ -39,17 +79,12 @@ kj::ArrayPtr<const char> trimWhitespace(kj::ArrayPtr<const char> str) {
   return str.slice(0, str.size() - (str.end() - ptr));
 }
 
-bool hasInvalidCodepoints(kj::ArrayPtr<const char> str, auto predicate) {
-  auto ptr = str.begin();
-  auto end = str.end();
-  while (ptr != end) {
-    if (predicate(static_cast<unsigned char>(*ptr))) {
-      ++ptr;
-      continue;
-    }
-    return true;
+constexpr bool hasInvalidCodepoints(kj::ArrayPtr<const char> str, auto predicate) {
+  bool has_invalid_codepoints = false;
+  for (const char ptr : str) {
+    has_invalid_codepoints |= !predicate(static_cast<uint8_t>(ptr));
   }
-  return false;
+  return has_invalid_codepoints;
 }
 
 kj::Maybe<size_t> findParamDelimiter(kj::ArrayPtr<const char> str) {
