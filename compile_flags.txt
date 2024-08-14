@@ -15,8 +15,8 @@
 -Iexternal/perfetto/include/perfetto/base/build_configs/bazel/
 -Iexternal/ssl/src/include
 -Isrc
--isystem/usr/lib/llvm-15/include/c++/v1
--isystem/usr/lib/llvm-15/lib/clang/15.0.7/include
+-isystem/usr/lib/llvm-16/include/c++/v1
+-isystem/usr/lib/llvm-16/lib/clang/16/include
 -isystem/usr/local/include
 -isystem/usr/include/x86_64-linux-gnu
 -isystem/usr/include

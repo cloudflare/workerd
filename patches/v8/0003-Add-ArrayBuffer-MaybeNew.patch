@@ -1,4 +1,4 @@
-From 1d861f69dcf5d40faf94b2c844f96432a190b4f2 Mon Sep 17 00:00:00 2001
+From 66ed20eae671ff611f2367ed894340cac7543236 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Fri, 16 Sep 2022 21:41:45 -0500
 Subject: Add `ArrayBuffer::MaybeNew()`.
@@ -8,10 +8,10 @@ In Cloudflare's edge runtime, this is part of a larger patch that allows gracefu
 (We would like to upstream our internal patch, just need to find the time...)
 
 diff --git a/include/v8-array-buffer.h b/include/v8-array-buffer.h
-index d625b85496bb4a4b3bb6a48f4f0c48de514d3e37..f8f0abc7e2e6e26815f305e621301b27161f87fd 100644
+index 0a3d8170f68214750907d0469df1a9c652da340e..368250248010b28ea6bf8f83c9836bdca2595f0e 100644
 --- a/include/v8-array-buffer.h
 +++ b/include/v8-array-buffer.h
-@@ -216,6 +216,14 @@ class V8_EXPORT ArrayBuffer : public Object {
+@@ -217,6 +217,14 @@ class V8_EXPORT ArrayBuffer : public Object {
     */
    size_t MaxByteLength() const;
  
@@ -24,5 +24,5 @@ index d625b85496bb4a4b3bb6a48f4f0c48de514d3e37..f8f0abc7e2e6e26815f305e621301b27
 +  }
 +
    /**
-    * Create a new ArrayBuffer. Allocate |byte_length| bytes.
-    * Allocated memory will be owned by a created ArrayBuffer and
+    * Create a new ArrayBuffer. Allocate |byte_length| bytes, which are either
+    * zero-initialized or uninitialized. Allocated memory will be owned by a

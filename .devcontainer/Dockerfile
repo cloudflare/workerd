@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/devcontainers/base:jammy
 
 # Install dependencies, including clang via through LLVM APT repository. Note that this
 # will also install lldb and clangd alongside dependencies.
-ARG LLVM_VERSION=15
+ARG LLVM_VERSION=16
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get -y install --no-install-recommends software-properties-common python3 python3-distutils tclsh \
     && curl -fSsL -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && bash /tmp/llvm.sh ${LLVM_VERSION} \

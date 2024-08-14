@@ -78,6 +78,9 @@ build:unix --host_cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 # Need to redefine _WIN32_WINNT to build dawn on Windows
 build:windows --per_file_copt='external/dawn@-Wno-macro-redefined'
 build:windows --host_per_file_copt='external/dawn@-Wno-macro-redefined'
+# V8 now requires Windows 10, Bazel fails to set this properly.
+build:windows --per_file_copt=external/v8/src/base/platform/platform-win32.cc@-D_WIN32_WINNT=0x0A00
+build:windows --host_per_file_copt=external/v8/src/base/platform/platform-win32.cc@-D_WIN32_WINNT=0x0A00
 
 # typescript configuration
 # do more correct type checking
