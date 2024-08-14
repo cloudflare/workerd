@@ -9,7 +9,7 @@
 #include <kj/array.h>
 #include <cmath>
 #include <map>
-#include <string.h>
+#include <cstring>
 #include <unicode/ustring.h>
 #include <unicode/uchar.h>
 #include <unicode/uidna.h>

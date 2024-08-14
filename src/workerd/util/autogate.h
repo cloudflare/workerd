@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include "kj/string.h"
+#include <kj/string.h>
 #include <capnp/blob.h>
 #include <capnp/list.h>
 #include <initializer_list>

@@ -14,8 +14,8 @@
 #include "gpu-sampler.h"
 #include "gpu-texture.h"
 #include "gpu-utils.h"
-#include "workerd/jsg/exception.h"
-#include "workerd/jsg/jsg.h"
+#include <workerd/jsg/exception.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
 

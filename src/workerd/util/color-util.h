@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <stdlib.h>
+#include <cstdlib>
 #include <kj/string.h>
 
 namespace workerd {
@@ -34,4 +34,4 @@ static ColorMode permitsColor() {
   }
 }
 
-}
+} // namespace workerd

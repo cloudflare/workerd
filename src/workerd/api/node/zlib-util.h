@@ -9,7 +9,7 @@
 #include "zlib.h"
 
 #include <limits>
-#include <stdint.h>
+#include <cstdint>
 
 namespace workerd::api::node {
 

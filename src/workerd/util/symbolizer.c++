@@ -3,9 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <cstdint>
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <kj/common.h>

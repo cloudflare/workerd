@@ -5,7 +5,7 @@
 #pragma once
 // Classes to manage lifetime of workers, scripts, and isolates.
 
-#include "workerd/util/xthreadnotifier.h"
+#include <workerd/util/xthreadnotifier.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/limit-enforcer.h>
 #include <kj/compat/http.h>

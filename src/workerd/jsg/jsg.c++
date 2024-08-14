@@ -4,7 +4,7 @@
 
 #include "jsg.h"
 #include "setup.h"
-#include "workerd/jsg/util.h"
+#include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
 namespace workerd::jsg {
