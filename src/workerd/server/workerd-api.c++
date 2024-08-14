@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "workerd-api.h"
+#include "workerd/api/worker-rpc.h"
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
@@ -240,6 +241,7 @@ WorkerdApi::EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) 
   return {
     .workerEntrypoint = typedLock.getConstructor<api::WorkerEntrypoint>(lock.v8Context()),
     .durableObject = typedLock.getConstructor<api::DurableObjectBase>(lock.v8Context()),
+    .workflow = typedLock.getConstructor<api::Workflow>(lock.v8Context()),
   };
 }
 const jsg::TypeHandler<Worker::Api::ErrorInterface>&

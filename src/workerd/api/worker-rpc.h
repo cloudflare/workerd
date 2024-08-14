@@ -478,6 +478,27 @@ public:
   JSG_RESOURCE_TYPE(DurableObjectBase) {}
 };
 
+// Base class for Workflows
+//
+// When the worker's top-level module exports a class that extends this class, it means that it
+// is a Workflow.
+//
+//     import {Workflow} from "cloudflare:workers";
+//     export class MyWorkflow extends Workflow {
+//       async run(batch, fns) { ... }
+//     }
+//
+// `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
+// define a constructor.
+class Workflow: public jsg::Object {
+public:
+  static jsg::Ref<Workflow> constructor(
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      jsg::Ref<ExecutionContext> ctx, jsg::JsObject env);
+
+  JSG_RESOURCE_TYPE(Workflow) {}
+};
+
 // The "cloudflare:workers" module, which exposes the WorkerEntrypoint and DurableObject types
 // for extending.
 class EntrypointsModule: public jsg::Object {
@@ -487,6 +508,7 @@ public:
 
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
+    JSG_NESTED_TYPE(Workflow);
     JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
     JSG_NESTED_TYPE_NAMED(JsRpcPromise, RpcPromise);
     JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
@@ -501,6 +523,7 @@ public:
   api::JsRpcStub,                    \
   api::JsRpcTarget,                  \
   api::WorkerEntrypoint,             \
+  api::Workflow,                     \
   api::DurableObjectBase,            \
   api::EntrypointsModule
 
