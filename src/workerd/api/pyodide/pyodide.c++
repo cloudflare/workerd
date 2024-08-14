@@ -8,20 +8,21 @@
 namespace workerd::api::pyodide {
 
 // singleton that owns bundle
-kj::TreeMap<kj::String, kj::Own<capnp::FlatArrayMessageReader>> bundleReaders;
 
-bool hasPyodideBundle(kj::StringPtr version) {
-  return bundleReaders.find(version) != kj::none;
+const kj::Maybe<jsg::Bundle::Reader> PyodideBundleManager::getPyodideBundle(kj::StringPtr version) const {
+  KJ_IF_SOME(t, bundles.lockShared()->find(version)) {
+    return t.bundle;
+  }
+  return kj::none;
 }
 
-jsg::Bundle::Reader getPyodideBundle(kj::StringPtr version) {
-  return KJ_REQUIRE_NONNULL(bundleReaders.find(version))->getRoot<jsg::Bundle>();
-}
-
-void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) {
-  auto wordArray = kj::arrayPtr(reinterpret_cast<const capnp::word*>(data.begin()), data.size() / sizeof(capnp::word));
-  auto reader = kj::heap<capnp::FlatArrayMessageReader>(wordArray).attach(kj::mv(data));
-  bundleReaders.insert(kj::mv(version), kj::mv(reader));
+void PyodideBundleManager::setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const {
+  auto wordArray = kj::arrayPtr(reinterpret_cast<const capnp::word*>(data.begin()),
+                                data.size() / sizeof(capnp::word));
+  auto messageReader = kj::heap<capnp::FlatArrayMessageReader>(wordArray).attach(kj::mv(data));
+  auto bundle = messageReader->getRoot<jsg::Bundle>();
+  bundles.lockExclusive()->insert(kj::mv(version),
+                                  {.messageReader = kj::mv(messageReader), .bundle = bundle});
 }
 
 static int readToTarget(kj::ArrayPtr<const kj::byte> source, int offset, kj::ArrayPtr<kj::byte> buf) {
