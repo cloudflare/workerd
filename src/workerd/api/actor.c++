@@ -27,18 +27,18 @@ public:
     auto& context = IoContext::current();
 
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
-        [&](SpanBuilder& span, IoChannelFactory& ioChannelFactory) {
-      if (span.isObserved()) {
-        span.setTag("actor_id"_kjc, kj::str(actorId));
+        [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+      if (tracing.span.isObserved()) {
+        tracing.span.setTag("actor_id"_kjc, kj::str(actorId));
       }
 
       // Lazily initialize actorChannel
       if (actorChannel == kj::none) {
-        actorChannel = context.getColoLocalActorChannel(channelId, actorId, span);
+        actorChannel = context.getColoLocalActorChannel(channelId, actorId, tracing.span);
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)
-          ->startRequest({.cfBlobJson = kj::mv(cfStr), .parentSpan = span});
+          ->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
     },
         {.inHouse = true,
           .wrapMetrics = true,
@@ -68,19 +68,19 @@ public:
     auto& context = IoContext::current();
 
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
-        [&](SpanBuilder& span, IoChannelFactory& ioChannelFactory) {
-      if (span.isObserved()) {
-        span.setTag("actor_id"_kjc, id->toString());
+        [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+      if (tracing.span.isObserved()) {
+        tracing.span.setTag("actor_id"_kjc, id->toString());
       }
 
       // Lazily initialize actorChannel
       if (actorChannel == kj::none) {
-        actorChannel = context.getGlobalActorChannel(
-            channelId, id->getInner(), kj::mv(locationHint), mode, enableReplicaRouting, span);
+        actorChannel = context.getGlobalActorChannel(channelId, id->getInner(),
+            kj::mv(locationHint), mode, enableReplicaRouting, tracing.span);
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)
-          ->startRequest({.cfBlobJson = kj::mv(cfStr), .parentSpan = span});
+          ->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
     },
         {.inHouse = true,
           .wrapMetrics = true,

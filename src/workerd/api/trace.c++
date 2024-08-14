@@ -74,7 +74,15 @@ jsg::V8Ref<v8::Object> getTraceLogMessage(jsg::Lock& js, const Trace::Log& log) 
 }
 
 kj::Array<jsg::Ref<TraceLog>> getTraceLogs(jsg::Lock& js, const Trace& trace) {
-  return KJ_MAP(x, trace.logs) -> jsg::Ref<TraceLog> { return jsg::alloc<TraceLog>(js, trace, x); };
+  auto builder = kj::heapArrayBuilder<jsg::Ref<TraceLog>>(trace.logs.size() + trace.spans.size());
+  for (auto i: kj::indices(trace.logs)) {
+    builder.add(jsg::alloc<TraceLog>(js, trace, trace.logs[i]));
+  }
+  // Add spans represented as logs to the logs object.
+  for (auto i: kj::indices(trace.spans)) {
+    builder.add(jsg::alloc<TraceLog>(js, trace, trace.spans[i]));
+  }
+  return builder.finish();
 }
 
 kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> getTraceDiagnosticChannelEvents(

@@ -782,14 +782,19 @@ kj::Date IoContext::now() {
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
-    kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
+    kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
   SpanBuilder span = nullptr;
+  SpanBuilder limeSpan = nullptr;
+
   KJ_IF_SOME(n, options.operationName) {
-    span = makeTraceSpan(kj::mv(n));
+    // TODO(cleanup): Avoid cloning the string here if possible.
+    span = makeTraceSpan(kj::ConstString(kj::str(n)));
+    limeSpan = makeLimeTraceSpan(kj::ConstString(kj::mv(n)));
   }
 
-  auto ret = func(span, getIoChannelFactory());
+  TraceContext tracing(kj::mv(span), kj::mv(limeSpan));
+  auto ret = func(tracing, getIoChannelFactory());
 
   if (options.wrapMetrics) {
     auto& metrics = getMetrics();
@@ -798,15 +803,18 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
 
-  if (span.isObserved()) {
-    ret = ret.attach(kj::mv(span));
+  if (tracing.span.isObserved()) {
+    ret = ret.attach(kj::mv(tracing.span));
+  }
+  if (tracing.limeSpan.isObserved()) {
+    ret = ret.attach(kj::mv(tracing.limeSpan));
   }
 
   return kj::mv(ret);
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequest(
-    kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
+    kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
   limitEnforcer->newSubrequest(options.inHouse);
   return getSubrequestNoChecks(kj::mv(func), kj::mv(options));
@@ -815,8 +823,9 @@ kj::Own<WorkerInterface> IoContext::getSubrequest(
 kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
     uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
   return getSubrequest(
-      [&](SpanBuilder& span, IoChannelFactory& channelFactory) {
-    return getSubrequestChannelImpl(channel, isInHouse, kj::mv(cfBlobJson), span, channelFactory);
+      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
   },
       SubrequestOptions{
         .inHouse = isInHouse,
@@ -830,8 +839,9 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<kj::ConstString> operationName) {
   return getSubrequestNoChecks(
-      [&](SpanBuilder& span, IoChannelFactory& channelFactory) {
-    return getSubrequestChannelImpl(channel, isInHouse, kj::mv(cfBlobJson), span, channelFactory);
+      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
   },
       SubrequestOptions{
         .inHouse = isInHouse,
@@ -843,11 +853,11 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
-    SpanBuilder& span,
+    TraceContext& tracing,
     IoChannelFactory& channelFactory) {
   IoChannelFactory::SubrequestMetadata metadata{
     .cfBlobJson = kj::mv(cfBlobJson),
-    .parentSpan = span,
+    .tracing = tracing,
     .featureFlagsForFl = worker->getIsolate().getFeatureFlagsForFl(),
   };
 
@@ -912,8 +922,18 @@ SpanParent IoContext::getCurrentTraceSpan() {
   return getMetrics().getSpan();
 }
 
+SpanParent IoContext::getCurrentLimeTraceSpan() {
+  // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
+  // context, as with Jaeger spans.
+  return getMetrics().getLimeSpan();
+}
+
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
   return getCurrentTraceSpan().newChild(kj::mv(operationName));
+}
+
+SpanBuilder IoContext::makeLimeTraceSpan(kj::ConstString operationName) {
+  return getCurrentLimeTraceSpan().newChild(kj::mv(operationName));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

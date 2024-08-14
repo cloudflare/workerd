@@ -2142,7 +2142,8 @@ private:
         kj::Maybe<kj::String> cacheName,
         kj::Maybe<kj::String> cfBlobJson,
         SpanParent parentSpan)
-        : client(asHttpClient(parent.startRequest({kj::mv(cfBlobJson), kj::mv(parentSpan)}))),
+        : client(asHttpClient(parent.startRequest(
+              {kj::mv(cfBlobJson), TraceParentContext(kj::mv(parentSpan), nullptr)}))),
           cacheName(kj::mv(cacheName)),
           cacheNamespaceHeader(cacheNamespaceHeader) {}
 
