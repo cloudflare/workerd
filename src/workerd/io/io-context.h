@@ -660,13 +660,17 @@ public:
   };
 
   kj::Own<WorkerInterface> getSubrequestNoChecks(
-      kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
+      kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
       SubrequestOptions options);
 
   // If creating a new subrequest is permitted, calls the given factory function synchronously to
   // create one.
+  // If operationName is specified within options and tracing is enabled, this will add a child span
+  // to the current trace span for both tracing formats.
+  // TODO(o11y): In the future we may need to change the interface to support having different span
+  // names and enforce that only documented spans can be emitted.
   kj::Own<WorkerInterface> getSubrequest(
-      kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
+      kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
       SubrequestOptions options);
 
   // Get WorkerInterface objects to use for subrequests.
@@ -747,11 +751,13 @@ public:
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
   SpanParent getCurrentTraceSpan();
+  SpanParent getCurrentLimeTraceSpan();
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.
   SpanBuilder makeTraceSpan(kj::ConstString operationName);
+  SpanBuilder makeLimeTraceSpan(kj::ConstString operationName);
 
   // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
   // request and get a possibly wrapped stream back.
@@ -860,7 +866,7 @@ private:
   kj::Own<WorkerInterface> getSubrequestChannelImpl(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
-      SpanBuilder& span,
+      TraceContext& tracing,
       IoChannelFactory& channelFactory);
 
   friend class IoContext_IncomingRequest;

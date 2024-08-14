@@ -3,10 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/trace.h>
+#include <workerd/util/thread-scopes.h>
 
 #include <capnp/message.h>
 #include <capnp/schema.h>
 #include <kj/debug.h>
+#include <kj/time.h>
 
 #include <cstdlib>
 
@@ -16,6 +18,10 @@ namespace workerd {
 // want this number to be big enough to be useful for tracing, but small enough to make it hard to
 // DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request.
 static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
+// Limit spans to at most 512, it could be difficult to fit e.g. 1024 spans within MAX_TRACE_BYTES
+// unless most of the included spans do not include tags. If use cases arise where this amount is
+// insufficient, merge smaller spans together or drop smaller spans.
+static constexpr size_t MAX_LIME_SPANS = 512;
 
 namespace {
 
@@ -272,9 +278,13 @@ Trace::~Trace() noexcept(false) {}
 
 void Trace::copyTo(rpc::Trace::Builder builder) {
   {
-    auto list = builder.initLogs(logs.size());
+    auto list = builder.initLogs(logs.size() + spans.size());
     for (auto i: kj::indices(logs)) {
       logs[i].copyTo(list[i]);
+    }
+    // Add spans represented as logs to the logs object.
+    for (auto i: kj::indices(spans)) {
+      spans[i].copyTo(list[i + logs.size()]);
     }
   }
 
@@ -574,13 +584,15 @@ WorkerTracer::WorkerTracer(
     kj::Own<PipelineTracer> parentPipeline, kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
-      parentPipeline(kj::mv(parentPipeline)) {}
+      parentPipeline(kj::mv(parentPipeline)),
+      self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::refcounted<Trace>(
-          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none)) {}
+          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none)),
+      self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 
-void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message) {
+void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) {
   if (trace->exceededLogLimit) {
     return;
   }
@@ -598,7 +610,55 @@ void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message
     return;
   }
   trace->bytesUsed = newSize;
+  if (isSpan) {
+    trace->spans.add(timestamp, logLevel, kj::mv(message));
+    trace->numSpans++;
+    return;
+  }
   trace->logs.add(timestamp, logLevel, kj::mv(message));
+}
+
+void WorkerTracer::addSpan(const Span& span, kj::String spanContext) {
+  // This is where we'll actually encode the span for now.
+  // Drop any spans beyond MAX_LIME_SPANS.
+  if (trace->numSpans >= MAX_LIME_SPANS) {
+    return;
+  }
+  if (isPredictableModeForTest()) {
+    // Do not emit span duration information in predictable mode.
+    log(span.endTime, LogLevel::LOG, kj::str("[\"span: ", span.operationName, "\"]"), true);
+  } else {
+    // Time since Unix epoch in seconds, with millisecond precision
+    double epochSecondsStart = (span.startTime - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1000.0;
+    double epochSecondsEnd = (span.endTime - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1000.0;
+    auto message = kj::str("[\"span: ", span.operationName, " ", kj::mv(spanContext), " ",
+        epochSecondsStart, " ", epochSecondsEnd, "\"]");
+    log(span.endTime, LogLevel::LOG, kj::mv(message), true);
+  }
+
+  // TODO(cleanup): Create a function in kj::OneOf to automatically convert to a given type (i.e
+  // String) to avoid having to handle each type explicitly here.
+  for (const Span::TagMap::Entry& tag: span.tags) {
+    auto value = [&]() {
+      KJ_SWITCH_ONEOF(tag.value) {
+        KJ_CASE_ONEOF(str, kj::String) {
+          return kj::str(str);
+        }
+        KJ_CASE_ONEOF(val, int64_t) {
+          return kj::str(val);
+        }
+        KJ_CASE_ONEOF(val, double) {
+          return kj::str(val);
+        }
+        KJ_CASE_ONEOF(val, bool) {
+          return kj::str(val);
+        }
+      }
+      KJ_UNREACHABLE;
+    }();
+    kj::String message = kj::str("[\"tag: "_kj, tag.key, " => "_kj, value, "\"]");
+    log(span.endTime, LogLevel::LOG, kj::mv(message), true);
+  }
 }
 
 void WorkerTracer::addException(

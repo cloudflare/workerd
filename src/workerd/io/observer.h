@@ -99,6 +99,9 @@ public:
   virtual SpanParent getSpan() {
     return nullptr;
   }
+  virtual SpanParent getLimeSpan() {
+    return nullptr;
+  }
 
   virtual void addedContextTask() {}
   virtual void finishedContextTask() {}

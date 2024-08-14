@@ -134,10 +134,14 @@ wd_cc_library(
     name = "trace",
     srcs = ["trace.c++"],
     hdrs = ["trace.h"],
+    implementation_deps = [
+        "//src/workerd/util:thread-scopes",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":worker-interface_capnp",
         "//src/workerd/jsg:memory-tracker",
+        "//src/workerd/util",
         "//src/workerd/util:own-util",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
