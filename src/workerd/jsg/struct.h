@@ -103,8 +103,9 @@ public:
                      kj::isSameType<typename FieldWrappers::Type, Unimplemented>()) && ...)) {
         return T{};
       }
-      jsg::throwTypeError(isolate, "Cannot initialize a dictionary with required members from an "
-                                    "undefined or null value.");
+      jsg::throwTypeError(isolate, kj::str("Cannot initialize ", typeid(T).name(),
+                                           " with required members from an "
+                                           "undefined or null value."));
     }
 
     if (!handle->IsObject()) return kj::none;
