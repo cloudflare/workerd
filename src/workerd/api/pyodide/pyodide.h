@@ -163,56 +163,19 @@ class ArtifactBundler : public jsg::Object {
 public:
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
-  ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot,
-      kj::Function<kj::Promise<bool>(MemorySnapshotResult snapshot)> uploadMemorySnapshotCb)
-      :
-        storedSnapshot(kj::none),
-        existingSnapshot(kj::mv(existingSnapshot)),
-        uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
-        hasUploaded(false),
-        isValidating(false) {};
-
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
-        uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false),
         isValidating(false){};
 
   ArtifactBundler(bool isValidating = false)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::none),
-        uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false),
         isValidating(isValidating){};
-
-  jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
-    // TODO(later): Remove upload code.
-
-    // Prevent multiple uploads.
-    if (hasUploaded) {
-      return js.rejectedPromise<bool>(
-          js.typeError("This ArtifactBundle has already uploaded a memory snapshot"));
-    }
-
-    // TODO(later): Only upload if `snapshot` isn't identical to `existingSnapshot`.
-
-    if (uploadMemorySnapshotCb == kj::none) {
-      return js.rejectedPromise<bool>(js.typeError("ArtifactBundler is disabled"));
-    }
-    auto& cb = KJ_REQUIRE_NONNULL(uploadMemorySnapshotCb);
-    hasUploaded = true;
-    auto& context = IoContext::current();
-    return context.awaitIo(js, cb({ .snapshot = kj::mv(snapshot), .importedModulesList = {}}));
-  };
 
   void storeMemorySnapshot(jsg::Lock& js, MemorySnapshotResult snapshot) {
     KJ_REQUIRE(isValidating);
     storedSnapshot = kj::mv(snapshot);
-  }
-
-  bool isEnabled() {
-    return uploadMemorySnapshotCb != kj::none;
   }
 
   bool hasMemorySnapshot() {
@@ -248,23 +211,24 @@ public:
     tracker.trackFieldWithSize("snapshot", KJ_REQUIRE_NONNULL(existingSnapshot).size());
   }
 
+  bool isEnabled() {
+    return false; // TODO(later): Remove this function once we regenerate the bundle.
+  }
+
   JSG_RESOURCE_TYPE(ArtifactBundler) {
-    JSG_METHOD(uploadMemorySnapshot);
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
-    JSG_METHOD(isEnabled);
     JSG_METHOD(isEwValidating);
     JSG_METHOD(storeMemorySnapshot);
+    JSG_METHOD(isEnabled);
   }
 
 private:
   // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
   // up cold starts.
   kj::Maybe<kj::Array<kj::byte>> existingSnapshot;
-  kj::Maybe<kj::Function<kj::Promise<bool>(MemorySnapshotResult snapshot)>> uploadMemorySnapshotCb;
-  bool hasUploaded;
   bool isValidating;
 };
 

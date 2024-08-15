@@ -26,8 +26,7 @@ let LOADED_BASELINE_SNAPSHOT: number;
 
 const TOP_LEVEL_SNAPSHOT =
   ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
-const SHOULD_UPLOAD_SNAPSHOT =
-  ArtifactBundler.isEnabled() || TOP_LEVEL_SNAPSHOT;
+const SHOULD_UPLOAD_SNAPSHOT = TOP_LEVEL_SNAPSHOT;
 
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of
@@ -315,22 +314,9 @@ function setUploadFunction(snapshot: Uint8Array, importedModulesList: Array<stri
     MEMORY_TO_UPLOAD = { snapshot, importedModulesList };
     return;
   }
-  DEFERRED_UPLOAD_FUNCTION = async () => {
-    try {
-      const success = await ArtifactBundler.uploadMemorySnapshot(snapshot);
-      // Free memory
-      // @ts-ignore
-      snapshot = undefined;
-      if (!success) {
-        console.warn("Memory snapshot upload failed.");
-      }
-    } catch (e) {
-      console.warn("Memory snapshot upload failed.");
-      reportError(e);
-    }
-  };
 }
 
+// TODO(later): Rename this to avoid `upload` nomenclature.
 export function maybeSetupSnapshotUpload(Module: Module): void {
   if (!SHOULD_UPLOAD_SNAPSHOT) {
     return;
