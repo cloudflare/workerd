@@ -754,12 +754,23 @@ struct RequestInitializerDict {
 
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, mode, credentials, cache,
              referrer, referrerPolicy, integrity, signal);
-  JSG_STRUCT_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
-    headers?: HeadersInit;
-    body?: BodyInit | null;
-    cache?: 'no-store';
-    cf?: Cf;
-  });
+  JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+    if(flags.getCacheOptionEnabled()) {
+      JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
+        headers?: HeadersInit;
+        body?: BodyInit | null;
+        cache?: 'no-store';
+        cf?: Cf;
+      });
+    } else {
+      JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
+        headers?: HeadersInit;
+        body?: BodyInit | null;
+        cache?: never;
+        cf?: Cf;
+      });
+    }
+  }
 
   // This method is called within tryUnwrap() when the type is unpacked from v8.
   // See jsg Readme for more details.
@@ -919,14 +930,20 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
       if(flags.getCacheOptionEnabled()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
+        JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
+          constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
+          clone(): Request<CfHostMetadata, Cf>;
+          cache?: "no-store";
+          get cf(): Cf | undefined;
+        });
+      } else {
+        JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
+          constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
+          clone(): Request<CfHostMetadata, Cf>;
+          get cf(): Cf | undefined;
+        });
       }
 
-      JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
-        constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
-        clone(): Request<CfHostMetadata, Cf>;
-        cache?: "no-store";
-        get cf(): Cf | undefined;
-      });
       // Use `RequestInfo` and `RequestInit` type aliases in constructor instead of inlining.
       // `CfProperties` is defined in `/types/defines/cf.d.ts`. We only really need a single `Cf`
       // type parameter here, but it would be a breaking type change to remove `CfHostMetadata`.

@@ -583,6 +583,11 @@ using HasGetTemplateOverload = decltype(
 #define JSG_STRUCT_TS_OVERRIDE(...) \
   static constexpr char _JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY[] = JSG_STRING_LITERAL(__VA_ARGS__)
 
+#define JSG_STRUCT_TS_OVERRIDE_DYNAMIC(...) \
+  static void jsgConfiguration(__VA_ARGS__); \
+  template <typename Registry> \
+  static void registerTypeScriptDynamicOverride(Registry& registry, ##__VA_ARGS__)
+
 // Like JSG_TS_DEFINE but for use with JSG_STRUCT. Should be placed adjacent to the JSG_STRUCT
 // declaration, inside the same `struct` definition. See the `## TypeScript`section of the JSG README.md
 // for more details.
@@ -622,6 +627,36 @@ namespace {
   template <typename T>
   struct HasStructTypeScriptDefine<T, decltype(T::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY, 0)> : std::true_type { };
 }
+
+#define _JSG_STRUCT_INTERNAL_KIND_AND_FIELDS_AND_TYPE_WRAPPER(...) \
+  static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = \
+      ::workerd::jsg::JsgKind::STRUCT; \
+  static constexpr char JSG_FOR_EACH(JSG_STRUCT_FIELD_NAME, , __VA_ARGS__); \
+  template <typename TypeWrapper, typename Self> \
+  using JsgFieldWrappers = ::workerd::jsg::TypeTuple< \
+    JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__) \
+  >
+
+#define _JSG_STRUCT_REGISTER_MEMBERS_TS_ROOT() \
+  if constexpr (::workerd::jsg::HasStructTypeScriptRoot<Self>::value) { \
+    registry.registerTypeScriptRoot(); \
+  }
+
+#define _JSG_STRUCT_REGISTER_MEMBERS_TS_OVERRIDE() \
+  if constexpr (::workerd::jsg::HasStructTypeScriptOverride<Self>::value) { \
+    registry.template registerTypeScriptOverride<Self::_JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY>(); \
+  }
+
+#define _JSG_STRUCT_REGISTER_MEMBERS_TS_DYNAMIC_OVERRIDE() \
+  if constexpr (requires (jsg::GetConfiguration<Self> arg) \
+      { registerTypeScriptDynamicOverride<Registry>(registry, arg); }) { \
+    registerTypeScriptDynamicOverride<Registry>(registry, arg); \
+  }
+
+#define _JSG_STRUCT_REGISTER_MEMBERS_TS_DEFINE() \
+  if constexpr (::workerd::jsg::HasStructTypeScriptDefine<Self>::value) { \
+    registry.template registerTypeScriptDefine<Self::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY>(); \
+  }
 
 // Nest this inside a simple struct declaration in order to support translating it to/from a
 // JavaScript object / Web IDL dictionary.
@@ -663,26 +698,23 @@ namespace {
 // exporting), then you should be able to use '$$' as the identifier prefix in C++ since only the
 // first '$' gets stripped.
 #define JSG_STRUCT(...) \
-  static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = \
-      ::workerd::jsg::JsgKind::STRUCT; \
-  static constexpr char JSG_FOR_EACH(JSG_STRUCT_FIELD_NAME, , __VA_ARGS__); \
+  _JSG_STRUCT_INTERNAL_KIND_AND_FIELDS_AND_TYPE_WRAPPER(__VA_ARGS__); \
   template <typename Registry, typename Self> \
-  static void registerMembers(Registry& registry) { \
+  static void registerMembers(Registry& registry) \
+      requires (!jsg::HasConfiguration<Self>) { \
     JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__); \
-    if constexpr (::workerd::jsg::HasStructTypeScriptRoot<Self>::value) { \
-      registry.registerTypeScriptRoot(); \
-    } \
-    if constexpr (::workerd::jsg::HasStructTypeScriptOverride<Self>::value) { \
-      registry.template registerTypeScriptOverride<Self::_JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY>(); \
-    } \
-    if constexpr (::workerd::jsg::HasStructTypeScriptDefine<Self>::value) { \
-      registry.template registerTypeScriptDefine<Self::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY>(); \
-    } \
+    _JSG_STRUCT_REGISTER_MEMBERS_TS_ROOT(); \
+    _JSG_STRUCT_REGISTER_MEMBERS_TS_OVERRIDE(); \
+    _JSG_STRUCT_REGISTER_MEMBERS_TS_DEFINE(); \
   } \
-  template <typename TypeWrapper, typename Self> \
-  using JsgFieldWrappers = ::workerd::jsg::TypeTuple< \
-    JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__) \
-  >
+  template <typename Registry, typename Self> \
+  static void registerMembers(Registry& registry, jsg::GetConfiguration<Self> arg) \
+      requires jsg::HasConfiguration<Self> { \
+    JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__); \
+    _JSG_STRUCT_REGISTER_MEMBERS_TS_ROOT(); \
+    _JSG_STRUCT_REGISTER_MEMBERS_TS_DYNAMIC_OVERRIDE(); \
+    _JSG_STRUCT_REGISTER_MEMBERS_TS_DEFINE(); \
+  }
 
 namespace {
 template <size_t N>
