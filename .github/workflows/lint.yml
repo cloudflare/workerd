@@ -1,0 +1,34 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches:
+    - main
+    
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - name: Setup Linux
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          wget https://apt.llvm.org/llvm.sh
+          sed -i '/apt-get install/d' llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          sudo apt-get install -y --no-install-recommends clang-format-18
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        # The pnpm version will be determined by the `packageManager` field in `.npmrc`
+      - name: Install project deps with pnpm
+        run: |
+          pnpm i
+      - name: Lint
+        run: |
+          python3 ./tools/cross/format.py --check
+        env:
+          CLANG_FORMAT: clang-format-18

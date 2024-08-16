@@ -2,7 +2,8 @@
   "name": "@cloudflare/workerd-root",
   "private": true,
   "scripts": {
-    "lint": "eslint types/src"
+    "lint": "eslint types/src",
+    "format": "prettier"
   },
   "dependencies": {
     "capnp-ts": "^0.7.0",
