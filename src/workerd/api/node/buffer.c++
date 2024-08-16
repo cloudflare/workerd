@@ -434,6 +434,7 @@ jsg::JsString toStringImpl(
     uint32_t start,
     uint32_t end,
     Encoding encoding) {
+  if (end < start) end = start;
   auto slice = bytes.slice(start, end);
   if (slice.size() == 0) return js.str();
   switch (encoding) {
