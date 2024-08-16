@@ -459,10 +459,17 @@ jsg::JsString toStringImpl(
       return js.str(data);
     }
     case Encoding::BASE64: {
-      return js.str(kj::encodeBase64(slice));
+      size_t length = simdutf::base64_length_from_binary(slice.size());
+      auto out = kj::heapArray<kj::byte>(length);
+      simdutf::binary_to_base64(reinterpret_cast<const char*>(slice.begin()), slice.size(), reinterpret_cast<char*>(out.begin()));
+      return js.str(out);
     }
     case Encoding::BASE64URL: {
-      return js.str(kj::encodeBase64Url(slice));
+      auto options = simdutf::base64_url;
+      size_t length = simdutf::base64_length_from_binary(slice.size(), options);
+      auto out = kj::heapArray<kj::byte>(length);
+      simdutf::binary_to_base64(reinterpret_cast<const char*>(slice.begin()), slice.size(), reinterpret_cast<char*>(out.begin()), options);
+      return js.str(out);
     }
     case Encoding::HEX: {
       return js.str(kj::encodeHex(slice));
