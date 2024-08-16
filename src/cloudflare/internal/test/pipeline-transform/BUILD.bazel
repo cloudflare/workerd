@@ -1,0 +1,8 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    size = "large",
+    src = "transform.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]),
+)
