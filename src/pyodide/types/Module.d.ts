@@ -39,4 +39,15 @@ interface Module {
     opt: object,
     path: string
   ) => WebAssembly.Exports;
+  growMemory(newSize: number): void;
+  resolveGlobalSymbol(symName: string): { sym?: (...args: number[]) => number };
+  getExecutableName(): string;
+  HEAPU32: Uint32Array;
+  stringToUTF8OnStack(str: string): number;
+  stackAlloc(size: number): number;
+  exitJS(ret: number, implicit: boolean): never;
+  handleException(e: any): number;
+  addRunDependency(x: string): void;
+  removeRunDependency(x: string): void;
+  noInitialRun: boolean;
 }

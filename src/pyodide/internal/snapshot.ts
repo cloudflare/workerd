@@ -160,17 +160,6 @@ export function preloadDynamicLibs(Module: Module): void {
   }
 }
 
-export function getSnapshotSettings() {
-  return {
-    preRun: [preloadDynamicLibs],
-    // if SNAPSHOT_SIZE is defined, start with the linear memory big enough to
-    // fit the snapshot. If it's not defined, this falls back to the default.
-    INITIAL_MEMORY: SNAPSHOT_SIZE,
-    // skip running main() if we have a snapshot
-    noInitialRun: SHOULD_RESTORE_SNAPSHOT,
-  };
-}
-
 type DylinkInfo = {
   [name: string]: { handles: string[] };
 } & {
@@ -404,10 +393,15 @@ function decodeSnapshot(): void {
 }
 
 export function restoreSnapshot(Module: Module): void {
-  if (!READ_MEMORY) {
+  if (!READ_MEMORY || !SNAPSHOT_SIZE) {
     throw Error('READ_MEMORY not defined when restoring snapshot');
   }
+  Module.growMemory(SNAPSHOT_SIZE);
   READ_MEMORY(Module);
+}
+
+export function hasSnapshot() {
+  return !!READ_MEMORY;
 }
 
 let TEST_SNAPSHOT: Uint8Array | undefined = undefined;

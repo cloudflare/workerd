@@ -8,8 +8,8 @@ interface EmscriptenSettings {
     ) => void
   ) => WebAssembly.Exports;
   reportUndefinedSymbolsNoOp: () => void;
-  noInitialRun: boolean;
   API: {
     config: API['config'];
   };
+  readyPromise: Promise<Module>;
 }

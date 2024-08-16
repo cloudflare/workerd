@@ -126,6 +126,10 @@ REPLACEMENTS = [
         "crypto.getRandomValues(",
         "getRandomValues(Module, ",
     ],
+    [
+        "(shouldRunNow)",
+        "(Module.noInitialRun)"
+    ]
 ]
 
 PYODIDE_BUCKET_MODULE = json.encode({
