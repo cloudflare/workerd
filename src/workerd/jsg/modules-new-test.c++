@@ -1129,7 +1129,7 @@ KJ_TEST("Previously resolved modules not found with incompatible resolve context
 
 // ======================================================================================
 
-KJ_TEST("Awaiting top-level dynamic import in synchronous require fails as expected") {
+KJ_TEST("Awaiting top-level dynamic import in synchronous require works as expected") {
   PREAMBLE([&](Lock& js) {
     ResolveObserverImpl observer;
     CompilationObserver compilationObserver;
@@ -1145,17 +1145,7 @@ KJ_TEST("Awaiting top-level dynamic import in synchronous require fails as expec
 
     auto attached = registry->attachToIsolate(js, compilationObserver);
 
-    js.tryCatch([&] {
-      // This is a synchronous resolve that should fail.
-      ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
-      KJ_FAIL_ASSERT("Should have failed");
-    }, [&](Value exception) {
-      auto str = kj::str(exception.getHandle(js));
-      KJ_ASSERT(str ==
-          "Error: The module evaluation did not complete synchronously. "
-          "This is not permitted for synchronous require(...). "
-          "Use await import(...) instead.");
-    });
+    ModuleRegistry::resolve(js, "file:///foo", "default"_kjc);
   });
 }
 
@@ -1373,10 +1363,8 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (d
       JSG_FAIL_REQUIRE(Error, "Should have failed");
     }, [&](Value exception) {
       auto str = kj::str(exception.getHandle(js));
-      KJ_ASSERT(str ==
-          "Error: The module evaluation did not complete synchronously. "
-          "This is not permitted for synchronous require(...). "
-          "Use await import(...) instead.");
+      KJ_ASSERT(
+          str == "TypeError: Circular module dependency with synchronous require: file:///bar");
     });
   });
 }
@@ -1816,40 +1804,28 @@ KJ_TEST("Aliased modules (import maps) work") {
 
 // ======================================================================================
 
-// TODO(soon): Temporarily disabling this test. TC-39 recently changed the syntax
-// for import attributes to move away from the "assert". Prior to v8 12.6 the
-// assert keyword was still supporteed, with 12.6 it is not. Since we currently
-// update the v8 version in the internal repo separately than we do the public
-// workerd repo, there's a small period of time in which the versions will be out
-// of sync. If we modify this test to work for 12.6, it will fail will 12.5. So since
-// the test is not yet critical, we'll disable it for now.
-//
-// If/when we decide to support import attributes, this test will need to be updated.
-// KJ_TEST("Import attributes are currently unsupported") {
-//   ResolveObserver resolveObserver;
-//   CompilationObserver compilationObserver;
-//   ModuleBundle::BundleBuilder builder;
+KJ_TEST("Import attributes are currently unsupported") {
+  ResolveObserver resolveObserver;
+  CompilationObserver compilationObserver;
+  ModuleBundle::BundleBuilder builder;
 
-//   // TODO(soon): The import attribute spec has been updated to replace the "assert"
-//   // with the "with" keyword. V8 has not yet picked up this change. Once it does,
-//   // this test will likely need to be changed.
-//   auto foo = kj::str("import abc from 'foo' assert { type: 'json' };");
-//   builder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+  auto foo = kj::str("import abc from 'foo' with { type: 'json' };");
+  builder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
 
-//   auto registry = ModuleRegistry::Builder(resolveObserver).add(builder.finish()).finish();
+  auto registry = ModuleRegistry::Builder(resolveObserver).add(builder.finish()).finish();
 
-//   PREAMBLE([&](Lock& js) {
-//     auto attached = registry->attachToIsolate(js, compilationObserver);
+  PREAMBLE([&](Lock& js) {
+    auto attached = registry->attachToIsolate(js, compilationObserver);
 
-//     js.tryCatch([&] {
-//       ModuleRegistry::resolve(js, "foo", "default"_kjc);
-//       JSG_FAIL_REQUIRE(Error, "Should have thrown");
-//     }, [&](Value exception) {
-//       auto str = kj::str(exception.getHandle(js));
-//       KJ_ASSERT(str == "TypeError: Import attributes are not supported");
-//     });
-//   });
-// }
+    js.tryCatch([&] {
+      ModuleRegistry::resolve(js, "foo", "default"_kjc);
+      JSG_FAIL_REQUIRE(Error, "Should have thrown");
+    }, [&](Value exception) {
+      auto str = kj::str(exception.getHandle(js));
+      KJ_ASSERT(str == "TypeError: Import attributes are not supported");
+    });
+  });
+}
 
 // ======================================================================================
 KJ_TEST("Using a deferred eval callback works") {

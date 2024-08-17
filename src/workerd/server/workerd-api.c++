@@ -882,6 +882,44 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const PythonConfig& pythonConfig) {
   jsg::modules::ModuleRegistry::Builder builder(
       observer, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
+  builder.setEvalCallback([](jsg::Lock& js, const auto& module, v8::Local<v8::Module> v8Module,
+                              const auto& observer) -> jsg::Promise<jsg::Value> {
+    static constexpr auto handleDynamicImport =
+        [](kj::Own<const Worker> worker, const auto& module, jsg::V8Ref<v8::Module> v8Module,
+            const auto& observer, kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext)
+        -> kj::Promise<jsg::Promise<jsg::Value>> {
+      co_await kj::yield();
+      KJ_ASSERT(!IoContext::hasCurrent());
+      auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
+
+      co_return worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+        return JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
+          jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
+          return js.tryCatch([&] {
+            return js.toPromise(jsg::check(v8Module.getHandle(js)->Evaluate(js.v8Context())));
+          }, [&](jsg::Value&& exception) {
+            return js.rejectedPromise<jsg::Value>(kj::mv(exception));
+          });
+        });
+      });
+    };
+
+    // If there is an active IoContext, then we want to defer evaluation of the
+    // module to escape the current IoContext.
+    if (IoContext::hasCurrent()) {
+      auto& context = IoContext::current();
+      return context.awaitIo(js,
+          handleDynamicImport(kj::atomicAddRef(context.getWorker()), module, js.v8Ref(v8Module),
+              observer, jsg::AsyncContextFrame::currentRef(js)),
+          [](jsg::Lock& js, jsg::Promise<jsg::Value>&& result) { return kj::mv(result); });
+    }
+
+    // If there is no active IoContext at this point, then we can evaluate the module
+    // immediately.
+    return js.tryCatch([&]() -> jsg::Promise<jsg::Value> {
+      return js.toPromise(jsg::check(v8Module->Evaluate(js.v8Context())));
+    }, [&](jsg::Value&& exception) { return js.rejectedPromise<jsg::Value>(kj::mv(exception)); });
+  });
 
   api::registerBuiltinModules<JsgWorkerdIsolate_TypeWrapper>(builder, featureFlags);
 
