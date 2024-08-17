@@ -24,6 +24,7 @@
 #include <workerd/jsg/util.h>
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
 #include <capnp/message.h>
 #include <capnp/compat/json.h>
 #include <kj/compat/gzip.h>
@@ -1361,6 +1362,21 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
 // =======================================================================================
 
 namespace {
+
+jsg::JsObject resolveNodeInspectModule(jsg::Lock& js) {
+  static constexpr auto kSpecifier = "node-internal:internal_inspect"_kj;
+  if (FeatureFlags::get(js).getNewModuleRegistry()) {
+    return KJ_ASSERT_NONNULL(
+        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, kSpecifier));
+  }
+
+  // Use the original module registry implementation
+  auto registry = jsg::ModuleRegistry::from(js);
+  KJ_ASSERT(registry != nullptr);
+  auto inspectModule = registry->resolveInternalImport(js, kSpecifier);
+  return jsg::JsObject(inspectModule.getHandle(js).As<v8::Object>());
+}
+
 kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     const kj::Path& mainModule,
     jsg::JsContext<api::ServiceWorkerGlobalScope>& jsContext,
@@ -1590,8 +1606,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 }
               }
             } else {
-            }  // Added to suppress a compiler warning
-
+            }
             startupMetrics->done();
           } catch (const kj::Exception& e) {
             lock.throwException(kj::cp(e));
@@ -1742,15 +1757,14 @@ void Worker::handleLog(jsg::Lock& js,
     auto colors =
         COLOR_MODE == ColorMode::ENABLED || (COLOR_MODE == ColorMode::ENABLED_IF_TTY && tty);
 
-    auto registry = jsg::ModuleRegistry::from(js);
-    auto inspectModule = registry->resolveInternalImport(js, "node-internal:internal_inspect"_kj);
-    auto inspectModuleHandle = inspectModule.getHandle(js).As<v8::Object>();
-    auto formatLog = js.v8Get(inspectModuleHandle, "formatLog"_kj).As<v8::Function>();
+    auto inspectModule = resolveNodeInspectModule(js);
+    v8::Local<v8::Value> formatLogVal = inspectModule.get(js, "formatLog"_kj);
+    KJ_ASSERT(formatLogVal->IsFunction());
+    auto formatLog = formatLogVal.As<v8::Function>();
 
-    auto recv = js.v8Undefined();
     args[length] = v8::Boolean::New(js.v8Isolate, colors);
-    auto formatted =
-        js.toString(jsg::check(formatLog->Call(context, recv, length + 1, args.data())));
+    auto formatted = js.toString(
+        jsg::check(formatLog->Call(context, js.v8Undefined(), length + 1, args.data())));
     fprintf(fd, "%s\n", formatted.cStr());
     fflush(fd);
   }
