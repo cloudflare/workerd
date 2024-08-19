@@ -2432,7 +2432,7 @@ function maybeGetEntries(value: Record<PropertyKey, unknown>): [unknown, unknown
   // would dispose the stub.
   if (isRpcWildcardType(value)) return;
 
-  const entriesFunction = value["entries"];
+  const entriesFunction = value["entries"] as any;
   if (typeof entriesFunction !== "function") return;
   const entriesIterator: unknown = entriesFunction.call(value);
   if (typeof entriesIterator !== "object" || entriesIterator === null) return;

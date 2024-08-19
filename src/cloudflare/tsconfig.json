@@ -30,8 +30,5 @@
       "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
     }
   },
-  "include": [
-    "*.ts",
-    "internal/*.ts"
-  ]
+  "exclude": []
 }
