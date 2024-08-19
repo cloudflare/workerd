@@ -1602,7 +1602,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 }
                 KJ_CASE_ONEOF(limitError, kj::Exception) { }
               }
-            }
+            } else {} // Added to suppress a compiler warning
+
             startupMetrics->done();
           } catch (const kj::Exception& e) {
             lock.throwException(kj::cp(e));
