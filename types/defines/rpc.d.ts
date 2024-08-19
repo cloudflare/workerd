@@ -208,8 +208,8 @@ declare module "cloudflare:workers" {
   type WorkflowStep = {
     do: <T extends Rpc.Serializable>(
       name: string,
-      callback: () => T
-    ) => T | Promise<T>;
+      callback: () => Promise<T>
+    ) => Promise<T>;
     sleep: (name: string, duration: SleepDuration) => void | Promise<void>;
   };
 
@@ -229,6 +229,6 @@ declare module "cloudflare:workers" {
         timestamp: Date;
       }>,
       step: WorkflowStep
-    ): unknown | Promise<unknown>;
+    ): Promise<unknown>;
   }
 }
