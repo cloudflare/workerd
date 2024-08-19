@@ -21,9 +21,7 @@
     "moduleResolution": "node",
     "declaration": true,
     "types": [
-      // todo: consume generated workerd types
-      // "@cloudflare/workers-types"
-      "@types/node",
+      "@types/node"
     ],
     "paths": {
       "node:*": ["./*"],
@@ -33,7 +31,7 @@
       "node:stream/*": ["./*"],
       "node-internal:*": ["./internal/*"],
       "cloudflare-internal:workers": ["./internal/workers.d.ts"],
-      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"],
+      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
     }
   },
   "include": [
@@ -47,5 +45,5 @@
     "path/*.ts",
     "path/*.js",
     "internal/*.ts"
-  ],
+  ]
 }
