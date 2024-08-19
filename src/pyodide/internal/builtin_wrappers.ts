@@ -1,5 +1,4 @@
 import { default as UnsafeEval } from 'internal:unsafe-eval';
-export { getRandomValues } from 'pyodide-internal:topLevelEntropy/lib';
 
 let lastTime: number;
 let lastDelta = 0;

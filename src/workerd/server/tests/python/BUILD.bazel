@@ -3,6 +3,7 @@ load("//:build/pyodide_bucket.bzl", "PYODIDE_IMPORTS_TO_TEST")
 load("//:build/wd_test.bzl", "wd_test")
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
+load("//:build/kj_test.bzl", "kj_test")
 
 # pyodide_dev.capnp.bin represents a custom pyodide version "dev" that is generated
 # at build time using the latest contents of the src/pyodide directory.
@@ -59,3 +60,11 @@ py_wd_test(
 )
 
 gen_import_tests(PYODIDE_IMPORTS_TO_TEST)
+
+kj_test(
+    src = "pool-test.c++",
+    deps = [
+        "//src/workerd/jsg",
+        "//src/workerd/api:pyodide",
+    ],
+)

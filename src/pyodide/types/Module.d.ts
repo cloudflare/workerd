@@ -50,4 +50,5 @@ interface Module {
   addRunDependency(x: string): void;
   removeRunDependency(x: string): void;
   noInitialRun: boolean;
+  getRandomValues(Module: Module, x: Uint8Array): Uint8Array | undefined;
 }

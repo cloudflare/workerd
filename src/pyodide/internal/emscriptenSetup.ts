@@ -1,4 +1,4 @@
-import { enterJaegerSpan } from 'pyodide-internal:jaeger';
+// import { enterJaegerSpan } from "pyodide-internal:jaeger";
 import { reportError } from 'pyodide-internal:util';
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -105,8 +105,8 @@ function setEnv(Module: Module): void {
  * This isn't public API of Pyodide so it's a bit fiddly.
  */
 function getEmscriptenSettings(
-  lockfile: PackageLock,
-  indexURL: string
+  lockfile?: PackageLock,
+  indexURL?: string
 ): EmscriptenSettings {
   const config = {
     // jsglobals is used for the js module.
@@ -180,13 +180,24 @@ async function instantiateEmscriptenModule(
   }
 }
 
+let emscriptenPromise: Promise<Module>;
 export async function setupEmscriptenModule(
-  lockfile: PackageLock,
-  indexURL: string
+  lockfile?: PackageLock,
+  indexURL?: string
 ) {
+  console.log('setupEmscripten Module');
+  if (emscriptenPromise) {
+    return await emscriptenPromise;
+  }
   const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
-  enterJaegerSpan('instantiate_emscripten', () =>
-    instantiateEmscriptenModule(emscriptenSettings)
-  );
-  return await emscriptenSettings.readyPromise;
+  // enterJaegerSpan("instantiate_emscripten", () =>
+  instantiateEmscriptenModule(emscriptenSettings);
+  // );
+  emscriptenPromise = emscriptenSettings.readyPromise;
+  console.log('Set emscriptenPromise');
+  const res = await emscriptenPromise;
+  console.log('awaited EmscriptenPromise');
+  return res;
 }
+
+export function f() {}

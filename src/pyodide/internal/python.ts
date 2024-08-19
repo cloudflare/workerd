@@ -18,6 +18,7 @@ import {
   entropyBeforeTopLevel,
 } from 'pyodide-internal:topLevelEntropy/lib';
 import { setupEmscriptenModule } from 'pyodide-internal:emscriptenSetup';
+import { getRandomValues } from 'pyodide-internal:topLevelEntropy/lib';
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -31,6 +32,7 @@ async function prepareWasmLinearMemory(Module: Module): Promise<void> {
   entropyMountFiles(Module);
   Module.noInitialRun = !SHOULD_RESTORE_SNAPSHOT;
   preloadDynamicLibs(Module);
+  Module.getRandomValues = getRandomValues;
   Module.removeRunDependency('dynlibs');
   if (SHOULD_RESTORE_SNAPSHOT) {
     restoreSnapshot(Module);
