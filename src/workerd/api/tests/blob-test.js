@@ -122,10 +122,10 @@ export default {
 export const testInspect = {
   async test(ctrl, env, ctx) {
     const blob = new Blob(["abc"], { type: "text/plain" });
-    strictEqual(inspect(blob), "Blob { type: 'text/plain', size: 3 }");
+    strictEqual(inspect(blob), "Blob { size: 3, type: 'text/plain' }");
 
     const file = new File(["1"], "file.txt", { type: "text/plain", lastModified: 1000 });
-    strictEqual(inspect(file), "File { lastModified: 1000, name: 'file.txt', type: 'text/plain', size: 1 }");
+    strictEqual(inspect(file), "File { name: 'file.txt', lastModified: 1000, size: 1, type: 'text/plain' }");
   }
 };
 

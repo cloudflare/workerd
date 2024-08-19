@@ -755,47 +755,46 @@ Buffer.prototype.lastIndexOf = function lastIndexOf(
   return bidirectionalIndexOf(this, val, byteOffset, encoding, false);
 };
 
-Buffer.prototype.asciiSlice = function asciiSlice(offset: number, length: number) {
-  validateOffset(offset, "offset", 0, this.length);
-  validateOffset(length, "length", 0, this.length - offset);
-  return bufferUtil.toString(this, offset, offset + length, ASCII);
+Buffer.prototype.asciiSlice = function asciiSlice(start: number, end: number) {
+  validateOffset(start, "start", 0, this.length);
+  validateOffset(end, "end", 0, this.length);
+  return bufferUtil.toString(this, start, end, ASCII);
 };
 
-Buffer.prototype.base64Slice = function base64Slice(offset: number, length: number) {
-  validateOffset(offset, "offset", 0, this.length);
-  validateOffset(length, "length", 0, this.length - offset);
-  return bufferUtil.toString(this, offset, offset + length, BASE64);
+Buffer.prototype.base64Slice = function base64Slice(start: number, end: number) {
+  validateOffset(start, "start", 0, this.length);
+  validateOffset(end, "end", 0, this.length);
+  return bufferUtil.toString(this, start, end, BASE64);
 };
 
-Buffer.prototype.base64urlSlice = function base64urlSlice(offset: number, length: number) {
-  validateOffset(offset, "offset", 0, this.length);
-  validateOffset(length, "length", 0, this.length - offset);
-  return bufferUtil.toString(this, offset, offset + length, BASE64URL);
+Buffer.prototype.base64urlSlice = function base64urlSlice(start: number, end: number) {
+  validateOffset(start, "start", 0, this.length);
+  validateOffset(end, "end", 0, this.length);
+  return bufferUtil.toString(this, start, end, BASE64URL);
 };
 
-Buffer.prototype.hexSlice = function hexSlice(offset: number, length: number) {
-  validateOffset(offset, "offset", 0, this.length);
-  validateOffset(length, "length", 0, this.length - offset);
-  return bufferUtil.toString(this, offset, offset + length, HEX);
+Buffer.prototype.hexSlice = function hexSlice(start: number, end: number) {
+  validateOffset(start, "start", 0, this.length);
+  validateOffset(end, "end", 0, this.length);
+  return bufferUtil.toString(this, start, end, HEX);
 };
 
-Buffer.prototype.latin1Slice = function latin1Slice(offset: number,
-                                                    length: number) {
-  validateOffset(offset, "offset", 0, this.length);
-  validateOffset(length, "length", 0, this.length - offset);
-  return bufferUtil.toString(this, offset, offset + length, LATIN1);
+Buffer.prototype.latin1Slice = function latin1Slice(start: number, end: number) {
+  validateOffset(start, "start", 0, this.length);
+  validateOffset(end, "end", 0, this.length);
+  return bufferUtil.toString(this, start, end, LATIN1);
 };
 
-Buffer.prototype.ucs2Slice = function ucs2Slice(offset: number, length: number) {
-  validateOffset(offset, "offset", 0, this.length);
-  validateOffset(length, "length", 0, this.length - offset);
-  return bufferUtil.toString(this, offset, offset + length, UTF16LE);
+Buffer.prototype.ucs2Slice = function ucs2Slice(start: number, end: number) {
+  validateOffset(start, "start", 0, this.length);
+  validateOffset(end, "end", 0, this.length);
+  return bufferUtil.toString(this, start, end, UTF16LE);
 };
 
-Buffer.prototype.utf8Slice = function utf8Slice(offset: number, length: number) {
-  validateOffset(offset, "offset", 0, this.length);
-  validateOffset(length, "length", 0, this.length - offset);
-  return bufferUtil.toString(this, offset, offset + length, UTF8);
+Buffer.prototype.utf8Slice = function utf8Slice(start: number, end: number) {
+  validateOffset(start, "start", 0, this.length);
+  validateOffset(end, "end", 0, this.length);
+  return bufferUtil.toString(this, start, end, UTF8);
 };
 
 Buffer.prototype.asciiWrite = function asciiWrite(string: StringLike,

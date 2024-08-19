@@ -25,7 +25,7 @@ namespace workerd::api {
 
 struct QueueResponse;
 
-class Headers: public jsg::Object {
+class Headers final: public jsg::Object {
 private:
   template <typename T>
   struct IteratorState {
@@ -777,7 +777,7 @@ struct RequestInitializerDict {
   void validate(jsg::Lock&);
 };
 
-class Request: public Body {
+class Request final: public Body {
 public:
   enum class Redirect {
     FOLLOW,
@@ -1013,7 +1013,7 @@ private:
   }
 };
 
-class Response: public Body {
+class Response final: public Body {
 public:
   enum class BodyEncoding {
     AUTO,
@@ -1228,7 +1228,7 @@ private:
   }
 };
 
-class FetchEvent: public ExtendableEvent {
+class FetchEvent final: public ExtendableEvent {
 public:
   FetchEvent(jsg::Ref<Request> request)
       : ExtendableEvent("fetch"), request(kj::mv(request)),

@@ -17,7 +17,7 @@ namespace workerd {
 // obnoxious amount of string allocation.)
 class SqliteKv {
 public:
-  explicit SqliteKv(SqliteDatabase& db): SqliteKv(ensureInitialized(db), true) {}
+  explicit SqliteKv(SqliteDatabase& db);
 
   typedef kj::StringPtr KeyPtr;
   typedef kj::ArrayPtr<const kj::byte> ValuePtr;
@@ -54,68 +54,79 @@ public:
   //   byte blobs or strings containing NUL bytes.
 
 private:
-  SqliteDatabase& db;
+  struct Uninitialized {
+    SqliteDatabase& db;
+  };
 
-  SqliteDatabase::Statement stmtGet = db.prepare(R"(
-    SELECT value FROM _cf_KV WHERE key = ?
-  )");
-  SqliteDatabase::Statement stmtPut = db.prepare(R"(
-    INSERT INTO _cf_KV VALUES(?, ?)
-      ON CONFLICT DO UPDATE SET value = excluded.value;
-  )");
-  SqliteDatabase::Statement stmtDelete = db.prepare(R"(
-    DELETE FROM _cf_KV WHERE key = ?
-  )");
-  SqliteDatabase::Statement stmtList = db.prepare(R"(
-    SELECT * FROM _cf_KV
-    WHERE key >= ?
-    ORDER BY key
-  )");
-  SqliteDatabase::Statement stmtListEnd = db.prepare(R"(
-    SELECT * FROM _cf_KV
-    WHERE key >= ? AND key < ?
-    ORDER BY key
-  )");
-  SqliteDatabase::Statement stmtListLimit = db.prepare(R"(
-    SELECT * FROM _cf_KV
-    WHERE key >= ?
-    ORDER BY key
-    LIMIT ?
-  )");
-  SqliteDatabase::Statement stmtListEndLimit = db.prepare(R"(
-    SELECT * FROM _cf_KV
-    WHERE key >= ? AND key < ?
-    ORDER BY key
-    LIMIT ?
-  )");
-  SqliteDatabase::Statement stmtListReverse = db.prepare(R"(
-    SELECT * FROM _cf_KV
-    WHERE key >= ?
-    ORDER BY key DESC
-  )");
-  SqliteDatabase::Statement stmtListEndReverse = db.prepare(R"(
-    SELECT * FROM _cf_KV
-    WHERE key >= ? AND key < ?
-    ORDER BY key DESC
-  )");
-  SqliteDatabase::Statement stmtListLimitReverse = db.prepare(R"(
-    SELECT * FROM _cf_KV
-    WHERE key >= ?
-    ORDER BY key DESC
-    LIMIT ?
-  )");
-  SqliteDatabase::Statement stmtListEndLimitReverse = db.prepare(R"(
-    SELECT * FROM _cf_KV
-    WHERE key >= ? AND key < ?
-    ORDER BY key DESC
-    LIMIT ?
-  )");
-  SqliteDatabase::Statement stmtDeleteAll = db.prepare(R"(
-    DELETE FROM _cf_KV
-  )");
+  struct Initialized {
+    SqliteDatabase& db;
 
-  SqliteDatabase& ensureInitialized(SqliteDatabase& db);
-  // Make sure the KV table is created, then return the same object.
+    SqliteDatabase::Statement stmtGet = db.prepare(R"(
+      SELECT value FROM _cf_KV WHERE key = ?
+    )");
+    SqliteDatabase::Statement stmtPut = db.prepare(R"(
+      INSERT INTO _cf_KV VALUES(?, ?)
+        ON CONFLICT DO UPDATE SET value = excluded.value;
+    )");
+    SqliteDatabase::Statement stmtDelete = db.prepare(R"(
+      DELETE FROM _cf_KV WHERE key = ?
+    )");
+    SqliteDatabase::Statement stmtList = db.prepare(R"(
+      SELECT * FROM _cf_KV
+      WHERE key >= ?
+      ORDER BY key
+    )");
+    SqliteDatabase::Statement stmtListEnd = db.prepare(R"(
+      SELECT * FROM _cf_KV
+      WHERE key >= ? AND key < ?
+      ORDER BY key
+    )");
+    SqliteDatabase::Statement stmtListLimit = db.prepare(R"(
+      SELECT * FROM _cf_KV
+      WHERE key >= ?
+      ORDER BY key
+      LIMIT ?
+    )");
+    SqliteDatabase::Statement stmtListEndLimit = db.prepare(R"(
+      SELECT * FROM _cf_KV
+      WHERE key >= ? AND key < ?
+      ORDER BY key
+      LIMIT ?
+    )");
+    SqliteDatabase::Statement stmtListReverse = db.prepare(R"(
+      SELECT * FROM _cf_KV
+      WHERE key >= ?
+      ORDER BY key DESC
+    )");
+    SqliteDatabase::Statement stmtListEndReverse = db.prepare(R"(
+      SELECT * FROM _cf_KV
+      WHERE key >= ? AND key < ?
+      ORDER BY key DESC
+    )");
+    SqliteDatabase::Statement stmtListLimitReverse = db.prepare(R"(
+      SELECT * FROM _cf_KV
+      WHERE key >= ?
+      ORDER BY key DESC
+      LIMIT ?
+    )");
+    SqliteDatabase::Statement stmtListEndLimitReverse = db.prepare(R"(
+      SELECT * FROM _cf_KV
+      WHERE key >= ? AND key < ?
+      ORDER BY key DESC
+      LIMIT ?
+    )");
+    SqliteDatabase::Statement stmtDeleteAll = db.prepare(R"(
+      DELETE FROM _cf_KV
+    )");
+
+    Initialized(SqliteDatabase& db): db(db) {}
+  };
+
+  kj::OneOf<Uninitialized, Initialized> state;
+
+  Initialized& ensureInitialized();
+  // Make sure the KV table is created and prepared statements are ready. Not called until the
+  // first write.
 
   SqliteKv(SqliteDatabase& db, bool);
 };
@@ -129,7 +140,9 @@ private:
 
 template <typename Func>
 bool SqliteKv::get(KeyPtr key, Func&& callback) {
-  auto query = stmtGet.run(key);
+  auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return false);
+
+  auto query = stmts.stmtGet.run(key);
 
   if (query.isDone()) {
     return false;
@@ -142,6 +155,8 @@ bool SqliteKv::get(KeyPtr key, Func&& callback) {
 template <typename Func>
 uint SqliteKv::list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order,
                     Func&& callback) {
+  auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return 0);
+
   auto iterate = [&](SqliteDatabase::Query&& query) {
     size_t count = 0;
     while (!query.isDone()) {
@@ -155,29 +170,29 @@ uint SqliteKv::list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, 
   if (order == Order::FORWARD) {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
-        return iterate(stmtListEndLimit.run(begin, e, (int64_t)l));
+        return iterate(stmts.stmtListEndLimit.run(begin, e, (int64_t)l));
       } else {
-        return iterate(stmtListEnd.run(begin, e));
+        return iterate(stmts.stmtListEnd.run(begin, e));
       }
     } else {
       KJ_IF_SOME(l, limit) {
-        return iterate(stmtListLimit.run(begin, (int64_t)l));
+        return iterate(stmts.stmtListLimit.run(begin, (int64_t)l));
       } else {
-        return iterate(stmtList.run(begin));
+        return iterate(stmts.stmtList.run(begin));
       }
     }
   } else {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
-        return iterate(stmtListEndLimitReverse.run(begin, e, (int64_t)l));
+        return iterate(stmts.stmtListEndLimitReverse.run(begin, e, (int64_t)l));
       } else {
-        return iterate(stmtListEndReverse.run(begin, e));
+        return iterate(stmts.stmtListEndReverse.run(begin, e));
       }
     } else {
       KJ_IF_SOME(l, limit) {
-        return iterate(stmtListLimitReverse.run(begin, (int64_t)l));
+        return iterate(stmts.stmtListLimitReverse.run(begin, (int64_t)l));
       } else {
-        return iterate(stmtListReverse.run(begin));
+        return iterate(stmts.stmtListReverse.run(begin));
       }
     }
   }

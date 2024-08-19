@@ -206,14 +206,12 @@ void IsolateBase::clearDestructionQueue() {
 }
 
 HeapTracer::HeapTracer(v8::Isolate* isolate)
-    : v8::EmbedderRootsHandler(
-          // Historically V8 would call IsRoot() to scan references, and then call ResetRoot()
-          // on those where IsRoot() returned false. But later, V8 added the ability to mark a
-          // reference "droppable", and it assumes droppable references are not roots. We only
-          // want V8 to call ResetRoot() on droppable references, so we can tell it not to bother
-          // even calling `IsRoot()` on anything else. See comment about droppable references
-          // in Wrappable::attachWrapper() for details.
-          v8::EmbedderRootsHandler::RootHandling::kDontQueryEmbedderForAnyReference),
+    // Historically V8 would call IsRoot() to scan references, and then call ResetRoot() on those
+    // where IsRoot() returned false. Currently, V8 allows marking a reference as "droppable", and
+    // assumes droppable references are not roots. This way V8 only calls ResetRoot() on droppable
+    // references, and doesn't even call `IsRoot()` on anything else. See comment about droppable
+    // references in Wrappable::attachWrapper() for details.
+    : v8::EmbedderRootsHandler(),
       isolate(isolate) {
   isolate->AddGCPrologueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
@@ -253,9 +251,8 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
 }
 
 bool HeapTracer::IsRoot(const v8::TracedReference<v8::Value>& handle) {
-  // V8 doesn't actually call this because we passed kDontQueryEmbedderForAnyReference to the
-  // EmbedderRootsHandler constructor. V8 will potentially use ResetRoot() only on references that
-  // were marked droppable.
+  // V8 doesn't actually call this anymore unless a deprecated EmbedderRootsHandler option is used.
+  // V8 will potentially use ResetRoot() only on references that were marked droppable.
   KJ_UNREACHABLE;
 }
 

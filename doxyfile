@@ -1219,8 +1219,8 @@ CLANG_OPTIONS          = -std=c++20     \
                          -I/usr/include/c++/11/bits \
                          -I/usr/include/x86_64-linux-gnu \
                          -I/usr/include/x86_64-linux-gnu/c++/11 \
-                         -I/usr/lib/llvm-15/include/c++/v1 \
-                         -I/usr/lib/llvm-15/lib/clang/15.0.7/include
+                         -I/usr/lib/llvm-16/include/c++/v1 \
+                         -I/usr/lib/llvm-16/lib/clang/16/include
 
 # If clang assisted parsing is enabled you can provide the clang parser with the
 # path to the directory containing a file called compile_commands.json. This

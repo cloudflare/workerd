@@ -65,6 +65,7 @@
 #include <workerd/util/use-perfetto-categories.h>
 
 namespace workerd::server {
+namespace {
 
 static kj::StringPtr getVersionString() {
   static const kj::String result = kj::str("workerd ", SUPPORTED_COMPATIBILITY_DATE);
@@ -609,7 +610,7 @@ private:
 
 // =======================================================================================
 
-class CliMain: public SchemaFileImpl::ErrorReporter {
+class CliMain final: public SchemaFileImpl::ErrorReporter {
 public:
   CliMain(kj::ProcessContext& context, char** argv)
       : context(context), argv(argv),
@@ -1513,6 +1514,7 @@ private:
 #endif
 };
 
+} // namespace
 }  // namespace workerd::server
 
 int main(int argc, char* argv[]) {

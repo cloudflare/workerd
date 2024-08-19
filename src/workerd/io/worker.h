@@ -5,7 +5,7 @@
 #pragma once
 // Classes to manage lifetime of workers, scripts, and isolates.
 
-#include "workerd/util/xthreadnotifier.h"
+#include <workerd/util/xthreadnotifier.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/limit-enforcer.h>
 #include <kj/compat/http.h>
@@ -458,6 +458,9 @@ public:
 
     // Class constructor for DurableObject (aka api::DurableObjectBase).
     jsg::JsObject durableObject;
+
+    // Class constructor for Workflow.
+    jsg::JsObject workflow;
   };
 
   // Get the constructors for classes from which entrypoint classes may inherit.

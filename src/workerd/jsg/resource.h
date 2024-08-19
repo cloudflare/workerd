@@ -926,19 +926,17 @@ struct ResourceTypeBuilder {
   inline void registerReadonlyPrototypeProperty() {
     auto v8Name = v8StrIntern(isolate, name);
 
-    using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    using Gcb = PropertyGetterCallback<TypeWrapper, name, Getter, getter, isContext>;
     if (!Gcb::enumerable) {
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
+    auto getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
 
-    prototype->SetNativeDataProperty(
-        v8Name,
-        &Gcb::callback,
-        nullptr,
-        v8::Local<v8::Value>(),
-        Gcb::enumerable ? v8::PropertyAttribute::ReadOnly
-                        : static_cast<v8::PropertyAttribute>(
-                            v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+    prototype->SetAccessorProperty(v8Name, getterFn, {},
+        Gcb::enumerable ?
+            v8::PropertyAttribute::ReadOnly :
+            static_cast<v8::PropertyAttribute>(
+                  v8::PropertyAttribute::DontEnum | v8::PropertyAttribute::ReadOnly));
   }
 
 

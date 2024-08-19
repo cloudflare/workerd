@@ -20,7 +20,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
-#include <time.h>
+#include <ctime>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <workerd/io/actor-cache.h>
@@ -33,9 +33,9 @@
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/api/worker-rpc.h>
 #include "workerd-api.h"
-#include "workerd/api/pyodide/pyodide.h"
-#include "workerd/io/hibernation-manager.h"
-#include <stdlib.h>
+#include <workerd/api/pyodide/pyodide.h>
+#include <workerd/io/hibernation-manager.h>
+#include <cstdlib>
 
 namespace workerd::server {
 
@@ -1862,6 +1862,10 @@ public:
                 auto db = kj::heap<SqliteDatabase>(*as,
                     kj::Path({d.uniqueKey, kj::str(idPtr, ".sqlite")}),
                     kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
+
+                // Before we do anything, make sure the database is in WAL mode.
+                db->run("PRAGMA journal_mode=WAL;");
+
                 return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
                     []() -> kj::Promise<void> { return kj::READY_NOW; },
                     *sqliteHooks).attach(kj::mv(sqliteHooks));

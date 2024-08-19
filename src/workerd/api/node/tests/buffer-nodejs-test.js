@@ -5894,3 +5894,13 @@ export const fileTest = {
     }
   }
 }
+
+// Ref: https://github.com/cloudflare/workerd/issues/2538
+export const sliceOffsetLimits = {
+  test() {
+    // Make sure the second parameter represents the "end" index, not length.
+    strictEqual(Buffer.from('abcd').utf8Slice(2, 3).toString(), 'c');
+    // Make sure to handle (end < start) edge case.
+    strictEqual(Buffer.from('abcd').utf8Slice(1, 0).toString(), '');
+  }
+}

@@ -75,22 +75,20 @@ jobs:
         # libc++, but this appears to cause errors so they are also being explicitly installed.
         # Since the GitHub runner image comes with a number of preinstalled packages, we don't need
         # to use APT much otherwise.
-        # TODO(cleanup): Upgrade this to LLVM 16 as soon as it is available on the latest Ubuntu
-        # LTS release. Debian includes LLVM 16 since the Bookworm 12.4 point release.
         run: |
           export DEBIAN_FRONTEND=noninteractive
           wget https://apt.llvm.org/llvm.sh
           sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 15
-          sudo apt-get install -y --no-install-recommends clang-15 lld-15 libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev libclang-rt-15-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-15/bin/clang --action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-15/bin/clang --host_action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
-          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-15/bin/llvm-symbolizer%" .bazelrc
+          sudo ./llvm.sh 16
+          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev libclang-rt-16-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-16/bin/llvm-symbolizer%" .bazelrc
       - name: Setup macOS
         if: matrix.os.name == 'macOS'
         # TODO: We want to symbolize stacks for crashes on CI. Xcode is currently based on LLVM 16
-        # and the macos-13 image has llvm@15 installed:
+        # but the macos-13 image has llvm@15 installed:
         # https://github.com/actions/runner-images/blob/main/images/macos/macos-13-Readme.md
         #
         # Not enabled because symbolication does not work on workerd macOS builds yet and running

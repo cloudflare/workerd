@@ -11,7 +11,7 @@
 #include <kj/string.h>
 #include <kj/exception.h>
 #include <kj/time.h>
-#include <stdint.h>
+#include <cstdint>
 
 namespace workerd {
 

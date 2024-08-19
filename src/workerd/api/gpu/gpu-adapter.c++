@@ -7,7 +7,7 @@
 #include "gpu-device.h"
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
-#include "workerd/jsg/exception.h"
+#include <workerd/jsg/exception.h>
 
 #define WGPU_FOR_EACH_LIMIT(X)                                                                     \
   X(maxTextureDimension1D)                                                                         \

@@ -6,7 +6,7 @@
 #include "setup.h"
 #include "ser.h"
 #include <kj/debug.h>
-#include <stdlib.h>
+#include <cstdlib>
 
 #if !_WIN32
 #include <cxxabi.h>
@@ -614,14 +614,14 @@ void returnRejectedPromise(
     const v8::FunctionCallbackInfo<v8::Value>& info,
     v8::Local<v8::Value> exception,
     v8::TryCatch& tryCatch) {
-  return returnRejectedPromiseImpl(info, exception, tryCatch);
+  return returnRejectedPromiseImpl<const v8::FunctionCallbackInfo<v8::Value>&>(info, exception, tryCatch);
 }
 
 void returnRejectedPromise(
     const v8::PropertyCallbackInfo<v8::Value>& info,
     v8::Local<v8::Value> exception,
     v8::TryCatch& tryCatch) {
-  return returnRejectedPromiseImpl(info, exception, tryCatch);
+  return returnRejectedPromiseImpl<const v8::PropertyCallbackInfo<v8::Value>&>(info, exception, tryCatch);
 }
 
 // ======================================================================================

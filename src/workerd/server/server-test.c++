@@ -9,7 +9,7 @@
 #include <workerd/jsg/setup.h>
 #include <kj/async-queue.h>
 #include <regex>
-#include <stdlib.h>
+#include <cstdlib>
 
 namespace workerd::server {
 namespace {

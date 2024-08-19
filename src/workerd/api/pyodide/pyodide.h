@@ -1,7 +1,7 @@
 #pragma once
 
-#include "kj/array.h"
-#include "kj/debug.h"
+#include <kj/array.h>
+#include <kj/debug.h>
 #include <kj/common.h>
 #include <kj/filesystem.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
@@ -12,19 +12,27 @@
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/io/io-context.h>
 #include <workerd/util/autogate.h>
-#include "capnp/serialize.h"
+#include <capnp/serialize.h>
 
 namespace workerd::api::pyodide {
 
-bool hasPyodideBundle(kj::StringPtr version);
+class PyodideBundleManager {
+public:
+  void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
+  const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version) const;
 
-void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data);
-jsg::Bundle::Reader getPyodideBundle(kj::StringPtr version);
-
+private:
+  struct MessageBundlePair {
+    kj::Own<capnp::FlatArrayMessageReader> messageReader;
+    jsg::Bundle::Reader bundle;
+  };
+  const kj::MutexGuarded<kj::HashMap<kj::String, MessageBundlePair>> bundles;
+};
 
 struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
+  const PyodideBundleManager pyodideBundleManager;
   bool createSnapshot;
   bool createBaselineSnapshot;
 };

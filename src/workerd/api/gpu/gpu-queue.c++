@@ -3,7 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-queue.h"
-#include "workerd/jsg/exception.h"
+#include <workerd/jsg/exception.h>
+
 
 namespace workerd::api::gpu {
 

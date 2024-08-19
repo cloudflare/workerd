@@ -7,7 +7,7 @@
 #include "r2-rpc.h"
 #include "util.h"
 #include <array>
-#include <math.h>
+#include <cmath>
 #include <workerd/api/http.h>
 #include <workerd/api/streams.h>
 #include <workerd/util/mimetype.h>

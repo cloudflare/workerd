@@ -26,6 +26,9 @@ build --nolegacy_external_runfiles
 # Flip this early to avoid breaking compatibility once it becomes the default.
 build --incompatible_disallow_empty_glob
 
+# Prevents bazel cache invalidation when switching terminals
+build --incompatible_strict_action_env
+
 # Dawn tint build flags
 build --@dawn//src/tint:tint_build_glsl_writer=False
 build --@dawn//src/tint:tint_build_glsl_validator=False
@@ -75,6 +78,9 @@ build:unix --host_cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 # Need to redefine _WIN32_WINNT to build dawn on Windows
 build:windows --per_file_copt='external/dawn@-Wno-macro-redefined'
 build:windows --host_per_file_copt='external/dawn@-Wno-macro-redefined'
+# V8 now requires Windows 10, Bazel fails to set this properly.
+build:windows --per_file_copt=external/v8/src/base/platform/platform-win32.cc@-D_WIN32_WINNT=0x0A00
+build:windows --host_per_file_copt=external/v8/src/base/platform/platform-win32.cc@-D_WIN32_WINNT=0x0A00
 
 # typescript configuration
 # do more correct type checking

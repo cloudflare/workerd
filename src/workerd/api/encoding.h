@@ -76,7 +76,7 @@ public:
 };
 
 // Decoder implementation that provides a fast-track for US-ASCII.
-class AsciiDecoder: public Decoder {
+class AsciiDecoder final: public Decoder {
 public:
   AsciiDecoder() = default;
   AsciiDecoder(AsciiDecoder&&) = default;
@@ -94,7 +94,7 @@ public:
 // Decoder implementation that uses ICU's built-in conversion APIs.
 // ICU's decoder is fairly comprehensive, covering the full range
 // of encodings required by the Encoding specification.
-class IcuDecoder: public Decoder {
+class IcuDecoder final: public Decoder {
 public:
   IcuDecoder(Encoding encoding, UConverter* converter, bool ignoreBom)
       : encoding(encoding), inner(converter), ignoreBom(ignoreBom), bomSeen(false) {}
@@ -126,7 +126,7 @@ private:
 
 // Implements the TextDecoder interface as prescribed by:
 // https://encoding.spec.whatwg.org/#interface-textdecoder
-class TextDecoder: public jsg::Object {
+class TextDecoder final: public jsg::Object {
 public:
   using DecoderImpl = kj::OneOf<AsciiDecoder, IcuDecoder>;
 
@@ -191,7 +191,7 @@ private:
 
 // Implements the TextEncoder interface as prescribed by:
 // https://encoding.spec.whatwg.org/#interface-textencoder
-class TextEncoder: public jsg::Object {
+class TextEncoder final: public jsg::Object {
 public:
   struct EncodeIntoResult {
     int read;

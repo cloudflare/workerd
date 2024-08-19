@@ -59,13 +59,11 @@ type VectorizeDistanceMetric = "euclidean" | "cosine" | "dot-product";
  */
 type VectorizeMetadataRetrievalLevel = "all" | "indexed" | "none";
 
-interface VectorizeQueryOptions<
-  MetadataReturn extends boolean | VectorizeMetadataRetrievalLevel = boolean,
-> {
+interface VectorizeQueryOptions{
   topK?: number;
   namespace?: string;
   returnValues?: boolean;
-  returnMetadata?: MetadataReturn;
+  returnMetadata?: boolean | VectorizeMetadataRetrievalLevel;
   filter?: VectorizeVectorMetadataFilter;
 }
 
@@ -188,7 +186,7 @@ declare abstract class VectorizeIndex {
    */
   public query(
     vector: VectorFloatArray | number[],
-    options: VectorizeQueryOptions
+    options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches>;
   /**
    * Insert a list of vectors into the index dataset. If a provided id exists, an error will be thrown.
@@ -235,7 +233,7 @@ declare abstract class Vectorize {
    */
   public query(
     vector: VectorFloatArray | number[],
-    options: VectorizeQueryOptions<VectorizeMetadataRetrievalLevel>
+    options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches>;
   /**
    * Insert a list of vectors into the index dataset. If a provided id exists, an error will be thrown.
