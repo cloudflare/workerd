@@ -429,6 +429,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Python modules are restricted in EWC.
   #
   # WARNING: Python Workers are still an experimental feature and thus subject to change.
+  pythonWorkersDevPyodide @58 :Bool
+    $compatEnableFlag("python_workers_development")
+    $pythonSnapshotRelease(pyodide = "dev", pyodideRevision = "dev",
+          packages = "2024-03-01", backport = 0)
+    $experimental;
+  # Enables Python Workers and uses the bundle from the Pyodide source directory directly. For testing.
 
   fetcherNoGetPutDelete @44 :Bool
       $compatEnableFlag("fetcher_no_get_put_delete")
