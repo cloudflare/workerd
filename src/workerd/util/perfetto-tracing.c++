@@ -37,7 +37,7 @@ std::unique_ptr<perfetto::TracingSession> createTracingSession(int fd, kj::Strin
 
   // The categories is a comma-separated list
   auto cats = PerfettoSession::parseCategories(categories);
-  for (auto category : cats) {
+  for (auto category: cats) {
     auto view = std::string(category.begin(), category.size());
     track_event_cfg.add_enabled_categories(view);
   }
@@ -47,8 +47,7 @@ std::unique_ptr<perfetto::TracingSession> createTracingSession(int fd, kj::Strin
   auto* ds_cfg = cfg.add_data_sources()->mutable_config();
   ds_cfg->set_name("track_event");
   ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
-  std::unique_ptr<perfetto::TracingSession> tracing_session(
-      perfetto::Tracing::NewTrace());
+  std::unique_ptr<perfetto::TracingSession> tracing_session(perfetto::Tracing::NewTrace());
   tracing_session->Setup(cfg, fd);
   return kj::mv(tracing_session);
 }
@@ -82,7 +81,8 @@ struct PerfettoSession::Impl {
   std::unique_ptr<perfetto::TracingSession> session;
 
   Impl(kj::AutoCloseFd dest, kj::StringPtr categories)
-      : fd(kj::mv(dest)), session(createTracingSession(fd.get(), categories)) {
+      : fd(kj::mv(dest)),
+        session(createTracingSession(fd.get(), categories)) {
     session->StartBlocking();
   }
 };

@@ -46,8 +46,8 @@ kj::Array<byte> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
     // however, it is practically impossible to reach this limit in any real-world
     // scenario given the size limit check below.
     size_t upperLimit = kOverflowLimit - size;
-    JSG_REQUIRE(partSize <= upperLimit, RangeError,
-                kj::str("Blob part too large: ", partSize, " bytes"));
+    JSG_REQUIRE(
+        partSize <= upperLimit, RangeError, kj::str("Blob part too large: ", partSize, " bytes"));
 
     // Checks for oversize
     if (size + partSize > maxBlobSize) {
@@ -57,7 +57,7 @@ kj::Array<byte> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
           kj::str("NOSENTRY Attempt to create a Blob with size ", size + partSize));
     }
     JSG_REQUIRE(size + partSize <= maxBlobSize, RangeError,
-                kj::str("Blob size ", size + partSize ," exceeds limit ", maxBlobSize));
+        kj::str("Blob size ", size + partSize, " exceeds limit ", maxBlobSize));
     size += partSize;
   }
 
@@ -118,8 +118,8 @@ kj::String normalizeType(kj::String type) {
 }
 
 jsg::BufferSource wrap(jsg::Lock& js, kj::Array<byte> data) {
-  auto buf = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, data.size()),
-      Error, "Unable to allocate space for Blob data");
+  auto buf = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, data.size()), Error,
+      "Unable to allocate space for Blob data");
   buf.asArrayPtr().copyFrom(data);
   return kj::mv(buf);
 
@@ -146,11 +146,12 @@ Blob::Blob(jsg::Lock& js, kj::Array<byte> data, kj::String type)
       type(kj::mv(type)) {}
 
 Blob::Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type)
-      : ownData(kj::mv(parent)), data(data), type(kj::mv(type)) {}
+    : ownData(kj::mv(parent)),
+      data(data),
+      type(kj::mv(type)) {}
 
-jsg::Ref<Blob> Blob::constructor(jsg::Lock& js,
-                                 jsg::Optional<Bits> bits,
-                                 jsg::Optional<Options> options) {
+jsg::Ref<Blob> Blob::constructor(
+    jsg::Lock& js, jsg::Optional<Bits> bits, jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(t, o.type) {
@@ -166,8 +167,8 @@ kj::ArrayPtr<const byte> Blob::getData() const {
   return data;
 }
 
-jsg::Ref<Blob> Blob::slice(jsg::Optional<int> maybeStart, jsg::Optional<int> maybeEnd,
-                            jsg::Optional<kj::String> type) {
+jsg::Ref<Blob> Blob::slice(
+    jsg::Optional<int> maybeStart, jsg::Optional<int> maybeEnd, jsg::Optional<kj::String> type) {
   int start = maybeStart.orDefault(0);
   int end = maybeEnd.orDefault(data.size());
 
@@ -193,8 +194,8 @@ jsg::Ref<Blob> Blob::slice(jsg::Optional<int> maybeStart, jsg::Optional<int> may
     end = data.size();
   }
 
-  return jsg::alloc<Blob>(JSG_THIS, data.slice(start, end),
-      normalizeType(kj::mv(type).orDefault(nullptr)));
+  return jsg::alloc<Blob>(
+      JSG_THIS, data.slice(start, end), normalizeType(kj::mv(type).orDefault(nullptr)));
 }
 
 jsg::Promise<kj::Array<kj::byte>> Blob::arrayBuffer(jsg::Lock& js) {
@@ -214,9 +215,7 @@ jsg::Promise<kj::String> Blob::text(jsg::Lock& js) {
 
 class Blob::BlobInputStream final: public ReadableStreamSource {
 public:
-  BlobInputStream(jsg::Ref<Blob> blob)
-      : unread(blob->data),
-        blob(kj::mv(blob)) {}
+  BlobInputStream(jsg::Ref<Blob> blob): unread(blob->data), blob(kj::mv(blob)) {}
 
   // Attempt to read a maximum of maxBytes from the remaining unread content of the blob
   // into the given buffer. It is the caller's responsibility to ensure that buffer has
@@ -269,30 +268,33 @@ private:
 
 jsg::Ref<ReadableStream> Blob::stream() {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_STREAM);
-  return jsg::alloc<ReadableStream>(
-      IoContext::current(),
-      kj::heap<BlobInputStream>(JSG_THIS));
+  return jsg::alloc<ReadableStream>(IoContext::current(), kj::heap<BlobInputStream>(JSG_THIS));
 }
 
 // =======================================================================================
 
-File::File(kj::Array<byte> data, kj::String name, kj::String type,
-           double lastModified)
+File::File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified)
     : Blob(kj::mv(data), kj::mv(type)),
-      name(kj::mv(name)), lastModified(lastModified) {}
+      name(kj::mv(name)),
+      lastModified(lastModified) {}
 
-File::File(jsg::Lock& js, kj::Array<byte> data, kj::String name, kj::String type,
-           double lastModified)
+File::File(
+    jsg::Lock& js, kj::Array<byte> data, kj::String name, kj::String type, double lastModified)
     : Blob(js, kj::mv(data), kj::mv(type)),
-      name(kj::mv(name)), lastModified(lastModified) {}
+      name(kj::mv(name)),
+      lastModified(lastModified) {}
 
-File::File(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data,
-           kj::String name, kj::String type, double lastModified)
+File::File(jsg::Ref<Blob> parent,
+    kj::ArrayPtr<const byte> data,
+    kj::String name,
+    kj::String type,
+    double lastModified)
     : Blob(kj::mv(parent), data, kj::mv(type)),
-      name(kj::mv(name)), lastModified(lastModified) {}
+      name(kj::mv(name)),
+      lastModified(lastModified) {}
 
-jsg::Ref<File> File::constructor(jsg::Lock& js, jsg::Optional<Bits> bits,
-    kj::String name, jsg::Optional<Options> options) {
+jsg::Ref<File> File::constructor(
+    jsg::Lock& js, jsg::Optional<Bits> bits, kj::String name, jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
   kj::Maybe<double> maybeLastModified;
   KJ_IF_SOME(o, options) {

@@ -20,23 +20,20 @@ kj::StringPtr KJ_STRINGIFY(const WebSocket::NativeState& state) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(ac, WebSocket::AwaitingConnection) return "AwaitingConnection";
     KJ_CASE_ONEOF(aaoc, WebSocket::AwaitingAcceptanceOrCoupling)
-        return "AwaitingAcceptanceOrCoupling";
+      return "AwaitingAcceptanceOrCoupling";
     KJ_CASE_ONEOF(a, WebSocket::Accepted) return "Accepted";
     KJ_CASE_ONEOF(r, WebSocket::Released) return "Released";
   }
   KJ_UNREACHABLE;
 }
 
-IoOwn<WebSocket::Native> WebSocket::initNative(
-    IoContext& ioContext,
+IoOwn<WebSocket::Native> WebSocket::initNative(IoContext& ioContext,
     kj::WebSocket& ws,
     kj::Array<kj::StringPtr> tags,
     bool closedOutgoingConn) {
   auto nativeObj = kj::heap<Native>();
-  nativeObj->state.init<Accepted>(Accepted::Hibernatable {
-      .ws = ws,
-      .tagsRef = kj::mv(tags) },
-      *nativeObj, ioContext);
+  nativeObj->state.init<Accepted>(
+      Accepted::Hibernatable{.ws = ws, .tagsRef = kj::mv(tags)}, *nativeObj, ioContext);
   // We might have called `close()` when this WebSocket was previously active.
   // If so, we want to prevent any future calls to `send()`.
   nativeObj->closedOutgoing = closedOutgoingConn;
@@ -44,34 +41,29 @@ IoOwn<WebSocket::Native> WebSocket::initNative(
   return ioContext.addObject(kj::mv(nativeObj));
 }
 
-WebSocket::WebSocket(jsg::Lock& js,
-    IoContext& ioContext,
-    kj::WebSocket& ws,
-    HibernationPackage package)
-    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket> {}, *this)),
+WebSocket::WebSocket(
+    jsg::Lock& js, IoContext& ioContext, kj::WebSocket& ws, HibernationPackage package)
+    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
       url(kj::mv(package.url)),
       protocol(kj::mv(package.protocol)),
       extensions(kj::mv(package.extensions)),
       serializedAttachment(kj::mv(package.serializedAttachment)),
-      farNative(
-          initNative(ioContext,
-              ws,
-              kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
-              package.closedOutgoingConnection)),
+      farNative(initNative(ioContext,
+          ws,
+          kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
+          package.closedOutgoingConnection)),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {}
-  // This constructor is used when reinstantiating a websocket that had been hibernating, which is
-  // why we can go straight to the Accepted state. However, note that we are actually in the
-  // `Hibernatable` "sub-state"!
+// This constructor is used when reinstantiating a websocket that had been hibernating, which is
+// why we can go straight to the Accepted state. However, note that we are actually in the
+// `Hibernatable` "sub-state"!
 
 jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
-    jsg::Lock& js,
-    kj::WebSocket& ws,
-    HibernationPackage package) {
+    jsg::Lock& js, kj::WebSocket& ws, HibernationPackage package) {
   return jsg::alloc<WebSocket>(js, IoContext::current(), ws, kj::mv(package));
 }
 
 WebSocket::WebSocket(kj::Own<kj::WebSocket> native)
-    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket> {}, *this)),
+    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
       url(kj::none),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
@@ -81,7 +73,7 @@ WebSocket::WebSocket(kj::Own<kj::WebSocket> native)
 }
 
 WebSocket::WebSocket(kj::String url)
-    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket> {}, *this)),
+    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
       url(kj::mv(url)),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
@@ -94,16 +86,17 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
 
   auto& canceler = KJ_ASSERT_NONNULL(farNative->state.tryGet<AwaitingConnection>()).canceler;
 
-  IoContext::current().awaitIo(js, canceler.wrap(kj::mv(prom)),
-      [this, self = JSG_THIS](jsg::Lock& js, PackedWebSocket packedSocket) mutable {
+  IoContext::current()
+      .awaitIo(js, canceler.wrap(kj::mv(prom)),
+          [this, self = JSG_THIS](jsg::Lock& js, PackedWebSocket packedSocket) mutable {
     auto& native = *farNative;
     KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
       // We've succeessfully established our web socket, we do not need to cancel anything.
       pending.canceler.release();
     }
 
-    native.state.init<AwaitingAcceptanceOrCoupling>(AwaitingAcceptanceOrCoupling{
-        IoContext::current().addObject(kj::mv(packedSocket.ws))});
+    native.state.init<AwaitingAcceptanceOrCoupling>(
+        AwaitingAcceptanceOrCoupling{IoContext::current().addObject(kj::mv(packedSocket.ws))});
 
     // both `protocol` and `extensions` start off as empty strings.
     // They become null if the connection is established and no protocol/extension was chosen.
@@ -132,8 +125,7 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
     reportError(js, jsg::JsValue(e.getHandle(js)).addRef(js));
 
     dispatchEventImpl(js,
-        jsg::alloc<CloseEvent>(1006, kj::str("Failed to establish websocket connection"),
-                                false));
+        jsg::alloc<CloseEvent>(1006, kj::str("Failed to establish websocket connection"), false));
   });
   // Note that in this attach we pass a strong reference to the WebSocket. The reference will be
   // dropped when either the connection promise completes or the IoContext is torn down,
@@ -148,14 +140,14 @@ bool validProtoToken(const kj::StringPtr protocol) {
     return false;
   }
 
-  for (auto& c : protocol) {
+  for (auto& c: protocol) {
     // Note that this also includes separators 0x20 (SP) and 0x09 (HT), so we don't need to check
     // for them below.
     if (c < 0x21 || 0x7E < c) {
       return false;
     }
 
-    switch(c) {
+    switch (c) {
       case '(':
       case ')':
       case '<':
@@ -180,10 +172,9 @@ bool validProtoToken(const kj::StringPtr protocol) {
   return true;
 }
 
-} // namespace
+}  // namespace
 
-jsg::Ref<WebSocket> WebSocket::constructor(
-    jsg::Lock& js,
+jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
     kj::String url,
     jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols) {
 
@@ -191,9 +182,8 @@ jsg::Ref<WebSocket> WebSocket::constructor(
 
   // Check if we have a valid URL
   kj::Url urlRecord;
-  kj::Maybe<kj::Exception> maybeException = kj::runCatchingExceptions([&]() {
-    urlRecord = kj::Url::parse(url);
-  });
+  kj::Maybe<kj::Exception> maybeException =
+      kj::runCatchingExceptions([&]() { urlRecord = kj::Url::parse(url); });
 
   constexpr auto wsErr = "WebSocket Constructor: "_kj;
 
@@ -208,8 +198,8 @@ jsg::Ref<WebSocket> WebSocket::constructor(
     urlRecord.scheme = kj::str("https");
   }
 
-  JSG_REQUIRE(urlRecord.fragment == kj::none, DOMSyntaxError, wsErr,
-      "The url fragment must be empty.");
+  JSG_REQUIRE(
+      urlRecord.fragment == kj::none, DOMSyntaxError, wsErr, "The url fragment must be empty.");
 
   kj::HttpHeaders headers(context.getHeaderTable());
   auto client = context.getHttpClient(0, false, kj::none, "WebSocket::constructor"_kjc);
@@ -221,13 +211,13 @@ jsg::Ref<WebSocket> WebSocket::constructor(
 
     KJ_SWITCH_ONEOF(variant) {
       KJ_CASE_ONEOF(proto, kj::String) {
-        JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
-            "The protocol header token is invalid.");
+        JSG_REQUIRE(
+            validProtoToken(proto), DOMSyntaxError, wsErr, "The protocol header token is invalid.");
         protoString = kj::mv(proto);
       }
       KJ_CASE_ONEOF(protoArr, kj::Array<kj::String>) {
-        JSG_REQUIRE(kj::size(protoArr) > 0, DOMSyntaxError, wsErr,
-            "The protocols array cannot be empty.");
+        JSG_REQUIRE(
+            kj::size(protoArr) > 0, DOMSyntaxError, wsErr, "The protocols array cannot be empty.");
         // Search for duplicates by checking for their presence in the set.
         kj::HashSet<kj::String> present;
 
@@ -259,13 +249,14 @@ jsg::Ref<WebSocket> WebSocket::constructor(
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
   }
 
-  auto prom = ([](auto& context, auto connUrl, auto headers, auto client)
-      -> kj::Promise<PackedWebSocket> {
+  auto prom =
+      ([](auto& context, auto connUrl, auto headers, auto client) -> kj::Promise<PackedWebSocket> {
     auto response = co_await client->openWebSocket(connUrl, headers);
 
     JSG_REQUIRE(response.statusCode == 101, TypeError,
         "Failed to establish the WebSocket connection: expected server to reply with HTTP "
-        "status code 101 (switching protocols), but received ", response.statusCode, " instead.");
+        "status code 101 (switching protocols), but received ",
+        response.statusCode, " instead.");
 
     KJ_SWITCH_ONEOF(response.webSocketOrBody) {
       KJ_CASE_ONEOF(webSocket, kj::Own<kj::WebSocket>) {
@@ -283,15 +274,13 @@ jsg::Ref<WebSocket> WebSocket::constructor(
           maybeExtensions = kj::str(extensions);
         }
 
-        co_return PackedWebSocket{
-          .ws = webSocket.attach(kj::mv(client)),
+        co_return PackedWebSocket{.ws = webSocket.attach(kj::mv(client)),
           .proto = kj::mv(maybeProto),
-          .extensions = kj::mv(maybeExtensions)
-        };
+          .extensions = kj::mv(maybeExtensions)};
       }
       KJ_CASE_ONEOF(body, kj::Own<kj::AsyncInputStream>) {
-        JSG_FAIL_REQUIRE(TypeError,
-            "Worker received body in a response to a request for a WebSocket.");
+        JSG_FAIL_REQUIRE(
+            TypeError, "Worker received body in a response to a request for a WebSocket.");
       }
     }
     KJ_UNREACHABLE
@@ -302,7 +291,8 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   return ws;
 }
 
-kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other, RequestObserver& request) {
+kj::Promise<DeferredProxy<void>> WebSocket::couple(
+    kj::Own<kj::WebSocket> other, RequestObserver& request) {
   auto& native = *farNative;
   JSG_REQUIRE(!native.state.is<AwaitingConnection>(), TypeError,
       "Can't return WebSocket in a Response if it was created with `new WebSocket()`");
@@ -310,8 +300,8 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other,
       "Can't return WebSocket that was already used in a response.");
   KJ_IF_SOME(state, native.state.tryGet<Accepted>()) {
     if (state.isHibernatable()) {
-      JSG_FAIL_REQUIRE(TypeError,
-          "Can't return WebSocket in a Response after calling acceptWebSocket().");
+      JSG_FAIL_REQUIRE(
+          TypeError, "Can't return WebSocket in a Response after calling acceptWebSocket().");
     } else {
       JSG_FAIL_REQUIRE(TypeError, "Can't return WebSocket in a Response after calling accept().");
     }
@@ -320,8 +310,8 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other,
   // Tear down the IoOwn since we now need to extend the WebSocket to a `DeferredProxy` promise.
   // This works because the `DeferredProxy` ends on the same event loop, but after the request
   // context goes away.
-  kj::Own<kj::WebSocket> self = kj::mv(KJ_ASSERT_NONNULL(
-      native.state.tryGet<AwaitingAcceptanceOrCoupling>()).ws);
+  kj::Own<kj::WebSocket> self =
+      kj::mv(KJ_ASSERT_NONNULL(native.state.tryGet<AwaitingAcceptanceOrCoupling>()).ws);
   native.state.init<Released>();
 
   auto& context = IoContext::current();
@@ -355,9 +345,9 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other,
 
   // We need to use `eagerlyEvaluate()` on both inputs to `joinPromises` to work around the awkward
   // behavior of `joinPromises` lazily-evaluating tail continuations.
-  auto promise = kj::joinPromises(kj::arr(upstream.eagerlyEvaluate(nullptr),
-                                          downstream.eagerlyEvaluate(nullptr)))
-      .attach(kj::mv(self), kj::mv(other));
+  auto promise = kj::joinPromises(
+      kj::arr(upstream.eagerlyEvaluate(nullptr), downstream.eagerlyEvaluate(nullptr)))
+                     .attach(kj::mv(self), kj::mv(other));
 
   KJ_IF_SOME(peer, tryGetPeer()) {
     // Since the WebSocket is terminated locally, we generally want the request and associated
@@ -521,15 +511,18 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
   //   accepted locally is implemented completely in JavaScript space, using jsg::Promise instead
   //   of kj::Promise, and then only use awaitIo() on truely remote WebSockets.
   // TODO(cleanup): Should addWaitUntil() take jsg::Promise instead of kj::Promise?
-  context.addWaitUntil(context.awaitJs(js, context.awaitIoLegacy(js, kj::mv(promise))
-      .then(js, [this, thisHandle = JSG_THIS]
-                (jsg::Lock& js, kj::Maybe<kj::Exception>&& maybeError) mutable {
+  context.addWaitUntil(context.awaitJs(js,
+      context.awaitIoLegacy(js, kj::mv(promise))
+          .then(js,
+              [this, thisHandle = JSG_THIS](
+                  jsg::Lock& js, kj::Maybe<kj::Exception>&& maybeError) mutable {
     auto& native = *farNative;
     KJ_IF_SOME(e, maybeError) {
       if (!native.closedIncoming && e.getType() == kj::Exception::Type::DISCONNECTED) {
         // Report premature disconnect or cancel as a close event.
-        dispatchEventImpl(js, jsg::alloc<CloseEvent>(
-            1006, kj::str("WebSocket disconnected without sending Close frame."), false));
+        dispatchEventImpl(js,
+            jsg::alloc<CloseEvent>(
+                1006, kj::str("WebSocket disconnected without sending Close frame."), false));
         native.closedIncoming = true;
         // If there are no further messages to send, so we can discard the underlying connection.
         tryReleaseNative(js);
@@ -564,7 +557,7 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
   }
 
   JSG_REQUIRE(native.state.is<Accepted>(), TypeError,
-      "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "\
+      "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "
       "messages.");
 
   auto maybeOutputLock = IoContext::current().waitForOutputLocksIfNecessary();
@@ -583,16 +576,16 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
     KJ_UNREACHABLE;
   }();
 
-  auto pendingAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size() -
-      autoResponseStatus.queuedAutoResponses;
+  auto pendingAutoResponses =
+      autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
   autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
-  outgoingMessages->insert(GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg), pendingAutoResponses});
+  outgoingMessages->insert(
+      GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg), pendingAutoResponses});
 
   ensurePumping(js);
 }
 
-void WebSocket::close(
-    jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<kj::String> reason) {
+void WebSocket::close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<kj::String> reason) {
   auto& native = *farNative;
 
   // Handle close before connection is established for websockets obtained through `new WebSocket()`.
@@ -617,14 +610,14 @@ void WebSocket::close(
     return;
   }
   JSG_REQUIRE(native.state.is<Accepted>(), TypeError,
-      "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "\
+      "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "
       "messages.");
 
   assertNoError(js);
 
   KJ_IF_SOME(c, code) {
     JSG_REQUIRE(c >= 1000 && c < 5000 && c != 1004 && c != 1005 && c != 1006 && c != 1015,
-                 TypeError, "Invalid WebSocket close code: ", c, ".");
+        TypeError, "Invalid WebSocket close code: ", c, ".");
   }
   if (reason != kj::none) {
     // The default code of 1005 cannot have a reason, per the standard, so if a reason is specified
@@ -638,18 +631,17 @@ void WebSocket::close(
   // queuedAutoResponses stores the total number of auto-response messages that are already in accounted
   // for in previous GatedMessages. This is useful to easily calculate the number of pendingAutoResponses
   // for each new GateMessage.
-  auto pendingAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size() -
-      autoResponseStatus.queuedAutoResponses;
+  auto pendingAutoResponses =
+      autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
   autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
 
-  outgoingMessages->insert(GatedMessage{
-      IoContext::current().waitForOutputLocksIfNecessary(),
-      kj::WebSocket::Close {
-        // Code 1005 actually translates to sending a close message with no body on the wire.
-        static_cast<uint16_t>(code.orDefault(1005)),
-        kj::mv(reason).orDefault(nullptr),
-      }, pendingAutoResponses
-  });
+  outgoingMessages->insert(GatedMessage{IoContext::current().waitForOutputLocksIfNecessary(),
+    kj::WebSocket::Close{
+      // Code 1005 actually translates to sending a close message with no body on the wire.
+      static_cast<uint16_t>(code.orDefault(1005)),
+      kj::mv(reason).orDefault(nullptr),
+    },
+    pendingAutoResponses});
 
   native.closedOutgoing = true;
   closedOutgoingForHib = true;
@@ -697,49 +689,50 @@ kj::Maybe<kj::String> WebSocket::getPreferredExtensions(kj::WebSocket::Extension
 }
 
 kj::Maybe<kj::StringPtr> WebSocket::getUrl() {
-  return url.map([](kj::StringPtr value){ return value; });
+  return url.map([](kj::StringPtr value) { return value; });
 }
 
 kj::Maybe<kj::StringPtr> WebSocket::getProtocol() {
-  return protocol.map([](kj::StringPtr value){ return value; });
+  return protocol.map([](kj::StringPtr value) { return value; });
 }
 
 kj::Maybe<kj::StringPtr> WebSocket::getExtensions() {
-  return extensions.map([](kj::StringPtr value){ return value; });
+  return extensions.map([](kj::StringPtr value) { return value; });
 }
 
 kj::Maybe<jsg::JsValue> WebSocket::deserializeAttachment(jsg::Lock& js) {
-  return serializedAttachment.map([&](kj::ArrayPtr<byte> attachment)
-      -> jsg::JsValue {
+  return serializedAttachment.map([&](kj::ArrayPtr<byte> attachment) -> jsg::JsValue {
     jsg::Deserializer deserializer(js, attachment, kj::none, kj::none,
-        jsg::Deserializer::Options {
-      .version = 15,
-      .readHeader = true,
-    });
+        jsg::Deserializer::Options{
+          .version = 15,
+          .readHeader = true,
+        });
 
     return deserializer.readValue(js);
   });
 }
 
 void WebSocket::serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) {
-  jsg::Serializer serializer(js, jsg::Serializer::Options {
-    .version = 15,
-    .omitHeader = false,
-  });
+  jsg::Serializer serializer(js,
+      jsg::Serializer::Options{
+        .version = 15,
+        .omitHeader = false,
+      });
   serializer.write(js, attachment);
   auto released = serializer.release();
   JSG_REQUIRE(released.data.size() <= MAX_ATTACHMENT_SIZE, Error,
-      "A WebSocket 'attachment' cannot be larger than ",  MAX_ATTACHMENT_SIZE, " bytes." \
-      "'attachment' was ", released.data.size(), " bytes.");
+      "A WebSocket 'attachment' cannot be larger than ", MAX_ATTACHMENT_SIZE,
+      " bytes."
+      "'attachment' was ",
+      released.data.size(), " bytes.");
   serializedAttachment = kj::mv(released.data);
 }
 
-void WebSocket::setAutoResponseStatus(kj::Maybe<kj::Date> time,
-    kj::Promise<void> autoResponsePromise) {
+void WebSocket::setAutoResponseStatus(
+    kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) {
   autoResponseTimestamp = time;
   autoResponseStatus.ongoingAutoResponse = kj::mv(autoResponsePromise);
 }
-
 
 kj::Maybe<kj::Date> WebSocket::getAutoResponseTimestamp() {
   return autoResponseTimestamp;
@@ -755,8 +748,8 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
     auto& context = IoContext::current();
     auto& accepted = KJ_ASSERT_NONNULL(native.state.tryGet<Accepted>());
     auto promise = kj::evalNow([&]() {
-      return accepted.canceler.wrap(pump(context, *outgoingMessages,
-        *accepted.ws, native, autoResponseStatus, observer));
+      return accepted.canceler.wrap(
+          pump(context, *outgoingMessages, *accepted.ws, native, autoResponseStatus, observer));
     });
 
     // TODO(cleanup): We use awaitIoLegacy() here because we don't want this to count as a pending
@@ -814,7 +807,7 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
 kj::Promise<void> WebSocket::sendAutoResponse(kj::String message, kj::WebSocket& ws) {
   if (autoResponseStatus.isPumping) {
     autoResponseStatus.pendingAutoResponseDeque.push_back(kj::mv(message));
-  } else if (!autoResponseStatus.isClosed){
+  } else if (!autoResponseStatus.isClosed) {
     auto p = ws.send(message).fork();
     autoResponseStatus.ongoingAutoResponse = p.addBranch();
     co_await p;
@@ -847,11 +840,14 @@ size_t countBytesFromMessage(const kj::WebSocket::Message& message) {
   KJ_UNREACHABLE;
 }
 
-} // namespace
+}  // namespace
 
-kj::Promise<void> WebSocket::pump(
-    IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native,
-    AutoResponse& autoResponse, kj::Maybe<kj::Own<WebSocketObserver>>& observer) {
+kj::Promise<void> WebSocket::pump(IoContext& context,
+    OutgoingMessagesMap& outgoingMessages,
+    kj::WebSocket& ws,
+    Native& native,
+    AutoResponse& autoResponse,
+    kj::Maybe<kj::Own<WebSocketObserver>>& observer) {
   KJ_ASSERT(!native.isPumping);
   native.isPumping = true;
   autoResponse.isPumping = true;
@@ -947,8 +943,7 @@ kj::Array<kj::StringPtr> WebSocket::getHibernatableTags() {
 }
 
 kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
-    kj::Maybe<kj::Own<InputGate::CriticalSection>> cs,
-    size_t maxMessageSize) {
+    kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize) {
   try {
     // Note that we'll throw if the websocket has enabled hibernation.
     auto& ws = *KJ_REQUIRE_NONNULL(
@@ -976,17 +971,17 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
       // something like context.run(handleMessage, *this, kj::mv(message)) where the acquired lock,
       // and the additional arguments are passed into handleMessage, avoiding the need for the
       // lambda here entirely.
-      auto result = co_await context.run([this, message=kj::mv(message)](auto& wLock) mutable {
+      auto result = co_await context.run([this, message = kj::mv(message)](auto& wLock) mutable {
         auto& native = *farNative;
         jsg::Lock& js = wLock;
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
-            dispatchEventImpl(js,
-                jsg::alloc<MessageEvent>(js, js.str(text)));
+            dispatchEventImpl(js, jsg::alloc<MessageEvent>(js, js.str(text)));
           }
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
-            dispatchEventImpl(js, jsg::alloc<MessageEvent>(js,
-                jsg::JsValue(js.arrayBuffer(kj::mv(data)).getHandle(js))));
+            dispatchEventImpl(js,
+                jsg::alloc<MessageEvent>(
+                    js, jsg::JsValue(js.arrayBuffer(kj::mv(data)).getHandle(js))));
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
             native.closedIncoming = true;
@@ -1011,8 +1006,7 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
 jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
   auto pipe = kj::newWebSocketPipe();
   auto pair = jsg::alloc<WebSocketPair>(
-      jsg::alloc<WebSocket>(kj::mv(pipe.ends[0])),
-      jsg::alloc<WebSocket>(kj::mv(pipe.ends[1])));
+      jsg::alloc<WebSocket>(kj::mv(pipe.ends[0])), jsg::alloc<WebSocket>(kj::mv(pipe.ends[1])));
   auto first = pair->getFirst();
   auto second = pair->getSecond();
 
@@ -1022,10 +1016,10 @@ jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
 }
 
 jsg::Ref<WebSocketPair::PairIterator> WebSocketPair::entries(jsg::Lock&) {
-  return jsg::alloc<PairIterator>(IteratorState {
+  return jsg::alloc<PairIterator>(IteratorState{
     .pair = JSG_THIS,
     .index = 0,
-   });
+  });
 }
 
 void WebSocket::reportError(jsg::Lock& js, kj::Exception&& e) {
@@ -1038,11 +1032,9 @@ void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
     auto msg = kj::str(v8::Exception::CreateMessage(js.v8Isolate, err.getHandle(js))->Get());
     error = err.addRef(js);
 
-    dispatchEventImpl(js, jsg::alloc<ErrorEvent>(kj::str("error"),
-      ErrorEvent::ErrorEventInit {
-        .message = kj::mv(msg),
-        .error = kj::mv(err)
-      }));
+    dispatchEventImpl(js,
+        jsg::alloc<ErrorEvent>(kj::str("error"),
+            ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we
     // can destroy the connection. Note that we don't set closedOutgoing = true because that flag
@@ -1080,10 +1072,7 @@ kj::Own<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::StringPtr> 
     auto ws = kj::mv(hibernatable.ws);
     // We pass a reference to the kj::WebSocket for the api::WebSocket to refer to when calling
     // `send()` or `close()`.
-    farNative->state.init<Accepted>(
-        Accepted::Hibernatable {
-            .ws = *ws,
-            .tagsRef = kj::mv(tags) },
+    farNative->state.init<Accepted>(Accepted::Hibernatable{.ws = *ws, .tagsRef = kj::mv(tags)},
         *farNative, IoContext::current());
     return kj::mv(ws);
   }
@@ -1134,7 +1123,7 @@ bool WebSocket::peerIsAwaitingCoupling() {
 WebSocket::HibernationPackage WebSocket::buildPackageForHibernation() {
   // TODO(cleanup): It would be great if we could limit this so only the HibernationManager
   // (or a derived class) could call it.
-  return HibernationPackage {
+  return HibernationPackage{
     .url = kj::mv(url),
     .protocol = kj::mv(protocol),
     .extensions = kj::mv(extensions),
@@ -1183,8 +1172,8 @@ kj::Maybe<kj::Own<kj::WebSocket>&> WebSocket::Accepted::WrappedWebSocket::getIfN
   return inner.tryGet<kj::Own<kj::WebSocket>>();
 }
 
-kj::Maybe<WebSocket::Accepted::Hibernatable&>
-WebSocket::Accepted::WrappedWebSocket::getIfHibernatable() {
+kj::Maybe<WebSocket::Accepted::Hibernatable&> WebSocket::Accepted::WrappedWebSocket::
+    getIfHibernatable() {
   return inner.tryGet<Hibernatable>();
 }
 

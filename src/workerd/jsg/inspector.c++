@@ -23,18 +23,19 @@ kj::String KJ_STRINGIFY(const v8_inspector::StringView& view) {
     // Looks like it's all ASCII.
     return kj::str(bytes.asChars());
   } else {
-    return kj::decodeUtf16(kj::arrayPtr(
-        reinterpret_cast<const char16_t*>(view.characters16()), view.length()));
+    return kj::decodeUtf16(
+        kj::arrayPtr(reinterpret_cast<const char16_t*>(view.characters16()), view.length()));
   }
 }
-}
+}  // namespace v8_inspector
 
 namespace workerd::jsg {
 namespace {
 class StringViewWithScratch: public v8_inspector::StringView {
 public:
   StringViewWithScratch(v8_inspector::StringView text, kj::Array<char16_t>&& scratch)
-      : v8_inspector::StringView(text), scratch(kj::mv(scratch)) {}
+      : v8_inspector::StringView(text),
+        scratch(kj::mv(scratch)) {}
 
 private:
   kj::Array<char16_t> scratch;
@@ -56,30 +57,25 @@ v8_inspector::StringView toInspectorStringView(kj::StringPtr text) {
   } else {
     kj::Array<char16_t> scratch = kj::encodeUtf16(text);
     return StringViewWithScratch(
-      v8_inspector::StringView(reinterpret_cast<uint16_t*>(scratch.begin()), scratch.size()),
-      kj::mv(scratch));
+        v8_inspector::StringView(reinterpret_cast<uint16_t*>(scratch.begin()), scratch.size()),
+        kj::mv(scratch));
   }
 }
 
 // Inform the inspector of a problem not associated with any particular exception object.
 //
 // Passes `description` as the exception's detailed message, dummy values for everything else.
-void sendExceptionToInspector(jsg::Lock& js,
-                              v8_inspector::V8Inspector& inspector,
-                              kj::StringPtr description) {
-  inspector.exceptionThrown(js.v8Context(),
-                            v8_inspector::StringView(),
-                            v8::Local<v8::Value>(),
-                            jsg::toInspectorStringView(description),
-                            v8_inspector::StringView(),
-                            0, 0, nullptr, 0);
+void sendExceptionToInspector(
+    jsg::Lock& js, v8_inspector::V8Inspector& inspector, kj::StringPtr description) {
+  inspector.exceptionThrown(js.v8Context(), v8_inspector::StringView(), v8::Local<v8::Value>(),
+      jsg::toInspectorStringView(description), v8_inspector::StringView(), 0, 0, nullptr, 0);
 }
 
 void sendExceptionToInspector(jsg::Lock& js,
-                              v8_inspector::V8Inspector& inspector,
-                              kj::String source,
-                              const jsg::JsValue& exception,
-                              jsg::JsMessage message) {
+    v8_inspector::V8Inspector& inspector,
+    kj::String source,
+    const jsg::JsValue& exception,
+    jsg::JsMessage message) {
   if (!message) {
     // This exception didn't come with a Message. This can happen for exceptions delivered via
     // v8::Promise::Catch(), or for exceptions which were tunneled through C++ promises. In the
@@ -105,11 +101,10 @@ void sendExceptionToInspector(jsg::Lock& js,
 
   // TODO(soon): EW-2636 Pass a real "script ID" as the last parameter instead of 0. I suspect this
   //   has something to do with the incorrect links in the console when it logs uncaught exceptions.
-  inspector.exceptionThrown(context,
-      jsg::toInspectorStringView(kj::mv(source)), exception,
+  inspector.exceptionThrown(context, jsg::toInspectorStringView(kj::mv(source)), exception,
       jsg::toInspectorStringView(kj::str(msg->Get())),
-      jsg::toInspectorStringView(kj::str(scriptResourceName)),
-      lineNumber, startColumn, inspector.createStackTrace(stackTrace), 0);
+      jsg::toInspectorStringView(kj::str(scriptResourceName)), lineNumber, startColumn,
+      inspector.createStackTrace(stackTrace), 0);
 }
 
 }  // namespace workerd::jsg

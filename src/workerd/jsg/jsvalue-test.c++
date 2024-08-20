@@ -118,19 +118,20 @@ KJ_TEST("simple") {
   e.expectEval("getStringIntern()", "string", "foo");
   e.expectEval("const m = getMap(); m.get('foo')", "number", "1");
   e.expectEval("const s = getSet(); s.size === 2 && s.has(1) && s.has('foo') && !s.has('bar')",
-               "boolean", "true");
+      "boolean", "true");
   e.expectEval("const a = getArray(); a[2];", "number", "1");
   e.expectEval("setRef('foo'); getRef('foo')", "string", "foo");
   e.expectEval("takeJsObject(undefined)", "throws",
-               "TypeError: Failed to execute 'takeJsObject' on 'JsValueContext': parameter 1 "
-               "is not of type 'JsObject'.");
+      "TypeError: Failed to execute 'takeJsObject' on 'JsValueContext': parameter 1 "
+      "is not of type 'JsObject'.");
   e.expectEval("getDate() instanceof Date", "boolean", "true");
-  e.expectEval("checkProxyPrototype(new Proxy(class extends Foo{}, {})) === Foo",
-               "boolean", "true");
+  e.expectEval(
+      "checkProxyPrototype(new Proxy(class extends Foo{}, {})) === Foo", "boolean", "true");
   e.expectEval("checkProxyPrototype(new Proxy({}, { getPrototypeOf() { return Foo; } } )) === Foo",
-               "boolean", "true");
+      "boolean", "true");
   e.expectEval("checkProxyPrototype(new Proxy({}, { getPrototypeOf() { return String; } } )) "
-               "=== Foo", "boolean", "false");
+               "=== Foo",
+      "boolean", "false");
 }
 
 }  // namespace

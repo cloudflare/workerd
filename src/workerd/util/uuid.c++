@@ -113,7 +113,6 @@ kj::Maybe<UUID> UUID::fromString(kj::StringPtr str) {
   return UUID(upper, lower);
 }
 
-
 kj::String UUID::toString() const {
   // clang-format off
   return kj::str(
@@ -157,4 +156,4 @@ kj::String UUID::toString() const {
   // clang-format on
 }
 
-} // namespace workerd
+}  // namespace workerd

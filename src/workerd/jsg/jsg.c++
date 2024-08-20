@@ -31,9 +31,8 @@ JsExceptionThrown::JsExceptionThrown() {
 }
 
 const char* JsExceptionThrown::what() const noexcept {
-  whatBuffer = kj::str(
-      "Uncaught JsExceptionThrown\nstack: ",
-      kj::stringifyStackTraceAddresses(tracePtr));
+  whatBuffer =
+      kj::str("Uncaught JsExceptionThrown\nstack: ", kj::stringifyStackTraceAddresses(tracePtr));
   return whatBuffer.cStr();
 }
 
@@ -116,7 +115,9 @@ void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTrace
 }
 
 Lock::Lock(v8::Isolate* v8Isolate)
-    : v8Isolate(v8Isolate), locker(v8Isolate), isolateScope(v8Isolate),
+    : v8Isolate(v8Isolate),
+      locker(v8Isolate),
+      isolateScope(v8Isolate),
       previousData(v8Isolate->GetData(2)),
       warningsLogged(IsolateBase::from(v8Isolate).areWarningsLogged()) {
   if (previousData != nullptr) {
@@ -143,21 +144,17 @@ Lock::~Lock() noexcept(false) {
 }
 
 Value Lock::parseJson(kj::ArrayPtr<const char> data) {
-  return withinHandleScope([&] {
-    return v8Ref(jsg::check(v8::JSON::Parse(v8Context(), v8Str(v8Isolate, data))));
-  });
+  return withinHandleScope(
+      [&] { return v8Ref(jsg::check(v8::JSON::Parse(v8Context(), v8Str(v8Isolate, data)))); });
 }
 
 Value Lock::parseJson(v8::Local<v8::String> text) {
-  return withinHandleScope([&] {
-    return v8Ref(jsg::check(v8::JSON::Parse(v8Context(), text)));
-  });
+  return withinHandleScope([&] { return v8Ref(jsg::check(v8::JSON::Parse(v8Context(), text))); });
 }
 
 kj::String Lock::serializeJson(v8::Local<v8::Value> value) {
-  return withinHandleScope([&] {
-    return toString(jsg::check(v8::JSON::Stringify(v8Context(), value)));
-  });
+  return withinHandleScope(
+      [&] { return toString(jsg::check(v8::JSON::Stringify(v8Context(), value))); });
 }
 
 void Lock::recursivelyFreeze(Value& value) {
@@ -214,12 +211,10 @@ void Lock::requestGcForTesting() const {
     return;
   }
   v8Isolate->RequestGarbageCollectionForTesting(
-    v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
+      v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 }
 
-void Lock::v8Set(v8::Local<v8::Object> obj,
-                 kj::StringPtr name,
-                 v8::Local<v8::Value> value) {
+void Lock::v8Set(v8::Local<v8::Object> obj, kj::StringPtr name, v8::Local<v8::Value> value) {
   KJ_ASSERT(check(obj->Set(v8Context(), v8StrIntern(v8Isolate, name), value)));
 }
 
@@ -291,13 +286,15 @@ void ExternalMemoryAdjustment::maybeDeferAdjustment(v8::Isolate* isolate, size_t
 }
 
 ExternalMemoryAdjustment::ExternalMemoryAdjustment(v8::Isolate* isolate, size_t amount)
-    : amount(amount), isolate(isolate) {
+    : amount(amount),
+      isolate(isolate) {
   KJ_DASSERT(isolate != nullptr);
   isolate->AdjustAmountOfExternalAllocatedMemory(amount);
 }
 
-ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other) :
-    amount(other.amount), isolate(other.isolate) {
+ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other)
+    : amount(other.amount),
+      isolate(other.isolate) {
   other.amount = 0;
   other.isolate = nullptr;
 }
@@ -334,13 +331,9 @@ ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
   return ExternalMemoryAdjustment(v8Isolate, amount);
 }
 
-Name::Name(kj::String string)
-    : hash(kj::hashCode(string)),
-      inner(kj::mv(string)) {}
+Name::Name(kj::String string): hash(kj::hashCode(string)), inner(kj::mv(string)) {}
 
-Name::Name(kj::StringPtr string)
-    : hash(kj::hashCode(string)),
-      inner(kj::str(string)) {}
+Name::Name(kj::StringPtr string): hash(kj::hashCode(string)), inner(kj::str(string)) {}
 
 Name::Name(Lock& js, v8::Local<v8::Symbol> symbol)
     : hash(kj::hashCode(symbol->GetIdentityHash())),
@@ -360,7 +353,8 @@ kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> Name::getUnwrapped(v8::Isolate* 
 
 void Name::visitForGc(GcVisitor& visitor) {
   KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(string, kj::String) {}
+    KJ_CASE_ONEOF(string, kj::String) {
+    }
     KJ_CASE_ONEOF(symbol, V8Ref<v8::Symbol>) {
       visitor.visit(symbol);
     }

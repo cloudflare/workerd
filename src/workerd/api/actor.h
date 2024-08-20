@@ -17,7 +17,8 @@
 #include <workerd/io/actor-id.h>
 
 namespace workerd {
-  template <typename T> class IoOwn;
+template <typename T>
+class IoOwn;
 }
 
 namespace workerd::api {
@@ -25,8 +26,7 @@ namespace workerd::api {
 // A capability to an ephemeral Actor namespace.
 class ColoLocalActorNamespace: public jsg::Object {
 public:
-  ColoLocalActorNamespace(uint channel)
-    : channel(channel) {}
+  ColoLocalActorNamespace(uint channel): channel(channel) {}
 
   jsg::Ref<Fetcher> get(kj::String actorId);
 
@@ -45,7 +45,9 @@ class DurableObjectId: public jsg::Object {
 public:
   DurableObjectId(kj::Own<ActorIdFactory::ActorId> id): id(kj::mv(id)) {}
 
-  const ActorIdFactory::ActorId& getInner() { return *id; }
+  const ActorIdFactory::ActorId& getInner() {
+    return *id;
+  }
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -53,10 +55,14 @@ public:
   // Converts to a string which can be passed back to the constructor to reproduce the same ID.
   kj::String toString();
 
-  inline bool equals(DurableObjectId& other) { return id->equals(*other.id); }
+  inline bool equals(DurableObjectId& other) {
+    return id->equals(*other.id);
+  }
 
   // Get the name, if known.
-  inline jsg::Optional<kj::StringPtr> getName() { return id->getName(); }
+  inline jsg::Optional<kj::StringPtr> getName() {
+    return id->getName();
+  }
 
   JSG_RESOURCE_TYPE(DurableObjectId) {
     JSG_METHOD(toString);
@@ -78,13 +84,18 @@ private:
 class DurableObject final: public Fetcher {
 
 public:
-  DurableObject(jsg::Ref<DurableObjectId> id, IoOwn<OutgoingFactory> outgoingFactory,
-                RequiresHostAndProtocol requiresHost)
-    : Fetcher(kj::mv(outgoingFactory), requiresHost, true /* isInHouse */),
-      id(kj::mv(id)) {}
+  DurableObject(jsg::Ref<DurableObjectId> id,
+      IoOwn<OutgoingFactory> outgoingFactory,
+      RequiresHostAndProtocol requiresHost)
+      : Fetcher(kj::mv(outgoingFactory), requiresHost, true /* isInHouse */),
+        id(kj::mv(id)) {}
 
-  jsg::Ref<DurableObjectId> getId() { return id.addRef(); };
-  jsg::Optional<kj::StringPtr> getName() { return id->getName(); }
+  jsg::Ref<DurableObjectId> getId() {
+    return id.addRef();
+  };
+  jsg::Optional<kj::StringPtr> getName() {
+    return id->getName();
+  }
 
   JSG_RESOURCE_TYPE(DurableObject) {
     JSG_INHERIT(Fetcher);
@@ -128,10 +139,11 @@ class DurableObjectNamespace: public jsg::Object {
 
 public:
   DurableObjectNamespace(uint channel, kj::Own<ActorIdFactory> idFactory)
-    : channel(channel), idFactory(kj::mv(idFactory)) {}
+      : channel(channel),
+        idFactory(kj::mv(idFactory)) {}
 
   struct NewUniqueIdOptions {
-      // Restricts the new unique ID to a set of colos within a jurisdiction.
+    // Restricts the new unique ID to a set of colos within a jurisdiction.
     jsg::Optional<kj::String> jurisdiction;
 
     JSG_STRUCT(jurisdiction);
@@ -171,16 +183,12 @@ public:
 
   // Gets a durable object by ID or creates it if it doesn't already exist.
   jsg::Ref<DurableObject> get(
-      jsg::Lock& js,
-      jsg::Ref<DurableObjectId> id,
-      jsg::Optional<GetDurableObjectOptions> options);
+      jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
 
   // Experimental. Gets a durable object by ID if it already exists. Currently, gated for use
   // by cloudflare only.
   jsg::Ref<DurableObject> getExisting(
-      jsg::Lock& js,
-      jsg::Ref<DurableObjectId> id,
-      jsg::Optional<GetDurableObjectOptions> options);
+      jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
 
   // Creates a subnamespace with the jurisdiction hardcoded.
   jsg::Ref<DurableObjectNamespace> jurisdiction(kj::String jurisdiction);
@@ -214,19 +222,15 @@ private:
   uint channel;
   kj::Own<ActorIdFactory> idFactory;
 
-  jsg::Ref<DurableObject> getImpl(
-      jsg::Lock& js,
+  jsg::Ref<DurableObject> getImpl(jsg::Lock& js,
       ActorGetMode mode,
       jsg::Ref<DurableObjectId> id,
       jsg::Optional<GetDurableObjectOptions> options);
 };
 
-#define EW_ACTOR_ISOLATE_TYPES                      \
-  api::ColoLocalActorNamespace,                     \
-  api::DurableObject,                               \
-  api::DurableObjectId,                             \
-  api::DurableObjectNamespace,                      \
-  api::DurableObjectNamespace::NewUniqueIdOptions,  \
-  api::DurableObjectNamespace::GetDurableObjectOptions
+#define EW_ACTOR_ISOLATE_TYPES                                                                     \
+  api::ColoLocalActorNamespace, api::DurableObject, api::DurableObjectId,                          \
+      api::DurableObjectNamespace, api::DurableObjectNamespace::NewUniqueIdOptions,                \
+      api::DurableObjectNamespace::GetDurableObjectOptions
 
 }  // namespace workerd::api

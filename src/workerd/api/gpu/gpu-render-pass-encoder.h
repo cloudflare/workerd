@@ -13,9 +13,9 @@
 
 namespace workerd::api::gpu {
 
-class GPURenderPassEncoder : public jsg::Object {
+class GPURenderPassEncoder: public jsg::Object {
 public:
-  explicit GPURenderPassEncoder(wgpu::RenderPassEncoder e) : encoder_(kj::mv(e)){};
+  explicit GPURenderPassEncoder(wgpu::RenderPassEncoder e): encoder_(kj::mv(e)) {};
   JSG_RESOURCE_TYPE(GPURenderPassEncoder) {
     JSG_METHOD(setPipeline);
     JSG_METHOD(draw);
@@ -25,8 +25,10 @@ public:
 private:
   wgpu::RenderPassEncoder encoder_;
   void setPipeline(jsg::Ref<GPURenderPipeline> pipeline);
-  void draw(GPUSize32 vertexCount, jsg::Optional<GPUSize32> instanceCount,
-            jsg::Optional<GPUSize32> firstVertex, jsg::Optional<GPUSize32> firstInstance);
+  void draw(GPUSize32 vertexCount,
+      jsg::Optional<GPUSize32> instanceCount,
+      jsg::Optional<GPUSize32> firstVertex,
+      jsg::Optional<GPUSize32> firstInstance);
   void end() {
     encoder_.End();
   };
@@ -42,8 +44,15 @@ struct GPURenderPassDepthStencilAttachment {
   jsg::Optional<GPULoadOp> stencilLoadOp;
   jsg::Optional<GPUStoreOp> stencilStoreOp;
   jsg::Optional<bool> stencilReadOnly;
-  JSG_STRUCT(view, depthClearValue, depthLoadOp, depthStoreOp, depthReadOnly, stencilClearValue,
-             stencilLoadOp, stencilStoreOp, stencilReadOnly);
+  JSG_STRUCT(view,
+      depthClearValue,
+      depthLoadOp,
+      depthStoreOp,
+      depthReadOnly,
+      stencilClearValue,
+      stencilLoadOp,
+      stencilStoreOp,
+      stencilReadOnly);
 };
 
 struct GPUColorDict {
@@ -78,8 +87,12 @@ struct GPURenderPassDescriptor {
   jsg::Optional<jsg::Ref<GPUQuerySet>> occlusionQuerySet;
   jsg::Optional<GPURenderPassTimestampWrites> timestampWrites;
   jsg::Optional<GPUSize64> maxDrawCount;
-  JSG_STRUCT(label, colorAttachments, depthStencilAttachment, occlusionQuerySet, timestampWrites,
-             maxDrawCount);
+  JSG_STRUCT(label,
+      colorAttachments,
+      depthStencilAttachment,
+      occlusionQuerySet,
+      timestampWrites,
+      maxDrawCount);
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

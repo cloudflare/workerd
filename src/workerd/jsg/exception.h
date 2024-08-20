@@ -9,7 +9,7 @@
 
 namespace workerd::jsg {
 
-#define JSG_EXCEPTION(jsErrorType) JSG_ERROR_ ## jsErrorType
+#define JSG_EXCEPTION(jsErrorType) JSG_ERROR_##jsErrorType
 #define JSG_DOM_EXCEPTION(name) "jsg.DOMException(" name ")"
 #define JSG_INTERNAL_DOM_EXCEPTION(name) "jsg-internal.DOMException(" name ")"
 
@@ -32,14 +32,14 @@ namespace workerd::jsg {
 
 #define JSG_ERROR_InternalDOMOperationError JSG_INTERNAL_DOM_EXCEPTION("OperationError")
 
-#define JSG_KJ_EXCEPTION(type, jsErrorType, ...)                                        \
-  kj::Exception(kj::Exception::Type::type, __FILE__, __LINE__,                           \
-                kj::str(JSG_EXCEPTION(jsErrorType) ": ", __VA_ARGS__))
+#define JSG_KJ_EXCEPTION(type, jsErrorType, ...)                                                   \
+  kj::Exception(kj::Exception::Type::type, __FILE__, __LINE__,                                     \
+      kj::str(JSG_EXCEPTION(jsErrorType) ": ", __VA_ARGS__))
 
-#define JSG_ASSERT(cond, jsErrorType, ...)                                              \
+#define JSG_ASSERT(cond, jsErrorType, ...)                                                         \
   KJ_ASSERT(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 
-#define JSG_REQUIRE(cond, jsErrorType, ...)                                             \
+#define JSG_REQUIRE(cond, jsErrorType, ...)                                                        \
   KJ_REQUIRE(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 // Unlike KJ_REQUIRE, JSG_REQUIRE passes all message arguments through kj::str which makes it
 // "prettier". This does have some implications like if there's only string literal arguments then
@@ -50,31 +50,31 @@ namespace workerd::jsg {
 // "some message 5" (or JSG_REQUIRE(false, "some message; x = ", x) if you wanted identical output,
 // but then why not use KJ_REQUIRE).
 
-#define JSG_REQUIRE_NONNULL(value, jsErrorType, ...)                                    \
+#define JSG_REQUIRE_NONNULL(value, jsErrorType, ...)                                               \
   KJ_REQUIRE_NONNULL(value, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 // JSG_REQUIRE + KJ_REQUIRE_NONNULL.
 
-#define JSG_FAIL_REQUIRE(jsErrorType, ...)                                              \
+#define JSG_FAIL_REQUIRE(jsErrorType, ...)                                                         \
   KJ_FAIL_REQUIRE(kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 // JSG_REQUIRE + KJ_FAIL_REQUIRE
 
-#define JSG_WARN_ONCE(msg, ...) \
-    static bool logOnce KJ_UNUSED = ([&] { \
-      KJ_LOG(WARNING, msg, ##__VA_ARGS__); \
-      return true; \
-    })() \
+#define JSG_WARN_ONCE(msg, ...)                                                                    \
+  static bool logOnce KJ_UNUSED = ([&] {                                                           \
+    KJ_LOG(WARNING, msg, ##__VA_ARGS__);                                                           \
+    return true;                                                                                   \
+  })()
 
 // Conditionally log a warning, at most once. Useful for determining if code changes would break
 // any existing scripts.
-#define JSG_WARN_ONCE_IF(cond, msg, ...) \
-  if (cond) { \
-    JSG_WARN_ONCE(msg, ##__VA_ARGS__); \
+#define JSG_WARN_ONCE_IF(cond, msg, ...)                                                           \
+  if (cond) {                                                                                      \
+    JSG_WARN_ONCE(msg, ##__VA_ARGS__);                                                             \
   }
 
 // These are passthrough functions to KJ. We expect the error string to be
 // surfaced to the application.
 
-#define _JSG_INTERNAL_REQUIRE(cond, jsErrorType, ...)                                             \
+#define _JSG_INTERNAL_REQUIRE(cond, jsErrorType, ...)                                              \
   do {                                                                                             \
     try {                                                                                          \
       KJ_REQUIRE(cond, jsErrorType ": Cloudflare internal error.");                                \
@@ -84,7 +84,7 @@ namespace workerd::jsg {
     }                                                                                              \
   } while (0)
 
-#define _JSG_INTERNAL_REQUIRE_NONNULL(value, jsErrorType, ...)                                    \
+#define _JSG_INTERNAL_REQUIRE_NONNULL(value, jsErrorType, ...)                                     \
   ([&]() -> decltype(auto) {                                                                       \
     try {                                                                                          \
       return KJ_REQUIRE_NONNULL(value, jsErrorType ": Cloudflare internal error.");                \
@@ -94,7 +94,7 @@ namespace workerd::jsg {
     }                                                                                              \
   }())
 
-#define _JSG_INTERNAL_FAIL_REQUIRE(jsErrorType, ...)                                              \
+#define _JSG_INTERNAL_FAIL_REQUIRE(jsErrorType, ...)                                               \
   do {                                                                                             \
     try {                                                                                          \
       KJ_FAIL_REQUIRE(jsErrorType ": Cloudflare internal error.");                                 \
@@ -116,12 +116,11 @@ bool isTunneledException(kj::StringPtr internalMessage);
 bool isDoNotLogException(kj::StringPtr internalMessage);
 
 // Log an exception ala LOG_EXCEPTION, but only if it is worth logging and not a tunneled exception.
-#define LOG_EXCEPTION_IF_INTERNAL(context, exception) \
-  if (!jsg::isTunneledException(exception.getDescription()) && \
-      !jsg::isDoNotLogException(exception.getDescription())) { \
-    LOG_EXCEPTION(context, exception); \
+#define LOG_EXCEPTION_IF_INTERNAL(context, exception)                                              \
+  if (!jsg::isTunneledException(exception.getDescription()) &&                                     \
+      !jsg::isDoNotLogException(exception.getDescription())) {                                     \
+    LOG_EXCEPTION(context, exception);                                                             \
   }
-
 
 struct TunneledErrorType {
   // The original error message stripped of prefixes.

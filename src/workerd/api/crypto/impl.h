@@ -17,12 +17,11 @@ typedef struct bignum_st BIGNUM;
 
 // Wrap calls to OpenSSL's EVP_* interface (and similar APIs) in this macro to
 // deal with errors.
-#define OSSLCALL(...) if ((__VA_ARGS__) != 1) \
-    ::workerd::api::throwOpensslError(__FILE__, __LINE__, #__VA_ARGS__)
+#define OSSLCALL(...)                                                                              \
+  if ((__VA_ARGS__) != 1) ::workerd::api::throwOpensslError(__FILE__, __LINE__, #__VA_ARGS__)
 
-#define UNWRAP_JWK_BIGNUM(value, ...) \
-    JSG_REQUIRE_NONNULL( \
-        decodeBase64Url(JSG_REQUIRE_NONNULL((value), __VA_ARGS__)), __VA_ARGS__)
+#define UNWRAP_JWK_BIGNUM(value, ...)                                                              \
+  JSG_REQUIRE_NONNULL(decodeBase64Url(JSG_REQUIRE_NONNULL((value), __VA_ARGS__)), __VA_ARGS__)
 
 namespace workerd::api {
 
@@ -100,10 +99,12 @@ class CryptoKey::Impl {
 public:
   // C++ API
 
-  using ImportFunc = kj::Own<Impl>(
-      jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
+  using ImportFunc = kj::Own<Impl>(jsg::Lock& js,
+      kj::StringPtr normalizedName,
+      kj::StringPtr format,
       SubtleCrypto::ImportKeyData keyData,
-      SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
+      SubtleCrypto::ImportKeyAlgorithm&& algorithm,
+      bool extractable,
       kj::ArrayPtr<const kj::String> keyUsages);
 
   static ImportFunc importAes;
@@ -116,9 +117,10 @@ public:
   static ImportFunc importEddsa;
   static ImportFunc importRsaRaw;
 
-  using GenerateFunc = kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>(
-      jsg::Lock& js, kj::StringPtr normalizedName,
-      SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
+  using GenerateFunc = kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>(jsg::Lock& js,
+      kj::StringPtr normalizedName,
+      SubtleCrypto::GenerateKeyAlgorithm&& algorithm,
+      bool extractable,
       kj::ArrayPtr<const kj::String> keyUsages);
 
   static GenerateFunc generateAes;
@@ -128,64 +130,65 @@ public:
   static GenerateFunc generateEcdh;
   static GenerateFunc generateEddsa;
 
-  Impl(bool extractable, CryptoKeyUsageSet usages) : extractable(extractable), usages(usages) {}
+  Impl(bool extractable, CryptoKeyUsageSet usages): extractable(extractable), usages(usages) {}
 
   static kj::Own<CryptoKey::Impl> from(kj::Own<EVP_PKEY> key);
 
-  bool isExtractable() const { return extractable; }
-  CryptoKeyUsageSet getUsages() const { return usages; }
+  bool isExtractable() const {
+    return extractable;
+  }
+  CryptoKeyUsageSet getUsages() const {
+    return usages;
+  }
 
   virtual kj::Array<kj::byte> encrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> plainText) const {
+      SubtleCrypto::EncryptAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> plainText) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The encrypt operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
   virtual kj::Array<kj::byte> decrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> cipherText) const {
+      SubtleCrypto::EncryptAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> cipherText) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The decrypt operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
 
   virtual kj::Array<kj::byte> sign(
-      SubtleCrypto::SignAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> data) const {
+      SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The sign operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
-  virtual bool verify(
-      SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> signature,
+  virtual bool verify(SubtleCrypto::SignAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> signature,
       kj::ArrayPtr<const kj::byte> data) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The verify operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
 
-  virtual kj::Array<kj::byte> deriveBits(
-      jsg::Lock& js,
-      SubtleCrypto::DeriveKeyAlgorithm&& algorithm, kj::Maybe<uint32_t> length) const {
+  virtual kj::Array<kj::byte> deriveBits(jsg::Lock& js,
+      SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
+      kj::Maybe<uint32_t> length) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError,
-        "The deriveKey and deriveBits operations are not implemented for \"",
-        getAlgorithmName(), "\".");
+        "The deriveKey and deriveBits operations are not implemented for \"", getAlgorithmName(),
+        "\".");
   }
 
-  virtual kj::Array<kj::byte> wrapKey(SubtleCrypto::EncryptAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> unwrappedKey) const {
+  virtual kj::Array<kj::byte> wrapKey(
+      SubtleCrypto::EncryptAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> unwrappedKey) const {
     // For many algorithms, wrapKey() is the same as encrypt(), so as a convenience the default
     // implementation just forwards to it.
     return encrypt(kj::mv(algorithm), unwrappedKey);
   }
 
-  virtual kj::Array<kj::byte> unwrapKey(SubtleCrypto::EncryptAlgorithm&& algorithm,
-      kj::ArrayPtr<const kj::byte> wrappedKey) const {
+  virtual kj::Array<kj::byte> unwrapKey(
+      SubtleCrypto::EncryptAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> wrappedKey) const {
     // For many algorithms, unwrapKey() is the same as decrypt(), so as a convenience the default
     // implementation just forwards to it.
     return decrypt(kj::mv(algorithm), wrappedKey);
   }
 
   virtual SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const {
-    JSG_FAIL_REQUIRE(DOMNotSupportedError,
-        "Unrecognized or unsupported export of \"", getAlgorithmName(), "\" requested.");
+    JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized or unsupported export of \"",
+        getAlgorithmName(), "\" requested.");
   }
 
   // The exportKeyExt variant is used by the Node.js crypto module. It allows the caller to
@@ -196,13 +199,12 @@ public:
   // cipher and passphrase.
   // Rather than modify the existing exportKey API, we add this new variant to support the
   // Node.js implementation without risking breaking the Web Crypto impl.
-  virtual kj::Array<kj::byte> exportKeyExt(
-      kj::StringPtr format,
+  virtual kj::Array<kj::byte> exportKeyExt(kj::StringPtr format,
       kj::StringPtr type,
       jsg::Optional<kj::String> cipher = kj::none,
       jsg::Optional<kj::Array<kj::byte>> passphrase = kj::none) const {
-    JSG_FAIL_REQUIRE(DOMNotSupportedError,
-        "Unrecognized or unsupported export of \"", getAlgorithmName(), "\" requested.");
+    JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized or unsupported export of \"",
+        getAlgorithmName(), "\" requested.");
   }
 
   virtual kj::StringPtr getAlgorithmName() const = 0;
@@ -216,17 +218,28 @@ public:
   // JS API implementation
 
   virtual AlgorithmVariant getAlgorithm(jsg::Lock& js) const = 0;
-  virtual kj::StringPtr getType() const { return "secret"_kj; }
+  virtual kj::StringPtr getType() const {
+    return "secret"_kj;
+  }
 
   virtual bool equals(const Impl& other) const = 0;
   virtual bool equals(const kj::Array<kj::byte>& other) const;
 
-  virtual kj::StringPtr jsgGetMemoryName() const { return "CryptoKey::Impl"; }
-  virtual size_t jsgGetMemorySelfSize() const { return sizeof(Impl); }
+  virtual kj::StringPtr jsgGetMemoryName() const {
+    return "CryptoKey::Impl";
+  }
+  virtual size_t jsgGetMemorySelfSize() const {
+    return sizeof(Impl);
+  }
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {}
 
-  virtual bool verifyX509Public(const X509* cert) const { return false; }
-  virtual bool verifyX509Private(const X509* cert) const { return false; }
+  virtual bool verifyX509Public(const X509* cert) const {
+    return false;
+  }
+  virtual bool verifyX509Private(const X509* cert) const {
+    return false;
+  }
+
 private:
   const bool extractable;
   const CryptoKeyUsageSet usages;
@@ -254,19 +267,22 @@ struct CryptoAlgorithm {
     return strcasecmp(name.cStr(), other.name.cStr()) == 0;
   }
   // Allow comparison by name, case-insensitive. This is a convenience for placing in an std::set.
-  inline bool operator< (const CryptoAlgorithm& other) const {
+  inline bool operator<(const CryptoAlgorithm& other) const {
     return strcasecmp(name.cStr(), other.name.cStr()) < 0;
   }
   // TODO(cleanup): I'd rather use kj::Table with HashIndex but we need a case-insensitive hash
   //   function, which seemed slightly too annoying to implement now.
 };
 
-class SslArrayDisposer : public kj::ArrayDisposer {
+class SslArrayDisposer: public kj::ArrayDisposer {
 public:
   static const SslArrayDisposer INSTANCE;
 
-  void disposeImpl(void* firstElement, size_t elementSize, size_t elementCount,
-                   size_t capacity, void (*destroyElement)(void*)) const;
+  void disposeImpl(void* firstElement,
+      size_t elementSize,
+      size_t elementCount,
+      size_t capacity,
+      void (*destroyElement)(void*)) const;
 };
 
 template <typename T, void (*sslFree)(T*)>
@@ -283,14 +299,14 @@ protected:
 template <typename T, void (*sslFree)(T*)>
 const SslDisposer<T, sslFree> SslDisposer<T, sslFree>::INSTANCE;
 
-#define OSSLCALL_OWN(T, code, ...) \
-  ({ \
-    T* result = code; \
-    JSG_REQUIRE(result != nullptr, ##__VA_ARGS__); \
-    kj::Own<T>(result, workerd::api::SslDisposer<T, &T##_free>::INSTANCE); \
+#define OSSLCALL_OWN(T, code, ...)                                                                 \
+  ({                                                                                               \
+    T* result = code;                                                                              \
+    JSG_REQUIRE(result != nullptr, ##__VA_ARGS__);                                                 \
+    kj::Own<T>(result, workerd::api::SslDisposer<T, &T##_free>::INSTANCE);                         \
   })
 
-#define OSSL_NEW(T, ...) \
+#define OSSL_NEW(T, ...)                                                                           \
   OSSLCALL_OWN(T, T##_new(__VA_ARGS__), InternalDOMOperationError, "Error allocating crypto")
 
 #define BIGNUM_new BN_new
@@ -299,7 +315,7 @@ const SslDisposer<T, sslFree> SslDisposer<T, sslFree>::INSTANCE;
 // Using BN_clear_free here ensures that any potentially sensitive information in the
 // BIGNUM is also cleansed when it is freed.
 
-using UniqueBignum = std::unique_ptr<BIGNUM, void(*)(BIGNUM*)>;
+using UniqueBignum = std::unique_ptr<BIGNUM, void (*)(BIGNUM*)>;
 kj::Maybe<kj::Own<BIGNUM>> toBignum(kj::ArrayPtr<const kj::byte> data);
 BIGNUM* toBignumUnowned(kj::ArrayPtr<const kj::byte> data);
 kj::Maybe<kj::Array<kj::byte>> bignumToArray(const BIGNUM& bignum);
@@ -307,29 +323,41 @@ kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum);
 kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum, size_t paddedLength);
 kj::Own<BIGNUM> newBignum();
 
-#define OSSL_BIO_MEM() \
-  ({ \
-    BIO* result = BIO_new(BIO_s_mem()); \
-    JSG_REQUIRE(result != nullptr, InternalDOMOperationError, "Error allocating crypto"); \
-    kj::Own<BIO>(result, workerd::api::SslDisposer<BIO, &BIO_free_all>::INSTANCE); \
+#define OSSL_BIO_MEM()                                                                             \
+  ({                                                                                               \
+    BIO* result = BIO_new(BIO_s_mem());                                                            \
+    JSG_REQUIRE(result != nullptr, InternalDOMOperationError, "Error allocating crypto");          \
+    kj::Own<BIO>(result, workerd::api::SslDisposer<BIO, &BIO_free_all>::INSTANCE);                 \
   })
 
 // Adopted from Node.js' crypto implementation. the MarkPopErrorOnReturn
 // and ClearErrorOnReturn mechanisms make working with the openssl error
 // stack a bit easier...
 struct MarkPopErrorOnReturn {
-  MarkPopErrorOnReturn() { ERR_set_mark(); }
-  ~MarkPopErrorOnReturn() { ERR_pop_to_mark(); }
+  MarkPopErrorOnReturn() {
+    ERR_set_mark();
+  }
+  ~MarkPopErrorOnReturn() {
+    ERR_pop_to_mark();
+  }
   KJ_DISALLOW_COPY_AND_MOVE(MarkPopErrorOnReturn);
 };
 
 struct ClearErrorOnReturn {
-  ClearErrorOnReturn() { ERR_clear_error(); }
-  ~ClearErrorOnReturn() { ERR_clear_error(); }
+  ClearErrorOnReturn() {
+    ERR_clear_error();
+  }
+  ~ClearErrorOnReturn() {
+    ERR_clear_error();
+  }
   KJ_DISALLOW_COPY_AND_MOVE(ClearErrorOnReturn);
 
-  uint32_t peekError() { return ERR_peek_error(); }
-  uint32_t consumeError() { return ERR_get_error(); }
+  uint32_t peekError() {
+    return ERR_peek_error();
+  }
+  uint32_t consumeError() {
+    return ERR_get_error();
+  }
 };
 
 // Returns ceil(a / b) for integers (std::ceil always returns a floating point result).
@@ -343,15 +371,27 @@ static inline T integerCeilDivision(T a, T b) {
 // with zeroes when destroyed.
 class ZeroOnFree {
 public:
-  inline ZeroOnFree(kj::Array<kj::byte>&& inner) : inner(kj::mv(inner)) {}
+  inline ZeroOnFree(kj::Array<kj::byte>&& inner): inner(kj::mv(inner)) {}
   ~ZeroOnFree() noexcept(false);
 
-  inline size_t size() const { return inner.size(); }
-  inline const kj::byte* begin() const { return inner.begin(); }
-  inline operator kj::ArrayPtr<const kj::byte>() const { return inner.asPtr(); }
-  inline operator const kj::Array<kj::byte>&() const { return inner; }
-  inline kj::ArrayPtr<kj::byte> asPtr() { return inner.asPtr(); }
-  inline kj::ArrayPtr<const kj::byte> asPtr() const { return inner.asPtr(); }
+  inline size_t size() const {
+    return inner.size();
+  }
+  inline const kj::byte* begin() const {
+    return inner.begin();
+  }
+  inline operator kj::ArrayPtr<const kj::byte>() const {
+    return inner.asPtr();
+  }
+  inline operator const kj::Array<kj::byte>&() const {
+    return inner;
+  }
+  inline kj::ArrayPtr<kj::byte> asPtr() {
+    return inner.asPtr();
+  }
+  inline kj::ArrayPtr<const kj::byte> asPtr() const {
+    return inner.asPtr();
+  }
 
 private:
   kj::Array<kj::byte> inner;
@@ -373,7 +413,7 @@ kj::Own<CryptoKey::Impl> fromRsaKey(kj::Own<EVP_PKEY> key);
 kj::Own<CryptoKey::Impl> fromEcKey(kj::Own<EVP_PKEY> key);
 kj::Own<CryptoKey::Impl> fromEd25519Key(kj::Own<EVP_PKEY> key);
 
- // If the input bytes are a valid ASN.1 sequence, return them minus the prefix.
+// If the input bytes are a valid ASN.1 sequence, return them minus the prefix.
 kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetAsn1Sequence(kj::ArrayPtr<const kj::byte> data);
 }  // namespace workerd::api
 

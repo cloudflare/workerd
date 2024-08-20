@@ -21,7 +21,7 @@ public:
     return kj::atomicRefcounted<AtomicWeakRef<T>>(this_);
   }
 
-  inline explicit AtomicWeakRef(T* thisArg) : this_(thisArg) {}
+  inline explicit AtomicWeakRef(T* thisArg): this_(thisArg) {}
 
   // This tries to materialize a strong reference to the owner. It will fail if the owner's
   // refcount has already dropped to 0. As discussed in the class, the lifetime of this weak
@@ -67,7 +67,7 @@ private:
 template <typename T>
 class WeakRef final: public kj::Refcounted {
 public:
-  inline WeakRef(kj::Badge<T>, T& thing) : maybeThing(thing) {}
+  inline WeakRef(kj::Badge<T>, T& thing): maybeThing(thing) {}
 
   // The use of the kj::Badge<T> in the constructor ensures that the initial instances
   // of WeakRef<T> can only be created within an instance of T. The instance T is responsible
@@ -80,7 +80,7 @@ public:
   // since the `IoContext` might not be alive for any async continuation, we do not provide
   // a `kj::Maybe<IoContext&> tryGet()` function. You are expected to invoke this function
   // again in the next continuation to re-check if the `IoContext` is still around.
-  template<typename F>
+  template <typename F>
   inline bool runIfAlive(F&& f) const {
     KJ_IF_SOME(thing, maybeThing) {
       kj::fwd<F>(f)(thing);
@@ -90,9 +90,15 @@ public:
     return false;
   }
 
-  inline kj::Maybe<T&> tryGet() { return maybeThing; }
-  inline kj::Own<WeakRef> addRef() { return kj::addRef(*this); }
-  inline bool isValid() const { return maybeThing != kj::none; }
+  inline kj::Maybe<T&> tryGet() {
+    return maybeThing;
+  }
+  inline kj::Own<WeakRef> addRef() {
+    return kj::addRef(*this);
+  }
+  inline bool isValid() const {
+    return maybeThing != kj::none;
+  }
 
 private:
   friend T;

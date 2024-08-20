@@ -25,8 +25,7 @@ namespace {
 jsg::V8System v8System;
 
 struct ActorStateContext: public jsg::Object, public jsg::ContextGlobal {
-  JSG_RESOURCE_TYPE(ActorStateContext) {
-  }
+  JSG_RESOURCE_TYPE(ActorStateContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(ActorStateIsolate, ActorStateContext);
 
@@ -34,8 +33,7 @@ KJ_TEST("v8 serialization version tag hasn't changed") {
   jsg::test::Evaluator<ActorStateContext, ActorStateIsolate> e(v8System);
   e.getIsolate().runInLockScope([&](ActorStateIsolate::Lock& isolateLock) {
     JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
-        isolateLock.newContext<ActorStateContext>().getHandle(isolateLock),
-        [&](jsg::Lock& js) {
+        isolateLock.newContext<ActorStateContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
       auto buf = serializeV8Value(isolateLock, isolateLock.boolean(true));
 
       // Confirm that a version header is appropriately written and that it contains the expected
@@ -43,7 +41,7 @@ KJ_TEST("v8 serialization version tag hasn't changed") {
       // to continue writing data at the old version so that we can do a rolling upgrade without
       // any bugs caused by old processes failing to read data written by new ones.
       KJ_EXPECT(buf[0] == 0xFF);
-      KJ_EXPECT(buf[1] == 0x0F); // v8 serializer version
+      KJ_EXPECT(buf[1] == 0x0F);  // v8 serializer version
 
       // And this just confirms that the deserializer agrees on the version.
       v8::ValueDeserializer deserializer(isolateLock.v8Isolate, buf.begin(), buf.size());
@@ -61,15 +59,14 @@ KJ_TEST("we support deserializing up to v15") {
   jsg::test::Evaluator<ActorStateContext, ActorStateIsolate> e(v8System);
   e.getIsolate().runInLockScope([&](ActorStateIsolate::Lock& isolateLock) {
     JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
-        isolateLock.newContext<ActorStateContext>().getHandle(isolateLock),
-        [&](jsg::Lock& js) {
+        isolateLock.newContext<ActorStateContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
       kj::Vector<kj::StringPtr> testCases;
       testCases.add("54");
       testCases.add("FF0D54");
       testCases.add("FF0E54");
       testCases.add("FF0F54");
 
-      for (const auto& hexStr : testCases) {
+      for (const auto& hexStr: testCases) {
         auto dataIn = kj::decodeHex(hexStr.asArray());
         KJ_EXPECT(deserializeV8Value(isolateLock, "some-key"_kj, dataIn).isTrue());
       }
@@ -104,8 +101,7 @@ KJ_TEST("wire format version does not change deserialization behavior on real da
   jsg::test::Evaluator<ActorStateContext, ActorStateIsolate> e(v8System);
   e.getIsolate().runInLockScope([&](ActorStateIsolate::Lock& isolateLock) {
     JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
-        isolateLock.newContext<ActorStateContext>().getHandle(isolateLock),
-        [&](jsg::Lock& js) {
+        isolateLock.newContext<ActorStateContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
       // Read in data line by line and verify that it round trips (serializes and
       // then deserializes) back to the exact same data as the input.
       std::string hexStr;

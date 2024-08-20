@@ -9,16 +9,20 @@
 
 namespace workerd {
 
-ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate,
-                         kj::Function<kj::Promise<void>()> commitCallback,
-                         Hooks& hooks)
-    : db(kj::mv(dbParam)), outputGate(outputGate), commitCallback(kj::mv(commitCallback)),
-      hooks(hooks), kv(*db), commitTasks(*this) {
+ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
+    OutputGate& outputGate,
+    kj::Function<kj::Promise<void>()> commitCallback,
+    Hooks& hooks)
+    : db(kj::mv(dbParam)),
+      outputGate(outputGate),
+      commitCallback(kj::mv(commitCallback)),
+      hooks(hooks),
+      kv(*db),
+      commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
 }
 
-ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent)
-    : parent(parent) {
+ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent): parent(parent) {
   KJ_REQUIRE(parent.currentTxn.is<NoTxn>());
   parent.beginTxn.run();
   parent.currentTxn = this;
@@ -46,10 +50,10 @@ void ActorSqlite::ImplicitTxn::commit() {
   }
 }
 
-ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite)
-    : actorSqlite(actorSqlite) {
+ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(actorSqlite) {
   KJ_SWITCH_ONEOF(actorSqlite.currentTxn) {
-    KJ_CASE_ONEOF(_, NoTxn) {}
+    KJ_CASE_ONEOF(_, NoTxn) {
+    }
     KJ_CASE_ONEOF(implicit, ImplicitTxn*) {
       // An implicit transaction is open, commit it now because it would be weird if writes
       // performed before the explicit transaction started were postponed until the transaction
@@ -71,8 +75,7 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite)
   // Unfortunately this means we cannot prepare the statement, unless we prepare a series of
   // statements for each depth. (Actually, it could be reasonable to prepare statements for
   // depth 0 specifically, but I'm not going to try it for now.)
-  actorSqlite.db->run(SqliteDatabase::TRUSTED,
-      kj::str("SAVEPOINT _cf_savepoint_", depth));
+  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_savepoint_", depth));
 }
 ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
   [&]() noexcept {
@@ -96,18 +99,17 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
-  KJ_REQUIRE(!hasChild, "critical sections should have prevented committing transaction while "
+  KJ_REQUIRE(!hasChild,
+      "critical sections should have prevented committing transaction while "
       "nested txn is outstanding");
 
-  actorSqlite.db->run(SqliteDatabase::TRUSTED,
-      kj::str("RELEASE _cf_savepoint_", depth));
+  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
   committed = true;
 
   if (parent == kj::none) {
     // We committed the root transaction, so it's time to signal any replication layer and lock
     // the output gate in the meantime.
-    actorSqlite.commitTasks.add(
-        actorSqlite.outputGate.lockWhile(actorSqlite.commitCallback()));
+    actorSqlite.commitTasks.add(actorSqlite.outputGate.lockWhile(actorSqlite.commitCallback()));
   }
 
   // No backpressure for SQLite.
@@ -125,18 +127,16 @@ kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
 }
 
 void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
-  actorSqlite.db->run(SqliteDatabase::TRUSTED,
-      kj::str("ROLLBACK TO _cf_savepoint_", depth));
-  actorSqlite.db->run(SqliteDatabase::TRUSTED,
-      kj::str("RELEASE _cf_savepoint_", depth));
+  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_savepoint_", depth));
+  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
 }
 
 void ActorSqlite::onWrite() {
   if (currentTxn.is<NoTxn>()) {
     auto txn = kj::heap<ImplicitTxn>(*this);
 
-    commitTasks.add(outputGate.lockWhile(kj::evalLater(
-        [this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
+    commitTasks.add(outputGate.lockWhile(
+        kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
 
@@ -180,30 +180,25 @@ void ActorSqlite::requireNotBroken() {
 // =======================================================================================
 // ActorCacheInterface implementation
 
-kj::OneOf<kj::Maybe<ActorCacheOps::Value>,
-          kj::Promise<kj::Maybe<ActorCacheOps::Value>>>
-    ActorSqlite::get(Key key, ReadOptions options) {
+kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>
+ActorSqlite::get(Key key, ReadOptions options) {
   requireNotBroken();
 
   kj::Maybe<ActorCacheOps::Value> result;
-  kv.get(key, [&](ValuePtr value) {
-    result = kj::heapArray(value);
-  });
+  kv.get(key, [&](ValuePtr value) { result = kj::heapArray(value); });
   return result;
 }
 
-kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
-    ActorSqlite::get(kj::Array<Key> keys, ReadOptions options) {
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::get(
+    kj::Array<Key> keys, ReadOptions options) {
   requireNotBroken();
 
   kj::Vector<KeyValuePair> results;
   for (auto& key: keys) {
-    kv.get(key, [&](ValuePtr value) {
-      results.add(KeyValuePair { kj::mv(key), kj::heapArray(value) });
-    });
+    kv.get(
+        key, [&](ValuePtr value) { results.add(KeyValuePair{kj::mv(key), kj::heapArray(value)}); });
   }
-  std::sort(results.begin(), results.end(),
-      [](auto& a, auto& b) { return a.key < b.key; });
+  std::sort(results.begin(), results.end(), [](auto& a, auto& b) { return a.key < b.key; });
   return GetResultList(kj::mv(results));
 }
 
@@ -214,27 +209,26 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::ge
   return hooks.getAlarm();
 }
 
-kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
-    ActorSqlite::list(Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::
+    list(Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
   requireNotBroken();
 
   kj::Vector<KeyValuePair> results;
   kv.list(begin, end, limit, SqliteKv::FORWARD, [&](KeyPtr key, ValuePtr value) {
-    results.add(KeyValuePair { kj::str(key), kj::heapArray(value) });
+    results.add(KeyValuePair{kj::str(key), kj::heapArray(value)});
   });
 
   // Already guaranteed sorted.
   return GetResultList(kj::mv(results));
 }
 
-kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
-    ActorSqlite::listReverse(Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit,
-                               ReadOptions options) {
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::
+    listReverse(Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
   requireNotBroken();
 
   kj::Vector<KeyValuePair> results;
   kv.list(begin, end, limit, SqliteKv::REVERSE, [&](KeyPtr key, ValuePtr value) {
-    results.add(KeyValuePair { kj::str(key), kj::heapArray(value) });
+    results.add(KeyValuePair{kj::str(key), kj::heapArray(value)});
   });
 
   // Already guaranteed sorted (reversed).
@@ -248,8 +242,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions
   return kj::none;
 }
 
-kj::Maybe<kj::Promise<void>> ActorSqlite::put(
-    kj::Array<KeyValuePair> pairs, WriteOptions options) {
+kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
   requireNotBroken();
 
   for (auto& pair: pairs) {
@@ -264,8 +257,7 @@ kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(Key key, WriteOptions op
   return kv.delete_(key);
 }
 
-kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(
-    kj::Array<Key> keys, WriteOptions options) {
+kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, WriteOptions options) {
   requireNotBroken();
 
   uint count = 0;
@@ -375,24 +367,23 @@ kj::Promise<void> ActorSqlite::Hooks::setAlarm(kj::Maybe<kj::Date>) {
 }
 
 kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>
-    ActorSqlite::ExplicitTxn::get(Key key, ReadOptions options) {
+ActorSqlite::ExplicitTxn::get(Key key, ReadOptions options) {
   return actorSqlite.get(kj::mv(key), options);
 }
-kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
-    ActorSqlite::ExplicitTxn::get(kj::Array<Key> keys, ReadOptions options) {
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::
+    ExplicitTxn::get(kj::Array<Key> keys, ReadOptions options) {
   return actorSqlite.get(kj::mv(keys), options);
 }
 kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::ExplicitTxn::getAlarm(
     ReadOptions options) {
   return actorSqlite.getAlarm(options);
 }
-kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
-    ActorSqlite::ExplicitTxn::list(
-        Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::
+    ExplicitTxn::list(Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
   return actorSqlite.list(kj::mv(begin), kj::mv(end), limit, options);
 }
-kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
-    ActorSqlite::ExplicitTxn::listReverse(
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::
+    ExplicitTxn::listReverse(
         Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
   return actorSqlite.listReverse(kj::mv(begin), kj::mv(end), limit, options);
 }

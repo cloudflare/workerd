@@ -23,22 +23,15 @@ namespace {
 bool isSpecialEventType(kj::StringPtr type) {
   // TODO(someday): How should we cover custom events here? Since it's just for a warning I'm
   //   leaving them out for now.
-  return type == "fetch" ||
-         type == "scheduled" ||
-         type == "tail" ||
-         type == "trace" ||
-         type == "alarm";
+  return type == "fetch" || type == "scheduled" || type == "tail" || type == "trace" ||
+      type == "alarm";
 }
 }  // namespace
 
 EventTarget::NativeHandler::NativeHandler(
-    jsg::Lock& js,
-    EventTarget& target,
-    kj::String type,
-    jsg::Function<Signature> func,
-    bool once)
+    jsg::Lock& js, EventTarget& target, kj::String type, jsg::Function<Signature> func, bool once)
     : type(kj::mv(type)),
-      state(State {
+      state(State{
         .target = target,
         .func = kj::mv(func),
       }),
@@ -46,7 +39,9 @@ EventTarget::NativeHandler::NativeHandler(
   target.addNativeListener(js, *this);
 }
 
-EventTarget::NativeHandler::~NativeHandler() noexcept(false) { detach(); }
+EventTarget::NativeHandler::~NativeHandler() noexcept(false) {
+  detach();
+}
 
 void EventTarget::NativeHandler::operator()(jsg::Lock& js, jsg::Ref<Event> event) {
   KJ_IF_SOME(s, state) {
@@ -81,10 +76,7 @@ void EventTarget::NativeHandler::detach() {
 }
 
 kj::Own<void> EventTarget::newNativeHandler(
-    jsg::Lock& js,
-    kj::String type,
-    jsg::Function<void(jsg::Ref<Event>)> func,
-    bool once) {
+    jsg::Lock& js, kj::String type, jsg::Function<void(jsg::Ref<Event>)> func, bool once) {
   return kj::heap<EventTarget::NativeHandler>(js, *this, kj::mv(type), kj::mv(func), once);
 }
 
@@ -96,8 +88,7 @@ const EventTarget::EventHandler::Handler& EventTarget::EventHandlerHashCallbacks
 }
 
 bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a,
-    const jsg::HashableV8Ref<v8::Object>& b) const {
+    const kj::Own<EventHandler>& a, const jsg::HashableV8Ref<v8::Object>& b) const {
   KJ_IF_SOME(jsA, a->handler.tryGet<EventHandler::JavaScriptHandler>()) {
     return jsA.identity == b;
   }
@@ -105,8 +96,7 @@ bool EventTarget::EventHandlerHashCallbacks::matches(
 }
 
 bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a,
-    const NativeHandler& b) const {
+    const kj::Own<EventHandler>& a, const NativeHandler& b) const {
   KJ_IF_SOME(ref, a->handler.tryGet<EventHandler::NativeHandlerRef>()) {
     return &ref.handler == &b;
   }
@@ -114,14 +104,12 @@ bool EventTarget::EventHandlerHashCallbacks::matches(
 }
 
 bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a,
-    const EventHandler::NativeHandlerRef& b) const {
+    const kj::Own<EventHandler>& a, const EventHandler::NativeHandlerRef& b) const {
   return matches(a, b.handler);
 }
 
 bool EventTarget::EventHandlerHashCallbacks::matches(
-    const kj::Own<EventHandler>& a,
-    const EventHandler::Handler& b) const {
+    const kj::Own<EventHandler>& a, const EventHandler::Handler& b) const {
   KJ_SWITCH_ONEOF(b) {
     KJ_CASE_ONEOF(jsB, EventHandler::JavaScriptHandler) {
       return matches(a, jsB.identity);
@@ -169,7 +157,9 @@ jsg::Ref<Event> Event::constructor(kj::String type, jsg::Optional<Init> init) {
   return jsg::alloc<Event>(kj::mv(type), init.orDefault(defaultInit), false /* not trusted */);
 }
 
-kj::StringPtr Event::getType() { return type; }
+kj::StringPtr Event::getType() {
+  return type;
+}
 
 jsg::Optional<jsg::Ref<EventTarget>> Event::getCurrentTarget() {
   return target.map([&](jsg::Ref<EventTarget>& t) { return t.addRef(); });
@@ -195,8 +185,8 @@ jsg::Ref<EventTarget> EventTarget::constructor() {
 }
 
 EventTarget::~EventTarget() noexcept(false) {
-  for (auto& entry : typeMap) {
-    for (auto& handler : entry.value.handlers) {
+  for (auto& entry: typeMap) {
+    for (auto& handler: entry.value.handlers) {
       KJ_IF_SOME(native, handler->handler.tryGet<EventHandler::NativeHandlerRef>()) {
         // Note: Can't call `detach()` here because it would loop back and call
         // `removeNativeListener()` on us, invalidating the `typeMap` iterator. We'll directly
@@ -219,18 +209,18 @@ kj::Array<kj::StringPtr> EventTarget::getHandlerNames() const {
   return KJ_MAP(entry, typeMap) { return entry.key.asPtr(); };
 }
 
-void EventTarget::addEventListener(jsg::Lock& js, kj::String type,
-                                   jsg::Identified<Handler> handler,
-                                   jsg::Optional<AddEventListenerOpts> maybeOptions) {
+void EventTarget::addEventListener(jsg::Lock& js,
+    kj::String type,
+    jsg::Identified<Handler> handler,
+    jsg::Optional<AddEventListenerOpts> maybeOptions) {
   if (warnOnSpecialEvents && isSpecialEventType(type)) {
-    js.logWarning(
-        kj::str("When using module syntax, the '", type, "' event handler should be "
-                "declared as an exported function on the root module as opposed to using "
-                "the global addEventListener()."));
+    js.logWarning(kj::str("When using module syntax, the '", type,
+        "' event handler should be "
+        "declared as an exported function on the root module as opposed to using "
+        "the global addEventListener()."));
   }
 
   js.withinHandleScope([&] {
-
     // Per the spec, the handler can be either a Function, or an object with a
     // handleEvent member function.
     HandlerFunction handlerFn = ([&]() {
@@ -254,9 +244,9 @@ void EventTarget::addEventListener(jsg::Lock& js, kj::String type,
         }
         KJ_CASE_ONEOF(opts, AddEventListenerOptions) {
           JSG_REQUIRE(!opts.capture.orDefault(false), TypeError,
-                      "addEventListener(): options.capture must be false.");
+              "addEventListener(): options.capture must be false.");
           JSG_REQUIRE(!opts.passive.orDefault(false), TypeError,
-                      "addEventListener(): options.passive must be false.");
+              "addEventListener(): options.passive must be false.");
           once = opts.once.orDefault(false);
           maybeSignal = kj::mv(opts.signal);
         }
@@ -273,30 +263,31 @@ void EventTarget::addEventListener(jsg::Lock& js, kj::String type,
     auto& set = getOrCreate(type);
 
     auto maybeAbortHandler = maybeSignal.map([&](jsg::Ref<AbortSignal>& signal) {
-      auto func = JSG_VISITABLE_LAMBDA(
-          (this, type = kj::mv(type), handler = handler.identity.addRef(js)),
-          (handler),
-          (jsg::Lock& js, jsg::Ref<Event>) {
-        removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
-      });
+      auto func =
+          JSG_VISITABLE_LAMBDA((this, type = kj::mv(type), handler = handler.identity.addRef(js)),
+              (handler), (jsg::Lock& js, jsg::Ref<Event>) {
+                removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
+              });
 
       return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true);
     });
 
     auto eventHandler = kj::heap<EventHandler>(
-      EventHandler::JavaScriptHandler {
-        .identity = kj::mv(handler.identity),
-        .callback = kj::mv(handlerFn),
-        .abortHandler = kj::mv(maybeAbortHandler),
-      }, once);
+        EventHandler::JavaScriptHandler{
+          .identity = kj::mv(handler.identity),
+          .callback = kj::mv(handlerFn),
+          .abortHandler = kj::mv(maybeAbortHandler),
+        },
+        once);
 
     set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
   });
 }
 
-void EventTarget::removeEventListener(jsg::Lock& js, kj::String type,
-                                      jsg::HashableV8Ref<v8::Object> handler,
-                                      jsg::Optional<EventListenerOpts> maybeOptions) {
+void EventTarget::removeEventListener(jsg::Lock& js,
+    kj::String type,
+    jsg::HashableV8Ref<v8::Object> handler,
+    jsg::Optional<EventListenerOpts> maybeOptions) {
   KJ_IF_SOME(value, maybeOptions) {
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(b, bool) {
@@ -304,7 +295,7 @@ void EventTarget::removeEventListener(jsg::Lock& js, kj::String type,
       }
       KJ_CASE_ONEOF(opts, EventListenerOptions) {
         JSG_REQUIRE(!opts.capture.orDefault(false), TypeError,
-                     "removeEventListener(): options.capture must be false.");
+            "removeEventListener(): options.capture must be false.");
       }
     }
   }
@@ -320,9 +311,10 @@ void EventTarget::addNativeListener(jsg::Lock& js, NativeHandler& handler) {
   auto& set = getOrCreate(handler.type);
 
   auto eventHandler = kj::heap<EventHandler>(
-    EventHandler::NativeHandlerRef {
-      .handler = handler,
-    }, handler.once);
+      EventHandler::NativeHandlerRef{
+        .handler = handler,
+      },
+      handler.once);
 
   set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
 }
@@ -361,11 +353,12 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
     KJ_IF_SOME(onProp, onEvents.get(js, kj::str("on", event->getType()))) {
       // If the on-event is not a function, we silently ignore it rather than raise an error.
       KJ_IF_SOME(cb, onProp.tryGet<HandlerFunction>()) {
-        callbacks.add(Callback {
-          .handler = EventHandler::JavaScriptHandler {
-            .identity = nullptr,  // won't be used below if oldStyle is true and once is false
-            .callback = kj::mv(cb),
-          },
+        callbacks.add(Callback{
+          .handler =
+              EventHandler::JavaScriptHandler{
+                .identity = nullptr,  // won't be used below if oldStyle is true and once is false
+                .callback = kj::mv(cb),
+              },
           .oldStyle = true,
         });
       }
@@ -376,19 +369,18 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
       for (auto& handler: handlerSet.handlers.ordered<kj::InsertionOrderIndex>()) {
         KJ_SWITCH_ONEOF(handler->handler) {
           KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-            callbacks.add(Callback {
-              .handler = EventHandler::JavaScriptHandler {
-                .identity = jsh.identity.addRef(js),
-                .callback = jsh.callback.addRef(js)
-              },
+            callbacks.add(Callback{
+              .handler = EventHandler::JavaScriptHandler{.identity = jsh.identity.addRef(js),
+                .callback = jsh.callback.addRef(js)},
               .once = handler->once,
             });
           }
           KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-            callbacks.add(Callback {
-              .handler = EventHandler::NativeHandlerRef {
-                .handler = native.handler,
-              },
+            callbacks.add(Callback{
+              .handler =
+                  EventHandler::NativeHandlerRef{
+                    .handler = native.handler,
+                  },
               .once = handler->once,
             });
           }
@@ -468,14 +460,13 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
               warnOnHandlerReturn = false;
               // To help make debugging easier, let's tailor the warning a bit if it was a promise.
               if (handle->IsPromise()) {
-                js.logWarning(
-                    kj::str("An event handler returned a promise that will be ignored. Event handlers "
-                            "should not have a return value and should not be async functions."));
+                js.logWarning(kj::str(
+                    "An event handler returned a promise that will be ignored. Event handlers "
+                    "should not have a return value and should not be async functions."));
               } else {
-                js.logWarning(
-                    kj::str("An event handler returned a value of type \"",
-                            handle->TypeOf(js.v8Isolate),
-                            "\" that will be ignored. Event handlers should not have a return value."));
+                js.logWarning(kj::str("An event handler returned a value of type \"",
+                    handle->TypeOf(js.v8Isolate),
+                    "\" that will be ignored. Event handlers should not have a return value."));
               }
             }
           }
@@ -495,16 +486,16 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
 }
 
 AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
-                         jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason,
-                         Flag flag) :
-    canceler(IoContext::current().addObject(
-        kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
-    flag(flag),
-    reason(kj::mv(maybeReason)) {}
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason,
+    Flag flag)
+    : canceler(
+          IoContext::current().addObject(kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
+      flag(flag),
+      reason(kj::mv(maybeReason)) {}
 
 kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
-  return onAbortHandler.map([&](jsg::JsRef<jsg::JsValue>& ref)
-      -> jsg::JsValue { return ref.getHandle(js); });
+  return onAbortHandler.map(
+      [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
 }
 
 void AbortSignal::setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler) {
@@ -537,8 +528,7 @@ jsg::JsValue AbortSignal::getReason(jsg::Lock& js) {
 }
 
 kj::Exception AbortSignal::abortException(
-    jsg::Lock& js,
-    jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
+    jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
   KJ_IF_SOME(reason, maybeReason) {
     KJ_SWITCH_ONEOF(reason) {
       KJ_CASE_ONEOF(reason, jsg::JsValue) {
@@ -553,9 +543,7 @@ kj::Exception AbortSignal::abortException(
   return JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The operation was aborted");
 }
 
-jsg::Ref<AbortSignal> AbortSignal::abort(
-    jsg::Lock& js,
-    jsg::Optional<jsg::JsValue> maybeReason) {
+jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   auto exception = abortException(js, maybeReason);
   KJ_IF_SOME(reason, maybeReason) {
     return jsg::alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
@@ -578,23 +566,23 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
 
   auto context = js.v8Context();
 
-  auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
-      context, context->Global());
+  auto& global =
+      jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(context, context->Global());
 
   // It's worth noting that the setTimeout holds a strong pointer to the AbortSignal,
   // keeping it from being garbage collected before the timer fires or until the request
   // completes, whichever comes first.
 
   global.setTimeoutInternal([signal = signal.addRef()](jsg::Lock& js) mutable {
-    signal->triggerAbort(js, JSG_KJ_EXCEPTION(DISCONNECTED,
-        DOMTimeoutError, "The operation was aborted due to timeout"));
+    signal->triggerAbort(js,
+        JSG_KJ_EXCEPTION(
+            DISCONNECTED, DOMTimeoutError, "The operation was aborted due to timeout"));
   }, delay);
 
   return kj::mv(signal);
 }
 
-jsg::Ref<AbortSignal> AbortSignal::any(
-    jsg::Lock& js,
+jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
     kj::Array<jsg::Ref<AbortSignal>> signals,
     const jsg::TypeHandler<EventTarget::HandlerFunction>& handler) {
   // If nothing was passed in, we can just return a signal that never aborts.
@@ -604,7 +592,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(
 
   // Let's check to see if any of the signals are already aborted. If it is, we can
   // optimize here by skipping the event handler registration.
-  for (auto& sig : signals) {
+  for (auto& sig: signals) {
     if (sig->getAborted()) {
       return AbortSignal::abort(js, sig->getReason(js));
     }
@@ -613,13 +601,13 @@ jsg::Ref<AbortSignal> AbortSignal::any(
   // Otherwise we need to create a new signal and register event handlers on all
   // of the signals that were passed in.
   auto signal = jsg::alloc<AbortSignal>();
-  for (auto& sig : signals) {
+  for (auto& sig: signals) {
     // This is a bit of a hack. We want to call addEventListener, but that requires a
     // jsg::Identified<EventTarget::Handler>, which we can't create directly yet.
     // So we create a jsg::Function, wrap that in a v8::Function, then convert that into
     // the jsg::Identified<EventTarget::Handler>, and voila, we have what we need.
-    auto fn = js.wrapSimpleFunction(js.v8Context(),
-        [&signal = *signal, &self = *sig](jsg::Lock& js, auto&) {
+    auto fn = js.wrapSimpleFunction(
+        js.v8Context(), [&signal = *signal, &self = *sig](jsg::Lock& js, auto&) {
       // Note that we are not capturing any strong references here to either signal
       // or sig. This is because we are capturing a strong reference to the signal
       // when we add the event below. This ensures that we do not have an unbreakable
@@ -628,18 +616,15 @@ jsg::Ref<AbortSignal> AbortSignal::any(
       // will have a strong reference to the new signal.
       signal.triggerAbort(js, self.getReason(js));
     });
-    jsg::Identified<EventTarget::Handler> identified = {
-      .identity = { js.v8Isolate, fn },
+    jsg::Identified<EventTarget::Handler> identified = {.identity = {js.v8Isolate, fn},
       .unwrapped = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, fn.As<v8::Value>()), TypeError,
-          "Unable to create AbortSignal.any handler")
-    };
+          "Unable to create AbortSignal.any handler")};
 
-    sig->addEventListener(js, kj::str("abort"), kj::mv(identified), AddEventListenerOptions {
-      // Once the abort is triggered, this handler should remove itself.
-      .once = true,
-      // When the signal is triggered, we'll use it to cancel the other registered signals.
-      .signal = signal.addRef()
-    });
+    sig->addEventListener(js, kj::str("abort"), kj::mv(identified),
+        AddEventListenerOptions{// Once the abort is triggered, this handler should remove itself.
+          .once = true,
+          // When the signal is triggered, we'll use it to cancel the other registered signals.
+          .signal = signal.addRef()});
   }
   return signal;
 }
@@ -653,8 +638,7 @@ RefcountedCanceler& AbortSignal::getCanceler() {
 }
 
 void AbortSignal::triggerAbort(
-    jsg::Lock& js,
-    jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
+    jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
   KJ_ASSERT(flag != Flag::NEVER_ABORTS);
   if (canceler->isCanceled()) {
     return;
@@ -685,15 +669,13 @@ void AbortSignal::triggerAbort(
   dispatchEventImpl(js, jsg::alloc<Event>(kj::str("abort")));
 }
 
-void AbortController::abort(
-    jsg::Lock& js,
-    jsg::Optional<jsg::JsValue> maybeReason) {
+void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   signal->triggerAbort(js, maybeReason);
 }
 
 void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
-  for (auto& entry : typeMap) {
-    for (auto& handler : entry.value.handlers) {
+  for (auto& entry: typeMap) {
+    for (auto& handler: entry.value.handlers) {
       KJ_SWITCH_ONEOF(handler->handler) {
         KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
           visitor.visit(js);
@@ -725,9 +707,7 @@ void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 kj::Promise<void> Scheduler::wait(
-    jsg::Lock& js,
-    double delay,
-    jsg::Optional<WaitOptions> maybeOptions) {
+    jsg::Lock& js, double delay, jsg::Optional<WaitOptions> maybeOptions) {
   KJ_IF_SOME(options, maybeOptions) {
     KJ_IF_SOME(s, options.signal) {
       if (s->getAborted()) {
@@ -742,13 +722,10 @@ kj::Promise<void> Scheduler::wait(
 
   auto context = js.v8Context();
 
-  auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
-      context, context->Global());
-  global.setTimeoutInternal(
-      [fulfiller = IoContext::current().addObject(kj::mv(paf.fulfiller))]
-      (jsg::Lock& lock) mutable {
-        fulfiller->fulfill();
-      },
+  auto& global =
+      jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(context, context->Global());
+  global.setTimeoutInternal([fulfiller = IoContext::current().addObject(kj::mv(paf.fulfiller))](
+                                jsg::Lock& lock) mutable { fulfiller->fulfill(); },
       delay);
 
   auto promise = kj::mv(paf.promise);
@@ -763,8 +740,8 @@ kj::Promise<void> Scheduler::wait(
 }
 
 void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
-  JSG_REQUIRE(getIsTrusted(), DOMInvalidStateError,
-             "waitUntil() can only be called on trusted event.");
+  JSG_REQUIRE(
+      getIsTrusted(), DOMInvalidStateError, "waitUntil() can only be called on trusted event.");
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 
@@ -774,9 +751,7 @@ jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState() {
     auto& lock = context.getCurrentLock();
     auto persistent = actor.makeStorageForSwSyntax(lock);
     return jsg::alloc<api::ActorState>(
-        actor.cloneId(),
-        actor.getTransient(lock),
-        kj::mv(persistent));
+        actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
   });
 }
 
@@ -784,15 +759,13 @@ CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
     : Event(kj::mv(ownType), (Event::Init)init),
       detail(kj::mv(init.detail)) {}
 
-jsg::Ref<CustomEvent> CustomEvent::constructor(jsg::Lock& js, kj::String type,
-                                               jsg::Optional<CustomEventInit> init) {
+jsg::Ref<CustomEvent> CustomEvent::constructor(
+    jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init) {
   return jsg::alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
 }
 
 jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {
-  return detail.map([&](jsg::JsRef<jsg::JsValue>& val) {
-    return val.getHandle(js);
-  });
+  return detail.map([&](jsg::JsRef<jsg::JsValue>& val) { return val.getHandle(js); });
 }
 
 CustomEvent::CustomEventInit::operator Event::Init() {
@@ -812,8 +785,8 @@ void EventTarget::EventHandler::JavaScriptHandler::jsgGetMemoryInfo(
   tracker.trackField("identity", identity);
   tracker.trackField("callback", callback);
   if (abortHandler != kj::none) {
-    tracker.trackFieldWithSize("abortHandler", sizeof(kj::Own<NativeHandler>) +
-                                                sizeof(NativeHandler));
+    tracker.trackFieldWithSize(
+        "abortHandler", sizeof(kj::Own<NativeHandler>) + sizeof(NativeHandler));
   }
 }
 
@@ -837,7 +810,7 @@ size_t EventTarget::EventHandlerSet::jsgGetMemorySelfSize() const {
 }
 
 void EventTarget::EventHandlerSet::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  for (const auto& handler : handlers) {
+  for (const auto& handler: handlers) {
     tracker.trackField("handler", handler);
   }
 }

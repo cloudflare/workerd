@@ -47,26 +47,22 @@ public:
     NORMALIZE_PATH = 1 << 2,
   };
 
-  bool equal(const Url& other, EquivalenceOption option = EquivalenceOption::DEFAULT) const
-      KJ_WARN_UNUSED_RESULT;
+  bool equal(const Url& other,
+      EquivalenceOption option = EquivalenceOption::DEFAULT) const KJ_WARN_UNUSED_RESULT;
 
   // Returns true if the given input can be successfully parsed as a URL. This is generally
   // more performant than using tryParse and checking for a kj::none result if all you want
   // to do is verify that the input is parseable. If you actually want to parse and use the
   // result, use tryParse instead.
   static bool canParse(kj::ArrayPtr<const char> input,
-                       kj::Maybe<kj::ArrayPtr<const char>> base = kj::none)
-                       KJ_WARN_UNUSED_RESULT;
-  static bool canParse(kj::StringPtr input,
-                       kj::Maybe<kj::StringPtr> base = kj::none)
-                       KJ_WARN_UNUSED_RESULT;
+      kj::Maybe<kj::ArrayPtr<const char>> base = kj::none) KJ_WARN_UNUSED_RESULT;
+  static bool canParse(
+      kj::StringPtr input, kj::Maybe<kj::StringPtr> base = kj::none) KJ_WARN_UNUSED_RESULT;
 
   static kj::Maybe<Url> tryParse(kj::ArrayPtr<const char> input,
-                                 kj::Maybe<kj::ArrayPtr<const char>> base = kj::none)
-                                 KJ_WARN_UNUSED_RESULT;
-  static kj::Maybe<Url> tryParse(kj::StringPtr input,
-                                 kj::Maybe<kj::StringPtr> base = kj::none)
-                                 KJ_WARN_UNUSED_RESULT;
+      kj::Maybe<kj::ArrayPtr<const char>> base = kj::none) KJ_WARN_UNUSED_RESULT;
+  static kj::Maybe<Url> tryParse(
+      kj::StringPtr input, kj::Maybe<kj::StringPtr> base = kj::none) KJ_WARN_UNUSED_RESULT;
 
   kj::Array<const char> getOrigin() const KJ_WARN_UNUSED_RESULT;
   kj::ArrayPtr<const char> getProtocol() const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
@@ -115,13 +111,9 @@ public:
   static bool isSpecialSchemeDefaultPort(kj::StringPtr protocol, kj::StringPtr port);
 
   JSG_MEMORY_INFO(Url) {
-    tracker.trackFieldWithSize("inner", getProtocol().size() +
-                                        getUsername().size() +
-                                        getPassword().size() +
-                                        getHost().size() +
-                                        getPathname().size() +
-                                        getHash().size() +
-                                        getSearch().size());
+    tracker.trackFieldWithSize("inner",
+        getProtocol().size() + getUsername().size() + getPassword().size() + getHost().size() +
+            getPathname().size() + getHash().size() + getSearch().size());
   }
 
   static kj::Array<kj::byte> percentDecode(kj::ArrayPtr<const kj::byte> input);
@@ -144,6 +136,7 @@ public:
   public:
     bool hasNext() const;
     kj::Maybe<kj::ArrayPtr<const char>> next() const;
+
   private:
     KeyIterator(kj::Own<void> inner);
     kj::Own<void> inner;
@@ -153,6 +146,7 @@ public:
   public:
     bool hasNext() const;
     kj::Maybe<kj::ArrayPtr<const char>> next() const;
+
   private:
     ValueIterator(kj::Own<void> inner);
     kj::Own<void> inner;
@@ -166,6 +160,7 @@ public:
     };
     bool hasNext() const;
     kj::Maybe<Entry> next() const;
+
   private:
     EntryIterator(kj::Own<void> inner);
     kj::Own<void> inner;
@@ -184,15 +179,14 @@ public:
   size_t size() const;
   void append(kj::ArrayPtr<const char> key, kj::ArrayPtr<const char> value);
   void set(kj::ArrayPtr<const char> key, kj::ArrayPtr<const char> value);
-  void delete_(kj::ArrayPtr<const char> key,
-               kj::Maybe<kj::ArrayPtr<const char>> maybeValue = kj::none);
+  void delete_(
+      kj::ArrayPtr<const char> key, kj::Maybe<kj::ArrayPtr<const char>> maybeValue = kj::none);
   bool has(kj::ArrayPtr<const char> key,
-           kj::Maybe<kj::ArrayPtr<const char>> maybeValue = kj::none) const
-           KJ_WARN_UNUSED_RESULT;
-  kj::Maybe<kj::ArrayPtr<const char>> get(kj::ArrayPtr<const char> key) const
-    KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
-  kj::Array<kj::ArrayPtr<const char>> getAll(kj::ArrayPtr<const char> key) const
-    KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+      kj::Maybe<kj::ArrayPtr<const char>> maybeValue = kj::none) const KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<kj::ArrayPtr<const char>> get(
+      kj::ArrayPtr<const char> key) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+  kj::Array<kj::ArrayPtr<const char>> getAll(
+      kj::ArrayPtr<const char> key) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
   void sort();
   KeyIterator getKeys() const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
   ValueIterator getValues() const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
@@ -237,8 +231,12 @@ public:
     Component& operator=(Component&&) = default;
     KJ_DISALLOW_COPY(Component);
 
-    inline kj::StringPtr getPattern() const KJ_LIFETIMEBOUND { return pattern; }
-    inline kj::StringPtr getRegex() const KJ_LIFETIMEBOUND { return regex; }
+    inline kj::StringPtr getPattern() const KJ_LIFETIMEBOUND {
+      return pattern;
+    }
+    inline kj::StringPtr getRegex() const KJ_LIFETIMEBOUND {
+      return regex;
+    }
     inline kj::ArrayPtr<const kj::String> getNames() const KJ_LIFETIMEBOUND {
       return names.asPtr();
     }
@@ -246,7 +244,7 @@ public:
     JSG_MEMORY_INFO(Component) {
       tracker.trackField("pattern", pattern);
       tracker.trackField("regex", regex);
-      for (const auto& name : names) {
+      for (const auto& name: names) {
         tracker.trackField("name", name);
       }
     }
@@ -294,9 +292,8 @@ public:
   // Processes the given init according to the specified mode and options.
   // If a kj::String is returned, then processing failed and the string
   // is the description to include in the error message (if any).
-  static Result<Init> processInit(Init init,
-                                  kj::Maybe<ProcessInitOptions> options = kj::none)
-                                  KJ_WARN_UNUSED_RESULT;
+  static Result<Init> processInit(
+      Init init, kj::Maybe<ProcessInitOptions> options = kj::none) KJ_WARN_UNUSED_RESULT;
 
   struct CompileOptions {
     // The base URL to use. Only used in the compile(kj::StringPtr, ...) variant.
@@ -304,27 +301,45 @@ public:
     bool ignoreCase = false;
   };
 
-  static Result<UrlPattern> tryCompile(kj::StringPtr, kj::Maybe<CompileOptions> = kj::none)
-      KJ_WARN_UNUSED_RESULT;
-  static Result<UrlPattern> tryCompile(Init init, kj::Maybe<CompileOptions> = kj::none)
-      KJ_WARN_UNUSED_RESULT;
+  static Result<UrlPattern> tryCompile(
+      kj::StringPtr, kj::Maybe<CompileOptions> = kj::none) KJ_WARN_UNUSED_RESULT;
+  static Result<UrlPattern> tryCompile(
+      Init init, kj::Maybe<CompileOptions> = kj::none) KJ_WARN_UNUSED_RESULT;
 
   UrlPattern(UrlPattern&&) = default;
   UrlPattern& operator=(UrlPattern&&) = default;
   KJ_DISALLOW_COPY(UrlPattern);
 
-  inline const Component& getProtocol() const KJ_LIFETIMEBOUND { return protocol; }
-  inline const Component& getUsername() const KJ_LIFETIMEBOUND { return username; }
-  inline const Component& getPassword() const KJ_LIFETIMEBOUND { return password; }
-  inline const Component& getHostname() const KJ_LIFETIMEBOUND { return hostname; }
-  inline const Component& getPort() const KJ_LIFETIMEBOUND { return port; }
-  inline const Component& getPathname() const KJ_LIFETIMEBOUND { return pathname; }
-  inline const Component& getSearch() const KJ_LIFETIMEBOUND { return search; }
-  inline const Component& getHash() const KJ_LIFETIMEBOUND { return hash; }
+  inline const Component& getProtocol() const KJ_LIFETIMEBOUND {
+    return protocol;
+  }
+  inline const Component& getUsername() const KJ_LIFETIMEBOUND {
+    return username;
+  }
+  inline const Component& getPassword() const KJ_LIFETIMEBOUND {
+    return password;
+  }
+  inline const Component& getHostname() const KJ_LIFETIMEBOUND {
+    return hostname;
+  }
+  inline const Component& getPort() const KJ_LIFETIMEBOUND {
+    return port;
+  }
+  inline const Component& getPathname() const KJ_LIFETIMEBOUND {
+    return pathname;
+  }
+  inline const Component& getSearch() const KJ_LIFETIMEBOUND {
+    return search;
+  }
+  inline const Component& getHash() const KJ_LIFETIMEBOUND {
+    return hash;
+  }
 
   // If ignoreCase is true, the JavaScript regular expression created for each pattern
   // must use the `vi` flag. Otherwise, they must use the `v` flag.
-  inline bool getIgnoreCase() const { return ignoreCase; }
+  inline bool getIgnoreCase() const {
+    return ignoreCase;
+  }
 
   JSG_MEMORY_INFO(UrlPattern) {
     tracker.trackField("protocol", protocol);
@@ -356,4 +371,4 @@ private:
 
 // Append _url to a string literal to create a parsed URL. An assert will be triggered
 // if the value cannot be parsed successfully.
-const workerd::jsg::Url operator "" _url(const char* str, size_t size) KJ_WARN_UNUSED_RESULT;
+const workerd::jsg::Url operator"" _url(const char* str, size_t size) KJ_WARN_UNUSED_RESULT;

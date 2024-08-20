@@ -86,7 +86,7 @@ public:
 };
 
 // Abstract interface that enforces resource limits on a IoContext.
-class LimitEnforcer  {
+class LimitEnforcer {
 public:
   // Called just after taking the isolate lock, before executing JavaScript code, to enforce
   // limits on that code execution, particularly the CPU limit. The returned `Own<void>` should

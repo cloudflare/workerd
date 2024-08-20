@@ -61,12 +61,11 @@ KJ_TEST("compatibility date parsing") {
 }
 
 KJ_TEST("compatibility flag parsing") {
-  auto expectCompileCompatibilityFlags = [](kj::StringPtr compatDate,
-      kj::ArrayPtr<const kj::StringPtr> featureFlags,
-      kj::StringPtr expectedOutput,
-      kj::ArrayPtr<const kj::StringPtr> expectedErrors = nullptr,
-      CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
-      bool r2InternalBetaApiSet = false, bool experimental = false) {
+  auto expectCompileCompatibilityFlags =
+      [](kj::StringPtr compatDate, kj::ArrayPtr<const kj::StringPtr> featureFlags,
+          kj::StringPtr expectedOutput, kj::ArrayPtr<const kj::StringPtr> expectedErrors = nullptr,
+          CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
+          bool r2InternalBetaApiSet = false, bool experimental = false) {
     capnp::MallocMessageBuilder message;
     auto orphanage = message.getOrphanage();
 
@@ -80,8 +79,8 @@ KJ_TEST("compatibility flag parsing") {
     auto output = outputOrphan.get();
 
     SimpleWorkerErrorReporter errorReporter;
-    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter, experimental,
-                              dateValidation);
+    compileCompatibilityFlags(
+        compatDate, flagList.asReader(), output, errorReporter, experimental, dateValidation);
 
     capnp::TextCodec codec;
     auto parsedExpectedOutput = codec.decode<CompatibilityFlags>(expectedOutput, orphanage);
@@ -108,20 +107,18 @@ KJ_TEST("compatibility flag parsing") {
       "(formDataParserSupportsFiles = false)");
 
   // Test compatibility flag overrides.
-  expectCompileCompatibilityFlags("2021-05-17", {"formdata_parser_supports_files"_kj},
-      "(formDataParserSupportsFiles = true)");
+  expectCompileCompatibilityFlags(
+      "2021-05-17", {"formdata_parser_supports_files"_kj}, "(formDataParserSupportsFiles = true)");
   expectCompileCompatibilityFlags("2021-05-17", {"fetch_refuses_unknown_protocols"_kj},
       "(fetchRefusesUnknownProtocols = true)");
   expectCompileCompatibilityFlags("2021-05-17",
       {"formdata_parser_supports_files"_kj, "fetch_refuses_unknown_protocols"_kj},
       "(formDataParserSupportsFiles = true, fetchRefusesUnknownProtocols = true)");
-  expectCompileCompatibilityFlags("2021-11-04",
-      {"fetch_refuses_unknown_protocols"_kj},
+  expectCompileCompatibilityFlags("2021-11-04", {"fetch_refuses_unknown_protocols"_kj},
       "(formDataParserSupportsFiles = true, fetchRefusesUnknownProtocols = true)");
 
   // Test errors.
-  expectCompileCompatibilityFlags("abcd", {}, "()",
-      {"Invalid compatibility date: abcd"});
+  expectCompileCompatibilityFlags("abcd", {}, "()", {"Invalid compatibility date: abcd"});
   expectCompileCompatibilityFlags("2021-05-17",
       {"formdata_parser_supports_files"_kj, "formdata_parser_supports_files"_kj},
       "(formDataParserSupportsFiles = true)",
@@ -131,13 +128,12 @@ KJ_TEST("compatibility flag parsing") {
       "(formDataParserSupportsFiles = true)",
       {"Compatibility flags are mutually contradictory: "
        "formdata_parser_supports_files vs formdata_parser_converts_files_to_strings"});
-  expectCompileCompatibilityFlags("2021-11-04",
-      {"formdata_parser_supports_files"_kj},
+  expectCompileCompatibilityFlags("2021-11-04", {"formdata_parser_supports_files"_kj},
       "(formDataParserSupportsFiles = true)",
       {"The compatibility flag formdata_parser_supports_files became the default as of "
        "2021-11-03 so does not need to be specified anymore."});
-  expectCompileCompatibilityFlags("2021-05-17", {"unknown_feature"_kj}, "()",
-      {"No such compatibility flag: unknown_feature"});
+  expectCompileCompatibilityFlags(
+      "2021-05-17", {"unknown_feature"_kj}, "()", {"No such compatibility flag: unknown_feature"});
 
   expectCompileCompatibilityFlags("2252-04-01", {}, "()",
       {"Can't set compatibility date in the future: 2252-04-01"},
@@ -145,7 +141,8 @@ KJ_TEST("compatibility flag parsing") {
 
   expectCompileCompatibilityFlags("2252-04-01", {}, "()",
       {kj::str("This Worker requires compatibility date \"2252-04-01\", but the newest date "
-               "supported by this server binary is \"", SUPPORTED_COMPATIBILITY_DATE, "\".")},
+               "supported by this server binary is \"",
+          SUPPORTED_COMPATIBILITY_DATE, "\".")},
       CompatibilityDateValidation::CODE_VERSION);
 
   // Test experimental requirement using durable_object_rename as it is obsolete
@@ -168,14 +165,14 @@ KJ_TEST("compatibility flag parsing") {
   // Multiple errors.
   expectCompileCompatibilityFlags("abcd",
       {"formdata_parser_supports_files"_kj, "fetch_refuses_unknown_protocols"_kj,
-       "unknown_feature"_kj, "fetch_refuses_unknown_protocols"_kj,
-       "another_feature"_kj, "formdata_parser_supports_files"_kj},
+        "unknown_feature"_kj, "fetch_refuses_unknown_protocols"_kj, "another_feature"_kj,
+        "formdata_parser_supports_files"_kj},
       "(formDataParserSupportsFiles = true, fetchRefusesUnknownProtocols = true)",
       {"Invalid compatibility date: abcd",
-       "Compatibility flag specified multiple times: fetch_refuses_unknown_protocols",
-       "Compatibility flag specified multiple times: formdata_parser_supports_files",
-       "No such compatibility flag: another_feature",
-       "No such compatibility flag: unknown_feature"});
+        "Compatibility flag specified multiple times: fetch_refuses_unknown_protocols",
+        "Compatibility flag specified multiple times: formdata_parser_supports_files",
+        "No such compatibility flag: another_feature",
+        "No such compatibility flag: unknown_feature"});
 
   // Can explicitly disable flag that's enabled for all dates.s
   expectCompileCompatibilityFlags("2021-05-17", {"r2_internal_beta_bindings"}, "()", {},
@@ -237,8 +234,8 @@ KJ_TEST("compatibility flag parsing") {
       " globalFetchStrictlyPublic = false,"
       " newModuleRegistry = false,"
       " allowCustomPorts = true,"
-      " internalWritableStreamAbortClearsQueue = true)", {},
-      CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
+      " internalWritableStreamAbortClearsQueue = true)",
+      {}, CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
   expectCompileCompatibilityFlags("2024-09-01", {"nodejs_compat"},
       "(formDataParserSupportsFiles = true,"
       " fetchRefusesUnknownProtocols = true,"
@@ -292,19 +289,18 @@ KJ_TEST("compatibility flag parsing") {
       " fetchStandardUrl = true,"
       " nodeJsCompatV2 = false,"
       " globalFetchStrictlyPublic = false,"
-      " newModuleRegistry = false)", {},
-      CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
+      " newModuleRegistry = false)",
+      {}, CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
 }
 
 KJ_TEST("encode to flag list for FL") {
   capnp::MallocMessageBuilder message;
   auto orphanage = message.getOrphanage();
 
-  auto compileOwnFeatureFlags = [&](kj::StringPtr compatDate,
-      kj::ArrayPtr<const kj::StringPtr> featureFlags,
-      CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
-      bool experimental = false) {
-
+  auto compileOwnFeatureFlags =
+      [&](kj::StringPtr compatDate, kj::ArrayPtr<const kj::StringPtr> featureFlags,
+          CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
+          bool experimental = false) {
     auto flagListOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(featureFlags.size());
     auto flagList = flagListOrphan.get();
     for (auto i: kj::indices(featureFlags)) {
@@ -316,8 +312,8 @@ KJ_TEST("encode to flag list for FL") {
 
     SimpleWorkerErrorReporter errorReporter;
 
-    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter, experimental,
-                              dateValidation);
+    compileCompatibilityFlags(
+        compatDate, flagList.asReader(), output, errorReporter, experimental, dateValidation);
     KJ_ASSERT(errorReporter.errors.empty());
 
     return kj::mv(outputOrphan);
@@ -325,7 +321,7 @@ KJ_TEST("encode to flag list for FL") {
 
   {
     // Disabled by date.
-    auto featureFlagsOrphan = compileOwnFeatureFlags("2021-05-17",{});
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2021-05-17", {});
     auto featureFlags = featureFlagsOrphan.get();
     auto strings = decompileCompatibilityFlagsForFl(featureFlags);
     KJ_EXPECT(strings.size() == 0);
@@ -333,7 +329,7 @@ KJ_TEST("encode to flag list for FL") {
 
   {
     // Disabled by date, enabled by flag.
-    auto featureFlagsOrphan = compileOwnFeatureFlags("2021-05-17",{"minimal_subrequests"_kj});
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2021-05-17", {"minimal_subrequests"_kj});
     auto featureFlags = featureFlagsOrphan.get();
     auto strings = decompileCompatibilityFlagsForFl(featureFlags);
     KJ_EXPECT(strings.size() == 1);
@@ -342,7 +338,7 @@ KJ_TEST("encode to flag list for FL") {
 
   {
     // Enabled by date.
-    auto featureFlagsOrphan = compileOwnFeatureFlags("2022-07-01",{});
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2022-07-01", {});
     auto featureFlags = featureFlagsOrphan.get();
     auto strings = decompileCompatibilityFlagsForFl(featureFlags);
     KJ_EXPECT(strings.size() == 2);
@@ -352,7 +348,7 @@ KJ_TEST("encode to flag list for FL") {
 
   {
     // Enabled by date, disabled by flag.
-    auto featureFlagsOrphan = compileOwnFeatureFlags("2022-07-01",{"cots_on_external_fetch"});
+    auto featureFlagsOrphan = compileOwnFeatureFlags("2022-07-01", {"cots_on_external_fetch"});
     auto featureFlags = featureFlagsOrphan.get();
     auto strings = decompileCompatibilityFlagsForFl(featureFlags);
     KJ_EXPECT(strings.size() == 1);

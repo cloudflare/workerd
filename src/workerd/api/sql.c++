@@ -9,12 +9,13 @@
 namespace workerd::api {
 
 SqlStorage::SqlStorage(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
-    : sqlite(IoContext::current().addObject(sqlite)), storage(kj::mv(storage)) {}
+    : sqlite(IoContext::current().addObject(sqlite)),
+      storage(kj::mv(storage)) {}
 
 SqlStorage::~SqlStorage() {}
 
-jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(jsg::Lock& js, kj::String querySql,
-                                              jsg::Arguments<BindingValue> bindings) {
+jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
+    jsg::Lock& js, kj::String querySql, jsg::Arguments<BindingValue> bindings) {
   SqliteDatabase::Regulator& regulator = *this;
   return jsg::alloc<Cursor>(*sqlite, regulator, querySql, kj::mv(bindings));
 }
@@ -22,7 +23,8 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(jsg::Lock& js, kj::String querySql
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
   SqliteDatabase::Regulator& regulator = *this;
   auto result = sqlite->ingestSql(regulator, querySql);
-  return IngestResult(kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
+  return IngestResult(
+      kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }
 
 jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, kj::String query) {
@@ -30,10 +32,9 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, kj::String qu
 }
 
 double SqlStorage::getDatabaseSize() {
-  int64_t pages = execMemoized(
-      pragmaPageCount,
-      "select (select * from pragma_page_count) - (select * from pragma_freelist_count);"
-  ).getInt64(0);
+  int64_t pages = execMemoized(pragmaPageCount,
+      "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
+                      .getInt64(0);
   return pages * getPageSize();
 }
 
@@ -60,16 +61,16 @@ bool SqlStorage::allowTransactions() const {
   return false;
 }
 
-SqlStorage::Cursor::State::State(
-    kj::RefcountedWrapper<SqliteDatabase::Statement>& statement,
+SqlStorage::Cursor::State::State(kj::RefcountedWrapper<SqliteDatabase::Statement>& statement,
     kj::Array<BindingValue> bindingsParam)
     : dependency(statement.addWrappedRef()),
       bindings(kj::mv(bindingsParam)),
       query(statement.getWrapped().run(mapBindings(bindings).asPtr())) {}
 
-SqlStorage::Cursor::State::State(
-    SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
-    kj::StringPtr sqlCode, kj::Array<BindingValue> bindingsParam)
+SqlStorage::Cursor::State::State(SqliteDatabase& db,
+    SqliteDatabase::Regulator& regulator,
+    kj::StringPtr sqlCode,
+    kj::Array<BindingValue> bindingsParam)
     : bindings(kj::mv(bindingsParam)),
       query(db.run(regulator, sqlCode, mapBindings(bindings).asPtr())) {}
 
@@ -123,18 +124,14 @@ jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js
 kj::Maybe<SqlStorage::Cursor::RowDict> SqlStorage::Cursor::rowIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   auto names = obj->cachedColumnNames.get();
-  return iteratorImpl(js, obj,
-      [&](State& state, uint i, Value&& value) {
+  return iteratorImpl(js, obj, [&](State& state, uint i, Value&& value) {
     return RowDict::Field{
       // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
       // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
       // which would be relatively slower.
       .name = names[i].getHandle(js),
-      .value = kj::mv(value)
-    };
-  }).map([&](kj::Array<RowDict::Field>&& fields) {
-    return RowDict { .fields = kj::mv(fields) };
-  });
+      .value = kj::mv(value)};
+  }).map([&](kj::Array<RowDict::Field>&& fields) { return RowDict{.fields = kj::mv(fields)}; });
 }
 
 jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
@@ -147,9 +144,7 @@ jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
 kj::Array<jsg::JsRef<jsg::JsString>> SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
   KJ_IF_SOME(s, state) {
     cachedColumnNames.ensureInitialized(js, s->query);
-    return KJ_MAP(name, this->cachedColumnNames.get()) {
-      return name.addRef(js);
-    };
+    return KJ_MAP(name, this->cachedColumnNames.get()) { return name.addRef(js); };
   } else {
     JSG_FAIL_REQUIRE(Error, "Cannot call .getColumnNames after Cursor iterator has been consumed.");
   }
@@ -157,16 +152,13 @@ kj::Array<jsg::JsRef<jsg::JsString>> SqlStorage::Cursor::getColumnNames(jsg::Loc
 
 kj::Maybe<kj::Array<SqlStorage::Cursor::Value>> SqlStorage::Cursor::rawIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
-  return iteratorImpl(js, obj,
-      [&](State& state, uint i, Value&& value) {
-    return kj::mv(value);
-  });
+  return iteratorImpl(js, obj, [&](State& state, uint i, Value&& value) { return kj::mv(value); });
 }
 
 template <typename Func>
 auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
-    -> kj::Maybe<kj::Array<
-        decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>> {
+    -> kj::Maybe<
+        kj::Array<decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>> {
   using Element = decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()));
 
   auto& state = *KJ_UNWRAP_OR(obj->state, {
@@ -230,7 +222,7 @@ auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func
 
 SqlStorage::Statement::Statement(SqliteDatabase::Statement&& statement)
     : statement(IoContext::current().addObject(
-        kj::refcountedWrapper<SqliteDatabase::Statement>(kj::mv(statement)))) {}
+          kj::refcountedWrapper<SqliteDatabase::Statement>(kj::mv(statement)))) {}
 
 kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings(
     kj::ArrayPtr<BindingValue> values) {
@@ -284,15 +276,14 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::Statement::run(jsg::Arguments<BindingVa
 
 void SqlStorage::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("storage", storage);
-  tracker.trackFieldWithSize("IoPtr<SqliteDatabase>",
-      sizeof(IoPtr<SqliteDatabase>));
+  tracker.trackFieldWithSize("IoPtr<SqliteDatabase>", sizeof(IoPtr<SqliteDatabase>));
   if (pragmaPageCount != kj::none) {
-    tracker.trackFieldWithSize("IoPtr<SqllitDatabase::Statement>",
-        sizeof(IoPtr<SqliteDatabase::Statement>));
+    tracker.trackFieldWithSize(
+        "IoPtr<SqllitDatabase::Statement>", sizeof(IoPtr<SqliteDatabase::Statement>));
   }
   if (pragmaGetMaxPageCount != kj::none) {
-    tracker.trackFieldWithSize("IoPtr<SqllitDatabase::Statement>",
-        sizeof(IoPtr<SqliteDatabase::Statement>));
+    tracker.trackFieldWithSize(
+        "IoPtr<SqllitDatabase::Statement>", sizeof(IoPtr<SqliteDatabase::Statement>));
   }
 }
 

@@ -10,13 +10,13 @@
 
 namespace workerd::api::gpu {
 
-class GPUPipelineLayout : public jsg::Object {
+class GPUPipelineLayout: public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::PipelineLayout&() const {
     return layout_;
   }
-  explicit GPUPipelineLayout(wgpu::PipelineLayout l) : layout_(kj::mv(l)){};
+  explicit GPUPipelineLayout(wgpu::PipelineLayout l): layout_(kj::mv(l)) {};
   JSG_RESOURCE_TYPE(GPUPipelineLayout) {}
 
 private:
@@ -32,4 +32,4 @@ struct GPUPipelineLayoutDescriptor {
 
 using GPUPipelineLayoutBase = kj::OneOf<jsg::NonCoercible<kj::String>, jsg::Ref<GPUPipelineLayout>>;
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

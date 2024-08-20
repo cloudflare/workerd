@@ -38,8 +38,8 @@ public:
   jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const override;
   EntrypointClasses getEntrypointClasses(jsg::Lock& lock) const override;
-  const jsg::TypeHandler<ErrorInterface>&
-      getErrorInterfaceTypeHandler(jsg::Lock& lock) const override;
+  const jsg::TypeHandler<ErrorInterface>& getErrorInterfaceTypeHandler(
+      jsg::Lock& lock) const override;
   const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(
@@ -59,7 +59,7 @@ public:
       kj::String text;
 
       Json clone() const {
-        return Json { .text = kj::str(text) };
+        return Json{.text = kj::str(text)};
       }
     };
     struct Fetcher {
@@ -116,14 +116,12 @@ public:
             clonedKeyData = json.clone();
           }
         }
-        return CryptoKey {
+        return CryptoKey{
           .format = kj::str(format),
           .keyData = kj::mv(clonedKeyData),
           .algorithm = algorithm.clone(),
           .extractable = extractable,
-          .usages = KJ_MAP(s, usages) {
-            return kj::str(s);
-          },
+          .usages = KJ_MAP(s, usages) { return kj::str(s); },
         };
       }
     };
@@ -135,8 +133,8 @@ public:
       uint64_t maxTotalValueSize;
 
       MemoryCache clone() const {
-        return MemoryCache {
-          .cacheId = cacheId.map([](auto& id) { return kj::str(id);}),
+        return MemoryCache{
+          .cacheId = cacheId.map([](auto& id) { return kj::str(id); }),
           .maxKeys = maxKeys,
           .maxValueSize = maxValueSize,
           .maxTotalValueSize = maxTotalValueSize,
@@ -166,11 +164,9 @@ public:
       kj::Array<Global> innerBindings;
 
       Wrapped clone() const {
-        return Wrapped {
-          .moduleName = kj::str(moduleName),
+        return Wrapped{.moduleName = kj::str(moduleName),
           .entrypoint = kj::str(entrypoint),
-          .innerBindings = KJ_MAP(b, innerBindings) { return b.clone(); }
-        };
+          .innerBindings = KJ_MAP(b, innerBindings) { return b.clone(); }};
       }
     };
     struct AnalyticsEngine {
@@ -178,11 +174,8 @@ public:
       kj::String dataset;
       int64_t version;
       AnalyticsEngine clone() const {
-        return AnalyticsEngine {
-          .subrequestChannel = subrequestChannel,
-          .dataset = kj::str(dataset),
-          .version = version
-        };
+        return AnalyticsEngine{
+          .subrequestChannel = subrequestChannel, .dataset = kj::str(dataset), .version = version};
       }
     };
     struct Hyperdrive {
@@ -193,7 +186,7 @@ public:
       kj::String scheme;
 
       Hyperdrive clone() const {
-        return Hyperdrive {
+        return Hyperdrive{
           .subrequestChannel = subrequestChannel,
           .database = kj::str(database),
           .user = kj::str(user),
@@ -204,46 +197,56 @@ public:
     };
     struct UnsafeEval {};
     kj::String name;
-    kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
-              DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped,
-              AnalyticsEngine, Hyperdrive, UnsafeEval, MemoryCache> value;
+    kj::OneOf<Json,
+        Fetcher,
+        KvNamespace,
+        R2Bucket,
+        R2Admin,
+        CryptoKey,
+        EphemeralActorNamespace,
+        DurableActorNamespace,
+        QueueBinding,
+        kj::String,
+        kj::Array<byte>,
+        Wrapped,
+        AnalyticsEngine,
+        Hyperdrive,
+        UnsafeEval,
+        MemoryCache>
+        value;
 
     Global clone() const;
   };
 
   void compileGlobals(jsg::Lock& lock,
-                      kj::ArrayPtr<const Global> globals,
-                      v8::Local<v8::Object> target,
-                      uint32_t ownerId) const;
+      kj::ArrayPtr<const Global> globals,
+      v8::Local<v8::Object> target,
+      uint32_t ownerId) const;
 
-  static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(
-      jsg::Lock& js,
+  static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
       config::Worker::Module::Reader conf,
       jsg::CompilationObserver& observer,
       CompatibilityFlags::Reader featureFlags);
 
   using ModuleFallbackCallback = Worker::Api::ModuleFallbackCallback;
-  void setModuleFallbackCallback(
-       kj::Function<ModuleFallbackCallback>&& callback) const override;
+  void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const override;
 
   static kj::Own<jsg::modules::ModuleRegistry> initializeBundleModuleRegistry(
-    const jsg::ResolveObserver& resolveObserver,
-    const config::Worker::Reader& conf,
-    const CompatibilityFlags::Reader& featureFlags,
-    const PythonConfig& pythonConfig);
+      const jsg::ResolveObserver& resolveObserver,
+      const config::Worker::Reader& conf,
+      const CompatibilityFlags::Reader& featureFlags,
+      const PythonConfig& pythonConfig);
 
 private:
   struct Impl;
   kj::Own<Impl> impl;
 
-  kj::Array<Worker::Script::CompiledGlobal> compileScriptGlobals(
-      jsg::Lock& lock,
+  kj::Array<Worker::Script::CompiledGlobal> compileScriptGlobals(jsg::Lock& lock,
       config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter,
       const jsg::CompilationObserver& observer) const;
 
-  void compileModules(
-      jsg::Lock& lock,
+  void compileModules(jsg::Lock& lock,
       config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter,
       capnp::List<config::Extension>::Reader extensions) const;

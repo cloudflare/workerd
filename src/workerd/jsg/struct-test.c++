@@ -21,17 +21,14 @@ struct StructContext: public Object, public ContextGlobal {
     return kj::str(s.str, ", ", s.num, ", ", s.box->value);
   }
   TestStruct makeTestStruct(kj::String str, double num, NumberBox& box) {
-    return { kj::mv(str), num, jsg::alloc<NumberBox>(box.value) };
+    return {kj::mv(str), num, jsg::alloc<NumberBox>(box.value)};
   }
   V8Ref<v8::Object> readSelfStruct(Lock& js, SelfStruct s) {
     KJ_ASSERT(s.i == 123);
     return kj::mv(s.self);
   }
   SelfStruct makeSelfStruct(Lock& js) {
-    return {
-      .self = { js.v8Isolate, v8::Object::New(js.v8Isolate) },
-      .i = 456
-    };
+    return {.self = {js.v8Isolate, v8::Object::New(js.v8Isolate)}, .i = 456};
   }
 
   JSG_RESOURCE_TYPE(StructContext) {
@@ -47,24 +44,18 @@ JSG_DECLARE_ISOLATE_TYPE(StructIsolate, StructContext, NumberBox, TestStruct, Se
 KJ_TEST("structs") {
   Evaluator<StructContext, StructIsolate> e(v8System);
   e.expectEval(
-      "readTestStruct({str: 'foo', num: 123, box: new NumberBox(456)})",
-      "string", "foo, 123, 456");
-  e.expectEval(
-      "var s = makeTestStruct('foo', 123, new NumberBox(456));\n"
-      "[s.str, s.num, s.box.value].join(', ')",
+      "readTestStruct({str: 'foo', num: 123, box: new NumberBox(456)})", "string", "foo, 123, 456");
+  e.expectEval("var s = makeTestStruct('foo', 123, new NumberBox(456));\n"
+               "[s.str, s.num, s.box.value].join(', ')",
       "string", "foo, 123, 456");
 
-  e.expectEval(
-      "readTestStruct({str: 'foo', num: 123, box: 'wrong'})",
-      "throws", "TypeError: Incorrect type for the 'box' field on 'TestStruct': the provided "
-                "value is not of type 'NumberBox'.");
+  e.expectEval("readTestStruct({str: 'foo', num: 123, box: 'wrong'})", "throws",
+      "TypeError: Incorrect type for the 'box' field on 'TestStruct': the provided "
+      "value is not of type 'NumberBox'.");
 
   e.expectEval(
-      "JSON.stringify(readSelfStruct({i: 123, x: 'foo'}))",
-      "string", "{\"i\":123,\"x\":\"foo\"}");
-  e.expectEval(
-      "JSON.stringify(makeSelfStruct())",
-      "string", "{\"i\":456}");
+      "JSON.stringify(readSelfStruct({i: 123, x: 'foo'}))", "string", "{\"i\":123,\"x\":\"foo\"}");
+  e.expectEval("JSON.stringify(makeSelfStruct())", "string", "{\"i\":456}");
 }
 
 }  // namespace

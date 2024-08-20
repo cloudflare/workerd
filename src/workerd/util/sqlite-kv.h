@@ -28,17 +28,14 @@ public:
   template <typename Func>
   bool get(KeyPtr key, Func&& callback);
 
-  enum Order {
-    FORWARD,
-    REVERSE
-  };
+  enum Order { FORWARD, REVERSE };
 
   // Search for all knows keys and values in a range, calling the callback (with KeyPtr and
   // ValuePtr parameters) for each one seen. `end` and `limit` can be null to request no constraint
   // be enforced.
   template <typename Func>
-  uint list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order,
-            Func&& callback);
+  uint list(
+      KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order, Func&& callback);
 
   // Store a value into the table.
   void put(KeyPtr key, ValuePtr value);
@@ -153,8 +150,8 @@ bool SqliteKv::get(KeyPtr key, Func&& callback) {
 }
 
 template <typename Func>
-uint SqliteKv::list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order,
-                    Func&& callback) {
+uint SqliteKv::list(
+    KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order, Func&& callback) {
   auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return 0);
 
   auto iterate = [&](SqliteDatabase::Query&& query) {

@@ -24,22 +24,24 @@
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
 
-namespace v8 { class Isolate; }
+namespace v8 {
+class Isolate;
+}
 
 namespace workerd {
 
 namespace api {
-  class DurableObjectState;
-  class DurableObjectStorage;
-  class ServiceWorkerGlobalScope;
-  struct ExportedHandler;
-  struct CryptoAlgorithm;
-  struct QueueExportedHandler;
-  class Socket;
-  class WebSocket;
-  class WebSocketRequestResponsePair;
-  class ExecutionContext;
-}
+class DurableObjectState;
+class DurableObjectStorage;
+class ServiceWorkerGlobalScope;
+struct ExportedHandler;
+struct CryptoAlgorithm;
+struct QueueExportedHandler;
+class Socket;
+class WebSocket;
+class WebSocketRequestResponsePair;
+class ExecutionContext;
+}  // namespace api
 
 class ThreadContext;
 class IoContext;
@@ -91,25 +93,29 @@ public:
   };
 
   explicit Worker(kj::Own<const Script> script,
-                  kj::Own<WorkerObserver> metrics,
-                  kj::FunctionParam<void(
-                      jsg::Lock& lock, const Api& api,
-                      v8::Local<v8::Object> target)> compileBindings,
-                  IsolateObserver::StartType startType,
-                  SpanParent parentSpan, LockType lockType,
-                  kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
-                  kj::Maybe<kj::Duration&> startupTime = kj::none);
+      kj::Own<WorkerObserver> metrics,
+      kj::FunctionParam<void(jsg::Lock& lock, const Api& api, v8::Local<v8::Object> target)>
+          compileBindings,
+      IsolateObserver::StartType startType,
+      SpanParent parentSpan,
+      LockType lockType,
+      kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
+      kj::Maybe<kj::Duration&> startupTime = kj::none);
   // `compileBindings()` is a callback that constructs all of the bindings and adds them as
   // properties to `target`.
 
   ~Worker() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Worker);
 
-  inline const Script& getScript() const { return *script; }
+  inline const Script& getScript() const {
+    return *script;
+  }
 
   inline const Isolate& getIsolate() const;
 
-  inline const WorkerObserver& getMetrics() const { return *metrics; }
+  inline const WorkerObserver& getMetrics() const {
+    return *metrics;
+  }
 
   class Lock;
 
@@ -135,8 +141,8 @@ public:
   class Actor;
 
   // Like takeAsyncLock(), but also takes care of actor cache time-based eviction and backpressure.
-  kj::Promise<AsyncLock> takeAsyncLockWhenActorCacheReady(kj::Date now, Actor& actor,
-      RequestObserver& request) const;
+  kj::Promise<AsyncLock> takeAsyncLockWhenActorCacheReady(
+      kj::Date now, Actor& actor, RequestObserver& request) const;
 
   // Track a set of address->callback overrides for which the connect(address) behavior should be
   // overridden via callbacks rather than using the default Socket connect() logic.
@@ -154,7 +160,7 @@ private:
 
   // metrics needs to be first to be destroyed last to correctly capture destruction timing.
   // it needs script to report destruction time, so it comes right after that.
-  TeardownFinishedGuard<WorkerObserver&> teardownGuard { *metrics };
+  TeardownFinishedGuard<WorkerObserver&> teardownGuard{*metrics};
 
   struct Impl;
   kj::Own<Impl> impl;
@@ -165,9 +171,11 @@ private:
   class AsyncWaiter;
   friend constexpr bool _kj_internal_isPolymorphic(AsyncWaiter*);
 
-  static void handleLog(jsg::Lock& js, ConsoleMode mode, LogLevel level,
-                          const v8::Global<v8::Function>& original,
-                          const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void handleLog(jsg::Lock& js,
+      ConsoleMode mode,
+      LogLevel level,
+      const v8::Global<v8::Function>& original,
+      const v8::FunctionCallbackInfo<v8::Value>& info);
 };
 
 // A compiled script within an Isolate, but which hasn't been instantiated into a particular
@@ -177,9 +185,15 @@ public:
   ~Script() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Script);
 
-  inline kj::StringPtr getId() const { return id; }
-  inline const Isolate& getIsolate() const { return *isolate; }
-  inline bool isModular() const { return modular; }
+  inline kj::StringPtr getId() const {
+    return id;
+  }
+  inline const Isolate& getIsolate() const {
+    return *isolate;
+  }
+  inline bool isModular() const {
+    return modular;
+  }
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
@@ -196,7 +210,8 @@ public:
     kj::StringPtr mainScriptName;
 
     // Callback which will compile the script-level globals, returning a list of them.
-    kj::Function<kj::Array<CompiledGlobal>(jsg::Lock& lock, const Api& api, const jsg::CompilationObserver& observer)>
+    kj::Function<kj::Array<CompiledGlobal>(
+        jsg::Lock& lock, const Api& api, const jsg::CompilationObserver& observer)>
         compileGlobals;
   };
   struct ModulesSource {
@@ -222,9 +237,12 @@ private:
   friend class Worker;
 
 public:  // pretend this is private (needs to be public because allocated through template)
-  explicit Script(kj::Own<const Isolate> isolate, kj::StringPtr id, Source source,
-                  IsolateObserver::StartType startType, bool logNewScript,
-                  kj::Maybe<ValidationErrorReporter&> errorReporter);
+  explicit Script(kj::Own<const Isolate> isolate,
+      kj::StringPtr id,
+      Source source,
+      IsolateObserver::StartType startType,
+      bool logNewScript,
+      kj::Maybe<ValidationErrorReporter&> errorReporter);
 };
 
 // Multiple zones may share the same script. We would like to compile each script only once,
@@ -254,11 +272,11 @@ public:
   // session has one isolate which may load many iterations of the script (this allows the
   // inspector session to stay open across them).
   explicit Isolate(kj::Own<Api> api,
-                   kj::Own<IsolateObserver>&& metrics,
-                   kj::StringPtr id,
-                   kj::Own<IsolateLimitEnforcer> limitEnforcer,
-                   InspectorPolicy inspectorPolicy,
-                   ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY);
+      kj::Own<IsolateObserver>&& metrics,
+      kj::StringPtr id,
+      kj::Own<IsolateLimitEnforcer> limitEnforcer,
+      InspectorPolicy inspectorPolicy,
+      ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY);
 
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
@@ -266,19 +284,28 @@ public:
   // Get the current Worker::Isolate from the current jsg::Lock
   static const Isolate& from(jsg::Lock& js);
 
-  inline const IsolateObserver& getMetrics() const { return *metrics; }
+  inline const IsolateObserver& getMetrics() const {
+    return *metrics;
+  }
 
-  inline kj::StringPtr getId() const { return id; }
+  inline kj::StringPtr getId() const {
+    return id;
+  }
 
   // Parses the given code to create a new script object and returns it.
-  kj::Own<const Worker::Script> newScript(
-      kj::StringPtr id, Script::Source source,
-      IsolateObserver::StartType startType, bool logNewScript = false,
+  kj::Own<const Worker::Script> newScript(kj::StringPtr id,
+      Script::Source source,
+      IsolateObserver::StartType startType,
+      bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none) const;
 
-  inline const IsolateLimitEnforcer& getLimitEnforcer() const { return *limitEnforcer; }
+  inline const IsolateLimitEnforcer& getLimitEnforcer() const {
+    return *limitEnforcer;
+  }
 
-  inline const Api& getApi() const { return *api; }
+  inline const Api& getApi() const {
+    return *api;
+  }
 
   // Returns the number of threads currently blocked trying to lock this isolate's mutex (using
   // takeAsyncLock()).
@@ -288,17 +315,14 @@ public:
   uint getLockSuccessCount() const;
 
   // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
-  kj::Promise<void> attachInspector(
-      kj::Timer& timer,
+  kj::Promise<void> attachInspector(kj::Timer& timer,
       kj::Duration timerOffset,
       kj::HttpService::Response& response,
       const kj::HttpHeaderTable& headerTable,
       kj::HttpHeaderId controlHeaderId) const;
 
   kj::Promise<void> attachInspector(
-      kj::Timer& timer,
-      kj::Duration timerOffset,
-      kj::WebSocket& webSocket) const;
+      kj::Timer& timer, kj::Duration timerOffset, kj::WebSocket& webSocket) const;
 
   // Log a warning to the inspector if attached, and log an INFO severity message.
   void logWarning(kj::StringPtr description, Worker::Lock& lock);
@@ -311,8 +335,7 @@ public:
   void logErrorOnce(kj::StringPtr description);
 
   // Wrap an HttpClient to report subrequests to inspector.
-  kj::Own<WorkerInterface> wrapSubrequestClient(
-      kj::Own<WorkerInterface> client,
+  kj::Own<WorkerInterface> wrapSubrequestClient(kj::Own<WorkerInterface> client,
       kj::HttpHeaderId contentEncodingHeaderId,
       RequestObserver& requestMetrics) const;
 
@@ -358,7 +381,7 @@ private:
   kj::Maybe<kj::String> featureFlagsForFl;
 
   kj::Own<IsolateObserver> metrics;
-  TeardownFinishedGuard<IsolateObserver&> teardownGuard { *metrics };
+  TeardownFinishedGuard<IsolateObserver&> teardownGuard{*metrics};
 
   struct Impl;
   kj::Own<Impl> impl;
@@ -459,8 +482,8 @@ public:
     jsg::Optional<kj::String> stack;
     JSG_STRUCT(name, message, stack);
   };
-  virtual const jsg::TypeHandler<ErrorInterface>&
-      getErrorInterfaceTypeHandler(jsg::Lock& lock) const = 0;
+  virtual const jsg::TypeHandler<ErrorInterface>& getErrorInterfaceTypeHandler(
+      jsg::Lock& lock) const = 0;
   virtual const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const = 0;
 
@@ -477,16 +500,14 @@ public:
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
 
   // Set the module fallback service callback, if any.
-  using ModuleFallbackCallback =
-      kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(
-          jsg::Lock& js,
-          kj::StringPtr,
-          kj::Maybe<kj::String>,
-          jsg::CompilationObserver&,
-          jsg::ModuleRegistry::ResolveMethod,
-          kj::Maybe<kj::StringPtr>);
-  virtual void setModuleFallbackCallback(
-      kj::Function<ModuleFallbackCallback>&& callback) const {
+  using ModuleFallbackCallback = kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(
+      jsg::Lock& js,
+      kj::StringPtr,
+      kj::Maybe<kj::String>,
+      jsg::CompilationObserver&,
+      jsg::ModuleRegistry::ResolveMethod,
+      kj::Maybe<kj::StringPtr>);
+  virtual void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const {
     // By default does nothing.
   }
 };
@@ -523,7 +544,9 @@ public:
 
   void requireNoPermanentException();
 
-  Worker& getWorker() { return worker; }
+  Worker& getWorker() {
+    return worker;
+  }
 
   operator jsg::Lock&();
 
@@ -546,8 +569,8 @@ public:
   // than querying the property from the exception itself. This is also useful in the case that
   // the exception itself is not the original and the stack is missing.
   void logUncaughtException(UncaughtExceptionSource source,
-                            const jsg::JsValue& exception,
-                            const jsg::JsMessage& message = jsg::JsMessage());
+      const jsg::JsValue& exception,
+      const jsg::JsMessage& message = jsg::JsMessage());
 
   // Version that takes a kj::Exception. If it has a serialized JS error attached as a detail, that
   // error may be extracted and used.
@@ -621,9 +644,9 @@ private:
   kj::Own<AsyncWaiter> waiter;
   kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming;
 
-  AsyncLock(kj::Own<AsyncWaiter> waiter,
-            kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming)
-      : waiter(kj::mv(waiter)), lockTiming(kj::mv(lockTiming)) {}
+  AsyncLock(kj::Own<AsyncWaiter> waiter, kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming)
+      : waiter(kj::mv(waiter)),
+        lockTiming(kj::mv(lockTiming)) {}
 
   friend class Worker::Isolate;
   friend class Worker::AsyncWaiter;
@@ -663,15 +686,14 @@ public:
   // The HibernationManager class manages HibernatableWebSockets created by an actor.
   // The manager handles accepting new WebSockets, retrieving existing WebSockets by tag, and
   // removing WebSockets from its collection when they disconnect.
-  class HibernationManager : public kj::Refcounted {
+  class HibernationManager: public kj::Refcounted {
   public:
     virtual void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) = 0;
     virtual kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(
-        jsg::Lock& js,
-        kj::Maybe<kj::StringPtr> tag) = 0;
+        jsg::Lock& js, kj::Maybe<kj::StringPtr> tag) = 0;
     virtual void hibernateWebSockets(Worker::Lock& lock) = 0;
-    virtual void setWebSocketAutoResponse(kj::Maybe<kj::StringPtr> request,
-        kj::Maybe<kj::StringPtr> response) = 0;
+    virtual void setWebSocketAutoResponse(
+        kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) = 0;
     virtual kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() = 0;
     virtual void setTimerChannel(TimerChannel& timerChannel) = 0;
     virtual kj::Own<HibernationManager> addRef() = 0;
@@ -681,11 +703,19 @@ public:
 
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
-  Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Id actorId,
-        bool hasTransient, MakeActorCacheFunc makeActorCache,
-        kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
-        kj::Own<Loopback> loopback, TimerChannel& timerChannel, kj::Own<ActorObserver> metrics,
-        kj::Maybe<kj::Own<HibernationManager>> manager, kj::Maybe<uint16_t> hibernationEventType);
+  Actor(const Worker& worker,
+      kj::Maybe<RequestTracker&> tracker,
+      Id actorId,
+      bool hasTransient,
+      MakeActorCacheFunc makeActorCache,
+      kj::Maybe<kj::StringPtr> className,
+      MakeStorageFunc makeStorage,
+      Worker::Lock& lock,
+      kj::Own<Loopback> loopback,
+      TimerChannel& timerChannel,
+      kj::Own<ActorObserver> metrics,
+      kj::Maybe<kj::Own<HibernationManager>> manager,
+      kj::Maybe<uint16_t> hibernationEventType);
 
   ~Actor() noexcept(false);
 
@@ -758,7 +788,9 @@ public:
   // Only needs to be called when allocating a HibernationManager!
   kj::Maybe<uint16_t> getHibernationEventType();
 
-  inline const Worker& getWorker() { return *worker; }
+  inline const Worker& getWorker() {
+    return *worker;
+  }
 
   void assertCanSetAlarm();
   kj::Promise<void> makeAlarmTaskForPreview(kj::Date scheduledTime);
@@ -792,16 +824,19 @@ private:
 // =======================================================================================
 // inline implementation details
 
-inline const Worker::Isolate& Worker::getIsolate() const { return *script->isolate; }
+inline const Worker::Isolate& Worker::getIsolate() const {
+  return *script->isolate;
+}
 
 KJ_DECLARE_NON_POLYMORPHIC(Worker::AsyncWaiter);
 
 // An implementation of Worker::ValidationErrorReporter that collects errors into
 // a kj::Vector<kj::String>.
-struct SimpleWorkerErrorReporter final : public Worker::ValidationErrorReporter {
-  void addError(kj::String error) override { errors.add(kj::mv(error)); }
-  void addHandler(kj::Maybe<kj::StringPtr> exportName,
-                  kj::StringPtr type) override {
+struct SimpleWorkerErrorReporter final: public Worker::ValidationErrorReporter {
+  void addError(kj::String error) override {
+    errors.add(kj::mv(error));
+  }
+  void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) override {
     KJ_UNREACHABLE;
   }
 
@@ -810,4 +845,4 @@ struct SimpleWorkerErrorReporter final : public Worker::ValidationErrorReporter 
   kj::Vector<kj::String> errors;
 };
 
-} // namespace workerd
+}  // namespace workerd

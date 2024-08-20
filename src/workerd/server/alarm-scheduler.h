@@ -32,17 +32,18 @@ struct ActorKey {
     auto ownUniqueKey = kj::str(uniqueKey);
     auto ownActorId = kj::str(actorId);
 
-    return kj::attachVal(ActorKey{
-      .uniqueKey = ownUniqueKey, .actorId = ownActorId
-    }, kj::mv(ownUniqueKey), kj::mv(ownActorId));
+    return kj::attachVal(ActorKey{.uniqueKey = ownUniqueKey, .actorId = ownActorId},
+        kj::mv(ownUniqueKey), kj::mv(ownActorId));
   }
 };
 
-inline uint KJ_HASHCODE(const ActorKey& k) { return kj::hashCode(k.uniqueKey, k.actorId); }
+inline uint KJ_HASHCODE(const ActorKey& k) {
+  return kj::hashCode(k.uniqueKey, k.actorId);
+}
 
 // Allows scheduling alarm executions at specific times, returning a promise representing
 // the completion of the alarm event.
-class AlarmScheduler final : kj::TaskSet::ErrorHandler {
+class AlarmScheduler final: kj::TaskSet::ErrorHandler {
 public:
   static constexpr auto RETRY_START_SECONDS = WorkerInterface::ALARM_RETRY_START_SECONDS;
 
@@ -61,10 +62,7 @@ public:
   using GetActorFn = kj::Function<kj::Own<WorkerInterface>(kj::String)>;
 
   AlarmScheduler(
-    const kj::Clock& clock,
-    kj::Timer& timer,
-    const SqliteDatabase::Vfs& vfs,
-    kj::PathPtr path);
+      const kj::Clock& clock, kj::Timer& timer, const SqliteDatabase::Vfs& vfs, kj::PathPtr path);
 
   kj::Maybe<kj::Date> getAlarm(ActorKey actor);
   bool setAlarm(ActorKey actor, kj::Date scheduledTime);
@@ -73,7 +71,7 @@ public:
   void registerNamespace(kj::StringPtr uniqueKey, GetActorFn getActor);
 
 private:
-  enum class AlarmStatus {WAITING, STARTED, FINISHED};
+  enum class AlarmStatus { WAITING, STARTED, FINISHED };
   const kj::Clock& clock;
   kj::Timer& timer;
   std::default_random_engine random;
@@ -112,13 +110,15 @@ private:
     bool retry;
     bool retryCountsAgainstLimit;
   };
-  kj::Promise<RetryInfo> runAlarm(const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount);
+  kj::Promise<RetryInfo> runAlarm(
+      const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount);
 
   void setAlarmInMemory(kj::Own<ActorKey> actor, kj::Date scheduledTime);
 
   ScheduledAlarm scheduleAlarm(kj::Date now, kj::Own<ActorKey> actor, kj::Date scheduledTime);
 
-  kj::Promise<void> makeAlarmTask(kj::Duration delay, const ActorKey& actor, kj::Date scheduledTime);
+  kj::Promise<void> makeAlarmTask(
+      kj::Duration delay, const ActorKey& actor, kj::Date scheduledTime);
 
   kj::Promise<void> checkTimestamp(kj::Duration delay, kj::Date scheduledTime);
 
@@ -138,4 +138,4 @@ private:
   void loadAlarmsFromDb();
 };
 
-} // namespace workerd::server
+}  // namespace workerd::server

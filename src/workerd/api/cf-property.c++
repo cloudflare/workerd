@@ -54,9 +54,8 @@ CfProperty::CfProperty(kj::Maybe<jsg::JsRef<jsg::JsObject>>&& parsed) {
 }
 
 jsg::Optional<jsg::JsObject> CfProperty::get(jsg::Lock& js) {
-  return getRef(js).map([&js](jsg::JsRef<jsg::JsObject>&& ref) mutable {
-    return ref.getHandle(js);
-  });
+  return getRef(js).map(
+      [&js](jsg::JsRef<jsg::JsObject>&& ref) mutable { return ref.getHandle(js); });
 }
 
 jsg::Optional<jsg::JsRef<jsg::JsObject>> CfProperty::getRef(jsg::Lock& js) {
@@ -84,7 +83,6 @@ jsg::Optional<jsg::JsRef<jsg::JsObject>> CfProperty::getRef(jsg::Lock& js) {
 
   return kj::none;
 }
-
 
 kj::Maybe<kj::String> CfProperty::serialize(jsg::Lock& js) {
   KJ_IF_SOME(cf, value) {
@@ -143,4 +141,4 @@ void CfProperty::visitForGc(jsg::GcVisitor& visitor) {
   }
 }
 
-} // namespace workerd::api
+}  // namespace workerd::api

@@ -20,18 +20,18 @@ namespace {
 bool isSpecialScheme(kj::StringPtr scheme) {
   // TODO(cleanup): Move this to kj::Url.
   static const std::set<kj::StringPtr> specialSchemes{
-      "ftp", "file", "gopher", "http", "https", "ws", "wss"};
+    "ftp", "file", "gopher", "http", "https", "ws", "wss"};
   return specialSchemes.count(scheme);
 }
 
 kj::Maybe<kj::StringPtr> defaultPortForScheme(kj::StringPtr scheme) {
-  static const std::map<kj::StringPtr, kj::StringPtr> defaultPorts {
-    { "ftp", "21" },
-    { "gopher", "70" },
-    { "http", "80" },
-    { "https", "443" },
-    { "ws", "80" },
-    { "wss", "443" },
+  static const std::map<kj::StringPtr, kj::StringPtr> defaultPorts{
+    {"ftp", "21"},
+    {"gopher", "70"},
+    {"http", "80"},
+    {"https", "443"},
+    {"ws", "80"},
+    {"wss", "443"},
   };
   auto port = defaultPorts.find(scheme);
   if (port != defaultPorts.end()) {
@@ -119,12 +119,13 @@ kj::String kjUrlToString(const kj::Url& url) {
     //   with the situation for now. Rather than expose these errors to the user as opaque internal
     //   errors (and nag us via Sentry), we get our hands dirty with some string matching, in the
     //   hopes of helping users work around the bugs.
-    KJ_IF_SOME(e, translateKjException(exception, {
-      { "invalid hostname when stringifying URL"_kj,
-        "Invalid hostname when stringifying URL."_kj },
-      { "invalid name in URL path"_kj,
-        "Invalid pathname when stringifying URL."_kj },
-    })) {
+    KJ_IF_SOME(e,
+        translateKjException(exception,
+            {
+              {"invalid hostname when stringifying URL"_kj,
+                "Invalid hostname when stringifying URL."_kj},
+              {"invalid name in URL path"_kj, "Invalid pathname when stringifying URL."_kj},
+            })) {
       kj::throwFatalException(kj::mv(e));
     }
 
@@ -144,13 +145,13 @@ kj::String kjUrlToString(const kj::Url& url) {
 
 jsg::Ref<URL> URL::constructor(kj::String url, jsg::Optional<kj::String> base) {
   KJ_IF_SOME(b, base) {
-    auto baseUrl = JSG_REQUIRE_NONNULL(kj::Url::tryParse(kj::mv(b)),
-        TypeError, "Invalid base URL string.");
-    return jsg::alloc<URL>(JSG_REQUIRE_NONNULL(baseUrl.tryParseRelative(kj::mv(url)),
-        TypeError, "Invalid relative URL string."));
+    auto baseUrl =
+        JSG_REQUIRE_NONNULL(kj::Url::tryParse(kj::mv(b)), TypeError, "Invalid base URL string.");
+    return jsg::alloc<URL>(JSG_REQUIRE_NONNULL(
+        baseUrl.tryParseRelative(kj::mv(url)), TypeError, "Invalid relative URL string."));
   }
-  return jsg::alloc<URL>(JSG_REQUIRE_NONNULL(kj::Url::tryParse(kj::mv(url)),
-      TypeError, "Invalid URL string."));
+  return jsg::alloc<URL>(
+      JSG_REQUIRE_NONNULL(kj::Url::tryParse(kj::mv(url)), TypeError, "Invalid URL string."));
 }
 
 URL::URL(kj::Url&& u): url(kj::refcounted<RefcountedUrl>(kj::mv(u))) {
@@ -343,9 +344,8 @@ void URL::setPort(kj::String value) {
 
 kj::String URL::getPathname() {
   if (url->path.size() > 0) {
-    auto components = KJ_MAP(component, url->path) {
-      return kj::str('/', kj::encodeUriPath(component));
-    };
+    auto components =
+        KJ_MAP(component, url->path) { return kj::str('/', kj::encodeUriPath(component)); };
     return kj::str(kj::strArray(components, ""), url->hasTrailingSlash ? "/" : "");
   } else if (url->hasTrailingSlash || isSpecialScheme(url->scheme)) {
     // Special URLs have non-empty paths by definition, regardless of the value of hasTrailingSlash.
@@ -433,10 +433,10 @@ void URL::setSearch(kj::String value) {
       //
       //   See step 1.3.1 of https://url.spec.whatwg.org/#query-state
       KJ_IF_SOME(key, trySplit(part, '=')) {
-        newQuery.add(kj::Url::QueryParam { percentDecodeQuery(key, err),
-                                           percentDecodeQuery(part, err) });
+        newQuery.add(
+            kj::Url::QueryParam{percentDecodeQuery(key, err), percentDecodeQuery(part, err)});
       } else {
-        newQuery.add(kj::Url::QueryParam { percentDecodeQuery(part, err), nullptr });
+        newQuery.add(kj::Url::QueryParam{percentDecodeQuery(part, err), nullptr});
       }
     }
 
@@ -497,14 +497,15 @@ jsg::Ref<URLSearchParams> URLSearchParams::constructor(
       }
       KJ_CASE_ONEOF(dict, jsg::Dict<kj::String>) {
         searchParams->url->query = KJ_MAP(entry, dict.fields) {
-          return kj::Url::QueryParam { kj::mv(entry.name), kj::mv(entry.value) };
+          return kj::Url::QueryParam{kj::mv(entry.name), kj::mv(entry.value)};
         };
       }
       KJ_CASE_ONEOF(arrayOfArrays, kj::Array<kj::Array<kj::String>>) {
         searchParams->url->query = KJ_MAP(entry, arrayOfArrays) {
-          JSG_REQUIRE(entry.size() == 2, TypeError, "To initialize a URLSearchParams object "
+          JSG_REQUIRE(entry.size() == 2, TypeError,
+              "To initialize a URLSearchParams object "
               "from an array-of-arrays, each inner array must have exactly two elements.");
-          return kj::Url::QueryParam { kj::mv(entry[0]), kj::mv(entry[1]) };
+          return kj::Url::QueryParam{kj::mv(entry[0]), kj::mv(entry[1])};
         };
       }
     }
@@ -514,12 +515,12 @@ jsg::Ref<URLSearchParams> URLSearchParams::constructor(
 }
 
 void URLSearchParams::append(kj::String name, kj::String value) {
-  url->query.add(kj::Url::QueryParam { kj::mv(name), kj::mv(value) });
+  url->query.add(kj::Url::QueryParam{kj::mv(name), kj::mv(value)});
 }
 
 void URLSearchParams::delete_(kj::String name) {
-  auto pivot = std::remove_if(url->query.begin(), url->query.end(),
-                              [&name](const auto& kv) { return kv.name == name; });
+  auto pivot = std::remove_if(
+      url->query.begin(), url->query.end(), [&name](const auto& kv) { return kv.name == name; });
   url->query.truncate(pivot - url->query.begin());
 }
 
@@ -574,17 +575,15 @@ void URLSearchParams::sort() {
   //   ﬃ   ef ac 83    |  fb03
   //   🌈  f0 9f 8c 88 |  d83c df08
 
-  std::stable_sort(url->query.begin(), url->query.end(),
-      [](const auto& left, const auto& right) {
-        auto leftUtf16 = kj::encodeUtf16(left.name.asArray());
-        auto rightUtf16 = kj::encodeUtf16(right.name.asArray());
-        return std::lexicographical_compare(leftUtf16.begin(), leftUtf16.end(),
-                                            rightUtf16.begin(), rightUtf16.end());
-      });
+  std::stable_sort(url->query.begin(), url->query.end(), [](const auto& left, const auto& right) {
+    auto leftUtf16 = kj::encodeUtf16(left.name.asArray());
+    auto rightUtf16 = kj::encodeUtf16(right.name.asArray());
+    return std::lexicographical_compare(
+        leftUtf16.begin(), leftUtf16.end(), rightUtf16.begin(), rightUtf16.end());
+  });
 }
 
-void URLSearchParams::forEach(
-    jsg::Lock& js,
+void URLSearchParams::forEach(jsg::Lock& js,
     jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<URLSearchParams>)> callback,
     jsg::Optional<jsg::Value> thisArg) {
   auto receiver = js.v8Undefined();
@@ -608,15 +607,15 @@ void URLSearchParams::forEach(
 }
 
 jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState { JSG_THIS });
+  return jsg::alloc<EntryIterator>(IteratorState{JSG_THIS});
 }
 
 jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock&) {
-  return jsg::alloc<KeyIterator>(IteratorState { JSG_THIS });
+  return jsg::alloc<KeyIterator>(IteratorState{JSG_THIS});
 }
 
 jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
-  return jsg::alloc<ValueIterator>(IteratorState { JSG_THIS });
+  return jsg::alloc<ValueIterator>(IteratorState{JSG_THIS});
 }
 
 kj::String URLSearchParams::toString() {

@@ -36,8 +36,7 @@ Serializer::Serializer(Lock& js, Options options)
 }
 
 v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
-    v8::Isolate *isolate,
-    v8::Local<v8::SharedArrayBuffer> sab) {
+    v8::Isolate* isolate, v8::Local<v8::SharedArrayBuffer> sab) {
   uint32_t n;
   auto value = JsValue(sab);
   for (n = 0; n < sharedArrayBuffers.size(); n++) {
@@ -55,8 +54,8 @@ void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Objec
   // The default error that V8 would generate is "#<TypeName> could not be cloned." -- for some
   // reason, it surrounds the type name in "#<>", which seems bizarre? Let's generate a better
   // error.
-  auto message = kj::str(
-      "Could not serialize object of type \"", obj->GetConstructorName(), "\". This type does "
+  auto message = kj::str("Could not serialize object of type \"", obj->GetConstructorName(),
+      "\". This type does "
       "not support serialization.");
   auto exception = js.domException(kj::str("DataCloneError"), kj::mv(message));
   js.throwException(jsg::JsValue(KJ_ASSERT_NONNULL(exception.tryGetHandle(js))));
@@ -132,7 +131,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     Object* obj = reinterpret_cast<jsg::Object*>(wrappable);
 
     if (!IsolateBase::from(isolate).serialize(
-          Lock::from(isolate), typeid(*wrappable), *obj, *this)) {
+            Lock::from(isolate), typeid(*wrappable), *obj, *this)) {
       // This type is not serializable.
       throwDataCloneErrorForObject(js, object);
     }
@@ -152,7 +151,7 @@ Serializer::Released Serializer::release() {
   sharedArrayBuffers.clear();
   arrayBuffers.clear();
   auto pair = ser.Release();
-  return Released {
+  return Released{
     .data = kj::Array(pair.first, pair.second, jsg::SERIALIZED_BUFFER_DISPOSER),
     .sharedArrayBuffers = sharedBackingStores.releaseAsArray(),
     .transferredArrayBuffers = backingStores.releaseAsArray(),
@@ -193,8 +192,7 @@ void Serializer::write(Lock& js, const JsValue& value) {
 
 Deserializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
 
-Deserializer::Deserializer(
-    Lock& js,
+Deserializer::Deserializer(Lock& js,
     kj::ArrayPtr<const kj::byte> data,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers,
@@ -209,18 +207,14 @@ Deserializer::Deserializer(
 }
 
 Deserializer::Deserializer(
-    Lock& js,
-    Serializer::Released& released,
-    kj::Maybe<Options> maybeOptions)
-    : Deserializer(
-        js,
-        released.data.asPtr(),
-        released.transferredArrayBuffers.asPtr(),
-        released.sharedArrayBuffers.asPtr(),
-        kj::mv(maybeOptions)) {}
+    Lock& js, Serializer::Released& released, kj::Maybe<Options> maybeOptions)
+    : Deserializer(js,
+          released.data.asPtr(),
+          released.transferredArrayBuffers.asPtr(),
+          released.sharedArrayBuffers.asPtr(),
+          kj::mv(maybeOptions)) {}
 
-void Deserializer::init(
-    Lock& js,
+void Deserializer::init(Lock& js,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<Options> maybeOptions) {
   auto options = kj::mv(maybeOptions).orDefault({});
@@ -233,9 +227,8 @@ void Deserializer::init(
     deser.SetWireFormatVersion(version);
   }
   KJ_IF_SOME(arrayBuffers, transferredArrayBuffers) {
-    for (auto n : kj::indices(arrayBuffers)) {
-      deser.TransferArrayBuffer(n,
-          v8::ArrayBuffer::New(js.v8Isolate, kj::mv((arrayBuffers)[n])));
+    for (auto n: kj::indices(arrayBuffers)) {
+      deser.TransferArrayBuffer(n, v8::ArrayBuffer::New(js.v8Isolate, kj::mv((arrayBuffers)[n])));
     }
   }
 }
@@ -275,8 +268,7 @@ kj::String Deserializer::readLengthDelimitedString() {
 }
 
 v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
-    v8::Isolate* isolate,
-    uint32_t clone_id) {
+    v8::Isolate* isolate, uint32_t clone_id) {
   KJ_IF_SOME(backingStores, sharedBackingStores) {
     KJ_ASSERT(clone_id < backingStores.size());
     return v8::SharedArrayBuffer::New(isolate, backingStores[clone_id]);
@@ -301,8 +293,7 @@ v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
   }
 }
 
-void SerializedBufferDisposer::disposeImpl(
-    void* firstElement,
+void SerializedBufferDisposer::disposeImpl(void* firstElement,
     size_t elementSize,
     size_t elementCount,
     size_t capacity,
@@ -311,12 +302,10 @@ void SerializedBufferDisposer::disposeImpl(
 }
 
 JsValue structuredClone(
-    Lock& js,
-    const JsValue& value,
-    kj::Maybe<kj::Array<JsValue>> maybeTransfer) {
+    Lock& js, const JsValue& value, kj::Maybe<kj::Array<JsValue>> maybeTransfer) {
   Serializer ser(js);
   KJ_IF_SOME(transfers, maybeTransfer) {
-    for (auto& item : transfers) {
+    for (auto& item: transfers) {
       ser.transfer(js, item);
     }
   }

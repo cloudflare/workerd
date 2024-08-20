@@ -38,7 +38,9 @@ kj::String errorsToString(
     return kj::str(": ", description, ".");
   }
 
-  return kj::str(": ", kj::strArray(KJ_MAP(e, accumulatedErrors) {
+  return kj::str(": ",
+      kj::strArray(
+          KJ_MAP(e, accumulatedErrors) {
     KJ_SWITCH_ONEOF(accumulatedErrors[0]) {
       KJ_CASE_ONEOF(e, kj::StringPtr) {
         return e;
@@ -48,14 +50,18 @@ kj::String errorsToString(
       }
     }
     KJ_UNREACHABLE;
-  }, " "), ".");
+  }, " "),
+      ".");
 }
-}
+}  // namespace
 
 const SslArrayDisposer SslArrayDisposer::INSTANCE;
 
-void SslArrayDisposer::disposeImpl(void* firstElement, size_t elementSize, size_t elementCount,
-                  size_t capacity, void (*destroyElement)(void*)) const {
+void SslArrayDisposer::disposeImpl(void* firstElement,
+    size_t elementSize,
+    size_t elementCount,
+    size_t capacity,
+    void (*destroyElement)(void*)) const {
   OPENSSL_free(firstElement);
 }
 
@@ -67,17 +73,18 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
   // in the queue might have been accidentally left there by previous, unrelated operations.
   // Unfortunately BoringSSL's ERR_error_string() and friends produce unfriendly strings that
   // mostly just tell you the error constant name, which isn't what we want to throw at users.
-  switch(ERR_GET_LIB(ERR_peek_last_error())) {
+  switch (ERR_GET_LIB(ERR_peek_last_error())) {
     // The error code defines overlap between the different boringssl libraries (for example, we
     // have EC_R_INVALID_ENCODING == RSA_R_CANNOT_RECOVER_MULTI_PRIME_KEY), so we must check the
     // library code.
     case ERR_LIB_EC:
       switch (ERR_GET_REASON(ERR_peek_last_error())) {
-#define MAP_ERROR(CODE, TEXT) \
-        case CODE: { \
-          ClearErrorOnReturn clearErrorOnReturn; \
-          kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line, \
-              kj::str(JSG_EXCEPTION(DOMOperationError) ": ", TEXT))); }
+#define MAP_ERROR(CODE, TEXT)                                                                      \
+  case CODE: {                                                                                     \
+    ClearErrorOnReturn clearErrorOnReturn;                                                         \
+    kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line,                 \
+        kj::str(JSG_EXCEPTION(DOMOperationError) ": ", TEXT)));                                    \
+  }
 
         MAP_ERROR(EC_R_INVALID_ENCODING, "Invalid point encoding.")
         MAP_ERROR(EC_R_INVALID_COMPRESSED_POINT, "Invalid compressed point.")
@@ -109,9 +116,9 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
     ERR_error_string_n(error, message, sizeof(message));
     lines.add(kj::heapString(message));
   }
-  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line, kj::str(
-      "OpenSSL call failed: ", code, "; ",
-      lines.size() == 0 ? "but ERR_get_error() returned 0"_kj : kj::strArray(lines, "; "))));
+  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line,
+      kj::str("OpenSSL call failed: ", code, "; ",
+          lines.size() == 0 ? "but ERR_get_error() returned 0"_kj : kj::strArray(lines, "; "))));
 }
 
 kj::Vector<kj::OneOf<kj::StringPtr, OpensslUntranslatedError>> consumeAllOpensslErrors() {
@@ -140,7 +147,7 @@ kj::Vector<kj::OneOf<kj::StringPtr, OpensslUntranslatedError>> consumeAllOpenssl
           break;
       }
 
-      return OpensslUntranslatedError {
+      return OpensslUntranslatedError{
         .library = ERR_lib_error_string(error),
         .reasonName = ERR_reason_error_string(error),
       };
@@ -162,9 +169,7 @@ kj::String tryDescribeOpensslErrors(kj::StringPtr defaultIfNoError) {
   // debugging issues.
 #if 1
   auto removeBegin = std::remove_if(accumulatedErrors.begin(), accumulatedErrors.end(),
-      [](const auto& error) {
-        return error.template is<OpensslUntranslatedError>();
-      });
+      [](const auto& error) { return error.template is<OpensslUntranslatedError>(); });
 
   accumulatedErrors.resize(removeBegin - accumulatedErrors.begin());
 #endif
@@ -192,7 +197,7 @@ std::pair<kj::StringPtr, const EVP_MD*> lookupDigestAlgorithm(kj::StringPtr algo
 
   auto algIter = registeredAlgorithms.find(algorithm);
   JSG_REQUIRE(algIter != registeredAlgorithms.end(), DOMNotSupportedError,
-               "Unrecognized or unimplemented digest algorithm requested.");
+      "Unrecognized or unimplemented digest algorithm requested.");
   return *algIter;
 }
 
@@ -231,8 +236,8 @@ void checkPbkdfLimits(jsg::Lock& js, size_t iterations) {
   auto& limits = Worker::Isolate::from(js).getLimitEnforcer();
   KJ_IF_SOME(max, limits.checkPbkdfIterations(js, iterations)) {
     JSG_FAIL_REQUIRE(DOMNotSupportedError,
-        kj::str("Pbkdf2 failed: iteration counts above ", max ," are not supported (requested ",
-                iterations, ")."));
+        kj::str("Pbkdf2 failed: iteration counts above ", max, " are not supported (requested ",
+            iterations, ")."));
   }
 }
 
@@ -264,7 +269,6 @@ kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& n, size_t padde
     return kj::none;
   }
   return kj::mv(result);
-
 }
 
 kj::Own<BIGNUM> newBignum() {
@@ -278,8 +282,7 @@ void CryptoKey::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
 bool CSPRNG(kj::ArrayPtr<kj::byte> buffer) {
   do {
     if (1 == RAND_status())
-      if (1 == RAND_bytes(buffer.begin(), buffer.size()))
-        return true;
+      if (1 == RAND_bytes(buffer.begin(), buffer.size())) return true;
 #if OPENSSL_VERSION_MAJOR >= 3
     const auto code = ERR_peek_last_error();
     // A misconfigured OpenSSL 3 installation may report 1 from RAND_poll()
@@ -287,8 +290,7 @@ bool CSPRNG(kj::ArrayPtr<kj::byte> buffer) {
     // a matching algorithm for the CSPRNG.
     if (ERR_GET_LIB(code) == ERR_LIB_RAND) {
       const auto reason = ERR_GET_REASON(code);
-      if (reason == RAND_R_ERROR_INSTANTIATING_DRBG ||
-          reason == RAND_R_UNABLE_TO_FETCH_DRBG ||
+      if (reason == RAND_R_ERROR_INSTANTIATING_DRBG || reason == RAND_R_UNABLE_TO_FETCH_DRBG ||
           reason == RAND_R_UNABLE_TO_CREATE_DRBG) {
         return false;
       }
@@ -299,19 +301,15 @@ bool CSPRNG(kj::ArrayPtr<kj::byte> buffer) {
   return false;
 }
 
-
 kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetAsn1Sequence(kj::ArrayPtr<const kj::byte> data) {
-  if (data.size() < 2 || data[0] != 0x30)
-    return kj::none;
+  if (data.size() < 2 || data[0] != 0x30) return kj::none;
 
   if (data[1] & 0x80) {
     // Long form.
     size_t n_bytes = data[1] & ~0x80;
-    if (n_bytes + 2 > data.size() || n_bytes > sizeof(size_t))
-      return kj::none;
+    if (n_bytes + 2 > data.size() || n_bytes > sizeof(size_t)) return kj::none;
     size_t length = 0;
-    for (size_t i = 0; i < n_bytes; i++)
-      length = (length << 8) | data[i + 2];
+    for (size_t i = 0; i < n_bytes; i++) length = (length << 8) | data[i + 2];
     auto start = 2 + n_bytes;
     auto end = start + kj::min(data.size() - 2 - n_bytes, length);
     return data.slice(start, end);

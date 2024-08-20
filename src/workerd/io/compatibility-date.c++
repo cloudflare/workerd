@@ -57,11 +57,11 @@ struct CompatDate {
     if (year < 2000 || year >= 3000) return kj::none;
     if (month < 1 || month > 12) return kj::none;
     if (day < 1 || day > 31) return kj::none;
-    return CompatDate { year, month, day };
+    return CompatDate{year, month, day};
   }
 
   static CompatDate parse(kj::StringPtr text, Worker::ValidationErrorReporter& errorReporter) {
-    static constexpr CompatDate DEFAULT_DATE { 2021, 5, 1 };
+    static constexpr CompatDate DEFAULT_DATE{2021, 5, 1};
     KJ_IF_SOME(v, parse(text)) {
       return v;
     } else {
@@ -79,11 +79,11 @@ struct CompatDate {
     struct tm t;
     KJ_ASSERT(gmtime_r(&now, &t) == &t);
 #endif
-    return { (uint)(t.tm_year + 1900), (uint)(t.tm_mon + 1), (uint)t.tm_mday };
+    return {(uint)(t.tm_year + 1900), (uint)(t.tm_mon + 1), (uint)t.tm_mday};
   }
 
   kj::String toString() {
-    return kj::str(year, '-', month < 10 ? "0" : "",  month, '-', day < 10 ? "0" : "", day);
+    return kj::str(year, '-', month < 10 ? "0" : "", month, '-', day < 10 ? "0" : "", day);
   }
 };
 }  // namespace
@@ -92,26 +92,29 @@ kj::String currentDateStr() {
   return CompatDate::today().toString();
 }
 
-void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text>::Reader compatFlags,
-                         CompatibilityFlags::Builder output,
-                         Worker::ValidationErrorReporter& errorReporter,
-                         bool allowExperimentalFeatures,
-                         CompatibilityDateValidation dateValidation) {
+void compileCompatibilityFlags(kj::StringPtr compatDate,
+    capnp::List<capnp::Text>::Reader compatFlags,
+    CompatibilityFlags::Builder output,
+    Worker::ValidationErrorReporter& errorReporter,
+    bool allowExperimentalFeatures,
+    CompatibilityDateValidation dateValidation) {
   auto parsedCompatDate = CompatDate::parse(compatDate, errorReporter);
 
   switch (dateValidation) {
     case CompatibilityDateValidation::CODE_VERSION:
       if (KJ_ASSERT_NONNULL(CompatDate::parse(SUPPORTED_COMPATIBILITY_DATE)) < parsedCompatDate) {
-        errorReporter.addError(kj::str(
-            "This Worker requires compatibility date \"", parsedCompatDate, "\", but the newest "
-            "date supported by this server binary is \"", SUPPORTED_COMPATIBILITY_DATE, "\"."));
+        errorReporter.addError(
+            kj::str("This Worker requires compatibility date \"", parsedCompatDate,
+                "\", but the newest "
+                "date supported by this server binary is \"",
+                SUPPORTED_COMPATIBILITY_DATE, "\"."));
       }
       break;
 
     case CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE:
       if (CompatDate::today() < parsedCompatDate) {
-        errorReporter.addError(kj::str(
-            "Can't set compatibility date in the future: ", parsedCompatDate));
+        errorReporter.addError(
+            kj::str("Can't set compatibility date in the future: ", parsedCompatDate));
       }
       break;
 
@@ -178,7 +181,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
           // This flag will be marked as enabled if the flag identified by
           // s.getName() is enabled, but only on or after the specified date.
           if (parsedCompatDate >= parsedDate && !disableByFlag) {
-            maybeImpliedBy.emplace(ImpliedBy {
+            maybeImpliedBy.emplace(ImpliedBy{
               .field = field,
               .other = schema.getFieldByName(s.getName()),
             });
@@ -195,18 +198,15 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
 
     // Check for conflicts.
     if (enableByFlag && disableByFlag) {
-      errorReporter.addError(kj::str(
-          "Compatibility flags are mutually contradictory: ",
+      errorReporter.addError(kj::str("Compatibility flags are mutually contradictory: ",
           enableFlagName, " vs ", disableFlagName));
     }
     if (enableByFlag && enableByDate) {
       KJ_IF_SOME(d, enableDate) {
-        errorReporter.addError(kj::str(
-            "The compatibility flag ", enableFlagName, " became the default as of ",
-            d, " so does not need to be specified anymore."));
+        errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
+            " became the default as of ", d, " so does not need to be specified anymore."));
       } else {
-        errorReporter.addError(kj::str(
-            "The compatibility flag ", enableFlagName,
+        errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
             " is the default, so does not need to be specified anymore."));
       }
     }
@@ -220,8 +220,8 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
         errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
             " is experimental and cannot yet be used in Workers deployed to Cloudflare."));
       } else {
-        errorReporter.addError(kj::str(
-            "The compatibility flag ", enableFlagName, " is experimental and may break or be "
+        errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
+            " is experimental and may break or be "
             "removed in a future version of workerd. To use this flag, you must pass --experimental "
             "on the command line."));
       }
@@ -230,7 +230,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
     dynamicOutput.set(field, enableByFlag || (enableByDate && !disableByFlag));
   }
 
-  for (auto& implied : impliedByList) {
+  for (auto& implied: impliedByList) {
     if (capnp::toDynamic(output).get(implied.other).as<bool>()) {
       dynamicOutput.set(implied.field, true);
     }
@@ -248,8 +248,7 @@ struct ParsedField {
   capnp::StructSchema::Field field;
 };
 
-kj::Array<const ParsedField> makeFieldTable(
-    capnp::StructSchema::FieldList fields) {
+kj::Array<const ParsedField> makeFieldTable(capnp::StructSchema::FieldList fields) {
   kj::Vector<ParsedField> table(fields.size());
 
   for (auto field: fields) {
@@ -265,7 +264,7 @@ kj::Array<const ParsedField> makeFieldTable(
     }
 
     if (neededByFl) {
-      table.add(ParsedField {
+      table.add(ParsedField{
         .enableFlag = KJ_REQUIRE_NONNULL(enableFlag),
         .field = field,
       });
@@ -278,8 +277,8 @@ kj::Array<const ParsedField> makeFieldTable(
 }  // namespace
 
 kj::Array<kj::StringPtr> decompileCompatibilityFlagsForFl(CompatibilityFlags::Reader input) {
-  static const auto fieldTable = makeFieldTable(
-      capnp::Schema::from<CompatibilityFlags>().getFields());
+  static const auto fieldTable =
+      makeFieldTable(capnp::Schema::from<CompatibilityFlags>().getFields());
 
   kj::Vector<kj::StringPtr> enableFlags;
 

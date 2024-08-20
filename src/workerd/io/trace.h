@@ -17,9 +17,9 @@
 #include <workerd/jsg/memory.h>
 
 namespace kj {
-  enum class HttpMethod;
-  class EntropySource;
-}
+enum class HttpMethod;
+class EntropySource;
+}  // namespace kj
 
 namespace workerd {
 
@@ -31,7 +31,8 @@ typedef rpc::Trace::Log::Level LogLevel;
 enum class PipelineLogLevel {
   // WARNING: This must be kept in sync with PipelineDef::LogLevel (which is not in the OSS
   //   release).
-  NONE, FULL
+  NONE,
+  FULL
 };
 
 // TODO(someday): See if we can merge similar code concepts...  Trace fills a role similar to
@@ -48,12 +49,15 @@ enum class PipelineLogLevel {
 // TODO(cleanup) - worth separating into immutable Trace vs. mutable TraceBuilder?
 
 // Collects trace information about the handling of a worker/pipeline fetch event.
-class Trace final : public kj::Refcounted {
+class Trace final: public kj::Refcounted {
 public:
-  explicit Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName,
+  explicit Trace(kj::Maybe<kj::String> stableId,
+      kj::Maybe<kj::String> scriptName,
       kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-      kj::Maybe<kj::String> dispatchNamespace, kj::Maybe<kj::String> scriptId,
-      kj::Array<kj::String> scriptTags, kj::Maybe<kj::String> entrypoint);
+      kj::Maybe<kj::String> dispatchNamespace,
+      kj::Maybe<kj::String> scriptId,
+      kj::Array<kj::String> scriptTags,
+      kj::Maybe<kj::String> entrypoint);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -62,8 +66,8 @@ public:
   public:
     class Header;
 
-    explicit FetchEventInfo(kj::HttpMethod method, kj::String url, kj::String cfJson,
-        kj::Array<Header> headers);
+    explicit FetchEventInfo(
+        kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
     FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
 
     class Header {
@@ -84,7 +88,7 @@ public:
 
     kj::HttpMethod method;
     kj::String url;
-      // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
+    // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
     kj::String cfJson;
     kj::Array<Header> headers;
 
@@ -169,12 +173,12 @@ public:
 
   class HibernatableWebSocketEventInfo {
   public:
-    struct Message{};
+    struct Message {};
     struct Close {
       uint16_t code;
       bool wasClean;
     };
-    struct Error{};
+    struct Error {};
 
     using Type = kj::OneOf<Message, Close, Error>;
 
@@ -191,7 +195,6 @@ public:
   public:
     explicit CustomEventInfo() {};
     CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
-
   };
 
   class FetchResponseInfo {
@@ -206,9 +209,8 @@ public:
 
   class DiagnosticChannelEvent {
   public:
-    explicit DiagnosticChannelEvent(kj::Date timestamp,
-                                    kj::String channel,
-                                    kj::Array<kj::byte> message);
+    explicit DiagnosticChannelEvent(
+        kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
     DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader);
     DiagnosticChannelEvent(DiagnosticChannelEvent&&) = default;
     KJ_DISALLOW_COPY(DiagnosticChannelEvent);
@@ -240,8 +242,8 @@ public:
 
   class Exception {
   public:
-    explicit Exception(kj::Date timestamp, kj::String name, kj::String message,
-                       kj::Maybe<kj::String> stack);
+    explicit Exception(
+        kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
     Exception(rpc::Trace::Exception::Reader reader);
     Exception(Exception&&) = default;
     KJ_DISALLOW_COPY(Exception);
@@ -264,9 +266,16 @@ public:
   // We treat the origin value as "unset".
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
 
-  typedef kj::OneOf<FetchEventInfo, JsRpcEventInfo, ScheduledEventInfo, AlarmEventInfo,
-          QueueEventInfo, EmailEventInfo, TraceEventInfo, HibernatableWebSocketEventInfo,
-          CustomEventInfo> EventInfo;
+  typedef kj::OneOf<FetchEventInfo,
+      JsRpcEventInfo,
+      ScheduledEventInfo,
+      AlarmEventInfo,
+      QueueEventInfo,
+      EmailEventInfo,
+      TraceEventInfo,
+      HibernatableWebSocketEventInfo,
+      CustomEventInfo>
+      EventInfo;
   kj::Maybe<EventInfo> eventInfo;
   // TODO(someday): Support more event types.
   // TODO(someday): Work out what sort of information we may want to convey about the parent
@@ -317,7 +326,7 @@ class WorkerTracer;
 // A tracer which records traces for a set of stages. All traces for a pipeline's stages and
 // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
 // trace worker.
-class PipelineTracer final : public kj::Refcounted {
+class PipelineTracer final: public kj::Refcounted {
 public:
   // Creates a pipeline tracer (with a possible parent).
   explicit PipelineTracer(kj::Maybe<kj::Own<PipelineTracer>> parentPipeline = kj::none)
@@ -336,13 +345,13 @@ public:
   }
 
   kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
-                                         kj::Maybe<kj::String> scriptId,
-                                         kj::Maybe<kj::String> stableId,
-                                         kj::Maybe<kj::String> scriptName,
-                                         kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-                                         kj::Maybe<kj::String> dispatchNamespace,
-                                         kj::Array<kj::String> scriptTags,
-                                         kj::Maybe<kj::String> entrypoint);
+      kj::Maybe<kj::String> scriptId,
+      kj::Maybe<kj::String> stableId,
+      kj::Maybe<kj::String> scriptName,
+      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
+      kj::Maybe<kj::String> dispatchNamespace,
+      kj::Array<kj::String> scriptTags,
+      kj::Maybe<kj::String> entrypoint);
   // Makes a tracer for a worker stage.
 
 private:
@@ -358,10 +367,11 @@ private:
 // Tracer are released, its Trace is considered complete and ready for submission. If the Trace to
 // write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
 // via extractTrace.
-class WorkerTracer final : public kj::Refcounted {
+class WorkerTracer final: public kj::Refcounted {
 public:
   explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
-      kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel);
+      kj::Own<Trace> trace,
+      PipelineLogLevel pipelineLogLevel);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
@@ -371,11 +381,11 @@ public:
   // TODO(soon): Eventually:
   //void setMetrics(...) // Or get from MetricsCollector::Request directly?
 
-  void addException(kj::Date timestamp, kj::String name, kj::String message,
-                    kj::Maybe<kj::String> stack);
+  void addException(
+      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
 
-  void addDiagnosticChannelEvent(kj::Date timestamp, kj::String channel,
-                                 kj::Array<kj::byte> message);
+  void addDiagnosticChannelEvent(
+      kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
   void setEventInfo(kj::Date timestamp, Trace::EventInfo&&);
@@ -463,7 +473,9 @@ public:
   uint droppedLogs = 0;
 
   explicit Span(kj::ConstString operationName, kj::Date startTime)
-      : operationName(kj::mv(operationName)), startTime(startTime), endTime(startTime) {}
+      : operationName(kj::mv(operationName)),
+        startTime(startTime),
+        endTime(startTime) {}
 };
 
 // An opaque token which can be used to create child spans of some parent. This is typically
@@ -488,18 +500,22 @@ public:
   // Create a new child span.
   //
   // `operationName` should be a string literal with infinite lifetime.
-  SpanBuilder newChild(kj::ConstString operationName,
-      kj::Date startTime = kj::systemPreciseCalendarClock().now());
+  SpanBuilder newChild(
+      kj::ConstString operationName, kj::Date startTime = kj::systemPreciseCalendarClock().now());
 
   // Useful to skip unnecessary code when not observed.
-  bool isObserved() { return observer != kj::none; }
+  bool isObserved() {
+    return observer != kj::none;
+  }
 
   // Get the underlying SpanObserver representing the parent span.
   //
   // This is needed in particular when making outbound network requests that must be annotated with
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
-  kj::Maybe<SpanObserver&> getObserver() { return observer; }
+  kj::Maybe<SpanObserver&> getObserver() {
+    return observer;
+  }
 
 private:
   kj::Maybe<kj::Own<SpanObserver>> observer;
@@ -522,8 +538,9 @@ public:
   //
   // `operationName` should be a string literal with infinite lifetime, or somehow otherwise be
   // attached to the observer observing this span.
-  explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName,
-                       kj::Date startTime = kj::systemPreciseCalendarClock().now()) {
+  explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
+      kj::ConstString operationName,
+      kj::Date startTime = kj::systemPreciseCalendarClock().now()) {
     if (observer != kj::none) {
       this->observer = kj::mv(observer);
       span.emplace(kj::mv(operationName), startTime);
@@ -545,20 +562,24 @@ public:
   void end();
 
   // Useful to skip unnecessary code when not observed.
-  bool isObserved() { return observer != kj::none; }
+  bool isObserved() {
+    return observer != kj::none;
+  }
 
   // Get the underlying SpanObserver representing the span.
   //
   // This is needed in particular when making outbound network requests that must be annotated with
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
-  kj::Maybe<SpanObserver&> getObserver() { return observer; }
+  kj::Maybe<SpanObserver&> getObserver() {
+    return observer;
+  }
 
   // Create a new child span.
   //
   // `operationName` should be a string literal with infinite lifetime.
-  SpanBuilder newChild(kj::ConstString operationName,
-      kj::Date startTime = kj::systemPreciseCalendarClock().now());
+  SpanBuilder newChild(
+      kj::ConstString operationName, kj::Date startTime = kj::systemPreciseCalendarClock().now());
 
   // Change the operation name from what was specified at span creation.
   //
@@ -604,8 +625,7 @@ public:
   virtual void report(const Span& span) = 0;
 };
 
-inline SpanParent::SpanParent(SpanBuilder& builder)
-    : observer(mapAddRef(builder.observer)) {}
+inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}
 
 inline SpanParent SpanParent::addRef() {
   return SpanParent(mapAddRef(observer));
@@ -613,12 +633,12 @@ inline SpanParent SpanParent::addRef() {
 
 inline SpanBuilder SpanParent::newChild(kj::ConstString operationName, kj::Date startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-                     kj::mv(operationName), startTime);
+      kj::mv(operationName), startTime);
 }
 
 inline SpanBuilder SpanBuilder::newChild(kj::ConstString operationName, kj::Date startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-                     kj::mv(operationName), startTime);
+      kj::mv(operationName), startTime);
 }
 
-} // namespace workerd
+}  // namespace workerd

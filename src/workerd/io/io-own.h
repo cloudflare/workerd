@@ -13,17 +13,28 @@ namespace workerd {
 
 class IoContext;
 
-template <typename T> class IoOwn;
-template <typename T> class IoPtr;
-template <typename T> class ReverseIoOwn;
+template <typename T>
+class IoOwn;
+template <typename T>
+class IoPtr;
+template <typename T>
+class ReverseIoOwn;
 
 template <typename T>
-struct RemoveIoOwn_ { typedef T Type; static constexpr bool is = false; };
+struct RemoveIoOwn_ {
+  typedef T Type;
+  static constexpr bool is = false;
+};
 template <typename T>
-struct RemoveIoOwn_<IoOwn<T>> { typedef T Type; static constexpr bool is = true; };
+struct RemoveIoOwn_<IoOwn<T>> {
+  typedef T Type;
+  static constexpr bool is = true;
+};
 
 template <typename T>
-constexpr bool isIoOwn() { return RemoveIoOwn_<T>::is; }
+constexpr bool isIoOwn() {
+  return RemoveIoOwn_<T>::is;
+}
 template <typename T>
 using RemoveIoOwn = typename RemoveIoOwn_<T>::Type;
 
@@ -104,8 +115,7 @@ private:
 // Object which receives possibly-cross-thread deletions of owned objects.
 class DeleteQueue: public kj::AtomicRefcounted {
 public:
-  DeleteQueue()
-      : crossThreadDeleteQueue(State { kj::Vector<OwnedObject*>() }) {}
+  DeleteQueue(): crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}) {}
 
   void scheduleDeletion(OwnedObject* object) const;
 
@@ -120,7 +130,8 @@ public:
   kj::MutexGuarded<kj::Maybe<State>> crossThreadDeleteQueue;
 
   // Implements the corresponding methods of IoContext and ActorContext.
-  template <typename T> IoOwn<T> addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects);
+  template <typename T>
+  IoOwn<T> addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects);
 
   template <typename T>
   ReverseIoOwn<T> addObjectReverse(
@@ -148,8 +159,7 @@ inline SpecificOwnedObject<T>* DeleteQueue::addObjectImpl(
   //   (which would have forced a bunch of useless vtables and vtable pointers)... I'm manually
   //   constructing the kj::Own<> using a disposer that I know is compatible.
   // TODO(cleanup): Can KJ be made to support this use case?
-  kj::Own<OwnedObject> ownedObject(
-      new SpecificOwnedObject<T>(kj::mv(obj)),
+  kj::Own<OwnedObject> ownedObject(new SpecificOwnedObject<T>(kj::mv(obj)),
       kj::_::HeapDisposer<SpecificOwnedObject<T>>::instance);
 
   if constexpr (kj::canConvert<T&, Finalizeable&>()) {
@@ -162,8 +172,7 @@ inline SpecificOwnedObject<T>* DeleteQueue::addObjectImpl(
 }
 
 template <typename T>
-inline IoOwn<T> DeleteQueue::addObject(
-    kj::Own<T> obj, OwnedObjectList& ownedObjects) {
+inline IoOwn<T> DeleteQueue::addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects) {
   return IoOwn<T>(kj::atomicAddRef(*this), addObjectImpl(kj::mv(obj), ownedObjects));
 }
 
@@ -179,8 +188,7 @@ inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(
 // to the delete queue to get the tear-down order right.
 class DeleteQueuePtr: public kj::Own<DeleteQueue> {
 public:
-  DeleteQueuePtr(kj::Own<DeleteQueue> value)
-      : kj::Own<DeleteQueue>(kj::mv(value)) {}
+  DeleteQueuePtr(kj::Own<DeleteQueue> value): kj::Own<DeleteQueue>(kj::mv(value)) {}
   KJ_DISALLOW_COPY_AND_MOVE(DeleteQueuePtr);
   ~DeleteQueuePtr() noexcept(false) {
     auto ptr = get();
@@ -202,7 +210,9 @@ public:
   KJ_DISALLOW_COPY(IoOwn);
 
   T* operator->();
-  T& operator*() { return *operator->(); }
+  T& operator*() {
+    return *operator->();
+  }
   operator kj::Own<T>() &&;
   IoOwn& operator=(IoOwn&& other);
   IoOwn& operator=(decltype(nullptr));
@@ -228,9 +238,9 @@ private:
   kj::Own<const DeleteQueue> deleteQueue;
   SpecificOwnedObject<T>* item;
 
-  IoOwn(kj::Own<const DeleteQueue> deleteQueue,
-        SpecificOwnedObject<T>* item)
-      : deleteQueue(kj::mv(deleteQueue)), item(item) {}
+  IoOwn(kj::Own<const DeleteQueue> deleteQueue, SpecificOwnedObject<T>* item)
+      : deleteQueue(kj::mv(deleteQueue)),
+        item(item) {}
 };
 
 // Reference held by a V8 heap object, pointing to a KJ event loop object. Cannot be
@@ -238,12 +248,13 @@ private:
 template <typename T>
 class IoPtr {
 public:
-  IoPtr(const IoPtr& other)
-      : deleteQueue(kj::atomicAddRef(*other.deleteQueue)), ptr(other.ptr) {}
+  IoPtr(const IoPtr& other): deleteQueue(kj::atomicAddRef(*other.deleteQueue)), ptr(other.ptr) {}
   IoPtr(IoPtr&& other) = default;
 
   T* operator->();
-  T& operator*() { return *operator->(); }
+  T& operator*() {
+    return *operator->();
+  }
   IoPtr& operator=(decltype(nullptr));
 
 private:
@@ -253,9 +264,9 @@ private:
   kj::Own<const DeleteQueue> deleteQueue;
   T* ptr;
 
-  IoPtr(kj::Own<const DeleteQueue> deleteQueue,
-         T* ptr)
-      : deleteQueue(kj::mv(deleteQueue)), ptr(ptr) {}
+  IoPtr(kj::Own<const DeleteQueue> deleteQueue, T* ptr)
+      : deleteQueue(kj::mv(deleteQueue)),
+        ptr(ptr) {}
 };
 
 // Owned pointer held by a KJ I/O object living in the same thread as an IoContext. The underlying
@@ -277,7 +288,9 @@ public:
   KJ_DISALLOW_COPY(ReverseIoOwn);
 
   T* operator->();
-  T& operator*() { return *operator->(); }
+  T& operator*() {
+    return *operator->();
+  }
   operator kj::Own<T>() &&;
   ReverseIoOwn& operator=(ReverseIoOwn&& other);
   ReverseIoOwn& operator=(decltype(nullptr));
@@ -289,15 +302,14 @@ private:
   kj::Own<workerd::WeakRef<IoContext>> weakRef;
   SpecificOwnedObject<T>* item;
 
-  ReverseIoOwn(kj::Own<workerd::WeakRef<IoContext>> weakRef,
-               SpecificOwnedObject<T>* item)
-      : weakRef(kj::mv(weakRef)), item(item) {}
+  ReverseIoOwn(kj::Own<workerd::WeakRef<IoContext>> weakRef, SpecificOwnedObject<T>* item)
+      : weakRef(kj::mv(weakRef)),
+        item(item) {}
 };
 
 template <typename T>
-IoOwn<T>::IoOwn(IoOwn&& other)
-    : deleteQueue(kj::mv(other.deleteQueue)),
-      item(other.item) {
+IoOwn<T>::IoOwn(IoOwn&& other): deleteQueue(kj::mv(other.deleteQueue)),
+                                item(other.item) {
   other.item = nullptr;
 }
 

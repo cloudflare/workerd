@@ -9,8 +9,7 @@
 
 namespace workerd::api {
 
-WritableStreamDefaultWriter::WritableStreamDefaultWriter()
-    : ioContext(tryGetIoContext()) {}
+WritableStreamDefaultWriter::WritableStreamDefaultWriter(): ioContext(tryGetIoContext()) {}
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
   KJ_IF_SOME(stream, state.tryGet<Attached>()) {
@@ -19,18 +18,16 @@ WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
 }
 
 jsg::Ref<WritableStreamDefaultWriter> WritableStreamDefaultWriter::constructor(
-    jsg::Lock& js,
-    jsg::Ref<WritableStream> stream) {
-  JSG_REQUIRE(!stream->isLocked(), TypeError,
-               "This WritableStream is currently locked to a writer.");
+    jsg::Lock& js, jsg::Ref<WritableStream> stream) {
+  JSG_REQUIRE(
+      !stream->isLocked(), TypeError, "This WritableStream is currently locked to a writer.");
   auto writer = jsg::alloc<WritableStreamDefaultWriter>();
   writer->lockToStream(js, *stream);
   return kj::mv(writer);
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::abort(
-    jsg::Lock& js,
-    jsg::Optional<v8::Local<v8::Value>> reason) {
+    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this writer was never attached");
@@ -54,8 +51,7 @@ jsg::Promise<void> WritableStreamDefaultWriter::abort(
   KJ_UNREACHABLE;
 }
 
-void WritableStreamDefaultWriter::attach(
-    WritableStreamController& controller,
+void WritableStreamDefaultWriter::attach(WritableStreamController& controller,
     jsg::Promise<void> closedPromise,
     jsg::Promise<void> readyPromise) {
   KJ_ASSERT(state.is<Initial>());
@@ -82,8 +78,7 @@ jsg::Promise<void> WritableStreamDefaultWriter::close(jsg::Lock& js) {
           js.v8TypeError("This WritableStream writer has been released."_kj));
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {
-      return js.rejectedPromise<void>(
-          js.v8TypeError("This WritableStream has been closed."_kj));
+      return js.rejectedPromise<void>(js.v8TypeError("This WritableStream has been closed."_kj));
     }
   }
   KJ_UNREACHABLE;
@@ -187,8 +182,7 @@ jsg::Promise<void> WritableStreamDefaultWriter::write(jsg::Lock& js, v8::Local<v
           js.v8TypeError("This WritableStream writer has been released."_kj));
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {
-      return js.rejectedPromise<void>(
-          js.v8TypeError("This WritableStream has been closed."_kj));
+      return js.rejectedPromise<void>(js.v8TypeError("This WritableStream has been closed."_kj));
     }
   }
   KJ_UNREACHABLE;
@@ -219,13 +213,12 @@ void WritableStreamDefaultWriter::visitForGc(jsg::GcVisitor& visitor) {
 
 // ======================================================================================
 
-WritableStream::WritableStream(
-    IoContext& ioContext,
+WritableStream::WritableStream(IoContext& ioContext,
     kj::Own<WritableStreamSink> sink,
     kj::Maybe<uint64_t> maybeHighWaterMark,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable)
-    : WritableStream(newWritableStreamInternalController(ioContext, kj::mv(sink),
-        maybeHighWaterMark, kj::mv(maybeClosureWaitable))) {}
+    : WritableStream(newWritableStreamInternalController(
+          ioContext, kj::mv(sink), maybeHighWaterMark, kj::mv(maybeClosureWaitable))) {}
 
 WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
     : ioContext(tryGetIoContext()),
@@ -233,20 +226,24 @@ WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
   getController().setOwnerRef(*this);
 }
 
-jsg::Ref<WritableStream> WritableStream::addRef() { return JSG_THIS; }
+jsg::Ref<WritableStream> WritableStream::addRef() {
+  return JSG_THIS;
+}
 
 void WritableStream::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(getController());
 }
 
-bool WritableStream::isLocked() { return getController().isLockedToWriter(); }
+bool WritableStream::isLocked() {
+  return getController().isLockedToWriter();
+}
 
-WritableStreamController& WritableStream::getController() { return *controller; }
+WritableStreamController& WritableStream::getController() {
+  return *controller;
+}
 
 kj::Own<WritableStreamSink> WritableStream::removeSink(jsg::Lock& js) {
-  return JSG_REQUIRE_NONNULL(
-      getController().removeSink(js),
-      TypeError,
+  return JSG_REQUIRE_NONNULL(getController().removeSink(js), TypeError,
       "This WritableStream does not have a WritableStreamSink");
 }
 
@@ -255,8 +252,7 @@ void WritableStream::detach(jsg::Lock& js) {
 }
 
 jsg::Promise<void> WritableStream::abort(
-    jsg::Lock& js,
-    jsg::Optional<v8::Local<v8::Value>> reason) {
+    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
@@ -284,15 +280,13 @@ jsg::Ref<WritableStreamDefaultWriter> WritableStream::getWriter(jsg::Lock& js) {
   return WritableStreamDefaultWriter::constructor(js, JSG_THIS);
 }
 
-jsg::Ref<WritableStream> WritableStream::constructor(
-    jsg::Lock& js,
+jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
     jsg::Optional<UnderlyingSink> underlyingSink,
     jsg::Optional<StreamQueuingStrategy> queuingStrategy) {
-  JSG_REQUIRE(FeatureFlags::get(js).getStreamsJavaScriptControllers(),
-               Error,
-               "To use the new WritableStream() constructor, enable the "
-               "streams_enable_constructors compatibility flag. "
-               "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
+  JSG_REQUIRE(FeatureFlags::get(js).getStreamsJavaScriptControllers(), Error,
+      "To use the new WritableStream() constructor, enable the "
+      "streams_enable_constructors compatibility flag. "
+      "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
   auto stream = jsg::alloc<WritableStream>(newWritableStreamJsController());
   stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
   return kj::mv(stream);
@@ -303,8 +297,7 @@ namespace {
 // Wrapper around `WritableStreamSink` that makes it suitable for passing off to capnp RPC.
 class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
 public:
-  WritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner)
-      : inner(kj::mv(inner)) {}
+  WritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner): inner(kj::mv(inner)) {}
   ~WritableStreamRpcAdapter() noexcept(false) {
     weakRef->invalidate();
     doneFulfiller->fulfill();
@@ -357,9 +350,7 @@ private:
           kj::Badge<WritableStreamRpcAdapter>(), *this);
 
   WritableStreamSink& getInner() {
-    return *KJ_UNWRAP_OR(inner, {
-      kj::throwFatalException(cancellationException());
-    });
+    return *KJ_UNWRAP_OR(inner, { kj::throwFatalException(cancellationException()); });
   }
 
   static kj::Exception cancellationException() {
@@ -377,7 +368,8 @@ private:
 class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
 public:
   WritableStreamJsRpcAdapter(IoContext& context, jsg::Ref<WritableStreamDefaultWriter> writer)
-      : context(context), writer(kj::mv(writer)) {}
+      : context(context),
+        writer(kj::mv(writer)) {}
 
   ~WritableStreamJsRpcAdapter() noexcept(false) {
     weakRef->invalidate();
@@ -406,13 +398,11 @@ public:
     // hopefully improve the situation here.
     if (!ended) {
       KJ_IF_SOME(writer, this->writer) {
-        context.addTask(context.run(
-            [writer=kj::mv(writer), exception=cancellationException()]
-            (Worker::Lock& lock) mutable {
+        context.addTask(context.run([writer = kj::mv(writer), exception = cancellationException()](
+                                        Worker::Lock& lock) mutable {
           jsg::Lock& js = lock;
           auto ex = js.exceptionToJs(kj::mv(exception));
-          return IoContext::current().awaitJs(lock,
-              writer->abort(lock, ex.getHandle(js)));
+          return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
         }));
       }
     }
@@ -432,13 +422,12 @@ public:
         }
         auto w = kj::mv(obj.writer);
         KJ_IF_SOME(writer, w) {
-          obj.context.addTask(obj.context.run(
-              [writer=kj::mv(writer), exception=cancellationException()]
-              (Worker::Lock& lock) mutable {
+          obj.context.addTask(
+              obj.context.run([writer = kj::mv(writer), exception = cancellationException()](
+                                  Worker::Lock& lock) mutable {
             jsg::Lock& js = lock;
             auto ex = js.exceptionToJs(kj::mv(exception));
-            return IoContext::current().awaitJs(lock,
-                writer->abort(lock, ex.getHandle(js)));
+            return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
           }));
         }
       }
@@ -463,7 +452,7 @@ public:
       return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
     }
     auto amount = 0;
-    for (auto& piece : pieces) {
+    for (auto& piece: pieces) {
       amount += piece.size();
     }
     if (amount == 0) return kj::READY_NOW;
@@ -475,7 +464,7 @@ public:
       // for the ArrayBuffer remains valid.
       auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, amount));
       auto ptr = source.asArrayPtr();
-      for (auto& piece : pieces) {
+      for (auto& piece: pieces) {
         KJ_DASSERT(ptr.size() > 0);
         KJ_DASSERT(piece.size() <= ptr.size());
         if (piece.size() == 0) continue;
@@ -573,9 +562,8 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
     auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper));
 
-    externalHandler->write(
-        [capnpStream = kj::mv(capnpStream), encoding]
-        (rpc::JsValue::External::Builder builder) mutable {
+    externalHandler->write([capnpStream = kj::mv(capnpStream), encoding](
+                               rpc::JsValue::External::Builder builder) mutable {
       auto ws = builder.initWritableStream();
       ws.setByteStream(kj::mv(capnpStream));
       ws.setEncoding(encoding);
@@ -593,8 +581,7 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     auto capnpStream = ioctx.getByteStreamFactory().kjToCapnp(kj::mv(wrapper));
 
     externalHandler->write(
-        [capnpStream = kj::mv(capnpStream)]
-        (rpc::JsValue::External::Builder builder) mutable {
+        [capnpStream = kj::mv(capnpStream)](rpc::JsValue::External::Builder builder) mutable {
       auto ws = builder.initWritableStream();
       ws.setByteStream(kj::mv(capnpStream));
       ws.setEncoding(StreamEncoding::IDENTITY);
@@ -604,8 +591,8 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
 jsg::Ref<WritableStream> WritableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-  auto& handler = KJ_REQUIRE_NONNULL(deserializer.getExternalHandler(),
-      "got WritableStream on non-RPC serialized object?");
+  auto& handler = KJ_REQUIRE_NONNULL(
+      deserializer.getExternalHandler(), "got WritableStream on non-RPC serialized object?");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHander*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got WritableStream on non-RPC serialized object?");
 
@@ -615,8 +602,8 @@ jsg::Ref<WritableStream> WritableStream::deserialize(
   auto ws = reader.getWritableStream();
   auto encoding = ws.getEncoding();
 
-  KJ_REQUIRE(static_cast<uint>(encoding) <
-      capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
+  KJ_REQUIRE(
+      static_cast<uint>(encoding) < capnp::Schema::from<StreamEncoding>().getEnumerants().size(),
       "unknown StreamEncoding received from peer");
 
   IoContext& ioctx = IoContext::current();

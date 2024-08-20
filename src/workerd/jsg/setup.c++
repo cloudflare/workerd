@@ -51,16 +51,16 @@ public:
   static const PlatformDisposer instance;
 };
 
-const PlatformDisposer PlatformDisposer::instance {};
+const PlatformDisposer PlatformDisposer::instance{};
 
 kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount) {
   return kj::Own<v8::Platform>(
-      v8::platform::NewDefaultPlatform(
-        backgroundThreadCount,  // default thread pool size
-        v8::platform::IdleTaskSupport::kDisabled,  // TODO(perf): investigate enabling
-        v8::platform::InProcessStackDumping::kDisabled,  // KJ's stack traces are better
-        nullptr)  // default TracingController
-      .release(), PlatformDisposer::instance);
+      v8::platform::NewDefaultPlatform(backgroundThreadCount,  // default thread pool size
+          v8::platform::IdleTaskSupport::kDisabled,            // TODO(perf): investigate enabling
+          v8::platform::InProcessStackDumping::kDisabled,      // KJ's stack traces are better
+          nullptr)                                             // default TracingController
+          .release(),
+      PlatformDisposer::instance);
 }
 
 static kj::Own<v8::Platform> userPlatform(v8::Platform& platform) {
@@ -76,7 +76,8 @@ V8System::V8System(v8::Platform& platformParam): V8System(platformParam, nullptr
 V8System::V8System(v8::Platform& platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
     : V8System(userPlatform(platformParam), flags) {}
 V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : platformInner(kj::mv(platformParam)), platformWrapper(*platformInner) {
+    : platformInner(kj::mv(platformParam)),
+      platformWrapper(*platformInner) {
 #if V8_HAS_STACK_START_MARKER
   v8::StackStartMarker::EnableForProcess();
 #endif
@@ -160,9 +161,7 @@ IsolateBase& IsolateBase::from(v8::Isolate* isolate) {
   return *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
 }
 
-void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate,
-                                     v8::EmbedderGraph* graph,
-                                     void* data) {
+void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data) {
   try {
     const auto base = reinterpret_cast<IsolateBase*>(data);
     MemoryTracker tracker(isolate, graph);
@@ -259,8 +258,8 @@ bool HeapTracer::IsRoot(const v8::TracedReference<v8::Value>& handle) {
 void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
   // references in Wrappable::attachWrapper() for details.
-  auto& wrappable = *reinterpret_cast<Wrappable*>(
-      handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
+  auto& wrappable =
+      *reinterpret_cast<Wrappable*>(handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
           Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
@@ -283,46 +282,45 @@ bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
 }
 
 namespace {
-  std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
-    return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      v8::CppHeapCreateParams heapParams {{}};
-      heapParams.marking_support = cppgc::Heap::MarkingType::kAtomic;
-      heapParams.sweeping_support = cppgc::Heap::SweepingType::kAtomic;
-      return v8::CppHeap::Create(system, heapParams);
-    });
-  }
-  static v8::Isolate* newIsolate(
-      v8::Isolate::CreateParams&& params,
-      v8::CppHeap* cppHeap) {
-    return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
-      // We currently don't attempt to support incremental marking or sweeping. We probably could
-      // support them, but it will take some careful investigation and testing. It's not clear if
-      // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
-      // full atomic mark-sweep usually doesn't require much of a pause.
-      //
-      // We probably won't ever support concurrent marking or sweeping because concurrent GC is
-      // only expected to be a win if there are idle CPU cores available. Workers normally run on
-      // servers that are handling many requests at once, thus it's expected CPU cores will be
-      // fully utilized. This differs from browser environments, where a user is typically doing
-      // only one thing at a time and thus likely has CPU cores to spare.
-
-      // V8 *claims* to take ownership of the v8::CppHeap but actually releases ownership of it
-      // during v8::Isolate::Dispose.
-      // TODO(soon): submit a bug report/patch to v8.
-      params.cpp_heap = cppHeap;
-
-      if (params.array_buffer_allocator == nullptr &&
-          params.array_buffer_allocator_shared == nullptr) {
-        params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
-            v8::ArrayBuffer::Allocator::NewDefaultAllocator());
-      }
-      return v8::Isolate::New(params);
-    });
-  }
+std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
+  return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    v8::CppHeapCreateParams heapParams{{}};
+    heapParams.marking_support = cppgc::Heap::MarkingType::kAtomic;
+    heapParams.sweeping_support = cppgc::Heap::SweepingType::kAtomic;
+    return v8::CppHeap::Create(system, heapParams);
+  });
 }
+static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap) {
+  return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
+    // We currently don't attempt to support incremental marking or sweeping. We probably could
+    // support them, but it will take some careful investigation and testing. It's not clear if
+    // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
+    // full atomic mark-sweep usually doesn't require much of a pause.
+    //
+    // We probably won't ever support concurrent marking or sweeping because concurrent GC is
+    // only expected to be a win if there are idle CPU cores available. Workers normally run on
+    // servers that are handling many requests at once, thus it's expected CPU cores will be
+    // fully utilized. This differs from browser environments, where a user is typically doing
+    // only one thing at a time and thus likely has CPU cores to spare.
 
-IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams,
-                         kj::Own<IsolateObserver> observer)
+    // V8 *claims* to take ownership of the v8::CppHeap but actually releases ownership of it
+    // during v8::Isolate::Dispose.
+    // TODO(soon): submit a bug report/patch to v8.
+    params.cpp_heap = cppHeap;
+
+    if (params.array_buffer_allocator == nullptr &&
+        params.array_buffer_allocator_shared == nullptr) {
+      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+          v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+    }
+    return v8::Isolate::New(params);
+  });
+}
+}  // namespace
+
+IsolateBase::IsolateBase(const V8System& system,
+    v8::Isolate::CreateParams&& createParams,
+    kj::Own<IsolateObserver> observer)
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.get())),
@@ -354,8 +352,8 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
     // use, we use `kExplicit`. Replacing the callback seems to solve the problem?
     ptr->SetWasmAsyncResolvePromiseCallback(
         [](v8::Isolate* isolate, v8::Local<v8::Context> context,
-          v8::Local<v8::Promise::Resolver> resolver,
-          v8::Local<v8::Value> result, v8::WasmAsyncSuccess success) {
+            v8::Local<v8::Promise::Resolver> resolver, v8::Local<v8::Value> result,
+            v8::WasmAsyncSuccess success) {
       switch (success) {
         case v8::WasmAsyncSuccess::kSuccess:
           resolver->Resolve(context, result).FromJust();
@@ -380,9 +378,10 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
 
       // Create Symbol.dispose and Symbol.asyncDispose.
-      symbolAsyncDispose.Reset(ptr, v8::Symbol::New(ptr,
-          v8::String::NewFromUtf8(ptr, "asyncDispose",
-              v8::NewStringType::kInternalized).ToLocalChecked()));
+      symbolAsyncDispose.Reset(ptr,
+          v8::Symbol::New(ptr,
+              v8::String::NewFromUtf8(ptr, "asyncDispose", v8::NewStringType::kInternalized)
+                  .ToLocalChecked()));
     }
   });
 }
@@ -390,7 +389,8 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     ptr->Dispose();
-    cppHeap.reset();;
+    cppHeap.reset();
+    ;
   });
 }
 
@@ -434,9 +434,8 @@ void IsolateBase::oomError(const char* location, const v8::OOMDetails& oom) {
     detailPrefix = "; detail: "_kj;
     detail = oom.detail;
   }
-  auto message = kj::str(
-      oom.is_heap_oom ? ": allocation failed: JavaScript heap out of memory"_kj
-                      : ": allocation failed: process out of memory"_kj,
+  auto message = kj::str(oom.is_heap_oom ? ": allocation failed: JavaScript heap out of memory"_kj
+                                         : ": allocation failed: process out of memory"_kj,
       detailPrefix, detail);
   reportV8FatalError(location, message);
 }
@@ -445,11 +444,10 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike) {
   v8::Isolate* isolate = context->GetIsolate();
   IsolateBase* self = reinterpret_cast<IsolateBase*>(isolate->GetData(0));
-  return { .codegen_allowed = self->evalAllowed, .modified_source = {} };
+  return {.codegen_allowed = self->evalAllowed, .modified_source = {}};
 }
 
-bool IsolateBase::allowWasmCallback(
-    v8::Local<v8::Context> context, v8::Local<v8::String> source) {
+bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
   // Don't allow WASM unless arbitrary eval() is allowed.
   IsolateBase* self = reinterpret_cast<IsolateBase*>(context->GetIsolate()->GetData(0));
   return self->evalAllowed;
@@ -476,11 +474,8 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
     case v8::JitCodeEvent::CODE_ADDED: {
       // Usually CODE_ADDED comes after CODE_END_LINE_INFO_RECORDING, but sometimes it doesn't,
       // particularly in the case of Wasm where it apperas no line info is provided.
-      auto& info = codeMap.findOrCreate(startAddr, [&]() {
-        return decltype(self->codeMap)::Entry {
-          startAddr, CodeBlockInfo()
-        };
-      });
+      auto& info = codeMap.findOrCreate(
+          startAddr, [&]() { return decltype(self->codeMap)::Entry{startAddr, CodeBlockInfo()}; });
       info.size = event->code_len;
       info.name = kj::str(kj::arrayPtr(event->name.str, event->name.len));
       info.type = event->code_type;
@@ -531,10 +526,8 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       // STATEMENT_POSITION.
       if (event->line_info.position_type == v8::JitCodeEvent::POSITION) {
         UserData* data = reinterpret_cast<UserData*>(event->user_data);
-        data->mapping.add(CodeBlockInfo::PositionMapping {
-          static_cast<uint>(event->line_info.offset),
-          static_cast<uint>(event->line_info.pos)
-        });
+        data->mapping.add(CodeBlockInfo::PositionMapping{
+          static_cast<uint>(event->line_info.offset), static_cast<uint>(event->line_info.pos)});
       }
       break;
 
@@ -551,11 +544,8 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
     case v8::JitCodeEvent::CODE_END_LINE_INFO_RECORDING: {
       // Sometimes CODE_END_LINE_INFO_RECORDING comes after CODE_ADDED, in particular with
       // modules.
-      auto& info = codeMap.findOrCreate(startAddr, [&]() {
-        return decltype(self->codeMap)::Entry {
-          startAddr, CodeBlockInfo()
-        };
-      });
+      auto& info = codeMap.findOrCreate(
+          startAddr, [&]() { return decltype(self->codeMap)::Entry{startAddr, CodeBlockInfo()}; });
 
       UserData* data = reinterpret_cast<UserData*>(event->user_data);
       info.mapping = data->mapping.releaseAsArray();
@@ -610,7 +600,7 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   state.fp = reinterpret_cast<void*>(mcontext.regs[29]);
   state.lr = reinterpret_cast<void*>(mcontext.regs[30]);
 #else
-  #error "Please add architecture support. See FillRegisterState() in v8/src/libsampler/sampler.cc"
+#error "Please add architecture support. See FillRegisterState() in v8/src/libsampler/sampler.cc"
 #endif
 
   v8::SampleInfo sampleInfo;
@@ -619,16 +609,36 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 
   kj::StringPtr vmState = "??";
   switch (sampleInfo.vm_state) {
-    case v8::StateTag::JS:                vmState = "js"; break;
-    case v8::StateTag::GC:                vmState = "gc"; break;
-    case v8::StateTag::PARSER:            vmState = "parser"; break;
-    case v8::StateTag::BYTECODE_COMPILER: vmState = "bytecode_compiler"; break;
-    case v8::StateTag::COMPILER:          vmState = "compiler"; break;
-    case v8::StateTag::OTHER:             vmState = "other"; break;
-    case v8::StateTag::EXTERNAL:          vmState = "external"; break;
-    case v8::StateTag::ATOMICS_WAIT:      vmState = "atomics_wait"; break;
-    case v8::StateTag::IDLE:              vmState = "idle"; break;
-    case v8::StateTag::LOGGING:           vmState = "logging"; break;
+    case v8::StateTag::JS:
+      vmState = "js";
+      break;
+    case v8::StateTag::GC:
+      vmState = "gc";
+      break;
+    case v8::StateTag::PARSER:
+      vmState = "parser";
+      break;
+    case v8::StateTag::BYTECODE_COMPILER:
+      vmState = "bytecode_compiler";
+      break;
+    case v8::StateTag::COMPILER:
+      vmState = "compiler";
+      break;
+    case v8::StateTag::OTHER:
+      vmState = "other";
+      break;
+    case v8::StateTag::EXTERNAL:
+      vmState = "external";
+      break;
+    case v8::StateTag::ATOMICS_WAIT:
+      vmState = "atomics_wait";
+      break;
+    case v8::StateTag::IDLE:
+      vmState = "idle";
+      break;
+    case v8::StateTag::LOGGING:
+      vmState = "logging";
+      break;
   }
   appendText("js: (", vmState, ")");
 
@@ -685,7 +695,9 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 
 kj::StringPtr IsolateBase::getUuid() {
   // Lazily create a random UUID for this isolate.
-  KJ_IF_SOME(u, uuid) { return u; }
+  KJ_IF_SOME(u, uuid) {
+    return u;
+  }
   return uuid.emplace(randomUUID(kj::none));
 }
 
