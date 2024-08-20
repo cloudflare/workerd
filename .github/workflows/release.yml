@@ -175,10 +175,6 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
-        with:
-          # This version will be different depending on the value of `packageManager` field
-          # in package.json file with the setting in `.npmrc` file.
-          version: latest
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
