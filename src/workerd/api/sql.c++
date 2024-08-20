@@ -37,19 +37,19 @@ double SqlStorage::getDatabaseSize() {
   return pages * getPageSize();
 }
 
-bool SqlStorage::isAllowedName(kj::StringPtr name) {
+bool SqlStorage::isAllowedName(kj::StringPtr name) const {
   return !name.startsWith("_cf_");
 }
 
-bool SqlStorage::isAllowedTrigger(kj::StringPtr name) {
+bool SqlStorage::isAllowedTrigger(kj::StringPtr name) const {
   return true;
 }
 
-void SqlStorage::onError(kj::StringPtr message) {
+void SqlStorage::onError(kj::StringPtr message) const {
   JSG_ASSERT(false, Error, message);
 }
 
-bool SqlStorage::allowTransactions() {
+bool SqlStorage::allowTransactions() const {
   if (IoContext::hasCurrent()) {
     IoContext::current().logWarningOnce(
         "To execute a transaction, please use the state.storage.transaction() API instead of the "

@@ -120,7 +120,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   jsg::NodeJsModuleContext);
 
 
-static PythonConfig defaultConfig {
+static const PythonConfig defaultConfig {
   .packageDiskCacheRoot = kj::none,
   .pyodideDiskCacheRoot = kj::none,
   .createSnapshot = false,
@@ -133,7 +133,7 @@ struct WorkerdApi::Impl final {
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
-  PythonConfig& pythonConfig;
+  const PythonConfig& pythonConfig;
 
   class Configuration {
   public:
@@ -156,7 +156,7 @@ struct WorkerdApi::Impl final {
        IsolateLimitEnforcer& limitEnforcer,
        kj::Own<jsg::IsolateObserver> observer,
        api::MemoryCacheProvider& memoryCacheProvider,
-       PythonConfig& pythonConfig = defaultConfig,
+       const PythonConfig& pythonConfig = defaultConfig,
        kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
       : features(capnp::clone(featuresParam)),
         maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
@@ -209,7 +209,7 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     IsolateLimitEnforcer& limitEnforcer,
     kj::Own<jsg::IsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
-    PythonConfig &pythonConfig,
+    const PythonConfig& pythonConfig,
     kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
     : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer),
                           memoryCacheProvider, pythonConfig,

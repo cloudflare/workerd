@@ -44,7 +44,7 @@ struct FormDataHeaderTable {
 };
 
 const FormDataHeaderTable& getFormDataHeaderTable() {
-  static FormDataHeaderTable table({});
+  static const FormDataHeaderTable table({});
   return table;
 }
 

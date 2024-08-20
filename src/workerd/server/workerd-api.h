@@ -26,7 +26,7 @@ public:
       IsolateLimitEnforcer& limitEnforcer,
       kj::Own<jsg::IsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
-      PythonConfig& pythonConfig,
+      const PythonConfig& pythonConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry);
   ~WorkerdApi() noexcept(false);
 

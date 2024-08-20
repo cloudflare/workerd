@@ -54,10 +54,10 @@ private:
     visitor.visit(storage);
   }
 
-  bool isAllowedName(kj::StringPtr name) override;
-  bool isAllowedTrigger(kj::StringPtr name) override;
-  void onError(kj::StringPtr message) override;
-  bool allowTransactions() override;
+  bool isAllowedName(kj::StringPtr name) const override;
+  bool isAllowedTrigger(kj::StringPtr name) const override;
+  void onError(kj::StringPtr message) const override;
+  bool allowTransactions() const override;
 
   IoPtr<SqliteDatabase> sqlite;
   jsg::Ref<DurableObjectStorage> storage;

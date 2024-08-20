@@ -1963,7 +1963,7 @@ struct JsgConfig {
   bool unwrapCustomThenables = false;
 };
 
-static JsgConfig DEFAULT_JSG_CONFIG = {};
+static constexpr JsgConfig DEFAULT_JSG_CONFIG = {};
 
 template <typename Config>
 static const JsgConfig& getConfig(const Config& config) {

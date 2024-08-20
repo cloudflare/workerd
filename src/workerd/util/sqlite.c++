@@ -365,7 +365,7 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
 
 // =======================================================================================
 
-SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
+constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
 
 SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::Maybe<kj::WriteMode> maybeMode) {
   KJ_IF_SOME(mode, maybeMode) {
@@ -435,7 +435,7 @@ kj::StringPtr SqliteDatabase::getCurrentQueryForDebug() {
 // Set up the regulator that will be used for authorizer callbacks while preparing this
 // statement.
 kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
-    Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
+    const Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
   KJ_ASSERT(currentRegulator == kj::none, "recursive prepareSql()?");
   KJ_DEFER(currentRegulator = kj::none);
   currentRegulator = regulator;
@@ -496,7 +496,8 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
   }
 }
 
-SqliteDatabase::IngestResult SqliteDatabase::ingestSql(Regulator& regulator, kj::StringPtr sqlCode) {
+SqliteDatabase::IngestResult SqliteDatabase::ingestSql(
+    const Regulator& regulator, kj::StringPtr sqlCode) {
   uint64_t rowsRead = 0;
   uint64_t rowsWritten = 0;
   uint64_t statementCount = 0;
@@ -522,7 +523,8 @@ SqliteDatabase::IngestResult SqliteDatabase::ingestSql(Regulator& regulator, kj:
   return {.remainder = sqlCode, .rowsRead = rowsRead, .rowsWritten = rowsWritten, .statementCount = statementCount};
 }
 
-void SqliteDatabase::executeWithRegulator(Regulator& regulator, kj::FunctionParam<void()> func) {
+void SqliteDatabase::executeWithRegulator(
+    const Regulator& regulator, kj::FunctionParam<void()> func) {
   // currentRegulator would only be set if we're running this method while running something else
   // with a regulator.  I'm not sure what the ramifications are, so for now, we'll just assume that
   // we can only call executeWithRegulator when no regulator is currently set.
@@ -536,7 +538,7 @@ void SqliteDatabase::executeWithRegulator(Regulator& regulator, kj::FunctionPara
 bool SqliteDatabase::isAuthorized(int actionCode,
     kj::Maybe<kj::StringPtr> param1, kj::Maybe<kj::StringPtr> param2,
     kj::Maybe<kj::StringPtr> dbName, kj::Maybe<kj::StringPtr> triggerName) {
-  Regulator& regulator = KJ_UNWRAP_OR(currentRegulator, {
+  const Regulator& regulator = KJ_UNWRAP_OR(currentRegulator, {
     // We're not currently preparing a statement, so we didn't expect the authorizer callback to
     // run. We blanket-deny in this case as a precaution.
     KJ_LOG(ERROR, "SQLite authorizer callback invoked at unexpected time", kj::getStackTrace());
@@ -786,7 +788,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 // Temp databases have very restricted operations
 bool SqliteDatabase::isAuthorizedTemp(int actionCode,
     const kj::Maybe<kj::StringPtr> &param1, const kj::Maybe<kj::StringPtr> &param2,
-    Regulator &regulator) {
+    const Regulator &regulator) {
 
   switch (actionCode) {
     case SQLITE_READ               :   /* Table Name      Column Name     */
@@ -868,12 +870,13 @@ void SqliteDatabase::setupSecurity() {
   // (handled in BUILD.sqlite3)
 }
 
-SqliteDatabase::Statement SqliteDatabase::prepare(Regulator& regulator, kj::StringPtr sqlCode) {
+SqliteDatabase::Statement SqliteDatabase::prepare(
+    const Regulator& regulator, kj::StringPtr sqlCode) {
   return Statement(*this, regulator,
       prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
 
-SqliteDatabase::Query::Query(SqliteDatabase& db, Regulator& regulator, Statement& statement,
+SqliteDatabase::Query::Query(SqliteDatabase& db, const Regulator& regulator, Statement& statement,
                              kj::ArrayPtr<const ValuePtr> bindings)
     : db(db), regulator(regulator), statement(statement) {
   // If the statement was used for a previous query, then its row counters contain data from that
@@ -882,7 +885,7 @@ SqliteDatabase::Query::Query(SqliteDatabase& db, Regulator& regulator, Statement
   init(bindings);
 }
 
-SqliteDatabase::Query::Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode,
+SqliteDatabase::Query::Query(SqliteDatabase& db, const Regulator& regulator, kj::StringPtr sqlCode,
                              kj::ArrayPtr<const ValuePtr> bindings)
     : db(db), regulator(regulator),
       ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),

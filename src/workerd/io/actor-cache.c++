@@ -23,7 +23,7 @@ namespace workerd {
 // hit this limit, so this is just a sanity check.
 static constexpr size_t MAX_ACTOR_STORAGE_RPC_WORDS = (16u << 20) / sizeof(capnp::word);
 
-ActorCache::Hooks ActorCache::Hooks::DEFAULT;
+const ActorCache::Hooks ActorCache::Hooks::DEFAULT;
 
 namespace {
 

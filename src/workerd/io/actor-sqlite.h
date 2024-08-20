@@ -27,7 +27,7 @@ public:
     virtual kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date scheduledTime, bool noCache);
     virtual void cancelDeferredAlarmDeletion();
 
-    static Hooks DEFAULT;
+    static const Hooks DEFAULT;
   };
 
   // Constructs ActorSqlite, arranging to honor the output gate, that is, any writes to the
@@ -41,7 +41,7 @@ public:
   // machines before being considered durable.
   explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate,
                        kj::Function<kj::Promise<void>()> commitCallback,
-                       Hooks& hooks = Hooks::DEFAULT);
+                       Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
 
   bool isCommitScheduled() { return !currentTxn.is<NoTxn>(); }
 

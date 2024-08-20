@@ -902,19 +902,19 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
     KJ_IF_SOME(alg, keyDataJwk.alg) {
       // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
       // importKey().
-      static std::map<kj::StringPtr, const EVP_MD*> rsaShaAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> rsaShaAlgorithms{
         {"RS1", EVP_sha1()},
         {"RS256", EVP_sha256()},
         {"RS384", EVP_sha384()},
         {"RS512", EVP_sha512()},
       };
-      static std::map<kj::StringPtr, const EVP_MD*> rsaPssAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> rsaPssAlgorithms{
         {"PS1", EVP_sha1()},
         {"PS256", EVP_sha256()},
         {"PS384", EVP_sha384()},
         {"PS512", EVP_sha512()},
       };
-      static std::map<kj::StringPtr, const EVP_MD*> rsaOaepAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> rsaOaepAlgorithms{
         {"RSA-OAEP", EVP_sha1()},
         {"RSA-OAEP-256", EVP_sha256()},
         {"RSA-OAEP-384", EVP_sha384()},
@@ -996,7 +996,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
     KJ_IF_SOME(alg, keyDataJwk.alg) {
       // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
       // importKey().
-      static std::map<kj::StringPtr, const EVP_MD*> rsaAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> rsaAlgorithms{
         {"RS1", EVP_sha1()},
         {"RS256", EVP_sha256()},
         {"RS384", EVP_sha384()},

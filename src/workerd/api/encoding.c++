@@ -281,9 +281,9 @@ Encoding getEncodingForLabel(kj::StringPtr label) {
 }
 }  // namespace
 
-kj::Array<const kj::byte> TextDecoder::EMPTY =
+const kj::Array<const kj::byte> TextDecoder::EMPTY =
     kj::Array<const kj::byte>(&DUMMY, 0, kj::NullArrayDisposer::instance);
-TextDecoder::DecodeOptions TextDecoder::DEFAULT_OPTIONS = TextDecoder::DecodeOptions();
+const TextDecoder::DecodeOptions TextDecoder::DEFAULT_OPTIONS = TextDecoder::DecodeOptions();
 
 kj::Maybe<IcuDecoder> IcuDecoder::create(Encoding encoding, bool fatal, bool ignoreBom) {
   UErrorCode status = U_ZERO_ERROR;

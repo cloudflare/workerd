@@ -184,9 +184,9 @@ private:
   DecoderImpl decoder;
   ConstructorOptions ctorOptions;
 
-  static DecodeOptions DEFAULT_OPTIONS;
+  static const DecodeOptions DEFAULT_OPTIONS;
   static constexpr kj::byte DUMMY = 0;
-  static kj::Array<const kj::byte> EMPTY;
+  static const kj::Array<const kj::byte> EMPTY;
 };
 
 // Implements the TextEncoder interface as prescribed by:

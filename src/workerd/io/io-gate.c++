@@ -7,7 +7,7 @@
 
 namespace workerd {
 
-InputGate::Hooks InputGate::Hooks::DEFAULT;
+const InputGate::Hooks InputGate::Hooks::DEFAULT;
 
 InputGate::InputGate(Hooks& hooks): InputGate(hooks, kj::newPromiseAndFulfiller<void>()) {}
 InputGate::InputGate(Hooks& hooks, kj::PromiseFulfillerPair<void> paf)
@@ -306,7 +306,7 @@ OutputGate::OutputGate(Hooks& hooks)
     : hooks(hooks), pastLocksPromise(kj::Promise<void>(kj::READY_NOW).fork()) {}
 OutputGate::~OutputGate() noexcept(false) {}
 
-OutputGate::Hooks OutputGate::Hooks::DEFAULT;
+const OutputGate::Hooks OutputGate::Hooks::DEFAULT;
 
 kj::Own<kj::PromiseFulfiller<void>> OutputGate::lock() {
   auto paf = kj::newPromiseAndFulfiller<void>();

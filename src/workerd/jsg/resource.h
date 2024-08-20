@@ -1079,7 +1079,7 @@ struct JsSetup {
     static void callback(v8::Local<v8::Name> property,
                          const v8::PropertyCallbackInfo<v8::Value>& info) {
       liftKj(info, [&]() {
-        static auto path = kj::Path::parse(moduleName);
+        static const auto path = kj::Path::parse(moduleName);
 
         auto& js = Lock::from(info.GetIsolate());
         auto context = js.v8Context();

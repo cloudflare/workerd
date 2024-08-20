@@ -263,7 +263,7 @@ struct CryptoAlgorithm {
 
 class SslArrayDisposer : public kj::ArrayDisposer {
 public:
-  static SslArrayDisposer INSTANCE;
+  static const SslArrayDisposer INSTANCE;
 
   void disposeImpl(void* firstElement, size_t elementSize, size_t elementCount,
                    size_t capacity, void (*destroyElement)(void*)) const;

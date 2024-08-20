@@ -15,7 +15,7 @@ KJ_TEST("Basic MimeType parsing works") {
     kj::StringPtr output;
     kj::Maybe<kj::Array<MimeType::MimeParams::Entry>> params;
   };
-  static TestCase kTests[] = {
+  static const TestCase kTests[] = {
     {
       .input = "text/plain"_kj,
       .type = "text"_kj,
@@ -88,7 +88,7 @@ KJ_TEST("Basic MimeType parsing works") {
   struct ErrorTestCase {
     kj::StringPtr input;
   };
-  static ErrorTestCase kErrorTests[] = {
+  static const ErrorTestCase kErrorTests[] = {
     { "" },
     { "text" },
     { "text/" },
