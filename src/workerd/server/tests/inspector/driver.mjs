@@ -4,14 +4,13 @@ import assert from "node:assert";
 import CDP from "chrome-remote-interface";
 import { WorkerdServerHarness } from "@workerd/test/server-harness.mjs";
 
-// Globals that are reset for each test.
+// Global that is reset for each test.
 let workerd;
-let inspectorClient;
 
 assert(env.WORKERD_BINARY !== undefined, "You must set the WORKERD_BINARY environment variable.");
 assert(env.WORKERD_CONFIG !== undefined, "You must set the WORKERD_CONFIG environment variable.");
 
-// Start workerd and connect to its inspector port with our CDP library.
+// Start workerd.
 beforeEach(async () => {
   workerd = new WorkerdServerHarness({
     workerdBinary: env.WORKERD_BINARY,
@@ -22,9 +21,18 @@ beforeEach(async () => {
   });
 
   await workerd.start();
+});
 
-  inspectorClient = await CDP({
-    port: await workerd.getListenInspectorPort(),
+// Stop workerd.
+afterEach(async () => {
+  const [code, signal] = await workerd.stop();
+  assert(code === 0 || signal === "SIGTERM");
+  workerd = null;
+});
+
+async function connectInspector(port) {
+  return await CDP({
+    port,
 
     // Hard-coded to match a service name expected in the `workerdConfig` file.
     target: "/main",
@@ -33,19 +41,27 @@ beforeEach(async () => {
     // implement the inspector protocol message in question.
     local: true,
   });
-});
+}
 
-// Stop both our CDP client and workerd.
-afterEach(async () => {
-  await inspectorClient.close();
-  inspectorClient = null;
+// TODO(soon): This test reproduces a null pointer dereference in workerd (possibly the same issue
+//   as https://github.com/cloudflare/workerd/issues/2564), but the test doesn't fail. :(
+test("Can repeatedly connect and disconnect to the inspector port", async () => {
+  for (let i = 0; i < 5; ++i) {
+    let inspectorClient = await connectInspector(await workerd.getListenInspectorPort());
 
-  const [code, signal] = await workerd.stop();
-  assert(code === 0 || signal === "SIGTERM");
-  workerd = null;
+    // Drive the worker with a test request.
+    let httpPort = await workerd.getListenPort("http");
+    const response = await fetch(`http://localhost:${httpPort}`);
+    let body = await response.arrayBuffer();
+    console.log(body);
+
+    await inspectorClient.close();
+  }
 });
 
 test("Profiler mostly sees deriveBits() frames", async () => {
+  let inspectorClient = await connectInspector(await workerd.getListenInspectorPort());
+
   // Enable and start profiling.
   await inspectorClient.Profiler.enable();
   await inspectorClient.Profiler.start();
@@ -86,4 +102,6 @@ test("Profiler mostly sees deriveBits() frames", async () => {
   // the most frequently sampled function.
   assert.equal(max.name, "deriveBits");
   assert.notEqual(max.count, 0);
+
+  await inspectorClient.close();
 });
