@@ -12,23 +12,28 @@
 #include <cstdlib>
 
 namespace workerd {
-  class ActorObserver;
+class ActorObserver;
 }
 
 namespace workerd::api {
 
-template <typename T> struct DeferredProxy;
+template <typename T>
+struct DeferredProxy;
 
 class MessageEvent: public Event {
 public:
   MessageEvent(jsg::Lock& js, const jsg::JsValue& data)
-      : Event("message"), data(jsg::JsRef(js, data)) {}
+      : Event("message"),
+        data(jsg::JsRef(js, data)) {}
   MessageEvent(jsg::Lock& js, jsg::JsRef<jsg::JsValue> data)
-      : Event("message"), data(kj::mv(data)) {}
+      : Event("message"),
+        data(kj::mv(data)) {}
   MessageEvent(jsg::Lock& js, kj::String type, const jsg::JsValue& data)
-      : Event(kj::mv(type)), data(jsg::JsRef(js, kj::mv(data))) {}
+      : Event(kj::mv(type)),
+        data(jsg::JsRef(js, kj::mv(data))) {}
   MessageEvent(jsg::Lock& js, kj::String type, jsg::JsRef<jsg::JsValue> data)
-      : Event(kj::mv(type)), data(kj::mv(data)) {}
+      : Event(kj::mv(type)),
+        data(kj::mv(data)) {}
 
   struct Initializer {
     jsg::JsRef<jsg::JsValue> data;
@@ -38,18 +43,27 @@ public:
       data: ArrayBuffer | string;
     });
   };
-  static jsg::Ref<MessageEvent> constructor(jsg::Lock& js,
-                                            kj::String type,
-                                            Initializer initializer) {
+  static jsg::Ref<MessageEvent> constructor(
+      jsg::Lock& js, kj::String type, Initializer initializer) {
     return jsg::alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
   }
 
-  jsg::JsValue getData(jsg::Lock& js) { return data.getHandle(js); }
+  jsg::JsValue getData(jsg::Lock& js) {
+    return data.getHandle(js);
+  }
 
-  jsg::Unimplemented getOrigin() { return jsg::Unimplemented(); }
-  jsg::Unimplemented getLastEventId() { return jsg::Unimplemented(); }
-  jsg::Unimplemented getSource() { return jsg::Unimplemented(); }
-  jsg::Unimplemented getPorts() { return jsg::Unimplemented(); }
+  jsg::Unimplemented getOrigin() {
+    return jsg::Unimplemented();
+  }
+  jsg::Unimplemented getLastEventId() {
+    return jsg::Unimplemented();
+  }
+  jsg::Unimplemented getSource() {
+    return jsg::Unimplemented();
+  }
+  jsg::Unimplemented getPorts() {
+    return jsg::Unimplemented();
+  }
 
   JSG_RESOURCE_TYPE(MessageEvent) {
     JSG_INHERIT(Event);
@@ -83,9 +97,15 @@ private:
 class CloseEvent: public Event {
 public:
   CloseEvent(uint code, kj::String reason, bool clean)
-      : Event("close"), code(code), reason(kj::mv(reason)), clean(clean) {}
+      : Event("close"),
+        code(code),
+        reason(kj::mv(reason)),
+        clean(clean) {}
   CloseEvent(kj::String type, int code, kj::String reason, bool clean)
-      : Event(kj::mv(type)), code(code), reason(kj::mv(reason)), clean(clean) {}
+      : Event(kj::mv(type)),
+        code(code),
+        reason(kj::mv(reason)),
+        clean(clean) {}
 
   struct Initializer {
     jsg::Optional<int> code;
@@ -95,18 +115,21 @@ public:
     JSG_STRUCT(code, reason, wasClean);
     JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
   };
-  static jsg::Ref<CloseEvent> constructor(kj::String type,
-                                          jsg::Optional<Initializer> initializer) {
+  static jsg::Ref<CloseEvent> constructor(kj::String type, jsg::Optional<Initializer> initializer) {
     Initializer init = kj::mv(initializer).orDefault({});
-    return jsg::alloc<CloseEvent>(kj::mv(type),
-        init.code.orDefault(0),
-        kj::mv(init.reason).orDefault(nullptr),
-        init.wasClean.orDefault(false));
+    return jsg::alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
+        kj::mv(init.reason).orDefault(nullptr), init.wasClean.orDefault(false));
   }
 
-  int getCode() { return code; }
-  kj::StringPtr getReason() { return reason; }
-  bool getWasClean() { return clean; }
+  int getCode() {
+    return code;
+  }
+  kj::StringPtr getReason() {
+    return reason;
+  }
+  bool getWasClean() {
+    return clean;
+  }
 
   JSG_RESOURCE_TYPE(CloseEvent) {
     JSG_INHERIT(Event);
@@ -147,14 +170,19 @@ private:
       tracker.trackField("pair", pair);
     }
   };
+
 public:
   WebSocketPair(jsg::Ref<WebSocket> first, jsg::Ref<WebSocket> second)
-      : sockets { kj::mv(first), kj::mv(second) } {}
+      : sockets{kj::mv(first), kj::mv(second)} {}
 
   static jsg::Ref<WebSocketPair> constructor();
 
-  jsg::Ref<WebSocket> getFirst() { return sockets[0].addRef(); }
-  jsg::Ref<WebSocket> getSecond() { return sockets[1].addRef(); }
+  jsg::Ref<WebSocket> getFirst() {
+    return sockets[0].addRef();
+  }
+  jsg::Ref<WebSocket> getSecond() {
+    return sockets[1].addRef();
+  }
 
   JSG_ITERATOR(PairIterator, entries, jsg::Ref<WebSocket>, IteratorState, iteratorNext);
 
@@ -213,6 +241,7 @@ private:
   // Forward declarations.
   struct PackedWebSocket;
   struct Native;
+
 public:
   // WebSocket ready states.
   static constexpr int READY_STATE_CONNECTING = 0;
@@ -221,8 +250,7 @@ public:
   static constexpr int READY_STATE_CLOSED = 3;
 
   // Creates the Native object when we recreate the WebSocket when waking from hibernation.
-  IoOwn<Native> initNative(
-      IoContext& ioContext,
+  IoOwn<Native> initNative(IoContext& ioContext,
       kj::WebSocket& ws,
       kj::Array<kj::StringPtr> tags,
       bool closedOutgoingConn);
@@ -257,9 +285,7 @@ public:
   // Similar to how the JS `constructor()` creates a WebSocket, when waking from hibernation
   // we want to be able to recreate WebSockets from C++ that will be delivered to JS code.
   static jsg::Ref<WebSocket> hibernatableFromNative(
-      jsg::Lock& js,
-      kj::WebSocket& ws,
-      HibernationPackage package);
+      jsg::Lock& js, kj::WebSocket& ws, HibernationPackage package);
 
   // The JS WebSocket constructor needs to initiate a connection, but we need to return the
   // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
@@ -326,7 +352,8 @@ public:
   // JS API.
 
   // Creates a new outbound WebSocket.
-  static jsg::Ref<WebSocket> constructor(jsg::Lock& js, kj::String url,
+  static jsg::Ref<WebSocket> constructor(jsg::Lock& js,
+      kj::String url,
       jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols);
 
   // Begin delivering events locally.
@@ -604,7 +631,7 @@ private:
 
     JSG_MEMORY_INFO(AutoResponse) {
       tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
-      for (const auto& message : pendingAutoResponseDeque) {
+      for (const auto& message: pendingAutoResponseDeque) {
         tracker.trackField(nullptr, message);
       }
     }
@@ -647,11 +674,15 @@ private:
   // object's members in a thread-unsafe way. `outgoingMessages` and `ws` are both `IoOwn`ed
   // objects so are safe to access from the thread without the isolate lock. The whole task is
   // owned by the `IoContext` so it'll be canceled if the `IoContext` is destroyed.
-  static kj::Promise<void> pump(
-      IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native,
-      AutoResponse& autoResponse, kj::Maybe<kj::Own<WebSocketObserver>>& observer);
+  static kj::Promise<void> pump(IoContext& context,
+      OutgoingMessagesMap& outgoingMessages,
+      kj::WebSocket& ws,
+      Native& native,
+      AutoResponse& autoResponse,
+      kj::Maybe<kj::Own<WebSocketObserver>>& observer);
 
-  kj::Promise<kj::Maybe<kj::Exception>> readLoop(kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize);
+  kj::Promise<kj::Maybe<kj::Exception>> readLoop(
+      kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize);
 
   void reportError(jsg::Lock& js, kj::Exception&& e);
   void reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err);
@@ -659,15 +690,11 @@ private:
   void assertNoError(jsg::Lock& js);
 };
 
-#define EW_WEBSOCKET_ISOLATE_TYPES       \
-  api::CloseEvent,                       \
-  api::CloseEvent::Initializer,          \
-  api::MessageEvent,                     \
-  api::MessageEvent::Initializer,        \
-  api::WebSocket,                        \
-  api::WebSocketPair,                    \
-  api::WebSocketPair::PairIterator,      \
-  api::WebSocketPair::PairIterator::Next \
-// The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
+#define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \
+  api::CloseEvent, api::CloseEvent::Initializer, api::MessageEvent,                                \
+      api::MessageEvent::Initializer, api::WebSocket, api::WebSocketPair,                          \
+      api::WebSocketPair::PairIterator,                                                            \
+      api::WebSocketPair::PairIterator::                                                           \
+          Next  // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

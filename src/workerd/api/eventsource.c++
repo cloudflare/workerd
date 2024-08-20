@@ -14,7 +14,7 @@ namespace workerd::api {
 namespace {
 class EventSourceSink final: public WritableStreamSink {
 public:
-  EventSourceSink(EventSource& eventSource) : eventSource(eventSource) {}
+  EventSourceSink(EventSource& eventSource): eventSource(eventSource) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     // The event stream is a new-line delimited format where each line represents an event.
@@ -37,21 +37,18 @@ public:
     // codepoint U+FEFF. We only want to check for this once.
     if (!bomChecked) {
       bomChecked = true;
-      if (input.size() >= 3 &&
-          input[0] == '\xEF' &&
-          input[1] == '\xBB' &&
-          input[2] == '\xBF') {
+      if (input.size() >= 3 && input[0] == '\xEF' && input[1] == '\xBB' && input[2] == '\xBF') {
         input = input.slice(3);
       }
     }
 
     while (input != nullptr) {
       KJ_IF_SOME(found, findEndOfLine(input)) {
-          auto prefix = kept.releaseAsArray();
-          // Feed the line into the processor.
-          feed(kj::str(prefix, input.slice(0, found.pos)));
-          input = found.remaining;
-          // If we've reached the end of the input, input will == nullptr here.
+        auto prefix = kept.releaseAsArray();
+        // Feed the line into the processor.
+        feed(kj::str(prefix, input.slice(0, found.pos)));
+        input = found.remaining;
+        // If we've reached the end of the input, input will == nullptr here.
       } else {
         // No end-of-line found, buffer the input.
         kept.addAll(input.begin(), input.end());
@@ -66,7 +63,7 @@ public:
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    for (auto& piece : pieces) {
+    for (auto& piece: pieces) {
       co_await write(piece);
     }
     co_return;
@@ -144,8 +141,8 @@ private:
     } else if (line[0] == ':') {
       // Ignore the line.
     } else {
-      static constexpr auto handle =
-          [](auto& self, kj::ArrayPtr<const char> field, kj::ArrayPtr<const char> value) {
+      static constexpr auto handle = [](auto& self, kj::ArrayPtr<const char> field,
+                                         kj::ArrayPtr<const char> value) {
         auto& pending = self.getPendingMessage();
         auto& ev = KJ_ASSERT_NONNULL(self.eventSource);
         // Per the spec, only one space after the colon is optional and trimmed.
@@ -232,9 +229,7 @@ kj::Promise<void> processBody(IoContext& context, kj::Promise<DeferredProxy<void
 }  // namespace
 
 jsg::Ref<EventSource> EventSource::constructor(
-    jsg::Lock& js,
-    kj::String url,
-    jsg::Optional<EventSourceInit> init) {
+    jsg::Lock& js, kj::String url, jsg::Optional<EventSourceInit> init) {
   JSG_REQUIRE(IoContext::hasCurrent(), DOMNotSupportedError,
       "An EventSource can only be created within the context of a worker request.");
 
@@ -246,9 +241,8 @@ jsg::Ref<EventSource> EventSource::constructor(
   }
 
   auto eventsource = jsg::alloc<EventSource>(js,
-      JSG_REQUIRE_NONNULL(jsg::Url::tryParse(url.asPtr()),
-          DOMSyntaxError,
-          kj::str("Cannot open an EventSource to '", url ,"'. The URL is invalid.")),
+      JSG_REQUIRE_NONNULL(jsg::Url::tryParse(url.asPtr()), DOMSyntaxError,
+          kj::str("Cannot open an EventSource to '", url, "'. The URL is invalid.")),
       kj::mv(init));
   eventsource->start(js);
   return kj::mv(eventsource);
@@ -257,10 +251,9 @@ jsg::Ref<EventSource> EventSource::constructor(
 jsg::Ref<EventSource> EventSource::from(jsg::Lock& js, jsg::Ref<ReadableStream> readable) {
   JSG_REQUIRE(IoContext::hasCurrent(), DOMNotSupportedError,
       "An EventSource can only be created within the context of a worker request.");
-  JSG_REQUIRE(!readable->isLocked(), TypeError,
-               "This ReadableStream is locked.");
-  JSG_REQUIRE(!readable->isDisturbed(), TypeError,
-              "This ReadableStream has already been read from.");
+  JSG_REQUIRE(!readable->isLocked(), TypeError, "This ReadableStream is locked.");
+  JSG_REQUIRE(
+      !readable->isDisturbed(), TypeError, "This ReadableStream has already been read from.");
   auto eventsource = jsg::alloc<EventSource>(js);
   eventsource->run(js, kj::mv(readable), false /* No reconnection attempts */);
   return kj::mv(eventsource);
@@ -287,8 +280,10 @@ void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool rec
   // controller has already been aborted.
   abortController->abort(js, error);
 
-  if (!reconnecting) readyState = State::CLOSED;
-  else readyState = State::CONNECTING;
+  if (!reconnecting)
+    readyState = State::CLOSED;
+  else
+    readyState = State::CONNECTING;
 
   // Dispatch the error event.
   dispatchEventImpl(js, jsg::alloc<ErrorEvent>(js, error));
@@ -306,14 +301,12 @@ void EventSource::notifyOpen(jsg::Lock& js) {
 void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messages) {
   if (readyState == State::CLOSED) return;
   js.tryCatch([&] {
-    for (auto& message : messages) {
-        auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
-        if (data.size() == 0) continue;
-        dispatchEventImpl(js, jsg::alloc<MessageEvent>(
-            kj::mv(message.event),
-            kj::mv(data),
-            kj::mv(message.id),
-            impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
+    for (auto& message: messages) {
+      auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
+      if (data.size() == 0) continue;
+      dispatchEventImpl(js,
+          jsg::alloc<MessageEvent>(kj::mv(message.event), kj::mv(data), kj::mv(message.id),
+              impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
     }
   }, [&](jsg::Value exception) {
     // If we end up with an exception being thrown in one of the event handlers, we will
@@ -328,13 +321,14 @@ void EventSource::reconnect(jsg::Lock& js) {
   abortController = jsg::alloc<AbortController>();
   auto signal = abortController->getSignal();
   context.awaitIo(js, signal->wrap(context.afterLimitTimeout(reconnectionTime)))
-      .then(js, JSG_VISITABLE_LAMBDA((self=JSG_THIS), (self), (jsg::Lock& js) mutable {
-    self->start(js);
-  }), JSG_VISITABLE_LAMBDA((self=JSG_THIS),(self),(jsg::Lock& js, jsg::Value exception) {
-    // In this case, it is most likely the EventSource was closed by the user or
-    // there was some other failure. We should not continue trying to reconnect.
-    self->notifyError(js, jsg::JsValue(exception.getHandle(js)));
-  }));
+      .then(js,
+          JSG_VISITABLE_LAMBDA(
+              (self = JSG_THIS), (self), (jsg::Lock & js) mutable { self->start(js); }),
+          JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self), (jsg::Lock& js, jsg::Value exception) {
+            // In this case, it is most likely the EventSource was closed by the user or
+            // there was some other failure. We should not continue trying to reconnect.
+            self->notifyError(js, jsg::JsValue(exception.getHandle(js)));
+          }));
 }
 
 void EventSource::start(jsg::Lock& js) {
@@ -351,92 +345,91 @@ void EventSource::start(jsg::Lock& js) {
   };
 
   auto onSuccess = JSG_VISITABLE_LAMBDA(
-      (self=JSG_THIS,
-       fetcher = fetcher.map([](jsg::Ref<Fetcher>& f) -> jsg::Ref<Fetcher> { return f.addRef(); })),
-      (self, fetcher),
-      (jsg::Lock& js, jsg::Ref<Response> response) {
-    if (self->readyState == State::CLOSED) return js.resolvedPromise();
-    auto& impl = KJ_ASSERT_NONNULL(self->impl);
-    if (!response->getOk()) {
-      // Response status code is not 2xx, so we fail.
-      // No reconnection attempt should be made.
-      return handleError(js, self,
-          kj::str("The response status code was ", response->getStatus(), "."));
-    }
+      (self = JSG_THIS, fetcher = fetcher.map([](jsg::Ref<Fetcher>& f) -> jsg::Ref<Fetcher> {
+    return f.addRef();
+  })),
+      (self, fetcher), (jsg::Lock& js, jsg::Ref<Response> response) {
+        if (self->readyState == State::CLOSED) return js.resolvedPromise();
+        auto& impl = KJ_ASSERT_NONNULL(self->impl);
+        if (!response->getOk()) {
+        // Response status code is not 2xx, so we fail.
+        // No reconnection attempt should be made.
+        return handleError(
+            js, self, kj::str("The response status code was ", response->getStatus(), "."));
+        }
 
-    // TODO(cleanup): Using jsg::ByteString here is really annoying. It would be nice to have
-    // an internal alternative that doesn't require an allocation.
-    KJ_IF_SOME(contentType, response->getHeaders(js)->get(
-        jsg::ByteString(kj::str("content-type")))) {
-      bool invalid = false;
-      KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
+        // TODO(cleanup): Using jsg::ByteString here is really annoying. It would be nice to have
+        // an internal alternative that doesn't require an allocation.
+        KJ_IF_SOME(contentType,
+            response->getHeaders(js)->get(jsg::ByteString(kj::str("content-type")))) {
+        bool invalid = false;
+        KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
         invalid = parsed != MimeType::EVENT_STREAM;
-      } else {
+        } else {
         invalid = true;
-      }
-      if (invalid) {
+        }
+        if (invalid) {
         // No reconnection attempt should be made.
         return handleError(js, self, kj::str("The content type '", contentType, "' is invalid."));
-      }
-    } else {
-      // No reconnection attempt should be made.
-      return handleError(js, self, kj::str("No content type header was present in the response."));
-    }
+        }
+        } else {
+        // No reconnection attempt should be made.
+        return handleError(
+            js, self, kj::str("No content type header was present in the response."));
+        }
 
-    // If the request was redirected, update the URL to the new location.
-    if (response->getRedirected()) {
-      KJ_IF_SOME(newUrl, jsg::Url::tryParse(response->getUrl())) {
+        // If the request was redirected, update the URL to the new location.
+        if (response->getRedirected()) {
+        KJ_IF_SOME(newUrl, jsg::Url::tryParse(response->getUrl())) {
         impl.url = kj::mv(newUrl);
-      } else {}  // Extra else block to squash compiler warning
-    }
+        } else {
+        }  // Extra else block to squash compiler warning
+        }
 
-    KJ_IF_SOME(body, response->getBody()) {
-      // Well, ok! We're ready to start trying to process the stream! We do so by
-      // pumping the body into an EventSourceSink until the body is closed, canceled,
-      // or errored.
-      self->run(js, kj::mv(body), true, response.addRef(), kj::mv(fetcher));
-      return js.resolvedPromise();
-    } else {
-      auto& i = KJ_ASSERT_NONNULL(self->impl);
-      // If there is no body, there's nothing to do. We'll treat this as if
-      // the server disconnected. If it only happens once, we'll try to reconnect.
-      // If it happens again, we'll fail the connection as it is likely indicative
-      // of a bug in the server or along the path to the server.
-      if (i.previousNoBody) {
-         self->notifyError(js, js.error("The server provided no content."));
-      } else {
+        KJ_IF_SOME(body, response->getBody()) {
+        // Well, ok! We're ready to start trying to process the stream! We do so by
+        // pumping the body into an EventSourceSink until the body is closed, canceled,
+        // or errored.
+        self->run(js, kj::mv(body), true, response.addRef(), kj::mv(fetcher));
+        return js.resolvedPromise();
+        } else {
+        auto& i = KJ_ASSERT_NONNULL(self->impl);
+        // If there is no body, there's nothing to do. We'll treat this as if
+        // the server disconnected. If it only happens once, we'll try to reconnect.
+        // If it happens again, we'll fail the connection as it is likely indicative
+        // of a bug in the server or along the path to the server.
+        if (i.previousNoBody) {
+        self->notifyError(js, js.error("The server provided no content."));
+        } else {
         i.previousNoBody = true;
-        self->notifyError(js,
-            js.error("The server provided no content. Will try reconnecting."),
+        self->notifyError(js, js.error("The server provided no content. Will try reconnecting."),
             true /* reconnecting */);
         self->reconnect(js);
-      }
-      return js.resolvedPromise();
-    }
-  });
+        }
+        return js.resolvedPromise();
+        }
+      });
 
-  auto onFailed = JSG_VISITABLE_LAMBDA(
-      (self=JSG_THIS),
-      (self),
-      (jsg::Lock& js, jsg::Value exception) {
-    self->notifyError(js, jsg::JsValue(exception.getHandle(js)));
-    return js.resolvedPromise();
-  });
+  auto onFailed =
+      JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self), (jsg::Lock& js, jsg::Value exception) {
+        self->notifyError(js, jsg::JsValue(exception.getHandle(js)));
+        return js.resolvedPromise();
+      });
 
   auto headers = jsg::alloc<Headers>();
-  headers->set(jsg::ByteString(kj::str("accept")),
-               jsg::ByteString(MimeType::EVENT_STREAM.essence()));
-  headers->set(jsg::ByteString(kj::str("cache-control")),
-               jsg::ByteString(kj::str("no-cache")));
+  headers->set(
+      jsg::ByteString(kj::str("accept")), jsg::ByteString(MimeType::EVENT_STREAM.essence()));
+  headers->set(jsg::ByteString(kj::str("cache-control")), jsg::ByteString(kj::str("no-cache")));
   if (lastEventId != ""_kjc) {
-    headers->set(jsg::ByteString(kj::str("last-event-id")),
-                 jsg::ByteString(kj::str(lastEventId)));
+    headers->set(jsg::ByteString(kj::str("last-event-id")), jsg::ByteString(kj::str(lastEventId)));
   }
 
-  fetchImpl(js, kj::mv(fetcher), kj::str(i.url), RequestInitializerDict {
-    .headers = kj::mv(headers),
-    .signal = abortController->getSignal(),
-  }).then(js, kj::mv(onSuccess), kj::mv(onFailed));
+  fetchImpl(js, kj::mv(fetcher), kj::str(i.url),
+      RequestInitializerDict{
+        .headers = kj::mv(headers),
+        .signal = abortController->getSignal(),
+      })
+      .then(js, kj::mv(onSuccess), kj::mv(onFailed));
 }
 
 namespace {
@@ -447,39 +440,37 @@ kj::Maybe<jsg::Ref<T>> addRef(kj::Maybe<jsg::Ref<T>>& ref) {
 }  // namespace
 
 void EventSource::run(jsg::Lock& js,
-                      jsg::Ref<ReadableStream> readable,
-                      bool withReconnection,
-                      kj::Maybe<jsg::Ref<Response>> response,
-                      kj::Maybe<jsg::Ref<Fetcher>> fetcher) {
+    jsg::Ref<ReadableStream> readable,
+    bool withReconnection,
+    kj::Maybe<jsg::Ref<Response>> response,
+    kj::Maybe<jsg::Ref<Fetcher>> fetcher) {
   notifyOpen(js);
 
-  auto onSuccess = JSG_VISITABLE_LAMBDA(
-      (self=JSG_THIS, readable=readable.addRef(), withReconnection,
-       response=addRef(response),
-       fetcher=addRef(fetcher)),
-      (self, readable, response, fetcher),
-      (jsg::Lock& js) {
-    // The pump finished. Did the server disconnect? If so, try reconnecting if we can.
-    self->notifyError(js, js.error("The server disconnected."), withReconnection);
-    if (withReconnection) self->reconnect(js);
-  });
+  auto onSuccess =
+      JSG_VISITABLE_LAMBDA((self = JSG_THIS, readable = readable.addRef(), withReconnection,
+                               response = addRef(response), fetcher = addRef(fetcher)),
+          (self, readable, response, fetcher), (jsg::Lock& js) {
+            // The pump finished. Did the server disconnect? If so, try reconnecting if we can.
+            self->notifyError(js, js.error("The server disconnected."), withReconnection);
+            if (withReconnection) self->reconnect(js);
+          });
 
   auto onFailed = JSG_VISITABLE_LAMBDA(
-      (self=JSG_THIS, response=addRef(response), fetcher=addRef(fetcher)),
-      (self, response, fetcher),
-      (jsg::Lock& js, jsg::Value exception) {
-    // If the pump fails, catch the error and convert it into an error event.
-    // If we got here, it likely isn't just a DISCONNECT event. Let's not
-    // try to reconnect at this point.
-    self->notifyError(js, jsg::JsValue(exception.getHandle(js)));
-  });
+      (self = JSG_THIS, response = addRef(response), fetcher = addRef(fetcher)),
+      (self, response, fetcher), (jsg::Lock& js, jsg::Value exception) {
+        // If the pump fails, catch the error and convert it into an error event.
+        // If we got here, it likely isn't just a DISCONNECT event. Let's not
+        // try to reconnect at this point.
+        self->notifyError(js, jsg::JsValue(exception.getHandle(js)));
+      });
 
   // Well, ok! We're ready to start trying to process the stream! We do so by
   // pumping the body into an EventSourceSink until the body is closed, canceled,
   // or errored.
-  context.awaitIo(js,
-      processBody(context, readable->pumpTo(js, kj::heap<EventSourceSink>(*this), true)))
-          .then(js, kj::mv(onSuccess), kj::mv(onFailed));
+  context
+      .awaitIo(
+          js, processBody(context, readable->pumpTo(js, kj::heap<EventSourceSink>(*this), true)))
+      .then(js, kj::mv(onSuccess), kj::mv(onFailed));
 }
 
 void EventSource::close(jsg::Lock& js) {
@@ -490,9 +481,8 @@ void EventSource::close(jsg::Lock& js) {
 }
 
 void EventSource::enqueueMessages(kj::Array<PendingMessage> messages) {
-  context.addTask(context.run([this, messages=kj::mv(messages)](auto& lock) mutable {
-    notifyMessages(lock, kj::mv(messages));
-  }));
+  context.addTask(context.run([this, messages = kj::mv(messages)](
+                                  auto& lock) mutable { notifyMessages(lock, kj::mv(messages)); }));
 }
 
 void EventSource::setReconnectionTime(uint32_t time) {
@@ -502,7 +492,9 @@ void EventSource::setReconnectionTime(uint32_t time) {
       kj::max(kj::min(time, MAX_RECONNECTION_TIME), MIN_RECONNECTION_TIME) * kj::MILLISECONDS;
 }
 
-kj::StringPtr EventSource::getLastEventId() { return lastEventId; }
+kj::StringPtr EventSource::getLastEventId() {
+  return lastEventId;
+}
 
 void EventSource::setLastEventId(kj::String id) {
   lastEventId = kj::mv(id);

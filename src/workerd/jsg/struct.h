@@ -14,18 +14,27 @@
 
 namespace workerd::jsg {
 
-template <typename TypeWrapper, typename Struct, typename T,
-          T Struct::*field, const char* name, size_t namePrefixStripLength>
+template <typename TypeWrapper,
+    typename Struct,
+    typename T,
+    T Struct::*field,
+    const char* name,
+    size_t namePrefixStripLength>
 class FieldWrapper {
   static constexpr inline const char* exportedName = name + namePrefixStripLength;
+
 public:
   using Type = T;
 
   explicit FieldWrapper(v8::Isolate* isolate)
       : nameHandle(isolate, v8StrIntern(isolate, exportedName)) {}
 
-  void wrap(TypeWrapper& wrapper, v8::Isolate* isolate, v8::Local<v8::Context> context,
-            kj::Maybe<v8::Local<v8::Object>> creator, Struct& in, v8::Local<v8::Object> out) {
+  void wrap(TypeWrapper& wrapper,
+      v8::Isolate* isolate,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Struct& in,
+      v8::Local<v8::Object> out) {
     if constexpr (kj::isSameType<T, SelfRef>()) {
       // Ignore SelfRef when converting to JS.
     } else if constexpr (kj::isSameType<T, Unimplemented>() || kj::isSameType<T, WontImplement>()) {
@@ -40,8 +49,10 @@ public:
     }
   }
 
-  Type unwrap(TypeWrapper& wrapper, v8::Isolate* isolate, v8::Local<v8::Context> context,
-              v8::Local<v8::Object> in) {
+  Type unwrap(TypeWrapper& wrapper,
+      v8::Isolate* isolate,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Object> in) {
     v8::Local<v8::Value> jsValue = check(in->Get(context, nameHandle.Get(isolate)));
     return wrapper.template unwrap<Type>(
         context, jsValue, TypeErrorContext::structField(typeid(Struct), exportedName), in);
@@ -56,8 +67,10 @@ struct TypeTuple {
   using Indexes = kj::_::MakeIndexes<sizeof...(T)>;
 };
 
-template <typename Self, typename T, typename FieldWrapperTuple,
-          typename Indices = typename FieldWrapperTuple::Indexes>
+template <typename Self,
+    typename T,
+    typename FieldWrapperTuple,
+    typename Indices = typename FieldWrapperTuple::Indexes>
 class StructWrapper;
 
 // TypeWrapper mixin for struct types (application-defined C++ structs declared with a
@@ -67,7 +80,9 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
 public:
   static const JsgKind JSG_KIND = JsgKind::STRUCT;
 
-  static constexpr const std::type_info& getName(T*) { return typeid(T); }
+  static constexpr const std::type_info& getName(T*) {
+    return typeid(T);
+  }
 
   v8::Local<v8::Object> wrap(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
@@ -75,13 +90,14 @@ public:
     v8::EscapableHandleScope handleScope(isolate);
     auto& fields = getFields(isolate);
     v8::Local<v8::Object> out = v8::Object::New(isolate);
-    (kj::get<indices>(fields).wrap(
-        static_cast<Self&>(*this), isolate, context, creator, in, out), ...);
+    (kj::get<indices>(fields).wrap(static_cast<Self&>(*this), isolate, context, creator, in, out),
+        ...);
     return handleScope.Escape(out);
   }
 
-  kj::Maybe<T> tryUnwrap(
-      v8::Local<v8::Context> context, v8::Local<v8::Value> handle, T*,
+  kj::Maybe<T> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      T*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // In the case that an individual field is the wrong type, we don't return null, but throw an
     // exception directly. This is because:
@@ -99,13 +115,15 @@ public:
     auto isolate = context->GetIsolate();
 
     if (handle->IsUndefined() || handle->IsNull()) {
-      if constexpr(((webidl::isOptional<typename FieldWrappers::Type> ||
-                     kj::isSameType<typename FieldWrappers::Type, Unimplemented>()) && ...)) {
+      if constexpr (((webidl::isOptional<typename FieldWrappers::Type> ||
+                         kj::isSameType<typename FieldWrappers::Type, Unimplemented>()) &&
+                        ...)) {
         return T{};
       }
-      jsg::throwTypeError(isolate, kj::str("Cannot initialize ", typeid(T).name(),
-                                           " with required members from an "
-                                           "undefined or null value."));
+      jsg::throwTypeError(isolate,
+          kj::str("Cannot initialize ", typeid(T).name(),
+              " with required members from an "
+              "undefined or null value."));
     }
 
     if (!handle->IsObject()) return kj::none;
@@ -120,9 +138,7 @@ public:
     //   before derived members. Objects with mutating getters might be broken by this, but it
     //   doesn't seem worth fixing absent a compelling use case.
 
-    return T {
-      kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), isolate, context, in)...
-    };
+    return T{kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), isolate, context, in)...};
   }
 
   void newContext() = delete;

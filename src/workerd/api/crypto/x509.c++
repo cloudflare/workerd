@@ -10,17 +10,11 @@ namespace workerd::api {
 
 namespace {
 
-static constexpr int kX509NameFlagsMultiline =
-    ASN1_STRFLGS_ESC_2253 |
-    ASN1_STRFLGS_ESC_CTRL |
-    ASN1_STRFLGS_UTF8_CONVERT |
-    XN_FLAG_SEP_MULTILINE |
-    XN_FLAG_FN_SN;
+static constexpr int kX509NameFlagsMultiline = ASN1_STRFLGS_ESC_2253 | ASN1_STRFLGS_ESC_CTRL |
+    ASN1_STRFLGS_UTF8_CONVERT | XN_FLAG_SEP_MULTILINE | XN_FLAG_FN_SN;
 
 static constexpr int kX509NameFlagsRFC2253WithinUtf8JSON =
-    XN_FLAG_RFC2253 &
-    ~ASN1_STRFLGS_ESC_MSB &
-    ~ASN1_STRFLGS_ESC_CTRL;
+    XN_FLAG_RFC2253 & ~ASN1_STRFLGS_ESC_MSB & ~ASN1_STRFLGS_ESC_CTRL;
 
 kj::Maybe<kj::Own<BIO>> newBio() {
   auto ptr = BIO_new(BIO_s_mem());
@@ -55,43 +49,41 @@ bool isSafeAltName(const char* name, size_t length, bool utf8) {
   for (size_t i = 0; i < length; i++) {
     char c = name[i];
     switch (c) {
-    case '"':
-    case '\\':
-      // These mess with encoding rules.
-      // Fall through.
-    case ',':
-      // Commas make it impossible to split the list of subject alternative
-      // names unambiguously, which is why we have to escape.
-      // Fall through.
-    case '\'':
-      // Single quotes are unlikely to appear in any legitimate values, but they
-      // could be used to make a value look like it was escaped (i.e., enclosed
-      // in single/double quotes).
-      return false;
-    default:
-      if (utf8) {
-        // In UTF8 strings, we require escaping for any ASCII control character,
-        // but NOT for non-ASCII characters. Note that all bytes of any code
-        // point that consists of more than a single byte have their MSB set.
-        if (static_cast<unsigned char>(c) < ' ' || c == '\x7f') {
-          return false;
+      case '"':
+      case '\\':
+        // These mess with encoding rules.
+        // Fall through.
+      case ',':
+        // Commas make it impossible to split the list of subject alternative
+        // names unambiguously, which is why we have to escape.
+        // Fall through.
+      case '\'':
+        // Single quotes are unlikely to appear in any legitimate values, but they
+        // could be used to make a value look like it was escaped (i.e., enclosed
+        // in single/double quotes).
+        return false;
+      default:
+        if (utf8) {
+          // In UTF8 strings, we require escaping for any ASCII control character,
+          // but NOT for non-ASCII characters. Note that all bytes of any code
+          // point that consists of more than a single byte have their MSB set.
+          if (static_cast<unsigned char>(c) < ' ' || c == '\x7f') {
+            return false;
+          }
+        } else {
+          // Check if the char is a control character or non-ASCII character. Note
+          // that char may or may not be a signed type. Regardless, non-ASCII
+          // values will always be outside of this range.
+          if (c < ' ' || c > '~') {
+            return false;
+          }
         }
-      } else {
-        // Check if the char is a control character or non-ASCII character. Note
-        // that char may or may not be a signed type. Regardless, non-ASCII
-        // values will always be outside of this range.
-        if (c < ' ' || c > '~') {
-          return false;
-        }
-      }
     }
   }
   return true;
 }
 
-void printAltName(BIO* out, const char* name,
-                  size_t length, bool utf8,
-                  const char* safe_prefix) {
+void printAltName(BIO* out, const char* name, size_t length, bool utf8, const char* safe_prefix) {
   if (isSafeAltName(name, length, utf8)) {
     // For backward-compatibility, append "safe" names without any
     // modifications.
@@ -125,7 +117,7 @@ void printAltName(BIO* out, const char* name,
         // Control character or non-ASCII character. We treat everything as
         // Latin-1, which corresponds to the first 255 Unicode code points.
         const char hex[] = "0123456789abcdef";
-        char u[] = { '\\', 'u', '0', '0', hex[(c & 0xf0) >> 4], hex[c & 0x0f] };
+        char u[] = {'\\', 'u', '0', '0', hex[(c & 0xf0) >> 4], hex[c & 0x0f]};
         BIO_write(out, u, sizeof(u));
       }
     }
@@ -133,18 +125,12 @@ void printAltName(BIO* out, const char* name,
   }
 }
 
-void printLatin1AltName(BIO* out,
-                        const ASN1_IA5STRING* name,
-                        const char* safe_prefix = nullptr) {
-  printAltName(out, reinterpret_cast<const char*>(name->data), name->length,
-               false, safe_prefix);
+void printLatin1AltName(BIO* out, const ASN1_IA5STRING* name, const char* safe_prefix = nullptr) {
+  printAltName(out, reinterpret_cast<const char*>(name->data), name->length, false, safe_prefix);
 }
 
-void printUtf8AltName(BIO* out,
-                      const ASN1_UTF8STRING* name,
-                      const char* safe_prefix = nullptr) {
-  printAltName(out, reinterpret_cast<const char*>(name->data), name->length,
-               true, safe_prefix);
+void printUtf8AltName(BIO* out, const ASN1_UTF8STRING* name, const char* safe_prefix = nullptr) {
+  printAltName(out, reinterpret_cast<const char*>(name->data), name->length, true, safe_prefix);
 }
 
 bool printGeneralName(BIO* out, const GENERAL_NAME* gen) {
@@ -182,16 +168,15 @@ bool printGeneralName(BIO* out, const GENERAL_NAME* gen) {
     // PrintAltName handles all of that safely.
     BIO_printf(out, "DirName:");
     auto tmp = KJ_ASSERT_NONNULL(newBio());
-    if (X509_NAME_print_ex(tmp.get(),
-                           gen->d.dirn,
-                           0,
-                           kX509NameFlagsRFC2253WithinUtf8JSON) < 0) {
+    if (X509_NAME_print_ex(tmp.get(), gen->d.dirn, 0, kX509NameFlagsRFC2253WithinUtf8JSON) < 0) {
       return false;
     }
     char* oline = nullptr;
     long n_bytes = BIO_get_mem_data(tmp.get(), &oline);  // NOLINT(runtime/int)
     KJ_REQUIRE(n_bytes >= 0);
-    if (n_bytes > 0) { KJ_REQUIRE(oline != nullptr); }
+    if (n_bytes > 0) {
+      KJ_REQUIRE(oline != nullptr);
+    }
 
     printAltName(out, oline, static_cast<size_t>(n_bytes), true, nullptr);
   } else if (gen->type == GEN_IPADD) {
@@ -245,18 +230,15 @@ bool printGeneralName(BIO* out, const GENERAL_NAME* gen) {
     }
 #endif  // OPENSSL_VERSION_MAJOR >= 3
     int val_type = gen->d.otherName->value->type;
-    if (prefix == nullptr ||
-        (unicode && val_type != V_ASN1_UTF8STRING) ||
+    if (prefix == nullptr || (unicode && val_type != V_ASN1_UTF8STRING) ||
         (!unicode && val_type != V_ASN1_IA5STRING)) {
       BIO_printf(out, "othername:<unsupported>");
     } else {
       BIO_printf(out, "othername:");
       if (unicode) {
-        printUtf8AltName(out, gen->d.otherName->value->value.utf8string,
-                         prefix);
+        printUtf8AltName(out, gen->d.otherName->value->value.utf8string, prefix);
       } else {
-        printLatin1AltName(out, gen->d.otherName->value->value.ia5string,
-                           prefix);
+        printLatin1AltName(out, gen->d.otherName->value->value.ia5string, prefix);
       }
     }
   } else if (gen->type == GEN_X400) {
@@ -278,16 +260,14 @@ bool safeX509SubjectAltNamePrint(BIO* out, X509_EXTENSION* ext) {
   KJ_REQUIRE(OBJ_obj2nid(X509_EXTENSION_get_object(ext)) == NID_subject_alt_name);
 
   GENERAL_NAMES* names = static_cast<GENERAL_NAMES*>(X509V3_EXT_d2i(ext));
-  if (names == nullptr)
-    return false;
+  if (names == nullptr) return false;
 
   bool ok = true;
 
   for (int i = 0; i < sk_GENERAL_NAME_num(names); i++) {
     GENERAL_NAME* gen = sk_GENERAL_NAME_value(names, i);
 
-    if (i != 0)
-      BIO_write(out, ", ", 2);
+    if (i != 0) BIO_write(out, ", ", 2);
 
     if (!(ok = printGeneralName(out, gen))) {
       break;
@@ -301,18 +281,15 @@ bool safeX509SubjectAltNamePrint(BIO* out, X509_EXTENSION* ext) {
 bool safeX509InfoAccessPrint(BIO* out, X509_EXTENSION* ext) {
   KJ_REQUIRE(OBJ_obj2nid(X509_EXTENSION_get_object(ext)) == NID_info_access);
 
-  AUTHORITY_INFO_ACCESS* descs =
-      static_cast<AUTHORITY_INFO_ACCESS*>(X509V3_EXT_d2i(ext));
-  if (descs == nullptr)
-    return false;
+  AUTHORITY_INFO_ACCESS* descs = static_cast<AUTHORITY_INFO_ACCESS*>(X509V3_EXT_d2i(ext));
+  if (descs == nullptr) return false;
 
   bool ok = true;
 
   for (int i = 0; i < sk_ACCESS_DESCRIPTION_num(descs); i++) {
     ACCESS_DESCRIPTION* desc = sk_ACCESS_DESCRIPTION_value(descs, i);
 
-    if (i != 0)
-      BIO_write(out, "\n", 1);
+    if (i != 0) BIO_write(out, "\n", 1);
 
     char objtmp[80] = {0};
     i2t_ASN1_OBJECT(objtmp, sizeof(objtmp), desc->method);
@@ -331,16 +308,14 @@ bool safeX509InfoAccessPrint(BIO* out, X509_EXTENSION* ext) {
 }
 
 void addFingerprintDigest(
-    const unsigned char* md,
-    unsigned int md_size,
-    char fingerprint[3 * EVP_MAX_MD_SIZE]) {
+    const unsigned char* md, unsigned int md_size, char fingerprint[3 * EVP_MAX_MD_SIZE]) {
   unsigned int i;
   const char hex[] = "0123456789ABCDEF";
 
   for (i = 0; i < md_size; i++) {
-    fingerprint[3*i] = hex[(md[i] & 0xf0) >> 4];
-    fingerprint[(3*i)+1] = hex[(md[i] & 0x0f)];
-    fingerprint[(3*i)+2] = ':';
+    fingerprint[3 * i] = hex[(md[i] & 0xf0) >> 4];
+    fingerprint[(3 * i) + 1] = hex[(md[i] & 0x0f)];
+    fingerprint[(3 * i) + 2] = ':';
   }
   fingerprint[(3 * (md_size - 1)) + 2] = '\0';
 }
@@ -417,20 +392,16 @@ kj::Array<kj::byte> getRsaPubKey(RSA* rsa) {
 }
 
 kj::Maybe<int32_t> getECGroupBits(const EC_GROUP* group) {
-  if (group == nullptr)
-    return kj::none;
+  if (group == nullptr) return kj::none;
 
   int32_t bits = EC_GROUP_order_bits(group);
-  if (bits <= 0)
-    return kj::none;
+  if (bits <= 0) return kj::none;
 
   return bits;
 }
 
-
-kj::Maybe<kj::Array<kj::byte>> eCPointToBuffer(const EC_GROUP* group,
-                                    const EC_POINT* point,
-                                    point_conversion_form_t form) {
+kj::Maybe<kj::Array<kj::byte>> eCPointToBuffer(
+    const EC_GROUP* group, const EC_POINT* point, point_conversion_form_t form) {
   size_t len = EC_POINT_point2oct(group, point, form, nullptr, 0, nullptr);
   if (len == 0) {
     return kj::none;
@@ -438,12 +409,7 @@ kj::Maybe<kj::Array<kj::byte>> eCPointToBuffer(const EC_GROUP* group,
 
   auto buffer = kj::heapArray<kj::byte>(len);
 
-  len = EC_POINT_point2oct(group,
-                           point,
-                           form,
-                           buffer.begin(),
-                           buffer.size(),
-                           nullptr);
+  len = EC_POINT_point2oct(group, point, form, buffer.begin(), buffer.size(), nullptr);
   if (len == 0) {
     return kj::none;
   }
@@ -462,8 +428,7 @@ kj::Maybe<kj::String> getCurveName(const int nid) {
 
 kj::Maybe<kj::Array<kj::byte>> getECPubKey(const EC_GROUP* group, EC_KEY* ec) {
   const EC_POINT* pubkey = EC_KEY_get0_public_key(ec);
-  if (pubkey == nullptr)
-    return kj::none;
+  if (pubkey == nullptr) return kj::none;
 
   return eCPointToBuffer(group, pubkey, EC_KEY_get_conv_form(ec));
 }
@@ -563,8 +528,8 @@ kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(kj::Array<const kj::
 kj::Maybe<kj::String> X509Certificate::getSubject() {
   ClearErrorOnReturn clearErrorOnReturn;
   KJ_IF_SOME(bio, newBio()) {
-    if (X509_NAME_print_ex(bio.get(), X509_get_subject_name(cert_.get()), 0,
-                           kX509NameFlagsMultiline) > 0) {
+    if (X509_NAME_print_ex(
+            bio.get(), X509_get_subject_name(cert_.get()), 0, kX509NameFlagsMultiline) > 0) {
       return toString(bio.get());
     }
   }
@@ -610,8 +575,8 @@ kj::Maybe<kj::String> X509Certificate::getInfoAccess() {
 kj::Maybe<kj::String> X509Certificate::getIssuer() {
   ClearErrorOnReturn clearErrorOnReturn;
   KJ_IF_SOME(bio, newBio()) {
-    if (X509_NAME_print_ex(bio.get(), X509_get_issuer_name(cert_.get()), 0,
-                           kX509NameFlagsMultiline) > 0) {
+    if (X509_NAME_print_ex(
+            bio.get(), X509_get_issuer_name(cert_.get()), 0, kX509NameFlagsMultiline) > 0) {
       return toString(bio.get());
     }
   }
@@ -620,8 +585,7 @@ kj::Maybe<kj::String> X509Certificate::getIssuer() {
 
 kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::getIssuerCert() {
   ClearErrorOnReturn clearErrorOnReturn;
-  return issuerCert_.map([](jsg::Ref<X509Certificate>& cert) mutable
-      -> jsg::Ref<X509Certificate> {
+  return issuerCert_.map([](jsg::Ref<X509Certificate>& cert) mutable -> jsg::Ref<X509Certificate> {
     return cert.addRef();
   });
 }
@@ -656,9 +620,7 @@ kj::Maybe<kj::Array<kj::String>> X509Certificate::getKeyUsage() {
 
   int j = 0;
   for (int i = 0; i < count; i++) {
-    if (OBJ_obj2txt(buf,
-                    sizeof(buf),
-                    sk_ASN1_OBJECT_value(eku.get(), i), 1) >= 0) {
+    if (OBJ_obj2txt(buf, sizeof(buf), sk_ASN1_OBJECT_value(eku.get(), i), 1) >= 0) {
       ext_key_usage[j++] = kj::str(buf);
     }
   }
@@ -674,9 +636,7 @@ kj::Maybe<kj::Array<const char>> X509Certificate::getSerialNumber() {
       KJ_DEFER(BN_clear_free(bn));
       char* data = BN_bn2hex(bn);
       return kj::arrayPtr<const char>(data, strlen(data))
-          .attach(kj::defer([data,len=strlen(data)]{
-        OPENSSL_clear_free(data, len);
-      }));
+          .attach(kj::defer([data, len = strlen(data)] { OPENSSL_clear_free(data, len); }));
     }
   }
 
@@ -730,26 +690,22 @@ bool X509Certificate::getIsCA() {
   return X509_check_ca(cert_.get()) == 1;
 }
 
-kj::Maybe<kj::String> X509Certificate::checkHost(kj::String name,
-                                                 jsg::Optional<CheckOptions> options) {
+kj::Maybe<kj::String> X509Certificate::checkHost(
+    kj::String name, jsg::Optional<CheckOptions> options) {
   ClearErrorOnReturn clearErrorOnReturn;
   char* peername = nullptr;
-  switch (X509_check_host(
-              cert_.get(),
-              name.begin(),
-              name.size(),
-              optionsToFlags(options),
-              &peername)) {
-    case 1:  {  // Match!
+  switch (
+      X509_check_host(cert_.get(), name.begin(), name.size(), optionsToFlags(options), &peername)) {
+    case 1: {  // Match!
       if (peername != nullptr) {
         KJ_DEFER(OPENSSL_free(peername));
         return kj::str(peername);
       }
       return kj::mv(name);
     }
-    case 0:  // No Match!
+    case 0:             // No Match!
       return kj::none;  // No return value is set
-    case -2:  // Error!
+    case -2:            // Error!
       JSG_FAIL_REQUIRE(Error, "Invalid name");
     default:  // Error!
       JSG_FAIL_REQUIRE(Error, "Operation failed");
@@ -758,19 +714,15 @@ kj::Maybe<kj::String> X509Certificate::checkHost(kj::String name,
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<kj::String> X509Certificate::checkEmail(kj::String email,
-                                                  jsg::Optional<CheckOptions> options) {
+kj::Maybe<kj::String> X509Certificate::checkEmail(
+    kj::String email, jsg::Optional<CheckOptions> options) {
   ClearErrorOnReturn clearErrorOnReturn;
-  switch (X509_check_email(
-              cert_.get(),
-              email.begin(),
-              email.size(),
-              optionsToFlags(options))) {
+  switch (X509_check_email(cert_.get(), email.begin(), email.size(), optionsToFlags(options))) {
     case 1:  // Match!
       return kj::mv(email);
-    case 0:  // No Match!
+    case 0:             // No Match!
       return kj::none;  // No return value is set
-    case -2:  // Error!
+    case -2:            // Error!
       JSG_FAIL_REQUIRE(Error, "Invalid name");
     default:  // Error!
       JSG_FAIL_REQUIRE(Error, "Operation failed");
@@ -784,9 +736,9 @@ kj::Maybe<kj::String> X509Certificate::checkIp(kj::String ip, jsg::Optional<Chec
   switch (X509_check_ip_asc(cert_.get(), ip.begin(), optionsToFlags(options))) {
     case 1:  // Match!
       return kj::mv(ip);
-    case 0:  // No Match!
+    case 0:             // No Match!
       return kj::none;  // No return value is set
-    case -2:  // Error!
+    case -2:            // Error!
       JSG_FAIL_REQUIRE(Error, "Invalid IP");
     default:  // Error!
       JSG_FAIL_REQUIRE(Error, "Operation failed");
@@ -847,20 +799,20 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
           obj.set(js, "pubkey", jsg::JsValue(js.bytes(kj::mv(pubkey)).getHandle(js)));
         }
 
-            const int nid = EC_GROUP_get_curve_name(group);
-    if (nid != 0) {
-      // Curve is well-known, get its OID and NIST nick-name (if it has one).
+        const int nid = EC_GROUP_get_curve_name(group);
+        if (nid != 0) {
+          // Curve is well-known, get its OID and NIST nick-name (if it has one).
 
-      KJ_IF_SOME(name, getCurveName<OBJ_nid2sn>(nid)) {
-        obj.set(js,"asn1Curve", js.str(name));
-      }
-      KJ_IF_SOME(name, getCurveName<EC_curve_nid2nist>(nid)) {
-        obj.set(js,"nistCurve", js.str(name));
-      }
-    } else {
-      // Unnamed curves can be described by their mathematical properties,
-      // but aren't used much (at all?) with X.509/TLS. Support later if needed.
-    }
+          KJ_IF_SOME(name, getCurveName<OBJ_nid2sn>(nid)) {
+            obj.set(js, "asn1Curve", js.str(name));
+          }
+          KJ_IF_SOME(name, getCurveName<EC_curve_nid2nist>(nid)) {
+            obj.set(js, "nistCurve", js.str(name));
+          }
+        } else {
+          // Unnamed curves can be described by their mathematical properties,
+          // but aren't used much (at all?) with X.509/TLS. Support later if needed.
+        }
         break;
       }
     }
@@ -883,9 +835,7 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
     obj.set(js, "fingerprint512", js.str(fingerprint512));
   }
   KJ_IF_SOME(keyUsage, getKeyUsage()) {
-    auto values = KJ_MAP(str, keyUsage) {
-      return jsg::JsValue(js.str(str));
-    };
+    auto values = KJ_MAP(str, keyUsage) { return jsg::JsValue(js.str(str)); };
     obj.set(js, "ext_key_usage", js.arr(values));
   }
   KJ_IF_SOME(serialNumber, getSerialNumber()) {

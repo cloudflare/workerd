@@ -49,7 +49,9 @@ public:
   typedef kj::String Key;
   typedef kj::StringPtr KeyPtr;
   // Keys are text for now, but we could also change this to `Array<const byte>`.
-  static inline Key cloneKey(KeyPtr ptr) { return kj::str(ptr); }
+  static inline Key cloneKey(KeyPtr ptr) {
+    return kj::str(ptr);
+  }
 
   // Values are raw bytes.
   typedef kj::Array<const byte> Value;
@@ -72,26 +74,26 @@ public:
     Key newKey;
   };
 
-  enum class CacheStatus {
-    CACHED,
-    UNCACHED
-  };
+  enum class CacheStatus { CACHED, UNCACHED };
 
   struct KeyValuePtrPairWithCache: public KeyValuePtrPair {
     CacheStatus status;
 
     KeyValuePtrPairWithCache(const KeyValuePtrPair& other, CacheStatus status)
-        : KeyValuePtrPair(other), status(status) {}
+        : KeyValuePtrPair(other),
+          status(status) {}
     KeyValuePtrPairWithCache(const KeyValuePtrPairWithCache& other)
-        : KeyValuePtrPair(other.key, other.value), status(other.status) {}
+        : KeyValuePtrPair(other.key, other.value),
+          status(other.status) {}
     KeyValuePtrPairWithCache(KeyPtr key, ValuePtr value, CacheStatus status)
-        : KeyValuePtrPair(key, value), status(status) {}
+        : KeyValuePtrPair(key, value),
+          status(status) {}
   };
 
   // An iterable type where each element is a KeyValuePtrPair.
   class GetResultList;
 
-  struct CleanAlarm{};
+  struct CleanAlarm {};
 
   struct DirtyAlarm {
     kj::Maybe<kj::Date> newTime;
@@ -99,7 +101,7 @@ public:
 
   using MaybeAlarmChange = kj::OneOf<CleanAlarm, DirtyAlarm>;
 
-  struct DirtyAlarmWithOptions : public DirtyAlarm {
+  struct DirtyAlarmWithOptions: public DirtyAlarm {
     ActorCacheWriteOptions options;
   };
 
@@ -138,23 +140,20 @@ public:
   // delay further puts until the promise resolves. This happens when too much data is pinned in
   // cache because writes haven't been flushed to disk yet. Dropping this promise will not cancel
   // the put.
-  virtual kj::Maybe<kj::Promise<void>> put(
-      Key key, Value value, WriteOptions options) = 0;
-  virtual kj::Maybe<kj::Promise<void>> put(
-      kj::Array<KeyValuePair> pairs, WriteOptions options) = 0;
+  virtual kj::Maybe<kj::Promise<void>> put(Key key, Value value, WriteOptions options) = 0;
+  virtual kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) = 0;
 
   // Writes a new alarm time into cache and schedules it to be flushed to disk later, same as put().
-  virtual kj::Maybe<kj::Promise<void>> setAlarm(kj::Maybe<kj::Date> newTime, WriteOptions options) = 0;
+  virtual kj::Maybe<kj::Promise<void>> setAlarm(
+      kj::Maybe<kj::Date> newTime, WriteOptions options) = 0;
 
   // Delete the gives keys.
   //
   // Returns a `bool` or `uint` if it can be immediately determined from cache how many keys were
   // present before the call. Otherwise, returns a promise which resolves after getting a response
   // from underlying storage. The promise also applies backpressure if needed, as with put().
-  virtual kj::OneOf<bool, kj::Promise<bool>> delete_(
-      Key key, WriteOptions options) = 0;
-  virtual kj::OneOf<uint, kj::Promise<uint>> delete_(
-      kj::Array<Key> keys, WriteOptions options) = 0;
+  virtual kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) = 0;
+  virtual kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) = 0;
 };
 
 // Abstract interface that is implemented by ActorCache as well as ActorSqlite.
@@ -265,11 +264,15 @@ public:
       "broken.ignored; jsg.Error: "
       "Durable Object storage is no longer accessible."_kj;
 
-  ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru, OutputGate& gate,
+  ActorCache(rpc::ActorStorage::Stage::Client storage,
+      const SharedLru& lru,
+      OutputGate& gate,
       Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
   ~ActorCache() noexcept(false);
 
-  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return kj::none; }
+  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override {
+    return kj::none;
+  }
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> get(
@@ -284,7 +287,8 @@ public:
   kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) override;
   kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
   kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
-  kj::Maybe<kj::Promise<void>> setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> setAlarm(
+      kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
   // See ActorCacheOps.
 
   kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
@@ -311,7 +315,7 @@ private:
       auto p = reinterpret_cast<ActorCache*>(pointer);
       KJ_IF_SOME(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
         d.status = DeferredAlarmDelete::Status::READY;
-        p->ensureFlushScheduled(WriteOptions { .noCache = d.noCache });
+        p->ensureFlushScheduled(WriteOptions{.noCache = d.noCache});
       }
     }
   };
@@ -398,6 +402,7 @@ private:
 
     // This enum indicates how synchronized this entry is with storage.
     EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+
   public:
     EntryValueStatus getValueStatus() const {
       return valueStatus;
@@ -438,7 +443,7 @@ private:
     }
 
     bool isDirty() const {
-      switch(getSyncStatus()) {
+      switch (getSyncStatus()) {
         case EntrySyncStatus::DIRTY: {
           return true;
         }
@@ -489,14 +494,20 @@ private:
   // Callbacks for a kj::TreeIndex for a kj::Table<kj::Own<Entry>>.
   class EntryTableCallbacks {
   public:
-    inline KeyPtr keyForRow(const kj::Own<Entry>& row) const { return row->key; }
+    inline KeyPtr keyForRow(const kj::Own<Entry>& row) const {
+      return row->key;
+    }
 
-    inline bool isBefore(const kj::Own<Entry>& row, KeyPtr key) const { return row->key < key; }
+    inline bool isBefore(const kj::Own<Entry>& row, KeyPtr key) const {
+      return row->key < key;
+    }
     inline bool isBefore(const kj::Own<Entry>& a, const kj::Own<Entry>& b) const {
       return a->key < b->key;
     }
 
-    inline bool matches(const kj::Own<Entry>& row, KeyPtr key) const { return row->key == key; }
+    inline bool matches(const kj::Own<Entry>& row, KeyPtr key) const {
+      return row->key == key;
+    }
   };
 
   // When delete() is called with one or more keys that aren't in cache, we will need to get
@@ -543,13 +554,14 @@ private:
   class CountedDeleteWaiter {
   public:
     explicit CountedDeleteWaiter(ActorCache& cache, kj::Own<CountedDelete> state)
-      : cache(cache), state(kj::mv(state)) {
+        : cache(cache),
+          state(kj::mv(state)) {
       // Register this operation so that we can batch it properly during flush.
       cache.countedDeletes.insert(this->state.get());
     }
     KJ_DISALLOW_COPY_AND_MOVE(CountedDeleteWaiter);
     ~CountedDeleteWaiter() noexcept(false) {
-      for (auto& entry : state->entries) {
+      for (auto& entry: state->entries) {
         // Let each entry associated with this counted delete know that we aren't waiting anymore.
         entry->isCountedDelete = false;
       }
@@ -593,8 +605,12 @@ private:
       return innerSize;
     }
 
-    auto begin() { return inner.begin(); }
-    auto end() { return inner.end(); }
+    auto begin() {
+      return inner.begin();
+    }
+    auto end() {
+      return inner.end();
+    }
 
   private:
     kj::List<Entry, &Entry::link> inner;
@@ -612,8 +628,8 @@ private:
   kj::ExternalMutexGuarded<kj::Table<kj::Own<Entry>, kj::TreeIndex<EntryTableCallbacks>>>
       currentValues;
 
-  struct UnknownAlarmTime{};
-  struct KnownAlarmTime{
+  struct UnknownAlarmTime {};
+  struct KnownAlarmTime {
     enum class Status { CLEAN, DIRTY, FLUSHING } status;
     kj::Maybe<kj::Date> time;
     bool noCache = false;
@@ -633,7 +649,8 @@ private:
     bool noCache = false;
   };
 
-  kj::OneOf<UnknownAlarmTime, KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime = UnknownAlarmTime{};
+  kj::OneOf<UnknownAlarmTime, KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime =
+      UnknownAlarmTime{};
 
   struct ReadCompletionChain: public kj::Refcounted {
     kj::Maybe<kj::Own<ReadCompletionChain>> next;
@@ -720,16 +737,17 @@ private:
   // inserted and will instead immediately have state NOT_IN_CACHE.
   //
   // Either way, a strong reference to the entry is returned.
-  kj::Own<Entry> addReadResultToCache(Lock& lock, Key key, kj::Maybe<capnp::Data::Reader> value,
-                                      const ReadOptions& readOptions);
-
+  kj::Own<Entry> addReadResultToCache(
+      Lock& lock, Key key, kj::Maybe<capnp::Data::Reader> value, const ReadOptions& readOptions);
 
   // Mark all gaps empty between the begin and end key.
   void markGapsEmpty(Lock& lock, KeyPtr begin, kj::Maybe<KeyPtr> end, const ReadOptions& options);
 
   // Implements put() or delete(). Multi-key variants call this for each key.
-  void putImpl(Lock& lock, kj::Own<Entry> newEntry,
-               const WriteOptions& options,  kj::Maybe<CountedDelete&> counted);
+  void putImpl(Lock& lock,
+      kj::Own<Entry> newEntry,
+      const WriteOptions& options,
+      kj::Maybe<CountedDelete&> counted);
 
   kj::Promise<kj::Maybe<Value>> getImpl(kj::Own<Entry> entry, ReadOptions options);
 
@@ -782,9 +800,10 @@ private:
   kj::Promise<void> flushImplUsingSingleMutedDelete(MutedDeleteFlush mutedFlush);
   kj::Promise<void> flushImplUsingSingleCountedDelete(CountedDeleteFlush countedFlush);
   kj::Promise<void> flushImplAlarmOnly(DirtyAlarm dirty);
-  kj::Promise<void> flushImplUsingTxn(
-      PutFlush putFlush, MutedDeleteFlush mutedDeleteFlush,
-      CountedDeleteFlushes countedDeleteFlushes, MaybeAlarmChange maybeAlarmChange);
+  kj::Promise<void> flushImplUsingTxn(PutFlush putFlush,
+      MutedDeleteFlush mutedDeleteFlush,
+      CountedDeleteFlushes countedDeleteFlushes,
+      MaybeAlarmChange maybeAlarmChange);
 
   // Carefully remove a clean entry from `currentValues`, making sure to update gaps.
   void evictEntry(Lock& lock, Entry& entry);
@@ -811,12 +830,13 @@ private:
 
 class ActorCacheOps::GetResultList {
   using Entry = ActorCache::Entry;
+
 public:
   class Iterator {
   public:
     KeyValuePtrPairWithCache operator*() {
       KJ_IREQUIRE(ptr->get()->getValueStatus() == ActorCache::EntryValueStatus::PRESENT);
-      return { ptr->get()->key, ptr->get()->getValuePtr().orDefault({}), *statusPtr };
+      return {ptr->get()->key, ptr->get()->getValuePtr().orDefault({}), *statusPtr};
     }
     Iterator& operator++() {
       ++ptr;
@@ -838,13 +858,20 @@ public:
     const CacheStatus* statusPtr;
 
     explicit Iterator(const kj::Own<Entry>* ptr, const CacheStatus* statusPtr)
-        : ptr(ptr), statusPtr(statusPtr) {}
+        : ptr(ptr),
+          statusPtr(statusPtr) {}
     friend class GetResultList;
   };
 
-  Iterator begin() const { return Iterator(entries.begin(), cacheStatuses.begin()); }
-  Iterator end() const { return Iterator(entries.end(), cacheStatuses.end()); }
-  size_t size() const { return entries.size(); }
+  Iterator begin() const {
+    return Iterator(entries.begin(), cacheStatuses.begin());
+  }
+  Iterator end() const {
+    return Iterator(entries.end(), cacheStatuses.end());
+  }
+  size_t size() const {
+    return entries.size();
+  }
 
   // Construct a simple GetResultList from key-value pairs.
   explicit GetResultList(kj::Vector<KeyValuePair> contents);
@@ -853,10 +880,7 @@ private:
   kj::Vector<kj::Own<Entry>> entries;
   kj::Vector<CacheStatus> cacheStatuses;
 
-  enum Order {
-    FORWARD,
-    REVERSE
-  };
+  enum Order { FORWARD, REVERSE };
 
   // Merges `cachedEntries` and `fetchedEntries`, which should each already be sorted in the
   // given order. If a key exists in both, `cachedEntries` is preferred.
@@ -868,8 +892,9 @@ private:
   // The idea is that `cachedEntries` is the set of entries that were loaded from cache while
   // `fetchedEntries` is the set read from storage.
   explicit GetResultList(kj::Vector<kj::Own<Entry>> cachedEntries,
-                         kj::Vector<kj::Own<Entry>> fetchedEntries,
-                         Order order, kj::Maybe<uint> limit = kj::none);
+      kj::Vector<kj::Own<Entry>> fetchedEntries,
+      Order order,
+      kj::Maybe<uint> limit = kj::none);
 
   friend class ActorCache;
 };
@@ -917,7 +942,9 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(SharedLru);
 
   // Mostly for testing.
-  size_t currentSize() const { return size.load(std::memory_order_relaxed); }
+  size_t currentSize() const {
+    return size.load(std::memory_order_relaxed);
+  }
 
 private:
   const Options options;
@@ -966,7 +993,8 @@ public:
   kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) override;
   kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
   kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
-  kj::Maybe<kj::Promise<void>> setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> setAlarm(
+      kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
   // Same interface as ActorCache.
   //
   // Read ops will reflect the previous writes made to the transaction even though they aren't
@@ -987,10 +1015,16 @@ private:
   // Callbacks for a kj::TreeIndex for a kj::Table<Change>.
   class ChangeTableCallbacks {
   public:
-    inline KeyPtr keyForRow(const Change& row) const { return row.entry->key; }
+    inline KeyPtr keyForRow(const Change& row) const {
+      return row.entry->key;
+    }
 
-    inline bool isBefore(const Change& row, KeyPtr key) const { return row.entry->key < key; }
-    inline bool matches(const Change& row, KeyPtr key) const { return row.entry->key == key; }
+    inline bool isBefore(const Change& row, KeyPtr key) const {
+      return row.entry->key < key;
+    }
+    inline bool matches(const Change& row, KeyPtr key) const {
+      return row.entry->key == key;
+    }
   };
 
   kj::Table<Change, kj::TreeIndex<ChangeTableCallbacks>> entriesToWrite;
@@ -1007,8 +1041,10 @@ private:
   // Adds the given key/value pair to `changes`. If an existing entry is replaced, *count is
   // incremented if it was a positive entry. If no existing entry is replaced, then the key
   // is returned, indicating that if a count is needed, we'll need to inspect cache/disk.
-  kj::Maybe<KeyPtr> putImpl(Lock& lock, kj::Own<Entry> entry,
-                            const WriteOptions& options, kj::Maybe<uint&> count = kj::none);
+  kj::Maybe<KeyPtr> putImpl(Lock& lock,
+      kj::Own<Entry> entry,
+      const WriteOptions& options,
+      kj::Maybe<uint&> count = kj::none);
 };
 
 }  // namespace workerd

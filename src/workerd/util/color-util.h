@@ -34,4 +34,4 @@ static ColorMode permitsColor() {
   }
 }
 
-} // namespace workerd
+}  // namespace workerd

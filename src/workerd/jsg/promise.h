@@ -25,14 +25,17 @@ template <typename T>
 struct OpaqueWrappable<T, false>: public Wrappable {
   // Used to implement wrapOpaque().
 
-  OpaqueWrappable(T&& value)
-      : value(kj::mv(value)) {}
+  OpaqueWrappable(T&& value): value(kj::mv(value)) {}
 
   T value;
   bool movedAway = false;
 
-  kj::StringPtr jsgGetMemoryName() const override { return "OpaqueWrappable"_kjc; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(OpaqueWrappable); }
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "OpaqueWrappable"_kjc;
+  }
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(OpaqueWrappable);
+  }
   void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
     Wrappable::jsgGetMemoryInfo(tracker);
   }
@@ -44,8 +47,12 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
 
   using OpaqueWrappable<T, false>::OpaqueWrappable;
 
-  kj::StringPtr jsgGetMemoryName() const override { return "OpaqueWrappable"_kjc; }
-  size_t jsgGetMemorySelfSize() const override { return sizeof(OpaqueWrappable); }
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "OpaqueWrappable"_kjc;
+  }
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(OpaqueWrappable);
+  }
   void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
     Wrappable::jsgGetMemoryInfo(tracker);
   }
@@ -239,8 +246,7 @@ public:
         "functions passed to .then() must return exactly the same type");
 
     typedef ThenCatchPair<Func, ErrorFunc> FuncPair;
-    return thenImpl<Output>(js,
-        FuncPair { kj::fwd<Func>(func), kj::fwd<ErrorFunc>(errorFunc) },
+    return thenImpl<Output>(js, FuncPair{kj::fwd<Func>(func), kj::fwd<ErrorFunc>(errorFunc)},
         &promiseContinuation<FuncPair, false, T, Output>,
         &promiseContinuation<FuncPair, true, Value, Output>);
   }
@@ -254,8 +260,7 @@ public:
 
     // HACK: The error function is never called, so it need not actually be a functor.
     typedef ThenCatchPair<Func, bool> FuncPair;
-    return thenImpl<Output>(js,
-        FuncPair { kj::fwd<Func>(func), false },
+    return thenImpl<Output>(js, FuncPair{kj::fwd<Func>(func), false},
         &promiseContinuation<FuncPair, false, T, Output>,
         &identityPromiseContinuation<FuncPair, true>);
   }
@@ -267,8 +272,7 @@ public:
 
     // HACK: The non-error function is never called, so it need not actually be a functor.
     typedef ThenCatchPair<bool, ErrorFunc> FuncPair;
-    return thenImpl<T>(js,
-        FuncPair { false, kj::fwd<ErrorFunc>(errorFunc) },
+    return thenImpl<T>(js, FuncPair{false, kj::fwd<ErrorFunc>(errorFunc)},
         &identityPromiseContinuation<FuncPair, false>,
         &promiseContinuation<FuncPair, true, Value, T>);
   }
@@ -298,8 +302,8 @@ public:
   // never rely on it for correctness.
   kj::Maybe<T> tryConsumeResolved(Lock& js) {
     return js.withinHandleScope([&]() -> kj::Maybe<T> {
-      auto handle = KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once")
-          .getHandle(js);
+      auto handle =
+          KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once").getHandle(js);
       switch (handle->State()) {
         case v8::Promise::kPending:
         case v8::Promise::kRejected:
@@ -332,9 +336,8 @@ public:
 
     template <typename U = T, typename = kj::EnableIf<isVoid<U>()>>
     void resolve(Lock& js) {
-      js.withinHandleScope([&] {
-        check(v8Resolver.getHandle(js)->Resolve(js.v8Context(), js.v8Undefined()));
-      });
+      js.withinHandleScope(
+          [&] { check(v8Resolver.getHandle(js)->Resolve(js.v8Context(), js.v8Undefined())); });
     }
 
     void resolve(Lock& js, Promise&& promise) {
@@ -343,9 +346,8 @@ public:
     }
 
     void reject(Lock& js, v8::Local<v8::Value> exception) {
-      js.withinHandleScope([&] {
-        check(v8Resolver.getHandle(js)->Reject(js.v8Context(), exception));
-      });
+      js.withinHandleScope(
+          [&] { check(v8Resolver.getHandle(js)->Reject(js.v8Context(), exception)); });
     }
 
     void reject(Lock& js, kj::Exception exception) {
@@ -353,7 +355,7 @@ public:
     }
 
     Resolver addRef(Lock& js) {
-      return { js.v8Isolate, v8Resolver.getHandle(js) };
+      return {js.v8Isolate, v8Resolver.getHandle(js)};
     }
     void visitForGc(GcVisitor& visitor) {
       visitor.visit(v8Resolver);
@@ -383,8 +385,7 @@ private:
   bool markedAsHandled = false;
 
   v8::Local<v8::Promise> getInner(Lock& js) {
-    return KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once")
-        .getHandle(js);
+    return KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once").getHandle(js);
   }
 
   template <typename U = T, typename = kj::EnableIf<!isVoid<U>()>()>
@@ -414,8 +415,8 @@ private:
   }
 
   template <typename Result, typename FuncPair>
-  Promise<RemovePromise<Result>> thenImpl(
-      Lock& js, FuncPair&& funcPair,
+  Promise<RemovePromise<Result>> thenImpl(Lock& js,
+      FuncPair&& funcPair,
       v8::FunctionCallback thenCallback,
       v8::FunctionCallback errCallback) {
     return js.withinHandleScope([&] {
@@ -431,8 +432,7 @@ private:
 
       using Type = RemovePromise<Result>;
 
-      return Promise<Type>(js.v8Isolate,
-          check(consumeHandle(js)->Then(context, then, errThen)));
+      return Promise<Type>(js.v8Isolate, check(consumeHandle(js)->Then(context, then, errThen)));
     });
   }
 
@@ -468,10 +468,7 @@ PromiseResolverPair<T> Lock::newPromiseAndResolver() {
   return withinHandleScope([&]() -> PromiseResolverPair<T> {
     auto resolver = check(v8::Promise::Resolver::New(v8Context()));
     auto promise = resolver->GetPromise();
-    return {
-      { v8Isolate, promise },
-      { v8Isolate, resolver }
-    };
+    return {{v8Isolate, promise}, {v8Isolate, resolver}};
   });
 }
 
@@ -485,23 +482,20 @@ inline Promise<void> Lock::resolvedPromise() {
 
 template <typename T>
 Promise<T> Lock::rejectedPromise(v8::Local<v8::Value> exception) {
-  auto [ promise, resolver ] = newPromiseAndResolver<T>();
+  auto [promise, resolver] = newPromiseAndResolver<T>();
   resolver.reject(*this, exception);
   return kj::mv(promise);
 }
 
 template <typename T>
 Promise<T> Lock::rejectedPromise(jsg::Value exception) {
-  return withinHandleScope([&] {
-    return rejectedPromise<T>(exception.getHandle(*this));
-  });
+  return withinHandleScope([&] { return rejectedPromise<T>(exception.getHandle(*this)); });
 }
 
 template <typename T>
 Promise<T> Lock::rejectedPromise(kj::Exception&& exception) {
-  return withinHandleScope([&] {
-    return rejectedPromise<T>(makeInternalError(v8Isolate, kj::mv(exception)));
-  });
+  return withinHandleScope(
+      [&] { return rejectedPromise<T>(makeInternalError(v8Isolate, kj::mv(exception))); });
 }
 
 template <class Func>
@@ -527,8 +521,8 @@ PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
   } catch (std::exception& exception) {
     return rejectedPromise<Result>(makeInternalError(v8Isolate, exception.what()));
   } catch (...) {
-    return rejectedPromise<Result>(makeInternalError(v8Isolate,
-        kj::str("caught unknown exception of type: ", kj::getCaughtExceptionType())));
+    return rejectedPromise<Result>(makeInternalError(
+        v8Isolate, kj::str("caught unknown exception of type: ", kj::getCaughtExceptionType())));
   }
 }
 
@@ -562,8 +556,8 @@ void thenUnwrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* isolate = args.GetIsolate();
     auto& wrapper = TypeWrapper::from(isolate);
     auto context = isolate->GetCurrentContext();
-    return wrapOpaque(context, wrapper.template unwrap<Output>(context, args[0],
-        TypeErrorContext::promiseResolution()));
+    return wrapOpaque(context,
+        wrapper.template unwrap<Output>(context, args[0], TypeErrorContext::promiseResolution()));
   });
 }
 
@@ -575,14 +569,16 @@ public:
   // object (or convertible to a JsgConfig) if is provided. However, because of the way TypeWrapper
   // inherits PromiseWrapper, we always end up passing a config option (which might be
   // std::nullptr_t). The getConfig allows us to handle any case using reasonable defaults.
-  PromiseWrapper(const auto& config) : config(getConfig(config)) {}
+  PromiseWrapper(const auto& config): config(getConfig(config)) {}
 
   template <typename T>
-  static constexpr const char* getName(Promise<T>*) { return "Promise"; }
+  static constexpr const char* getName(Promise<T>*) {
+    return "Promise";
+  }
 
   template <typename T>
-  v8::Local<v8::Promise> wrap(
-      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator,
+  v8::Local<v8::Promise> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
       Promise<T>&& promise) {
     // Add a .then() to unwrap the value (i.e. convert C++ value to JavaScript).
     //
@@ -591,8 +587,8 @@ public:
     // the object whose method returned the promise will not be destroyed while the promise is
     // still executing.
     auto markedAsHandled = promise.markedAsHandled;
-    auto then = check(v8::Function::New(context,
-        &thenWrap<TypeWrapper, T>, creator.orDefault({}), 1, v8::ConstructorBehavior::kThrow));
+    auto then = check(v8::Function::New(context, &thenWrap<TypeWrapper, T>, creator.orDefault({}),
+        1, v8::ConstructorBehavior::kThrow));
 
     auto& js = jsg::Lock::from(context->GetIsolate());
     auto ret = check(promise.consumeHandle(js)->Then(context, then));
@@ -608,9 +604,10 @@ public:
   }
 
   template <typename T>
-  kj::Maybe<Promise<T>> tryUnwrap(
-      v8::Local<v8::Context> context, v8::Local<v8::Value> handle,
-      Promise<T>*, kj::Maybe<v8::Local<v8::Object>> parentObject) {
+  kj::Maybe<Promise<T>> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      Promise<T>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsPromise()) {
       auto promise = handle.As<v8::Promise>();
       if constexpr (!isVoid<T>() && !isV8Ref<T>()) {
@@ -621,8 +618,8 @@ public:
         // TODO(perf): We could in theory check if promise->State() is kFulfilled and, in that
         //   case, pull out promise->Result(), unwrap it, and make a new immediate promise.
         //   Similarly in `wrap()`. Not clear if the added complexity is worth it, though.
-        auto then = check(v8::Function::New(context,
-            &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
+        auto then = check(v8::Function::New(
+            context, &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
         promise = check(promise->Then(context, then));
       }
       return Promise<T>(context->GetIsolate(), promise);
@@ -659,8 +656,7 @@ public:
         return js.resolvedPromise();
       } else {
         auto& wrapper = *static_cast<TypeWrapper*>(this);
-        KJ_IF_SOME(value,
-            wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
+        KJ_IF_SOME(value, wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
           return js.resolvedPromise(kj::mv(value));
         } else {
           // Wrong type.
@@ -691,17 +687,16 @@ private:
 class UnhandledRejectionHandler {
 public:
   using Handler = void(jsg::Lock& js,
-                       v8::PromiseRejectEvent event,
-                       jsg::V8Ref<v8::Promise> promise,
-                       jsg::Value value);
+      v8::PromiseRejectEvent event,
+      jsg::V8Ref<v8::Promise> promise,
+      jsg::Value value);
 
-  explicit UnhandledRejectionHandler(kj::Function<Handler> handler)
-      : handler(kj::mv(handler)) {}
+  explicit UnhandledRejectionHandler(kj::Function<Handler> handler): handler(kj::mv(handler)) {}
 
   void report(jsg::Lock& js,
-              v8::PromiseRejectEvent event,
-              jsg::V8Ref<v8::Promise> promise,
-              jsg::Value value);
+      v8::PromiseRejectEvent event,
+      jsg::V8Ref<v8::Promise> promise,
+      jsg::Value value);
 
   void clear();
 
@@ -719,8 +714,7 @@ private:
   // later in the event loop tick, any remaining rejections will generate a
   // warning to the inspector console (if enabled);
   struct UnhandledRejection {
-    explicit UnhandledRejection(
-        jsg::Lock& js,
+    explicit UnhandledRejection(jsg::Lock& js,
         jsg::V8Ref<v8::Promise> promise,
         jsg::Value value,
         v8::Local<v8::Message> message,
@@ -746,11 +740,15 @@ private:
     v8::Global<v8::Message> message;
     kj::Maybe<Ref<AsyncContextFrame>> asyncContextFrame;
 
-    inline bool isAlive() { return !promise.IsEmpty() && !value.IsEmpty(); }
+    inline bool isAlive() {
+      return !promise.IsEmpty() && !value.IsEmpty();
+    }
 
     size_t rejectionNumber;
 
-    uint hashCode() const { return hash; }
+    uint hashCode() const {
+      return hash;
+    }
 
     JSG_MEMORY_INFO(UnhandledRejection) {
       tracker.trackField("promise", promise);
@@ -766,7 +764,8 @@ private:
     uint hash;
 
     HashedPromise(v8::Local<v8::Promise> promise)
-        : promise(promise), hash(kj::hashCode(promise->GetIdentityHash())) {}
+        : promise(promise),
+          hash(kj::hashCode(promise->GetIdentityHash())) {}
 
     JSG_MEMORY_INFO(HashedPromise) {
       tracker.trackField("promise", promise);
@@ -774,15 +773,21 @@ private:
   };
 
   struct UnhandledRejectionCallbacks {
-    inline const UnhandledRejection& keyForRow(const UnhandledRejection& row) const { return row; }
+    inline const UnhandledRejection& keyForRow(const UnhandledRejection& row) const {
+      return row;
+    }
     inline bool matches(const UnhandledRejection& a, const UnhandledRejection& b) const {
       return a.promise == b.promise;
     }
     inline bool matches(const UnhandledRejection& a, const HashedPromise& b) const {
       return a.promise == b.promise;
     }
-    inline uint hashCode(const UnhandledRejection& row) const { return row.hashCode(); }
-    inline uint hashCode(const HashedPromise& key) const { return key.hash; }
+    inline uint hashCode(const UnhandledRejection& row) const {
+      return row.hashCode();
+    }
+    inline uint hashCode(const HashedPromise& key) const {
+      return key.hash;
+    }
   };
 
   kj::Function<Handler> handler;

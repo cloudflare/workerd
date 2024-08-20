@@ -30,16 +30,13 @@ public:
     kj::ArrayPtr<const byte> buffer;
   };
 
-  explicit Context(Mode mode, kj::StringPtr format, ContextFlags flags) :
-      mode(mode), strictCompression(flags) {
+  explicit Context(Mode mode, kj::StringPtr format, ContextFlags flags)
+      : mode(mode),
+        strictCompression(flags) {
     int result = Z_OK;
     switch (mode) {
       case Mode::COMPRESS:
-        result = deflateInit2(
-            &ctx,
-            Z_DEFAULT_COMPRESSION,
-            Z_DEFLATED,
-            getWindowBits(format),
+        result = deflateInit2(&ctx, Z_DEFAULT_COMPRESSION, Z_DEFLATED, getWindowBits(format),
             8,  // memLevel = 8 is the default
             Z_DEFAULT_STRATEGY);
         break;
@@ -79,15 +76,13 @@ public:
     switch (mode) {
       case Mode::COMPRESS:
         result = deflate(&ctx, flush);
-        JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END,
-                     Error,
-                     "Compression failed.");
+        JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, Error,
+            "Compression failed.");
         break;
       case Mode::DECOMPRESS:
         result = inflate(&ctx, flush);
-        JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END,
-                     Error,
-                     "Decompression failed.");
+        JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, Error,
+            "Decompression failed.");
 
         if (strictCompression == ContextFlags::STRICT) {
           // The spec requires that a TypeError is produced if there is trailing data after the end
@@ -95,16 +90,16 @@ public:
           JSG_REQUIRE(!(result == Z_STREAM_END && ctx.avail_in > 0), TypeError,
               "Trailing bytes after end of compressed data");
           // Same applies to closing a stream before the complete decompressed data is available.
-          JSG_REQUIRE(!(flush == Z_FINISH && result == Z_BUF_ERROR &&
-              ctx.avail_out == sizeof(buffer)), TypeError,
-              "Called close() on a decompression stream with incomplete data");
+          JSG_REQUIRE(
+              !(flush == Z_FINISH && result == Z_BUF_ERROR && ctx.avail_out == sizeof(buffer)),
+              TypeError, "Called close() on a decompression stream with incomplete data");
         }
         break;
       default:
         KJ_UNREACHABLE;
     }
 
-    return Result {
+    return Result{
       .success = result == Z_OK,
       .buffer = kj::arrayPtr(buffer, sizeof(buffer) - ctx.avail_out),
     };
@@ -121,9 +116,12 @@ private:
     static constexpr auto GZIP = 16;
     static constexpr auto DEFLATE = 15;
     static constexpr auto DEFLATE_RAW = -15;
-    if (format == "gzip") return DEFLATE + GZIP;
-    else if (format == "deflate") return DEFLATE;
-    else if (format == "deflate-raw") return DEFLATE_RAW;
+    if (format == "gzip")
+      return DEFLATE + GZIP;
+    else if (format == "deflate")
+      return DEFLATE;
+    else if (format == "deflate-raw")
+      return DEFLATE_RAW;
     KJ_UNREACHABLE;
   }
 
@@ -140,7 +138,7 @@ private:
 // used to track the amount of data that has not been read back yet.
 class LazyBuffer {
 public:
-  LazyBuffer() : valid_size_(0) {}
+  LazyBuffer(): valid_size_(0) {}
 
   // Return a chunk of data and mark it as invalid. The returned chunk remains valid until data is
   // shifted, cleared or destructor is called. maybeShift() should be called after the returned data
@@ -228,10 +226,8 @@ public:
       }
       KJ_CASE_ONEOF(open, Open) {
         if (pieces.size() == 0) return kj::READY_NOW;
-        return write(pieces[0])
-            .then([this, pieces = pieces.slice(1)]() mutable {
-          return write(pieces);
-        });
+        return write(pieces[0]).then(
+            [this, pieces = pieces.slice(1)]() mutable { return write(pieces); });
       }
     }
     KJ_UNREACHABLE;
@@ -255,16 +251,14 @@ public:
         // There might still be data in the output buffer remaining to read.
         if (output.empty()) return size_t(0);
         return tryReadInternal(
-            kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes),
-            minBytes);
+            kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
         return kj::cp(exception);
       }
       KJ_CASE_ONEOF(open, Open) {
         return tryReadInternal(
-            kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes),
-            minBytes);
+            kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
       }
     }
     KJ_UNREACHABLE;
@@ -316,7 +310,7 @@ private:
 
     // Otherwise, create a pending read.
     auto promise = kj::newPromiseAndFulfiller<size_t>();
-    auto pendingRead = PendingRead {
+    auto pendingRead = PendingRead{
       .buffer = dest,
       .minBytes = minBytes,
       .filled = 0,
@@ -443,37 +437,33 @@ private:
 
 jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::String format) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
-               "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
+      "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
-  auto readableSide =
-      kj::refcounted<CompressionStreamImpl<Context::Mode::COMPRESS>>(kj::mv(format),
-                                                                     Context::ContextFlags::NONE);
+  auto readableSide = kj::refcounted<CompressionStreamImpl<Context::Mode::COMPRESS>>(
+      kj::mv(format), Context::ContextFlags::NONE);
   auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();
 
-  return jsg::alloc<CompressionStream>(
-    jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-    jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+  return jsg::alloc<CompressionStream>(jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
+      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
 }
 
 jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj::String format) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
-               "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
+      "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
   auto readableSide =
-      kj::refcounted<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(
-          kj::mv(format),
-          FeatureFlags::get(js).getStrictCompression() ?
-              Context::ContextFlags::STRICT :
-              Context::ContextFlags::NONE);
+      kj::refcounted<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(kj::mv(format),
+          FeatureFlags::get(js).getStrictCompression() ? Context::ContextFlags::STRICT
+                                                       : Context::ContextFlags::NONE);
   auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();
 
   return jsg::alloc<DecompressionStream>(
-    jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-    jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+      jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
+      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
 }
 
 }  // namespace workerd::api

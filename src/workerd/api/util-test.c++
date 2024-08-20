@@ -26,11 +26,9 @@ KJ_TEST("redactUrl can detect hex ids") {
   expectUnredacted("https://domain/path?a=1&b=2"_kj);
 
   expectRedacted(
-      "https://domain/0123456789abcdef0123456789abcdef/x"_kj,
-      "https://domain/REDACTED/x"_kj);
+      "https://domain/0123456789abcdef0123456789abcdef/x"_kj, "https://domain/REDACTED/x"_kj);
   expectRedacted(
-      "https://domain/0123456789abcdef-0123456789abcdef/x"_kj,
-      "https://domain/REDACTED/x"_kj);
+      "https://domain/0123456789abcdef-0123456789abcdef/x"_kj, "https://domain/REDACTED/x"_kj);
 
   // not long enough:
   expectUnredacted("https://domain/0123456789abcdef0123456789abcde/x"_kj);
@@ -62,156 +60,99 @@ KJ_TEST("readContentTypeParameter can fetch boundary parameter") {
 
   // normal
   expectContentTypeParameter(
-    "multipart/form-data; boundary=\"__boundary__\""_kj,
-    "boundary"_kj,
-    "__boundary__"_kj
-  );
+      "multipart/form-data; boundary=\"__boundary__\""_kj, "boundary"_kj, "__boundary__"_kj);
 
   // multiple params
-  expectContentTypeParameter(
-    "multipart/form-data; charset=utf-8; boundary=\"__boundary__\""_kj,
-    "boundary"_kj,
-    "__boundary__"_kj
-  );
+  expectContentTypeParameter("multipart/form-data; charset=utf-8; boundary=\"__boundary__\""_kj,
+      "boundary"_kj, "__boundary__"_kj);
 
- // param name inside value of other param
+  // param name inside value of other param
   expectContentTypeParameter(
-    "multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\""_kj,
-    "boundary"_kj,
-    "__boundary__"_kj
-  );
+      "multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\""_kj, "boundary"_kj,
+      "__boundary__"_kj);
 
   // ensure param is not found
   KJ_ASSERT(readContentTypeParameter(
-    "multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\""_kj,
-    "boundary1"_kj
-  ) == kj::none);
+                "multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\""_kj,
+                "boundary1"_kj) == kj::none);
 
   // no quotes
   expectContentTypeParameter(
-    "multipart/form-data; charset=\"boundary=;\"; boundary=__boundary__"_kj,
-    "boundary"_kj,
-    "__boundary__"_kj
-  );
+      "multipart/form-data; charset=\"boundary=;\"; boundary=__boundary__"_kj, "boundary"_kj,
+      "__boundary__"_kj);
 
   // attribute names are case-insensitive, but values are not
   expectContentTypeParameter(
-    "multipart/form-data; charset=\"boundary=;\"; boundary=__Boundary__"_kj,
-    "Boundary"_kj,
-    "__Boundary__"_kj
-  );
+      "multipart/form-data; charset=\"boundary=;\"; boundary=__Boundary__"_kj, "Boundary"_kj,
+      "__Boundary__"_kj);
 
   // different order
-  expectContentTypeParameter(
-    "multipart/form-data; boundary=\"__boundary__\"; charset=utf-8"_kj,
-    "boundary"_kj,
-    "__boundary__"_kj
-  );
+  expectContentTypeParameter("multipart/form-data; boundary=\"__boundary__\"; charset=utf-8"_kj,
+      "boundary"_kj, "__boundary__"_kj);
 
   // bogus parameter
-  expectContentTypeParameter(
-    "multipart/form-data; foo=123; boundary=\"__boundary__\""_kj,
-    "boundary"_kj,
-    "__boundary__"_kj
-  );
+  expectContentTypeParameter("multipart/form-data; foo=123; boundary=\"__boundary__\""_kj,
+      "boundary"_kj, "__boundary__"_kj);
 
   // quoted-string
   expectContentTypeParameter(
-    R"(multipart/form-data; foo="\"boundary=bar\""; boundary="realboundary")",
-    "boundary"_kj,
-    "realboundary"_kj
-  );
+      R"(multipart/form-data; foo="\"boundary=bar\""; boundary="realboundary")", "boundary"_kj,
+      "realboundary"_kj);
 
   // handle non-closing quotes
   expectContentTypeParameter(
-    R"(multipart/form-data; charset="boundary=;\"; boundary="__boundary__")",
-    "boundary"_kj,
-    "__boundary__"_kj);
+      R"(multipart/form-data; charset="boundary=;\"; boundary="__boundary__")", "boundary"_kj,
+      "__boundary__"_kj);
 
   expectContentTypeParameter(
-    R"(multipart/form-data; charset="boundary=;"; boundary="__boundary__\")",
-    "boundary"_kj,
-    "__boundary__"_kj);
+      R"(multipart/form-data; charset="boundary=;"; boundary="__boundary__\")", "boundary"_kj,
+      "__boundary__"_kj);
 
   expectContentTypeParameter(
-    R"(multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\")",
-    "boundary"_kj,
-    R"(\"__boundary__\")");
+      R"(multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\")", "boundary"_kj,
+      R"(\"__boundary__\")");
 
   // spurious whitespace before ;
   expectContentTypeParameter(
-    "multipart/form-data; boundary=asdf ;foo=bar"_kj,
-    "boundary"_kj,
-    "asdf"_kj
-  );
+      "multipart/form-data; boundary=asdf ;foo=bar"_kj, "boundary"_kj, "asdf"_kj);
 
   // spurious whitespace before ; with quotes
   expectContentTypeParameter(
-    "multipart/form-data; boundary=\"asdf\" ;foo=bar"_kj,
-    "boundary"_kj,
-    "asdf"_kj
-  );
+      "multipart/form-data; boundary=\"asdf\" ;foo=bar"_kj, "boundary"_kj, "asdf"_kj);
 
   // all whitespace
-  KJ_ASSERT(readContentTypeParameter(
-    "multipart/form-data; boundary= ;foo=bar"_kj,
-    "boundary"_kj
-  ) == kj::none);
+  KJ_ASSERT(readContentTypeParameter("multipart/form-data; boundary= ;foo=bar"_kj, "boundary"_kj) ==
+      kj::none);
 
   // all whitespace with quotes
-  KJ_ASSERT(readContentTypeParameter(
-    "multipart/form-data; boundary="" ;foo=bar"_kj,
-    "boundary"_kj
-  ) == kj::none);
+  KJ_ASSERT(readContentTypeParameter("multipart/form-data; boundary="
+                                     " ;foo=bar"_kj,
+                "boundary"_kj) == kj::none);
 
   // terminal escape character after quote
-  KJ_ASSERT(readContentTypeParameter(
-    R"(multipart/form-data; foo="\)",
-    "boundary"_kj
-  ) == kj::none);
+  KJ_ASSERT(readContentTypeParameter(R"(multipart/form-data; foo="\)", "boundary"_kj) == kj::none);
 
   // space before value
-  expectContentTypeParameter(
-    "multipart/form-data; boundary= a"_kj,
-    "boundary"_kj,
-    " a"_kj
-  );
+  expectContentTypeParameter("multipart/form-data; boundary= a"_kj, "boundary"_kj, " a"_kj);
 
   // space before value with quotes
-  expectContentTypeParameter(
-    "multipart/form-data; boundary=\" a\""_kj,
-    "boundary"_kj,
-    " a"_kj
-  );
+  expectContentTypeParameter("multipart/form-data; boundary=\" a\""_kj, "boundary"_kj, " a"_kj);
 
   // space before ; on another param
   expectContentTypeParameter(
-    "multipart/form-data; foo=\"bar\" ;boundary=asdf"_kj,
-    "boundary"_kj,
-    "asdf"_kj
-  );
+      "multipart/form-data; foo=\"bar\" ;boundary=asdf"_kj, "boundary"_kj, "asdf"_kj);
 
   // space before ; on another param with quotes
   expectContentTypeParameter(
-    "multipart/form-data; foo=\"bar\" ;boundary=\"asdf\""_kj,
-    "boundary"_kj,
-    "asdf"_kj
-  );
+      "multipart/form-data; foo=\"bar\" ;boundary=\"asdf\""_kj, "boundary"_kj, "asdf"_kj);
 
   // space before ; on another param no quotes
   expectContentTypeParameter(
-    "multipart/form-data; foo=bar ;boundary=asdf"_kj,
-    "boundary"_kj,
-    "asdf"_kj
-  );
+      "multipart/form-data; foo=bar ;boundary=asdf"_kj, "boundary"_kj, "asdf"_kj);
 
   // space before ; on another param quotes on wanted param
   expectContentTypeParameter(
-    "multipart/form-data; foo=bar ;boundary=\"asdf\""_kj,
-    "boundary"_kj,
-    "asdf"_kj
-  );
-
+      "multipart/form-data; foo=bar ;boundary=\"asdf\""_kj, "boundary"_kj, "asdf"_kj);
 }
 
 }  // namespace

@@ -10,7 +10,7 @@
 
 namespace workerd::api::gpu {
 
-class GPUSupportedFeatures : public jsg::Object {
+class GPUSupportedFeatures: public jsg::Object {
 public:
   explicit GPUSupportedFeatures(kj::Array<wgpu::FeatureName> features);
   JSG_RESOURCE_TYPE(GPUSupportedFeatures) {
@@ -19,7 +19,7 @@ public:
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    for (const auto& feature : enabled_) {
+    for (const auto& feature: enabled_) {
       tracker.trackField(nullptr, feature);
     }
   }
@@ -30,4 +30,4 @@ private:
   kj::Array<kj::StringPtr> keys();
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

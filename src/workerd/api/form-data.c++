@@ -20,13 +20,12 @@ namespace workerd::api {
 
 namespace {
 // Like split() in kj/compat/url.c++, but splits at a substring rather than a character.
-kj::ArrayPtr<const char> splitAtSubString(
-    kj::ArrayPtr<const char>& text, kj::StringPtr subString) {
+kj::ArrayPtr<const char> splitAtSubString(kj::ArrayPtr<const char>& text, kj::StringPtr subString) {
   // TODO(perf): Use a Boyer-Moore search?
   auto iter = std::search(text.begin(), text.end(), subString.begin(), subString.end());
   auto result = kj::arrayPtr(text.begin(), iter - text.begin());
-  text = text.slice(kj::min(text.size(), result.end() - text.begin() + subString.size()),
-                    text.size());
+  text =
+      text.slice(kj::min(text.size(), result.end() - text.begin() + subString.size()), text.size());
   return result;
 }
 
@@ -50,25 +49,28 @@ const FormDataHeaderTable& getFormDataHeaderTable() {
 
 namespace p = kj::parse;
 constexpr auto httpIdentifier = p::oneOrMore(p::nameChar.orChar('-'));
-constexpr auto quotedChar = p::oneOf(
-    p::anyOfChars("\"\n\\").invert(),
+constexpr auto quotedChar = p::oneOf(p::anyOfChars("\"\n\\").invert(),
     // Chrome interprets "\<c>" as reducing to <c> for any character <c>, including double quote.
     // (So "\n" = "n", etc.)
     p::sequence(p::exactChar<'\\'>(), p::anyOfChars("\n").invert()));
-constexpr auto contentDispositionParam =
-    p::sequence(p::exactChar<';'>(), p::discardWhitespace,
-                httpIdentifier, p::discardWhitespace,
-                p::exactChar<'='>(), p::discardWhitespace,
-                p::exactChar<'"'>(),
-                p::oneOrMore(quotedChar),
-                p::exactChar<'"'>(), p::discardWhitespace);
-constexpr auto contentDisposition =
-    p::sequence(p::discardWhitespace, httpIdentifier,
-                p::discardWhitespace, p::many(contentDispositionParam));
+constexpr auto contentDispositionParam = p::sequence(p::exactChar<';'>(),
+    p::discardWhitespace,
+    httpIdentifier,
+    p::discardWhitespace,
+    p::exactChar<'='>(),
+    p::discardWhitespace,
+    p::exactChar<'"'>(),
+    p::oneOrMore(quotedChar),
+    p::exactChar<'"'>(),
+    p::discardWhitespace);
+constexpr auto contentDisposition = p::sequence(
+    p::discardWhitespace, httpIdentifier, p::discardWhitespace, p::many(contentDispositionParam));
 
-void parseFormData(kj::Maybe<jsg::Lock&> js, kj::Vector<FormData::Entry>& data,
-                   kj::StringPtr boundary, kj::ArrayPtr<const char> body,
-                   bool convertFilesToStrings) {
+void parseFormData(kj::Maybe<jsg::Lock&> js,
+    kj::Vector<FormData::Entry>& data,
+    kj::StringPtr boundary,
+    kj::ArrayPtr<const char> body,
+    bool convertFilesToStrings) {
   // multipart/form-data messages are delimited by <CRLF>--<boundary>. We want to be able to handle
   // omitted carriage returns, though, so our delimiter only matches against a preceding line feed.
   const auto delimiter = kj::str("\n--", boundary);
@@ -78,8 +80,8 @@ void parseFormData(kj::Maybe<jsg::Lock&> js, kj::Vector<FormData::Entry>& data,
   // newline is required.
   auto message = splitAtSubString(body, delimiter.slice(1));
 
-  JSG_REQUIRE(body.size() > 0, TypeError,
-      "No initial boundary string (or you have a truncated message).");
+  JSG_REQUIRE(
+      body.size() > 0, TypeError, "No initial boundary string (or you have a truncated message).");
 
   const auto done = [](kj::ArrayPtr<const char>& body) {
     // Consume any (CR)LF characters that trailed the boundary and indicate continuation, or consume
@@ -97,8 +99,8 @@ void parseFormData(kj::Maybe<jsg::Lock&> js, kj::Vector<FormData::Entry>& data,
     return false;
   };
 
-  constexpr auto staticRegexFlags = std::regex_constants::ECMAScript
-                                  | std::regex_constants::optimize;
+  constexpr auto staticRegexFlags =
+      std::regex_constants::ECMAScript | std::regex_constants::optimize;
 
   static const auto headerTerminationRegex = std::regex("\r?\n\r?\n", staticRegexFlags);
 
@@ -108,7 +110,7 @@ void parseFormData(kj::Maybe<jsg::Lock&> js, kj::Vector<FormData::Entry>& data,
 
   while (!done(body)) {
     JSG_REQUIRE(std::regex_search(body.begin(), body.end(), match, headerTerminationRegex),
-                 TypeError, "No multipart message header termination found.");
+        TypeError, "No multipart message header termination found.");
 
     // TODO(cleanup): Use kj-http to parse multipart headers. Right now that API isn't public, so
     //   I'm just using a regex. For reference, multipart/form-data supports the following three
@@ -126,19 +128,20 @@ void parseFormData(kj::Maybe<jsg::Lock&> js, kj::Vector<FormData::Entry>& data,
     kj::HttpHeaders headers(*formDataHeaderTable.table);
     JSG_REQUIRE(headers.tryParse(headersText), TypeError, "FormData part had invalid headers.");
 
-    kj::StringPtr disposition = JSG_REQUIRE_NONNULL(
-        headers.get(formDataHeaderTable.contentDispositionId),
-        TypeError, "No valid Content-Disposition header found in FormData part.");
+    kj::StringPtr disposition =
+        JSG_REQUIRE_NONNULL(headers.get(formDataHeaderTable.contentDispositionId), TypeError,
+            "No valid Content-Disposition header found in FormData part.");
 
     kj::Maybe<kj::String> maybeName;
     kj::Maybe<kj::String> filename;
     {
       p::IteratorInput<char, const char*> input(disposition.begin(), disposition.end());
-      auto result = JSG_REQUIRE_NONNULL(contentDisposition(input),
-          TypeError, "Invalid Content-Disposition header found in FormData part.");
+      auto result = JSG_REQUIRE_NONNULL(contentDisposition(input), TypeError,
+          "Invalid Content-Disposition header found in FormData part.");
       JSG_REQUIRE(kj::get<0>(result) == "form-data"_kj.asArray(), TypeError,
           "Content-Disposition header for FormData part must have the value \"form-data\", "
-          "possibly followed by parameters. Got: \"", kj::get<0>(result), "\"");
+          "possibly followed by parameters. Got: \"",
+          kj::get<0>(result), "\"");
 
       for (auto& param: kj::get<1>(result)) {
         if (kj::get<0>(param) == "name"_kj.asArray()) {
@@ -149,14 +152,14 @@ void parseFormData(kj::Maybe<jsg::Lock&> js, kj::Vector<FormData::Entry>& data,
       }
     }
 
-    kj::String name = JSG_REQUIRE_NONNULL(kj::mv(maybeName),
-        TypeError, "Content-Disposition header in FormData part is missing a name.");
+    kj::String name = JSG_REQUIRE_NONNULL(kj::mv(maybeName), TypeError,
+        "Content-Disposition header in FormData part is missing a name.");
 
     kj::Maybe<kj::StringPtr> type = headers.get(kj::HttpHeaderId::CONTENT_TYPE);
 
     message = splitAtSubString(body, delimiter);
-    JSG_REQUIRE(body.size() > 0, TypeError,
-        "No subsequent boundary string after multipart message.");
+    JSG_REQUIRE(
+        body.size() > 0, TypeError, "No subsequent boundary string after multipart message.");
 
     if (message.size() > 0) {
       // If we skipped a CR, we must avoid including it in the message data.
@@ -164,35 +167,29 @@ void parseFormData(kj::Maybe<jsg::Lock&> js, kj::Vector<FormData::Entry>& data,
     }
 
     if (filename == kj::none || convertFilesToStrings) {
-      data.add(FormData::Entry { kj::mv(name), kj::str(message) });
+      data.add(FormData::Entry{kj::mv(name), kj::str(message)});
     } else {
       auto bytes = kj::heapArray(message.asBytes());
       KJ_IF_SOME(lock, js) {
-        data.add(FormData::Entry {
-          kj::mv(name),
-          jsg::alloc<File>(lock, kj::mv(bytes),
-                           KJ_ASSERT_NONNULL(kj::mv(filename)),
-                           kj::str(type.orDefault(nullptr)), dateNow())
-        });
+        data.add(FormData::Entry{kj::mv(name),
+          jsg::alloc<File>(lock, kj::mv(bytes), KJ_ASSERT_NONNULL(kj::mv(filename)),
+              kj::str(type.orDefault(nullptr)), dateNow())});
       } else {
         // This variation is used when we do not have an isolate lock. In this
         // case, the external memory held by the File is not tracked towards
         // the isolate's external memory.
-        data.add(FormData::Entry {
-          kj::mv(name),
-          jsg::alloc<File>(kj::mv(bytes),
-                           KJ_ASSERT_NONNULL(kj::mv(filename)),
-                           kj::str(type.orDefault(nullptr)), dateNow())
-        });
+        data.add(FormData::Entry{kj::mv(name),
+          jsg::alloc<File>(kj::mv(bytes), KJ_ASSERT_NONNULL(kj::mv(filename)),
+              kj::str(type.orDefault(nullptr)), dateNow())});
       }
     }
   }
 }
 
-kj::OneOf<jsg::Ref<File>, kj::String>
-blobToFile(jsg::Lock& js, kj::StringPtr name,
-           kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
-           jsg::Optional<kj::String> filename) {
+kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
+    kj::StringPtr name,
+    kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+    jsg::Optional<kj::String> filename) {
   auto fromBlob = [&](jsg::Ref<Blob> blob) {
     kj::String fn;
     KJ_IF_SOME(f, filename) {
@@ -202,8 +199,8 @@ blobToFile(jsg::Lock& js, kj::StringPtr name,
     }
     // The file is created with the same data as the blob (essentially as just
     // a view of the same blob) to avoid copying the data.
-    return jsg::alloc<File>(blob.addRef(), blob->getData(), kj::mv(fn),
-                            kj::str(blob->getType()), dateNow());
+    return jsg::alloc<File>(
+        blob.addRef(), blob->getData(), kj::mv(fn), kj::str(blob->getType()), dateNow());
   };
 
   KJ_SWITCH_ONEOF(value) {
@@ -315,8 +312,10 @@ FormData::EntryType FormData::clone(FormData::EntryType& value) {
   KJ_UNREACHABLE;
 }
 
-void FormData::parse(kj::Maybe<jsg::Lock&> js, kj::ArrayPtr<const char> rawText,
-                     kj::StringPtr contentType, bool convertFilesToStrings) {
+void FormData::parse(kj::Maybe<jsg::Lock&> js,
+    kj::ArrayPtr<const char> rawText,
+    kj::StringPtr contentType,
+    bool convertFilesToStrings) {
   KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
     auto& params = parsed.params();
     if (MimeType::FORM_DATA == parsed) {
@@ -333,40 +332,40 @@ void FormData::parse(kj::Maybe<jsg::Lock&> js, kj::ArrayPtr<const char> rawText,
       KJ_IF_SOME(charsetParam, params.find("charset"_kj)) {
         auto charset = kj::str(charsetParam);
         JSG_REQUIRE(strcasecmp(charset.cStr(), "utf-8") == 0 ||
-                    strcasecmp(charset.cStr(), "utf8") == 0 ||
-                    strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
+                strcasecmp(charset.cStr(), "utf8") == 0 ||
+                strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
             TypeError, "Non-utf-8 application/x-www-form-urlencoded body.");
       }
       kj::Vector<kj::Url::QueryParam> query;
       parseQueryString(query, kj::mv(rawText));
       data.reserve(query.size());
       for (auto& param: query) {
-        data.add(Entry { kj::mv(param.name), kj::mv(param.value) });
+        data.add(Entry{kj::mv(param.name), kj::mv(param.value)});
       }
       return;
     }
   }
-  JSG_FAIL_REQUIRE(TypeError, kj::str(
-      "Unrecognized Content-Type header value. FormData can only "
-      "parse the following MIME types: ",
-      MimeType::FORM_DATA.toString(), ", ",
-      MimeType::FORM_URLENCODED.toString()));
+  JSG_FAIL_REQUIRE(TypeError,
+      kj::str("Unrecognized Content-Type header value. FormData can only "
+              "parse the following MIME types: ",
+          MimeType::FORM_DATA.toString(), ", ", MimeType::FORM_URLENCODED.toString()));
 }
 
 jsg::Ref<FormData> FormData::constructor() {
   return jsg::alloc<FormData>();
 }
 
-void FormData::append(jsg::Lock& js, kj::String name,
+void FormData::append(jsg::Lock& js,
+    kj::String name,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
     jsg::Optional<kj::String> filename) {
   auto filifiedValue = blobToFile(js, name, kj::mv(value), kj::mv(filename));
-  data.add(Entry { kj::mv(name), kj::mv(filifiedValue) });
+  data.add(Entry{kj::mv(name), kj::mv(filifiedValue)});
 }
 
 void FormData::delete_(kj::String name) {
-  auto pivot = std::remove_if(data.begin(), data.end(),
-                              [&name](const auto& kv) { return kv.name == name; });
+  auto pivot =
+      std::remove_if(data.begin(), data.end(), [&name](const auto& kv) { return kv.name == name; });
   data.truncate(pivot - data.begin());
 }
 
@@ -399,7 +398,8 @@ bool FormData::has(kj::String name) {
 }
 
 // Set the first element named `name` to `value`, then remove all the rest matching that name.
-void FormData::set(jsg::Lock& js, kj::String name,
+void FormData::set(jsg::Lock& js,
+    kj::String name,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
     jsg::Optional<kj::String> filename) {
   const auto predicate = [name = name.slice(0)](const auto& kv) { return kv.name == name; };
@@ -414,19 +414,18 @@ void FormData::set(jsg::Lock& js, kj::String name,
 }
 
 jsg::Ref<FormData::EntryIterator> FormData::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState { JSG_THIS });
+  return jsg::alloc<EntryIterator>(IteratorState{JSG_THIS});
 }
 
 jsg::Ref<FormData::KeyIterator> FormData::keys(jsg::Lock&) {
-  return jsg::alloc<KeyIterator>(IteratorState { JSG_THIS });
+  return jsg::alloc<KeyIterator>(IteratorState{JSG_THIS});
 }
 
 jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock&) {
-  return jsg::alloc<ValueIterator>(IteratorState { JSG_THIS });
+  return jsg::alloc<ValueIterator>(IteratorState{JSG_THIS});
 }
 
-void FormData::forEach(
-    jsg::Lock& js,
+void FormData::forEach(jsg::Lock& js,
     jsg::Function<void(EntryType, kj::StringPtr, jsg::Ref<FormData>)> callback,
     jsg::Optional<jsg::Value> thisArg) {
   // Here, if the thisArg is not passed, or is passed explicitly as a null or

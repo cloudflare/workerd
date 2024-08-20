@@ -29,19 +29,14 @@ public:
   void set(kj::String name, kj::String value);
   kj::String toString();
 
-  JSG_ITERATOR(EntryIterator, entries,
-               kj::Array<kj::String>,
-               IteratorState<kj::Array<kj::String>>,
-               iteratorNext<kj::Array<kj::String>>);
-  JSG_ITERATOR(KeyIterator, keys,
-                kj::String,
-                IteratorState<kj::String>,
-                iteratorNext<kj::String>);
-  JSG_ITERATOR(ValueIterator,
-                values,
-                kj::String,
-                IteratorState<kj::String>,
-                iteratorNext<kj::String>);
+  JSG_ITERATOR(EntryIterator,
+      entries,
+      kj::Array<kj::String>,
+      IteratorState<kj::Array<kj::String>>,
+      iteratorNext<kj::Array<kj::String>>);
+  JSG_ITERATOR(KeyIterator, keys, kj::String, IteratorState<kj::String>, iteratorNext<kj::String>);
+  JSG_ITERATOR(
+      ValueIterator, values, kj::String, IteratorState<kj::String>, iteratorNext<kj::String>);
 
   JSG_RESOURCE_TYPE(MIMEParams) {
     JSG_METHOD_NAMED(delete, delete_);
@@ -110,44 +105,44 @@ private:
   jsg::Ref<MIMEParams> params;
 };
 
-#define JS_UTIL_IS_TYPES(V) \
-  V(ArrayBufferView) \
-  V(ArgumentsObject) \
-  V(ArrayBuffer) \
-  V(AsyncFunction) \
-  V(BigInt64Array) \
-  V(BigIntObject) \
-  V(BigUint64Array) \
-  V(BooleanObject) \
-  V(DataView) \
-  V(Date) \
-  V(External) \
-  V(Float32Array) \
-  V(Float64Array) \
-  V(GeneratorFunction) \
-  V(GeneratorObject) \
-  V(Int8Array) \
-  V(Int16Array) \
-  V(Int32Array) \
-  V(Map) \
-  V(MapIterator) \
-  V(ModuleNamespaceObject) \
-  V(NativeError) \
-  V(NumberObject) \
-  V(Promise) \
-  V(Proxy) \
-  V(RegExp) \
-  V(Set) \
-  V(SetIterator) \
-  V(SharedArrayBuffer) \
-  V(StringObject) \
-  V(SymbolObject) \
-  V(TypedArray) \
-  V(Uint8Array) \
-  V(Uint8ClampedArray) \
-  V(Uint16Array) \
-  V(Uint32Array) \
-  V(WeakMap) \
+#define JS_UTIL_IS_TYPES(V)                                                                        \
+  V(ArrayBufferView)                                                                               \
+  V(ArgumentsObject)                                                                               \
+  V(ArrayBuffer)                                                                                   \
+  V(AsyncFunction)                                                                                 \
+  V(BigInt64Array)                                                                                 \
+  V(BigIntObject)                                                                                  \
+  V(BigUint64Array)                                                                                \
+  V(BooleanObject)                                                                                 \
+  V(DataView)                                                                                      \
+  V(Date)                                                                                          \
+  V(External)                                                                                      \
+  V(Float32Array)                                                                                  \
+  V(Float64Array)                                                                                  \
+  V(GeneratorFunction)                                                                             \
+  V(GeneratorObject)                                                                               \
+  V(Int8Array)                                                                                     \
+  V(Int16Array)                                                                                    \
+  V(Int32Array)                                                                                    \
+  V(Map)                                                                                           \
+  V(MapIterator)                                                                                   \
+  V(ModuleNamespaceObject)                                                                         \
+  V(NativeError)                                                                                   \
+  V(NumberObject)                                                                                  \
+  V(Promise)                                                                                       \
+  V(Proxy)                                                                                         \
+  V(RegExp)                                                                                        \
+  V(Set)                                                                                           \
+  V(SetIterator)                                                                                   \
+  V(SharedArrayBuffer)                                                                             \
+  V(StringObject)                                                                                  \
+  V(SymbolObject)                                                                                  \
+  V(TypedArray)                                                                                    \
+  V(Uint8Array)                                                                                    \
+  V(Uint8ClampedArray)                                                                             \
+  V(Uint16Array)                                                                                   \
+  V(Uint32Array)                                                                                   \
+  V(WeakMap)                                                                                       \
   V(WeakSet)
 
 class UtilModule final: public jsg::Object {
@@ -169,7 +164,7 @@ public:
   static constexpr int kRejected = jsg::PromiseState::REJECTED;
 
   struct PromiseDetails {
-    int state; // TODO: can we make this a `jsg::PromiseState`
+    int state;  // TODO: can we make this a `jsg::PromiseState`
     jsg::Optional<jsg::JsValue> result;
 
     JSG_STRUCT(state, result);
@@ -221,9 +216,9 @@ public:
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
 
-  #define V(Type) JSG_METHOD(is##Type);
+#define V(Type) JSG_METHOD(is##Type);
     JS_UTIL_IS_TYPES(V)
-  #undef V
+#undef V
     JSG_METHOD(isAnyArrayBuffer);
     JSG_METHOD(isBoxedPrimitive);
 
@@ -231,18 +226,12 @@ public:
   }
 };
 
-#define EW_NODE_UTIL_ISOLATE_TYPES              \
-    api::node::UtilModule,                      \
-    api::node::UtilModule::PromiseDetails,      \
-    api::node::UtilModule::ProxyDetails,        \
-    api::node::UtilModule::PreviewedEntries,    \
-    api::node::MIMEType,                        \
-    api::node::MIMEParams,                      \
-    api::node::MIMEParams::EntryIterator,       \
-    api::node::MIMEParams::ValueIterator,       \
-    api::node::MIMEParams::KeyIterator,         \
-    api::node::MIMEParams::EntryIterator::Next, \
-    api::node::MIMEParams::ValueIterator::Next, \
-    api::node::MIMEParams::KeyIterator::Next
+#define EW_NODE_UTIL_ISOLATE_TYPES                                                                 \
+  api::node::UtilModule, api::node::UtilModule::PromiseDetails,                                    \
+      api::node::UtilModule::ProxyDetails, api::node::UtilModule::PreviewedEntries,                \
+      api::node::MIMEType, api::node::MIMEParams, api::node::MIMEParams::EntryIterator,            \
+      api::node::MIMEParams::ValueIterator, api::node::MIMEParams::KeyIterator,                    \
+      api::node::MIMEParams::EntryIterator::Next, api::node::MIMEParams::ValueIterator::Next,      \
+      api::node::MIMEParams::KeyIterator::Next
 
 }  // namespace workerd::api::node

@@ -10,13 +10,13 @@
 
 namespace workerd::api::gpu {
 
-class GPUQuerySet : public jsg::Object {
+class GPUQuerySet: public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::QuerySet&() const {
     return querySet_;
   }
-  explicit GPUQuerySet(wgpu::QuerySet q) : querySet_(kj::mv(q)){};
+  explicit GPUQuerySet(wgpu::QuerySet q): querySet_(kj::mv(q)) {};
   JSG_RESOURCE_TYPE(GPUQuerySet) {}
 
 private:
@@ -34,4 +34,4 @@ struct GPUQuerySetDescriptor {
 
 wgpu::QueryType parseQueryType(kj::StringPtr type);
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

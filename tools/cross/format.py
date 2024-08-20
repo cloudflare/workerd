@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 from argparse import ArgumentParser, Namespace
-from typing import List, Optional, Tuple, Set, Callable
+from typing import List, Optional, Tuple, Callable
 from dataclasses import dataclass
 
 
@@ -63,8 +63,8 @@ def check_clang_format() -> bool:
         # Run clang-format with --version to check its version
         output = subprocess.check_output([CLANG_FORMAT, "--version"], encoding="utf-8")
         major, _, _ = re.search(r"version\s*(\d+)\.(\d+)\.(\d+)", output).groups()
-        if int(major) < 18:
-            logging.error("clang-format version must be at least 18.0.0")
+        if int(major) != 18:
+            logging.error("clang-format version must be 18")
             exit(1)
     except FileNotFoundError:
         # Clang-format is not in the PATH
@@ -72,15 +72,21 @@ def check_clang_format() -> bool:
         exit(1)
 
 
-def filter_files_by_exts(files: List[str], dir_path: str, exts: Tuple[str, ...]) -> List[str]:
-    return [file for file in files
-            if file.startswith(dir_path + "/") and file.endswith(exts)] 
+def filter_files_by_exts(
+    files: List[str], dir_path: str, exts: Tuple[str, ...]
+) -> List[str]:
+    return [
+        file
+        for file in files
+        if file.startswith(dir_path + "/") and file.endswith(exts)
+    ]
 
 
 def clang_format(files: List[str], check: bool = False) -> bool:
     if check:
         result = subprocess.run(
-            [CLANG_FORMAT, "--verbose", "--dry-run", "--Werror"] + files)
+            [CLANG_FORMAT, "--verbose", "--dry-run", "--Werror"] + files
+        )
         return result.returncode == 0
     else:
         subprocess.run([CLANG_FORMAT, "--verbose", "-i"] + files)
@@ -120,7 +126,7 @@ def git_get_modified_files(
 def git_get_all_files() -> List[str]:
     return subprocess.check_output(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-        encoding="utf-8"
+        encoding="utf-8",
     ).splitlines()
 
 
@@ -132,23 +138,16 @@ class FormatConfig:
 
 
 FORMATTERS = [
-    # TODO: Re-enable once C++ PR is ready: https://github.com/cloudflare/workerd/pull/2505
-    #FormatConfig(
-    #    directory='src/workerd',
-    #    extensions=('.c++', '.h'),
-    #    formatter=clang_format
-    #),
     FormatConfig(
-        directory='src',
-        extensions=('.js', '.ts', '.cjs', '.ejs', '.mjs'),
-        formatter=prettier
+        directory="src/workerd", extensions=(".c++", ".h"), formatter=clang_format
     ),
     FormatConfig(
-        directory='src',
-        extensions=('.json', ),
-        formatter=prettier
+        directory="src",
+        extensions=(".js", ".ts", ".cjs", ".ejs", ".mjs"),
+        formatter=prettier,
     ),
-     # TODO: lint bazel files
+    FormatConfig(directory="src", extensions=(".json",), formatter=prettier),
+    # TODO: lint bazel files
 ]
 
 
@@ -165,9 +164,9 @@ def main():
     options = parse_args()
     check_clang_format()
     if options.subcommand == "git":
-        files = set(git_get_modified_files(
-            options.target, options.source, options.staged
-        ))
+        files = set(
+            git_get_modified_files(options.target, options.source, options.staged)
+        )
     else:
         files = git_get_all_files()
 
@@ -177,8 +176,11 @@ def main():
         all_ok &= format(config, files, options.check)
 
     if not all_ok:
-        logging.error("Code has linting issues. Fix with python ./tools/cross/format.py")
+        logging.error(
+            "Code has linting issues. Fix with python ./tools/cross/format.py"
+        )
         exit(1)
+
 
 if __name__ == "__main__":
     main()

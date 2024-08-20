@@ -19,14 +19,16 @@ namespace {
 // stream and whether or not it requires pending event registration.
 class EncodedAsyncInputStream final: public ReadableStreamSource {
 public:
-  explicit EncodedAsyncInputStream(kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding,
-                                   IoContext& context);
+  explicit EncodedAsyncInputStream(
+      kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding, IoContext& context);
 
   // Read bytes in identity encoding. If the stream is not already in identity encoding, it will be
   // converted to identity encoding via an appropriate stream wrapper.
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
 
-  StreamEncoding getPreferredEncoding() override { return encoding; }
+  StreamEncoding getPreferredEncoding() override {
+    return encoding;
+  }
 
   // Return the number of bytes, if known, which this input stream will produce if the sink is known
   // to be of a particular encoding.
@@ -56,36 +58,32 @@ private:
 
 EncodedAsyncInputStream::EncodedAsyncInputStream(
     kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding, IoContext& context)
-    : inner(kj::mv(inner)), encoding(encoding), ioContext(context) {}
+    : inner(kj::mv(inner)),
+      encoding(encoding),
+      ioContext(context) {}
 
 kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
     void* buffer, size_t minBytes, size_t maxBytes) {
   ensureIdentityEncoding();
 
   return kj::evalNow([&]() {
-    return inner->tryRead(buffer, minBytes, maxBytes)
-      .attach(ioContext.registerPendingEvent());
+    return inner->tryRead(buffer, minBytes, maxBytes).attach(ioContext.registerPendingEvent());
   }).catch_([](kj::Exception&& exception) -> kj::Promise<size_t> {
-    KJ_IF_SOME(e, translateKjException(exception, {
-      { "gzip compressed stream ended prematurely"_kj,
-        "Gzip compressed stream ended prematurely."_kj },
-      { "gzip decompression failed"_kj,
-        "Gzip decompression failed." },
-      { "brotli state allocation failed"_kj,
-        "Brotli state allocation failed." },
-      { "invalid brotli window size"_kj,
-        "Invalid brotli window size." },
-      { "invalid brotli compression level"_kj,
-        "Invalid brotli compression level." },
-      { "brotli window size too big"_kj,
-        "Brotli window size too big." },
-      { "brotli decompression failed"_kj,
-        "Brotli decompression failed." },
-      { "brotli compression failed"_kj,
-        "Brotli compression failed." },
-      { "brotli compressed stream ended prematurely"_kj,
-        "Brotli compressed stream ended prematurely." },
-    })) {
+    KJ_IF_SOME(e,
+        translateKjException(exception,
+            {
+              {"gzip compressed stream ended prematurely"_kj,
+                "Gzip compressed stream ended prematurely."_kj},
+              {"gzip decompression failed"_kj, "Gzip decompression failed."},
+              {"brotli state allocation failed"_kj, "Brotli state allocation failed."},
+              {"invalid brotli window size"_kj, "Invalid brotli window size."},
+              {"invalid brotli compression level"_kj, "Invalid brotli compression level."},
+              {"brotli window size too big"_kj, "Brotli window size too big."},
+              {"brotli decompression failed"_kj, "Brotli decompression failed."},
+              {"brotli compression failed"_kj, "Brotli compression failed."},
+              {"brotli compressed stream ended prematurely"_kj,
+                "Brotli compressed stream ended prematurely."},
+            })) {
       return kj::mv(e);
     }
 
@@ -148,8 +146,8 @@ void EncodedAsyncInputStream::ensureIdentityEncoding() {
 // does, it is important for us to release it as soon as end() or abort() are called.
 class EncodedAsyncOutputStream final: public WritableStreamSink {
 public:
-  explicit EncodedAsyncOutputStream(kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding,
-                                    IoContext& context);
+  explicit EncodedAsyncOutputStream(
+      kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding, IoContext& context);
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override;
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
@@ -176,8 +174,11 @@ private:
   // I use a OneOf here rather than probing with downcasts because end() must be called for
   // correctness rather than for optimization. I "know" this code will never be compiled w/o RTTI,
   // but I'm paranoid.
-  kj::OneOf<kj::Own<kj::AsyncOutputStream>, kj::Own<kj::GzipAsyncOutputStream>,
-            kj::Own<kj::BrotliAsyncOutputStream>, Ended> inner;
+  kj::OneOf<kj::Own<kj::AsyncOutputStream>,
+      kj::Own<kj::GzipAsyncOutputStream>,
+      kj::Own<kj::BrotliAsyncOutputStream>,
+      Ended>
+      inner;
 
   StreamEncoding encoding;
 
@@ -186,7 +187,9 @@ private:
 
 EncodedAsyncOutputStream::EncodedAsyncOutputStream(
     kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding, IoContext& context)
-    : inner(kj::mv(inner)), encoding(encoding), ioContext(context) {}
+    : inner(kj::mv(inner)),
+      encoding(encoding),
+      ioContext(context) {}
 
 kj::Promise<void> EncodedAsyncOutputStream::write(kj::ArrayPtr<const byte> buffer) {
   // Alternatively, we could throw here but this is erring on the side of leniency.
@@ -204,8 +207,7 @@ kj::Promise<void> EncodedAsyncOutputStream::write(
 
   ensureIdentityEncoding();
 
-  return getInner().write(pieces)
-      .attach(ioContext.registerPendingEvent());
+  return getInner().write(pieces).attach(ioContext.registerPendingEvent());
 }
 
 kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFrom(
@@ -215,7 +217,7 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
   // pump into it, just return an immediately resolved promise. Alternatively
   // we could throw here.
   if (inner.is<Ended>()) {
-    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void> { kj::READY_NOW });
+    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{kj::READY_NOW});
   }
 
   KJ_IF_SOME(nativeInput, kj::dynamicDowncastIfAvailable<EncodedAsyncInputStream>(input)) {
@@ -251,13 +253,14 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
         KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
           promise = promise.then([&br = br]() { return br->end(); });
         }
-        KJ_CASE_ONEOF(e, Ended) {}
+        KJ_CASE_ONEOF(e, Ended) {
+        }
       }
     }
 
     // Since this is a system stream, the pump task is eligible to be deferred past IoContext
     // lifetime!
-    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void> { kj::mv(promise) });
+    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{kj::mv(promise)});
   }
 
   return kj::none;
@@ -291,7 +294,8 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
     KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
       promise = br->end().attach(kj::mv(br));
     }
-    KJ_CASE_ONEOF(e, Ended) {}
+    KJ_CASE_ONEOF(e, Ended) {
+    }
   }
 
   inner.init<Ended>();
@@ -353,24 +357,22 @@ kj::Own<WritableStreamSink> newSystemStream(
   return kj::heap<EncodedAsyncOutputStream>(kj::mv(inner), encoding, context);
 }
 
-SystemMultiStream newSystemMultiStream(
-    kj::Own<kj::AsyncIoStream> stream, IoContext& context) {
+SystemMultiStream newSystemMultiStream(kj::Own<kj::AsyncIoStream> stream, IoContext& context) {
 
   auto wrapped = kj::refcountedWrapper(kj::mv(stream));
-  return {
-    .readable = kj::heap<EncodedAsyncInputStream>(
-        wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context),
+  return {.readable = kj::heap<EncodedAsyncInputStream>(
+              wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context),
     .writable = kj::heap<EncodedAsyncOutputStream>(
-        wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context)
-  };
+        wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context)};
 }
 
 ContentEncodingOptions::ContentEncodingOptions(CompatibilityFlags::Reader flags)
     : brotliEnabled(flags.getBrotliContentEncoding()) {}
 
-StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& headers,
-                                  Response::BodyEncoding bodyEncoding,
-                                  ContentEncodingOptions options) {
+StreamEncoding getContentEncoding(IoContext& context,
+    const kj::HttpHeaders& headers,
+    Response::BodyEncoding bodyEncoding,
+    ContentEncodingOptions options) {
   if (bodyEncoding == Response::BodyEncoding::MANUAL) {
     return StreamEncoding::IDENTITY;
   }

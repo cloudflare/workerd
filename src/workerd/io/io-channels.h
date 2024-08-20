@@ -10,7 +10,9 @@
 #include <workerd/io/trace.h>
 #include <workerd/api/util.h>
 
-namespace kj { class HttpClient; }
+namespace kj {
+class HttpClient;
+}
 
 namespace workerd {
 
@@ -32,8 +34,7 @@ public:
   // The returned client is intended to be used for one request. `parentSpan` has the same meaning
   // as in `IoContext::SubrequestMetadata`.
   virtual kj::Own<kj::HttpClient> getNamespace(
-      kj::StringPtr name, kj::Maybe<kj::String> cfBlobJson,
-      SpanParent parentSpan) = 0;
+      kj::StringPtr name, kj::Maybe<kj::String> cfBlobJson, SpanParent parentSpan) = 0;
 };
 
 // A timer instance, used to back Date.now(), setTimeout(), etc. This object may implement
@@ -146,12 +147,15 @@ public:
   // one of the worker's bindings, however it doesn't necessarily have to be from the the correct
   // `ActorIdFactory` -- if it's from some other factory, the method will throw an appropriate
   // exception.
-  virtual kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id,
-      kj::Maybe<kj::String> locationHint, ActorGetMode mode, SpanParent parentSpan) = 0;
+  virtual kj::Own<ActorChannel> getGlobalActor(uint channel,
+      const ActorIdFactory::ActorId& id,
+      kj::Maybe<kj::String> locationHint,
+      ActorGetMode mode,
+      SpanParent parentSpan) = 0;
 
   // Get an actor stub from the given namespace for the actor with the given name.
-  virtual kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::StringPtr id,
-      SpanParent parentSpan) = 0;
+  virtual kj::Own<ActorChannel> getColoLocalActor(
+      uint channel, kj::StringPtr id, SpanParent parentSpan) = 0;
 
   // Aborts all actors except those in namespaces marked with `preventEviction`.
   virtual void abortAllActors() {
@@ -159,4 +163,4 @@ public:
   }
 };
 
-} // namespace workerd
+}  // namespace workerd

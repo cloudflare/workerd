@@ -17,21 +17,17 @@ v8::Local<T> getLocal(v8::Isolate* isolate, v8::Global<T>& global) {
 };
 
 kj::Maybe<Ref<AsyncContextFrame>> getFrameRef(jsg::Lock& js) {
-  return AsyncContextFrame::current(js).map([]
-      (AsyncContextFrame& frame) -> Ref<AsyncContextFrame> {
-    return frame.addRef();
-  });
+  return AsyncContextFrame::current(js).map(
+      [](AsyncContextFrame& frame) -> Ref<AsyncContextFrame> { return frame.addRef(); });
 }
 
 kj::Maybe<AsyncContextFrame&> tryGetFrame(kj::Maybe<Ref<AsyncContextFrame>>& maybeFrame) {
-  return maybeFrame.map([](Ref<AsyncContextFrame>& frame) -> AsyncContextFrame& {
-    return *frame.get();
-  });
+  return maybeFrame.map(
+      [](Ref<AsyncContextFrame>& frame) -> AsyncContextFrame& { return *frame.get(); });
 }
 }  // namespace
 
-UnhandledRejectionHandler::UnhandledRejection::UnhandledRejection(
-    jsg::Lock& js,
+UnhandledRejectionHandler::UnhandledRejection::UnhandledRejection(jsg::Lock& js,
     jsg::V8Ref<v8::Promise> promise,
     jsg::Value value,
     v8::Local<v8::Message> message,
@@ -47,10 +43,7 @@ UnhandledRejectionHandler::UnhandledRejection::UnhandledRejection(
 }
 
 void UnhandledRejectionHandler::report(
-    Lock& js,
-    v8::PromiseRejectEvent event,
-    jsg::V8Ref<v8::Promise> promise,
-    jsg::Value value) {
+    Lock& js, v8::PromiseRejectEvent event, jsg::V8Ref<v8::Promise> promise, jsg::Value value) {
   js.tryCatch([&] {
     switch (event) {
       case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler: {
@@ -66,7 +59,7 @@ void UnhandledRejectionHandler::report(
         break;
       }
     }
-  }, [&] (Value exception) {
+  }, [&](Value exception) {
     // Exceptions here should be rare but possible. Any errors that occur
     // here are likely fatal to the worker. This handling helps us avoid
     // crashing. We'll log the error hand continue.
@@ -92,9 +85,7 @@ void UnhandledRejectionHandler::clear() {
 }
 
 void UnhandledRejectionHandler::rejectedWithNoHandler(
-    jsg::Lock& js,
-    jsg::V8Ref<v8::Promise> promise,
-    jsg::V8Ref<v8::Value> value) {
+    jsg::Lock& js, jsg::V8Ref<v8::Promise> promise, jsg::V8Ref<v8::Value> value) {
   auto message = v8::Exception::CreateMessage(js.v8Isolate, value.getHandle(js));
 
   // It's not yet clear under what conditions it happens, but this can be called
@@ -102,12 +93,9 @@ void UnhandledRejectionHandler::rejectedWithNoHandler(
   // but we address the edge case by using upsert and just replacing the existing
   // value and message when it does.
 
-  unhandledRejections.upsert(UnhandledRejection(
-      js,
-      kj::mv(promise),
-      kj::mv(value),
-      kj::mv(message),
-      ++rejectionCount), [&](UnhandledRejection& existing, UnhandledRejection&& replacement) {
+  unhandledRejections.upsert(
+      UnhandledRejection(js, kj::mv(promise), kj::mv(value), kj::mv(message), ++rejectionCount),
+      [&](UnhandledRejection& existing, UnhandledRejection&& replacement) {
     // Replacing the promise here is defensive, since they have the same hash
     // it *should* be the same promise, but let's be sure. We don't need to
     // assert here because the book keeping on this is not critical.
@@ -118,8 +106,7 @@ void UnhandledRejectionHandler::rejectedWithNoHandler(
 }
 
 void UnhandledRejectionHandler::handledAfterRejection(
-    jsg::Lock& js,
-    jsg::V8Ref<v8::Promise> promise) {
+    jsg::Lock& js, jsg::V8Ref<v8::Promise> promise) {
   // If an unhandled rejection is found in the table, then all we need to do is erase it.
   // If it's not found, then we'll skip on to the next step of determining if we've already
   // emitted an unhandled rejection warning about this promise to determine if we need to
@@ -141,17 +128,16 @@ void UnhandledRejectionHandler::handledAfterRejection(
       // from the inspector console). We currently don't appear to have a way of
       // doing that yet, so printing the warning is the next best thing.
       if (js.areWarningsLogged()) {
-        js.logWarning(
-            kj::str("A promise rejection was handled asynchronously. This warning "
-                    "occurs when attaching a catch handler to a promise after it "
-                    "rejected. (rejection #", item.rejectionNumber, ")"));
+        js.logWarning(kj::str("A promise rejection was handled asynchronously. This warning "
+                              "occurs when attaching a catch handler to a promise after it "
+                              "rejected. (rejection #",
+            item.rejectionNumber, ")"));
       }
 
       AsyncContextFrame::Scope scope(js, tryGetFrame(item.asyncContextFrame));
 
-      handler(js, v8::kPromiseHandlerAddedAfterReject,
-              jsg::HashableV8Ref(js.v8Isolate, promise),
-              js.v8Ref(js.v8Undefined()));
+      handler(js, v8::kPromiseHandlerAddedAfterReject, jsg::HashableV8Ref(js.v8Isolate, promise),
+          js.v8Ref(js.v8Undefined()));
     }
     warnedRejections.release(item);
   }
@@ -182,21 +168,19 @@ void UnhandledRejectionHandler::ensureProcessingWarnings(jsg::Lock& js) {
       // be duplicated -- such as when a promise gets rejected multiple times.
       // Check quickly before inserting to avoid a crash.
       warnedRejections.upsert(
-          kj::mv(entry),
-          [](UnhandledRejection& existing, UnhandledRejection&& replacement) {
+          kj::mv(entry), [](UnhandledRejection& existing, UnhandledRejection&& replacement) {
         // We're just going to ignore if the unhandled rejection was already here.
       });
 
       js.tryCatch([&] {
-        handler(js, v8::kPromiseRejectWithNoHandler,
-                jsg::HashableV8Ref(js.v8Isolate, promise),
-                js.v8Ref(value));
+        handler(js, v8::kPromiseRejectWithNoHandler, jsg::HashableV8Ref(js.v8Isolate, promise),
+            js.v8Ref(value));
       }, [&](Value exception) {
         // If any exceptions occur while reporting the event, we will log them
         // but otherwise ignore them. We do not want such errors to be fatal here.
         if (js.areWarningsLogged()) {
-          js.logWarning(kj::str("Exception while logging unhandled rejection:",
-                                exception.getHandle(js)));
+          js.logWarning(
+              kj::str("Exception while logging unhandled rejection:", exception.getHandle(js)));
         }
       });
     }

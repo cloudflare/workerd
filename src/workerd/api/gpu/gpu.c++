@@ -22,23 +22,23 @@ void initialize() {
   dawnProcSetProcs(&dawn::native::GetProcs());
 }
 
-GPU::GPU() : async_(kj::refcounted<AsyncRunner>(instance_.Get())) {}
+GPU::GPU(): async_(kj::refcounted<AsyncRunner>(instance_.Get())) {}
 
 kj::String parseAdapterType(wgpu::AdapterType type) {
   switch (type) {
-  case wgpu::AdapterType::DiscreteGPU:
-    return kj::str("Discrete GPU");
-  case wgpu::AdapterType::IntegratedGPU:
-    return kj::str("Integrated GPU");
-  case wgpu::AdapterType::CPU:
-    return kj::str("CPU");
-  case wgpu::AdapterType::Unknown:
-    return kj::str("Unknown");
+    case wgpu::AdapterType::DiscreteGPU:
+      return kj::str("Discrete GPU");
+    case wgpu::AdapterType::IntegratedGPU:
+      return kj::str("Integrated GPU");
+    case wgpu::AdapterType::CPU:
+      return kj::str("CPU");
+    case wgpu::AdapterType::Unknown:
+      return kj::str("Unknown");
   }
 }
 
-jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
-GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> options) {
+jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>> GPU::requestAdapter(
+    jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> options) {
 
 #if defined(_WIN32)
   constexpr auto defaultBackendType = wgpu::BackendType::D3D12;
@@ -57,15 +57,16 @@ GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> optio
   }
 
   kj::Maybe<dawn::native::Adapter> adapter;
-  for (auto& a : adapters) {
+  for (auto& a: adapters) {
     wgpu::AdapterInfo info;
     a.GetInfo(&info);
     if (info.backendType != defaultBackendType) {
       continue;
     }
 
-    KJ_LOG(INFO, kj::str("found webgpu device '", info.device, "' of type ",
-                         parseAdapterType(info.adapterType)));
+    KJ_LOG(INFO,
+        kj::str("found webgpu device '", info.device, "' of type ",
+            parseAdapterType(info.adapterType)));
     adapter = a;
     break;
   }
@@ -79,4 +80,4 @@ GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> optio
   return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(kj::none));
 }
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

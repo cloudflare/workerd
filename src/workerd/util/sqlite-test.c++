@@ -36,8 +36,8 @@ void setupSql(SqliteDatabase& db) {
       INSERT INTO people (id, name, email)
       VALUES (?, ?, ?),
             (?, ?, ?);
-    )", 123, "Bob"_kj, "bob@example.com"_kj,
-        321, "Alice"_kj, "alice@example.com"_kj);
+    )",
+        123, "Bob"_kj, "bob@example.com"_kj, 321, "Alice"_kj, "alice@example.com"_kj);
 
     KJ_EXPECT(query.changeCount() == 2);
   }
@@ -128,8 +128,8 @@ KJ_TEST("SQLite backed by in-memory directory") {
     SqliteDatabase db(vfs, kj::Path({"foo"}));
     checkSql(db);
     KJ_EXPECT_THROW_MESSAGE("attempt to write a readonly database",
-                            db.run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234,
-                                   "Carol"_kj, "carol@example.com"));
+        db.run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234, "Carol"_kj,
+            "carol@example.com"));
   }
 }
 
@@ -155,15 +155,15 @@ private:
 
   kj::Path makeTmpPath() {
     const char* tmpDir = getenv("TEST_TMPDIR");
-    kj::String pathStr = kj::str(
-        tmpDir != nullptr ? tmpDir : "/var/tmp", "/workerd-sqlite-test.XXXXXX");
+    kj::String pathStr =
+        kj::str(tmpDir != nullptr ? tmpDir : "/var/tmp", "/workerd-sqlite-test.XXXXXX");
 #if _WIN32
     if (_mktemp(pathStr.begin()) == nullptr) {
       KJ_FAIL_SYSCALL("_mktemp", errno, pathStr);
     }
     auto path = disk->getCurrentPath().evalNative(pathStr);
-    disk->getRoot().openSubdir(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY |
-                                     kj::WriteMode::CREATE_PARENT);
+    disk->getRoot().openSubdir(
+        path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
     return path;
 #else
     if (mkdtemp(pathStr.begin()) == nullptr) {
@@ -216,8 +216,8 @@ KJ_TEST("SQLite backed by real disk") {
 
     checkSql(db);
     KJ_EXPECT_THROW_MESSAGE("attempt to write a readonly database",
-                            db.run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234,
-                                   "Carol"_kj, "carol@example.com"));
+        db.run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234, "Carol"_kj,
+            "carol@example.com"));
   }
 }
 
@@ -241,7 +241,7 @@ void doReadOnlyUpdateTest(const kj::Directory& dir) {
   }
 
   db.run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234, "Carol"_kj,
-         "carol@example.com");
+      "carol@example.com");
 
   {
     // Make sure there's we added some WAL, since that's where the read-only database will have to
@@ -293,7 +293,7 @@ KJ_TEST("In-memory read-only crash regression") {
 
   // then write into the read/write database:
   KJ_ASSERT_NONNULL(db).run("INSERT INTO people (id, name, email) VALUES (?, ?, ?);", 234,
-                            "Carol"_kj, "carol@example.com");
+      "Carol"_kj, "carol@example.com");
 
   // we can destroy the read/write database with no problems,
   db = kj::none;
@@ -424,8 +424,8 @@ KJ_TEST("SQLite Regulator") {
   KJ_EXPECT(getBar.run().getInt(0) == 456);
 
   // Trying to prepare a statement that violates the regulator fails.
-  KJ_EXPECT_THROW_MESSAGE("access to foo.value is prohibited",
-      db.prepare(noFoo, "SELECT value FROM foo"));
+  KJ_EXPECT_THROW_MESSAGE(
+      "access to foo.value is prohibited", db.prepare(noFoo, "SELECT value FROM foo"));
 
   // If we create a new table, all statements must be re-prepared, which re-runs the regulator.
   // Make sure that works.
@@ -435,8 +435,8 @@ KJ_TEST("SQLite Regulator") {
 
   // Let's screw with SQLite and make the regulator fail on re-run to see what happens.
   noFoo.alwaysFail = true;
-  KJ_EXPECT_THROW_MESSAGE("access to bar.value is prohibited",
-      KJ_EXPECT(getBar.run().getInt(0) == 456));
+  KJ_EXPECT_THROW_MESSAGE(
+      "access to bar.value is prohibited", KJ_EXPECT(getBar.run().getInt(0) == 456));
 }
 
 KJ_TEST("SQLite onWrite callback") {
@@ -470,8 +470,11 @@ struct RowCounts {
   uint64_t written;
 };
 
-template<typename ...Params>
-RowCounts countRowsTouched(SqliteDatabase& db, const SqliteDatabase::Regulator& regulator, kj::StringPtr sqlCode, Params... bindParams) {
+template <typename... Params>
+RowCounts countRowsTouched(SqliteDatabase& db,
+    const SqliteDatabase::Regulator& regulator,
+    kj::StringPtr sqlCode,
+    Params... bindParams) {
   uint64_t rowsFound = 0;
 
   // Runs a query; retrieves and discards all the data.
@@ -481,14 +484,13 @@ RowCounts countRowsTouched(SqliteDatabase& db, const SqliteDatabase::Regulator& 
     query.nextRow();
   }
 
-  return {.found = rowsFound,
-          .read = query.getRowsRead(),
-          .written = query.getRowsWritten()};
+  return {.found = rowsFound, .read = query.getRowsRead(), .written = query.getRowsWritten()};
 }
 
-template<typename ...Params>
+template <typename... Params>
 RowCounts countRowsTouched(SqliteDatabase& db, kj::StringPtr sqlCode, Params... bindParams) {
-  return countRowsTouched(db, SqliteDatabase::TRUSTED, sqlCode, std::forward<Params>(bindParams)...);
+  return countRowsTouched(
+      db, SqliteDatabase::TRUSTED, sqlCode, std::forward<Params>(bindParams)...);
 }
 
 KJ_TEST("SQLite read row counters (basic)") {
@@ -628,7 +630,8 @@ KJ_TEST("SQLite write row counters (basic)") {
     db.run("INSERT INTO things (id) VALUES (3)");
     db.run("INSERT INTO things (id) VALUES (5)");
 
-    RowCounts stats = countRowsTouched(db, "INSERT INTO unindexed_things (id) SELECT id FROM things");
+    RowCounts stats =
+        countRowsTouched(db, "INSERT INTO unindexed_things (id) SELECT id FROM things");
     KJ_EXPECT(stats.read == 3);
     KJ_EXPECT(stats.written == 3);
   }
@@ -641,7 +644,8 @@ KJ_TEST("SQLite write row counters (basic)") {
     db.run("INSERT INTO unindexed_things (id) VALUES (3)");
     db.run("INSERT INTO unindexed_things (id) VALUES (4)");
 
-    RowCounts stats = countRowsTouched(db, "UPDATE unindexed_things SET id = id * 10 WHERE id >= 3");
+    RowCounts stats =
+        countRowsTouched(db, "UPDATE unindexed_things SET id = id * 10 WHERE id >= 3");
     KJ_EXPECT(stats.written == 2);
   }
 

@@ -13,13 +13,14 @@
 #include <workerd/util/http-util.h>
 
 namespace workerd::api {
-  class Headers;
+class Headers;
 }
 
 namespace workerd::api::public_beta {
 
 kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr);
-kj::ArrayPtr<kj::StringPtr> fillR2Path(kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket);
+kj::ArrayPtr<kj::StringPtr> fillR2Path(
+    kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket);
 
 class R2MultipartUpload;
 
@@ -38,13 +39,20 @@ public:
   // `clientIndex` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
   explicit R2Bucket(CompatibilityFlags::Reader featureFlags, uint clientIndex)
-      : featureFlags(featureFlags), clientIndex(clientIndex) {}
+      : featureFlags(featureFlags),
+        clientIndex(clientIndex) {}
 
   explicit R2Bucket(FeatureFlags featureFlags, uint clientIndex, kj::String bucket, friend_tag_t)
-      : featureFlags(featureFlags), clientIndex(clientIndex), adminBucket(kj::mv(bucket)) {}
+      : featureFlags(featureFlags),
+        clientIndex(clientIndex),
+        adminBucket(kj::mv(bucket)) {}
 
-  explicit R2Bucket(FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String jwt, friend_tag_t)
-      : featureFlags(featureFlags), clientIndex(clientIndex), adminBucket(kj::mv(bucket)), jwt(kj::mv(jwt)) {}
+  explicit R2Bucket(
+      FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String jwt, friend_tag_t)
+      : featureFlags(featureFlags),
+        clientIndex(clientIndex),
+        adminBucket(kj::mv(bucket)),
+        jwt(kj::mv(jwt)) {}
 
   struct Range {
     jsg::Optional<double> offset;
@@ -91,24 +99,32 @@ public:
 
   class Checksums: public jsg::Object {
   public:
-    Checksums(
-      jsg::Optional<kj::Array<kj::byte>> md5,
-      jsg::Optional<kj::Array<kj::byte>> sha1,
-      jsg::Optional<kj::Array<kj::byte>> sha256,
-      jsg::Optional<kj::Array<kj::byte>> sha384,
-      jsg::Optional<kj::Array<kj::byte>> sha512
-    ):
-      md5(kj::mv(md5)),
-      sha1(kj::mv(sha1)),
-      sha256(kj::mv(sha256)),
-      sha384(kj::mv(sha384)),
-      sha512(kj::mv(sha512)) {}
+    Checksums(jsg::Optional<kj::Array<kj::byte>> md5,
+        jsg::Optional<kj::Array<kj::byte>> sha1,
+        jsg::Optional<kj::Array<kj::byte>> sha256,
+        jsg::Optional<kj::Array<kj::byte>> sha384,
+        jsg::Optional<kj::Array<kj::byte>> sha512)
+        : md5(kj::mv(md5)),
+          sha1(kj::mv(sha1)),
+          sha256(kj::mv(sha256)),
+          sha384(kj::mv(sha384)),
+          sha512(kj::mv(sha512)) {}
 
-    jsg::Optional<kj::Array<kj::byte>> getMd5() const { return md5.map(cloneByteArray); }
-    jsg::Optional<kj::Array<kj::byte>> getSha1() const { return sha1.map(cloneByteArray); }
-    jsg::Optional<kj::Array<kj::byte>> getSha256() const { return sha256.map(cloneByteArray); }
-    jsg::Optional<kj::Array<kj::byte>> getSha384() const { return sha384.map(cloneByteArray); }
-    jsg::Optional<kj::Array<kj::byte>> getSha512() const { return sha512.map(cloneByteArray); }
+    jsg::Optional<kj::Array<kj::byte>> getMd5() const {
+      return md5.map(cloneByteArray);
+    }
+    jsg::Optional<kj::Array<kj::byte>> getSha1() const {
+      return sha1.map(cloneByteArray);
+    }
+    jsg::Optional<kj::Array<kj::byte>> getSha256() const {
+      return sha256.map(cloneByteArray);
+    }
+    jsg::Optional<kj::Array<kj::byte>> getSha384() const {
+      return sha384.map(cloneByteArray);
+    }
+    jsg::Optional<kj::Array<kj::byte>> getSha512() const {
+      return sha512.map(cloneByteArray);
+    }
 
     StringChecksums toJSON();
 
@@ -147,8 +163,12 @@ public:
     jsg::Optional<kj::String> cacheControl;
     jsg::Optional<kj::Date> cacheExpiry;
 
-    JSG_STRUCT(contentType, contentLanguage, contentDisposition,
-                contentEncoding, cacheControl, cacheExpiry);
+    JSG_STRUCT(contentType,
+        contentLanguage,
+        contentDisposition,
+        contentEncoding,
+        cacheControl,
+        cacheExpiry);
     JSG_STRUCT_TS_OVERRIDE(R2HTTPMetadata);
 
     HttpMetadata clone() const;
@@ -173,7 +193,8 @@ public:
     jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha512;
     jsg::Optional<kj::String> storageClass;
 
-    JSG_STRUCT(onlyIf, httpMetadata, customMetadata, md5, sha1, sha256, sha384, sha512, storageClass);
+    JSG_STRUCT(
+        onlyIf, httpMetadata, customMetadata, md5, sha1, sha256, sha384, sha512, storageClass);
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
@@ -188,24 +209,51 @@ public:
 
   class HeadResult: public jsg::Object {
   public:
-    HeadResult(kj::String name, kj::String version, double size,
-               kj::String etag, jsg::Ref<Checksums> checksums, kj::Date uploaded,
-               jsg::Optional<HttpMetadata> httpMetadata,
-               jsg::Optional<jsg::Dict<kj::String>> customMetadata, jsg::Optional<Range> range,
-               kj::String storageClass):
-        name(kj::mv(name)), version(kj::mv(version)), size(size), etag(kj::mv(etag)),
-        checksums(kj::mv(checksums)), uploaded(uploaded), httpMetadata(kj::mv(httpMetadata)),
-        customMetadata(kj::mv(customMetadata)), range(kj::mv(range)),
-        storageClass(kj::mv(storageClass)) {}
+    HeadResult(kj::String name,
+        kj::String version,
+        double size,
+        kj::String etag,
+        jsg::Ref<Checksums> checksums,
+        kj::Date uploaded,
+        jsg::Optional<HttpMetadata> httpMetadata,
+        jsg::Optional<jsg::Dict<kj::String>> customMetadata,
+        jsg::Optional<Range> range,
+        kj::String storageClass)
+        : name(kj::mv(name)),
+          version(kj::mv(version)),
+          size(size),
+          etag(kj::mv(etag)),
+          checksums(kj::mv(checksums)),
+          uploaded(uploaded),
+          httpMetadata(kj::mv(httpMetadata)),
+          customMetadata(kj::mv(customMetadata)),
+          range(kj::mv(range)),
+          storageClass(kj::mv(storageClass)) {}
 
-    kj::String getName() const { return kj::str(name); }
-    kj::String getVersion() const { return kj::str(version); }
-    double getSize() const { return size; }
-    kj::String getEtag() const { return kj::str(etag); }
-    kj::String getHttpEtag() const { return kj::str('"', etag, '"'); }
-    jsg::Ref<Checksums> getChecksums() { return checksums.addRef();}
-    kj::Date getUploaded() const { return uploaded; }
-    kj::StringPtr getStorageClass() const { return storageClass; }
+    kj::String getName() const {
+      return kj::str(name);
+    }
+    kj::String getVersion() const {
+      return kj::str(version);
+    }
+    double getSize() const {
+      return size;
+    }
+    kj::String getEtag() const {
+      return kj::str(etag);
+    }
+    kj::String getHttpEtag() const {
+      return kj::str('"', etag, '"');
+    }
+    jsg::Ref<Checksums> getChecksums() {
+      return checksums.addRef();
+    }
+    kj::Date getUploaded() const {
+      return uploaded;
+    }
+    kj::StringPtr getStorageClass() const {
+      return storageClass;
+    }
 
     jsg::Optional<HttpMetadata> getHttpMetadata() const {
       return httpMetadata.map([](const HttpMetadata& m) { return m.clone(); });
@@ -214,17 +262,17 @@ public:
     const jsg::Optional<jsg::Dict<kj::String>> getCustomMetadata() const {
       return customMetadata.map([](const jsg::Dict<kj::String>& m) {
         return jsg::Dict<kj::String>{
-          .fields = KJ_MAP(f, m.fields) {
-            return jsg::Dict<kj::String>::Field{
-              .name = kj::str(f.name), .value = kj::str(f.value)
-            };
-          },
+          .fields =
+              KJ_MAP(f, m.fields) {
+          return jsg::Dict<kj::String>::Field{.name = kj::str(f.name), .value = kj::str(f.value)};
+        },
         };
       });
     }
 
-
-    jsg::Optional<Range> getRange() { return range; }
+    jsg::Optional<Range> getRange() {
+      return range;
+    }
 
     void writeHttpMetadata(jsg::Lock& js, Headers& headers);
 
@@ -270,13 +318,27 @@ public:
 
   class GetResult: public HeadResult {
   public:
-    GetResult(kj::String name, kj::String version, double size,
-              kj::String etag, jsg::Ref<Checksums> checksums, kj::Date uploaded, jsg::Optional<HttpMetadata> httpMetadata,
-              jsg::Optional<jsg::Dict<kj::String>> customMetadata, jsg::Optional<Range> range, kj::String storageClass,
-              jsg::Ref<ReadableStream> body)
-      : HeadResult(
-          kj::mv(name), kj::mv(version), size, kj::mv(etag), kj::mv(checksums), uploaded,
-          kj::mv(KJ_ASSERT_NONNULL(httpMetadata)), kj::mv(KJ_ASSERT_NONNULL(customMetadata)), range, kj::mv(storageClass)),
+    GetResult(kj::String name,
+        kj::String version,
+        double size,
+        kj::String etag,
+        jsg::Ref<Checksums> checksums,
+        kj::Date uploaded,
+        jsg::Optional<HttpMetadata> httpMetadata,
+        jsg::Optional<jsg::Dict<kj::String>> customMetadata,
+        jsg::Optional<Range> range,
+        kj::String storageClass,
+        jsg::Ref<ReadableStream> body)
+        : HeadResult(kj::mv(name),
+              kj::mv(version),
+              size,
+              kj::mv(etag),
+              kj::mv(checksums),
+              uploaded,
+              kj::mv(KJ_ASSERT_NONNULL(httpMetadata)),
+              kj::mv(KJ_ASSERT_NONNULL(customMetadata)),
+              range,
+              kj::mv(storageClass)),
           body(kj::mv(body)) {}
 
     jsg::Ref<ReadableStream> getBody() {
@@ -308,6 +370,7 @@ public:
     void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
       tracker.trackField("body", body);
     }
+
   private:
     jsg::Ref<ReadableStream> body;
   };
@@ -344,34 +407,35 @@ public:
     // from `R2BucketListOptions` to `R2ListOptions`.
   };
 
-  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(
-      jsg::Lock& js, kj::String key,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags
-  );
-  jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>>> get(
-      jsg::Lock& js, kj::String key, jsg::Optional<GetOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags
-  );
+  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(jsg::Lock& js,
+      kj::String key,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+      CompatibilityFlags::Reader flags);
+  jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>>> get(jsg::Lock& js,
+      kj::String key,
+      jsg::Optional<GetOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+      CompatibilityFlags::Reader flags);
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> put(jsg::Lock& js,
-      kj::String key, kj::Maybe<R2PutValue> value, jsg::Optional<PutOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
-  );
-  jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUpload(
-      jsg::Lock& js, kj::String key, jsg::Optional<MultipartOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
-  );
-  jsg::Ref<R2MultipartUpload> resumeMultipartUpload(
-      jsg::Lock& js, kj::String key, kj::String uploadId,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
-  );
-  jsg::Promise<void> delete_(
-      jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
-  );
-  jsg::Promise<ListResult> list(
-      jsg::Lock& js, jsg::Optional<ListOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags
-  );
+      kj::String key,
+      kj::Maybe<R2PutValue> value,
+      jsg::Optional<PutOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+  jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUpload(jsg::Lock& js,
+      kj::String key,
+      jsg::Optional<MultipartOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+  jsg::Ref<R2MultipartUpload> resumeMultipartUpload(jsg::Lock& js,
+      kj::String key,
+      kj::String uploadId,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+  jsg::Promise<void> delete_(jsg::Lock& js,
+      kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+  jsg::Promise<ListResult> list(jsg::Lock& js,
+      jsg::Optional<ListOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+      CompatibilityFlags::Reader flags);
 
   JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {
     JSG_METHOD(head);
@@ -462,7 +526,6 @@ private:
 // Non-generic wrapper avoid moving the parseObjectMetadata implementation into this header file
 // by making use of dynamic dispatch.
 kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(
-  kj::StringPtr action, R2Result& r2Result, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+    kj::StringPtr action, R2Result& r2Result, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
 }  // namespace workerd::api::public_beta
-

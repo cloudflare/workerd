@@ -9,7 +9,8 @@ TimeoutId TimeoutId::Generator::getNext() {
   auto id = nextId++;
   if (nextId > MAX_SAFE_INTEGER) {
     KJ_LOG(WARNING, "Unable to set timeout because there are no more unique ids");
-    JSG_FAIL_REQUIRE(Error, "Unable to set timeout because there are no more unique ids "
+    JSG_FAIL_REQUIRE(Error,
+        "Unable to set timeout because there are no more unique ids "
         "less than Number.MAX_SAFE_INTEGER.");
   }
   return TimeoutId(id);
@@ -17,7 +18,9 @@ TimeoutId TimeoutId::Generator::getNext() {
 
 TimeoutManager::TimeoutParameters::TimeoutParameters(
     bool repeat, int64_t msDelay, jsg::Function<void()> function)
-    : repeat(repeat), msDelay(msDelay), function(kj::mv(function)) {
+    : repeat(repeat),
+      msDelay(msDelay),
+      function(kj::mv(function)) {
   // Don't allow pushing Date.now() backwards! This should be checked before TimeoutParameters
   // is created but just in case...
   if (msDelay < 0) {

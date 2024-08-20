@@ -22,25 +22,26 @@ kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
   // string value in the MIME type... which is fun.
 
   static const auto isAsciiWhitespace = [](auto c) {
-    return c == 0x09 /* tab */ ||
-          c == 0x0a /* lf  */ ||
-          c == 0x0c /* ff  */ ||
-          c == 0x0d /* cr  */ ||
-          c == 0x20 /* sp  */;
+    return c == 0x09 /* tab */ || c == 0x0a /* lf  */ || c == 0x0c /* ff  */ ||
+        c == 0x0d /* cr  */ || c == 0x20 /* sp  */;
   };
 
   static const auto trim = [](auto label) {
     size_t start = 0;
     auto end = label.size();
-    while (start < end && isAsciiWhitespace(label[start])) { start++; }
-    while (end > start && isAsciiWhitespace(label[end - 1])) { end--; }
+    while (start < end && isAsciiWhitespace(label[start])) {
+      start++;
+    }
+    while (end > start && isAsciiWhitespace(label[end - 1])) {
+      end--;
+    }
     return label.slice(start, end).asChars();
   };
 
   static const auto strip = [](auto label) {
     auto result = kj::heapArray<kj::byte>(label.size());
     size_t len = 0;
-    for (auto c : label) {
+    for (auto c: label) {
       if (!isAsciiWhitespace(c)) {
         result[len++] = c;
       }
@@ -51,13 +52,8 @@ kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
   static const auto isBase64 = [](kj::ArrayPtr<const char> label) -> bool {
     KJ_IF_SOME(pos, label.findLast(';')) {
       auto res = trim(label.slice(pos + 1));
-      return res.size() == 6 &&
-          (res[0] | 0x20) == 'b' &&
-          (res[1] | 0x20) == 'a' &&
-          (res[2] | 0x20) == 's' &&
-          (res[3] | 0x20) == 'e' &&
-          (res[4] == '6') &&
-          (res[5] == '4');
+      return res.size() == 6 && (res[0] | 0x20) == 'b' && (res[1] | 0x20) == 'a' &&
+          (res[2] | 0x20) == 's' && (res[3] | 0x20) == 'e' && (res[4] == '6') && (res[5] == '4');
     }
     return false;
   };
@@ -85,7 +81,6 @@ kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
     } else {
       decoded = jsg::Url::percentDecode(data.asBytes());
     }
-
 
     if (unparsed.startsWith(";"_kj)) {
       // If the mime type starts with ;, then the spec tells us to

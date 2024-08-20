@@ -39,13 +39,18 @@ public:
   // `commitCallback` will be invoked after committing a transaction. The output gate will block on
   // the returned promise. This can be used e.g. when the database needs to be replicated to other
   // machines before being considered durable.
-  explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate,
-                       kj::Function<kj::Promise<void>()> commitCallback,
-                       Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
+  explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam,
+      OutputGate& outputGate,
+      kj::Function<kj::Promise<void>()> commitCallback,
+      Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
 
-  bool isCommitScheduled() { return !currentTxn.is<NoTxn>(); }
+  bool isCommitScheduled() {
+    return !currentTxn.is<NoTxn>();
+  }
 
-  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return *db; }
+  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override {
+    return *db;
+  }
 
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
@@ -61,7 +66,8 @@ public:
   kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) override;
   kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
   kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
-  kj::Maybe<kj::Promise<void>> setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> setAlarm(
+      kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
   // See ActorCacheOps.
 
   kj::Own<ActorCacheInterface::Transaction> startTransaction() override;

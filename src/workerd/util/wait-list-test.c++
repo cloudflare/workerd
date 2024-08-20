@@ -30,7 +30,7 @@ KJ_TEST("CrossThreadWaitList") {
       promise2.wait(ws);
 
       KJ_ASSERT(list.isDone());
-     };
+    };
 
     kj::Thread waiter1(threadFunc);
     kj::Thread waiter2(threadFunc);
@@ -69,10 +69,12 @@ KJ_TEST("CrossThreadWaitList exceptions") {
 
       (*ready.lockExclusive())++;
 
-      promise1.then([]() { KJ_FAIL_REQUIRE("didn't throw"); }, [](kj::Exception&& e) {
+      promise1
+          .then([]() { KJ_FAIL_REQUIRE("didn't throw"); }, [](kj::Exception&& e) {
         KJ_ASSERT(e.getDescription() == "foo");
       }).wait(ws);
-      promise2.then([]() { KJ_FAIL_REQUIRE("didn't throw"); }, [](kj::Exception&& e) {
+      promise2
+          .then([]() { KJ_FAIL_REQUIRE("didn't throw"); }, [](kj::Exception&& e) {
         KJ_ASSERT(e.getDescription() == "foo");
       }).wait(ws);
 

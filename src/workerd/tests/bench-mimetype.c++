@@ -10,7 +10,9 @@ WD_BENCH("Mimetype::ParseAndSerialize") {
   MimeType::parse("video/webm;codecs=\"vp09.02.10.10.01.09.16.09.01,opus\""_kj).toString();
 
   // longest entry from https://www.iana.org/assignments/media-types/media-types.xhtml
-  MimeType::parse("application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"_kj).toString();
+  MimeType::parse(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"_kj)
+      .toString();
 }
 
 WD_BENCH("Mimetype::Serialize") {
@@ -20,6 +22,6 @@ WD_BENCH("Mimetype::Serialize") {
   MimeType::JSON.toString();
 }
 
-} // namespace
+}  // namespace
 
-}
+}  // namespace workerd

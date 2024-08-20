@@ -17,7 +17,7 @@
 
 namespace workerd::jsg {
 class DOMException;
-}  // namespace jsg
+}  // namespace workerd::jsg
 
 namespace workerd::api {
 
@@ -58,7 +58,7 @@ class URLSearchParams;
 namespace url {
 class URL;
 class URLSearchParams;
-}  // namespace
+}  // namespace url
 
 // We need access to DOMException within this namespace so JSG_NESTED_TYPE can name it correctly.
 using DOMException = jsg::DOMException;
@@ -66,7 +66,9 @@ using DOMException = jsg::DOMException;
 // A subset of the standard Navigator API.
 class Navigator: public jsg::Object {
 public:
-  kj::StringPtr getUserAgent() { return "Cloudflare-Workers"_kj; }
+  kj::StringPtr getUserAgent() {
+    return "Cloudflare-Workers"_kj;
+  }
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
   jsg::Ref<api::gpu::GPU> getGPU(CompatibilityFlags::Reader flags);
 #endif
@@ -96,7 +98,9 @@ public:
   // smaller in magnitude, which allows them to be more precise due to the nature of floating
   // point numbers. In our case, though, we don't return precise measurements from this interface
   // anyway, for Spectre reasons -- it returns the same as Date.now().
-  double getTimeOrigin() { return 0.0; }
+  double getTimeOrigin() {
+    return 0.0;
+  }
 
   double now();
 
@@ -109,14 +113,16 @@ public:
 class PromiseRejectionEvent: public Event {
 public:
   PromiseRejectionEvent(
-      v8::PromiseRejectEvent type,
-      jsg::V8Ref<v8::Promise> promise,
-      jsg::Value reason);
+      v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason);
 
   static jsg::Ref<PromiseRejectionEvent> constructor(kj::String type) = delete;
 
-  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) { return promise.addRef(js); }
-  jsg::Value getReason(jsg::Lock& js) { return reason.addRef(js); }
+  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) {
+    return promise.addRef(js);
+  }
+  jsg::Value getReason(jsg::Lock& js) {
+    return reason.addRef(js);
+  }
 
   JSG_RESOURCE_TYPE(PromiseRejectionEvent) {
     JSG_INHERIT(Event);
@@ -138,7 +144,9 @@ private:
 
 class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
 public:
-  jsg::Unimplemented importScripts(kj::String s) { return {}; };
+  jsg::Unimplemented importScripts(kj::String s) {
+    return {};
+  };
 
   JSG_RESOURCE_TYPE(WorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
@@ -208,8 +216,12 @@ class AlarmInvocationInfo: public jsg::Object {
 public:
   AlarmInvocationInfo(uint32_t retry): retryCount(retry) {}
 
-  bool getIsRetry() { return retryCount > 0; }
-  uint32_t getRetryCount() { return retryCount; }
+  bool getIsRetry() {
+    return retryCount > 0;
+  }
+  uint32_t getRetryCount() {
+    return retryCount;
+  }
 
   JSG_RESOURCE_TYPE(AlarmInvocationInfo) {
     JSG_READONLY_INSTANCE_PROPERTY(isRetry, getIsRetry);
@@ -226,32 +238,37 @@ private:
 // treat incorrect types as if the field is undefined. Without this, Durable Object class
 // constructors that set a field with one of these names would cause confusing type errors.
 struct ExportedHandler {
-  typedef jsg::Promise<jsg::Ref<api::Response>> FetchHandler(
-      jsg::Ref<api::Request> request, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  typedef jsg::Promise<jsg::Ref<api::Response>> FetchHandler(jsg::Ref<api::Request> request,
+      jsg::Value env,
+      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
-  typedef kj::Promise<void> TailHandler(
-      kj::Array<jsg::Ref<TraceItem>> events, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  typedef kj::Promise<void> TailHandler(kj::Array<jsg::Ref<TraceItem>> events,
+      jsg::Value env,
+      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
-  typedef kj::Promise<void> ScheduledHandler(
-      jsg::Ref<ScheduledController> controller, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  typedef kj::Promise<void> ScheduledHandler(jsg::Ref<ScheduledController> controller,
+      jsg::Value env,
+      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ScheduledHandler>> scheduled;
 
   typedef kj::Promise<void> AlarmHandler(jsg::Ref<AlarmInvocationInfo> alarmInfo);
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
-  typedef jsg::Promise<void> TestHandler(
-      jsg::Ref<TestController> controller, jsg::Value env,
+  typedef jsg::Promise<void> TestHandler(jsg::Ref<TestController> controller,
+      jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TestHandler>> test;
 
-  typedef kj::Promise<void> HibernatableWebSocketMessageHandler(jsg::Ref<WebSocket>, kj::OneOf<kj::String, kj::Array<byte>> message);
+  typedef kj::Promise<void> HibernatableWebSocketMessageHandler(
+      jsg::Ref<WebSocket>, kj::OneOf<kj::String, kj::Array<byte>> message);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketMessageHandler>> webSocketMessage;
 
-  typedef kj::Promise<void> HibernatableWebSocketCloseHandler(jsg::Ref<WebSocket>, int code, kj::String reason, bool wasClean);
+  typedef kj::Promise<void> HibernatableWebSocketCloseHandler(
+      jsg::Ref<WebSocket>, int code, kj::String reason, bool wasClean);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketCloseHandler>> webSocketClose;
 
   typedef kj::Promise<void> HibernatableWebSocketErrorHandler(jsg::Ref<WebSocket>, jsg::Value);
@@ -260,7 +277,16 @@ struct ExportedHandler {
   // Self-ref potentially allows extracting other custom handlers from the object.
   jsg::SelfRef self;
 
-  JSG_STRUCT(fetch, tail, trace, scheduled, alarm, test, webSocketMessage, webSocketClose, webSocketError, self);
+  JSG_STRUCT(fetch,
+      tail,
+      trace,
+      scheduled,
+      alarm,
+      test,
+      webSocketMessage,
+      webSocketClose,
+      webSocketError,
+      self);
 
   JSG_STRUCT_TS_ROOT();
   // ExportedHandler isn't included in the global scope, but we still want to
@@ -323,7 +349,9 @@ public:
   // We do not implement a similar mechanism in workerd. These are here only to
   // satisfy the API contract for the `Immediate` object but are never expected
   // to actually do anything.
-  bool hasRef() { return false; }
+  bool hasRef() {
+    return false;
+  }
   void ref() { /* non-op */ }
   void unref() { /* non-op */ }
 
@@ -361,64 +389,64 @@ public:
   //
   // If `exportedHandler` is provided, the request will be delivered to it rather than to event
   // listeners.
-  kj::Promise<DeferredProxy<void>> request(
-      kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
-      kj::AsyncInputStream& requestBody, kj::HttpService::Response& response,
+  kj::Promise<DeferredProxy<void>> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response,
       kj::Maybe<kj::StringPtr> cfBlobJson,
-      Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
 
   // Received sendTraces (called from C++, not JS).
   void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
-      Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Start a scheduled event (called from C++, not JS). It is the caller's responsibility to wait
   // for waitUntil()s in order to construct the final ScheduledResult.
-  void startScheduled(
-      kj::Date scheduledTime,
+  void startScheduled(kj::Date scheduledTime,
       kj::StringPtr cron,
-      Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received runAlarm (called from C++, not JS).
-  kj::Promise<WorkerInterface::AlarmResult> runAlarm(
-      kj::Date scheduledTime,
+  kj::Promise<WorkerInterface::AlarmResult> runAlarm(kj::Date scheduledTime,
       kj::Duration timeout,
       uint32_t retryCount,
-      Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received test() (called from C++, not JS). See WorkerInterface::test(). This version returns
   // a jsg::Promise<void>; it fails if an exception is thrown. WorkerEntrypoint will catch these
   // and report them.
-  jsg::Promise<void> test(
-      Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
+  jsg::Promise<void> test(Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
 
   kj::Promise<void> eventTimeoutPromise(uint32_t timeoutMs);
-  kj::Promise<void> setHibernatableEventTimeout(kj::Promise<void> event, kj::Maybe<uint32_t> eventTimeoutMs);
+  kj::Promise<void> setHibernatableEventTimeout(
+      kj::Promise<void> event, kj::Maybe<uint32_t> eventTimeoutMs);
 
-  void sendHibernatableWebSocketMessage(
-      kj::OneOf<kj::String, kj::Array<byte>> message,
+  void sendHibernatableWebSocketMessage(kj::OneOf<kj::String, kj::Array<byte>> message,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  void sendHibernatableWebSocketClose(
-      HibernatableSocketParams::Close close,
+  void sendHibernatableWebSocketClose(HibernatableSocketParams::Close close,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  void sendHibernatableWebSocketError(
-      kj::Exception e,
+  void sendHibernatableWebSocketError(kj::Exception e,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  void emitPromiseRejection(
-      jsg::Lock& js,
+  void emitPromiseRejection(jsg::Lock& js,
       v8::PromiseRejectEvent event,
       jsg::V8Ref<v8::Promise> promise,
       jsg::Value value);
@@ -438,28 +466,26 @@ public:
   };
 
   jsg::JsValue structuredClone(
-      jsg::Lock& js,
-      jsg::JsValue value,
-      jsg::Optional<StructuredCloneOptions> options);
+      jsg::Lock& js, jsg::JsValue value, jsg::Optional<StructuredCloneOptions> options);
 
   TimeoutId::NumberType setTimeout(jsg::Lock& js,
-                                   jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
-                                   jsg::Optional<double> msDelay,
-                                   jsg::Arguments<jsg::Value> args);
+      jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
+      jsg::Optional<double> msDelay,
+      jsg::Arguments<jsg::Value> args);
   void clearTimeout(kj::Maybe<TimeoutId::NumberType> timeoutId);
 
-  TimeoutId::NumberType setTimeoutInternal(
-      jsg::Function<void()> function,
-      double msDelay);
+  TimeoutId::NumberType setTimeoutInternal(jsg::Function<void()> function, double msDelay);
 
   TimeoutId::NumberType setInterval(jsg::Lock& js,
-                                    jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
-                                    jsg::Optional<double> msDelay,
-                                    jsg::Arguments<jsg::Value> args);
-  void clearInterval(kj::Maybe<TimeoutId::NumberType> timeoutId) { clearTimeout(timeoutId); }
+      jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
+      jsg::Optional<double> msDelay,
+      jsg::Arguments<jsg::Value> args);
+  void clearInterval(kj::Maybe<TimeoutId::NumberType> timeoutId) {
+    clearTimeout(timeoutId);
+  }
 
-  jsg::Promise<jsg::Ref<Response>> fetch(
-      jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> request,
+  jsg::Promise<jsg::Ref<Response>> fetch(jsg::Lock& js,
+      kj::OneOf<jsg::Ref<Request>, kj::String> request,
       jsg::Optional<Request::Initializer> requestInitr);
 
   jsg::Ref<ServiceWorkerGlobalScope> getSelf() {
@@ -483,7 +509,9 @@ public:
 
   // The origin is unknown, return "null" as described in
   // https://html.spec.whatwg.org/multipage/browsers.html#concept-origin-opaque.
-  kj::StringPtr getOrigin() { return "null"; }
+  kj::StringPtr getOrigin() {
+    return "null";
+  }
 
   jsg::Ref<CacheStorage> getCaches();
 
@@ -495,8 +523,8 @@ public:
   jsg::JsValue getBuffer(jsg::Lock& js);
   jsg::JsValue getProcess(jsg::Lock& js);
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
-                                   jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
-                                   jsg::Arguments<jsg::Value> args);
+      jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
+      jsg::Arguments<jsg::Value> args);
   void clearImmediate(kj::Maybe<jsg::Ref<Immediate>> immediate);
 
   JSG_RESOURCE_TYPE(ServiceWorkerGlobalScope, CompatibilityFlags::Reader flags) {
@@ -792,17 +820,10 @@ private:
   // be monkeypatchable / mutable at the global scope.
 };
 
-#define EW_GLOBAL_SCOPE_ISOLATE_TYPES                    \
-  api::WorkerGlobalScope,                                \
-  api::ServiceWorkerGlobalScope,                         \
-  api::TestController,                                   \
-  api::ExecutionContext,                                 \
-  api::ExportedHandler,                                  \
-  api::ServiceWorkerGlobalScope::StructuredCloneOptions, \
-  api::PromiseRejectionEvent,                            \
-  api::Navigator,                                        \
-  api::Performance,                                      \
-  api::AlarmInvocationInfo,                              \
-  api::Immediate
+#define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
+  api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
+      api::ExecutionContext, api::ExportedHandler,                                                 \
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::PromiseRejectionEvent,           \
+      api::Navigator, api::Performance, api::AlarmInvocationInfo, api::Immediate
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

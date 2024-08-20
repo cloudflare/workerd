@@ -22,7 +22,9 @@ static thread_local bool inCppgcShimDestructor = false;
 
 };
 
-bool HeapTracer::isInCppgcDestructor() { return inCppgcShimDestructor; }
+bool HeapTracer::isInCppgcDestructor() {
+  return inCppgcShimDestructor;
+}
 
 void HeapTracer::clearWrappers() {
   // When clearing wrappers (at isolate shutdown), we may be destroying objects that were recently
@@ -69,7 +71,7 @@ void HeapTracer::clearWrappers() {
 // condemned after that point and will be deleted shortly thereafter.
 class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
 public:
-  CppgcShim(Wrappable& wrappable): state(Active { kj::addRef(wrappable) }) {
+  CppgcShim(Wrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
     wrappable.cppgcShim = *this;
   }
@@ -96,7 +98,8 @@ public:
           next.state.get<Freelisted>().prev = freelisted.prev;
         }
       }
-      KJ_CASE_ONEOF(d, Dead) {}
+      KJ_CASE_ONEOF(d, Dead) {
+      }
     }
   }
 
@@ -110,7 +113,8 @@ public:
         // due to conservative GC or due to incremental marking. Unfortunately the shim won't be
         // collected on this pass but hopefully it can be on the next pass.
       }
-      KJ_CASE_ONEOF(d, Dead) {}
+      KJ_CASE_ONEOF(d, Dead) {
+      }
     }
   }
 
@@ -129,14 +133,20 @@ public:
   };
   struct Dead {};
 
-  kj::StringPtr jsgGetMemoryName() const { return "CppgcShim"_kjc; }
-  size_t jsgGetMemorySelfSize() const { return sizeof(CppgcShim); }
+  kj::StringPtr jsgGetMemoryName() const {
+    return "CppgcShim"_kjc;
+  }
+  size_t jsgGetMemorySelfSize() const {
+    return sizeof(CppgcShim);
+  }
   void jsgGetMemoryInfo(MemoryTracker& tracker) const {
     KJ_IF_SOME(active, state.tryGet<Active>()) {
       tracker.trackField("wrappable", active.wrappable);
     }
   }
-  bool jsgGetMemoryInfoIsRootNode() const { return false; }
+  bool jsgGetMemoryInfoIsRootNode() const {
+    return false;
+  }
 
   mutable kj::OneOf<Active, Freelisted, Dead> state;
   // This is `mutable` because `Trace()` is const. We configure V8 to perform traces atomically in
@@ -159,7 +169,7 @@ Wrappable::CppgcShim* HeapTracer::allocateShim(Wrappable& wrappable) {
     KJ_IF_SOME(next, freelistedShims) {
       next.state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
     }
-    shim.state = Wrappable::CppgcShim::Active { kj::addRef(wrappable) };
+    shim.state = Wrappable::CppgcShim::Active{kj::addRef(wrappable)};
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
     wrappable.cppgcShim = shim;
     return &shim;
@@ -173,7 +183,7 @@ void HeapTracer::clearFreelistedShims() {
   for (;;) {
     KJ_IF_SOME(shim, freelistedShims) {
       freelistedShims = shim.state.get<Wrappable::CppgcShim::Freelisted>().next;
-      shim.state = Wrappable::CppgcShim::Dead {};
+      shim.state = Wrappable::CppgcShim::Dead{};
     } else {
       break;
     }
@@ -181,7 +191,7 @@ void HeapTracer::clearFreelistedShims() {
 }
 
 void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  for (const auto& wrapper : wrappers) {
+  for (const auto& wrapper: wrappers) {
     tracker.trackField("wrapper", wrapper);
   }
   // TODO(soon): Track the other fields here?
@@ -214,7 +224,7 @@ kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
     if (shouldFreelistShim) {
       tracer.addToFreelist(shim);
     } else {
-      shim.state = CppgcShim::Dead {};
+      shim.state = CppgcShim::Dead{};
     }
     wrapper = kj::none;
     cppgcShim = kj::none;
@@ -257,7 +267,7 @@ void Wrappable::addStrongRef() {
 }
 void Wrappable::removeStrongRef() {
   KJ_DREQUIRE(isolate == nullptr || v8::Isolate::TryGetCurrent() == isolate,
-              "destroying wrapper without isolate lock");
+      "destroying wrapper without isolate lock");
   if (--strongRefcount == 0) {
     // This was the last strong reference.
     if (wrapper == kj::none) {
@@ -299,8 +309,8 @@ void Wrappable::traceFromV8(cppgc::Visitor& cppgcVisitor) {
   jsgVisitForGc(visitor);
 }
 
-void Wrappable::attachWrapper(v8::Isolate* isolate,
-                              v8::Local<v8::Object> object, bool needsGcTracing) {
+void Wrappable::attachWrapper(
+    v8::Isolate* isolate, v8::Local<v8::Object> object, bool needsGcTracing) {
   auto& tracer = HeapTracer::getTracer(isolate);
 
   KJ_REQUIRE(wrapper == kj::none);
@@ -341,14 +351,8 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  int indices[] = {
-      WRAPPABLE_TAG_FIELD_INDEX,
-      WRAPPED_OBJECT_FIELD_INDEX
-  };
-  void* values[] = {
-    const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG),
-    this
-  };
+  int indices[] = {WRAPPABLE_TAG_FIELD_INDEX, WRAPPED_OBJECT_FIELD_INDEX};
+  void* values[] = {const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG), this};
   object->SetAlignedPointerInInternalFields(2, indices, values);
 
   v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
@@ -372,8 +376,8 @@ void Wrappable::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
 v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
     v8::Local<v8::Context> context, bool needsGcTracing) {
   auto isolate = context->GetIsolate();
-  auto object = jsg::check(IsolateBase::getOpaqueTemplate(isolate)
-      ->InstanceTemplate()->NewInstance(context));
+  auto object =
+      jsg::check(IsolateBase::getOpaqueTemplate(isolate)->InstanceTemplate()->NewInstance(context));
   attachWrapper(isolate, object, needsGcTracing);
   return object;
 }
@@ -381,8 +385,9 @@ v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
 kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
     v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   if (handle->IsObject()) {
-    v8::Local<v8::Object> instance = v8::Local<v8::Object>::Cast(handle)
-        ->FindInstanceInPrototypeChain(IsolateBase::getOpaqueTemplate(isolate));
+    v8::Local<v8::Object> instance =
+        v8::Local<v8::Object>::Cast(handle)->FindInstanceInPrototypeChain(
+            IsolateBase::getOpaqueTemplate(isolate));
     if (!instance.IsEmpty()) {
       return *reinterpret_cast<Wrappable*>(
           instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX));
@@ -464,8 +469,8 @@ void GcVisitor::visit(Data& value) {
       if (value.tracedHandle == kj::none) {
         // Create the TracedReference.
         v8::HandleScope scope(parent.isolate);
-        value.tracedHandle = v8::TracedReference<v8::Data>(
-            parent.isolate, value.handle.Get(parent.isolate));
+        value.tracedHandle =
+            v8::TracedReference<v8::Data>(parent.isolate, value.handle.Get(parent.isolate));
 
         // Set the handle weak.
         value.handle.SetWeak();

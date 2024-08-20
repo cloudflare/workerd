@@ -59,74 +59,73 @@ using api::pyodide::PythonConfig;
 
 namespace {
 JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
-  // Declares the listing of host object types and structs that the jsg
-  // automatic type mapping will understand. Each of the various
-  // NNNN_ISOLATE_TYPES macros are defined in different header files
-  // (e.g. GLOBAL_SCOPE_ISOLATE_TYPES is defined in api/global-scope.h).
-  //
-  // Global scope types are defined first just by convention, the rest
-  // of the list is in alphabetical order for easier readability (the
-  // actual order of the items is unimportant), followed by additional
-  // types defined in worker.c++ or as part of jsg.
-  //
-  // When adding a new NNNN_ISOLATE_TYPES macro, remember to add it to
-  // src/workerd/api/rtti.c++ too (and tools/api-encoder.c++ for the
-  // time being), so it gets included in the TypeScript types.
-  EW_GLOBAL_SCOPE_ISOLATE_TYPES,
+    // Declares the listing of host object types and structs that the jsg
+    // automatic type mapping will understand. Each of the various
+    // NNNN_ISOLATE_TYPES macros are defined in different header files
+    // (e.g. GLOBAL_SCOPE_ISOLATE_TYPES is defined in api/global-scope.h).
+    //
+    // Global scope types are defined first just by convention, the rest
+    // of the list is in alphabetical order for easier readability (the
+    // actual order of the items is unimportant), followed by additional
+    // types defined in worker.c++ or as part of jsg.
+    //
+    // When adding a new NNNN_ISOLATE_TYPES macro, remember to add it to
+    // src/workerd/api/rtti.c++ too (and tools/api-encoder.c++ for the
+    // time being), so it gets included in the TypeScript types.
+    EW_GLOBAL_SCOPE_ISOLATE_TYPES,
 
-  EW_ACTOR_ISOLATE_TYPES,
-  EW_ACTOR_STATE_ISOLATE_TYPES,
-  EW_ANALYTICS_ENGINE_ISOLATE_TYPES,
-  EW_BASICS_ISOLATE_TYPES,
-  EW_BLOB_ISOLATE_TYPES,
-  EW_CACHE_ISOLATE_TYPES,
-  EW_CRYPTO_ISOLATE_TYPES,
-  EW_ENCODING_ISOLATE_TYPES,
-  EW_EVENTS_ISOLATE_TYPES,
-  EW_FORMDATA_ISOLATE_TYPES,
-  EW_HTML_REWRITER_ISOLATE_TYPES,
-  EW_HTTP_ISOLATE_TYPES,
-  EW_SOCKETS_ISOLATE_TYPES,
-  EW_KV_ISOLATE_TYPES,
-  EW_PYODIDE_ISOLATE_TYPES,
-  EW_QUEUE_ISOLATE_TYPES,
-  EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES,
-  EW_R2_PUBLIC_BETA_ISOLATE_TYPES,
-  EW_WORKER_RPC_ISOLATE_TYPES,
-  EW_SCHEDULED_ISOLATE_TYPES,
-  EW_STREAMS_ISOLATE_TYPES,
-  EW_TRACE_ISOLATE_TYPES,
-  EW_UNSAFE_ISOLATE_TYPES,
-  EW_MEMORY_CACHE_ISOLATE_TYPES,
-  EW_URL_ISOLATE_TYPES,
-  EW_URL_STANDARD_ISOLATE_TYPES,
-  EW_URLPATTERN_ISOLATE_TYPES,
-  EW_WEBSOCKET_ISOLATE_TYPES,
-  EW_SQL_ISOLATE_TYPES,
-  EW_NODE_ISOLATE_TYPES,
-  EW_RTTI_ISOLATE_TYPES,
-  EW_HYPERDRIVE_ISOLATE_TYPES,
-  EW_EVENTSOURCE_ISOLATE_TYPES,
+    EW_ACTOR_ISOLATE_TYPES,
+    EW_ACTOR_STATE_ISOLATE_TYPES,
+    EW_ANALYTICS_ENGINE_ISOLATE_TYPES,
+    EW_BASICS_ISOLATE_TYPES,
+    EW_BLOB_ISOLATE_TYPES,
+    EW_CACHE_ISOLATE_TYPES,
+    EW_CRYPTO_ISOLATE_TYPES,
+    EW_ENCODING_ISOLATE_TYPES,
+    EW_EVENTS_ISOLATE_TYPES,
+    EW_FORMDATA_ISOLATE_TYPES,
+    EW_HTML_REWRITER_ISOLATE_TYPES,
+    EW_HTTP_ISOLATE_TYPES,
+    EW_SOCKETS_ISOLATE_TYPES,
+    EW_KV_ISOLATE_TYPES,
+    EW_PYODIDE_ISOLATE_TYPES,
+    EW_QUEUE_ISOLATE_TYPES,
+    EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES,
+    EW_R2_PUBLIC_BETA_ISOLATE_TYPES,
+    EW_WORKER_RPC_ISOLATE_TYPES,
+    EW_SCHEDULED_ISOLATE_TYPES,
+    EW_STREAMS_ISOLATE_TYPES,
+    EW_TRACE_ISOLATE_TYPES,
+    EW_UNSAFE_ISOLATE_TYPES,
+    EW_MEMORY_CACHE_ISOLATE_TYPES,
+    EW_URL_ISOLATE_TYPES,
+    EW_URL_STANDARD_ISOLATE_TYPES,
+    EW_URLPATTERN_ISOLATE_TYPES,
+    EW_WEBSOCKET_ISOLATE_TYPES,
+    EW_SQL_ISOLATE_TYPES,
+    EW_NODE_ISOLATE_TYPES,
+    EW_RTTI_ISOLATE_TYPES,
+    EW_HYPERDRIVE_ISOLATE_TYPES,
+    EW_EVENTSOURCE_ISOLATE_TYPES,
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  EW_WEBGPU_ISOLATE_TYPES,
+    EW_WEBGPU_ISOLATE_TYPES,
 #endif
 
-  jsg::TypeWrapperExtension<PromiseWrapper>,
-  jsg::InjectConfiguration<CompatibilityFlags::Reader>,
-  Worker::Api::ErrorInterface,
-  jsg::CommonJsModuleObject,
-  jsg::CommonJsModuleContext,
-  jsg::NodeJsModuleObject,
-  jsg::NodeJsModuleContext);
+    jsg::TypeWrapperExtension<PromiseWrapper>,
+    jsg::InjectConfiguration<CompatibilityFlags::Reader>,
+    Worker::Api::ErrorInterface,
+    jsg::CommonJsModuleObject,
+    jsg::CommonJsModuleContext,
+    jsg::NodeJsModuleObject,
+    jsg::NodeJsModuleContext);
 
-
-static const PythonConfig defaultConfig {
+static const PythonConfig defaultConfig{
   .packageDiskCacheRoot = kj::none,
   .pyodideDiskCacheRoot = kj::none,
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
-}
+}  // namespace
 
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
@@ -139,12 +138,16 @@ struct WorkerdApi::Impl final {
   public:
     Configuration(Impl& impl)
         : features(*impl.features),
-          jsgConfig(jsg::JsgConfig {
+          jsgConfig(jsg::JsgConfig{
             .noSubstituteNull = features.getNoSubstituteNull(),
             .unwrapCustomThenables = features.getUnwrapCustomThenables(),
           }) {}
-    operator const CompatibilityFlags::Reader() const { return features; }
-    operator const jsg::JsgConfig&() const { return jsgConfig; }
+    operator const CompatibilityFlags::Reader() const {
+      return features;
+    }
+    operator const jsg::JsgConfig&() const {
+      return jsgConfig;
+    }
 
   private:
     CompatibilityFlags::Reader& features;
@@ -152,30 +155,31 @@ struct WorkerdApi::Impl final {
   };
 
   Impl(jsg::V8System& v8System,
-       CompatibilityFlags::Reader featuresParam,
-       IsolateLimitEnforcer& limitEnforcer,
-       kj::Own<jsg::IsolateObserver> observer,
-       api::MemoryCacheProvider& memoryCacheProvider,
-       const PythonConfig& pythonConfig = defaultConfig,
-       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
+      CompatibilityFlags::Reader featuresParam,
+      IsolateLimitEnforcer& limitEnforcer,
+      kj::Own<jsg::IsolateObserver> observer,
+      api::MemoryCacheProvider& memoryCacheProvider,
+      const PythonConfig& pythonConfig = defaultConfig,
+      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
       : features(capnp::clone(featuresParam)),
         maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
-        jsgIsolate(v8System, Configuration(*this), kj::mv(observer),
-                   limitEnforcer.getCreateParams()),
-        memoryCacheProvider(memoryCacheProvider), pythonConfig(pythonConfig) {}
+        jsgIsolate(
+            v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
+        memoryCacheProvider(memoryCacheProvider),
+        pythonConfig(pythonConfig) {}
 
-  static v8::Local<v8::String> compileTextGlobal(JsgWorkerdIsolate::Lock& lock,
-      capnp::Text::Reader reader) {
+  static v8::Local<v8::String> compileTextGlobal(
+      JsgWorkerdIsolate::Lock& lock, capnp::Text::Reader reader) {
     return lock.wrapNoContext(reader);
   };
 
-  static v8::Local<v8::ArrayBuffer> compileDataGlobal(JsgWorkerdIsolate::Lock& lock,
-      capnp::Data::Reader reader) {
+  static v8::Local<v8::ArrayBuffer> compileDataGlobal(
+      JsgWorkerdIsolate::Lock& lock, capnp::Data::Reader reader) {
     return lock.wrapNoContext(kj::heapArray(reader));
   };
 
-  static v8::Local<v8::WasmModuleObject> compileWasmGlobal(
-      JsgWorkerdIsolate::Lock& lock, capnp::Data::Reader reader,
+  static v8::Local<v8::WasmModuleObject> compileWasmGlobal(JsgWorkerdIsolate::Lock& lock,
+      capnp::Data::Reader reader,
       const jsg::CompilationObserver& observer) {
     lock.setAllowEval(true);
     KJ_DEFER(lock.setAllowEval(false));
@@ -189,11 +193,9 @@ struct WorkerdApi::Impl final {
     return jsg::compileWasmModule(lock, reader, observer);
   };
 
-  static v8::Local<v8::Value> compileJsonGlobal(JsgWorkerdIsolate::Lock& lock,
-      capnp::Text::Reader reader) {
-    return jsg::check(v8::JSON::Parse(
-        lock.v8Context(),
-        lock.wrapNoContext(reader)));
+  static v8::Local<v8::Value> compileJsonGlobal(
+      JsgWorkerdIsolate::Lock& lock, capnp::Text::Reader reader) {
+    return jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapNoContext(reader)));
   };
 
   kj::Maybe<jsg::modules::ModuleRegistry&> tryGetModuleRegistry() const {
@@ -211,9 +213,13 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
     kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
-    : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer),
-                          memoryCacheProvider, pythonConfig,
-                          kj::mv(newModuleRegistry))) {}
+    : impl(kj::heap<Impl>(v8System,
+          features,
+          limitEnforcer,
+          kj::mv(observer),
+          memoryCacheProvider,
+          pythonConfig,
+          kj::mv(newModuleRegistry))) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -222,18 +228,17 @@ kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
 CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
   return *impl->features;
 }
-jsg::JsContext<api::ServiceWorkerGlobalScope>
-    WorkerdApi::newContext(jsg::Lock& lock) const {
-  jsg::NewContextOptions options {
+jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(jsg::Lock& lock) const {
+  jsg::NewContextOptions options{
     .newModuleRegistry = impl->tryGetModuleRegistry(),
   };
-  return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
-      .newContext<api::ServiceWorkerGlobalScope>(kj::mv(options), lock.v8Isolate);
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
+      kj::mv(options), lock.v8Isolate);
 }
 jsg::Dict<NamedExport> WorkerdApi::unwrapExports(
     jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const {
-  return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
-      .unwrap<jsg::Dict<NamedExport>>(lock.v8Context(), moduleNamespace);
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).unwrap<jsg::Dict<NamedExport>>(
+      lock.v8Context(), moduleNamespace);
 }
 WorkerdApi::EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
   auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
@@ -244,20 +249,20 @@ WorkerdApi::EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) 
     .workflow = typedLock.getConstructor<api::Workflow>(lock.v8Context()),
   };
 }
-const jsg::TypeHandler<Worker::Api::ErrorInterface>&
-    WorkerdApi::getErrorInterfaceTypeHandler(jsg::Lock& lock) const {
+const jsg::TypeHandler<Worker::Api::ErrorInterface>& WorkerdApi::getErrorInterfaceTypeHandler(
+    jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();
 }
 
-const jsg::TypeHandler<api::QueueExportedHandler>&
-    WorkerdApi::getQueueTypeHandler(jsg::Lock& lock) const {
+const jsg::TypeHandler<api::QueueExportedHandler>& WorkerdApi::getQueueTypeHandler(
+    jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
 }
 
 jsg::JsObject WorkerdApi::wrapExecutionContext(
     jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
-  return jsg::JsObject(kj::downcast<JsgWorkerdIsolate::Lock>(lock)
-      .wrap(lock.v8Context(), kj::mv(ref)));
+  return jsg::JsObject(
+      kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(ref)));
 }
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
@@ -274,22 +279,17 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
       }
 
       bool isPython = api::pyodide::hasPythonModules(modules);
-      return Worker::Script::ModulesSource {
-        modules[0].getName(),
-        [conf,&errorReporter, extensions](jsg::Lock& lock, const Worker::Api& api) {
-          return WorkerdApi::from(api).compileModules(lock, conf, errorReporter, extensions);
-        },
-        isPython
-      };
+      return Worker::Script::ModulesSource{modules[0].getName(),
+        [conf, &errorReporter, extensions](jsg::Lock& lock, const Worker::Api& api) {
+        return WorkerdApi::from(api).compileModules(lock, conf, errorReporter, extensions);
+      }, isPython};
     }
     case config::Worker::SERVICE_WORKER_SCRIPT:
-      return Worker::Script::ScriptSource {
-        conf.getServiceWorkerScript(),
-        name,
-        [conf,&errorReporter](jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer) {
-          return WorkerdApi::from(api).compileScriptGlobals(lock, conf, errorReporter, observer);
-        }
-      };
+      return Worker::Script::ScriptSource{conf.getServiceWorkerScript(), name,
+        [conf, &errorReporter](
+            jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer) {
+        return WorkerdApi::from(api).compileScriptGlobals(lock, conf, errorReporter, observer);
+      }};
     case config::Worker::INHERIT:
       // TODO(beta): Support inherit.
       KJ_FAIL_ASSERT("inherit should have been handled earlier");
@@ -298,20 +298,15 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
   errorReporter.addError(kj::str("Encountered unknown Worker code type. Was the "
                                  "config compiled with a newer version of the schema?"));
 invalid:
-  return Worker::Script::ScriptSource {
-    ""_kj,
-    name,
+  return Worker::Script::ScriptSource{""_kj, name,
     [](jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer)
-        -> kj::Array<Worker::Script::CompiledGlobal> {
-      return nullptr;
-    }
-  };
+        -> kj::Array<Worker::Script::CompiledGlobal> { return nullptr; }};
 }
 
-kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileScriptGlobals(
-      jsg::Lock& lockParam, config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      const jsg::CompilationObserver& observer) const {
+kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileScriptGlobals(jsg::Lock& lockParam,
+    config::Worker::Reader conf,
+    Worker::ValidationErrorReporter& errorReporter,
+    const jsg::CompilationObserver& observer) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileScriptGlobals()");
   // For Service Worker scripts, we support Wasm modules as globals, but they need to be loaded
   // at script load time.
@@ -329,9 +324,9 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileScriptGlobals(
       auto name = lock.str(binding.getName());
       auto value = Impl::compileWasmGlobal(lock, binding.getWasmModule(), observer);
 
-      compiledGlobals.add(Worker::Script::CompiledGlobal {
-        { lock.v8Isolate, name },
-        { lock.v8Isolate, value },
+      compiledGlobals.add(Worker::Script::CompiledGlobal{
+        {lock.v8Isolate, name},
+        {lock.v8Isolate, value},
       });
     }
   }
@@ -349,8 +344,7 @@ kj::Array<kj::StringPtr> compileNamedExports(capnp::List<capnp::Text>::Reader na
 }
 }  // namespace
 
-kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
-    jsg::Lock& js,
+kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
     config::Worker::Module::Reader module,
     jsg::CompilationObserver& observer,
     CompatibilityFlags::Reader featureFlags) {
@@ -358,59 +352,38 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(js);
   switch (module.which()) {
     case config::Worker::Module::TEXT: {
-      return jsg::ModuleRegistry::ModuleInfo(
-          lock,
-          module.getName(),
-          kj::none,
-          jsg::ModuleRegistry::TextModuleInfo(lock,
-              Impl::compileTextGlobal(lock, module.getText())));
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), kj::none,
+          jsg::ModuleRegistry::TextModuleInfo(
+              lock, Impl::compileTextGlobal(lock, module.getText())));
     }
     case config::Worker::Module::DATA: {
-      return jsg::ModuleRegistry::ModuleInfo(
-          lock,
-          module.getName(),
-          kj::none,
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), kj::none,
           jsg::ModuleRegistry::DataModuleInfo(
-              lock,
-              Impl::compileDataGlobal(lock, module.getData()).As<v8::ArrayBuffer>()));
+              lock, Impl::compileDataGlobal(lock, module.getData()).As<v8::ArrayBuffer>()));
     }
     case config::Worker::Module::WASM: {
-      return jsg::ModuleRegistry::ModuleInfo(
-          lock,
-          module.getName(),
-          kj::none,
-          jsg::ModuleRegistry::WasmModuleInfo(lock,
-              Impl::compileWasmGlobal(lock, module.getWasm(), observer)));
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), kj::none,
+          jsg::ModuleRegistry::WasmModuleInfo(
+              lock, Impl::compileWasmGlobal(lock, module.getWasm(), observer)));
     }
     case config::Worker::Module::JSON: {
-        return jsg::ModuleRegistry::ModuleInfo(
-            lock,
-            module.getName(),
-            kj::none,
-            jsg::ModuleRegistry::JsonModuleInfo(lock,
-                Impl::compileJsonGlobal(lock, module.getJson())));
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), kj::none,
+          jsg::ModuleRegistry::JsonModuleInfo(
+              lock, Impl::compileJsonGlobal(lock, module.getJson())));
     }
     case config::Worker::Module::ES_MODULE: {
-      return jsg::ModuleRegistry::ModuleInfo(
-          lock,
-          module.getName(),
-          module.getEsModule(),
-          jsg::ModuleInfoCompileOption::BUNDLE,
-          observer);
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), module.getEsModule(),
+          jsg::ModuleInfoCompileOption::BUNDLE, observer);
     }
     case config::Worker::Module::COMMON_JS_MODULE: {
       kj::Maybe<kj::Array<kj::StringPtr>> named = kj::none;
       if (module.hasNamedExports()) {
         named = compileNamedExports(module.getNamedExports());
       }
-      return jsg::ModuleRegistry::ModuleInfo(
-          lock,
-          module.getName(),
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(),
           named.map([](kj::Array<kj::StringPtr>& named) { return named.asPtr(); }),
           jsg::ModuleRegistry::CommonJsModuleInfo(
-              lock,
-              module.getName(),
-              module.getCommonJsModule()));
+              lock, module.getName(), module.getCommonJsModule()));
     }
     case config::Worker::Module::NODE_JS_COMPAT_MODULE: {
       KJ_REQUIRE(featureFlags.getNodeJsCompat(),
@@ -419,14 +392,10 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(
       if (module.hasNamedExports()) {
         named = compileNamedExports(module.getNamedExports());
       }
-      return jsg::ModuleRegistry::ModuleInfo(
-          lock,
-          module.getName(),
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(),
           named.map([](kj::Array<kj::StringPtr>& named) { return named.asPtr(); }),
           jsg::ModuleRegistry::NodeJsModuleInfo(
-              lock,
-              module.getName(),
-              module.getNodeJsCompatModule()));
+              lock, module.getName(), module.getNodeJsCompatModule()));
     }
     case config::Worker::Module::PYTHON_MODULE: {
       // Nothing to do. Handled in compileModules.
@@ -446,7 +415,7 @@ kj::Path getPyodideBundleFileName(kj::StringPtr version) {
 }
 
 kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(
-  const kj::Maybe<kj::Own<const kj::Directory>> &maybeDir, kj::StringPtr version) {
+    const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir, kj::StringPtr version) {
   KJ_IF_SOME(dir, maybeDir) {
     kj::Path filename = getPyodideBundleFileName(version);
     auto file = dir->tryOpenFile(filename);
@@ -457,10 +426,9 @@ kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(
   return kj::none;
 }
 
-void writePyodideBundleFileToDisk(
-  const kj::Maybe<kj::Own<const kj::Directory>> &maybeDir,
-  kj::StringPtr version,
-  kj::ArrayPtr<byte> bytes) {
+void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir,
+    kj::StringPtr version,
+    kj::ArrayPtr<byte> bytes) {
   KJ_IF_SOME(dir, maybeDir) {
     kj::Path filename = getPyodideBundleFileName(version);
     auto replacer = dir->replaceFile(filename, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
@@ -470,8 +438,9 @@ void writePyodideBundleFileToDisk(
   }
 }
 
-kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
-  KJ_IF_SOME (version, pyConfig.pyodideBundleManager.getPyodideBundle(version)) {
+kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
+    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
+  KJ_IF_SOME(version, pyConfig.pyodideBundleManager.getPyodideBundle(version)) {
     return version;
   }
 
@@ -490,7 +459,7 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(const api::pyodide::PythonConf
 
   {
     KJ_LOG(INFO, "Loading Pyodide package from internet...");
-    kj::Thread([&] () {
+    kj::Thread([&]() {
       kj::AsyncIoContext io = kj::setupAsyncIo();
       kj::HttpHeaderTable table;
 
@@ -498,15 +467,17 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(const api::pyodide::PythonConf
       options.useSystemTrustStore = true;
 
       kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
-      auto &network = io.provider->getNetwork();
+      auto& network = io.provider->getNetwork();
       auto tlsNetwork = tls->wrapNetwork(network);
-      auto &timer = io.provider->getTimer();
+      auto& timer = io.provider->getTimer();
 
       auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
 
       kj::HttpHeaders headers(table);
 
-      kj::String url = kj::str("https://pyodide.runtime-playground.workers.dev/pyodide-capnp-bin/pyodide-", version, ".capnp.bin");
+      kj::String url =
+          kj::str("https://pyodide.runtime-playground.workers.dev/pyodide-capnp-bin/pyodide-",
+              version, ".capnp.bin");
 
       auto req = client->request(kj::HttpMethod::GET, kj::StringPtr(url), headers);
 
@@ -516,17 +487,16 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(const api::pyodide::PythonConf
       writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
 
       pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
-
     });
   }
 
   KJ_LOG(INFO, "Loaded Pyodide package from internet");
   return pyConfig.pyodideBundleManager.getPyodideBundle(version);
 }
-}
+}  // namespace
 
-void WorkerdApi::compileModules(
-    jsg::Lock& lockParam, config::Worker::Reader conf,
+void WorkerdApi::compileModules(jsg::Lock& lockParam,
+    config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
     capnp::List<config::Extension>::Reader extensions) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileModules()");
@@ -540,19 +510,20 @@ void WorkerdApi::compileModules(
       KJ_REQUIRE(featureFlags.getPythonWorkers(),
           "The python_workers compatibility flag is required to use Python.");
       // Inject Pyodide bundle
-      if(util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
-          KJ_IF_SOME(bundle, fetchPyodideBundle(impl->pythonConfig, "dev"_kj)) {
-            modules->addBuiltinBundle(bundle, kj::none);
-          } else {
-            auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-            auto pyodide = pythonRelease.getPyodide();
-            auto pyodideRevision = pythonRelease.getPyodideRevision();
-            auto backport = pythonRelease.getBackport();
+      if (util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
+        KJ_IF_SOME(bundle, fetchPyodideBundle(impl->pythonConfig, "dev"_kj)) {
+          modules->addBuiltinBundle(bundle, kj::none);
+        } else {
+          auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+          auto pyodide = pythonRelease.getPyodide();
+          auto pyodideRevision = pythonRelease.getPyodideRevision();
+          auto backport = pythonRelease.getBackport();
 
-            auto version = kj::str(pyodide, "_", pyodideRevision, "_", backport);
-            auto bundle = KJ_ASSERT_NONNULL(fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
-            modules->addBuiltinBundle(bundle, kj::none);
-          }
+          auto version = kj::str(pyodide, "_", pyodideRevision, "_", backport);
+          auto bundle = KJ_ASSERT_NONNULL(
+              fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+          modules->addBuiltinBundle(bundle, kj::none);
+        }
       }
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
       {
@@ -571,14 +542,13 @@ void WorkerdApi::compileModules(
         using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
         auto specifier = "pyodide-internal:runtime-generated/metadata";
         auto metadataReader = makePyodideMetadataReader(conf, impl->pythonConfig);
-        modules->addBuiltinModule(
-            specifier,
+        modules->addBuiltinModule(specifier,
             [specifier = kj::str(specifier), metadataReader = kj::mv(metadataReader)](
                 jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-              auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-              auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(metadataReader));
-              return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-            },
+          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+          auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(metadataReader));
+          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+        },
             jsg::ModuleRegistry::Type::INTERNAL);
       }
       // Inject artifact bundler.
@@ -591,7 +561,8 @@ void WorkerdApi::compileModules(
             [specifier = kj::str(specifier)](
                 jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
           auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-          auto wrap = wrapper.wrap(js.v8Context(), kj::none, ArtifactBundler::makeDisabledBundler());
+          auto wrap =
+              wrapper.wrap(js.v8Context(), kj::none, ArtifactBundler::makeDisabledBundler());
           return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
         },
             jsg::ModuleRegistry::Type::INTERNAL);
@@ -603,14 +574,13 @@ void WorkerdApi::compileModules(
         using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
         using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
         auto specifier = "pyodide-internal:internalJaeger";
-        modules->addBuiltinModule(
-            specifier,
+        modules->addBuiltinModule(specifier,
             [specifier = kj::str(specifier)](
                 jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-              auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-              auto wrap = wrapper.wrap(js.v8Context(), kj::none, DisabledInternalJaeger::create());
-              return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-            },
+          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+          auto wrap = wrapper.wrap(js.v8Context(), kj::none, DisabledInternalJaeger::create());
+          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+        },
             jsg::ModuleRegistry::Type::INTERNAL);
       }
 
@@ -621,15 +591,14 @@ void WorkerdApi::compileModules(
         using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
         auto specifier = "pyodide-internal:disk_cache";
         auto diskCache = jsg::alloc<DiskCache>(impl->pythonConfig.packageDiskCacheRoot);
-        modules->addBuiltinModule(
-          specifier,
-          [specifier = kj::str(specifier), diskCache = kj::mv(diskCache)](
-              jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-            auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-            auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(diskCache));
-            return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-          },
-          jsg::ModuleRegistry::Type::INTERNAL);
+        modules->addBuiltinModule(specifier,
+            [specifier = kj::str(specifier), diskCache = kj::mv(diskCache)](
+                jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
+          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+          auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(diskCache));
+          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+        },
+            jsg::ModuleRegistry::Type::INTERNAL);
       }
 
       // Inject a (disabled) SimplePythonLimiter
@@ -638,14 +607,13 @@ void WorkerdApi::compileModules(
         using ObjectModuleInfo = jsg::ModuleRegistry::ObjectModuleInfo;
         using ResolveMethod = jsg::ModuleRegistry::ResolveMethod;
         auto specifier = "pyodide-internal:limiter";
-        modules->addBuiltinModule(
-            specifier,
+        modules->addBuiltinModule(specifier,
             [specifier = kj::str(specifier)](
                 jsg::Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable {
-              auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
-              auto wrap = wrapper.wrap(js.v8Context(), kj::none, SimplePythonLimiter::makeDisabled());
-              return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
-            },
+          auto& wrapper = JsgWorkerdIsolate_TypeWrapper::from(js.v8Isolate);
+          auto wrap = wrapper.wrap(js.v8Context(), kj::none, SimplePythonLimiter::makeDisabled());
+          return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
+        },
             jsg::ModuleRegistry::Type::INTERNAL);
       }
     }
@@ -665,14 +633,14 @@ void WorkerdApi::compileModules(
     for (auto extension: extensions) {
       for (auto module: extension.getModules()) {
         modules->addBuiltinModule(module.getName(), module.getEsModule().asArray(),
-            module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL : jsg::ModuleRegistry::Type::BUILTIN);
+            module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL
+                                 : jsg::ModuleRegistry::Type::BUILTIN);
       }
     }
   });
 }
 
-static v8::Local<v8::Value> createBindingValue(
-    JsgWorkerdIsolate::Lock& lock,
+static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     const WorkerdApi::Global& global,
     CompatibilityFlags::Reader featureFlags,
     uint32_t ownerId,
@@ -690,26 +658,27 @@ static v8::Local<v8::Value> createBindingValue(
     }
 
     KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
-      value = lock.wrap(context, jsg::alloc<api::Fetcher>(
-          pipeline.channel,
-          pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
-                                : api::Fetcher::RequiresHostAndProtocol::NO,
-          pipeline.isInHouse));
+      value = lock.wrap(context,
+          jsg::alloc<api::Fetcher>(pipeline.channel,
+              pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
+                                    : api::Fetcher::RequiresHostAndProtocol::NO,
+              pipeline.isInHouse));
     }
 
     KJ_CASE_ONEOF(ns, Global::KvNamespace) {
-      value = lock.wrap(context, jsg::alloc<api::KvNamespace>(
-          kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
+      value = lock.wrap(context,
+          jsg::alloc<api::KvNamespace>(
+              kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(r2, Global::R2Bucket) {
-      value = lock.wrap(context,
-          jsg::alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
+      value = lock.wrap(
+          context, jsg::alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(r2a, Global::R2Admin) {
-      value = lock.wrap(context,
-          jsg::alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
+      value = lock.wrap(
+          context, jsg::alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(ns, Global::QueueBinding) {
@@ -731,26 +700,25 @@ static v8::Local<v8::Value> createBindingValue(
 
       v8::Local<v8::String> algoStr = lock.wrap(context, kj::mv(key.algorithm.text));
       v8::Local<v8::Value> algo = jsg::check(v8::JSON::Parse(context, algoStr));
-      auto importKeyAlgo = lock.unwrap<
-          kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
+      auto importKeyAlgo =
+          lock.unwrap<kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
 
-      jsg::Ref<api::CryptoKey> importedKey = api::SubtleCrypto().importKeySync(lock,
-          key.format, kj::mv(keyData),
-          api::interpretAlgorithmParam(kj::mv(importKeyAlgo)),
-          key.extractable, key.usages);
+      jsg::Ref<api::CryptoKey> importedKey =
+          api::SubtleCrypto().importKeySync(lock, key.format, kj::mv(keyData),
+              api::interpretAlgorithmParam(kj::mv(importKeyAlgo)), key.extractable, key.usages);
 
       value = lock.wrap(context, kj::mv(importedKey));
     }
 
     KJ_CASE_ONEOF(cache, Global::MemoryCache) {
-      value = lock.wrap(context, jsg::alloc<api::MemoryCache>(
-          api::SharedMemoryCache::Use(
-              memoryCacheProvider.getInstance(cache.cacheId),
-              {
-                .maxKeys = cache.maxKeys,
-                .maxValueSize = cache.maxValueSize,
-                .maxTotalValueSize = cache.maxTotalValueSize,
-              })));
+      value = lock.wrap(context,
+          jsg::alloc<api::MemoryCache>(
+              api::SharedMemoryCache::Use(memoryCacheProvider.getInstance(cache.cacheId),
+                  {
+                    .maxKeys = cache.maxKeys,
+                    .maxValueSize = cache.maxValueSize,
+                    .maxTotalValueSize = cache.maxTotalValueSize,
+                  })));
     }
 
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
@@ -758,14 +726,16 @@ static v8::Local<v8::Value> createBindingValue(
     }
 
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
-      value = lock.wrap(context, jsg::alloc<api::DurableObjectNamespace>(ns.actorChannel,
-          kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
+      value = lock.wrap(context,
+          jsg::alloc<api::DurableObjectNamespace>(
+              ns.actorChannel, kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
     }
 
     KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
-        // Use subrequestChannel as logfwdrChannel
-        value = lock.wrap(context, jsg::alloc<api::AnalyticsEngine>(ae.subrequestChannel,
-                    kj::str(ae.dataset), ae.version, ownerId));
+      // Use subrequestChannel as logfwdrChannel
+      value = lock.wrap(context,
+          jsg::alloc<api::AnalyticsEngine>(
+              ae.subrequestChannel, kj::str(ae.dataset), ae.version, ownerId));
     }
 
     KJ_CASE_ONEOF(text, kj::String) {
@@ -781,8 +751,9 @@ static v8::Local<v8::Value> createBindingValue(
       auto moduleName = kj::Path::parse(wrapped.moduleName);
 
       // wrapped bindings can be produced by internal modules only
-      KJ_IF_SOME(moduleInfo, moduleRegistry->resolve(lock, moduleName, kj::none,
-           jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
+      KJ_IF_SOME(moduleInfo,
+          moduleRegistry->resolve(
+              lock, moduleName, kj::none, jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
         // obtain the module
         auto module = moduleInfo.module.getHandle(lock);
         jsg::instantiateModule(lock, module);
@@ -791,8 +762,7 @@ static v8::Local<v8::Value> createBindingValue(
         auto env = v8::Object::New(lock.v8Isolate);
         for (const auto& innerBinding: wrapped.innerBindings) {
           lock.v8Set(env, innerBinding.name,
-                     createBindingValue(lock, innerBinding, featureFlags, ownerId,
-                                         memoryCacheProvider));
+              createBindingValue(lock, innerBinding, featureFlags, ownerId, memoryCacheProvider));
         }
 
         // obtain exported function to call
@@ -802,17 +772,17 @@ static v8::Local<v8::Value> createBindingValue(
 
         // invoke the function, its result will be binding value
         auto args = kj::arr(env.As<v8::Value>());
-        value = jsg::check(v8::Function::Cast(*fn)-> Call(context, context->Global(),
-            args.size(), args.begin()));
+        value = jsg::check(
+            v8::Function::Cast(*fn)->Call(context, context->Global(), args.size(), args.begin()));
       } else {
-        KJ_LOG(ERROR, "wrapped binding module can't be resolved (internal modules only)", moduleName);
+        KJ_LOG(
+            ERROR, "wrapped binding module can't be resolved (internal modules only)", moduleName);
       }
     }
     KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
-      value = lock.wrap(context, jsg::alloc<api::Hyperdrive>(
-                                     hyperdrive.subrequestChannel, kj::str(hyperdrive.database),
-                                     kj::str(hyperdrive.user), kj::str(hyperdrive.password),
-                                     kj::str(hyperdrive.scheme)));
+      value = lock.wrap(context,
+          jsg::alloc<api::Hyperdrive>(hyperdrive.subrequestChannel, kj::str(hyperdrive.database),
+              kj::str(hyperdrive.user), kj::str(hyperdrive.password), kj::str(hyperdrive.scheme)));
     }
     KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
       value = lock.wrap(context, jsg::alloc<api::UnsafeEval>());
@@ -822,8 +792,8 @@ static v8::Local<v8::Value> createBindingValue(
   return value;
 }
 
-void WorkerdApi::compileGlobals(
-    jsg::Lock& lockParam, kj::ArrayPtr<const Global> globals,
+void WorkerdApi::compileGlobals(jsg::Lock& lockParam,
+    kj::ArrayPtr<const Global> globals,
     v8::Local<v8::Object> target,
     uint32_t ownerId) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileGlobals()");
@@ -834,8 +804,8 @@ void WorkerdApi::compileGlobals(
     for (auto& global: globals) {
       lockParam.withinHandleScope([&] {
         // Don't use String's usual TypeHandler here because we want to intern the string.
-        auto value = createBindingValue(lock, global, featureFlags, ownerId,
-                                        impl->memoryCacheProvider);
+        auto value =
+            createBindingValue(lock, global, featureFlags, ownerId, impl->memoryCacheProvider);
         KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
         lockParam.v8Set(target, global.name, value);
       });
@@ -843,8 +813,7 @@ void WorkerdApi::compileGlobals(
   });
 }
 
-void WorkerdApi::setModuleFallbackCallback(
-    kj::Function<ModuleFallbackCallback>&& callback) const {
+void WorkerdApi::setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const {
   auto& isolateBase = const_cast<JsgWorkerdIsolate&>(impl->jsgIsolate);
   isolateBase.setModuleFallbackCallback(kj::mv(callback));
 }
@@ -902,7 +871,7 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
       result.value = hyperdrive.clone();
     }
     KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
-      result.value = Global::UnsafeEval {};
+      result.value = Global::UnsafeEval{};
     }
   }
 
@@ -920,8 +889,8 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const config::Worker::Reader& conf,
     const CompatibilityFlags::Reader& featureFlags,
     const PythonConfig& pythonConfig) {
-  jsg::modules::ModuleRegistry::Builder builder(observer,
-      jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
+  jsg::modules::ModuleRegistry::Builder builder(
+      observer, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
 
   api::registerBuiltinModules<JsgWorkerdIsolate_TypeWrapper>(builder, featureFlags);
 
@@ -930,7 +899,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   bool hasPythonModules = false;
   auto confModules = conf.getModules();
   using namespace workerd::api::pyodide;
-  for (auto def : confModules) {
+  for (auto def: confModules) {
     switch (def.which()) {
       case config::Worker::Module::ES_MODULE: {
         jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
@@ -938,32 +907,28 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
           flags = flags | jsg::modules::Module::Flags::MAIN;
           firstEsm = false;
         }
-        bundleBuilder.addEsmModule(def.getName(),
-          kj::heapArray<const char>(def.getEsModule()), flags);
+        bundleBuilder.addEsmModule(
+            def.getName(), kj::heapArray<const char>(def.getEsModule()), flags);
         break;
       }
       case config::Worker::Module::TEXT: {
-        bundleBuilder.addSyntheticModule(
-            def.getName(), jsg::modules::Module::newTextModuleHandler(
-                kj::heapArray<const char>(def.getText())));
+        bundleBuilder.addSyntheticModule(def.getName(),
+            jsg::modules::Module::newTextModuleHandler(kj::heapArray<const char>(def.getText())));
         break;
       }
       case config::Worker::Module::DATA: {
-        bundleBuilder.addSyntheticModule(
-            def.getName(), jsg::modules::Module::newDataModuleHandler(
-                kj::heapArray<kj::byte>(def.getData())));
+        bundleBuilder.addSyntheticModule(def.getName(),
+            jsg::modules::Module::newDataModuleHandler(kj::heapArray<kj::byte>(def.getData())));
         break;
       }
       case config::Worker::Module::WASM: {
-        bundleBuilder.addSyntheticModule(
-            def.getName(), jsg::modules::Module::newWasmModuleHandler(
-                kj::heapArray<kj::byte>(def.getWasm())));
+        bundleBuilder.addSyntheticModule(def.getName(),
+            jsg::modules::Module::newWasmModuleHandler(kj::heapArray<kj::byte>(def.getWasm())));
         break;
       }
       case config::Worker::Module::JSON: {
-        bundleBuilder.addSyntheticModule(
-            def.getName(), jsg::modules::Module::newJsonModuleHandler(
-                kj::heapArray<const char>(def.getJson())));
+        bundleBuilder.addSyntheticModule(def.getName(),
+            jsg::modules::Module::newJsonModuleHandler(kj::heapArray<const char>(def.getJson())));
         break;
       }
       case config::Worker::Module::COMMON_JS_MODULE: {
@@ -989,10 +954,9 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       }
       case config::Worker::Module::PYTHON_MODULE: {
         KJ_REQUIRE(featureFlags.getPythonWorkers(),
-          "The python_workers compatibility flag is required to use Python.");
+            "The python_workers compatibility flag is required to use Python.");
         hasPythonModules = true;
-        bundleBuilder.addEsmModule(
-          def.getName(), kj::str(PYTHON_ENTRYPOINT).releaseArray());
+        bundleBuilder.addEsmModule(def.getName(), kj::str(PYTHON_ENTRYPOINT).releaseArray());
         break;
       }
       case config::Worker::Module::PYTHON_REQUIREMENT: {
@@ -1014,45 +978,35 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
 
     // Inject metadata that the entrypoint module will read.
     pyodideBundleBuilder.addSynthetic(metadataSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<
-            PyodideMetadataReader,
+        jsg::modules::Module::newJsgObjectModuleHandler<PyodideMetadataReader,
             JsgWorkerdIsolate_TypeWrapper>(
-            [metadataReader=makePyodideMetadataReader(conf, pythonConfig)]
-            (jsg::Lock& js) mutable
-                -> jsg::Ref<PyodideMetadataReader> {
-      return metadataReader.addRef();
-    }));
+            [metadataReader = makePyodideMetadataReader(conf, pythonConfig)](jsg::Lock& js) mutable
+            -> jsg::Ref<PyodideMetadataReader> { return metadataReader.addRef(); }));
     // Inject artifact bundler.
     pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<
-            ArtifactBundler,
-            JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable
-                -> jsg::Ref<ArtifactBundler> {
+        jsg::modules::Module::newJsgObjectModuleHandler<ArtifactBundler,
+            JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable -> jsg::Ref<ArtifactBundler> {
       return ArtifactBundler::makeDisabledBundler();
     }));
     // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
     pyodideBundleBuilder.addSynthetic(internalJaegerSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<
-            DisabledInternalJaeger,
-            JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable
-                -> jsg::Ref<DisabledInternalJaeger> {
+        jsg::modules::Module::newJsgObjectModuleHandler<DisabledInternalJaeger,
+            JsgWorkerdIsolate_TypeWrapper>(
+            [](jsg::Lock& js) mutable -> jsg::Ref<DisabledInternalJaeger> {
       return DisabledInternalJaeger::create();
     }));
     // Inject disk cache module
     pyodideBundleBuilder.addSynthetic(diskCacheSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<
-            DiskCache,
-            JsgWorkerdIsolate_TypeWrapper>(
-                [packageDiskCache=jsg::alloc<DiskCache>(pythonConfig.packageDiskCacheRoot)]
-                (jsg::Lock& js) mutable -> jsg::Ref<DiskCache> {
+        jsg::modules::Module::newJsgObjectModuleHandler<DiskCache, JsgWorkerdIsolate_TypeWrapper>(
+            [packageDiskCache = jsg::alloc<DiskCache>(pythonConfig.packageDiskCacheRoot)](
+                jsg::Lock& js) mutable -> jsg::Ref<DiskCache> {
       return packageDiskCache.addRef();
     }));
     // Inject a (disabled) SimplePythonLimiter
     pyodideBundleBuilder.addSynthetic(limiterSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<
-            SimplePythonLimiter,
-            JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable
-                -> jsg::Ref<SimplePythonLimiter> {
+        jsg::modules::Module::newJsgObjectModuleHandler<SimplePythonLimiter,
+            JsgWorkerdIsolate_TypeWrapper>(
+            [](jsg::Lock& js) mutable -> jsg::Ref<SimplePythonLimiter> {
       return SimplePythonLimiter::makeDisabled();
     }));
 

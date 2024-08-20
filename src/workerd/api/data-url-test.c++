@@ -6,8 +6,8 @@ namespace workerd::api {
 namespace {
 
 KJ_TEST("DataUrl Basics") {
-  auto dataUrl = KJ_ASSERT_NONNULL(
-      DataUrl::tryParse("data:text/plain;base64,SGVsbG8sIFdvcmxkIQ=="_kj));
+  auto dataUrl =
+      KJ_ASSERT_NONNULL(DataUrl::tryParse("data:text/plain;base64,SGVsbG8sIFdvcmxkIQ=="_kj));
   KJ_ASSERT(dataUrl.getMimeType() == MimeType::PLAINTEXT);
   KJ_ASSERT(dataUrl.getData().asChars() == "Hello, World!"_kj);
 }
@@ -38,22 +38,19 @@ KJ_TEST("DataUrl no-base64") {
 }
 
 KJ_TEST("DataUrl default mime type") {
-  auto dataUrl = KJ_ASSERT_NONNULL(
-      DataUrl::tryParse("data:,Hello, World!"_kj));
+  auto dataUrl = KJ_ASSERT_NONNULL(DataUrl::tryParse("data:,Hello, World!"_kj));
   KJ_ASSERT(dataUrl.getMimeType() == MimeType::PLAINTEXT);
   KJ_ASSERT(dataUrl.getData().asChars() == "Hello, World!"_kj);
 }
 
 KJ_TEST("DataUrl default mime type") {
-  auto dataUrl = KJ_ASSERT_NONNULL(
-      DataUrl::tryParse("data:;,Hello, World!"_kj));
+  auto dataUrl = KJ_ASSERT_NONNULL(DataUrl::tryParse("data:;,Hello, World!"_kj));
   KJ_ASSERT(dataUrl.getMimeType() == MimeType::PLAINTEXT);
   KJ_ASSERT(dataUrl.getData().asChars() == "Hello, World!"_kj);
 }
 
 KJ_TEST("DataUrl default mime type") {
-  auto dataUrl = KJ_ASSERT_NONNULL(
-      DataUrl::tryParse("data:;charset=UTF-8,Hello, World!"_kj));
+  auto dataUrl = KJ_ASSERT_NONNULL(DataUrl::tryParse("data:;charset=UTF-8,Hello, World!"_kj));
   KJ_ASSERT(dataUrl.getMimeType() == MimeType::PLAINTEXT);
   KJ_ASSERT(dataUrl.getData().asChars() == "Hello, World!"_kj);
 
@@ -69,12 +66,11 @@ struct Test {
 
 KJ_TEST("DataUrl Web Platform Tests") {
 
-  Test tests[] = {
-    {
-      "data://test/,X"_kj,
-      "text/plain;charset=US-ASCII"_kj,
-      kj::heapArray<kj::byte>({88}),
-    },
+  Test tests[] = {{
+                    "data://test/,X"_kj,
+                    "text/plain;charset=US-ASCII"_kj,
+                    kj::heapArray<kj::byte>({88}),
+                  },
     {
       "data://test:test/,X"_kj,
       nullptr,
@@ -86,9 +82,9 @@ KJ_TEST("DataUrl Web Platform Tests") {
       kj::heapArray<kj::byte>({88}),
     },
     {
-       "data:"_kj,
-       nullptr,
-       kj::heapArray<kj::byte>(0),
+      "data:"_kj,
+      nullptr,
+      kj::heapArray<kj::byte>(0),
     },
     {
       "data:text/html"_kj,
@@ -429,12 +425,11 @@ KJ_TEST("DataUrl Web Platform Tests") {
       "data:;CHARSET=\"X\",X"_kj,
       "text/plain;charset=X"_kj,
       kj::heapArray<kj::byte>({88}),
-    }
-  };
+    }};
 
   auto testPtr = kj::arrayPtr<Test>(tests, 72);
 
-  for (auto& test : testPtr) {
+  for (auto& test: testPtr) {
     if (test.mimeType == nullptr) {
       KJ_ASSERT(DataUrl::tryParse(test.input) == kj::none);
     } else {
@@ -455,100 +450,71 @@ KJ_TEST("DataUrl base64") {
   // web platform's forgiving base64 decoder. That's just fine for us.
   // These cases were extracted from the Web Platform Tests for data urls
   // See: https://github.com/web-platform-tests/wpt/blob/master/fetch/data-urls/resources/
-  Base64Test tests[] = {
-    { ""_kj, nullptr },
-    { "abcd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { " abcd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcd "_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { " abcd==="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcd=== "_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcd ==="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "a"_kj, nullptr },
-    { "ab"_kj, kj::heapArray<kj::byte>({105}) },
-    { "abc"_kj, kj::heapArray<kj::byte>({105, 183}) },
-    { "abcde"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "𐀀"_kj, nullptr },
-    { "="_kj, nullptr },
-    { "=="_kj, nullptr },
-    { "==="_kj, nullptr },
-    { "===="_kj, nullptr },
-    { "====="_kj, nullptr },
-    { "a="_kj, nullptr },
-    { "a=="_kj, nullptr },
-    { "a==="_kj, nullptr },
-    { "a===="_kj, nullptr },
-    { "a====="_kj, nullptr },
-    { "ab="_kj, kj::heapArray<kj::byte>({105}) },
-    { "ab=="_kj, kj::heapArray<kj::byte>({105}) },
-    { "ab==="_kj, kj::heapArray<kj::byte>({105}) },
-    { "ab===="_kj, kj::heapArray<kj::byte>({105}) },
-    { "ab====="_kj, kj::heapArray<kj::byte>({105}) },
-    { "abc="_kj, kj::heapArray<kj::byte>({105, 183}) },
-    { "abc=="_kj, kj::heapArray<kj::byte>({105, 183}) },
-    { "abc==="_kj, kj::heapArray<kj::byte>({105, 183}) },
-    { "abc===="_kj, kj::heapArray<kj::byte>({105, 183}) },
-    { "abc====="_kj, kj::heapArray<kj::byte>({105, 183}) },
-    { "abcd="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcd=="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcd==="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcd===="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcd====="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcde="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcde=="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcde==="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcde===="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abcde====="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "=a"_kj, nullptr },
-    { "=a="_kj, nullptr },
-    { "a=b"_kj, kj::heapArray<kj::byte>({105}) },
-    { "a=b="_kj, kj::heapArray<kj::byte>({105}) },
-    { "ab=c"_kj, kj::heapArray<kj::byte>({105, 183}) },
-    { "ab=c="_kj, kj::heapArray<kj::byte>({105, 183}) },
-    { "abc=d"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "abc=d="_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\u000Bcd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\u3000cd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\u3001cd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\tcd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\ncd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\fcd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\rcd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab cd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\u00a0cd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\t\n\f\r cd"_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { " \t\n\f\r ab\t\n\f\r cd\t\n\f\r "_kj, kj::heapArray<kj::byte>({105, 183, 29}) },
-    { "ab\t\n\f\r =\t\n\f\r =\t\n\f\r "_kj, kj::heapArray<kj::byte>({105})},
-    { "A"_kj, nullptr },
-    { "/A"_kj, kj::heapArray<kj::byte>({252}) },
-    { "//A"_kj, kj::heapArray<kj::byte>({255, 240}) },
-    { "///A"_kj, kj::heapArray<kj::byte>({255, 255, 192}) },
-    { "////A"_kj, kj::heapArray<kj::byte>({255, 255, 255}) },
-    { "/"_kj, nullptr },
-    { "A/"_kj, kj::heapArray<kj::byte>({3}) },
-    { "AA/"_kj, kj::heapArray<kj::byte>({0, 15}) },
-    { "AAAA/"_kj, kj::heapArray<kj::byte>({0, 0, 0}) },
-    { "AAA/"_kj, kj::heapArray<kj::byte>({0, 0, 63}) },
-    { "\u0000nonsense"_kj, kj::heapArray<kj::byte>({158, 137, 236, 122, 123, 30}) },
-    { "abcd\u0000nonsense"_kj,
-      kj::heapArray<kj::byte>({105, 183, 29, 158, 137, 236, 122, 123, 30}) },
-    { "YQ"_kj, kj::heapArray<kj::byte>({97}) },
-    { "YR"_kj, kj::heapArray<kj::byte>({97}) },
-    { "~~"_kj, nullptr },
-    { ".."_kj, nullptr },
-    { "--"_kj, nullptr },
-    { "__"_kj, nullptr }
-  };
+  Base64Test tests[] = {{""_kj, nullptr}, {"abcd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {" abcd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcd "_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {" abcd==="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcd=== "_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcd ==="_kj, kj::heapArray<kj::byte>({105, 183, 29})}, {"a"_kj, nullptr},
+    {"ab"_kj, kj::heapArray<kj::byte>({105})}, {"abc"_kj, kj::heapArray<kj::byte>({105, 183})},
+    {"abcde"_kj, kj::heapArray<kj::byte>({105, 183, 29})}, {"𐀀"_kj, nullptr}, {"="_kj, nullptr},
+    {"=="_kj, nullptr}, {"==="_kj, nullptr}, {"===="_kj, nullptr}, {"====="_kj, nullptr},
+    {"a="_kj, nullptr}, {"a=="_kj, nullptr}, {"a==="_kj, nullptr}, {"a===="_kj, nullptr},
+    {"a====="_kj, nullptr}, {"ab="_kj, kj::heapArray<kj::byte>({105})},
+    {"ab=="_kj, kj::heapArray<kj::byte>({105})}, {"ab==="_kj, kj::heapArray<kj::byte>({105})},
+    {"ab===="_kj, kj::heapArray<kj::byte>({105})}, {"ab====="_kj, kj::heapArray<kj::byte>({105})},
+    {"abc="_kj, kj::heapArray<kj::byte>({105, 183})},
+    {"abc=="_kj, kj::heapArray<kj::byte>({105, 183})},
+    {"abc==="_kj, kj::heapArray<kj::byte>({105, 183})},
+    {"abc===="_kj, kj::heapArray<kj::byte>({105, 183})},
+    {"abc====="_kj, kj::heapArray<kj::byte>({105, 183})},
+    {"abcd="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcd=="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcd==="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcd===="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcd====="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcde="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcde=="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcde==="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcde===="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abcde====="_kj, kj::heapArray<kj::byte>({105, 183, 29})}, {"=a"_kj, nullptr},
+    {"=a="_kj, nullptr}, {"a=b"_kj, kj::heapArray<kj::byte>({105})},
+    {"a=b="_kj, kj::heapArray<kj::byte>({105})}, {"ab=c"_kj, kj::heapArray<kj::byte>({105, 183})},
+    {"ab=c="_kj, kj::heapArray<kj::byte>({105, 183})},
+    {"abc=d"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"abc=d="_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\u000Bcd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\u3000cd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\u3001cd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\tcd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\ncd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\fcd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\rcd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab cd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\u00a0cd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\t\n\f\r cd"_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {" \t\n\f\r ab\t\n\f\r cd\t\n\f\r "_kj, kj::heapArray<kj::byte>({105, 183, 29})},
+    {"ab\t\n\f\r =\t\n\f\r =\t\n\f\r "_kj, kj::heapArray<kj::byte>({105})}, {"A"_kj, nullptr},
+    {"/A"_kj, kj::heapArray<kj::byte>({252})}, {"//A"_kj, kj::heapArray<kj::byte>({255, 240})},
+    {"///A"_kj, kj::heapArray<kj::byte>({255, 255, 192})},
+    {"////A"_kj, kj::heapArray<kj::byte>({255, 255, 255})}, {"/"_kj, nullptr},
+    {"A/"_kj, kj::heapArray<kj::byte>({3})}, {"AA/"_kj, kj::heapArray<kj::byte>({0, 15})},
+    {"AAAA/"_kj, kj::heapArray<kj::byte>({0, 0, 0})},
+    {"AAA/"_kj, kj::heapArray<kj::byte>({0, 0, 63})},
+    {"\u0000nonsense"_kj, kj::heapArray<kj::byte>({158, 137, 236, 122, 123, 30})},
+    {"abcd\u0000nonsense"_kj, kj::heapArray<kj::byte>({105, 183, 29, 158, 137, 236, 122, 123, 30})},
+    {"YQ"_kj, kj::heapArray<kj::byte>({97})}, {"YR"_kj, kj::heapArray<kj::byte>({97})},
+    {"~~"_kj, nullptr}, {".."_kj, nullptr}, {"--"_kj, nullptr}, {"__"_kj, nullptr}};
 
   auto testPtr = kj::arrayPtr<Base64Test>(tests, 80);
 
-  for (auto& test : testPtr) {
+  for (auto& test: testPtr) {
     auto input = kj::str("data:;base64,", test.input);
 
     auto url = KJ_ASSERT_NONNULL(DataUrl::tryParse(input));
 
     KJ_ASSERT(url.getData() == test.expected, test.input);
   }
-
 }
 
 KJ_TEST("Large Data URL") {

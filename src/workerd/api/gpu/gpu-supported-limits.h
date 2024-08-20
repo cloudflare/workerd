@@ -10,9 +10,9 @@
 
 namespace workerd::api::gpu {
 
-class GPUSupportedLimits : public jsg::Object {
+class GPUSupportedLimits: public jsg::Object {
 public:
-  explicit GPUSupportedLimits(wgpu::SupportedLimits limits) : limits_(kj::mv(limits)){};
+  explicit GPUSupportedLimits(wgpu::SupportedLimits limits): limits_(kj::mv(limits)) {};
   JSG_RESOURCE_TYPE(GPUSupportedLimits) {
     JSG_READONLY_PROTOTYPE_PROPERTY(maxTextureDimension1D, getMaxTextureDimension1D);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxTextureDimension2D, getMaxTextureDimension2D);
@@ -20,44 +20,44 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(maxTextureArrayLayers, getMaxTextureArrayLayers);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxBindGroups, getMaxBindGroups);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxBindingsPerBindGroup, getMaxBindingsPerBindGroup);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxDynamicUniformBuffersPerPipelineLayout,
-                                    getMaxDynamicUniformBuffersPerPipelineLayout);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxDynamicStorageBuffersPerPipelineLayout,
-                                    getMaxDynamicStorageBuffersPerPipelineLayout);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxSampledTexturesPerShaderStage,
-                                    getMaxSampledTexturesPerShaderStage);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxDynamicUniformBuffersPerPipelineLayout, getMaxDynamicUniformBuffersPerPipelineLayout);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxDynamicStorageBuffersPerPipelineLayout, getMaxDynamicStorageBuffersPerPipelineLayout);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxSampledTexturesPerShaderStage, getMaxSampledTexturesPerShaderStage);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxSamplersPerShaderStage, getMaxSamplersPerShaderStage);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxStorageBuffersPerShaderStage,
-                                    getMaxStorageBuffersPerShaderStage);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxStorageTexturesPerShaderStage,
-                                    getMaxStorageTexturesPerShaderStage);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxUniformBuffersPerShaderStage,
-                                    getMaxUniformBuffersPerShaderStage);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxStorageBuffersPerShaderStage, getMaxStorageBuffersPerShaderStage);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxStorageTexturesPerShaderStage, getMaxStorageTexturesPerShaderStage);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxUniformBuffersPerShaderStage, getMaxUniformBuffersPerShaderStage);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxUniformBufferBindingSize, getMaxUniformBufferBindingSize);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxStorageBufferBindingSize, getMaxStorageBufferBindingSize);
-    JSG_READONLY_PROTOTYPE_PROPERTY(minUniformBufferOffsetAlignment,
-                                    getMinUniformBufferOffsetAlignment);
-    JSG_READONLY_PROTOTYPE_PROPERTY(minStorageBufferOffsetAlignment,
-                                    getMinStorageBufferOffsetAlignment);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        minUniformBufferOffsetAlignment, getMinUniformBufferOffsetAlignment);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        minStorageBufferOffsetAlignment, getMinStorageBufferOffsetAlignment);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxVertexBuffers, getMaxVertexBuffers);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxBufferSize, getMaxBufferSize);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxVertexAttributes, getMaxVertexAttributes);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxVertexBufferArrayStride, getMaxVertexBufferArrayStride);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxInterStageShaderComponents,
-                                    getMaxInterStageShaderComponents);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxInterStageShaderComponents, getMaxInterStageShaderComponents);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxInterStageShaderVariables, getMaxInterStageShaderVariables);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxColorAttachments, getMaxColorAttachments);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxColorAttachmentBytesPerSample,
-                                    getMaxColorAttachmentBytesPerSample);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxComputeWorkgroupStorageSize,
-                                    getMaxComputeWorkgroupStorageSize);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxComputeInvocationsPerWorkgroup,
-                                    getMaxComputeInvocationsPerWorkgroup);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxColorAttachmentBytesPerSample, getMaxColorAttachmentBytesPerSample);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxComputeWorkgroupStorageSize, getMaxComputeWorkgroupStorageSize);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxComputeInvocationsPerWorkgroup, getMaxComputeInvocationsPerWorkgroup);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxComputeWorkgroupSizeX, getMaxComputeWorkgroupSizeX);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxComputeWorkgroupSizeY, getMaxComputeWorkgroupSizeY);
     JSG_READONLY_PROTOTYPE_PROPERTY(maxComputeWorkgroupSizeZ, getMaxComputeWorkgroupSizeZ);
-    JSG_READONLY_PROTOTYPE_PROPERTY(maxComputeWorkgroupsPerDimension,
-                                    getMaxComputeWorkgroupsPerDimension);
+    JSG_READONLY_PROTOTYPE_PROPERTY(
+        maxComputeWorkgroupsPerDimension, getMaxComputeWorkgroupsPerDimension);
   }
 
 private:
@@ -187,4 +187,4 @@ private:
   }
 };
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

@@ -4,7 +4,7 @@
 
 namespace workerd::jsg {
 
-JsValue::JsValue(v8::Local<v8::Value> inner) : inner(inner) {
+JsValue::JsValue(v8::Local<v8::Value> inner): inner(inner) {
   requireOnStack(this);
 }
 
@@ -16,7 +16,9 @@ bool JsValue::strictEquals(const JsValue& other) const {
   return inner->StrictEquals(other.inner);
 }
 
-JsMap::operator JsObject() { return JsObject(inner); }
+JsMap::operator JsObject() {
+  return JsObject(inner);
+}
 
 void JsMap::set(Lock& js, const JsValue& name, const JsValue& value) {
   check(inner->Set(js.v8Context(), name.inner, value.inner));
@@ -110,17 +112,19 @@ kj::String JsObject::getConstructorName() {
   return kj::str(inner->GetConstructorName());
 }
 
-JsArray JsObject::getPropertyNames(Lock& js, KeyCollectionFilter keyFilter,
-                                     PropertyFilter propertyFilter,
-                                     IndexFilter indexFilter) {
+JsArray JsObject::getPropertyNames(Lock& js,
+    KeyCollectionFilter keyFilter,
+    PropertyFilter propertyFilter,
+    IndexFilter indexFilter) {
   auto v8keyFilter = keyFilter == KeyCollectionFilter::INCLUDE_PROTOTYPES
-    ? v8::KeyCollectionMode::kIncludePrototypes : v8::KeyCollectionMode::kOwnOnly;
+      ? v8::KeyCollectionMode::kIncludePrototypes
+      : v8::KeyCollectionMode::kOwnOnly;
   auto v8PropertyFilter = static_cast<v8::PropertyFilter>(propertyFilter);
   auto v8IndexFilter = indexFilter == IndexFilter::INCLUDE_INDICES
-    ? v8::IndexFilter::kIncludeIndices : v8::IndexFilter::kSkipIndices;
+      ? v8::IndexFilter::kIncludeIndices
+      : v8::IndexFilter::kSkipIndices;
   return JsArray(
-    check(inner->GetPropertyNames(js.v8Context(), v8keyFilter, v8PropertyFilter, v8IndexFilter))
-  );
+      check(inner->GetPropertyNames(js.v8Context(), v8keyFilter, v8PropertyFilter, v8IndexFilter)));
 }
 
 JsArray JsObject::previewEntries(bool* isKeyValue) {
@@ -159,10 +163,10 @@ JsValue JsObject::getPrototype(Lock& js) {
     }
     JSG_REQUIRE(trap.isFunction(), TypeError, "Proxy getPrototypeOf trap is not a function");
     v8::Local<v8::Function> fn = ((v8::Local<v8::Value>)trap).As<v8::Function>();
-    v8::Local<v8::Value> args[] = { target };
+    v8::Local<v8::Value> args[] = {target};
     auto ret = JsValue(check(fn->Call(js.v8Context(), jsHandler.inner, 1, args)));
     JSG_REQUIRE(ret.isObject() || ret.isNull(), TypeError,
-                "Proxy getPrototypeOf trap did not return an object or null");
+        "Proxy getPrototypeOf trap did not return an object or null");
     // TODO(maybe): V8 performs additional checks on the returned value to
     // see if the proxy and the target are extensible or not, and if the
     // returned prototype is consistent with the target's prototype if they
@@ -195,7 +199,10 @@ kj::String JsValue::typeOf(Lock& js) const {
   return kj::str(inner->TypeOf(js.v8Isolate));
 }
 
-#define V(Type) bool JsValue::is##Type () const { return inner->Is##Type(); }
+#define V(Type)                                                                                    \
+  bool JsValue::is##Type() const {                                                                 \
+    return inner->Is##Type();                                                                      \
+  }
 JS_IS_TYPES(V)
 #undef V
 
@@ -215,7 +222,9 @@ bool JsBoolean::value(Lock& js) const {
   return inner->BooleanValue(js.v8Isolate);
 }
 
-uint32_t JsArray::size() const { return inner->Length(); }
+uint32_t JsArray::size() const {
+  return inner->Length();
+}
 
 JsValue JsArray::get(Lock& js, uint32_t i) const {
   return JsValue(check(inner->Get(js.v8Context(), i)));
@@ -225,7 +234,9 @@ void JsArray::add(Lock& js, const JsValue& value) {
   check(inner->Set(js.v8Context(), size(), value.inner));
 }
 
-JsArray::operator JsObject() const { return JsObject(inner.As<v8::Object>()); }
+JsArray::operator JsObject() const {
+  return JsObject(inner.As<v8::Object>());
+}
 
 int JsString::length(jsg::Lock& js) const {
   return inner->Length();
@@ -252,46 +263,29 @@ bool JsString::operator==(const JsString& other) const {
 }
 
 JsString::WriteIntoStatus JsString::writeInto(
-    Lock& js,
-    kj::ArrayPtr<char> buffer,
-    WriteOptions options) const {
-  WriteIntoStatus result = { 0, 0 };
+    Lock& js, kj::ArrayPtr<char> buffer, WriteOptions options) const {
+  WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
-    result.written = inner->WriteUtf8(js.v8Isolate,
-                                      buffer.begin(),
-                                      buffer.size(),
-                                      &result.read,
-                                      options);
+    result.written =
+        inner->WriteUtf8(js.v8Isolate, buffer.begin(), buffer.size(), &result.read, options);
   }
   return result;
 }
 
 JsString::WriteIntoStatus JsString::writeInto(
-    Lock& js,
-    kj::ArrayPtr<uint16_t> buffer,
-    WriteOptions options) const {
-  WriteIntoStatus result = { 0, 0 };
+    Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteOptions options) const {
+  WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
-    result.written = inner->Write(js.v8Isolate,
-                                  buffer.begin(),
-                                  0,
-                                  buffer.size(),
-                                  options);
+    result.written = inner->Write(js.v8Isolate, buffer.begin(), 0, buffer.size(), options);
   }
   return result;
 }
 
 JsString::WriteIntoStatus JsString::writeInto(
-    Lock& js,
-    kj::ArrayPtr<kj::byte> buffer,
-    WriteOptions options) const {
-  WriteIntoStatus result = { 0, 0 };
+    Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteOptions options) const {
+  WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
-    result.written = inner->WriteOneByte(js.v8Isolate,
-                                         buffer.begin(),
-                                         0,
-                                         buffer.size(),
-                                         options);
+    result.written = inner->WriteOneByte(js.v8Isolate, buffer.begin(), 0, buffer.size(), options);
   }
   return result;
 }
@@ -382,43 +376,28 @@ JsString Lock::str() {
 }
 
 JsString Lock::str(kj::ArrayPtr<const char16_t> str) {
-  return JsString(check(v8::String::NewFromTwoByte(
-      v8Isolate,
-      reinterpret_cast<const uint16_t*>(str.begin()),
-      v8::NewStringType::kNormal,
-      str.size())));
+  return JsString(check(v8::String::NewFromTwoByte(v8Isolate,
+      reinterpret_cast<const uint16_t*>(str.begin()), v8::NewStringType::kNormal, str.size())));
 }
 
 JsString Lock::str(kj::ArrayPtr<const uint16_t> str) {
-  return JsString(check(v8::String::NewFromTwoByte(
-      v8Isolate,
-      str.begin(),
-      v8::NewStringType::kNormal,
-      str.size())));
+  return JsString(check(
+      v8::String::NewFromTwoByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
 }
 
 JsString Lock::str(kj::ArrayPtr<const char> str) {
-  return JsString(check(v8::String::NewFromUtf8(
-      v8Isolate,
-      str.begin(),
-      v8::NewStringType::kNormal,
-      str.size())));
+  return JsString(check(
+      v8::String::NewFromUtf8(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
 }
 
 JsString Lock::str(kj::ArrayPtr<const kj::byte> str) {
-  return JsString(check(v8::String::NewFromOneByte(
-      v8Isolate,
-      str.begin(),
-      v8::NewStringType::kNormal,
-      str.size())));
+  return JsString(check(
+      v8::String::NewFromOneByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
 }
 
 JsString Lock::strIntern(kj::StringPtr str) {
   return JsString(check(v8::String::NewFromUtf8(
-      v8Isolate,
-      str.begin(),
-      v8::NewStringType::kInternalized,
-      str.size())));
+      v8Isolate, str.begin(), v8::NewStringType::kInternalized, str.size())));
 }
 
 JsString Lock::strExtern(kj::ArrayPtr<const char> str) {
@@ -429,15 +408,13 @@ JsString Lock::strExtern(kj::ArrayPtr<const uint16_t> str) {
   return JsString(newExternalTwoByteString(*this, str));
 }
 
-JsRegExp Lock::regexp(kj::StringPtr str,
-                      RegExpFlags flags,
-                      kj::Maybe<uint32_t> backtrackLimit) {
+JsRegExp Lock::regexp(kj::StringPtr str, RegExpFlags flags, kj::Maybe<uint32_t> backtrackLimit) {
   KJ_IF_SOME(limit, backtrackLimit) {
-    return JsRegExp(check(v8::RegExp::NewWithBacktrackLimit(v8Context(), v8Str(v8Isolate, str),
-        static_cast<v8::RegExp::Flags>(flags), limit)));
+    return JsRegExp(check(v8::RegExp::NewWithBacktrackLimit(
+        v8Context(), v8Str(v8Isolate, str), static_cast<v8::RegExp::Flags>(flags), limit)));
   }
-  return JsRegExp(check(v8::RegExp::New(v8Context(), v8Str(v8Isolate, str),
-      static_cast<v8::RegExp::Flags>(flags))));
+  return JsRegExp(check(
+      v8::RegExp::New(v8Context(), v8Str(v8Isolate, str), static_cast<v8::RegExp::Flags>(flags))));
 }
 
 JsObject Lock::obj() {
@@ -485,10 +462,11 @@ JsArray Lock::arr(kj::ArrayPtr<JsValue> values) {
   return JsArray(v8::Array::New(v8Isolate, items.begin(), items.size()));
 }
 
-#define V(Name) \
-  JsSymbol Lock::symbol##Name() { \
-    return JsSymbol(v8::Symbol::Get##Name(v8Isolate)); }
-  JS_V8_SYMBOLS(V)
+#define V(Name)                                                                                    \
+  JsSymbol Lock::symbol##Name() {                                                                  \
+    return JsSymbol(v8::Symbol::Get##Name(v8Isolate));                                             \
+  }
+JS_V8_SYMBOLS(V)
 #undef V
 
 JsDate Lock::date(double timestamp) {
@@ -496,8 +474,8 @@ JsDate Lock::date(double timestamp) {
 }
 
 JsDate Lock::date(kj::Date date) {
-  return JsDate(jsg::check(v8::Date::New(
-      v8Context(), (date - kj::UNIX_EPOCH) / kj::MILLISECONDS)).As<v8::Date>());
+  return JsDate(jsg::check(v8::Date::New(v8Context(), (date - kj::UNIX_EPOCH) / kj::MILLISECONDS))
+                    .As<v8::Date>());
 }
 
 JsDate Lock::date(kj::StringPtr date) {
