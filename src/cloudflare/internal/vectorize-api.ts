@@ -57,6 +57,7 @@ class VectorizeIndexImpl implements Vectorize {
 
         if (typeof options.returnMetadata === 'boolean') {
           // Allow boolean returnMetadata for backward compatibility. true converts to 'all' and false converts to 'none'
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           options.returnMetadata = options.returnMetadata ? 'all' : 'none';
         }
       }
@@ -226,7 +227,9 @@ class VectorizeIndexImpl implements Vectorize {
             cause: new Error(errResponse.error),
           }
         );
-      } catch {}
+      } catch {
+        // do nothing
+      }
 
       if (err) {
         throw err;

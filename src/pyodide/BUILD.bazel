@@ -147,7 +147,7 @@ expand_template(
 
 data = wd_ts_bundle_capnp(
     name = "pyodide.capnp",
-    eslintrc_json = ".eslintrc.json",
+    eslintrc_json = "eslint.config.mjs",
     import_name = "pyodide",
     internal_data_modules = ["generated/python_stdlib.zip"] + glob([
         "internal/*.py",

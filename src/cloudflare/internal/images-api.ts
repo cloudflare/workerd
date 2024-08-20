@@ -63,7 +63,7 @@ class ImageTransformerImpl implements ImageTransformer {
     this.consumed = false;
   }
 
-  public transform(transform: Transform): ImageTransformerImpl {
+  public transform(transform: Transform): this {
     this.transforms.push(transform);
     return this;
   }

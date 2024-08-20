@@ -91,7 +91,8 @@ def wd_ts_bundle_capnp(
             data = srcs + [
                 eslintrc_json,
                 tsconfig_json,
-                "//:node_modules/@typescript-eslint/eslint-plugin",
+                "//tools:base-eslint",
+                "//:prettierrc",
             ],
             tags = ["lint"],
             target_compatible_with = select({

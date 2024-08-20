@@ -19,6 +19,6 @@
     "composite": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "eslint.config.mjs"],
   "exclude": ["test/types/**/*.ts", "src/worker/**"]
 }

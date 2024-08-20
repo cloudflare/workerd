@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
@@ -88,4 +89,11 @@ selects.config_setting_group(
         ":set_dead_strip",
         ":not_dbg_build",
     ],
+)
+
+# prettier
+js_library(
+    name = "prettierrc",
+    srcs = [".prettierrc.json"],
+    visibility = ["//visibility:public"],
 )

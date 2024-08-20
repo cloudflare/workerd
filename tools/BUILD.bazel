@@ -1,0 +1,12 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+js_library(
+    name = "base-eslint",
+    srcs = ["base.eslint.config.mjs"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//:node_modules/@eslint/js",
+        "//:node_modules/eslint-plugin-prettier",
+        "//:node_modules/typescript-eslint",
+    ],
+)
