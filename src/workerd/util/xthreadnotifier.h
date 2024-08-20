@@ -42,19 +42,4 @@ private:
   kj::MutexGuarded<kj::PromiseCrossThreadFulfillerPair<void>> paf;
 };
 
-
-// Convenience struct for creating and passing around a kj::Executor and XThreadNotifier. The
-// default constructor creates a pair of the objects which are both tied to the current thread.
-struct ExecutorNotifierPair {
-  kj::Own<const kj::Executor> executor = kj::getCurrentThreadExecutor().addRef();
-  kj::Own<XThreadNotifier> notifier = XThreadNotifier::create();
-
-  ExecutorNotifierPair clone() {
-    return {
-      .executor = executor->addRef(),
-      .notifier = kj::atomicAddRef(*notifier),
-    };
-  }
-};
-
 }  // namespace workerd
