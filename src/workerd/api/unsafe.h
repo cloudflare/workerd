@@ -4,6 +4,8 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
 #include <workerd/io/io-context.h>
+#include <iostream>
+#include <unistd.h>
 
 namespace workerd::api {
 
@@ -63,6 +65,86 @@ public:
   }
 };
 
+#define REPRL_CRFD 100
+#define REPRL_CWFD 101
+#define REPRL_DRFD 102
+#define REPRL_DWFD 103
+
+#define CHECK(condition)                    \
+    do {                                    \
+        if (!(condition)) {                 \
+            fprintf(stderr, "Error: %s:%d: condition failed: %s\n", __FILE__, __LINE__, #condition); \
+            exit(EXIT_FAILURE);             \
+        }                                   \
+    } while (0)
+
+// A special binding that allows access to stdin. Used for REPL.
+class Stdin: public jsg::Object {
+public:
+  Stdin() = default;
+
+  kj::String getline(jsg::Lock& js) {
+    std::string res;
+    std::getline(std::cin, res);
+    return kj::heapString(res.c_str());
+  }
+
+  void reprl(jsg::Lock& js) {
+    js.setAllowEval(true);
+    char helo[] = "HELO";
+    if (write(REPRL_CWFD, helo, 4) != 4 || read(REPRL_CRFD, helo, 4) != 4) {
+      printf("Invalid HELO response from parent\n");
+    }
+
+    if (memcmp(helo, "HELO", 4) != 0) {
+      printf("Invalid response from parent\n");
+    }
+
+    do {
+      size_t script_size = 0;
+      char action[4];
+      CHECK(read(REPRL_CRFD, action, 4) == 4);
+      if (strcmp(action, "cexe") == 0) {
+        CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
+      } else {
+        fprintf(stderr, "Unknown action: %s\n", action);
+        _exit(-1);
+      }
+
+      char script[script_size+1];
+      char *ptr = script;
+      size_t remaining = script_size;
+      while(remaining > 0) {
+        ssize_t rv = read(REPRL_DRFD, ptr, remaining);
+        if(rv <= 0) {
+          fprintf(stderr, "Failed to load script\n");
+          _exit(-1);
+        }
+        remaining -= rv;
+        ptr += rv;
+      }
+
+      script[script_size] = 0;
+
+      //eval the script
+      int status = 0;
+      auto compiled = jsg::NonModuleScript::compile(script, js, "reprl"_kj);
+      auto val = jsg::JsValue(compiled.runAndReturn(js.v8Context()));
+
+      fflush(stdout);
+      fflush(stderr);
+
+      CHECK(write(REPRL_CWFD, &status, 4) == 4);
+
+    } while(true);
+  }
+
+  JSG_RESOURCE_TYPE(Stdin) {
+    JSG_METHOD(getline);
+    JSG_METHOD(reprl);
+  }
+};
+
 class UnsafeModule: public jsg::Object {
 public:
   UnsafeModule() = default;
@@ -83,11 +165,14 @@ void registerUnsafeModule(Registry& registry) {
 }
 
 #define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, \
-  api::UnsafeModule
+  api::UnsafeModule, \
+  api::Stdin
 
 template <class Registry> void registerUnsafeModules(Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<UnsafeEval>("internal:unsafe-eval",
                                                  workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  registry.template addBuiltinModule<Stdin>("workerd:stdin",
+                                                 workerd::jsg::ModuleRegistry::Type::BUILTIN);
 }
 
 template <typename TypeWrapper>

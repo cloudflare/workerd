@@ -1518,6 +1518,16 @@ private:
 }  // namespace workerd::server
 
 int main(int argc, char* argv[]) {
+  // TODO: this is reeeeaaally bad
+  argc = 4;
+  char *new_argv[5];
+  new_argv[0] = "workerd";
+  new_argv[1] = "test";
+  new_argv[2] = "/home/garrett/workerd/samples/reprl/config.capnp";
+  new_argv[3] = "--experimental";
+  new_argv[4] = nullptr;
+  argv = new_argv;
+
   ::kj::TopLevelProcessContext context(argv[0]);
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
