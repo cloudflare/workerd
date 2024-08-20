@@ -6,6 +6,11 @@ export class DurableObjectExample {
   }
 
   async fetch() {
+    // Some WebGPU APIs use setTimeout under the hood. There used to be a bug whereby webGPU would
+    // try to use a timeout ID that was already in use by a call to a JS timer API (or vice versa).
+    // We set a timeout here as a regression test.
+    setTimeout(() => { console.log("timeout fired"); }, 30000);
+
     ok(navigator.gpu);
     const adapter = await navigator.gpu.requestAdapter();
     ok(adapter);
