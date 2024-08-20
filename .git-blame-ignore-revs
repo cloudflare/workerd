@@ -1,2 +1,5 @@
 # Apply prettier to the project
 0523bf8b36a937348f1bb79eceda2463a5c220b5
+
+# Apply clang-format to the project.
+5e8537a77e760c160ace3dfe23ee8c76ee5aeeb3
