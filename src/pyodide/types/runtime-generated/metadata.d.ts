@@ -10,7 +10,7 @@ declare namespace MetadataReader {
   const getSizes: () => number[];
   const readMemorySnapshot: (
     offset: number,
-    buf: Uint32Array | Uint8Array,
+    buf: Uint32Array | Uint8Array
   ) => void;
   const getMemorySnapshotSize: () => number;
   const disposeMemorySnapshot: () => void;

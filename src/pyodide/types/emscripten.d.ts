@@ -4,12 +4,12 @@ interface EmscriptenSettings {
     wasmImports: WebAssembly.Imports,
     successCallback: (
       inst: WebAssembly.Instance,
-      mod: WebAssembly.Module,
-    ) => void,
+      mod: WebAssembly.Module
+    ) => void
   ) => WebAssembly.Exports;
   reportUndefinedSymbolsNoOp: () => void;
   noInitialRun: boolean;
   API: {
-    config: API["config"];
+    config: API['config'];
   };
 }

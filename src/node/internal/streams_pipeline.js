@@ -48,7 +48,7 @@ import {
   ERR_MISSING_ARGS,
   ERR_STREAM_DESTROYED,
   ERR_STREAM_PREMATURE_CLOSE,
-  AbortError
+  AbortError,
 } from 'node-internal:internal_errors';
 import {
   validateFunction,
@@ -64,10 +64,10 @@ function destroyer(stream, reading, writing) {
     stream,
     {
       readable: reading,
-      writable: writing
+      writable: writing,
     },
     (err) => {
-      finished = !err
+      finished = !err;
     }
   );
   return {
@@ -76,7 +76,7 @@ function destroyer(stream, reading, writing) {
       finished = true;
       destroyerImpl(stream, err || new ERR_STREAM_DESTROYED('pipe'));
     },
-    cleanup
+    cleanup,
   };
 }
 
@@ -95,7 +95,11 @@ function makeAsyncIterable(val) {
     // Legacy streams are not Iterable.
     return fromReadable(val);
   }
-  throw new ERR_INVALID_ARG_TYPE('val', ['Readable', 'Iterable', 'AsyncIterable'], val);
+  throw new ERR_INVALID_ARG_TYPE(
+    'val',
+    ['Readable', 'Iterable', 'AsyncIterable'],
+    val
+  );
 }
 
 async function* fromReadable(val) {
@@ -114,7 +118,7 @@ async function pump(iterable, writable, finish, { end }) {
       onresolve = null;
       callback();
     }
-  }
+  };
   const wait = () => {
     return new Promise((resolve, reject) => {
       if (error) {
@@ -134,7 +138,7 @@ async function pump(iterable, writable, finish, { end }) {
   const cleanup = eos(
     writable,
     {
-      readable: false
+      readable: false,
     },
     resume
   );
@@ -182,7 +186,9 @@ export function pipelineImpl(streams, callback, opts) {
   function abort() {
     finishImpl(new AbortError());
   }
-  outerSignal === null || outerSignal === undefined ? undefined : outerSignal.addEventListener('abort', abort);
+  outerSignal === null || outerSignal === undefined
+    ? undefined
+    : outerSignal.addEventListener('abort', abort);
   let error;
   let value;
   const destroys = [];
@@ -200,7 +206,9 @@ export function pipelineImpl(streams, callback, opts) {
     while (destroys.length) {
       destroys.shift()(error);
     }
-    outerSignal === null || outerSignal === undefined ? undefined : outerSignal.removeEventListener('abort', abort);
+    outerSignal === null || outerSignal === undefined
+      ? undefined
+      : outerSignal.removeEventListener('abort', abort);
     ac.abort();
     if (final) {
       if (!error) {
@@ -214,7 +222,9 @@ export function pipelineImpl(streams, callback, opts) {
     const stream = streams[i];
     const reading = i < streams.length - 1;
     const writing = i > 0;
-    const end = reading || (opts === null || opts === undefined ? undefined : opts.end) !== false;
+    const end =
+      reading ||
+      (opts === null || opts === undefined ? undefined : opts.end) !== false;
     const isLastStream = i === streams.length - 1;
     if (isNodeStream(stream)) {
       if (end) {
@@ -227,7 +237,11 @@ export function pipelineImpl(streams, callback, opts) {
 
       // Catch stream errors that occur after pipe/pump has completed.
       function onError(err) {
-        if (err && err.name !== 'AbortError' && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+        if (
+          err &&
+          err.name !== 'AbortError' &&
+          err.code !== 'ERR_STREAM_PREMATURE_CLOSE'
+        ) {
           finish(err);
         }
       }
@@ -235,16 +249,20 @@ export function pipelineImpl(streams, callback, opts) {
       if (isReadable(stream) && isLastStream) {
         lastStreamCleanup.push(() => {
           stream.removeListener('error', onError);
-        })
+        });
       }
     }
     if (i === 0) {
       if (typeof stream === 'function') {
         ret = stream({
-          signal
+          signal,
         });
         if (!isIterable(ret)) {
-          throw new ERR_INVALID_RETURN_VALUE('Iterable, AsyncIterable or Stream', 'source', ret);
+          throw new ERR_INVALID_RETURN_VALUE(
+            'Iterable, AsyncIterable or Stream',
+            'source',
+            ret
+          );
         }
       } else if (isIterable(stream) || isReadableNodeStream(stream)) {
         ret = stream;
@@ -254,11 +272,15 @@ export function pipelineImpl(streams, callback, opts) {
     } else if (typeof stream === 'function') {
       ret = makeAsyncIterable(ret);
       ret = stream(ret, {
-        signal
+        signal,
       });
       if (reading) {
         if (!isIterable(ret, true)) {
-          throw new ERR_INVALID_RETURN_VALUE('AsyncIterable', `transform[${i - 1}]`, ret);
+          throw new ERR_INVALID_RETURN_VALUE(
+            'AsyncIterable',
+            `transform[${i - 1}]`,
+            ret
+          );
         }
       } else {
         let _ret;
@@ -268,12 +290,13 @@ export function pipelineImpl(streams, callback, opts) {
         // composed through `.pipe(stream)`.
 
         const pt = new PassThrough({
-          objectMode: true
+          objectMode: true,
         });
 
         // Handle Promises/A+ spec, `then` could be a getter that throws on
         // second use.
-        const then = (_ret = ret) === null || _ret === undefined ? undefined : _ret.then
+        const then =
+          (_ret = ret) === null || _ret === undefined ? undefined : _ret.then;
         if (typeof then === 'function') {
           finishCount++;
           then.call(
@@ -296,10 +319,14 @@ export function pipelineImpl(streams, callback, opts) {
         } else if (isIterable(ret, true)) {
           finishCount++;
           pump(ret, pt, finish, {
-            end
+            end,
           });
         } else {
-          throw new ERR_INVALID_RETURN_VALUE('AsyncIterable or Promise', 'destination', ret);
+          throw new ERR_INVALID_RETURN_VALUE(
+            'AsyncIterable or Promise',
+            'destination',
+            ret
+          );
         }
         ret = pt;
         const { destroy, cleanup } = destroyer(ret, false, true);
@@ -312,7 +339,7 @@ export function pipelineImpl(streams, callback, opts) {
       if (isReadableNodeStream(ret)) {
         finishCount += 2;
         const cleanup = pipe(ret, stream, finish, {
-          end
+          end,
         });
         if (isReadable(stream) && isLastStream) {
           lastStreamCleanup.push(cleanup);
@@ -320,10 +347,14 @@ export function pipelineImpl(streams, callback, opts) {
       } else if (isIterable(ret)) {
         finishCount++;
         pump(ret, stream, finish, {
-          end
+          end,
         });
       } else {
-        throw new ERR_INVALID_ARG_TYPE('val', ['Readable', 'Iterable', 'AsyncIterable'], ret);
+        throw new ERR_INVALID_ARG_TYPE(
+          'val',
+          ['Readable', 'Iterable', 'AsyncIterable'],
+          ret
+        );
       }
       ret = stream;
     } else {
@@ -346,17 +377,17 @@ export function pipe(src, dst, finish, { end }) {
       // Finish if the destination closes before the source has completed.
       finish(new ERR_STREAM_PREMATURE_CLOSE());
     }
-  })
+  });
   src.pipe(dst, {
-    end
+    end,
   });
   if (end) {
     // Compat. Before node v10.12.0 stdio used to throw an error so
     // pipe() did/does not end() stdio destinations.
     // Now they allow it but "secretly" don't close the underlying fd.
     src.once('end', () => {
-      ended = true
-      dst.end()
+      ended = true;
+      dst.end();
     });
   } else {
     finish();
@@ -365,7 +396,7 @@ export function pipe(src, dst, finish, { end }) {
     src,
     {
       readable: true,
-      writable: false
+      writable: false,
     },
     (err) => {
       const rState = src._readableState;
@@ -395,7 +426,7 @@ export function pipe(src, dst, finish, { end }) {
     dst,
     {
       readable: false,
-      writable: true
+      writable: true,
     },
     finish
   );

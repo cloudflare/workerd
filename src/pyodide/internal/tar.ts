@@ -1,4 +1,4 @@
-import { default as TarReader } from "pyodide-internal:packages_tar_reader";
+import { default as TarReader } from 'pyodide-internal:packages_tar_reader';
 
 // This is based on the info about the tar file format on wikipedia
 // And some trial and error with real tar files.
@@ -24,7 +24,7 @@ function decodeHeader(buf: Uint8Array, reader: Reader): TarFSInfo {
   const namePrefix = decodeField(buf, 345, 155);
   let path = namePrefix + nameBase;
   // Trim possible leading ./
-  if (path.startsWith("./")) {
+  if (path.startsWith('./')) {
     path = path.slice(2);
   }
   const mode = decodeNumber(buf, 100, 8);
@@ -50,11 +50,11 @@ export function parseTarInfo(reader = TarReader): [TarFSInfo, string[]] {
   const root: TarFSInfo = {
     children: new Map(),
     mode: 0o777,
-    type: "5",
+    type: '5',
     modtime: 0,
     size: 0,
-    path: "",
-    name: "",
+    path: '',
+    name: '',
     parts: [],
     reader,
   };
@@ -76,18 +76,18 @@ export function parseTarInfo(reader = TarReader): [TarFSInfo, string[]] {
     }
     const contentsOffset = offset + 512;
     offset += 512 * Math.ceil(info.size / 512 + 1);
-    if (info.path === "") {
+    if (info.path === '') {
       // skip possible leading ./ directory
       continue;
     }
-    if (info.path.includes("PaxHeader")) {
+    if (info.path.includes('PaxHeader')) {
       // Ignore PaxHeader extension
       // These metadata directories don't actually have a directory entry which
       // is going to cause us to crash below.
       // Our tar files shouldn't have these anyways...
       continue;
     }
-    if (info.type === "L") {
+    if (info.type === 'L') {
       const buf = new Uint8Array(info.size);
       reader.read(contentsOffset, buf);
       longName = decodeString(buf);
@@ -111,12 +111,12 @@ export function parseTarInfo(reader = TarReader): [TarFSInfo, string[]] {
     }
     // go down to target (in many tar files this second loop body is evaluated 0
     // times)
-    const parts = info.path.slice(0, -1).split("/");
+    const parts = info.path.slice(0, -1).split('/');
     for (let i = directories.length; i < parts.length - 1; i++) {
       directories.push(directory);
       directory = directory.children!.get(parts[i])!;
     }
-    if (info.type === "5") {
+    if (info.type === '5') {
       // a directory
       directories.push(directory);
       info.parts = parts;
@@ -124,11 +124,11 @@ export function parseTarInfo(reader = TarReader): [TarFSInfo, string[]] {
       info.children = new Map();
       directory.children!.set(info.name, info);
       directory = info;
-    } else if (info.type === "0") {
+    } else if (info.type === '0') {
       // a normal file
       info.contentsOffset = contentsOffset;
       info.name = info.path.slice(directory.path.length);
-      if (info.name.endsWith(".so")) {
+      if (info.name.endsWith('.so')) {
         soFiles.push(info.path);
       }
       directory.children!.set(info.name, info);

@@ -1,4 +1,4 @@
-import { deepEqual, ok, equal } from "node:assert";
+import { deepEqual, ok, equal } from 'node:assert';
 
 export class DurableObjectExample {
   constructor(state) {
@@ -7,9 +7,9 @@ export class DurableObjectExample {
 
   async fetch() {
     ok(navigator.gpu);
-    if (!("gpu" in navigator)) {
+    if (!('gpu' in navigator)) {
       console.log(
-        "WebGPU is not supported. Enable chrome://flags/#enable-unsafe-webgpu flag."
+        'WebGPU is not supported. Enable chrome://flags/#enable-unsafe-webgpu flag.'
       );
       return;
     }
@@ -17,18 +17,18 @@ export class DurableObjectExample {
     const adapter = await navigator.gpu.requestAdapter();
     ok(adapter);
 
-    const adapterInfo = await adapter.requestAdapterInfo(["device"]);
+    const adapterInfo = await adapter.requestAdapterInfo(['device']);
     ok(adapterInfo);
     ok(adapterInfo.device);
 
     ok(adapter.features.keys());
-    ok(adapter.features.has("depth-clip-control"));
+    ok(adapter.features.has('depth-clip-control'));
 
     ok(adapter.limits);
     ok(adapter.limits.maxBufferSize);
 
     const requiredFeatures = [];
-    requiredFeatures.push("depth-clip-control");
+    requiredFeatures.push('depth-clip-control');
     const device = await adapter.requestDevice({
       requiredFeatures,
     });
@@ -37,7 +37,7 @@ export class DurableObjectExample {
     ok(device.lost);
 
     ok(device.features.keys());
-    ok(device.features.has("depth-clip-control"));
+    ok(device.features.has('depth-clip-control'));
 
     ok(device.limits);
     ok(device.limits.maxBufferSize);
@@ -46,8 +46,8 @@ export class DurableObjectExample {
       2 /* rows */, 4 /* columns */, 1, 2, 3, 4, 5, 6, 7, 8,
     ]);
 
-    device.pushErrorScope("out-of-memory");
-    device.pushErrorScope("validation");
+    device.pushErrorScope('out-of-memory');
+    device.pushErrorScope('validation');
 
     const gpuBufferFirstMatrix = device.createBuffer({
       mappedAtCreation: true,
@@ -98,21 +98,21 @@ export class DurableObjectExample {
           binding: 0,
           visibility: GPUShaderStage.COMPUTE,
           buffer: {
-            type: "read-only-storage",
+            type: 'read-only-storage',
           },
         },
         {
           binding: 1,
           visibility: GPUShaderStage.COMPUTE,
           buffer: {
-            type: "read-only-storage",
+            type: 'read-only-storage',
           },
         },
         {
           binding: 2,
           visibility: GPUShaderStage.COMPUTE,
           buffer: {
-            type: "storage",
+            type: 'storage',
           },
         },
       ],
@@ -190,17 +190,17 @@ export class DurableObjectExample {
       }),
       compute: {
         module: shaderModule,
-        entryPoint: "main",
+        entryPoint: 'main',
       },
     });
     ok(computePipeline);
 
     // Pipeline with auto layout
     const computePipelineAuto = device.createComputePipeline({
-      layout: "auto",
+      layout: 'auto',
       compute: {
         module: shaderModule,
-        entryPoint: "main",
+        entryPoint: 'main',
       },
     });
     ok(computePipelineAuto);
@@ -232,9 +232,9 @@ export class DurableObjectExample {
     ok(bindGroupAutoLayout);
 
     // Commands submission
-    const commandEncoder = device.createCommandEncoder({ label: "label1" });
+    const commandEncoder = device.createCommandEncoder({ label: 'label1' });
     ok(commandEncoder);
-    equal(commandEncoder.label, "label1");
+    equal(commandEncoder.label, 'label1');
 
     const passEncoder = commandEncoder.beginComputePass();
     ok(passEncoder);
@@ -279,16 +279,16 @@ export class DurableObjectExample {
       new Float32Array([2, 2, 50, 60, 114, 140])
     );
 
-    return new Response("OK");
+    return new Response('OK');
   }
 }
 
 export const compute_shader = {
   async test(ctrl, env, ctx) {
-    let id = env.ns.idFromName("A");
+    let id = env.ns.idFromName('A');
     let obj = env.ns.get(id);
-    let res = await obj.fetch("http://foo/test");
+    let res = await obj.fetch('http://foo/test');
     let text = await res.text();
-    equal(text, "OK");
+    equal(text, 'OK');
   },
 };

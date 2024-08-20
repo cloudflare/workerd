@@ -1,12 +1,12 @@
 {
   "env": {
-      "es2022": true,
-      "worker": true
+    "es2022": true,
+    "worker": true
   },
   "extends": [
-      "plugin:@typescript-eslint/recommended",
-      "plugin:@typescript-eslint/recommended-requiring-type-checking",
-      "plugin:@typescript-eslint/strict"
+    "plugin:@typescript-eslint/recommended",
+    "plugin:@typescript-eslint/recommended-requiring-type-checking",
+    "plugin:@typescript-eslint/strict"
   ],
   "overrides": [],
   "parserOptions": {

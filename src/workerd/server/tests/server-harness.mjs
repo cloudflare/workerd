@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import assert from "node:assert";
+import { spawn } from 'node:child_process';
+import assert from 'node:assert';
 
 // A convenience class to:
 // - start workerd
@@ -17,11 +17,7 @@ export class WorkerdServerHarness {
   #listenInspectorPort = null;
   #closed = null;
 
-  constructor({
-    workerdBinary,
-    workerdConfig,
-    listenPortNames,
-  }) {
+  constructor({ workerdBinary, workerdConfig, listenPortNames }) {
     this.#workerdBinary = workerdBinary;
     this.#workerdConfig = workerdConfig;
     this.#listenPortNames = listenPortNames;
@@ -35,20 +31,20 @@ export class WorkerdServerHarness {
     const CONTROL_FD = 3;
 
     const args = [
-      "serve",
+      'serve',
       this.#workerdConfig,
-      "--verbose",
-      "--inspector-addr=127.0.0.1:0",
+      '--verbose',
+      '--inspector-addr=127.0.0.1:0',
       `--control-fd=${CONTROL_FD}`,
     ];
 
     const options = {
       stdio: [
-        "inherit",
-        "inherit",
-        "inherit",
+        'inherit',
+        'inherit',
+        'inherit',
         // One more for our control FD.
-        "pipe",
+        'pipe',
       ],
     };
 
@@ -63,38 +59,41 @@ export class WorkerdServerHarness {
     // spend forever on this code.
     this.#listenPorts = new Map();
     for (const listenPort of this.#listenPortNames) {
-      this.#listenPorts.set(listenPort, new Promise((resolve, reject) => {
-        this.#child.stdio[CONTROL_FD].on("data", data => {
-          const parsed = JSON.parse(data);
-          if (parsed.event === "listen" && parsed.socket === listenPort) {
-            resolve(parsed.port);
-          }
-        });
-        this.#child.once("error", reject);
-      }));
+      this.#listenPorts.set(
+        listenPort,
+        new Promise((resolve, reject) => {
+          this.#child.stdio[CONTROL_FD].on('data', (data) => {
+            const parsed = JSON.parse(data);
+            if (parsed.event === 'listen' && parsed.socket === listenPort) {
+              resolve(parsed.port);
+            }
+          });
+          this.#child.once('error', reject);
+        })
+      );
     }
 
     // Do the same as the above for the inspector port.
     this.#listenInspectorPort = new Promise((resolve, reject) => {
-      this.#child.stdio[CONTROL_FD].on("data", data => {
+      this.#child.stdio[CONTROL_FD].on('data', (data) => {
         const parsed = JSON.parse(data);
-        if (parsed.event === "listen-inspector") {
+        if (parsed.event === 'listen-inspector') {
           resolve(parsed.port);
         }
       });
-      this.#child.once("error", reject);
+      this.#child.once('error', reject);
     });
 
     // Set up a closed promise, too.
     this.#closed = new Promise((resolve, reject) => {
-      this.#child.once("close", (code, signal) => resolve([code, signal]))
-                 .once("error", reject);
+      this.#child
+        .once('close', (code, signal) => resolve([code, signal]))
+        .once('error', reject);
     });
 
     // Wait for the subprocess to complete spawning before we return.
     await new Promise((resolve, reject) => {
-      this.#child.once("spawn", resolve)
-                 .once("error", reject);
+      this.#child.once('spawn', resolve).once('error', reject);
     });
   }
 

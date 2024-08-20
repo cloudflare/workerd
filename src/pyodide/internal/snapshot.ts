@@ -1,18 +1,18 @@
-import { default as ArtifactBundler } from "pyodide-internal:artifacts";
-import { default as UnsafeEval } from "internal:unsafe-eval";
-import { default as DiskCache } from "pyodide-internal:disk_cache";
+import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
+import { default as UnsafeEval } from 'internal:unsafe-eval';
+import { default as DiskCache } from 'pyodide-internal:disk_cache';
 import {
   SITE_PACKAGES,
   getSitePackagesPath,
-} from "pyodide-internal:setupPackages";
-import { default as TarReader } from "pyodide-internal:packages_tar_reader";
-import processScriptImports from "pyodide-internal:process_script_imports.py";
+} from 'pyodide-internal:setupPackages';
+import { default as TarReader } from 'pyodide-internal:packages_tar_reader';
+import processScriptImports from 'pyodide-internal:process_script_imports.py';
 import {
   SHOULD_SNAPSHOT_TO_DISK,
   IS_CREATING_BASELINE_SNAPSHOT,
   MEMORY_SNAPSHOT_READER,
-} from "pyodide-internal:metadata";
-import { reportError, simpleRunPython } from "pyodide-internal:util";
+} from 'pyodide-internal:metadata';
+import { reportError, simpleRunPython } from 'pyodide-internal:util';
 
 let LOADED_BASELINE_SNAPSHOT: number;
 
@@ -58,10 +58,11 @@ export async function uploadArtifacts(): Promise<void> {
 /**
  * Used to hold the memory that needs to be uploaded for the validator.
  */
-let MEMORY_TO_UPLOAD: ArtifactBundler.MemorySnapshotResult | undefined = undefined;
+let MEMORY_TO_UPLOAD: ArtifactBundler.MemorySnapshotResult | undefined =
+  undefined;
 function getMemoryToUpload(): ArtifactBundler.MemorySnapshotResult {
   if (!MEMORY_TO_UPLOAD) {
-    throw new TypeError("Expected MEMORY_TO_UPLOAD to be set");
+    throw new TypeError('Expected MEMORY_TO_UPLOAD to be set');
   }
   const tmp = MEMORY_TO_UPLOAD;
   MEMORY_TO_UPLOAD = undefined;
@@ -80,10 +81,10 @@ function getMemoryToUpload(): ArtifactBundler.MemorySnapshotResult {
 function loadDynlib(
   Module: Module,
   path: string,
-  wasmModuleData: Uint8Array,
+  wasmModuleData: Uint8Array
 ): void {
   const wasmModule = UnsafeEval.newWasmModule(wasmModuleData);
-  const dso = Module.newDSO(path, undefined, "loading");
+  const dso = Module.newDSO(path, undefined, 'loading');
   // even though these are used via dlopen, we are allocating them in an arena
   // outside the heap and the memory cannot be reclaimed. So I don't think it
   // would help us to allow them to be dealloc'd.
@@ -121,17 +122,17 @@ export function preloadDynamicLibs(Module: Module): void {
     // [[ '_lzma.so' ], [ '_ssl.so' ]]
     // but we put a few more because we messed up the memory snapshot...
     SO_FILES_TO_LOAD = [
-      ["_hashlib.so"],
-      ["_lzma.so"],
-      ["_sqlite3.so"],
-      ["_ssl.so"],
+      ['_hashlib.so'],
+      ['_lzma.so'],
+      ['_sqlite3.so'],
+      ['_ssl.so'],
     ];
   }
   if (
     IS_CREATING_BASELINE_SNAPSHOT ||
     (LOADED_BASELINE_SNAPSHOT && LOADED_SNAPSHOT_VERSION === 2)
   ) {
-    SO_FILES_TO_LOAD = [["_lzma.so"], ["_ssl.so"]];
+    SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
   }
   try {
     const sitePackages = getSitePackagesPath(Module);
@@ -141,20 +142,20 @@ export function preloadDynamicLibs(Module: Module): void {
         node = node?.children?.get(part);
       }
       if (!node) {
-        throw Error("fs node could not be found for " + soFile);
+        throw Error('fs node could not be found for ' + soFile);
       }
       const { contentsOffset, size } = node;
       if (contentsOffset === undefined) {
-        throw Error("contentsOffset not defined for " + soFile);
+        throw Error('contentsOffset not defined for ' + soFile);
       }
       const wasmModuleData = new Uint8Array(size);
       TarReader.read(contentsOffset, wasmModuleData);
-      const path = sitePackages + "/" + soFile.join("/");
+      const path = sitePackages + '/' + soFile.join('/');
       PRELOADED_SO_FILES.push(path);
       loadDynlib(Module, path, wasmModuleData);
     }
   } catch (e) {
-    console.warn("Error in preloadDynamicLibs");
+    console.warn('Error in preloadDynamicLibs');
     reportError(e);
   }
 }
@@ -184,7 +185,7 @@ type DylinkInfo = {
 function recordDsoHandles(Module: Module): DylinkInfo {
   const dylinkInfo: DylinkInfo = {};
   for (const [handle, { name }] of Object.entries(
-    Module.LDSO.loadedLibsByHandle,
+    Module.LDSO.loadedLibsByHandle
   )) {
     if (Number(handle) === 0) {
       continue;
@@ -207,25 +208,25 @@ function recordDsoHandles(Module: Module): DylinkInfo {
 // Can get this list by starting Python and filtering sys.modules for modules
 // whose importer is not FrozenImporter or BuiltinImporter.
 const SNAPSHOT_IMPORTS = [
-  "_pyodide.docstring",
-  "_pyodide._core_docs",
-  "traceback",
-  "collections.abc",
+  '_pyodide.docstring',
+  '_pyodide._core_docs',
+  'traceback',
+  'collections.abc',
   // Asyncio is the really slow one here. In native Python on my machine, `import asyncio` takes ~50
   // ms.
-  "asyncio",
-  "inspect",
-  "tarfile",
-  "importlib.metadata",
-  "re",
-  "shutil",
-  "sysconfig",
-  "importlib.machinery",
-  "pathlib",
-  "site",
-  "tempfile",
-  "typing",
-  "zipfile",
+  'asyncio',
+  'inspect',
+  'tarfile',
+  'importlib.metadata',
+  're',
+  'shutil',
+  'sysconfig',
+  'importlib.machinery',
+  'pathlib',
+  'site',
+  'tempfile',
+  'typing',
+  'zipfile',
 ];
 
 /**
@@ -247,12 +248,12 @@ const SNAPSHOT_IMPORTS = [
  * This function returns a list of modules that have been imported.
  */
 function memorySnapshotDoImports(Module: Module): Array<string> {
-  const toImport = SNAPSHOT_IMPORTS.join(",");
+  const toImport = SNAPSHOT_IMPORTS.join(',');
   const toDelete = Array.from(
-    new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".", 1)[0])),
-  ).join(",");
+    new Set(SNAPSHOT_IMPORTS.map((x) => x.split('.', 1)[0]))
+  ).join(',');
   simpleRunPython(Module, `import ${toImport}`);
-  simpleRunPython(Module, "sysconfig.get_config_vars()");
+  simpleRunPython(Module, 'sysconfig.get_config_vars()');
   // Delete to avoid polluting globals
   simpleRunPython(Module, `del ${toDelete}`);
   if (IS_CREATING_BASELINE_SNAPSHOT) {
@@ -266,20 +267,23 @@ function memorySnapshotDoImports(Module: Module): Array<string> {
   //
   // See process_script_imports.py.
   const processScriptImportsString = new TextDecoder().decode(
-    new Uint8Array(processScriptImports),
+    new Uint8Array(processScriptImports)
   );
   simpleRunPython(Module, processScriptImportsString);
 
-  const importedModules: Array<string> = JSON.parse(simpleRunPython(
-    Module, "import sys, json; print(json.dumps(CF_LOADED_MODULES), file=sys.stderr)"
-  ));
+  const importedModules: Array<string> = JSON.parse(
+    simpleRunPython(
+      Module,
+      'import sys, json; print(json.dumps(CF_LOADED_MODULES), file=sys.stderr)'
+    )
+  );
 
   return importedModules;
 }
 
 function checkLoadedSoFiles(dsoJSON: DylinkInfo): void {
   PRELOADED_SO_FILES.sort();
-  const keys = Object.keys(dsoJSON).filter((k) => k.startsWith("/"));
+  const keys = Object.keys(dsoJSON).filter((k) => k.startsWith('/'));
   keys.sort();
   const msg = `Internal error taking snapshot: mismatch: ${JSON.stringify(keys)} vs ${JSON.stringify(PRELOADED_SO_FILES)}`;
   if (keys.length !== PRELOADED_SO_FILES.length) {
@@ -297,18 +301,26 @@ function checkLoadedSoFiles(dsoJSON: DylinkInfo): void {
  * are initialized in the linear memory snapshot and then saving a copy of the
  * linear memory into MEMORY.
  */
-function makeLinearMemorySnapshot(Module: Module): ArtifactBundler.MemorySnapshotResult {
+function makeLinearMemorySnapshot(
+  Module: Module
+): ArtifactBundler.MemorySnapshotResult {
   const importedModulesList = memorySnapshotDoImports(Module);
   const dsoJSON = recordDsoHandles(Module);
   if (IS_CREATING_BASELINE_SNAPSHOT) {
     // checkLoadedSoFiles(dsoJSON);
   }
-  return { snapshot: encodeSnapshot(Module.HEAP8, dsoJSON), importedModulesList };
+  return {
+    snapshot: encodeSnapshot(Module.HEAP8, dsoJSON),
+    importedModulesList,
+  };
 }
 
-function setUploadFunction(snapshot: Uint8Array, importedModulesList: Array<string>): void {
-  if (snapshot.constructor.name !== "Uint8Array") {
-    throw new TypeError("Expected TO_UPLOAD to be a Uint8Array");
+function setUploadFunction(
+  snapshot: Uint8Array,
+  importedModulesList: Array<string>
+): void {
+  if (snapshot.constructor.name !== 'Uint8Array') {
+    throw new TypeError('Expected TO_UPLOAD to be a Uint8Array');
   }
   if (TOP_LEVEL_SNAPSHOT) {
     MEMORY_TO_UPLOAD = { snapshot, importedModulesList };
@@ -343,7 +355,7 @@ function encodeSnapshot(heap: Uint8Array, dsoJSON: object): Uint8Array {
   const encoder = new TextEncoder();
   const { written: jsonLength } = encoder.encodeInto(
     dsoString,
-    toUpload.subarray(HEADER_SIZE),
+    toUpload.subarray(HEADER_SIZE)
   );
   const uint32View = new Uint32Array(toUpload.buffer);
   uint32View[0] = SNAPSHOT_MAGIC;
@@ -359,7 +371,7 @@ function encodeSnapshot(heap: Uint8Array, dsoJSON: object): Uint8Array {
  */
 function decodeSnapshot(): void {
   if (!MEMORY_SNAPSHOT_READER) {
-    throw Error("Memory snapshot reader not available");
+    throw Error('Memory snapshot reader not available');
   }
   let buf = new Uint32Array(2);
   let offset = 0;
@@ -383,7 +395,7 @@ function decodeSnapshot(): void {
   READ_MEMORY = function (Module) {
     // restore memory from snapshot
     if (!MEMORY_SNAPSHOT_READER) {
-      throw Error("Memory snapshot reader not available when reading memory");
+      throw Error('Memory snapshot reader not available when reading memory');
     }
     MEMORY_SNAPSHOT_READER.readMemorySnapshot(snapshotOffset, Module.HEAP8);
     MEMORY_SNAPSHOT_READER.disposeMemorySnapshot();
@@ -393,7 +405,7 @@ function decodeSnapshot(): void {
 
 export function restoreSnapshot(Module: Module): void {
   if (!READ_MEMORY) {
-    throw Error("READ_MEMORY not defined when restoring snapshot");
+    throw Error('READ_MEMORY not defined when restoring snapshot');
   }
   READ_MEMORY(Module);
 }
@@ -419,7 +431,7 @@ let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
     }
     decodeSnapshot();
   } catch (e) {
-    console.warn("Error in top level of python.js");
+    console.warn('Error in top level of python.js');
     reportError(e);
   }
 })();
@@ -430,14 +442,14 @@ export function finishSnapshotSetup(pyodide: Pyodide): void {
     // have changed.
     simpleRunPython(
       pyodide._module,
-      "from importlib import invalidate_caches as f; f(); del f",
+      'from importlib import invalidate_caches as f; f(); del f'
     );
   }
 
   // This is just here for our test suite. Ugly but just about the only way to test this.
   if (TEST_SNAPSHOT) {
     const snapshotString = new TextDecoder().decode(TEST_SNAPSHOT);
-    pyodide.registerJsModule("cf_internal_test_utils", {
+    pyodide.registerJsModule('cf_internal_test_utils', {
       snapshot: snapshotString,
     });
   }
@@ -447,7 +459,7 @@ export function maybeStoreMemorySnapshot() {
   if (ArtifactBundler.isEwValidating()) {
     ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
-    DiskCache.put("snapshot.bin", getMemoryToUpload().snapshot);
-    console.log("Saved snapshot to disk");
+    DiskCache.put('snapshot.bin', getMemoryToUpload().snapshot);
+    console.log('Saved snapshot to disk');
   }
 }

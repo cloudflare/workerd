@@ -5,25 +5,28 @@
 // Type definitions for c++ implementation.
 
 export class Socket {
-  public readonly readable: unknown
-  public readonly writable: unknown
-  public readonly closed: Promise<void>
-  public close(): Promise<void>
-  public startTls(options: TlsOptions): Socket
+  public readonly readable: unknown;
+  public readonly writable: unknown;
+  public readonly closed: Promise<void>;
+  public close(): Promise<void>;
+  public startTls(options: TlsOptions): Socket;
 }
 
 export type TlsOptions = {
-  expectedServerHostname?: string
-}
+  expectedServerHostname?: string;
+};
 
 export type SocketAddress = {
-  hostname: string
-  port: number
-}
+  hostname: string;
+  port: number;
+};
 
 export type SocketOptions = {
-  secureTransport?: 'off' | 'on' | 'starttls'
-  allowHalfOpen?: boolean
-}
+  secureTransport?: 'off' | 'on' | 'starttls';
+  allowHalfOpen?: boolean;
+};
 
-export function connect(address: string | SocketAddress, options?: SocketOptions): Socket;
+export function connect(
+  address: string | SocketAddress,
+  options?: SocketOptions
+): Socket;

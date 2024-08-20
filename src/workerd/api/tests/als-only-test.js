@@ -1,11 +1,8 @@
-import {
-  AsyncLocalStorage,
-} from 'node:async_hooks';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 export const customthenable = {
   // Test to ensure that async context is propagated into custom thenables.
   async test() {
-
     // This should just work
     const als = new AsyncLocalStorage();
     if (!(als instanceof AsyncLocalStorage)) {
@@ -21,5 +18,5 @@ export const customthenable = {
         throw err;
       }
     }
-  }
+  },
 };

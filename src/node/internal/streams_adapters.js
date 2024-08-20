@@ -25,17 +25,11 @@
 
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
-import {
-  Readable,
-} from 'node-internal:streams_readable';
+import { Readable } from 'node-internal:streams_readable';
 
-import {
-  Writable,
-} from 'node-internal:streams_writable';
+import { Writable } from 'node-internal:streams_writable';
 
-import {
-  Duplex,
-} from 'node-internal:streams_duplex';
+import { Duplex } from 'node-internal:streams_duplex';
 
 import {
   destroy,
@@ -46,9 +40,7 @@ import {
   isWritableEnded,
 } from 'node-internal:streams_util';
 
-import {
-  Buffer,
-} from 'node-internal:internal_buffer';
+import { Buffer } from 'node-internal:internal_buffer';
 
 import {
   ERR_INVALID_ARG_TYPE,
@@ -62,10 +54,7 @@ import {
   normalizeEncoding,
 } from 'node-internal:internal_utils';
 
-import {
-  validateBoolean,
-  validateObject,
-} from 'node-internal:validators';
+import { validateBoolean, validateObject } from 'node-internal:validators';
 
 import * as process from 'node-internal:process';
 
@@ -89,7 +78,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
     throw new ERR_INVALID_ARG_TYPE(
       'streamWritable',
       'stream.Writable',
-      streamWritable,
+      streamWritable
     );
   }
 
@@ -100,18 +89,16 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
   }
 
   const highWaterMark = streamWritable.writableHighWaterMark;
-  const strategy =
-    streamWritable.writableObjectMode ?
-      new CountQueuingStrategy({ highWaterMark }) :
-      { highWaterMark };
+  const strategy = streamWritable.writableObjectMode
+    ? new CountQueuingStrategy({ highWaterMark })
+    : { highWaterMark };
 
   let controller;
   let backpressurePromise;
   let closed;
 
   function onDrain() {
-    if (backpressurePromise !== undefined)
-      backpressurePromise.resolve();
+    if (backpressurePromise !== undefined) backpressurePromise.resolve();
   }
 
   const cleanup = finished(streamWritable, (error) => {
@@ -125,8 +112,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
     // that happen to emit an error event again after finished is called.
     streamWritable.on('error', () => {});
     if (error != null) {
-      if (backpressurePromise !== undefined)
-        backpressurePromise.reject(error);
+      if (backpressurePromise !== undefined) backpressurePromise.reject(error);
       // If closed is not undefined, the error is happening
       // after the WritableStream close has already started.
       // We need to reject it here.
@@ -150,33 +136,38 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
 
   streamWritable.on('drain', onDrain);
 
-  return new WritableStream({
-    start(c) { controller = c; },
+  return new WritableStream(
+    {
+      start(c) {
+        controller = c;
+      },
 
-    async write(chunk) {
-      if (streamWritable.writableNeedDrain || !streamWritable.write(chunk)) {
-        backpressurePromise = createDeferredPromise();
-        return backpressurePromise.promise.finally(() => {
-          backpressurePromise = undefined;
-        });
-      }
+      async write(chunk) {
+        if (streamWritable.writableNeedDrain || !streamWritable.write(chunk)) {
+          backpressurePromise = createDeferredPromise();
+          return backpressurePromise.promise.finally(() => {
+            backpressurePromise = undefined;
+          });
+        }
+      },
+
+      abort(reason) {
+        destroy(streamWritable, reason);
+      },
+
+      close() {
+        if (closed === undefined && !isWritableEnded(streamWritable)) {
+          closed = createDeferredPromise();
+          streamWritable.end();
+          return closed.promise;
+        }
+
+        controller = undefined;
+        return Promise.resolve();
+      },
     },
-
-    abort(reason) {
-      destroy(streamWritable, reason);
-    },
-
-    close() {
-      if (closed === undefined && !isWritableEnded(streamWritable)) {
-        closed = createDeferredPromise();
-        streamWritable.end();
-        return closed.promise;
-      }
-
-      controller = undefined;
-      return Promise.resolve();
-    },
-  }, strategy);
+    strategy
+  );
 }
 
 /**
@@ -189,12 +180,16 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
  * }} [options]
  * @returns {Writable}
  */
-export function newStreamWritableFromWritableStream(writableStream, options = {}) {
+export function newStreamWritableFromWritableStream(
+  writableStream,
+  options = {}
+) {
   if (!(writableStream instanceof WritableStream)) {
     throw new ERR_INVALID_ARG_TYPE(
       'writableStream',
       'WritableStream',
-      writableStream);
+      writableStream
+    );
   }
 
   validateObject(options, 'options');
@@ -233,10 +228,11 @@ export function newStreamWritableFromWritableStream(writableStream, options = {}
       }
 
       writer.ready.then(() => {
-        return Promise.all(chunks.map((data) => writer.write(data)))
-            .then(done, done);
-      },
-      done);
+        return Promise.all(chunks.map((data) => writer.write(data))).then(
+          done,
+          done
+        );
+      }, done);
     },
 
     write(chunk, encoding, callback) {
@@ -265,8 +261,7 @@ export function newStreamWritableFromWritableStream(writableStream, options = {}
 
       writer.ready.then(() => {
         return writer.write(chunk).then(done, done);
-      },
-      done);
+      }, done);
     },
 
     destroy(error, callback) {
@@ -279,7 +274,9 @@ export function newStreamWritableFromWritableStream(writableStream, options = {}
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => { throw error; });
+          process.nextTick(() => {
+            throw error;
+          });
         }
       }
 
@@ -315,19 +312,21 @@ export function newStreamWritableFromWritableStream(writableStream, options = {}
     },
   });
 
-  writer.closed.then(() => {
-    // If the WritableStream closes before the stream.Writable has been
-    // ended, we signal an error on the stream.Writable.
-    closed = true;
-    if (!isWritableEnded(writable))
-      destroy(writable, new ERR_STREAM_PREMATURE_CLOSE());
-  },
-  (error) => {
-    // If the WritableStream errors before the stream.Writable has been
-    // destroyed, signal an error on the stream.Writable.
-    closed = true;
-    destroy(writable, error);
-  });
+  writer.closed.then(
+    () => {
+      // If the WritableStream closes before the stream.Writable has been
+      // ended, we signal an error on the stream.Writable.
+      closed = true;
+      if (!isWritableEnded(writable))
+        destroy(writable, new ERR_STREAM_PREMATURE_CLOSE());
+    },
+    (error) => {
+      // If the WritableStream errors before the stream.Writable has been
+      // destroyed, signal an error on the stream.Writable.
+      closed = true;
+      destroy(writable, error);
+    }
+  );
 
   return writable;
 }
@@ -340,7 +339,10 @@ export function newStreamWritableFromWritableStream(writableStream, options = {}
  * }} [options]
  * @returns {ReadableStream}
  */
-export function newReadableStreamFromStreamReadable(streamReadable, options = {}) {
+export function newReadableStreamFromStreamReadable(
+  streamReadable,
+  options = {}
+) {
   // Not using the internal/streams/utils isReadableNodeStream utility
   // here because it will return false if streamReadable is a Duplex
   // whose readable option is false. For a Duplex that is not readable,
@@ -349,7 +351,8 @@ export function newReadableStreamFromStreamReadable(streamReadable, options = {}
     throw new ERR_INVALID_ARG_TYPE(
       'streamReadable',
       'stream.Readable',
-      streamReadable);
+      streamReadable
+    );
   }
 
   if (isDestroyed(streamReadable) || !isReadable(streamReadable)) {
@@ -363,8 +366,7 @@ export function newReadableStreamFromStreamReadable(streamReadable, options = {}
 
   const evaluateStrategyOrFallback = (strategy) => {
     // If there is a strategy available, use it
-    if (strategy)
-      return strategy;
+    if (strategy) return strategy;
 
     if (objectMode) {
       // When running in objectMode explicitly but no strategy, we just fall
@@ -385,11 +387,9 @@ export function newReadableStreamFromStreamReadable(streamReadable, options = {}
 
   function onData(chunk) {
     // Copy the Buffer to detach it from the pool.
-    if (Buffer.isBuffer(chunk) && !objectMode)
-      chunk = new Uint8Array(chunk);
+    if (Buffer.isBuffer(chunk) && !objectMode) chunk = new Uint8Array(chunk);
     controller.enqueue(chunk);
-    if (controller.desiredSize <= 0)
-      streamReadable.pause();
+    if (controller.desiredSize <= 0) streamReadable.pause();
   }
 
   streamReadable.pause();
@@ -404,22 +404,28 @@ export function newReadableStreamFromStreamReadable(streamReadable, options = {}
     // This is a protection against non-standard, legacy streams
     // that happen to emit an error event again after finished is called.
     streamReadable.on('error', () => {});
-    if (error)
-      return controller.error(error);
+    if (error) return controller.error(error);
     controller.close();
   });
 
   streamReadable.on('data', onData);
 
-  return new ReadableStream({
-    start(c) { controller = c; },
+  return new ReadableStream(
+    {
+      start(c) {
+        controller = c;
+      },
 
-    pull() { streamReadable.resume(); },
+      pull() {
+        streamReadable.resume();
+      },
 
-    cancel(reason) {
-      destroy(streamReadable, reason);
+      cancel(reason) {
+        destroy(streamReadable, reason);
+      },
     },
-  }, strategy);
+    strategy
+  );
 }
 
 /**
@@ -432,21 +438,20 @@ export function newReadableStreamFromStreamReadable(streamReadable, options = {}
  * }} [options]
  * @returns {Readable}
  */
-export function newStreamReadableFromReadableStream(readableStream, options = {}) {
+export function newStreamReadableFromReadableStream(
+  readableStream,
+  options = {}
+) {
   if (!(readableStream instanceof ReadableStream)) {
     throw new ERR_INVALID_ARG_TYPE(
       'readableStream',
       'ReadableStream',
-      readableStream);
+      readableStream
+    );
   }
 
   validateObject(options, 'options');
-  const {
-    highWaterMark,
-    encoding,
-    objectMode = false,
-    signal,
-  } = options;
+  const { highWaterMark, encoding, objectMode = false, signal } = options;
 
   if (encoding !== undefined && !Buffer.isEncoding(encoding))
     throw new ERR_INVALID_ARG_VALUE(encoding, 'options.encoding');
@@ -462,15 +467,17 @@ export function newStreamReadableFromReadableStream(readableStream, options = {}
     signal,
 
     read() {
-      reader.read().then((chunk) => {
-        if (chunk.done) {
-          // Value should always be undefined here.
-          readable.push(null);
-        } else {
-          readable.push(chunk.value);
-        }
-      },
-      (error) => destroy(readable, error));
+      reader.read().then(
+        (chunk) => {
+          if (chunk.done) {
+            // Value should always be undefined here.
+            readable.push(null);
+          } else {
+            readable.push(chunk.value);
+          }
+        },
+        (error) => destroy(readable, error)
+      );
     },
 
     destroy(error, callback) {
@@ -483,7 +490,9 @@ export function newStreamReadableFromReadableStream(readableStream, options = {}
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => { throw error; });
+          process.nextTick(() => {
+            throw error;
+          });
         }
       }
 
@@ -495,13 +504,15 @@ export function newStreamReadableFromReadableStream(readableStream, options = {}
     },
   });
 
-  reader.closed.then(() => {
-    closed = true;
-  },
-  (error) => {
-    closed = true;
-    destroy(readable, error);
-  });
+  reader.closed.then(
+    () => {
+      closed = true;
+    },
+    (error) => {
+      closed = true;
+      destroy(readable, error);
+    }
+  );
 
   return readable;
 }
@@ -523,8 +534,10 @@ export function newReadableWritablePairFromDuplex(duplex) {
   // false. Instead, we'll check the readable and writable state after
   // and return closed WritableStream or closed ReadableStream as
   // necessary.
-  if (typeof duplex?._writableState !== 'object' ||
-      typeof duplex?._readableState !== 'object') {
+  if (
+    typeof duplex?._writableState !== 'object' ||
+    typeof duplex?._readableState !== 'object'
+  ) {
     throw new ERR_INVALID_ARG_TYPE('duplex', 'stream.Duplex', duplex);
   }
 
@@ -536,21 +549,17 @@ export function newReadableWritablePairFromDuplex(duplex) {
     return { readable, writable };
   }
 
-  const writable =
-    isWritable(duplex) ?
-      newWritableStreamFromStreamWritable(duplex) :
-      new WritableStream();
+  const writable = isWritable(duplex)
+    ? newWritableStreamFromStreamWritable(duplex)
+    : new WritableStream();
 
-  if (!isWritable(duplex))
-    writable.close();
+  if (!isWritable(duplex)) writable.close();
 
-  const readable =
-    isReadable(duplex) ?
-      newReadableStreamFromStreamReadable(duplex) :
-      new ReadableStream();
+  const readable = isReadable(duplex)
+    ? newReadableStreamFromStreamReadable(duplex)
+    : new ReadableStream();
 
-  if (!isReadable(duplex))
-    readable.cancel();
+  if (!isReadable(duplex)) readable.cancel();
 
   return { writable, readable };
 }
@@ -567,24 +576,26 @@ export function newReadableWritablePairFromDuplex(duplex) {
  * }} [options]
  * @returns {Duplex}
  */
-export function newStreamDuplexFromReadableWritablePair(pair = {}, options = {}) {
+export function newStreamDuplexFromReadableWritablePair(
+  pair = {},
+  options = {}
+) {
   validateObject(pair, 'pair');
-  const {
-    readable: readableStream,
-    writable: writableStream,
-  } = pair;
+  const { readable: readableStream, writable: writableStream } = pair;
 
   if (!(readableStream instanceof ReadableStream)) {
     throw new ERR_INVALID_ARG_TYPE(
       'pair.readable',
       'ReadableStream',
-      readableStream);
+      readableStream
+    );
   }
   if (!(writableStream instanceof WritableStream)) {
     throw new ERR_INVALID_ARG_TYPE(
       'pair.writable',
       'WritableStream',
-      writableStream);
+      writableStream
+    );
   }
 
   validateObject(options, 'options');
@@ -630,11 +641,12 @@ export function newStreamDuplexFromReadableWritablePair(pair = {}, options = {})
       }
 
       writer.ready.then(() => {
-        return Promise.all(chunks.map((data) => {
-          return writer.write(data);
-        })).then(done, done);
-      },
-      done);
+        return Promise.all(
+          chunks.map((data) => {
+            return writer.write(data);
+          })
+        ).then(done, done);
+      }, done);
     },
 
     write(chunk, encoding, callback) {
@@ -663,8 +675,7 @@ export function newStreamDuplexFromReadableWritablePair(pair = {}, options = {})
 
       writer.ready.then(() => {
         return writer.write(chunk).then(done, done);
-      },
-      done);
+      }, done);
     },
 
     final(callback) {
@@ -687,14 +698,16 @@ export function newStreamDuplexFromReadableWritablePair(pair = {}, options = {})
     },
 
     read() {
-      reader.read().then((chunk) => {
-        if (chunk.done) {
-          duplex.push(null);
-        } else {
-          duplex.push(chunk.value);
-        }
-      },
-      (error) => destroy(duplex, error));
+      reader.read().then(
+        (chunk) => {
+          if (chunk.done) {
+            duplex.push(null);
+          } else {
+            duplex.push(chunk.value);
+          }
+        },
+        (error) => destroy(duplex, error)
+      );
     },
 
     destroy(error, callback) {
@@ -707,22 +720,22 @@ export function newStreamDuplexFromReadableWritablePair(pair = {}, options = {})
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => { throw error; });
+          process.nextTick(() => {
+            throw error;
+          });
         }
       }
 
       async function closeWriter() {
-        if (!writableClosed)
-          await writer.abort(error);
+        if (!writableClosed) await writer.abort(error);
       }
 
       async function closeReader() {
-        if (!readableClosed)
-          await reader.cancel(error);
+        if (!readableClosed) await reader.cancel(error);
       }
 
       if (!writableClosed || !readableClosed) {
-        Promise.all([ closeWriter(), closeReader() ]).then(done, done);
+        Promise.all([closeWriter(), closeReader()]).then(done, done);
         return;
       }
 
@@ -730,25 +743,29 @@ export function newStreamDuplexFromReadableWritablePair(pair = {}, options = {})
     },
   });
 
-  writer.closed.then(() => {
-    writableClosed = true;
-    if (!isWritableEnded(duplex))
-      destroy(duplex, new ERR_STREAM_PREMATURE_CLOSE());
-  },
-  (error) => {
-    writableClosed = true;
-    readableClosed = true;
-    destroy(duplex, error);
-  });
+  writer.closed.then(
+    () => {
+      writableClosed = true;
+      if (!isWritableEnded(duplex))
+        destroy(duplex, new ERR_STREAM_PREMATURE_CLOSE());
+    },
+    (error) => {
+      writableClosed = true;
+      readableClosed = true;
+      destroy(duplex, error);
+    }
+  );
 
-  reader.closed.then(() => {
-    readableClosed = true;
-  },
-  (error) => {
-    writableClosed = true;
-    readableClosed = true;
-    destroy(duplex, error);
-  });
+  reader.closed.then(
+    () => {
+      readableClosed = true;
+    },
+    (error) => {
+      writableClosed = true;
+      readableClosed = true;
+      destroy(duplex, error);
+    }
+  );
 
   return duplex;
 }

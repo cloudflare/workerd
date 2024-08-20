@@ -2,14 +2,19 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import {
-  Buffer,
-} from 'node-internal:internal_buffer';
+import { Buffer } from 'node-internal:internal_buffer';
 
 // random
-export function checkPrimeSync(candidate: ArrayBufferView, num_checks: number): boolean;
-export function randomPrime(size: number, safe: boolean, add?: ArrayBufferView|undefined,
-                            rem?: ArrayBufferView|undefined): ArrayBuffer;
+export function checkPrimeSync(
+  candidate: ArrayBufferView,
+  num_checks: number
+): boolean;
+export function randomPrime(
+  size: number,
+  safe: boolean,
+  add?: ArrayBufferView | undefined,
+  rem?: ArrayBufferView | undefined
+): ArrayBuffer;
 
 // X509Certificate
 export interface CheckOptions {
@@ -21,26 +26,26 @@ export interface CheckOptions {
 }
 
 export class X509Certificate {
-  public static parse(data: ArrayBuffer|ArrayBufferView): X509Certificate;
-  public get subject(): string|undefined;
-  public get subjectAltName(): string|undefined;
-  public get infoAccess(): string|undefined;
-  public get issuer(): string|undefined;
-  public get issuerCert(): X509Certificate|undefined;
-  public get validFrom(): string|undefined;
-  public get validTo(): string|undefined;
-  public get fingerprint(): string|undefined;
-  public get fingerprint256(): string|undefined;
-  public get fingerprint512(): string|undefined;
-  public get keyUsage(): string[]|undefined;
-  public get serialNumber(): string|undefined;
-  public get pem(): string|undefined;
-  public get raw(): ArrayBuffer|undefined;
-  public get publicKey(): CryptoKey|undefined;
+  public static parse(data: ArrayBuffer | ArrayBufferView): X509Certificate;
+  public get subject(): string | undefined;
+  public get subjectAltName(): string | undefined;
+  public get infoAccess(): string | undefined;
+  public get issuer(): string | undefined;
+  public get issuerCert(): X509Certificate | undefined;
+  public get validFrom(): string | undefined;
+  public get validTo(): string | undefined;
+  public get fingerprint(): string | undefined;
+  public get fingerprint256(): string | undefined;
+  public get fingerprint512(): string | undefined;
+  public get keyUsage(): string[] | undefined;
+  public get serialNumber(): string | undefined;
+  public get pem(): string | undefined;
+  public get raw(): ArrayBuffer | undefined;
+  public get publicKey(): CryptoKey | undefined;
   public get isCA(): boolean;
-  public checkHost(host: string, options?: CheckOptions): string|undefined;
-  public checkEmail(email: string, options?: CheckOptions): string|undefined;
-  public checkIp(ip: string, options?: CheckOptions): string|undefined;
+  public checkHost(host: string, options?: CheckOptions): string | undefined;
+  public checkEmail(email: string, options?: CheckOptions): string | undefined;
+  public checkIp(ip: string, options?: CheckOptions): string | undefined;
   public checkIssued(cert: X509Certificate): boolean;
   public checkPrivateKey(key: CryptoKey): boolean;
   public verify(key: CryptoKey): boolean;
@@ -55,7 +60,7 @@ export class HashHandle {
   public copy(xofLen: number): HashHandle;
 }
 
-export type ArrayLike = ArrayBuffer|string|Buffer|ArrayBufferView;
+export type ArrayLike = ArrayBuffer | string | Buffer | ArrayBufferView;
 
 export class HmacHandle {
   public constructor(algorithm: string, key: ArrayLike | CryptoKey);
@@ -64,30 +69,58 @@ export class HmacHandle {
 }
 
 // hkdf
-export function getHkdf(hash: string, key: ArrayLike, salt: ArrayLike, info: ArrayLike,
-                        length: number): ArrayBuffer;
+export function getHkdf(
+  hash: string,
+  key: ArrayLike,
+  salt: ArrayLike,
+  info: ArrayLike,
+  length: number
+): ArrayBuffer;
 
 // pbkdf2
-export function getPbkdf(password: ArrayLike, salt: ArrayLike, iterations: number, keylen: number,
-                         digest: string): ArrayBuffer;
+export function getPbkdf(
+  password: ArrayLike,
+  salt: ArrayLike,
+  iterations: number,
+  keylen: number,
+  digest: string
+): ArrayBuffer;
 
 // scrypt
-export function getScrypt(password: ArrayLike, salt: ArrayLike, N: number, r: number, p: number,
-                          maxmem: number, keylen: number): ArrayBuffer;
+export function getScrypt(
+  password: ArrayLike,
+  salt: ArrayLike,
+  N: number,
+  r: number,
+  p: number,
+  maxmem: number,
+  keylen: number
+): ArrayBuffer;
 
 // Keys
-export function exportKey(key: CryptoKey, options?: InnerExportOptions): KeyExportResult;
+export function exportKey(
+  key: CryptoKey,
+  options?: InnerExportOptions
+): KeyExportResult;
 export function equals(key: CryptoKey, otherKey: CryptoKey): boolean;
 export function getAsymmetricKeyDetail(key: CryptoKey): AsymmetricKeyDetails;
 export function getAsymmetricKeyType(key: CryptoKey): AsymmetricKeyType;
 export function createSecretKey(key: ArrayBuffer | ArrayBufferView): CryptoKey;
-export function createPrivateKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;
-export function createPublicKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;
+export function createPrivateKey(
+  key: InnerCreateAsymmetricKeyOptions
+): CryptoKey;
+export function createPublicKey(
+  key: InnerCreateAsymmetricKeyOptions
+): CryptoKey;
 
 // Spkac
-export function verifySpkac(input: ArrayBufferView|ArrayBuffer): boolean;
-export function exportPublicKey(input: ArrayBufferView|ArrayBuffer): null | ArrayBuffer;
-export function exportChallenge(input: ArrayBufferView|ArrayBuffer): null | ArrayBuffer;
+export function verifySpkac(input: ArrayBufferView | ArrayBuffer): boolean;
+export function exportPublicKey(
+  input: ArrayBufferView | ArrayBuffer
+): null | ArrayBuffer;
+export function exportChallenge(
+  input: ArrayBufferView | ArrayBuffer
+): null | ArrayBuffer;
 
 export type KeyData = string | ArrayBuffer | ArrayBufferView;
 
@@ -125,12 +158,13 @@ export interface AesKeyAlgorithm {
   length: number;
 }
 
-export type KeyAlgorithm = RsaKeyAlgorithm |
-                           EcKeyAlgorithm |
-                           DhKeyAlgorithm |
-                           DsaKeyAlgorithm |
-                           HmacKeyAlgorithm |
-                           AesKeyAlgorithm;
+export type KeyAlgorithm =
+  | RsaKeyAlgorithm
+  | EcKeyAlgorithm
+  | DhKeyAlgorithm
+  | DsaKeyAlgorithm
+  | HmacKeyAlgorithm
+  | AesKeyAlgorithm;
 
 export interface CryptoKey {
   algorithm: KeyAlgorithm;
@@ -179,7 +213,14 @@ export type SecretKeyFormat = 'buffer' | 'jwk';
 export type AsymmetricKeyFormat = 'pem' | 'der' | 'jwk';
 export type PublicKeyEncoding = 'pkcs1' | 'spki';
 export type PrivateKeyEncoding = 'pkcs1' | 'pkcs8' | 'sec1';
-export type AsymmetricKeyType = 'rsa' | 'rsa-pss' | 'dsa' | 'ec' | 'x25519' | 'ed25519' | 'dh';
+export type AsymmetricKeyType =
+  | 'rsa'
+  | 'rsa-pss'
+  | 'dsa'
+  | 'ec'
+  | 'x25519'
+  | 'ed25519'
+  | 'dh';
 export type SecretKeyType = 'hmac' | 'aes';
 export type ParamEncoding = 'named' | 'explicit';
 
@@ -207,13 +248,15 @@ export interface InnerPrivateKeyExportOptions {
   passphrase?: Uint8Array;
 }
 
-export type ExportOptions = SecretKeyExportOptions |
-                            PublicKeyExportOptions |
-                            PrivateKeyExportOptions;
+export type ExportOptions =
+  | SecretKeyExportOptions
+  | PublicKeyExportOptions
+  | PrivateKeyExportOptions;
 
-export type InnerExportOptions = SecretKeyExportOptions |
-                                 PublicKeyExportOptions |
-                                 InnerPrivateKeyExportOptions;
+export type InnerExportOptions =
+  | SecretKeyExportOptions
+  | PublicKeyExportOptions
+  | InnerPrivateKeyExportOptions;
 
 export interface AsymmetricKeyDetails {
   modulusLength?: number;
@@ -246,7 +289,7 @@ export interface GenerateKeyOptions {
 
 export interface GenerateKeyPairOptions {
   modulusLength?: number;
-  publicExponent?: number|bigint;
+  publicExponent?: number | bigint;
   hashAlgorithm?: string;
   mgf1HashAlgorithm?: string;
   saltLength?: number;
@@ -263,8 +306,10 @@ export interface GenerateKeyPairOptions {
 
 // DiffieHellman
 export class DiffieHellmanHandle {
-  public constructor(sizeOrKey: number | ArrayBuffer | ArrayBufferView,
-                     generator: number | ArrayBuffer | ArrayBufferView);
+  public constructor(
+    sizeOrKey: number | ArrayBuffer | ArrayBufferView,
+    generator: number | ArrayBuffer | ArrayBufferView
+  );
   public setPublicKey(data: ArrayBuffer | ArrayBufferView | Buffer): void;
   public setPrivateKey(data: ArrayBuffer | ArrayBufferView | Buffer): void;
   public getPublicKey(): ArrayBuffer;
@@ -272,7 +317,7 @@ export class DiffieHellmanHandle {
   public getGenerator(): ArrayBuffer;
   public getPrime(): ArrayBuffer;
 
-  public computeSecret(key: ArrayBuffer|ArrayBufferView): ArrayBuffer;
+  public computeSecret(key: ArrayBuffer | ArrayBufferView): ArrayBuffer;
   public generateKeys(): ArrayBuffer;
 
   public getVerifyError(): number;

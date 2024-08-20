@@ -29,20 +29,20 @@
 
 // TODO(soon): Fill in more of the internal/errors implementation
 
-import { inspect } from "node-internal:internal_inspect";
+import { inspect } from 'node-internal:internal_inspect';
 
 const classRegExp = /^([A-Z][a-z0-9]*)+$/;
 
 const kTypes = [
-  "string",
-  "function",
-  "number",
-  "object",
-  "Function",
-  "Object",
-  "boolean",
-  "bigint",
-  "symbol",
+  'string',
+  'function',
+  'number',
+  'object',
+  'Function',
+  'Object',
+  'boolean',
+  'bigint',
+  'symbol',
 ];
 
 export class NodeErrorAbstraction extends Error {
@@ -54,7 +54,8 @@ export class NodeErrorAbstraction extends Error {
     this.name = name;
     //This number changes depending on the name of this class
     //20 characters as of now
-    (this as any).stack = this.stack && `${name} [${this.code}]${this.stack.slice(20)}`;
+    (this as any).stack =
+      this.stack && `${name} [${this.code}]${this.stack.slice(20)}`;
   }
 
   override toString() {
@@ -90,19 +91,19 @@ export class NodeTypeError extends NodeErrorAbstraction implements TypeError {
 
 function createInvalidArgType(
   name: string,
-  expected: string | string[],
+  expected: string | string[]
 ): string {
   // https://github.com/nodejs/node/blob/f3eb224/lib/internal/errors.js#L1037-L1087
   expected = Array.isArray(expected) ? expected : [expected];
-  let msg = "The ";
-  if (name.endsWith(" argument")) {
+  let msg = 'The ';
+  if (name.endsWith(' argument')) {
     // For cases like 'first argument'
     msg += `${name} `;
   } else {
-    const type = name.includes(".") ? "property" : "argument";
+    const type = name.includes('.') ? 'property' : 'argument';
     msg += `"${name}" ${type} `;
   }
-  msg += "must be ";
+  msg += 'must be ';
 
   const types = [];
   const instances = [];
@@ -120,31 +121,31 @@ function createInvalidArgType(
   // Special handle `object` in case other instances are allowed to outline
   // the differences between each other.
   if (instances.length > 0) {
-    const pos = types.indexOf("object");
+    const pos = types.indexOf('object');
     if (pos !== -1) {
       types.splice(pos, 1);
-      instances.push("Object");
+      instances.push('Object');
     }
   }
 
   if (types.length > 0) {
     if (types.length > 2) {
       const last = types.pop();
-      msg += `one of type ${types.join(", ")}, or ${last}`;
+      msg += `one of type ${types.join(', ')}, or ${last}`;
     } else if (types.length === 2) {
       msg += `one of type ${types[0]} or ${types[1]}`;
     } else {
       msg += `of type ${types[0]}`;
     }
     if (instances.length > 0 || other.length > 0) {
-      msg += " or ";
+      msg += ' or ';
     }
   }
 
   if (instances.length > 0) {
     if (instances.length > 2) {
       const last = instances.pop();
-      msg += `an instance of ${instances.join(", ")}, or ${last}`;
+      msg += `an instance of ${instances.join(', ')}, or ${last}`;
     } else {
       msg += `an instance of ${instances[0]}`;
       if (instances.length === 2) {
@@ -152,20 +153,20 @@ function createInvalidArgType(
       }
     }
     if (other.length > 0) {
-      msg += " or ";
+      msg += ' or ';
     }
   }
 
   if (other.length > 0) {
     if (other.length > 2) {
       const last = other.pop();
-      msg += `one of ${other.join(", ")}, or ${last}`;
+      msg += `one of ${other.join(', ')}, or ${last}`;
     } else if (other.length === 2) {
       msg += `one of ${other[0]} or ${other[1]}`;
     } else {
-     // @ts-ignore
+      // @ts-ignore
       if (other[0].toLowerCase() !== other[0]) {
-        msg += "an ";
+        msg += 'an ';
       }
       msg += `${other[0]}`;
     }
@@ -178,10 +179,10 @@ function invalidArgTypeHelper(input: any) {
   if (input == null) {
     return ` Received ${input}`;
   }
-  if (typeof input === "function" && input.name) {
+  if (typeof input === 'function' && input.name) {
     return ` Received function ${input.name}`;
   }
-  if (typeof input === "object") {
+  if (typeof input === 'object') {
     if (input.constructor && input.constructor.name) {
       return ` Received an instance of ${input.constructor.name}`;
     }
@@ -195,9 +196,9 @@ function invalidArgTypeHelper(input: any) {
 }
 
 function addNumericalSeparator(val: string) {
-  let res = "";
+  let res = '';
   let i = val.length;
-  const start = val[0] === "-" ? 1 : 0;
+  const start = val[0] === '-' ? 1 : 0;
   for (; i >= start + 4; i -= 3) {
     res = `_${val.slice(i - 3, i)}${res}`;
   }
@@ -206,31 +207,37 @@ function addNumericalSeparator(val: string) {
 
 export class ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY extends NodeError {
   constructor() {
-    super("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY", "Public key is not valid for specified curve");
+    super(
+      'ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY',
+      'Public key is not valid for specified curve'
+    );
   }
 }
 
 export class ERR_CRYPTO_HASH_FINALIZED extends NodeError {
   constructor() {
-    super("ERR_CRYPTO_HASH_FINALIZED", "Digest already called");
+    super('ERR_CRYPTO_HASH_FINALIZED', 'Digest already called');
   }
 }
 
 export class ERR_CRYPTO_HASH_UPDATE_FAILED extends NodeError {
   constructor() {
-    super("ERR_CRYPTO_HASH_UPDATE_FAILED", "Hash update failed");
+    super('ERR_CRYPTO_HASH_UPDATE_FAILED', 'Hash update failed');
   }
 }
 
 export class ERR_CRYPTO_INCOMPATIBLE_KEY extends NodeError {
   constructor(name: string, msg: string) {
-    super("ERR_CRYPTO_INCOMPATIBLE_KEY", `Incompatible ${name}: ${msg}`);
+    super('ERR_CRYPTO_INCOMPATIBLE_KEY', `Incompatible ${name}: ${msg}`);
   }
 }
 
 export class ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE extends NodeError {
   constructor(actual: string, expected: string) {
-    super("ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", `Invalid key object type ${actual}, expected ${expected}.`);
+    super(
+      'ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE',
+      `Invalid key object type ${actual}, expected ${expected}.`
+    );
   }
 }
 
@@ -238,7 +245,7 @@ export class ERR_INVALID_ARG_TYPE_RANGE extends NodeRangeError {
   constructor(name: string, expected: string | string[], actual: unknown) {
     const msg = createInvalidArgType(name, expected);
 
-    super("ERR_INVALID_ARG_TYPE", `${msg}.${invalidArgTypeHelper(actual)}`);
+    super('ERR_INVALID_ARG_TYPE', `${msg}.${invalidArgTypeHelper(actual)}`);
   }
 }
 
@@ -246,32 +253,32 @@ export class ERR_INVALID_ARG_TYPE extends NodeTypeError {
   constructor(name: string, expected: string | string[], actual: unknown) {
     const msg = createInvalidArgType(name, expected);
 
-    super("ERR_INVALID_ARG_TYPE", `${msg}.${invalidArgTypeHelper(actual)}`);
+    super('ERR_INVALID_ARG_TYPE', `${msg}.${invalidArgTypeHelper(actual)}`);
   }
 
   static RangeError = ERR_INVALID_ARG_TYPE_RANGE;
 }
 
 export class ERR_INVALID_ARG_VALUE_RANGE extends NodeRangeError {
-  constructor(name: string, value: unknown, reason: string = "is invalid") {
-    const type = name.includes(".") ? "property" : "argument";
+  constructor(name: string, value: unknown, reason: string = 'is invalid') {
+    const type = name.includes('.') ? 'property' : 'argument';
     const inspected = inspect(value);
 
     super(
-      "ERR_INVALID_ARG_VALUE",
-      `The ${type} '${name}' ${reason}. Received ${inspected}`,
+      'ERR_INVALID_ARG_VALUE',
+      `The ${type} '${name}' ${reason}. Received ${inspected}`
     );
   }
 }
 
 export class ERR_INVALID_ARG_VALUE extends NodeTypeError {
-  constructor(name: string, value: unknown, reason: string = "is invalid") {
-    const type = name.includes(".") ? "property" : "argument";
+  constructor(name: string, value: unknown, reason: string = 'is invalid') {
+    const type = name.includes('.') ? 'property' : 'argument';
     const inspected = inspect(value);
 
     super(
-      "ERR_INVALID_ARG_VALUE",
-      `The ${type} '${name}' ${reason}. Received ${inspected}`,
+      'ERR_INVALID_ARG_VALUE',
+      `The ${type} '${name}' ${reason}. Received ${inspected}`
     );
   }
 
@@ -279,13 +286,14 @@ export class ERR_INVALID_ARG_VALUE extends NodeTypeError {
 }
 
 export class ERR_OUT_OF_RANGE extends RangeError {
-  code = "ERR_OUT_OF_RANGE";
+  code = 'ERR_OUT_OF_RANGE';
 
   constructor(
     str: string,
     range: string,
     input: unknown,
-    replaceDefaultBoolean = false) {
+    replaceDefaultBoolean = false
+  ) {
     // TODO(later): Implement internal assert?
     // assert(range, 'Missing "range" argument');
     let msg = replaceDefaultBoolean
@@ -294,12 +302,12 @@ export class ERR_OUT_OF_RANGE extends RangeError {
     let received;
     if (Number.isInteger(input) && Math.abs(input as number) > 2 ** 32) {
       received = addNumericalSeparator(String(input));
-    } else if (typeof input === "bigint") {
+    } else if (typeof input === 'bigint') {
       received = String(input);
       if (input > 2n ** 32n || input < -(2n ** 32n)) {
         received = addNumericalSeparator(received);
       }
-      received += "n";
+      received += 'n';
     } else {
       received = inspect(input);
     }
@@ -319,23 +327,23 @@ export class ERR_OUT_OF_RANGE extends RangeError {
 
 export class ERR_UNHANDLED_ERROR extends NodeError {
   constructor(x: string) {
-    super("ERR_UNHANDLED_ERROR", `Unhandled error. (${x})`);
+    super('ERR_UNHANDLED_ERROR', `Unhandled error. (${x})`);
   }
 }
 
 export class ERR_INVALID_THIS extends NodeTypeError {
   constructor(x: string) {
-    super("ERR_INVALID_THIS", `Value of "this" must be of type ${x}`);
+    super('ERR_INVALID_THIS', `Value of "this" must be of type ${x}`);
   }
 }
 
 export class ERR_BUFFER_OUT_OF_BOUNDS extends NodeRangeError {
   constructor(name?: string) {
     super(
-      "ERR_BUFFER_OUT_OF_BOUNDS",
+      'ERR_BUFFER_OUT_OF_BOUNDS',
       name
         ? `"${name}" is outside of buffer bounds`
-        : "Attempt to access memory outside buffer bounds",
+        : 'Attempt to access memory outside buffer bounds'
     );
   }
 }
@@ -343,45 +351,45 @@ export class ERR_BUFFER_OUT_OF_BOUNDS extends NodeRangeError {
 export class ERR_INVALID_BUFFER_SIZE extends NodeRangeError {
   constructor(size: number) {
     super(
-      "ERR_INVALID_BUFFER_SIZE",
-      `Buffer size must be a multiple of ${size}-bits`,
+      'ERR_INVALID_BUFFER_SIZE',
+      `Buffer size must be a multiple of ${size}-bits`
     );
   }
 }
 
 export class ERR_UNKNOWN_ENCODING extends NodeTypeError {
   constructor(x: string) {
-    super("ERR_UNKNOWN_ENCODING", `Unknown encoding: ${x}`);
+    super('ERR_UNKNOWN_ENCODING', `Unknown encoding: ${x}`);
   }
 }
 
 export class ERR_STREAM_PREMATURE_CLOSE extends NodeTypeError {
   constructor() {
-    super("ERR_STREAM_PREMATURE_CLOSE", "Premature close");
+    super('ERR_STREAM_PREMATURE_CLOSE', 'Premature close');
   }
 }
 
 export class AbortError extends Error {
   code: string;
 
-  constructor(message = "The operation was aborted", options?: ErrorOptions) {
-    if (options !== undefined && typeof options !== "object") {
-      throw new ERR_INVALID_ARG_TYPE("options", "Object", options);
+  constructor(message = 'The operation was aborted', options?: ErrorOptions) {
+    if (options !== undefined && typeof options !== 'object') {
+      throw new ERR_INVALID_ARG_TYPE('options', 'Object', options);
     }
     super(message, options);
-    this.code = "ABORT_ERR";
-    this.name = "AbortError";
+    this.code = 'ABORT_ERR';
+    this.name = 'AbortError';
   }
 }
 
 function determineSpecificType(value: any) {
   if (value == null) {
-    return "" + value;
+    return '' + value;
   }
-  if (typeof value === "function" && value.name) {
+  if (typeof value === 'function' && value.name) {
     return `function ${value.name}`;
   }
-  if (typeof value === "object") {
+  if (typeof value === 'object') {
     if (value.constructor?.name) {
       return `an instance of ${value.constructor.name}`;
     }
@@ -395,39 +403,37 @@ function determineSpecificType(value: any) {
 
 export class ERR_AMBIGUOUS_ARGUMENT extends NodeTypeError {
   constructor(x: string, y: string) {
-    super("ERR_AMBIGUOUS_ARGUMENT", `The "${x}" argument is ambiguous. ${y}`);
+    super('ERR_AMBIGUOUS_ARGUMENT', `The "${x}" argument is ambiguous. ${y}`);
   }
 }
 
 export class ERR_INVALID_RETURN_VALUE extends NodeTypeError {
   constructor(input: string, name: string, value: unknown) {
     super(
-      "ERR_INVALID_RETURN_VALUE",
-      `Expected ${input} to be returned from the "${name}" function but got ${
-        determineSpecificType(
-          value,
-        )
-      }.`,
+      'ERR_INVALID_RETURN_VALUE',
+      `Expected ${input} to be returned from the "${name}" function but got ${determineSpecificType(
+        value
+      )}.`
     );
   }
 }
 
 export class ERR_MULTIPLE_CALLBACK extends NodeError {
   constructor() {
-    super("ERR_MULTIPLE_CALLBACK", "Callback called multiple times");
+    super('ERR_MULTIPLE_CALLBACK', 'Callback called multiple times');
   }
 }
 
 export class ERR_MISSING_ARGS extends NodeTypeError {
   constructor(...args: (string | string[])[]) {
-    let msg = "The ";
+    let msg = 'The ';
 
     const len = args.length;
 
     const wrap = (a: unknown) => `"${a}"`;
 
     args = args.map((a) =>
-      Array.isArray(a) ? a.map(wrap).join(" or ") : wrap(a)
+      Array.isArray(a) ? a.map(wrap).join(' or ') : wrap(a)
     );
 
     switch (len) {
@@ -438,73 +444,85 @@ export class ERR_MISSING_ARGS extends NodeTypeError {
         msg += `${args[0]} and ${args[1]} arguments`;
         break;
       default:
-        msg += args.slice(0, len - 1).join(", ");
+        msg += args.slice(0, len - 1).join(', ');
         msg += `, and ${args[len - 1]} arguments`;
         break;
     }
 
-    super("ERR_MISSING_ARGS", `${msg} must be specified`);
+    super('ERR_MISSING_ARGS', `${msg} must be specified`);
   }
 }
 
 export class ERR_FALSY_VALUE_REJECTION extends NodeError {
   reason: string;
   constructor(reason: string) {
-    super("ERR_FALSY_VALUE_REJECTION", "Promise was rejected with falsy value");
+    super('ERR_FALSY_VALUE_REJECTION', 'Promise was rejected with falsy value');
     this.reason = reason;
   }
 }
 
 export class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
-  constructor(name: string|symbol) {
+  constructor(name: string | symbol) {
     if (typeof name === 'symbol') {
       name = (name as symbol).description!;
     }
-    super("ERR_METHOD_NOT_IMPLEMENTED", `The ${name} method is not implemented`);
+    super(
+      'ERR_METHOD_NOT_IMPLEMENTED',
+      `The ${name} method is not implemented`
+    );
   }
 }
 
 export class ERR_STREAM_CANNOT_PIPE extends NodeError {
   constructor() {
-    super("ERR_STREAM_CANNOT_PIPE", "Cannot pipe, not readable");
+    super('ERR_STREAM_CANNOT_PIPE', 'Cannot pipe, not readable');
   }
 }
 export class ERR_STREAM_DESTROYED extends NodeError {
-  constructor(name: string|symbol) {
+  constructor(name: string | symbol) {
     if (typeof name === 'symbol') {
       name = (name as symbol).description!;
     }
-    super("ERR_STREAM_DESTROYED", `Cannot call ${name} after a stream was destroyed`);
+    super(
+      'ERR_STREAM_DESTROYED',
+      `Cannot call ${name} after a stream was destroyed`
+    );
   }
 }
 export class ERR_STREAM_ALREADY_FINISHED extends NodeError {
-  constructor(name: string|symbol) {
+  constructor(name: string | symbol) {
     if (typeof name === 'symbol') {
       name = (name as symbol).description!;
     }
-    super("ERR_STREAM_ALREADY_FINISHED", `Cannot call ${name} after a stream was finished`);
+    super(
+      'ERR_STREAM_ALREADY_FINISHED',
+      `Cannot call ${name} after a stream was finished`
+    );
   }
 }
 export class ERR_STREAM_NULL_VALUES extends NodeTypeError {
   constructor() {
-    super("ERR_STREAM_NULL_VALUES", "May not write null values to stream");
+    super('ERR_STREAM_NULL_VALUES', 'May not write null values to stream');
   }
 }
 export class ERR_STREAM_WRITE_AFTER_END extends NodeError {
   constructor() {
-    super("ERR_STREAM_WRITE_AFTER_END", "write after end");
+    super('ERR_STREAM_WRITE_AFTER_END', 'write after end');
   }
 }
 
 export class ERR_STREAM_PUSH_AFTER_EOF extends NodeError {
   constructor() {
-    super("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF");
+    super('ERR_STREAM_PUSH_AFTER_EOF', 'stream.push() after EOF');
   }
 }
 
 export class ERR_STREAM_UNSHIFT_AFTER_END_EVENT extends NodeError {
   constructor() {
-    super("ERR_STREAM_UNSHIFT_AFTER_END_EVENT", "stream.unshift() after end event");
+    super(
+      'ERR_STREAM_UNSHIFT_AFTER_END_EVENT',
+      'stream.unshift() after end event'
+    );
   }
 }
 
@@ -515,10 +533,12 @@ export function aggregateTwoErrors(innerError: any, outerError: any) {
       outerError.errors.push(innerError);
       return outerError;
     }
-    const err = new AggregateError([outerError, innerError], outerError.message);
+    const err = new AggregateError(
+      [outerError, innerError],
+      outerError.message
+    );
     (err as any).code = outerError.code;
     return err;
   }
-  return innerError || outerError
+  return innerError || outerError;
 }
-

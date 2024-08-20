@@ -77,58 +77,58 @@ export const test_ok = {
     [false, 0, '', undefined, NaN, null].forEach((val) => {
       throws(() => ok(val, 'message'), { message: 'message' });
     });
-  }
+  },
 };
 
 export const test_equal = {
   test(ctrl, env, ctx) {
     [
-      {a: 1, b: 1},
-      {a: 1, b: '1', fails: true},
-      {a: 1, b: '1', fails: true, message: 'boom'},
-      {a: 'a', b: 'a'},
-      {a: ctx, b: ctx},
-    ].forEach(({a,b,fails,message}) => {
+      { a: 1, b: 1 },
+      { a: 1, b: '1', fails: true },
+      { a: 1, b: '1', fails: true, message: 'boom' },
+      { a: 'a', b: 'a' },
+      { a: ctx, b: ctx },
+    ].forEach(({ a, b, fails, message }) => {
       if (!fails) {
-        equal(a,b);
-        strictEqual(a,b);
+        equal(a, b);
+        strictEqual(a, b);
         if (message) {
           throws(() => notEqual(a, b, message), { message });
           throws(() => notStrictEqual(a, b, message), { message });
         } else {
-          throws(() => notEqual(a,b), { name: 'AssertionError' });
-          throws(() => notStrictEqual(a,b), { name: 'AssertionError' });
+          throws(() => notEqual(a, b), { name: 'AssertionError' });
+          throws(() => notStrictEqual(a, b), { name: 'AssertionError' });
         }
       } else {
         notEqual(a, b);
         notStrictEqual(a, b);
         if (message) {
-          throws(() => equal(a,b,message), { message });
-          throws(() => strictEqual(a,b,message), { message });
+          throws(() => equal(a, b, message), { message });
+          throws(() => strictEqual(a, b, message), { message });
         } else {
-          throws(() => equal(a,b), { name: 'AssertionError' });
-          throws(() => strictEqual(a,b), { name: 'AssertionError' });
+          throws(() => equal(a, b), { name: 'AssertionError' });
+          throws(() => strictEqual(a, b), { name: 'AssertionError' });
         }
       }
     });
-  }
+  },
 };
 
 export const test_fail = {
   test(ctrl, env, ctx) {
-    throws(() => fail("boom"), { message: "boom" });
-    throws(() => ifError("boom"));
+    throws(() => fail('boom'), { message: 'boom' });
+    throws(() => ifError('boom'));
     throws(() => ifError(false));
     doesNotThrow(() => ifError(null));
     doesNotThrow(() => ifError(undefined));
-  }
+  },
 };
 
 export const test_rejects = {
   async test(ctrl, env, ctx) {
     await rejects(Promise.reject(new Error('boom')), { message: 'boom' });
     await doesNotReject(Promise.resolve(1));
-  }
+  },
 };
 
 export const test_matching = {
@@ -137,7 +137,7 @@ export const test_matching = {
     throws(() => match('hello', /not/), { name: 'AssertionError' });
     doesNotMatch('hello', /not/);
     throws(() => doesNotMatch('hello', /hello/), { name: 'AssertionError' });
-  }
+  },
 };
 
 export const test_deep_equal = {
@@ -145,27 +145,27 @@ export const test_deep_equal = {
     const a = {
       b: [
         {
-          c: new Uint8Array([1,2,3]),
+          c: new Uint8Array([1, 2, 3]),
           d: false,
-          e: 'hello'
-        }
+          e: 'hello',
+        },
       ],
     };
     const b = {
       b: [
         {
-          c: new Uint8Array([1,2,3]),
+          c: new Uint8Array([1, 2, 3]),
           d: false,
-          e: 'hello'
-        }
+          e: 'hello',
+        },
       ],
     };
-    deepEqual(a,b);
-    deepStrictEqual(a,b);
+    deepEqual(a, b);
+    deepStrictEqual(a, b);
     b.b[0].c[0] = 4;
-    notDeepEqual(a,b);
-    notDeepStrictEqual(a,b);
-  }
+    notDeepEqual(a, b);
+    notDeepStrictEqual(a, b);
+  },
 };
 
 export const test_deep_equal_errors = {
@@ -201,7 +201,7 @@ export const test_deep_equal_errors = {
         (err) => {
           assert(err instanceof AssertionError);
           deepEqual(trimMessage(err.message), expectedError);
-          return true
+          return true;
         }
       );
       throws(
@@ -209,7 +209,7 @@ export const test_deep_equal_errors = {
         (err) => {
           assert(err instanceof AssertionError);
           deepEqual(trimMessage(err.message), expectedError);
-          return true
+          return true;
         }
       );
     }
@@ -229,7 +229,7 @@ export const test_deep_equal_errors = {
         (err) => {
           assert(err instanceof AssertionError);
           deepEqual(trimMessage(err.message), expectedError);
-          return true
+          return true;
         }
       );
       throws(
@@ -237,7 +237,7 @@ export const test_deep_equal_errors = {
         (err) => {
           assert(err instanceof AssertionError);
           deepEqual(trimMessage(err.message), expectedError);
-          return true
+          return true;
         }
       );
     }
@@ -255,10 +255,10 @@ function trimMessage(msg) {
 export const test_mocks = {
   test() {
     const fn = mock.fn(() => {});
-    fn(1,2,3);
+    fn(1, 2, 3);
     strictEqual(fn.mock.callCount(), 1);
     strictEqual(fn.mock.calls[0].arguments.length, 3);
-    deepStrictEqual(fn.mock.calls[0].arguments, [1,2,3]);
+    deepStrictEqual(fn.mock.calls[0].arguments, [1, 2, 3]);
 
     fn.mock.mockImplementation(() => 42);
     strictEqual(fn(), 42);
@@ -266,7 +266,7 @@ export const test_mocks = {
 
     fn.mock.resetCalls();
     strictEqual(fn.mock.callCount(), 0);
-  }
+  },
 };
 
 export const spiesOnFunction = {
@@ -293,12 +293,12 @@ export const spiesOnFunction = {
     strictEqual(call.result, 10);
     strictEqual(call.target, undefined);
     strictEqual(call.this, 1000);
-  }
+  },
 };
 
 export const speiesOnBoundFunction = {
   test() {
-    const bound = function(arg1, arg2) {
+    const bound = function (arg1, arg2) {
       return this + arg1 + arg2;
     }.bind(50);
     const sum = mock.fn(bound);
@@ -319,7 +319,7 @@ export const speiesOnBoundFunction = {
     strictEqual(call.result, 60);
     strictEqual(call.target, undefined);
     strictEqual(call.this, undefined);
-  }
+  },
 };
 
 export const spiesOnConstructor = {
@@ -361,7 +361,7 @@ export const spiesOnConstructor = {
     strictEqual(call.result, instance);
     strictEqual(call.target, Clazz);
     strictEqual(call.this, instance);
-  }
+  },
 };
 
 export const noopSpyCreatedByDefault = {
@@ -377,7 +377,7 @@ export const noopSpyCreatedByDefault = {
     strictEqual(call.result, undefined);
     strictEqual(call.target, undefined);
     strictEqual(call.this, undefined);
-  }
+  },
 };
 
 export const internalNoOpFunctionCanBeReused = {
@@ -395,7 +395,7 @@ export const internalNoOpFunctionCanBeReused = {
     strictEqual(fn2.mock.calls.length, 1);
     strictEqual(fn1.prop, true);
     strictEqual(fn2.prop, undefined);
-  }
+  },
 };
 
 export const functionsCanBeMockedMultipleTimesAtOnce = {
@@ -424,7 +424,7 @@ export const functionsCanBeMockedMultipleTimesAtOnce = {
     notStrictEqual(fn1.mock, fn2.mock);
     strictEqual(fn1.mock.calls.length, 1);
     strictEqual(fn2.mock.calls.length, 2);
-  }
+  },
 };
 
 export const internalNoopFunctionCanBeReusedAsMethods = {
@@ -451,7 +451,7 @@ export const internalNoopFunctionCanBeReusedAsMethods = {
     strictEqual(obj.bar.mock.calls.length, 2);
     strictEqual(obj.foo.prop, true);
     strictEqual(obj.bar.prop, undefined);
-  }
+  },
 };
 
 export const methodsCanBeMockedMultipleTimesButNotAtTheSameTime = {
@@ -495,7 +495,7 @@ export const methodsCanBeMockedMultipleTimesButNotAtTheSameTime = {
     obj.sum.mock.restore();
     strictEqual(obj.sum, originalSum);
     strictEqual(obj.sum.mock, undefined);
-  }
+  },
 };
 
 export const spiesOnObjectMethod = {
@@ -522,7 +522,7 @@ export const spiesOnObjectMethod = {
     strictEqual(obj.method.mock.restore(), undefined);
     strictEqual(obj.method(1, 3), 9);
     strictEqual(obj.method.mock, undefined);
-  }
+  },
 };
 
 export const spiesOnGetter = {
@@ -550,7 +550,7 @@ export const spiesOnGetter = {
 
     strictEqual(getter.mock.restore(), undefined);
     strictEqual(obj.method, 5);
-  }
+  },
 };
 
 export const spiesOnSetter = {
@@ -585,12 +585,12 @@ export const spiesOnSetter = {
     strictEqual(obj.prop, 77);
     obj.method = 65;
     strictEqual(obj.prop, 65);
-  }
+  },
 };
 
 export const spyFunctionsCanBeBound = {
   test() {
-    const sum = mock.fn(function(arg1, arg2) {
+    const sum = mock.fn(function (arg1, arg2) {
       return this + arg1 + arg2;
     });
     const bound = sum.bind(1000);
@@ -606,7 +606,7 @@ export const spyFunctionsCanBeBound = {
 
     strictEqual(sum.mock.restore(), undefined);
     strictEqual(sum.bind(0)(2, 11), 13);
-  }
+  },
 };
 
 export const mocksPrototypeMethodsOnAnInstance = {
@@ -639,16 +639,13 @@ export const mocksPrototypeMethodsOnAnInstance = {
 
     const obj2 = new Runner();
     // Ensure that a brand new instance is not mocked
-    strictEqual(
-      obj2.someTask.mock,
-      undefined
-    );
+    strictEqual(obj2.someTask.mock, undefined);
 
     strictEqual(obj.someTask.mock.restore(), undefined);
     strictEqual(await obj.method(msg), msg);
     strictEqual(obj.someTask.mock, undefined);
     strictEqual(Runner.prototype.someTask.mock, undefined);
-  }
+  },
 };
 
 export const spiesOnAsyncStaticClassMethods = {
@@ -682,22 +679,21 @@ export const spiesOnAsyncStaticClassMethods = {
     strictEqual(await Runner.method(msg), msg);
     strictEqual(Runner.someTask.mock, undefined);
     strictEqual(Runner.prototype.someTask, undefined);
-
-  }
+  },
 };
 
 export const givenNullToAMockMethodItThrowsAInvalidArgumentError = {
   test() {
     throws(() => mock.method(null, {}), { code: 'ERR_INVALID_ARG_TYPE' });
-  }
-}
+  },
+};
 
 export const itShouldThrowGivenAnInexistentPropertyOnAObjectInstance = {
   test() {
     throws(() => mock.method({ abc: 0 }, 'non-existent'), {
-      code: 'ERR_INVALID_ARG_VALUE'
+      code: 'ERR_INVALID_ARG_VALUE',
     });
-  }
+  },
 };
 
 export const spyFunctionsCanBeUsedOnClassesInheritance = {
@@ -732,7 +728,7 @@ export const spyFunctionsCanBeUsedOnClassesInheritance = {
     strictEqual(C.someTask.mock.restore(), undefined);
     strictEqual(C.method(msg), msg);
     strictEqual(C.someTask.mock, undefined);
-  }
+  },
 };
 
 export const spyFunctionsDontAffectThePrototypeChain = {
@@ -747,16 +743,34 @@ export const spyFunctionsDontAffectThePrototypeChain = {
 
     const msg = 'ok';
 
-    const ABeforeMockIsUnchanged = Object.getOwnPropertyDescriptor(A, A.someTask.name);
-    const BBeforeMockIsUnchanged = Object.getOwnPropertyDescriptor(B, B.someTask.name);
-    const CBeforeMockShouldNotHaveDesc = Object.getOwnPropertyDescriptor(C, C.someTask.name);
+    const ABeforeMockIsUnchanged = Object.getOwnPropertyDescriptor(
+      A,
+      A.someTask.name
+    );
+    const BBeforeMockIsUnchanged = Object.getOwnPropertyDescriptor(
+      B,
+      B.someTask.name
+    );
+    const CBeforeMockShouldNotHaveDesc = Object.getOwnPropertyDescriptor(
+      C,
+      C.someTask.name
+    );
 
     mock.method(C, C.someTask.name);
     C.someTask(msg);
-    const BAfterMockIsUnchanged = Object.getOwnPropertyDescriptor(B, B.someTask.name);
+    const BAfterMockIsUnchanged = Object.getOwnPropertyDescriptor(
+      B,
+      B.someTask.name
+    );
 
-    const AAfterMockIsUnchanged = Object.getOwnPropertyDescriptor(A, A.someTask.name);
-    const CAfterMockHasDescriptor = Object.getOwnPropertyDescriptor(C, C.someTask.name);
+    const AAfterMockIsUnchanged = Object.getOwnPropertyDescriptor(
+      A,
+      A.someTask.name
+    );
+    const CAfterMockHasDescriptor = Object.getOwnPropertyDescriptor(
+      C,
+      C.someTask.name
+    );
 
     strictEqual(CBeforeMockShouldNotHaveDesc, undefined);
     ok(CAfterMockHasDescriptor);
@@ -766,9 +780,12 @@ export const spyFunctionsDontAffectThePrototypeChain = {
     strictEqual(BBeforeMockIsUnchanged, undefined);
 
     strictEqual(C.someTask.mock.restore(), undefined);
-    const CAfterRestoreKeepsDescriptor = Object.getOwnPropertyDescriptor(C, C.someTask.name);
+    const CAfterRestoreKeepsDescriptor = Object.getOwnPropertyDescriptor(
+      C,
+      C.someTask.name
+    );
     ok(CAfterRestoreKeepsDescriptor);
-  }
+  },
 };
 
 export const mockedFunctionsReportThrownErrors = {
@@ -788,7 +805,7 @@ export const mockedFunctionsReportThrownErrors = {
     strictEqual(call.result, undefined);
     strictEqual(call.target, undefined);
     strictEqual(call.this, undefined);
-  }
+  },
 };
 
 export const mockedConstructorsReportThrownErrors = {
@@ -814,7 +831,7 @@ export const mockedConstructorsReportThrownErrors = {
     strictEqual(call.result, undefined);
     strictEqual(call.target, Clazz);
     strictEqual(call.this, undefined);
-  }
+  },
 };
 
 export const mocksAFunction = {
@@ -842,7 +859,7 @@ export const mocksAFunction = {
 
     strictEqual(fn.mock.restore(), undefined);
     strictEqual(fn(2, 11), 13);
-  }
+  },
 };
 
 export const mocksAConstructor = {
@@ -895,7 +912,7 @@ export const mocksAConstructor = {
     throws(() => {
       instance.getPrivateValue();
     }, /TypeError: Cannot read private member #privateValue /);
-  }
+  },
 };
 
 export const mocksAnObjectMethod = {
@@ -926,7 +943,7 @@ export const mocksAnObjectMethod = {
     strictEqual(obj.method.mock.restore(), undefined);
     strictEqual(obj.method(1, 3), 9);
     strictEqual(obj.method.mock, undefined);
-  }
+  },
 };
 
 export const mocksAGetter = {
@@ -958,7 +975,7 @@ export const mocksAGetter = {
 
     strictEqual(getter.mock.restore(), undefined);
     strictEqual(obj.method, 5);
-  }
+  },
 };
 
 export const mocksASetter = {
@@ -997,7 +1014,7 @@ export const mocksASetter = {
     strictEqual(obj.prop, -77);
     obj.method = 65;
     strictEqual(obj.prop, 65);
-  }
+  },
 };
 
 export const mocksAGetterWithSyntaxSugar = {
@@ -1025,7 +1042,7 @@ export const mocksAGetterWithSyntaxSugar = {
 
     strictEqual(getter.mock.restore(), undefined);
     strictEqual(obj.method, 5);
-  }
+  },
 };
 
 export const mocksASetterWithSyntaxSugar = {
@@ -1064,7 +1081,7 @@ export const mocksASetterWithSyntaxSugar = {
     strictEqual(obj.prop, -77);
     obj.method = 65;
     strictEqual(obj.prop, 65);
-  }
+  },
 };
 
 export const mockedFunctionsMatchNameAndLength = {
@@ -1077,27 +1094,18 @@ export const mockedFunctionsMatchNameAndLength = {
     }
 
     function func1() {}
-    const func2 = function(a) {}; // eslint-disable-line func-style
+    const func2 = function (a) {}; // eslint-disable-line func-style
     const arrow = (a, b, c) => {};
     const obj = { method(a, b) {} };
 
-    deepStrictEqual(
-      getNameAndLength(func1),
-      getNameAndLength(mock.fn(func1))
-    );
-    deepStrictEqual(
-      getNameAndLength(func2),
-      getNameAndLength(mock.fn(func2))
-    );
-    deepStrictEqual(
-      getNameAndLength(arrow),
-      getNameAndLength(mock.fn(arrow))
-    );
+    deepStrictEqual(getNameAndLength(func1), getNameAndLength(mock.fn(func1)));
+    deepStrictEqual(getNameAndLength(func2), getNameAndLength(mock.fn(func2)));
+    deepStrictEqual(getNameAndLength(arrow), getNameAndLength(mock.fn(arrow)));
     deepStrictEqual(
       getNameAndLength(obj.method),
       getNameAndLength(mock.method(obj, 'method', func1))
     );
-  }
+  },
 };
 
 export const methodFailsIfMethodCannotBeRedefined = {
@@ -1110,7 +1118,7 @@ export const methodFailsIfMethodCannotBeRedefined = {
       configurable: false,
       value(a, b) {
         return a + b + this.prop;
-      }
+      },
     });
 
     function mockMethod(a) {
@@ -1122,7 +1130,7 @@ export const methodFailsIfMethodCannotBeRedefined = {
     }, /Cannot redefine property: method/);
     strictEqual(obj.method(1, 3), 9);
     strictEqual(obj.method.mock, undefined);
-  }
+  },
 };
 
 export const methodFailsIfFieldIsAPropertyInsteadOfAMethod = {
@@ -1141,7 +1149,7 @@ export const methodFailsIfFieldIsAPropertyInsteadOfAMethod = {
     }, /The argument 'methodName' must be a method/);
     strictEqual(obj.method, 100);
     strictEqual(obj.method.mock, undefined);
-  }
+  },
 };
 
 export const mocksCanBeRestored = {
@@ -1164,7 +1172,7 @@ export const mocksCanBeRestored = {
     strictEqual(fn(), 4);
     strictEqual(fn(), 5);
     strictEqual(fn(), 6);
-  }
+  },
 };
 
 export const mockImplementationCanBeChangedDynamically = {
@@ -1187,9 +1195,9 @@ export const mockImplementationCanBeChangedDynamically = {
     }
 
     function mustNotCall() {
-      return function() {
+      return function () {
         throw new Error('This function should not be called');
-      }
+      };
     }
 
     const fn = mock.fn(addOne);
@@ -1224,7 +1232,7 @@ export const mockImplementationCanBeChangedDynamically = {
     strictEqual(fn(), 18);
     strictEqual(fn(), 19);
     strictEqual(fn.mock.callCount(), 12);
-  }
+  },
 };
 
 export const resetMockCalls = {
@@ -1243,7 +1251,7 @@ export const resetMockCalls = {
     strictEqual(fn.mock.callCount(), 0);
 
     strictEqual(fn(3, 2), 1);
-  }
+  },
 };
 
 export const usesTopLevelMock = {
@@ -1264,7 +1272,7 @@ export const usesTopLevelMock = {
     mock.reset();
     strictEqual(fn(3, 4), 7);
     strictEqual(fn.mock.calls.length, 2);
-  }
+  },
 };
 
 export const theGetterAndSetterOptionsCannotBeUsedTogether = {
@@ -1272,7 +1280,7 @@ export const theGetterAndSetterOptionsCannotBeUsedTogether = {
     throws(() => {
       mock.method({}, 'method', { getter: true, setter: true });
     }, /The property 'options\.setter' cannot be used with 'options\.getter'/);
-  }
+  },
 };
 
 export const methodNamesMustBeStringsOrSymbols = {
@@ -1289,7 +1297,7 @@ export const methodNamesMustBeStringsOrSymbols = {
     throws(() => {
       mock.method(obj, {});
     }, /The "methodName" argument must be one of type string or symbol/);
-  }
+  },
 };
 
 export const theTimesOptionMustBeAnIntegerGreaterOrEqualToOne = {
@@ -1305,7 +1313,7 @@ export const theTimesOptionMustBeAnIntegerGreaterOrEqualToOne = {
     throws(() => {
       mock.fn(() => {}, { times: 3.14159 });
     }, /The value of "options\.times" is out of range/);
-  }
+  },
 };
 
 export const spiesOnAClassPrototypeMethod = {
@@ -1336,7 +1344,7 @@ export const spiesOnAClassPrototypeMethod = {
     strictEqual(call.error, undefined);
     strictEqual(call.target, undefined);
     strictEqual(call.this, instance);
-  }
+  },
 };
 
 export const getterFailsIfGetterOptionsSetToFalse = {
@@ -1344,7 +1352,7 @@ export const getterFailsIfGetterOptionsSetToFalse = {
     throws(() => {
       mock.getter({}, 'method', { getter: false });
     }, /The property 'options\.getter' cannot be false/);
-  }
+  },
 };
 
 export const setterFailsIfSetterOptionsSetToFalse = {
@@ -1352,7 +1360,7 @@ export const setterFailsIfSetterOptionsSetToFalse = {
     throws(() => {
       mock.setter({}, 'method', { setter: false });
     }, /The property 'options\.setter' cannot be false/);
-  }
+  },
 };
 
 export const getterFailsIfSetterOptionsIsTrue = {
@@ -1360,7 +1368,7 @@ export const getterFailsIfSetterOptionsIsTrue = {
     throws(() => {
       mock.getter({}, 'method', { setter: true });
     }, /The property 'options\.setter' cannot be used with 'options\.getter'/);
-  }
+  },
 };
 
 export const setterFailsIfGetterOptionsIsTrue = {
@@ -1368,5 +1376,5 @@ export const setterFailsIfGetterOptionsIsTrue = {
     throws(() => {
       mock.setter({}, 'method', { getter: true });
     }, /The property 'options\.setter' cannot be used with 'options\.getter'/);
-  }
+  },
 };

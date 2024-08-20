@@ -26,7 +26,6 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-
 // a transform stream is a readable/writable stream where you do
 // something with the data.  Sometimes it's called a "filter",
 // but that's not a great name for it, since that implies a thing where
@@ -69,19 +68,13 @@
 // would be consumed, and then the rest would wait (un-transformed) until
 // the results of the previous transformed chunk were consumed.
 
-'use strict'
+'use strict';
 
-import {
-  ERR_METHOD_NOT_IMPLEMENTED
-} from 'node-internal:internal_errors';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
-import {
-  Duplex,
-} from 'node-internal:streams_duplex';
+import { Duplex } from 'node-internal:streams_duplex';
 
-import {
-  getHighWaterMark,
-} from 'node-internal:streams_util';
+import { getHighWaterMark } from 'node-internal:streams_util';
 
 Object.setPrototypeOf(Transform.prototype, Duplex.prototype);
 Object.setPrototypeOf(Transform, Duplex);
@@ -94,7 +87,9 @@ export function Transform(options) {
   // TODO (ronag): This should preferably always be
   // applied but would be semver-major. Or even better;
   // make Transform a Readable with the Writable interface.
-  const readableHighWaterMark = options ? getHighWaterMark(options, 'readableHighWaterMark', true) : null;
+  const readableHighWaterMark = options
+    ? getHighWaterMark(options, 'readableHighWaterMark', true)
+    : null;
   if (readableHighWaterMark === 0) {
     // A Duplex will buffer both on the writable and readable side while
     // a Transform just wants to buffer hwm number of elements. To avoid
@@ -107,7 +102,7 @@ export function Transform(options) {
       // a "bug" where we check needDrain before calling _write and not after.
       // Refs: https://github.com/nodejs/node/pull/32887
       // Refs: https://github.com/nodejs/node/pull/35941
-      writableHighWaterMark: options?.writableHighWaterMark || 0
+      writableHighWaterMark: options?.writableHighWaterMark || 0,
     };
   }
   Duplex.call(this, options);
@@ -118,7 +113,8 @@ export function Transform(options) {
   this._readableState.sync = false;
   this[kCallback] = null;
   if (options) {
-    if (typeof options.transform === 'function') this._transform = options.transform;
+    if (typeof options.transform === 'function')
+      this._transform = options.transform;
     if (typeof options.flush === 'function') this._flush = options.flush;
   }
 
@@ -147,7 +143,7 @@ function final(cb) {
       if (cb) {
         cb();
       }
-    })
+    });
   } else {
     this.push(null);
     if (cb) {
@@ -164,8 +160,8 @@ function prefinish() {
 Transform.prototype._final = final;
 
 Transform.prototype._transform = function () {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('_transform()')
-}
+  throw new ERR_METHOD_NOT_IMPLEMENTED('_transform()');
+};
 
 Transform.prototype._write = function (chunk, encoding, callback) {
   const rState = this._readableState;
@@ -190,8 +186,8 @@ Transform.prototype._write = function (chunk, encoding, callback) {
     } else {
       this[kCallback] = callback;
     }
-  })
-}
+  });
+};
 
 Transform.prototype._read = function (_size) {
   if (this[kCallback]) {
@@ -199,7 +195,7 @@ Transform.prototype._read = function (_size) {
     this[kCallback] = null;
     callback();
   }
-}
+};
 
 Object.setPrototypeOf(PassThrough.prototype, Transform.prototype);
 Object.setPrototypeOf(PassThrough, Transform);
@@ -215,4 +211,4 @@ export function PassThrough(options) {
 
 PassThrough.prototype._transform = function (chunk, _, cb) {
   cb(null, chunk);
-}
+};

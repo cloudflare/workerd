@@ -1,8 +1,4 @@
-import {
-  strictEqual,
-  ok,
-  deepStrictEqual,
-} from 'node:assert';
+import { strictEqual, ok, deepStrictEqual } from 'node:assert';
 
 const enc = new TextEncoder();
 
@@ -15,11 +11,12 @@ export const rs = {
         start(c) {
           c.enqueue(enc.encode('hellohello'));
           c.close();
-        }
-      })
+        },
+      }),
     });
-    for await (const _ of resp.body) {}
-  }
+    for await (const _ of resp.body) {
+    }
+  },
 };
 
 export const ts = {
@@ -32,10 +29,11 @@ export const ts = {
     writer.close();
     const resp = await env.subrequest.fetch('http://example.org', {
       method: 'POST',
-      body: readable
+      body: readable,
     });
-    for await (const _ of resp.body) {}
-  }
+    for await (const _ of resp.body) {
+    }
+  },
 };
 
 export const byobMin = {
@@ -43,7 +41,9 @@ export const byobMin = {
     let controller;
     const rs = new ReadableStream({
       type: 'bytes',
-      start(c) { controller = c; }
+      start(c) {
+        controller = c;
+      },
     });
 
     async function handleRead(readable) {
@@ -67,7 +67,7 @@ export const byobMin = {
 
     strictEqual(results[0].status, 'fulfilled');
     strictEqual(results[1].status, 'fulfilled');
-  }
+  },
 };
 
 export const cancelReadsOnReleaseLock = {
@@ -78,12 +78,15 @@ export const cancelReadsOnReleaseLock = {
 
     const result = await Promise.allSettled([read, reader.releaseLock()]);
     strictEqual(result[0].status, 'rejected');
-    strictEqual(result[0].reason.message, 'This ReadableStream reader has been released.');
+    strictEqual(
+      result[0].reason.message,
+      'This ReadableStream reader has been released.'
+    );
     strictEqual(result[1].status, 'fulfilled');
 
     // Make sure we can still get another reader
     const reader2 = rs.getReader();
-  }
+  },
 };
 
 export const cancelWriteOnReleaseLock = {
@@ -91,7 +94,7 @@ export const cancelWriteOnReleaseLock = {
     const ws = new WritableStream({
       write() {
         return new Promise(() => {});
-      }
+      },
     });
     const writer = ws.getWriter();
     // This first write is just to start the write queue so that the
@@ -104,12 +107,15 @@ export const cancelWriteOnReleaseLock = {
       writer.releaseLock(),
     ]);
     strictEqual(results[0].status, 'rejected');
-    strictEqual(results[0].reason.message, 'This WritableStream writer has been released.');
+    strictEqual(
+      results[0].reason.message,
+      'This WritableStream writer has been released.'
+    );
     strictEqual(results[1].status, 'fulfilled');
 
     // Make sure we can still get another writer
     const writer2 = ws.getWriter();
-  }
+  },
 };
 
 export const readAllTextRequestSmall = {
@@ -119,12 +125,15 @@ export const readAllTextRequestSmall = {
         c.enqueue(enc.encode('hello '));
         c.enqueue(enc.encode('world!'));
         c.close();
-      }
+      },
     });
-    const request = new Request('http://example.org', { method: 'POST', body: rs });
+    const request = new Request('http://example.org', {
+      method: 'POST',
+      body: rs,
+    });
     const text = await request.text();
     strictEqual(text, 'hello world!');
-  }
+  },
 };
 
 export const readAllTextResponseSmall = {
@@ -134,12 +143,12 @@ export const readAllTextResponseSmall = {
         c.enqueue(enc.encode('hello '));
         c.enqueue(enc.encode('world!'));
         c.close();
-      }
+      },
     });
     const response = new Response(rs);
     const text = await response.text();
     strictEqual(text, 'hello world!');
-  }
+  },
 };
 
 export const readAllTextRequestBig = {
@@ -161,13 +170,16 @@ export const readAllTextRequestBig = {
         const chunk = chunks.shift();
         check += chunk;
         c.enqueue(enc.encode(chunk));
-      }
+      },
     });
-    const request = new Request('http://example.org', { method: 'POST', body: rs });
+    const request = new Request('http://example.org', {
+      method: 'POST',
+      body: rs,
+    });
     const text = await request.text();
     strictEqual(text.length, check.length);
     strictEqual(text, check);
-  }
+  },
 };
 
 export const readAllTextResponseBig = {
@@ -190,14 +202,14 @@ export const readAllTextResponseBig = {
         const chunk = chunks.shift();
         check += chunk;
         c.enqueue(enc.encode(chunk));
-      }
+      },
     });
     const response = new Response(rs);
     const promise = response.text();
     const text = await promise;
     strictEqual(text.length, check.length);
     strictEqual(text, check);
-  }
+  },
 };
 
 export const readAllTextFailedPull = {
@@ -206,7 +218,7 @@ export const readAllTextFailedPull = {
       async pull(c) {
         await scheduler.wait(10);
         throw new Error('boom');
-      }
+      },
     });
     const response = new Response(rs);
     const promise = response.text();
@@ -216,7 +228,7 @@ export const readAllTextFailedPull = {
     } catch (err) {
       strictEqual(err.message, 'boom');
     }
-  }
+  },
 };
 
 export const readAllTextFailedStart = {
@@ -225,7 +237,7 @@ export const readAllTextFailedStart = {
       async start(c) {
         await scheduler.wait(10);
         throw new Error('boom');
-      }
+      },
     });
     const response = new Response(rs);
     const promise = response.text();
@@ -235,7 +247,7 @@ export const readAllTextFailedStart = {
     } catch (err) {
       strictEqual(err.message, 'boom');
     }
-  }
+  },
 };
 
 export const readAllTextFailed = {
@@ -244,7 +256,7 @@ export const readAllTextFailed = {
       async start(c) {
         await scheduler.wait(10);
         c.error(new Error('boom'));
-      }
+      },
     });
     const response = new Response(rs);
     ok(!rs.locked);
@@ -256,7 +268,7 @@ export const readAllTextFailed = {
     } catch (err) {
       strictEqual(err.message, 'boom');
     }
-  }
+  },
 };
 
 export const tsCancel = {
@@ -271,7 +283,7 @@ export const tsCancel = {
           strictEqual(reason, 'boom');
           await scheduler.wait(10);
           cancelCalled = true;
-        }
+        },
       });
       ok(!cancelCalled);
       await readable.cancel('boom');
@@ -285,7 +297,7 @@ export const tsCancel = {
           strictEqual(reason, 'boom');
           await scheduler.wait(10);
           cancelCalled = true;
-        }
+        },
       });
       ok(!cancelCalled);
       await writable.abort('boom');
@@ -296,7 +308,7 @@ export const tsCancel = {
       const { writable } = new TransformStream({
         async cancel(reason) {
           throw new Error('boomy');
-        }
+        },
       });
       try {
         await writable.abort('boom');
@@ -305,7 +317,7 @@ export const tsCancel = {
         strictEqual(err.message, 'boomy');
       }
     }
-  }
+  },
 };
 
 export const writableStreamGcTraceFinishes = {
@@ -313,7 +325,7 @@ export const writableStreamGcTraceFinishes = {
     // TODO(soon): We really need better testing for gc visitation.
     const ws = new WritableStream();
     gc();
-  }
+  },
 };
 
 export const readableStreamFromAsyncGenerator = {
@@ -323,14 +335,14 @@ export const readableStreamFromAsyncGenerator = {
       yield 'hello';
       await scheduler.wait(10);
       yield 'world';
-    };
+    }
     const rs = ReadableStream.from(gen());
     const chunks = [];
     for await (const chunk of rs) {
       chunks.push(chunk);
     }
     deepStrictEqual(chunks, ['hello', 'world']);
-  }
+  },
 };
 
 export const readableStreamFromSyncGenerator = {
@@ -341,7 +353,7 @@ export const readableStreamFromSyncGenerator = {
       chunks.push(chunk);
     }
     deepStrictEqual(chunks, ['hello', 'world']);
-  }
+  },
 };
 
 export const readableStreamFromSyncGenerator2 = {
@@ -356,7 +368,7 @@ export const readableStreamFromSyncGenerator2 = {
       chunks.push(chunk);
     }
     deepStrictEqual(chunks, ['hello', 'world']);
-  }
+  },
 };
 
 export const readableStreamFromAsyncCanceled = {
@@ -371,7 +383,7 @@ export const readableStreamFromAsyncCanceled = {
       } finally {
         strictEqual(count, 1);
       }
-    };
+    }
     const rs = ReadableStream.from(gen());
     const chunks = [];
     for await (const chunk of rs) {
@@ -379,15 +391,15 @@ export const readableStreamFromAsyncCanceled = {
       return;
     }
     deepStrictEqual(chunks, ['hello']);
-  }
+  },
 };
 
 export const readableStreamFromThrowingAsyncGen = {
   async test() {
     async function* gen() {
-        yield 'hello';
-        throw new Error('boom');
-    };
+      yield 'hello';
+      throw new Error('boom');
+    }
     const rs = ReadableStream.from(gen());
     const chunks = [];
     try {
@@ -399,19 +411,19 @@ export const readableStreamFromThrowingAsyncGen = {
       strictEqual(err.message, 'boom');
     }
     deepStrictEqual(chunks, ['hello']);
-  }
+  },
 };
 
 export const readableStreamFromNoopAsyncGen = {
   async test() {
-    async function* gen() {};
+    async function* gen() {}
     const rs = ReadableStream.from(gen());
     const chunks = [];
     for await (const chunk of rs) {
       chunks.push(chunk);
     }
     deepStrictEqual(chunks, []);
-  }
+  },
 };
 
 export const abortWriterAfterGc = {
@@ -424,7 +436,7 @@ export const abortWriterAfterGc = {
     const writer = getWriter();
     gc();
     await writer.abort();
-  }
+  },
 };
 
 export const finalReadOnInternalStreamReturnsBuffer = {
@@ -445,12 +457,12 @@ export const finalReadOnInternalStreamReturnsBuffer = {
     ok(result.value instanceof Uint8Array);
     strictEqual(result.value.byteLength, 0);
     strictEqual(result.value.buffer.byteLength, 10);
-  }
+  },
 };
 
 export default {
   async fetch(request, env) {
     strictEqual(request.headers.get('content-length'), '10');
     return new Response(request.body);
-  }
+  },
 };

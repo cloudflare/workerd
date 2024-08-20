@@ -28,23 +28,23 @@
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
 import { inspect } from 'node-internal:internal_inspect';
 
-let blue = "";
-let green = "";
-let red = "";
-let defaultColor = "";
+let blue = '';
+let green = '';
+let red = '';
+let defaultColor = '';
 
 const kReadableOperator: { [key: string]: string } = {
-  deepStrictEqual: "Expected values to be strictly deep-equal:",
-  strictEqual: "Expected values to be strictly equal:",
+  deepStrictEqual: 'Expected values to be strictly deep-equal:',
+  strictEqual: 'Expected values to be strictly equal:',
   strictEqualObject: 'Expected "actual" to be reference-equal to "expected":',
-  deepEqual: "Expected values to be loosely deep-equal:",
+  deepEqual: 'Expected values to be loosely deep-equal:',
   notDeepStrictEqual: 'Expected "actual" not to be strictly deep-equal to:',
   notStrictEqual: 'Expected "actual" to be strictly unequal to:',
   notStrictEqualObject:
     'Expected "actual" not to be reference-equal to "expected":',
   notDeepEqual: 'Expected "actual" not to be loosely deep-equal to:',
-  notIdentical: "Values have same structure but are not reference-equal:",
-  notDeepEqualUnequal: "Expected values not to be loosely deep-equal:",
+  notIdentical: 'Values have same structure but are not reference-equal:',
+  notDeepEqualUnequal: 'Expected values not to be loosely deep-equal:',
 };
 
 // Comparing short primitives should just show === / !== instead of using the
@@ -61,78 +61,82 @@ export function copyError(source: any): Error {
       Object.defineProperty(target, key, desc);
     }
   }
-  Object.defineProperty(target, "message", { value: source.message });
+  Object.defineProperty(target, 'message', { value: source.message });
   return target;
 }
 
 export function inspectValue(val: unknown): string {
-  return inspect(
-    val,
-    {
-      compact: true,
-      customInspect: false,
-      depth: 1000,
-      maxArrayLength: Infinity,
-      // Assert compares only enumerable properties (with a few exceptions).
-      showHidden: false,
-      // Assert does not detect proxies currently.
-      showProxy: false,
-      sorted: true,
-      // Inspect getters as we also check them when comparing entries.
-      getters: true,
-    },
-  );
+  return inspect(val, {
+    compact: true,
+    customInspect: false,
+    depth: 1000,
+    maxArrayLength: Infinity,
+    // Assert compares only enumerable properties (with a few exceptions).
+    showHidden: false,
+    // Assert does not detect proxies currently.
+    showProxy: false,
+    sorted: true,
+    // Inspect getters as we also check them when comparing entries.
+    getters: true,
+  });
 }
 
 export function createErrDiff(
   actual: unknown,
   expected: unknown,
-  operator: string,
+  operator: string
 ): string {
-  let other = "";
-  let res = "";
-  let end = "";
+  let other = '';
+  let res = '';
+  let end = '';
   let skipped = false;
   const actualInspected = inspectValue(actual);
-  const actualLines = actualInspected.split("\n");
-  const expectedLines = inspectValue(expected).split("\n");
+  const actualLines = actualInspected.split('\n');
+  const expectedLines = inspectValue(expected).split('\n');
 
   let i = 0;
-  let indicator = "";
+  let indicator = '';
 
   // In case both values are objects or functions explicitly mark them as not
   // reference equal for the `strictEqual` operator.
   if (
-    operator === "strictEqual" &&
-    ((typeof actual === "object" && actual !== null &&
-      typeof expected === "object" && expected !== null) ||
-      (typeof actual === "function" && typeof expected === "function"))
+    operator === 'strictEqual' &&
+    ((typeof actual === 'object' &&
+      actual !== null &&
+      typeof expected === 'object' &&
+      expected !== null) ||
+      (typeof actual === 'function' && typeof expected === 'function'))
   ) {
-    operator = "strictEqualObject";
+    operator = 'strictEqualObject';
   }
 
   // If "actual" and "expected" fit on a single line and they are not strictly
   // equal, check further special handling.
   if (
-    actualLines.length === 1 && expectedLines.length === 1 &&
+    actualLines.length === 1 &&
+    expectedLines.length === 1 &&
     actualLines[0] !== expectedLines[0]
   ) {
     const actualRaw = actualLines[0];
     const expectedRaw = expectedLines[0];
-    const inputLength = (actualRaw as string).length + (expectedRaw as string).length;
+    const inputLength =
+      (actualRaw as string).length + (expectedRaw as string).length;
     // If the character length of "actual" and "expected" together is less than
     // kMaxShortLength and if neither is an object and at least one of them is
     // not `zero`, use the strict equal comparison to visualize the output.
     if (inputLength <= kMaxShortLength) {
       if (
-        (typeof actual !== "object" || actual === null) &&
-        (typeof expected !== "object" || expected === null) &&
+        (typeof actual !== 'object' || actual === null) &&
+        (typeof expected !== 'object' || expected === null) &&
         (actual !== 0 || expected !== 0)
-      ) { // -0 === +0
-        return `${kReadableOperator[operator]}\n\n` +
-          `${actualLines[0]} !== ${expectedLines[0]}\n`;
+      ) {
+        // -0 === +0
+        return (
+          `${kReadableOperator[operator]}\n\n` +
+          `${actualLines[0]} !== ${expectedLines[0]}\n`
+        );
       }
-    } else if (operator !== "strictEqualObject") {
+    } else if (operator !== 'strictEqualObject') {
       // If the stderr is a tty and the input length is lower than the current
       // columns per line, add a mismatch indicator below the output. If it is
       // not a tty, use a default value of 80 characters.
@@ -145,7 +149,7 @@ export function createErrDiff(
         if (i > 2) {
           // Add position indicator for the first mismatch in case it is a
           // single line and the input length is less than the column length.
-          indicator = `\n  ${" ".repeat(i)}^`;
+          indicator = `\n  ${' '.repeat(i)}^`;
           i = 0;
         }
       }
@@ -176,7 +180,7 @@ export function createErrDiff(
   // E.g., assert.deepStrictEqual({ a: Symbol() }, { a: Symbol() })
   if (maxLines === 0) {
     // We have to get the result again. The lines were all removed before.
-    const actualLines = actualInspected.split("\n");
+    const actualLines = actualInspected.split('\n');
 
     // Only remove lines in case it makes sense to collapse those.
     if (actualLines.length > 50) {
@@ -186,7 +190,7 @@ export function createErrDiff(
       }
     }
 
-    return `${kReadableOperator['notIdentical']}\n\n${actualLines.join("\n")}\n`;
+    return `${kReadableOperator['notIdentical']}\n\n${actualLines.join('\n')}\n`;
   }
 
   // There were at least five identical lines at the end. Mark a couple of
@@ -195,14 +199,15 @@ export function createErrDiff(
     end = `\n${blue}...${defaultColor}${end}`;
     skipped = true;
   }
-  if (other !== "") {
+  if (other !== '') {
     end = `\n  ${other}${end}`;
-    other = "";
+    other = '';
   }
 
   let printedLines = 0;
   let identical = 0;
-  const msg = kReadableOperator[operator] +
+  const msg =
+    kReadableOperator[operator] +
     `\n${green}+ actual${defaultColor} ${red}- expected${defaultColor}`;
   const skippedMsg = ` ${blue}...${defaultColor} Lines skipped`;
 
@@ -253,8 +258,9 @@ export function createErrDiff(
       // If the lines diverge, specifically check for lines that only diverge by
       // a trailing comma. In that case it is actually identical and we should
       // mark it as such.
-      let divergingLines = actualLine !== expectedLine &&
-        (!(actualLine as string).endsWith(",") ||
+      let divergingLines =
+        actualLine !== expectedLine &&
+        (!(actualLine as string).endsWith(',') ||
           (actualLine as string).slice(0, -1) !== expectedLine);
       // If the expected line has a trailing comma but is otherwise identical,
       // add a comma at the end of the actual line. Otherwise the output could
@@ -267,11 +273,11 @@ export function createErrDiff(
       //
       if (
         divergingLines &&
-        (expectedLine as string).endsWith(",") &&
+        (expectedLine as string).endsWith(',') &&
         (expectedLine as string).slice(0, -1) === actualLine
       ) {
         divergingLines = false;
-        actualLine += ",";
+        actualLine += ',';
       }
       if (divergingLines) {
         // If more than two former lines are identical, print them. Collapse
@@ -305,7 +311,7 @@ export function createErrDiff(
         // Add all cached information to the result before adding other things
         // and reset the cache.
         res += other;
-        other = "";
+        other = '';
         identical++;
         // The very first identical line since the last diverging line is be
         // added to the result.
@@ -317,12 +323,14 @@ export function createErrDiff(
     }
     // Inspected object to big (Show ~50 rows max)
     if (printedLines > 50 && i < maxLines - 2) {
-      return `${msg}${skippedMsg}\n${res}\n${blue}...${defaultColor}${other}\n` +
-        `${blue}...${defaultColor}`;
+      return (
+        `${msg}${skippedMsg}\n${res}\n${blue}...${defaultColor}${other}\n` +
+        `${blue}...${defaultColor}`
+      );
     }
   }
 
-  return `${msg}${skipped ? skippedMsg : ""}\n${res}${other}${end}${indicator}`;
+  return `${msg}${skipped ? skippedMsg : ''}\n${res}${other}${end}${indicator}`;
 }
 
 export interface AssertionErrorDetailsDescriptor {
@@ -355,8 +363,8 @@ export class AssertionError extends Error {
 
   // deno-lint-ignore constructor-super
   constructor(options: AssertionErrorConstructorOptions) {
-    if (typeof options !== "object" || options === null) {
-      throw new ERR_INVALID_ARG_TYPE("options", "Object", options);
+    if (typeof options !== 'object' || options === null) {
+      throw new ERR_INVALID_ARG_TYPE('options', 'Object', options);
     }
     const {
       message,
@@ -366,10 +374,7 @@ export class AssertionError extends Error {
       // Compatibility with older versions.
       stackStartFunction,
     } = options;
-    let {
-      actual,
-      expected,
-    } = options;
+    let { actual, expected } = options;
 
     // TODO(schwarzkopfb): `stackTraceLimit` should be added to `ErrorConstructor` in
     // cli/dts/lib.deno.shared_globals.d.ts
@@ -383,32 +388,36 @@ export class AssertionError extends Error {
       // in a very close way to the original in case both sides are actually
       // instances of Error.
       if (
-        typeof actual === "object" && actual !== null &&
-        typeof expected === "object" && expected !== null &&
-        "stack" in actual && actual instanceof Error &&
-        "stack" in expected && expected instanceof Error
+        typeof actual === 'object' &&
+        actual !== null &&
+        typeof expected === 'object' &&
+        expected !== null &&
+        'stack' in actual &&
+        actual instanceof Error &&
+        'stack' in expected &&
+        expected instanceof Error
       ) {
         actual = copyError(actual);
         expected = copyError(expected);
       }
 
-      if (operator === "deepStrictEqual" || operator === "strictEqual") {
+      if (operator === 'deepStrictEqual' || operator === 'strictEqual') {
         super(createErrDiff(actual, expected, operator));
       } else if (
-        operator === "notDeepStrictEqual" ||
-        operator === "notStrictEqual"
+        operator === 'notDeepStrictEqual' ||
+        operator === 'notStrictEqual'
       ) {
         // In case the objects are equal but the operator requires unequal, show
         // the first object and say A equals B
         let base = kReadableOperator[operator];
-        const res = inspectValue(actual).split("\n");
+        const res = inspectValue(actual).split('\n');
 
         // In case "actual" is an object or a function, it should not be
         // reference equal.
         if (
-          operator === "notStrictEqual" &&
-          ((typeof actual === "object" && actual !== null) ||
-            typeof actual === "function")
+          operator === 'notStrictEqual' &&
+          ((typeof actual === 'object' && actual !== null) ||
+            typeof actual === 'function')
         ) {
           base = kReadableOperator['notStrictEqualObject'];
         }
@@ -423,15 +432,15 @@ export class AssertionError extends Error {
 
         // Only print a single input.
         if (res.length === 1) {
-          super(`${base}${res[0]!.length > 5 ? "\n\n" : " "}${res[0]}`);
+          super(`${base}${res[0]!.length > 5 ? '\n\n' : ' '}${res[0]}`);
         } else {
-          super(`${base}\n\n${res.join("\n")}\n`);
+          super(`${base}\n\n${res.join('\n')}\n`);
         }
       } else {
         let res = inspectValue(actual);
         let other = inspectValue(expected);
-        const knownOperator = kReadableOperator[operator ?? ""];
-        if (operator === "notDeepEqual" && res === other) {
+        const knownOperator = kReadableOperator[operator ?? ''];
+        if (operator === 'notDeepEqual' && res === other) {
           res = `${knownOperator}\n\n${res}`;
           if (res.length > 1024) {
             res = `${res.slice(0, 1021)}...`;
@@ -444,7 +453,7 @@ export class AssertionError extends Error {
           if (other.length > 512) {
             other = `${other.slice(0, 509)}...`;
           }
-          if (operator === "deepEqual") {
+          if (operator === 'deepEqual') {
             res = `${knownOperator}\n\n${res}\n\nshould loosely deep-equal\n\n`;
           } else {
             const newOp = kReadableOperator[`${operator}Unequal`];
@@ -462,15 +471,15 @@ export class AssertionError extends Error {
     (Error as ErrorWithStackTraceLimit).stackTraceLimit = limit;
 
     (this as any).generatedMessage = !message;
-    Object.defineProperty(this, "name", {
+    Object.defineProperty(this, 'name', {
       __proto__: null,
-      value: "AssertionError [ERR_ASSERTION]",
+      value: 'AssertionError [ERR_ASSERTION]',
       enumerable: false,
       writable: true,
       configurable: true,
       // deno-lint-ignore no-explicit-any
     } as any);
-    (this as any).code = "ERR_ASSERTION";
+    (this as any).code = 'ERR_ASSERTION';
 
     if (details) {
       (this as any).actual = undefined;
@@ -478,11 +487,11 @@ export class AssertionError extends Error {
       (this as any).operator = undefined;
 
       for (let i = 0; i < details.length; i++) {
-        this["message " + i] = (details[i] as any).message;
-        this["actual " + i] = (details[i] as any).actual;
-        this["expected " + i] = (details[i] as any).expected;
-        this["operator " + i] = (details[i] as any).operator;
-        this["stack trace " + i] = (details[i] as any).stack;
+        this['message ' + i] = (details[i] as any).message;
+        this['actual ' + i] = (details[i] as any).actual;
+        this['expected ' + i] = (details[i] as any).expected;
+        this['operator ' + i] = (details[i] as any).operator;
+        this['stack trace ' + i] = (details[i] as any).stack;
       }
     } else {
       (this as any).actual = actual;
@@ -495,7 +504,7 @@ export class AssertionError extends Error {
     // Create error message including the error code in the name.
     this.stack;
     // Reset the name.
-    this.name = "AssertionError";
+    this.name = 'AssertionError';
   }
 
   override toString() {
@@ -507,13 +516,13 @@ export class AssertionError extends Error {
     const tmpActual = (this as any).actual;
     const tmpExpected = (this as any).expected;
 
-    for (const name of ["actual", "expected"]) {
-      if (typeof this[name] === "string") {
+    for (const name of ['actual', 'expected']) {
+      if (typeof this[name] === 'string') {
         const value = this[name] as string;
-        const lines = value.split("\n");
+        const lines = value.split('\n');
         if (lines.length > 10) {
           lines.length = 10;
-          this[name] = `${lines.join("\n")}\n...`;
+          this[name] = `${lines.join('\n')}\n...`;
         } else if (value.length > 512) {
           this[name] = `${value.slice(512)}...`;
         }

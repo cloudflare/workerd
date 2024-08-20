@@ -2,52 +2,52 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import * as assert from 'node:assert'
+import * as assert from 'node:assert';
 
 // Test helpers, since I want everything to run in sequence but I don't
 // want to lose context about which assertion failed.
 const test = (fn) => ({
   async test(ctr, env) {
-    await fn(env.d1)
+    await fn(env.d1);
   },
-})
+});
 
 // Recurse through nested objects/arrays looking for 'anything' and deleting that
 // key/value from both objects. Gives us a way to get expect.toMatchObject behaviour
 // with only deepEqual
-const anything = Symbol('anything')
+const anything = Symbol('anything');
 const deleteAnything = (expected, actual) => {
   Object.entries(expected).forEach(([k, v]) => {
     if (v === anything) {
-      delete actual[k]
-      delete expected[k]
+      delete actual[k];
+      delete expected[k];
     } else if (typeof v === 'object' && typeof actual[k] === 'object') {
-      deleteAnything(expected[k], actual[k])
+      deleteAnything(expected[k], actual[k]);
     }
-  })
-}
+  });
+};
 
 const itShould = async (description, ...assertions) => {
   if (assertions.length % 2 !== 0)
-    throw new Error('itShould takes pairs of cb, expected args')
+    throw new Error('itShould takes pairs of cb, expected args');
 
   try {
     for (let i = 0; i < assertions.length; i += 2) {
-      const cb = assertions[i]
-      const expected = assertions[i + 1]
-      const actual = await cb()
-      deleteAnything(expected, actual)
+      const cb = assertions[i];
+      const expected = assertions[i + 1];
+      const actual = await cb();
+      deleteAnything(expected, actual);
       try {
-        assert.deepEqual(actual, expected)
+        assert.deepEqual(actual, expected);
       } catch (e) {
-        console.log(actual)
-        throw e
+        console.log(actual);
+        throw e;
       }
     }
   } catch (e) {
-    throw new Error(`TEST ERROR!\n❌ Failed to ${description}\n${e.message}`)
+    throw new Error(`TEST ERROR!\n❌ Failed to ${description}\n${e.message}`);
   }
-}
+};
 
 // Make it easy to specify only a the meta properties we're interested in
 const meta = (values) => ({
@@ -60,7 +60,7 @@ const meta = (values) => ({
   rows_read: anything,
   rows_written: anything,
   ...values,
-})
+});
 
 export const test_d1_api = test(async (DB) => {
   await itShould(
@@ -77,7 +77,7 @@ export const test_d1_api = test(async (DB) => {
         );`
       ).run(),
     { success: true, meta: anything }
-  )
+  );
 
   await itShould(
     'select an empty set',
@@ -87,19 +87,19 @@ export const test_d1_api = test(async (DB) => {
       results: [],
       meta: meta({ changed_db: false }),
     }
-  )
+  );
 
   await itShould(
     'have no results for .run()',
     () => DB.prepare(`SELECT * FROM users;`).run(),
     { success: true, meta: anything }
-  )
+  );
 
   await itShould(
     'delete no rows ok',
     () => DB.prepare(`DELETE FROM users;`).run(),
     { success: true, meta: anything }
-  )
+  );
 
   await itShould(
     'insert a few rows with a returning statement',
@@ -132,13 +132,13 @@ export const test_d1_api = test(async (DB) => {
       ],
       meta: anything,
     }
-  )
+  );
 
   await itShould(
     'delete two rows ok',
     () => DB.prepare(`DELETE FROM users;`).run(),
     { success: true, meta: anything }
-  )
+  );
 
   // In an earlier implementation, .run() called a different endpoint that threw on RETURNING clauses.
   await itShould(
@@ -156,11 +156,11 @@ export const test_d1_api = test(async (DB) => {
       success: true,
       meta: anything,
     }
-  )
+  );
 
   // Results format tests
 
-  const select_1 = DB.prepare(`select 1;`)
+  const select_1 = DB.prepare(`select 1;`);
   await itShould(
     'return simple results for select 1',
     () => select_1.all(),
@@ -175,9 +175,9 @@ export const test_d1_api = test(async (DB) => {
     { 1: 1 },
     () => select_1.first('1'),
     1
-  )
+  );
 
-  const select_all = DB.prepare(`SELECT * FROM users;`)
+  const select_all = DB.prepare(`SELECT * FROM users;`);
   await itShould(
     'return all users',
     () => select_all.all(),
@@ -216,9 +216,9 @@ export const test_d1_api = test(async (DB) => {
     },
     () => select_all.first('name'),
     'Albert Ross'
-  )
+  );
 
-  const select_one = DB.prepare(`SELECT * FROM users WHERE user_id = ?;`)
+  const select_one = DB.prepare(`SELECT * FROM users WHERE user_id = ?;`);
 
   await itShould(
     'return the first user when bound with user_id = 1',
@@ -248,7 +248,7 @@ export const test_d1_api = test(async (DB) => {
     },
     () => select_one.bind(1).first('name'),
     'Albert Ross'
-  )
+  );
 
   await itShould(
     'return the second user when bound with user_id = 2',
@@ -278,7 +278,7 @@ export const test_d1_api = test(async (DB) => {
     },
     () => select_one.bind(2).first('name'),
     'Al Dente'
-  )
+  );
 
   await itShould(
     'return the results of two commands with batch',
@@ -311,7 +311,7 @@ export const test_d1_api = test(async (DB) => {
         success: true,
       },
     ]
-  )
+  );
 
   await itShould(
     'allow binding all types of parameters',
@@ -339,8 +339,8 @@ export const test_d1_api = test(async (DB) => {
       DB.prepare(`SELECT count(1) as count FROM users WHERE land_based = ?`)
         .bind(2)
         .first('count'),
-    0,
-  )
+    0
+  );
 
   await itShould(
     'create two tables with overlapping column names',
@@ -399,7 +399,7 @@ export const test_d1_api = test(async (DB) => {
         }),
       },
     ]
-  )
+  );
 
   await itShould(
     'still sadly lose data for duplicate columns in a join',
@@ -421,7 +421,7 @@ export const test_d1_api = test(async (DB) => {
         rows_written: 0,
       }),
     }
-  )
+  );
 
   await itShould(
     'not lose data for duplicate columns in a join using raw()',
@@ -434,7 +434,7 @@ export const test_d1_api = test(async (DB) => {
       [4, 5, 6, 'D', 'E', 'F'],
       [4, 5, 6, 'G', 'H', 'I'],
     ]
-  )
+  );
 
   await itShould(
     'add columns using  .raw({ columnNames: true })',
@@ -448,7 +448,7 @@ export const test_d1_api = test(async (DB) => {
       [4, 5, 6, 'D', 'E', 'F'],
       [4, 5, 6, 'G', 'H', 'I'],
     ]
-  )
+  );
 
   await itShould(
     'not add columns using  .raw({ columnNames: false })',
@@ -461,7 +461,7 @@ export const test_d1_api = test(async (DB) => {
       [4, 5, 6, 'D', 'E', 'F'],
       [4, 5, 6, 'G', 'H', 'I'],
     ]
-  )
+  );
 
   await itShould(
     'return 0 rows_written for IN clauses',
@@ -474,5 +474,5 @@ export const test_d1_api = test(async (DB) => {
       results: [{ c: 'A', d: 'B', e: 'C' }],
       meta: meta({ rows_read: 3, rows_written: 0 }),
     }
-  )
-})
+  );
+});

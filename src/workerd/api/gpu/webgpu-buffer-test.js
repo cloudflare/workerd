@@ -1,4 +1,4 @@
-import { deepEqual, ok, equal } from "node:assert";
+import { deepEqual, ok, equal } from 'node:assert';
 
 export class DurableObjectExample {
   constructor(state) {
@@ -20,7 +20,7 @@ export class DurableObjectExample {
     );
     const emptyBufferContents = Array(bufferSize).fill(0);
     const gpuWriteBuffer = device.createBuffer({
-      label: "gpuWriteBuffer",
+      label: 'gpuWriteBuffer',
       mappedAtCreation: true,
       size: bufferSize,
       usage: GPUBufferUsage.MAP_WRITE | GPUBufferUsage.COPY_SRC,
@@ -31,7 +31,7 @@ export class DurableObjectExample {
 
     deepEqual(gpuWriteBuffer.usage, 6);
 
-    deepEqual(gpuWriteBuffer.mapState, "mapped");
+    deepEqual(gpuWriteBuffer.mapState, 'mapped');
 
     const arrayBuffer = gpuWriteBuffer.getMappedRange();
     ok(arrayBuffer);
@@ -44,7 +44,7 @@ export class DurableObjectExample {
 
     // Get a GPU buffer for reading in an unmapped state.
     const gpuReadBuffer = device.createBuffer({
-      label: "gpuReadBuffer",
+      label: 'gpuReadBuffer',
       mappedAtCreation: false,
       size: bufferSize,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -96,7 +96,7 @@ export class DurableObjectExample {
     const textureSize = 64;
     const textureDesc = {
       size: { width: textureSize, height: textureSize, depthOrArrayLayers: 1 },
-      format: "rgba8unorm-srgb",
+      format: 'rgba8unorm-srgb',
       usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
     };
     const texture = device.createTexture(textureDesc);
@@ -149,16 +149,16 @@ export class DurableObjectExample {
       4
     );
 
-    return new Response("OK");
+    return new Response('OK');
   }
 }
 
 export const buffer_mapping = {
   async test(ctrl, env, ctx) {
-    let id = env.ns.idFromName("A");
+    let id = env.ns.idFromName('A');
     let obj = env.ns.get(id);
-    let res = await obj.fetch("http://foo/test");
+    let res = await obj.fetch('http://foo/test');
     let text = await res.text();
-    equal(text, "OK");
+    equal(text, 'OK');
   },
 };

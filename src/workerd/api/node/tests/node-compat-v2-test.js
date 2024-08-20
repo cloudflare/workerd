@@ -26,7 +26,7 @@ export const nodeJsExpectedGlobals = {
     assert.strictEqual(process, globalThis.process);
 
     assert.strictEqual(global, globalThis);
-  }
+  },
 };
 
 export const nodeJsGetBuiltins = {
@@ -35,7 +35,7 @@ export const nodeJsGetBuiltins = {
     const { default: fs } = await import('node:fs');
     const { default: path } = await import('node:path');
 
-    await import ('node:path');
+    await import('node:path');
 
     // But process.getBuiltinModule should always return the built-in module.
     const builtInPath = process.getBuiltinModule('node:path');
@@ -62,18 +62,20 @@ export const nodeJsGetBuiltins = {
 
     const socket = await import('cloudflare:sockets');
     assert.strictEqual(process.getBuiltinModule('cloudflare:sockets'), socket);
-  }
+  },
 };
 
 export const nodeJsEventsExports = {
   async test() {
     // Expected node:events exports should be present
-    const { EventEmitter, getMaxListeners, usingDomains } = await import('node:events');
+    const { EventEmitter, getMaxListeners, usingDomains } = await import(
+      'node:events'
+    );
     assert.notEqual(getMaxListeners, undefined);
     assert.strictEqual(getMaxListeners, EventEmitter.getMaxListeners);
     assert.notEqual(usingDomains, undefined);
     assert.strictEqual(usingDomains, EventEmitter.usingDomains);
-  }
+  },
 };
 
 export const nodeJsBufferExports = {
@@ -86,29 +88,31 @@ export const nodeJsBufferExports = {
     assert.strictEqual(btoa, globalThis.btoa);
     assert.notEqual(Blob, undefined);
     assert.strictEqual(Blob, globalThis.Blob);
-  }
+  },
 };
 
 export const nodeJsSetImmediate = {
   async test() {
     const als = new AsyncLocalStorage();
     const { promise, resolve } = Promise.withResolvers();
-    als.run('abc', () => setImmediate((a) => {
-      assert.strictEqual(als.getStore(), 'abc');
-      resolve(a);
-    }, 1));
+    als.run('abc', () =>
+      setImmediate((a) => {
+        assert.strictEqual(als.getStore(), 'abc');
+        resolve(a);
+      }, 1)
+    );
     assert.strictEqual(await promise, 1);
 
     const i = setImmediate(() => {
       throw new Error('should not have fired');
     });
-    i[Symbol.dispose]();  // Calls clear immediate
-    i[Symbol.dispose]();  // Should be a no-op
+    i[Symbol.dispose](); // Calls clear immediate
+    i[Symbol.dispose](); // Should be a no-op
 
     const i2 = setImmediate(() => {
       throw new Error('should not have fired');
     });
     clearImmediate(i2);
     clearImmediate(i2); // clearing twice works fine
-  }
+  },
 };

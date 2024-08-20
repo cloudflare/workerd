@@ -4,9 +4,7 @@
 //
 /* eslint-disable */
 
-import {
-  ERR_METHOD_NOT_IMPLEMENTED
-} from 'node-internal:internal_errors';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
 export const getRandomValues = crypto.getRandomValues;
 export const subtle = crypto.subtle;
@@ -47,21 +45,11 @@ import {
   Hmac,
 } from 'node-internal:crypto_hash';
 
-import {
-  hkdf,
-  hkdfSync,
-} from 'node-internal:crypto_hkdf';
+import { hkdf, hkdfSync } from 'node-internal:crypto_hkdf';
 
-import {
-  pbkdf2,
-  pbkdf2Sync,
-  ArrayLike,
-} from 'node-internal:crypto_pbkdf2';
+import { pbkdf2, pbkdf2Sync, ArrayLike } from 'node-internal:crypto_pbkdf2';
 
-import {
-  scrypt,
-  scryptSync,
-} from 'node-internal:crypto_scrypt';
+import { scrypt, scryptSync } from 'node-internal:crypto_scrypt';
 
 import {
   KeyObject,
@@ -79,9 +67,7 @@ import {
 
 import { Certificate } from 'node-internal:crypto_spkac';
 
-import {
-  X509Certificate,
-} from 'node-internal:crypto_x509';
+import { X509Certificate } from 'node-internal:crypto_x509';
 
 export {
   // DH
@@ -136,9 +122,10 @@ export {
   Certificate,
   // X509
   X509Certificate,
-}
+};
 
 export function getCiphers() {
+  // prettier-ignore
   return ["aes-128-cbc", "aes-192-cbc", "aes-256-cbc", "aes-128-ctr", "aes-192-ctr", "aes-256-ctr",
   "aes-128-ecb", "aes-192-ecb", "aes-256-ecb", "aes-128-gcm", "aes-192-gcm", "aes-256-gcm",
   "aes-128-ofb", "aes-192-ofb", "aes-256-ofb", "des-ecb", "des-ede", "des-ede-cbc", "rc2-cbc"];
@@ -147,12 +134,16 @@ export function getCiphers() {
 export function getCurves() {
   // Hardcoded list of supported curves. Note that prime256v1 is equivalent to secp256r1, we follow
   // OpenSSL's and bssl's nomenclature here.
+
+  // prettier-ignore
   return ['secp224r1', 'prime256v1', 'secp384r1', 'secp521r1'];
 }
 
 export function getHashes() {
   // Hardcoded list of hashes supported in boringssl, node's approach looks pretty clunky. This is
   // expected to change infrequently based of bssl's stability-focused approach.
+
+  // prettier-ignore
   return ['md4', 'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'md5-sha1', 'RSA-MD5',
           'RSA-SHA1', 'RSA-SHA224', 'RSA-SHA256', 'RSA-SHA384', 'RSA-SHA512', 'DSA-SHA',
           'DSA-SHA1', 'ecdsa-with-SHA1'];
@@ -165,11 +156,11 @@ export function secureHeapUsed() {
     used: 0,
     utilization: 0,
     min: 0,
-  }
+  };
 }
 
 // We do not allow users to set the engine used.
-export function setEngine(_1 : string, _2?: number) {
+export function setEngine(_1: string, _2?: number) {
   throw new ERR_METHOD_NOT_IMPLEMENTED('setEngine');
 }
 
@@ -180,7 +171,9 @@ export function setFips(_: boolean) {
 
 // We always run in FIPS mode.
 export const fips = true;
-export function getFips() { return fips; }
+export function getFips() {
+  return fips;
+}
 
 export default {
   // DH
@@ -236,8 +229,12 @@ export default {
   // Fips
   getFips,
   setFips,
-  get fips() { return getFips(); },
-  set fips(_: boolean) { setFips(_); },
+  get fips() {
+    return getFips();
+  },
+  set fips(_: boolean) {
+    setFips(_);
+  },
   // WebCrypto
   subtle,
   webcrypto,
@@ -326,4 +323,3 @@ export default {
 // * WebCrypto
 //   * [x] crypto.subtle
 //   * [x] crypto.webcrypto
-

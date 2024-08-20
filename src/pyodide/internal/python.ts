@@ -1,24 +1,24 @@
 Error.stackTraceLimit = Infinity;
-import { enterJaegerSpan } from "pyodide-internal:jaeger";
+import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import {
   TRANSITIVE_REQUIREMENTS,
   SITE_PACKAGES,
   adjustSysPath,
   mountLib,
-} from "pyodide-internal:setupPackages";
-import { reportError } from "pyodide-internal:util";
+} from 'pyodide-internal:setupPackages';
+import { reportError } from 'pyodide-internal:util';
 import {
   SHOULD_RESTORE_SNAPSHOT,
   finishSnapshotSetup,
   getSnapshotSettings,
   maybeSetupSnapshotUpload,
   restoreSnapshot,
-} from "pyodide-internal:snapshot";
+} from 'pyodide-internal:snapshot';
 import {
   entropyMountFiles,
   entropyAfterRuntimeInit,
   entropyBeforeTopLevel,
-} from "pyodide-internal:topLevelEntropy/lib";
+} from 'pyodide-internal:topLevelEntropy/lib';
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -32,8 +32,8 @@ import {
  * _createPyodideModule and pyodideWasmModule together are produced by the
  * Emscripten linker
  */
-import { _createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
-import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
+import { _createPyodideModule } from 'pyodide-internal:generated/pyodide.asm';
+import pyodideWasmModule from 'pyodide-internal:generated/pyodide.asm.wasm';
 
 /**
  * The Python and Pyodide stdlib zipped together. The zip format is convenient
@@ -44,7 +44,7 @@ import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
  * with a bunch of C libs to unpack various archive formats, but they need stuff
  * in this zip file to initialize their runtime state.
  */
-import stdlib from "pyodide-internal:generated/python_stdlib.zip";
+import stdlib from 'pyodide-internal:generated/python_stdlib.zip';
 
 /**
  * A hook that the Emscripten runtime calls to perform the WebAssembly
@@ -62,16 +62,13 @@ import stdlib from "pyodide-internal:generated/python_stdlib.zip";
  */
 function instantiateWasm(
   wasmImports: WebAssembly.Imports,
-  successCallback: (
-    inst: WebAssembly.Instance,
-    mod: WebAssembly.Module,
-  ) => void,
+  successCallback: (inst: WebAssembly.Instance, mod: WebAssembly.Module) => void
 ): WebAssembly.Exports {
   (async function () {
     // Instantiate pyodideWasmModule with wasmImports
     const instance = await WebAssembly.instantiate(
       pyodideWasmModule,
-      wasmImports,
+      wasmImports
     );
     successCallback(instance, pyodideWasmModule);
   })();
@@ -107,7 +104,7 @@ function prepareFileSystem(Module: Module): void {
     Module.FS.writeFile(
       `/lib/python${pymajor}${pyminor}.zip`,
       new Uint8Array(stdlib),
-      { canOwn: true },
+      { canOwn: true }
     );
     Module.FS.mkdirTree(Module.API.config.env.HOME);
   } catch (e) {
@@ -129,18 +126,18 @@ function setEnv(Module: Module): void {
  */
 function getEmscriptenSettings(
   lockfile: PackageLock,
-  indexURL: string,
+  indexURL: string
 ): EmscriptenSettings {
   const config = {
     // jsglobals is used for the js module.
     jsglobals: globalThis,
     // environment variables go here
     env: {
-      HOME: "/session",
+      HOME: '/session',
       // We don't have access to entropy at startup so we cannot support hash
       // randomization. Setting `PYTHONHASHSEED` disables it. See further
       // discussion in topLevelEntropy/entropy_patches.py
-      PYTHONHASHSEED: "111",
+      PYTHONHASHSEED: '111',
     },
     // This is the index that we use as the base URL to fetch the wheels.
     indexURL,
@@ -171,7 +168,7 @@ function getEmscriptenSettings(
  * Returns the instantiated emscriptenModule object.
  */
 async function instantiateEmscriptenModule(
-  emscriptenSettings: EmscriptenSettings,
+  emscriptenSettings: EmscriptenSettings
 ): Promise<Module> {
   try {
     // Force Emscripten to feature detect the way we want
@@ -190,7 +187,7 @@ async function instantiateEmscriptenModule(
     const emscriptenModule = await p;
     return emscriptenModule;
   } catch (e) {
-    console.warn("Error in instantiateEmscriptenModule");
+    console.warn('Error in instantiateEmscriptenModule');
     reportError(e);
   }
 }
@@ -221,19 +218,19 @@ async function prepareWasmLinearMemory(Module: Module): Promise<void> {
 
 export async function loadPyodide(
   lockfile: PackageLock,
-  indexURL: string,
+  indexURL: string
 ): Promise<Pyodide> {
   const emscriptenSettings = getEmscriptenSettings(lockfile, indexURL);
-  const Module = await enterJaegerSpan("instantiate_emscripten", () =>
-    instantiateEmscriptenModule(emscriptenSettings),
+  const Module = await enterJaegerSpan('instantiate_emscripten', () =>
+    instantiateEmscriptenModule(emscriptenSettings)
   );
-  await enterJaegerSpan("prepare_wasm_linear_memory", () =>
-    prepareWasmLinearMemory(Module),
+  await enterJaegerSpan('prepare_wasm_linear_memory', () =>
+    prepareWasmLinearMemory(Module)
   );
   maybeSetupSnapshotUpload(Module);
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
-  await enterJaegerSpan("finalize_bootstrap", Module.API.finalizeBootstrap);
+  await enterJaegerSpan('finalize_bootstrap', Module.API.finalizeBootstrap);
   const pyodide = Module.API.public_api;
   finishSnapshotSetup(pyodide);
   return pyodide;

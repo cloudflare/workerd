@@ -26,15 +26,11 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import {
-  pipeline,
-} from 'node-internal:streams_pipeline';
-import {
-  Duplex,
-} from 'node-internal:streams_duplex';
+import { pipeline } from 'node-internal:streams_pipeline';
+import { Duplex } from 'node-internal:streams_duplex';
 import {
   Readable as ReadableConstructor,
-  from
+  from,
 } from 'node-internal:streams_readable';
 import {
   isNodeStream,
@@ -69,10 +65,18 @@ export function compose(...streams) {
       continue;
     }
     if (n < streams.length - 1 && !isReadable(streams[n])) {
-      throw new ERR_INVALID_ARG_VALUE(`streams[${n}]`, orgStreams[n], 'must be readable');
+      throw new ERR_INVALID_ARG_VALUE(
+        `streams[${n}]`,
+        orgStreams[n],
+        'must be readable'
+      );
     }
     if (n > 0 && !isWritable(streams[n])) {
-      throw new ERR_INVALID_ARG_VALUE(`streams[${n}]`, orgStreams[n], 'must be writable');
+      throw new ERR_INVALID_ARG_VALUE(
+        `streams[${n}]`,
+        orgStreams[n],
+        'must be writable'
+      );
     }
   }
   let ondrain;
@@ -101,10 +105,18 @@ export function compose(...streams) {
   // See, https://github.com/nodejs/node/pull/33515.
   d = new Duplex({
     // TODO (ronag): highWaterMark?
-    writableObjectMode: !!(head !== null && head !== undefined && head.writableObjectMode),
-    readableObjectMode: !!(tail !== null && tail !== undefined && tail.writableObjectMode),
+    writableObjectMode: !!(
+      head !== null &&
+      head !== undefined &&
+      head.writableObjectMode
+    ),
+    readableObjectMode: !!(
+      tail !== null &&
+      tail !== undefined &&
+      tail.writableObjectMode
+    ),
     writable,
-    readable
+    readable,
   });
   if (writable) {
     const w = head;
@@ -175,6 +187,6 @@ export function compose(...streams) {
   return d;
 }
 
-ReadableConstructor.prototype.compose = function(...streams) {
+ReadableConstructor.prototype.compose = function (...streams) {
   return compose(this, ...streams);
 };

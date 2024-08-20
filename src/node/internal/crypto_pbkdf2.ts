@@ -30,11 +30,9 @@
 
 import { default as cryptoImpl } from 'node-internal:crypto';
 type ArrayLike = cryptoImpl.ArrayLike;
-export {ArrayLike};
+export { ArrayLike };
 
-import {
-    Buffer,
-} from 'node-internal:internal_buffer';
+import { Buffer } from 'node-internal:internal_buffer';
 
 import {
   validateInt32,
@@ -42,41 +40,74 @@ import {
   validateString,
 } from 'node-internal:validators';
 
-import {
-  getArrayBufferOrView,
-} from 'node-internal:crypto_util';
+import { getArrayBufferOrView } from 'node-internal:crypto_util';
 
-export function pbkdf2Sync(password: ArrayLike, salt: ArrayLike, iterations: number,
-                           keylen: number, digest: string): Buffer {
-  ({ password, salt, iterations, keylen, digest } =
-    check(password, salt, iterations, keylen, digest));
+export function pbkdf2Sync(
+  password: ArrayLike,
+  salt: ArrayLike,
+  iterations: number,
+  keylen: number,
+  digest: string
+): Buffer {
+  ({ password, salt, iterations, keylen, digest } = check(
+    password,
+    salt,
+    iterations,
+    keylen,
+    digest
+  ));
 
-  const result = cryptoImpl.getPbkdf(password, salt, iterations, keylen, digest);
+  const result = cryptoImpl.getPbkdf(
+    password,
+    salt,
+    iterations,
+    keylen,
+    digest
+  );
   return Buffer.from(result);
 }
 
-export type Pbkdf2Callback = (err?: Error|null, result?: Buffer) => void;
-export function pbkdf2(password: ArrayLike, salt: ArrayLike, iterations: number, keylen: number,
-                       digest: string, callback: Pbkdf2Callback): void {
+export type Pbkdf2Callback = (err?: Error | null, result?: Buffer) => void;
+export function pbkdf2(
+  password: ArrayLike,
+  salt: ArrayLike,
+  iterations: number,
+  keylen: number,
+  digest: string,
+  callback: Pbkdf2Callback
+): void {
   if (typeof digest === 'function') {
     // Appease node test cases
     validateString(undefined, 'digest');
   }
   validateFunction(callback, 'callback');
-  ({ password, salt, iterations, keylen, digest } =
-    check(password, salt, iterations, keylen, digest));
+  ({ password, salt, iterations, keylen, digest } = check(
+    password,
+    salt,
+    iterations,
+    keylen,
+    digest
+  ));
 
   new Promise<ArrayBuffer>((res, rej) => {
     try {
       res(cryptoImpl.getPbkdf(password, salt, iterations, keylen, digest));
-    } catch(err) {
+    } catch (err) {
       rej(err);
     }
-  }).then((val) => callback(null, Buffer.from(val)), (err) => callback(err));
+  }).then(
+    (val) => callback(null, Buffer.from(val)),
+    (err) => callback(err)
+  );
 }
 
-function check(password: ArrayLike|ArrayBufferView, salt: ArrayLike|ArrayBufferView, iterations: number, keylen: number,
-               digest: string): any {
+function check(
+  password: ArrayLike | ArrayBufferView,
+  salt: ArrayLike | ArrayBufferView,
+  iterations: number,
+  keylen: number,
+  digest: string
+): any {
   validateString(digest, 'digest');
 
   password = getArrayBufferOrView(password, 'password');
