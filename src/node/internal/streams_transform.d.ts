@@ -287,6 +287,8 @@ export class Duplex extends Readable implements Writable {
   readonly writableLength: number;
   readonly writableObjectMode: boolean;
   readonly writableCorked: number;
+  readonly destroyed: boolean;
+
   allowHalfOpen: boolean;
   constructor(opts?: DuplexOptions);
   _write(
@@ -465,6 +467,7 @@ interface TransformOptions extends DuplexOptions {
 type TransformCallback = (error?: Error | null, data?: any) => void;
 
 export class Transform extends Duplex {
+  readonly destroyed: boolean;
   constructor(opts?: TransformOptions);
   _transform(
     chunk: any,

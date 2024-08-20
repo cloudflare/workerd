@@ -13,7 +13,7 @@ async function* readLines(
 
   // @ts-expect-error must have a '[Symbol.asyncIterator]()' method
   for await (const chunk of stream) {
-    const full = partial + chunk;
+    const full = partial + (chunk as string);
     for (const char of full) {
       if (char === '\n') {
         yield full.substring(start, end);
@@ -68,13 +68,15 @@ export class PipelineTransformImpl extends entrypoints.WorkerEntrypoint {
 
   // called by the dispatcher which then calls the subclass methods
   // @ts-expect-error thinks ping is never used
-  private async _ping(): Promise<void> {
+  private _ping(): Promise<void> {
     // making sure the function was overriden by an implementing subclass
     if (this.transformJson !== PipelineTransformImpl.prototype.transformJson) {
-      return await Promise.resolve(); // eslint
+      return Promise.resolve();
     } else {
-      throw new Error(
-        'the transformJson method must be overridden by the PipelineTransform subclass'
+      return Promise.reject(
+        new Error(
+          'the transformJson method must be overridden by the PipelineTransform subclass'
+        )
       );
     }
   }
@@ -92,16 +94,18 @@ export class PipelineTransformImpl extends entrypoints.WorkerEntrypoint {
     this.#initalized = true;
 
     switch (this.#batch.format) {
-      case Format.JSON_STREAM:
+      case Format.JSON_STREAM: {
         const data = await this.#readJsonStream();
         const transformed = await this.transformJson(data);
         return this.#sendJson(transformed);
+      }
       default:
         throw new Error('unsupported batch format');
     }
   }
 
   async #readJsonStream(): Promise<object[]> {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (this.#batch!.format !== Format.JSON_STREAM) {
       throw new Error(`expected JSON_STREAM not ${this.#batch!.format}`);
     }

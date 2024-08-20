@@ -113,6 +113,7 @@ function processCallback(this: ZlibHandleType): void {
     assert.strictEqual(have, 0, 'have should not go down');
   }
 
+  /* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */
   if (self.destroyed) {
     this.cb();
     return;
@@ -254,11 +255,12 @@ function processChunkSync(
   let offset = self._outOffset;
   const chunkSize = self._chunkSize;
 
-  let error;
+  let error: Error | undefined;
   self.on('error', function onError(er) {
     error = er;
   });
 
+  /* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */
   while (true) {
     ok(handle, 'Handle should have been defined');
     handle.writeSync(
@@ -371,6 +373,7 @@ export class ZlibBase extends Transform {
       flushBoundIdx = FLUSH_BOUND_IDX_BROTLI;
     }
 
+    /* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */
     if (opts) {
       if (opts.chunkSize != null) {
         chunkSize = opts.chunkSize;
@@ -430,7 +433,7 @@ export class ZlibBase extends Transform {
     this._defaultFlushFlag = flush;
     this._finishFlushFlag = finishFlush;
     this._defaultFullFlushFlag = fullFlush;
-    this._info = Boolean(opts?.info);
+    this._info = Boolean(opts.info);
     this._maxOutputLength = maxOutputLength;
   }
 
@@ -684,7 +687,7 @@ export class Zlib extends ZlibBase {
   #paramsAfterFlushCallback(
     level: number,
     strategy: number,
-    callback: () => void
+    callback?: () => void
   ): void {
     ok(this._handle, 'zlib binding closed');
     this._handle.params(level, strategy);

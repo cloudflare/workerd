@@ -108,11 +108,7 @@ class D1DatabaseWithSessionAPI extends D1Database {
     constraintOrToken: D1SessionCommitTokenOrConstraint | null | undefined
   ): D1DatabaseSession {
     constraintOrToken = constraintOrToken?.trim();
-    if (
-      constraintOrToken === null ||
-      constraintOrToken === undefined ||
-      constraintOrToken === ''
-    ) {
+    if (constraintOrToken == null || constraintOrToken === '') {
       constraintOrToken = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
     }
     return new D1DatabaseSession(this.fetcher, constraintOrToken);
@@ -181,6 +177,7 @@ class D1DatabaseSession {
     switch (this.commitTokenOrConstraint) {
       // First to any replica, and then anywhere that satisfies the commit token.
       case D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED:
+        return null;
       // First to primary, and then anywhere that satisfies the commit token.
       case D1_SESSION_CONSTRAINT_FIRST_PRIMARY:
         return null;
@@ -449,7 +446,7 @@ class D1PreparedStatement {
 
     const firstResult = results[0]!;
     if (colName !== undefined) {
-      if (hasResults && firstResult[colName] === undefined) {
+      if (firstResult[colName] === undefined) {
         throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
           cause: new Error('Column not found'),
         });
@@ -460,6 +457,7 @@ class D1PreparedStatement {
     }
   }
 
+  /* eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters */
   public async run<T = Record<string, unknown>>(): Promise<D1Response> {
     return firstIfArray(
       await this.dbSession._sendOrThrow<T>(
@@ -554,12 +552,12 @@ function mapD1Result<T>(result: D1UpstreamResponse<T>): D1UpstreamResponse<T> {
   return result.error
     ? {
         success: false,
-        meta: result.meta || {},
+        meta: result.meta,
         error: result.error,
       }
     : {
         success: true,
-        meta: result.meta || {},
+        meta: result.meta,
         ...('results' in result ? { results: result.results } : {}),
       };
 }

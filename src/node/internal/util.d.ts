@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/ban-types */
 
 export abstract class MIMEType {
   public constructor(input: string);
@@ -74,11 +73,12 @@ export type TypedArray =
 export function isArrayBufferView(value: unknown): value is ArrayBufferView;
 export function isArgumentsObject(value: unknown): value is IArguments;
 export function isArrayBuffer(value: unknown): value is ArrayBuffer;
+/* eslint-disable-next-line @typescript-eslint/no-unsafe-function-type */
 export function isAsyncFunction(value: unknown): value is Function;
 export function isBigInt64Array(value: unknown): value is BigInt64Array;
-export function isBigIntObject(value: unknown): value is BigInt;
+export function isBigIntObject(value: unknown): value is bigint;
 export function isBigUint64Array(value: unknown): value is BigUint64Array;
-export function isBooleanObject(value: unknown): value is Boolean;
+export function isBooleanObject(value: unknown): value is boolean;
 export function isDataView(value: unknown): value is DataView;
 export function isDate(value: unknown): value is Date;
 export function isExternal(value: unknown): boolean;
@@ -95,7 +95,7 @@ export function isMapIterator(
 ): value is IterableIterator<unknown>;
 export function isModuleNamespaceObject(value: unknown): boolean;
 export function isNativeError(value: unknown): value is Error;
-export function isNumberObject(value: unknown): value is Number;
+export function isNumberObject(value: unknown): value is number;
 export function isPromise(value: unknown): value is Promise<unknown>;
 export function isProxy(value: unknown): boolean;
 export function isRegExp(value: unknown): value is RegExp;
@@ -104,8 +104,8 @@ export function isSetIterator(
   value: unknown
 ): value is IterableIterator<unknown>;
 export function isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
-export function isStringObject(value: unknown): value is String;
-export function isSymbolObject(value: unknown): value is Symbol;
+export function isStringObject(value: unknown): value is string;
+export function isSymbolObject(value: unknown): value is symbol;
 export function isTypedArray(value: unknown): value is TypedArray;
 export function isUint8Array(value: unknown): value is Uint8Array;
 export function isUint8ClampedArray(value: unknown): value is Uint8ClampedArray;
@@ -118,6 +118,6 @@ export function isAnyArrayBuffer(
 ): value is ArrayBuffer | SharedArrayBuffer;
 export function isBoxedPrimitive(
   value: unknown
-): value is Number | String | Boolean | BigInt | Symbol;
+): value is number | string | boolean | bigint | symbol;
 
 export function getBuiltinModule(id: string): any;

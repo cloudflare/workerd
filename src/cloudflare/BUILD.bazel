@@ -2,7 +2,7 @@ load("@workerd//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
 wd_ts_bundle(
     name = "cloudflare",
-    eslintrc_json = ".eslintrc.json",
+    eslintrc_json = "eslint.config.mjs",
     import_name = "cloudflare",
     internal_modules = glob(
         [
