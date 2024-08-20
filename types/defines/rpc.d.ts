@@ -195,7 +195,7 @@ declare module "cloudflare:workers" {
     webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
   }
 
-  export type DurationLabel =
+  export type WorkflowDurationLabel =
     | "second"
     | "minute"
     | "hour"
@@ -203,14 +203,27 @@ declare module "cloudflare:workers" {
     | "week"
     | "month"
     | "year";
-  export type SleepDuration = `${number} ${DurationLabel}${"s" | ""}` | number;
 
-  type WorkflowStep = {
+  export type WorkflowSleepDuration = `${number} ${WorkflowDurationLabel}${"s" | ""}` | number;
+
+  export type WorkflowBackoff = 'constant' | 'linear' | 'exponential';
+
+  export type WorkflowStepConfig = {
+    retries?: {
+      limit: number;
+      delay: string | number;
+      backoff?: WorkflowBackoff;
+    };
+    timeout?: string | number;
+  };
+
+  export type WorkflowStep = {
     do: <T extends Rpc.Serializable>(
       name: string,
-      callback: () => Promise<T>
+      callback: () => Promise<T>,
+	    config?: WorkflowStepConfig,
     ) => Promise<T>;
-    sleep: (name: string, duration: SleepDuration) => void | Promise<void>;
+    sleep: (name: string, duration: WorkflowSleepDuration) => void | Promise<void>;
   };
 
   export abstract class Workflow<
