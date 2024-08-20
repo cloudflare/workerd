@@ -1,0 +1,18 @@
+sh_test(
+    name = "helloworld_compile_test",
+    size = "small",
+    srcs = ["compile-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location //samples:helloworld/config.capnp)",
+        "$(location compile-helloworld-test.ok)",
+    ],
+    data = [
+        "compile-helloworld-test.ok",
+        "//src/workerd/server:workerd",
+        "//samples:helloworld/config.capnp",
+        "//samples:helloworld/worker.js",
+    ],
+    tags = ["no-qemu"],
+)
+
