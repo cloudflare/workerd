@@ -36,20 +36,13 @@ import {
   validateString,
 } from 'node-internal:validators';
 
-import {
-  KeyObject,
-} from 'node-internal:crypto_keys';
+import { KeyObject } from 'node-internal:crypto_keys';
 
 type ArrayLike = cryptoImpl.ArrayLike;
 
-import {
-  kMaxLength,
-} from 'node-internal:internal_buffer';
+import { kMaxLength } from 'node-internal:internal_buffer';
 
-import {
-  toBuf,
-  validateByteSource,
-} from 'node-internal:crypto_util';
+import { toBuf, validateByteSource } from 'node-internal:crypto_util';
 
 import {
   isAnyArrayBuffer,
@@ -62,13 +55,21 @@ import {
   ERR_OUT_OF_RANGE,
 } from 'node-internal:internal_errors';
 
-function validateParameters(hash: string, key: ArrayLike | KeyObject, salt: ArrayLike,
-                            info: ArrayLike, length: number) {
+function validateParameters(
+  hash: string,
+  key: ArrayLike | KeyObject,
+  salt: ArrayLike,
+  info: ArrayLike,
+  length: number
+) {
   // TODO(soon): Add support for KeyObject input.
   if (key instanceof KeyObject) {
-    throw new NodeError("ERR_METHOD_NOT_IMPLEMENTED", "KeyObject support for hkdf() and " +
-                        "hkdfSync() is not yet implemented. Use ArrayBuffer, TypedArray, " +
-                        "DataView, or Buffer instead.");
+    throw new NodeError(
+      'ERR_METHOD_NOT_IMPLEMENTED',
+      'KeyObject support for hkdf() and ' +
+        'hkdfSync() is not yet implemented. Use ArrayBuffer, TypedArray, ' +
+        'DataView, or Buffer instead.'
+    );
   }
 
   validateString(hash, 'digest');
@@ -82,7 +83,8 @@ function validateParameters(hash: string, key: ArrayLike | KeyObject, salt: Arra
     throw new ERR_OUT_OF_RANGE(
       'info',
       'must not contain more than 1024 bytes',
-      info.byteLength);
+      info.byteLength
+    );
   }
 
   return {
@@ -108,43 +110,57 @@ function prepareKey(key: ArrayLike): ArrayLike {
         'DataView',
         'Buffer',
       ],
-      key);
+      key
+    );
   }
 
   return key;
 }
 
-export function hkdf(hash: string, key: ArrayLike | KeyObject, salt: ArrayLike, info: ArrayLike,
-                     length: number,
-                     callback: (err: Error|null, derivedKey?: ArrayBuffer) => void): void {
-  ({
+export function hkdf(
+  hash: string,
+  key: ArrayLike | KeyObject,
+  salt: ArrayLike,
+  info: ArrayLike,
+  length: number,
+  callback: (err: Error | null, derivedKey?: ArrayBuffer) => void
+): void {
+  ({ hash, key, salt, info, length } = validateParameters(
     hash,
     key,
     salt,
     info,
-    length,
-  } = validateParameters(hash, key, salt, info, length));
+    length
+  ));
 
   validateFunction(callback, 'callback');
 
   new Promise<ArrayBuffer>((res, rej) => {
     try {
       res(cryptoImpl.getHkdf(hash, key as ArrayLike, salt, info, length));
-    } catch(err) {
+    } catch (err) {
       rej(err);
     }
-  }).then((val: ArrayBuffer) => callback(null, val), (err) => callback(err));
+  }).then(
+    (val: ArrayBuffer) => callback(null, val),
+    (err) => callback(err)
+  );
 }
 
-export function hkdfSync(hash: string, key: ArrayLike | KeyObject, salt: ArrayLike,
-                         info: ArrayLike, length: number): ArrayBuffer {
-  ({
+export function hkdfSync(
+  hash: string,
+  key: ArrayLike | KeyObject,
+  salt: ArrayLike,
+  info: ArrayLike,
+  length: number
+): ArrayBuffer {
+  ({ hash, key, salt, info, length } = validateParameters(
     hash,
     key,
     salt,
     info,
-    length,
-  } = validateParameters(hash, key, salt, info, length));
+    length
+  ));
 
   return cryptoImpl.getHkdf(hash, key, salt, info, length);
 }

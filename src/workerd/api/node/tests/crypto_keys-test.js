@@ -1,47 +1,52 @@
-
-import {
-  strictEqual,
-  ok,
-} from 'node:assert';
-import {
-  KeyObject,
-  SecretKeyObject,
-  createSecretKey,
-} from 'node:crypto';
-import {
-  Buffer,
-} from 'node:buffer';
+import { strictEqual, ok } from 'node:assert';
+import { KeyObject, SecretKeyObject, createSecretKey } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 
 export const secret_key_equals_test = {
   async test(ctrl, env, ctx) {
     const secretKeyData1 = Buffer.from('abcdefghijklmnop');
     const secretKeyData2 = Buffer.from('abcdefghijklmnop'.repeat(2));
-    const aes1 = await crypto.subtle.importKey('raw',
-        secretKeyData1,
-        { name: 'AES-CBC'},
-        true, ['encrypt', 'decrypt']);
-    const aes2 = await crypto.subtle.importKey('raw',
-        secretKeyData1,
-        { name: 'AES-CBC'},
-        true, ['encrypt', 'decrypt']);
-    const aes3 = await crypto.subtle.importKey('raw',
-        secretKeyData2,
-        { name: 'AES-CBC'},
-        true, ['encrypt', 'decrypt']);
-    const hmac = await crypto.subtle.importKey('raw',
-        secretKeyData1,
-        {
-          name: 'HMAC',
-          hash: 'SHA-256',
-        },
-        true, ['sign', 'verify']);
-    const hmac2 = await crypto.subtle.importKey('raw',
-        secretKeyData1,
-        {
-          name: 'HMAC',
-          hash: 'SHA-256',
-        },
-        false, ['sign', 'verify']);
+    const aes1 = await crypto.subtle.importKey(
+      'raw',
+      secretKeyData1,
+      { name: 'AES-CBC' },
+      true,
+      ['encrypt', 'decrypt']
+    );
+    const aes2 = await crypto.subtle.importKey(
+      'raw',
+      secretKeyData1,
+      { name: 'AES-CBC' },
+      true,
+      ['encrypt', 'decrypt']
+    );
+    const aes3 = await crypto.subtle.importKey(
+      'raw',
+      secretKeyData2,
+      { name: 'AES-CBC' },
+      true,
+      ['encrypt', 'decrypt']
+    );
+    const hmac = await crypto.subtle.importKey(
+      'raw',
+      secretKeyData1,
+      {
+        name: 'HMAC',
+        hash: 'SHA-256',
+      },
+      true,
+      ['sign', 'verify']
+    );
+    const hmac2 = await crypto.subtle.importKey(
+      'raw',
+      secretKeyData1,
+      {
+        name: 'HMAC',
+        hash: 'SHA-256',
+      },
+      false,
+      ['sign', 'verify']
+    );
 
     const aes1_ko = KeyObject.from(aes1);
     const aes2_ko = KeyObject.from(aes2);
@@ -66,7 +71,7 @@ export const secret_key_equals_test = {
     // Unable to determine equality if either key is not extractable.
     ok(!hmac_ko.equals(hmac2_ko));
     ok(!hmac2_ko.equals(hmac_ko));
-  }
+  },
 };
 
 // In case anyone comes across these tests and wonders why there are
@@ -75,17 +80,16 @@ export const secret_key_equals_test = {
 // pulled directly from MDN examples.
 
 const jwkEcKey = {
-  crv: "P-384",
-  d: "wouCtU7Nw4E8_7n5C1-xBjB4xqSb_liZhYMsy8MGgxUny6Q8NCoH9xSiviwLFfK_",
+  crv: 'P-384',
+  d: 'wouCtU7Nw4E8_7n5C1-xBjB4xqSb_liZhYMsy8MGgxUny6Q8NCoH9xSiviwLFfK_',
   ext: true,
-  key_ops: ["sign"],
-  kty: "EC",
-  x: "SzrRXmyI8VWFJg1dPUNbFcc9jZvjZEfH7ulKI1UkXAltd7RGWrcfFxqyGPcwu6AQ",
-  y: "hHUag3OvDzEr0uUQND4PXHQTXP5IDGdYhJhL-WLKjnGjQAw0rNGy5V29-aV-yseW",
+  key_ops: ['sign'],
+  kty: 'EC',
+  x: 'SzrRXmyI8VWFJg1dPUNbFcc9jZvjZEfH7ulKI1UkXAltd7RGWrcfFxqyGPcwu6AQ',
+  y: 'hHUag3OvDzEr0uUQND4PXHQTXP5IDGdYhJhL-WLKjnGjQAw0rNGy5V29-aV-yseW',
 };
 
-const pemEncodedKey =
-`
+const pemEncodedKey = `
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy3Xo3U13dc+xojwQYWoJLCbOQ5fOVY8LlnqcJm1W1BFtxIhOAJWohiHuIRMctv7d
 zx47TLlmARSKvTRjd0dF92jx/xY20Lz+DXp8YL5yUWAFgA3XkO3LSJ
 gEOex10NB8jfkmgSb7QIudTVvbbUDfd5fwIBmCtaCwWx7NyeWWDb7A
@@ -101,8 +105,8 @@ export const asymmetric_key_equals_test = {
       'jwk',
       jwkEcKey,
       {
-        name: "ECDSA",
-        namedCurve: "P-384",
+        name: 'ECDSA',
+        namedCurve: 'P-384',
       },
       true,
       ['sign']
@@ -111,8 +115,8 @@ export const asymmetric_key_equals_test = {
       'jwk',
       jwkEcKey,
       {
-        name: "ECDSA",
-        namedCurve: "P-384",
+        name: 'ECDSA',
+        namedCurve: 'P-384',
       },
       true,
       ['sign']
@@ -126,21 +130,21 @@ export const asymmetric_key_equals_test = {
       'spki',
       pemContent,
       {
-        name: "RSA-OAEP",
-        hash: "SHA-256",
+        name: 'RSA-OAEP',
+        hash: 'SHA-256',
       },
       true,
-      ["encrypt"]
+      ['encrypt']
     );
     const rsa2 = await crypto.subtle.importKey(
       'spki',
       pemContent,
       {
-        name: "RSA-OAEP",
-        hash: "SHA-256",
+        name: 'RSA-OAEP',
+        hash: 'SHA-256',
       },
       false,
-      ["encrypt"]
+      ['encrypt']
     );
     strictEqual(rsa.type, 'public');
 
@@ -162,23 +166,22 @@ export const asymmetric_key_equals_test = {
     ok(!rsa_ko.equals(rsa2_ko));
 
     jwk1_ko.export({
-      type: "pkcs8",
-      format: "der",
-      cipher: "aes-128-cbc",
-      passphrase: Buffer.alloc(0)
+      type: 'pkcs8',
+      format: 'der',
+      cipher: 'aes-128-cbc',
+      passphrase: Buffer.alloc(0),
     });
     jwk1_ko.export({
-      type: "pkcs8",
-      format: "der",
-      cipher: "aes-128-cbc",
-      passphrase: ''
+      type: 'pkcs8',
+      format: 'der',
+      cipher: 'aes-128-cbc',
+      passphrase: '',
     });
-  }
+  },
 };
 
 export const secret_key_test = {
   test(ctrl, env, ctx) {
-
     const key1 = createSecretKey('hello');
     const key2 = createSecretKey('hello');
     const key3 = createSecretKey('there');
@@ -192,5 +195,5 @@ export const secret_key_test = {
     strictEqual(key3.type, 'secret');
     ok(key1.equals(key2));
     ok(!key1.equals(key3));
-  }
+  },
 };

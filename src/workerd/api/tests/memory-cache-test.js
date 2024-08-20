@@ -1,7 +1,4 @@
-import {
-  strictEqual,
-  ok,
-} from 'node:assert';
+import { strictEqual, ok } from 'node:assert';
 
 export const basic = {
   async test(ctrl, env) {
@@ -17,7 +14,7 @@ export const basic = {
     strictEqual(value, 'bar');
     strictEqual(value, value2);
     strictEqual(fallbackCalled, 1);
-  }
+  },
 };
 
 export const keysTooLarge = {
@@ -35,13 +32,16 @@ export const keysTooLarge = {
     for (const key of ['a'.repeat(2049), 'ä'.repeat(1025)]) {
       await env.CACHE.read(key, async (k) => {
         throw new Error('should not be called');
-      }).then(() => {
-        throw new Error('should have rejected');
-      }, err => {
-        strictEqual(err.message, 'Key too large.');
-      });
+      }).then(
+        () => {
+          throw new Error('should have rejected');
+        },
+        (err) => {
+          strictEqual(err.message, 'Key too large.');
+        }
+      );
     }
-  }
+  },
 };
 
 export const valueNotSerializable = {
@@ -63,7 +63,7 @@ export const valueNotSerializable = {
     } catch (err) {
       strictEqual(err.message, 'failed to serialize function');
     }
-  }
+  },
 };
 
 export const evictionsHappen = {
@@ -85,20 +85,26 @@ export const evictionsHappen = {
     });
     // At this point, 'bar' should have been evicted.
     strictEqual(await env.CACHE2.read('bar'), undefined);
-  }
+  },
 };
 
 export const evictionsHappenValueSize = {
   async test(ctrl, env) {
-    strictEqual(await env.CACHE3.read('foo', async (key) => {
-      return { value: 'a'.repeat(495) };
-    }), 'a'.repeat(495));
+    strictEqual(
+      await env.CACHE3.read('foo', async (key) => {
+        return { value: 'a'.repeat(495) };
+      }),
+      'a'.repeat(495)
+    );
 
     strictEqual(await env.CACHE3.read('foo'), 'a'.repeat(495));
 
-    strictEqual(await env.CACHE3.read('bar', async (key) => {
-      return { value: 'a'.repeat(500) };
-    }), 'a'.repeat(500));
+    strictEqual(
+      await env.CACHE3.read('bar', async (key) => {
+        return { value: 'a'.repeat(500) };
+      }),
+      'a'.repeat(500)
+    );
 
     strictEqual(await env.CACHE3.read('bar'), undefined);
 
@@ -109,22 +115,26 @@ export const evictionsHappenValueSize = {
       strictEqual(await env.CACHE3.read(`${n}`), 'a'.repeat(100));
     }
     strictEqual(await env.CACHE3.read('bar'), undefined);
-  }
+  },
 };
 
 export const concurrentReads = {
   async test(ctrl, env) {
     const promises = [];
-    promises.push(env.CACHE.read('qux', () => {
-      return { value: 'qux' };
-    }));
-    promises.push(env.CACHE.read('qux', () => {
-      throw new Error('should not have been called');
-    }));
+    promises.push(
+      env.CACHE.read('qux', () => {
+        return { value: 'qux' };
+      })
+    );
+    promises.push(
+      env.CACHE.read('qux', () => {
+        throw new Error('should not have been called');
+      })
+    );
     const results = await Promise.allSettled(promises);
     strictEqual(results[0].value, 'qux');
     strictEqual(results[1].value, 'qux');
-  }
+  },
 };
 
 export const delayedFallback = {
@@ -134,7 +144,7 @@ export const delayedFallback = {
       return { value: 123 };
     });
     strictEqual(foo, 123);
-  }
+  },
 };
 
 export const expiredEviction = {
@@ -145,7 +155,7 @@ export const expiredEviction = {
     strictEqual(ret, 'foo');
     await scheduler.wait(600);
     strictEqual(await env.CACHE.read('expires'), undefined);
-  }
+  },
 };
 
 export const fallbackThrows = {
@@ -176,7 +186,7 @@ export const fallbackThrows = {
     } catch (err) {
       strictEqual(err.message, 'foo');
     }
-  }
+  },
 };
 
 export const fallbackQueueMicrotask = {
@@ -189,38 +199,46 @@ export const fallbackQueueMicrotask = {
       return promise;
     });
     strictEqual(ret, 'xyz');
-  }
+  },
 };
 
 export const fallbackChainingOnError = {
   async test(ctrl, env) {
     const promises = [];
-    promises.push(env.CACHE.read('fallback', () => {
-      throw new Error('foo');
-    }));
-    promises.push(env.CACHE.read('fallback', () => {
-      return { value: 'bar' };
-    }));
+    promises.push(
+      env.CACHE.read('fallback', () => {
+        throw new Error('foo');
+      })
+    );
+    promises.push(
+      env.CACHE.read('fallback', () => {
+        return { value: 'bar' };
+      })
+    );
     const results = await Promise.allSettled(promises);
     // The first one failed.
     strictEqual(results[0].reason.message, 'foo');
     // The second one succeeded.
     strictEqual(results[1].value, 'bar');
-  }
-}
+  },
+};
 
 export const fallbackNotLocked = {
   async test(ctrl, env) {
     // Test that one long running fallback does not block another one.
     const promises = [];
-    promises.push(env.CACHE.read('aaa', async () => {
-      await scheduler.wait(500);
-      return { value: 'aaa' };
-    }));
-    promises.push(env.CACHE.read('bbb', async () => {
-      return { value: 'bbb' };
-    }));
+    promises.push(
+      env.CACHE.read('aaa', async () => {
+        await scheduler.wait(500);
+        return { value: 'aaa' };
+      })
+    );
+    promises.push(
+      env.CACHE.read('bbb', async () => {
+        return { value: 'bbb' };
+      })
+    );
     const raced = await Promise.race(promises);
     strictEqual(raced, 'bbb');
-  }
+  },
 };

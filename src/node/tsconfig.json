@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "lib": [ "ESNext" ],
+    "lib": ["ESNext"],
     "alwaysStrict": true,
     "strict": true,
     "allowJs": true,
@@ -20,9 +20,7 @@
     "esModuleInterop": true,
     "moduleResolution": "node",
     "declaration": true,
-    "types": [
-      "@types/node"
-    ],
+    "types": ["@types/node"],
     "paths": {
       "node:*": ["./*"],
       "node:assert/*": ["./*"],

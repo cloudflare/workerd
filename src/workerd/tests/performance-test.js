@@ -25,6 +25,5 @@ export const test = {
     if (start == performance.now()) {
       throw new Error('performance.now() is not increasing');
     }
-  }
+  },
 };
-

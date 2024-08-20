@@ -46,11 +46,13 @@ import {
 } from 'node:buffer';
 
 import * as buffer from 'node:buffer';
-if (buffer.Buffer !== Buffer ||
-    buffer.SlowBuffer !== SlowBuffer ||
-    buffer.kMaxLength !== kMaxLength ||
-    buffer.kStringMaxLength !== kStringMaxLength ||
-    buffer.constants !== constants) {
+if (
+  buffer.Buffer !== Buffer ||
+  buffer.SlowBuffer !== SlowBuffer ||
+  buffer.kMaxLength !== kMaxLength ||
+  buffer.kStringMaxLength !== kStringMaxLength ||
+  buffer.constants !== constants
+) {
   throw new Error('Incorrect default exports');
 }
 
@@ -78,8 +80,8 @@ export const simpleAlloc = {
 
     const d = Buffer.from([]);
     strictEqual(d.length, 0);
-  }
-}
+  },
+};
 
 export const offsetProperties = {
   test(ctrl, env, ctx) {
@@ -87,7 +89,7 @@ export const offsetProperties = {
     strictEqual(b.length, 128);
     strictEqual(b.byteOffset, 0);
     strictEqual(b.offset, 0);
-  }
+  },
 };
 
 export const bufferFromUint8Array = {
@@ -107,7 +109,7 @@ export const bufferFromUint8Array = {
         strictEqual(value, ui8[key]);
       }
     }
-  }
+  },
 };
 
 export const bufferFromUint32Array = {
@@ -126,7 +128,7 @@ export const bufferFromUint32Array = {
         strictEqual(value, ui32[key]);
       }
     }
-  }
+  },
 };
 
 export const invalidEncodingForToString = {
@@ -135,11 +137,14 @@ export const invalidEncodingForToString = {
     // Test invalid encoding for Buffer.toString
     throws(() => b.toString('invalid'), /Unknown encoding: invalid/);
     // // Invalid encoding for Buffer.write
-    throws(() => b.write('test string', 0, 5, 'invalid'), /Unknown encoding: invalid/);
+    throws(
+      () => b.write('test string', 0, 5, 'invalid'),
+      /Unknown encoding: invalid/
+    );
     // Unsupported arguments for Buffer.write
 
     throws(() => b.write('test', 'utf8', 0), { code: 'ERR_INVALID_ARG_TYPE' });
-  }
+  },
 };
 
 export const zeroLengthBuffers = {
@@ -154,14 +159,14 @@ export const zeroLengthBuffers = {
     new Buffer('', 'latin1');
     new Buffer('', 'binary');
     Buffer(0);
-  }
+  },
 };
 
 export const outOfBoundsWrites = {
   test(ctrl, env, ctx) {
     const outOfRangeError = {
       code: 'ERR_OUT_OF_RANGE',
-      name: 'RangeError'
+      name: 'RangeError',
     };
 
     const b = Buffer.alloc(1024);
@@ -189,23 +194,22 @@ export const outOfBoundsWrites = {
     b.copy(Buffer.alloc(1), 0, 2048, 2048);
 
     Buffer.alloc(1).write('', 1, 0);
-  }
+  },
 };
 
 export const smartDefaults = {
   test(ctrl, env, ctx) {
-      const writeTest = Buffer.from('abcdes');
-      writeTest.write('n', 'ascii');
-      throws(
-        () => writeTest.write('o', '1', 'ascii'),
-        { code: 'ERR_INVALID_ARG_TYPE' }
-      );
-      writeTest.write('o', 1, 'ascii');
-      writeTest.write('d', 2, 'ascii');
-      writeTest.write('e', 3, 'ascii');
-      writeTest.write('j', 4, 'ascii');
-      strictEqual(writeTest.toString(), 'nodejs');
-  }
+    const writeTest = Buffer.from('abcdes');
+    writeTest.write('n', 'ascii');
+    throws(() => writeTest.write('o', '1', 'ascii'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    writeTest.write('o', 1, 'ascii');
+    writeTest.write('d', 2, 'ascii');
+    writeTest.write('e', 3, 'ascii');
+    writeTest.write('j', 4, 'ascii');
+    strictEqual(writeTest.toString(), 'nodejs');
+  },
 };
 
 export const asciiSlice = {
@@ -227,7 +231,11 @@ export const asciiSlice = {
       const offset = 100;
 
       strictEqual(asciiString.length, b.write(asciiString, offset, 'ascii'));
-      const asciiSlice = b.toString('ascii', offset, offset + asciiString.length);
+      const asciiSlice = b.toString(
+        'ascii',
+        offset,
+        offset + asciiString.length
+      );
       strictEqual(asciiString, asciiSlice);
     }
 
@@ -241,7 +249,7 @@ export const asciiSlice = {
         strictEqual(sliceA[i], sliceB[i]);
       }
     }
-  }
+  },
 };
 
 export const utf8Slice = {
@@ -255,8 +263,15 @@ export const utf8Slice = {
       let utf8Slice = b.toString('utf8', 0, Buffer.byteLength(utf8String));
       strictEqual(utf8String, utf8Slice);
 
-      strictEqual(Buffer.byteLength(utf8String), b.write(utf8String, offset, 'utf8'));
-      utf8Slice = b.toString('utf8', offset, offset + Buffer.byteLength(utf8String));
+      strictEqual(
+        Buffer.byteLength(utf8String),
+        b.write(utf8String, offset, 'utf8')
+      );
+      utf8Slice = b.toString(
+        'utf8',
+        offset,
+        offset + Buffer.byteLength(utf8String)
+      );
       strictEqual(utf8String, utf8Slice);
 
       const sliceA = b.slice(offset, offset + Buffer.byteLength(utf8String));
@@ -313,7 +328,7 @@ export const utf8Slice = {
       strictEqual(c[0], 6);
       strictEqual(c[1], 7);
     }
-  }
+  },
 };
 
 export const bufferFrom = {
@@ -347,7 +362,8 @@ export const bufferFrom = {
         // Length should be 12
         const f = Buffer.from('привет', encoding);
         deepStrictEqual(
-          f, Buffer.from([63, 4, 64, 4, 56, 4, 50, 4, 53, 4, 66, 4])
+          f,
+          Buffer.from([63, 4, 64, 4, 56, 4, 50, 4, 53, 4, 66, 4])
         );
         strictEqual(f.toString(encoding), 'привет');
       }
@@ -406,8 +422,16 @@ export const bufferFrom = {
       [
         {},
         new Boolean(true),
-        { valueOf() { return null; } },
-        { valueOf() { return undefined; } },
+        {
+          valueOf() {
+            return null;
+          },
+        },
+        {
+          valueOf() {
+            return undefined;
+          },
+        },
         { valueOf: null },
         { __proto__: null },
         new Number(true),
@@ -427,52 +451,79 @@ export const bufferFrom = {
 
       Buffer.allocUnsafe(10); // Should not throw.
       Buffer.from('deadbeaf', 'hex'); // Should not throw.
-
     }
-  }
+  },
 };
 
 export const base64 = {
   test(ctrl, env, ctx) {
     const base64flavors = ['base64', 'base64url'];
     {
-      strictEqual((Buffer.from('Man')).toString('base64'), 'TWFu');
-      strictEqual((Buffer.from('Woman')).toString('base64'), 'V29tYW4=');
-      strictEqual((Buffer.from('Man')).toString('base64url'), 'TWFu');
-      strictEqual((Buffer.from('Woman')).toString('base64url'), 'V29tYW4');
+      strictEqual(Buffer.from('Man').toString('base64'), 'TWFu');
+      strictEqual(Buffer.from('Woman').toString('base64'), 'V29tYW4=');
+      strictEqual(Buffer.from('Man').toString('base64url'), 'TWFu');
+      strictEqual(Buffer.from('Woman').toString('base64url'), 'V29tYW4');
     }
 
     {
       const expected = [0xff, 0xff, 0xbe, 0xff, 0xef, 0xbf, 0xfb, 0xef, 0xff];
-      deepStrictEqual(Buffer.from('//++/++/++//', 'base64'), Buffer.from(expected));
-      deepStrictEqual(Buffer.from('__--_--_--__', 'base64'), Buffer.from(expected));
-      deepStrictEqual(Buffer.from('//++/++/++//', 'base64url'), Buffer.from(expected));
-      deepStrictEqual(Buffer.from('__--_--_--__', 'base64url'), Buffer.from(expected));
+      deepStrictEqual(
+        Buffer.from('//++/++/++//', 'base64'),
+        Buffer.from(expected)
+      );
+      deepStrictEqual(
+        Buffer.from('__--_--_--__', 'base64'),
+        Buffer.from(expected)
+      );
+      deepStrictEqual(
+        Buffer.from('//++/++/++//', 'base64url'),
+        Buffer.from(expected)
+      );
+      deepStrictEqual(
+        Buffer.from('__--_--_--__', 'base64url'),
+        Buffer.from(expected)
+      );
     }
 
     {
       // Test that regular and URL-safe base64 both work both ways with padding
-      const expected = [0xff, 0xff, 0xbe, 0xff, 0xef, 0xbf, 0xfb, 0xef, 0xff, 0xfb];
-      deepStrictEqual(Buffer.from('//++/++/++//+w==', 'base64'), Buffer.from(expected));
-      deepStrictEqual(Buffer.from('//++/++/++//+w==', 'base64'), Buffer.from(expected));
-      deepStrictEqual(Buffer.from('//++/++/++//+w==', 'base64url'), Buffer.from(expected));
-      deepStrictEqual(Buffer.from('//++/++/++//+w==', 'base64url'), Buffer.from(expected));
+      const expected = [
+        0xff, 0xff, 0xbe, 0xff, 0xef, 0xbf, 0xfb, 0xef, 0xff, 0xfb,
+      ];
+      deepStrictEqual(
+        Buffer.from('//++/++/++//+w==', 'base64'),
+        Buffer.from(expected)
+      );
+      deepStrictEqual(
+        Buffer.from('//++/++/++//+w==', 'base64'),
+        Buffer.from(expected)
+      );
+      deepStrictEqual(
+        Buffer.from('//++/++/++//+w==', 'base64url'),
+        Buffer.from(expected)
+      );
+      deepStrictEqual(
+        Buffer.from('//++/++/++//+w==', 'base64url'),
+        Buffer.from(expected)
+      );
     }
 
     {
       // big example
-      const quote = 'Man is distinguished, not only by his reason, but by this ' +
-                    'singular passion from other animals, which is a lust ' +
-                    'of the mind, that by a perseverance of delight in the ' +
-                    'continued and indefatigable generation of knowledge, ' +
-                    'exceeds the short vehemence of any carnal pleasure.';
-      const expected = 'TWFuIGlzIGRpc3Rpbmd1aXNoZWQsIG5vdCBvbmx5IGJ5IGhpcyByZWFzb' +
-                       '24sIGJ1dCBieSB0aGlzIHNpbmd1bGFyIHBhc3Npb24gZnJvbSBvdGhlci' +
-                       'BhbmltYWxzLCB3aGljaCBpcyBhIGx1c3Qgb2YgdGhlIG1pbmQsIHRoYXQ' +
-                       'gYnkgYSBwZXJzZXZlcmFuY2Ugb2YgZGVsaWdodCBpbiB0aGUgY29udGlu' +
-                       'dWVkIGFuZCBpbmRlZmF0aWdhYmxlIGdlbmVyYXRpb24gb2Yga25vd2xlZ' +
-                       'GdlLCBleGNlZWRzIHRoZSBzaG9ydCB2ZWhlbWVuY2Ugb2YgYW55IGNhcm' +
-                       '5hbCBwbGVhc3VyZS4=';
+      const quote =
+        'Man is distinguished, not only by his reason, but by this ' +
+        'singular passion from other animals, which is a lust ' +
+        'of the mind, that by a perseverance of delight in the ' +
+        'continued and indefatigable generation of knowledge, ' +
+        'exceeds the short vehemence of any carnal pleasure.';
+      const expected =
+        'TWFuIGlzIGRpc3Rpbmd1aXNoZWQsIG5vdCBvbmx5IGJ5IGhpcyByZWFzb' +
+        '24sIGJ1dCBieSB0aGlzIHNpbmd1bGFyIHBhc3Npb24gZnJvbSBvdGhlci' +
+        'BhbmltYWxzLCB3aGljaCBpcyBhIGx1c3Qgb2YgdGhlIG1pbmQsIHRoYXQ' +
+        'gYnkgYSBwZXJzZXZlcmFuY2Ugb2YgZGVsaWdodCBpbiB0aGUgY29udGlu' +
+        'dWVkIGFuZCBpbmRlZmF0aWdhYmxlIGdlbmVyYXRpb24gb2Yga25vd2xlZ' +
+        'GdlLCBleGNlZWRzIHRoZSBzaG9ydCB2ZWhlbWVuY2Ugb2YgYW55IGNhcm' +
+        '5hbCBwbGVhc3VyZS4=';
       strictEqual(Buffer.from(quote).toString('base64'), expected);
       strictEqual(
         Buffer.from(quote).toString('base64url'),
@@ -486,12 +537,13 @@ export const base64 = {
         strictEqual(quote, b.toString('ascii', 0, quote.length));
 
         // Check that the base64 decoder ignores whitespace
-        const expectedWhite = `${expected.slice(0, 60)} \n` +
-                              `${expected.slice(60, 120)} \n` +
-                              `${expected.slice(120, 180)} \n` +
-                              `${expected.slice(180, 240)} \n` +
-                              `${expected.slice(240, 300)}\n` +
-                              `${expected.slice(300, 360)}\n`;
+        const expectedWhite =
+          `${expected.slice(0, 60)} \n` +
+          `${expected.slice(60, 120)} \n` +
+          `${expected.slice(120, 180)} \n` +
+          `${expected.slice(180, 240)} \n` +
+          `${expected.slice(240, 300)}\n` +
+          `${expected.slice(300, 360)}\n`;
         b = Buffer.allocUnsafe(1024);
         bytesWritten = b.write(expectedWhite, 0, encoding);
         strictEqual(quote.length, bytesWritten);
@@ -504,12 +556,18 @@ export const base64 = {
         strictEqual(quote, b.toString('ascii', 0, quote.length));
 
         // Check that the base64 decoder ignores illegal chars
-        const expectedIllegal = expected.slice(0, 60) + ' \x80' +
-                                expected.slice(60, 120) + ' \xff' +
-                                expected.slice(120, 180) + ' \x00' +
-                                expected.slice(180, 240) + ' \x98' +
-                                expected.slice(240, 300) + '\x03' +
-                                expected.slice(300, 360);
+        const expectedIllegal =
+          expected.slice(0, 60) +
+          ' \x80' +
+          expected.slice(60, 120) +
+          ' \xff' +
+          expected.slice(120, 180) +
+          ' \x00' +
+          expected.slice(180, 240) +
+          ' \x98' +
+          expected.slice(240, 300) +
+          '\x03' +
+          expected.slice(300, 360);
         b = Buffer.from(expectedIllegal, encoding);
         strictEqual(quote.length, b.length);
         strictEqual(quote, b.toString('ascii', 0, quote.length));
@@ -527,51 +585,171 @@ export const base64 = {
       strictEqual(Buffer.from('KioqKg==', encoding).toString(), '*'.repeat(4));
       strictEqual(Buffer.from('KioqKio=', encoding).toString(), '*'.repeat(5));
       strictEqual(Buffer.from('KioqKioq', encoding).toString(), '*'.repeat(6));
-      strictEqual(Buffer.from('KioqKioqKg==', encoding).toString(), '*'.repeat(7));
-      strictEqual(Buffer.from('KioqKioqKio=', encoding).toString(), '*'.repeat(8));
-      strictEqual(Buffer.from('KioqKioqKioq', encoding).toString(), '*'.repeat(9));
-      strictEqual(Buffer.from('KioqKioqKioqKg==', encoding).toString(), '*'.repeat(10));
-      strictEqual(Buffer.from('KioqKioqKioqKio=', encoding).toString(), '*'.repeat(11));
-      strictEqual(Buffer.from('KioqKioqKioqKioq', encoding).toString(), '*'.repeat(12));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKg==', encoding).toString(), '*'.repeat(13));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKio=', encoding).toString(), '*'.repeat(14));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioq', encoding).toString(), '*'.repeat(15));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioqKg==', encoding).toString(), '*'.repeat(16));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioqKio=', encoding).toString(), '*'.repeat(17));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioqKioq', encoding).toString(),'*'.repeat(18));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioqKioqKg==', encoding).toString(), '*'.repeat(19));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioqKioqKio=', encoding).toString(), '*'.repeat(20));
+      strictEqual(
+        Buffer.from('KioqKioqKg==', encoding).toString(),
+        '*'.repeat(7)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKio=', encoding).toString(),
+        '*'.repeat(8)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioq', encoding).toString(),
+        '*'.repeat(9)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKg==', encoding).toString(),
+        '*'.repeat(10)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKio=', encoding).toString(),
+        '*'.repeat(11)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioq', encoding).toString(),
+        '*'.repeat(12)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKg==', encoding).toString(),
+        '*'.repeat(13)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKio=', encoding).toString(),
+        '*'.repeat(14)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioq', encoding).toString(),
+        '*'.repeat(15)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioqKg==', encoding).toString(),
+        '*'.repeat(16)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioqKio=', encoding).toString(),
+        '*'.repeat(17)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioqKioq', encoding).toString(),
+        '*'.repeat(18)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioqKioqKg==', encoding).toString(),
+        '*'.repeat(19)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioqKioqKio=', encoding).toString(),
+        '*'.repeat(20)
+      );
 
       // No padding, not a multiple of 4
       strictEqual(Buffer.from('Kg', encoding).toString(), '*');
       strictEqual(Buffer.from('Kio', encoding).toString(), '*'.repeat(2));
       strictEqual(Buffer.from('KioqKg', encoding).toString(), '*'.repeat(4));
       strictEqual(Buffer.from('KioqKio', encoding).toString(), '*'.repeat(5));
-      strictEqual(Buffer.from('KioqKioqKg', encoding).toString(), '*'.repeat(7));
-      strictEqual(Buffer.from('KioqKioqKio', encoding).toString(), '*'.repeat(8));
-      strictEqual(Buffer.from('KioqKioqKioqKg', encoding).toString(), '*'.repeat(10));
-      strictEqual(Buffer.from('KioqKioqKioqKio', encoding).toString(), '*'.repeat(11));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKg', encoding).toString(), '*'.repeat(13));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKio', encoding).toString(), '*'.repeat(14));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioqKg', encoding).toString(), '*'.repeat(16));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioqKio', encoding).toString(), '*'.repeat(17));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioqKioqKg', encoding).toString(), '*'.repeat(19));
-      strictEqual(Buffer.from('KioqKioqKioqKioqKioqKioqKio', encoding).toString(), '*'.repeat(20));
+      strictEqual(
+        Buffer.from('KioqKioqKg', encoding).toString(),
+        '*'.repeat(7)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKio', encoding).toString(),
+        '*'.repeat(8)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKg', encoding).toString(),
+        '*'.repeat(10)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKio', encoding).toString(),
+        '*'.repeat(11)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKg', encoding).toString(),
+        '*'.repeat(13)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKio', encoding).toString(),
+        '*'.repeat(14)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioqKg', encoding).toString(),
+        '*'.repeat(16)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioqKio', encoding).toString(),
+        '*'.repeat(17)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioqKioqKg', encoding).toString(),
+        '*'.repeat(19)
+      );
+      strictEqual(
+        Buffer.from('KioqKioqKioqKioqKioqKioqKio', encoding).toString(),
+        '*'.repeat(20)
+      );
     });
 
     // Handle padding graciously, multiple-of-4 or not
-    strictEqual(Buffer.from('72INjkR5fchcxk9+VgdGPFJDxUBFR5/rMFsghgxADiw==', 'base64').length, 32);
-    strictEqual(Buffer.from('72INjkR5fchcxk9-VgdGPFJDxUBFR5_rMFsghgxADiw==', 'base64url').length, 32);
-    strictEqual(Buffer.from('72INjkR5fchcxk9+VgdGPFJDxUBFR5/rMFsghgxADiw=', 'base64').length, 32);
-    strictEqual(Buffer.from('72INjkR5fchcxk9-VgdGPFJDxUBFR5_rMFsghgxADiw=', 'base64url').length, 32);
-    strictEqual(Buffer.from('72INjkR5fchcxk9+VgdGPFJDxUBFR5/rMFsghgxADiw', 'base64').length, 32);
-    strictEqual(Buffer.from('72INjkR5fchcxk9-VgdGPFJDxUBFR5_rMFsghgxADiw', 'base64url').length, 32);
-    strictEqual(Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg==', 'base64').length, 31);
-    strictEqual(Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg==', 'base64url').length, 31);
-    strictEqual(Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg=', 'base64').length, 31);
-    strictEqual(Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg=', 'base64url').length, 31);
-    strictEqual(Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg', 'base64').length, 31);
-    strictEqual(Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg', 'base64url').length, 31);
+    strictEqual(
+      Buffer.from('72INjkR5fchcxk9+VgdGPFJDxUBFR5/rMFsghgxADiw==', 'base64')
+        .length,
+      32
+    );
+    strictEqual(
+      Buffer.from('72INjkR5fchcxk9-VgdGPFJDxUBFR5_rMFsghgxADiw==', 'base64url')
+        .length,
+      32
+    );
+    strictEqual(
+      Buffer.from('72INjkR5fchcxk9+VgdGPFJDxUBFR5/rMFsghgxADiw=', 'base64')
+        .length,
+      32
+    );
+    strictEqual(
+      Buffer.from('72INjkR5fchcxk9-VgdGPFJDxUBFR5_rMFsghgxADiw=', 'base64url')
+        .length,
+      32
+    );
+    strictEqual(
+      Buffer.from('72INjkR5fchcxk9+VgdGPFJDxUBFR5/rMFsghgxADiw', 'base64')
+        .length,
+      32
+    );
+    strictEqual(
+      Buffer.from('72INjkR5fchcxk9-VgdGPFJDxUBFR5_rMFsghgxADiw', 'base64url')
+        .length,
+      32
+    );
+    strictEqual(
+      Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg==', 'base64')
+        .length,
+      31
+    );
+    strictEqual(
+      Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg==', 'base64url')
+        .length,
+      31
+    );
+    strictEqual(
+      Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg=', 'base64')
+        .length,
+      31
+    );
+    strictEqual(
+      Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg=', 'base64url')
+        .length,
+      31
+    );
+    strictEqual(
+      Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg', 'base64')
+        .length,
+      31
+    );
+    strictEqual(
+      Buffer.from('w69jACy6BgZmaFvv96HG6MYksWytuZu3T1FvGnulPg', 'base64url')
+        .length,
+      31
+    );
 
     {
       // This string encodes single '.' character in UTF-16
@@ -628,9 +806,11 @@ export const base64 = {
     deepStrictEqual(Buffer.from('w0  ', 'base64'), Buffer.from('w0', 'base64'));
 
     // // Regression test for https://github.com/nodejs/node/issues/13657.
-    deepStrictEqual(Buffer.from(' YWJvcnVtLg', 'base64'), Buffer.from('YWJvcnVtLg', 'base64'));
-  }
-
+    deepStrictEqual(
+      Buffer.from(' YWJvcnVtLg', 'base64'),
+      Buffer.from('YWJvcnVtLg', 'base64')
+    );
+  },
 };
 
 export const hex = {
@@ -642,23 +822,25 @@ export const hex = {
         hexb[i] = i;
       }
       const hexStr = hexb.toString('hex');
-      strictEqual(hexStr,
-                  '000102030405060708090a0b0c0d0e0f' +
-                  '101112131415161718191a1b1c1d1e1f' +
-                  '202122232425262728292a2b2c2d2e2f' +
-                  '303132333435363738393a3b3c3d3e3f' +
-                  '404142434445464748494a4b4c4d4e4f' +
-                  '505152535455565758595a5b5c5d5e5f' +
-                  '606162636465666768696a6b6c6d6e6f' +
-                  '707172737475767778797a7b7c7d7e7f' +
-                  '808182838485868788898a8b8c8d8e8f' +
-                  '909192939495969798999a9b9c9d9e9f' +
-                  'a0a1a2a3a4a5a6a7a8a9aaabacadaeaf' +
-                  'b0b1b2b3b4b5b6b7b8b9babbbcbdbebf' +
-                  'c0c1c2c3c4c5c6c7c8c9cacbcccdcecf' +
-                  'd0d1d2d3d4d5d6d7d8d9dadbdcdddedf' +
-                  'e0e1e2e3e4e5e6e7e8e9eaebecedeeef' +
-                  'f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+      strictEqual(
+        hexStr,
+        '000102030405060708090a0b0c0d0e0f' +
+          '101112131415161718191a1b1c1d1e1f' +
+          '202122232425262728292a2b2c2d2e2f' +
+          '303132333435363738393a3b3c3d3e3f' +
+          '404142434445464748494a4b4c4d4e4f' +
+          '505152535455565758595a5b5c5d5e5f' +
+          '606162636465666768696a6b6c6d6e6f' +
+          '707172737475767778797a7b7c7d7e7f' +
+          '808182838485868788898a8b8c8d8e8f' +
+          '909192939495969798999a9b9c9d9e9f' +
+          'a0a1a2a3a4a5a6a7a8a9aaabacadaeaf' +
+          'b0b1b2b3b4b5b6b7b8b9babbbcbdbebf' +
+          'c0c1c2c3c4c5c6c7c8c9cacbcccdcecf' +
+          'd0d1d2d3d4d5d6d7d8d9dadbdcdddedf' +
+          'e0e1e2e3e4e5e6e7e8e9eaebecedeeef' +
+          'f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff'
+      );
 
       const hexb2 = Buffer.from(hexStr, 'hex');
       for (let i = 0; i < 256; i++) {
@@ -684,7 +866,7 @@ export const hex = {
       strictEqual(b2, b3);
       strictEqual(b2, b4);
     }
-  }
+  },
 };
 
 export const slicing = {
@@ -692,13 +874,15 @@ export const slicing = {
     function buildBuffer(data) {
       if (Array.isArray(data)) {
         const buffer = Buffer.allocUnsafe(data.length);
-        data.forEach((v, k) => buffer[k] = v);
+        data.forEach((v, k) => (buffer[k] = v));
         return buffer;
       }
       return null;
     }
 
-    const x = buildBuffer([0x81, 0xa3, 0x66, 0x6f, 0x6f, 0xa3, 0x62, 0x61, 0x72]);
+    const x = buildBuffer([
+      0x81, 0xa3, 0x66, 0x6f, 0x6f, 0xa3, 0x62, 0x61, 0x72,
+    ]);
 
     {
       const z = x.slice(4);
@@ -739,7 +923,7 @@ export const slicing = {
       strictEqual(z[0], 0x66);
       strictEqual(z[1], 0x6f);
     }
-  }
+  },
 };
 
 export const writing = {
@@ -810,41 +994,41 @@ export const writing = {
       // https://github.com/nodejs/node-v0.x-archive/issues/243
       // Test write() with maxLength
       const buf = Buffer.allocUnsafe(4);
-      buf.fill(0xFF);
+      buf.fill(0xff);
       strictEqual(buf.write('abcd', 1, 2, 'utf8'), 2);
-      strictEqual(buf[0], 0xFF);
+      strictEqual(buf[0], 0xff);
       strictEqual(buf[1], 0x61);
       strictEqual(buf[2], 0x62);
-      strictEqual(buf[3], 0xFF);
+      strictEqual(buf[3], 0xff);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       strictEqual(buf.write('abcd', 1, 4), 3);
-      strictEqual(buf[0], 0xFF);
+      strictEqual(buf[0], 0xff);
       strictEqual(buf[1], 0x61);
       strictEqual(buf[2], 0x62);
       strictEqual(buf[3], 0x63);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       strictEqual(buf.write('abcd', 1, 2, 'utf8'), 2);
-      strictEqual(buf[0], 0xFF);
+      strictEqual(buf[0], 0xff);
       strictEqual(buf[1], 0x61);
       strictEqual(buf[2], 0x62);
-      strictEqual(buf[3], 0xFF);
+      strictEqual(buf[3], 0xff);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       strictEqual(buf.write('abcdef', 1, 2, 'hex'), 2);
-      strictEqual(buf[0], 0xFF);
-      strictEqual(buf[1], 0xAB);
-      strictEqual(buf[2], 0xCD);
-      strictEqual(buf[3], 0xFF);
+      strictEqual(buf[0], 0xff);
+      strictEqual(buf[1], 0xab);
+      strictEqual(buf[2], 0xcd);
+      strictEqual(buf[3], 0xff);
 
       ['ucs2', 'ucs-2', 'utf16le', 'utf-16le'].forEach((encoding) => {
-        buf.fill(0xFF);
+        buf.fill(0xff);
         strictEqual(buf.write('abcd', 0, 2, encoding), 2);
         strictEqual(buf[0], 0x61);
         strictEqual(buf[1], 0x00);
-        strictEqual(buf[2], 0xFF);
-        strictEqual(buf[3], 0xFF);
+        strictEqual(buf[2], 0xff);
+        strictEqual(buf[3], 0xff);
       });
     }
 
@@ -861,7 +1045,7 @@ export const writing = {
     {
       // Test for buffer overrun
       const buf = Buffer.from([0, 0, 0, 0, 0]); // length: 5
-      const sub = buf.slice(0, 4);         // length: 4
+      const sub = buf.slice(0, 4); // length: 4
       strictEqual(sub.write('12345', 'latin1'), 4);
       strictEqual(buf[4], 0);
       strictEqual(sub.write('12345', 'binary'), 4);
@@ -875,47 +1059,47 @@ export const writing = {
       deepStrictEqual(buf.toJSON().data, [0x56, 0x34, 0x12]);
       strictEqual(buf.readUIntLE(0, 3), 0x123456);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeUIntBE(0x123456, 0, 3);
       deepStrictEqual(buf.toJSON().data, [0x12, 0x34, 0x56]);
       strictEqual(buf.readUIntBE(0, 3), 0x123456);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntLE(0x123456, 0, 3);
       deepStrictEqual(buf.toJSON().data, [0x56, 0x34, 0x12]);
       strictEqual(buf.readIntLE(0, 3), 0x123456);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntBE(0x123456, 0, 3);
       deepStrictEqual(buf.toJSON().data, [0x12, 0x34, 0x56]);
       strictEqual(buf.readIntBE(0, 3), 0x123456);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntLE(-0x123456, 0, 3);
       deepStrictEqual(buf.toJSON().data, [0xaa, 0xcb, 0xed]);
       strictEqual(buf.readIntLE(0, 3), -0x123456);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntBE(-0x123456, 0, 3);
       deepStrictEqual(buf.toJSON().data, [0xed, 0xcb, 0xaa]);
       strictEqual(buf.readIntBE(0, 3), -0x123456);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntLE(-0x123400, 0, 3);
       deepStrictEqual(buf.toJSON().data, [0x00, 0xcc, 0xed]);
       strictEqual(buf.readIntLE(0, 3), -0x123400);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntBE(-0x123400, 0, 3);
       deepStrictEqual(buf.toJSON().data, [0xed, 0xcc, 0x00]);
       strictEqual(buf.readIntBE(0, 3), -0x123400);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntLE(-0x120000, 0, 3);
       deepStrictEqual(buf.toJSON().data, [0x00, 0x00, 0xee]);
       strictEqual(buf.readIntLE(0, 3), -0x120000);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntBE(-0x120000, 0, 3);
       deepStrictEqual(buf.toJSON().data, [0xee, 0x00, 0x00]);
       strictEqual(buf.readIntBE(0, 3), -0x120000);
@@ -925,42 +1109,42 @@ export const writing = {
       deepStrictEqual(buf.toJSON().data, [0x90, 0x78, 0x56, 0x34, 0x12]);
       strictEqual(buf.readUIntLE(0, 5), 0x1234567890);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeUIntBE(0x1234567890, 0, 5);
       deepStrictEqual(buf.toJSON().data, [0x12, 0x34, 0x56, 0x78, 0x90]);
       strictEqual(buf.readUIntBE(0, 5), 0x1234567890);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntLE(0x1234567890, 0, 5);
       deepStrictEqual(buf.toJSON().data, [0x90, 0x78, 0x56, 0x34, 0x12]);
       strictEqual(buf.readIntLE(0, 5), 0x1234567890);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntBE(0x1234567890, 0, 5);
       deepStrictEqual(buf.toJSON().data, [0x12, 0x34, 0x56, 0x78, 0x90]);
       strictEqual(buf.readIntBE(0, 5), 0x1234567890);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntLE(-0x1234567890, 0, 5);
       deepStrictEqual(buf.toJSON().data, [0x70, 0x87, 0xa9, 0xcb, 0xed]);
       strictEqual(buf.readIntLE(0, 5), -0x1234567890);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntBE(-0x1234567890, 0, 5);
       deepStrictEqual(buf.toJSON().data, [0xed, 0xcb, 0xa9, 0x87, 0x70]);
       strictEqual(buf.readIntBE(0, 5), -0x1234567890);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntLE(-0x0012000000, 0, 5);
       deepStrictEqual(buf.toJSON().data, [0x00, 0x00, 0x00, 0xee, 0xff]);
       strictEqual(buf.readIntLE(0, 5), -0x0012000000);
 
-      buf.fill(0xFF);
+      buf.fill(0xff);
       buf.writeIntBE(-0x0012000000, 0, 5);
       deepStrictEqual(buf.toJSON().data, [0xff, 0xee, 0x00, 0x00, 0x00]);
       strictEqual(buf.readIntBE(0, 5), -0x0012000000);
     }
-  }
+  },
 };
 
 export const misc = {
@@ -1027,7 +1211,7 @@ export const misc = {
 
     const outOfRangeError = {
       code: 'ERR_OUT_OF_RANGE',
-      name: 'RangeError'
+      name: 'RangeError',
     };
 
     // issue GH-5587
@@ -1035,8 +1219,14 @@ export const misc = {
     throws(() => Buffer.alloc(16).writeDoubleLE(0, 9), outOfRangeError);
 
     // Attempt to overflow buffers, similar to previous bug in array buffers
-    throws(() => Buffer.allocUnsafe(8).writeFloatLE(0.0, 0xffffffff), outOfRangeError);
-    throws(() => Buffer.allocUnsafe(8).writeFloatLE(0.0, 0xffffffff), outOfRangeError);
+    throws(
+      () => Buffer.allocUnsafe(8).writeFloatLE(0.0, 0xffffffff),
+      outOfRangeError
+    );
+    throws(
+      () => Buffer.allocUnsafe(8).writeFloatLE(0.0, 0xffffffff),
+      outOfRangeError
+    );
 
     // Ensure negative values can't get past offset
     throws(() => Buffer.allocUnsafe(8).writeFloatLE(0.0, -1), outOfRangeError);
@@ -1044,14 +1234,11 @@ export const misc = {
 
     // Regression test for https://github.com/nodejs/node-v0.x-archive/issues/5482:
     // should throw but not assert in C++ land.
-    throws(
-      () => Buffer.from('', 'buffer'),
-      {
-        code: 'ERR_UNKNOWN_ENCODING',
-        name: 'TypeError',
-        message: 'Unknown encoding: buffer'
-      }
-    );
+    throws(() => Buffer.from('', 'buffer'), {
+      code: 'ERR_UNKNOWN_ENCODING',
+      name: 'TypeError',
+      message: 'Unknown encoding: buffer',
+    });
 
     // Regression test for https://github.com/nodejs/node-v0.x-archive/issues/6111.
     // Constructing a buffer from another buffer should a) work, and b) not corrupt
@@ -1069,14 +1256,13 @@ export const misc = {
       }
     }
 
-    throws(
-      () => Buffer.allocUnsafe(10).copy(),
-      {
-        code: 'ERR_INVALID_ARG_TYPE',
-        name: 'TypeError',
-        message: 'The "target" argument must be an instance of Buffer or ' +
-                 'Uint8Array. Received undefined'
-      });
+    throws(() => Buffer.allocUnsafe(10).copy(), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+      message:
+        'The "target" argument must be an instance of Buffer or ' +
+        'Uint8Array. Received undefined',
+    });
 
     throws(() => Buffer.from(), {
       name: 'TypeError',
@@ -1107,7 +1293,7 @@ export const misc = {
       throws(() => Buffer.from(new ArrayBuffer(0), -1 >>> 0), {
         code: 'ERR_BUFFER_OUT_OF_BOUNDS',
         name: 'RangeError',
-        message: '"offset" is outside of buffer bounds'
+        message: '"offset" is outside of buffer bounds',
       });
     }
 
@@ -1129,8 +1315,14 @@ export const misc = {
     // Regression test to verify that an empty ArrayBuffer does not throw.
     Buffer.from(new ArrayBuffer());
 
-    throws(() => Buffer.alloc({ valueOf: () => 1 }), /"size" argument must be of type number/);
-    throws(() => Buffer.alloc({ valueOf: () => -1 }), /"size" argument must be of type number/);
+    throws(
+      () => Buffer.alloc({ valueOf: () => 1 }),
+      /"size" argument must be of type number/
+    );
+    throws(
+      () => Buffer.alloc({ valueOf: () => -1 }),
+      /"size" argument must be of type number/
+    );
 
     strictEqual(Buffer.prototype.toLocaleString, Buffer.prototype.toString);
     {
@@ -1138,33 +1330,44 @@ export const misc = {
       strictEqual(buf.toLocaleString(), buf.toString());
     }
 
-    throws(() => {
-      Buffer.alloc(0x1000, 'This is not correctly encoded', 'hex');
-    }, {
-      name: 'TypeError'
-    });
+    throws(
+      () => {
+        Buffer.alloc(0x1000, 'This is not correctly encoded', 'hex');
+      },
+      {
+        name: 'TypeError',
+      }
+    );
 
-    throws(() => {
-      Buffer.alloc(0x1000, 'c', 'hex');
-    }, {
-      name: 'TypeError'
-    });
+    throws(
+      () => {
+        Buffer.alloc(0x1000, 'c', 'hex');
+      },
+      {
+        name: 'TypeError',
+      }
+    );
 
-    throws(() => {
-      Buffer.alloc(1, Buffer.alloc(0));
-    }, {
-      code: 'ERR_INVALID_ARG_VALUE',
-      name: 'TypeError'
-    });
+    throws(
+      () => {
+        Buffer.alloc(1, Buffer.alloc(0));
+      },
+      {
+        code: 'ERR_INVALID_ARG_VALUE',
+        name: 'TypeError',
+      }
+    );
 
-    throws(() => {
-      Buffer.alloc(40, 'x', 20);
-    }, {
-      code: 'ERR_INVALID_ARG_TYPE',
-      name: 'TypeError'
-    });
-
-  }
+    throws(
+      () => {
+        Buffer.alloc(40, 'x', 20);
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+      }
+    );
+  },
 };
 
 export const arrayBuffers = {
@@ -1181,32 +1384,34 @@ export const arrayBuffers = {
     strictEqual(buf.buffer, ab);
     strictEqual(buf.length, ab.byteLength);
 
-    buf.fill(0xC);
+    buf.fill(0xc);
     for (let i = 0; i < LENGTH; i++) {
-      strictEqual(ui[i], 0xC);
-      ui[i] = 0xF;
-      strictEqual(buf[i], 0xF);
+      strictEqual(ui[i], 0xc);
+      ui[i] = 0xf;
+      strictEqual(buf[i], 0xf);
     }
 
-    buf.writeUInt32LE(0xF00, 0);
-    buf.writeUInt32BE(0xB47, 4);
+    buf.writeUInt32LE(0xf00, 0);
+    buf.writeUInt32BE(0xb47, 4);
     buf.writeDoubleLE(3.1415, 8);
 
-    strictEqual(dv.getUint32(0, true), 0xF00);
-    strictEqual(dv.getUint32(4), 0xB47);
+    strictEqual(dv.getUint32(0, true), 0xf00);
+    strictEqual(dv.getUint32(4), 0xb47);
     strictEqual(dv.getFloat64(8, true), 3.1415);
-
 
     // Now test protecting users from doing stupid things
 
-    throws(function() {
-      function AB() { }
-      Object.setPrototypeOf(AB, ArrayBuffer);
-      Object.setPrototypeOf(AB.prototype, ArrayBuffer.prototype);
-      Buffer.from(new AB());
-    }, {
-      name: 'TypeError',
-    });
+    throws(
+      function () {
+        function AB() {}
+        Object.setPrototypeOf(AB, ArrayBuffer);
+        Object.setPrototypeOf(AB.prototype, ArrayBuffer.prototype);
+        Buffer.from(new AB());
+      },
+      {
+        name: 'TypeError',
+      }
+    );
 
     // Test the byteOffset and length arguments
     {
@@ -1227,12 +1432,12 @@ export const arrayBuffers = {
       throws(() => Buffer.from(ab.buffer, 6), {
         code: 'ERR_BUFFER_OUT_OF_BOUNDS',
         name: 'RangeError',
-        message: '"offset" is outside of buffer bounds'
+        message: '"offset" is outside of buffer bounds',
       });
       throws(() => Buffer.from(ab.buffer, 3, 6), {
         code: 'ERR_BUFFER_OUT_OF_BOUNDS',
         name: 'RangeError',
-        message: '"length" is outside of buffer bounds'
+        message: '"length" is outside of buffer bounds',
       });
     }
 
@@ -1255,12 +1460,12 @@ export const arrayBuffers = {
       throws(() => Buffer(ab.buffer, 6), {
         code: 'ERR_BUFFER_OUT_OF_BOUNDS',
         name: 'RangeError',
-        message: '"offset" is outside of buffer bounds'
+        message: '"offset" is outside of buffer bounds',
       });
       throws(() => Buffer(ab.buffer, 3, 6), {
         code: 'ERR_BUFFER_OUT_OF_BOUNDS',
         name: 'RangeError',
-        message: '"length" is outside of buffer bounds'
+        message: '"length" is outside of buffer bounds',
       });
     }
 
@@ -1277,13 +1482,16 @@ export const arrayBuffers = {
       deepStrictEqual(Buffer.from(ab, [1]), Buffer.from(ab, 1));
 
       // If byteOffset is Infinity, throw.
-      throws(() => {
-        Buffer.from(ab, Infinity);
-      }, {
-        code: 'ERR_BUFFER_OUT_OF_BOUNDS',
-        name: 'RangeError',
-        message: '"offset" is outside of buffer bounds'
-      });
+      throws(
+        () => {
+          Buffer.from(ab, Infinity);
+        },
+        {
+          code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+          name: 'RangeError',
+          message: '"offset" is outside of buffer bounds',
+        }
+      );
     }
 
     {
@@ -1299,18 +1507,21 @@ export const arrayBuffers = {
       deepStrictEqual(Buffer.from(ab, 0, [1]), Buffer.from(ab, 0, 1));
 
       // If length is Infinity, throw.
-      throws(() => {
-        Buffer.from(ab, 0, Infinity);
-      }, {
-        code: 'ERR_BUFFER_OUT_OF_BOUNDS',
-        name: 'RangeError',
-        message: '"length" is outside of buffer bounds'
-      });
+      throws(
+        () => {
+          Buffer.from(ab, 0, Infinity);
+        },
+        {
+          code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+          name: 'RangeError',
+          message: '"length" is outside of buffer bounds',
+        }
+      );
     }
 
     // Test an array like entry with the length set to NaN.
     deepStrictEqual(Buffer.from({ length: NaN }), Buffer.alloc(0));
-  }
+  },
 };
 
 export const ascii = {
@@ -1319,12 +1530,14 @@ export const ascii = {
     // it doesn't do transliteration.
     strictEqual(Buffer.from('hérité').toString('ascii'), 'hC)ritC)');
     // 71 characters, 78 bytes. The ’ character is a triple-byte sequence.
-    const input = 'C’est, graphiquement, la réunion d’un accent aigu ' +
-                  'et d’un accent grave.';
+    const input =
+      'C’est, graphiquement, la réunion d’un accent aigu ' +
+      'et d’un accent grave.';
 
-    const expected = 'Cb\u0000\u0019est, graphiquement, la rC)union ' +
-                    'db\u0000\u0019un accent aigu et db\u0000\u0019un ' +
-                    'accent grave.';
+    const expected =
+      'Cb\u0000\u0019est, graphiquement, la rC)union ' +
+      'db\u0000\u0019un accent aigu et db\u0000\u0019un ' +
+      'accent grave.';
 
     const buf = Buffer.from(input);
 
@@ -1335,7 +1548,7 @@ export const ascii = {
       if (input.charCodeAt(i) > 65535) ++i;
       if (input.charCodeAt(i) > 127) ++i;
     }
-  }
+  },
 };
 
 export const badHex = {
@@ -1375,8 +1588,7 @@ export const badHex = {
 
     {
       const buf = Buffer.alloc(256);
-      for (let i = 0; i < 256; i++)
-        buf[i] = i;
+      for (let i = 0; i < 256; i++) buf[i] = i;
 
       const hex = buf.toString('hex');
       deepStrictEqual(Buffer.from(hex, 'hex'), buf);
@@ -1384,14 +1596,14 @@ export const badHex = {
       const badHex = `${hex.slice(0, 256)}xx${hex.slice(256, 510)}`;
       deepStrictEqual(Buffer.from(badHex, 'hex'), buf.slice(0, 128));
     }
-  }
+  },
 };
 
 export const bigint64 = {
   test(ctrl, env, ctx) {
     const buf = Buffer.allocUnsafe(8);
 
-    ['LE', 'BE'].forEach(function(endianness) {
+    ['LE', 'BE'].forEach(function (endianness) {
       // Should allow simple BigInts to be written and read
       let val = 123456789n;
       buf[`writeBigInt64${endianness}`](val, 0);
@@ -1415,49 +1627,45 @@ export const bigint64 = {
       strictEqual(val, buf[`readBigUInt64${endianness}`](0));
 
       // Should throw a RangeError upon INT64_MAX+1 being written
-      throws(function() {
+      throws(function () {
         const val = 0x8000000000000000n;
         buf[`writeBigInt64${endianness}`](val, 0);
       }, RangeError);
 
       // Should throw a RangeError upon UINT64_MAX+1 being written
-      throws(function() {
-        const val = 0x10000000000000000n;
-        buf[`writeBigUInt64${endianness}`](val, 0);
-      }, {
-        code: 'ERR_OUT_OF_RANGE',
-        message: 'The value of "value" is out of range. It must be ' +
-          '>= 0n and < 2n ** 64n. Received 18_446_744_073_709_551_616n'
-      });
+      throws(
+        function () {
+          const val = 0x10000000000000000n;
+          buf[`writeBigUInt64${endianness}`](val, 0);
+        },
+        {
+          code: 'ERR_OUT_OF_RANGE',
+          message:
+            'The value of "value" is out of range. It must be ' +
+            '>= 0n and < 2n ** 64n. Received 18_446_744_073_709_551_616n',
+        }
+      );
 
       // Should throw a TypeError upon invalid input
-      throws(function() {
+      throws(function () {
         buf[`writeBigInt64${endianness}`]('bad', 0);
       }, TypeError);
 
       // Should throw a TypeError upon invalid input
-      throws(function() {
+      throws(function () {
         buf[`writeBigUInt64${endianness}`]('bad', 0);
       }, TypeError);
     });
-  }
+  },
 };
 
 export const byteLength = {
   test(ctrl, env, ctx) {
-    [
-      [32, 'latin1'],
-      [NaN, 'utf8'],
-      [{}, 'latin1'],
-      [],
-    ].forEach((args) => {
-      throws(
-        () => Buffer.byteLength(...args),
-        {
-          code: 'ERR_INVALID_ARG_TYPE',
-          name: 'TypeError',
-        }
-      );
+    [[32, 'latin1'], [NaN, 'utf8'], [{}, 'latin1'], []].forEach((args) => {
+      throws(() => Buffer.byteLength(...args), {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+      });
     });
 
     ok(ArrayBuffer.isView(new Buffer(10)));
@@ -1524,13 +1732,19 @@ export const byteLength = {
     strictEqual(Buffer.byteLength('aGVsbG8gd29ybGQ=', 'BASE64'), 11);
     strictEqual(Buffer.byteLength('bm9kZS5qcyByb2NrcyE=', 'base64'), 14);
     strictEqual(Buffer.byteLength('aGkk', 'base64'), 3);
-    strictEqual(Buffer.byteLength('bHNrZGZsa3NqZmtsc2xrZmFqc2RsZmtqcw==', 'base64'), 25);
+    strictEqual(
+      Buffer.byteLength('bHNrZGZsa3NqZmtsc2xrZmFqc2RsZmtqcw==', 'base64'),
+      25
+    );
     // base64url
     strictEqual(Buffer.byteLength('aGVsbG8gd29ybGQ', 'base64url'), 11);
     strictEqual(Buffer.byteLength('aGVsbG8gd29ybGQ', 'BASE64URL'), 11);
     strictEqual(Buffer.byteLength('bm9kZS5qcyByb2NrcyE', 'base64url'), 14);
     strictEqual(Buffer.byteLength('aGkk', 'base64url'), 3);
-    strictEqual(Buffer.byteLength('bHNrZGZsa3NqZmtsc2xrZmFqc2RsZmtqcw', 'base64url'), 25);
+    strictEqual(
+      Buffer.byteLength('bHNrZGZsa3NqZmtsc2xrZmFqc2RsZmtqcw', 'base64url'),
+      25
+    );
     // special padding
     strictEqual(Buffer.byteLength('aaa=', 'base64'), 2);
     strictEqual(Buffer.byteLength('aaaa==', 'base64'), 3);
@@ -1557,11 +1771,12 @@ export const byteLength = {
       const encoding = String(i).repeat(i);
 
       ok(!Buffer.isEncoding(encoding));
-      strictEqual(Buffer.byteLength('foo', encoding),
-                         Buffer.byteLength('foo', 'utf8'));
+      strictEqual(
+        Buffer.byteLength('foo', encoding),
+        Buffer.byteLength('foo', 'utf8')
+      );
     }
-
-  }
+  },
 };
 
 export const compareOffset = {
@@ -1581,10 +1796,7 @@ export const compareOffset = {
 
     // Zero-length target, return 1
     strictEqual(a.compare(b, 0, 0, 0), 1);
-    throws(
-      () => a.compare(b, 0, '0', '0'),
-      { code: 'ERR_INVALID_ARG_TYPE' }
-    );
+    throws(() => a.compare(b, 0, '0', '0'), { code: 'ERR_INVALID_ARG_TYPE' });
 
     // Equivalent to Buffer.compare(a, b.slice(6, 10))
     strictEqual(a.compare(b, 6, 10), 1);
@@ -1612,34 +1824,23 @@ export const compareOffset = {
     strictEqual(a.compare(b, 0, 7, 4, 6), -1);
 
     // Null is ambiguous.
-    throws(
-      () => a.compare(b, 0, null),
-      { code: 'ERR_INVALID_ARG_TYPE' }
-    );
+    throws(() => a.compare(b, 0, null), { code: 'ERR_INVALID_ARG_TYPE' });
 
     // Values do not get coerced.
-    throws(
-      () => a.compare(b, 0, { valueOf: () => 5 }),
-      { code: 'ERR_INVALID_ARG_TYPE' }
-    );
+    throws(() => a.compare(b, 0, { valueOf: () => 5 }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
 
     // Infinity should not be coerced.
-    throws(
-      () => a.compare(b, Infinity, -Infinity),
-      { code: 'ERR_OUT_OF_RANGE' }
-    );
+    throws(() => a.compare(b, Infinity, -Infinity), {
+      code: 'ERR_OUT_OF_RANGE',
+    });
 
     // Zero length target because default for targetEnd <= targetSource
     strictEqual(a.compare(b, 0xff), 1);
 
-    throws(
-      () => a.compare(b, '0xff'),
-      { code: 'ERR_INVALID_ARG_TYPE' }
-    );
-    throws(
-      () => a.compare(b, 0, '0xff'),
-      { code: 'ERR_INVALID_ARG_TYPE' }
-    );
+    throws(() => a.compare(b, '0xff'), { code: 'ERR_INVALID_ARG_TYPE' });
+    throws(() => a.compare(b, 0, '0xff'), { code: 'ERR_INVALID_ARG_TYPE' });
 
     const oor = { code: 'ERR_OUT_OF_RANGE' };
 
@@ -1652,10 +1853,11 @@ export const compareOffset = {
     throws(() => a.compare(), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
-      message: 'The "target" argument must be an instance of ' +
-               'Buffer or Uint8Array. Received undefined'
+      message:
+        'The "target" argument must be an instance of ' +
+        'Buffer or Uint8Array. Received undefined',
     });
-  }
+  },
 };
 
 export const compare = {
@@ -1663,7 +1865,7 @@ export const compare = {
     const b = Buffer.alloc(1, 'a');
     const c = Buffer.alloc(1, 'c');
     const d = Buffer.alloc(2, 'aa');
-    const e = new Uint8Array([ 0x61, 0x61 ]); // ASCII 'aa', same as d
+    const e = new Uint8Array([0x61, 0x61]); // ASCII 'aa', same as d
 
     strictEqual(b.compare(c), -1);
     strictEqual(c.compare(d), 1);
@@ -1696,13 +1898,13 @@ export const compare = {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
-  }
+  },
 };
 
 export const concat = {
   test(ctrl, env, ctx) {
     const zero = [];
-    const one = [ Buffer.from('asdf') ];
+    const one = [Buffer.from('asdf')];
     const long = [];
     for (let i = 0; i < 10; i++) long.push(Buffer.from('asdf'));
 
@@ -1723,28 +1925,37 @@ export const concat = {
     strictEqual(flatLongLen.toString(), check);
 
     [undefined, null, Buffer.from('hello')].forEach((value) => {
-      throws(() => {
-        Buffer.concat(value);
-      }, {
-        name: 'TypeError',
-      });
+      throws(
+        () => {
+          Buffer.concat(value);
+        },
+        {
+          name: 'TypeError',
+        }
+      );
     });
 
     [[42], ['hello', Buffer.from('world')]].forEach((value) => {
-      throws(() => {
-        Buffer.concat(value);
-      }, {
-        name: 'TypeError',
-        //code: 'ERR_INVALID_ARG_TYPE',
-      });
+      throws(
+        () => {
+          Buffer.concat(value);
+        },
+        {
+          name: 'TypeError',
+          //code: 'ERR_INVALID_ARG_TYPE',
+        }
+      );
     });
 
-    throws(() => {
-      Buffer.concat([Buffer.from('hello'), 3]);
-    }, {
-      name: 'TypeError',
-      //code: 'ERR_INVALID_ARG_TYPE',
-    });
+    throws(
+      () => {
+        Buffer.concat([Buffer.from('hello'), 3]);
+      },
+      {
+        name: 'TypeError',
+        //code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
 
     // eslint-disable-next-line node-core/crypto-check
     const random10 = Buffer.alloc(10);
@@ -1764,11 +1975,19 @@ export const concat = {
     // The tail should be zero-filled
     deepStrictEqual(Buffer.concat([empty], 100), Buffer.alloc(100));
     deepStrictEqual(Buffer.concat([empty], 4096), Buffer.alloc(4096));
-    deepStrictEqual(Buffer.concat([random10], 40), Buffer.concat([random10, Buffer.alloc(30)]));
+    deepStrictEqual(
+      Buffer.concat([random10], 40),
+      Buffer.concat([random10, Buffer.alloc(30)])
+    );
 
-    deepStrictEqual(Buffer.concat([new Uint8Array([0x41, 0x42]), new Uint8Array([0x43, 0x44])]),
-                    Buffer.from('ABCD'));
-  }
+    deepStrictEqual(
+      Buffer.concat([
+        new Uint8Array([0x41, 0x42]),
+        new Uint8Array([0x43, 0x44]),
+      ]),
+      Buffer.from('ABCD')
+    );
+  },
 };
 
 export const konstants = {
@@ -1776,12 +1995,15 @@ export const konstants = {
     strictEqual(typeof MAX_LENGTH, 'number');
     strictEqual(typeof MAX_STRING_LENGTH, 'number');
     ok(MAX_STRING_LENGTH <= MAX_LENGTH);
-    throws(() => ' '.repeat(MAX_STRING_LENGTH + 1), /^RangeError: Invalid string length$/);
+    throws(
+      () => ' '.repeat(MAX_STRING_LENGTH + 1),
+      /^RangeError: Invalid string length$/
+    );
     ' '.repeat(MAX_STRING_LENGTH); // Should not throw.
     // Legacy values match:
     strictEqual(kMaxLength, MAX_LENGTH);
     strictEqual(kStringMaxLength, MAX_STRING_LENGTH);
-  }
+  },
 };
 
 export const copy = {
@@ -1908,40 +2130,32 @@ export const copy = {
     const bb = Buffer.allocUnsafe(10);
     bb.fill('hello crazy world');
 
-
     // Try to copy from before the beginning of b. Should not throw.
     b.copy(c, 0, 100, 10);
 
     // Throw with invalid source type
-    throws(
-      () => Buffer.prototype.copy.call(0),
-      {
-        code: 'ERR_INVALID_ARG_TYPE',
-        name: 'TypeError',
-      }
-    );
+    throws(() => Buffer.prototype.copy.call(0), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
 
     // Copy throws at negative targetStart
-    throws(
-      () => Buffer.allocUnsafe(5).copy(Buffer.allocUnsafe(5), -1, 0),
-      {
-        code: 'ERR_OUT_OF_RANGE',
-        name: 'RangeError',
-        message: 'The value of "targetStart" is out of range. ' +
-                 'It must be >= 0. Received -1'
-      }
-    );
+    throws(() => Buffer.allocUnsafe(5).copy(Buffer.allocUnsafe(5), -1, 0), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+      message:
+        'The value of "targetStart" is out of range. ' +
+        'It must be >= 0. Received -1',
+    });
 
     // Copy throws at negative sourceStart
-    throws(
-      () => Buffer.allocUnsafe(5).copy(Buffer.allocUnsafe(5), 0, -1),
-      {
-        code: 'ERR_OUT_OF_RANGE',
-        name: 'RangeError',
-        message: 'The value of "sourceStart" is out of range. ' +
-                 'It must be >= 0. Received -1'
-      }
-    );
+    throws(() => Buffer.allocUnsafe(5).copy(Buffer.allocUnsafe(5), 0, -1), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+      message:
+        'The value of "sourceStart" is out of range. ' +
+        'It must be >= 0. Received -1',
+    });
 
     {
       // Check sourceEnd resets to targetEnd if former is greater than the latter
@@ -1954,15 +2168,13 @@ export const copy = {
     }
 
     // Throw with negative sourceEnd
-    throws(
-      () => b.copy(c, 0, 0, -1),
-      {
-        code: 'ERR_OUT_OF_RANGE',
-        name: 'RangeError',
-        message: 'The value of "sourceEnd" is out of range. ' +
-                 'It must be >= 0. Received -1'
-      }
-    );
+    throws(() => b.copy(c, 0, 0, -1), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+      message:
+        'The value of "sourceEnd" is out of range. ' +
+        'It must be >= 0. Received -1',
+    });
 
     // When sourceStart is greater than sourceEnd, zero copied
     strictEqual(b.copy(c, 0, 100, 10), 0);
@@ -2005,13 +2217,16 @@ export const copy = {
     {
       c.fill('C');
       throws(() => {
-        b.copy(c, { [Symbol.toPrimitive]() { throw new Error('foo'); } });
+        b.copy(c, {
+          [Symbol.toPrimitive]() {
+            throw new Error('foo');
+          },
+        });
       }, /foo/);
       // No copying took place:
       deepStrictEqual(c.toString(), 'C'.repeat(c.length));
     }
-
-  }
+  },
 };
 
 export const equals = {
@@ -2027,14 +2242,11 @@ export const equals = {
     ok(d.equals(d));
     ok(d.equals(new Uint8Array([0x61, 0x62, 0x63, 0x64, 0x65])));
 
-    throws(
-      () => Buffer.alloc(1).equals('abc'),
-      {
-        code: 'ERR_INVALID_ARG_TYPE',
-        name: 'TypeError',
-      }
-    );
-  }
+    throws(() => Buffer.alloc(1).equals('abc'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+  },
 };
 
 export const failedAllocTypedArrays = {
@@ -2066,62 +2278,61 @@ export const failedAllocTypedArrays = {
         }
       }
     }
-  }
+  },
 };
 
 export const fakes = {
   test(ctrl, env, ctx) {
-    function FakeBuffer() { }
+    function FakeBuffer() {}
     Object.setPrototypeOf(FakeBuffer, Buffer);
     Object.setPrototypeOf(FakeBuffer.prototype, Buffer.prototype);
 
     const fb = new FakeBuffer();
 
-    throws(function() {
+    throws(function () {
       Buffer.from(fb);
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       +Buffer.prototype; // eslint-disable-line no-unused-expressions
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       Buffer.compare(fb, Buffer.alloc(0));
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       fb.write('foo');
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       Buffer.concat([fb, fb]);
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       fb.toString();
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       fb.equals(Buffer.alloc(0));
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       fb.indexOf(5);
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       fb.readFloatLE(0);
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       fb.writeFloatLE(0);
     }, TypeError);
 
-    throws(function() {
+    throws(function () {
       fb.fill(0);
     }, TypeError);
-
-  }
+  },
 };
 
 export const fill = {
@@ -2233,21 +2444,27 @@ export const fill = {
     testBufs('61c8b462c8b563c8b6', 4, 1, 'hex');
     testBufs('61c8b462c8b563c8b6', 12, 1, 'hex');
 
-    throws(() => {
-      const buf = Buffer.allocUnsafe(SIZE);
+    throws(
+      () => {
+        const buf = Buffer.allocUnsafe(SIZE);
 
-      buf.fill('yKJh', 'hex');
-    }, {
-      name: 'TypeError'
-    });
+        buf.fill('yKJh', 'hex');
+      },
+      {
+        name: 'TypeError',
+      }
+    );
 
-    throws(() => {
-      const buf = Buffer.allocUnsafe(SIZE);
+    throws(
+      () => {
+        const buf = Buffer.allocUnsafe(SIZE);
 
-      buf.fill('\u0222', 'hex');
-    }, {
-      name: 'TypeError'
-    });
+        buf.fill('\u0222', 'hex');
+      },
+      {
+        name: 'TypeError',
+      }
+    );
 
     // BASE64
     testBufs('YWJj', 'base64');
@@ -2306,41 +2523,29 @@ export const fill = {
       ['', 0, buf1.length + 1],
       ['', 1, -1],
     ].forEach((args) => {
-      throws(
-        () => buf1.fill(...args),
-        { name: 'RangeError' }
-      );
+      throws(() => buf1.fill(...args), { name: 'RangeError' });
     });
 
-    throws(
-      () => buf1.fill('a', 0, buf1.length, 'node rocks!'),
-      {
-        code: 'ERR_UNKNOWN_ENCODING',
-        name: 'TypeError',
-        message: 'Unknown encoding: node rocks!'
-      }
-    );
+    throws(() => buf1.fill('a', 0, buf1.length, 'node rocks!'), {
+      code: 'ERR_UNKNOWN_ENCODING',
+      name: 'TypeError',
+      message: 'Unknown encoding: node rocks!',
+    });
 
     [
       ['a', 0, 0, NaN],
       ['a', 0, 0, false],
     ].forEach((args) => {
-      throws(
-        () => buf1.fill(...args),
-        {
-          name: 'TypeError',
-        }
-      );
+      throws(() => buf1.fill(...args), {
+        name: 'TypeError',
+      });
     });
 
-    throws(
-      () => buf1.fill('a', 0, 0, 'foo'),
-      {
-        code: 'ERR_UNKNOWN_ENCODING',
-        name: 'TypeError',
-        message: 'Unknown encoding: foo'
-      }
-    );
+    throws(() => buf1.fill('a', 0, 0, 'foo'), {
+      code: 'ERR_UNKNOWN_ENCODING',
+      name: 'TypeError',
+      message: 'Unknown encoding: foo',
+    });
 
     function genBuffer(size, args) {
       const b = Buffer.allocUnsafe(size);
@@ -2369,11 +2574,9 @@ export const fill = {
       }
 
       // Should never be reached.
-      if (offset < 0 || end > buf2.length)
-        throw new ERR_OUT_OF_RANGE();
+      if (offset < 0 || end > buf2.length) throw new ERR_OUT_OF_RANGE();
 
-      if (end <= offset)
-        return buf2;
+      if (end <= offset) return buf2;
 
       offset >>>= 0;
       end >>>= 0;
@@ -2388,10 +2591,8 @@ export const fill = {
         offset += written;
         // Safety check in case write falls into infinite loop.
         if (written === 0) {
-          if (wasZero)
-            throw new Error('Could not write all data to Buffer');
-          else
-            wasZero = true;
+          if (wasZero) throw new Error('Could not write all data to Buffer');
+          else wasZero = true;
         }
       } while (offset < buf2.length);
 
@@ -2402,17 +2603,19 @@ export const fill = {
       bufReset();
       buf1.fill.apply(buf1, arguments);
       // Swap bytes on BE archs for ucs2 encoding.
-      deepStrictEqual(buf1.fill.apply(buf1, arguments),
-                             writeToFill.apply(null, arguments));
+      deepStrictEqual(
+        buf1.fill.apply(buf1, arguments),
+        writeToFill.apply(null, arguments)
+      );
     }
 
     // Make sure these throw.
-    throws(
-      () => Buffer.allocUnsafe(8).fill('a', -1),
-      { code: 'ERR_OUT_OF_RANGE' });
-    throws(
-      () => Buffer.allocUnsafe(8).fill('a', 0, 9),
-      { code: 'ERR_OUT_OF_RANGE' });
+    throws(() => Buffer.allocUnsafe(8).fill('a', -1), {
+      code: 'ERR_OUT_OF_RANGE',
+    });
+    throws(() => Buffer.allocUnsafe(8).fill('a', 0, 9), {
+      code: 'ERR_OUT_OF_RANGE',
+    });
 
     // // Make sure this doesn't hang indefinitely.
     Buffer.allocUnsafe(8).fill('');
@@ -2420,12 +2623,10 @@ export const fill = {
 
     {
       const buf = Buffer.alloc(64, 10);
-      for (let i = 0; i < buf.length; i++)
-        strictEqual(buf[i], 10);
+      for (let i = 0; i < buf.length; i++) strictEqual(buf[i], 10);
 
       buf.fill(11, 0, buf.length >> 1);
-      for (let i = 0; i < buf.length >> 1; i++)
-        strictEqual(buf[i], 11);
+      for (let i = 0; i < buf.length >> 1; i++) strictEqual(buf[i], 11);
       for (let i = (buf.length >> 1) + 1; i < buf.length; i++)
         strictEqual(buf[i], 10);
 
@@ -2434,20 +2635,15 @@ export const fill = {
         strictEqual(buf[i], 'h'.charCodeAt(0));
 
       buf.fill(0);
-      for (let i = 0; i < buf.length; i++)
-        strictEqual(buf[i], 0);
+      for (let i = 0; i < buf.length; i++) strictEqual(buf[i], 0);
 
       buf.fill(null);
-      for (let i = 0; i < buf.length; i++)
-        strictEqual(buf[i], 0);
+      for (let i = 0; i < buf.length; i++) strictEqual(buf[i], 0);
 
       buf.fill(1, 16, 32);
-      for (let i = 0; i < 16; i++)
-        strictEqual(buf[i], 0);
-      for (let i = 16; i < 32; i++)
-        strictEqual(buf[i], 1);
-      for (let i = 32; i < buf.length; i++)
-        strictEqual(buf[i], 0);
+      for (let i = 0; i < 16; i++) strictEqual(buf[i], 0);
+      for (let i = 16; i < 32; i++) strictEqual(buf[i], 1);
+      for (let i = 32; i < buf.length; i++) strictEqual(buf[i], 0);
     }
 
     {
@@ -2460,18 +2656,22 @@ export const fill = {
     // Make sure "end" is properly checked, even if it's magically mangled using
     // Symbol.toPrimitive.
     {
-      throws(() => {
-        const end = {
-          [Symbol.toPrimitive]() {
-            return 1;
-          }
-        };
-        Buffer.alloc(1).fill(Buffer.alloc(1), 0, end);
-      }, {
-        code: 'ERR_INVALID_ARG_TYPE',
-        message: 'The "end" argument must be of type number. Received an ' +
-                 'instance of Object'
-      });
+      throws(
+        () => {
+          const end = {
+            [Symbol.toPrimitive]() {
+              return 1;
+            },
+          };
+          Buffer.alloc(1).fill(Buffer.alloc(1), 0, end);
+        },
+        {
+          code: 'ERR_INVALID_ARG_TYPE',
+          message:
+            'The "end" argument must be of type number. Received an ' +
+            'instance of Object',
+        }
+      );
     }
 
     // Test that bypassing 'length' won't cause an abort.
@@ -2484,54 +2684,66 @@ export const fill = {
       const buf = Buffer.from('w00t');
       Object.defineProperty(buf, 'length', {
         value: 1337,
-        enumerable: true
+        enumerable: true,
       });
       buf.fill('');
     }
 
     deepStrictEqual(
       Buffer.allocUnsafeSlow(16).fill('ab', 'utf16le'),
-      Buffer.from('61006200610062006100620061006200', 'hex'));
+      Buffer.from('61006200610062006100620061006200', 'hex')
+    );
 
     deepStrictEqual(
       Buffer.allocUnsafeSlow(15).fill('ab', 'utf16le'),
-      Buffer.from('610062006100620061006200610062', 'hex'));
+      Buffer.from('610062006100620061006200610062', 'hex')
+    );
 
     deepStrictEqual(
       Buffer.allocUnsafeSlow(16).fill('ab', 'utf16le'),
-      Buffer.from('61006200610062006100620061006200', 'hex'));
+      Buffer.from('61006200610062006100620061006200', 'hex')
+    );
     deepStrictEqual(
       Buffer.allocUnsafeSlow(16).fill('a', 'utf16le'),
-      Buffer.from('61006100610061006100610061006100', 'hex'));
+      Buffer.from('61006100610061006100610061006100', 'hex')
+    );
 
     strictEqual(
       Buffer.allocUnsafeSlow(16).fill('a', 'utf16le').toString('utf16le'),
-      'a'.repeat(8));
+      'a'.repeat(8)
+    );
     strictEqual(
       Buffer.allocUnsafeSlow(16).fill('a', 'latin1').toString('latin1'),
-      'a'.repeat(16));
+      'a'.repeat(16)
+    );
     strictEqual(
       Buffer.allocUnsafeSlow(16).fill('a', 'utf8').toString('utf8'),
-      'a'.repeat(16));
+      'a'.repeat(16)
+    );
 
     strictEqual(
       Buffer.allocUnsafeSlow(16).fill('Љ', 'utf16le').toString('utf16le'),
-      'Љ'.repeat(8));
+      'Љ'.repeat(8)
+    );
     strictEqual(
       Buffer.allocUnsafeSlow(16).fill('Љ', 'latin1').toString('latin1'),
-      '\t'.repeat(16));
+      '\t'.repeat(16)
+    );
     strictEqual(
       Buffer.allocUnsafeSlow(16).fill('Љ', 'utf8').toString('utf8'),
-      'Љ'.repeat(8));
+      'Љ'.repeat(8)
+    );
 
-    throws(() => {
-      const buf = Buffer.from('a'.repeat(1000));
+    throws(
+      () => {
+        const buf = Buffer.from('a'.repeat(1000));
 
-      buf.fill('This is not correctly encoded', 'hex');
-    }, {
-      name: 'TypeError'
-    });
-
+        buf.fill('This is not correctly encoded', 'hex');
+      },
+      {
+        name: 'TypeError',
+      }
+    );
 
     {
       const bufEmptyString = Buffer.alloc(5, '');
@@ -2546,7 +2758,7 @@ export const fill = {
       const bufZero = Buffer.alloc(5, 0);
       strictEqual(bufZero.toString(), '\x00\x00\x00\x00\x00');
     }
-  }
+  },
 };
 
 export const includes = {
@@ -2627,61 +2839,71 @@ export const includes = {
 
     // test hex encoding
     strictEqual(
-      Buffer.from(b.toString('hex'), 'hex')
-        .includes('64', 0, 'hex'),
+      Buffer.from(b.toString('hex'), 'hex').includes('64', 0, 'hex'),
       true
     );
     strictEqual(
-      Buffer.from(b.toString('hex'), 'hex')
-        .includes(Buffer.from('64', 'hex'), 0, 'hex'),
+      Buffer.from(b.toString('hex'), 'hex').includes(
+        Buffer.from('64', 'hex'),
+        0,
+        'hex'
+      ),
       true
     );
 
     // Test base64 encoding
     strictEqual(
-      Buffer.from(b.toString('base64'), 'base64')
-        .includes('ZA==', 0, 'base64'),
+      Buffer.from(b.toString('base64'), 'base64').includes('ZA==', 0, 'base64'),
       true
     );
     strictEqual(
-      Buffer.from(b.toString('base64'), 'base64')
-        .includes(Buffer.from('ZA==', 'base64'), 0, 'base64'),
+      Buffer.from(b.toString('base64'), 'base64').includes(
+        Buffer.from('ZA==', 'base64'),
+        0,
+        'base64'
+      ),
       true
     );
 
     // test ascii encoding
     strictEqual(
-      Buffer.from(b.toString('ascii'), 'ascii')
-        .includes('d', 0, 'ascii'),
+      Buffer.from(b.toString('ascii'), 'ascii').includes('d', 0, 'ascii'),
       true
     );
     strictEqual(
-      Buffer.from(b.toString('ascii'), 'ascii')
-        .includes(Buffer.from('d', 'ascii'), 0, 'ascii'),
+      Buffer.from(b.toString('ascii'), 'ascii').includes(
+        Buffer.from('d', 'ascii'),
+        0,
+        'ascii'
+      ),
       true
     );
 
     // Test latin1 encoding
     strictEqual(
-      Buffer.from(b.toString('latin1'), 'latin1')
-        .includes('d', 0, 'latin1'),
+      Buffer.from(b.toString('latin1'), 'latin1').includes('d', 0, 'latin1'),
       true
     );
     strictEqual(
-      Buffer.from(b.toString('latin1'), 'latin1')
-        .includes(Buffer.from('d', 'latin1'), 0, 'latin1'),
+      Buffer.from(b.toString('latin1'), 'latin1').includes(
+        Buffer.from('d', 'latin1'),
+        0,
+        'latin1'
+      ),
       true
     );
 
     // Test binary encoding
     strictEqual(
-      Buffer.from(b.toString('binary'), 'binary')
-        .includes('d', 0, 'binary'),
+      Buffer.from(b.toString('binary'), 'binary').includes('d', 0, 'binary'),
       true
     );
     strictEqual(
-      Buffer.from(b.toString('binary'), 'binary')
-        .includes(Buffer.from('d', 'binary'), 0, 'binary'),
+      Buffer.from(b.toString('binary'), 'binary').includes(
+        Buffer.from('d', 'binary'),
+        0,
+        'binary'
+      ),
       true
     );
 
@@ -2691,22 +2913,20 @@ export const includes = {
     ok(twoByteString.includes('\u0395', 4, 'ucs2'));
     ok(twoByteString.includes('\u03a3', -4, 'ucs2'));
     ok(twoByteString.includes('\u03a3', -6, 'ucs2'));
-    ok(twoByteString.includes(
-      Buffer.from('\u03a3', 'ucs2'), -6, 'ucs2'));
+    ok(twoByteString.includes(Buffer.from('\u03a3', 'ucs2'), -6, 'ucs2'));
     ok(!twoByteString.includes('\u03a3', -2, 'ucs2'));
 
-    const mixedByteStringUcs2 =
-      Buffer.from('\u039a\u0391abc\u03a3\u03a3\u0395', 'ucs2');
+    const mixedByteStringUcs2 = Buffer.from(
+      '\u039a\u0391abc\u03a3\u03a3\u0395',
+      'ucs2'
+    );
     ok(mixedByteStringUcs2.includes('bc', 0, 'ucs2'));
     ok(mixedByteStringUcs2.includes('\u03a3', 0, 'ucs2'));
     ok(!mixedByteStringUcs2.includes('\u0396', 0, 'ucs2'));
 
-    ok(
-      mixedByteStringUcs2.includes(Buffer.from('bc', 'ucs2'), 0, 'ucs2'));
-    ok(
-      mixedByteStringUcs2.includes(Buffer.from('\u03a3', 'ucs2'), 0, 'ucs2'));
-    ok(
-      !mixedByteStringUcs2.includes(Buffer.from('\u0396', 'ucs2'), 0, 'ucs2'));
+    ok(mixedByteStringUcs2.includes(Buffer.from('bc', 'ucs2'), 0, 'ucs2'));
+    ok(mixedByteStringUcs2.includes(Buffer.from('\u03a3', 'ucs2'), 0, 'ucs2'));
+    ok(!mixedByteStringUcs2.includes(Buffer.from('\u0396', 'ucs2'), 0, 'ucs2'));
 
     twoByteString = Buffer.from('\u039a\u0391\u03a3\u03a3\u0395', 'ucs2');
 
@@ -2724,7 +2944,9 @@ export const includes = {
     ok(twoByteString.includes('\u03a3\u03a3', 0, 'ucs2'), 'Sigma Sigma');
     ok(twoByteString.includes('\u03a3\u0395', 0, 'ucs2'), 'Sigma Epsilon');
 
-    const mixedByteStringUtf8 = Buffer.from('\u039a\u0391abc\u03a3\u03a3\u0395');
+    const mixedByteStringUtf8 = Buffer.from(
+      '\u039a\u0391abc\u03a3\u03a3\u0395'
+    );
     ok(mixedByteStringUtf8.includes('bc'));
     ok(mixedByteStringUtf8.includes('bc', 5));
     ok(mixedByteStringUtf8.includes('bc', -8));
@@ -2734,7 +2956,8 @@ export const includes = {
     // Test complex string includes algorithms. Only trigger for long strings.
     // Long string that isn't a simple repeat of a shorter string.
     let longString = 'A';
-    for (let i = 66; i < 76; i++) {  // from 'B' to 'K'
+    for (let i = 66; i < 76; i++) {
+      // from 'B' to 'K'
       longString = longString + String.fromCharCode(i) + longString;
     }
 
@@ -2755,15 +2978,17 @@ export const includes = {
 
     // Search for a non-ASCII string in a pure ASCII string.
     const asciiString = Buffer.from(
-      'arglebargleglopglyfarglebargleglopglyfarglebargleglopglyf');
+      'arglebargleglopglyfarglebargleglopglyfarglebargleglopglyf'
+    );
     ok(!asciiString.includes('\x2061'));
     ok(asciiString.includes('leb', 0));
 
     // Search in string containing many non-ASCII chars.
     const allCodePoints = [];
     for (let i = 0; i < 65534; i++) allCodePoints[i] = i;
-    const allCharsString = String.fromCharCode.apply(String, allCodePoints) +
-        String.fromCharCode(65534, 65535);
+    const allCharsString =
+      String.fromCharCode.apply(String, allCodePoints) +
+      String.fromCharCode(65534, 65535);
     const allCharsBufferUtf8 = Buffer.from(allCharsString);
     const allCharsBufferUcs2 = Buffer.from(allCharsString, 'ucs2');
 
@@ -2773,26 +2998,29 @@ export const includes = {
     ok(!allCharsBufferUcs2.includes('notfound'));
 
     // Find substrings in Utf8.
-    let lengths = [1, 3, 15];  // Single char, simple and complex.
-    let indices = [0x5, 0x60, 0x400, 0x680, 0x7ee, 0xFF02, 0x16610, 0x2f77b];
+    let lengths = [1, 3, 15]; // Single char, simple and complex.
+    let indices = [0x5, 0x60, 0x400, 0x680, 0x7ee, 0xff02, 0x16610, 0x2f77b];
     for (let lengthIndex = 0; lengthIndex < lengths.length; lengthIndex++) {
       for (let i = 0; i < indices.length; i++) {
         const index = indices[i];
         let length = lengths[lengthIndex];
 
-        if (index + length > 0x7F) {
+        if (index + length > 0x7f) {
           length = 2 * length;
         }
 
-        if (index + length > 0x7FF) {
+        if (index + length > 0x7ff) {
           length = 3 * length;
         }
 
-        if (index + length > 0xFFFF) {
+        if (index + length > 0xffff) {
           length = 4 * length;
         }
 
-        const patternBufferUtf8 = allCharsBufferUtf8.slice(index, index + length);
+        const patternBufferUtf8 = allCharsBufferUtf8.slice(
+          index,
+          index + length
+        );
         ok(index, allCharsBufferUtf8.includes(patternBufferUtf8));
 
         const patternStringUtf8 = patternBufferUtf8.toString();
@@ -2801,35 +3029,28 @@ export const includes = {
     }
 
     // Find substrings in Usc2.
-    lengths = [2, 4, 16];  // Single char, simple and complex.
+    lengths = [2, 4, 16]; // Single char, simple and complex.
     indices = [0x5, 0x65, 0x105, 0x205, 0x285, 0x2005, 0x2085, 0xfff0];
     for (let lengthIndex = 0; lengthIndex < lengths.length; lengthIndex++) {
       for (let i = 0; i < indices.length; i++) {
         const index = indices[i] * 2;
         const length = lengths[lengthIndex];
 
-        const patternBufferUcs2 =
-          allCharsBufferUcs2.slice(index, index + length);
-        ok(
-          allCharsBufferUcs2.includes(patternBufferUcs2, 0, 'ucs2'));
+        const patternBufferUcs2 = allCharsBufferUcs2.slice(
+          index,
+          index + length
+        );
+        ok(allCharsBufferUcs2.includes(patternBufferUcs2, 0, 'ucs2'));
 
         const patternStringUcs2 = patternBufferUcs2.toString('ucs2');
-        ok(
-          allCharsBufferUcs2.includes(patternStringUcs2, 0, 'ucs2'));
+        ok(allCharsBufferUcs2.includes(patternStringUcs2, 0, 'ucs2'));
       }
     }
 
-    [
-      () => { },
-      {},
-      [],
-    ].forEach((val) => {
-      throws(
-        () => b.includes(val),
-        {
-          name: 'TypeError',
-        }
-      );
+    [() => {}, {}, []].forEach((val) => {
+      throws(() => b.includes(val), {
+        name: 'TypeError',
+      });
     });
 
     // Test truncation of Number arguments to uint8
@@ -2847,7 +3068,7 @@ export const includes = {
       ok(!buf.includes(0xff));
       ok(!buf.includes(0xffff));
     }
-  }
+  },
 };
 
 export const indexof = {
@@ -2937,98 +3158,105 @@ export const indexof = {
 
     // test hex encoding
     strictEqual(
-      Buffer.from(b.toString('hex'), 'hex')
-        .indexOf('64', 0, 'hex'),
+      Buffer.from(b.toString('hex'), 'hex').indexOf('64', 0, 'hex'),
       3
     );
     strictEqual(
-      Buffer.from(b.toString('hex'), 'hex')
-        .indexOf(Buffer.from('64', 'hex'), 0, 'hex'),
+      Buffer.from(b.toString('hex'), 'hex').indexOf(
+        Buffer.from('64', 'hex'),
+        0,
+        'hex'
+      ),
       3
     );
 
     // Test base64 encoding
     strictEqual(
-      Buffer.from(b.toString('base64'), 'base64')
-        .indexOf('ZA==', 0, 'base64'),
+      Buffer.from(b.toString('base64'), 'base64').indexOf('ZA==', 0, 'base64'),
       3
     );
     strictEqual(
-      Buffer.from(b.toString('base64'), 'base64')
-        .indexOf(Buffer.from('ZA==', 'base64'), 0, 'base64'),
+      Buffer.from(b.toString('base64'), 'base64').indexOf(
+        Buffer.from('ZA==', 'base64'),
+        0,
+        'base64'
+      ),
       3
     );
 
     // Test base64url encoding
     strictEqual(
-      Buffer.from(b.toString('base64url'), 'base64url')
-        .indexOf('ZA==', 0, 'base64url'),
+      Buffer.from(b.toString('base64url'), 'base64url').indexOf(
+        'ZA==',
+        0,
+        'base64url'
+      ),
       3
     );
 
     // test ascii encoding
     strictEqual(
-      Buffer.from(b.toString('ascii'), 'ascii')
-        .indexOf('d', 0, 'ascii'),
+      Buffer.from(b.toString('ascii'), 'ascii').indexOf('d', 0, 'ascii'),
       3
     );
     strictEqual(
-      Buffer.from(b.toString('ascii'), 'ascii')
-        .indexOf(Buffer.from('d', 'ascii'), 0, 'ascii'),
+      Buffer.from(b.toString('ascii'), 'ascii').indexOf(
+        Buffer.from('d', 'ascii'),
+        0,
+        'ascii'
+      ),
       3
     );
 
     // Test latin1 encoding
     strictEqual(
-      Buffer.from(b.toString('latin1'), 'latin1')
-        .indexOf('d', 0, 'latin1'),
+      Buffer.from(b.toString('latin1'), 'latin1').indexOf('d', 0, 'latin1'),
       3
     );
     strictEqual(
-      Buffer.from(b.toString('latin1'), 'latin1')
-        .indexOf(Buffer.from('d', 'latin1'), 0, 'latin1'),
+      Buffer.from(b.toString('latin1'), 'latin1').indexOf(
+        Buffer.from('d', 'latin1'),
+        0,
+        'latin1'
+      ),
       3
     );
     strictEqual(
-      Buffer.from('aa\u00e8aa', 'latin1')
-        .indexOf('\u00e8', 'latin1'),
+      Buffer.from('aa\u00e8aa', 'latin1').indexOf('\u00e8', 'latin1'),
       2
     );
+    strictEqual(Buffer.from('\u00e8', 'latin1').indexOf('\u00e8', 'latin1'), 0);
     strictEqual(
-      Buffer.from('\u00e8', 'latin1')
-        .indexOf('\u00e8', 'latin1'),
-      0
-    );
-    strictEqual(
-      Buffer.from('\u00e8', 'latin1')
-        .indexOf(Buffer.from('\u00e8', 'latin1'), 'latin1'),
+      Buffer.from('\u00e8', 'latin1').indexOf(
+        Buffer.from('\u00e8', 'latin1'),
+        'latin1'
+      ),
       0
     );
 
     // Test binary encoding
     strictEqual(
-      Buffer.from(b.toString('binary'), 'binary')
-        .indexOf('d', 0, 'binary'),
+      Buffer.from(b.toString('binary'), 'binary').indexOf('d', 0, 'binary'),
       3
     );
     strictEqual(
-      Buffer.from(b.toString('binary'), 'binary')
-        .indexOf(Buffer.from('d', 'binary'), 0, 'binary'),
+      Buffer.from(b.toString('binary'), 'binary').indexOf(
+        Buffer.from('d', 'binary'),
+        0,
+        'binary'
+      ),
       3
     );
     strictEqual(
-      Buffer.from('aa\u00e8aa', 'binary')
-        .indexOf('\u00e8', 'binary'),
+      Buffer.from('aa\u00e8aa', 'binary').indexOf('\u00e8', 'binary'),
       2
     );
+    strictEqual(Buffer.from('\u00e8', 'binary').indexOf('\u00e8', 'binary'), 0);
     strictEqual(
-      Buffer.from('\u00e8', 'binary')
-        .indexOf('\u00e8', 'binary'),
-      0
-    );
-    strictEqual(
-      Buffer.from('\u00e8', 'binary')
-        .indexOf(Buffer.from('\u00e8', 'binary'), 'binary'),
+      Buffer.from('\u00e8', 'binary').indexOf(
+        Buffer.from('\u00e8', 'binary'),
+        'binary'
+      ),
       0
     );
 
@@ -3040,32 +3268,47 @@ export const indexof = {
       // Test usc2 and utf16le encoding
       ['ucs2', 'utf16le'].forEach((encoding) => {
         const twoByteString = Buffer.from(
-          '\u039a\u0391\u03a3\u03a3\u0395', encoding);
+          '\u039a\u0391\u03a3\u03a3\u0395',
+          encoding
+        );
 
         strictEqual(twoByteString.indexOf('\u0395', 4, encoding), 8);
         strictEqual(twoByteString.indexOf('\u03a3', -4, encoding), 6);
         strictEqual(twoByteString.indexOf('\u03a3', -6, encoding), 4);
-        strictEqual(twoByteString.indexOf(
-          Buffer.from('\u03a3', encoding), -6, encoding), 4);
+        strictEqual(
+          twoByteString.indexOf(Buffer.from('\u03a3', encoding), -6, encoding),
+          4
+        );
         strictEqual(-1, twoByteString.indexOf('\u03a3', -2, encoding));
       });
     }
 
-    const mixedByteStringUcs2 =
-        Buffer.from('\u039a\u0391abc\u03a3\u03a3\u0395', 'ucs2');
+    const mixedByteStringUcs2 = Buffer.from(
+      '\u039a\u0391abc\u03a3\u03a3\u0395',
+      'ucs2'
+    );
     strictEqual(mixedByteStringUcs2.indexOf('bc', 0, 'ucs2'), 6);
     strictEqual(mixedByteStringUcs2.indexOf('\u03a3', 0, 'ucs2'), 10);
     strictEqual(-1, mixedByteStringUcs2.indexOf('\u0396', 0, 'ucs2'));
 
     strictEqual(
-      mixedByteStringUcs2.indexOf(Buffer.from('bc', 'ucs2'), 0, 'ucs2'), 6);
+      mixedByteStringUcs2.indexOf(Buffer.from('bc', 'ucs2'), 0, 'ucs2'),
+      6
+    );
     strictEqual(
-      mixedByteStringUcs2.indexOf(Buffer.from('\u03a3', 'ucs2'), 0, 'ucs2'), 10);
+      mixedByteStringUcs2.indexOf(Buffer.from('\u03a3', 'ucs2'), 0, 'ucs2'),
+      10
+    );
     strictEqual(
-      -1, mixedByteStringUcs2.indexOf(Buffer.from('\u0396', 'ucs2'), 0, 'ucs2'));
+      -1,
+      mixedByteStringUcs2.indexOf(Buffer.from('\u0396', 'ucs2'), 0, 'ucs2')
+    );
 
     {
-      const twoByteString = Buffer.from('\u039a\u0391\u03a3\u03a3\u0395', 'ucs2');
+      const twoByteString = Buffer.from(
+        '\u039a\u0391\u03a3\u03a3\u0395',
+        'ucs2'
+      );
 
       // Test single char pattern
       strictEqual(twoByteString.indexOf('\u039a', 0, 'ucs2'), 0);
@@ -3091,7 +3334,9 @@ export const indexof = {
       strictEqual(index, 6, `Sigma Epsilon - at index ${index}`);
     }
 
-    const mixedByteStringUtf8 = Buffer.from('\u039a\u0391abc\u03a3\u03a3\u0395');
+    const mixedByteStringUtf8 = Buffer.from(
+      '\u039a\u0391abc\u03a3\u03a3\u0395'
+    );
     strictEqual(mixedByteStringUtf8.indexOf('bc'), 5);
     strictEqual(mixedByteStringUtf8.indexOf('bc', 5), 5);
     strictEqual(mixedByteStringUtf8.indexOf('bc', -8), 5);
@@ -3101,7 +3346,8 @@ export const indexof = {
     // Test complex string indexOf algorithms. Only trigger for long strings.
     // Long string that isn't a simple repeat of a shorter string.
     let longString = 'A';
-    for (let i = 66; i < 76; i++) {  // from 'B' to 'K'
+    for (let i = 66; i < 76; i++) {
+      // from 'B' to 'K'
       longString = longString + String.fromCharCode(i) + longString;
     }
 
@@ -3111,8 +3357,11 @@ export const indexof = {
     let pattern = 'ABACABADABACABA';
     for (let i = 0; i < longBufferString.length - pattern.length; i += 7) {
       const index = longBufferString.indexOf(pattern, i);
-      strictEqual((i + 15) & ~0xf, index,
-                         `Long ABACABA...-string at index ${i}`);
+      strictEqual(
+        (i + 15) & ~0xf,
+        index,
+        `Long ABACABA...-string at index ${i}`
+      );
     }
 
     let index = longBufferString.indexOf('AJABACA');
@@ -3124,20 +3373,21 @@ export const indexof = {
     index = longBufferString.indexOf(pattern);
     strictEqual(index, 511, `Long JABACABA..., First J - at index ${index}`);
     index = longBufferString.indexOf(pattern, 512);
-    strictEqual(
-      index, 1535, `Long JABACABA..., Second J - at index ${index}`);
+    strictEqual(index, 1535, `Long JABACABA..., Second J - at index ${index}`);
 
     // Search for a non-ASCII string in a pure ASCII string.
     const asciiString = Buffer.from(
-      'arglebargleglopglyfarglebargleglopglyfarglebargleglopglyf');
+      'arglebargleglopglyfarglebargleglopglyfarglebargleglopglyf'
+    );
     strictEqual(-1, asciiString.indexOf('\x2061'));
     strictEqual(asciiString.indexOf('leb', 0), 3);
 
     // Search in string containing many non-ASCII chars.
     const allCodePoints = [];
     for (let i = 0; i < 65534; i++) allCodePoints[i] = i;
-    const allCharsString = String.fromCharCode.apply(String, allCodePoints) +
-        String.fromCharCode(65534, 65535);
+    const allCharsString =
+      String.fromCharCode.apply(String, allCodePoints) +
+      String.fromCharCode(65534, 65535);
     const allCharsBufferUtf8 = Buffer.from(allCharsString);
     const allCharsBufferUcs2 = Buffer.from(allCharsString, 'ucs2');
 
@@ -3157,26 +3407,31 @@ export const indexof = {
 
     {
       // Find substrings in Utf8.
-      const lengths = [1, 3, 15];  // Single char, simple and complex.
-      const indices = [0x5, 0x60, 0x400, 0x680, 0x7ee, 0xFF02, 0x16610, 0x2f77b];
+      const lengths = [1, 3, 15]; // Single char, simple and complex.
+      const indices = [
+        0x5, 0x60, 0x400, 0x680, 0x7ee, 0xff02, 0x16610, 0x2f77b,
+      ];
       for (let lengthIndex = 0; lengthIndex < lengths.length; lengthIndex++) {
         for (let i = 0; i < indices.length; i++) {
           const index = indices[i];
           let length = lengths[lengthIndex];
 
-          if (index + length > 0x7F) {
+          if (index + length > 0x7f) {
             length = 2 * length;
           }
 
-          if (index + length > 0x7FF) {
+          if (index + length > 0x7ff) {
             length = 3 * length;
           }
 
-          if (index + length > 0xFFFF) {
+          if (index + length > 0xffff) {
             length = 4 * length;
           }
 
-          const patternBufferUtf8 = allCharsBufferUtf8.slice(index, index + length);
+          const patternBufferUtf8 = allCharsBufferUtf8.slice(
+            index,
+            index + length
+          );
           strictEqual(index, allCharsBufferUtf8.indexOf(patternBufferUtf8));
 
           const patternStringUtf8 = patternBufferUtf8.toString();
@@ -3187,36 +3442,35 @@ export const indexof = {
 
     {
       // Find substrings in Usc2.
-      const lengths = [2, 4, 16];  // Single char, simple and complex.
+      const lengths = [2, 4, 16]; // Single char, simple and complex.
       const indices = [0x5, 0x65, 0x105, 0x205, 0x285, 0x2005, 0x2085, 0xfff0];
       for (let lengthIndex = 0; lengthIndex < lengths.length; lengthIndex++) {
         for (let i = 0; i < indices.length; i++) {
           const index = indices[i] * 2;
           const length = lengths[lengthIndex];
 
-          const patternBufferUcs2 =
-              allCharsBufferUcs2.slice(index, index + length);
+          const patternBufferUcs2 = allCharsBufferUcs2.slice(
+            index,
+            index + length
+          );
           strictEqual(
-            index, allCharsBufferUcs2.indexOf(patternBufferUcs2, 0, 'ucs2'));
+            index,
+            allCharsBufferUcs2.indexOf(patternBufferUcs2, 0, 'ucs2')
+          );
 
           const patternStringUcs2 = patternBufferUcs2.toString('ucs2');
           strictEqual(
-            index, allCharsBufferUcs2.indexOf(patternStringUcs2, 0, 'ucs2'));
+            index,
+            allCharsBufferUcs2.indexOf(patternStringUcs2, 0, 'ucs2')
+          );
         }
       }
     }
 
-    [
-      () => {},
-      {},
-      [],
-    ].forEach((val) => {
-      throws(
-        () => b.indexOf(val),
-        {
-          name: 'TypeError',
-        }
-      );
+    [() => {}, {}, []].forEach((val) => {
+      throws(() => b.indexOf(val), {
+        name: 'TypeError',
+      });
     });
 
     // Test weird offset arguments.
@@ -3231,24 +3485,12 @@ export const indexof = {
     strictEqual(b.indexOf('b', [2]), -1);
 
     // Behavior should match String.indexOf()
-    strictEqual(
-      b.indexOf('b', undefined),
-      s.indexOf('b', undefined));
-    strictEqual(
-      b.indexOf('b', {}),
-      s.indexOf('b', {}));
-    strictEqual(
-      b.indexOf('b', 0),
-      s.indexOf('b', 0));
-    strictEqual(
-      b.indexOf('b', null),
-      s.indexOf('b', null));
-    strictEqual(
-      b.indexOf('b', []),
-      s.indexOf('b', []));
-    strictEqual(
-      b.indexOf('b', [2]),
-      s.indexOf('b', [2]));
+    strictEqual(b.indexOf('b', undefined), s.indexOf('b', undefined));
+    strictEqual(b.indexOf('b', {}), s.indexOf('b', {}));
+    strictEqual(b.indexOf('b', 0), s.indexOf('b', 0));
+    strictEqual(b.indexOf('b', null), s.indexOf('b', null));
+    strictEqual(b.indexOf('b', []), s.indexOf('b', []));
+    strictEqual(b.indexOf('b', [2]), s.indexOf('b', [2]));
 
     // All code for handling encodings is shared between Buffer.indexOf and
     // Buffer.lastIndexOf, so only testing the separate lastIndexOf semantics.
@@ -3317,24 +3559,12 @@ export const indexof = {
     strictEqual(b.lastIndexOf('b', [2]), 1);
 
     // Behavior should match String.lastIndexOf()
-    strictEqual(
-      b.lastIndexOf('b', undefined),
-      s.lastIndexOf('b', undefined));
-    strictEqual(
-      b.lastIndexOf('b', {}),
-      s.lastIndexOf('b', {}));
-    strictEqual(
-      b.lastIndexOf('b', 0),
-      s.lastIndexOf('b', 0));
-    strictEqual(
-      b.lastIndexOf('b', null),
-      s.lastIndexOf('b', null));
-    strictEqual(
-      b.lastIndexOf('b', []),
-      s.lastIndexOf('b', []));
-    strictEqual(
-      b.lastIndexOf('b', [2]),
-      s.lastIndexOf('b', [2]));
+    strictEqual(b.lastIndexOf('b', undefined), s.lastIndexOf('b', undefined));
+    strictEqual(b.lastIndexOf('b', {}), s.lastIndexOf('b', {}));
+    strictEqual(b.lastIndexOf('b', 0), s.lastIndexOf('b', 0));
+    strictEqual(b.lastIndexOf('b', null), s.lastIndexOf('b', null));
+    strictEqual(b.lastIndexOf('b', []), s.lastIndexOf('b', []));
+    strictEqual(b.lastIndexOf('b', [2]), s.lastIndexOf('b', [2]));
 
     // Test needles longer than the haystack.
     strictEqual(b.lastIndexOf('aaaaaaaaaaaaaaa', 'ucs2'), -1);
@@ -3366,8 +3596,10 @@ export const indexof = {
     strictEqual(bufferString.lastIndexOf('panama'), 21);
     strictEqual(bufferString.lastIndexOf('a man a plan a canal panama'), 0);
     strictEqual(-1, bufferString.lastIndexOf('a man a plan a canal mexico'));
-    strictEqual(-1, bufferString
-      .lastIndexOf('a man a plan a canal mexico city'));
+    strictEqual(
+      -1,
+      bufferString.lastIndexOf('a man a plan a canal mexico city')
+    );
     strictEqual(-1, bufferString.lastIndexOf(Buffer.from('a'.repeat(1000))));
     strictEqual(bufferString.lastIndexOf('a man a plan', 4), 0);
     strictEqual(bufferString.lastIndexOf('a '), 13);
@@ -3418,21 +3650,21 @@ export const indexof = {
     }
     const parts = [];
     for (let i = 0; i < 1000000; i++) {
-      parts.push((countBits(i) % 2 === 0) ? 'yolo' : 'swag');
+      parts.push(countBits(i) % 2 === 0 ? 'yolo' : 'swag');
     }
     const reallyLong = Buffer.from(parts.join(' '));
     strictEqual(reallyLong.slice(0, 19).toString(), 'yolo swag swag yolo');
 
     // Expensive reverse searches. Stress test lastIndexOf:
-    pattern = reallyLong.slice(0, 100000);  // First 1/50th of the pattern.
+    pattern = reallyLong.slice(0, 100000); // First 1/50th of the pattern.
     strictEqual(reallyLong.lastIndexOf(pattern), 4751360);
     strictEqual(reallyLong.lastIndexOf(pattern, 4000000), 3932160);
     strictEqual(reallyLong.lastIndexOf(pattern, 3000000), 2949120);
-    pattern = reallyLong.slice(100000, 200000);  // Second 1/50th.
+    pattern = reallyLong.slice(100000, 200000); // Second 1/50th.
     strictEqual(reallyLong.lastIndexOf(pattern), 4728480);
-    pattern = reallyLong.slice(0, 1000000);  // First 1/5th.
+    pattern = reallyLong.slice(0, 1000000); // First 1/5th.
     strictEqual(reallyLong.lastIndexOf(pattern), 3932160);
-    pattern = reallyLong.slice(0, 2000000);  // first 2/5ths.
+    pattern = reallyLong.slice(0, 2000000); // first 2/5ths.
     strictEqual(reallyLong.lastIndexOf(pattern), 0);
 
     // Test truncation of Number arguments to uint8
@@ -3453,12 +3685,12 @@ export const indexof = {
 
     // Test that Uint8Array arguments are okay.
     {
-      const needle = new Uint8Array([ 0x66, 0x6f, 0x6f ]);
+      const needle = new Uint8Array([0x66, 0x6f, 0x6f]);
       const haystack = Buffer.from('a foo b foo');
       strictEqual(haystack.indexOf(needle), 2);
       strictEqual(haystack.lastIndexOf(needle), haystack.length - 3);
     }
-  }
+  },
 };
 
 export const inheritance = {
@@ -3473,30 +3705,29 @@ export const inheritance = {
 
     T.prototype.sum = function sum() {
       let cntr = 0;
-      for (let i = 0; i < this.length; i++)
-        cntr += this[i];
+      for (let i = 0; i < this.length; i++) cntr += this[i];
       return cntr;
     };
 
-
     const vals = [new T(4), T(4)];
 
-    vals.forEach(function(t) {
+    vals.forEach(function (t) {
       strictEqual(t.constructor, T);
       strictEqual(Object.getPrototypeOf(t), T.prototype);
-      strictEqual(Object.getPrototypeOf(Object.getPrototypeOf(t)),
-                         Buffer.prototype);
+      strictEqual(
+        Object.getPrototypeOf(Object.getPrototypeOf(t)),
+        Buffer.prototype
+      );
 
       t.fill(5);
       let cntr = 0;
-      for (let i = 0; i < t.length; i++)
-        cntr += t[i];
+      for (let i = 0; i < t.length; i++) cntr += t[i];
       strictEqual(cntr, t.length * 5);
 
       // Check this does not throw
       t.toString();
     });
-  }
+  },
 };
 
 export const iterator = {
@@ -3509,48 +3740,39 @@ export const iterator = {
 
     arr = [];
 
-    for (b of buffer)
-      arr.push(b);
+    for (b of buffer) arr.push(b);
 
     deepStrictEqual(arr, [1, 2, 3, 4, 5]);
-
 
     // Buffer iterators should be iterable
 
     arr = [];
 
-    for (b of buffer[Symbol.iterator]())
-      arr.push(b);
+    for (b of buffer[Symbol.iterator]()) arr.push(b);
 
     deepStrictEqual(arr, [1, 2, 3, 4, 5]);
-
 
     // buffer#values() should return iterator for values
 
     arr = [];
 
-    for (b of buffer.values())
-      arr.push(b);
+    for (b of buffer.values()) arr.push(b);
 
     deepStrictEqual(arr, [1, 2, 3, 4, 5]);
-
 
     // buffer#keys() should return iterator for keys
 
     arr = [];
 
-    for (b of buffer.keys())
-      arr.push(b);
+    for (b of buffer.keys()) arr.push(b);
 
     deepStrictEqual(arr, [0, 1, 2, 3, 4]);
-
 
     // buffer#entries() should return iterator for entries
 
     arr = [];
 
-    for (b of buffer.entries())
-      arr.push(b);
+    for (b of buffer.entries()) arr.push(b);
 
     deepStrictEqual(arr, [
       [0, 1],
@@ -3559,7 +3781,7 @@ export const iterator = {
       [3, 4],
       [4, 5],
     ]);
-  }
+  },
 };
 
 export const negativeAlloc = {
@@ -3589,7 +3811,7 @@ export const negativeAlloc = {
     throws(() => SlowBuffer(-100), msg);
     throws(() => SlowBuffer(-1), msg);
     throws(() => SlowBuffer(NaN), msg);
-  }
+  },
 };
 
 export const overMaxLength = {
@@ -3612,29 +3834,28 @@ export const overMaxLength = {
 
     // issue GH-4331
     throws(() => Buffer.allocUnsafe(0x100000001), bufferMaxSizeMsg);
-    throws(() => Buffer.allocUnsafe(0xFFFFFFFFF), bufferMaxSizeMsg);
-  }
+    throws(() => Buffer.allocUnsafe(0xfffffffff), bufferMaxSizeMsg);
+  },
 };
 
 export const read = {
   test(ctrl, env, ctx) {
     // Testing basic buffer read functions
-    const buf = Buffer.from([0xa4, 0xfd, 0x48, 0xea, 0xcf, 0xff, 0xd9, 0x01, 0xde]);
+    const buf = Buffer.from([
+      0xa4, 0xfd, 0x48, 0xea, 0xcf, 0xff, 0xd9, 0x01, 0xde,
+    ]);
 
     function read(buff, funx, args, expected) {
       strictEqual(buff[funx](...args), expected);
-      throws(
-        () => buff[funx](-1, args[1]),
-        { code: 'ERR_OUT_OF_RANGE' }
-      );
+      throws(() => buff[funx](-1, args[1]), { code: 'ERR_OUT_OF_RANGE' });
     }
 
     // Testing basic functionality of readDoubleBE() and readDoubleLE()
-    read(buf, 'readDoubleBE', [1], -3.1827727774563287e+295);
-    read(buf, 'readDoubleLE', [1], -6.966010051009108e+144);
+    read(buf, 'readDoubleBE', [1], -3.1827727774563287e295);
+    read(buf, 'readDoubleLE', [1], -6.966010051009108e144);
 
     // Testing basic functionality of readFloatBE() and readFloatLE()
-    read(buf, 'readFloatBE', [1], -1.6691549692541768e+37);
+    read(buf, 'readFloatBE', [1], -1.6691549692541768e37);
     read(buf, 'readFloatLE', [1], -7861303808);
 
     // Testing basic functionality of readInt8()
@@ -3668,59 +3889,56 @@ export const read = {
     read(buf, 'readUIntLE', [2, 2], 0xea48);
 
     // Error name and message
-    const OOR_ERROR =
-    {
-      name: 'RangeError'
+    const OOR_ERROR = {
+      name: 'RangeError',
     };
 
-    const OOB_ERROR =
-    {
+    const OOB_ERROR = {
       name: 'RangeError',
-      message: 'Attempt to access memory outside buffer bounds'
+      message: 'Attempt to access memory outside buffer bounds',
     };
 
     // Attempt to overflow buffers, similar to previous bug in array buffers
-    throws(
-      () => Buffer.allocUnsafe(8).readFloatBE(0xffffffff), OOR_ERROR);
+    throws(() => Buffer.allocUnsafe(8).readFloatBE(0xffffffff), OOR_ERROR);
 
-    throws(
-      () => Buffer.allocUnsafe(8).readFloatLE(0xffffffff), OOR_ERROR);
+    throws(() => Buffer.allocUnsafe(8).readFloatLE(0xffffffff), OOR_ERROR);
 
     // Ensure negative values can't get past offset
-    throws(
-      () => Buffer.allocUnsafe(8).readFloatBE(-1), OOR_ERROR);
-    throws(
-      () => Buffer.allocUnsafe(8).readFloatLE(-1), OOR_ERROR);
+    throws(() => Buffer.allocUnsafe(8).readFloatBE(-1), OOR_ERROR);
+    throws(() => Buffer.allocUnsafe(8).readFloatLE(-1), OOR_ERROR);
 
     // Offset checks
     {
       const buf = Buffer.allocUnsafe(0);
 
-      throws(
-        () => buf.readUInt8(0), OOB_ERROR);
-      throws(
-        () => buf.readInt8(0), OOB_ERROR);
+      throws(() => buf.readUInt8(0), OOB_ERROR);
+      throws(() => buf.readInt8(0), OOB_ERROR);
     }
 
     [16, 32].forEach((bit) => {
       const buf = Buffer.allocUnsafe(bit / 8 - 1);
-      [`Int${bit}B`, `Int${bit}L`, `UInt${bit}B`, `UInt${bit}L`].forEach((fn) => {
-        throws(
-          () => buf[`read${fn}E`](0), OOB_ERROR);
-      });
+      [`Int${bit}B`, `Int${bit}L`, `UInt${bit}B`, `UInt${bit}L`].forEach(
+        (fn) => {
+          throws(() => buf[`read${fn}E`](0), OOB_ERROR);
+        }
+      );
     });
 
     [16, 32].forEach((bits) => {
-      const buf = Buffer.from([0xFF, 0xFF, 0xFF, 0xFF]);
+      const buf = Buffer.from([0xff, 0xff, 0xff, 0xff]);
       ['LE', 'BE'].forEach((endian) => {
-        strictEqual(buf[`readUInt${bits}${endian}`](0),
-                          (0xFFFFFFFF >>> (32 - bits)));
+        strictEqual(
+          buf[`readUInt${bits}${endian}`](0),
+          0xffffffff >>> (32 - bits)
+        );
 
-        strictEqual(buf[`readInt${bits}${endian}`](0),
-                          (0xFFFFFFFF >> (32 - bits)));
+        strictEqual(
+          buf[`readInt${bits}${endian}`](0),
+          0xffffffff >> (32 - bits)
+        );
       });
     });
-  }
+  },
 };
 
 export const readDouble = {
@@ -3736,7 +3954,7 @@ export const readDouble = {
     buffer[5] = 0x55;
     buffer[6] = 0xd5;
     buffer[7] = 0x3f;
-    strictEqual(buffer.readDoubleBE(0), 1.1945305291680097e+103);
+    strictEqual(buffer.readDoubleBE(0), 1.1945305291680097e103);
     strictEqual(buffer.readDoubleLE(0), 0.3333333333333333);
 
     buffer[0] = 1;
@@ -3775,7 +3993,7 @@ export const readDouble = {
     buffer[6] = 0xef;
     buffer[7] = 0x7f;
     ok(Number.isNaN(buffer.readDoubleBE(0)));
-    strictEqual(buffer.readDoubleLE(0), 1.7976931348623157e+308);
+    strictEqual(buffer.readDoubleLE(0), 1.7976931348623157e308);
 
     buffer[0] = 0;
     buffer[1] = 0;
@@ -3822,48 +4040,38 @@ export const readDouble = {
     strictEqual(buffer.readDoubleLE(0), -Infinity);
 
     ['readDoubleLE', 'readDoubleBE'].forEach((fn) => {
-
       // Verify that default offset works fine.
       buffer[fn](undefined);
       buffer[fn]();
 
       ['', '0', null, {}, [], () => {}, true, false].forEach((off) => {
-        throws(
-          () => buffer[fn](off),
-          { code: 'ERR_INVALID_ARG_TYPE' }
-        );
+        throws(() => buffer[fn](off), { code: 'ERR_INVALID_ARG_TYPE' });
       });
 
       [Infinity, -1, 1].forEach((offset) => {
-        throws(
-          () => buffer[fn](offset),
-          {
-            code: 'ERR_OUT_OF_RANGE',
-            name: 'RangeError',
-          });
+        throws(() => buffer[fn](offset), {
+          code: 'ERR_OUT_OF_RANGE',
+          name: 'RangeError',
+        });
       });
 
-      throws(
-        () => Buffer.alloc(1)[fn](1),
-        {
-          code: 'ERR_BUFFER_OUT_OF_BOUNDS',
-          name: 'RangeError',
-          message: 'Attempt to access memory outside buffer bounds'
-        });
+      throws(() => Buffer.alloc(1)[fn](1), {
+        code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+        name: 'RangeError',
+        message: 'Attempt to access memory outside buffer bounds',
+      });
 
       [NaN, 1.01].forEach((offset) => {
-        throws(
-          () => buffer[fn](offset),
-          {
-            code: 'ERR_OUT_OF_RANGE',
-            name: 'RangeError',
-            message: 'The value of "offset" is out of range. ' +
-                    `It must be an integer. Received ${offset}`
-          });
+        throws(() => buffer[fn](offset), {
+          code: 'ERR_OUT_OF_RANGE',
+          name: 'RangeError',
+          message:
+            'The value of "offset" is out of range. ' +
+            `It must be an integer. Received ${offset}`,
+        });
       });
     });
-
-  }
+  },
 };
 
 export const readFloat = {
@@ -3890,7 +4098,7 @@ export const readFloat = {
     buffer[2] = 0x7f;
     buffer[3] = 0x7f;
     ok(Number.isNaN(buffer.readFloatBE(0)));
-    strictEqual(buffer.readFloatLE(0), 3.4028234663852886e+38);
+    strictEqual(buffer.readFloatLE(0), 3.4028234663852886e38);
 
     buffer[0] = 0xab;
     buffer[1] = 0xaa;
@@ -3927,48 +4135,38 @@ export const readFloat = {
     strictEqual(buffer.readFloatLE(0), -Infinity);
 
     ['readFloatLE', 'readFloatBE'].forEach((fn) => {
-
       // Verify that default offset works fine.
       buffer[fn](undefined);
       buffer[fn]();
 
       ['', '0', null, {}, [], () => {}, true, false].forEach((off) => {
-        throws(
-          () => buffer[fn](off),
-          { code: 'ERR_INVALID_ARG_TYPE' }
-        );
+        throws(() => buffer[fn](off), { code: 'ERR_INVALID_ARG_TYPE' });
       });
 
       [Infinity, -1, 1].forEach((offset) => {
-        throws(
-          () => buffer[fn](offset),
-          {
-            code: 'ERR_OUT_OF_RANGE',
-            name: 'RangeError',
-          });
+        throws(() => buffer[fn](offset), {
+          code: 'ERR_OUT_OF_RANGE',
+          name: 'RangeError',
+        });
       });
 
-      throws(
-        () => Buffer.alloc(1)[fn](1),
-        {
-          code: 'ERR_BUFFER_OUT_OF_BOUNDS',
-          name: 'RangeError',
-          message: 'Attempt to access memory outside buffer bounds'
-        });
+      throws(() => Buffer.alloc(1)[fn](1), {
+        code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+        name: 'RangeError',
+        message: 'Attempt to access memory outside buffer bounds',
+      });
 
       [NaN, 1.01].forEach((offset) => {
-        throws(
-          () => buffer[fn](offset),
-          {
-            code: 'ERR_OUT_OF_RANGE',
-            name: 'RangeError',
-            message: 'The value of "offset" is out of range. ' +
-                    `It must be an integer. Received ${offset}`
-          });
+        throws(() => buffer[fn](offset), {
+          code: 'ERR_OUT_OF_RANGE',
+          name: 'RangeError',
+          message:
+            'The value of "offset" is out of range. ' +
+            `It must be an integer. Received ${offset}`,
+        });
       });
     });
-
-  }
+  },
 };
 
 export const readInt = {
@@ -3978,36 +4176,29 @@ export const readInt = {
       const buffer = Buffer.alloc(4);
 
       ['Int8', 'Int16BE', 'Int16LE', 'Int32BE', 'Int32LE'].forEach((fn) => {
-
         // Verify that default offset works fine.
         buffer[`read${fn}`](undefined);
         buffer[`read${fn}`]();
 
         ['', '0', null, {}, [], () => {}, true, false].forEach((o) => {
-          throws(
-            () => buffer[`read${fn}`](o),
-            {
-              code: 'ERR_INVALID_ARG_TYPE',
-              name: 'TypeError'
-            });
+          throws(() => buffer[`read${fn}`](o), {
+            code: 'ERR_INVALID_ARG_TYPE',
+            name: 'TypeError',
+          });
         });
 
         [Infinity, -1, -4294967295].forEach((offset) => {
-          throws(
-            () => buffer[`read${fn}`](offset),
-            {
-              code: 'ERR_OUT_OF_RANGE',
-              name: 'RangeError'
-            });
+          throws(() => buffer[`read${fn}`](offset), {
+            code: 'ERR_OUT_OF_RANGE',
+            name: 'RangeError',
+          });
         });
 
         [NaN, 1.01].forEach((offset) => {
-          throws(
-            () => buffer[`read${fn}`](offset),
-            {
-              code: 'ERR_OUT_OF_RANGE',
-              name: 'RangeError',
-            });
+          throws(() => buffer[`read${fn}`](offset), {
+            code: 'ERR_OUT_OF_RANGE',
+            name: 'RangeError',
+          });
         });
       });
     }
@@ -4082,7 +4273,9 @@ export const readInt = {
 
     // Test Int
     {
-      const buffer = Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+      const buffer = Buffer.from([
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+      ]);
 
       strictEqual(buffer.readIntLE(0, 1), 0x01);
       strictEqual(buffer.readIntBE(0, 1), 0x01);
@@ -4099,59 +4292,51 @@ export const readInt = {
 
       // Check byteLength.
       ['readIntBE', 'readIntLE'].forEach((fn) => {
-        ['', '0', null, {}, [], () => {}, true, false, undefined].forEach((len) => {
-          throws(
-            () => buffer[fn](0, len),
-            { name: 'RangeError' });
-        });
+        ['', '0', null, {}, [], () => {}, true, false, undefined].forEach(
+          (len) => {
+            throws(() => buffer[fn](0, len), { name: 'RangeError' });
+          }
+        );
 
         [Infinity, -1].forEach((byteLength) => {
-          throws(
-            () => buffer[fn](0, byteLength),
-            {
-              name: 'RangeError',
-            });
+          throws(() => buffer[fn](0, byteLength), {
+            name: 'RangeError',
+          });
         });
 
         [NaN, 1.01].forEach((byteLength) => {
-          throws(
-            () => buffer[fn](0, byteLength),
-            {
-              name: 'RangeError',
-            });
+          throws(() => buffer[fn](0, byteLength), {
+            name: 'RangeError',
+          });
         });
       });
 
       // Test 1 to 6 bytes.
       for (let i = 1; i <= 6; i++) {
         ['readIntBE', 'readIntLE'].forEach((fn) => {
-          ['', '0', null, {}, [], () => {}, true, false, undefined].forEach((o) => {
-            throws(
-              () => buffer[fn](o, i),
-              {
-                name: 'TypeError'
+          ['', '0', null, {}, [], () => {}, true, false, undefined].forEach(
+            (o) => {
+              throws(() => buffer[fn](o, i), {
+                name: 'TypeError',
               });
-          });
+            }
+          );
 
           [Infinity, -1, -4294967295].forEach((offset) => {
-            throws(
-              () => buffer[fn](offset, i),
-              {
-                name: 'RangeError',
-              });
+            throws(() => buffer[fn](offset, i), {
+              name: 'RangeError',
+            });
           });
 
           [NaN, 1.01].forEach((offset) => {
-            throws(
-              () => buffer[fn](offset, i),
-              {
-                name: 'RangeError',
-              });
+            throws(() => buffer[fn](offset, i), {
+              name: 'RangeError',
+            });
           });
         });
       }
     }
-  }
+  },
 };
 
 export const readUint = {
@@ -4160,39 +4345,34 @@ export const readUint = {
     {
       const buffer = Buffer.alloc(4);
 
-      ['UInt8', 'UInt16BE', 'UInt16LE', 'UInt32BE', 'UInt32LE'].forEach((fn) => {
+      ['UInt8', 'UInt16BE', 'UInt16LE', 'UInt32BE', 'UInt32LE'].forEach(
+        (fn) => {
+          // Verify that default offset works fine.
+          buffer[`read${fn}`](undefined);
+          buffer[`read${fn}`]();
 
-        // Verify that default offset works fine.
-        buffer[`read${fn}`](undefined);
-        buffer[`read${fn}`]();
-
-        ['', '0', null, {}, [], () => {}, true, false].forEach((o) => {
-          throws(
-            () => buffer[`read${fn}`](o),
-            {
+          ['', '0', null, {}, [], () => {}, true, false].forEach((o) => {
+            throws(() => buffer[`read${fn}`](o), {
               code: 'ERR_INVALID_ARG_TYPE',
-              name: 'TypeError'
+              name: 'TypeError',
             });
-        });
+          });
 
-        [Infinity, -1, -4294967295].forEach((offset) => {
-          throws(
-            () => buffer[`read${fn}`](offset),
-            {
-              code: 'ERR_OUT_OF_RANGE',
-              name: 'RangeError'
-            });
-        });
-
-        [NaN, 1.01].forEach((offset) => {
-          throws(
-            () => buffer[`read${fn}`](offset),
-            {
+          [Infinity, -1, -4294967295].forEach((offset) => {
+            throws(() => buffer[`read${fn}`](offset), {
               code: 'ERR_OUT_OF_RANGE',
               name: 'RangeError',
             });
-        });
-      });
+          });
+
+          [NaN, 1.01].forEach((offset) => {
+            throws(() => buffer[`read${fn}`](offset), {
+              code: 'ERR_OUT_OF_RANGE',
+              name: 'RangeError',
+            });
+          });
+        }
+      );
     }
 
     // Test 8 bit unsigned integers
@@ -4233,7 +4413,9 @@ export const readUint = {
 
     // Test UInt
     {
-      const buffer = Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+      const buffer = Buffer.from([
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+      ]);
 
       strictEqual(buffer.readUIntLE(0, 1), 0x01);
       strictEqual(buffer.readUIntBE(0, 1), 0x01);
@@ -4250,60 +4432,51 @@ export const readUint = {
 
       // Check byteLength.
       ['readUIntBE', 'readUIntLE'].forEach((fn) => {
-        ['', '0', null, {}, [], () => {}, true, false, undefined].forEach((len) => {
-          throws(
-            () => buffer[fn](0, len),
-            { name: 'RangeError' });
-        });
+        ['', '0', null, {}, [], () => {}, true, false, undefined].forEach(
+          (len) => {
+            throws(() => buffer[fn](0, len), { name: 'RangeError' });
+          }
+        );
 
         [Infinity, -1].forEach((byteLength) => {
-          throws(
-            () => buffer[fn](0, byteLength),
-            {
-              name: 'RangeError',
-            });
+          throws(() => buffer[fn](0, byteLength), {
+            name: 'RangeError',
+          });
         });
 
         [NaN, 1.01].forEach((byteLength) => {
-          throws(
-            () => buffer[fn](0, byteLength),
-            {
-              name: 'RangeError',
-            });
+          throws(() => buffer[fn](0, byteLength), {
+            name: 'RangeError',
+          });
         });
       });
 
       // Test 1 to 6 bytes.
       for (let i = 1; i <= 6; i++) {
         ['readUIntBE', 'readUIntLE'].forEach((fn) => {
-          ['', '0', null, {}, [], () => {}, true, false, undefined].forEach((o) => {
-            throws(
-              () => buffer[fn](o, i),
-              {
-                name: 'TypeError'
+          ['', '0', null, {}, [], () => {}, true, false, undefined].forEach(
+            (o) => {
+              throws(() => buffer[fn](o, i), {
+                name: 'TypeError',
               });
-          });
+            }
+          );
 
           [Infinity, -1, -4294967295].forEach((offset) => {
-            throws(
-              () => buffer[fn](offset, i),
-              {
-                name: 'RangeError',
-              });
+            throws(() => buffer[fn](offset, i), {
+              name: 'RangeError',
+            });
           });
 
           [NaN, 1.01].forEach((offset) => {
-            throws(
-              () => buffer[fn](offset, i),
-              {
-                name: 'RangeError',
-              });
+            throws(() => buffer[fn](offset, i), {
+              name: 'RangeError',
+            });
           });
         });
       }
     }
-
-  }
+  },
 };
 
 export const sharedArrayBuffer = {
@@ -4330,7 +4503,7 @@ export const sharedArrayBuffer = {
     strictEqual(Buffer.byteLength(sab), sab.byteLength);
 
     Buffer.from({ buffer: sab }); // Should not throw.
-  }
+  },
 };
 
 export const slice = {
@@ -4394,8 +4567,10 @@ export const slice = {
 
     {
       // Single argument slice
-      strictEqual(Buffer.from('abcde', 'utf8').slice(1).toString('utf8'),
-                         'bcde');
+      strictEqual(
+        Buffer.from('abcde', 'utf8').slice(1).toString('utf8'),
+        'bcde'
+      );
     }
 
     // slice(0,0).length === 0
@@ -4405,16 +4580,15 @@ export const slice = {
       // Regression tests for https://github.com/nodejs/node/issues/9096
       const buf = Buffer.from('abcd', 'utf8');
       strictEqual(buf.slice(buf.length / 3).toString('utf8'), 'bcd');
-      strictEqual(
-        buf.slice(buf.length / 3, buf.length).toString(),
-        'bcd'
-      );
+      strictEqual(buf.slice(buf.length / 3, buf.length).toString(), 'bcd');
     }
 
     {
       const buf = Buffer.from('abcdefg', 'utf8');
-      strictEqual(buf.slice(-(-1 >>> 0) - 1).toString('utf8'),
-                         buf.toString('utf8'));
+      strictEqual(
+        buf.slice(-(-1 >>> 0) - 1).toString('utf8'),
+        buf.toString('utf8')
+      );
     }
 
     {
@@ -4424,8 +4598,8 @@ export const slice = {
 
     {
       const buf = Buffer.from([
-        1, 29, 0, 0, 1, 143, 216, 162, 92, 254, 248, 63, 0,
-        0, 0, 18, 184, 6, 0, 175, 29, 0, 8, 11, 1, 0, 0,
+        1, 29, 0, 0, 1, 143, 216, 162, 92, 254, 248, 63, 0, 0, 0, 18, 184, 6, 0,
+        175, 29, 0, 8, 11, 1, 0, 0,
       ]);
       const chunk1 = Buffer.from([
         1, 29, 0, 0, 1, 143, 216, 162, 92, 254, 248, 63, 0,
@@ -4438,32 +4612,46 @@ export const slice = {
       deepStrictEqual(buf.slice(0, middle), chunk1);
       deepStrictEqual(buf.slice(middle), chunk2);
     }
-  }
+  },
 };
 
 export const swap = {
   test(ctrl, env, ctx) {
     // Test buffers small enough to use the JS implementation
     {
-      const buf = Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
-                              0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10]);
+      const buf = Buffer.from([
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
+        0x0d, 0x0e, 0x0f, 0x10,
+      ]);
 
       strictEqual(buf, buf.swap16());
-      deepStrictEqual(buf, Buffer.from([0x02, 0x01, 0x04, 0x03, 0x06, 0x05,
-                                              0x08, 0x07, 0x0a, 0x09, 0x0c, 0x0b,
-                                              0x0e, 0x0d, 0x10, 0x0f]));
+      deepStrictEqual(
+        buf,
+        Buffer.from([
+          0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07, 0x0a, 0x09, 0x0c,
+          0x0b, 0x0e, 0x0d, 0x10, 0x0f,
+        ])
+      );
       buf.swap16(); // restore
 
       strictEqual(buf, buf.swap32());
-      deepStrictEqual(buf, Buffer.from([0x04, 0x03, 0x02, 0x01, 0x08, 0x07,
-                                              0x06, 0x05, 0x0c, 0x0b, 0x0a, 0x09,
-                                              0x10, 0x0f, 0x0e, 0x0d]));
+      deepStrictEqual(
+        buf,
+        Buffer.from([
+          0x04, 0x03, 0x02, 0x01, 0x08, 0x07, 0x06, 0x05, 0x0c, 0x0b, 0x0a,
+          0x09, 0x10, 0x0f, 0x0e, 0x0d,
+        ])
+      );
       buf.swap32(); // restore
 
       strictEqual(buf, buf.swap64());
-      deepStrictEqual(buf, Buffer.from([0x08, 0x07, 0x06, 0x05, 0x04, 0x03,
-                                              0x02, 0x01, 0x10, 0x0f, 0x0e, 0x0d,
-                                              0x0c, 0x0b, 0x0a, 0x09]));
+      deepStrictEqual(
+        buf,
+        Buffer.from([
+          0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x10, 0x0f, 0x0e,
+          0x0d, 0x0c, 0x0b, 0x0a, 0x09,
+        ])
+      );
     }
 
     // Operates in-place
@@ -4489,19 +4677,22 @@ export const swap = {
     }
 
     {
-      const buf = Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                              0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-                              0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                              0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10]);
+      const buf = Buffer.from([
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
+        0x0d, 0x0e, 0x0f, 0x10, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+      ]);
 
       buf.slice(2, 18).swap64();
 
-      deepStrictEqual(buf, Buffer.from([0x01, 0x02, 0x0a, 0x09, 0x08, 0x07,
-                                              0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
-                                              0x10, 0x0f, 0x0e, 0x0d, 0x0c, 0x0b,
-                                              0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                                              0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
-                                              0x0f, 0x10]));
+      deepStrictEqual(
+        buf,
+        Buffer.from([
+          0x01, 0x02, 0x0a, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02,
+          0x01, 0x10, 0x0f, 0x0e, 0x0d, 0x0c, 0x0b, 0x03, 0x04, 0x05, 0x06,
+          0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+        ])
+      );
     }
 
     // Force use of native code (Buffer size above threshold limit for js impl)
@@ -4509,7 +4700,10 @@ export const swap = {
       const bufData = new Uint32Array(256).fill(0x04030201);
       const buf = Buffer.from(bufData.buffer, bufData.byteOffset);
       const otherBufData = new Uint32Array(256).fill(0x03040102);
-      const otherBuf = Buffer.from(otherBufData.buffer, otherBufData.byteOffset);
+      const otherBuf = Buffer.from(
+        otherBufData.buffer,
+        otherBufData.byteOffset
+      );
       buf.swap16();
       deepStrictEqual(buf, otherBuf);
     }
@@ -4518,7 +4712,10 @@ export const swap = {
       const bufData = new Uint32Array(256).fill(0x04030201);
       const buf = Buffer.from(bufData.buffer);
       const otherBufData = new Uint32Array(256).fill(0x01020304);
-      const otherBuf = Buffer.from(otherBufData.buffer, otherBufData.byteOffset);
+      const otherBuf = Buffer.from(
+        otherBufData.buffer,
+        otherBufData.byteOffset
+      );
       buf.swap32();
       deepStrictEqual(buf, otherBuf);
     }
@@ -4531,7 +4728,10 @@ export const swap = {
         otherBufData[otherBufData.length - i - 1] = i % 8;
       }
       const buf = Buffer.from(bufData.buffer, bufData.byteOffset);
-      const otherBuf = Buffer.from(otherBufData.buffer, otherBufData.byteOffset);
+      const otherBuf = Buffer.from(
+        otherBufData.buffer,
+        otherBufData.byteOffset
+      );
       buf.swap64();
       deepStrictEqual(buf, otherBuf);
     }
@@ -4548,7 +4748,10 @@ export const swap = {
       }
       const buf = Buffer.from(bufData.buffer, bufData.byteOffset);
       // 0|1 0|1 0|1...
-      const otherBuf = Buffer.from(otherBufData.buffer, otherBufData.byteOffset);
+      const otherBuf = Buffer.from(
+        otherBufData.buffer,
+        otherBufData.byteOffset
+      );
       // 0|0 1|0 1|0...
 
       buf.slice(1, buf.length - 1).swap16();
@@ -4566,7 +4769,10 @@ export const swap = {
       }
       const buf = Buffer.from(bufData.buffer, bufData.byteOffset);
       // 0|1 2 3 0|1 2 3...
-      const otherBuf = Buffer.from(otherBufData.buffer, otherBufData.byteOffset);
+      const otherBuf = Buffer.from(
+        otherBufData.buffer,
+        otherBufData.byteOffset
+      );
       // 0|0 3 2 1|0 3 2...
 
       buf.slice(1, buf.length - 3).swap32();
@@ -4584,22 +4790,29 @@ export const swap = {
       }
       const buf = Buffer.from(bufData.buffer, bufData.byteOffset);
       // 0|1 2 3 4 5 6 7 0|1 2 3 4...
-      const otherBuf = Buffer.from(otherBufData.buffer, otherBufData.byteOffset);
+      const otherBuf = Buffer.from(
+        otherBufData.buffer,
+        otherBufData.byteOffset
+      );
       // 0|0 7 6 5 4 3 2 1|0 7 6 5...
 
       buf.slice(1, buf.length - 7).swap64();
       deepStrictEqual(buf.slice(0, otherBuf.length), otherBuf);
     }
-  }
+  },
 };
 
 export const json = {
   test(ctrl, env, ctx) {
     {
-      strictEqual(JSON.stringify(Buffer.alloc(0)),
-                         '{"type":"Buffer","data":[]}');
-      strictEqual(JSON.stringify(Buffer.from([1, 2, 3, 4])),
-                         '{"type":"Buffer","data":[1,2,3,4]}');
+      strictEqual(
+        JSON.stringify(Buffer.alloc(0)),
+        '{"type":"Buffer","data":[]}'
+      );
+      strictEqual(
+        JSON.stringify(Buffer.from([1, 2, 3, 4])),
+        '{"type":"Buffer","data":[1,2,3,4]}'
+      );
     }
 
     // issue GH-7849
@@ -4620,39 +4833,40 @@ export const json = {
       strictEqual(string, '{"type":"Buffer","data":[116,101,115,116]}');
 
       function receiver(key, value) {
-        return value && value.type === 'Buffer' ? Buffer.from(value.data) : value;
+        return value && value.type === 'Buffer'
+          ? Buffer.from(value.data)
+          : value;
       }
 
       deepStrictEqual(buffer, JSON.parse(string, receiver));
     }
-  }
+  },
 };
 
 export const writeUint8 = {
   test(ctrl, env, ctx) {
-    { // OOB
+    {
+      // OOB
       const data = Buffer.alloc(8);
-      ['UInt8', 'UInt16BE', 'UInt16LE', 'UInt32BE', 'UInt32LE'].forEach((fn) => {
+      ['UInt8', 'UInt16BE', 'UInt16LE', 'UInt32BE', 'UInt32LE'].forEach(
+        (fn) => {
+          // Verify that default offset works fine.
+          data[`write${fn}`](23, undefined);
+          data[`write${fn}`](23);
 
-        // Verify that default offset works fine.
-        data[`write${fn}`](23, undefined);
-        data[`write${fn}`](23);
+          ['', '0', null, {}, [], () => {}, true, false].forEach((o) => {
+            throws(() => data[`write${fn}`](23, o), { name: 'TypeError' });
+          });
 
-        ['', '0', null, {}, [], () => {}, true, false].forEach((o) => {
-          throws(
-            () => data[`write${fn}`](23, o),
-            { name: 'TypeError' });
-        });
-
-        [NaN, Infinity, -1, 1.01].forEach((o) => {
-          throws(
-            () => data[`write${fn}`](23, o),
-            { name: 'RangeError' });
-        });
-      });
+          [NaN, Infinity, -1, 1.01].forEach((o) => {
+            throws(() => data[`write${fn}`](23, o), { name: 'RangeError' });
+          });
+        }
+      );
     }
 
-    { // Test 8 bit
+    {
+      // Test 8 bit
       const data = Buffer.alloc(4);
 
       data.writeUInt8(23, 0);
@@ -4706,12 +4920,9 @@ export const writeUint8 = {
 
       value = 0xfffff;
       ['writeUInt16BE', 'writeUInt16LE'].forEach((fn) => {
-        throws(
-          () => data[fn](value, 0),
-          {
-            name: 'RangeError',
-          }
-        );
+        throws(() => data[fn](value, 0), {
+          name: 'RangeError',
+        });
       });
     }
 
@@ -4757,65 +4968,56 @@ export const writeUint8 = {
 
       // Check byteLength.
       ['writeUIntBE', 'writeUIntLE'].forEach((fn) => {
-        ['', '0', null, {}, [], () => {}, true, false, undefined].forEach((bl) => {
-          throws(
-            () => data[fn](23, 0, bl),
-            { name: 'RangeError' });
-        });
+        ['', '0', null, {}, [], () => {}, true, false, undefined].forEach(
+          (bl) => {
+            throws(() => data[fn](23, 0, bl), { name: 'RangeError' });
+          }
+        );
 
         [Infinity, -1].forEach((byteLength) => {
-          throws(
-            () => data[fn](23, 0, byteLength),
-            {
-              name: 'RangeError',
-            }
-          );
+          throws(() => data[fn](23, 0, byteLength), {
+            name: 'RangeError',
+          });
         });
 
         [NaN, 1.01].forEach((byteLength) => {
-          throws(
-            () => data[fn](42, 0, byteLength),
-            {
-              name: 'RangeError',
-            });
+          throws(() => data[fn](42, 0, byteLength), {
+            name: 'RangeError',
+          });
         });
       });
 
       // Test 1 to 6 bytes.
       for (let i = 1; i <= 6; i++) {
         const range = i < 5 ? `= ${val - 1}` : ` 2 ** ${i * 8}`;
-        const received = i > 4 ?
-          String(val).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1_') :
-          val;
+        const received =
+          i > 4 ? String(val).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1_') : val;
         ['writeUIntBE', 'writeUIntLE'].forEach((fn) => {
-          throws(() => {
-            data[fn](val, 0, i);
-          }, {
-            name: 'RangeError',
-          });
+          throws(
+            () => {
+              data[fn](val, 0, i);
+            },
+            {
+              name: 'RangeError',
+            }
+          );
 
           ['', '0', null, {}, [], () => {}, true, false].forEach((o) => {
-            throws(
-              () => data[fn](23, o, i),
-              {
-                name: 'TypeError'
-              });
+            throws(() => data[fn](23, o, i), {
+              name: 'TypeError',
+            });
           });
 
           [Infinity, -1, -4294967295].forEach((offset) => {
-            throws(
-              () => data[fn](val - 1, offset, i),
-              {
-                name: 'RangeError',
-              });
+            throws(() => data[fn](val - 1, offset, i), {
+              name: 'RangeError',
+            });
           });
 
           [NaN, 1.01].forEach((offset) => {
-            throws(
-              () => data[fn](val - 1, offset, i),
-              {
-                name: 'RangeError',
-              });
+            throws(() => data[fn](val - 1, offset, i), {
+              name: 'RangeError',
+            });
           });
         });
 
@@ -4824,15 +5026,22 @@ export const writeUint8 = {
     }
 
     for (const fn of [
-      'UInt8', 'UInt16LE', 'UInt16BE', 'UInt32LE', 'UInt32BE', 'UIntLE', 'UIntBE',
-      'BigUInt64LE', 'BigUInt64BE',
+      'UInt8',
+      'UInt16LE',
+      'UInt16BE',
+      'UInt32LE',
+      'UInt32BE',
+      'UIntLE',
+      'UIntBE',
+      'BigUInt64LE',
+      'BigUInt64BE',
     ]) {
       const p = Buffer.prototype;
       const lowerFn = fn.replace(/UInt/, 'Uint');
       strictEqual(p[`write${fn}`], p[`write${lowerFn}`]);
       strictEqual(p[`read${fn}`], p[`read${lowerFn}`]);
     }
-  }
+  },
 };
 
 export const writeInt = {
@@ -4847,12 +5056,12 @@ export const writeInt = {
 
       buffer.writeInt8(0x23, 0);
       buffer.writeInt8(-5, 1);
-      ok(buffer.equals(new Uint8Array([ 0x23, 0xfb ])));
+      ok(buffer.equals(new Uint8Array([0x23, 0xfb])));
 
       /* Make sure we handle min/max correctly */
       buffer.writeInt8(0x7f, 0);
       buffer.writeInt8(-0x80, 1);
-      ok(buffer.equals(new Uint8Array([ 0x7f, 0x80 ])));
+      ok(buffer.equals(new Uint8Array([0x7f, 0x80])));
 
       throws(() => {
         buffer.writeInt8(0x7f + 1, 0);
@@ -4866,15 +5075,11 @@ export const writeInt = {
       buffer.writeInt8(23);
 
       ['', '0', null, {}, [], () => {}, true, false].forEach((off) => {
-        throws(
-          () => buffer.writeInt8(23, off),
-          { name: 'TypeError' });
+        throws(() => buffer.writeInt8(23, off), { name: 'TypeError' });
       });
 
       [NaN, Infinity, -1, 1.01].forEach((off) => {
-        throws(
-          () => buffer.writeInt8(23, off),
-          { name: 'RangeError' });
+        throws(() => buffer.writeInt8(23, off), { name: 'RangeError' });
       });
     }
 
@@ -4884,27 +5089,26 @@ export const writeInt = {
 
       buffer.writeInt16BE(0x0023, 0);
       buffer.writeInt16LE(0x0023, 2);
-      ok(buffer.equals(new Uint8Array([ 0x00, 0x23, 0x23, 0x00 ])));
+      ok(buffer.equals(new Uint8Array([0x00, 0x23, 0x23, 0x00])));
 
       buffer.writeInt16BE(-5, 0);
       buffer.writeInt16LE(-5, 2);
-      ok(buffer.equals(new Uint8Array([ 0xff, 0xfb, 0xfb, 0xff ])));
+      ok(buffer.equals(new Uint8Array([0xff, 0xfb, 0xfb, 0xff])));
 
       buffer.writeInt16BE(-1679, 0);
       buffer.writeInt16LE(-1679, 2);
-      ok(buffer.equals(new Uint8Array([ 0xf9, 0x71, 0x71, 0xf9 ])));
+      ok(buffer.equals(new Uint8Array([0xf9, 0x71, 0x71, 0xf9])));
 
       /* Make sure we handle min/max correctly */
       buffer.writeInt16BE(0x7fff, 0);
       buffer.writeInt16BE(-0x8000, 2);
-      ok(buffer.equals(new Uint8Array([ 0x7f, 0xff, 0x80, 0x00 ])));
+      ok(buffer.equals(new Uint8Array([0x7f, 0xff, 0x80, 0x00])));
 
       buffer.writeInt16LE(0x7fff, 0);
       buffer.writeInt16LE(-0x8000, 2);
-      ok(buffer.equals(new Uint8Array([ 0xff, 0x7f, 0x00, 0x80 ])));
+      ok(buffer.equals(new Uint8Array([0xff, 0x7f, 0x00, 0x80])));
 
       ['writeInt16BE', 'writeInt16LE'].forEach((fn) => {
-
         // Verify that default offset works fine.
         buffer[fn](23, undefined);
         buffer[fn](23);
@@ -4917,15 +5121,11 @@ export const writeInt = {
         }, errorOutOfBounds);
 
         ['', '0', null, {}, [], () => {}, true, false].forEach((off) => {
-          throws(
-            () => buffer[fn](23, off),
-            { code: 'ERR_INVALID_ARG_TYPE' });
+          throws(() => buffer[fn](23, off), { code: 'ERR_INVALID_ARG_TYPE' });
         });
 
         [NaN, Infinity, -1, 1.01].forEach((off) => {
-          throws(
-            () => buffer[fn](23, off),
-            { code: 'ERR_OUT_OF_RANGE' });
+          throws(() => buffer[fn](23, off), { code: 'ERR_OUT_OF_RANGE' });
         });
       });
     }
@@ -4936,37 +5136,46 @@ export const writeInt = {
 
       buffer.writeInt32BE(0x23, 0);
       buffer.writeInt32LE(0x23, 4);
-      ok(buffer.equals(new Uint8Array([
-        0x00, 0x00, 0x00, 0x23, 0x23, 0x00, 0x00, 0x00,
-      ])));
+      ok(
+        buffer.equals(
+          new Uint8Array([0x00, 0x00, 0x00, 0x23, 0x23, 0x00, 0x00, 0x00])
+        )
+      );
 
       buffer.writeInt32BE(-5, 0);
       buffer.writeInt32LE(-5, 4);
-      ok(buffer.equals(new Uint8Array([
-        0xff, 0xff, 0xff, 0xfb, 0xfb, 0xff, 0xff, 0xff,
-      ])));
+      ok(
+        buffer.equals(
+          new Uint8Array([0xff, 0xff, 0xff, 0xfb, 0xfb, 0xff, 0xff, 0xff])
+        )
+      );
 
       buffer.writeInt32BE(-805306713, 0);
       buffer.writeInt32LE(-805306713, 4);
-      ok(buffer.equals(new Uint8Array([
-        0xcf, 0xff, 0xfe, 0xa7, 0xa7, 0xfe, 0xff, 0xcf,
-      ])));
+      ok(
+        buffer.equals(
+          new Uint8Array([0xcf, 0xff, 0xfe, 0xa7, 0xa7, 0xfe, 0xff, 0xcf])
+        )
+      );
 
       /* Make sure we handle min/max correctly */
       buffer.writeInt32BE(0x7fffffff, 0);
       buffer.writeInt32BE(-0x80000000, 4);
-      ok(buffer.equals(new Uint8Array([
-        0x7f, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00,
-      ])));
+      ok(
+        buffer.equals(
+          new Uint8Array([0x7f, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00])
+        )
+      );
 
       buffer.writeInt32LE(0x7fffffff, 0);
       buffer.writeInt32LE(-0x80000000, 4);
-      ok(buffer.equals(new Uint8Array([
-        0xff, 0xff, 0xff, 0x7f, 0x00, 0x00, 0x00, 0x80,
-      ])));
+      ok(
+        buffer.equals(
+          new Uint8Array([0xff, 0xff, 0xff, 0x7f, 0x00, 0x00, 0x00, 0x80])
+        )
+      );
 
       ['writeInt32BE', 'writeInt32LE'].forEach((fn) => {
-
         // Verify that default offset works fine.
         buffer[fn](23, undefined);
         buffer[fn](23);
@@ -4979,15 +5188,11 @@ export const writeInt = {
         }, errorOutOfBounds);
 
         ['', '0', null, {}, [], () => {}, true, false].forEach((off) => {
-          throws(
-            () => buffer[fn](23, off),
-            { code: 'ERR_INVALID_ARG_TYPE' });
+          throws(() => buffer[fn](23, off), { code: 'ERR_INVALID_ARG_TYPE' });
         });
 
         [NaN, Infinity, -1, 1.01].forEach((off) => {
-          throws(
-            () => buffer[fn](23, off),
-            { code: 'ERR_OUT_OF_RANGE' });
+          throws(() => buffer[fn](23, off), { code: 'ERR_OUT_OF_RANGE' });
         });
       });
     }
@@ -4997,14 +5202,10 @@ export const writeInt = {
       const value = 0x1234567890ab;
       const buffer = Buffer.allocUnsafe(6);
       buffer.writeIntBE(value, 0, 6);
-      ok(buffer.equals(new Uint8Array([
-        0x12, 0x34, 0x56, 0x78, 0x90, 0xab,
-      ])));
+      ok(buffer.equals(new Uint8Array([0x12, 0x34, 0x56, 0x78, 0x90, 0xab])));
 
       buffer.writeIntLE(value, 0, 6);
-      ok(buffer.equals(new Uint8Array([
-        0xab, 0x90, 0x78, 0x56, 0x34, 0x12,
-      ])));
+      ok(buffer.equals(new Uint8Array([0xab, 0x90, 0x78, 0x56, 0x34, 0x12])));
     }
 
     // Test Int
@@ -5013,27 +5214,22 @@ export const writeInt = {
 
       // Check byteLength.
       ['writeIntBE', 'writeIntLE'].forEach((fn) => {
-        ['', '0', null, {}, [], () => {}, true, false, undefined].forEach((bl) => {
-          throws(
-            () => data[fn](23, 0, bl),
-            { name: 'RangeError' });
-        });
+        ['', '0', null, {}, [], () => {}, true, false, undefined].forEach(
+          (bl) => {
+            throws(() => data[fn](23, 0, bl), { name: 'RangeError' });
+          }
+        );
 
         [Infinity, -1].forEach((byteLength) => {
-          throws(
-            () => data[fn](23, 0, byteLength),
-            {
-              name: 'RangeError',
-            }
-          );
+          throws(() => data[fn](23, 0, byteLength), {
+            name: 'RangeError',
+          });
         });
 
         [NaN, 1.01].forEach((byteLength) => {
-          throws(
-            () => data[fn](42, 0, byteLength),
-            {
-              name: 'RangeError',
-            });
+          throws(() => data[fn](42, 0, byteLength), {
+            name: 'RangeError',
+          });
         });
       });
 
@@ -5047,43 +5243,43 @@ export const writeInt = {
             range = `>= -(2 ** ${i * 8 - 1}) and < 2 ** ${i * 8 - 1}`;
           }
           [min - 1, max + 1].forEach((val) => {
-            const received = i > 4 ?
-              String(val).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1_') :
-              val;
-            throws(() => {
-              data[fn](val, 0, i);
-            }, {
+            const received =
+              i > 4
+                ? String(val).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1_')
+                : val;
+            throws(
+              () => {
+                data[fn](val, 0, i);
+              },
+              {
+                name: 'RangeError',
+              }
+            );
+          });
+
+          ['', '0', null, {}, [], () => {}, true, false, undefined].forEach(
+            (o) => {
+              throws(() => data[fn](min, o, i), {
+                name: 'TypeError',
+              });
+            }
+          );
+
+          [Infinity, -1, -4294967295].forEach((offset) => {
+            throws(() => data[fn](min, offset, i), {
               name: 'RangeError',
             });
           });
 
-          ['', '0', null, {}, [], () => {}, true, false, undefined].forEach((o) => {
-            throws(
-              () => data[fn](min, o, i),
-              {
-                name: 'TypeError'
-              });
-          });
-
-          [Infinity, -1, -4294967295].forEach((offset) => {
-            throws(
-              () => data[fn](min, offset, i),
-              {
-                name: 'RangeError',
-              });
-          });
-
           [NaN, 1.01].forEach((offset) => {
-            throws(
-              () => data[fn](max, offset, i),
-              {
-                name: 'RangeError',
-              });
+            throws(() => data[fn](max, offset, i), {
+              name: 'RangeError',
+            });
           });
         });
       }
     }
-  }
+  },
 };
 
 export const writeFloat = {
@@ -5092,41 +5288,62 @@ export const writeFloat = {
 
     buffer.writeFloatBE(1, 0);
     buffer.writeFloatLE(1, 4);
-    ok(buffer.equals(
-      new Uint8Array([ 0x3f, 0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3f ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([0x3f, 0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3f])
+      )
+    );
 
     buffer.writeFloatBE(1 / 3, 0);
     buffer.writeFloatLE(1 / 3, 4);
-    ok(buffer.equals(
-      new Uint8Array([ 0x3e, 0xaa, 0xaa, 0xab, 0xab, 0xaa, 0xaa, 0x3e ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([0x3e, 0xaa, 0xaa, 0xab, 0xab, 0xaa, 0xaa, 0x3e])
+      )
+    );
 
-    buffer.writeFloatBE(3.4028234663852886e+38, 0);
-    buffer.writeFloatLE(3.4028234663852886e+38, 4);
-    ok(buffer.equals(
-      new Uint8Array([ 0x7f, 0x7f, 0xff, 0xff, 0xff, 0xff, 0x7f, 0x7f ])));
+    buffer.writeFloatBE(3.4028234663852886e38, 0);
+    buffer.writeFloatLE(3.4028234663852886e38, 4);
+    ok(
+      buffer.equals(
+        new Uint8Array([0x7f, 0x7f, 0xff, 0xff, 0xff, 0xff, 0x7f, 0x7f])
+      )
+    );
 
     buffer.writeFloatLE(1.1754943508222875e-38, 0);
     buffer.writeFloatBE(1.1754943508222875e-38, 4);
-    ok(buffer.equals(
-      new Uint8Array([ 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x00 ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x00])
+      )
+    );
 
     buffer.writeFloatBE(0 * -1, 0);
     buffer.writeFloatLE(0 * -1, 4);
-    ok(buffer.equals(
-      new Uint8Array([ 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80 ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80])
+      )
+    );
 
     buffer.writeFloatBE(Infinity, 0);
     buffer.writeFloatLE(Infinity, 4);
-    ok(buffer.equals(
-      new Uint8Array([ 0x7F, 0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0x7F ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([0x7f, 0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0x7f])
+      )
+    );
 
     strictEqual(buffer.readFloatBE(0), Infinity);
     strictEqual(buffer.readFloatLE(4), Infinity);
 
     buffer.writeFloatBE(-Infinity, 0);
     buffer.writeFloatLE(-Infinity, 4);
-    ok(buffer.equals(
-      new Uint8Array([ 0xFF, 0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0xFF ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([0xff, 0x80, 0x00, 0x00, 0x00, 0x00, 0x80, 0xff])
+      )
+    );
 
     strictEqual(buffer.readFloatBE(0), -Infinity);
     strictEqual(buffer.readFloatLE(4), -Infinity);
@@ -5136,14 +5353,18 @@ export const writeFloat = {
 
     // JS only knows a single NaN but there exist two platform specific
     // implementations. Therefore, allow both quiet and signalling NaNs.
-    if (buffer[1] === 0xBF) {
+    if (buffer[1] === 0xbf) {
       ok(
-        buffer.equals(new Uint8Array(
-          [ 0x7F, 0xBF, 0xFF, 0xFF, 0xFF, 0xFF, 0xBF, 0x7F ])));
+        buffer.equals(
+          new Uint8Array([0x7f, 0xbf, 0xff, 0xff, 0xff, 0xff, 0xbf, 0x7f])
+        )
+      );
     } else {
       ok(
-        buffer.equals(new Uint8Array(
-          [ 0x7F, 0xC0, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x7F ])));
+        buffer.equals(
+          new Uint8Array([0x7f, 0xc0, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x7f])
+        )
+      );
     }
 
     ok(Number.isNaN(buffer.readFloatBE(0)));
@@ -5154,44 +5375,32 @@ export const writeFloat = {
       const small = Buffer.allocUnsafe(1);
 
       ['writeFloatLE', 'writeFloatBE'].forEach((fn) => {
-
         // Verify that default offset works fine.
         buffer[fn](23, undefined);
         buffer[fn](23);
 
-        throws(
-          () => small[fn](11.11, 0),
-          {
-            name: 'RangeError',
-          });
+        throws(() => small[fn](11.11, 0), {
+          name: 'RangeError',
+        });
 
         ['', '0', null, {}, [], () => {}, true, false].forEach((off) => {
-          throws(
-            () => small[fn](23, off),
-            { name: 'TypeError' }
-          );
+          throws(() => small[fn](23, off), { name: 'TypeError' });
         });
 
         [Infinity, -1, 5].forEach((offset) => {
-          throws(
-            () => buffer[fn](23, offset),
-            {
-              name: 'RangeError',
-            }
-          );
+          throws(() => buffer[fn](23, offset), {
+            name: 'RangeError',
+          });
         });
 
         [NaN, 1.01].forEach((offset) => {
-          throws(
-            () => buffer[fn](42, offset),
-            {
-              name: 'RangeError',
-            });
+          throws(() => buffer[fn](42, offset), {
+            name: 'RangeError',
+          });
         });
       });
     }
-
-  }
+  },
 };
 
 export const writeDouble = {
@@ -5200,46 +5409,70 @@ export const writeDouble = {
 
     buffer.writeDoubleBE(2.225073858507201e-308, 0);
     buffer.writeDoubleLE(2.225073858507201e-308, 8);
-    ok(buffer.equals(new Uint8Array([
-      0x00, 0x0f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0f, 0x00,
-    ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([
+          0x00, 0x0f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0x0f, 0x00,
+        ])
+      )
+    );
 
     buffer.writeDoubleBE(1.0000000000000004, 0);
     buffer.writeDoubleLE(1.0000000000000004, 8);
-    ok(buffer.equals(new Uint8Array([
-      0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
-      0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f,
-    ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([
+          0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x02, 0x00, 0x00,
+          0x00, 0x00, 0x00, 0xf0, 0x3f,
+        ])
+      )
+    );
 
     buffer.writeDoubleBE(-2, 0);
     buffer.writeDoubleLE(-2, 8);
-    ok(buffer.equals(new Uint8Array([
-      0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0,
-    ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([
+          0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x00, 0x00, 0x00, 0x00, 0xc0,
+        ])
+      )
+    );
 
-    buffer.writeDoubleBE(1.7976931348623157e+308, 0);
-    buffer.writeDoubleLE(1.7976931348623157e+308, 8);
-    ok(buffer.equals(new Uint8Array([
-      0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xef, 0x7f,
-    ])));
+    buffer.writeDoubleBE(1.7976931348623157e308, 0);
+    buffer.writeDoubleLE(1.7976931348623157e308, 8);
+    ok(
+      buffer.equals(
+        new Uint8Array([
+          0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xef, 0x7f,
+        ])
+      )
+    );
 
     buffer.writeDoubleBE(0 * -1, 0);
     buffer.writeDoubleLE(0 * -1, 8);
-    ok(buffer.equals(new Uint8Array([
-      0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80,
-    ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([
+          0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x00, 0x00, 0x00, 0x00, 0x80,
+        ])
+      )
+    );
 
     buffer.writeDoubleBE(Infinity, 0);
     buffer.writeDoubleLE(Infinity, 8);
 
-    ok(buffer.equals(new Uint8Array([
-      0x7F, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x7F,
-    ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([
+          0x7f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x00, 0x00, 0x00, 0xf0, 0x7f,
+        ])
+      )
+    );
 
     strictEqual(buffer.readDoubleBE(0), Infinity);
     strictEqual(buffer.readDoubleLE(8), Infinity);
@@ -5247,10 +5480,14 @@ export const writeDouble = {
     buffer.writeDoubleBE(-Infinity, 0);
     buffer.writeDoubleLE(-Infinity, 8);
 
-    ok(buffer.equals(new Uint8Array([
-      0xFF, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0xFF,
-    ])));
+    ok(
+      buffer.equals(
+        new Uint8Array([
+          0xff, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x00, 0x00, 0x00, 0xf0, 0xff,
+        ])
+      )
+    );
 
     strictEqual(buffer.readDoubleBE(0), -Infinity);
     strictEqual(buffer.readDoubleLE(8), -Infinity);
@@ -5260,16 +5497,24 @@ export const writeDouble = {
 
     // JS only knows a single NaN but there exist two platform specific
     // implementations. Therefore, allow both quiet and signalling NaNs.
-    if (buffer[1] === 0xF7) {
-      ok(buffer.equals(new Uint8Array([
-        0x7F, 0xF7, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF7, 0x7F,
-      ])));
+    if (buffer[1] === 0xf7) {
+      ok(
+        buffer.equals(
+          new Uint8Array([
+            0x7f, 0xf7, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xf7, 0x7f,
+          ])
+        )
+      );
     } else {
-      ok(buffer.equals(new Uint8Array([
-        0x7F, 0xF8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x7F,
-      ])));
+      ok(
+        buffer.equals(
+          new Uint8Array([
+            0x7f, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0xf8, 0x7f,
+          ])
+        )
+      );
     }
 
     ok(Number.isNaN(buffer.readDoubleBE(0)));
@@ -5280,55 +5525,42 @@ export const writeDouble = {
       const small = Buffer.allocUnsafe(1);
 
       ['writeDoubleLE', 'writeDoubleBE'].forEach((fn) => {
-
         // Verify that default offset works fine.
         buffer[fn](23, undefined);
         buffer[fn](23);
 
-        throws(
-          () => small[fn](11.11, 0),
-          {
-            code: 'ERR_BUFFER_OUT_OF_BOUNDS',
-            name: 'RangeError',
-            message: 'Attempt to access memory outside buffer bounds'
-          });
+        throws(() => small[fn](11.11, 0), {
+          code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+          name: 'RangeError',
+          message: 'Attempt to access memory outside buffer bounds',
+        });
 
         ['', '0', null, {}, [], () => {}, true, false].forEach((off) => {
-          throws(
-            () => small[fn](23, off),
-            { name: 'TypeError' });
+          throws(() => small[fn](23, off), { name: 'TypeError' });
         });
 
         [Infinity, -1, 9].forEach((offset) => {
-          throws(
-            () => buffer[fn](23, offset),
-            {
-              name: 'RangeError',
-            });
+          throws(() => buffer[fn](23, offset), {
+            name: 'RangeError',
+          });
         });
 
         [NaN, 1.01].forEach((offset) => {
-          throws(
-            () => buffer[fn](42, offset),
-            {
-              name: 'RangeError',
-            });
+          throws(() => buffer[fn](42, offset), {
+            name: 'RangeError',
+          });
         });
       });
     }
-
-  }
+  },
 };
 
 export const write = {
   test(ctrl, env, ctx) {
     [-1, 10].forEach((offset) => {
-      throws(
-        () => Buffer.alloc(9).write('foo', offset),
-        {
-          name: 'RangeError',
-        }
-      );
+      throws(() => Buffer.alloc(9).write('foo', offset), {
+        name: 'RangeError',
+      });
     });
 
     const resultMap = new Map([
@@ -5344,8 +5576,17 @@ export const write = {
     ]);
 
     // utf8, ucs2, ascii, latin1, utf16le
-    const encodings = ['utf8', 'utf-8', 'ascii', 'latin1',
-                       'binary', 'ucs2', 'ucs-2', 'utf16le', 'utf-16le'];
+    const encodings = [
+      'utf8',
+      'utf-8',
+      'ascii',
+      'latin1',
+      'binary',
+      'ucs2',
+      'ucs-2',
+      'utf16le',
+      'utf-16le',
+    ];
 
     encodings
       .reduce((es, e) => es.concat(e, e.toUpperCase()), [])
@@ -5354,8 +5595,7 @@ export const write = {
         const len = Buffer.byteLength('foo', encoding);
         strictEqual(buf.write('foo', 0, len, encoding), len);
 
-        if (encoding.includes('-'))
-          encoding = encoding.replace('-', '');
+        if (encoding.includes('-')) encoding = encoding.replace('-', '');
 
         deepStrictEqual(buf, resultMap.get(encoding.toLowerCase()));
       });
@@ -5410,8 +5650,7 @@ export const write = {
     deepStrictEqual([...z], [0, 0, 0x61, 0x62]);
 
     // Large overrun could corrupt the process
-    strictEqual(Buffer.alloc(4)
-      .write('ыыыыыы'.repeat(100), 3, 'utf16le'), 0);
+    strictEqual(Buffer.alloc(4).write('ыыыыыы'.repeat(100), 3, 'utf16le'), 0);
 
     {
       // .write() does not affect the byte after the written-to slice of the Buffer.
@@ -5420,15 +5659,23 @@ export const write = {
       strictEqual(buf.write('ыы', 1, 'utf16le'), 4);
       deepStrictEqual([...buf], [0, 0x4b, 0x04, 0x4b, 0x04, 0, 0, 0]);
     }
-
-  }
+  },
 };
 
 export const toString = {
   test(ctrl, env, ctx) {
     // utf8, ucs2, ascii, latin1, utf16le
-    const encodings = ['utf8', 'utf-8', 'ucs2', 'ucs-2', 'ascii', 'latin1',
-                      'binary', 'utf16le', 'utf-16le'];
+    const encodings = [
+      'utf8',
+      'utf-8',
+      'ucs2',
+      'ucs-2',
+      'ascii',
+      'latin1',
+      'binary',
+      'utf16le',
+      'utf-16le',
+    ];
 
     encodings
       .reduce((es, e) => es.concat(e, e.toUpperCase()), [])
@@ -5443,8 +5690,7 @@ export const toString = {
 
     // hex
     ['hex', 'HEX'].forEach((encoding) => {
-      strictEqual(Buffer.from('666f6f', encoding).toString(encoding),
-                        '666f6f');
+      strictEqual(Buffer.from('666f6f', encoding).toString(encoding), '666f6f');
     });
 
     // Invalid encodings
@@ -5453,14 +5699,13 @@ export const toString = {
       const error = {
         code: 'ERR_UNKNOWN_ENCODING',
         name: 'TypeError',
-        message: `Unknown encoding: ${encoding}`
+        message: `Unknown encoding: ${encoding}`,
       };
       ok(!Buffer.isEncoding(encoding));
       throws(() => Buffer.from('foo').toString(encoding), error);
     }
-
-  }
-}
+  },
+};
 
 export const toStringRangeError = {
   test(ctrl, env, ctx) {
@@ -5474,7 +5719,7 @@ export const toStringRangeError = {
     throws(() => Buffer.alloc(len).toString('utf8'), message);
     throws(() => Buffer.allocUnsafe(len).toString('utf8'), message);
     throws(() => Buffer.allocUnsafeSlow(len).toString('utf8'), message);
-  }
+  },
 };
 
 export const toStringRange = {
@@ -5554,23 +5799,34 @@ export const toStringRange = {
     strictEqual(rangeBuffer.toString('ascii', 0, true), 'a');
 
     // Try toString() with an object as an encoding
-    strictEqual(rangeBuffer.toString({ toString: function() {
-      return 'ascii';
-    } }), 'abc');
+    strictEqual(
+      rangeBuffer.toString({
+        toString: function () {
+          return 'ascii';
+        },
+      }),
+      'abc'
+    );
 
     // Try toString() with 0 and null as the encoding
-    throws(() => {
-      rangeBuffer.toString(0, 1, 2);
-    }, {
-      name: 'TypeError',
-    });
+    throws(
+      () => {
+        rangeBuffer.toString(0, 1, 2);
+      },
+      {
+        name: 'TypeError',
+      }
+    );
 
-    throws(() => {
-      rangeBuffer.toString(null, 1, 2);
-    }, {
-      name: 'TypeError',
-    });
-  }
+    throws(
+      () => {
+        rangeBuffer.toString(null, 1, 2);
+      },
+      {
+        name: 'TypeError',
+      }
+    );
+  },
 };
 
 export const inspect = {
@@ -5582,7 +5838,8 @@ export const inspect = {
     let s = buffer.SlowBuffer(60);
     s.fill('0123456789'.repeat(6));
 
-    let expected = '<Buffer 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 ... 10 more bytes>';
+    let expected =
+      '<Buffer 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 ... 10 more bytes>';
 
     strictEqual(util.inspect(b), expected);
     strictEqual(util.inspect(s), expected);
@@ -5608,11 +5865,8 @@ export const inspect = {
     b = Buffer.alloc(0);
     b.prop = 123;
 
-    strictEqual(
-      util.inspect(b),
-      '<Buffer prop: 123>'
-    );
-  }
+    strictEqual(util.inspect(b), '<Buffer prop: 123>');
+  },
 };
 
 export const isAsciiTest = {
@@ -5624,19 +5878,23 @@ export const isAsciiTest = {
 
     [
       undefined,
-      '', 'hello',
-      false, true,
-      0, 1,
-      0n, 1n,
+      '',
+      'hello',
+      false,
+      true,
+      0,
+      1,
+      0n,
+      1n,
       Symbol(),
       () => {},
-      {}, [], null,
+      {},
+      [],
+      null,
     ].forEach((input) => {
-      throws(
-        () => isAscii(input),
-      );
+      throws(() => isAscii(input));
     });
-  }
+  },
 };
 
 export const isUtf8Test = {
@@ -5649,63 +5907,55 @@ export const isUtf8Test = {
 
     // Taken from test/fixtures/wpt/encoding/textdecoder-fatal.any.js
     [
-      [0xFF], // 'invalid code'
-      [0xC0], // 'ends early'
-      [0xE0], // 'ends early 2'
-      [0xC0, 0x00], // 'invalid trail'
-      [0xC0, 0xC0], // 'invalid trail 2'
-      [0xE0, 0x00], // 'invalid trail 3'
-      [0xE0, 0xC0], // 'invalid trail 4'
-      [0xE0, 0x80, 0x00], // 'invalid trail 5'
-      [0xE0, 0x80, 0xC0], // 'invalid trail 6'
-      [0xFC, 0x80, 0x80, 0x80, 0x80, 0x80], // '> 0x10FFFF'
-      [0xFE, 0x80, 0x80, 0x80, 0x80, 0x80], // 'obsolete lead byte'
+      [0xff], // 'invalid code'
+      [0xc0], // 'ends early'
+      [0xe0], // 'ends early 2'
+      [0xc0, 0x00], // 'invalid trail'
+      [0xc0, 0xc0], // 'invalid trail 2'
+      [0xe0, 0x00], // 'invalid trail 3'
+      [0xe0, 0xc0], // 'invalid trail 4'
+      [0xe0, 0x80, 0x00], // 'invalid trail 5'
+      [0xe0, 0x80, 0xc0], // 'invalid trail 6'
+      [0xfc, 0x80, 0x80, 0x80, 0x80, 0x80], // '> 0x10FFFF'
+      [0xfe, 0x80, 0x80, 0x80, 0x80, 0x80], // 'obsolete lead byte'
 
       // Overlong encodings
-      [0xC0, 0x80], // 'overlong U+0000 - 2 bytes'
-      [0xE0, 0x80, 0x80], // 'overlong U+0000 - 3 bytes'
-      [0xF0, 0x80, 0x80, 0x80], // 'overlong U+0000 - 4 bytes'
-      [0xF8, 0x80, 0x80, 0x80, 0x80], // 'overlong U+0000 - 5 bytes'
-      [0xFC, 0x80, 0x80, 0x80, 0x80, 0x80], // 'overlong U+0000 - 6 bytes'
+      [0xc0, 0x80], // 'overlong U+0000 - 2 bytes'
+      [0xe0, 0x80, 0x80], // 'overlong U+0000 - 3 bytes'
+      [0xf0, 0x80, 0x80, 0x80], // 'overlong U+0000 - 4 bytes'
+      [0xf8, 0x80, 0x80, 0x80, 0x80], // 'overlong U+0000 - 5 bytes'
+      [0xfc, 0x80, 0x80, 0x80, 0x80, 0x80], // 'overlong U+0000 - 6 bytes'
 
-      [0xC1, 0xBF], // 'overlong U+007F - 2 bytes'
-      [0xE0, 0x81, 0xBF], // 'overlong U+007F - 3 bytes'
-      [0xF0, 0x80, 0x81, 0xBF], // 'overlong U+007F - 4 bytes'
-      [0xF8, 0x80, 0x80, 0x81, 0xBF], // 'overlong U+007F - 5 bytes'
-      [0xFC, 0x80, 0x80, 0x80, 0x81, 0xBF], // 'overlong U+007F - 6 bytes'
+      [0xc1, 0xbf], // 'overlong U+007F - 2 bytes'
+      [0xe0, 0x81, 0xbf], // 'overlong U+007F - 3 bytes'
+      [0xf0, 0x80, 0x81, 0xbf], // 'overlong U+007F - 4 bytes'
+      [0xf8, 0x80, 0x80, 0x81, 0xbf], // 'overlong U+007F - 5 bytes'
+      [0xfc, 0x80, 0x80, 0x80, 0x81, 0xbf], // 'overlong U+007F - 6 bytes'
 
-      [0xE0, 0x9F, 0xBF], // 'overlong U+07FF - 3 bytes'
-      [0xF0, 0x80, 0x9F, 0xBF], // 'overlong U+07FF - 4 bytes'
-      [0xF8, 0x80, 0x80, 0x9F, 0xBF], // 'overlong U+07FF - 5 bytes'
-      [0xFC, 0x80, 0x80, 0x80, 0x9F, 0xBF], // 'overlong U+07FF - 6 bytes'
+      [0xe0, 0x9f, 0xbf], // 'overlong U+07FF - 3 bytes'
+      [0xf0, 0x80, 0x9f, 0xbf], // 'overlong U+07FF - 4 bytes'
+      [0xf8, 0x80, 0x80, 0x9f, 0xbf], // 'overlong U+07FF - 5 bytes'
+      [0xfc, 0x80, 0x80, 0x80, 0x9f, 0xbf], // 'overlong U+07FF - 6 bytes'
 
-      [0xF0, 0x8F, 0xBF, 0xBF], // 'overlong U+FFFF - 4 bytes'
-      [0xF8, 0x80, 0x8F, 0xBF, 0xBF], // 'overlong U+FFFF - 5 bytes'
-      [0xFC, 0x80, 0x80, 0x8F, 0xBF, 0xBF], // 'overlong U+FFFF - 6 bytes'
+      [0xf0, 0x8f, 0xbf, 0xbf], // 'overlong U+FFFF - 4 bytes'
+      [0xf8, 0x80, 0x8f, 0xbf, 0xbf], // 'overlong U+FFFF - 5 bytes'
+      [0xfc, 0x80, 0x80, 0x8f, 0xbf, 0xbf], // 'overlong U+FFFF - 6 bytes'
 
-      [0xF8, 0x84, 0x8F, 0xBF, 0xBF], // 'overlong U+10FFFF - 5 bytes'
-      [0xFC, 0x80, 0x84, 0x8F, 0xBF, 0xBF], // 'overlong U+10FFFF - 6 bytes'
+      [0xf8, 0x84, 0x8f, 0xbf, 0xbf], // 'overlong U+10FFFF - 5 bytes'
+      [0xfc, 0x80, 0x84, 0x8f, 0xbf, 0xbf], // 'overlong U+10FFFF - 6 bytes'
 
       // UTF-16 surrogates encoded as code points in UTF-8
-      [0xED, 0xA0, 0x80], // 'lead surrogate'
-      [0xED, 0xB0, 0x80], // 'trail surrogate'
-      [0xED, 0xA0, 0x80, 0xED, 0xB0, 0x80], // 'surrogate pair'
+      [0xed, 0xa0, 0x80], // 'lead surrogate'
+      [0xed, 0xb0, 0x80], // 'trail surrogate'
+      [0xed, 0xa0, 0x80, 0xed, 0xb0, 0x80], // 'surrogate pair'
     ].forEach((input) => {
       strictEqual(isUtf8(Buffer.from(input)), false);
     });
 
-    [
-      null,
-      undefined,
-      'hello',
-      true,
-      false,
-    ].forEach((input) => {
-      throws(
-        () => isUtf8(input),
-      );
+    [null, undefined, 'hello', true, false].forEach((input) => {
+      throws(() => isUtf8(input));
     });
-  }
+  },
 };
 
 // Adapted from test/parallel/test-icu-transcode.js
@@ -5713,11 +5963,11 @@ export const transcodeTest = {
   test(ctrl, env, ctx) {
     const orig = Buffer.from('těst ☕', 'utf8');
     const tests = {
-      'latin1': [0x74, 0x3f, 0x73, 0x74, 0x20, 0x3f],
-      'ascii': [0x74, 0x3f, 0x73, 0x74, 0x20, 0x3f],
-      'ucs2': [0x74, 0x00, 0x1b, 0x01, 0x73,
-               0x00, 0x74, 0x00, 0x20, 0x00,
-               0x15, 0x26]
+      latin1: [0x74, 0x3f, 0x73, 0x74, 0x20, 0x3f],
+      ascii: [0x74, 0x3f, 0x73, 0x74, 0x20, 0x3f],
+      ucs2: [
+        0x74, 0x00, 0x1b, 0x01, 0x73, 0x00, 0x74, 0x00, 0x20, 0x00, 0x15, 0x26,
+      ],
     };
 
     for (const test in tests) {
@@ -5746,13 +5996,16 @@ export const transcodeTest = {
     {
       deepStrictEqual(
         transcode(Buffer.from('hi', 'ascii'), 'ascii', 'utf16le'),
-        Buffer.from('hi', 'utf16le'));
+        Buffer.from('hi', 'utf16le')
+      );
       deepStrictEqual(
         transcode(Buffer.from('hi', 'latin1'), 'latin1', 'utf16le'),
-        Buffer.from('hi', 'utf16le'));
+        Buffer.from('hi', 'utf16le')
+      );
       deepStrictEqual(
         transcode(Buffer.from('hä', 'latin1'), 'latin1', 'utf16le'),
-        Buffer.from('hä', 'utf16le'));
+        Buffer.from('hä', 'utf16le')
+      );
     }
 
     {
@@ -5765,7 +6018,8 @@ export const transcodeTest = {
       const uint8array = new Uint8Array([...Buffer.from('hä', 'latin1')]);
       deepStrictEqual(
         transcode(uint8array, 'latin1', 'utf16le'),
-        Buffer.from('hä', 'utf16le'));
+        Buffer.from('hä', 'utf16le')
+      );
     }
 
     // Invalid arguments should fail
@@ -5791,7 +6045,7 @@ export const transcodeTest = {
       ok(copied_value.buffer.detached);
       ok(!original.buffer.detached);
     }
-  }
+  },
 };
 
 // Tests are taken from Node.js
@@ -5820,15 +6074,10 @@ export const fileTest = {
       const toPrimitive = {
         [Symbol.toPrimitive]() {
           return 'NaN';
-        }
+        },
       };
 
-      const invalidLastModified = [
-        null,
-        'string',
-        false,
-        toPrimitive,
-      ];
+      const invalidLastModified = [null, 'string', false, toPrimitive];
 
       for (const lastModified of invalidLastModified) {
         const file = new File([], '', { lastModified });
@@ -5845,13 +6094,10 @@ export const fileTest = {
       const toPrimitive = {
         [Symbol.toPrimitive]() {
           throw new TypeError('boom');
-        }
+        },
       };
 
-      const throwValues = [
-        BigInt(3n),
-        toPrimitive,
-      ];
+      const throwValues = [BigInt(3n), toPrimitive];
 
       for (const lastModified of throwValues) {
         throws(() => new File([], '', { lastModified }), TypeError);
@@ -5863,7 +6109,7 @@ export const fileTest = {
         {
           [Symbol.toPrimitive]() {
             return 10;
-          }
+          },
         },
         new Number(10),
         10,
@@ -5888,12 +6134,12 @@ export const fileTest = {
         get lastModified() {
           counter++;
           return 10;
-        }
+        },
       });
       strictEqual(counter, 1);
     }
-  }
-}
+  },
+};
 
 // Ref: https://github.com/cloudflare/workerd/issues/2538
 export const sliceOffsetLimits = {
@@ -5902,5 +6148,5 @@ export const sliceOffsetLimits = {
     strictEqual(Buffer.from('abcd').utf8Slice(2, 3).toString(), 'c');
     // Make sure to handle (end < start) edge case.
     strictEqual(Buffer.from('abcd').utf8Slice(1, 0).toString(), '');
-  }
-}
+  },
+};

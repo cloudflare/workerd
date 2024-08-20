@@ -1,4 +1,4 @@
-import { default as internalJaeger } from "pyodide-internal:internalJaeger";
+import { default as internalJaeger } from 'pyodide-internal:internalJaeger';
 
 /**
  * Used for tracing via Jaeger.

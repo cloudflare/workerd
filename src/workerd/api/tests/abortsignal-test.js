@@ -1,8 +1,4 @@
-import {
-  strictEqual,
-  ok,
-  throws
-} from 'node:assert';
+import { strictEqual, ok, throws } from 'node:assert';
 
 // Test for the AbortSignal and AbortController standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
@@ -10,7 +6,7 @@ import {
 export const abortcontroller = {
   test() {
     // AbortSignal is not directly creatable
-    throws(() => new AbortSignal);
+    throws(() => new AbortSignal());
 
     const ac = new AbortController();
     ok(ac.signal instanceof AbortSignal);
@@ -20,7 +16,7 @@ export const abortcontroller = {
     strictEqual(ac.signal, ac.signal);
 
     // signal is read only
-    throws(() => ac.signal = 1);
+    throws(() => (ac.signal = 1));
 
     let invoked = 0;
     ac.signal.onabort = (event) => {
@@ -32,8 +28,8 @@ export const abortcontroller = {
     ac.signal.throwIfAborted();
 
     // reason and aborted are read only
-    throws(() => ac.signal.reason = 1);
-    throws(() => ac.signal.aborted = 'foo');
+    throws(() => (ac.signal.reason = 1));
+    throws(() => (ac.signal.aborted = 'foo'));
 
     // trigger our abort with a default reason...
     ac.abort();
@@ -54,7 +50,7 @@ export const abortcontroller = {
     ac.abort();
 
     strictEqual(invoked, 1);
-  }
+  },
 };
 
 export const abortcontrollerWithReason = {
@@ -75,7 +71,7 @@ export const abortcontrollerWithReason = {
     strictEqual(ac.signal.reason, 'foo');
 
     strictEqual(invoked, 1);
-  }
+  },
 };
 
 export const alreadyAborted = {
@@ -92,14 +88,14 @@ export const alreadyAborted = {
     } catch (err) {
       strictEqual(err, 'foo');
     }
-  }
+  },
 };
 
 export const timedAbort = {
   async test() {
     const timed = AbortSignal.timeout(100);
     let resolve;
-    const promise = new Promise(r => resolve = r);
+    const promise = new Promise((r) => (resolve = r));
     let invoked = 0;
     timed.onabort = () => {
       invoked++;
@@ -107,7 +103,7 @@ export const timedAbort = {
     };
     await promise;
     strictEqual(invoked, 1);
-  }
+  },
 };
 
 export const anyAbort = {
@@ -128,7 +124,7 @@ export const anyAbort = {
     ac.abort();
 
     strictEqual(invoked, 1);
-  }
+  },
 };
 
 export const anyAbort2 = {
@@ -139,7 +135,7 @@ export const anyAbort2 = {
 
     let invoked = 0;
     let resolve;
-    const promise = new Promise(r => resolve = r);
+    const promise = new Promise((r) => (resolve = r));
 
     any.onabort = () => {
       invoked++;
@@ -149,7 +145,7 @@ export const anyAbort2 = {
     await promise;
 
     strictEqual(invoked, 1);
-  }
+  },
 };
 
 export const anyAbort3 = {
@@ -161,7 +157,7 @@ export const anyAbort3 = {
     const any = AbortSignal.any([timed, aborted]);
     strictEqual(any.aborted, true);
     strictEqual(any.reason, 123);
-  }
+  },
 };
 
 export const onabortPrototypeProperty = {
@@ -194,5 +190,5 @@ export const onabortPrototypeProperty = {
     const handler = {};
     ac.signal.onabort = handler;
     strictEqual(ac.signal.onabort, handler);
-  }
+  },
 };

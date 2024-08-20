@@ -25,8 +25,9 @@ addEventListener('error', handler);
 reportError('boom');
 
 throws(() => reportError(), {
-  message: "Failed to execute 'reportError' on 'ServiceWorkerGlobalScope': " +
-           "parameter 1 is not of type 'JsValue'."
+  message:
+    "Failed to execute 'reportError' on 'ServiceWorkerGlobalScope': " +
+    "parameter 1 is not of type 'JsValue'.",
 });
 
 export const reportErrorTest = {
@@ -37,5 +38,5 @@ export const reportErrorTest = {
     // is make sure the basic API is working and that the mock fn was called.
     reportError(boom);
     strictEqual(handler.mock.calls.length, 2);
-  }
+  },
 };

@@ -26,15 +26,9 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import {
-  isIterable,
-  isNodeStream,
-  finished,
-} from 'node-internal:streams_util';
+import { isIterable, isNodeStream, finished } from 'node-internal:streams_util';
 
-import {
-  pipelineImpl as pl
-} from 'node-internal:streams_pipeline';
+import { pipelineImpl as pl } from 'node-internal:streams_pipeline';
 
 export { finished };
 
@@ -43,7 +37,12 @@ export function pipeline(...streams) {
     let signal;
     let end;
     const lastArg = streams[streams.length - 1];
-    if (lastArg && typeof lastArg === 'object' && !isNodeStream(lastArg) && !isIterable(lastArg)) {
+    if (
+      lastArg &&
+      typeof lastArg === 'object' &&
+      !isNodeStream(lastArg) &&
+      !isIterable(lastArg)
+    ) {
       const options = streams.pop();
       signal = options.signal;
       end = options.end;
@@ -59,7 +58,7 @@ export function pipeline(...streams) {
       },
       {
         signal,
-        end
+        end,
       }
     );
   });

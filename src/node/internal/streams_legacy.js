@@ -26,16 +26,12 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import {
-  EventEmitter,
-} from 'node-internal:events';
+import { EventEmitter } from 'node-internal:events';
 
-import {
-  Buffer,
-} from 'node-internal:internal_buffer';
+import { Buffer } from 'node-internal:internal_buffer';
 
 export function Stream(opts) {
-  EventEmitter.call(this, opts||{});
+  EventEmitter.call(this, opts || {});
 }
 
 Object.setPrototypeOf(Stream.prototype, EventEmitter.prototype);
@@ -103,16 +99,16 @@ Stream.prototype.pipe = function (dest, options) {
 
   // Allow for unix-like usage: A.pipe(B).pipe(C)
   return dest;
-}
+};
 
 // Backwards-compat with node 0.4.x
-Stream.Stream = Stream
+Stream.Stream = Stream;
 Stream._isUint8Array = function isUint8Array(value) {
   return value instanceof Uint8Array;
-}
+};
 Stream._isArrayBufferView = function isArrayBufferView(value) {
   return ArrayBuffer.isView(value);
-}
+};
 Stream._uint8ArrayToBuffer = function _uint8ArrayToBuffer(chunk) {
   return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-}
+};

@@ -5,7 +5,7 @@
 // This test is aimed towards validating a correct deleteAlarm behavior in workerd.
 // Currently running alarms cannot be deleted within alarm() handler, but can delete it everywhere
 // else.
-import * as assert from 'node:assert'
+import * as assert from 'node:assert';
 
 export class DurableObjectExample {
   constructor(state) {
@@ -21,12 +21,15 @@ export class DurableObjectExample {
     try {
       await prom;
       if (Date.now() < scheduledTime.valueOf()) {
-        throw new Error(`Date.now() is before scheduledTime! ${Date.now()} vs ${scheduledTime.valueOf()}`);
+        throw new Error(
+          `Date.now() is before scheduledTime! ${Date.now()} vs ${scheduledTime.valueOf()}`
+        );
       }
     } catch (e) {
-      throw new Error(`error waiting for alarm at ${scheduledTime.valueOf()}: ${e}`);
+      throw new Error(
+        `error waiting for alarm at ${scheduledTime.valueOf()}: ${e}`
+      );
     }
-
 
     let alarm = await this.state.storage.getAlarm();
     if (alarm != null) {
@@ -72,16 +75,16 @@ export class DurableObjectExample {
     assert.equal(this.state.alarmsTriggered, 1);
 
     // All done, return "OK" because if we reach this, everything worked as expected.
-    return new Response("OK");
+    return new Response('OK');
   }
 }
 
 export default {
   async test(ctrl, env, ctx) {
-    let id = env.ns.idFromName("A");
+    let id = env.ns.idFromName('A');
     let obj = env.ns.get(id);
-    let res = await obj.fetch("http://foo/test");
+    let res = await obj.fetch('http://foo/test');
     let text = await res.text();
-    assert.equal(text, "OK");
-  }
-}
+    assert.equal(text, 'OK');
+  },
+};

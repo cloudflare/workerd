@@ -1,11 +1,11 @@
-import { ok, deepEqual, equal } from "node:assert";
+import { ok, deepEqual, equal } from 'node:assert';
 
 async function hash(data) {
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray
-    .map((bytes) => bytes.toString(16).padStart(2, "0"))
-    .join("");
+    .map((bytes) => bytes.toString(16).padStart(2, '0'))
+    .join('');
   return hashHex;
 }
 
@@ -17,7 +17,7 @@ export class DurableObjectExample {
   async fetch() {
     ok(navigator.gpu);
     const adapter = await navigator.gpu.requestAdapter({
-      powerPreference: "high-performance",
+      powerPreference: 'high-performance',
       forceFallbackAdapter: false,
     });
     ok(adapter);
@@ -28,7 +28,7 @@ export class DurableObjectExample {
     const textureSize = 256;
     const textureDesc = {
       size: { width: textureSize, height: textureSize, depthOrArrayLayers: 1 },
-      format: "rgba8unorm-srgb",
+      format: 'rgba8unorm-srgb',
       usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
     };
     const texture = device.createTexture(textureDesc);
@@ -84,12 +84,12 @@ export class DurableObjectExample {
       layout: pipelineLayout,
       vertex: {
         module: shaderModule,
-        entryPoint: "vs_main",
+        entryPoint: 'vs_main',
         buffers: [],
       },
       fragment: {
         module: shaderModule,
-        entryPoint: "fs_main",
+        entryPoint: 'fs_main',
         targets: [
           {
             format: textureDesc.format,
@@ -102,8 +102,8 @@ export class DurableObjectExample {
         ],
       },
       primitive: {
-        frontFace: "ccw",
-        GPUCullMode: "back",
+        frontFace: 'ccw',
+        GPUCullMode: 'back',
       },
       multisample: {
         count: 1,
@@ -119,8 +119,8 @@ export class DurableObjectExample {
       colorAttachments: [
         {
           clearValue: { r: 0.1, g: 0.2, b: 0.3, a: 1.0 },
-          loadOp: "clear",
-          storeOp: "store",
+          loadOp: 'clear',
+          storeOp: 'store',
           view: textureView,
         },
       ],
@@ -134,7 +134,7 @@ export class DurableObjectExample {
 
     encoder.copyTextureToBuffer(
       {
-        aspect: "all",
+        aspect: 'all',
         texture: texture,
         mipLevel: 0,
         origin: {},
@@ -159,20 +159,20 @@ export class DurableObjectExample {
     const result = await hash(data);
     equal(
       result,
-      "dd7fd0917e7f9383fd7f2ae5027bf6a4f8f90b2ab5c69c52d4f29a856bd9165a"
+      'dd7fd0917e7f9383fd7f2ae5027bf6a4f8f90b2ab5c69c52d4f29a856bd9165a'
     );
     outputBuffer.unmap();
 
-    return new Response("OK");
+    return new Response('OK');
   }
 }
 
 export const windowless = {
   async test(ctrl, env, ctx) {
-    let id = env.ns.idFromName("A");
+    let id = env.ns.idFromName('A');
     let obj = env.ns.get(id);
-    let res = await obj.fetch("http://foo/test");
+    let res = await obj.fetch('http://foo/test');
     let text = await res.text();
-    equal(text, "OK");
+    equal(text, 'OK');
   },
 };

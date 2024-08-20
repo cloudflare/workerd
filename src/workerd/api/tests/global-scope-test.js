@@ -9,7 +9,7 @@ import {
 export const navigatorUserAgent = {
   async test() {
     strictEqual(navigator.userAgent, 'Cloudflare-Workers');
-  }
+  },
 };
 
 export const timeoutClamping = {
@@ -19,17 +19,17 @@ export const timeoutClamping = {
     const p1 = new Promise((resolve) => {
       setTimeout(() => {
         resolve('b');
-      }, 9223372036854775808);  // Will be clamped to a max of 3153600000000
+      }, 9223372036854775808); // Will be clamped to a max of 3153600000000
     });
 
     const p2 = new Promise((resolve) => {
       setTimeout(() => {
         resolve('a');
-      }, -100);  // Will be clamped to 0
+      }, -100); // Will be clamped to 0
     });
 
     strictEqual(await Promise.race([p1, p2]), 'a');
-  }
+  },
 };
 
 export const timeoutCount = {
@@ -38,9 +38,10 @@ export const timeoutCount = {
       setTimeout(() => {});
     }
     throws(() => setTimeout(() => {}), {
-      message: 'You have exceeded the number of active timeouts you may set. max active timeouts: 10000, current active timeouts: 10000, finished timeouts: 0'
+      message:
+        'You have exceeded the number of active timeouts you may set. max active timeouts: 10000, current active timeouts: 10000, finished timeouts: 0',
     });
-  }
+  },
 };
 
 export const timeoutImplicitCancel = {
@@ -49,32 +50,41 @@ export const timeoutImplicitCancel = {
     setTimeout(() => {
       throw new Error('boom');
     }, 100000);
-  }
+  },
 };
 
 export const timeoutVarargs = {
   async test() {
     let resolve;
-    const promise = new Promise((a) => resolve = a);
-    setTimeout((a,b,c) => {
-      resolve([a,b,c]);
-    }, 10, 1, 2, 3);
+    const promise = new Promise((a) => (resolve = a));
+    setTimeout(
+      (a, b, c) => {
+        resolve([a, b, c]);
+      },
+      10,
+      1,
+      2,
+      3
+    );
     const results = await promise;
-    deepStrictEqual(results, [1,2,3]);
-  }
+    deepStrictEqual(results, [1, 2, 3]);
+  },
 };
 
 export const intervalVarargs = {
   async test() {
     let resolve;
-    const promise = new Promise((a) => resolve = a);
+    const promise = new Promise((a) => (resolve = a));
+
+    // prettier-ignore
     const i = setInterval((a,b,c) => {
       resolve([a,b,c]);
       clearInterval(i);
     }, 10, 1, 2, 3);
+
     const results = await promise;
-    deepStrictEqual(results, [1,2,3]);
-  }
+    deepStrictEqual(results, [1, 2, 3]);
+  },
 };
 
 export const mutableGlobals = {
@@ -96,7 +106,11 @@ export const mutableGlobals = {
         caches: { value: 'hello there', writable: true, configurable: true },
         crypto: { value: 'we are', writable: true, configurable: true },
         self: { value: 'mutable', writable: true, configurable: true },
-        scheduler: { value: 'at global scope', writable: true, configurable: true },
+        scheduler: {
+          value: 'at global scope',
+          writable: true,
+          configurable: true,
+        },
       });
       strictEqual(globalThis.caches, 'hello there');
       strictEqual(globalThis.crypto, 'we are');
@@ -107,60 +121,63 @@ export const mutableGlobals = {
       globalThis.self = oldSelf;
       globalThis.scheduler = oldScheduler;
     }
-
-  }
+  },
 };
 
 export const queueMicrotask = {
   async test() {
     [1, undefined, 'hello'].forEach((i) => {
       throws(() => globalThis.queueMicrotask(i), {
-        message: "Failed to execute 'queueMicrotask' on 'ServiceWorkerGlobalScope': " +
-                 "parameter 1 is not of type 'Function'."
+        message:
+          "Failed to execute 'queueMicrotask' on 'ServiceWorkerGlobalScope': " +
+          "parameter 1 is not of type 'Function'.",
       });
     });
     let resolve;
-    const promise = new Promise((a) => resolve = a);
+    const promise = new Promise((a) => (resolve = a));
     globalThis.queueMicrotask(resolve);
     await promise;
-  }
+  },
 };
 
 export const unhandledRejectionHandler = {
   async test() {
     let resolve;
-    const promise = new Promise((a) => resolve = a);
-    addEventListener('unhandledrejection', (event) => {
-      resolve();
-    }, {once:true});
+    const promise = new Promise((a) => (resolve = a));
+    addEventListener(
+      'unhandledrejection',
+      (event) => {
+        resolve();
+      },
+      { once: true }
+    );
     // This should trigger the unhandledrejection handler
     Promise.reject('boom');
     await promise;
-  }
+  },
 };
 
 export const unhandledRejectionHandler2 = {
   async test() {
     let resolve;
-    const promise = new Promise((a) => resolve = a);
+    const promise = new Promise((a) => (resolve = a));
     const handler = (event) => {
       throw new Error('should not have fired');
     };
     addEventListener('unhandledrejection', handler);
     try {
       await Promise.reject('boom');
-    } catch {
-    }
+    } catch {}
     await Promise.reject('boom').catch(() => {});
     removeEventListener('unhandledrejection', handler);
-  }
+  },
 };
 
 export const unhandledRejectionHandler3 = {
   async test() {
     let resolve, resolve2;
-    const promise = new Promise((a) => resolve = a);
-    const promise2 = new Promise((a) => resolve2 = a);
+    const promise = new Promise((a) => (resolve = a));
+    const promise2 = new Promise((a) => (resolve2 = a));
     addEventListener('unhandledrejection', (event) => {
       event.promise.catch(() => {});
       resolve();
@@ -170,35 +187,36 @@ export const unhandledRejectionHandler3 = {
     });
     Promise.reject('boom');
     await Promise.all([promise, promise2]);
-  }
+  },
 };
 
 export const unhandledRejectionHandler4 = {
   async test() {
     let resolve;
-    const promise = new Promise((a) => resolve = a);
+    const promise = new Promise((a) => (resolve = a));
     addEventListener('unhandledrejection', (event) => {
       throw new Error('does not crash. safe to ignore in test logs');
     });
 
     Promise.reject('boom');
-  }
+  },
 };
 
 export const structuredClone = {
   test() {
-
     {
-      strictEqual(globalThis.structuredClone("hello"), "hello");
+      strictEqual(globalThis.structuredClone('hello'), 'hello');
     }
 
     {
       const a = {
         b: {
-          c: [{
-            d: 1
-          }]
-        }
+          c: [
+            {
+              d: 1,
+            },
+          ],
+        },
       };
       const clone = globalThis.structuredClone(a);
       a.b.c[0].d = 2;
@@ -208,28 +226,31 @@ export const structuredClone = {
     {
       const enc = new TextEncoder();
       const dec = new TextDecoder();
-      const u8 = enc.encode("hello");
+      const u8 = enc.encode('hello');
       const clone = globalThis.structuredClone(u8);
-      strictEqual(dec.decode(clone), "hello");
+      strictEqual(dec.decode(clone), 'hello');
     }
 
     {
       const enc = new TextEncoder();
       const dec = new TextDecoder();
-      const u8 = enc.encode("hello");
-      const clone = globalThis.structuredClone({a: u8 });
+      const u8 = enc.encode('hello');
+      const clone = globalThis.structuredClone({ a: u8 });
       u8[0] = 1;
       strictEqual(dec.decode(u8), '\u0001ello');
-      strictEqual(dec.decode(clone.a), "hello");
+      strictEqual(dec.decode(clone.a), 'hello');
     }
 
     {
       const enc = new TextEncoder();
       const dec = new TextDecoder();
-      const u8 = enc.encode("hello");
-      const clone = globalThis.structuredClone({a: u8 }, { transfer: [ u8.buffer ] });
+      const u8 = enc.encode('hello');
+      const clone = globalThis.structuredClone(
+        { a: u8 },
+        { transfer: [u8.buffer] }
+      );
       strictEqual(u8.byteLength, 0);
-      strictEqual(dec.decode(clone.a), "hello");
+      strictEqual(dec.decode(clone.a), 'hello');
     }
 
     {
@@ -258,28 +279,31 @@ export const structuredClone = {
 
     {
       const u8 = new Uint8Array(1);
-      globalThis.structuredClone(u8, { transfer: [ u8.buffer, u8.buffer ] });
+      globalThis.structuredClone(u8, { transfer: [u8.buffer, u8.buffer] });
     }
 
     // Non-transferable objects throw
     throws(() => globalThis.structuredClone({}, { transfer: {} }));
 
-    const memory = new WebAssembly.Memory({initial: 2, maximum: 2});
+    const memory = new WebAssembly.Memory({ initial: 2, maximum: 2 });
     throws(() => globalThis.structuredClone(memory));
-
-  }
+  },
 };
 
 export const base64 = {
   test() {
-    function format_value(elem) { return elem; }
+    function format_value(elem) {
+      return elem;
+    }
     // Cloudflare note: The real format_value() is in testharness.js.
 
     function generate_tests(f, cases) {
       // Cloudflare note: the real generate_tests() is in the real testharness.js, and presumably it
       // calls test(t[0], () => { f(t[1]) }), or something, for each `t` in `cases`. We can forgo the
       // description element (t[0]) for our purposes.
-      cases.forEach(([description, testCase]) => { f(testCase); });
+      cases.forEach(([description, testCase]) => {
+        f(testCase);
+      });
     }
 
     /**
@@ -294,11 +318,11 @@ export const base64 = {
       // greater than U+00FF."
       for (var i = 0; i < s.length; i++) {
         if (s.charCodeAt(i) > 255) {
-          return "INVALID_CHARACTER_ERR";
+          return 'INVALID_CHARACTER_ERR';
         }
       }
 
-      var out = "";
+      var out = '';
       for (var i = 0; i < s.length; i += 3) {
         var groupsOfSix = [undefined, undefined, undefined, undefined];
         groupsOfSix[0] = s.charCodeAt(i) >> 2;
@@ -312,8 +336,8 @@ export const base64 = {
           groupsOfSix[3] = s.charCodeAt(i + 2) & 0x3f;
         }
         for (var j = 0; j < groupsOfSix.length; j++) {
-          if (typeof groupsOfSix[j] == "undefined") {
-            out += "=";
+          if (typeof groupsOfSix[j] == 'undefined') {
+            out += '=';
           } else {
             out += btoaLookup(groupsOfSix[j]);
           }
@@ -355,13 +379,13 @@ export const base64 = {
       input = String(input);
 
       // "Remove all space characters from input."
-      input = input.replace(/[ \t\n\f\r]/g, "");
+      input = input.replace(/[ \t\n\f\r]/g, '');
 
       // "If the length of input divides by 4 leaving no remainder, then: if
       // input ends with one or two U+003D EQUALS SIGN (=) characters, remove
       // them from input."
       if (input.length % 4 == 0 && /==?$/.test(input)) {
-        input = input.replace(/==?$/, "");
+        input = input.replace(/==?$/, '');
       }
 
       // "If the length of input divides by 4 leaving a remainder of 1, throw an
@@ -376,13 +400,12 @@ export const base64 = {
       // U+0030 DIGIT ZERO (0) to U+0039 DIGIT NINE (9)
       // U+0041 LATIN CAPITAL LETTER A to U+005A LATIN CAPITAL LETTER Z
       // U+0061 LATIN SMALL LETTER A to U+007A LATIN SMALL LETTER Z"
-      if (input.length % 4 == 1
-        || !/^[+/0-9A-Za-z]*$/.test(input)) {
+      if (input.length % 4 == 1 || !/^[+/0-9A-Za-z]*$/.test(input)) {
         return null;
       }
 
       // "Let output be a string, initially empty."
-      var output = "";
+      var output = '';
 
       // "Let buffer be a buffer that can have bits appended to it, initially
       // empty."
@@ -446,18 +469,18 @@ export const base64 = {
      */
     function atobLookup(chr) {
       if (/[A-Z]/.test(chr)) {
-        return chr.charCodeAt(0) - "A".charCodeAt(0);
+        return chr.charCodeAt(0) - 'A'.charCodeAt(0);
       }
       if (/[a-z]/.test(chr)) {
-        return chr.charCodeAt(0) - "a".charCodeAt(0) + 26;
+        return chr.charCodeAt(0) - 'a'.charCodeAt(0) + 26;
       }
       if (/[0-9]/.test(chr)) {
-        return chr.charCodeAt(0) - "0".charCodeAt(0) + 52;
+        return chr.charCodeAt(0) - '0'.charCodeAt(0) + 52;
       }
-      if (chr == "+") {
+      if (chr == '+') {
         return 62;
       }
-      if (chr == "/") {
+      if (chr == '/') {
         return 63;
       }
       // Throw exception; should not be hit in tests
@@ -478,16 +501,38 @@ export const base64 = {
       strictEqual(globalThis.atob(globalThis.btoa(input)), String(input));
     }
 
-    var tests = ["עברית", "", "ab", "abc", "abcd", "abcde",
+    var tests = [
+      'עברית',
+      '',
+      'ab',
+      'abc',
+      'abcd',
+      'abcde',
       // This one is thrown in because IE9 seems to fail atob(btoa()) on it.  Or
       // possibly to fail btoa().  I actually can't tell what's happening here,
       // but it doesn't hurt.
-      "\xff\xff\xc0",
+      '\xff\xff\xc0',
       // Is your DOM implementation binary-safe?
-      "\0a", "a\0b",
+      '\0a',
+      'a\0b',
       // WebIDL tests.
-      undefined, null, 7, 12, 1.5, true, false, NaN, +Infinity, -Infinity, 0, -0,
-      { toString: function () { return "foo" } },
+      undefined,
+      null,
+      7,
+      12,
+      1.5,
+      true,
+      false,
+      NaN,
+      +Infinity,
+      -Infinity,
+      0,
+      -0,
+      {
+        toString: function () {
+          return 'foo';
+        },
+      },
     ];
     for (var i = 0; i < 258; i++) {
       tests.push(String.fromCharCode(i));
@@ -498,21 +543,25 @@ export const base64 = {
 
     // This is supposed to be U+10000.
     tests.push(String.fromCharCode(0xd800, 0xdc00));
-    tests = tests.map(
-      function (elem) {
-        var expected = mybtoa(elem);
-        if (expected === "INVALID_CHARACTER_ERR") {
-          return ["btoa(" + format_value(elem) + ") must raise INVALID_CHARACTER_ERR", elem];
-        }
-        return ["btoa(" + format_value(elem) + ") == " + format_value(mybtoa(elem)), elem];
+    tests = tests.map(function (elem) {
+      var expected = mybtoa(elem);
+      if (expected === 'INVALID_CHARACTER_ERR') {
+        return [
+          'btoa(' + format_value(elem) + ') must raise INVALID_CHARACTER_ERR',
+          elem,
+        ];
       }
-    );
+      return [
+        'btoa(' + format_value(elem) + ') == ' + format_value(mybtoa(elem)),
+        elem,
+      ];
+    });
 
-    var everything = "";
+    var everything = '';
     for (var i = 0; i < 256; i++) {
       everything += String.fromCharCode(i);
     }
-    tests.push(["btoa(first 256 code points concatenated)", everything]);
+    tests.push(['btoa(first 256 code points concatenated)', everything]);
 
     generate_tests(testBtoa, tests);
 
@@ -526,49 +575,109 @@ export const base64 = {
       strictEqual(globalThis.atob(input), expected);
     }
 
-    var tests = ["", "abcd", " abcd", "abcd ", " abcd===", "abcd=== ",
-      "abcd ===", "a", "ab", "abc", "abcde", String.fromCharCode(0xd800, 0xdc00),
-      "=", "==", "===", "====", "=====",
-      "a=", "a==", "a===", "a====", "a=====",
-      "ab=", "ab==", "ab===", "ab====", "ab=====",
-      "abc=", "abc==", "abc===", "abc====", "abc=====",
-      "abcd=", "abcd==", "abcd===", "abcd====", "abcd=====",
-      "abcde=", "abcde==", "abcde===", "abcde====", "abcde=====",
-      "=a", "=a=", "a=b", "a=b=", "ab=c", "ab=c=", "abc=d", "abc=d=",
+    var tests = [
+      '',
+      'abcd',
+      ' abcd',
+      'abcd ',
+      ' abcd===',
+      'abcd=== ',
+      'abcd ===',
+      'a',
+      'ab',
+      'abc',
+      'abcde',
+      String.fromCharCode(0xd800, 0xdc00),
+      '=',
+      '==',
+      '===',
+      '====',
+      '=====',
+      'a=',
+      'a==',
+      'a===',
+      'a====',
+      'a=====',
+      'ab=',
+      'ab==',
+      'ab===',
+      'ab====',
+      'ab=====',
+      'abc=',
+      'abc==',
+      'abc===',
+      'abc====',
+      'abc=====',
+      'abcd=',
+      'abcd==',
+      'abcd===',
+      'abcd====',
+      'abcd=====',
+      'abcde=',
+      'abcde==',
+      'abcde===',
+      'abcde====',
+      'abcde=====',
+      '=a',
+      '=a=',
+      'a=b',
+      'a=b=',
+      'ab=c',
+      'ab=c=',
+      'abc=d',
+      'abc=d=',
       // With whitespace
-      "ab\tcd", "ab\ncd", "ab\fcd", "ab\rcd", "ab cd", "ab\u00a0cd",
-      "ab\t\n\f\r cd", " \t\n\f\r ab\t\n\f\r cd\t\n\f\r ",
-      "ab\t\n\f\r =\t\n\f\r =\t\n\f\r ",
+      'ab\tcd',
+      'ab\ncd',
+      'ab\fcd',
+      'ab\rcd',
+      'ab cd',
+      'ab\u00a0cd',
+      'ab\t\n\f\r cd',
+      ' \t\n\f\r ab\t\n\f\r cd\t\n\f\r ',
+      'ab\t\n\f\r =\t\n\f\r =\t\n\f\r ',
       // Test if any bits are set at the end.  These should all be fine, since
       // they end with A, which becomes 0:
-      "A", "/A", "//A", "///A", "////A",
+      'A',
+      '/A',
+      '//A',
+      '///A',
+      '////A',
       // These are all bad, since they end in / (= 63, all bits set) but their
       // length isn't a multiple of four characters, so they can't be output by
       // btoa().  Thus one might expect some UAs to throw exceptions or otherwise
       // object, since they could never be output by btoa(), so they're good to
       // test.
-      "/", "A/", "AA/", "AAAA/",
+      '/',
+      'A/',
+      'AA/',
+      'AAAA/',
       // But this one is possible:
-      "AAA/",
+      'AAA/',
       // Binary-safety tests
-      "\0nonsense", "abcd\0nonsense",
+      '\0nonsense',
+      'abcd\0nonsense',
       // WebIDL tests
       // TODO(conform): We need automatic stringification of arguments before these will work.
       //undefined, null, 7, 12, 1.5, true, false, NaN, +Infinity, -Infinity, 0, -0,
       //{ toString: function () { return "foo" } },
       //{ toString: function () { return "abcd" } },
     ];
-    tests = tests.map(
-      function (elem) {
-        if (myatob(elem) === null) {
-          return ["atob(" + format_value(elem) + ") must raise InvalidCharacterError", elem];
-        }
-        return ["atob(" + format_value(elem) + ") == " + format_value(myatob(elem)), elem];
+    tests = tests.map(function (elem) {
+      if (myatob(elem) === null) {
+        return [
+          'atob(' + format_value(elem) + ') must raise InvalidCharacterError',
+          elem,
+        ];
       }
-    );
+      return [
+        'atob(' + format_value(elem) + ') == ' + format_value(myatob(elem)),
+        elem,
+      ];
+    });
 
     generate_tests(testAtob, tests);
-  }
+  },
 };
 
 export const webSocketPairIterable = {
@@ -576,5 +685,5 @@ export const webSocketPairIterable = {
     const [a, b] = new WebSocketPair();
     ok(a instanceof WebSocket);
     ok(b instanceof WebSocket);
-  }
+  },
 };

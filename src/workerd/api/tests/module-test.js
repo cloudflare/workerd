@@ -7,5 +7,5 @@ export const basics = {
     if (assert !== assert2 && assert !== assert3) {
       throw new Error('bad things happened');
     }
-  }
+  },
 };

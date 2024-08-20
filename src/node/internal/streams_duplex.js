@@ -26,22 +26,16 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import {
-  Readable,
-} from 'node-internal:streams_readable';
+import { Readable } from 'node-internal:streams_readable';
 
-import {
-  Writable,
-} from 'node-internal:streams_writable';
+import { Writable } from 'node-internal:streams_writable';
 
 import {
   newStreamDuplexFromReadableWritablePair,
   newReadableWritablePairFromDuplex,
 } from 'node-internal:streams_adapters';
 
-import {
-  createDeferredPromise,
-} from 'node-internal:internal_utils';
+import { createDeferredPromise } from 'node-internal:internal_utils';
 
 import * as process from 'node-internal:process';
 
@@ -70,7 +64,8 @@ Object.setPrototypeOf(Duplex, Readable);
   // Allow the keys array to be GC'ed.
   for (let i = 0; i < keys.length; i++) {
     const method = keys[i];
-    if (!Duplex.prototype[method]) Duplex.prototype[method] = Writable.prototype[method];
+    if (!Duplex.prototype[method])
+      Duplex.prototype[method] = Writable.prototype[method];
   }
 }
 
@@ -101,56 +96,65 @@ export function Duplex(options) {
 }
 Object.defineProperties(Duplex.prototype, {
   writable: {
-    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writable')
+    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writable'),
   },
   writableHighWaterMark: {
-    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableHighWaterMark')
+    ...Object.getOwnPropertyDescriptor(
+      Writable.prototype,
+      'writableHighWaterMark'
+    ),
   },
   writableObjectMode: {
-    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableObjectMode')
+    ...Object.getOwnPropertyDescriptor(
+      Writable.prototype,
+      'writableObjectMode'
+    ),
   },
   writableBuffer: {
-    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableBuffer')
+    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableBuffer'),
   },
   writableLength: {
-    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableLength')
+    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableLength'),
   },
   writableFinished: {
-    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableFinished')
+    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableFinished'),
   },
   writableCorked: {
-    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableCorked')
+    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableCorked'),
   },
   writableEnded: {
-    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableEnded')
+    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableEnded'),
   },
   writableNeedDrain: {
-    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableNeedDrain')
+    ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableNeedDrain'),
   },
   destroyed: {
     get() {
-      if (this._readableState === undefined || this._writableState === undefined) {
-        return false
+      if (
+        this._readableState === undefined ||
+        this._writableState === undefined
+      ) {
+        return false;
       }
-      return this._readableState.destroyed && this._writableState.destroyed
+      return this._readableState.destroyed && this._writableState.destroyed;
     },
     set(value) {
       // Backward compatibility, the user is explicitly
       // managing destroyed.
       if (this._readableState && this._writableState) {
-        this._readableState.destroyed = value
-        this._writableState.destroyed = value
+        this._readableState.destroyed = value;
+        this._writableState.destroyed = value;
       }
-    }
-  }
+    },
+  },
 });
 
 export function fromWeb(pair, options) {
-  return newStreamDuplexFromReadableWritablePair(pair, options)
+  return newStreamDuplexFromReadableWritablePair(pair, options);
 }
 
 export function toWeb(duplex) {
-  return newReadableWritablePairFromDuplex(duplex)
+  return newReadableWritablePairFromDuplex(duplex);
 }
 
 export function from(body) {
@@ -168,17 +172,25 @@ function isBlob(b) {
 }
 
 // This is needed for pre node 17.
-class Duplexify extends (Duplex) {
+class Duplexify extends Duplex {
   constructor(options) {
     super(options);
     // https://github.com/nodejs/node/pull/34385
 
-    if ((options === null || options === undefined ? undefined : options.readable) === false) {
+    if (
+      (options === null || options === undefined
+        ? undefined
+        : options.readable) === false
+    ) {
       this['_readableState'].readable = false;
       this['_readableState'].ended = true;
       this['_readableState'].endEmitted = true;
     }
-    if ((options === null || options === undefined ? undefined : options.writable) === false) {
+    if (
+      (options === null || options === undefined
+        ? undefined
+        : options.writable) === false
+    ) {
       this['_readableState'].writable = false;
       this['_readableState'].ending = true;
       this['_readableState'].ended = true;
@@ -193,18 +205,18 @@ function duplexify(body, name) {
   }
   if (isReadableNodeStream(body)) {
     return _duplexify({
-      readable: body
+      readable: body,
     });
   }
   if (isWritableNodeStream(body)) {
     return _duplexify({
-      writable: body
+      writable: body,
     });
   }
   if (isNodeStream(body)) {
     return _duplexify({
       writable: false,
-      readable: false
+      readable: false,
     });
   }
 
@@ -217,14 +229,14 @@ function duplexify(body, name) {
   }
 
   if (typeof body === 'function') {
-    const { value, write, final, destroy } = fromAsyncGen(body)
+    const { value, write, final, destroy } = fromAsyncGen(body);
     if (isIterable(value)) {
       return Readable.from(Duplexify, value, {
         // TODO (ronag): highWaterMark?
         objectMode: true,
         write,
         final,
-        destroy
+        destroy,
       });
     }
     const then = value.then;
@@ -233,12 +245,12 @@ function duplexify(body, name) {
       const promise = Reflect.apply(then, value, [
         (val) => {
           if (val != null) {
-            throw new ERR_INVALID_RETURN_VALUE('nully', 'body', val)
+            throw new ERR_INVALID_RETURN_VALUE('nully', 'body', val);
           }
         },
         (err) => {
-          destroyer(d, err)
-        }
+          destroyer(d, err);
+        },
       ]);
 
       return (d = new Duplexify({
@@ -249,17 +261,21 @@ function duplexify(body, name) {
         final(cb) {
           final(async () => {
             try {
-              await promise
+              await promise;
               process.nextTick(cb, null);
             } catch (err) {
               process.nextTick(cb, err);
             }
-          })
+          });
         },
-        destroy
+        destroy,
       }));
     }
-    throw new ERR_INVALID_RETURN_VALUE('Iterable, AsyncIterable or AsyncFunction', name, value)
+    throw new ERR_INVALID_RETURN_VALUE(
+      'Iterable, AsyncIterable or AsyncFunction',
+      name,
+      value
+    );
   }
   if (isBlob(body)) {
     return duplexify(body.arrayBuffer(), name);
@@ -268,8 +284,8 @@ function duplexify(body, name) {
     return Readable.from(Duplexify, body, {
       // TODO (ronag): highWaterMark?
       objectMode: true,
-      writable: false
-    })
+      writable: false,
+    });
   }
 
   if (
@@ -280,12 +296,16 @@ function duplexify(body, name) {
   }
 
   if (
-    typeof (body === null || body === undefined ? undefined : body.writable) === 'object' ||
-    typeof (body === null || body === undefined ? undefined : body.readable) === 'object'
+    typeof (body === null || body === undefined ? undefined : body.writable) ===
+      'object' ||
+    typeof (body === null || body === undefined ? undefined : body.readable) ===
+      'object'
   ) {
     const readable =
       body !== null && body !== undefined && body.readable
-        ? isReadableNodeStream(body === null || body === undefined ? undefined : body.readable)
+        ? isReadableNodeStream(
+            body === null || body === undefined ? undefined : body.readable
+          )
           ? body === null || body === undefined
             ? undefined
             : body.readable
@@ -293,7 +313,9 @@ function duplexify(body, name) {
         : undefined;
     const writable =
       body !== null && body !== undefined && body.writable
-        ? isWritableNodeStream(body === null || body === undefined ? undefined : body.writable)
+        ? isWritableNodeStream(
+            body === null || body === undefined ? undefined : body.writable
+          )
           ? body === null || body === undefined
             ? undefined
             : body.writable
@@ -301,10 +323,10 @@ function duplexify(body, name) {
         : undefined;
     return _duplexify({
       readable,
-      writable
+      writable,
     });
   }
-  const then = body?.then
+  const then = body?.then;
   if (typeof then === 'function') {
     let d;
     Reflect.apply(then, body, [
@@ -316,13 +338,13 @@ function duplexify(body, name) {
       },
       (err) => {
         destroyer(d, err);
-      }
+      },
     ]);
 
     return (d = new Duplexify({
       objectMode: true,
       writable: false,
-      read() {}
+      read() {},
     }));
   }
   throw new ERR_INVALID_ARG_TYPE(
@@ -336,16 +358,16 @@ function duplexify(body, name) {
       'AsyncIterable',
       'Function',
       '{ readable, writable } pair',
-      'Promise'
+      'Promise',
     ],
     body
-  )
+  );
 }
 
 function fromAsyncGen(fn) {
-  let { promise, resolve } = createDeferredPromise()
-  const ac = new AbortController()
-  const signal = ac.signal
+  let { promise, resolve } = createDeferredPromise();
+  const ac = new AbortController();
+  const signal = ac.signal;
   const value = fn(
     (async function* () {
       while (true) {
@@ -356,14 +378,14 @@ function fromAsyncGen(fn) {
         if (done) return;
         if (signal.aborted)
           throw new AbortError(undefined, {
-            cause: signal.reason
+            cause: signal.reason,
           });
         ({ promise, resolve } = createDeferredPromise());
         yield chunk;
       }
     })(),
     {
-      signal
+      signal,
     }
   );
   return {
@@ -374,26 +396,29 @@ function fromAsyncGen(fn) {
       _resolve({
         chunk,
         done: false,
-        cb
-      })
+        cb,
+      });
     },
     final(cb) {
       const _resolve = resolve;
       resolve = null;
-      (_resolve)({
+      _resolve({
         done: true,
-        cb
+        cb,
       });
     },
     destroy(err, cb) {
       ac.abort();
       cb(err);
-    }
-  }
+    },
+  };
 }
 
 function _duplexify(pair) {
-  const r = pair.readable && typeof pair.readable.read !== 'function' ? Readable.wrap(pair.readable) : pair.readable;
+  const r =
+    pair.readable && typeof pair.readable.read !== 'function'
+      ? Readable.wrap(pair.readable)
+      : pair.readable;
   const w = pair.writable;
   let readable = !!isReadable(r);
   let writable = !!isWritable(w);
@@ -403,14 +428,14 @@ function _duplexify(pair) {
   let onclose;
   let d;
   function onfinished(err) {
-    const cb = onclose
-    onclose = null
+    const cb = onclose;
+    onclose = null;
     if (cb) {
-      cb(err)
+      cb(err);
     } else if (err) {
-      d.destroy(err)
+      d.destroy(err);
     } else if (!readable && !writable) {
-      d.destroy()
+      d.destroy();
     }
   }
 
@@ -419,10 +444,18 @@ function _duplexify(pair) {
   // See, https://github.com/nodejs/node/pull/33515.
   d = new Duplexify({
     // TODO (ronag): highWaterMark?
-    readableObjectMode: !!(r !== null && r !== undefined && r.readableObjectMode),
-    writableObjectMode: !!(w !== null && w !== undefined && w.writableObjectMode),
+    readableObjectMode: !!(
+      r !== null &&
+      r !== undefined &&
+      r.readableObjectMode
+    ),
+    writableObjectMode: !!(
+      w !== null &&
+      w !== undefined &&
+      w.writableObjectMode
+    ),
     readable,
-    writable
+    writable,
   });
   if (writable) {
     eos(w, (err) => {
@@ -503,6 +536,6 @@ function _duplexify(pair) {
       destroyer(w, err);
       destroyer(r, err);
     }
-  }
+  };
   return d;
 }

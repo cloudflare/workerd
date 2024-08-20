@@ -1,8 +1,4 @@
-import {
-  deepStrictEqual,
-  strictEqual,
-  ok,
-} from 'node:assert';
+import { deepStrictEqual, strictEqual, ok } from 'node:assert';
 
 // Test for the Event and EventTarget standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
@@ -60,7 +56,7 @@ export const wait = {
     // globalThis.scheduler can be monkeypatched over...
     scheduler = 'foo';
     strictEqual(globalThis.scheduler, 'foo');
-  }
+  },
 };
 
 export default {
@@ -71,6 +67,6 @@ export default {
     scheduler.wait(10).then(() => {
       globalThis.longWait = true;
     });
-    return new Response("not waiting");
-  }
+    return new Response('not waiting');
+  },
 };

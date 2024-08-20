@@ -5,7 +5,7 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import { AsyncLocalStorage } from "node-internal:async_hooks";
+import { AsyncLocalStorage } from 'node-internal:async_hooks';
 
 export type TransformCallback = (value: any) => any;
 
@@ -14,17 +14,27 @@ export abstract class Channel {
   publish(message: any): void;
   subscribe(callback: MessageCallback): void;
   unsubscribe(callback: MessageCallback): void;
-  bindStore(context: AsyncLocalStorage<any>,
-            transform?: TransformCallback): void;
+  bindStore(
+    context: AsyncLocalStorage<any>,
+    transform?: TransformCallback
+  ): void;
   unbindStore(context: AsyncLocalStorage<any>): void;
-  runStores(context: any,
-            fn: (...args: any[]) => any,
-            receiver?: any,
-            ...args: any[]): any;
+  runStores(
+    context: any,
+    fn: (...args: any[]) => any,
+    receiver?: any,
+    ...args: any[]
+  ): any;
 }
 
-export type MessageCallback = (message: any, name: string|symbol) => void;
-export function hasSubscribers(name: string|symbol) : boolean;
-export function channel(name: string|symbol) : Channel;
-export function subscribe(name: string|symbol, callback: MessageCallback) : void;
-export function unsubscribe(name: string|symbol, callback: MessageCallback) : void;
+export type MessageCallback = (message: any, name: string | symbol) => void;
+export function hasSubscribers(name: string | symbol): boolean;
+export function channel(name: string | symbol): Channel;
+export function subscribe(
+  name: string | symbol,
+  callback: MessageCallback
+): void;
+export function unsubscribe(
+  name: string | symbol,
+  callback: MessageCallback
+): void;

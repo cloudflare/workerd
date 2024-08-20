@@ -10,9 +10,9 @@ interface FarthestPoint {
 }
 
 export enum DiffType {
-  removed = "removed",
-  common = "common",
-  added = "added",
+  removed = 'removed',
+  common = 'common',
+  added = 'added',
 }
 
 export interface DiffResult<T> {
@@ -52,7 +52,7 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
   const suffixCommon = createCommon(
     A.slice(prefixCommon.length),
     B.slice(prefixCommon.length),
-    true,
+    true
   ).reverse();
   A = suffixCommon.length
     ? A.slice(prefixCommon.length, -suffixCommon.length)
@@ -68,26 +68,26 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
   if (!N) {
     return [
       ...prefixCommon.map(
-        (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c }),
+        (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c })
       ),
       ...A.map(
         (a): DiffResult<typeof a> => ({
           type: swapped ? DiffType.added : DiffType.removed,
           value: a,
-        }),
+        })
       ),
       ...suffixCommon.map(
-        (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c }),
+        (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c })
       ),
     ];
   }
   const offset = N;
   const delta = M - N;
   const size = M + N + 1;
-  const fp: FarthestPoint[] = Array.from(
-    { length: size },
-    () => ({ y: -1, id: -1 }),
-  );
+  const fp: FarthestPoint[] = Array.from({ length: size }, () => ({
+    y: -1,
+    id: -1,
+  }));
   /**
    * INFO:
    * This buffer is used to save memory and improve performance.
@@ -105,7 +105,7 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
     A: T[],
     B: T[],
     current: FarthestPoint,
-    swapped: boolean,
+    swapped: boolean
   ): Array<{
     type: DiffType;
     value: T;
@@ -150,7 +150,7 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
     slide: FarthestPoint,
     down: FarthestPoint,
     k: number,
-    M: number,
+    M: number
   ): FarthestPoint {
     if (slide && slide.y === -1 && down && down.y === -1) {
       return { y: 0, id: 0 };
@@ -180,7 +180,7 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
     down: FarthestPoint,
     _offset: number,
     A: T[],
-    B: T[],
+    B: T[]
   ): FarthestPoint {
     const M = A.length;
     const N = B.length;
@@ -208,7 +208,7 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
         fp[k + 1 + offset],
         offset,
         A,
-        B,
+        B
       );
     }
     for (let k = delta + p; k > delta; --k) {
@@ -219,7 +219,7 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
         fp[k + 1 + offset],
         offset,
         A,
-        B,
+        B
       );
     }
     fp[delta + offset] = snake(
@@ -229,17 +229,17 @@ export function diff<T>(A: T[], B: T[]): Array<DiffResult<T>> {
       fp[delta + 1 + offset],
       offset,
       A,
-      B,
+      B
     );
   }
   return [
     ...prefixCommon.map(
-      (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c }),
+      (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c })
     ),
     // @ts-ignore
     ...backTrace(A, B, fp[delta + offset], swapped),
     ...suffixCommon.map(
-      (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c }),
+      (c): DiffResult<typeof c> => ({ type: DiffType.common, value: c })
     ),
   ];
 }
@@ -255,13 +255,14 @@ export function diffstr(A: string, B: string) {
     // unescape invisible characters.
     // ref: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String#escape_sequences
     return string
-      .replaceAll("\b", "\\b")
-      .replaceAll("\f", "\\f")
-      .replaceAll("\t", "\\t")
-      .replaceAll("\v", "\\v")
-      .replaceAll( // does not remove line breaks
+      .replaceAll('\b', '\\b')
+      .replaceAll('\f', '\\f')
+      .replaceAll('\t', '\\t')
+      .replaceAll('\v', '\\v')
+      .replaceAll(
+        // does not remove line breaks
         /\r\n|\r|\n/g,
-        (str) => str === "\r" ? "\\r" : str === "\n" ? "\\n\n" : "\\r\\n\r\n",
+        (str) => (str === '\r' ? '\\r' : str === '\n' ? '\\n\n' : '\\r\\n\r\n')
       );
   }
 
@@ -277,7 +278,9 @@ export function diffstr(A: string, B: string) {
       for (let i = 0; i < tokens.length - 1; i++) {
         if (
           // @ts-ignore
-          !tokens[i + 1] && tokens[i + 2] && words.test(tokens[i]) &&
+          !tokens[i + 1] &&
+          tokens[i + 2] &&
+          words.test(tokens[i]) &&
           // @ts-ignore
           words.test(tokens[i + 2])
         ) {
@@ -289,7 +292,8 @@ export function diffstr(A: string, B: string) {
       return tokens.filter((token) => token);
     } else {
       // Split string on new lines symbols
-      const tokens = [], lines = string.split(/(\n|\r\n)/);
+      const tokens = [],
+        lines = string.split(/(\n|\r\n)/);
 
       // Ignore final empty token when text ends with a newline
       if (!lines[lines.length - 1]) {
@@ -314,32 +318,35 @@ export function diffstr(A: string, B: string) {
   // and merge "space-diff" if surrounded by word-diff for cleaner displays
   function createDetails(
     line: DiffResult<string>,
-    tokens: Array<DiffResult<string>>,
+    tokens: Array<DiffResult<string>>
   ) {
-    return tokens.filter(({ type }) =>
-      type === line.type || type === DiffType.common
-    ).map((result, i, t) => {
-      if (
-        (result.type === DiffType.common) && (t[i - 1]) &&
-        (t[i - 1]?.type === t[i + 1]?.type) && /\s+/.test(result.value)
-      ) {
-        return {
-          ...result,
-          // @ts-ignore
-          type: t[i - 1].type,
-        };
-      }
-      return result;
-    });
+    return tokens
+      .filter(({ type }) => type === line.type || type === DiffType.common)
+      .map((result, i, t) => {
+        if (
+          result.type === DiffType.common &&
+          t[i - 1] &&
+          t[i - 1]?.type === t[i + 1]?.type &&
+          /\s+/.test(result.value)
+        ) {
+          return {
+            ...result,
+            // @ts-ignore
+            type: t[i - 1].type,
+          };
+        }
+        return result;
+      });
   }
 
   // Compute multi-line diff
   const diffResult = diff(
     tokenize(`${unescape(A)}\n`),
-    tokenize(`${unescape(B)}\n`),
+    tokenize(`${unescape(B)}\n`)
   );
 
-  const added = [], removed = [];
+  const added = [],
+    removed = [];
   for (const result of diffResult) {
     if (result.type === DiffType.added) {
       added.push(result);
@@ -360,11 +367,11 @@ export function diffstr(A: string, B: string) {
       b = bLines.shift();
       tokens = diff(
         tokenize(a.value, { wordDiff: true }),
-        tokenize(b?.value ?? "", { wordDiff: true }),
+        tokenize(b?.value ?? '', { wordDiff: true })
       );
       if (
-        tokens.some(({ type, value }) =>
-          type === DiffType.common && value.trim().length
+        tokens.some(
+          ({ type, value }) => type === DiffType.common && value.trim().length
         )
       ) {
         break;
@@ -387,31 +394,32 @@ export function diffstr(A: string, B: string) {
 function createSign(diffType: DiffType): string {
   switch (diffType) {
     case DiffType.added:
-      return "+   ";
+      return '+   ';
     case DiffType.removed:
-      return "-   ";
+      return '-   ';
     default:
-      return "    ";
+      return '    ';
   }
 }
 
 export function buildMessage(
   diffResult: ReadonlyArray<DiffResult<string>>,
-  { stringDiff = false } = {},
+  { stringDiff = false } = {}
 ): string[] {
-  const messages: string[] = [], diffMessages: string[] = [];
+  const messages: string[] = [],
+    diffMessages: string[] = [];
   messages.push('');
   messages.push('');
-  messages.push('[Diff] Actual / Expected',
-  );
-  messages.push("");
-  messages.push("");
+  messages.push('[Diff] Actual / Expected');
+  messages.push('');
+  messages.push('');
   diffResult.forEach((result: DiffResult<string>) => {
-    const line = result.details?.map((detail) => detail.value).join("") ?? result.value;
+    const line =
+      result.details?.map((detail) => detail.value).join('') ?? result.value;
     diffMessages.push(`${createSign(result.type)}${line}`);
   });
-  messages.push(...(stringDiff ? [diffMessages.join("")] : diffMessages));
-  messages.push("");
+  messages.push(...(stringDiff ? [diffMessages.join('')] : diffMessages));
+  messages.push('');
 
   return messages;
 }

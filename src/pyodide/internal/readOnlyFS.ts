@@ -1,8 +1,11 @@
-export function createReadonlyFS<Info>(FSOps: FSOps<Info>, Module: Module): EmscriptenFS<Info> {
+export function createReadonlyFS<Info>(
+  FSOps: FSOps<Info>,
+  Module: Module
+): EmscriptenFS<Info> {
   const FS = Module.FS;
   const ReadOnlyFS: EmscriptenFS<Info> = {
     mount(mount) {
-      return ReadOnlyFS.createNode(null, "/", mount.opts.info);
+      return ReadOnlyFS.createNode(null, '/', mount.opts.info);
     },
     createNode(parent, name, info): FSNode<Info> {
       let { permissions: mode, isDir } = FSOps.getNodeMode(parent, name, info);
@@ -60,8 +63,8 @@ export function createReadonlyFS<Info>(FSOps: FSOps<Info>, Module: Module): Emsc
         } else if (whence === 2) {
           // SEEK_END
           if (FS.isFile(stream.node.mode)) {
-            if ((stream.node.info as any).size == undefined){
-              throw new Error("File size is undefined");
+            if ((stream.node.info as any).size == undefined) {
+              throw new Error('File size is undefined');
             }
             position += (stream.node.info as any).size;
           }

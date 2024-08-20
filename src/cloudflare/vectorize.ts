@@ -7,11 +7,11 @@
  * These can be supplied in place of configuring explicit dimensions.
  */
 export enum KnownModel {
-  "openai/text-embedding-ada-002" = "openai/text-embedding-ada-002",
-  "cohere/embed-multilingual-v2.0" = "cohere/embed-multilingual-v2.0",
-  "@cf/baai/bge-small-en-v1.5" = "@cf/baai/bge-small-en-v1.5",
-  "@cf/baai/bge-base-en-v1.5" = "@cf/baai/bge-base-en-v1.5",
-  "@cf/baai/bge-large-en-v1.5" = "@cf/baai/bge-large-en-v1.5",
+  'openai/text-embedding-ada-002' = 'openai/text-embedding-ada-002',
+  'cohere/embed-multilingual-v2.0' = 'cohere/embed-multilingual-v2.0',
+  '@cf/baai/bge-small-en-v1.5' = '@cf/baai/bge-small-en-v1.5',
+  '@cf/baai/bge-base-en-v1.5' = '@cf/baai/bge-base-en-v1.5',
+  '@cf/baai/bge-large-en-v1.5' = '@cf/baai/bge-large-en-v1.5',
 }
 
 /**
@@ -19,9 +19,9 @@ export enum KnownModel {
  * Distance metrics determine how other "similar" vectors are determined.
  */
 export enum DistanceMetric {
-  EUCLIDEAN = "euclidean",
-  COSINE = "cosine",
-  DOT_PRODUCT = "dot-product",
+  EUCLIDEAN = 'euclidean',
+  COSINE = 'cosine',
+  DOT_PRODUCT = 'dot-product',
 }
 
 /**
@@ -33,14 +33,14 @@ export enum MetadataRetrievalLevel {
    *
    * This is a more expensive retrieval, as it requires additional fetching & reading of un-indexed data.
    */
-  ALL = "all",
+  ALL = 'all',
   /**
    * Return all metadata fields configured for indexing in the vector return set.
    *
    * This level of retrieval is "free" in that no additional overhead is incurred returning this data.
    * However, note that indexed metadata is subject to truncation (especially for larger strings).
    */
-  INDEXED = "indexed",
+  INDEXED = 'indexed',
   /** No indexed metadata will be returned. */
-  NONE = "none",
+  NONE = 'none',
 }

@@ -25,17 +25,14 @@
 
 'use strict';
 
-import {
-  Buffer,
-  kMaxLength
-} from 'node:buffer';
+import { Buffer, kMaxLength } from 'node:buffer';
 import * as assert from 'node:assert';
 
 import {
   // createSecretKey,
   hkdf,
   hkdfSync,
-  getHashes
+  getHashes,
 } from 'node:crypto';
 
 function deferredPromise() {
@@ -48,85 +45,89 @@ function deferredPromise() {
     promise,
     resolve,
     reject,
-  }
+  };
 }
 
 export const hkdf_error_tests = {
   async test(ctrl, env, ctx) {
     assert.throws(() => hkdf(), {
       code: 'ERR_INVALID_ARG_TYPE',
-      message: /The "digest" argument must be of type string/
+      message: /The "digest" argument must be of type string/,
     });
 
     [1, {}, [], false, Infinity].forEach((i) => {
       assert.throws(() => hkdf(i, 'a'), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "digest" argument must be of type string/
+        message: /^The "digest" argument must be of type string/,
       });
       assert.throws(() => hkdfSync(i, 'a'), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "digest" argument must be of type string/
+        message: /^The "digest" argument must be of type string/,
       });
     });
 
     [1, {}, [], false, Infinity].forEach((i) => {
       assert.throws(() => hkdf('sha256', i), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "ikm" argument must be /
+        message: /^The "ikm" argument must be /,
       });
       assert.throws(() => hkdfSync('sha256', i), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "ikm" argument must be /
+        message: /^The "ikm" argument must be /,
       });
     });
 
     [1, {}, [], false, Infinity].forEach((i) => {
       assert.throws(() => hkdf('sha256', 'secret', i), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "salt" argument must be /
+        message: /^The "salt" argument must be /,
       });
       assert.throws(() => hkdfSync('sha256', 'secret', i), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "salt" argument must be /
+        message: /^The "salt" argument must be /,
       });
     });
 
     [1, {}, [], false, Infinity].forEach((i) => {
       assert.throws(() => hkdf('sha256', 'secret', 'salt', i), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "info" argument must be /
+        message: /^The "info" argument must be /,
       });
       assert.throws(() => hkdfSync('sha256', 'secret', 'salt', i), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "info" argument must be /
+        message: /^The "info" argument must be /,
       });
     });
 
     ['test', {}, [], false].forEach((i) => {
       assert.throws(() => hkdf('sha256', 'secret', 'salt', 'info', i), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "length" argument must be of type number/
+        message: /^The "length" argument must be of type number/,
       });
       assert.throws(() => hkdfSync('sha256', 'secret', 'salt', 'info', i), {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /^The "length" argument must be of type number/
+        message: /^The "length" argument must be of type number/,
       });
     });
 
     assert.throws(() => hkdf('sha256', 'secret', 'salt', 'info', -1), {
-      code: 'ERR_OUT_OF_RANGE'
+      code: 'ERR_OUT_OF_RANGE',
     });
     assert.throws(() => hkdfSync('sha256', 'secret', 'salt', 'info', -1), {
-      code: 'ERR_OUT_OF_RANGE'
+      code: 'ERR_OUT_OF_RANGE',
     });
-    assert.throws(() => hkdf('sha256', 'secret', 'salt', 'info',
-                            kMaxLength + 1), {
-      code: 'ERR_OUT_OF_RANGE'
-    });
-    assert.throws(() => hkdfSync('sha256', 'secret', 'salt', 'info',
-                                kMaxLength + 1), {
-      code: 'ERR_OUT_OF_RANGE'
-    });
+    assert.throws(
+      () => hkdf('sha256', 'secret', 'salt', 'info', kMaxLength + 1),
+      {
+        code: 'ERR_OUT_OF_RANGE',
+      }
+    );
+    assert.throws(
+      () => hkdfSync('sha256', 'secret', 'salt', 'info', kMaxLength + 1),
+      {
+        code: 'ERR_OUT_OF_RANGE',
+      }
+    );
 
     {
       const p = deferredPromise();
@@ -139,14 +140,14 @@ export const hkdf_error_tests = {
       await assert.rejects(p.promise);
     }
     assert.throws(() => hkdfSync('unknown', 'a', '', '', 10), {
-      name: 'TypeError'
+      name: 'TypeError',
     });
 
     assert.throws(() => hkdf('unknown', 'a', '', Buffer.alloc(1025), 10), {
-      code: 'ERR_OUT_OF_RANGE'
+      code: 'ERR_OUT_OF_RANGE',
     });
     assert.throws(() => hkdfSync('unknown', 'a', '', Buffer.alloc(1025), 10), {
-      code: 'ERR_OUT_OF_RANGE'
+      code: 'ERR_OUT_OF_RANGE',
     });
 
     {
@@ -159,14 +160,13 @@ export const hkdf_error_tests = {
       });
       await assert.rejects(p.promise);
     }
-    assert.throws(
-      () => hkdfSync('sha512', 'a', '', '', 64 * 255 + 1), {
-        name: 'RangeError'
+    assert.throws(() => hkdfSync('sha512', 'a', '', '', 64 * 255 + 1), {
+      name: 'RangeError',
     });
-  }
-}
+  },
+};
 
-async function hkdfTestAlg([ hash, secret, salt, info, length ]) {
+async function hkdfTestAlg([hash, secret, salt, info, length]) {
   {
     const syncResult = hkdfSync(hash, secret, salt, info, length);
     assert.ok(syncResult instanceof ArrayBuffer);
@@ -174,11 +174,11 @@ async function hkdfTestAlg([ hash, secret, salt, info, length ]) {
     const p = deferredPromise();
 
     hkdf(hash, secret, salt, info, length, (err, asyncResult) => {
-         if (err) return p.reject(err);
-         assert.ok(is_async);
-         assert.ok(asyncResult instanceof ArrayBuffer);
-         assert.deepStrictEqual(syncResult, asyncResult);
-         p.resolve();
+      if (err) return p.reject(err);
+      assert.ok(is_async);
+      assert.ok(asyncResult instanceof ArrayBuffer);
+      assert.deepStrictEqual(syncResult, asyncResult);
+      p.resolve();
     });
     // Keep this after the hkdf call above. This verifies
     // that the callback is invoked asynchronously.
@@ -194,9 +194,9 @@ async function hkdfTestAlg([ hash, secret, salt, info, length ]) {
 
     const syncResult = hkdfSync(hash, buf_secret, buf_salt, buf_info, length);
     hkdf(hash, buf_secret, buf_salt, buf_info, length, (err, asyncResult) => {
-         if (err) return p.reject(err);
-         assert.deepStrictEqual(syncResult, asyncResult);
-         p.resolve();
+      if (err) return p.reject(err);
+      assert.deepStrictEqual(syncResult, asyncResult);
+      p.resolve();
     });
     await p.promise;
   }
@@ -225,9 +225,9 @@ async function hkdfTestAlg([ hash, secret, salt, info, length ]) {
 
     const syncResult = hkdfSync(hash, ta_secret, ta_salt, ta_info, length);
     hkdf(hash, ta_secret, ta_salt, ta_info, length, (err, asyncResult) => {
-         if (err) return p.reject(err);
-         assert.deepStrictEqual(syncResult, asyncResult);
-         p.resolve();
+      if (err) return p.reject(err);
+      assert.deepStrictEqual(syncResult, asyncResult);
+      p.resolve();
     });
     await p.promise;
 
@@ -236,7 +236,8 @@ async function hkdfTestAlg([ hash, secret, salt, info, length ]) {
       ta_secret.buffer,
       ta_salt.buffer,
       ta_info.buffer,
-      length);
+      length
+    );
     assert.deepStrictEqual(syncResult, syncResultBuf);
   }
 
@@ -246,16 +247,11 @@ async function hkdfTestAlg([ hash, secret, salt, info, length ]) {
     const a_salt = new ArrayBuffer(0);
     const a_info = new ArrayBuffer(1);
 
-    const syncResult = hkdfSync(
-      hash,
-      ta_secret.buffer,
-      a_salt,
-      a_info,
-      length);
+    const syncResult = hkdfSync(hash, ta_secret.buffer, a_salt, a_info, length);
     hkdf(hash, ta_secret, a_salt, a_info, length, (err, asyncResult) => {
-         if (err) return p.reject(err);
-         assert.deepStrictEqual(syncResult, asyncResult);
-         p.resolve();
+      if (err) return p.reject(err);
+      assert.deepStrictEqual(syncResult, asyncResult);
+      p.resolve();
     });
     await p.promise;
   }
@@ -276,5 +272,5 @@ export const hkdf_correctness_tests = {
     getHashes().forEach((hash) => {
       assert.ok(hkdfSync(hash, 'key', 'salt', 'info', 5));
     });
-  }
-}
+  },
+};

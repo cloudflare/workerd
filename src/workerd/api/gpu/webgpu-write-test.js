@@ -1,4 +1,4 @@
-import { ok, deepEqual, equal } from "node:assert";
+import { ok, deepEqual, equal } from 'node:assert';
 
 export class DurableObjectExample {
   constructor(state) {
@@ -26,16 +26,16 @@ export class DurableObjectExample {
     new Uint8Array(arrayBuffer).set([0, 1, 2, 3]);
     deepEqual(new Uint8Array(arrayBuffer), new Uint8Array([0, 1, 2, 3]));
 
-    return new Response("OK");
+    return new Response('OK');
   }
 }
 
 export const buffer_write = {
   async test(ctrl, env, ctx) {
-    let id = env.ns.idFromName("A");
+    let id = env.ns.idFromName('A');
     let obj = env.ns.get(id);
-    let res = await obj.fetch("http://foo/test");
+    let res = await obj.fetch('http://foo/test');
     let text = await res.text();
-    equal(text, "OK");
+    equal(text, 'OK');
   },
 };
