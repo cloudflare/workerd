@@ -103,7 +103,7 @@ CryptoKey::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
 }
 
 kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
-  static std::map<kj::StringPtr, kj::StringPtr> mapping{
+  static const std::map<kj::StringPtr, kj::StringPtr> mapping{
     {"RSASSA-PKCS1-v1_5", "rsa"},
     {"RSA-PSS", "rsa"},
     {"RSA-OAEP", "rsa"},

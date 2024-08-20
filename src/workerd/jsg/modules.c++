@@ -62,7 +62,7 @@ public:
   }
 
   static const CompileCache& get() {
-    static CompileCache instance;
+    static const CompileCache instance;
     return instance;
   }
 

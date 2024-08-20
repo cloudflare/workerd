@@ -356,7 +356,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   return outputGate.wait();
 }
 
-ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
+const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
 
 kj::Maybe<kj::Own<void>> ActorSqlite::Hooks::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
   JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");

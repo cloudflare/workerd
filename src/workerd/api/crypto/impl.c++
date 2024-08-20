@@ -52,7 +52,7 @@ kj::String errorsToString(
 }
 }
 
-SslArrayDisposer SslArrayDisposer::INSTANCE;
+const SslArrayDisposer SslArrayDisposer::INSTANCE;
 
 void SslArrayDisposer::disposeImpl(void* firstElement, size_t elementSize, size_t elementCount,
                   size_t capacity, void (*destroyElement)(void*)) const {

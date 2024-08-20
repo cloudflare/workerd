@@ -19,13 +19,13 @@ namespace {
 
 bool isSpecialScheme(kj::StringPtr scheme) {
   // TODO(cleanup): Move this to kj::Url.
-  static std::set<kj::StringPtr> specialSchemes{
+  static const std::set<kj::StringPtr> specialSchemes{
       "ftp", "file", "gopher", "http", "https", "ws", "wss"};
   return specialSchemes.count(scheme);
 }
 
 kj::Maybe<kj::StringPtr> defaultPortForScheme(kj::StringPtr scheme) {
-  static std::map<kj::StringPtr, kj::StringPtr> defaultPorts {
+  static const std::map<kj::StringPtr, kj::StringPtr> defaultPorts {
     { "ftp", "21" },
     { "gopher", "70" },
     { "http", "80" },

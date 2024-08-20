@@ -1744,7 +1744,7 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
     KJ_LOG(INFO, "console.log()", message());
   } else {
     // Write to stdio if allowed by console mode
-    static ColorMode COLOR_MODE = permitsColor();
+    static const ColorMode COLOR_MODE = permitsColor();
 #if _WIN32
     static bool STDOUT_TTY = _isatty(_fileno(stdout));
     static bool STDERR_TTY = _isatty(_fileno(stderr));

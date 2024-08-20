@@ -264,7 +264,7 @@ class MockActorLoopback : public Worker::Actor::Loopback, public kj::Refcounted 
 
 using api::pyodide::PythonConfig;
 
-PythonConfig defaultPythonConfig { .packageDiskCacheRoot = kj::none, .pyodideDiskCacheRoot = kj::none, .createSnapshot = false, .createBaselineSnapshot = false };
+const PythonConfig defaultPythonConfig { .packageDiskCacheRoot = kj::none, .pyodideDiskCacheRoot = kj::none, .createSnapshot = false, .createBaselineSnapshot = false };
 
 TestFixture::TestFixture(SetupParams&& params)
   : waitScope(params.waitScope),

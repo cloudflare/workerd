@@ -278,7 +278,7 @@ kj::Array<const ParsedField> makeFieldTable(
 }  // namespace
 
 kj::Array<kj::StringPtr> decompileCompatibilityFlagsForFl(CompatibilityFlags::Reader input) {
-  static auto fieldTable = makeFieldTable(
+  static const auto fieldTable = makeFieldTable(
       capnp::Schema::from<CompatibilityFlags>().getFields());
 
   kj::Vector<kj::StringPtr> enableFlags;
@@ -331,7 +331,7 @@ kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
   uint latestFieldOrdinal = 0;
   kj::Maybe<PythonSnapshotRelease::Reader> result;
 
-  static auto fieldTable =
+  static const auto fieldTable =
       makePythonSnapshotFieldTable(capnp::Schema::from<CompatibilityFlags>().getFields());
 
   for (auto field: fieldTable) {

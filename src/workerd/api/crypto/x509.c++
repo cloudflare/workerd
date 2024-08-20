@@ -211,7 +211,7 @@ bool printGeneralName(BIO* out, const GENERAL_NAME* gen) {
   } else if (gen->type == GEN_RID) {
     // Unlike OpenSSL's default implementation, never print the OID as text and
     // instead always print its numeric representation.
-    char oline[256];
+    char oline[256] = {0};
     OBJ_obj2txt(oline, sizeof(oline), gen->d.rid, true);
     BIO_printf(out, "Registered ID:%s", oline);
   } else if (gen->type == GEN_OTHERNAME) {
@@ -314,7 +314,7 @@ bool safeX509InfoAccessPrint(BIO* out, X509_EXTENSION* ext) {
     if (i != 0)
       BIO_write(out, "\n", 1);
 
-    char objtmp[80];
+    char objtmp[80] = {0};
     i2t_ASN1_OBJECT(objtmp, sizeof(objtmp), desc->method);
     BIO_printf(out, "%s - ", objtmp);
     if (!(ok = printGeneralName(out, desc->location))) {
@@ -491,7 +491,7 @@ kj::Maybe<jsg::JsObject> getX509NameObject(jsg::Lock& js, X509* cert) {
     // If OpenSSL knows the type, use the short name of the type as the key, and
     // the numeric representation of the type's OID otherwise.
     int type_nid = OBJ_obj2nid(type);
-    char type_buf[80];
+    char type_buf[80] = {0};
     const char* type_str;
     if (type_nid != NID_undef) {
       type_str = OBJ_nid2sn(type_nid);
@@ -540,7 +540,7 @@ struct StackOfXASN1Disposer: public kj::Disposer {
     sk_ASN1_OBJECT_pop_free(ptr, ASN1_OBJECT_free);
   }
 };
-StackOfXASN1Disposer stackOfXASN1Disposer;
+constexpr StackOfXASN1Disposer stackOfXASN1Disposer;
 }  // namespace
 
 kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(kj::Array<const kj::byte> raw) {

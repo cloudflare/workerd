@@ -380,7 +380,7 @@ ReadableStream::Reader ReadableStream::getReader(
 jsg::Ref<ReadableStream::ReadableStreamAsyncIterator> ReadableStream::values(
     jsg::Lock& js,
     jsg::Optional<ValuesOptions> options) {
-  static auto defaultOptions = ValuesOptions {};
+  static const auto defaultOptions = ValuesOptions {};
   return jsg::alloc<ReadableStreamAsyncIterator>(AsyncIteratorState {
     .ioContext = ioContext,
     .reader = ReadableStreamDefaultReader::constructor(js, JSG_THIS),

@@ -395,7 +395,7 @@ KJ_TEST("SQLite Regulator") {
   public:
     RegulatorImpl(kj::StringPtr blocked): blocked(blocked) {}
 
-    bool isAllowedName(kj::StringPtr name) override {
+    bool isAllowedName(kj::StringPtr name) const override {
       if (alwaysFail) return false;
       return name != blocked;
     }
@@ -471,7 +471,7 @@ struct RowCounts {
 };
 
 template<typename ...Params>
-RowCounts countRowsTouched(SqliteDatabase& db, SqliteDatabase::Regulator& regulator, kj::StringPtr sqlCode, Params... bindParams) {
+RowCounts countRowsTouched(SqliteDatabase& db, const SqliteDatabase::Regulator& regulator, kj::StringPtr sqlCode, Params... bindParams) {
   uint64_t rowsFound = 0;
 
   // Runs a query; retrieves and discards all the data.
@@ -668,7 +668,7 @@ KJ_TEST("SQLite row counters with triggers") {
   public:
     RegulatorImpl() = default;
 
-    bool isAllowedTrigger(kj::StringPtr name) override {
+    bool isAllowedTrigger(kj::StringPtr name) const override {
       // SqliteDatabase::TRUSTED doesn't let us use triggers at all.
       return true;
     }

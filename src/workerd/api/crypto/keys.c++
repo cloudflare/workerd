@@ -7,7 +7,7 @@
 namespace workerd::api {
 
 namespace {
-static char EMPTY_PASSPHRASE[] = "";
+static const char EMPTY_PASSPHRASE[] = "";
 }  // namespace
 
 kj::StringPtr toStringPtr(KeyType type) {
@@ -90,7 +90,7 @@ kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::exportKeyExt(
   auto bio = OSSL_BIO_MEM();
 
   struct EncDetail {
-    char* pass = &EMPTY_PASSPHRASE[0];
+    char* pass = const_cast<char*>(&EMPTY_PASSPHRASE[0]);
     size_t pass_len = 0;
     const EVP_CIPHER* cipher = nullptr;
   };

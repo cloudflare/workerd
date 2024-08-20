@@ -31,7 +31,7 @@ using ReadContinuation = jsg::Promise<ReadResult>(ReadResult&&);
 using CloseContinuation = jsg::Promise<void>(ReadResult&&);
 using ReadErrorContinuation = jsg::Promise<ReadResult>(jsg::Value&&);
 
-kj::UnwindDetector unwindDetector;
+const kj::MutexGuarded<kj::UnwindDetector> unwindDetectorMutex;
 
 template <typename Signature>
 struct MustCall;
@@ -61,7 +61,8 @@ struct MustCall<Ret(Args...)> {
         location(location) {}
 
   ~MustCall() {
-    if (!unwindDetector.isUnwinding()) {
+    auto unwindDetector = unwindDetectorMutex.lockExclusive();
+    if (!unwindDetector->isUnwinding()) {
       KJ_ASSERT(called == expected,
           kj::str("MustCall function was not called ", expected,
                   " times. [actual: ", called , "]"), location);

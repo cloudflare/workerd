@@ -51,10 +51,10 @@ public:
     virtual void inputGateWaiterAdded() {}
     virtual void inputGateWaiterRemoved() {}
 
-    static Hooks DEFAULT;
+    static const Hooks DEFAULT;
   };
 
-  InputGate(Hooks& hooks = Hooks::DEFAULT);
+  InputGate(Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
   ~InputGate() noexcept;
 
   class CriticalSection;
@@ -235,10 +235,10 @@ public:
     virtual void outputGateWaiterAdded() {}
     virtual void outputGateWaiterRemoved() {}
 
-    static Hooks DEFAULT;
+    static const Hooks DEFAULT;
   };
 
-  OutputGate(Hooks& hooks = Hooks::DEFAULT);
+  OutputGate(Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
   ~OutputGate() noexcept(false);
 
   // Block all future `wait()` calls until `promise` completes. Returns a wrapper around `promise`.

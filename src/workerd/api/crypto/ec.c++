@@ -581,7 +581,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyD
     KJ_IF_SOME(alg, keyDataJwk.alg) {
       // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
       // importKey().
-      static std::map<kj::StringPtr, int> ecdsaAlgorithms {
+      static const std::map<kj::StringPtr, int> ecdsaAlgorithms {
         {"ES256", NID_X9_62_prime256v1},
         {"ES384", NID_secp384r1},
         {"ES512", NID_secp521r1},
@@ -999,8 +999,8 @@ template <size_t keySize, void (*KeypairInit)(uint8_t[keySize], uint8_t[keySize*
 CryptoKeyPair generateKeyImpl(kj::StringPtr normalizedName, int nid,
                               CryptoKeyUsageSet privateKeyUsages, CryptoKeyUsageSet publicKeyUsages,
                               bool extractablePrivateKey, kj::StringPtr curveName) {
-  uint8_t rawPublicKey[keySize];
-  uint8_t rawPrivateKey[keySize * 2];
+  uint8_t rawPublicKey[keySize] = {0};
+  uint8_t rawPrivateKey[keySize * 2] = {0};
   KeypairInit(rawPublicKey, rawPrivateKey);
 
   // The private key technically also contains the public key. Why does the keypair function bother

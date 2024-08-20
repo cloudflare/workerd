@@ -258,7 +258,7 @@ public:
     virtual void storageReadCompleted(kj::Duration latency) {}
     virtual void storageWriteCompleted(kj::Duration latency) {}
 
-    static Hooks DEFAULT;
+    static const Hooks DEFAULT;
   };
 
   static constexpr auto SHUTDOWN_ERROR_MESSAGE =
@@ -266,7 +266,7 @@ public:
       "Durable Object storage is no longer accessible."_kj;
 
   ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru, OutputGate& gate,
-      Hooks& hooks = Hooks::DEFAULT);
+      Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
   ~ActorCache() noexcept(false);
 
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return kj::none; }

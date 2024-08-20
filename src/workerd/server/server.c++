@@ -124,7 +124,7 @@ static kj::Vector<char> escapeJsonString(kj::StringPtr text) {
 
 // TODO(now): Temporary
 class ServerResolveObserver final : public jsg::ResolveObserver {};
-ServerResolveObserver serverResolveObserver;
+const ServerResolveObserver serverResolveObserver;
 
 }  // namespace
 
