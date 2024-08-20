@@ -281,7 +281,7 @@ export function diffstr(A: string, B: string) {
           // @ts-ignore
           words.test(tokens[i + 2])
         ) {
-          tokens[i] += tokens[i + 2];
+          tokens[i] += tokens[i + 2] as string;
           tokens.splice(i + 1, 2);
           i--;
         }

@@ -45,11 +45,11 @@ function debuglogImpl(set: string) {
 // In Node.js' implementation, debuglog availability is determined by the NODE_DEBUG
 // environment variable. However, we don't have access to the environment variables
 // in the same way. Instead, we'll just always enable debuglog on the requested sets.
-export function debuglog(set : string, cb? : (debug : (...args : any[]) => void) => void) {
+export function debuglog(set : string, cb? : (debug : (...args : any[]) => void) => void): any {
   function init() {
     set = set.toUpperCase();
   }
-  let debug = (...args : any[]) => {
+  let debug = (...args : any[]): void => {
     init();
     debug = debuglogImpl(set);
     if (typeof cb === 'function') {

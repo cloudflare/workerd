@@ -19,7 +19,8 @@ COPY . .
 RUN echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
 RUN echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
 COPY .bazel-cache /bazel-disk-cache
-RUN npm install -g pnpm@latest-7
+# pnpm version will be different depending on the value of `packageManager` field in package.json
+RUN npm install -g pnpm@latest
 RUN pnpm install
 
 RUN pnpm exec bazelisk build --disk_cache=/bazel-disk-cache --config=release_linux //src/workerd/server:workerd

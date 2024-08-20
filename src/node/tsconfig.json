@@ -34,16 +34,5 @@
       "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
     }
   },
-  "include": [
-    "*.ts",
-    "assert/*.ts",
-    "assert/*.js",
-    "stream/*.ts",
-    "stream/*.js",
-    "util/*.js",
-    "util/*.ts",
-    "path/*.ts",
-    "path/*.js",
-    "internal/*.ts"
-  ]
+  "exclude": []
 }
