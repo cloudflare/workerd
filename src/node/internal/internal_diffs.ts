@@ -277,9 +277,9 @@ export function diffstr(A: string, B: string) {
       // Join boundary splits that we do not consider to be boundaries and merge empty strings surrounded by word chars
       for (let i = 0; i < tokens.length - 1; i++) {
         if (
-          // @ts-ignore
           !tokens[i + 1] &&
           tokens[i + 2] &&
+          // @ts-ignore
           words.test(tokens[i]) &&
           // @ts-ignore
           words.test(tokens[i + 2])

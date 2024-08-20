@@ -17,10 +17,10 @@ function crc32(data: ArrayBufferView | string, value: number = 0): number {
 const constPrefix = 'CONST_';
 const constants = {};
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
 Object.defineProperties(
   constants,
   Object.fromEntries(
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     Object.entries(Object.getPrototypeOf(zlibUtil))
       .filter(([k]) => k.startsWith(constPrefix))
       .map(([k, v]) => [
