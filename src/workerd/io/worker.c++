@@ -2339,11 +2339,8 @@ struct MessageQueue {
 
 class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspector::Channel {
 public:
-  InspectorChannelImpl(kj::Own<const Worker::Isolate> isolateParam,
-      ExecutorNotifierPair isolateThreadExecutorNotifierPair,
-      kj::WebSocket& webSocket)
-      : ioHandler(kj::mv(isolateThreadExecutorNotifierPair), webSocket),
-        state(kj::heap<State>(this, kj::mv(isolateParam))) {
+  InspectorChannelImpl(kj::Own<const Worker::Isolate> isolateParam, kj::WebSocket& webSocket)
+      : ioHandler(webSocket), state(kj::heap<State>(this, kj::mv(isolateParam))) {
     ioHandler.connect(*this);
   }
 
@@ -2596,12 +2593,11 @@ private:
   // the InspectorChannelImpl and the InspectorClient.
   class WebSocketIoHandler final {
   public:
-    WebSocketIoHandler(ExecutorNotifierPair isolateThreadExecutorNotifierPair, kj::WebSocket& webSocket)
-        : isolateThreadExecutor(kj::mv(isolateThreadExecutorNotifierPair.executor)),
-          incomingQueueNotifier(kj::mv(isolateThreadExecutorNotifierPair.notifier)),
-          webSocket(webSocket) {
+    WebSocketIoHandler(kj::WebSocket& webSocket)
+        : webSocket(webSocket) {
       // Assume we are being instantiated on the InspectorService thread, the thread that will do
       // I/O for CDP messages. Messages are delivered to the InspectorChannelImpl on the Isolate thread.
+      incomingQueueNotifier = XThreadNotifier::create();
       outgoingQueueNotifier = XThreadNotifier::create();
     }
 
@@ -2634,20 +2630,7 @@ private:
     // Message pumping promise that should be evaluated on the InspectorService
     // thread.
     kj::Promise<void> messagePump() {
-      // Although inspector I/O must happen on the InspectorService thread (to make sure breakpoints
-      // don't block inspector I/O), inspector messages must be actually dispatched on the Isolate
-      // thread. So, we run the dispatch loop on the Isolate thread.
-      //
-      // Note that the above comment is only really accurate in vanilla workerd. In the case of the
-      // internal Cloudflare Workers runtime, `isolateThreadExecutor` may actually refer to the
-      // current thread's `kj::Executor`. That's fine; calling `executeAsync()` on the current
-      // thread's executor just posts the task to the event loop, and everything works as expected.
-      auto dispatchLoopPromise = isolateThreadExecutor->executeAsync([this]() {
-        return dispatchLoop();
-      });
-      return receiveLoop()
-          .exclusiveJoin(kj::mv(dispatchLoopPromise))
-          .exclusiveJoin(transmitLoop());
+      return receiveLoop().exclusiveJoin(dispatchLoop()).exclusiveJoin(transmitLoop());
     }
 
     void send(kj::String message) {
@@ -2688,7 +2671,6 @@ private:
       outgoingQueueNotifier->notify();
     }
 
-    // Must be called on the InspectorService thread.
     kj::Promise<void> receiveLoop() {
      for (;;) {
         auto message = co_await webSocket.receive(MAX_MESSAGE_SIZE);
@@ -2711,7 +2693,6 @@ private:
       }
     }
 
-    // Must be called on the Isolate thread.
     kj::Promise<void> dispatchLoop() {
       for (;;) {
         co_await incomingQueueNotifier->awaitNotification();
@@ -2721,7 +2702,6 @@ private:
       }
     }
 
-    // Must be called on the InspectorService thread.
     kj::Promise<void> transmitLoop() {
       for (;;) {
         co_await outgoingQueueNotifier->awaitNotification();
@@ -2748,17 +2728,10 @@ private:
       }
     }
 
-    // We need access to the Isolate thread's kj::Executor to run the inspector dispatch loop. This
-    // doesn't actually have to be an Own, because the Isolate thread will destroy the Isolate
-    // before it exits, but it doesn't hurt.
-    kj::Own<const kj::Executor> isolateThreadExecutor;
-
     kj::MutexGuarded<MessageQueue> incomingQueue;
-    // This XThreadNotifier must be created on the Isolate thread.
     kj::Own<XThreadNotifier> incomingQueueNotifier;
 
     kj::MutexGuarded<MessageQueue> outgoingQueue;
-    // This XThreadNotifier must be created on the InspectorService thread.
     kj::Own<XThreadNotifier> outgoingQueueNotifier;
 
     kj::WebSocket& webSocket;                 // only accessed on the InspectorService thread.
@@ -2908,17 +2881,11 @@ kj::Promise<void> Worker::Isolate::attachInspector(
   headers.set(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
   auto webSocket = response.acceptWebSocket(headers);
 
-  // This `attachInspector()` overload is used by the internal Cloudflare Workers runtime, which has
-  // no concept of a single Isolate thread. Instead, it's okay for all inspector messages to be
-  // dispatched on the calling thread.
-  auto executorNotifierPair = ExecutorNotifierPair{};
-
-  return attachInspector(kj::mv(executorNotifierPair), timer, timerOffset, *webSocket)
+  return attachInspector(timer, timerOffset, *webSocket)
       .attach(kj::mv(webSocket));
 }
 
 kj::Promise<void> Worker::Isolate::attachInspector(
-    ExecutorNotifierPair isolateThreadExecutorNotifierPair,
     kj::Timer& timer,
     kj::Duration timerOffset,
     kj::WebSocket& webSocket) const {
@@ -2939,10 +2906,7 @@ kj::Promise<void> Worker::Isolate::attachInspector(
 
     lockedSelf.impl->inspectorClient.setInspectorTimerInfo(timer, timerOffset);
 
-    auto channel = kj::heap<Worker::Isolate::InspectorChannelImpl>(
-        kj::atomicAddRef(*this),
-        kj::mv(isolateThreadExecutorNotifierPair),
-        webSocket);
+    auto channel = kj::heap<Worker::Isolate::InspectorChannelImpl>(kj::atomicAddRef(*this), webSocket);
     lockedSelf.currentInspectorSession = *channel;
     lockedSelf.impl->inspectorClient.setChannel(*channel);
 
