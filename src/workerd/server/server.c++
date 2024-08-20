@@ -2572,6 +2572,8 @@ void Server::abortAllActors() {
       }
     }
   }
+
+  alarmScheduler->deleteAllAlarms();
 }
 
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf,
