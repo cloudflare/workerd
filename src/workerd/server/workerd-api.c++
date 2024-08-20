@@ -411,7 +411,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
 
 namespace {
 kj::Path getPyodideBundleFileName(kj::StringPtr version) {
-  return kj::Path(kj::str("pyodide-", version, ".capnp.bin"));
+  return kj::Path(kj::str("pyodide_", version, ".capnp.bin"));
 }
 
 kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(
@@ -476,7 +476,7 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
       kj::HttpHeaders headers(table);
 
       kj::String url =
-          kj::str("https://pyodide.runtime-playground.workers.dev/pyodide-capnp-bin/pyodide-",
+          kj::str("https://pyodide.runtime-playground.workers.dev/pyodide-capnp-bin/pyodide_",
               version, ".capnp.bin");
 
       auto req = client->request(kj::HttpMethod::GET, kj::StringPtr(url), headers);
@@ -511,19 +511,11 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           "The python_workers compatibility flag is required to use Python.");
       // Inject Pyodide bundle
       if (util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
-        KJ_IF_SOME(bundle, fetchPyodideBundle(impl->pythonConfig, "dev"_kj)) {
-          modules->addBuiltinBundle(bundle, kj::none);
-        } else {
-          auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-          auto pyodide = pythonRelease.getPyodide();
-          auto pyodideRevision = pythonRelease.getPyodideRevision();
-          auto backport = pythonRelease.getBackport();
-
-          auto version = kj::str(pyodide, "_", pyodideRevision, "_", backport);
-          auto bundle = KJ_ASSERT_NONNULL(
-              fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
-          modules->addBuiltinBundle(bundle, kj::none);
-        }
+        auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+        auto version = getPythonBundleName(pythonRelease);
+        auto bundle = KJ_ASSERT_NONNULL(
+            fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+        modules->addBuiltinBundle(bundle, kj::none);
       }
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
       {

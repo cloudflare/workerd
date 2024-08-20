@@ -355,4 +355,12 @@ kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
   return result;
 }
 
+kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease) {
+  if (pyodideRelease.getPyodide() == "dev") {
+    return kj::str("dev");
+  }
+  return kj::str(pyodideRelease.getPyodide(), "_", pyodideRelease.getPyodideRevision(), "_",
+      pyodideRelease.getBackport());
+}
+
 }  // namespace workerd
