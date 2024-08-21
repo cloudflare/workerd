@@ -6,13 +6,15 @@ import re
 import shutil
 import subprocess
 from argparse import ArgumentParser, Namespace
-from typing import List, Optional, Tuple, Callable
+from typing import Optional, Callable
+from pathlib import Path
 from dataclasses import dataclass
 
 
 CLANG_FORMAT = os.environ.get("CLANG_FORMAT", "clang-format")
 PRETTIER = os.environ.get("PRETTIER", "node_modules/.bin/prettier")
 RUFF = os.environ.get("RUFF", "ruff")
+BUILDIFIER = os.environ.get("BUILDIFIER", "buildifier")
 
 
 def parse_args() -> Namespace:
@@ -60,11 +62,16 @@ def parse_args() -> Namespace:
     return options
 
 
-def check_clang_format() -> bool:
+def check_clang_format() -> None:
     try:
         # Run clang-format with --version to check its version
         output = subprocess.check_output([CLANG_FORMAT, "--version"], encoding="utf-8")
-        major, _, _ = re.search(r"version\s*(\d+)\.(\d+)\.(\d+)", output).groups()
+        match = re.search(r"version\s*(\d+)\.(\d+)\.(\d+)", output)
+        if not match:
+            logging.error("unable to read clang version")
+            exit(1)
+
+        major, _, _ = match.groups()
         if int(major) != 18:
             logging.error("clang-format version must be 18")
             exit(1)
@@ -74,17 +81,21 @@ def check_clang_format() -> bool:
         exit(1)
 
 
-def filter_files_by_exts(
-    files: List[str], dir_path: str, exts: Tuple[str, ...]
-) -> List[str]:
+def filter_files_by_globs(
+    files: list[Path], dir_path: Path, globs: tuple[str, ...]
+) -> list[Path]:
     return [
         file
         for file in files
-        if (dir_path == "." or file.startswith(dir_path + "/")) and file.endswith(exts)
+        if file.is_relative_to(dir_path) and matches_any_glob(globs, file)
     ]
 
 
-def clang_format(files: List[str], check: bool = False) -> bool:
+def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
+    return any(file.match(glob) for glob in globs)
+
+
+def clang_format(files: list[Path], check: bool = False) -> bool:
     cmd = [CLANG_FORMAT]
     if check:
         cmd += ["--dry-run", "--Werror"]
@@ -94,17 +105,19 @@ def clang_format(files: List[str], check: bool = False) -> bool:
     return result.returncode == 0
 
 
-def prettier(files: List[str], check: bool = False) -> bool:
-    cmd = [PRETTIER, "--log-level=warn"]
-    if check:
-        cmd.append("--check")
-    else:
-        cmd.append("--write")
+def prettier(files: list[Path], check: bool = False) -> bool:
+    cmd = [PRETTIER, "--log-level=warn", "--check" if check else "--write"]
     result = subprocess.run(cmd + files)
     return result.returncode == 0
 
 
-def ruff(files: List[str], check: bool = False) -> bool:
+def buildifier(files: list[Path], check: bool = False) -> bool:
+    cmd = [BUILDIFIER, "--mode=check" if check else "--mode=fix"]
+    result = subprocess.run(cmd + files)
+    return result.returncode == 0
+
+
+def ruff(files: list[Path], check: bool = False) -> bool:
     if files and not shutil.which(RUFF):
         msg = "Cannot find ruff, will not format Python"
         if check:
@@ -125,13 +138,13 @@ def ruff(files: List[str], check: bool = False) -> bool:
 
 def git_get_modified_files(
     target: str, source: Optional[str], staged: bool
-) -> List[str]:
+) -> list[Path]:
     if staged:
         files_in_diff = subprocess.check_output(
             ["git", "diff", "--diff-filter=d", "--name-only", "--cached"],
             encoding="utf-8",
         ).splitlines()
-        return files_in_diff
+        return [Path(file) for file in files_in_diff]
     else:
         merge_base = subprocess.check_output(
             ["git", "merge-base", target, source or "HEAD"], encoding="utf-8"
@@ -141,39 +154,45 @@ def git_get_modified_files(
             + ([source] if source else []),
             encoding="utf-8",
         ).splitlines()
-        return files_in_diff
+        return [Path(file) for file in files_in_diff]
 
 
-def git_get_all_files() -> List[str]:
-    return subprocess.check_output(
+def git_get_all_files() -> list[Path]:
+    files = subprocess.check_output(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
         encoding="utf-8",
     ).splitlines()
+    return [Path(file) for file in files]
 
 
 @dataclass
 class FormatConfig:
     directory: str
-    extensions: Tuple[str, ...]
-    formatter: Callable[[List[str], bool], bool]
+    globs: tuple[str, ...]
+    formatter: Callable[[list[Path], bool], bool]
 
 
 FORMATTERS = [
     FormatConfig(
-        directory="src/workerd", extensions=(".c++", ".h"), formatter=clang_format
+        directory="src/workerd", globs=("*.c++", "*.h"), formatter=clang_format
     ),
     FormatConfig(
         directory="src",
-        extensions=(".js", ".ts", ".cjs", ".ejs", ".mjs", ".json"),
+        globs=("*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"),
         formatter=prettier,
     ),
-    FormatConfig(directory=".", extensions=(".py",), formatter=ruff),
-    # TODO: lint bazel files
+    FormatConfig(directory="src", globs=("*.json",), formatter=prettier),
+    FormatConfig(directory=".", globs=("*.py",), formatter=ruff),
+    FormatConfig(
+        directory=".",
+        globs=("*.bzl", "*.bazel", "WORKSPACE", "BUILD", "BUILD.*"),
+        formatter=buildifier,
+    ),
 ]
 
 
-def format(config: FormatConfig, files: List[str], check: bool) -> bool:
-    matching_files = filter_files_by_exts(files, config.directory, config.extensions)
+def format(config: FormatConfig, files: list[Path], check: bool) -> bool:
+    matching_files = filter_files_by_globs(files, Path(config.directory), config.globs)
 
     if not matching_files:
         return True
@@ -181,13 +200,11 @@ def format(config: FormatConfig, files: List[str], check: bool) -> bool:
     return config.formatter(matching_files, check)
 
 
-def main():
+def main() -> None:
     options = parse_args()
     check_clang_format()
     if options.subcommand == "git":
-        files = set(
-            git_get_modified_files(options.target, options.source, options.staged)
-        )
+        files = git_get_modified_files(options.target, options.source, options.staged)
     else:
         files = git_get_all_files()
 
