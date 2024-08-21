@@ -83,23 +83,23 @@ def filter_files_by_exts(
 
 
 def clang_format(files: List[str], check: bool = False) -> bool:
+    cmd = [CLANG_FORMAT, "--verbose"]
     if check:
-        result = subprocess.run(
-            [CLANG_FORMAT, "--verbose", "--dry-run", "--Werror"] + files
-        )
-        return result.returncode == 0
+        cmd += ["--dry-run", "--Werror"]
     else:
-        subprocess.run([CLANG_FORMAT, "--verbose", "-i"] + files)
-        return True
+        cmd.append("-i")
+    result = subprocess.run(cmd + files)
+    return result.returncode == 0
 
 
 def prettier(files: List[str], check: bool = False) -> bool:
+    cmd = [PRETTIER]
     if check:
-        result = subprocess.run([PRETTIER, "--check"] + files)
-        return result.returncode == 0
+        cmd.append("--check")
     else:
-        subprocess.run([PRETTIER, "--write"] + files)
-        return True
+        cmd.append("--write")
+    result = subprocess.run(cmd + files)
+    return result.returncode == 0
 
 
 def git_get_modified_files(
