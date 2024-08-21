@@ -85,7 +85,7 @@ def filter_files_by_exts(
 
 
 def clang_format(files: List[str], check: bool = False) -> bool:
-    cmd = [CLANG_FORMAT, "--verbose"]
+    cmd = [CLANG_FORMAT]
     if check:
         cmd += ["--dry-run", "--Werror"]
     else:
@@ -95,7 +95,7 @@ def clang_format(files: List[str], check: bool = False) -> bool:
 
 
 def prettier(files: List[str], check: bool = False) -> bool:
-    cmd = [PRETTIER]
+    cmd = [PRETTIER, "--log-level=warn"]
     if check:
         cmd.append("--check")
     else:
@@ -164,10 +164,9 @@ FORMATTERS = [
     ),
     FormatConfig(
         directory="src",
-        extensions=(".js", ".ts", ".cjs", ".ejs", ".mjs"),
+        extensions=(".js", ".ts", ".cjs", ".ejs", ".mjs", ".json"),
         formatter=prettier,
     ),
-    FormatConfig(directory="src", extensions=(".json",), formatter=prettier),
     FormatConfig(directory=".", extensions=(".py",), formatter=ruff),
     # TODO: lint bazel files
 ]

@@ -1,5 +1,6 @@
 alias b := build
 alias t := test
+alias f := format
 
 default:
   @just --list
@@ -26,3 +27,6 @@ test *args="//...":
 
 test-asan *args="//...":
   just test {{args}} --config=asan
+
+format:
+  python3 tools/cross/format.py
