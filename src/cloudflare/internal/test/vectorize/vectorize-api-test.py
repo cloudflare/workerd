@@ -8,19 +8,29 @@ from js import JSON
 from pyodide.ffi import to_js as _to_js
 from js import Object
 
+
 def to_js(obj):
-   return _to_js(obj, dict_converter=Object.fromEntries)
+    return _to_js(obj, dict_converter=Object.fromEntries)
+
 
 async def test(context, env):
-  IDX = env.vectorSearch
+    IDX = env.vectorSearch
 
-  res_array = [0] * 5
-  # TODO(EW-8209): This shouldn't require `to_js`. It subtly fails without it.
-  results = await IDX.query(Float32Array.new(res_array), to_js({
-    "topK": 3,
-    "returnValues": True,
-    "returnMetadata": True,
-  }))
-  assert results.count > 0
-  assert results.matches[0].id == "b0daca4a-ffd8-4865-926b-e24800af2a2d"
-  assert results.matches[1].metadata.text == "Peter Piper picked a peck of pickled peppers"
+    res_array = [0] * 5
+    # TODO(EW-8209): This shouldn't require `to_js`. It subtly fails without it.
+    results = await IDX.query(
+        Float32Array.new(res_array),
+        to_js(
+            {
+                "topK": 3,
+                "returnValues": True,
+                "returnMetadata": True,
+            }
+        ),
+    )
+    assert results.count > 0
+    assert results.matches[0].id == "b0daca4a-ffd8-4865-926b-e24800af2a2d"
+    assert (
+        results.matches[1].metadata.text
+        == "Peter Piper picked a peck of pickled peppers"
+    )
