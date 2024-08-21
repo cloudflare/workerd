@@ -335,9 +335,9 @@ public:
   // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
   //
   // This overload will dispatch all inspector messages on the `kj::Executor` passed in via
-  // `isolateThreadExecutorNotifierPair`. For CPU profiling to work as expected, this `kj::Executor`
-  // must be associated with the same thread which executes the Worker's JavaScript.
-  kj::Promise<void> attachInspector(ExecutorNotifierPair isolateThreadExecutorNotifierPair,
+  // `isolateThreadExecutor`. For CPU profiling to work as expected, this `kj::Executor` must be
+  // associated with the same thread which executes the Worker's JavaScript.
+  kj::Promise<void> attachInspector(kj::Own<const kj::Executor> isolateThreadExecutor,
       kj::Timer& timer,
       kj::Duration timerOffset,
       kj::WebSocket& webSocket) const;
