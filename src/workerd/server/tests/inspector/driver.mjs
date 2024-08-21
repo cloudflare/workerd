@@ -27,6 +27,11 @@ beforeEach(async () => {
   });
 
   await workerd.start();
+
+  // We wait for the worker's HTTP port to come online before starting the test case. If we don't,
+  // and the inspector port comes online first, there's a chance the inspector connection will fail
+  // with 404 because the isolate doesn't exist yet.
+  await workerd.getListenPort('http');
 });
 
 // Stop workerd.
