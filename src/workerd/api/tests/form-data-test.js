@@ -8,7 +8,6 @@ import {
 
 export const apiFormDataParse = {
   async test(ctrl, env) {
-
     const INPUT = `---
 Content-Disposition: form-data; name="field0"
 
@@ -31,15 +30,15 @@ part3
       method: 'POST',
       body: INPUT,
       headers: {
-        'content-type': 'multipart/form-data; Boundary="-"'
-      }
+        'content-type': 'multipart/form-data; Boundary="-"',
+      },
     });
 
     const formData = await req.formData();
 
     deepStrictEqual(formData.getAll('field0'), ['part0', 'part2']);
     deepStrictEqual(formData.getAll('field1'), ['part1', 'part3']);
-  }
+  },
 };
 
 export const invalidFormdataContentDisposition = {
@@ -56,20 +55,23 @@ foo-content
       method: 'POST',
       body: INPUT,
       headers: {
-        'content-type': 'multipart/form-data;boundary=2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a'
-      }
+        'content-type':
+          'multipart/form-data;boundary=2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a',
+      },
     });
 
     try {
       await req.formData();
       throw new Error('Parsing the form data should have thrown');
     } catch (err) {
-      strictEqual(err.message,
-                  'Content-Disposition header for FormData part must ' +
-                  'have the value "form-data", possibly followed by ' +
-                  'parameters. Got: "foobar"');
+      strictEqual(
+        err.message,
+        'Content-Disposition header for FormData part must ' +
+          'have the value "form-data", possibly followed by ' +
+          'parameters. Got: "foobar"'
+      );
     }
-  }
+  },
 };
 
 export const invalidFormData = {
@@ -83,9 +85,9 @@ export const invalidFormData = {
       });
       throw new Error('should have thrown');
     } catch (err) {
-      strictEqual(err.message, 'Name or filename can\'t end with backslash');
+      strictEqual(err.message, "Name or filename can't end with backslash");
     }
-  }
+  },
 };
 
 export const formDataWithFilesBlobs = {
@@ -122,13 +124,14 @@ qux-content
       method: 'POST',
       body: INPUT,
       headers: {
-        'content-type': 'multipart/form-data;boundary=2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a'
-      }
+        'content-type':
+          'multipart/form-data;boundary=2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a',
+      },
     });
 
     async function assertFile(file, name, type, content) {
       if (!(file instanceof File)) {
-        throw new Error("not a File: " + file);
+        throw new Error('not a File: ' + file);
       }
 
       strictEqual(name, file.name);
@@ -137,17 +140,32 @@ qux-content
     }
 
     const form = await req.formData();
-    await assertFile(form.get("foo"), "foo.txt",
-                     "application/octet-stream", "foo-content");
-    await assertFile(form.getAll("bar")[0], "bar-renamed.txt",
-                     "application/octet-stream", "bar1-content");
-    await assertFile(form.getAll("bar")[1],
-                     "bar2.txt", "text/bary", "bar2-content");
-    await assertFile(form.get("baz"), "baz", "text/bazzy",
-                     "baz-content");
-    await assertFile(form.get("qux"), "qux%0A%22\\.txt",
-                     "application/octet-stream", "qux-content");
-  }
+    await assertFile(
+      form.get('foo'),
+      'foo.txt',
+      'application/octet-stream',
+      'foo-content'
+    );
+    await assertFile(
+      form.getAll('bar')[0],
+      'bar-renamed.txt',
+      'application/octet-stream',
+      'bar1-content'
+    );
+    await assertFile(
+      form.getAll('bar')[1],
+      'bar2.txt',
+      'text/bary',
+      'bar2-content'
+    );
+    await assertFile(form.get('baz'), 'baz', 'text/bazzy', 'baz-content');
+    await assertFile(
+      form.get('qux'),
+      'qux%0A%22\\.txt',
+      'application/octet-stream',
+      'qux-content'
+    );
+  },
 };
 
 export const sendFilesInFormdata = {
@@ -184,29 +202,36 @@ qux-content
       method: 'POST',
       body: INPUT,
       headers: {
-        'content-type': 'multipart/form-data;boundary=2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a'
-      }
+        'content-type':
+          'multipart/form-data;boundary=2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a',
+      },
     });
 
     const form = await req.formData();
 
-    form.set("foo", new File(["foo-content"], "foo.txt"));
-    form.append("bar", new File(["bar1-content"], "bar1.txt"), "bar-renamed.txt");
-    form.append("bar", new File(["bar2-content"], "bar2.txt", {type: "text/bary"}));
-    form.append("baz", new Blob(["baz-content"], {type: "text/bazzy"}));
-    form.set("qux", new Blob(["qux-content"]), "qux\n\"\\.txt");
+    form.set('foo', new File(['foo-content'], 'foo.txt'));
+    form.append(
+      'bar',
+      new File(['bar1-content'], 'bar1.txt'),
+      'bar-renamed.txt'
+    );
+    form.append(
+      'bar',
+      new File(['bar2-content'], 'bar2.txt', { type: 'text/bary' })
+    );
+    form.append('baz', new Blob(['baz-content'], { type: 'text/bazzy' }));
+    form.set('qux', new Blob(['qux-content']), 'qux\n"\\.txt');
 
-    if (!(form.get("foo") instanceof File)) {
-      throw new Error("expected file");
+    if (!(form.get('foo') instanceof File)) {
+      throw new Error('expected file');
     }
-    if (form.get("foo").name != "foo.txt") {
-      throw new Error("expected file name foo.txt");
+    if (form.get('foo').name != 'foo.txt') {
+      throw new Error('expected file name foo.txt');
     }
-    if (!(form.getAll("bar")[1] instanceof File)) {
-      throw new Error("expected files");
+    if (!(form.getAll('bar')[1] instanceof File)) {
+      throw new Error('expected files');
     }
-
-  }
+  },
 };
 
 async function parseFormData(contentType, text) {
@@ -227,9 +252,9 @@ export const testFormDataParser = {
         // No parts. Note that Chrome throws a TypeError on this input, but it'll generate output that
         // looks like this if you ask it to serialize an empty form.
         contentType: 'multipart/form-data; boundary="+"',
-        body: "--+--",
-        expected: "",
-        comment: "Empty form is okay",
+        body: '--+--',
+        expected: '',
+        comment: 'Empty form is okay',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
@@ -259,9 +284,9 @@ export const testFormDataParser = {
           'part3\r\n',
 
           '--+--',
-        ].join(""),
-        expected: "field0=part0,field1=part1,field0=part2,field1=part3",
-        comment: "Mixed CRLF and LF, case-insensitivity of header name",
+        ].join(''),
+        expected: 'field0=part0,field1=part1,field0=part2,field1=part3',
+        comment: 'Mixed CRLF and LF, case-insensitivity of header name',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
@@ -315,9 +340,10 @@ export const testFormDataParser = {
           '\n',
 
           '--+--',
-        ].join(""),
-        expected: "empties=,empties=,empties=,empties=,empties=,empties=,empties=,empties=",
-        comment: "Mixed CRLF and LF with empty messages",
+        ].join(''),
+        expected:
+          'empties=,empties=,empties=,empties=,empties=,empties=,empties=,empties=',
+        comment: 'Mixed CRLF and LF with empty messages',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
@@ -335,9 +361,9 @@ export const testFormDataParser = {
           'part1\r\n',
 
           '--+--',
-        ].join(""),
-        expected: "field0=part0,field1=part1",
-        comment: "Content-Type header should be okay",
+        ].join(''),
+        expected: 'field0=part0,field1=part1',
+        comment: 'Content-Type header should be okay',
       },
       {
         contentType: 'application/x-www-form-urlencoded',
@@ -346,29 +372,23 @@ export const testFormDataParser = {
           'field1=part1',
           'field0=part2',
           'field1=part3',
-        ].join("&"),
-        expected: "field0=part0,field1=part1,field0=part2,field1=part3",
-        comment: "Basic application/x-www-form-urlencoded parse works",
+        ].join('&'),
+        expected: 'field0=part0,field1=part1,field0=part2,field1=part3',
+        comment: 'Basic application/x-www-form-urlencoded parse works',
       },
       {
         contentType: 'application/x-www-form-urlencoded',
-        body: [
-          'field0=data+with+an+%26+in+it',
-        ].join("&"),
-        expected: "field0=data with an & in it",
-        comment: "application/x-www-form-urlencoded data gets percent-and-plus-decoded",
+        body: ['field0=data+with+an+%26+in+it'].join('&'),
+        expected: 'field0=data with an & in it',
+        comment:
+          'application/x-www-form-urlencoded data gets percent-and-plus-decoded',
       },
       {
         contentType: 'application/x-www-form-urlencoded',
-        body: [
-          '',
-          '=',
-          'field1',
-          '=part2',
-          'field1=',
-        ].join("&"),
-        expected: "=,field1=,=part2,field1=",
-        comment: "application/x-www-form-urlencoded data with awkward &, = placement",
+        body: ['', '=', 'field1', '=part2', 'field1='].join('&'),
+        expected: '=,field1=,=part2,field1=',
+        comment:
+          'application/x-www-form-urlencoded data with awkward &, = placement',
       },
     ];
 
@@ -385,18 +405,18 @@ export const testFormDataParser = {
     let failureCases = [
       {
         contentType: 'multipart/form-data; boundary="+"',
-        body: "",
-        comment: "Empty body throws",
+        body: '',
+        comment: 'Empty body throws',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
-        body: "--asdf--",
-        comment: "Bad boundary throws",
+        body: '--asdf--',
+        comment: 'Bad boundary throws',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
-        body: "--+",
-        comment: "Non-terminal boundary at end throws",
+        body: '--+',
+        comment: 'Non-terminal boundary at end throws',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
@@ -406,8 +426,8 @@ export const testFormDataParser = {
           '\r\n',
           'part0\r\n',
           '-+--',
-        ].join(""),
-        comment: "Bad terminal delimiter",
+        ].join(''),
+        comment: 'Bad terminal delimiter',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
@@ -417,8 +437,8 @@ export const testFormDataParser = {
           '\r\n',
           'part0\r\n',
           '--+--',
-        ].join(""),
-        comment: "Bad Content-Disposition header",
+        ].join(''),
+        comment: 'Bad Content-Disposition header',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
@@ -428,8 +448,8 @@ export const testFormDataParser = {
           '\r\n',
           'part0\r\n',
           '--+--',
-        ].join(""),
-        comment: "Bad Content-Disposition header",
+        ].join(''),
+        comment: 'Bad Content-Disposition header',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
@@ -439,8 +459,8 @@ export const testFormDataParser = {
           '\r',
           'part0\r\n',
           '--+--',
-        ].join(""),
-        comment: "No header termination CRLFCRLF",
+        ].join(''),
+        comment: 'No header termination CRLFCRLF',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
@@ -449,8 +469,8 @@ export const testFormDataParser = {
           'Content-Disposition: form-data; name="field0"\r\n',
           '\r\n',
           'part0\r\n',
-        ].join(""),
-        comment: "No subsequent boundary string",
+        ].join(''),
+        comment: 'No subsequent boundary string',
       },
       {
         contentType: 'multipart/form-data; boundary="+"',
@@ -460,27 +480,27 @@ export const testFormDataParser = {
           '\r\n',
           'part0\r\n',
           '--+\r--',
-        ].join(""),
+        ].join(''),
         comment: "Boundary was not succeeded by CRLF, LF, or '--'",
       },
       {
         contentType: 'multipart/form-data; boundary=',
         body: '----',
-        comment: "Empty boundary parameter in content-type",
+        comment: 'Empty boundary parameter in content-type',
       },
       {
         contentType: 'application/x-www-form-urlencoded; charset=big5',
         body: '--+--',
-        comment: "Unsupported charset",
-      }
+        comment: 'Unsupported charset',
+      },
     ];
 
     for (let i = 0; i < failureCases.length; ++i) {
       const c = failureCases[i];
       await rejects(() => parseFormData(c.contentType, c.body));
     }
-  }
-}
+  },
+};
 
 export const testFormDataSerializer = {
   async test() {
@@ -498,16 +518,20 @@ export const testFormDataSerializer = {
 
     // Parse it back.
     // This regex assumes an unquoted boundary, which is true for our serializer.
-    const boundary = /boundary=(.+)$/.exec(response.headers.get("Content-Type"))[1];
-    const actual = await parseFormData(`multipart/form-data; boundary="${boundary}"`,
-                                       await response.text());
+    const boundary = /boundary=(.+)$/.exec(
+      response.headers.get('Content-Type')
+    )[1];
+    const actual = await parseFormData(
+      `multipart/form-data; boundary="${boundary}"`,
+      await response.text()
+    );
 
     const expectedData = [
-      "field0=part0",
-      "field1=part1",
-      "field0=part2",
-      "field1=part3",
-      "field-with-a-%22-in-it=part4",
+      'field0=part0',
+      'field1=part1',
+      'field0=part2',
+      'field1=part3',
+      'field-with-a-%22-in-it=part4',
     ];
     const actualData = [];
     for (let [k, v] of actual) {
@@ -515,7 +539,7 @@ export const testFormDataSerializer = {
     }
 
     strictEqual('' + actualData.join(','), '' + expectedData.join(','));
-  }
+  },
 };
 
 export const testFormDataSet = {
@@ -530,7 +554,7 @@ export const testFormDataSet = {
     fd.set('foo', '6');
 
     strictEqual('' + fd.getAll('foo'), '6');
-  }
+  },
 };
 
 export const testFormDataIterators = {
@@ -543,71 +567,78 @@ export const testFormDataIterators = {
     strictEqual(key.next().value, undefined);
     strictEqual(value.next().value, undefined);
 
-    fd.append("key", "0");
-    fd.append("key", "1");
-    strictEqual("" + entry.next().value, "key,0");
-    strictEqual("" + key.next().value, "key");
-    strictEqual("" + value.next().value, "0");
+    fd.append('key', '0');
+    fd.append('key', '1');
+    strictEqual('' + entry.next().value, 'key,0');
+    strictEqual('' + key.next().value, 'key');
+    strictEqual('' + value.next().value, '0');
 
-    fd.delete("key");
+    fd.delete('key');
     strictEqual(entry.next().value, undefined);
     strictEqual(key.next().value, undefined);
     strictEqual(value.next().value, undefined);
-  }
+  },
 };
 
 export const testFormDataForeach = {
   test() {
     const fd = new FormData();
 
-    fd.forEach(function(v, k, t) {
+    fd.forEach(function (v, k, t) {
       throw new Error('should not be called on empty array');
     });
 
     let foreachOutput = [];
-    fd.append("key1", "value1");
-    fd.append("key2", "value2");
+    fd.append('key1', 'value1');
+    fd.append('key2', 'value2');
 
     let i = 0;
-    fd.forEach(function(value, key, captureFd) {
-      notStrictEqual(value, "3"); // if this is true, then the test is useless
+    fd.forEach(function (value, key, captureFd) {
+      notStrictEqual(value, '3'); // if this is true, then the test is useless
       // updating the headers should affect them immediately when not called through forEach
-      captureFd.set(key, "3");
-      strictEqual(captureFd.get(key), "3");
+      captureFd.set(key, '3');
+      strictEqual(captureFd.get(key), '3');
       // updating the headers should not affect `value`
-      notStrictEqual(value, "3");
+      notStrictEqual(value, '3');
       foreachOutput.push(`${key}=${value}`);
 
-      captureFd.append("some-key", "4");
+      captureFd.append('some-key', '4');
       // console.log("appended");
       i += 1;
     });
 
     // appending keys within the loop should call the callback on the new items
     strictEqual(i, 4);
-    strictEqual("" + foreachOutput.join('&'), "key1=value1&key2=value2&some-key=4&some-key=4");
+    strictEqual(
+      '' + foreachOutput.join('&'),
+      'key1=value1&key2=value2&some-key=4&some-key=4'
+    );
     // `capture_headers.set` should affect the outer headers object
-    strictEqual(fd.get("key1"), "3");
-    strictEqual(fd.get("key2"), "3");
+    strictEqual(fd.get('key1'), '3');
+    strictEqual(fd.get('key2'), '3');
     // `capture_headers.append` should affect the outer object
-    deepStrictEqual(fd.getAll("some-key"), ["3", "4"]);
+    deepStrictEqual(fd.getAll('some-key'), ['3', '4']);
 
     throws(() => fd.forEach());
     throws(() => fd.forEach(1));
 
     // `this` can be overriden by setting the second argument
-    fd.forEach(function() {
+    fd.forEach(function () {
       // NOTE: can't use `assert_equals` because `this` has type `object` which apparently it doesn't like
       strictEqual(this, 1);
     }, 1);
 
-    throws(() => { fd.forEach(function() { throw new Error("boo"); }) });
+    throws(() => {
+      fd.forEach(function () {
+        throw new Error('boo');
+      });
+    });
 
     // forEach should not move the value
-    fd.set("key1", "a");
+    fd.set('key1', 'a');
     fd.forEach(() => {});
-    strictEqual(fd.get("key1"), "a");
-  }
+    strictEqual(fd.get('key1'), 'a');
+  },
 };
 
 export const w3cTestFormDataAppend = {
@@ -617,37 +648,50 @@ export const w3cTestFormDataAppend = {
       for (let [k, v] of creator()) {
         result.push(`${k}=${v}`);
       }
-      verifier(result.join(","));
+      verifier(result.join(','));
     }
 
-    test_formdata(function() {
-      var fd = new FormData();
-      fd.append("name", new String("value"));
-      return fd;
-    }, function(data) {
-      strictEqual(data, "name=value");
-    }, "Passing a String object to FormData.append should work.");
+    test_formdata(
+      function () {
+        var fd = new FormData();
+        fd.append('name', new String('value'));
+        return fd;
+      },
+      function (data) {
+        strictEqual(data, 'name=value');
+      },
+      'Passing a String object to FormData.append should work.'
+    );
 
-    strictEqual(create_formdata(['key', 'value1']).get('key'), "value1");
-    strictEqual(create_formdata(['key', 'value2'], ['key', 'value1']).get('key'), "value2");
-    strictEqual(create_formdata(['key', undefined]).get('key'), "undefined");
-    strictEqual(create_formdata(['key', undefined], ['key', 'value1']).get('key'), "undefined");
-    strictEqual(create_formdata(['key', null]).get('key'), "null");
-    strictEqual(create_formdata(['key', null], ['key', 'value1']).get('key'), "null");
+    strictEqual(create_formdata(['key', 'value1']).get('key'), 'value1');
+    strictEqual(
+      create_formdata(['key', 'value2'], ['key', 'value1']).get('key'),
+      'value2'
+    );
+    strictEqual(create_formdata(['key', undefined]).get('key'), 'undefined');
+    strictEqual(
+      create_formdata(['key', undefined], ['key', 'value1']).get('key'),
+      'undefined'
+    );
+    strictEqual(create_formdata(['key', null]).get('key'), 'null');
+    strictEqual(
+      create_formdata(['key', null], ['key', 'value1']).get('key'),
+      'null'
+    );
 
     function create_formdata() {
       var fd = new FormData();
       for (var i = 0; i < arguments.length; i++) {
         fd.append.apply(fd, arguments[i]);
-      };
+      }
       return fd;
     }
-  }
+  },
 };
 
 export const w3cTestFormDataBlob = {
   test() {
-    function create_formdata () {
+    function create_formdata() {
       var fd = new FormData();
       for (var i = 0; i < arguments.length; i++) {
         fd.append.apply(fd, arguments[i]);
@@ -656,7 +700,7 @@ export const w3cTestFormDataBlob = {
     }
 
     throws(() => create_formdata('a', 'b', 'c'));
-  }
+  },
 };
 
 export const w3cTestFormDataDelete = {
@@ -678,16 +722,16 @@ export const w3cTestFormDataDelete = {
       fd.delete('key1');
       strictEqual(fd.get('key1'), null);
       strictEqual(fd.get('key2'), 'value2');
-    };
+    }
 
     function create_formdata() {
       var fd = new FormData();
       for (var i = 0; i < arguments.length; i++) {
         fd.append.apply(fd, arguments[i]);
-      };
+      }
       return fd;
     }
-  }
+  },
 };
 
 export const w3cTestFormDataForeach = {
@@ -709,7 +753,8 @@ export const w3cTestFormDataForeach = {
     //var expected_values = ['v1', 'v3', 'v4', 'v6', file];
 
     {
-      var mykeys = [], myvalues = [];
+      var mykeys = [],
+        myvalues = [];
       for (var entry of fd) {
         strictEqual(entry.length, 2);
         mykeys.push(entry[0]);
@@ -720,70 +765,98 @@ export const w3cTestFormDataForeach = {
     }
 
     {
-      var mykeys = [], myvalues = [];
+      var mykeys = [],
+        myvalues = [];
       for (var entry of fd.entries()) {
-        strictEqual(entry.length, 2,
-            'entries() iterator should yield key/value pairs');
+        strictEqual(
+          entry.length,
+          2,
+          'entries() iterator should yield key/value pairs'
+        );
         mykeys.push(entry[0]);
         myvalues.push(entry[1]);
       }
-      deepStrictEqual(mykeys, expected_keys,
-          'entries() iterator should see duplicate keys');
-      deepStrictEqual(myvalues, expected_values,
-          'entries() iterator should see non-deleted values');
+      deepStrictEqual(
+        mykeys,
+        expected_keys,
+        'entries() iterator should see duplicate keys'
+      );
+      deepStrictEqual(
+        myvalues,
+        expected_values,
+        'entries() iterator should see non-deleted values'
+      );
     }
 
     {
       var mykeys = [];
-      for (var entry of fd.keys())
-        mykeys.push(entry);
+      for (var entry of fd.keys()) mykeys.push(entry);
       deepStrictEqual(mykeys, expected_keys);
     }
 
     {
       var myvalues = [];
-      for (var entry of fd.values())
-        myvalues.push(entry);
-      deepStrictEqual(myvalues, expected_values,
-          'values() iterator should see non-deleted values');
+      for (var entry of fd.values()) myvalues.push(entry);
+      deepStrictEqual(
+        myvalues,
+        expected_values,
+        'values() iterator should see non-deleted values'
+      );
     }
-  }
-}
+  },
+};
 
 export const w3cTestFormDataGet = {
   test() {
-    strictEqual(create_formdata(['key', 'value1'], ['key', 'value2']).get('key'), "value1");
-    strictEqual(create_formdata(['key', 'value1'], ['key', 'value2']).get('nil'), null);
+    strictEqual(
+      create_formdata(['key', 'value1'], ['key', 'value2']).get('key'),
+      'value1'
+    );
+    strictEqual(
+      create_formdata(['key', 'value1'], ['key', 'value2']).get('nil'),
+      null
+    );
     strictEqual(create_formdata().get('key'), null);
-    deepStrictEqual(create_formdata(['key', 'value1'],
-        ['key', 'value2']).getAll('key'), ["value1", "value2"]);
-    deepStrictEqual(create_formdata(['key', 'value1'], ['key', 'value2']).getAll('nil'), []);
+    deepStrictEqual(
+      create_formdata(['key', 'value1'], ['key', 'value2']).getAll('key'),
+      ['value1', 'value2']
+    );
+    deepStrictEqual(
+      create_formdata(['key', 'value1'], ['key', 'value2']).getAll('nil'),
+      []
+    );
     deepStrictEqual(create_formdata().getAll('key'), []);
 
     function create_formdata() {
       var fd = new FormData();
       for (var i = 0; i < arguments.length; i++) {
-          fd.append.apply(fd, arguments[i]);
-      };
+        fd.append.apply(fd, arguments[i]);
+      }
       return fd;
     }
-  }
+  },
 };
 
 export const w3cTestFormDataHas = {
   test() {
-    strictEqual(create_formdata(['key', 'value1'], ['key', 'value2']).has('key'), true);
-    strictEqual(create_formdata(['key', 'value1'], ['key', 'value2']).has('nil'), false);
+    strictEqual(
+      create_formdata(['key', 'value1'], ['key', 'value2']).has('key'),
+      true
+    );
+    strictEqual(
+      create_formdata(['key', 'value1'], ['key', 'value2']).has('nil'),
+      false
+    );
     strictEqual(create_formdata().has('key'), false);
 
     function create_formdata() {
       var fd = new FormData();
       for (var i = 0; i < arguments.length; i++) {
-          fd.append.apply(fd, arguments[i]);
-      };
+        fd.append.apply(fd, arguments[i]);
+      }
       return fd;
     }
-  }
+  },
 };
 
 export const w3cTestFormDataSet = {
@@ -793,23 +866,36 @@ export const w3cTestFormDataSet = {
       for (let [k, v] of creator()) {
         result.push(`${k}=${v}`);
       }
-      verifier(result.join(","));
+      verifier(result.join(','));
     }
 
-    test_formdata(function () {
-      var fd = new FormData();
-      fd.set("name", new String("value"));
-      return fd;
-    }, function (data) {
-      strictEqual(data, "name=value");
-    }, "Passing a String object to FormData.set should work");
+    test_formdata(
+      function () {
+        var fd = new FormData();
+        fd.set('name', new String('value'));
+        return fd;
+      },
+      function (data) {
+        strictEqual(data, 'name=value');
+      },
+      'Passing a String object to FormData.set should work'
+    );
 
-    strictEqual(create_formdata(['key', 'value1']).get('key'), "value1");
-    strictEqual(create_formdata(['key', 'value2'], ['key', 'value1']).get('key'), "value1");
-    strictEqual(create_formdata(['key', undefined]).get('key'), "undefined");
-    strictEqual(create_formdata(['key', undefined], ['key', 'value1']).get('key'), "value1");
-    strictEqual(create_formdata(['key', null]).get('key'), "null");
-    strictEqual(create_formdata(['key', null], ['key', 'value1']).get('key'), "value1");
+    strictEqual(create_formdata(['key', 'value1']).get('key'), 'value1');
+    strictEqual(
+      create_formdata(['key', 'value2'], ['key', 'value1']).get('key'),
+      'value1'
+    );
+    strictEqual(create_formdata(['key', undefined]).get('key'), 'undefined');
+    strictEqual(
+      create_formdata(['key', undefined], ['key', 'value1']).get('key'),
+      'value1'
+    );
+    strictEqual(create_formdata(['key', null]).get('key'), 'null');
+    strictEqual(
+      create_formdata(['key', null], ['key', 'value1']).get('key'),
+      'value1'
+    );
 
     // TODO(conform): Support File/Blob.
     //test(function () {
@@ -824,10 +910,10 @@ export const w3cTestFormDataSet = {
       var fd = new FormData();
       for (var i = 0; i < arguments.length; i++) {
         fd.set.apply(fd, arguments[i]);
-      };
+      }
       return fd;
     }
-  }
+  },
 };
 
 export const w3cTestFormData = {
@@ -837,19 +923,23 @@ export const w3cTestFormData = {
       for (let [k, v] of fd) {
         result.push(`${k}=${v}`);
       }
-      strictEqual(result.join(","), expected, name);
+      strictEqual(result.join(','), expected, name);
     }
 
-    function create_formdata () {
+    function create_formdata() {
       var fd = new FormData();
       for (var i = 0; i < arguments.length; i++) {
         fd.append.apply(fd, arguments[i]);
-      };
+      }
       return fd;
     }
 
-    do_test("empty formdata", new FormData(), '');
-    do_test("formdata with string", create_formdata(['key', 'value']), 'key=value');
+    do_test('empty formdata', new FormData(), '');
+    do_test(
+      'formdata with string',
+      create_formdata(['key', 'value']),
+      'key=value'
+    );
     //do_test("formdata with named string", create_formdata(['key', new Blob(['value'], {type: 'text/plain'}), 'kv.txt']), '\nkey=kv.txt:text/plain:5,');
-  }
+  },
 };

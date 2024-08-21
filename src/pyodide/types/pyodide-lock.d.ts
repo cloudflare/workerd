@@ -2,7 +2,7 @@ interface PackageDeclaration {
   depends: string[];
   file_name: string;
   imports: string[];
-  install_dir: "site" | "stdlib";
+  install_dir: 'site' | 'stdlib';
   name: string;
   package_type: string;
   sha256: string;
@@ -17,7 +17,7 @@ interface PackageLock {
   };
 }
 
-declare module "pyodide-internal:generated/pyodide-lock.json" {
+declare module 'pyodide-internal:generated/pyodide-lock.json' {
   const lock: PackageLock;
   export default lock;
 }

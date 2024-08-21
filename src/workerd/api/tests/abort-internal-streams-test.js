@@ -19,5 +19,5 @@ export const abortInternalStreamsTest = {
     } catch (err) {
       strictEqual(err, undefined);
     }
-  }
+  },
 };

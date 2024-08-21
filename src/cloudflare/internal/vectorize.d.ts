@@ -33,7 +33,7 @@ interface VectorizeError {
  *
  * This list is expected to grow as support for more operations are released.
  */
-type VectorizeVectorMetadataFilterOp = "$eq" | "$ne";
+type VectorizeVectorMetadataFilterOp = '$eq' | '$ne';
 
 /**
  * Filter criteria for vector metadata used to limit the retrieved query result set.
@@ -54,7 +54,7 @@ type VectorizeVectorMetadataFilter = {
  * Supported distance metrics for an index.
  * Distance metrics determine how other "similar" vectors are determined.
  */
-type VectorizeDistanceMetric = "euclidean" | "cosine" | "dot-product";
+type VectorizeDistanceMetric = 'euclidean' | 'cosine' | 'dot-product';
 
 /**
  * Metadata return levels for a Vectorize query.
@@ -65,9 +65,9 @@ type VectorizeDistanceMetric = "euclidean" | "cosine" | "dot-product";
  * @property indexed  Return all metadata fields configured for indexing in the vector return set. This level of retrieval is "free" in that no additional overhead is incurred returning this data. However, note that indexed metadata is subject to truncation (especially for larger strings).
  * @property none     No indexed metadata will be returned.
  */
-type VectorizeMetadataRetrievalLevel = "all" | "indexed" | "none";
+type VectorizeMetadataRetrievalLevel = 'all' | 'indexed' | 'none';
 
-interface VectorizeQueryOptions{
+interface VectorizeQueryOptions {
   topK?: number;
   namespace?: string;
   returnValues?: boolean;
@@ -137,8 +137,8 @@ interface VectorizeVector {
 /**
  * Represents a matched vector for a query along with its score and (if specified) the matching vector information.
  */
-type VectorizeMatch = Pick<Partial<VectorizeVector>, "values"> &
-  Omit<VectorizeVector, "values"> & {
+type VectorizeMatch = Pick<Partial<VectorizeVector>, 'values'> &
+  Omit<VectorizeVector, 'values'> & {
     /** The score or rank for similarity, when returned as a result */
     score: number;
   };

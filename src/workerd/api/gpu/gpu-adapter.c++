@@ -56,8 +56,8 @@ void setLimit(wgpu::RequiredLimits& limits, kj::StringPtr name, unsigned long lo
   JSG_FAIL_REQUIRE(TypeError, "unknown limit", name);
 }
 
-jsg::Promise<jsg::Ref<GPUAdapterInfo>>
-GPUAdapter::requestAdapterInfo(jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints) {
+jsg::Promise<jsg::Ref<GPUAdapterInfo>> GPUAdapter::requestAdapterInfo(
+    jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints) {
 
   wgpu::AdapterInfo info = {};
   adapter_.GetInfo(&info);
@@ -67,19 +67,19 @@ GPUAdapter::requestAdapterInfo(jsg::Lock& js, jsg::Optional<kj::Array<kj::String
 
 kj::String parseDeviceLostReason(wgpu::DeviceLostReason reason) {
   switch (reason) {
-  case wgpu::DeviceLostReason::Destroyed:
-    return kj::str("destroyed");
-  case wgpu::DeviceLostReason::Unknown:
-    return kj::str("unknown");
-  case wgpu::DeviceLostReason::InstanceDropped:
-    return kj::str("dropped");
-  case wgpu::DeviceLostReason::FailedCreation:
-    return kj::str("failed_creation");
+    case wgpu::DeviceLostReason::Destroyed:
+      return kj::str("destroyed");
+    case wgpu::DeviceLostReason::Unknown:
+      return kj::str("unknown");
+    case wgpu::DeviceLostReason::InstanceDropped:
+      return kj::str("dropped");
+    case wgpu::DeviceLostReason::FailedCreation:
+      return kj::str("failed_creation");
   }
 }
 
-jsg::Promise<jsg::Ref<GPUDevice>>
-GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> descriptor) {
+jsg::Promise<jsg::Ref<GPUDevice>> GPUAdapter::requestDevice(
+    jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> descriptor) {
   wgpu::DeviceDescriptor desc{};
   kj::Vector<wgpu::FeatureName> requiredFeatures;
   wgpu::RequiredLimits limits;
@@ -89,7 +89,7 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
     }
 
     KJ_IF_SOME(features, d.requiredFeatures) {
-      for (auto& required : features) {
+      for (auto& required: features) {
         requiredFeatures.add(parseFeatureName(required));
       }
 
@@ -98,7 +98,7 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
     }
 
     KJ_IF_SOME(requiredLimits, d.requiredLimits) {
-      for (auto& f : requiredLimits.fields) {
+      for (auto& f: requiredLimits.fields) {
         setLimit(limits, f.name, f.value);
       }
       desc.requiredLimits = &limits;
@@ -107,52 +107,50 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
 
   using DeviceLostContext = AsyncContext<jsg::Ref<GPUDeviceLostInfo>>;
   auto deviceLostCtx = kj::refcounted<DeviceLostContext>(js, kj::addRef(*async_));
-  desc.SetDeviceLostCallback(
-      wgpu::CallbackMode::AllowSpontaneous,
-      [ctx = kj::addRef(*deviceLostCtx)](const wgpu::Device&, wgpu::DeviceLostReason reason,
-                                         const char* message) mutable {
-        auto r = parseDeviceLostReason(reason);
-        if (ctx->fulfiller_->isWaiting()) {
-          auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
-          ctx->fulfiller_->fulfill(kj::mv(lostInfo));
-        }
-      });
+  desc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous,
+      [ctx = kj::addRef(*deviceLostCtx)](
+          const wgpu::Device&, wgpu::DeviceLostReason reason, const char* message) mutable {
+    auto r = parseDeviceLostReason(reason);
+    if (ctx->fulfiller_->isWaiting()) {
+      auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
+      ctx->fulfiller_->fulfill(kj::mv(lostInfo));
+    }
+  });
 
   auto uErrorCtx = kj::heap<UncapturedErrorContext>();
   desc.SetUncapturedErrorCallback(
       [](const wgpu::Device&, wgpu::ErrorType type, const char* message, void* userdata) {
-        auto maybeTarget = static_cast<kj::Maybe<EventTarget*>*>(userdata);
+    auto maybeTarget = static_cast<kj::Maybe<EventTarget*>*>(userdata);
 
-        KJ_IF_SOME(target, *maybeTarget) {
-          if (target->getHandlerCount("uncapturederror") > 0) {
-            jsg::Ref<GPUError> error = nullptr;
-            switch (type) {
-            case wgpu::ErrorType::Validation:
-              error = jsg::alloc<GPUValidationError>(kj::str(message));
-              break;
-            case wgpu::ErrorType::NoError:
-              KJ_UNREACHABLE;
-            case wgpu::ErrorType::OutOfMemory:
-              error = jsg::alloc<GPUOutOfMemoryError>(kj::str(message));
-              break;
-            case wgpu::ErrorType::Internal:
-            case wgpu::ErrorType::DeviceLost:
-            case wgpu::ErrorType::Unknown:
-              error = jsg::alloc<GPUInternalError>(kj::str(message));
-              break;
-            }
-
-            auto init = GPUUncapturedErrorEventInit{kj::mv(error)};
-            auto ev = jsg::alloc<GPUUncapturedErrorEvent>("uncapturederror"_kj, kj::mv(init));
-            target->dispatchEventImpl(IoContext::current().getCurrentLock(), kj::mv(ev));
-            return;
-          }
+    KJ_IF_SOME(target, *maybeTarget) {
+      if (target->getHandlerCount("uncapturederror") > 0) {
+        jsg::Ref<GPUError> error = nullptr;
+        switch (type) {
+          case wgpu::ErrorType::Validation:
+            error = jsg::alloc<GPUValidationError>(kj::str(message));
+            break;
+          case wgpu::ErrorType::NoError:
+            KJ_UNREACHABLE;
+          case wgpu::ErrorType::OutOfMemory:
+            error = jsg::alloc<GPUOutOfMemoryError>(kj::str(message));
+            break;
+          case wgpu::ErrorType::Internal:
+          case wgpu::ErrorType::DeviceLost:
+          case wgpu::ErrorType::Unknown:
+            error = jsg::alloc<GPUInternalError>(kj::str(message));
+            break;
         }
 
-        // no "uncapturederror" handler
-        KJ_LOG(INFO, "WebGPU uncaptured error", kj::str((uint32_t)type), message);
-      },
-      (void*)&uErrorCtx->target);
+        auto init = GPUUncapturedErrorEventInit{kj::mv(error)};
+        auto ev = jsg::alloc<GPUUncapturedErrorEvent>("uncapturederror"_kj, kj::mv(init));
+        target->dispatchEventImpl(IoContext::current().getCurrentLock(), kj::mv(ev));
+        return;
+      }
+    }
+
+    // no "uncapturederror" handler
+    KJ_LOG(INFO, "WebGPU uncaptured error", kj::str((uint32_t)type), message);
+  }, (void*)&uErrorCtx->target);
 
   struct UserData {
     wgpu::Device device = nullptr;
@@ -160,16 +158,14 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
   };
   UserData userData;
 
-  adapter_.RequestDevice(
-      &desc,
+  adapter_.RequestDevice(&desc,
       [](WGPURequestDeviceStatus status, WGPUDevice cDevice, const char* message, void* pUserData) {
-        JSG_REQUIRE(status == WGPURequestDeviceStatus_Success, Error, message);
+    JSG_REQUIRE(status == WGPURequestDeviceStatus_Success, Error, message);
 
-        UserData& userData = *reinterpret_cast<UserData*>(pUserData);
-        userData.device = wgpu::Device::Acquire(cDevice);
-        userData.requestEnded = true;
-      },
-      (void*)&userData);
+    UserData& userData = *reinterpret_cast<UserData*>(pUserData);
+    userData.device = wgpu::Device::Acquire(cDevice);
+    userData.requestEnded = true;
+  }, (void*)&userData);
 
   KJ_ASSERT(userData.requestEnded);
 
@@ -202,4 +198,4 @@ jsg::Ref<GPUSupportedLimits> GPUAdapter::getLimits() {
   return jsg::alloc<GPUSupportedLimits>(kj::mv(wgpuLimits));
 }
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

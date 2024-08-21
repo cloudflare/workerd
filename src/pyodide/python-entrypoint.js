@@ -6,4 +6,4 @@
 // we delegate the implementation to `python-entrypoint-helper` which is a
 // BUILTIN module that can see our INTERNAL modules.
 
-export { default } from "pyodide:python-entrypoint-helper";
+export { default } from 'pyodide:python-entrypoint-helper';

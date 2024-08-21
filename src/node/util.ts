@@ -14,9 +14,7 @@ import {
   validateObject,
 } from 'node-internal:validators';
 
-import {
-  debuglog,
-} from 'node-internal:debuglog';
+import { debuglog } from 'node-internal:debuglog';
 export const debug = debuglog;
 export { debuglog };
 
@@ -31,41 +29,37 @@ import {
   formatWithOptions,
   stripVTControlCharacters,
 } from 'node-internal:internal_inspect';
-export {
-  inspect,
-  format,
-  formatWithOptions,
-  stripVTControlCharacters,
-};
+export { inspect, format, formatWithOptions, stripVTControlCharacters };
 
 export const types = internalTypes;
 
-export const {
-  MIMEParams,
-  MIMEType,
-} = utilImpl;
+export const { MIMEParams, MIMEType } = utilImpl;
 
-const callbackifyOnRejected = (reason: unknown, cb : Function) => {
+const callbackifyOnRejected = (reason: unknown, cb: Function) => {
   if (!reason) {
     reason = new ERR_FALSY_VALUE_REJECTION(`${reason}`);
   }
   return cb(reason);
 };
 
-export function callbackify
-    <T extends (...args: any[]) => Promise<any>>(original: T):
-    T extends (...args: infer TArgs) => Promise<infer TReturn> ? (...params: [...TArgs, (err: Error, ret: TReturn) => any]) => void : never {
+export function callbackify<T extends (...args: any[]) => Promise<any>>(
+  original: T
+): T extends (...args: infer TArgs) => Promise<infer TReturn>
+  ? (...params: [...TArgs, (err: Error, ret: TReturn) => any]) => void
+  : never {
   validateFunction(original, 'original');
 
-  function callbackified(this: unknown,
-                         ...args: [...unknown[],
-                         (err: unknown, ret: unknown) => void]) : any {
+  function callbackified(
+    this: unknown,
+    ...args: [...unknown[], (err: unknown, ret: unknown) => void]
+  ): any {
     const maybeCb = args.pop();
     validateFunction(maybeCb, 'last argument');
     const cb = (maybeCb as Function).bind(this);
-    Reflect.apply(original, this, args)
-      .then((ret: any) => queueMicrotask(() => cb(null, ret)),
-            (rej: any) => queueMicrotask(() => callbackifyOnRejected(rej, cb)));
+    Reflect.apply(original, this, args).then(
+      (ret: any) => queueMicrotask(() => cb(null, ret)),
+      (rej: any) => queueMicrotask(() => callbackifyOnRejected(rej, cb))
+    );
   }
 
   const descriptors = Object.getOwnPropertyDescriptors(original);
@@ -99,7 +93,7 @@ export function promisify(original: Function): Function {
       value: fn,
       enumerable: false,
       writable: false,
-      configurable: true
+      configurable: true,
     });
   }
 
@@ -132,7 +126,7 @@ export function promisify(original: Function): Function {
     value: fn,
     enumerable: false,
     writable: false,
-    configurable: true
+    configurable: true,
   });
 
   const descriptors = Object.getOwnPropertyDescriptors(original);
@@ -148,7 +142,6 @@ export function promisify(original: Function): Function {
 promisify.custom = kCustomPromisifiedSymbol;
 
 export function inherits(ctor: Function, superCtor: Function) {
-
   if (ctor === undefined || ctor === null)
     throw new ERR_INVALID_ARG_TYPE('ctor', 'Function', ctor);
 
@@ -156,13 +149,16 @@ export function inherits(ctor: Function, superCtor: Function) {
     throw new ERR_INVALID_ARG_TYPE('superCtor', 'Function', superCtor);
 
   if (superCtor.prototype === undefined) {
-    throw new ERR_INVALID_ARG_TYPE('superCtor.prototype',
-                                   'Object', superCtor.prototype);
+    throw new ERR_INVALID_ARG_TYPE(
+      'superCtor.prototype',
+      'Object',
+      superCtor.prototype
+    );
   }
   Object.defineProperty(ctor, 'super_', {
     value: superCtor,
     writable: true,
-    configurable: true
+    configurable: true,
   });
   Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
 }
@@ -182,42 +178,41 @@ export function _extend(target: Object, source: Object) {
 export const TextDecoder = globalThis.TextDecoder;
 export const TextEncoder = globalThis.TextEncoder;
 
-export function toUSVString(input : any) {
+export function toUSVString(input: any) {
   // TODO(cleanup): Apparently the typescript types for this aren't available yet?
   return (`${input}` as any).toWellFormed();
 }
 
-function pad(n: any) : string {
+function pad(n: any): string {
   return `${n}`.padStart(2, '0');
 }
 
+// prettier-ignore
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
                 'Oct', 'Nov', 'Dec'];
 
-function timestamp() : string {
+function timestamp(): string {
   const d = new Date();
-  const t = [
-    pad(d.getHours()),
-    pad(d.getMinutes()),
-    pad(d.getSeconds()),
-  ].join(':');
+  const t = [pad(d.getHours()), pad(d.getMinutes()), pad(d.getSeconds())].join(
+    ':'
+  );
   return `${d.getDate()} ${months[d.getMonth()]} ${t}`;
 }
 
-export function log(...args : any[]) {
+export function log(...args: any[]) {
   console.log('%s - %s', timestamp(), format(...args));
 }
 
-export function parseArgs(..._ : any[]) : any {
+export function parseArgs(..._: any[]): any {
   // We currently have no plans to implement the util.parseArgs API.
   throw new Error('node:util parseArgs is not implemented');
 }
 
-export function transferableAbortController(..._ : any[]) : any {
+export function transferableAbortController(..._: any[]): any {
   throw new Error('node:util transferableAbortController is not implemented');
 }
 
-export function transferableAbortSignal(..._ : any[]) : any {
+export function transferableAbortSignal(..._: any[]): any {
   throw new Error('node:util transferableAbortSignal is not implemented');
 }
 
@@ -231,7 +226,10 @@ export async function aborted(signal: AbortSignal, resource: object) {
   // this additional option. Unfortunately Node.js does not make this argument optional.
   // We'll just ignore it.
   validateAbortSignal(signal, 'signal');
-  validateObject(resource, 'resource', { allowArray: true, allowFunction: true });
+  validateObject(resource, 'resource', {
+    allowArray: true,
+    allowFunction: true,
+  });
   if (signal.aborted) return Promise.resolve();
   // TODO(cleanup): Apparently withResolvers isn't part of type defs we use yet
   const { promise, resolve } = (Promise as any).withResolvers();
@@ -240,7 +238,12 @@ export async function aborted(signal: AbortSignal, resource: object) {
   return promise;
 }
 
-export function deprecate(fn: Function, _1?: string, _2?: string, _3? : boolean) {
+export function deprecate(
+  fn: Function,
+  _1?: string,
+  _2?: string,
+  _3?: boolean
+) {
   // TODO(soon): Node.js's implementation wraps the given function in a new function that
   // logs a warning to the console if the function is called. Do we want to support that?
   // For now, we're just going to silently return the input method unmodified.

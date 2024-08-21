@@ -17,7 +17,9 @@ public:
 
   static jsg::Ref<TextEncoderStream> constructor(jsg::Lock& js);
 
-  kj::StringPtr getEncoding() { return "utf-8"_kj; }
+  kj::StringPtr getEncoding() {
+    return "utf-8"_kj;
+  }
 
   JSG_RESOURCE_TYPE(TextEncoderStream) {
     JSG_INHERIT(TransformStream);
@@ -38,13 +40,11 @@ public:
   };
 
   TextDecoderStream(jsg::Ref<TextDecoder> decoder,
-                    jsg::Ref<ReadableStream> readable,
-                    jsg::Ref<WritableStream> writable);
+      jsg::Ref<ReadableStream> readable,
+      jsg::Ref<WritableStream> writable);
 
   static jsg::Ref<TextDecoderStream> constructor(
-      jsg::Lock& js,
-      jsg::Optional<kj::String> label,
-      jsg::Optional<TextDecoderStreamInit> options);
+      jsg::Lock& js, jsg::Optional<kj::String> label, jsg::Optional<TextDecoderStreamInit> options);
 
   kj::StringPtr getEncoding();
   bool getFatal();

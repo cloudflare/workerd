@@ -9,8 +9,7 @@
 
 namespace workerd::api {
 
-class WritableStreamDefaultWriter: public jsg::Object,
-                                   public WritableStreamController::Writer {
+class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamController::Writer {
 public:
   explicit WritableStreamDefaultWriter();
 
@@ -19,8 +18,7 @@ public:
   // JavaScript API
 
   static jsg::Ref<WritableStreamDefaultWriter> constructor(
-      jsg::Lock& js,
-      jsg::Ref<WritableStream> stream);
+      jsg::Lock& js, jsg::Ref<WritableStream> stream);
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
   jsg::MemoizedIdentity<jsg::Promise<void>>& getReady();
@@ -65,8 +63,7 @@ public:
 
   // Internal API
 
-  void attach(
-      WritableStreamController& controller,
+  void attach(WritableStreamController& controller,
       jsg::Promise<void> closedPromise,
       jsg::Promise<void> readyPromise) override;
 
@@ -102,12 +99,14 @@ private:
 class WritableStream: public jsg::Object {
 public:
   explicit WritableStream(IoContext& ioContext,
-                          kj::Own<WritableStreamSink> sink,
-                          kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
-                          kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
+      kj::Own<WritableStreamSink> sink,
+      kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
+      kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
   explicit WritableStream(kj::Own<WritableStreamController> controller);
-  ~WritableStream() noexcept(false) { weakRef->invalidate(); }
+  ~WritableStream() noexcept(false) {
+    weakRef->invalidate();
+  }
 
   WritableStreamController& getController();
 
@@ -125,8 +124,7 @@ public:
   // ---------------------------------------------------------------------------
   // JS interface
 
-  static jsg::Ref<WritableStream> constructor(
-      jsg::Lock& js,
+  static jsg::Ref<WritableStream> constructor(jsg::Lock& js,
       jsg::Optional<UnderlyingSink> underlyingSink,
       jsg::Optional<StreamQueuingStrategy> queuingStrategy);
 
@@ -178,7 +176,9 @@ private:
   kj::Own<WeakRef<WritableStream>> weakRef =
       kj::refcounted<WeakRef<WritableStream>>(kj::Badge<WritableStream>(), *this);
 
-  kj::Own<WeakRef<WritableStream>> addWeakRef() { return weakRef->addRef(); }
+  kj::Own<WeakRef<WritableStream>> addWeakRef() {
+    return weakRef->addRef();
+  }
 
   void visitForGc(jsg::GcVisitor& visitor);
 

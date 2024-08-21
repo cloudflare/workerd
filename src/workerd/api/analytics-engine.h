@@ -26,10 +26,12 @@ namespace workerd::api {
 // https://blog.cloudflare.com/workers-analytics-engine/
 class AnalyticsEngine: public jsg::Object {
 public:
-  explicit AnalyticsEngine(uint logfwdrChannel, kj::String dataset,
-                           int64_t version, uint32_t ownerId)
-      : logfwdrChannel(logfwdrChannel), dataset(kj::mv(dataset)),
-        version(version), ownerId(ownerId) {}
+  explicit AnalyticsEngine(
+      uint logfwdrChannel, kj::String dataset, int64_t version, uint32_t ownerId)
+      : logfwdrChannel(logfwdrChannel),
+        dataset(kj::mv(dataset)),
+        version(version),
+        ownerId(ownerId) {}
   struct AnalyticsEngineEvent {
     // An array of values for the user-defined indexes, that provide a way for
     // users to improve the efficiency of common queries. In addition, by
@@ -50,8 +52,8 @@ public:
 
   // Send an Analytics Engine-compatible event to the configured logfwdr socket.
   // Like logfwdr itself, `writeDataPoint` makes no delivery guarantees.
-  void writeDataPoint(jsg::Lock& js,
-             jsg::Optional<api::AnalyticsEngine::AnalyticsEngineEvent> event);
+  void writeDataPoint(
+      jsg::Lock& js, jsg::Optional<api::AnalyticsEngine::AnalyticsEngineEvent> event);
 
   JSG_RESOURCE_TYPE(AnalyticsEngine) {
     JSG_METHOD(writeDataPoint);
@@ -73,7 +75,9 @@ private:
   int64_t version;
   uint32_t ownerId;
 
-  uint64_t now() { return millisToNanos(dateNow()); }
+  uint64_t now() {
+    return millisToNanos(dateNow());
+  }
 };
 #define EW_ANALYTICS_ENGINE_ISOLATE_TYPES                                                          \
   ::workerd::api::AnalyticsEngine, ::workerd::api::AnalyticsEngine::AnalyticsEngineEvent

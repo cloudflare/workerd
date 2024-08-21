@@ -10,5 +10,5 @@ export const test = {
     strictEqual(foo, 1);
     strictEqual(bar, undefined);
     strictEqual(baz.foo, foo);
-  }
+  },
 };

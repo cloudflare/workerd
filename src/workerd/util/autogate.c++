@@ -30,7 +30,7 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
     gates[(unsigned long)i] = false;
   }
 
-  for (auto name : autogates) {
+  for (auto name: autogates) {
     if (!name.startsWith("workerd-autogate-")) {
       LOG_ERROR_ONCE("Autogate configuration includes gate with invalid prefix.");
       continue;
@@ -60,7 +60,9 @@ void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates) {
   globalAutogate = Autogate(gates);
 }
 
-void Autogate::deinitAutogate() { globalAutogate = kj::none; }
+void Autogate::deinitAutogate() {
+  globalAutogate = kj::none;
+}
 
 void Autogate::initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames) {
   capnp::MallocMessageBuilder message;

@@ -2,7 +2,9 @@
 # All it does is walk through the imports in each of the worker's modules and attempts to import
 # them. Local imports are not possible because the worker file path is explicitly removed from the
 # module search path.
-CF_LOADED_MODULES=[]
+CF_LOADED_MODULES = []
+
+
 def _do_it():
     import ast
     from pathlib import Path

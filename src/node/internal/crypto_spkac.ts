@@ -27,28 +27,35 @@
 /* eslint-disable */
 
 import { default as cryptoImpl } from 'node-internal:crypto';
-import {
-  StringLike,
-  Buffer,
-} from 'node-internal:internal_buffer';
+import { StringLike, Buffer } from 'node-internal:internal_buffer';
 
-import {
-  getArrayBufferOrView,
-} from 'node-internal:crypto_util';
+import { getArrayBufferOrView } from 'node-internal:crypto_util';
 
 type ArrayLike = cryptoImpl.ArrayLike;
 
 export function verifySpkac(spkac: StringLike | ArrayLike, encoding?: string) {
-  return cryptoImpl.verifySpkac(getArrayBufferOrView(spkac as any, 'spkac', encoding));
+  return cryptoImpl.verifySpkac(
+    getArrayBufferOrView(spkac as any, 'spkac', encoding)
+  );
 }
 
-export function exportPublicKey(spkac: StringLike | ArrayLike, encoding?: string) {
-  const ret = cryptoImpl.exportPublicKey(getArrayBufferOrView(spkac as any, 'spkac', encoding));
+export function exportPublicKey(
+  spkac: StringLike | ArrayLike,
+  encoding?: string
+) {
+  const ret = cryptoImpl.exportPublicKey(
+    getArrayBufferOrView(spkac as any, 'spkac', encoding)
+  );
   return ret ? Buffer.from(ret) : Buffer.alloc(0);
 }
 
-export function exportChallenge(spkac: StringLike | ArrayLike, encoding?: string) {
-  const ret = cryptoImpl.exportChallenge(getArrayBufferOrView(spkac as any, 'spkac', encoding));
+export function exportChallenge(
+  spkac: StringLike | ArrayLike,
+  encoding?: string
+) {
+  const ret = cryptoImpl.exportChallenge(
+    getArrayBufferOrView(spkac as any, 'spkac', encoding)
+  );
   return ret ? Buffer.from(ret) : Buffer.alloc(0);
 }
 
@@ -61,8 +68,7 @@ export function exportChallenge(spkac: StringLike | ArrayLike, encoding?: string
 // For backwards compatibility reasons, this cannot be converted into a
 // ES6 Class.
 export function Certificate(this: any) {
-  if (!(this instanceof Certificate))
-    return new (Certificate as any)();
+  if (!(this instanceof Certificate)) return new (Certificate as any)();
 }
 
 Certificate.prototype.verifySpkac = verifySpkac;

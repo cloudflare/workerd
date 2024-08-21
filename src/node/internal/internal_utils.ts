@@ -32,83 +32,86 @@ import type { Encoding } from 'node-internal:buffer';
 
 const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;
 
-export function normalizeEncoding(enc?: string) : Encoding | undefined {
-  if (enc == null ||
-      enc === "utf8" ||
-      enc === "utf-8" ||
-      enc === "UTF8" ||
-      enc === "UTF-8") return UTF8;
+export function normalizeEncoding(enc?: string): Encoding | undefined {
+  if (
+    enc == null ||
+    enc === 'utf8' ||
+    enc === 'utf-8' ||
+    enc === 'UTF8' ||
+    enc === 'UTF-8'
+  )
+    return UTF8;
   return slowCases(enc);
 }
 
-export function slowCases(enc: string) : Encoding | undefined {
+export function slowCases(enc: string): Encoding | undefined {
   switch (enc.length) {
     case 4:
-      if (enc === "UTF8") return UTF8;
-      if (enc === "ucs2" || enc === "UCS2") return UTF16LE;
+      if (enc === 'UTF8') return UTF8;
+      if (enc === 'ucs2' || enc === 'UCS2') return UTF16LE;
       enc = `${enc}`.toLowerCase();
-      if (enc === "utf8") return UTF8;
-      if (enc === "ucs2") return UTF16LE;
+      if (enc === 'utf8') return UTF8;
+      if (enc === 'ucs2') return UTF16LE;
       break;
     case 3:
-      if (
-        enc === "hex" || enc === "HEX" ||
-        `${enc}`.toLowerCase() === "hex"
-      ) {
+      if (enc === 'hex' || enc === 'HEX' || `${enc}`.toLowerCase() === 'hex') {
         return HEX;
       }
       break;
     case 5:
-      if (enc === "ascii") return ASCII;
-      if (enc === "ucs-2") return UTF16LE;
-      if (enc === "UTF-8") return UTF8;
-      if (enc === "ASCII") return ASCII;
-      if (enc === "UCS-2") return UTF16LE;
+      if (enc === 'ascii') return ASCII;
+      if (enc === 'ucs-2') return UTF16LE;
+      if (enc === 'UTF-8') return UTF8;
+      if (enc === 'ASCII') return ASCII;
+      if (enc === 'UCS-2') return UTF16LE;
       enc = `${enc}`.toLowerCase();
-      if (enc === "utf-8") return UTF8;
-      if (enc === "ascii") return ASCII;
-      if (enc === "ucs-2") return UTF16LE;
+      if (enc === 'utf-8') return UTF8;
+      if (enc === 'ascii') return ASCII;
+      if (enc === 'ucs-2') return UTF16LE;
       break;
     case 6:
-      if (enc === "base64") return BASE64;
-      if (enc === "latin1" || enc === "binary") return LATIN1;
-      if (enc === "BASE64") return BASE64;
-      if (enc === "LATIN1" || enc === "BINARY") return LATIN1;
+      if (enc === 'base64') return BASE64;
+      if (enc === 'latin1' || enc === 'binary') return LATIN1;
+      if (enc === 'BASE64') return BASE64;
+      if (enc === 'LATIN1' || enc === 'BINARY') return LATIN1;
       enc = `${enc}`.toLowerCase();
-      if (enc === "base64") return BASE64;
-      if (enc === "latin1" || enc === "binary") return LATIN1;
+      if (enc === 'base64') return BASE64;
+      if (enc === 'latin1' || enc === 'binary') return LATIN1;
       break;
     case 7:
       if (
-        enc === "utf16le" || enc === "UTF16LE" ||
-        `${enc}`.toLowerCase() === "utf16le"
+        enc === 'utf16le' ||
+        enc === 'UTF16LE' ||
+        `${enc}`.toLowerCase() === 'utf16le'
       ) {
         return UTF16LE;
       }
       break;
     case 8:
       if (
-        enc === "utf-16le" || enc === "UTF-16LE" ||
-        `${enc}`.toLowerCase() === "utf-16le"
+        enc === 'utf-16le' ||
+        enc === 'UTF-16LE' ||
+        `${enc}`.toLowerCase() === 'utf-16le'
       ) {
         return UTF16LE;
       }
       break;
     case 9:
       if (
-        enc === "base64url" || enc === "BASE64URL" ||
-        `${enc}`.toLowerCase() === "base64url"
+        enc === 'base64url' ||
+        enc === 'BASE64URL' ||
+        `${enc}`.toLowerCase() === 'base64url'
       ) {
         return BASE64URL;
       }
       break;
     default:
-      if (enc === "") return UTF8;
+      if (enc === '') return UTF8;
   }
   return undefined;
 }
 
-export function spliceOne(list: (string|undefined)[], index: number) {
+export function spliceOne(list: (string | undefined)[], index: number) {
   for (; index + 1 < list.length; index++) list[index] = list[index + 1];
   list.pop();
 }
@@ -124,29 +127,30 @@ export const SKIP_SYMBOLS = 16;
 const isNumericLookup: Record<string, boolean> = {};
 export function isArrayIndex(value: unknown): value is number | string {
   switch (typeof value) {
-    case "number":
+    case 'number':
       return value >= 0 && (value | 0) === value;
-    case "string": {
+    case 'string': {
       const result = isNumericLookup[value];
       if (result !== void 0) {
         return result;
       }
       const length = value.length;
       if (length === 0) {
-        return isNumericLookup[value] = false;
+        return (isNumericLookup[value] = false);
       }
       let ch = 0;
       let i = 0;
       for (; i < length; ++i) {
         ch = value.charCodeAt(i);
         if (
-          i === 0 && ch === 0x30 && length > 1 /* must not start with 0 */ ||
-          ch < 0x30 /* 0 */ || ch > 0x39 /* 9 */
+          (i === 0 && ch === 0x30 && length > 1) /* must not start with 0 */ ||
+          ch < 0x30 /* 0 */ ||
+          ch > 0x39 /* 9 */
         ) {
-          return isNumericLookup[value] = false;
+          return (isNumericLookup[value] = false);
         }
       }
-      return isNumericLookup[value] = true;
+      return (isNumericLookup[value] = true);
     }
     default:
       return false;
@@ -156,7 +160,7 @@ export function isArrayIndex(value: unknown): value is number | string {
 export function getOwnNonIndexProperties(
   // deno-lint-ignore ban-types
   obj: object,
-  filter: number,
+  filter: number
 ): (string | symbol)[] {
   let allProperties = [
     ...Object.getOwnPropertyNames(obj),
@@ -186,10 +190,10 @@ export function getOwnNonIndexProperties(
     if (filter & ONLY_CONFIGURABLE && !desc.configurable) {
       continue;
     }
-    if (filter & SKIP_STRINGS && typeof key === "string") {
+    if (filter & SKIP_STRINGS && typeof key === 'string') {
       continue;
     }
-    if (filter & SKIP_SYMBOLS && typeof key === "symbol") {
+    if (filter & SKIP_SYMBOLS && typeof key === 'symbol') {
       continue;
     }
     result.push(key);
@@ -205,7 +209,7 @@ export function createDeferredPromise() {
   const promise = new Promise((res, rej) => {
     resolve = res;
     reject = rej;
-  })
+  });
   return {
     promise,
     resolve,

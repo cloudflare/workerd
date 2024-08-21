@@ -19,9 +19,8 @@ constexpr bool isWhitespace(const char c) noexcept {
 constexpr std::array<uint8_t, 256> token_table = []() consteval {
   std::array<uint8_t, 256> result{};
 
-  for (uint8_t c : { '!' ,  '#' ,  '$' ,  '%' ,  '&' ,  '\'' ,
-          '*' ,  '+' ,  '\\' ,  '-' ,  '.' ,  '^' ,
-          '_' ,  '`' ,  '|' ,  '~'}) {
+  for (uint8_t c:
+      {'!', '#', '$', '%', '&', '\'', '*', '+', '\\', '-', '.', '^', '_', '`', '|', '~'}) {
     result[c] = true;
   }
 
@@ -69,7 +68,9 @@ constexpr bool isQuotedStringTokenChar(const uint8_t c) noexcept {
 kj::ArrayPtr<const char> skipWhitespace(kj::ArrayPtr<const char> str) {
   auto ptr = str.begin();
   auto end = str.end();
-  while (ptr != end && isWhitespace(*ptr)) { ptr++; }
+  while (ptr != end && isWhitespace(*ptr)) {
+    ptr++;
+  }
   return str.slice(ptr - str.begin());
 }
 
@@ -81,7 +82,7 @@ kj::ArrayPtr<const char> trimWhitespace(kj::ArrayPtr<const char> str) {
 
 constexpr bool hasInvalidCodepoints(kj::ArrayPtr<const char> str, auto predicate) {
   bool has_invalid_codepoints = false;
-  for (const char ptr : str) {
+  for (const char ptr: str) {
     has_invalid_codepoints |= !predicate(static_cast<uint8_t>(ptr));
   }
   return has_invalid_codepoints;
@@ -243,12 +244,12 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
   return kj::mv(result);
 }
 
-MimeType::MimeType(kj::StringPtr type,
-                   kj::StringPtr subtype,
-                   kj::Maybe<MimeParams> params)
+MimeType::MimeType(kj::StringPtr type, kj::StringPtr subtype, kj::Maybe<MimeParams> params)
     : type_(toLowerCopy(type)),
       subtype_(toLowerCopy(subtype)) {
-  KJ_IF_SOME(p, params) { params_ = kj::mv(p); }
+  KJ_IF_SOME(p, params) {
+    params_ = kj::mv(p);
+  }
 }
 
 kj::StringPtr MimeType::type() const {
@@ -276,8 +277,7 @@ const MimeType::MimeParams& MimeType::params() const {
 }
 
 bool MimeType::addParam(kj::ArrayPtr<const char> name, kj::ArrayPtr<const char> value) {
-  if (name.size() == 0 ||
-      hasInvalidCodepoints(name, isTokenChar) ||
+  if (name.size() == 0 || hasInvalidCodepoints(name, isTokenChar) ||
       hasInvalidCodepoints(value, isQuotedStringTokenChar)) {
     return false;
   }
@@ -301,7 +301,7 @@ kj::String MimeType::paramsToString() const {
 
 void MimeType::paramsToString(MimeType::ToStringBuffer& buffer) const {
   bool first = true;
-  for (auto& param : params()) {
+  for (auto& param: params()) {
     buffer.append(first ? "" : ";", param.key, "=");
     first = false;
     if (param.value.size() == 0) {
@@ -338,7 +338,7 @@ kj::String MimeType::toString() const {
 MimeType MimeType::clone(ParseOptions options) const {
   MimeParams copy;
   if (!(options & ParseOptions::IGNORE_PARAMS)) {
-    for (const auto& entry : params_) {
+    for (const auto& entry: params_) {
       copy.insert(kj::str(entry.key), kj::str(entry.value));
     }
   }
@@ -349,7 +349,9 @@ bool MimeType::operator==(const MimeType& other) const {
   return this == &other || (type_ == other.type_ && subtype_ == other.subtype_);
 }
 
-MimeType::operator kj::String() const { return toString(); }
+MimeType::operator kj::String() const {
+  return toString();
+}
 
 kj::String KJ_STRINGIFY(const MimeType& mimeType) {
   return mimeType.toString();
@@ -376,37 +378,32 @@ const MimeType MimeType::WILDCARD = MimeType("*"_kj, "*"_kj);
 
 bool MimeType::isText(const MimeType& mimeType) {
   auto type = mimeType.type();
-  return type == "text" ||
-      isXml(mimeType) ||
-      isJson(mimeType) ||
-      isJavascript(mimeType);
+  return type == "text" || isXml(mimeType) || isJson(mimeType) || isJavascript(mimeType);
 }
 
 bool MimeType::isXml(const MimeType& mimeType) {
   auto type = mimeType.type();
   auto subtype = mimeType.subtype();
   return (type == "text" || type == "application") &&
-         (subtype == "xml" || subtype.endsWith("+xml"));
+      (subtype == "xml" || subtype.endsWith("+xml"));
 }
 
 bool MimeType::isJson(const MimeType& mimeType) {
   auto type = mimeType.type();
   auto subtype = mimeType.subtype();
   return (type == "text" || type == "application") &&
-         (subtype == "json" || subtype.endsWith("+json"));
+      (subtype == "json" || subtype.endsWith("+json"));
 }
 
 bool MimeType::isFont(const MimeType& mimeType) {
   auto type = mimeType.type();
   auto subtype = mimeType.subtype();
   return (type == "font" || type == "application") &&
-         (subtype.startsWith("font-") || subtype.startsWith("x-font-"));
+      (subtype.startsWith("font-") || subtype.startsWith("x-font-"));
 }
 
 bool MimeType::isJavascript(const MimeType& mimeType) {
-  return JAVASCRIPT == mimeType ||
-         XJAVASCRIPT == mimeType ||
-         TEXT_JAVASCRIPT == mimeType;
+  return JAVASCRIPT == mimeType || XJAVASCRIPT == mimeType || TEXT_JAVASCRIPT == mimeType;
 }
 
 bool MimeType::isImage(const MimeType& mimeType) {
@@ -429,17 +426,18 @@ kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
     // a quoted section, returning the position of the comma or kj::none
     // if not found.
     for (size_t i = 0; i < input.size(); ++i) {
-      if (input[i] == '"' && (i == 0 || input[i-1] != '\\')) {
+      if (input[i] == '"' && (i == 0 || input[i - 1] != '\\')) {
         // Skip to the end of the quoted section
-        while (++i < input.size() && (input[i] != '"' || input[i-1] == '\\')) {}
-      } else if (input[i] == ',' && (i == 0 || input[i-1] != '\\')) {
+        while (++i < input.size() && (input[i] != '"' || input[i - 1] == '\\')) {
+        }
+      } else if (input[i] == ',' && (i == 0 || input[i - 1] != '\\')) {
         return i;
       }
     }
     return kj::none;
   };
 
-  constexpr static auto processPart = [](auto& mimeType, auto& part) -> kj::Maybe<MimeType>{
+  constexpr static auto processPart = [](auto& mimeType, auto& part) -> kj::Maybe<MimeType> {
     KJ_IF_SOME(parsed, tryParseImpl(part)) {
       if (parsed == MimeType::WILDCARD) return kj::none;
 

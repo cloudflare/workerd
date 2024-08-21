@@ -33,5 +33,5 @@ KJ_TEST("can check thrown exception type and message") {
   }
 }
 
-} // namespace
-} // namespace workerd
+}  // namespace
+}  // namespace workerd

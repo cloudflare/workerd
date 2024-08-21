@@ -2,18 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import {
-  ok,
-  strictEqual,
-  deepStrictEqual,
-} from 'node:assert';
+import { ok, strictEqual, deepStrictEqual } from 'node:assert';
 
 export const test = {
   async test() {
     const res = new Response('test', {
       headers: {
         'content-type': 'text/plain, x/y, text/html',
-      }
+      },
     });
 
     const blob = await res.blob();
@@ -23,7 +19,7 @@ export const test = {
 
     strictEqual(await blob.text(), 'test');
     strictEqual(blob.type, 'text/html');
-  }
+  },
 };
 
 export const bytes = {
@@ -38,5 +34,5 @@ export const bytes = {
     const u8_2 = await res.bytes();
     deepStrictEqual(u8_2, check);
     ok(u8_2 instanceof Uint8Array);
-  }
+  },
 };

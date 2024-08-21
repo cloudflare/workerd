@@ -6,6 +6,8 @@ workspace(name = "workerd")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
 
+NODE_VERSION = "20.14.0"
+
 http_archive(
     name = "bazel_skylib",
     sha256 = "9f38886a40548c6e96c106b752f242130ee11aaa068a56ba7e56f4511f33e4f2",
@@ -141,7 +143,7 @@ http_archive(
     urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-stdlib/pyodide_packages.tar.zip"],
 )
 
-load("//:build/pyodide_bucket.bzl", "PYODIDE_LOCK_SHA256", "PYODIDE_GITHUB_RELEASE_URL", "PYODIDE_ALL_WHEELS_ZIP_SHA256")
+load("//:build/pyodide_bucket.bzl", "PYODIDE_ALL_WHEELS_ZIP_SHA256", "PYODIDE_GITHUB_RELEASE_URL", "PYODIDE_LOCK_SHA256")
 
 http_file(
     name = "pyodide-lock.json",
@@ -151,15 +153,15 @@ http_file(
 
 http_archive(
     name = "all_pyodide_wheels",
-    sha256 = PYODIDE_ALL_WHEELS_ZIP_SHA256,
-    urls = [PYODIDE_GITHUB_RELEASE_URL + "all_wheels.zip"],
     build_file_content = """
 filegroup(
     name = "whls",
     srcs = glob(["*"]),
     visibility = ["//visibility:public"]
 )
-    """
+    """,
+    sha256 = PYODIDE_ALL_WHEELS_ZIP_SHA256,
+    urls = [PYODIDE_GITHUB_RELEASE_URL + "all_wheels.zip"],
 )
 
 # ========================================================================================
@@ -220,9 +222,9 @@ git_repository(
 
 git_repository(
     name = "fp16",
-    commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
     build_file_content = "exports_files(glob([\"**\"]))",
-    remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git"
+    commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
+    remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git",
 )
 
 # Bindings for abseil libraries used by V8
@@ -373,9 +375,9 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2021",
-    versions = ["1.77.0"], # LLVM 17
     # Rust registers wasm targets by default which we don't need, workerd is only built for its native platform.
     extra_target_triples = [],
+    versions = ["1.77.0"],  # LLVM 17
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
@@ -395,52 +397,44 @@ rust_analyzer_dependencies()
 #
 # workerd uses Node.js scripts for generating TypeScript types.
 
-# Fetch rules_nodejs before aspect_rules_js, otherwise we'll get an outdated rules_nodejs version.
-http_archive(
-    name = "rules_nodejs",
-    integrity = "sha256-h8YXHFvntpU41Gldne0priYmxe12qa3u3ON7Y8c772c=",
-    strip_prefix = "rules_nodejs-6.2.0",
-    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.2.0/rules_nodejs-v6.2.0.tar.gz",
-)
-
 http_archive(
     name = "aspect_rules_js",
-    integrity = "sha256-/GiHCR7jJDZh+1Mv0yRCMLbhk8IlZqA4yf10jKaPuIA=",
-    strip_prefix = "rules_js-1.42.3",
-    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.42.3.tar.gz",
+    sha256 = "6b7e73c35b97615a09281090da3645d9f03b2a09e8caa791377ad9022c88e2e6",
+    strip_prefix = "rules_js-2.0.0",
+    url = "https://github.com/aspect-build/rules_js/releases/download/v2.0.0/rules_js-v2.0.0.tar.gz",
 )
 
 http_archive(
     name = "aspect_rules_ts",
-    integrity = "sha256-9ppkUrEp052bBfPf+LEFcYW7GVtNrwz/QZmI3nV8bDE=",
-    strip_prefix = "rules_ts-2.4.2",
-    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v2.4.2.tar.gz",
+    sha256 = "ee7dcc35faef98f3050df9cf26f2a72ef356cab8ad927efb1c4dc119ac082a19",
+    strip_prefix = "rules_ts-3.0.0",
+    url = "https://github.com/aspect-build/rules_ts/releases/download/v3.0.0/rules_ts-v3.0.0.tar.gz",
 )
 
 load("@aspect_rules_js//js:repositories.bzl", "rules_js_dependencies")
 
 rules_js_dependencies()
 
-load("@rules_nodejs//nodejs:repositories.bzl", "nodejs_register_toolchains")
+load("@aspect_rules_js//js:toolchains.bzl", "rules_js_register_toolchains")
 
-nodejs_register_toolchains(
-    name = "nodejs",
+rules_js_register_toolchains(
     node_urls = [
         # github workflows may substitute a mirror URL here to avoid fetch failures.
         # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
         "https://nodejs.org/dist/v{version}/{filename}",
     ],
-    node_version = "20.14.0",
+    node_version = NODE_VERSION,
 )
 
-load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies", TS_LATEST_VERSION = "LATEST_TYPESCRIPT_VERSION")
+load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies")
 
-rules_ts_dependencies(ts_version = TS_LATEST_VERSION)
+rules_ts_dependencies(ts_version_from = "//:package.json")
 
-load("@aspect_rules_js//npm:npm_import.bzl", "npm_translate_lock")
+load("@aspect_rules_js//npm:repositories.bzl", "npm_translate_lock")
 
 npm_translate_lock(
     name = "npm",
+    npmrc = "//:.npmrc",
     patch_args = {
         "capnp-ts@0.7.0": ["-p1"],
     },
@@ -472,6 +466,7 @@ npm_repositories()
 
 http_archive(
     name = "v8",
+    integrity = "sha256-yoLczQj1XEZL4EHVRjAwpVjgr9/q0YlRGnNX47Ke2ws=",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -498,7 +493,6 @@ http_archive(
         "//:patches/v8/0019-wasm-Fix-more-code-logging-races.patch",
         "//:patches/v8/0020-wasm-Remove-destructor-of-LogCodesTask.patch",
     ],
-    integrity = "sha256-yoLczQj1XEZL4EHVRjAwpVjgr9/q0YlRGnNX47Ke2ws=",
     strip_prefix = "v8-12.8.374.10",
     url = "https://github.com/v8/v8/archive/refs/tags/12.8.374.10.tar.gz",
 )

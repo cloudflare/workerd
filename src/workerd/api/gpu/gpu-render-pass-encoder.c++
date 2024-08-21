@@ -10,9 +10,10 @@ void GPURenderPassEncoder::setPipeline(jsg::Ref<GPURenderPipeline> pipeline) {
   encoder_.SetPipeline(*pipeline);
 }
 
-void GPURenderPassEncoder::draw(GPUSize32 vertexCount, jsg::Optional<GPUSize32> instanceCount,
-                                jsg::Optional<GPUSize32> firstVertex,
-                                jsg::Optional<GPUSize32> firstInstance) {
+void GPURenderPassEncoder::draw(GPUSize32 vertexCount,
+    jsg::Optional<GPUSize32> instanceCount,
+    jsg::Optional<GPUSize32> firstVertex,
+    jsg::Optional<GPUSize32> firstInstance) {
   KJ_IF_SOME(iCount, instanceCount) {
     KJ_IF_SOME(fVertex, firstVertex) {
       KJ_IF_SOME(fInstance, firstInstance) {
@@ -25,4 +26,4 @@ void GPURenderPassEncoder::draw(GPUSize32 vertexCount, jsg::Optional<GPUSize32> 
   return encoder_.Draw(vertexCount);
 }
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

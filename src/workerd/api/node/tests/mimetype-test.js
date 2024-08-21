@@ -1,11 +1,6 @@
-import {
-  deepStrictEqual,
-  ok,
-  strictEqual,
-} from 'node:assert';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert';
 
 import { MIMEType } from 'node:util';
-
 
 export const test_ok = {
   test() {
@@ -24,18 +19,14 @@ export const test_ok = {
 
     deepStrictEqual(Array.from(mt.params), [
       ['charset', 'utf-8'],
-      ['boundary', 'foo']
+      ['boundary', 'foo'],
     ]);
 
-    deepStrictEqual(Array.from(mt.params.keys()), [
-      'charset', 'boundary'
-    ]);
+    deepStrictEqual(Array.from(mt.params.keys()), ['charset', 'boundary']);
 
-    deepStrictEqual(Array.from(mt.params.values()), [
-      'utf-8', 'foo'
-    ]);
+    deepStrictEqual(Array.from(mt.params.values()), ['utf-8', 'foo']);
 
     mt.params.delete('boundary');
     ok(!mt.params.has('boundary'));
-  }
+  },
 };

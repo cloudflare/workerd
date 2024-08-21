@@ -2,22 +2,28 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
+import assert from 'node:assert';
 
-async function assertRequestCacheThrowsError(cacheHeader: RequestCache,
+async function assertRequestCacheThrowsError(
+  cacheHeader: RequestCache,
   errorName: String = 'Error',
-  errorMessage: String = "The 'cache' field on 'RequestInitializerDict' is not implemented.") {
-  assert.throws(() => {
-    const header = { cache : cacheHeader};
-    const req: RequestInit = header;
-    new Request('https://example.org', req);
-  }, {
-    name: errorName,
-    message: errorMessage,
-  });
+  errorMessage: String = "The 'cache' field on 'RequestInitializerDict' is not implemented."
+) {
+  assert.throws(
+    () => {
+      const header = { cache: cacheHeader };
+      const req: RequestInit = header;
+      new Request('https://example.org', req);
+    },
+    {
+      name: errorName,
+      message: errorMessage,
+    }
+  );
 }
 
-async function assertFetchCacheRejectsError(cacheHeader: RequestCache,
+async function assertFetchCacheRejectsError(
+  cacheHeader: RequestCache,
   errorName: String = 'Error',
   errorMessage: String = "The 'cache' field on 'RequestInitializerDict' is not implemented.") {
   await assert.rejects((async () => {
@@ -55,5 +61,5 @@ export const cacheMode = {
           'Unsupported cache mode: ' + cacheMode);
       }
     }
-  }
-}
+  },
+};

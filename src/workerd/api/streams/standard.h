@@ -134,16 +134,13 @@ public:
   using Entry = typename Self::QueueType::Entry;
   using StateListener = typename Self::QueueType::ConsumerImpl::StateListener;
 
-  ReadableImpl(UnderlyingSource underlyingSource,
-               StreamQueuingStrategy queuingStrategy);
+  ReadableImpl(UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
 
   // Invokes the start algorithm to initialize the underlying source.
   void start(jsg::Lock& js, jsg::Ref<Self> self);
 
   // If the readable is not already closed or errored, initiates a cancellation.
-  jsg::Promise<void> cancel(jsg::Lock& js,
-                             jsg::Ref<Self> self,
-                             v8::Local<v8::Value> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> maybeReason);
 
   // True if the readable is not closed, not errored, and close has not already been requested.
   bool canCloseOrEnqueue();
@@ -268,9 +265,7 @@ public:
 
   WritableImpl(WritableStream& owner);
 
-  jsg::Promise<void> abort(jsg::Lock& js,
-                            jsg::Ref<Self> self,
-                            v8::Local<v8::Value> reason);
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
 
   void advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self);
 
@@ -289,14 +284,10 @@ public:
   void finishErroring(jsg::Lock& js, jsg::Ref<Self> self);
 
   void finishInFlightClose(
-      jsg::Lock& js,
-      jsg::Ref<Self> self,
-      kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
+      jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
 
   void finishInFlightWrite(
-      jsg::Lock& js,
-      jsg::Ref<Self> self,
-      kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
+      jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
 
   ssize_t getDesiredSize();
 
@@ -306,8 +297,7 @@ public:
 
   kj::Maybe<WritableStreamJsController&> tryGetOwner();
 
-  void setup(
-      jsg::Lock& js,
+  void setup(jsg::Lock& js,
       jsg::Ref<Self> self,
       UnderlyingSink underlyingSink,
       StreamQueuingStrategy queuingStrategy);
@@ -336,7 +326,6 @@ public:
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-
   struct Algorithms {
     kj::Maybe<jsg::Function<UnderlyingSink::AbortAlgorithm>> abort;
     kj::Maybe<jsg::Function<UnderlyingSink::CloseAlgorithm>> close;
@@ -369,10 +358,8 @@ private:
   // try tracing each other.
   kj::Maybe<kj::Own<WeakRef<WritableStream>>> owner;
   jsg::Ref<AbortSignal> signal;
-  kj::OneOf<StreamStates::Closed,
-            StreamStates::Errored,
-            StreamStates::Erroring,
-            Writable> state = Writable();
+  kj::OneOf<StreamStates::Closed, StreamStates::Errored, StreamStates::Erroring, Writable> state =
+      Writable();
   Algorithms algorithms;
   bool started = false;
   bool starting = false;
@@ -402,13 +389,12 @@ public:
   using QueueType = ValueQueue;
   using ReadableImpl = ReadableImpl<ReadableStreamDefaultController>;
 
-  ReadableStreamDefaultController(UnderlyingSource underlyingSource,
-                                  StreamQueuingStrategy queuingStrategy);
+  ReadableStreamDefaultController(
+      UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
 
   void start(jsg::Lock& js);
 
-  jsg::Promise<void> cancel(jsg::Lock& js,
-                            jsg::Optional<v8::Local<v8::Value>> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
 
   void close(jsg::Lock& js);
 
@@ -464,8 +450,7 @@ private:
 // object name.
 class ReadableStreamBYOBRequest: public jsg::Object {
 public:
-  ReadableStreamBYOBRequest(
-      jsg::Lock& js,
+  ReadableStreamBYOBRequest(jsg::Lock& js,
       kj::Own<ByteQueue::ByobRequest> readRequest,
       jsg::Ref<ReadableByteStreamController> controller);
 
@@ -505,8 +490,8 @@ private:
     jsg::V8Ref<v8::Uint8Array> view;
 
     Impl(jsg::Lock& js,
-         kj::Own<ByteQueue::ByobRequest> readRequest,
-         jsg::Ref<ReadableByteStreamController> controller);
+        kj::Own<ByteQueue::ByobRequest> readRequest,
+        jsg::Ref<ReadableByteStreamController> controller);
 
     void updateView(jsg::Lock& js);
   };
@@ -525,13 +510,12 @@ public:
   using QueueType = ByteQueue;
   using ReadableImpl = ReadableImpl<ReadableByteStreamController>;
 
-  ReadableByteStreamController(UnderlyingSource underlyingSource,
-                               StreamQueuingStrategy queuingStrategy);
+  ReadableByteStreamController(
+      UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
 
   void start(jsg::Lock& js);
 
-  jsg::Promise<void> cancel(jsg::Lock& js,
-                             jsg::Optional<v8::Local<v8::Value>> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
 
   void close(jsg::Lock& js);
 
@@ -598,12 +582,11 @@ public:
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
 
-  bool isStarted() { return impl.started; }
+  bool isStarted() {
+    return impl.started;
+  }
 
-  void setup(
-      jsg::Lock& js,
-      UnderlyingSink underlyingSink,
-      StreamQueuingStrategy queuingStrategy);
+  void setup(jsg::Lock& js, UnderlyingSink underlyingSink, StreamQueuingStrategy queuingStrategy);
 
   jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> value);
 
@@ -638,9 +621,9 @@ public:
   TransformStreamDefaultController(jsg::Lock& js);
 
   void init(jsg::Lock& js,
-            jsg::Ref<ReadableStream>& readable,
-            jsg::Ref<WritableStream>& writable,
-            jsg::Optional<Transformer> maybeTransformer);
+      jsg::Ref<ReadableStream>& readable,
+      jsg::Ref<WritableStream>& writable,
+      jsg::Optional<Transformer> maybeTransformer);
 
   // The startPromise is used by both the readable and writable sides in their respective
   // start algorithms. The promise itself is resolved within the init function when the
@@ -699,10 +682,8 @@ private:
     }
   };
 
-  void errorWritableAndUnblockWrite(jsg::Lock& js,
-                                    v8::Local<v8::Value> reason);
-  jsg::Promise<void> performTransform(jsg::Lock& js,
-                                       v8::Local<v8::Value> chunk);
+  void errorWritableAndUnblockWrite(jsg::Lock& js, v8::Local<v8::Value> reason);
+  jsg::Promise<void> performTransform(jsg::Lock& js, v8::Local<v8::Value> chunk);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
 
   kj::Maybe<IoContext&> ioContext;

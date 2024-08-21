@@ -41,7 +41,7 @@ struct GPURequestAdapterOptions {
   JSG_STRUCT(powerPreference, forceFallbackAdapter);
 };
 
-class GPU : public jsg::Object {
+class GPU: public jsg::Object {
 public:
   explicit GPU();
   JSG_RESOURCE_TYPE(GPU) {
@@ -49,8 +49,8 @@ public:
   }
 
 private:
-  jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
-  requestAdapter(jsg::Lock&, jsg::Optional<GPURequestAdapterOptions>);
+  jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>> requestAdapter(
+      jsg::Lock&, jsg::Optional<GPURequestAdapterOptions>);
   dawn::native::Instance instance_;
   kj::Own<AsyncRunner> async_;
 };
@@ -88,4 +88,4 @@ private:
       api::gpu::GPURenderPassTimestampWrites, api::gpu::GPUImageCopyTexture,                       \
       api::gpu::GPUImageCopyBuffer, api::gpu::GPUOrigin3DDict
 
-}; // namespace workerd::api::gpu
+};  // namespace workerd::api::gpu

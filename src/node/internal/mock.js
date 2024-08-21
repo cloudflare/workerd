@@ -176,13 +176,13 @@ export class MockTracker {
    * @returns {ProxyConstructor} The mock function tracker.
    */
   fn(
-    original = function() {},
+    original = function () {},
     implementation = original,
-    options = kEmptyObject,
+    options = kEmptyObject
   ) {
     if (original !== null && typeof original === 'object') {
       options = original;
-      original = function() {};
+      original = function () {};
       implementation = original;
     } else if (implementation !== null && typeof implementation === 'object') {
       options = implementation;
@@ -194,7 +194,11 @@ export class MockTracker {
     validateObject(options, 'options');
     const { times = Infinity } = options;
     validateTimes(times, 'options.times');
-    const ctx = new MockFunctionContext(implementation, { __proto__: null, original }, times);
+    const ctx = new MockFunctionContext(
+      implementation,
+      { __proto__: null, original },
+      times
+    );
     return this.#setupMock(ctx, original);
   }
 
@@ -213,7 +217,7 @@ export class MockTracker {
     objectOrFunction,
     methodName,
     implementation = kDefaultFunction,
-    options = kEmptyObject,
+    options = kEmptyObject
   ) {
     validateStringOrSymbol(methodName, 'methodName');
     if (typeof objectOrFunction !== 'function') {
@@ -228,11 +232,7 @@ export class MockTracker {
     validateFunction(implementation, 'implementation');
     validateObject(options, 'options');
 
-    const {
-      getter = false,
-      setter = false,
-      times = Infinity,
-    } = options;
+    const { getter = false, setter = false, times = Infinity } = options;
 
     validateBoolean(getter, 'options.getter');
     validateBoolean(setter, 'options.setter');
@@ -240,7 +240,9 @@ export class MockTracker {
 
     if (setter && getter) {
       throw new ERR_INVALID_ARG_VALUE(
-        'options.setter', setter, "cannot be used with 'options.getter'",
+        'options.setter',
+        setter,
+        "cannot be used with 'options.getter'"
       );
     }
     const descriptor = findMethodOnPrototypeChain(objectOrFunction, methodName);
@@ -257,13 +259,20 @@ export class MockTracker {
 
     if (typeof original !== 'function') {
       throw new ERR_INVALID_ARG_VALUE(
-        'methodName', original, 'must be a method',
+        'methodName',
+        original,
+        'must be a method'
       );
     }
 
-    const restore = { __proto__: null, descriptor, object: objectOrFunction, methodName };
-    const impl = implementation === kDefaultFunction ?
-      original : implementation;
+    const restore = {
+      __proto__: null,
+      descriptor,
+      object: objectOrFunction,
+      methodName,
+    };
+    const impl =
+      implementation === kDefaultFunction ? original : implementation;
     const ctx = new MockFunctionContext(impl, restore, times);
     const mock = this.#setupMock(ctx, original);
     const mockDescriptor = {
@@ -304,7 +313,7 @@ export class MockTracker {
     object,
     methodName,
     implementation = kDefaultFunction,
-    options = kEmptyObject,
+    options = kEmptyObject
   ) {
     if (implementation !== null && typeof implementation === 'object') {
       options = implementation;
@@ -317,7 +326,9 @@ export class MockTracker {
 
     if (getter === false) {
       throw new ERR_INVALID_ARG_VALUE(
-        'options.getter', getter, 'cannot be false',
+        'options.getter',
+        getter,
+        'cannot be false'
       );
     }
 
@@ -344,7 +355,7 @@ export class MockTracker {
     object,
     methodName,
     implementation = kDefaultFunction,
-    options = kEmptyObject,
+    options = kEmptyObject
   ) {
     if (implementation !== null && typeof implementation === 'object') {
       options = implementation;
@@ -357,7 +368,9 @@ export class MockTracker {
 
     if (setter === false) {
       throw new ERR_INVALID_ARG_VALUE(
-        'options.setter', setter, 'cannot be false',
+        'options.setter',
+        setter,
+        'cannot be false'
       );
     }
 

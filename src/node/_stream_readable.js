@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 /* eslint-disable */
+
+// prettier-ignore
 import {
   Readable,
   ReadableState,
@@ -11,6 +13,8 @@ import {
   from,
   wrap,
 } from 'node-internal:streams_readable';
+
+// prettier-ignore
 export {
   Readable,
   ReadableState,

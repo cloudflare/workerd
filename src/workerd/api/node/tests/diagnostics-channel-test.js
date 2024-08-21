@@ -1,7 +1,4 @@
-import {
-  ok,
-  strictEqual,
-} from 'node:assert';
+import { ok, strictEqual } from 'node:assert';
 
 import {
   hasSubscribers,
@@ -12,9 +9,7 @@ import {
   Channel,
 } from 'node:diagnostics_channel';
 
-import {
-  AsyncLocalStorage,
-} from 'node:async_hooks';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 function deferredPromise() {
   let resolve, reject;
@@ -55,7 +50,7 @@ export const test_basics = {
     ok(!hasSubscribers('foo'));
 
     await messagePromise.promise;
-  }
+  },
 };
 
 export const test_tracing = {
@@ -104,15 +99,21 @@ export const test_tracing = {
           promises[1].reject(err);
         }
       },
-      asyncStart() { promises[2].resolve(); },
-      asyncEnd() { promises[3].resolve(); },
-      error() { promises[4].resolve(); },
+      asyncStart() {
+        promises[2].resolve();
+      },
+      asyncEnd() {
+        promises[3].resolve();
+      },
+      error() {
+        promises[4].resolve();
+      },
     });
 
     tc.tracePromise(async () => {
       throw new Error('boom');
     }, context);
 
-    await Promise.all(promises.map(p => p.promise));
-  }
+    await Promise.all(promises.map((p) => p.promise));
+  },
 };

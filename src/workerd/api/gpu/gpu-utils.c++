@@ -10,8 +10,8 @@ namespace workerd::api::gpu {
 
 wgpu::StoreOp parseGPUStoreOp(kj::StringPtr storeOp) {
   static std::map<kj::StringPtr, wgpu::StoreOp> mapping{
-      {"store", wgpu::StoreOp::Store},
-      {"discard", wgpu::StoreOp::Discard},
+    {"store", wgpu::StoreOp::Store},
+    {"discard", wgpu::StoreOp::Discard},
   };
   auto found = mapping.find(storeOp);
   JSG_REQUIRE(found != mapping.end(), TypeError, "unload GPU store operation: ", storeOp);
@@ -20,8 +20,8 @@ wgpu::StoreOp parseGPUStoreOp(kj::StringPtr storeOp) {
 
 wgpu::LoadOp parseGPULoadOp(kj::StringPtr loadOp) {
   static std::map<kj::StringPtr, wgpu::LoadOp> mapping{
-      {"load", wgpu::LoadOp::Load},
-      {"clear", wgpu::LoadOp::Clear},
+    {"load", wgpu::LoadOp::Load},
+    {"clear", wgpu::LoadOp::Clear},
   };
   auto found = mapping.find(loadOp);
   JSG_REQUIRE(found != mapping.end(), TypeError, "unload GPU load operation: ", loadOp);
@@ -71,331 +71,331 @@ wgpu::FeatureName parseFeatureName(GPUFeatureName& str) {
 GPUTextureDimension getTextureDimension(wgpu::TextureDimension& dimension) {
 
   switch (dimension) {
-  case wgpu::TextureDimension::e1D:
-    return kj::str("1d");
-  case wgpu::TextureDimension::e2D:
-    return kj::str("2d");
-  case wgpu::TextureDimension::e3D:
-    return kj::str("3d");
-  default:
-    KJ_UNREACHABLE
+    case wgpu::TextureDimension::e1D:
+      return kj::str("1d");
+    case wgpu::TextureDimension::e2D:
+      return kj::str("2d");
+    case wgpu::TextureDimension::e3D:
+      return kj::str("3d");
+    default:
+      KJ_UNREACHABLE
   }
 }
 
 GPUTextureFormat getTextureFormat(wgpu::TextureFormat& format) {
   switch (format) {
-  case wgpu::TextureFormat::R8Unorm:
-    return kj::str("r8unorm");
+    case wgpu::TextureFormat::R8Unorm:
+      return kj::str("r8unorm");
 
-  case wgpu::TextureFormat::R8Snorm:
-    return kj::str("r8snorm");
+    case wgpu::TextureFormat::R8Snorm:
+      return kj::str("r8snorm");
 
-  case wgpu::TextureFormat::R8Uint:
-    return kj::str("r8uint");
+    case wgpu::TextureFormat::R8Uint:
+      return kj::str("r8uint");
 
-  case wgpu::TextureFormat::R8Sint:
-    return kj::str("r8sint");
+    case wgpu::TextureFormat::R8Sint:
+      return kj::str("r8sint");
 
-  case wgpu::TextureFormat::R16Uint:
-    return kj::str("r16uint");
+    case wgpu::TextureFormat::R16Uint:
+      return kj::str("r16uint");
 
-  case wgpu::TextureFormat::R16Sint:
-    return kj::str("r16sint");
+    case wgpu::TextureFormat::R16Sint:
+      return kj::str("r16sint");
 
-  case wgpu::TextureFormat::R16Float:
-    return kj::str("r16float");
+    case wgpu::TextureFormat::R16Float:
+      return kj::str("r16float");
 
-  case wgpu::TextureFormat::RG8Unorm:
-    return kj::str("rg8unorm");
+    case wgpu::TextureFormat::RG8Unorm:
+      return kj::str("rg8unorm");
 
-  case wgpu::TextureFormat::RG8Snorm:
-    return kj::str("rg8snorm");
+    case wgpu::TextureFormat::RG8Snorm:
+      return kj::str("rg8snorm");
 
-  case wgpu::TextureFormat::RG8Uint:
-    return kj::str("rg8uint");
+    case wgpu::TextureFormat::RG8Uint:
+      return kj::str("rg8uint");
 
-  case wgpu::TextureFormat::RG8Sint:
-    return kj::str("rg8sint");
+    case wgpu::TextureFormat::RG8Sint:
+      return kj::str("rg8sint");
 
-  case wgpu::TextureFormat::R32Uint:
-    return kj::str("r32uint");
+    case wgpu::TextureFormat::R32Uint:
+      return kj::str("r32uint");
 
-  case wgpu::TextureFormat::R32Sint:
-    return kj::str("r32sint");
+    case wgpu::TextureFormat::R32Sint:
+      return kj::str("r32sint");
 
-  case wgpu::TextureFormat::R32Float:
-    return kj::str("r32float");
+    case wgpu::TextureFormat::R32Float:
+      return kj::str("r32float");
 
-  case wgpu::TextureFormat::RG16Uint:
-    return kj::str("rg16uint");
+    case wgpu::TextureFormat::RG16Uint:
+      return kj::str("rg16uint");
 
-  case wgpu::TextureFormat::RG16Sint:
-    return kj::str("rg16sint");
+    case wgpu::TextureFormat::RG16Sint:
+      return kj::str("rg16sint");
 
-  case wgpu::TextureFormat::RG16Float:
-    return kj::str("rg16float");
+    case wgpu::TextureFormat::RG16Float:
+      return kj::str("rg16float");
 
-  case wgpu::TextureFormat::RGBA8Unorm:
-    return kj::str("rgba8unorm");
+    case wgpu::TextureFormat::RGBA8Unorm:
+      return kj::str("rgba8unorm");
 
-  case wgpu::TextureFormat::RGBA8UnormSrgb:
-    return kj::str("rgba8unorm-srgb");
+    case wgpu::TextureFormat::RGBA8UnormSrgb:
+      return kj::str("rgba8unorm-srgb");
 
-  case wgpu::TextureFormat::RGBA8Snorm:
-    return kj::str("rgba8snorm");
+    case wgpu::TextureFormat::RGBA8Snorm:
+      return kj::str("rgba8snorm");
 
-  case wgpu::TextureFormat::RGBA8Uint:
-    return kj::str("rgba8uint");
+    case wgpu::TextureFormat::RGBA8Uint:
+      return kj::str("rgba8uint");
 
-  case wgpu::TextureFormat::RGBA8Sint:
-    return kj::str("rgba8sint");
+    case wgpu::TextureFormat::RGBA8Sint:
+      return kj::str("rgba8sint");
 
-  case wgpu::TextureFormat::BGRA8Unorm:
-    return kj::str("bgra8unorm");
+    case wgpu::TextureFormat::BGRA8Unorm:
+      return kj::str("bgra8unorm");
 
-  case wgpu::TextureFormat::BGRA8UnormSrgb:
-    return kj::str("bgra8unorm-srgb");
+    case wgpu::TextureFormat::BGRA8UnormSrgb:
+      return kj::str("bgra8unorm-srgb");
 
-  case wgpu::TextureFormat::RGB9E5Ufloat:
-    return kj::str("rgb9e5ufloat");
+    case wgpu::TextureFormat::RGB9E5Ufloat:
+      return kj::str("rgb9e5ufloat");
 
-  case wgpu::TextureFormat::RGB10A2Unorm:
-    return kj::str("rgb10a2unorm");
+    case wgpu::TextureFormat::RGB10A2Unorm:
+      return kj::str("rgb10a2unorm");
 
-  case wgpu::TextureFormat::RG11B10Ufloat:
-    return kj::str("rg11b10ufloat");
+    case wgpu::TextureFormat::RG11B10Ufloat:
+      return kj::str("rg11b10ufloat");
 
-  case wgpu::TextureFormat::RG32Uint:
-    return kj::str("rg32uint");
+    case wgpu::TextureFormat::RG32Uint:
+      return kj::str("rg32uint");
 
-  case wgpu::TextureFormat::RG32Sint:
-    return kj::str("rg32sint");
+    case wgpu::TextureFormat::RG32Sint:
+      return kj::str("rg32sint");
 
-  case wgpu::TextureFormat::RG32Float:
-    return kj::str("rg32float");
+    case wgpu::TextureFormat::RG32Float:
+      return kj::str("rg32float");
 
-  case wgpu::TextureFormat::RGBA16Uint:
-    return kj::str("rgba16uint");
+    case wgpu::TextureFormat::RGBA16Uint:
+      return kj::str("rgba16uint");
 
-  case wgpu::TextureFormat::RGBA16Sint:
-    return kj::str("rgba16sint");
+    case wgpu::TextureFormat::RGBA16Sint:
+      return kj::str("rgba16sint");
 
-  case wgpu::TextureFormat::RGBA16Float:
-    return kj::str("rgba16float");
+    case wgpu::TextureFormat::RGBA16Float:
+      return kj::str("rgba16float");
 
-  case wgpu::TextureFormat::RGBA32Uint:
-    return kj::str("rgba32uint");
+    case wgpu::TextureFormat::RGBA32Uint:
+      return kj::str("rgba32uint");
 
-  case wgpu::TextureFormat::RGBA32Sint:
-    return kj::str("rgba32sint");
+    case wgpu::TextureFormat::RGBA32Sint:
+      return kj::str("rgba32sint");
 
-  case wgpu::TextureFormat::RGBA32Float:
-    return kj::str("rgba32float");
+    case wgpu::TextureFormat::RGBA32Float:
+      return kj::str("rgba32float");
 
-  case wgpu::TextureFormat::Stencil8:
-    return kj::str("stencil8");
+    case wgpu::TextureFormat::Stencil8:
+      return kj::str("stencil8");
 
-  case wgpu::TextureFormat::Depth16Unorm:
-    return kj::str("depth16unorm");
+    case wgpu::TextureFormat::Depth16Unorm:
+      return kj::str("depth16unorm");
 
-  case wgpu::TextureFormat::Depth24Plus:
-    return kj::str("depth24plus");
+    case wgpu::TextureFormat::Depth24Plus:
+      return kj::str("depth24plus");
 
-  case wgpu::TextureFormat::Depth24PlusStencil8:
-    return kj::str("depth24plus-stencil8");
+    case wgpu::TextureFormat::Depth24PlusStencil8:
+      return kj::str("depth24plus-stencil8");
 
-  case wgpu::TextureFormat::Depth32Float:
-    return kj::str("depth32float");
+    case wgpu::TextureFormat::Depth32Float:
+      return kj::str("depth32float");
 
-  case wgpu::TextureFormat::Depth32FloatStencil8:
-    return kj::str("depth32float-stencil8");
+    case wgpu::TextureFormat::Depth32FloatStencil8:
+      return kj::str("depth32float-stencil8");
 
-  case wgpu::TextureFormat::BC1RGBAUnorm:
-    return kj::str("bc1-rgba-unorm");
+    case wgpu::TextureFormat::BC1RGBAUnorm:
+      return kj::str("bc1-rgba-unorm");
 
-  case wgpu::TextureFormat::BC1RGBAUnormSrgb:
-    return kj::str("bc1-rgba-unorm-srgb");
+    case wgpu::TextureFormat::BC1RGBAUnormSrgb:
+      return kj::str("bc1-rgba-unorm-srgb");
 
-  case wgpu::TextureFormat::BC2RGBAUnorm:
-    return kj::str("bc2-rgba-unorm");
+    case wgpu::TextureFormat::BC2RGBAUnorm:
+      return kj::str("bc2-rgba-unorm");
 
-  case wgpu::TextureFormat::BC2RGBAUnormSrgb:
-    return kj::str("bc2-rgba-unorm-srgb");
+    case wgpu::TextureFormat::BC2RGBAUnormSrgb:
+      return kj::str("bc2-rgba-unorm-srgb");
 
-  case wgpu::TextureFormat::BC3RGBAUnorm:
-    return kj::str("bc3-rgba-unorm");
+    case wgpu::TextureFormat::BC3RGBAUnorm:
+      return kj::str("bc3-rgba-unorm");
 
-  case wgpu::TextureFormat::BC3RGBAUnormSrgb:
-    return kj::str("bc3-rgba-unorm-srgb");
+    case wgpu::TextureFormat::BC3RGBAUnormSrgb:
+      return kj::str("bc3-rgba-unorm-srgb");
 
-  case wgpu::TextureFormat::BC4RUnorm:
-    return kj::str("bc4-r-unorm");
+    case wgpu::TextureFormat::BC4RUnorm:
+      return kj::str("bc4-r-unorm");
 
-  case wgpu::TextureFormat::BC4RSnorm:
-    return kj::str("bc4-r-snorm");
+    case wgpu::TextureFormat::BC4RSnorm:
+      return kj::str("bc4-r-snorm");
 
-  case wgpu::TextureFormat::BC5RGUnorm:
-    return kj::str("bc5-rg-unorm");
+    case wgpu::TextureFormat::BC5RGUnorm:
+      return kj::str("bc5-rg-unorm");
 
-  case wgpu::TextureFormat::BC5RGSnorm:
-    return kj::str("bc5-rg-snorm");
+    case wgpu::TextureFormat::BC5RGSnorm:
+      return kj::str("bc5-rg-snorm");
 
-  case wgpu::TextureFormat::BC6HRGBUfloat:
-    return kj::str("bc6h-rgb-ufloat");
+    case wgpu::TextureFormat::BC6HRGBUfloat:
+      return kj::str("bc6h-rgb-ufloat");
 
-  case wgpu::TextureFormat::BC6HRGBFloat:
-    return kj::str("bc6h-rgb-float");
+    case wgpu::TextureFormat::BC6HRGBFloat:
+      return kj::str("bc6h-rgb-float");
 
-  case wgpu::TextureFormat::BC7RGBAUnorm:
-    return kj::str("bc7-rgba-unorm");
+    case wgpu::TextureFormat::BC7RGBAUnorm:
+      return kj::str("bc7-rgba-unorm");
 
-  case wgpu::TextureFormat::BC7RGBAUnormSrgb:
-    return kj::str("bc7-rgba-unorm-srgb");
+    case wgpu::TextureFormat::BC7RGBAUnormSrgb:
+      return kj::str("bc7-rgba-unorm-srgb");
 
-  case wgpu::TextureFormat::ETC2RGB8Unorm:
-    return kj::str("etc2-rgb8unorm");
+    case wgpu::TextureFormat::ETC2RGB8Unorm:
+      return kj::str("etc2-rgb8unorm");
 
-  case wgpu::TextureFormat::ETC2RGB8UnormSrgb:
-    return kj::str("etc2-rgb8unorm-srgb");
+    case wgpu::TextureFormat::ETC2RGB8UnormSrgb:
+      return kj::str("etc2-rgb8unorm-srgb");
 
-  case wgpu::TextureFormat::ETC2RGB8A1Unorm:
-    return kj::str("etc2-rgb8a1unorm");
+    case wgpu::TextureFormat::ETC2RGB8A1Unorm:
+      return kj::str("etc2-rgb8a1unorm");
 
-  case wgpu::TextureFormat::ETC2RGB8A1UnormSrgb:
-    return kj::str("etc2-rgb8a1unorm-srgb");
+    case wgpu::TextureFormat::ETC2RGB8A1UnormSrgb:
+      return kj::str("etc2-rgb8a1unorm-srgb");
 
-  case wgpu::TextureFormat::ETC2RGBA8Unorm:
-    return kj::str("etc2-rgba8unorm");
+    case wgpu::TextureFormat::ETC2RGBA8Unorm:
+      return kj::str("etc2-rgba8unorm");
 
-  case wgpu::TextureFormat::ETC2RGBA8UnormSrgb:
-    return kj::str("etc2-rgba8unorm-srgb");
+    case wgpu::TextureFormat::ETC2RGBA8UnormSrgb:
+      return kj::str("etc2-rgba8unorm-srgb");
 
-  case wgpu::TextureFormat::EACR11Unorm:
-    return kj::str("eac-r11unorm");
+    case wgpu::TextureFormat::EACR11Unorm:
+      return kj::str("eac-r11unorm");
 
-  case wgpu::TextureFormat::EACR11Snorm:
-    return kj::str("eac-r11snorm");
+    case wgpu::TextureFormat::EACR11Snorm:
+      return kj::str("eac-r11snorm");
 
-  case wgpu::TextureFormat::EACRG11Unorm:
-    return kj::str("eac-rg11unorm");
+    case wgpu::TextureFormat::EACRG11Unorm:
+      return kj::str("eac-rg11unorm");
 
-  case wgpu::TextureFormat::EACRG11Snorm:
-    return kj::str("eac-rg11snorm");
+    case wgpu::TextureFormat::EACRG11Snorm:
+      return kj::str("eac-rg11snorm");
 
-  case wgpu::TextureFormat::ASTC4x4Unorm:
-    return kj::str("astc-4x4-unorm");
+    case wgpu::TextureFormat::ASTC4x4Unorm:
+      return kj::str("astc-4x4-unorm");
 
-  case wgpu::TextureFormat::ASTC4x4UnormSrgb:
-    return kj::str("astc-4x4-unorm-srgb");
+    case wgpu::TextureFormat::ASTC4x4UnormSrgb:
+      return kj::str("astc-4x4-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC5x4Unorm:
-    return kj::str("astc-5x4-unorm");
+    case wgpu::TextureFormat::ASTC5x4Unorm:
+      return kj::str("astc-5x4-unorm");
 
-  case wgpu::TextureFormat::ASTC5x4UnormSrgb:
-    return kj::str("astc-5x4-unorm-srgb");
+    case wgpu::TextureFormat::ASTC5x4UnormSrgb:
+      return kj::str("astc-5x4-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC5x5Unorm:
-    return kj::str("astc-5x5-unorm");
+    case wgpu::TextureFormat::ASTC5x5Unorm:
+      return kj::str("astc-5x5-unorm");
 
-  case wgpu::TextureFormat::ASTC5x5UnormSrgb:
-    return kj::str("astc-5x5-unorm-srgb");
+    case wgpu::TextureFormat::ASTC5x5UnormSrgb:
+      return kj::str("astc-5x5-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC6x5Unorm:
-    return kj::str("astc-6x5-unorm");
+    case wgpu::TextureFormat::ASTC6x5Unorm:
+      return kj::str("astc-6x5-unorm");
 
-  case wgpu::TextureFormat::ASTC6x5UnormSrgb:
-    return kj::str("astc-6x5-unorm-srgb");
+    case wgpu::TextureFormat::ASTC6x5UnormSrgb:
+      return kj::str("astc-6x5-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC6x6Unorm:
-    return kj::str("astc-6x6-unorm");
+    case wgpu::TextureFormat::ASTC6x6Unorm:
+      return kj::str("astc-6x6-unorm");
 
-  case wgpu::TextureFormat::ASTC6x6UnormSrgb:
-    return kj::str("astc-6x6-unorm-srgb");
+    case wgpu::TextureFormat::ASTC6x6UnormSrgb:
+      return kj::str("astc-6x6-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC8x5Unorm:
-    return kj::str("astc-8x5-unorm");
+    case wgpu::TextureFormat::ASTC8x5Unorm:
+      return kj::str("astc-8x5-unorm");
 
-  case wgpu::TextureFormat::ASTC8x5UnormSrgb:
-    return kj::str("astc-8x5-unorm-srgb");
+    case wgpu::TextureFormat::ASTC8x5UnormSrgb:
+      return kj::str("astc-8x5-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC8x6Unorm:
-    return kj::str("astc-8x6-unorm");
+    case wgpu::TextureFormat::ASTC8x6Unorm:
+      return kj::str("astc-8x6-unorm");
 
-  case wgpu::TextureFormat::ASTC8x6UnormSrgb:
-    return kj::str("astc-8x6-unorm-srgb");
+    case wgpu::TextureFormat::ASTC8x6UnormSrgb:
+      return kj::str("astc-8x6-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC8x8Unorm:
-    return kj::str("astc-8x8-unorm");
+    case wgpu::TextureFormat::ASTC8x8Unorm:
+      return kj::str("astc-8x8-unorm");
 
-  case wgpu::TextureFormat::ASTC8x8UnormSrgb:
-    return kj::str("astc-8x8-unorm-srgb");
+    case wgpu::TextureFormat::ASTC8x8UnormSrgb:
+      return kj::str("astc-8x8-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC10x5Unorm:
-    return kj::str("astc-10x5-unorm");
+    case wgpu::TextureFormat::ASTC10x5Unorm:
+      return kj::str("astc-10x5-unorm");
 
-  case wgpu::TextureFormat::ASTC10x5UnormSrgb:
-    return kj::str("astc-10x5-unorm-srgb");
+    case wgpu::TextureFormat::ASTC10x5UnormSrgb:
+      return kj::str("astc-10x5-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC10x6Unorm:
-    return kj::str("astc-10x6-unorm");
+    case wgpu::TextureFormat::ASTC10x6Unorm:
+      return kj::str("astc-10x6-unorm");
 
-  case wgpu::TextureFormat::ASTC10x6UnormSrgb:
-    return kj::str("astc-10x6-unorm-srgb");
+    case wgpu::TextureFormat::ASTC10x6UnormSrgb:
+      return kj::str("astc-10x6-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC10x8Unorm:
-    return kj::str("astc-10x8-unorm");
+    case wgpu::TextureFormat::ASTC10x8Unorm:
+      return kj::str("astc-10x8-unorm");
 
-  case wgpu::TextureFormat::ASTC10x8UnormSrgb:
-    return kj::str("astc-10x8-unorm-srgb");
+    case wgpu::TextureFormat::ASTC10x8UnormSrgb:
+      return kj::str("astc-10x8-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC10x10Unorm:
-    return kj::str("astc-10x10-unorm");
+    case wgpu::TextureFormat::ASTC10x10Unorm:
+      return kj::str("astc-10x10-unorm");
 
-  case wgpu::TextureFormat::ASTC10x10UnormSrgb:
-    return kj::str("astc-10x10-unorm-srgb");
+    case wgpu::TextureFormat::ASTC10x10UnormSrgb:
+      return kj::str("astc-10x10-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC12x10Unorm:
-    return kj::str("astc-12x10-unorm");
+    case wgpu::TextureFormat::ASTC12x10Unorm:
+      return kj::str("astc-12x10-unorm");
 
-  case wgpu::TextureFormat::ASTC12x10UnormSrgb:
-    return kj::str("astc-12x10-unorm-srgb");
+    case wgpu::TextureFormat::ASTC12x10UnormSrgb:
+      return kj::str("astc-12x10-unorm-srgb");
 
-  case wgpu::TextureFormat::ASTC12x12Unorm:
-    return kj::str("astc-12x12-unorm");
+    case wgpu::TextureFormat::ASTC12x12Unorm:
+      return kj::str("astc-12x12-unorm");
 
-  case wgpu::TextureFormat::ASTC12x12UnormSrgb:
-    return kj::str("astc-12x12-unorm-srgb");
-  default:
-    KJ_UNREACHABLE
+    case wgpu::TextureFormat::ASTC12x12UnormSrgb:
+      return kj::str("astc-12x12-unorm-srgb");
+    default:
+      KJ_UNREACHABLE
   }
 }
 
 kj::Maybe<GPUFeatureName> getFeatureName(wgpu::FeatureName& feature) {
   switch (feature) {
-  case wgpu::FeatureName::DepthClipControl:
-    return kj::str("depth-clip-control");
-  case wgpu::FeatureName::Depth32FloatStencil8:
-    return kj::str("depth32float-stencil8");
-  case wgpu::FeatureName::TextureCompressionBC:
-    return kj::str("texture-compression-bc");
-  case wgpu::FeatureName::TextureCompressionETC2:
-    return kj::str("texture-compression-etc2");
-  case wgpu::FeatureName::TextureCompressionASTC:
-    return kj::str("texture-compression-astc");
-  case wgpu::FeatureName::TimestampQuery:
-    return kj::str("timestamp-query");
-  case wgpu::FeatureName::IndirectFirstInstance:
-    return kj::str("indirect-first-instance");
-  case wgpu::FeatureName::ShaderF16:
-    return kj::str("shader-f16");
-  case wgpu::FeatureName::RG11B10UfloatRenderable:
-    return kj::str("rg11b10ufloat-renderable");
-  case wgpu::FeatureName::BGRA8UnormStorage:
-    return kj::str("bgra8unorm-storage");
-  case wgpu::FeatureName::Float32Filterable:
-    return kj::str("float32-filterable");
-  default:
-    break;
+    case wgpu::FeatureName::DepthClipControl:
+      return kj::str("depth-clip-control");
+    case wgpu::FeatureName::Depth32FloatStencil8:
+      return kj::str("depth32float-stencil8");
+    case wgpu::FeatureName::TextureCompressionBC:
+      return kj::str("texture-compression-bc");
+    case wgpu::FeatureName::TextureCompressionETC2:
+      return kj::str("texture-compression-etc2");
+    case wgpu::FeatureName::TextureCompressionASTC:
+      return kj::str("texture-compression-astc");
+    case wgpu::FeatureName::TimestampQuery:
+      return kj::str("timestamp-query");
+    case wgpu::FeatureName::IndirectFirstInstance:
+      return kj::str("indirect-first-instance");
+    case wgpu::FeatureName::ShaderF16:
+      return kj::str("shader-f16");
+    case wgpu::FeatureName::RG11B10UfloatRenderable:
+      return kj::str("rg11b10ufloat-renderable");
+    case wgpu::FeatureName::BGRA8UnormStorage:
+      return kj::str("bgra8unorm-storage");
+    case wgpu::FeatureName::Float32Filterable:
+      return kj::str("float32-filterable");
+    default:
+      break;
   }
 
   return kj::none;
@@ -1136,4 +1136,4 @@ wgpu::BlendOperation parseBlendOperation(kj::StringPtr operation) {
   JSG_FAIL_REQUIRE(TypeError, "unknown blend operation: ", operation);
 }
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

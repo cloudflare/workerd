@@ -1,4 +1,3 @@
-
 from js import Response
 
 import io
@@ -12,12 +11,13 @@ sys.stdout = StringIO()
 
 ii = code.InteractiveInterpreter()
 
+
 async def on_fetch(request, env):
-  cmd = (await request.json()).cmd
+    cmd = (await request.json()).cmd
 
-  ii.runsource(cmd)
+    ii.runsource(cmd)
 
-  res = sys.stdout.getvalue()
-  sys.stdout = StringIO()
+    res = sys.stdout.getvalue()
+    sys.stdout = StringIO()
 
-  return Response.new(res)
+    return Response.new(res)

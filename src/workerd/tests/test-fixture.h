@@ -28,29 +28,35 @@ struct TestFixture {
     kj::Maybe<Worker::Actor::Id> actorId;
   };
 
-  TestFixture(SetupParams&& params = { });
+  TestFixture(SetupParams&& params = {});
 
   struct V8Environment {
     v8::Isolate* isolate;
   };
 
-  struct Environment : public V8Environment {
+  struct Environment: public V8Environment {
     IoContext& context;
     Worker::Lock& lock;
     jsg::Lock& js;
     CompatibilityFlags::Reader features;
   };
 
-  template <typename T> struct RunReturnType { using Type = T; };
-  template <typename T> struct RunReturnType<kj::Promise<T>> { using Type = T; };
+  template <typename T>
+  struct RunReturnType {
+    using Type = T;
+  };
+  template <typename T>
+  struct RunReturnType<kj::Promise<T>> {
+    using Type = T;
+  };
 
   // Setup the incoming request and run given callback in worker's IO context.
   // callback should accept const Environment& parameter and return Promise<T>|void.
   // For void callbacks run waits for their completion, for promises waits for their resolution
   // and returns the result.
-  template<typename CallBack>
-  auto runInIoContext(CallBack&& callback)
-      -> typename RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
+  template <typename CallBack>
+  auto runInIoContext(CallBack&& callback) ->
+      typename RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
     auto request = createIncomingRequest();
     kj::WaitScope* waitScope;
     KJ_IF_SOME(ws, this->waitScope) {
@@ -60,18 +66,18 @@ struct TestFixture {
     }
 
     auto& context = request->getContext();
-    return context.run([&](Worker::Lock& lock) {
+    return context
+        .run([&](Worker::Lock& lock) {
       // auto features = workerBundle.getFeatureFlags();
       auto& js = jsg::Lock::from(lock.getIsolate());
-      Environment env = {{.isolate=lock.getIsolate()}, context, lock, js};
+      Environment env = {{.isolate = lock.getIsolate()}, context, lock, js};
       KJ_ASSERT(env.isolate == v8::Isolate::TryGetCurrent());
       return callback(env);
     }).wait(*waitScope);
   }
 
   // Special void version of runInIoContext that ignores exceptions with given descriptions.
-  void runInIoContext(
-      kj::Function<kj::Promise<void>(const Environment&)>&& callback,
+  void runInIoContext(kj::Function<kj::Promise<void>(const Environment&)>&& callback,
       kj::ArrayPtr<kj::StringPtr> errorsToIgnore);
 
   struct Response {

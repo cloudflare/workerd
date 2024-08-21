@@ -21,3 +21,11 @@ just prepare
 ```sh
 just compile-commands
 ```
+
+## Code Formatting
+
+workerd code is automatically formatted by clang-format. Run `python ./tools/cross/format.py` to reformat the code
+or use the appropriate IDE extension.
+While workerd generally requires llvm 15, formatting requires clang-format-18.
+
+Code formatting is checked before check-in and during `Linting` CI build.

@@ -39,7 +39,7 @@ struct PythonConfig {
 
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
-class PackagesTarReader : public jsg::Object {
+class PackagesTarReader: public jsg::Object {
 public:
   PackagesTarReader() = default;
 
@@ -50,10 +50,9 @@ public:
   }
 };
 
-
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
-class PyodideMetadataReader : public jsg::Object {
+class PyodideMetadataReader: public jsg::Object {
 private:
   kj::String mainModule;
   kj::Array<kj::String> names;
@@ -66,14 +65,21 @@ private:
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
 public:
-  PyodideMetadataReader(kj::String mainModule, kj::Array<kj::String> names,
-                        kj::Array<kj::Array<kj::byte>> contents, kj::Array<kj::String> requirements,
-                        bool isWorkerd, bool isTracing,
-                        bool snapshotToDisk,
-                        bool createBaselineSnapshot,
-                        kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
-      : mainModule(kj::mv(mainModule)), names(kj::mv(names)), contents(kj::mv(contents)),
-        requirements(kj::mv(requirements)), isWorkerdFlag(isWorkerd), isTracingFlag(isTracing),
+  PyodideMetadataReader(kj::String mainModule,
+      kj::Array<kj::String> names,
+      kj::Array<kj::Array<kj::byte>> contents,
+      kj::Array<kj::String> requirements,
+      bool isWorkerd,
+      bool isTracing,
+      bool snapshotToDisk,
+      bool createBaselineSnapshot,
+      kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
+      : mainModule(kj::mv(mainModule)),
+        names(kj::mv(names)),
+        contents(kj::mv(contents)),
+        requirements(kj::mv(requirements)),
+        isWorkerdFlag(isWorkerd),
+        isTracingFlag(isTracing),
         snapshotToDisk(snapshotToDisk),
         createBaselineSnapshot(createBaselineSnapshot),
         memorySnapshot(kj::mv(memorySnapshot)) {}
@@ -139,13 +145,13 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("mainModule", mainModule);
-    for (const auto& name : names) {
+    for (const auto& name: names) {
       tracker.trackField("name", name);
     }
-    for (const auto& content : contents) {
+    for (const auto& content: contents) {
       tracker.trackField("content", content);
     }
-    for (const auto& requirement : requirements) {
+    for (const auto& requirement: requirements) {
       tracker.trackField("requirement", requirement);
     }
   }
@@ -159,60 +165,23 @@ struct MemorySnapshotResult {
 
 // A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
-class ArtifactBundler : public jsg::Object {
+class ArtifactBundler: public jsg::Object {
 public:
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
-
-  ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot,
-      kj::Function<kj::Promise<bool>(MemorySnapshotResult snapshot)> uploadMemorySnapshotCb)
-      :
-        storedSnapshot(kj::none),
-        existingSnapshot(kj::mv(existingSnapshot)),
-        uploadMemorySnapshotCb(kj::mv(uploadMemorySnapshotCb)),
-        hasUploaded(false),
-        isValidating(false) {};
 
   ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
-        uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false),
-        isValidating(false){};
+        isValidating(false) {};
 
   ArtifactBundler(bool isValidating = false)
       : storedSnapshot(kj::none),
         existingSnapshot(kj::none),
-        uploadMemorySnapshotCb(kj::none),
-        hasUploaded(false),
-        isValidating(isValidating){};
-
-  jsg::Promise<bool> uploadMemorySnapshot(jsg::Lock& js, kj::Array<kj::byte> snapshot) {
-    // TODO(later): Remove upload code.
-
-    // Prevent multiple uploads.
-    if (hasUploaded) {
-      return js.rejectedPromise<bool>(
-          js.typeError("This ArtifactBundle has already uploaded a memory snapshot"));
-    }
-
-    // TODO(later): Only upload if `snapshot` isn't identical to `existingSnapshot`.
-
-    if (uploadMemorySnapshotCb == kj::none) {
-      return js.rejectedPromise<bool>(js.typeError("ArtifactBundler is disabled"));
-    }
-    auto& cb = KJ_REQUIRE_NONNULL(uploadMemorySnapshotCb);
-    hasUploaded = true;
-    auto& context = IoContext::current();
-    return context.awaitIo(js, cb({ .snapshot = kj::mv(snapshot), .importedModulesList = {}}));
-  };
+        isValidating(isValidating) {};
 
   void storeMemorySnapshot(jsg::Lock& js, MemorySnapshotResult snapshot) {
     KJ_REQUIRE(isValidating);
     storedSnapshot = kj::mv(snapshot);
-  }
-
-  bool isEnabled() {
-    return uploadMemorySnapshotCb != kj::none;
   }
 
   bool hasMemorySnapshot() {
@@ -231,7 +200,6 @@ public:
     existingSnapshot = kj::none;
   }
 
-
   // Determines whether this ArtifactBundler was created inside the validator.
   bool isEwValidating() {
     return isValidating;
@@ -248,46 +216,45 @@ public:
     tracker.trackFieldWithSize("snapshot", KJ_REQUIRE_NONNULL(existingSnapshot).size());
   }
 
+  bool isEnabled() {
+    return false;  // TODO(later): Remove this function once we regenerate the bundle.
+  }
+
   JSG_RESOURCE_TYPE(ArtifactBundler) {
-    JSG_METHOD(uploadMemorySnapshot);
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
-    JSG_METHOD(isEnabled);
     JSG_METHOD(isEwValidating);
     JSG_METHOD(storeMemorySnapshot);
+    JSG_METHOD(isEnabled);
   }
 
 private:
   // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
   // up cold starts.
   kj::Maybe<kj::Array<kj::byte>> existingSnapshot;
-  kj::Maybe<kj::Function<kj::Promise<bool>(MemorySnapshotResult snapshot)>> uploadMemorySnapshotCb;
-  bool hasUploaded;
   bool isValidating;
 };
 
-
-class DisabledInternalJaeger : public jsg::Object {
+class DisabledInternalJaeger: public jsg::Object {
 public:
   static jsg::Ref<DisabledInternalJaeger> create() {
     return jsg::alloc<DisabledInternalJaeger>();
   }
-  JSG_RESOURCE_TYPE(DisabledInternalJaeger) {
-  }
+  JSG_RESOURCE_TYPE(DisabledInternalJaeger) {}
 };
 
 // This cache is used by Pyodide to store wheels fetched over the internet across workerd restarts in local dev only
 class DiskCache: public jsg::Object {
 private:
-  static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT; // always set to kj::none
+  static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT;  // always set to kj::none
 
-  const kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot;
+  const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot;
 
 public:
-  DiskCache(): cacheRoot(NULL_CACHE_ROOT) {}; // Disabled disk cache
-  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>> &cacheRoot): cacheRoot(cacheRoot) {};
+  DiskCache(): cacheRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
+  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot): cacheRoot(cacheRoot) {};
 
   static jsg::Ref<DiskCache> makeDisabled() {
     return jsg::alloc<DiskCache>();
@@ -302,29 +269,24 @@ public:
   }
 };
 
-
 // A limiter which will throw if the startup is found to exceed limits. The script will still be
 // able to run for longer than the limit, but an error will be thrown as soon as the startup
 // finishes. This way we can enforce a Python-specific startup limit.
 //
 // TODO(later): stop execution as soon limit is reached, instead of doing so after the fact.
-class SimplePythonLimiter : public jsg::Object {
+class SimplePythonLimiter: public jsg::Object {
 private:
   int startupLimitMs;
   kj::Maybe<kj::Function<kj::TimePoint()>> getTimeCb;
 
   kj::Maybe<kj::TimePoint> startTime;
 
-
-
 public:
-  SimplePythonLimiter() :
-      startupLimitMs(0),
-      getTimeCb(kj::none) {}
+  SimplePythonLimiter(): startupLimitMs(0), getTimeCb(kj::none) {}
 
-  SimplePythonLimiter(int startupLimitMs, kj::Function<kj::TimePoint()> getTimeCb) :
-      startupLimitMs(startupLimitMs),
-      getTimeCb(kj::mv(getTimeCb)) {}
+  SimplePythonLimiter(int startupLimitMs, kj::Function<kj::TimePoint()> getTimeCb)
+      : startupLimitMs(startupLimitMs),
+        getTimeCb(kj::mv(getTimeCb)) {}
 
   static jsg::Ref<SimplePythonLimiter> makeDisabled() {
     return jsg::alloc<SimplePythonLimiter>();
@@ -356,20 +318,19 @@ public:
 
 using Worker = server::config::Worker;
 
-jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf, const PythonConfig& pythonConfig);
+jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
+    Worker::Reader conf, const PythonConfig& pythonConfig);
 
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
 
-#define EW_PYODIDE_ISOLATE_TYPES       \
-  api::pyodide::PackagesTarReader,     \
-  api::pyodide::PyodideMetadataReader, \
-  api::pyodide::ArtifactBundler,       \
-  api::pyodide::DiskCache,             \
-  api::pyodide::DisabledInternalJaeger,\
-  api::pyodide::SimplePythonLimiter,   \
-  api::pyodide::MemorySnapshotResult
+#define EW_PYODIDE_ISOLATE_TYPES                                                                   \
+  api::pyodide::PackagesTarReader, api::pyodide::PyodideMetadataReader,                            \
+      api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
+      api::pyodide::DisabledInternalJaeger, api::pyodide::SimplePythonLimiter,                     \
+      api::pyodide::MemorySnapshotResult
 
-template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
+template <class Registry>
+void registerPyodideModules(Registry& registry, auto featureFlags) {
   // We add `pyodide:` packages here including python-entrypoint-helper.js.
   if (!util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
     registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
@@ -396,4 +357,4 @@ kj::Own<jsg::modules::ModuleBundle> getExternalPyodideModuleBundle(auto featureF
   return builder.finish();
 }
 
-} // namespace workerd::api::pyodide
+}  // namespace workerd::api::pyodide

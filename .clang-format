@@ -1,3 +1,7 @@
+Language: Cpp
+Standard: c++20
+ColumnLimit: 100
+
 WhitespaceSensitiveMacros:
   # clang format doesn't understand TypeScript, so make sure it doesn't mangle
   # overrides and additional definitions
@@ -5,6 +9,99 @@ WhitespaceSensitiveMacros:
   - JSG_TS_DEFINE
   - JSG_STRUCT_TS_OVERRIDE
   - JSG_STRUCT_TS_DEFINE
-PointerAlignment: Left
-ColumnLimit: 100
 AllowShortFunctionsOnASingleLine: Empty
+
+# We should have "true" here but adding an include header would result in too many changed lines.
+# Once we turn this on we should use IncludeCategories so that things are consistently sorted.
+# For example, to protect against brittle headers (a header not including everything its using
+# because existing users happened to include a dependency for it), one could use the following
+# order:
+#   local folder files
+#   project files
+#   3p dependency includes
+#   standard language headers (put kj/ here?)
+#   system headers
+# While this would be ideal it's also important to note that this isn't the (non-documented) style
+# that KJ uses, so it may be worth documenting the style & making it consistent.
+SortIncludes: false
+
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: true
+
+IndentWidth: 2
+IndentCaseBlocks: false
+IndentCaseLabels: true
+PointerAlignment: Left
+DerivePointerAlignment: true
+
+# Really "Attach" but empty braces aren't split.
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterFunction: false
+  AfterNamespace: false
+  AfterObjCDeclaration: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+
+Cpp11BracedListStyle: true
+
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 0
+AlwaysBreakAfterReturnType: None
+AlwaysBreakTemplateDeclarations: Yes
+BreakStringLiterals: false
+BinPackArguments: true
+BinPackParameters: false
+BracedInitializerIndentWidth: 2
+BreakInheritanceList: BeforeColon
+ContinuationIndentWidth: 4
+IfMacros:
+  [
+    "KJ_SWITCH_ONEOF",
+    "KJ_CASE_ONEOF",
+    "KJ_IF_MAYBE",
+    "KJ_IF_SOME",
+    "CFJS_RESOURCE_TYPE",
+  ]
+LambdaBodyIndentation: OuterScope
+Macros:
+  - "KJ_MAP(x,y)=[y](auto x)"
+  - "JSG_VISITABLE_LAMBDA(x,y,z)=[x,y](z)"
+  # The WhitespaceSensitiveMacros solution is flaky, adding the following ensures no formatting:
+  - "JSG_TS_OVERRIDE(x)=enum class"
+  - "JSG_TS_DEFINE(x)=enum class"
+  - "JSG_STRUCT_TS_OVERRIDE(x)=enum class"
+  - "JSG_STRUCT_TS_DEFINE(x)=enum class"
+PenaltyReturnTypeOnItsOwnLine: 1000
+PackConstructorInitializers: CurrentLine
+ReflowComments: false
+SpaceBeforeCtorInitializerColon: false
+SpaceBeforeInheritanceColon: false
+SpaceBeforeParens: ControlStatementsExceptControlMacros
+SpaceBeforeRangeBasedForLoopColon: false
+SpacesBeforeTrailingComments: 2
+---
+# Some files with embedded typescript are incorrectly recognized by clang-format as Objective-C
+# This is because the C/C++ macro expansion step happens after the language recognition step, so
+# when trying to parse the file, the c++ parser fails with incorrect syntax and a fallback to
+# the Objective-C parser is used.
+# This is a workaround to hide the warning.
+# TODO: Remove this once we have a better solution.
+Language: ObjC
+DisableFormat: true

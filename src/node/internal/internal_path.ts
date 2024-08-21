@@ -22,42 +22,41 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import {
-  CHAR_DOT,
-  CHAR_FORWARD_SLASH,
-} from 'node-internal:constants';
+import { CHAR_DOT, CHAR_FORWARD_SLASH } from 'node-internal:constants';
 
-import {
-  validateObject,
-  validateString,
-} from 'node-internal:validators';
+import { validateObject, validateString } from 'node-internal:validators';
 
-function isPosixPathSeparator(code : number) {
+function isPosixPathSeparator(code: number) {
   return code === CHAR_FORWARD_SLASH;
 }
 
 // Resolves . and .. elements in a path with directory names
-function normalizeString(path: string, allowAboveRoot: boolean, separator: string, isPathSeparator: (code:number) => boolean) {
+function normalizeString(
+  path: string,
+  allowAboveRoot: boolean,
+  separator: string,
+  isPathSeparator: (code: number) => boolean
+) {
   let res = '';
   let lastSegmentLength = 0;
   let lastSlash = -1;
   let dots = 0;
   let code = 0;
   for (let i = 0; i <= path.length; ++i) {
-    if (i < path.length)
-      code = path.charCodeAt(i);
-    else if (isPathSeparator(code))
-      break;
-    else
-      code = CHAR_FORWARD_SLASH;
+    if (i < path.length) code = path.charCodeAt(i);
+    else if (isPathSeparator(code)) break;
+    else code = CHAR_FORWARD_SLASH;
 
     if (isPathSeparator(code)) {
       if (lastSlash === i - 1 || dots === 1) {
         // NOOP
       } else if (dots === 2) {
-        if (res.length < 2 || lastSegmentLength !== 2 ||
-            res.charCodeAt(res.length - 1) !== CHAR_DOT ||
-            res.charCodeAt(res.length - 2) !== CHAR_DOT) {
+        if (
+          res.length < 2 ||
+          lastSegmentLength !== 2 ||
+          res.charCodeAt(res.length - 1) !== CHAR_DOT ||
+          res.charCodeAt(res.length - 2) !== CHAR_DOT
+        ) {
           if (res.length > 2) {
             const lastSlashIndex = res.lastIndexOf(separator);
             if (lastSlashIndex === -1) {
@@ -65,8 +64,7 @@ function normalizeString(path: string, allowAboveRoot: boolean, separator: strin
               lastSegmentLength = 0;
             } else {
               res = res.slice(0, lastSlashIndex);
-              lastSegmentLength =
-                res.length - 1 - res.lastIndexOf(separator);
+              lastSegmentLength = res.length - 1 - res.lastIndexOf(separator);
             }
             lastSlash = i;
             dots = 0;
@@ -86,8 +84,7 @@ function normalizeString(path: string, allowAboveRoot: boolean, separator: strin
       } else {
         if (res.length > 0)
           res += `${separator}${path.slice(lastSlash + 1, i)}`;
-        else
-          res = path.slice(lastSlash + 1, i);
+        else res = path.slice(lastSlash + 1, i);
         lastSegmentLength = i - lastSlash - 1;
       }
       lastSlash = i;
@@ -101,7 +98,7 @@ function normalizeString(path: string, allowAboveRoot: boolean, separator: strin
   return res;
 }
 
-function formatExt(ext : string) {
+function formatExt(ext: string) {
   return ext ? `${ext[0] === '.' ? '' : '.'}${ext}` : '';
 }
 
@@ -125,11 +122,11 @@ type PathObject = {
   ext?: string;
 };
 
-function _format(sep : string, pathObject : PathObject) {
+function _format(sep: string, pathObject: PathObject) {
   validateObject(pathObject, 'pathObject', {});
   const dir = pathObject.dir || pathObject.root;
-  const base = pathObject.base ||
-    `${pathObject.name || ''}${formatExt(pathObject.ext!)}`;
+  const base =
+    pathObject.base || `${pathObject.name || ''}${formatExt(pathObject.ext!)}`;
   if (!dir) {
     return base;
   }
@@ -142,39 +139,39 @@ const win32 = {
     throw new Error('path.win32.resolve() is not implemented.');
   },
 
-  normalize(_ : string) {
+  normalize(_: string) {
     throw new Error('path.win32.normalize() is not implemented.');
   },
 
-  isAbsolute(_ : string) {
+  isAbsolute(_: string) {
     throw new Error('path.win32.isAbsolute() is not implemented.');
   },
 
-  join(..._ : string[]) {
+  join(..._: string[]) {
     throw new Error('path.win32.join() is not implemented.');
   },
 
-  relative(_0 : string, _1 : string) {
+  relative(_0: string, _1: string) {
     throw new Error('path.win32.relative() is not implemented.');
   },
 
-  toNamespacedPath(_ : string) {
+  toNamespacedPath(_: string) {
     throw new Error('path.win32.toNamedspacedPath() is not implemented.');
   },
 
-  dirname(_ : string) {
+  dirname(_: string) {
     throw new Error('path.win32.dirname() is not implemented.');
   },
 
-  basename(_0 : string, _1? : string) {
+  basename(_0: string, _1?: string) {
     throw new Error('path.win32.basename() is not implemented.');
   },
 
-  extname(_ : string) {
+  extname(_: string) {
     throw new Error('path.win32.extname() is not implemented.');
   },
 
-  format(_ : PathObject) {
+  format(_: PathObject) {
     throw new Error('path.win32.format() is not implemented.');
   },
 
@@ -188,8 +185,8 @@ const win32 = {
 
   sep: '\\',
   delimiter: ';',
-  win32: null as Object|null,
-  posix: null as Object|null,
+  win32: null as Object | null,
+  posix: null as Object | null,
 };
 
 const posix = {
@@ -220,8 +217,12 @@ const posix = {
     // handle relative paths to be safe (might happen when process.cwd() fails)
 
     // Normalize the path
-    resolvedPath = normalizeString(resolvedPath, !resolvedAbsolute, '/',
-                                   isPosixPathSeparator);
+    resolvedPath = normalizeString(
+      resolvedPath,
+      !resolvedAbsolute,
+      '/',
+      isPosixPathSeparator
+    );
 
     if (resolvedAbsolute) {
       return `/${resolvedPath}`;
@@ -233,25 +234,23 @@ const posix = {
    * @param {string} path
    * @returns {string}
    */
-  normalize(path : string) {
+  normalize(path: string) {
     validateString(path, 'path');
 
-    if (path.length === 0)
-      return '.';
+    if (path.length === 0) return '.';
 
     const isAbsolute = path.charCodeAt(0) === CHAR_FORWARD_SLASH;
-    const trailingSeparator = path.charCodeAt(path.length - 1) === CHAR_FORWARD_SLASH;
+    const trailingSeparator =
+      path.charCodeAt(path.length - 1) === CHAR_FORWARD_SLASH;
 
     // Normalize the path
     path = normalizeString(path, !isAbsolute, '/', isPosixPathSeparator);
 
     if (path.length === 0) {
-      if (isAbsolute)
-        return '/';
+      if (isAbsolute) return '/';
       return trailingSeparator ? './' : '.';
     }
-    if (trailingSeparator)
-      path += '/';
+    if (trailingSeparator) path += '/';
 
     return isAbsolute ? `/${path}` : path;
   },
@@ -260,7 +259,7 @@ const posix = {
    * @param {string} path
    * @returns {boolean}
    */
-  isAbsolute(path : string) {
+  isAbsolute(path: string) {
     validateString(path, 'path');
     return path.length > 0 && path.charCodeAt(0) === CHAR_FORWARD_SLASH;
   },
@@ -269,22 +268,18 @@ const posix = {
    * @param {...string} args
    * @returns {string}
    */
-  join(...args : string[]) {
-    if (args.length === 0)
-      return '.';
+  join(...args: string[]) {
+    if (args.length === 0) return '.';
     let joined;
     for (let i = 0; i < args.length; ++i) {
       const arg = args[i];
       validateString(arg, 'path');
       if (arg!.length > 0) {
-        if (joined === undefined)
-          joined = arg;
-        else
-          joined += `/${arg}`;
+        if (joined === undefined) joined = arg;
+        else joined += `/${arg}`;
       }
     }
-    if (joined === undefined)
-      return '.';
+    if (joined === undefined) return '.';
     return posix.normalize(joined);
   },
 
@@ -293,19 +288,17 @@ const posix = {
    * @param {string} to
    * @returns {string}
    */
-  relative(from: string, to : string) {
+  relative(from: string, to: string) {
     validateString(from, 'from');
     validateString(to, 'to');
 
-    if (from === to)
-      return '';
+    if (from === to) return '';
 
     // Trim leading forward slashes.
     from = posix.resolve(from);
     to = posix.resolve(to);
 
-    if (from === to)
-      return '';
+    if (from === to) return '';
 
     const fromStart = 1;
     const fromEnd = from.length;
@@ -314,15 +307,13 @@ const posix = {
     const toLen = to.length - toStart;
 
     // Compare paths to find the longest common path from root
-    const length = (fromLen < toLen ? fromLen : toLen);
+    const length = fromLen < toLen ? fromLen : toLen;
     let lastCommonSep = -1;
     let i = 0;
     for (; i < length; i++) {
       const fromCode = from.charCodeAt(fromStart + i);
-      if (fromCode !== to.charCodeAt(toStart + i))
-        break;
-      else if (fromCode === CHAR_FORWARD_SLASH)
-        lastCommonSep = i;
+      if (fromCode !== to.charCodeAt(toStart + i)) break;
+      else if (fromCode === CHAR_FORWARD_SLASH) lastCommonSep = i;
     }
     if (i === length) {
       if (toLen > length) {
@@ -367,7 +358,7 @@ const posix = {
    * @param {string} path
    * @returns {string}
    */
-  toNamespacedPath(path : string) {
+  toNamespacedPath(path: string) {
     // Non-op on posix systems
     return path;
   },
@@ -376,10 +367,9 @@ const posix = {
    * @param {string} path
    * @returns {string}
    */
-  dirname(path : string) {
+  dirname(path: string) {
     validateString(path, 'path');
-    if (path.length === 0)
-      return '.';
+    if (path.length === 0) return '.';
     const hasRoot = path.charCodeAt(0) === CHAR_FORWARD_SLASH;
     let end = -1;
     let matchedSlash = true;
@@ -395,10 +385,8 @@ const posix = {
       }
     }
 
-    if (end === -1)
-      return hasRoot ? '/' : '.';
-    if (hasRoot && end === 1)
-      return '//';
+    if (end === -1) return hasRoot ? '/' : '.';
+    if (hasRoot && end === 1) return '//';
     return path.slice(0, end);
   },
 
@@ -407,18 +395,20 @@ const posix = {
    * @param {string} [suffix]
    * @returns {string}
    */
-  basename(path : string, suffix? : string) {
-    if (suffix !== undefined)
-      validateString(suffix, 'ext');
+  basename(path: string, suffix?: string) {
+    if (suffix !== undefined) validateString(suffix, 'ext');
     validateString(path, 'path');
 
     let start = 0;
     let end = -1;
     let matchedSlash = true;
 
-    if (suffix !== undefined && suffix.length > 0 && suffix.length <= path.length) {
-      if (suffix === path)
-        return '';
+    if (
+      suffix !== undefined &&
+      suffix.length > 0 &&
+      suffix.length <= path.length
+    ) {
+      if (suffix === path) return '';
       let extIdx = suffix.length - 1;
       let firstNonSlashEnd = -1;
       for (let i = path.length - 1; i >= 0; --i) {
@@ -455,10 +445,8 @@ const posix = {
         }
       }
 
-      if (start === end)
-        end = firstNonSlashEnd;
-      else if (end === -1)
-        end = path.length;
+      if (start === end) end = firstNonSlashEnd;
+      else if (end === -1) end = path.length;
       return path.slice(start, end);
     }
     for (let i = path.length - 1; i >= 0; --i) {
@@ -477,8 +465,7 @@ const posix = {
       }
     }
 
-    if (end === -1)
-      return '';
+    if (end === -1) return '';
     return path.slice(start, end);
   },
 
@@ -486,7 +473,7 @@ const posix = {
    * @param {string} path
    * @returns {string}
    */
-  extname(path : string) {
+  extname(path: string) {
     validateString(path, 'path');
     let startDot = -1;
     let startPart = 0;
@@ -514,10 +501,8 @@ const posix = {
       }
       if (code === CHAR_DOT) {
         // If this is our first dot, mark it as the start of our extension
-        if (startDot === -1)
-          startDot = i;
-        else if (preDotState !== 1)
-          preDotState = 1;
+        if (startDot === -1) startDot = i;
+        else if (preDotState !== 1) preDotState = 1;
       } else if (startDot !== -1) {
         // We saw a non-dot and non-path separator before our dot, so we should
         // have a good chance at having a non-empty extension
@@ -525,14 +510,14 @@ const posix = {
       }
     }
 
-    if (startDot === -1 ||
-        end === -1 ||
-        // We saw a non-dot character immediately before the dot
-        preDotState === 0 ||
-        // The (right-most) trimmed path component is exactly '..'
-        (preDotState === 1 &&
-         startDot === end - 1 &&
-         startDot === startPart + 1)) {
+    if (
+      startDot === -1 ||
+      end === -1 ||
+      // We saw a non-dot character immediately before the dot
+      preDotState === 0 ||
+      // The (right-most) trimmed path component is exactly '..'
+      (preDotState === 1 && startDot === end - 1 && startDot === startPart + 1)
+    ) {
       return '';
     }
     return path.slice(startDot, end);
@@ -550,14 +535,12 @@ const posix = {
    *   ext: string;
    *   }}
    */
-  parse(path: string) : PathObject {
+  parse(path: string): PathObject {
     validateString(path, 'path');
 
     const ret = { root: '', dir: '', base: '', ext: '', name: '' };
-    if (path.length === 0)
-      return ret;
-    const isAbsolute =
-      path.charCodeAt(0) === CHAR_FORWARD_SLASH;
+    if (path.length === 0) return ret;
+    const isAbsolute = path.charCodeAt(0) === CHAR_FORWARD_SLASH;
     let start;
     if (isAbsolute) {
       ret.root = '/';
@@ -595,10 +578,8 @@ const posix = {
       }
       if (code === CHAR_DOT) {
         // If this is our first dot, mark it as the start of our extension
-        if (startDot === -1)
-          startDot = i;
-        else if (preDotState !== 1)
-          preDotState = 1;
+        if (startDot === -1) startDot = i;
+        else if (preDotState !== 1) preDotState = 1;
       } else if (startDot !== -1) {
         // We saw a non-dot and non-path separator before our dot, so we should
         // have a good chance at having a non-empty extension
@@ -608,13 +589,15 @@ const posix = {
 
     if (end !== -1) {
       const start = startPart === 0 && isAbsolute ? 1 : startPart;
-      if (startDot === -1 ||
-          // We saw a non-dot character immediately before the dot
-          preDotState === 0 ||
-          // The (right-most) trimmed path component is exactly '..'
-          (preDotState === 1 &&
+      if (
+        startDot === -1 ||
+        // We saw a non-dot character immediately before the dot
+        preDotState === 0 ||
+        // The (right-most) trimmed path component is exactly '..'
+        (preDotState === 1 &&
           startDot === end - 1 &&
-          startDot === startPart + 1)) {
+          startDot === startPart + 1)
+      ) {
         ret.base = ret.name = path.slice(start, end);
       } else {
         ret.name = path.slice(start, startDot);
@@ -623,10 +606,8 @@ const posix = {
       }
     }
 
-    if (startPart > 0)
-      ret.dir = path.slice(0, startPart - 1);
-    else if (isAbsolute)
-      ret.dir = '/';
+    if (startPart > 0) ret.dir = path.slice(0, startPart - 1);
+    else if (isAbsolute) ret.dir = '/';
 
     return ret;
   },
@@ -637,8 +618,8 @@ const posix = {
 
   sep: '/',
   delimiter: ':',
-  win32: null as Object|null,
-  posix: null as Object|null,
+  win32: null as Object | null,
+  posix: null as Object | null,
 };
 
 posix.win32 = win32.win32 = win32;

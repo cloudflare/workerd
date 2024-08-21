@@ -5,5 +5,5 @@ type CryptoKey = unknown;
 
 declare const CryptoKey: {
   prototype: CryptoKey;
-  new(): CryptoKey;
+  new (): CryptoKey;
 };

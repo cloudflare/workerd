@@ -29,16 +29,13 @@ void AsyncRunner::QueueTick() {
   }
   tick_queued_ = true;
 
-  IoContext::current().setTimeoutImpl(
-      timeoutIdGenerator, false,
-      [this](jsg::Lock& js) mutable {
-        this->tick_queued_ = false;
-        if (this->count_ > 0) {
-          this->instance_.ProcessEvents();
-          QueueTick();
-        }
-      },
-      BUSY_LOOP_DELAY_MS);
+  IoContext::current().setTimeoutImpl(timeoutIdGenerator, false, [this](jsg::Lock& js) mutable {
+    this->tick_queued_ = false;
+    if (this->count_ > 0) {
+      this->instance_.ProcessEvents();
+      QueueTick();
+    }
+  }, BUSY_LOOP_DELAY_MS);
 }
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

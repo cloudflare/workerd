@@ -18,9 +18,7 @@ import {
   setDefaultHighWaterMark,
   isWritable,
 } from 'node-internal:streams_util';
-import {
-  compose,
-} from 'node-internal:streams_compose';
+import { compose } from 'node-internal:streams_compose';
 import { Stream } from 'node-internal:streams_legacy';
 import { Writable } from 'node-internal:streams_writable';
 import { Readable } from 'node-internal:streams_readable';

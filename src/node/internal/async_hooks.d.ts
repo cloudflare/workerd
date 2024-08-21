@@ -6,13 +6,23 @@ export interface AsyncResourceOptions {
 
 export class AsyncResource {
   public constructor(type: string, options?: AsyncResourceOptions);
-  public runInAsyncScope<R>(fn: (...args: unknown[]) => R, ...args: unknown[]): R;
+  public runInAsyncScope<R>(
+    fn: (...args: unknown[]) => R,
+    ...args: unknown[]
+  ): R;
 
   public bind<Func extends (...args: unknown[]) => unknown>(
-    fn: Func): Func & { asyncResource: AsyncResource; };
+    fn: Func
+  ): Func & { asyncResource: AsyncResource };
 
-  public static bind<Func extends (this: ThisArg, ...args: unknown[]) => unknown, ThisArg>(
-    fn: Func, type?: string, thisArg?: ThisArg): Func & { asyncResource: AsyncResource; };
+  public static bind<
+    Func extends (this: ThisArg, ...args: unknown[]) => unknown,
+    ThisArg,
+  >(
+    fn: Func,
+    type?: string,
+    thisArg?: ThisArg
+  ): Func & { asyncResource: AsyncResource };
 }
 
 export class AsyncLocalStorage<T> {

@@ -23,5 +23,4 @@ export class RpcStub {
   public constructor(server: object);
 }
 
-export class RpcTarget {
-}
+export class RpcTarget {}

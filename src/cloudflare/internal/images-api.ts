@@ -7,7 +7,7 @@ type Fetcher = {
 };
 
 type RawInfoResponse =
-  | { format: "image/svg+xml" }
+  | { format: 'image/svg+xml' }
   | {
       format: string;
       file_size: number;
@@ -19,10 +19,10 @@ class TransformationResultImpl implements TransformationResult {
   public constructor(private readonly bindingsResponse: Response) {}
 
   public contentType(): string {
-    const contentType = this.bindingsResponse.headers.get("content-type");
+    const contentType = this.bindingsResponse.headers.get('content-type');
     if (!contentType) {
       throw new ImagesErrorImpl(
-        "IMAGES_TRANSFORM_ERROR 9523: No content-type on bindings response",
+        'IMAGES_TRANSFORM_ERROR 9523: No content-type on bindings response',
         9523
       );
     }
@@ -37,7 +37,7 @@ class TransformationResultImpl implements TransformationResult {
   public response(): Response {
     return new Response(this.image(), {
       headers: {
-        "content-type": this.contentType(),
+        'content-type': this.contentType(),
       },
     });
   }
@@ -71,34 +71,34 @@ class ImageTransformerImpl implements ImageTransformer {
   public async output(options: OutputOptions): Promise<TransformationResult> {
     if (this.consumed) {
       throw new ImagesErrorImpl(
-        "IMAGES_TRANSFORM_ERROR 9525: ImageTransformer consumed; you may only call .output() once",
+        'IMAGES_TRANSFORM_ERROR 9525: ImageTransformer consumed; you may only call .output() once',
         9525
       );
     }
     this.consumed = true;
 
     const body = new FormData();
-    body.append("image", await streamToBlob(this.stream));
-    body.append("output_format", options.format);
+    body.append('image', await streamToBlob(this.stream));
+    body.append('output_format', options.format);
     if (options.quality !== undefined) {
-      body.append("output_quality", options.quality.toString());
+      body.append('output_quality', options.quality.toString());
     }
 
     if (options.background !== undefined) {
-      body.append("background", options.background);
+      body.append('background', options.background);
     }
 
-    body.append("transforms", JSON.stringify(this.transforms));
+    body.append('transforms', JSON.stringify(this.transforms));
 
     const response = await this.fetcher.fetch(
-      "https://js.images.cloudflare.com/transform",
+      'https://js.images.cloudflare.com/transform',
       {
-        method: "POST",
+        method: 'POST',
         body,
       }
     );
 
-    await throwErrorIfErrorResponse("TRANSFORM", response);
+    await throwErrorIfErrorResponse('TRANSFORM', response);
 
     return new TransformationResultImpl(response);
   }
@@ -109,21 +109,21 @@ class ImagesBindingImpl implements ImagesBinding {
 
   public async info(stream: ReadableStream<Uint8Array>): Promise<InfoResponse> {
     const body = new FormData();
-    body.append("image", await streamToBlob(stream));
+    body.append('image', await streamToBlob(stream));
 
     const response = await this.fetcher.fetch(
-      "https://js.images.cloudflare.com/info",
+      'https://js.images.cloudflare.com/info',
       {
-        method: "POST",
+        method: 'POST',
         body,
       }
     );
 
-    await throwErrorIfErrorResponse("INFO", response);
+    await throwErrorIfErrorResponse('INFO', response);
 
     const r = (await response.json()) as RawInfoResponse;
 
-    if ("file_size" in r) {
+    if ('file_size' in r) {
       return {
         fileSize: r.file_size,
         width: r.width,
@@ -153,7 +153,7 @@ async function throwErrorIfErrorResponse(
   operation: string,
   response: Response
 ): Promise<void> {
-  const statusHeader = response.headers.get("cf-images-binding") || "";
+  const statusHeader = response.headers.get('cf-images-binding') || '';
 
   const match = /err=(\d+)/.exec(statusHeader);
 

@@ -7,32 +7,25 @@
 #include "jsg.h"
 #include "ser.h"
 
-#define JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(f) \
-    f(INDEX_SIZE_ERR, 1, "IndexSizeError") \
-    f(DOMSTRING_SIZE_ERR, 2, "DOMStringSizeError") \
-    f(HIERARCHY_REQUEST_ERR, 3, "HierarchyRequestError") \
-    f(WRONG_DOCUMENT_ERR, 4, "WrongDocumentError") \
-    f(INVALID_CHARACTER_ERR, 5, "InvalidCharacterError") \
-    f(NO_DATA_ALLOWED_ERR, 6, "NoDataAllowedError") \
-    f(NO_MODIFICATION_ALLOWED_ERR, 7, "NoModificationAllowedError") \
-    f(NOT_FOUND_ERR, 8, "NotFoundError") \
-    f(NOT_SUPPORTED_ERR, 9, "NotSupportedError") \
-    f(INUSE_ATTRIBUTE_ERR, 10, "InUseAttributeError") \
-    f(INVALID_STATE_ERR, 11, "InvalidStateError") \
-    f(SYNTAX_ERR, 12, "SyntaxError") \
-    f(INVALID_MODIFICATION_ERR, 13, "InvalidModificationError") \
-    f(NAMESPACE_ERR, 14, "NamespaceError") \
-    f(INVALID_ACCESS_ERR, 15, "InvalidAccessError") \
-    f(VALIDATION_ERR, 16, "ValidationError") \
-    f(TYPE_MISMATCH_ERR, 17, "TypeMismatchError") \
-    f(SECURITY_ERR, 18, "SecurityError") \
-    f(NETWORK_ERR, 19, "NetworkError") \
-    f(ABORT_ERR, 20, "AbortError") \
-    f(URL_MISMATCH_ERR, 21, "URLMismatchError") \
-    f(QUOTA_EXCEEDED_ERR, 22, "QuotaExceededError") \
-    f(TIMEOUT_ERR, 23, "TimeoutError") \
-    f(INVALID_NODE_TYPE_ERR, 24, "InvalidNodeTypeError") \
-    f(DATA_CLONE_ERR, 25, "DataCloneError")
+#define JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(f)                                                   \
+  f(INDEX_SIZE_ERR, 1, "IndexSizeError") f(DOMSTRING_SIZE_ERR, 2, "DOMStringSizeError")            \
+      f(HIERARCHY_REQUEST_ERR, 3, "HierarchyRequestError") f(WRONG_DOCUMENT_ERR, 4,                \
+          "WrongDocumentError") f(INVALID_CHARACTER_ERR, 5, "InvalidCharacterError")               \
+          f(NO_DATA_ALLOWED_ERR, 6, "NoDataAllowedError")                                          \
+              f(NO_MODIFICATION_ALLOWED_ERR, 7, "NoModificationAllowedError") f(                   \
+                  NOT_FOUND_ERR, 8, "NotFoundError") f(NOT_SUPPORTED_ERR, 9, "NotSupportedError")  \
+                  f(INUSE_ATTRIBUTE_ERR, 10, "InUseAttributeError") f(                             \
+                      INVALID_STATE_ERR, 11, "InvalidStateError") f(SYNTAX_ERR, 12, "SyntaxError") \
+                      f(INVALID_MODIFICATION_ERR, 13, "InvalidModificationError") f(NAMESPACE_ERR, \
+                          14, "NamespaceError") f(INVALID_ACCESS_ERR, 15, "InvalidAccessError")    \
+                          f(VALIDATION_ERR, 16, "ValidationError") f(TYPE_MISMATCH_ERR, 17,        \
+                              "TypeMismatchError") f(SECURITY_ERR, 18, "SecurityError")            \
+                              f(NETWORK_ERR, 19, "NetworkError") f(ABORT_ERR, 20, "AbortError")    \
+                                  f(URL_MISMATCH_ERR, 21, "URLMismatchError")                      \
+                                      f(QUOTA_EXCEEDED_ERR, 22, "QuotaExceededError")              \
+                                          f(TIMEOUT_ERR, 23, "TimeoutError")                       \
+                                              f(INVALID_NODE_TYPE_ERR, 24, "InvalidNodeTypeError") \
+                                                  f(DATA_CLONE_ERR, 25, "DataCloneError")
 
 namespace workerd::jsg {
 
@@ -50,24 +43,20 @@ namespace workerd::jsg {
 // "DOMException".
 class DOMException: public Object {
 public:
-  DOMException(kj::String message, kj::String name)
-      : message(kj::mv(message)),
-        name(kj::mv(name)) {}
+  DOMException(kj::String message, kj::String name): message(kj::mv(message)), name(kj::mv(name)) {}
 
   // JS API
 
   static Ref<DOMException> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-                                       Optional<kj::String> message,
-                                       Optional<kj::String> name);
+      Optional<kj::String> message,
+      Optional<kj::String> name);
 
   kj::StringPtr getName();
   kj::StringPtr getMessage();
   int getCode();
 
-#define JSG_DOM_EXCEPTION_CONSTANT_CXX(name, code, friendlyName) \
-    static constexpr int name = code;
-#define JSG_DOM_EXCEPTION_CONSTANT_JS(name, code, friendlyName) \
-    JSG_STATIC_CONSTANT(name);
+#define JSG_DOM_EXCEPTION_CONSTANT_CXX(name, code, friendlyName) static constexpr int name = code;
+#define JSG_DOM_EXCEPTION_CONSTANT_JS(name, code, friendlyName) JSG_STATIC_CONSTANT(name);
 
   // Define constexpr codes for every INDEX_SIZE_ERR, DOMSTRING_SIZE_ERR, etc.
   JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(JSG_DOM_EXCEPTION_CONSTANT_CXX)
@@ -120,4 +109,4 @@ private:
   PropertyReflection<kj::String> stack;
 };
 
-}  // namespace::jsg
+}  // namespace workerd::jsg

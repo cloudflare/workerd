@@ -7,7 +7,7 @@
 
 namespace workerd {
 
-InputGate::Hooks InputGate::Hooks::DEFAULT;
+const InputGate::Hooks InputGate::Hooks::DEFAULT;
 
 InputGate::InputGate(Hooks& hooks): InputGate(hooks, kj::newPromiseAndFulfiller<void>()) {}
 InputGate::InputGate(Hooks& hooks, kj::PromiseFulfillerPair<void> paf)
@@ -25,7 +25,9 @@ InputGate::~InputGate() noexcept {
 
 InputGate::Waiter::Waiter(
     kj::PromiseFulfiller<Lock>& fulfiller, InputGate& gate, bool isChildWaiter)
-    : fulfiller(fulfiller), gate(&gate), isChildWaiter(isChildWaiter) {
+    : fulfiller(fulfiller),
+      gate(&gate),
+      isChildWaiter(isChildWaiter) {
   gate.hooks.inputGateWaiterAdded();
   if (isChildWaiter) {
     gate.waitingChildren.add(*this);
@@ -64,9 +66,8 @@ kj::Promise<void> InputGate::onBroken() {
 
 InputGate::Lock::Lock(InputGate& gate)
     : gate(&gate),
-      cs(gate.isCriticalSection
-          ? kj::Maybe(kj::addRef(static_cast<CriticalSection&>(gate)))
-          : kj::none) {
+      cs(gate.isCriticalSection ? kj::Maybe(kj::addRef(static_cast<CriticalSection&>(gate)))
+                                : kj::none) {
   InputGate* gateToLock = &gate;
 
   KJ_IF_SOME(c, cs) {
@@ -283,7 +284,7 @@ void InputGate::setBroken(const kj::Exception& e) {
 
 InputGate& InputGate::CriticalSection::parentAsInputGate() {
   CriticalSection* ptr = this;
-  for(;;) {
+  for (;;) {
     KJ_SWITCH_ONEOF(ptr->parent) {
       KJ_CASE_ONEOF(p, InputGate*) {
         return *p;
@@ -303,10 +304,11 @@ InputGate& InputGate::CriticalSection::parentAsInputGate() {
 // =======================================================================================
 
 OutputGate::OutputGate(Hooks& hooks)
-    : hooks(hooks), pastLocksPromise(kj::Promise<void>(kj::READY_NOW).fork()) {}
+    : hooks(hooks),
+      pastLocksPromise(kj::Promise<void>(kj::READY_NOW).fork()) {}
 OutputGate::~OutputGate() noexcept(false) {}
 
-OutputGate::Hooks OutputGate::Hooks::DEFAULT;
+const OutputGate::Hooks OutputGate::Hooks::DEFAULT;
 
 kj::Own<kj::PromiseFulfiller<void>> OutputGate::lock() {
   auto paf = kj::newPromiseAndFulfiller<void>();
@@ -317,14 +319,13 @@ kj::Own<kj::PromiseFulfiller<void>> OutputGate::lock() {
 
 kj::Promise<void> OutputGate::wait() {
   hooks.outputGateWaiterAdded();
-  return pastLocksPromise.addBranch().attach(kj::defer([this]() {
-    hooks.outputGateWaiterRemoved();
-  }));
+  return pastLocksPromise.addBranch().attach(
+      kj::defer([this]() { hooks.outputGateWaiterRemoved(); }));
 }
 
 kj::Promise<void> OutputGate::onBroken() {
-  KJ_REQUIRE(!brokenState.is<kj::Own<kj::PromiseFulfiller<void>>>(),
-      "onBroken() can only be called once");
+  KJ_REQUIRE(
+      !brokenState.is<kj::Own<kj::PromiseFulfiller<void>>>(), "onBroken() can only be called once");
 
   KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
     return kj::cp(e);
@@ -343,7 +344,7 @@ namespace {
 
 void END_OUTPUT_LOCK_CANCELATION_STACK_START_WAITER_STACK() {}
 
-} // namespace
+}  // namespace
 
 kj::Exception OutputGate::makeUnfulfilledException() {
   return kj::getDestructionReason(

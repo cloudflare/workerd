@@ -1,4 +1,3 @@
-
 // Copyright (c) 2017-2022 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
@@ -24,20 +23,11 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import {
-  ok,
-  fail,
-  strictEqual,
-  throws,
-} from 'node:assert';
+import { ok, fail, strictEqual, throws } from 'node:assert';
 
-import {
-  Buffer,
-} from 'node:buffer';
+import { Buffer } from 'node:buffer';
 
-import {
-  StringDecoder,
-} from 'node:string_decoder';
+import { StringDecoder } from 'node:string_decoder';
 
 import * as string_decoder from 'node:string_decoder';
 
@@ -143,7 +133,6 @@ function unicodeEscape(str) {
 
 export const stringDecoder = {
   test(ctrl, env, ctx) {
-
     // Test default encoding
     let decoder = new StringDecoder();
     strictEqual(decoder.encoding, 'utf8');
@@ -168,7 +157,7 @@ export const stringDecoder = {
 
     test_(
       'utf-8',
-      Buffer.from([0xCB, 0xA4, 0x64, 0xE1, 0x8B, 0xA4, 0x30, 0xE3, 0x81, 0x85]),
+      Buffer.from([0xcb, 0xa4, 0x64, 0xe1, 0x8b, 0xa4, 0x30, 0xe3, 0x81, 0x85]),
       '\u02e4\u0064\u12e4\u0030\u3045'
     );
 
@@ -197,8 +186,11 @@ export const stringDecoder = {
 
     // V8 has changed their invalid UTF-8 handling, see
     // https://chromium-review.googlesource.com/c/v8/v8/+/671020 for more info.
-    test_('utf-8', Buffer.from('EDA0B5EDB08D', 'hex'),
-          '\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd');
+    test_(
+      'utf-8',
+      Buffer.from('EDA0B5EDB08D', 'hex'),
+      '\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd'
+    );
 
     // UCS-2
     test_('ucs2', Buffer.from('ababc', 'ucs2'), 'ababc');
@@ -221,10 +213,7 @@ export const stringDecoder = {
     const arrayBufferViewStr = 'String for ArrayBufferView tests\n';
     const inputBuffer = Buffer.from(arrayBufferViewStr.repeat(8), 'utf8');
     for (const expectView of getArrayBufferViews(inputBuffer)) {
-      strictEqual(
-        decoder.write(expectView),
-        inputBuffer.toString('utf8')
-      );
+      strictEqual(decoder.write(expectView), inputBuffer.toString('utf8'));
       strictEqual(decoder.end(), '');
     }
 
@@ -237,8 +226,10 @@ export const stringDecoder = {
     strictEqual(decoder.end(), '');
 
     decoder = new StringDecoder('utf8');
-    strictEqual(decoder.write(Buffer.from('\ufffd\ufffd\ufffd')),
-                '\ufffd\ufffd\ufffd');
+    strictEqual(
+      decoder.write(Buffer.from('\ufffd\ufffd\ufffd')),
+      '\ufffd\ufffd\ufffd'
+    );
     strictEqual(decoder.end(), '');
 
     decoder = new StringDecoder('utf8');
@@ -293,31 +284,22 @@ export const stringDecoder = {
     strictEqual(decoder.write(Buffer.from('bde5', 'hex')), '\ufffd\ufffd');
     strictEqual(decoder.end(), '\ufffd');
 
-    throws(
-      () => new StringDecoder(1),
-      {
-        code: 'ERR_UNKNOWN_ENCODING',
-        name: 'TypeError',
-        message: 'Unknown encoding: 1'
-      }
-    );
+    throws(() => new StringDecoder(1), {
+      code: 'ERR_UNKNOWN_ENCODING',
+      name: 'TypeError',
+      message: 'Unknown encoding: 1',
+    });
 
-    throws(
-      () => new StringDecoder('test'),
-      {
-        code: 'ERR_UNKNOWN_ENCODING',
-        name: 'TypeError',
-        message: 'Unknown encoding: test'
-      }
-    );
+    throws(() => new StringDecoder('test'), {
+      code: 'ERR_UNKNOWN_ENCODING',
+      name: 'TypeError',
+      message: 'Unknown encoding: test',
+    });
 
-    throws(
-      () => new StringDecoder('utf8').write(null),
-      {
-        code: 'ERR_INVALID_ARG_TYPE',
-        name: 'TypeError',
-      }
-    );
+    throws(() => new StringDecoder('utf8').write(null), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
 
     throws(
       () => new StringDecoder('utf8').__proto__.write(Buffer.from('abc')),
@@ -325,51 +307,54 @@ export const stringDecoder = {
         code: 'ERR_INVALID_THIS',
       }
     );
-  }
+  },
 };
 
 export const stringDecoderEnd = {
   test(ctrl, env, ctx) {
     const encodings = ['base64', 'base64url', 'hex', 'utf8', 'utf16le', 'ucs2'];
-    const bufs = [ '☃💩', 'asdf' ].map((b) => Buffer.from(b));
+    const bufs = ['☃💩', 'asdf'].map((b) => Buffer.from(b));
 
     // Also test just arbitrary bytes from 0-15.
     for (let i = 1; i <= 16; i++) {
-      const bytes = '.'.repeat(i - 1).split('.').map((_, j) => j + 0x78);
+      const bytes = '.'
+        .repeat(i - 1)
+        .split('.')
+        .map((_, j) => j + 0x78);
       bufs.push(Buffer.from(bytes));
     }
 
     encodings.forEach(testEncoding);
 
-    testEnd('utf8', Buffer.of(0xE2), Buffer.of(0x61), '\uFFFDa');
-    testEnd('utf8', Buffer.of(0xE2), Buffer.of(0x82), '\uFFFD\uFFFD');
-    testEnd('utf8', Buffer.of(0xE2), Buffer.of(0xE2), '\uFFFD\uFFFD');
-    testEnd('utf8', Buffer.of(0xE2, 0x82), Buffer.of(0x61), '\uFFFDa');
-    testEnd('utf8', Buffer.of(0xE2, 0x82), Buffer.of(0xAC), '\uFFFD\uFFFD');
-    testEnd('utf8', Buffer.of(0xE2, 0x82), Buffer.of(0xE2), '\uFFFD\uFFFD');
-    testEnd('utf8', Buffer.of(0xE2, 0x82, 0xAC), Buffer.of(0x61), '€a');
+    testEnd('utf8', Buffer.of(0xe2), Buffer.of(0x61), '\uFFFDa');
+    testEnd('utf8', Buffer.of(0xe2), Buffer.of(0x82), '\uFFFD\uFFFD');
+    testEnd('utf8', Buffer.of(0xe2), Buffer.of(0xe2), '\uFFFD\uFFFD');
+    testEnd('utf8', Buffer.of(0xe2, 0x82), Buffer.of(0x61), '\uFFFDa');
+    testEnd('utf8', Buffer.of(0xe2, 0x82), Buffer.of(0xac), '\uFFFD\uFFFD');
+    testEnd('utf8', Buffer.of(0xe2, 0x82), Buffer.of(0xe2), '\uFFFD\uFFFD');
+    testEnd('utf8', Buffer.of(0xe2, 0x82, 0xac), Buffer.of(0x61), '€a');
 
-    testEnd('utf16le', Buffer.of(0x3D), Buffer.of(0x61, 0x00), 'a');
-    testEnd('utf16le', Buffer.of(0x3D), Buffer.of(0xD8, 0x4D, 0xDC), '\u4DD8');
-    testEnd('utf16le', Buffer.of(0x3D, 0xD8), Buffer.of(), '\uD83D');
-    testEnd('utf16le', Buffer.of(0x3D, 0xD8), Buffer.of(0x61, 0x00), '\uD83Da');
+    testEnd('utf16le', Buffer.of(0x3d), Buffer.of(0x61, 0x00), 'a');
+    testEnd('utf16le', Buffer.of(0x3d), Buffer.of(0xd8, 0x4d, 0xdc), '\u4DD8');
+    testEnd('utf16le', Buffer.of(0x3d, 0xd8), Buffer.of(), '\uD83D');
+    testEnd('utf16le', Buffer.of(0x3d, 0xd8), Buffer.of(0x61, 0x00), '\uD83Da');
     testEnd(
       'utf16le',
-      Buffer.of(0x3D, 0xD8),
-      Buffer.of(0x4D, 0xDC),
+      Buffer.of(0x3d, 0xd8),
+      Buffer.of(0x4d, 0xdc),
       '\uD83D\uDC4D'
     );
-    testEnd('utf16le', Buffer.of(0x3D, 0xD8, 0x4D), Buffer.of(), '\uD83D');
+    testEnd('utf16le', Buffer.of(0x3d, 0xd8, 0x4d), Buffer.of(), '\uD83D');
     testEnd(
       'utf16le',
-      Buffer.of(0x3D, 0xD8, 0x4D),
+      Buffer.of(0x3d, 0xd8, 0x4d),
       Buffer.of(0x61, 0x00),
       '\uD83Da'
     );
-    testEnd('utf16le', Buffer.of(0x3D, 0xD8, 0x4D), Buffer.of(0xDC), '\uD83D');
+    testEnd('utf16le', Buffer.of(0x3d, 0xd8, 0x4d), Buffer.of(0xdc), '\uD83D');
     testEnd(
       'utf16le',
-      Buffer.of(0x3D, 0xD8, 0x4D, 0xDC),
+      Buffer.of(0x3d, 0xd8, 0x4d, 0xdc),
       Buffer.of(0x61, 0x00),
       '👍a'
     );
@@ -386,7 +371,12 @@ export const stringDecoderEnd = {
     testEnd('base64url', Buffer.of(0x61, 0x61), Buffer.of(), 'YWE');
     testEnd('base64url', Buffer.of(0x61, 0x61), Buffer.of(0x61), 'YWEYQ');
     testEnd('base64url', Buffer.of(0x61, 0x61, 0x61), Buffer.of(), 'YWFh');
-    testEnd('base64url', Buffer.of(0x61, 0x61, 0x61), Buffer.of(0x61), 'YWFhYQ');
+    testEnd(
+      'base64url',
+      Buffer.of(0x61, 0x61, 0x61),
+      Buffer.of(0x61),
+      'YWFhYQ'
+    );
 
     function testEncoding(encoding) {
       bufs.forEach((buf) => {
@@ -428,7 +418,7 @@ export const stringDecoderEnd = {
 
       strictEqual(res, expected);
     }
-  }
+  },
 };
 
 export const stringDecoderFuzz = {
@@ -439,13 +429,18 @@ export const stringDecoderFuzz = {
 
     function randBuf(maxLen) {
       const buf = Buffer.allocUnsafe(rand(maxLen));
-      for (let i = 0; i < buf.length; i++)
-        buf[i] = rand(256);
+      for (let i = 0; i < buf.length; i++) buf[i] = rand(256);
       return buf;
     }
 
     const encodings = [
-      'utf16le', 'utf8', 'ascii', 'hex', 'base64', 'latin1', 'base64url',
+      'utf16le',
+      'utf8',
+      'ascii',
+      'hex',
+      'base64',
+      'latin1',
+      'base64url',
     ];
 
     function runSingleFuzzTest() {
@@ -462,91 +457,113 @@ export const stringDecoderFuzz = {
       }
       strings.push(sd.end());
 
-      strictEqual(strings.join(''), Buffer.concat(bufs).toString(enc),
-                  `Mismatch:\n${strings}\n` +
-                  bufs.map((buf) => buf.toString('hex')) +
-                  `\nfor encoding ${enc}`);
+      strictEqual(
+        strings.join(''),
+        Buffer.concat(bufs).toString(enc),
+        `Mismatch:\n${strings}\n` +
+          bufs.map((buf) => buf.toString('hex')) +
+          `\nfor encoding ${enc}`
+      );
     }
 
     const start = Date.now();
-    while (Date.now() - start < 100)
-      runSingleFuzzTest();
-  }
+    while (Date.now() - start < 100) runSingleFuzzTest();
+  },
 };
 
 export const stringDecoderHacking = {
   test(ctrl, env, ctx) {
-    throws(() => {
-      const sd = new StringDecoder();
-      const sym = Object.getOwnPropertySymbols(sd)[0];
-      sd[sym] = "not a buffer";
-      sd.write(Buffer.from("this shouldn't crash"));
-    }, {
-      name: 'TypeError'
-    });
+    throws(
+      () => {
+        const sd = new StringDecoder();
+        const sym = Object.getOwnPropertySymbols(sd)[0];
+        sd[sym] = 'not a buffer';
+        sd.write(Buffer.from("this shouldn't crash"));
+      },
+      {
+        name: 'TypeError',
+      }
+    );
 
-    throws(() => {
-      const sd = new StringDecoder();
-      const sym = Object.getOwnPropertySymbols(sd)[0];
-      sd[sym] = Buffer.alloc(1);
-      sd.write(Buffer.from("this shouldn't crash"));
-    }, {
-      message: 'Invalid StringDecoder'
-    });
+    throws(
+      () => {
+        const sd = new StringDecoder();
+        const sym = Object.getOwnPropertySymbols(sd)[0];
+        sd[sym] = Buffer.alloc(1);
+        sd.write(Buffer.from("this shouldn't crash"));
+      },
+      {
+        message: 'Invalid StringDecoder',
+      }
+    );
 
-    throws(() => {
-      const sd = new StringDecoder();
-      const sym = Object.getOwnPropertySymbols(sd)[0];
-      sd[sym] = Buffer.alloc(9);
-      sd.write(Buffer.from("this shouldn't crash"));
-    }, {
-      message: 'Invalid StringDecoder'
-    });
+    throws(
+      () => {
+        const sd = new StringDecoder();
+        const sym = Object.getOwnPropertySymbols(sd)[0];
+        sd[sym] = Buffer.alloc(9);
+        sd.write(Buffer.from("this shouldn't crash"));
+      },
+      {
+        message: 'Invalid StringDecoder',
+      }
+    );
 
-    throws(() => {
-      const sd = new StringDecoder();
-      const sym = Object.getOwnPropertySymbols(sd)[0];
-      sd[sym][5] = 100;
-      sd.write(Buffer.from("this shouldn't crash"));
-    }, {
-      message: 'Buffered bytes cannot exceed 4'
-    });
+    throws(
+      () => {
+        const sd = new StringDecoder();
+        const sym = Object.getOwnPropertySymbols(sd)[0];
+        sd[sym][5] = 100;
+        sd.write(Buffer.from("this shouldn't crash"));
+      },
+      {
+        message: 'Buffered bytes cannot exceed 4',
+      }
+    );
 
-    throws(() => {
-      const sd = new StringDecoder();
-      const sym = Object.getOwnPropertySymbols(sd)[0];
-      sd[sym][4] = 100;
-      sd.write(Buffer.from("this shouldn't crash"));
-    }, {
-      message: 'Missing bytes cannot exceed 4'
-    });
+    throws(
+      () => {
+        const sd = new StringDecoder();
+        const sym = Object.getOwnPropertySymbols(sd)[0];
+        sd[sym][4] = 100;
+        sd.write(Buffer.from("this shouldn't crash"));
+      },
+      {
+        message: 'Missing bytes cannot exceed 4',
+      }
+    );
 
-    throws(() => {
-      const sd = new StringDecoder();
-      const sym = Object.getOwnPropertySymbols(sd)[0];
-      sd[sym][6] = 100;
-      sd.write(Buffer.from("this shouldn't crash"));
-    }, {
-      message: 'Invalid StringDecoder state'
-    });
+    throws(
+      () => {
+        const sd = new StringDecoder();
+        const sym = Object.getOwnPropertySymbols(sd)[0];
+        sd[sym][6] = 100;
+        sd.write(Buffer.from("this shouldn't crash"));
+      },
+      {
+        message: 'Invalid StringDecoder state',
+      }
+    );
 
-    throws(() => {
-      const sd = new StringDecoder();
-      const sym = Object.getOwnPropertySymbols(sd)[0];
-      sd[sym][4] = 3;
-      sd[sym][5] = 2;
-      sd.write(Buffer.from("this shouldn't crash"));
-    }, {
-      message: 'Invalid StringDecoder state'
-    });
-
+    throws(
+      () => {
+        const sd = new StringDecoder();
+        const sym = Object.getOwnPropertySymbols(sd)[0];
+        sd[sym][4] = 3;
+        sd[sym][5] = 2;
+        sd.write(Buffer.from("this shouldn't crash"));
+      },
+      {
+        message: 'Invalid StringDecoder state',
+      }
+    );
 
     {
       // fuzz a bit with random values
       const messages = [
-        "Invalid StringDecoder state",
-        "Missing bytes cannot exceed 4",
-        "Buffered bytes cannot exceed 4",
+        'Invalid StringDecoder state',
+        'Missing bytes cannot exceed 4',
+        'Buffered bytes cannot exceed 4',
       ];
       for (let n = 0; n < 255; n++) {
         try {
@@ -561,5 +578,5 @@ export const stringDecoderHacking = {
         }
       }
     }
-  }
+  },
 };

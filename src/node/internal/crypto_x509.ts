@@ -26,10 +26,7 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import {
-  default as cryptoImpl,
-  CheckOptions,
-} from 'node-internal:crypto';
+import { default as cryptoImpl, CheckOptions } from 'node-internal:crypto';
 
 import {
   validateString,
@@ -37,27 +34,18 @@ import {
   validateBoolean,
 } from 'node-internal:validators';
 
-import {
-  isArrayBufferView,
-} from 'node-internal:internal_types';
+import { isArrayBufferView } from 'node-internal:internal_types';
 
-import {
-  Buffer,
-} from 'node-internal:internal_buffer';
+import { Buffer } from 'node-internal:internal_buffer';
 
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 
-import {
-  kHandle,
-} from 'node-internal:crypto_util';
+import { kHandle } from 'node-internal:crypto_util';
 
-import {
-  PublicKeyObject,
-  PrivateKeyObject,
-} from 'node-internal:crypto_keys';
+import { PublicKeyObject, PrivateKeyObject } from 'node-internal:crypto_keys';
 
 function translatePeerCertificate(c: any) {
   if (!c) return null;
@@ -71,7 +59,7 @@ function translatePeerCertificate(c: any) {
 
     // XXX: More key validation?
     const regex = /([^\n:]*):([^\n]*)(?:\n|$)/g;
-    regex[Symbol.replace](info, (_: any, key: any, val: any) : any => {
+    regex[Symbol.replace](info, (_: any, key: any, val: any): any => {
       if (val.charCodeAt(0) === 0x22) {
         // The translatePeerCertificate function is only
         // used on internally created legacy certificate
@@ -80,10 +68,8 @@ function translatePeerCertificate(c: any) {
         // so this should never throw.
         val = JSON.parse(val);
       }
-      if (key in c.infoAccess)
-        c.infoAccess[key].push(val);
-      else
-        c.infoAccess[key] = [val];
+      if (key in c.infoAccess) c.infoAccess[key].push(val);
+      else c.infoAccess[key] = [val];
     });
   }
   return c;
@@ -97,7 +83,10 @@ function checkOptions(options?: CheckOptions) {
   if (options.partialWildcards !== undefined)
     validateBoolean(options.partialWildcards, 'options.partialWildcards');
   if (options.singleLabelSubdomains !== undefined)
-    validateBoolean(options.singleLabelSubdomains, 'options.singleLabelSubdomains');
+    validateBoolean(
+      options.singleLabelSubdomains,
+      'options.singleLabelSubdomains'
+    );
   if (options.wildcards !== undefined)
     validateBoolean(options.wildcards, 'options.wildcards');
   if (options.subject !== undefined)
@@ -108,7 +97,9 @@ export class X509Certificate {
   #handle?: cryptoImpl.X509Certificate = undefined;
   #state = new Map();
 
-  constructor(buffer: ArrayBufferView | ArrayBuffer | cryptoImpl.X509Certificate | string) {
+  constructor(
+    buffer: ArrayBufferView | ArrayBuffer | cryptoImpl.X509Certificate | string
+  ) {
     if (buffer instanceof cryptoImpl.X509Certificate) {
       this.#handle = buffer;
       return;
@@ -117,8 +108,11 @@ export class X509Certificate {
       buffer = Buffer.from(buffer);
     }
     if (!isArrayBufferView(buffer)) {
-      throw new ERR_INVALID_ARG_TYPE('buffer',
-        ['string', 'Buffer', 'TypedArray', 'DataView'], buffer);
+      throw new ERR_INVALID_ARG_TYPE(
+        'buffer',
+        ['string', 'Buffer', 'TypedArray', 'DataView'],
+        buffer
+      );
     }
     this.#handle = cryptoImpl.X509Certificate.parse(buffer);
   }
@@ -154,8 +148,7 @@ export class X509Certificate {
     let value = this.#state.get('issuerCertificate');
     if (value === undefined) {
       const cert = this.#handle!.issuerCert;
-      if (cert)
-        value = new X509Certificate(cert);
+      if (cert) value = new X509Certificate(cert);
       this.#state.set('issuerCertificate', value);
     }
     return value ?? undefined;
@@ -267,7 +260,9 @@ export class X509Certificate {
 
   // There's no standardized JSON encoding for X509 certs so we
   // fallback to providing the PEM encoding as a string.
-  toJSON() { return this.toString(); }
+  toJSON() {
+    return this.toString();
+  }
 
   get ca() {
     let value = this.#state.get('ca');
@@ -310,16 +305,14 @@ export class X509Certificate {
   checkPrivateKey(pkey: PrivateKeyObject) {
     if (!(pkey instanceof PrivateKeyObject))
       throw new ERR_INVALID_ARG_TYPE('pkey', 'KeyObject', pkey);
-    if (pkey.type !== 'private')
-      throw new ERR_INVALID_ARG_VALUE('pkey', pkey);
+    if (pkey.type !== 'private') throw new ERR_INVALID_ARG_VALUE('pkey', pkey);
     return this.#handle!.checkPrivateKey(pkey[kHandle]) ?? undefined;
   }
 
   verify(pkey: PublicKeyObject) {
     if (!(pkey instanceof PublicKeyObject))
       throw new ERR_INVALID_ARG_TYPE('pkey', 'KeyObject', pkey);
-    if (pkey.type !== 'public')
-      throw new ERR_INVALID_ARG_VALUE('pkey', pkey);
+    if (pkey.type !== 'public') throw new ERR_INVALID_ARG_VALUE('pkey', pkey);
     return this.#handle!.verify(pkey[kHandle]);
   }
 

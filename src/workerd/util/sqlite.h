@@ -33,7 +33,6 @@ public:
   class Statement;
   class Lock;
   class LockManager;
-  class Regulator;
   struct VfsOptions;
 
   struct IngestResult {
@@ -49,15 +48,67 @@ public:
 
   // Allows a SqliteDatabase to be passed directly into SQLite API functions where `sqlite*` is
   // expected.
-  operator sqlite3*() { return db; }
+  operator sqlite3*() {
+    return db;
+  }
+
+  // Class which regulates a SQL query, especially to control how queries created in JavaScript
+  // application code are handled.
+  class Regulator {
+
+  public:
+    // Returns whether the given name (which may be a table, index, view, etc.) is allowed to be
+    // accessed. Typically, this is used to deny access to names containing special prefixes
+    // indicating that they are privileged, like `_cf_`.
+    //
+    // This only applies to global names. Scoped names, such as column names, are not subject to
+    // authorization.
+    virtual bool isAllowedName(kj::StringPtr name) const {
+      return true;
+    }
+
+    // Returns whether a given trigger or view name should be permitted to run as a side effect of a
+    // query running under this Regulator. This is a precaution to prevent application-defined
+    // triggers from executing under a privileged regulator.
+    //
+    // TODO(someday): In theory a trigger should run with the authority level under which it was
+    //   created, but how do we track that? In practice we probably never expect triggers to run on
+    //   trusted queries.
+    virtual bool isAllowedTrigger(kj::StringPtr name) const {
+      return false;
+    }
+
+    // Report that an error occurred. `message` is the detail message constructed by SQLite. This
+    // function should typically throw an exception. If no exception is thrown, a simple KJ exception
+    // will be thrown after `onError()` returns.
+    //
+    // The purpose of this callback is to allow the JavaScript API bindings to throw a JSG exception.
+    //
+    // Note that SQLITE_MISUSE errors are NOT reported using `onError()` -- they will throw regular
+    // KJ exceptions in all cases. This is because SQLITE_MISUSE indicates a bug that could lead to
+    // undefined behavior. Such bugs are always in C++ code; JavaScript application code must be
+    // prohibited from causing such errors in the first place.
+    virtual void onError(kj::StringPtr message) const {}
+
+    // Are BEGIN TRANSACTION and SAVEPOINT statements allowed? Note that if allowed, SAVEPOINT will
+    // also be subject to `isAllowedName()` for the savepoint name. If denied, the application will
+    // not be able to create any sort of transaction.
+    //
+    // In Durable Objects, we disallow these statements because the platform provides an explicit
+    // API for transactions that is safer (e.g. it automatically rolls back on throw). Also, the
+    // platform automatically wraps every entry into the isolate lock in a transaction.
+    virtual bool allowTransactions() const {
+      return true;
+    }
+  };
 
   // Use as the `Regulator&` for queries that are fully trusted. As a general rule, this should
   // be used if and only if the SQL query is a string literal.
-  static Regulator TRUSTED;
+  static constexpr Regulator TRUSTED;
 
   // Prepares the given SQL code as a persistent statement that can be used across several queries.
   // Don't use this for one-off queries; pass the code to the Query constructor.
-  Statement prepare(Regulator& regulator, kj::StringPtr sqlCode);
+  Statement prepare(const Regulator& regulator, kj::StringPtr sqlCode);
 
   // Convenience method to start a query. This is equivalent to `prepare(sqlCode).run(bindings...)`
   // except:
@@ -66,7 +117,7 @@ public:
   //   `Query` object are both associated with the last statement. This is particularly convenient
   //   for doing database initialization such as creating several tables at once.
   template <typename... Params>
-  Query run(Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings);
+  Query run(const Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings);
 
   template <size_t size>
   Statement prepare(const char (&sqlCode)[size]);
@@ -79,7 +130,9 @@ public:
   // callback is called just before executing the query.
   //
   // Durable Objects uses this to automatically begin a transaction and close the output gate.
-  void onWrite(kj::Function<void()> callback) { onWriteCallback = kj::mv(callback); }
+  void onWrite(kj::Function<void()> callback) {
+    onWriteCallback = kj::mv(callback);
+  }
 
   // Invoke the onWrite() callback.
   //
@@ -99,16 +152,16 @@ public:
   // Helper to execute a chunk of SQL that may not be complete.
   // Executes every valid statement provided, and returns the remaining portion of the input
   // that was not processed. This is used for streaming SQL ingestion.
-  IngestResult ingestSql(Regulator& regulator, kj::StringPtr sqlCode);
+  IngestResult ingestSql(const Regulator& regulator, kj::StringPtr sqlCode);
 
   // Execute a function with the given regulator.
-  void executeWithRegulator(Regulator& regulator, kj::FunctionParam<void()> func);
+  void executeWithRegulator(const Regulator& regulator, kj::FunctionParam<void()> func);
 
 private:
   sqlite3* db;
 
   // Set while a query is compiling.
-  kj::Maybe<Regulator&> currentRegulator;
+  kj::Maybe<const Regulator&> currentRegulator;
 
   // Set while a statement is executing.
   kj::Maybe<sqlite3_stmt&> currentStatement;
@@ -126,63 +179,22 @@ private:
   // In MULTI mode, if `sqlCode` contains multiple statements, each statement before the last one
   // is executed immediately. The returned object represents the last statement.
   kj::Own<sqlite3_stmt> prepareSql(
-      Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
+      const Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
 
   // Implements SQLite authorizer callback, see sqlite3_set_authorizer().
   bool isAuthorized(int actionCode,
-      kj::Maybe<kj::StringPtr> param1, kj::Maybe<kj::StringPtr> param2,
-      kj::Maybe<kj::StringPtr> dbName, kj::Maybe<kj::StringPtr> triggerName);
+      kj::Maybe<kj::StringPtr> param1,
+      kj::Maybe<kj::StringPtr> param2,
+      kj::Maybe<kj::StringPtr> dbName,
+      kj::Maybe<kj::StringPtr> triggerName);
 
   // Implements SQLite authorizer for 'temp' DB
   bool isAuthorizedTemp(int actionCode,
-      const kj::Maybe <kj::StringPtr> &param1, const kj::Maybe <kj::StringPtr> &param2,
-      Regulator &regulator);
+      const kj::Maybe<kj::StringPtr>& param1,
+      const kj::Maybe<kj::StringPtr>& param2,
+      const Regulator& regulator);
 
   void setupSecurity();
-};
-
-// Class which regulates a SQL query, especially to control how queries created in JavaScript
-// application code are handled.
-class SqliteDatabase::Regulator {
-
-public:
-  // Returns whether the given name (which may be a table, index, view, etc.) is allowed to be
-  // accessed. Typically, this is used to deny access to names containing special prefixes
-  // indicating that they are privileged, like `_cf_`.
-  //
-  // This only applies to global names. Scoped names, such as column names, are not subject to
-  // authorization.
-  virtual bool isAllowedName(kj::StringPtr name) { return true; }
-
-  // Returns whether a given trigger or view name should be permitted to run as a side effect of a
-  // query running under this Regulator. This is a precaution to prevent application-defined
-  // triggers from executing under a privileged regulator.
-  //
-  // TODO(someday): In theory a trigger should run with the authority level under which it was
-  //   created, but how do we track that? In practice we probably never expect triggers to run on
-  //   trusted queries.
-  virtual bool isAllowedTrigger(kj::StringPtr name) { return false; }
-
-  // Report that an error occurred. `message` is the detail message constructed by SQLite. This
-  // function should typically throw an exception. If no exception is thrown, a simple KJ exception
-  // will be thrown after `onError()` returns.
-  //
-  // The purpose of this callback is to allow the JavaScript API bindings to throw a JSG exception.
-  //
-  // Note that SQLITE_MISUSE errors are NOT reported using `onError()` -- they will throw regular
-  // KJ exceptions in all cases. This is because SQLITE_MISUSE indicates a bug that could lead to
-  // undefined behavior. Such bugs are always in C++ code; JavaScript application code must be
-  // prohibited from causing such errors in the first place.
-  virtual void onError(kj::StringPtr message) {}
-
-  // Are BEGIN TRANSACTION and SAVEPOINT statements allowed? Note that if allowed, SAVEPOINT will
-  // also be subject to `isAllowedName()` for the savepoint name. If denied, the application will
-  // not be able to create any sort of transaction.
-  //
-  // In Durable Objects, we disallow these statements because the platform provides an explicit
-  // API for transactions that is safer (e.g. it automatically rolls back on throw). Also, the
-  // platform automatically wraps every entry into the isolate lock in a transaction.
-  virtual bool allowTransactions() { return true; }
 };
 
 // Represents a prepared SQL statement, which can be executed many times.
@@ -202,15 +214,19 @@ public:
   template <typename... Params>
   Query run(Params&&... bindings);
 
-  operator sqlite3_stmt*() { return stmt; }
+  operator sqlite3_stmt*() {
+    return stmt;
+  }
 
 private:
   SqliteDatabase& db;
-  Regulator& regulator;
+  const Regulator& regulator;
   kj::Own<sqlite3_stmt> stmt;
 
-  Statement(SqliteDatabase& db, Regulator& regulator, kj::Own<sqlite3_stmt> stmt)
-      : db(db), regulator(regulator), stmt(kj::mv(stmt)) {}
+  Statement(SqliteDatabase& db, const Regulator& regulator, kj::Own<sqlite3_stmt> stmt)
+      : db(db),
+        regulator(regulator),
+        stmt(kj::mv(stmt)) {}
 
   friend class SqliteDatabase;
 };
@@ -221,8 +237,8 @@ private:
 // the stack.
 class SqliteDatabase::Query {
 public:
-  using ValuePtr = kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double,
-                             decltype(nullptr)>;
+  using ValuePtr =
+      kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double, decltype(nullptr)>;
 
   // Construct using Statement::run() or SqliteDatabase::run().
 
@@ -235,7 +251,9 @@ public:
   uint64_t getRowsWritten();
 
   // If true, there are no more rows. (When true, the methods below must not be called.)
-  bool isDone() { return done; }
+  bool isDone() {
+    return done;
+  }
 
   // For INSERT, UPDATE, or DELETE queries, returns the number of rows changed. For other query
   // types the result is undefined.
@@ -275,42 +293,69 @@ public:
   bool isNull(uint column);
 
   kj::Maybe<kj::ArrayPtr<const byte>> getMaybeBlob(uint column) {
-    if (isNull(column)) { return kj::none; } else { return getBlob(column); }
+    if (isNull(column)) {
+      return kj::none;
+    } else {
+      return getBlob(column);
+    }
   }
   kj::Maybe<kj::StringPtr> getMaybeText(uint column) {
-    if (isNull(column)) { return kj::none; } else { return getText(column); }
+    if (isNull(column)) {
+      return kj::none;
+    } else {
+      return getText(column);
+    }
   }
   kj::Maybe<int> getMaybeInt(uint column) {
-    if (isNull(column)) { return kj::none; } else { return getInt(column); }
+    if (isNull(column)) {
+      return kj::none;
+    } else {
+      return getInt(column);
+    }
   }
   kj::Maybe<int64_t> getMaybeInt64(uint column) {
-    if (isNull(column)) { return kj::none; } else { return getInt64(column); }
+    if (isNull(column)) {
+      return kj::none;
+    } else {
+      return getInt64(column);
+    }
   }
   kj::Maybe<double> getMaybeDouble(uint column) {
-    if (isNull(column)) { return kj::none; } else { return getDouble(column); }
+    if (isNull(column)) {
+      return kj::none;
+    } else {
+      return getDouble(column);
+    }
   }
 
 private:
   SqliteDatabase& db;
-  Regulator& regulator;
-  kj::Own<sqlite3_stmt> ownStatement;   // for one-off queries
+  const Regulator& regulator;
+  kj::Own<sqlite3_stmt> ownStatement;  // for one-off queries
   sqlite3_stmt* statement;
   bool done = false;
 
   friend class SqliteDatabase;
 
-  Query(SqliteDatabase& db, Regulator& regulator, Statement& statement,
-        kj::ArrayPtr<const ValuePtr> bindings);
-  Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode,
-        kj::ArrayPtr<const ValuePtr> bindings);
+  Query(SqliteDatabase& db,
+      const Regulator& regulator,
+      Statement& statement,
+      kj::ArrayPtr<const ValuePtr> bindings);
+  Query(SqliteDatabase& db,
+      const Regulator& regulator,
+      kj::StringPtr sqlCode,
+      kj::ArrayPtr<const ValuePtr> bindings);
   template <typename... Params>
-  Query(SqliteDatabase& db, Regulator& regulator, Statement& statement, Params&&... bindings)
-      : db(db), regulator(regulator), statement(statement) {
+  Query(SqliteDatabase& db, const Regulator& regulator, Statement& statement, Params&&... bindings)
+      : db(db),
+        regulator(regulator),
+        statement(statement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   template <typename... Params>
-  Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings)
-      : db(db), regulator(regulator),
+  Query(SqliteDatabase& db, const Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings)
+      : db(db),
+        regulator(regulator),
         ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
         statement(ownStatement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
@@ -330,10 +375,18 @@ private:
 
   // Some reasonable automatic conversions.
 
-  inline void bind(uint column, int value) { bind(column, static_cast<long long>(value)); }
-  inline void bind(uint column, uint value) { bind(column, static_cast<long long>(value)); }
-  inline void bind(uint column, long value) { bind(column, static_cast<long long>(value)); }
-  inline void bind(uint column, float value) { bind(column, static_cast<double>(value)); }
+  inline void bind(uint column, int value) {
+    bind(column, static_cast<long long>(value));
+  }
+  inline void bind(uint column, uint value) {
+    bind(column, static_cast<long long>(value));
+  }
+  inline void bind(uint column, long value) {
+    bind(column, static_cast<long long>(value));
+  }
+  inline void bind(uint column, float value) {
+    bind(column, static_cast<double>(value));
+  }
 
   template <typename... T, size_t... i>
   void bindAll(std::index_sequence<i...>, T&&... value) {
@@ -400,8 +453,8 @@ public:
   // Unlike the other constructor, this version never uses SQLite's native VFS implementation.
   // `lockManager` will be responsible for coordinating access between multiple concurrent clients
   // of the same database.
-  explicit Vfs(const kj::Directory& directory, const LockManager& lockManager,
-               Options options = {});
+  explicit Vfs(
+      const kj::Directory& directory, const LockManager& lockManager, Options options = {});
 
   ~Vfs() noexcept(false);
 
@@ -412,7 +465,9 @@ public:
   // name.
   //
   // TODO(cleanup): Patch SQLite to allow passing the pointer in?
-  kj::StringPtr getName() const { return name; }
+  kj::StringPtr getName() const {
+    return name;
+  }
 
   KJ_DISALLOW_COPY_AND_MOVE(Vfs);
 
@@ -425,7 +480,7 @@ private:
   // Value returned by getName();
   kj::String name = makeName();
 
-  sqlite3_vfs& native;  // the system's default VFS implementation
+  sqlite3_vfs& native;       // the system's default VFS implementation
   kj::Own<sqlite3_vfs> vfs;  // our VFS
 
   // Result of `directory.getFd()`, if it returns non-null. Cached here for convenience.
@@ -498,13 +553,7 @@ public:
   //
   // (The values of this enum correspond to the SQLITE_LOCK_* constants, but we're trying to
   // avoid including sqlite's header here.)
-  enum Level {
-    UNLOCKED,
-    SHARED,
-    RESERVED,
-    PENDING,
-    EXCLUSIVE
-  };
+  enum Level { UNLOCKED, SHARED, RESERVED, PENDING, EXCLUSIVE };
 
   // Increase the lock's level. Returns false if the requested level is not available. This
   // method never blocks; SQLite takes care of retrying if needed. Per SQLite docs, if an attempt
@@ -584,7 +633,7 @@ public:
 
 template <typename... Params>
 SqliteDatabase::Query SqliteDatabase::run(
-    Regulator& regulator, kj::StringPtr sqlCode, Params&&... params) {
+    const Regulator& regulator, kj::StringPtr sqlCode, Params&&... params) {
   return Query(*this, regulator, sqlCode, kj::fwd<Params>(params)...);
 }
 
@@ -598,8 +647,7 @@ SqliteDatabase::Statement SqliteDatabase::prepare(const char (&sqlCode)[size]) {
   return prepare(TRUSTED, kj::StringPtr(sqlCode, size - 1));
 }
 template <size_t size, typename... Params>
-SqliteDatabase::Query SqliteDatabase::run(
-    const char (&sqlCode)[size], Params&&... params) {
+SqliteDatabase::Query SqliteDatabase::run(const char (&sqlCode)[size], Params&&... params) {
   return Query(*this, TRUSTED, sqlCode, kj::fwd<Params>(params)...);
 }
 

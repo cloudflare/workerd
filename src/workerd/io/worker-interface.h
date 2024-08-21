@@ -22,9 +22,11 @@ public:
 
   // Make an HTTP request. (This method is inherited from HttpService, but re-declared here for
   // visibility.)
-  virtual kj::Promise<void> request(
-      kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
-      kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) = 0;
+  virtual kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) = 0;
   // TODO(perf): Consider changing this to return Promise<DeferredProxy>. This would allow
   //   more resources to be dropped when merely proxying a request. However, it means we would no
   //   longer be immplementing kj::HttpService. But maybe that doesn't matter too much in practice.
@@ -33,10 +35,10 @@ public:
   // pure-virtual to force all subclasses of WorkerInterface to implement it explicitly rather
   // than get the default implementation which throws an unimplemented exception.
   virtual kj::Promise<void> connect(kj::StringPtr host,
-                                    const kj::HttpHeaders& headers,
-                                    kj::AsyncIoStream& connection,
-                                    ConnectResponse& response,
-                                    kj::HttpConnectSettings settings) = 0;
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) = 0;
 
   // Hints that this worker will likely be invoked in the near future, so should be warmed up now.
   // This method should also call `prewarm()` on any subsequent pipeline stages that are expected
@@ -86,13 +88,15 @@ public:
   // passed or failed. In the case of a failure, information should have already been written to
   // stderr and to the devtools; there is no need for the caller to write anything further. (If the
   // promise rejects, this indicates a bug in the test harness itself.)
-  virtual kj::Promise<bool> test() { return nullptr; }
+  virtual kj::Promise<bool> test() {
+    return nullptr;
+  }
   // TODO(someday): Produce a structured test report?
 
   // These two constants are shared by multiple systems that invoke alarms (the production
   // implementation, and the preview implementation), whose code live in completely different
   // places. We end up defining them here mostly for lack of a better option.
-  static constexpr auto ALARM_RETRY_START_SECONDS = 2; // not a duration so we can left shift it
+  static constexpr auto ALARM_RETRY_START_SECONDS = 2;  // not a duration so we can left shift it
   static constexpr auto ALARM_RETRY_MAX_TRIES = 6;
 
   class CustomEvent {
@@ -104,14 +108,12 @@ public:
 
     // Deliver the event to an isolate in this process. `incomingRequest` has been newly-allocated
     // for this event.
-    virtual kj::Promise<Result> run(
-        kj::Own<IoContext_IncomingRequest> incomingRequest,
+    virtual kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
         kj::Maybe<kj::StringPtr> entrypointName,
         kj::TaskSet& waitUntilTasks) = 0;
 
     // Forward the event over RPC.
-    virtual kj::Promise<Result> sendRpc(
-        capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+    virtual kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         capnp::ByteStreamFactory& byteStreamFactory,
         kj::TaskSet& waitUntilTasks,
         rpc::EventDispatcher::Client dispatcher) = 0;
@@ -135,7 +137,8 @@ public:
   // immediately; if its callbacks have not run yet, they will not run at all. So, a CustomEvent
   // implementation can hold references to objects it doesn't own as long as the returned promise
   // will be canceled before those objects go away.
-  [[nodiscard]] virtual kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) = 0;
+  [[nodiscard]] virtual kj::Promise<CustomEvent::Result> customEvent(
+      kj::Own<CustomEvent> event) = 0;
 
 private:
   kj::Maybe<kj::Own<kj::HttpService>> adapterService;
@@ -156,8 +159,7 @@ kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface);
 // A WorkerInterface that cancels WebSockets when revokeProm is rejected.
 // Currently only supports cancelling for upgrades.
 kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
-    kj::Own<WorkerInterface> worker,
-    kj::Promise<void> revokeProm);
+    kj::Own<WorkerInterface> worker, kj::Promise<void> revokeProm);
 
 // Implementation of WorkerInterface on top of rpc::EventDispatcher. Since an EventDispatcher
 // is intended to be single-use, this class is also inherently single-use (i.e. only one event
@@ -165,17 +167,21 @@ kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
 class RpcWorkerInterface: public WorkerInterface {
 public:
   RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-                     capnp::ByteStreamFactory& byteStreamFactory,
-                     kj::TaskSet& waitUntilTasks,
-                     rpc::EventDispatcher::Client dispatcher);
+      capnp::ByteStreamFactory& byteStreamFactory,
+      kj::TaskSet& waitUntilTasks,
+      rpc::EventDispatcher::Client dispatcher);
 
-  kj::Promise<void> request(
-      kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
-      kj::AsyncInputStream& requestBody, Response& response) override;
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override;
 
-  kj::Promise<void> connect(
-    kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
-    ConnectResponse& tunnel, kj::HttpConnectSettings settings) override;
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& tunnel,
+      kj::HttpConnectSettings settings) override;
 
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
@@ -189,4 +195,4 @@ private:
   rpc::EventDispatcher::Client dispatcher;
 };
 
-} // namespace workerd
+}  // namespace workerd

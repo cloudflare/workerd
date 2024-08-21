@@ -33,12 +33,14 @@ public:
   private:
     jsg::JsRef<jsg::JsValue> error;
 
-    jsg::JsValue getError(jsg::Lock& js) { return error.getHandle(js); }
+    jsg::JsValue getError(jsg::Lock& js) {
+      return error.getHandle(js);
+    }
   };
 
   class OpenEvent final: public Event {
   public:
-    OpenEvent() : Event(kj::str("open")) {}
+    OpenEvent(): Event(kj::str("open")) {}
     static jsg::Ref<OpenEvent> constructor() = delete;
     JSG_RESOURCE_TYPE(OpenEvent) {
       JSG_INHERIT(Event);
@@ -48,10 +50,10 @@ public:
   class MessageEvent final: public Event {
   public:
     explicit MessageEvent(kj::Maybe<kj::String> type,
-                 kj::String data,
-                 kj::String lastEventId,
-                 kj::Maybe<jsg::Url&> url)
-        : Event(kj::mv(type).orDefault([] { return kj::str("message");})),
+        kj::String data,
+        kj::String lastEventId,
+        kj::Maybe<jsg::Url&> url)
+        : Event(kj::mv(type).orDefault([] { return kj::str("message"); })),
           data(kj::mv(data)),
           lastEventId(kj::mv(lastEventId)),
           origin(url.map([](auto& url) { return url.getOrigin(); })) {}
@@ -69,8 +71,12 @@ public:
     kj::String lastEventId;
     kj::Maybe<kj::Array<const char>> origin;
 
-    kj::StringPtr getData() { return data; }
-    kj::StringPtr getLastEventId() { return lastEventId; }
+    kj::StringPtr getData() {
+      return data;
+    }
+    kj::StringPtr getLastEventId() {
+      return lastEventId;
+    }
     kj::Maybe<kj::ArrayPtr<const char>> getOrigin() {
       return origin.map([](auto& a) -> kj::ArrayPtr<const char> { return a.asPtr(); });
     }
@@ -97,9 +103,8 @@ public:
 
   EventSource(jsg::Lock& js);
 
-  static jsg::Ref<EventSource> constructor(jsg::Lock& js,
-                                           kj::String url,
-                                           jsg::Optional<EventSourceInit> init);
+  static jsg::Ref<EventSource> constructor(
+      jsg::Lock& js, kj::String url, jsg::Optional<EventSourceInit> init);
 
   kj::ArrayPtr<const char> getUrl() const {
     KJ_IF_SOME(i, impl) {
@@ -107,8 +112,12 @@ public:
     }
     return nullptr;
   }
-  bool getWithCredentials() const { return false; }
-  uint getReadyState() const { return static_cast<uint>(readyState); }
+  bool getWithCredentials() const {
+    return false;
+  }
+  uint getReadyState() const {
+    return static_cast<uint>(readyState);
+  }
 
   void close(jsg::Lock& js);
 
@@ -120,9 +129,8 @@ public:
   static jsg::Ref<EventSource> from(jsg::Lock& js, jsg::Ref<ReadableStream> stream);
 
   kj::Maybe<jsg::JsValue> getOnOpen(jsg::Lock& js) {
-    return onopenValue.map([&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue {
-      return ref.getHandle(js);
-    });
+    return onopenValue.map(
+        [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
   }
   void setOnOpen(jsg::Lock& js, jsg::JsValue value) {
     if (!value.isObject() && !value.isFunction()) {
@@ -132,9 +140,8 @@ public:
     }
   }
   kj::Maybe<jsg::JsValue> getOnMessage(jsg::Lock& js) {
-    return onmessageValue.map([&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue {
-      return ref.getHandle(js);
-    });
+    return onmessageValue.map(
+        [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
   }
   void setOnMessage(jsg::Lock& js, jsg::JsValue value) {
     if (!value.isObject() && !value.isFunction()) {
@@ -144,9 +151,8 @@ public:
     }
   }
   kj::Maybe<jsg::JsValue> getOnError(jsg::Lock& js) {
-    return onerrorValue.map([&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue {
-      return ref.getHandle(js);
-    });
+    return onerrorValue.map(
+        [&](jsg::JsRef<jsg::JsValue>& ref) -> jsg::JsValue { return ref.getHandle(js); });
   }
   void setOnError(jsg::Lock& js, jsg::JsValue value) {
     if (!value.isObject() && !value.isFunction()) {
@@ -244,10 +250,10 @@ private:
 
   // The run() method handles the actual processing of the stream.
   void run(jsg::Lock& js,
-           jsg::Ref<ReadableStream> stream,
-           bool withReconnection = true,
-           kj::Maybe<jsg::Ref<Response>> response = kj::none,
-           kj::Maybe<jsg::Ref<Fetcher>> fetcher = kj::none);
+      jsg::Ref<ReadableStream> stream,
+      bool withReconnection = true,
+      kj::Maybe<jsg::Ref<Response>> response = kj::none,
+      kj::Maybe<jsg::Ref<Fetcher>> fetcher = kj::none);
   // The start() method initializes the fetch and the processing of the
   // stream by calling run.
   void start(jsg::Lock& js);
@@ -256,9 +262,6 @@ private:
 
 }  // namespace workerd::api
 
-#define EW_EVENTSOURCE_ISOLATE_TYPES      \
-  api::EventSource,                       \
-  api::EventSource::ErrorEvent,           \
-  api::EventSource::OpenEvent,            \
-  api::EventSource::MessageEvent,         \
-  api::EventSource::EventSourceInit
+#define EW_EVENTSOURCE_ISOLATE_TYPES                                                               \
+  api::EventSource, api::EventSource::ErrorEvent, api::EventSource::OpenEvent,                     \
+      api::EventSource::MessageEvent, api::EventSource::EventSourceInit

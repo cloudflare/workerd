@@ -45,8 +45,10 @@ kj::String fullyQualifiedTypeName(const std::type_info& type) {
 
   // Replace instances of `anonymous namespace' with (anonymous namespace)
   for (auto& c: result.asArray()) {
-    if (c == '`') c = '(';
-    else if (c == '\'') c = ')';
+    if (c == '`')
+      c = '(';
+    else if (c == '\'')
+      c = ')';
   }
 
   return kj::mv(result);
@@ -104,41 +106,29 @@ bool setRemoteError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
   // If an exception was tunneled, we add a property `.remote` to the Javascript error.
   KJ_ASSERT(exception->IsObject());
   auto obj = exception.As<v8::Object>();
-  return jsg::check(
-    obj->Set(
-      isolate->GetCurrentContext(),
-      jsg::v8StrIntern(isolate, "remote"_kj),
-      v8::True(isolate)));
+  return jsg::check(obj->Set(
+      isolate->GetCurrentContext(), jsg::v8StrIntern(isolate, "remote"_kj), v8::True(isolate)));
 }
 
 bool setRetryableError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
   KJ_ASSERT(exception->IsObject());
   auto obj = exception.As<v8::Object>();
-  return jsg::check(
-    obj->Set(
-      isolate->GetCurrentContext(),
-      jsg::v8StrIntern(isolate, "retryable"_kj),
-      v8::True(isolate)));
+  return jsg::check(obj->Set(
+      isolate->GetCurrentContext(), jsg::v8StrIntern(isolate, "retryable"_kj), v8::True(isolate)));
 }
 
 bool setOverloadedError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
   KJ_ASSERT(exception->IsObject());
   auto obj = exception.As<v8::Object>();
-  return jsg::check(
-    obj->Set(
-      isolate->GetCurrentContext(),
-      jsg::v8StrIntern(isolate, "overloaded"_kj),
-      v8::True(isolate)));
+  return jsg::check(obj->Set(
+      isolate->GetCurrentContext(), jsg::v8StrIntern(isolate, "overloaded"_kj), v8::True(isolate)));
 }
 
 bool setDurableObjectResetError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
   KJ_ASSERT(exception->IsObject());
   auto obj = exception.As<v8::Object>();
-  return jsg::check(
-    obj->Set(
-      isolate->GetCurrentContext(),
-      jsg::v8StrIntern(isolate, "durableObjectReset"_kj),
-      v8::True(isolate)));
+  return jsg::check(obj->Set(isolate->GetCurrentContext(),
+      jsg::v8StrIntern(isolate, "durableObjectReset"_kj), v8::True(isolate)));
 }
 struct DecodedException {
   v8::Local<v8::Value> handle;
@@ -147,9 +137,8 @@ struct DecodedException {
   bool isDurableObjectReset;
 };
 
-DecodedException decodeTunneledException(v8::Isolate* isolate,
-                                         kj::StringPtr internalMessage,
-                                         kj::Exception::Type excType) {
+DecodedException decodeTunneledException(
+    v8::Isolate* isolate, kj::StringPtr internalMessage, kj::Exception::Type excType) {
   // We currently support tunneling the following error types:
   //
   // - Error:        While the Web IDL spec claims this is reserved for use by program authors, this
@@ -183,11 +172,11 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
   result.isFromRemote = tunneledInfo.isFromRemote;
   result.isDurableObjectReset = tunneledInfo.isDurableObjectReset;
 
-#define HANDLE_V8_ERROR(error_name, error_type) \
-  if (errorType.startsWith(error_name)) { \
-    auto message = appMessage(errorType.slice(strlen(error_name))); \
-    result.handle = v8::Exception::error_type(v8Str(isolate, message)); \
-    break; \
+#define HANDLE_V8_ERROR(error_name, error_type)                                                    \
+  if (errorType.startsWith(error_name)) {                                                          \
+    auto message = appMessage(errorType.slice(strlen(error_name)));                                \
+    result.handle = v8::Exception::error_type(v8Str(isolate, message));                            \
+    break;                                                                                         \
   }
 
   do {
@@ -264,11 +253,12 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
 
   if (tunneledException.isInternal) {
     auto& observer = IsolateBase::from(isolate).getObserver();
-    observer.reportInternalException(exception, {
-      .isInternal = tunneledException.isInternal,
-      .isFromRemote = tunneledException.isFromRemote,
-      .isDurableObjectReset = tunneledException.isDurableObjectReset,
-    });
+    observer.reportInternalException(exception,
+        {
+          .isInternal = tunneledException.isInternal,
+          .isFromRemote = tunneledException.isFromRemote,
+          .isDurableObjectReset = tunneledException.isDurableObjectReset,
+        });
     // Don't log exceptions that have been explicitly marked with worker_do_not_log or are
     // DISCONNECTED exceptions as these are unlikely to represent bugs worth tracking.
     if (exception.getType() != kj::Exception::Type::DISCONNECTED &&
@@ -299,9 +289,8 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
 }
 
 Value Lock::exceptionToJs(kj::Exception&& exception) {
-  return withinHandleScope([&] {
-    return Value(v8Isolate, makeInternalError(v8Isolate, kj::mv(exception)));
-  });
+  return withinHandleScope(
+      [&] { return Value(v8Isolate, makeInternalError(v8Isolate, kj::mv(exception))); });
 }
 
 JsRef<JsValue> Lock::exceptionToJsValue(kj::Exception&& exception) {
@@ -312,16 +301,12 @@ JsRef<JsValue> Lock::exceptionToJsValue(kj::Exception&& exception) {
 }
 
 void Lock::throwException(Value&& exception) {
-  withinHandleScope([&] {
-    v8Isolate->ThrowException(exception.getHandle(*this));
-  });
+  withinHandleScope([&] { v8Isolate->ThrowException(exception.getHandle(*this)); });
   throw JsExceptionThrown();
 }
 
 void Lock::throwException(const JsValue& exception) {
-  withinHandleScope([&] {
-    v8Isolate->ThrowException(exception);
-  });
+  withinHandleScope([&] { v8Isolate->ThrowException(exception); });
   throw JsExceptionThrown();
 }
 
@@ -342,11 +327,12 @@ void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
   v8::TryCatch tryCatch(js.v8Isolate);
   try {
-    Serializer ser(js, {
-      // Make sure we don't break compatibility if V8 introduces a new version. This value can
-      // be bumped to match the new version once all of production is updated to understand it.
-      .version = 15,
-    });
+    Serializer ser(js,
+        {
+          // Make sure we don't break compatibility if V8 introduces a new version. This value can
+          // be bumped to match the new version once all of production is updated to understand it.
+          .version = 15,
+        });
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
   } catch (JsExceptionThrown&) {
@@ -367,46 +353,37 @@ static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType)
   }
 
   switch (c.kind) {
-  case TypeErrorContext::METHOD_ARGUMENT:
-    return kj::str(
-        "Failed to execute '", c.memberName, "' on '", type, "': parameter ", c.argumentIndex + 1,
-        " is not of type '", expectedType, "'.");
-  case TypeErrorContext::CONSTRUCTOR_ARGUMENT:
-    return kj::str(
-        "Failed to construct '", type, "': constructor parameter ", c.argumentIndex + 1,
-        " is not of type '", expectedType, "'.");
-  case TypeErrorContext::SETTER_ARGUMENT:
-    return kj::str(
-        "Failed to set the '", c.memberName, "' property on '", type,
-        "': the provided value is not of type '", expectedType, "'.");
-  case TypeErrorContext::STRUCT_FIELD:
-    return kj::str(
-        "Incorrect type for the '", c.memberName, "' field on '", type,
-        "': the provided value is not of type '", expectedType, "'.");
-  case TypeErrorContext::ARRAY_ELEMENT:
-    return kj::str(
-        "Incorrect type for array element ", c.argumentIndex,
-        ": the provided value is not of type '", expectedType, "'.");
-  case TypeErrorContext::CALLBACK_ARGUMENT:
-    return kj::str(
-        "Failed to execute function: parameter ", c.argumentIndex + 1, " is not of type '",
-        expectedType, "'.");
-  case TypeErrorContext::CALLBACK_RETURN:
-    return kj::str("Callback returned incorrect type; expected '", expectedType, "'");
-  case TypeErrorContext::DICT_KEY:
-    return kj::str(
-        "Incorrect type for map entry '", c.memberName,
-        "': the provided key is not of type '", expectedType, "'.");
-  case TypeErrorContext::DICT_FIELD:
-    return kj::str(
-        "Incorrect type for map entry '", c.memberName,
-        "': the provided value is not of type '", expectedType, "'.");
-  case TypeErrorContext::PROMISE_RESOLUTION:
-    return kj::str(
-        "Incorrect type for Promise: the Promise did not resolve to '", expectedType, "'.");
-  case TypeErrorContext::OTHER:
-    return kj::str(
-        "Incorrect type: the provided value is not of type '", expectedType, "'.");
+    case TypeErrorContext::METHOD_ARGUMENT:
+      return kj::str("Failed to execute '", c.memberName, "' on '", type, "': parameter ",
+          c.argumentIndex + 1, " is not of type '", expectedType, "'.");
+    case TypeErrorContext::CONSTRUCTOR_ARGUMENT:
+      return kj::str("Failed to construct '", type, "': constructor parameter ",
+          c.argumentIndex + 1, " is not of type '", expectedType, "'.");
+    case TypeErrorContext::SETTER_ARGUMENT:
+      return kj::str("Failed to set the '", c.memberName, "' property on '", type,
+          "': the provided value is not of type '", expectedType, "'.");
+    case TypeErrorContext::STRUCT_FIELD:
+      return kj::str("Incorrect type for the '", c.memberName, "' field on '", type,
+          "': the provided value is not of type '", expectedType, "'.");
+    case TypeErrorContext::ARRAY_ELEMENT:
+      return kj::str("Incorrect type for array element ", c.argumentIndex,
+          ": the provided value is not of type '", expectedType, "'.");
+    case TypeErrorContext::CALLBACK_ARGUMENT:
+      return kj::str("Failed to execute function: parameter ", c.argumentIndex + 1,
+          " is not of type '", expectedType, "'.");
+    case TypeErrorContext::CALLBACK_RETURN:
+      return kj::str("Callback returned incorrect type; expected '", expectedType, "'");
+    case TypeErrorContext::DICT_KEY:
+      return kj::str("Incorrect type for map entry '", c.memberName,
+          "': the provided key is not of type '", expectedType, "'.");
+    case TypeErrorContext::DICT_FIELD:
+      return kj::str("Incorrect type for map entry '", c.memberName,
+          "': the provided value is not of type '", expectedType, "'.");
+    case TypeErrorContext::PROMISE_RESOLUTION:
+      return kj::str(
+          "Incorrect type for Promise: the Promise did not resolve to '", expectedType, "'.");
+    case TypeErrorContext::OTHER:
+      return kj::str("Incorrect type: the provided value is not of type '", expectedType, "'.");
   };
 
   KJ_UNREACHABLE;
@@ -420,36 +397,32 @@ static kj::String unimplementedErrorMessage(TypeErrorContext c) {
   }
 
   switch (c.kind) {
-  case TypeErrorContext::METHOD_ARGUMENT:
-    return kj::str(
-        "Failed to execute '", c.memberName, "' on '", type, "': parameter ", c.argumentIndex + 1,
-        " is not implemented.");
-  case TypeErrorContext::CONSTRUCTOR_ARGUMENT:
-    return kj::str(
-        "Failed to construct '", type, "': constructor parameter ", c.argumentIndex + 1,
-        " is not implemented.");
-  case TypeErrorContext::SETTER_ARGUMENT:
-    return kj::str(
-        "Failed to set the '", c.memberName, "' property on '", type,
-        "': the ability to set this property is not implemented.");
-  case TypeErrorContext::STRUCT_FIELD:
-    return kj::str(
-        "The '", c.memberName, "' field on '", type, "' is not implemented.");
-  case TypeErrorContext::ARRAY_ELEMENT:
-    KJ_UNREACHABLE;
-  case TypeErrorContext::CALLBACK_ARGUMENT:
-    return kj::str(
-        "Failed to execute function: parameter ", c.argumentIndex + 1, " is not implemented.");
-  case TypeErrorContext::CALLBACK_RETURN:
-    KJ_UNREACHABLE;
-  case TypeErrorContext::DICT_KEY:
-    KJ_UNREACHABLE;
-  case TypeErrorContext::DICT_FIELD:
-    KJ_UNREACHABLE;
-  case TypeErrorContext::PROMISE_RESOLUTION:
-    KJ_UNREACHABLE;
-  case TypeErrorContext::OTHER:
-    KJ_UNREACHABLE;
+    case TypeErrorContext::METHOD_ARGUMENT:
+      return kj::str("Failed to execute '", c.memberName, "' on '", type, "': parameter ",
+          c.argumentIndex + 1, " is not implemented.");
+    case TypeErrorContext::CONSTRUCTOR_ARGUMENT:
+      return kj::str("Failed to construct '", type, "': constructor parameter ",
+          c.argumentIndex + 1, " is not implemented.");
+    case TypeErrorContext::SETTER_ARGUMENT:
+      return kj::str("Failed to set the '", c.memberName, "' property on '", type,
+          "': the ability to set this property is not implemented.");
+    case TypeErrorContext::STRUCT_FIELD:
+      return kj::str("The '", c.memberName, "' field on '", type, "' is not implemented.");
+    case TypeErrorContext::ARRAY_ELEMENT:
+      KJ_UNREACHABLE;
+    case TypeErrorContext::CALLBACK_ARGUMENT:
+      return kj::str(
+          "Failed to execute function: parameter ", c.argumentIndex + 1, " is not implemented.");
+    case TypeErrorContext::CALLBACK_RETURN:
+      KJ_UNREACHABLE;
+    case TypeErrorContext::DICT_KEY:
+      KJ_UNREACHABLE;
+    case TypeErrorContext::DICT_FIELD:
+      KJ_UNREACHABLE;
+    case TypeErrorContext::PROMISE_RESOLUTION:
+      KJ_UNREACHABLE;
+    case TypeErrorContext::OTHER:
+      KJ_UNREACHABLE;
   };
 
   KJ_UNREACHABLE;
@@ -460,20 +433,18 @@ void throwTypeError(v8::Isolate* isolate, kj::StringPtr message) {
   throw JsExceptionThrown();
 }
 
-void throwTypeError(v8::Isolate* isolate,
-    TypeErrorContext errorContext, kj::String expectedType) {
+void throwTypeError(v8::Isolate* isolate, TypeErrorContext errorContext, kj::String expectedType) {
   kj::String message = typeErrorMessage(errorContext, expectedType.cStr());
   throwTypeError(isolate, message);
 }
 
-void throwTypeError(v8::Isolate* isolate,
-    TypeErrorContext errorContext, const char* expectedType) {
+void throwTypeError(v8::Isolate* isolate, TypeErrorContext errorContext, const char* expectedType) {
   kj::String message = typeErrorMessage(errorContext, expectedType);
   throwTypeError(isolate, message);
 }
 
-void throwTypeError(v8::Isolate* isolate,
-    TypeErrorContext errorContext, const std::type_info& expectedType) {
+void throwTypeError(
+    v8::Isolate* isolate, TypeErrorContext errorContext, const std::type_info& expectedType) {
   if (expectedType == typeid(Unimplemented)) {
     isolate->ThrowError(v8StrIntern(isolate, unimplementedErrorMessage(errorContext)));
     throw JsExceptionThrown();
@@ -500,15 +471,12 @@ kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value>
 }
 
 kj::Exception Lock::exceptionToKj(Value&& exception) {
-  return withinHandleScope([&] {
-    return createTunneledException(v8Isolate, exception.getHandle(*this));
-  });
+  return withinHandleScope(
+      [&] { return createTunneledException(v8Isolate, exception.getHandle(*this)); });
 }
 
 kj::Exception Lock::exceptionToKj(const JsValue& exception) {
-  return withinHandleScope([&] {
-    return createTunneledException(v8Isolate, exception);
-  });
+  return withinHandleScope([&] { return createTunneledException(v8Isolate, exception); });
 }
 
 static kj::byte DUMMY = 0;
@@ -560,14 +528,11 @@ void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> valu
   } else if (value->IsObject()) {
     v8::HandleScope scope(context->GetIsolate());
     auto obj = value.As<v8::Object>();
-    auto names = check(obj->GetPropertyNames(context,
-        v8::KeyCollectionMode::kOwnOnly,
-        v8::ALL_PROPERTIES,
-        v8::IndexFilter::kIncludeIndices));
+    auto names = check(obj->GetPropertyNames(context, v8::KeyCollectionMode::kOwnOnly,
+        v8::ALL_PROPERTIES, v8::IndexFilter::kIncludeIndices));
 
     for (auto i: kj::zeroTo(names->Length())) {
-      recursivelyFreeze(context,
-          check(obj->Get(context, check(names->Get(context, i)))));
+      recursivelyFreeze(context, check(obj->Get(context, check(names->Get(context, i)))));
     }
 
     check(obj->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
@@ -584,8 +549,7 @@ v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Val
 
 namespace {
 v8::MaybeLocal<v8::Value> makeRejectedPromise(
-    v8::Isolate* isolate,
-    v8::Local<v8::Value> exception) {
+    v8::Isolate* isolate, v8::Local<v8::Value> exception) {
   v8::Local<v8::Promise::Resolver> resolver;
   auto context = isolate->GetCurrentContext();
   if (!v8::Promise::Resolver::New(context).ToLocal(&resolver) ||
@@ -596,10 +560,7 @@ v8::MaybeLocal<v8::Value> makeRejectedPromise(
   return resolver->GetPromise();
 };
 
-void returnRejectedPromiseImpl(
-    auto info,
-    v8::Local<v8::Value> exception,
-    v8::TryCatch& tryCatch) {
+void returnRejectedPromiseImpl(auto info, v8::Local<v8::Value> exception, v8::TryCatch& tryCatch) {
   v8::Local<v8::Value> promise;
   if (!makeRejectedPromise(info.GetIsolate(), exception).ToLocal(&promise)) {
     // If makeRejectedPromise fails, the tryCatch should have caught the error.
@@ -610,18 +571,18 @@ void returnRejectedPromiseImpl(
 }
 }  // namespace
 
-void returnRejectedPromise(
-    const v8::FunctionCallbackInfo<v8::Value>& info,
+void returnRejectedPromise(const v8::FunctionCallbackInfo<v8::Value>& info,
     v8::Local<v8::Value> exception,
     v8::TryCatch& tryCatch) {
-  return returnRejectedPromiseImpl<const v8::FunctionCallbackInfo<v8::Value>&>(info, exception, tryCatch);
+  return returnRejectedPromiseImpl<const v8::FunctionCallbackInfo<v8::Value>&>(
+      info, exception, tryCatch);
 }
 
-void returnRejectedPromise(
-    const v8::PropertyCallbackInfo<v8::Value>& info,
+void returnRejectedPromise(const v8::PropertyCallbackInfo<v8::Value>& info,
     v8::Local<v8::Value> exception,
     v8::TryCatch& tryCatch) {
-  return returnRejectedPromiseImpl<const v8::PropertyCallbackInfo<v8::Value>&>(info, exception, tryCatch);
+  return returnRejectedPromiseImpl<const v8::PropertyCallbackInfo<v8::Value>&>(
+      info, exception, tryCatch);
 }
 
 // ======================================================================================
@@ -653,14 +614,20 @@ class ExternString: public Type {
   // IN THE SOFTWARE.
 
 public:
-  inline const Data* data() const override { return buf.begin(); }
+  inline const Data* data() const override {
+    return buf.begin();
+  }
 
-  inline size_t length() const override { return buf.size(); }
+  inline size_t length() const override {
+    return buf.size();
+  }
 
-  inline uint64_t byteLength() const { return length() * sizeof(Data); }
+  inline uint64_t byteLength() const {
+    return length() * sizeof(Data);
+  }
 
-  static v8::MaybeLocal<v8::String> createExtern(v8::Isolate* isolate,
-                                                 kj::ArrayPtr<const Data>& buf) {
+  static v8::MaybeLocal<v8::String> createExtern(
+      v8::Isolate* isolate, kj::ArrayPtr<const Data>& buf) {
     if (buf.size() == 0) {
       return v8::String::Empty(isolate);
     }
@@ -695,7 +662,8 @@ private:
   kj::ArrayPtr<const Data> buf;
 
   inline ExternString(v8::Isolate* isolate, kj::ArrayPtr<const Data>& buf)
-      : isolate(isolate), buf(buf) {}
+      : isolate(isolate),
+        buf(buf) {}
 };
 
 using ExternOneByteString = ExternString<v8::String::ExternalOneByteStringResource, char>;

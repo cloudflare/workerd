@@ -14,22 +14,25 @@ function crc32(data: ArrayBufferView | string, value: number = 0): number {
   return zlibUtil.crc32(data, value);
 }
 
-
-const constPrefix = 'CONST_'; 
+const constPrefix = 'CONST_';
 const constants = {};
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-Object.defineProperties(constants, Object.fromEntries(Object.entries(Object.getPrototypeOf(zlibUtil))
-  .filter(([k,]) => k.startsWith(constPrefix))
-  .map(([k, v]) => [k.slice(constPrefix.length), {
-    value: v,
-    writable: false,
-    configurable: false,
-    enumerable: true
-  }])
-));
-
-export {
-  crc32,
+Object.defineProperties(
   constants,
-}
+  Object.fromEntries(
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+    Object.entries(Object.getPrototypeOf(zlibUtil))
+      .filter(([k]) => k.startsWith(constPrefix))
+      .map(([k, v]) => [
+        k.slice(constPrefix.length),
+        {
+          value: v,
+          writable: false,
+          configurable: false,
+          enumerable: true,
+        },
+      ])
+  )
+);
+
+export { crc32, constants };

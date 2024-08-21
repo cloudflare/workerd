@@ -60,7 +60,9 @@ struct MemoryCacheEntry {
   // evicted.
   kj::Own<CacheValue> value;
 
-  inline size_t size() const { return value->bytes.size(); }
+  inline size_t size() const {
+    return value->bytes.size();
+  }
 
   // The expiration timestamp of this cache entry, usually the time at which the
   // entry was created plus some TTL. This is measured in milliseconds and
@@ -83,7 +85,7 @@ class MemoryCacheProvider;
 // implementation in the near future. The memcached-based impl would likely be
 // fairly different from this implementation so quite a few of the details here
 // are expected to change.
-class SharedMemoryCache : public kj::AtomicRefcounted {
+class SharedMemoryCache: public kj::AtomicRefcounted {
 private:
   struct InProgress;
 
@@ -128,7 +130,9 @@ public:
       };
     }
 
-    static constexpr Limits min() { return {0, 0, 0}; }
+    static constexpr Limits min() {
+      return {0, 0, 0};
+    }
 
     static Limits max(const Limits& a, const Limits& b) {
       return Limits{
@@ -143,19 +147,19 @@ public:
 
   using AdditionalResizeMemoryLimitHandler = kj::Function<void(ThreadUnsafeData&)>;
 
-  SharedMemoryCache(
-      kj::Maybe<const MemoryCacheProvider&> provider,
+  SharedMemoryCache(kj::Maybe<const MemoryCacheProvider&> provider,
       kj::StringPtr id,
       kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler);
 
   ~SharedMemoryCache() noexcept(false);
 
-  kj::StringPtr getId() const { return id; }
+  kj::StringPtr getId() const {
+    return id;
+  }
 
-  static kj::Own<const SharedMemoryCache> create(
-    kj::Maybe<const MemoryCacheProvider&> provider,
-    kj::StringPtr id,
-    kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler);
+  static kj::Own<const SharedMemoryCache> create(kj::Maybe<const MemoryCacheProvider&> provider,
+      kj::StringPtr id,
+      kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler);
 
 public:
   // RAII class that attaches itself to a cache, suggests cache limits to the
@@ -284,7 +288,9 @@ private:
   // operations.
   class KeyCallbacks {
   public:
-    inline const kj::String& keyForRow(const MemoryCacheEntry& entry) const { return entry.key; }
+    inline const kj::String& keyForRow(const MemoryCacheEntry& entry) const {
+      return entry.key;
+    }
 
     template <typename KeyLike>
     inline bool matches(const MemoryCacheEntry& e, KeyLike&& key) const {
@@ -393,7 +399,9 @@ public:
 
     // Returns the next liveliness and increments it so that the next call to
     // this function will return a different value.
-    inline uint64_t stepLiveliness() { return nextLiveliness++; }
+    inline uint64_t stepLiveliness() {
+      return nextLiveliness++;
+    }
 
     // We do not handle integer overflow, but a 64-bit counter should never wrap
     // around, at least not in the foreseeable future. (Even at a billion cache
@@ -406,7 +414,7 @@ public:
     size_t totalValueSize = 0;
 
     // The actual cache contents.
-    kj::Table<MemoryCacheEntry,            // row type
+    kj::Table<MemoryCacheEntry,              // row type
         kj::HashIndex<KeyCallbacks>,         // index over keys
         kj::TreeIndex<LivelinessCallbacks>,  // index over liveliness
         kj::TreeIndex<ValueSizeCallbacks>,   // index over value sizes
@@ -424,7 +432,6 @@ public:
   };
 
 private:
-
   // To ensure thread-safety, all mutable data is guarded by a mutex. Each cache
   // operation requires an exclusive lock. Even read-only operations need to
   // update the liveliness of cache entries, which currently requires a lock.
@@ -463,7 +470,9 @@ public:
       jsg::NonCoercible<kj::String> key,
       jsg::Optional<FallbackFunction> optionalFallback);
 
-  JSG_RESOURCE_TYPE(MemoryCache) { JSG_METHOD(read); }
+  JSG_RESOURCE_TYPE(MemoryCache) {
+    JSG_METHOD(read);
+  }
 
 private:
   SharedMemoryCache::Use cacheUse;
@@ -478,14 +487,12 @@ private:
 // the in memory cache is being used.
 class MemoryCacheProvider {
 public:
-  MemoryCacheProvider(
-      kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
-           additionalResizeMemoryLimitHandler = kj::none);
+  MemoryCacheProvider(kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
+                          additionalResizeMemoryLimitHandler = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheProvider);
   ~MemoryCacheProvider() noexcept(false);
 
-  kj::Own<const SharedMemoryCache> getInstance(
-      kj::Maybe<kj::StringPtr> cacheId = kj::none) const;
+  kj::Own<const SharedMemoryCache> getInstance(kj::Maybe<kj::StringPtr> cacheId = kj::none) const;
 
   void removeInstance(const SharedMemoryCache& instance) const;
 

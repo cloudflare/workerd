@@ -1,5 +1,5 @@
 export function reportError(e: any): never {
-  e.stack?.split("\n").forEach((s: any) => console.warn(s));
+  e.stack?.split('\n').forEach((s: any) => console.warn(s));
   throw e;
 }
 
@@ -30,19 +30,19 @@ export function reportError(e: any): never {
  */
 export function simpleRunPython(
   emscriptenModule: Module,
-  code: string,
+  code: string
 ): string {
   const [status, err] = emscriptenModule.API.rawRun(code);
   // status 0: Ok
   // status -1: Error
   if (status) {
     // PyRun_SimpleString will have written a Python traceback to stderr.
-    console.warn("Command failed:", code);
-    console.warn("Error was:");
-    for (const line of err.split("\n")) {
+    console.warn('Command failed:', code);
+    console.warn('Error was:');
+    for (const line of err.split('\n')) {
       console.warn(line);
     }
-    throw new Error("Failed");
+    throw new Error('Failed');
   }
   return err;
 }

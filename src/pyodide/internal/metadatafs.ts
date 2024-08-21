@@ -1,11 +1,11 @@
-import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
-import { createReadonlyFS } from "pyodide-internal:readOnlyFS";
+import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
+import { createReadonlyFS } from 'pyodide-internal:readOnlyFS';
 
 function createTree(paths: string[]): MetadataFSInfo {
   const tree = new Map();
   paths.forEach((elt: string, idx: number) => {
     let subTree = tree;
-    const parts = elt.split("/");
+    const parts = elt.split('/');
     const name = parts.pop();
     for (const part of parts) {
       let next = subTree.get(part);
@@ -20,7 +20,8 @@ function createTree(paths: string[]): MetadataFSInfo {
   return tree;
 }
 
-export function createMetadataFS(Module: Module): object { // TODO: Make this type more specific
+export function createMetadataFS(Module: Module): object {
+  // TODO: Make this type more specific
   const TIMESTAMP = Date.now();
   const names = MetadataReader.getNames();
   const sizes = MetadataReader.getSizes();
@@ -29,7 +30,7 @@ export function createMetadataFS(Module: Module): object { // TODO: Make this ty
     getNodeMode(parent, name, info) {
       return {
         permissions: 0o555, // read and execute but not write
-        isDir: typeof info !== "number",
+        isDir: typeof info !== 'number',
       };
     },
     setNodeAttributes(node, info, isDir) {
@@ -47,13 +48,13 @@ export function createMetadataFS(Module: Module): object { // TODO: Make this ty
     },
     readdir(node) {
       if (node.tree == undefined) {
-        throw new Error("cannot read directory, tree is undefined");
+        throw new Error('cannot read directory, tree is undefined');
       }
       return Array.from(node.tree.keys());
     },
     lookup(parent, name) {
       if (parent.tree == undefined) {
-        throw new Error("cannot lookup directory, tree is undefined");
+        throw new Error('cannot lookup directory, tree is undefined');
       }
       return parent.tree.get(name)!;
     },

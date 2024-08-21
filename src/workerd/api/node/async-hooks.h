@@ -30,19 +30,21 @@ namespace workerd::api::node {
 //   console.log(als.getStore());  // undefined
 class AsyncLocalStorage final: public jsg::Object {
 public:
-  AsyncLocalStorage() : key(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {}
-  ~AsyncLocalStorage() noexcept(false) { key->reset(); }
+  AsyncLocalStorage(): key(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {}
+  ~AsyncLocalStorage() noexcept(false) {
+    key->reset();
+  }
 
   static jsg::Ref<AsyncLocalStorage> constructor(jsg::Lock& js);
 
   v8::Local<v8::Value> run(jsg::Lock& js,
-                           v8::Local<v8::Value> store,
-                           jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
-                           jsg::Arguments<jsg::Value> args);
+      v8::Local<v8::Value> store,
+      jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
+      jsg::Arguments<jsg::Value> args);
 
   v8::Local<v8::Value> exit(jsg::Lock& js,
-                           jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
-                           jsg::Arguments<jsg::Value> args);
+      jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
+      jsg::Arguments<jsg::Value> args);
 
   v8::Local<v8::Value> getStore(jsg::Lock& js);
 
@@ -88,7 +90,6 @@ public:
 private:
   kj::Own<jsg::AsyncContextFrame::StorageKey> key;
 };
-
 
 // Note: The AsyncResource class is provided for Node.js backwards compatibility.
 // The class can be replaced entirely for async context tracking using the
@@ -149,34 +150,35 @@ public:
   // constructor to be a string specifying the resource type, we do not actually use it
   // for anything. We'll just ignore the value and not store it, but we at least need to
   // accept the argument and validate that it is a string.
-  static jsg::Ref<AsyncResource> constructor(jsg::Lock& js, jsg::Optional<kj::String> type,
-                                             jsg::Optional<Options> options = kj::none);
+  static jsg::Ref<AsyncResource> constructor(
+      jsg::Lock& js, jsg::Optional<kj::String> type, jsg::Optional<Options> options = kj::none);
 
   // The Node.js API uses numeric identifiers for all async resources. We do not
   // implement that part of their API. To prevent subtle bugs, we'll throw explicitly.
-  inline jsg::Unimplemented asyncId() { return {}; }
+  inline jsg::Unimplemented asyncId() {
+    return {};
+  }
 
   // The Node.js API uses numeric identifiers for all async resources. We do not
   // implement that part of their API. To prevent subtle bugs, we'll throw explicitly.
-  inline jsg::Unimplemented triggerAsyncId() { return {}; }
+  inline jsg::Unimplemented triggerAsyncId() {
+    return {};
+  }
 
-  static v8::Local<v8::Function> staticBind(
-      jsg::Lock& js,
+  static v8::Local<v8::Function> staticBind(jsg::Lock& js,
       v8::Local<v8::Function> fn,
       jsg::Optional<kj::String> type,
       jsg::Optional<v8::Local<v8::Value>> thisArg,
       const jsg::TypeHandler<jsg::Ref<AsyncResource>>& handler);
 
   // Binds the given function to this async context.
-  v8::Local<v8::Function> bind(
-      jsg::Lock& js,
+  v8::Local<v8::Function> bind(jsg::Lock& js,
       v8::Local<v8::Function> fn,
       jsg::Optional<v8::Local<v8::Value>> thisArg,
       const jsg::TypeHandler<jsg::Ref<AsyncResource>>& handler);
 
   // Calls the given function within this async context.
-  v8::Local<v8::Value> runInAsyncScope(
-      jsg::Lock& js,
+  v8::Local<v8::Value> runInAsyncScope(jsg::Lock& js,
       jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> fn,
       jsg::Optional<v8::Local<v8::Value>> thisArg,
       jsg::Arguments<jsg::Value>);
@@ -194,7 +196,6 @@ public:
       bind<Func extends (...args: any[]) => any>(fn: Func): Func;
       runInAsyncScope<This, Result>(fn: (this: This, ...args: any[]) => Result, thisArg?: This, ...args: any[]): Result;
     });
-
   }
 
   // Returns the jsg::AsyncContextFrame captured when the AsyncResource was created, if any.
@@ -226,10 +227,8 @@ public:
   }
 };
 
-#define EW_NODE_ASYNCHOOKS_ISOLATE_TYPES       \
-    api::node::AsyncHooksModule,               \
-    api::node::AsyncResource,                  \
-    api::node::AsyncResource::Options,         \
-    api::node::AsyncLocalStorage
+#define EW_NODE_ASYNCHOOKS_ISOLATE_TYPES                                                           \
+  api::node::AsyncHooksModule, api::node::AsyncResource, api::node::AsyncResource::Options,        \
+      api::node::AsyncLocalStorage
 
 }  // namespace workerd::api::node

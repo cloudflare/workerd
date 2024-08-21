@@ -23,7 +23,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import internal from "node-internal:util";
+import internal from 'node-internal:util';
 
 export function isCryptoKey(value: unknown): boolean {
   return value instanceof CryptoKey;
@@ -45,7 +45,8 @@ export const isDataView = internal.isDataView.bind(internal);
 export const isExternal = internal.isExternal.bind(internal);
 export const isMap = internal.isMap.bind(internal);
 export const isMapIterator = internal.isMapIterator.bind(internal);
-export const isModuleNamespaceObject = internal.isModuleNamespaceObject.bind(internal);
+export const isModuleNamespaceObject =
+  internal.isModuleNamespaceObject.bind(internal);
 export const isNativeError = internal.isNativeError.bind(internal);
 export const isPromise = internal.isPromise.bind(internal);
 export const isProxy = internal.isProxy.bind(internal);
