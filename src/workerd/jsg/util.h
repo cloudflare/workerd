@@ -421,6 +421,9 @@ auto getParameterType(void (*)(Arg)) -> Arg;
 template <typename T>
 using GetConfiguration = decltype(getParameterType(&T::jsgConfiguration));
 
+template <typename T>
+concept HasConfiguration = requires(GetConfiguration<T> arg) { T::jsgConfiguration(arg); };
+
 inline bool isFinite(double value) {
   return !(kj::isNaN(value) || value == kj::inf() || value == -kj::inf());
 }
