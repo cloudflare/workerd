@@ -1,7 +1,13 @@
 common --enable_platform_specific_config
 build --verbose_failures
-build --build_tag_filters=-off-by-default,-slow
-test --test_tag_filters=-off-by-default,-slow
+build --build_tag_filters=-off-by-default
+test --test_tag_filters=-off-by-default
+# exclude enormous tests by default
+build --test_size_filters=-enormous
+
+# use lower test timeouts: https://bazel.build/reference/test-encyclopedia#role-test-runner
+# corresponds to small,medium,large,enormous tests (medium is default)
+build --test_timeout=1,15,60,240
 
 # Not using bzlmod for dependencies yet
 common --noenable_bzlmod

@@ -6,6 +6,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "python-vectorize-api-test.wd-test",
     data = glob([
         "*.py",

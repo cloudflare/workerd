@@ -1,6 +1,6 @@
 sh_test(
     name = "helloworld_compile_test",
-    size = "small",
+    size = "medium",
     srcs = ["compile-test.sh"],
     args = [
         "$(location //src/workerd/server:workerd)",
