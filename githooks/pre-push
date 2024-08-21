@@ -15,10 +15,10 @@ fi
 
 while read LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA
 do
-  git fetch origin master &>/dev/null
-  # Check all local changes, not present in origin/master, for lint.
+  git fetch origin main &>/dev/null
+  # Check all local changes, not present in origin/main, for lint.
   set +e
-  $PYTHON_PATH "$(dirname -- $BASH_SOURCE)/../tools/cross/format.py" --check git --source $LOCAL_SHA --target origin/master
+  $PYTHON_PATH "$(dirname -- $BASH_SOURCE)/../tools/cross/format.py" --check git --source $LOCAL_SHA --target origin/main
   EXIT_CODE=$?
   set -e
   case $EXIT_CODE in
@@ -42,4 +42,3 @@ do
       ;;
   esac
 done
-
