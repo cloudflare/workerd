@@ -66,6 +66,7 @@ kj::Maybe<CompressionError> ZlibContext::getError() const {
       if (stream.avail_out != 0 && flush == Z_FINISH) {
         return constructError("unexpected end of file"_kj);
       }
+      break;
     case Z_STREAM_END:
       // normal statuses, not fatal
       break;
@@ -108,7 +109,7 @@ kj::Maybe<CompressionError> ZlibContext::setDictionary() {
 }
 
 bool ZlibContext::initializeZlib() {
-  if (initialized.lockExclusive()) {
+  if (initialized) {
     return false;
   }
   switch (mode) {
@@ -134,7 +135,7 @@ bool ZlibContext::initializeZlib() {
   }
 
   setDictionary();
-  *initialized.lockExclusive() = true;
+  initialized = true;
   return true;
 }
 
@@ -284,7 +285,7 @@ kj::Maybe<CompressionError> ZlibContext::setParams(int _level, int _strategy) {
 }
 
 void ZlibContext::close() {
-  if (!initialized.lockExclusive()) {
+  if (!initialized) {
     dictionary.clear();
     mode = ZlibMode::NONE;
     return;

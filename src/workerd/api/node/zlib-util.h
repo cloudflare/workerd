@@ -10,7 +10,6 @@
 #include "zlib.h"
 #include <kj/array.h>
 #include <kj/compat/brotli.h>
-#include <kj/mutex.h>
 #include <kj/vector.h>
 
 #include <cstdlib>
@@ -142,7 +141,7 @@ private:
     return {kj::str(message), kj::str(ZlibStrerror(err)), err};
   };
 
-  kj::MutexGuarded<bool> initialized{false};
+  bool initialized = false;
   ZlibMode mode = ZlibMode::NONE;
   int flush = Z_NO_FLUSH;
   int windowBits = 0;
