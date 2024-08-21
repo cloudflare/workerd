@@ -1230,10 +1230,12 @@ private:
 // to define the inspector socket.
 class Server::InspectorService final: public kj::HttpService, public kj::HttpServerErrorHandler {
 public:
-  InspectorService(kj::Timer& timer,
+  InspectorService(kj::Own<const kj::Executor> isolateThreadExecutor,
+      kj::Timer& timer,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       InspectorServiceIsolateRegistrar& registrar)
-      : timer(timer),
+      : isolateThreadExecutor(kj::mv(isolateThreadExecutor)),
+        timer(timer),
         headerTable(headerTableBuilder.getFutureTable()),
         server(timer, headerTable, *this, kj::HttpServerSettings{.errorHandler = *this}),
         registrar(registrar) {
@@ -1288,7 +1290,8 @@ public:
             auto webSocket = response.acceptWebSocket(responseHeaders);
             kj::Duration timerOffset = 0 * kj::MILLISECONDS;
             try {
-              co_return co_await ref->attachInspector(timer, timerOffset, *webSocket);
+              co_return co_await ref->attachInspector(
+                  isolateThreadExecutor->addRef(), timer, timerOffset, *webSocket);
             } catch (...) {
               auto exception = kj::getCaughtExceptionAsKj();
               if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
@@ -1407,6 +1410,7 @@ public:
   }
 
 private:
+  kj::Own<const kj::Executor> isolateThreadExecutor;
   kj::Timer& timer;
   kj::HttpHeaderTable& headerTable;
   kj::HashMap<kj::String, kj::Own<const Worker::Isolate::WeakIsolateRef>> isolates;
@@ -3481,14 +3485,26 @@ uint startInspector(
   static constexpr uint DEFAULT_PORT = 9229;
   kj::MutexGuarded<uint> inspectorPort(UNASSIGNED_PORT);
 
-  kj::Thread thread([inspectorAddress, &inspectorPort, &registrar]() {
+  // `startInspector()` is called on the Isolate thread. V8 requires CPU profiling to be started and
+  // stopped on the same thread which executes JavaScript -- that is, the Isolate thread -- which
+  // means we need to dispatch inspector messages on this thread. To help make that happen, we
+  // capture this thread's kj::Executor here, and pass it into the InspectorService below. Later,
+  // when the InspectorService receives a WebSocket connection, it calls
+  // `Isolate::attachInspector()`, which uses the kj::Executor we create here to create a
+  // XThreadNotifier and start a dispatch loop. The InspectorService reads subsequent WebSocket
+  // inspector messages and feeds them to that dispatch loop via the XThreadNotifier.
+  auto isolateThreadExecutor = kj::getCurrentThreadExecutor().addRef();
+
+  // Start the InspectorService thread.
+  kj::Thread thread([inspectorAddress, &inspectorPort, &registrar,
+                        isolateThreadExecutor = kj::mv(isolateThreadExecutor)]() mutable {
     kj::AsyncIoContext io = kj::setupAsyncIo();
 
     kj::HttpHeaderTable::Builder headerTableBuilder;
 
     // Create the special inspector service.
-    auto inspectorService(
-        kj::heap<Server::InspectorService>(io.provider->getTimer(), headerTableBuilder, registrar));
+    auto inspectorService(kj::heap<Server::InspectorService>(
+        kj::mv(isolateThreadExecutor), io.provider->getTimer(), headerTableBuilder, registrar));
     auto ownHeaderTable = headerTableBuilder.build();
 
     // Configure and start the inspector socket.

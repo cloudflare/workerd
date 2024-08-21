@@ -315,14 +315,32 @@ public:
   uint getLockSuccessCount() const;
 
   // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
+  // Also adds a special JSON value to the header identified by `controlHeaderId`, for compatibility
+  // with internal Cloudflare systems.
+  //
+  // This overload will dispatch all inspector messages on the _calling thread's_ `kj::Executor`.
+  // When linked against vanilla V8, this means that CPU profiling will only profile JavaScript
+  // running on the _calling thread_, which will most likely only be inspector console commands, and
+  // is not typically desired.
+  //
+  // For the above reason , this overload is curently only suitable for use by the internal Workers
+  // Runtime codebase, which patches V8 to profile whichever thread currently holds the `v8::Locker`
+  // for this Isolate.
   kj::Promise<void> attachInspector(kj::Timer& timer,
       kj::Duration timerOffset,
       kj::HttpService::Response& response,
       const kj::HttpHeaderTable& headerTable,
       kj::HttpHeaderId controlHeaderId) const;
 
-  kj::Promise<void> attachInspector(
-      kj::Timer& timer, kj::Duration timerOffset, kj::WebSocket& webSocket) const;
+  // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
+  //
+  // This overload will dispatch all inspector messages on the `kj::Executor` passed in via
+  // `isolateThreadExecutor`. For CPU profiling to work as expected, this `kj::Executor` must be
+  // associated with the same thread which executes the Worker's JavaScript.
+  kj::Promise<void> attachInspector(kj::Own<const kj::Executor> isolateThreadExecutor,
+      kj::Timer& timer,
+      kj::Duration timerOffset,
+      kj::WebSocket& webSocket) const;
 
   // Log a warning to the inspector if attached, and log an INFO severity message.
   void logWarning(kj::StringPtr description, Worker::Lock& lock);
