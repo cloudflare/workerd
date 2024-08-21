@@ -584,9 +584,9 @@ using HasGetTemplateOverload =
 
 // Like JSG_STRUCT_TS_OVERRIDE, however it enables dynamic selection of TS_OVERRIDE.
 // Should be placed adjacent to the JSG_STRUCT delcaration, inside the same struct definition.
-#define JSG_STRUCT_TS_OVERRIDE_DYNAMIC(...) \
-  static void jsgConfiguration(__VA_ARGS__); \
-  template <typename Registry> \
+#define JSG_STRUCT_TS_OVERRIDE_DYNAMIC(...)                                                        \
+  static void jsgConfiguration(__VA_ARGS__);                                                       \
+  template <typename Registry>                                                                     \
   static void registerTypeScriptDynamicOverride(Registry& registry, ##__VA_ARGS__)
 
 // Like JSG_TS_DEFINE but for use with JSG_STRUCT. Should be placed adjacent to the JSG_STRUCT
@@ -672,40 +672,42 @@ struct HasStructTypeScriptDefine<T, decltype(T::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE
 // identifiers starting with $ are rare in JS land, especially for things the runtime would be
 // exporting), then you should be able to use '$$' as the identifier prefix in C++ since only the
 // first '$' gets stripped.
-#define JSG_STRUCT(...) \
-  static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = \
-      ::workerd::jsg::JsgKind::STRUCT; \
-  static constexpr char JSG_FOR_EACH(JSG_STRUCT_FIELD_NAME, , __VA_ARGS__); \
-  template <typename TypeWrapper, typename Self> \
-  using JsgFieldWrappers = ::workerd::jsg::TypeTuple< \
-    JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__) \
-  >; \
-  template <typename Registry, typename Self, typename Config> \
-  static void registerMembersInternal(Registry& registry, \
-      Config arg) {\
-    JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__); \
-    if constexpr (::workerd::jsg::HasStructTypeScriptRoot<Self>::value) { \
-      registry.registerTypeScriptRoot(); \
-    } \
-    if constexpr (requires (jsg::GetConfiguration<Self> arg) \
-        { registerTypeScriptDynamicOverride<Registry>(registry, arg); }) { \
-      registerTypeScriptDynamicOverride<Registry>(registry, arg); \
-    } else if constexpr (::workerd::jsg::HasStructTypeScriptOverride<Self>::value) { \
-      registry.template registerTypeScriptOverride<Self::_JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY>(); \
-    } \
-    if constexpr (::workerd::jsg::HasStructTypeScriptDefine<Self>::value) { \
-      registry.template registerTypeScriptDefine<Self::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY>(); \
-    } \
-  } \
-  template <typename Registry, typename Self> \
-  static void registerMembers(Registry& registry) \
-      requires (!jsg::HasConfiguration<Self>) { \
-    registerMembersInternal<Registry, Self, void*>(registry, nullptr); \
-  } \
-  template <typename Registry, typename Self> \
-  static void registerMembers(Registry& registry, jsg::GetConfiguration<Self> arg) \
-      requires jsg::HasConfiguration<Self> { \
-    registerMembersInternal<Registry, Self, jsg::GetConfiguration<Self>>(registry, arg); \
+#define JSG_STRUCT(...)                                                                            \
+  static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::STRUCT;   \
+  static constexpr char JSG_FOR_EACH(JSG_STRUCT_FIELD_NAME, , __VA_ARGS__);                        \
+  template <typename TypeWrapper, typename Self>                                                   \
+  using JsgFieldWrappers =                                                                         \
+      ::workerd::jsg::TypeTuple<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;                    \
+  template <typename Registry, typename Self, typename Config>                                     \
+  static void registerMembersInternal(Registry& registry, Config arg) {                            \
+    JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__);                                       \
+    if constexpr (::workerd::jsg::HasStructTypeScriptRoot<Self>::value) {                          \
+      registry.registerTypeScriptRoot();                                                           \
+    }                                                                                              \
+    if constexpr (requires(jsg::GetConfiguration<Self> arg) {                                      \
+                    registerTypeScriptDynamicOverride<Registry>(registry, arg);                    \
+                  }) {                                                                             \
+      registerTypeScriptDynamicOverride<Registry>(registry, arg);                                  \
+    } else if constexpr (::workerd::jsg::HasStructTypeScriptOverride<Self>::value) {               \
+      registry.template registerTypeScriptOverride<                                                \
+          Self::_JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY>();                                    \
+    }                                                                                              \
+    if constexpr (::workerd::jsg::HasStructTypeScriptDefine<Self>::value) {                        \
+      registry                                                                                     \
+          .template registerTypeScriptDefine<Self::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY>();   \
+    }                                                                                              \
+  }                                                                                                \
+  template <typename Registry, typename Self>                                                      \
+  static void registerMembers(Registry& registry)                                                  \
+    requires(!jsg::HasConfiguration<Self>)                                                         \
+  {                                                                                                \
+    registerMembersInternal<Registry, Self, void*>(registry, nullptr);                             \
+  }                                                                                                \
+  template <typename Registry, typename Self>                                                      \
+  static void registerMembers(Registry& registry, jsg::GetConfiguration<Self> arg)                 \
+    requires jsg::HasConfiguration<Self>                                                           \
+  {                                                                                                \
+    registerMembersInternal<Registry, Self, jsg::GetConfiguration<Self>>(registry, arg);           \
   }
 
 namespace {
