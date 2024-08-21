@@ -3,3 +3,6 @@
 
 # Apply clang-format to the project.
 5e8537a77e760c160ace3dfe23ee8c76ee5aeeb3
+
+# Apply ruff format to the project
+d6d0607a845e6f71084ce272a1c1e8c50e244bdd

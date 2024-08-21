@@ -13,6 +13,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           show-progress: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
       - name: Setup Linux
         run: |
           export DEBIAN_FRONTEND=noninteractive
@@ -27,6 +30,9 @@ jobs:
       - name: Install project deps with pnpm
         run: |
           pnpm i
+      - name: Install Ruff
+        run: |
+          pip install ruff
       - name: Lint
         run: |
           python3 ./tools/cross/format.py --check

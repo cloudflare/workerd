@@ -1,5 +1,6 @@
 from asgi import env
 
+
 async def on_fetch(request):
     import asgi
 

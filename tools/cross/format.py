@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import shutil
 import subprocess
 from argparse import ArgumentParser, Namespace
 from typing import List, Optional, Tuple, Callable
@@ -11,6 +12,7 @@ from dataclasses import dataclass
 
 CLANG_FORMAT = os.environ.get("CLANG_FORMAT", "clang-format")
 PRETTIER = os.environ.get("PRETTIER", "node_modules/.bin/prettier")
+RUFF = os.environ.get("RUFF", "ruff")
 
 
 def parse_args() -> Namespace:
@@ -78,7 +80,7 @@ def filter_files_by_exts(
     return [
         file
         for file in files
-        if file.startswith(dir_path + "/") and file.endswith(exts)
+        if (dir_path == "." or file.startswith(dir_path + "/")) and file.endswith(exts)
     ]
 
 
@@ -98,6 +100,25 @@ def prettier(files: List[str], check: bool = False) -> bool:
         cmd.append("--check")
     else:
         cmd.append("--write")
+    result = subprocess.run(cmd + files)
+    return result.returncode == 0
+
+
+def ruff(files: List[str], check: bool = False) -> bool:
+    if files and not shutil.which(RUFF):
+        msg = "Cannot find ruff, will not format Python"
+        if check:
+            # In ci, fail.
+            logging.error(msg)
+            return False
+        else:
+            # In a local checkout, let it go. If the user wants Python
+            # formatting they can install ruff and run again.
+            logging.warning(msg)
+            return True
+    cmd = [RUFF, "format"]
+    if check:
+        cmd.append("--diff")
     result = subprocess.run(cmd + files)
     return result.returncode == 0
 
@@ -147,6 +168,7 @@ FORMATTERS = [
         formatter=prettier,
     ),
     FormatConfig(directory="src", extensions=(".json",), formatter=prettier),
+    FormatConfig(directory=".", extensions=(".py",), formatter=ruff),
     # TODO: lint bazel files
 ]
 

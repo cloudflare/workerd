@@ -5,9 +5,11 @@ from fastapi import Request, Depends
 
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 
+
 @Depends
 async def env(request: Request):
     return request.scope["env"]
+
 
 @contextmanager
 def acquire_js_buffer(pybuffer):
@@ -45,15 +47,17 @@ def request_to_scope(req, env, ws=False):
         "path": path,
         "query_string": query_string,
         "type": ty,
-        "env": env
+        "env": env,
     }
 
 
 async def start_application(app):
     shutdown_future = Future()
+
     async def shutdown():
         shutdown_future.set_result(None)
         await sleep(0)
+
     it = iter([{"type": "lifespan.startup"}, Future()])
 
     async def receive():
@@ -65,11 +69,11 @@ async def start_application(app):
     ready = Future()
 
     async def send(got):
-        if got['type'] == 'lifespan.startup.complete':
+        if got["type"] == "lifespan.startup.complete":
             print("Application startup complete.")
             print("Uvicorn running")
             ready.set_result(None)
-        if got['type'] == 'lifespan.shutdown.complete':
+        if got["type"] == "lifespan.shutdown.complete":
             print("Application shutdown complete")
         raise RuntimeError(f"Unexpected lifespan event {got['type']}")
 

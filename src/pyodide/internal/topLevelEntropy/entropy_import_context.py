@@ -20,7 +20,13 @@ from .import_patch_manager import block_calls
 import sys
 
 RUST_PACKAGES = ["pydantic_core", "tiktoken"]
-MODULES_TO_PATCH = ["random", "numpy.random", "numpy.random.mtrand", "tempfile", "aiohttp.http_websocket"] + RUST_PACKAGES
+MODULES_TO_PATCH = [
+    "random",
+    "numpy.random",
+    "numpy.random.mtrand",
+    "tempfile",
+    "aiohttp.http_websocket",
+] + RUST_PACKAGES
 
 # Control number of allowed entropy calls.
 
@@ -136,6 +142,7 @@ def pydantic_core_context(module):
 @contextmanager
 def aiohttp_http_websocket_context(module):
     import random
+
     Random = random.Random
 
     def patched_Random():
