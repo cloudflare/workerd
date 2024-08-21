@@ -10,6 +10,7 @@ selects.config_setting_group(
         "@platforms//cpu:x86_64",
     ],
 )
+
 selects.config_setting_group(
     name = "linux_arm64",
     match_all = [
@@ -17,6 +18,7 @@ selects.config_setting_group(
         "@platforms//cpu:aarch64",
     ],
 )
+
 selects.config_setting_group(
     name = "macos_x64",
     match_all = [
@@ -24,6 +26,7 @@ selects.config_setting_group(
         "@platforms//cpu:x86_64",
     ],
 )
+
 selects.config_setting_group(
     name = "macos_arm64",
     match_all = [
@@ -31,6 +34,7 @@ selects.config_setting_group(
         "@platforms//cpu:aarch64",
     ],
 )
+
 selects.config_setting_group(
     name = "win_x64",
     match_all = [
@@ -38,6 +42,7 @@ selects.config_setting_group(
         "@platforms//cpu:x86_64",
     ],
 )
+
 CARGO_BAZEL = select({
     ":linux_x64": "@cargo_bazel_linux_x64//file:downloaded",
     ":linux_arm64": "@cargo_bazel_linux_arm64//file:downloaded",
@@ -54,6 +59,8 @@ crates_vendor(
     cargo_bazel = CARGO_BAZEL,
     mode = "remote",
     packages = PACKAGES,
+    # Not needed, we have a well-defined set of supported platforms
+    render_config = render_config(generate_target_compatible_with = False),
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
@@ -61,8 +68,6 @@ crates_vendor(
         "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc",
     ],
-    # Not needed, we have a well-defined set of supported platforms
-   render_config = render_config(generate_target_compatible_with = False),
 )
 
 # TODO(cleanup): Switching to rust_library() would reduce the overhead of this by not creating a
@@ -70,12 +75,12 @@ crates_vendor(
 rust_static_library(
     name = "rust-deps",
     srcs = ["src/lib.rs"],
-    stamp = -1, # default to bazel --stamp flag
     # When stamping is enabled this will be replaced by the corresponding
     # value in ./bazel-out/volatile-status.txt
     rustc_env = {
-        "WORKERD_VERSION": "{WORKERD_VERSION}"
+        "WORKERD_VERSION": "{WORKERD_VERSION}",
     },
+    stamp = -1,  # default to bazel --stamp flag
     visibility = ["//visibility:public"],
     deps = [
         # On Windows, CXX is broken under Bazel (https://github.com/dtolnay/cxx/pull/125).

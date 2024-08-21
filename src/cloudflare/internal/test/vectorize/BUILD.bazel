@@ -7,5 +7,8 @@ wd_test(
 
 wd_test(
     src = "python-vectorize-api-test.wd-test",
-    data = glob(["*.py", "*.js"]),
+    data = glob([
+        "*.py",
+        "*.js",
+    ]),
 )

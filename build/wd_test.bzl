@@ -47,7 +47,6 @@ def wd_test(
         "$(location {})".format(src),
     ] + args
 
-
     _wd_test(
         name = name,
         data = data,

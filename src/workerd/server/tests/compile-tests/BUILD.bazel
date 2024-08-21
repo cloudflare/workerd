@@ -9,10 +9,9 @@ sh_test(
     ],
     data = [
         "compile-helloworld-test.ok",
-        "//src/workerd/server:workerd",
         "//samples:helloworld/config.capnp",
         "//samples:helloworld/worker.js",
+        "//src/workerd/server:workerd",
     ],
     tags = ["no-qemu"],
 )
-

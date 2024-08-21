@@ -126,8 +126,8 @@ wd_cc_library(
         ":worker-interface_capnp",
         "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util:own-util",
-        "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/kj:kj-async",
     ],
 )
@@ -184,8 +184,8 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":worker-interface_capnp",
-        "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
     ],
 )

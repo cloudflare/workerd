@@ -120,12 +120,12 @@ wd_cc_library(
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:pyodide",
         "//src/workerd/api:rtti",
+        "//src/workerd/api/node",
         "//src/workerd/io",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-tls",
-        "//src/workerd/api/node"
     ],
 )
 
@@ -164,10 +164,8 @@ kj_test(
     ],
 )
 
-
 copy_file(
     name = "pyodide.capnp.bin@rule",
     src = "//src/pyodide:pyodide.capnp.bin@rule",
     out = "pyodide.capnp.bin",
 )
-

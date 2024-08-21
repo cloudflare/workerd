@@ -1,6 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
-load("//:build/wd_ts_project.bzl", "wd_ts_project")
 load("//:build/typescript.bzl", "js_name", "module_name")
+load("//:build/wd_ts_project.bzl", "wd_ts_project")
 
 def wd_ts_test(src, deps = [], **kwargs):
     """Bazel rule to compile and run a TypeScript test"""

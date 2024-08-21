@@ -3,7 +3,7 @@ load("@aspect_rules_js//npm:defs.bzl", "npm_package")
 
 js_library(
     name = "server-harness_js_lib",
-    srcs = [ "server-harness.mjs" ],
+    srcs = ["server-harness.mjs"],
 )
 
 npm_package(

@@ -6,3 +6,6 @@
 
 # Apply ruff format to the project
 d6d0607a845e6f71084ce272a1c1e8c50e244bdd
+
+# Apply buildifier to the project
+f457f19039b82536b35659c1f9cb898a198e6cd1

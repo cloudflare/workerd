@@ -8,10 +8,10 @@ load("@npm//:defs.bzl", "npm_link_all_packages")
 cc_capnp_library(
     name = "icudata-embed",
     srcs = ["icudata-embed.capnp"],
+    data = ["@com_googlesource_chromium_icu//:icudata"],
+    defines = ["WORKERD_ICU_DATA_EMBED"],
     include_prefix = ".",
     visibility = ["//visibility:public"],
-    data = ["@com_googlesource_chromium_icu//:icudata"],
-    defines = [ "WORKERD_ICU_DATA_EMBED" ],
 )
 
 npm_link_all_packages(name = "node_modules")
@@ -75,10 +75,17 @@ config_setting(
 # Workaround for bazel not supporting negated conditions (https://github.com/bazelbuild/bazel-skylib/issues/272)
 selects.config_setting_group(
     name = "not_dbg_build",
-    match_any = [":fast_build", ":opt_build"],
+    match_any = [
+        ":fast_build",
+        ":opt_build",
+    ],
 )
 
 selects.config_setting_group(
     name = "use_dead_strip",
-    match_all = ["@platforms//os:macos", ":set_dead_strip", ":not_dbg_build"],
+    match_all = [
+        "@platforms//os:macos",
+        ":set_dead_strip",
+        ":not_dbg_build",
+    ],
 )

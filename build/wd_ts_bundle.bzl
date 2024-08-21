@@ -1,7 +1,7 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
 load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle_capnp")
-load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 
 def _to_js(file_name):
     if file_name.endswith(".ts"):
@@ -99,7 +99,6 @@ def wd_ts_bundle_capnp(
             }),
         )
     return data
-
 
 def wd_ts_bundle(name, import_name, *args, **kwargs):
     data = wd_ts_bundle_capnp(name + ".capnp", import_name, *args, **kwargs)

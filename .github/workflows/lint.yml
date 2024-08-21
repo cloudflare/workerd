@@ -24,6 +24,9 @@ jobs:
           chmod +x llvm.sh
           sudo ./llvm.sh 18
           sudo apt-get install -y --no-install-recommends clang-format-18
+          # buildifier won't install properly if specifying a particular version
+          go install github.com/bazelbuild/buildtools/buildifier@latest
+          echo "BUILDIFIER=$HOME/go/bin/buildifier" >> $GITHUB_ENV
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         # The pnpm version will be determined by the `packageManager` field in `.npmrc`

@@ -69,7 +69,7 @@ genrule(
     outs = [
         "include/dawn/dawn_proc_table.h",
         "include/dawn/webgpu.h",
-        "include/dawn/wire/client/webgpu.h"
+        "include/dawn/wire/client/webgpu.h",
     ],
     cmd = "$(location :dawn_json_generator) " +
           "--dawn-json $(location src/dawn/dawn.json) " +
@@ -1101,12 +1101,12 @@ cc_library(
         "src",
         "src/dawn/partition_alloc",
     ],
+    visibility = ["//visibility:public"],
     deps = [
-        "@dawn//src/tint/lang/wgsl/features",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@dawn//src/tint/lang/wgsl/features",
     ],
-    visibility = ["//visibility:public"],
 )
 
 cc_library(

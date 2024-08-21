@@ -9,5 +9,8 @@ wd_test(
 wd_test(
     src = "python-ai-api-test.wd-test",
     args = ["--experimental"],
-    data = glob(["*.js", "*.py"]),
+    data = glob([
+        "*.js",
+        "*.py",
+    ]),
 )

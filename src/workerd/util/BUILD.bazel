@@ -172,17 +172,19 @@ wd_cc_library(
 
 exports_files(["autogate.h"])
 
-[kj_test(
-    src = f,
-    deps = [
-        ":util",
-    ],
-) for f in [
-    "batch-queue-test.c++",
-    "mimetype-test.c++",
-    "wait-list-test.c++",
-    "duration-exceeded-logger-test.c++",
-    "string-buffer-test.c++",
+[
+    kj_test(
+        src = f,
+        deps = [
+            ":util",
+        ],
+    )
+    for f in [
+        "batch-queue-test.c++",
+        "mimetype-test.c++",
+        "wait-list-test.c++",
+        "duration-exceeded-logger-test.c++",
+        "string-buffer-test.c++",
     ]
 ]
 
