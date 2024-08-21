@@ -53,6 +53,7 @@ kj::String currentDateStr();
 
 kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
     CompatibilityFlags::Reader featureFlags);
+kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease);
 
 // These values come from src/workerd/io/compatibility-date.capnp
 static constexpr uint64_t COMPAT_ENABLE_FLAG_ANNOTATION_ID = 0xb6dabbc87cd1b03eull;

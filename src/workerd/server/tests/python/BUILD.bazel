@@ -4,14 +4,14 @@ load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 
-# pyodide-dev.capnp.bin represents a custom pyodide version "dev" that is generated
+# pyodide_dev.capnp.bin represents a custom pyodide version "dev" that is generated
 # at build time using the latest contents of the src/pyodide directory.
 # This is used to run tests to ensure that they are always run against the latest build of
 # the Pyodide bundle.
 copy_file(
-    name = "pyodide-dev.capnp.bin@rule",
+    name = "pyodide_dev.capnp.bin@rule",
     src = "//src/pyodide:pyodide.capnp.bin",
-    out = "pyodide-bundle-cache/pyodide-dev.capnp.bin"
+    out = "pyodide-bundle-cache/pyodide_dev.capnp.bin"
 )
 
 py_wd_test(

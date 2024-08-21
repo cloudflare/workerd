@@ -424,7 +424,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers @43 :Bool
       $compatEnableFlag("python_workers")
       $pythonSnapshotRelease(pyodide = "0.26.0a2", pyodideRevision = "2024-03-01",
-          packages = "2024-03-01", backport = 0);
+          packages = "2024-03-01", backport = 0)
+      $impliedByAfterDate(name = "pythonWorkersDevPyodide", date = "2000-01-01");
   # Enables Python Workers. Access to this flag is not restricted, instead bundles containing
   # Python modules are restricted in EWC.
   #
@@ -572,4 +573,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # would not be cleared until the next time the queue was processed. This behavior leads
   # to a situtation where the stream can hang if the consumer stops consuming. When set,
   # this flag changes the behavior to clear the queue immediately upon abort.
+
+  pythonWorkersDevPyodide @58 :Bool
+    $compatEnableFlag("python_workers_development")
+    $pythonSnapshotRelease(pyodide = "dev", pyodideRevision = "dev",
+          packages = "2024-03-01", backport = 0)
+    $experimental;
+  # Enables Python Workers and uses the bundle from the Pyodide source directory directly. For testing only.
 }

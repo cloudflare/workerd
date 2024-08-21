@@ -23,7 +23,7 @@ const unitTests :Workerd.Config = (
           (name = "{}", pythonRequirement = ""),
         ],
         compatibilityDate = "2024-05-02",
-        compatibilityFlags = ["python_workers"],
+        compatibilityFlags = ["python_workers_development"],
       )
     ),
   ],
