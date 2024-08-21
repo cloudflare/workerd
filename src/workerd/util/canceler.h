@@ -24,12 +24,14 @@ public:
   class Listener {
   public:
     explicit Listener(RefcountedCanceler& canceler, kj::Function<void()> fn)
-      : fn(kj::mv(fn)),
-        canceler(canceler) {
+        : fn(kj::mv(fn)),
+          canceler(canceler) {
       canceler.addListener(*this);
     }
 
-    ~Listener() { canceler.removeListener(*this); }
+    ~Listener() {
+      canceler.removeListener(*this);
+    }
 
   private:
     kj::Function<void()> fn;
@@ -62,8 +64,8 @@ public:
 
   void cancel(kj::StringPtr cancelReason) {
     if (reason == kj::none) {
-      cancel(kj::Exception(kj::Exception::Type::DISCONNECTED, __FILE__, __LINE__,
-                           kj::str(cancelReason)));
+      cancel(kj::Exception(
+          kj::Exception::Type::DISCONNECTED, __FILE__, __LINE__, kj::str(cancelReason)));
     }
   }
 
@@ -71,13 +73,15 @@ public:
     if (reason == kj::none) {
       reason = kj::cp(exception);
       canceler.cancel(exception);
-      for (auto& listener : listeners) {
+      for (auto& listener: listeners) {
         listener.fn();
       }
     }
   }
 
-  bool isEmpty() const { return canceler.isEmpty(); }
+  bool isEmpty() const {
+    return canceler.isEmpty();
+  }
 
   void throwIfCanceled() {
     KJ_IF_SOME(ex, reason) {
@@ -85,7 +89,9 @@ public:
     }
   }
 
-  bool isCanceled() const { return reason != kj::none; }
+  bool isCanceled() const {
+    return reason != kj::none;
+  }
 
   void addListener(Listener& listener) {
     listeners.add(listener);

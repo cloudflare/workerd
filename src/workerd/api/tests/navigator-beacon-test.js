@@ -1,7 +1,4 @@
-import {
-  ok,
-  strictEqual,
-} from 'node:assert';
+import { ok, strictEqual } from 'node:assert';
 
 const enc = new TextEncoder();
 
@@ -11,19 +8,24 @@ ok(!navigator.sendBeacon('http://example.org', 'does not work'));
 export const navigatorBeaconTest = {
   async test(ctrl, env, ctx) {
     ok(navigator.sendBeacon('http://example.org', 'beacon'));
-    ok(navigator.sendBeacon('http://example.org', new ReadableStream({
-      start(c) {
-        c.enqueue(enc.encode('beacon'));
-        c.close();
-      }
-    })));
+    ok(
+      navigator.sendBeacon(
+        'http://example.org',
+        new ReadableStream({
+          start(c) {
+            c.enqueue(enc.encode('beacon'));
+            c.close();
+          },
+        })
+      )
+    );
     ok(navigator.sendBeacon('http://example.org', enc.encode('beacon')));
-  }
+  },
 };
 
 export default {
   async fetch(req, env) {
     strictEqual(await req.text(), 'beacon');
     return new Response(null, { status: 204 });
-  }
+  },
 };

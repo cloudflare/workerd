@@ -1,4 +1,3 @@
-
 interface ENV {
   HOME: string;
 }
@@ -38,6 +37,6 @@ interface Module {
   loadWebAssemblyModule: (
     mod: WebAssembly.Module,
     opt: object,
-    path: string,
+    path: string
   ) => WebAssembly.Exports;
 }

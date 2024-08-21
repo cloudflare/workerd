@@ -1,11 +1,6 @@
-import {
-  strictEqual,
-  throws,
-    deepStrictEqual
-} from 'node:assert';
+import { strictEqual, throws, deepStrictEqual } from 'node:assert';
 import { Buffer } from 'node:buffer';
 import { crc32, constants } from 'node:zlib';
-
 
 // The following test data comes from
 // https://github.com/zlib-ng/zlib-ng/blob/5401b24/test/test_crc32.cc
@@ -19,7 +14,7 @@ export const crc32Test = {
     const tests = [
       [0x0, 0x0, 0, 0x0],
       [0xffffffff, 0x0, 0, 0x0],
-      [0x0, 0x0, 255, 0x0], /*  BZ 174799.  */
+      [0x0, 0x0, 255, 0x0] /*  BZ 174799.  */,
       [0x0, 0x0, 256, 0x0],
       [0x0, 0x0, 257, 0x0],
       [0x0, 0x0, 32767, 0x0],
@@ -94,15 +89,24 @@ export const crc32Test = {
       [0x0, ':(_*&%/[[}+,?#$&*+#[([*-/#;%(]', 30, 0x6c80c388],
       [0x0, '{[#-;:$/{)(+[}#]/{&!%(@)%:@-$:', 30, 0xd54d977d],
       [0x0, '_{$*,}(&,@.)):=!/%(&(,,-?$}}}!', 30, 0xe3966ad5],
-      [0x0,
-      'e$98KNzqaV)Y:2X?]77].{gKRD4G5{mHZk,Z)SpU%L3FSgv!Wb8MLAFdi{+fp)c,@8m6v)yXg@]HBDFk?.4&}g5_udE*JHCiH=aL',
-      100, 0xe7c71db9],
-      [0x0,
-      'r*Fd}ef+5RJQ;+W=4jTR9)R*p!B;]Ed7tkrLi;88U7g@3v!5pk2X6D)vt,.@N8c]@yyEcKi[vwUu@.Ppm@C6%Mv*3Nw}Y,58_aH)',
-      100, 0xeaa52777],
-      [0x0,
-      'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&',
-      100, 0xcd472048],
+      [
+        0x0,
+        'e$98KNzqaV)Y:2X?]77].{gKRD4G5{mHZk,Z)SpU%L3FSgv!Wb8MLAFdi{+fp)c,@8m6v)yXg@]HBDFk?.4&}g5_udE*JHCiH=aL',
+        100,
+        0xe7c71db9,
+      ],
+      [
+        0x0,
+        'r*Fd}ef+5RJQ;+W=4jTR9)R*p!B;]Ed7tkrLi;88U7g@3v!5pk2X6D)vt,.@N8c]@yyEcKi[vwUu@.Ppm@C6%Mv*3Nw}Y,58_aH)',
+        100,
+        0xeaa52777,
+      ],
+      [
+        0x0,
+        'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&',
+        100,
+        0xcd472048,
+      ],
       [0x7a30360d, 'abacus', 6, 0xf8655a84],
       [0x6fd767ee, 'backlog', 7, 0x1ed834b1],
       [0xefeb7589, 'campfire', 8, 0x686cfca],
@@ -168,163 +172,197 @@ export const crc32Test = {
       [0x569e613c, ':(_*&%/[[}+,?#$&*+#[([*-/#;%(]', 30, 0x7e2b0a66],
       [0x36aa61da, '{[#-;:$/{)(+[}#]/{&!%(@)%:@-$:', 30, 0xb3430dc7],
       [0xf67222df, '_{$*,}(&,@.)):=!/%(&(,,-?$}}}!', 30, 0x626c17a],
-      [0x74b34fd3,
-      'e$98KNzqaV)Y:2X?]77].{gKRD4G5{mHZk,Z)SpU%L3FSgv!Wb8MLAFdi{+fp)c,@8m6v)yXg@]HBDFk?.4&}g5_udE*JHCiH=aL',
-      100, 0xccf98060],
-      [0x351fd770,
-      'r*Fd}ef+5RJQ;+W=4jTR9)R*p!B;]Ed7tkrLi;88U7g@3v!5pk2X6D)vt,.@N8c]@yyEcKi[vwUu@.Ppm@C6%Mv*3Nw}Y,58_aH)',
-      100, 0xd8b95312],
-      [0xc45aef77,
-      'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&',
-      100, 0xbb1c9912],
-      [0xc45aef77,
-      'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
-        'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
-        'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
-        'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
-        'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
+      [
+        0x74b34fd3,
+        'e$98KNzqaV)Y:2X?]77].{gKRD4G5{mHZk,Z)SpU%L3FSgv!Wb8MLAFdi{+fp)c,@8m6v)yXg@]HBDFk?.4&}g5_udE*JHCiH=aL',
+        100,
+        0xccf98060,
+      ],
+      [
+        0x351fd770,
+        'r*Fd}ef+5RJQ;+W=4jTR9)R*p!B;]Ed7tkrLi;88U7g@3v!5pk2X6D)vt,.@N8c]@yyEcKi[vwUu@.Ppm@C6%Mv*3Nw}Y,58_aH)',
+        100,
+        0xd8b95312,
+      ],
+      [
+        0xc45aef77,
         'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&',
-      600, 0x888AFA5B],
+        100,
+        0xbb1c9912,
+      ],
+      [
+        0xc45aef77,
+        'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
+          'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
+          'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
+          'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
+          'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&' +
+          'h{bcmdC+a;t+Cf{6Y_dFq-{X4Yu&7uNfVDh?q&_u.UWJU],-GiH7ADzb7-V.Q%4=+v!$L9W+T=bP]$_:]Vyg}A.ygD.r;h-D]m%&',
+        600,
+        0x888afa5b,
+      ],
     ];
 
-    for (const [ crc, data, len, expected ] of tests) {
+    for (const [crc, data, len, expected] of tests) {
       if (data === 0) {
         continue;
       }
       const buf = Buffer.from(data, 'utf8');
       strictEqual(buf.length, len);
-      strictEqual(crc32(buf, crc), expected,
-                        `crc32('${data}', ${crc}) in buffer is not ${expected}`);
-      strictEqual(crc32(buf.toString(), crc), expected,
-                        `crc32('${data}', ${crc}) in string is not ${expected}`);
+      strictEqual(
+        crc32(buf, crc),
+        expected,
+        `crc32('${data}', ${crc}) in buffer is not ${expected}`
+      );
+      strictEqual(
+        crc32(buf.toString(), crc),
+        expected,
+        `crc32('${data}', ${crc}) in string is not ${expected}`
+      );
       if (crc === 0) {
-        strictEqual(crc32(buf), expected,
-                          `crc32('${data}') in buffer is not ${expected}`);
-        strictEqual(crc32(buf.toString()), expected,
-                          `crc32('${data}') in string is not ${expected}`);
+        strictEqual(
+          crc32(buf),
+          expected,
+          `crc32('${data}') in buffer is not ${expected}`
+        );
+        strictEqual(
+          crc32(buf.toString()),
+          expected,
+          `crc32('${data}') in string is not ${expected}`
+        );
       }
     }
 
     [undefined, null, true, 1, () => {}, {}].forEach((invalid) => {
-      throws(() => { crc32(invalid); }, { code: 'ERR_INVALID_ARG_TYPE' });
+      throws(
+        () => {
+          crc32(invalid);
+        },
+        { code: 'ERR_INVALID_ARG_TYPE' }
+      );
     });
 
     [null, true, () => {}, {}].forEach((invalid) => {
-      throws(() => { crc32('test', invalid); }, { code: 'ERR_INVALID_ARG_TYPE' });
+      throws(
+        () => {
+          crc32('test', invalid);
+        },
+        { code: 'ERR_INVALID_ARG_TYPE' }
+      );
     });
-  }
-}
+  },
+};
 
 export const constantsTest = {
   test() {
     deepStrictEqual(Object.keys(constants).sort(), [
-      "BROTLI_DECODE",
-      "BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES",
-      "BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MAP",
-      "BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MODES",
-      "BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_1",
-      "BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2",
-      "BROTLI_DECODER_ERROR_ALLOC_TREE_GROUPS",
-      "BROTLI_DECODER_ERROR_DICTIONARY_NOT_SET",
-      "BROTLI_DECODER_ERROR_FORMAT_BLOCK_LENGTH_1",
-      "BROTLI_DECODER_ERROR_FORMAT_BLOCK_LENGTH_2",
-      "BROTLI_DECODER_ERROR_FORMAT_CL_SPACE",
-      "BROTLI_DECODER_ERROR_FORMAT_CONTEXT_MAP_REPEAT",
-      "BROTLI_DECODER_ERROR_FORMAT_DICTIONARY",
-      "BROTLI_DECODER_ERROR_FORMAT_DISTANCE",
-      "BROTLI_DECODER_ERROR_FORMAT_EXUBERANT_META_NIBBLE",
-      "BROTLI_DECODER_ERROR_FORMAT_EXUBERANT_NIBBLE",
-      "BROTLI_DECODER_ERROR_FORMAT_HUFFMAN_SPACE",
-      "BROTLI_DECODER_ERROR_FORMAT_PADDING_1",
-      "BROTLI_DECODER_ERROR_FORMAT_PADDING_2",
-      "BROTLI_DECODER_ERROR_FORMAT_RESERVED",
-      "BROTLI_DECODER_ERROR_FORMAT_SIMPLE_HUFFMAN_ALPHABET",
-      "BROTLI_DECODER_ERROR_FORMAT_SIMPLE_HUFFMAN_SAME",
-      "BROTLI_DECODER_ERROR_FORMAT_TRANSFORM",
-      "BROTLI_DECODER_ERROR_FORMAT_WINDOW_BITS",
-      "BROTLI_DECODER_ERROR_INVALID_ARGUMENTS",
-      "BROTLI_DECODER_ERROR_UNREACHABLE",
-      "BROTLI_DECODER_NEEDS_MORE_INPUT",
-      "BROTLI_DECODER_NEEDS_MORE_OUTPUT",
-      "BROTLI_DECODER_NO_ERROR",
-      "BROTLI_DECODER_PARAM_DISABLE_RING_BUFFER_REALLOCATION",
-      "BROTLI_DECODER_PARAM_LARGE_WINDOW",
-      "BROTLI_DECODER_RESULT_ERROR",
-      "BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT",
-      "BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT",
-      "BROTLI_DECODER_RESULT_SUCCESS",
-      "BROTLI_DECODER_SUCCESS",
-      "BROTLI_DEFAULT_MODE",
-      "BROTLI_DEFAULT_QUALITY",
-      "BROTLI_DEFAULT_WINDOW",
-      "BROTLI_ENCODE",
-      "BROTLI_LARGE_MAX_WINDOW_BITS",
-      "BROTLI_MAX_INPUT_BLOCK_BITS",
-      "BROTLI_MAX_QUALITY",
-      "BROTLI_MAX_WINDOW_BITS",
-      "BROTLI_MIN_INPUT_BLOCK_BITS",
-      "BROTLI_MIN_QUALITY",
-      "BROTLI_MIN_WINDOW_BITS",
-      "BROTLI_MODE_FONT",
-      "BROTLI_MODE_GENERIC",
-      "BROTLI_MODE_TEXT",
-      "BROTLI_OPERATION_EMIT_METADATA",
-      "BROTLI_OPERATION_FINISH",
-      "BROTLI_OPERATION_FLUSH",
-      "BROTLI_OPERATION_PROCESS",
-      "BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING",
-      "BROTLI_PARAM_LARGE_WINDOW",
-      "BROTLI_PARAM_LGBLOCK",
-      "BROTLI_PARAM_LGWIN",
-      "BROTLI_PARAM_MODE",
-      "BROTLI_PARAM_NDIRECT",
-      "BROTLI_PARAM_NPOSTFIX",
-      "BROTLI_PARAM_QUALITY",
-      "BROTLI_PARAM_SIZE_HINT",
-      "DEFLATE",
-      "DEFLATERAW",
-      "GUNZIP",
-      "GZIP",
-      "INFLATE",
-      "INFLATERAW",
-      "UNZIP",
-      "ZLIB_VERNUM",
-      "Z_BEST_COMPRESSION",
-      "Z_BEST_SPEED",
-      "Z_BLOCK",
-      "Z_BUF_ERROR",
-      "Z_DATA_ERROR",
-      "Z_DEFAULT_CHUNK",
-      "Z_DEFAULT_COMPRESSION",
-      "Z_DEFAULT_LEVEL",
-      "Z_DEFAULT_MEMLEVEL",
-      "Z_DEFAULT_STRATEGY",
-      "Z_DEFAULT_WINDOWBITS",
-      "Z_ERRNO",
-      "Z_FILTERED",
-      "Z_FINISH",
-      "Z_FIXED",
-      "Z_FULL_FLUSH",
-      "Z_HUFFMAN_ONLY",
-      "Z_MAX_CHUNK",
-      "Z_MAX_LEVEL",
-      "Z_MAX_MEMLEVEL",
-      "Z_MAX_WINDOWBITS",
-      "Z_MEM_ERROR",
-      "Z_MIN_CHUNK",
-      "Z_MIN_LEVEL",
-      "Z_MIN_MEMLEVEL",
-      "Z_MIN_WINDOWBITS",
-      "Z_NEED_DICT",
-      "Z_NO_COMPRESSION",
-      "Z_NO_FLUSH",
-      "Z_OK",
-      "Z_PARTIAL_FLUSH",
-      "Z_RLE",
-      "Z_STREAM_END",
-      "Z_STREAM_ERROR",
-      "Z_SYNC_FLUSH",
-      "Z_VERSION_ERROR"
+      'BROTLI_DECODE',
+      'BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES',
+      'BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MAP',
+      'BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MODES',
+      'BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_1',
+      'BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2',
+      'BROTLI_DECODER_ERROR_ALLOC_TREE_GROUPS',
+      'BROTLI_DECODER_ERROR_DICTIONARY_NOT_SET',
+      'BROTLI_DECODER_ERROR_FORMAT_BLOCK_LENGTH_1',
+      'BROTLI_DECODER_ERROR_FORMAT_BLOCK_LENGTH_2',
+      'BROTLI_DECODER_ERROR_FORMAT_CL_SPACE',
+      'BROTLI_DECODER_ERROR_FORMAT_CONTEXT_MAP_REPEAT',
+      'BROTLI_DECODER_ERROR_FORMAT_DICTIONARY',
+      'BROTLI_DECODER_ERROR_FORMAT_DISTANCE',
+      'BROTLI_DECODER_ERROR_FORMAT_EXUBERANT_META_NIBBLE',
+      'BROTLI_DECODER_ERROR_FORMAT_EXUBERANT_NIBBLE',
+      'BROTLI_DECODER_ERROR_FORMAT_HUFFMAN_SPACE',
+      'BROTLI_DECODER_ERROR_FORMAT_PADDING_1',
+      'BROTLI_DECODER_ERROR_FORMAT_PADDING_2',
+      'BROTLI_DECODER_ERROR_FORMAT_RESERVED',
+      'BROTLI_DECODER_ERROR_FORMAT_SIMPLE_HUFFMAN_ALPHABET',
+      'BROTLI_DECODER_ERROR_FORMAT_SIMPLE_HUFFMAN_SAME',
+      'BROTLI_DECODER_ERROR_FORMAT_TRANSFORM',
+      'BROTLI_DECODER_ERROR_FORMAT_WINDOW_BITS',
+      'BROTLI_DECODER_ERROR_INVALID_ARGUMENTS',
+      'BROTLI_DECODER_ERROR_UNREACHABLE',
+      'BROTLI_DECODER_NEEDS_MORE_INPUT',
+      'BROTLI_DECODER_NEEDS_MORE_OUTPUT',
+      'BROTLI_DECODER_NO_ERROR',
+      'BROTLI_DECODER_PARAM_DISABLE_RING_BUFFER_REALLOCATION',
+      'BROTLI_DECODER_PARAM_LARGE_WINDOW',
+      'BROTLI_DECODER_RESULT_ERROR',
+      'BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT',
+      'BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT',
+      'BROTLI_DECODER_RESULT_SUCCESS',
+      'BROTLI_DECODER_SUCCESS',
+      'BROTLI_DEFAULT_MODE',
+      'BROTLI_DEFAULT_QUALITY',
+      'BROTLI_DEFAULT_WINDOW',
+      'BROTLI_ENCODE',
+      'BROTLI_LARGE_MAX_WINDOW_BITS',
+      'BROTLI_MAX_INPUT_BLOCK_BITS',
+      'BROTLI_MAX_QUALITY',
+      'BROTLI_MAX_WINDOW_BITS',
+      'BROTLI_MIN_INPUT_BLOCK_BITS',
+      'BROTLI_MIN_QUALITY',
+      'BROTLI_MIN_WINDOW_BITS',
+      'BROTLI_MODE_FONT',
+      'BROTLI_MODE_GENERIC',
+      'BROTLI_MODE_TEXT',
+      'BROTLI_OPERATION_EMIT_METADATA',
+      'BROTLI_OPERATION_FINISH',
+      'BROTLI_OPERATION_FLUSH',
+      'BROTLI_OPERATION_PROCESS',
+      'BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING',
+      'BROTLI_PARAM_LARGE_WINDOW',
+      'BROTLI_PARAM_LGBLOCK',
+      'BROTLI_PARAM_LGWIN',
+      'BROTLI_PARAM_MODE',
+      'BROTLI_PARAM_NDIRECT',
+      'BROTLI_PARAM_NPOSTFIX',
+      'BROTLI_PARAM_QUALITY',
+      'BROTLI_PARAM_SIZE_HINT',
+      'DEFLATE',
+      'DEFLATERAW',
+      'GUNZIP',
+      'GZIP',
+      'INFLATE',
+      'INFLATERAW',
+      'UNZIP',
+      'ZLIB_VERNUM',
+      'Z_BEST_COMPRESSION',
+      'Z_BEST_SPEED',
+      'Z_BLOCK',
+      'Z_BUF_ERROR',
+      'Z_DATA_ERROR',
+      'Z_DEFAULT_CHUNK',
+      'Z_DEFAULT_COMPRESSION',
+      'Z_DEFAULT_LEVEL',
+      'Z_DEFAULT_MEMLEVEL',
+      'Z_DEFAULT_STRATEGY',
+      'Z_DEFAULT_WINDOWBITS',
+      'Z_ERRNO',
+      'Z_FILTERED',
+      'Z_FINISH',
+      'Z_FIXED',
+      'Z_FULL_FLUSH',
+      'Z_HUFFMAN_ONLY',
+      'Z_MAX_CHUNK',
+      'Z_MAX_LEVEL',
+      'Z_MAX_MEMLEVEL',
+      'Z_MAX_WINDOWBITS',
+      'Z_MEM_ERROR',
+      'Z_MIN_CHUNK',
+      'Z_MIN_LEVEL',
+      'Z_MIN_MEMLEVEL',
+      'Z_MIN_WINDOWBITS',
+      'Z_NEED_DICT',
+      'Z_NO_COMPRESSION',
+      'Z_NO_FLUSH',
+      'Z_OK',
+      'Z_PARTIAL_FLUSH',
+      'Z_RLE',
+      'Z_STREAM_END',
+      'Z_STREAM_ERROR',
+      'Z_SYNC_FLUSH',
+      'Z_VERSION_ERROR',
     ]);
- }
-}
+  },
+};

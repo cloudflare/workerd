@@ -49,10 +49,11 @@ struct Serialized {
 Serialized serializeV8(jsg::Lock& js, const jsg::JsValue& body) {
   // Use a specific serialization version to avoid sending messages using a new version before all
   // runtimes at the edge know how to read it.
-  jsg::Serializer serializer(js, jsg::Serializer::Options {
-    .version = 15,
-    .omitHeader = false,
-  });
+  jsg::Serializer serializer(js,
+      jsg::Serializer::Options{
+        .version = 15,
+        .omitHeader = false,
+      });
   serializer.write(js, jsg::JsValue(body));
   kj::Array<kj::byte> bytes = serializer.release().data;
   Serialized result;
@@ -69,20 +70,13 @@ enum class SerializeArrayBufferBehavior {
 };
 
 Serialized serialize(jsg::Lock& js,
-                     const jsg::JsValue& body,
-                     kj::StringPtr contentType,
-                     SerializeArrayBufferBehavior bufferBehavior) {
+    const jsg::JsValue& body,
+    kj::StringPtr contentType,
+    SerializeArrayBufferBehavior bufferBehavior) {
   if (contentType == IncomingQueueMessage::ContentType::TEXT) {
-    JSG_REQUIRE(
-      body.isString(),
-      TypeError,
-      kj::str(
-        "Content Type \"",
-        IncomingQueueMessage::ContentType::TEXT,
-        "\" requires a value of type string, but received: ",
-        body.typeOf(js)
-      )
-    );
+    JSG_REQUIRE(body.isString(), TypeError,
+        kj::str("Content Type \"", IncomingQueueMessage::ContentType::TEXT,
+            "\" requires a value of type string, but received: ", body.typeOf(js)));
 
     kj::String s = body.toString(js);
     Serialized result;
@@ -90,16 +84,9 @@ Serialized serialize(jsg::Lock& js,
     result.own = kj::mv(s);
     return kj::mv(result);
   } else if (contentType == IncomingQueueMessage::ContentType::BYTES) {
-    JSG_REQUIRE(
-      body.isArrayBufferView(),
-      TypeError,
-      kj::str(
-        "Content Type \"",
-        IncomingQueueMessage::ContentType::BYTES,
-        "\" requires a value of type ArrayBufferView, but received: ",
-        body.typeOf(js)
-      )
-    );
+    JSG_REQUIRE(body.isArrayBufferView(), TypeError,
+        kj::str("Content Type \"", IncomingQueueMessage::ContentType::BYTES,
+            "\" requires a value of type ArrayBufferView, but received: ", body.typeOf(js)));
 
     jsg::BufferSource source(js, body);
     if (bufferBehavior == SerializeArrayBufferBehavior::SHALLOW_REFERENCE) {
@@ -141,9 +128,8 @@ struct SerializedWithOptions {
   kj::Maybe<int> delaySeconds;
 };
 
-jsg::JsValue deserialize(jsg::Lock& js,
-                         kj::Array<kj::byte> body,
-                         kj::Maybe<kj::StringPtr> contentType) {
+jsg::JsValue deserialize(
+    jsg::Lock& js, kj::Array<kj::byte> body, kj::Maybe<kj::StringPtr> contentType) {
   auto type = contentType.orDefault(IncomingQueueMessage::ContentType::V8);
 
   if (type == IncomingQueueMessage::ContentType::TEXT) {
@@ -181,9 +167,8 @@ jsg::JsValue deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
 }
 }  // namespace
 
-kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
-                                    jsg::JsValue body,
-                                    jsg::Optional<SendOptions> options) {
+kj::Promise<void> WorkerQueue::send(
+    jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options) {
   auto& context = IoContext::current();
 
   JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
@@ -208,7 +193,8 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
     serialized = serialize(js, body, type, SerializeArrayBufferBehavior::DEEP_COPY);
   } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
     headers.add("X-Msg-Fmt", IncomingQueueMessage::ContentType::JSON);
-    serialized = serialize(js, body, IncomingQueueMessage::ContentType::JSON, SerializeArrayBufferBehavior::DEEP_COPY);
+    serialized = serialize(
+        js, body, IncomingQueueMessage::ContentType::JSON, SerializeArrayBufferBehavior::DEEP_COPY);
   } else {
     // TODO(cleanup) send message format header (v8) by default
     serialized = serializeV8(js, body);
@@ -219,17 +205,16 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
   // we have to do is provide the end of the path (which is "/message") to send a single message.
 
   auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
-  auto req = client->request(kj::HttpMethod::POST,
-                             "https://fake-host/message"_kjc,
-                             headers, serialized.data.size());
+  auto req = client->request(
+      kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
 
-  static constexpr auto handleSend = [](auto req, auto serialized, auto client)
-      -> kj::Promise<void> {
+  static constexpr auto handleSend = [](auto req, auto serialized,
+                                         auto client) -> kj::Promise<void> {
     co_await req.body->write(serialized.data);
     auto response = co_await req.response;
 
-    JSG_REQUIRE(response.statusCode == 200, Error,
-                kj::str("Queue send failed: ", response.statusText));
+    JSG_REQUIRE(
+        response.statusCode == 200, Error, kj::str("Queue send failed: ", response.statusText));
 
     // Read and discard response body, otherwise we might burn the HTTP connection.
     co_await response.body->readAllBytes().ignoreResult();
@@ -239,8 +224,9 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
       .attach(context.registerPendingEvent());
 };
 
-kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch,
-                                         jsg::Optional<SendBatchOptions> options) {
+kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
+    jsg::Sequence<MessageSendRequest> batch,
+    jsg::Optional<SendBatchOptions> options) {
   auto& context = IoContext::current();
 
   JSG_REQUIRE(batch.size() > 0, TypeError, "sendBatch() requires at least one message");
@@ -251,8 +237,7 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
   auto builder = kj::heapArrayBuilder<SerializedWithOptions>(messageCount);
   for (auto& message: batch) {
     auto body = message.body.getHandle(js);
-    JSG_REQUIRE(!body.isUndefined(), TypeError,
-                "Message body cannot be undefined");
+    JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
 
     SerializedWithOptions item;
     KJ_IF_SOME(secs, message.delaySeconds) {
@@ -261,13 +246,12 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
 
     KJ_IF_SOME(contentType, message.contentType) {
       item.contentType = validateContentType(contentType);
-      item.body = serialize(js, body, contentType,
-          SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
+      item.body = serialize(js, body, contentType, SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
     } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
       item.contentType = IncomingQueueMessage::ContentType::JSON;
-      item.body = serialize(js, body, IncomingQueueMessage::ContentType::JSON, SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
-    }
-    else {
+      item.body = serialize(js, body, IncomingQueueMessage::ContentType::JSON,
+          SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
+    } else {
       item.body = serializeV8(js, body);
     }
 
@@ -334,16 +318,15 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
   // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
   // we have to do is provide the end of the path (which is "/batch") to send a message batch.
 
-  auto req = client->request(kj::HttpMethod::POST,
-                             "https://fake-host/batch"_kjc,
-                             headers, body.size());
+  auto req =
+      client->request(kj::HttpMethod::POST, "https://fake-host/batch"_kjc, headers, body.size());
 
   static constexpr auto handleWrite = [](auto req, auto body, auto client) -> kj::Promise<void> {
     co_await req.body->write(body.asBytes());
     auto response = co_await req.response;
 
     JSG_REQUIRE(response.statusCode == 200, Error,
-                kj::str("Queue sendBatch failed: ", response.statusText));
+        kj::str("Queue sendBatch failed: ", response.statusText));
 
     // Read and discard response body, otherwise we might burn the HTTP connection.
     co_await response.body->readAllBytes().ignoreResult();
@@ -353,9 +336,8 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
       .attach(context.registerPendingEvent());
 };
 
-QueueMessage::QueueMessage(jsg::Lock& js,
-                           rpc::QueueMessage::Reader message,
-                           IoPtr<QueueEventResult> result)
+QueueMessage::QueueMessage(
+    jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result)
     : id(kj::str(message.getId())),
       timestamp(message.getTimestampNs() * kj::NANOSECONDS + kj::UNIX_EPOCH),
       body(deserialize(js, message).addRef(js)),
@@ -378,16 +360,16 @@ jsg::JsValue QueueMessage::getBody(jsg::Lock& js) {
 
 void QueueMessage::retry(jsg::Optional<QueueRetryOptions> options) {
   if (result->ackAll) {
-    auto msg = kj::str(
-        "Received a call to retry() on message ", id, " after ackAll() was already called. "
+    auto msg = kj::str("Received a call to retry() on message ", id,
+        " after ackAll() was already called. "
         "Calling retry() on a message after calling ackAll() has no effect.");
     IoContext::current().logWarning(msg);
     return;
   }
 
   if (result->explicitAcks.contains(id)) {
-    auto msg = kj::str(
-        "Received a call to retry() on message ", id, " after ack() was already called. "
+    auto msg = kj::str("Received a call to retry() on message ", id,
+        " after ack() was already called. "
         "Calling retry() on a message after calling ack() has no effect.");
     IoContext::current().logWarning(msg);
     return;
@@ -407,25 +389,28 @@ void QueueMessage::ack() {
   }
 
   if (result->retryBatch.retry) {
-    auto msg = kj::str(
-        "Received a call to ack() on message ", id, " after retryAll() was already called. "
+    auto msg = kj::str("Received a call to ack() on message ", id,
+        " after retryAll() was already called. "
         "Calling ack() on a message after calling retryAll() has no effect.");
     IoContext::current().logWarning(msg);
     return;
   }
 
   if (result->retries.find(id) != kj::none) {
-    auto msg = kj::str(
-        "Received a call to ack() on message ", id, " after retry() was already called. "
+    auto msg = kj::str("Received a call to ack() on message ", id,
+        " after retry() was already called. "
         "Calling ack() on a message after calling retry() has no effect.");
     IoContext::current().logWarning(msg);
     return;
   }
-  result->explicitAcks.findOrCreate(id, [this]() { return kj::heapString(id); } );
+  result->explicitAcks.findOrCreate(id, [this]() { return kj::heapString(id); });
 }
 
-QueueEvent::QueueEvent(jsg::Lock& js, rpc::EventDispatcher::QueueParams::Reader params, IoPtr<QueueEventResult> result)
-    : ExtendableEvent("queue"), queueName(kj::heapString(params.getQueueName())), result(result) {
+QueueEvent::QueueEvent(
+    jsg::Lock& js, rpc::EventDispatcher::QueueParams::Reader params, IoPtr<QueueEventResult> result)
+    : ExtendableEvent("queue"),
+      queueName(kj::heapString(params.getQueueName())),
+      result(result) {
   // Note that we must make deep copies of all data here since the incoming Reader may be
   // deallocated while JS's GC wrappers still exist.
   auto incoming = params.getMessages();
@@ -437,7 +422,9 @@ QueueEvent::QueueEvent(jsg::Lock& js, rpc::EventDispatcher::QueueParams::Reader 
 }
 
 QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> result)
-    : ExtendableEvent("queue"), queueName(kj::mv(params.queueName)), result(result)  {
+    : ExtendableEvent("queue"),
+      queueName(kj::mv(params.queueName)),
+      result(result) {
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(params.messages.size());
   for (auto i: kj::indices(params.messages)) {
     messagesBuilder.add(jsg::alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
@@ -472,11 +459,11 @@ void QueueEvent::ackAll() {
 }
 
 namespace {
-jsg::Ref<QueueEvent> startQueueEvent(
-    EventTarget& globalEventTarget,
+jsg::Ref<QueueEvent> startQueueEvent(EventTarget& globalEventTarget,
     kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params,
     IoPtr<QueueEventResult> result,
-    Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler,
     const jsg::TypeHandler<QueueExportedHandler>& handlerHandler) {
   jsg::Lock& js = lock;
   // Start a queue event (called from C++, not JS). Similar to startScheduled(), the caller must
@@ -492,30 +479,25 @@ jsg::Ref<QueueEvent> startQueueEvent(
   }
 
   KJ_IF_SOME(h, exportedHandler) {
-    auto queueHandler = KJ_ASSERT_NONNULL(handlerHandler.tryUnwrap(
-        lock, h.self.getHandle(lock)));
+    auto queueHandler = KJ_ASSERT_NONNULL(handlerHandler.tryUnwrap(lock, h.self.getHandle(lock)));
     KJ_IF_SOME(f, queueHandler.queue) {
-      auto promise = f(lock,
-                          jsg::alloc<QueueController>(event.addRef()),
-                          jsg::JsValue(h.env.getHandle(js)).addRef(js),
-                          h.getCtx());
-      event->waitUntil(promise.then(
-        [event=event.addRef()]() mutable { event->setCompletionStatus(QueueEvent::CompletedSuccessfully{}); },
-        [event=event.addRef()](kj::Exception&& e) mutable {
-          event->setCompletionStatus(QueueEvent::CompletedWithError{ kj::cp(e) });
-          return kj::mv(e);
-        }));
+      auto promise = f(lock, jsg::alloc<QueueController>(event.addRef()),
+          jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx());
+      event->waitUntil(promise.then([event = event.addRef()]() mutable {
+        event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
+      }, [event = event.addRef()](kj::Exception&& e) mutable {
+        event->setCompletionStatus(QueueEvent::CompletedWithError{kj::cp(e)});
+        return kj::mv(e);
+      }));
     } else {
-      lock.logWarningOnce(
-          "Received a QueueEvent but we lack a handler for QueueEvents. "
-          "Did you remember to export a queue() function?");
+      lock.logWarningOnce("Received a QueueEvent but we lack a handler for QueueEvents. "
+                          "Did you remember to export a queue() function?");
       JSG_FAIL_REQUIRE(Error, "Handler does not export a queue() function.");
     }
   } else {
     if (globalEventTarget.getHandlerCount("queue") == 0) {
-      lock.logWarningOnce(
-          "Received a QueueEvent but we lack an event listener for queue events. "
-          "Did you remember to call addEventListener(\"queue\", ...)?");
+      lock.logWarningOnce("Received a QueueEvent but we lack an event listener for queue events. "
+                          "Did you remember to call addEventListener(\"queue\", ...)?");
       JSG_FAIL_REQUIRE(Error, "No event listener registered for queue messages.");
     }
     globalEventTarget.dispatchEventImpl(lock, event.addRef());
@@ -524,7 +506,7 @@ jsg::Ref<QueueEvent> startQueueEvent(
 
   return event.addRef();
 }
-}
+}  // namespace
 
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
@@ -552,7 +534,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
 
   // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
   // waitUntil'ed callback safely without worrying about whether this coroutine gets canceled.
-  struct QueueEventHolder : public kj::Refcounted {
+  struct QueueEventHolder: public kj::Refcounted {
     jsg::Ref<QueueEvent> event = nullptr;
   };
   auto queueEventHolder = kj::refcounted<QueueEventHolder>();
@@ -561,14 +543,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   // that users can write queue handlers in the old addEventListener("queue", ...) syntax (where we
   // can't just wait on their addEventListener handler to resolve because it can't be async).
   context.addWaitUntil(context.run(
-      [this, entrypointName=entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
-       &metrics = incomingRequest->getMetrics()]
-      (Worker::Lock& lock) mutable {
+      [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
+          &metrics = incomingRequest->getMetrics()](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
-    queueEvent->event = startQueueEvent(lock.getGlobalScope(), kj::mv(params), context.addObject(result), lock,
-        lock.getExportedHandler(entrypointName, context.getActor()), typeHandler);
+    queueEvent->event =
+        startQueueEvent(lock.getGlobalScope(), kj::mv(params), context.addObject(result), lock,
+            lock.getExportedHandler(entrypointName, context.getActor()), typeHandler);
   }));
 
   // TODO(soon): There's a good chance we'll want a different wall-clock timeout for queue handlers
@@ -605,7 +587,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     KJ_LOG(WARNING, "NOSENTRY queue event hit timeout", scriptId, status, tasks);
   }
 
-  co_return WorkerInterface::CustomEvent::Result {
+  co_return WorkerInterface::CustomEvent::Result{
     .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU,
   };
 }
@@ -646,18 +628,18 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
     }
 
     this->result.explicitAcks.clear();
-    for (const auto& msgId : respResult.getExplicitAcks()) {
+    for (const auto& msgId: respResult.getExplicitAcks()) {
       this->result.explicitAcks.insert(kj::heapString(msgId));
     }
     this->result.retries.clear();
-    for (const auto& retry : respResult.getRetryMessages()) {
+    for (const auto& retry: respResult.getRetryMessages()) {
       auto& entry = this->result.retries.upsert(kj::heapString(retry.getMsgId()), {});
       if (retry.isDelaySeconds()) {
         entry.value.delaySeconds = retry.getDelaySeconds();
       }
     }
 
-    return WorkerInterface::CustomEvent::Result {
+    return WorkerInterface::CustomEvent::Result{
       .outcome = respResult.getOutcome(),
     };
   });
@@ -665,19 +647,19 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
 
 kj::Array<QueueRetryMessage> QueueCustomEventImpl::getRetryMessages() const {
   auto retryMsgs = kj::heapArrayBuilder<QueueRetryMessage>(result.retries.size());
-  for (const auto& entry : result.retries) {
-    retryMsgs.add(QueueRetryMessage{.msgId = kj::heapString(entry.key),
-                                    .delaySeconds = entry.value.delaySeconds});
+  for (const auto& entry: result.retries) {
+    retryMsgs.add(QueueRetryMessage{
+      .msgId = kj::heapString(entry.key), .delaySeconds = entry.value.delaySeconds});
   }
   return retryMsgs.finish();
 }
 
 kj::Array<kj::String> QueueCustomEventImpl::getExplicitAcks() const {
   auto ackArray = kj::heapArrayBuilder<kj::String>(result.explicitAcks.size());
-  for (const auto& msgId : result.explicitAcks) {
+  for (const auto& msgId: result.explicitAcks) {
     ackArray.add(kj::heapString(msgId));
   }
   return ackArray.finish();
 }
 
-} // namespace workerd::api
+}  // namespace workerd::api

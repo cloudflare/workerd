@@ -1,4 +1,4 @@
-import { ok, equal } from "node:assert";
+import { ok, equal } from 'node:assert';
 
 export class DurableObjectExample {
   constructor(state) {
@@ -17,8 +17,11 @@ export class DurableObjectExample {
     ok(device.features.keys());
 
     let callbackCalled = false;
-    device.addEventListener("uncapturederror", (event) => {
-      ok(event.error.message.includes("not a multiple of 4") || event.error.message.includes("Error while parsing WGSL"));
+    device.addEventListener('uncapturederror', (event) => {
+      ok(
+        event.error.message.includes('not a multiple of 4') ||
+          event.error.message.includes('Error while parsing WGSL')
+      );
       callbackCalled = true;
     });
 
@@ -28,7 +31,7 @@ export class DurableObjectExample {
       usage: GPUBufferUsage.STORAGE,
     });
 
-    device.pushErrorScope("validation");
+    device.pushErrorScope('validation');
 
     device.createBuffer({
       mappedAtCreation: true,
@@ -78,21 +81,21 @@ export class DurableObjectExample {
 
     const compilationInfo = await shaderModule.getCompilationInfo();
     ok(compilationInfo.messages.length === 1);
-    ok(compilationInfo.messages[0].type === "error");
+    ok(compilationInfo.messages[0].type === 'error');
 
     // ensure callback with error was indeed called
     ok(callbackCalled);
 
-    return new Response("OK");
+    return new Response('OK');
   }
 }
 
 export const error_handling = {
   async test(ctrl, env, ctx) {
-    let id = env.ns.idFromName("A");
+    let id = env.ns.idFromName('A');
     let obj = env.ns.get(id);
-    let res = await obj.fetch("http://foo/test");
+    let res = await obj.fetch('http://foo/test');
     let text = await res.text();
-    equal(text, "OK");
+    equal(text, 'OK');
   },
 };

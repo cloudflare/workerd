@@ -1,7 +1,7 @@
-import { default as MetadataReader } from "pyodide-internal:runtime-generated/metadata";
-export { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
-import { default as PYODIDE_BUCKET } from "pyodide-internal:generated/pyodide-bucket.json";
-import { default as ArtifactBundler } from "pyodide-internal:artifacts";
+import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
+export { default as LOCKFILE } from 'pyodide-internal:generated/pyodide-lock.json';
+import { default as PYODIDE_BUCKET } from 'pyodide-internal:generated/pyodide-bucket.json';
+import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 
 export const IS_WORKERD = MetadataReader.isWorkerd();
 export const IS_TRACING = MetadataReader.isTracing();

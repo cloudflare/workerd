@@ -17,8 +17,8 @@ namespace workerd::api {
 class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 public:
   LocalActorOutgoingFactory(uint channelId, kj::String actorId)
-    : channelId(channelId),
-      actorId(kj::mv(actorId)) {}
+      : channelId(channelId),
+        actorId(kj::mv(actorId)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
@@ -34,15 +34,12 @@ public:
         actorChannel = context.getColoLocalActorChannel(channelId, actorId, span);
       }
 
-      return KJ_REQUIRE_NONNULL(actorChannel)->startRequest({
-        .cfBlobJson = kj::mv(cfStr),
-        .parentSpan = span
-      });
-    }, {
-      .inHouse = true,
-      .wrapMetrics = true,
-      .operationName = kj::ConstString("actor_subrequest"_kjc)
-    }));
+      return KJ_REQUIRE_NONNULL(actorChannel)
+          ->startRequest({.cfBlobJson = kj::mv(cfStr), .parentSpan = span});
+    },
+        {.inHouse = true,
+          .wrapMetrics = true,
+          .operationName = kj::ConstString("actor_subrequest"_kjc)}));
   }
 
 private:
@@ -53,15 +50,14 @@ private:
 
 class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 public:
-  GlobalActorOutgoingFactory(
-      uint channelId,
+  GlobalActorOutgoingFactory(uint channelId,
       jsg::Ref<DurableObjectId> id,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode)
-    : channelId(channelId),
-      id(kj::mv(id)),
-      locationHint(kj::mv(locationHint)),
-      mode(mode) {}
+      : channelId(channelId),
+        id(kj::mv(id)),
+        locationHint(kj::mv(locationHint)),
+        mode(mode) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
@@ -74,19 +70,16 @@ public:
 
       // Lazily initialize actorChannel
       if (actorChannel == kj::none) {
-        actorChannel = context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint),
-            mode, span);
+        actorChannel = context.getGlobalActorChannel(
+            channelId, id->getInner(), kj::mv(locationHint), mode, span);
       }
 
-      return KJ_REQUIRE_NONNULL(actorChannel)->startRequest({
-        .cfBlobJson = kj::mv(cfStr),
-        .parentSpan = span
-      });
-    }, {
-      .inHouse = true,
-      .wrapMetrics = true,
-      .operationName = kj::ConstString("actor_subrequest"_kjc)
-    }));
+      return KJ_REQUIRE_NONNULL(actorChannel)
+          ->startRequest({.cfBlobJson = kj::mv(cfStr), .parentSpan = span});
+    },
+        {.inHouse = true,
+          .wrapMetrics = true,
+          .operationName = kj::ConstString("actor_subrequest"_kjc)}));
   }
 
 private:
@@ -103,8 +96,8 @@ jsg::Ref<Fetcher> ColoLocalActorNamespace::get(kj::String actorId) {
 
   auto& context = IoContext::current();
 
-  kj::Own<api::Fetcher::OutgoingFactory> factory = kj::heap<LocalActorOutgoingFactory>(
-      channel, kj::mv(actorId));
+  kj::Own<api::Fetcher::OutgoingFactory> factory =
+      kj::heap<LocalActorOutgoingFactory>(channel, kj::mv(actorId));
   auto outgoingFactory = context.addObject(kj::mv(factory));
 
   bool isInHouse = true;
@@ -132,21 +125,16 @@ jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromString(kj::String id) {
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::get(
-    jsg::Lock& js,
-    jsg::Ref<DurableObjectId> id,
-    jsg::Optional<GetDurableObjectOptions> options) {
+    jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options) {
   return getImpl(js, ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options));
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::getExisting(
-    jsg::Lock& js,
-    jsg::Ref<DurableObjectId> id,
-    jsg::Optional<GetDurableObjectOptions> options) {
+    jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options) {
   return getImpl(js, ActorGetMode::GET_EXISTING, kj::mv(id), kj::mv(options));
 }
 
-jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(
-    jsg::Lock& js,
+jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
     ActorGetMode mode,
     jsg::Ref<DurableObjectId> id,
     jsg::Optional<GetDurableObjectOptions> options) {
@@ -168,8 +156,8 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(
 }
 
 jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(kj::String jurisdiction) {
-  return jsg::alloc<api::DurableObjectNamespace>(channel,
-      idFactory->cloneWithJurisdiction(jurisdiction));
+  return jsg::alloc<api::DurableObjectNamespace>(
+      channel, idFactory->cloneWithJurisdiction(jurisdiction));
 }
 
 }  // namespace workerd::api

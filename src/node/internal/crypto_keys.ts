@@ -47,7 +47,7 @@ import {
   // TODO(soon): Uncomment these once createPrivateKey/createPublicKey are implemented.
   // JsonWebKey,
   // InnerCreateAsymmetricKeyOptions,
-  default as cryptoImpl
+  default as cryptoImpl,
 } from 'node-internal:crypto';
 
 import {
@@ -71,10 +71,7 @@ import {
   // ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 
-import {
-  validateObject,
-  validateString,
-} from 'node-internal:validators';
+import { validateObject, validateString } from 'node-internal:validators';
 
 // In Node.js, the definition of KeyObject is a bit complicated because
 // KeyObject instances in Node.js can be transferred via postMessage() and
@@ -95,33 +92,46 @@ export abstract class KeyObject {
     throw new Error('Illegal constructor');
   }
 
-  static from(key: CryptoKey) : KeyObject {
+  static from(key: CryptoKey): KeyObject {
     if (!(key instanceof CryptoKey)) {
       throw new ERR_INVALID_ARG_TYPE('key', 'CryptoKey', key);
     }
     switch (key.type) {
       case 'secret':
-        return Reflect.construct(function(this: SecretKeyObject) {
-          this[kHandle] = key;
-        }, [], SecretKeyObject);
+        return Reflect.construct(
+          function (this: SecretKeyObject) {
+            this[kHandle] = key;
+          },
+          [],
+          SecretKeyObject
+        );
       case 'private':
-        return Reflect.construct(function(this: PrivateKeyObject) {
-          this[kHandle] = key;
-        }, [], PrivateKeyObject);
+        return Reflect.construct(
+          function (this: PrivateKeyObject) {
+            this[kHandle] = key;
+          },
+          [],
+          PrivateKeyObject
+        );
       case 'public':
-        return Reflect.construct(function(this: PublicKeyObject) {
-          this[kHandle] = key;
-        }, [], PublicKeyObject);
+        return Reflect.construct(
+          function (this: PublicKeyObject) {
+            this[kHandle] = key;
+          },
+          [],
+          PublicKeyObject
+        );
     }
   }
 
-  export(options: ExportOptions = {}) : KeyExportResult {
+  export(options: ExportOptions = {}): KeyExportResult {
     validateObject(options, 'options', {});
 
     // Yes, converting to any is a bit of a cheat, but it allows us to check
     // each option individually without having to do a bunch of type guards.
     const opts = options as any;
-    if (opts.format !== undefined) validateString(opts.format, 'options.format');
+    if (opts.format !== undefined)
+      validateString(opts.format, 'options.format');
     if (opts.type !== undefined) validateString(opts.type, 'options.type');
     if (this.type === 'private') {
       if (opts.cipher !== undefined) {
@@ -130,107 +140,142 @@ export abstract class KeyObject {
           opts.passphrase = Buffer.from(opts.passphrase, opts.encoding);
         }
         if (!isUint8Array(opts.passphrase)) {
-          throw new ERR_INVALID_ARG_TYPE('options.passphrase', [
-            'string', 'Uint8Array'
-          ], opts.passphrase);
+          throw new ERR_INVALID_ARG_TYPE(
+            'options.passphrase',
+            ['string', 'Uint8Array'],
+            opts.passphrase
+          );
         }
       }
     }
 
-    const ret = cryptoImpl.exportKey(this[kHandle], options as InnerExportOptions);
+    const ret = cryptoImpl.exportKey(
+      this[kHandle],
+      options as InnerExportOptions
+    );
     if (typeof ret === 'string') return ret;
     if (isUint8Array(ret)) {
-      return Buffer.from((ret as Uint8Array).buffer, ret.byteOffset, ret.byteLength) as KeyExportResult;
+      return Buffer.from(
+        (ret as Uint8Array).buffer,
+        ret.byteOffset,
+        ret.byteLength
+      ) as KeyExportResult;
     } else if (isArrayBuffer(ret)) {
-      return Buffer.from(ret as ArrayBuffer, 0, (ret as ArrayBuffer).byteLength);
+      return Buffer.from(
+        ret as ArrayBuffer,
+        0,
+        (ret as ArrayBuffer).byteLength
+      );
     }
     return ret;
   }
 
-  equals(otherKeyObject: KeyObject) : boolean {
-    if (this === otherKeyObject ||
-        this[kHandle] === otherKeyObject[kHandle]) return true;
+  equals(otherKeyObject: KeyObject): boolean {
+    if (this === otherKeyObject || this[kHandle] === otherKeyObject[kHandle])
+      return true;
     if (this.type !== otherKeyObject.type) return false;
     if (!(otherKeyObject[kHandle] instanceof CryptoKey)) {
-      throw new ERR_INVALID_ARG_TYPE('otherKeyObject', 'KeyObject', otherKeyObject);
+      throw new ERR_INVALID_ARG_TYPE(
+        'otherKeyObject',
+        'KeyObject',
+        otherKeyObject
+      );
     }
     return cryptoImpl.equals(this[kHandle], otherKeyObject[kHandle]);
   }
 
-  abstract get type() : KeyObjectType;
+  abstract get type(): KeyObjectType;
 
   get [Symbol.toStringTag]() {
-    return "KeyObject"
+    return 'KeyObject';
   }
 }
 
 abstract class AsymmetricKeyObject extends KeyObject {
-  get asymmetricKeyDetails() : AsymmetricKeyDetails {
+  get asymmetricKeyDetails(): AsymmetricKeyDetails {
     let detail = cryptoImpl.getAsymmetricKeyDetail(this[kHandle]);
     if (isArrayBuffer(detail.publicExponent)) {
-      detail.publicExponent = arrayBufferToUnsignedBigInt(detail.publicExponent as any);
+      detail.publicExponent = arrayBufferToUnsignedBigInt(
+        detail.publicExponent as any
+      );
     }
     return detail;
   }
 
-  get asymmetricKeyType() : AsymmetricKeyType {
+  get asymmetricKeyType(): AsymmetricKeyType {
     return cryptoImpl.getAsymmetricKeyType(this[kHandle]);
   }
 }
 
 export class PublicKeyObject extends AsymmetricKeyObject {
-  override export(options?: PublicKeyExportOptions) : KeyExportResult {
+  override export(options?: PublicKeyExportOptions): KeyExportResult {
     return super.export(options);
   }
 
-  get type() : KeyObjectType { return 'public'; }
+  get type(): KeyObjectType {
+    return 'public';
+  }
 }
 
 export class PrivateKeyObject extends AsymmetricKeyObject {
-  override export(options?: PrivateKeyExportOptions) : KeyExportResult {
+  override export(options?: PrivateKeyExportOptions): KeyExportResult {
     return super.export(options);
   }
 
-  get type() : KeyObjectType { return 'private'; }
+  get type(): KeyObjectType {
+    return 'private';
+  }
 }
 
 export class SecretKeyObject extends KeyObject {
-  get symmetricKeySize() : number {
-    return (this[kHandle].algorithm as any).length | 0
+  get symmetricKeySize(): number {
+    return (this[kHandle].algorithm as any).length | 0;
   }
 
-  override export(options?: SecretKeyExportOptions) : KeyExportResult {
+  override export(options?: SecretKeyExportOptions): KeyExportResult {
     return super.export(options);
   }
 
-  get type() : KeyObjectType { return 'secret'; }
+  get type(): KeyObjectType {
+    return 'secret';
+  }
 }
 
 type ValidateKeyDataOptions = {
   allowObject?: boolean;
 };
-function validateKeyData(key: unknown, name: string, options : ValidateKeyDataOptions = {
-  allowObject: false,
-}) {
-  if (key == null ||
+function validateKeyData(
+  key: unknown,
+  name: string,
+  options: ValidateKeyDataOptions = {
+    allowObject: false,
+  }
+) {
+  if (
+    key == null ||
     (typeof key !== 'string' &&
-     (options.allowObject && typeof key !== 'object') &&
-     !isArrayBufferView(key) &&
-     !isAnyArrayBuffer(key))) {
-    const expected = [
-      'string',
-      'ArrayBuffer',
-      'TypedArray',
-      'DataView'
-    ];
+      options.allowObject &&
+      typeof key !== 'object' &&
+      !isArrayBufferView(key) &&
+      !isAnyArrayBuffer(key))
+  ) {
+    const expected = ['string', 'ArrayBuffer', 'TypedArray', 'DataView'];
     if (options.allowObject) expected.push('object');
     throw new ERR_INVALID_ARG_TYPE(name, expected, key);
   }
 }
 
-export function createSecretKey(key: string, encoding?: string) : SecretKeyObject;
-export function createSecretKey(key: ArrayBuffer | ArrayBufferView) : SecretKeyObject;
-export function createSecretKey(key: KeyData, encoding?: string) : SecretKeyObject {
+export function createSecretKey(
+  key: string,
+  encoding?: string
+): SecretKeyObject;
+export function createSecretKey(
+  key: ArrayBuffer | ArrayBufferView
+): SecretKeyObject;
+export function createSecretKey(
+  key: KeyData,
+  encoding?: string
+): SecretKeyObject {
   validateKeyData(key, 'key');
   if (typeof key === 'string') key = Buffer.from(key as string, encoding);
   return KeyObject.from(cryptoImpl.createSecretKey(key)) as SecretKeyObject;
@@ -328,10 +373,16 @@ export function createSecretKey(key: KeyData, encoding?: string) : SecretKeyObje
 //   return inner;
 // }
 
-export function createPrivateKey(key: string) : PrivateKeyObject;
-export function createPrivateKey(key: ArrayBuffer | ArrayBufferView) : PrivateKeyObject;
-export function createPrivateKey(key: CreateAsymmetricKeyOptions) : PrivateKeyObject;
-export function createPrivateKey(_key: CreateAsymmetricKeyOptions | KeyData) : PrivateKeyObject {
+export function createPrivateKey(key: string): PrivateKeyObject;
+export function createPrivateKey(
+  key: ArrayBuffer | ArrayBufferView
+): PrivateKeyObject;
+export function createPrivateKey(
+  key: CreateAsymmetricKeyOptions
+): PrivateKeyObject;
+export function createPrivateKey(
+  _key: CreateAsymmetricKeyOptions | KeyData
+): PrivateKeyObject {
   // The options here are fairly complex. The key data can be a string,
   // ArrayBuffer, or ArrayBufferView. The first argument can be one of
   // these or an object with a key property that is one of these. If the
@@ -342,15 +393,18 @@ export function createPrivateKey(_key: CreateAsymmetricKeyOptions | KeyData) : P
   //     validateAsymmetricKeyOptions(key, kPrivateKey))) as PrivateKeyObject;
 }
 
-export function createPublicKey(key: string) : PublicKeyObject;
-export function createPublicKey(key: ArrayBuffer) : PublicKeyObject;
-export function createPublicKey(key: ArrayBufferView) : PublicKeyObject;
+export function createPublicKey(key: string): PublicKeyObject;
+export function createPublicKey(key: ArrayBuffer): PublicKeyObject;
+export function createPublicKey(key: ArrayBufferView): PublicKeyObject;
 
-export function createPublicKey(key: KeyObject) : PublicKeyObject;
-export function createPublicKey(key: CryptoKey) : PublicKeyObject;
-export function createPublicKey(key: CreateAsymmetricKeyOptions) : PublicKeyObject;
-export function createPublicKey(_key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject)
-    : PublicKeyObject {
+export function createPublicKey(key: KeyObject): PublicKeyObject;
+export function createPublicKey(key: CryptoKey): PublicKeyObject;
+export function createPublicKey(
+  key: CreateAsymmetricKeyOptions
+): PublicKeyObject;
+export function createPublicKey(
+  _key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject
+): PublicKeyObject {
   // The options here are a bit complicated. The key material itself can
   // either be a string, ArrayBuffer, or ArrayBufferView. It is also
   // possible to pass a private key in the form of either a CryptoKey
@@ -369,37 +423,45 @@ export function createPublicKey(_key: CreateAsymmetricKeyOptions | KeyData | Cry
 export type PublicKeyResult = KeyExportResult | PublicKeyObject;
 export type PrivateKeyResult = KeyExportResult | PrivateKeyObject;
 export type GenerateKeyCallback = (err?: any, key?: KeyObject) => void;
-export type GenerateKeyPairCallback =
-  (err?: any, publicKey?: PublicKeyResult, privateKey?: PrivateKeyResult) => void;
+export type GenerateKeyPairCallback = (
+  err?: any,
+  publicKey?: PublicKeyResult,
+  privateKey?: PrivateKeyResult
+) => void;
 
 export interface KeyObjectPair {
   publicKey: PublicKeyResult;
   privateKey: PrivateKeyResult;
 }
 
-export function generateKey(_type: SecretKeyType,
+export function generateKey(
+  _type: SecretKeyType,
   _options: GenerateKeyOptions,
-  callback: GenerateKeyCallback) {
-// We intentionally have not implemented key generation up to this point.
-// The reason is that generation of cryptographically safe keys is a CPU
-// intensive operation that can often exceed limits on the amount of CPU
-// time a worker is allowed.
-callback(new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync'));
+  callback: GenerateKeyCallback
+) {
+  // We intentionally have not implemented key generation up to this point.
+  // The reason is that generation of cryptographically safe keys is a CPU
+  // intensive operation that can often exceed limits on the amount of CPU
+  // time a worker is allowed.
+  callback(new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync'));
 }
 
-export function generateKeySync(_type: SecretKeyType,
-      _options: GenerateKeyOptions) {
-// We intentionally have not implemented key generation up to this point.
-// The reason is that generation of cryptographically safe keys is a CPU
-// intensive operation that can often exceed limits on the amount of CPU
-// time a worker is allowed.
-throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync');
+export function generateKeySync(
+  _type: SecretKeyType,
+  _options: GenerateKeyOptions
+) {
+  // We intentionally have not implemented key generation up to this point.
+  // The reason is that generation of cryptographically safe keys is a CPU
+  // intensive operation that can often exceed limits on the amount of CPU
+  // time a worker is allowed.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync');
 }
 
 export function generateKeyPair(
-    _type : AsymmetricKeyType,
-    _options: GenerateKeyPairOptions,
-    callback: GenerateKeyPairCallback) {
+  _type: AsymmetricKeyType,
+  _options: GenerateKeyPairOptions,
+  callback: GenerateKeyPairCallback
+) {
   // We intentionally have not implemented key generation up to this point.
   // The reason is that generation of cryptographically safe keys is a CPU
   // intensive operation that can often exceed limits on the amount of CPU
@@ -408,8 +470,9 @@ export function generateKeyPair(
 }
 
 export function generateKeyPairSync(
-    _type : AsymmetricKeyType,
-    _options: GenerateKeyPairOptions) : KeyObjectPair {
+  _type: AsymmetricKeyType,
+  _options: GenerateKeyPairOptions
+): KeyObjectPair {
   // We intentionally have not implemented key generation up to this point.
   // The reason is that generation of cryptographically safe keys is a CPU
   // intensive operation that can often exceed limits on the amount of CPU

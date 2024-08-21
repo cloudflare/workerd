@@ -10,8 +10,7 @@
 
 namespace workerd::jsg {
 
-Ref<DOMException> DOMException::constructor(
-    const v8::FunctionCallbackInfo<v8::Value>& args,
+Ref<DOMException> DOMException::constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
     Optional<kj::String> message,
     Optional<kj::String> name) {
   Lock& js = Lock::from(args.GetIsolate());
@@ -34,8 +33,7 @@ Ref<DOMException> DOMException::constructor(
   jsg::check(args.This()->DefineProperty(js.v8Context(), stackName, prop));
 
   return jsg::alloc<DOMException>(
-      kj::mv(errMessage),
-      kj::mv(name).orDefault([] { return kj::str("Error"); }));
+      kj::mv(errMessage), kj::mv(name).orDefault([] { return kj::str("Error"); }));
 }
 
 kj::StringPtr DOMException::getName() {
@@ -47,7 +45,7 @@ kj::StringPtr DOMException::getMessage() {
 }
 
 int DOMException::getCode() {
-  static std::map<kj::StringPtr, int> legacyCodes{
+  static const std::map<kj::StringPtr, int> legacyCodes{
 #define MAP_ENTRY(name, code, friendlyName) {friendlyName, code},
     JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(MAP_ENTRY)
 #undef MAP_ENTRY
@@ -93,10 +91,10 @@ jsg::Ref<DOMException> DOMException::deserialize(
       // somewhere. So let's go ahead and support it.
       kj::String name = deserializer.readLengthDelimitedString();
       auto errorForStack = KJ_ASSERT_NONNULL(deserializer.readValue(js).tryCast<JsObject>());
-      kj::String message = KJ_ASSERT_NONNULL(errorForStack.get(js, "message"_kj)
-          .tryCast<JsString>()).toString(js);
-      kj::String stack = KJ_ASSERT_NONNULL(errorForStack.get(js, "stack")
-          .tryCast<JsString>()).toString(js);
+      kj::String message =
+          KJ_ASSERT_NONNULL(errorForStack.get(js, "message"_kj).tryCast<JsString>()).toString(js);
+      kj::String stack =
+          KJ_ASSERT_NONNULL(errorForStack.get(js, "stack").tryCast<JsString>()).toString(js);
       return js.domException(kj::mv(message), kj::mv(name), kj::mv(stack));
     }
   }

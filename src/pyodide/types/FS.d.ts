@@ -1,4 +1,3 @@
-
 interface Reader {
   read: (offset: number, dest: Uint8Array) => number;
 }
@@ -24,24 +23,36 @@ interface FS {
   mkdirTree: (dirname: string) => void;
   writeFile: (fname: string, contents: Uint8Array, options: object) => void;
   mount<Info>(fs: object, options: { info?: Info }, path: string): void;
-  createNode<Info>(parent: FSNode<Info> | null, name: string, mode: number): FSNode<Info>;
+  createNode<Info>(
+    parent: FSNode<Info> | null,
+    name: string,
+    mode: number
+  ): FSNode<Info>;
   isFile: (mode: number) => boolean;
   genericErrors: Error[];
 }
 
 interface FSOps<Info> {
-  getNodeMode: (parent: FSNode<Info> | null, name: string, info: Info) => {
+  getNodeMode: (
+    parent: FSNode<Info> | null,
+    name: string,
+    info: Info
+  ) => {
     permissions: number;
     isDir: boolean;
   };
   setNodeAttributes: (node: FSNode<Info>, info: Info, isDir: boolean) => void;
   readdir: (node: FSNode<Info>) => string[];
   lookup: (parent: FSNode<Info>, name: string) => Info;
-  read: (stream: FSStream<Info>, position: number, buffer: Uint8Array) => number;
+  read: (
+    stream: FSStream<Info>,
+    position: number,
+    buffer: Uint8Array
+  ) => number;
 }
 
 interface MountOpts<Info> {
-  opts: { info: Info }
+  opts: { info: Info };
 }
 
 interface FSNodeOps<Info> {
@@ -57,7 +68,13 @@ interface FSStream<Info> {
 
 interface FSStreamOps<Info> {
   llseek: (stream: FSStream<Info>, offset: number, whence: number) => number;
-  read: (stream: FSStream<Info>, buffer: Uint8Array, offset: number, length: number, position: number) => number;
+  read: (
+    stream: FSStream<Info>,
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number
+  ) => number;
 }
 
 interface FSNode<Info> {
@@ -79,19 +96,23 @@ interface FSAttr {
   mode: number;
   nlink: number;
   uid: number;
-  gid: number,
-  rdev: number,
-  size: number,
-  atime: Date,
-  mtime: Date,
-  ctime: Date,
+  gid: number;
+  rdev: number;
+  size: number;
+  atime: Date;
+  mtime: Date;
+  ctime: Date;
   blksize: number;
   blocks: number;
 }
 
 interface EmscriptenFS<Info> {
   mount: (mount: MountOpts<Info>) => FSNode<Info>;
-  createNode: (parent: FSNode<Info> | null, name: string, info: Info) => FSNode<Info>;
+  createNode: (
+    parent: FSNode<Info> | null,
+    name: string,
+    info: Info
+  ) => FSNode<Info>;
   node_ops: FSNodeOps<Info>;
   stream_ops: FSStreamOps<Info>;
 }

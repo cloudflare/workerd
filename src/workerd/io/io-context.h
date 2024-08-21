@@ -26,7 +26,9 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/util/uncaught-exception-source.h>
 
-namespace capnp { class HttpOverCapnpFactory; }
+namespace capnp {
+class HttpOverCapnpFactory;
+}
 
 namespace workerd {
 
@@ -41,14 +43,18 @@ class IoContext;
 // information for each individual collected instance.
 class WarningAggregator final: public kj::AtomicRefcounted {
 public:
-
   // The IoContext will maintain a map of WarningAggregators based on an opaque key.
   class Key final {
   public:
-    Key() : hash(kj::hashCode(this)) {}
+    Key(): hash(kj::hashCode(this)) {}
     KJ_DISALLOW_COPY_AND_MOVE(Key);
-    inline uint hashCode() const { return hash; }
-    inline bool operator==(const Key& other) const { return this == &other; }
+    inline uint hashCode() const {
+      return hash;
+    }
+    inline bool operator==(const Key& other) const {
+      return this == &other;
+    }
+
   private:
     uint hash;
   };
@@ -63,9 +69,8 @@ public:
   // The EmitCallback is called when the WarningAggregator is destroyed. It is
   // responsible for actually emitting the warnings that are collected. It will
   // only be called once and only if there are any collected warnings.
-  using EmitCallback = kj::Function<void(
-      Worker::Lock& lock,
-      kj::Array<kj::Own<WarningContext>> warnings)>;
+  using EmitCallback =
+      kj::Function<void(Worker::Lock& lock, kj::Array<kj::Own<WarningContext>> warnings)>;
 
   WarningAggregator(IoContext& context, EmitCallback emitter);
   ~WarningAggregator() noexcept(false);
@@ -98,13 +103,15 @@ private:
 class IoContext_IncomingRequest final {
 public:
   IoContext_IncomingRequest(kj::Own<IoContext> context,
-                            kj::Own<IoChannelFactory> ioChannelFactory,
-                            kj::Own<RequestObserver> metrics,
-                            kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
+      kj::Own<IoChannelFactory> ioChannelFactory,
+      kj::Own<RequestObserver> metrics,
+      kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
-  IoContext& getContext() { return *context; }
+  IoContext& getContext() {
+    return *context;
+  }
 
   // Invoked when the request is actually delivered.
   //
@@ -140,9 +147,13 @@ public:
   enum class FinishScheduledResult { COMPLETED, ABORTED, TIMEOUT };
   kj::Promise<FinishScheduledResult> finishScheduled();
 
-  RequestObserver& getMetrics() { return *metrics; }
+  RequestObserver& getMetrics() {
+    return *metrics;
+  }
 
-  kj::Maybe<WorkerTracer&> getWorkerTracer() { return workerTracer; }
+  kj::Maybe<WorkerTracer&> getWorkerTracer() {
+    return workerTracer;
+  }
 
 private:
   kj::Own<IoContext> context;
@@ -194,16 +205,21 @@ public:
 
   // Construct a new IoContext. Before using it, you must also create an IncomingRequest.
   IoContext(ThreadContext& thread,
-                 kj::Own<const Worker> worker, kj::Maybe<Worker::Actor&> actor,
-                 kj::Own<LimitEnforcer> limitEnforcer);
+      kj::Own<const Worker> worker,
+      kj::Maybe<Worker::Actor&> actor,
+      kj::Own<LimitEnforcer> limitEnforcer);
 
   // On destruction, all outstanding tasks associated with this request are canceled.
   ~IoContext() noexcept(false);
 
   using IncomingRequest = IoContext_IncomingRequest;
 
-  const Worker& getWorker() { return *worker; }
-  Worker::Lock& getCurrentLock() { return KJ_REQUIRE_NONNULL(currentLock); }
+  const Worker& getWorker() {
+    return *worker;
+  }
+  Worker::Lock& getCurrentLock() {
+    return KJ_REQUIRE_NONNULL(currentLock);
+  }
 
   kj::Maybe<Worker::Actor&> getActor() {
     return actor;
@@ -221,7 +237,9 @@ public:
     return getCurrentIncomingRequest().getWorkerTracer();
   }
 
-  LimitEnforcer& getLimitEnforcer() { return *limitEnforcer; }
+  LimitEnforcer& getLimitEnforcer() {
+    return *limitEnforcer;
+  }
 
   // Get the current input lock. Throws an exception if no input lock is held (e.g. because this is
   // not an actor request).
@@ -284,8 +302,8 @@ public:
 
   void logUncaughtException(kj::StringPtr description);
   void logUncaughtException(UncaughtExceptionSource source,
-                            const jsg::JsValue& exception,
-                            const jsg::JsMessage& message = jsg::JsMessage());
+      const jsg::JsValue& exception,
+      const jsg::JsMessage& message = jsg::JsMessage());
 
   // Log an uncaught exception from an asynchronous context, i.e. when the IoContext is not
   // "current".
@@ -296,16 +314,24 @@ public:
   // Returns a promise that will reject with an exception if and when the request should be
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for
   // incoming tasks.
-  kj::Promise<void> onAbort() { return abortPromise.addBranch(); }
+  kj::Promise<void> onAbort() {
+    return abortPromise.addBranch();
+  }
 
   // Force context abort now.
-  void abort(kj::Exception&& e) { abortFulfiller->reject(kj::mv(e)); }
+  void abort(kj::Exception&& e) {
+    abortFulfiller->reject(kj::mv(e));
+  }
 
   // Has event.passThroughOnException() been called?
-  bool isFailOpen() { return failOpen; }
+  bool isFailOpen() {
+    return failOpen;
+  }
 
   // Called by event.passThroughOnException().
-  void setFailOpen() { failOpen = true; }
+  void setFailOpen() {
+    failOpen = true;
+  }
 
   // -----------------------------------------------------------------
   // Tracking thread-local request
@@ -319,15 +345,13 @@ public:
   // before executing the callback.
   template <typename Func>
   kj::PromiseForResult<Func, Worker::Lock&> run(
-      Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none)
-      KJ_WARN_UNUSED_RESULT;
+      Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Like run() but executes within the given critical section, if it is non-null. If
   // `criticalSection` is null, then this just forwards to the other run() (with null inputLock).
   template <typename Func>
-  kj::PromiseForResult<Func, Worker::Lock&> run(
-      Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection)
-      KJ_WARN_UNUSED_RESULT;
+  kj::PromiseForResult<Func, Worker::Lock&> run(Func&& func,
+      kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) KJ_WARN_UNUSED_RESULT;
 
   // Returns the current IoContext for the thread.
   // Throws an exception if there is no current context (see hasCurrent() below).
@@ -380,8 +404,7 @@ public:
   void addTask(kj::Promise<void> promise);
 
   template <typename T, typename Func>
-  jsg::PromiseForResult<Func, T, true> awaitIo(
-      jsg::Lock& js, kj::Promise<T> promise, Func&& func);
+  jsg::PromiseForResult<Func, T, true> awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func);
 
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
   // JavaScript promise for the result of that. If no `func` is provided, no transformation is
@@ -423,9 +446,8 @@ public:
   jsg::Promise<T> awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> promise);
 
   template <typename T, typename Func>
-  jsg::PromiseForResult<Func, T, true> awaitIoWithInputLock(jsg::Lock& js,
-                                                             kj::Promise<T> promise,
-                                                             Func&& func);
+  jsg::PromiseForResult<Func, T, true> awaitIoWithInputLock(
+      jsg::Lock& js, kj::Promise<T> promise, Func&& func);
 
   // DEPRECATED: Like awaitIo() but:
   // - Does not have a continuation function, so suffers from the problems described in
@@ -465,7 +487,9 @@ public:
   kj::_::ReducePromises<RemoveIoOwn<T>> awaitJs(jsg::Lock& js, jsg::Promise<T> promise);
 
   // Returns the number of times addTask() has been called (even if the tasks have completed).
-  uint taskCount() { return addTaskCounter; }
+  uint taskCount() {
+    return addTaskCounter;
+  }
 
   // Indicates that the script has requested that it stay active until the given promise resolves.
   // drain() waits until all such promises have completed.
@@ -473,7 +497,9 @@ public:
 
   // Returns the status of waitUntil promises. If a promise fails, this sets the status to the
   // one corresponding to the exception type.
-  EventOutcome waitUntilStatus() const { return waitUntilStatusValue; }
+  EventOutcome waitUntilStatus() const {
+    return waitUntilStatusValue;
+  }
 
   // DO NOT USE, use `addWaitUntil()` instead.
   kj::TaskSet& getWaitUntilTasks() {
@@ -488,14 +514,16 @@ public:
   //    thread.
   // 2. Can be safely destroyed from any thread.
   // 3. Invalidates itself when the request ends (such that dereferencing throws).
-  template <typename T> IoOwn<T> addObject(kj::Own<T> obj);
+  template <typename T>
+  IoOwn<T> addObject(kj::Own<T> obj);
 
   // Wraps a reference in a wrapper which:
   // 1. Will throw an exception if dereferenced while the IoContext is not current for the
   //    thread.
   // 2. Can be safely destroyed from any thread.
   // 3. Invalidates itself when the request ends (such that dereferencing throws).
-  template <typename T> IoPtr<T> addObject(T& obj);
+  template <typename T>
+  IoPtr<T> addObject(T& obj);
 
   // Like addObject() but takes a functor, returning a functor with the same signature but which
   // holds the original functor under a `IoOwn`, and so will stop working if the IoContext
@@ -508,7 +536,8 @@ public:
   // reference is dropped OR the IoContext itself is destroyed. In the latter case, further
   // attempts to access the returned reference will throw. The reference can only be used and
   // destroyed within the same thread as the IoContext lives.
-  template <typename T> ReverseIoOwn<T> addObjectReverse(kj::Own<T> obj);
+  template <typename T>
+  ReverseIoOwn<T> addObjectReverse(kj::Own<T> obj);
 
   // Call this to indicate that the caller expects to call into JavaScript in this IoContext
   // at some point in the future, in response to some *external* event that the caller is waiting
@@ -533,8 +562,8 @@ public:
   // resolves, the inner promise (the DeferredProxy<T>) is treated as external I/O.
   template <typename T>
   jsg::Promise<T> awaitDeferredProxy(jsg::Lock& js, kj::Promise<api::DeferredProxy<T>>&& promise) {
-    return awaitIoImpl(js, waitForDeferredProxy(kj::mv(promise)), getCriticalSection(),
-                       IdentityFunc<T>());
+    return awaitIoImpl(
+        js, waitForDeferredProxy(kj::mv(promise)), getCriticalSection(), IdentityFunc<T>());
   }
 
   bool isFinalized() {
@@ -542,10 +571,14 @@ public:
   }
 
   // Called by ScheduledEvent
-  void setNoRetryScheduled() { retryScheduled = false; }
+  void setNoRetryScheduled() {
+    retryScheduled = false;
+  }
 
   // Called by ServiceWorkerGlobalScope::runScheduled
-  bool shouldRetryScheduled() { return retryScheduled; }
+  bool shouldRetryScheduled() {
+    return retryScheduled;
+  }
 
   // -----------------------------------------------------------------
   // Access to I/O
@@ -553,10 +586,7 @@ public:
   // Used to implement setTimeout(). We don't expose the timer directly because the
   // promises it returns need to live in this I/O context, anyway.
   TimeoutId setTimeoutImpl(
-    TimeoutId::Generator& generator,
-    bool repeat,
-    jsg::Function<void()> function,
-    double msDelay);
+      TimeoutId::Generator& generator, bool repeat, jsg::Function<void()> function, double msDelay);
 
   // Used to implement clearTimeout(). We don't expose the timer directly because the
   // promises it returns need to live in this I/O context, anyway.
@@ -571,7 +601,9 @@ public:
   kj::Date now();
 
   // Returns a promise that resolves once `now() >= when`.
-  kj::Promise<void> atTime(kj::Date when) { return getIoChannelFactory().getTimer().atTime(when); }
+  kj::Promise<void> atTime(kj::Date when) {
+    return getIoChannelFactory().getTimer().atTime(when);
+  }
 
   // Returns a promise that resolves after some time. This is intended to be used for implementing
   // time limits on some sort of operation, not for implementing application-driven timing, as it
@@ -582,7 +614,9 @@ public:
   }
 
   // Provide access to the system CSPRNG.
-  kj::EntropySource& getEntropySource() { return thread.getEntropySource(); }
+  kj::EntropySource& getEntropySource() {
+    return thread.getEntropySource();
+  }
 
   capnp::HttpOverCapnpFactory& getHttpOverCapnpFactory() {
     return thread.getHttpOverCapnpFactory();
@@ -592,8 +626,12 @@ public:
     return thread.getByteStreamFactory();
   }
 
-  const kj::HttpHeaderTable& getHeaderTable() { return thread.getHeaderTable(); }
-  const ThreadContext::HeaderIdBundle& getHeaderIds() { return thread.getHeaderIds(); }
+  const kj::HttpHeaderTable& getHeaderTable() {
+    return thread.getHeaderTable();
+  }
+  const ThreadContext::HeaderIdBundle& getHeaderIds() {
+    return thread.getHeaderIds();
+  }
 
   // Subrequest channel numbers for the two special channels.
   // NULL = The channel used by global fetch() when the Request has no fetcher attached.
@@ -648,23 +686,29 @@ public:
   // - In preview, in-house requests do not show up in the network tab.
   //
   // `operationName` is the name to use for the request's span, if tracing is turned on.
-  kj::Own<WorkerInterface> getSubrequestChannel(
-      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName);
+  kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      kj::ConstString operationName);
 
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
-  kj::Own<WorkerInterface> getSubrequestChannelNoChecks(
-      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
+  kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<kj::ConstString> operationName = kj::none);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.
-  kj::Own<kj::HttpClient> getHttpClient(
-      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName);
+  kj::Own<kj::HttpClient> getHttpClient(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      kj::ConstString operationName);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.
-  kj::Own<kj::HttpClient> getHttpClientNoChecks(
-      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
+  kj::Own<kj::HttpClient> getHttpClientNoChecks(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<kj::ConstString> operationName = kj::none);
   // TODO(cleanup): Make it the caller's job to call asHttpClient() on the result of
   //   getSubrequest*().
@@ -673,14 +717,16 @@ public:
     return getIoChannelFactory().getCapability(channel);
   }
 
-  kj::Own<IoChannelFactory::ActorChannel> getGlobalActorChannel(
-      uint channel, const ActorIdFactory::ActorId& id, kj::Maybe<kj::String> locationHint,
-      ActorGetMode mode, SpanParent parentSpan) {
-    return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint), mode,
-        kj::mv(parentSpan));
-  }
-  kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(uint channel, kj::StringPtr id,
+  kj::Own<IoChannelFactory::ActorChannel> getGlobalActorChannel(uint channel,
+      const ActorIdFactory::ActorId& id,
+      kj::Maybe<kj::String> locationHint,
+      ActorGetMode mode,
       SpanParent parentSpan) {
+    return getIoChannelFactory().getGlobalActor(
+        channel, id, kj::mv(locationHint), mode, kj::mv(parentSpan));
+  }
+  kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(
+      uint channel, kj::StringPtr id, SpanParent parentSpan) {
     return getIoChannelFactory().getColoLocalActor(channel, id, kj::mv(parentSpan));
   }
 
@@ -728,8 +774,7 @@ public:
 
   // Returns the existing WarningAggregator for the specified key, or calls load to create one.
   kj::Own<WarningAggregator> getWarningAggregator(
-      const WarningAggregator::Key& key,
-      kj::Function<kj::Own<WarningAggregator>(IoContext&)> load);
+      const WarningAggregator::Key& key, kj::Function<kj::Own<WarningAggregator>(IoContext&)> load);
 
   // The IoChannelFactory must be accessed through the
   // currentIncomingRequest because it has some tracing context built in.
@@ -790,8 +835,11 @@ private:
   kj::TaskSet waitUntilTasks;
   EventOutcome waitUntilStatusValue = EventOutcome::OK;
 
-  void setTimeoutImpl(TimeoutId timeoutId, bool repeat, jsg::V8Ref<v8::Function> function,
-    double msDelay, kj::Array<jsg::Value> args);
+  void setTimeoutImpl(TimeoutId timeoutId,
+      bool repeat,
+      jsg::V8Ref<v8::Function> function,
+      double msDelay,
+      kj::Array<jsg::Value> args);
 
   uint addTaskCounter = 0;
   kj::Maybe<kj::TaskSet> tasks;
@@ -807,13 +855,17 @@ private:
   // destructed.
   kj::Own<TimeoutManager> timeoutManager;
 
-  kj::Own<WorkerInterface> getSubrequestChannelImpl(
-      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
-      SpanBuilder& span, IoChannelFactory& channelFactory);
+  kj::Own<WorkerInterface> getSubrequestChannelImpl(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      SpanBuilder& span,
+      IoChannelFactory& channelFactory);
 
   friend class IoContext_IncomingRequest;
-  template <typename T> friend class IoOwn;
-  template <typename T> friend class IoPtr;
+  template <typename T>
+  friend class IoOwn;
+  template <typename T>
+  friend class IoPtr;
 
   void taskFailed(kj::Exception&& exception) override;
   void requireCurrent();
@@ -825,8 +877,11 @@ private:
   public:
     virtual void run(Worker::Lock& lock) = 0;
   };
-  void runImpl(Runnable& runnable, bool takePendingEvent, Worker::LockType lockType,
-               kj::Maybe<InputGate::Lock> inputLock, bool allowPermanentException);
+  void runImpl(Runnable& runnable,
+      bool takePendingEvent,
+      Worker::LockType lockType,
+      kj::Maybe<InputGate::Lock> inputLock,
+      bool allowPermanentException);
 
   void runFinalizers(Worker::AsyncLock& asyncLock);
 
@@ -879,15 +934,16 @@ private:
   // setup of a number of scopes that must be entered prior to running within the
   // context, including entering the V8StackScope and acquiring the Worker::Lock.
   void runInContextScope(Worker::LockType lockType,
-                         kj::Maybe<InputGate::Lock> inputLock,
-                         kj::Function<void(Worker::Lock&)> func);
+      kj::Maybe<InputGate::Lock> inputLock,
+      kj::Function<void(Worker::Lock&)> func);
 
   friend class Finalizeable;
   friend class DeleteQueue;
   template <typename T>
   friend kj::Promise<ExceptionOr<T>> promiseForExceptionOrT(kj::Promise<T> promise);
-  template<typename Result>
-  friend Result throwOrReturnResult(jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult);
+  template <typename Result>
+  friend Result throwOrReturnResult(
+      jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult);
 };
 
 // =======================================================================================
@@ -902,8 +958,8 @@ template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
-    return cs.get()->wait()
-        .then([this,func=kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
+    return cs.get()->wait().then(
+        [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
       return run(kj::fwd<Func>(func), kj::mv(inputLock));
     });
   } else {
@@ -917,8 +973,8 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
     if (inputLock == kj::none) {
-      return a.getInputGate().wait()
-          .then([this,func=kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
+      return a.getInputGate().wait().then(
+          [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
         return run(kj::fwd<Func>(func), kj::mv(inputLock));
       });
     }
@@ -928,9 +984,8 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     asyncLockPromise = worker->takeAsyncLock(getMetrics());
   }
 
-  return asyncLockPromise
-      .then([this,inputLock=kj::mv(inputLock),func=kj::fwd<Func>(func)]
-            (Worker::AsyncLock lock) mutable {
+  return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
+                                   Worker::AsyncLock lock) mutable {
     typedef decltype(func(kj::instance<Worker::Lock&>())) Result;
     if constexpr (kj::isSameType<Result, void>()) {
       struct RunnableImpl: public Runnable {
@@ -955,7 +1010,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
         }
       };
 
-      RunnableImpl runnable { kj::fwd<Func>(func) };
+      RunnableImpl runnable{kj::fwd<Func>(func)};
       runImpl(runnable, true, lock, kj::mv(inputLock), false);
       KJ_IF_SOME(r, runnable.result) {
         return kj::mv(r);
@@ -969,27 +1024,26 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 template <typename T, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIo(
     jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
-  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getCriticalSection(),
-                     kj::fwd<Func>(func));
+  return awaitIoImpl(
+      js, promise.attach(registerPendingEvent()), getCriticalSection(), kj::fwd<Func>(func));
 }
 
 template <typename T>
 jsg::Promise<T> IoContext::awaitIo(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getCriticalSection(),
-                     IdentityFunc<T>());
+  return awaitIoImpl(
+      js, promise.attach(registerPendingEvent()), getCriticalSection(), IdentityFunc<T>());
 }
 
 template <typename T, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIoWithInputLock(
     jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
-  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getInputLock(),
-                     kj::fwd<Func>(func));
+  return awaitIoImpl(
+      js, promise.attach(registerPendingEvent()), getInputLock(), kj::fwd<Func>(func));
 }
 
 template <typename T>
 jsg::Promise<T> IoContext::awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getInputLock(),
-                     IdentityFunc<T>());
+  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getInputLock(), IdentityFunc<T>());
 }
 
 template <typename T>
@@ -1005,24 +1059,18 @@ jsg::Promise<T> IoContext::awaitIoLegacyWithInputLock(jsg::Lock& js, kj::Promise
 // To reduce the code size impact of awaitIoImpl, move promise continuation code out of
 // awaitIoImpl() where possible. This way, the then() parameters are only templated based on one
 // type each.
-template<typename T>
+template <typename T>
 kj::Promise<IoContext::ExceptionOr<T>> promiseForExceptionOrT(kj::Promise<T> promise) {
   if constexpr (jsg::isVoid<T>()) {
-    return promise.then([]() -> IoContext::ExceptionOr<T> {
-      return kj::none;
-    }, [](kj::Exception&& exception) -> IoContext::ExceptionOr<T> {
-      return kj::mv(exception);
-    });
+    return promise.then([]() -> IoContext::ExceptionOr<T> { return kj::none; },
+        [](kj::Exception&& exception) -> IoContext::ExceptionOr<T> { return kj::mv(exception); });
   } else {
-    return promise.then([](T&& result) -> IoContext::ExceptionOr<T> {
-      return kj::mv(result);
-    }, [](kj::Exception&& exception) -> IoContext::ExceptionOr<T> {
-      return kj::mv(exception);
-    });
+    return promise.then([](T&& result) -> IoContext::ExceptionOr<T> { return kj::mv(result); },
+        [](kj::Exception&& exception) -> IoContext::ExceptionOr<T> { return kj::mv(exception); });
   }
 };
 
-template<typename Result>
+template <typename Result>
 Result throwOrReturnResult(jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult) {
   if constexpr (jsg::isVoid<Result>()) {
     KJ_IF_SOME(e, exceptionOrResult) {
@@ -1070,16 +1118,15 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 
   // Reminder: This can throw JsExceptionThrown if the execution context has been terminated.
   // it's important in that case that `promiseExceptionOrT` will be destroyed before `func`.
-  auto [ jsPromise, resolver ] = js.newPromiseAndResolver<ExceptionOr<Result>>();
+  auto [jsPromise, resolver] = js.newPromiseAndResolver<ExceptionOr<Result>>();
 
-  addTask(promiseExceptionOrT
-      .then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
-            maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js),
-            // Reminder: It's important that `func` gets attached to the promise before the whole
-            // thing is passed to `addTask()`, so that it's impossible for `func` to be destroyed
-            // before the inner promise.
-            func = kj::fwd<Func>(func)]
-            (ExceptionOr<T>&& exceptionOrT) mutable {
+  addTask(promiseExceptionOrT.then(
+      [this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
+          maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js),
+          // Reminder: It's important that `func` gets attached to the promise before the whole
+          // thing is passed to `addTask()`, so that it's impossible for `func` to be destroyed
+          // before the inner promise.
+          func = kj::fwd<Func>(func)](ExceptionOr<T>&& exceptionOrT) mutable {
     struct FuncResultPair {
       // It's important that `exceptionOrT` is destroyed before `Func`. Lambda captures are
       // destroyed in unspecified order, so we wrap them in a struct to make it explicit.
@@ -1087,10 +1134,10 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
       ExceptionOr<T> exceptionOrT;
     };
 
-    return run([resolver = kj::mv(resolver),
-                funcResultPair = FuncResultPair { kj::fwd<Func>(func), kj::mv(exceptionOrT) },
-                maybeAsyncContext = kj::mv(maybeAsyncContext)]
-                (Worker::Lock& lock) mutable {
+    return run(
+        [resolver = kj::mv(resolver),
+            funcResultPair = FuncResultPair{kj::fwd<Func>(func), kj::mv(exceptionOrT)},
+            maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
       jsg::Lock& js = lock;
 
@@ -1141,9 +1188,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
                   // Here we can just `resolver.reject` because we already have a JS exception.
                   resolver.resolve(js, funcResultPair.func(js, kj::mv(result)));
                 }
-              }, [&](jsg::Value error) {
-                resolver.reject(js, error.getHandle(js));
-              });
+              }, [&](jsg::Value error) { resolver.reject(js, error.getHandle(js)); });
             } catch (jsg::JsExceptionThrown&) {
               // An uncatchable JS exception -- presumably, the isolate has been terminated. We
               // can't convert this into a promise rejection, we need to just propagate it up.
@@ -1155,7 +1200,8 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
           }
         }
       }
-    }, kj::mv(ilOrCs));
+    },
+        kj::mv(ilOrCs));
   }));
 
   // Reminder: This can throw JsExceptionThrown if the execution context has been terminated. We
@@ -1178,21 +1224,19 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
       if (!isDone) {
         // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
         // this promise.
-        fulfiller->reject(
-            JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
+        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
       }
     }
 
   private:
     kj::Maybe<kj::StringPtr> finalize() override {
       if (!isDone) {
-        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED,
-            Error, "Promise will never complete."));
+        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
         isDone = true;
         return "A hanging Promise was canceled. This happens when the worker runtime is waiting "
-                "for a Promise from JavaScript to resolve, but has detected that the Promise "
-                "cannot possibly ever resolve because all code and events related to the "
-                "Promise's I/O context have already finished."_kj;
+               "for a Promise from JavaScript to resolve, but has detected that the Promise "
+               "cannot possibly ever resolve because all code and events related to the "
+               "Promise's I/O context have already finished."_kj;
       } else {
         return kj::none;
       }
@@ -1200,9 +1244,8 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
   };
   auto fulfiller = kj::refcounted<RefcountedFulfiller>(kj::mv(paf.fulfiller));
 
-  auto errorHandler =
-      [fulfiller = addObject(kj::addRef(*fulfiller))]
-      (jsg::Lock& js, jsg::Value jsExceptionRef) mutable {
+  auto errorHandler = [fulfiller = addObject(kj::addRef(*fulfiller))](
+                          jsg::Lock& js, jsg::Value jsExceptionRef) mutable {
     // Note: `context` can possibly be different than the one that started the wait, if the
     // promise resolved from a different context. In that case the use of `fulfiller` will
     // throw later on. But it's OK to use the wrong context up until that point.
@@ -1218,8 +1261,8 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
     //   once the exception has been tunneled into a KJ exception, so the later logging won't be
     //   as useful. We should improve the tunneling to include stack traces and ensure that all
     //   consumers do in fact log exceptions, then we can remove this.
-    context.logUncaughtException(UncaughtExceptionSource::INTERNAL_ASYNC,
-                                 jsg::JsValue(jsException));
+    context.logUncaughtException(
+        UncaughtExceptionSource::INTERNAL_ASYNC, jsg::JsValue(jsException));
 
     fulfiller->fulfiller->reject(jsg::createTunneledException(isolate, jsException));
     fulfiller->isDone = true;
@@ -1231,8 +1274,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
       fulfiller->isDone = true;
     }, kj::mv(errorHandler));
   } else {
-    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))]
-                    (jsg::Lock&, T&& result) mutable {
+    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock&, T&& result) mutable {
       if constexpr (isIoOwn<T>()) {
         fulfiller->fulfiller->fulfill(kj::mv(*result));
       } else {
@@ -1260,13 +1302,11 @@ inline IoPtr<T> IoContext::addObject(T& obj) {
 template <typename Func>
 auto IoContext::addFunctor(Func&& func) {
   if constexpr (kj::isReference<Func>()) {
-    return [func = addObject(func)](auto&&... params) mutable {
-      return (*func)(kj::fwd<decltype(params)>(params)...);
-    };
+    return [func = addObject(func)](
+               auto&&... params) mutable { return (*func)(kj::fwd<decltype(params)>(params)...); };
   } else {
-    return [func = addObject(kj::heap(kj::mv(func)))](auto&&... params) mutable {
-      return (*func)(kj::fwd<decltype(params)>(params)...);
-    };
+    return [func = addObject(kj::heap(kj::mv(func)))](
+               auto&&... params) mutable { return (*func)(kj::fwd<decltype(params)>(params)...); };
   }
 }
 
@@ -1287,11 +1327,14 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   typedef jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>> T;
   auto [result, resolver] = js.newPromiseAndResolver<T>();
 
-  addTask(cs->wait().then([this, callback = kj::mv(callback),
-                           maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)]
-                          (InputGate::Lock inputLock) mutable {
-    return run([this, callback = kj::mv(callback),
-                maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+  addTask(
+      cs->wait()
+          .then([this, callback = kj::mv(callback),
+                    maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](
+                    InputGate::Lock inputLock) mutable {
+    return run(
+        [this, callback = kj::mv(callback), maybeAsyncContext = kj::mv(maybeAsyncContext)](
+            Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::Scope scope(lock, maybeAsyncContext);
       auto cb = kj::mv(callback);
 
@@ -1301,26 +1344,29 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
 
       // Arrange to time out if the critical section runs more than 30 seconds, so that objects
       // won't be hung forever if they have a critical section that deadlocks.
-      auto timeout = afterLimitTimeout(30 * kj::SECONDS)
-        .then([]() -> T {
-          kj::throwFatalException(JSG_KJ_EXCEPTION(
-              OVERLOADED, Error,
-              "A call to blockConcurrencyWhile() in a Durable Object waited for "
-              "too long. The call was canceled and the Durable Object was reset."));
+      auto timeout = afterLimitTimeout(30 * kj::SECONDS).then([]() -> T {
+        kj::throwFatalException(JSG_KJ_EXCEPTION(OVERLOADED, Error,
+            "A call to blockConcurrencyWhile() in a Durable Object waited for "
+            "too long. The call was canceled and the Durable Object was reset."));
       });
 
       return awaitJs(lock, kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
-    }, kj::mv(inputLock));
-  }).then([this, cs = kj::mv(cs), resolver = kj::mv(resolver),
-           maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](T&& value) mutable {
+    },
+        kj::mv(inputLock));
+  })
+          .then(
+              [this, cs = kj::mv(cs), resolver = kj::mv(resolver),
+                  maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](T&& value) mutable {
     auto inputLock = cs->succeeded();
-    return run([value = kj::mv(value),resolver = kj::mv(resolver),
-                maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+    return run(
+        [value = kj::mv(value), resolver = kj::mv(resolver),
+            maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::Scope scope(lock, maybeAsyncContext);
       resolver.resolve(lock, kj::mv(value));
-    }, kj::mv(inputLock));
-  }, [cs = kj::mv(cs2)]
-     (kj::Exception&& e) mutable {
+    },
+        kj::mv(inputLock));
+  },
+              [cs = kj::mv(cs2)](kj::Exception&& e) mutable {
     // Annotate as broken for periodic metrics.
     auto msg = e.getDescription();
     if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {

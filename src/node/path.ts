@@ -5,10 +5,7 @@
 
 /* eslint-disable */
 
-import {
-  posix,
-  win32,
-} from 'node-internal:internal_path';
+import { posix, win32 } from 'node-internal:internal_path';
 
 const {
   resolve,

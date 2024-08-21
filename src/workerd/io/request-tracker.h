@@ -50,7 +50,7 @@ public:
     hooks = kj::none;
   }
 
-  kj::Own<RequestTracker> addRef()  {
+  kj::Own<RequestTracker> addRef() {
     return kj::addRef(*this);
   }
 
@@ -62,4 +62,4 @@ private:
   kj::Maybe<Hooks&> hooks;
 };
 
-} // namespace workerd
+}  // namespace workerd

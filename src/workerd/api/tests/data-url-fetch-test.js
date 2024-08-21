@@ -1,6 +1,4 @@
-import {
-  strictEqual,
-} from 'node:assert';
+import { strictEqual } from 'node:assert';
 
 export const dataUrl = {
   async test() {
@@ -9,15 +7,17 @@ export const dataUrl = {
     strictEqual(resp.statusText, 'OK');
     strictEqual(await resp.text(), 'Hello, World!');
     strictEqual(resp.headers.get('content-type'), 'text/plain');
-  }
+  },
 };
 
 export const base64DataUrl = {
   async test() {
-    const resp = await fetch('  DATA:text/plain;a=\"b\";base64,\t\nSGVsbG8sIFdvcmxkIQ%3D%3D'  );
+    const resp = await fetch(
+      '  DATA:text/plain;a="b";base64,\t\nSGVsbG8sIFdvcmxkIQ%3D%3D'
+    );
     strictEqual(resp.status, 200);
     strictEqual(resp.statusText, 'OK');
     strictEqual(await resp.text(), 'Hello, World!');
     strictEqual(resp.headers.get('content-type'), 'text/plain;a=b');
-  }
+  },
 };

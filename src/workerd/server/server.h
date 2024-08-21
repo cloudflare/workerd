@@ -17,11 +17,11 @@
 #include <kj/compat/http.h>
 
 namespace kj {
-  class TlsContext;
+class TlsContext;
 }
 
 namespace workerd::jsg {
-  class V8System;
+class V8System;
 }
 
 namespace workerd::server {
@@ -34,14 +34,19 @@ using api::pyodide::PythonConfig;
 // in such a way that it can be unit-tested. workerd.c++ implements the CLI wrapper around this.
 class Server final: private kj::TaskSet::ErrorHandler {
 public:
-  Server(kj::Filesystem& fs, kj::Timer& timer, kj::Network& network,
-         kj::EntropySource& entropySource, Worker::ConsoleMode consoleMode,
-         kj::Function<void(kj::String)> reportConfigError);
+  Server(kj::Filesystem& fs,
+      kj::Timer& timer,
+      kj::Network& network,
+      kj::EntropySource& entropySource,
+      Worker::ConsoleMode consoleMode,
+      kj::Function<void(kj::String)> reportConfigError);
   ~Server() noexcept(false);
 
   // Permit experimental features to be used. These features may break backwards compatibility
   // in the future.
-  void allowExperimental() { experimental = true; }
+  void allowExperimental() {
+    experimental = true;
+  }
 
   void overrideSocket(kj::String name, kj::Own<kj::ConnectionReceiver> port) {
     socketOverrides.upsert(kj::mv(name), kj::mv(port));
@@ -61,10 +66,10 @@ public:
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
   }
-  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>> &&dkr) {
+  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
     pythonConfig.packageDiskCacheRoot = kj::mv(dkr);
   }
-  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>> &&dkr) {
+  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
     pythonConfig.pyodideDiskCacheRoot = kj::mv(dkr);
   }
   void setPythonCreateSnapshot() {
@@ -75,17 +80,19 @@ public:
   }
 
   // Runs the server using the given config.
-  kj::Promise<void> run(jsg::V8System& v8System, config::Config::Reader conf,
-                        kj::Promise<void> drainWhen = kj::NEVER_DONE);
+  kj::Promise<void> run(jsg::V8System& v8System,
+      config::Config::Reader conf,
+      kj::Promise<void> drainWhen = kj::NEVER_DONE);
 
   // Executes one or more tests. By default, all exported test handlers from all entrypoints to
   // all services in the config are executed. Glob patterns can be specified to match specific
   // service and entrypoint names.
   //
   // The returned promise resolves true if at least one test ran and no tests failed.
-  kj::Promise<bool> test(jsg::V8System& v8System, config::Config::Reader conf,
-                         kj::StringPtr servicePattern = "*"_kj,
-                         kj::StringPtr entrypointPattern = "*"_kj);
+  kj::Promise<bool> test(jsg::V8System& v8System,
+      config::Config::Reader conf,
+      kj::StringPtr servicePattern = "*"_kj,
+      kj::StringPtr entrypointPattern = "*"_kj);
 
   struct Durable {
     kj::String uniqueKey;
@@ -105,12 +112,10 @@ private:
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
-  PythonConfig pythonConfig = PythonConfig {
-    .packageDiskCacheRoot = kj::none,
+  PythonConfig pythonConfig = PythonConfig{.packageDiskCacheRoot = kj::none,
     .pyodideDiskCacheRoot = kj::none,
     .createSnapshot = false,
-    .createBaselineSnapshot = false
-  };
+    .createBaselineSnapshot = false};
 
   bool experimental = false;
 
@@ -158,7 +163,8 @@ private:
 
     template <typename... Params>
     ListedHttpServer(Server& owner, Params&&... params)
-        : owner(owner), httpServer(kj::fwd<Params>(params)...) {
+        : owner(owner),
+          httpServer(kj::fwd<Params>(params)...) {
       owner.httpServers.add(*this);
     };
     ~ListedHttpServer() noexcept(false) {
@@ -181,24 +187,25 @@ private:
   kj::Promise<void> handleDrain(kj::Promise<void> drainWhen);
 
   kj::Own<kj::TlsContext> makeTlsContext(config::TlsOptions::Reader conf);
-  kj::Promise<kj::Own<kj::NetworkAddress>> makeTlsNetworkAddress(
-      config::TlsOptions::Reader conf, kj::StringPtr addrStr,
-      kj::Maybe<kj::StringPtr> certificateHost, uint defaultPort = 0);
+  kj::Promise<kj::Own<kj::NetworkAddress>> makeTlsNetworkAddress(config::TlsOptions::Reader conf,
+      kj::StringPtr addrStr,
+      kj::Maybe<kj::StringPtr> certificateHost,
+      uint defaultPort = 0);
 
   class HttpRewriter;
 
   kj::Own<Service> makeInvalidConfigService();
-  kj::Own<Service> makeExternalService(
-      kj::StringPtr name, config::ExternalServer::Reader conf,
+  kj::Own<Service> makeExternalService(kj::StringPtr name,
+      config::ExternalServer::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
   kj::Own<Service> makeNetworkService(config::Network::Reader conf);
-  kj::Own<Service> makeDiskDirectoryService(
-      kj::StringPtr name, config::DiskDirectory::Reader conf,
+  kj::Own<Service> makeDiskDirectoryService(kj::StringPtr name,
+      config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
-  kj::Own<Service> makeWorker(kj::StringPtr name, config::Worker::Reader conf,
+  kj::Own<Service> makeWorker(kj::StringPtr name,
+      config::Worker::Reader conf,
       capnp::List<config::Extension>::Reader extensions);
-  kj::Own<Service> makeService(
-      config::Service::Reader conf,
+  kj::Own<Service> makeService(config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       capnp::List<config::Extension>::Reader extensions);
 
@@ -208,8 +215,10 @@ private:
   // Can only be called in the link stage.
   Service& lookupService(config::ServiceDesignator::Reader designator, kj::String errorContext);
 
-  kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener, Service& service,
-                               kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter);
+  kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener,
+      Service& service,
+      kj::StringPtr physicalProtocol,
+      kj::Own<HttpRewriter> rewriter);
 
   class InvalidConfigService;
   class ExternalHttpService;
@@ -220,17 +229,18 @@ private:
   class WorkerEntrypointService;
   class HttpListener;
 
-  void startServices(jsg::V8System& v8System, config::Config::Reader config,
-                     kj::HttpHeaderTable::Builder& headerTableBuilder,
-                     kj::ForkedPromise<void>& forkedDrainWhen);
+  void startServices(jsg::V8System& v8System,
+      config::Config::Reader config,
+      kj::HttpHeaderTable::Builder& headerTableBuilder,
+      kj::ForkedPromise<void>& forkedDrainWhen);
 
   // Must be called after startServices!
   void startAlarmScheduler(config::Config::Reader config);
 
   kj::Promise<void> listenOnSockets(config::Config::Reader config,
-                                    kj::HttpHeaderTable::Builder& headerTableBuilder,
-                                    kj::ForkedPromise<void>& forkedDrainWhen,
-                                    bool forTest = false);
+      kj::HttpHeaderTable::Builder& headerTableBuilder,
+      kj::ForkedPromise<void>& forkedDrainWhen,
+      bool forTest = false);
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
@@ -241,18 +251,24 @@ public:
     return kj::READY_NOW;
   }
   kj::Promise<void> getMultiple(GetMultipleContext context) override {
-    return context.getParams().getStream().endRequest(capnp::MessageSize {2, 0})
-        .send().ignoreResult();
+    return context.getParams()
+        .getStream()
+        .endRequest(capnp::MessageSize{2, 0})
+        .send()
+        .ignoreResult();
   }
   kj::Promise<void> list(ListContext context) override {
-    return context.getParams().getStream().endRequest(capnp::MessageSize {2, 0})
-        .send().ignoreResult();
+    return context.getParams()
+        .getStream()
+        .endRequest(capnp::MessageSize{2, 0})
+        .send()
+        .ignoreResult();
   }
   kj::Promise<void> getAlarm(GetAlarmContext context) override {
     return kj::READY_NOW;
   }
   kj::Promise<void> txn(TxnContext context) override {
-    auto results = context.getResults(capnp::MessageSize {2, 1});
+    auto results = context.getResults(capnp::MessageSize{2, 1});
     results.setTransaction(kj::heap<TransactionImpl>());
     return kj::READY_NOW;
   }
@@ -264,12 +280,18 @@ private:
       return kj::READY_NOW;
     }
     kj::Promise<void> getMultiple(GetMultipleContext context) override {
-      return context.getParams().getStream().endRequest(capnp::MessageSize {2, 0})
-          .send().ignoreResult();
+      return context.getParams()
+          .getStream()
+          .endRequest(capnp::MessageSize{2, 0})
+          .send()
+          .ignoreResult();
     }
     kj::Promise<void> list(ListContext context) override {
-      return context.getParams().getStream().endRequest(capnp::MessageSize {2, 0})
-          .send().ignoreResult();
+      return context.getParams()
+          .getStream()
+          .endRequest(capnp::MessageSize{2, 0})
+          .send()
+          .ignoreResult();
     }
     kj::Promise<void> getAlarm(GetAlarmContext context) override {
       return kj::READY_NOW;

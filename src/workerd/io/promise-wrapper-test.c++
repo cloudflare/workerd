@@ -45,9 +45,7 @@ struct CaptureThrowContext: public jsg::Object, public ContextGlobal {
 
   template <typename T>
   v8::Local<v8::Value> testT(jsg::Lock& js, const jsg::TypeHandler<Function<T()>>& handler) {
-    return handler.wrap(js, [](Lock&) -> T {
-      JSG_FAIL_REQUIRE(TypeError, "boom");
-    });
+    return handler.wrap(js, [](Lock&) -> T { JSG_FAIL_REQUIRE(TypeError, "boom"); });
   }
 
   static kj::Promise<void> staticTest1() {
@@ -83,9 +81,7 @@ struct CaptureThrowContext: public jsg::Object, public ContextGlobal {
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(
-    CaptureThrowIsolate,
-    CaptureThrowContext,
-    jsg::TypeWrapperExtension<workerd::PromiseWrapper>);
+    CaptureThrowIsolate, CaptureThrowContext, jsg::TypeWrapperExtension<workerd::PromiseWrapper>);
 
 KJ_TEST("Async functions capture sync errors with flag") {
   Evaluator<CaptureThrowContext, CaptureThrowIsolate> e(v8System);

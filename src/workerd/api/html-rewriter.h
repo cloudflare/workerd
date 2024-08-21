@@ -437,18 +437,10 @@ private:
   void htmlContentScopeEnd() override;
 };
 
-#define EW_HTML_REWRITER_ISOLATE_TYPES          \
-  api::ContentOptions,                          \
-  api::HTMLRewriter,                            \
-  api::HTMLRewriter::ElementContentHandlers,    \
-  api::HTMLRewriter::DocumentContentHandlers,   \
-  api::Doctype,                                 \
-  api::Element,                                 \
-  api::EndTag,                                  \
-  api::Comment,                                 \
-  api::Text,                                    \
-  api::DocumentEnd,                             \
-  api::Element::AttributesIterator,             \
-  api::Element::AttributesIterator::Next
+#define EW_HTML_REWRITER_ISOLATE_TYPES                                                             \
+  api::ContentOptions, api::HTMLRewriter, api::HTMLRewriter::ElementContentHandlers,               \
+      api::HTMLRewriter::DocumentContentHandlers, api::Doctype, api::Element, api::EndTag,         \
+      api::Comment, api::Text, api::DocumentEnd, api::Element::AttributesIterator,                 \
+      api::Element::AttributesIterator::Next
 
 }  // namespace workerd::api

@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "lib": [ "ESNext", "DOM" ],
+    "lib": ["ESNext", "DOM"],
     "alwaysStrict": true,
     "strict": true,
     "allowJs": true,
@@ -30,8 +30,5 @@
       "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
     }
   },
-  "include": [
-    "*.ts",
-    "internal/*.ts"
-  ]
+  "exclude": []
 }

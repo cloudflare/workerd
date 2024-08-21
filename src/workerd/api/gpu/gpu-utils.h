@@ -54,7 +54,7 @@ using GPUBlendFactor = kj::String;
 using GPULoadOp = kj::String;
 using GPUStoreOp = kj::String;
 
-struct GPUMapMode : public jsg::Object {
+struct GPUMapMode: public jsg::Object {
   static constexpr GPUFlagsConstant READ = 0x0001;
   static constexpr GPUFlagsConstant WRITE = 0x0002;
 
@@ -64,7 +64,7 @@ struct GPUMapMode : public jsg::Object {
   }
 };
 
-struct GPUShaderStage : public jsg::Object {
+struct GPUShaderStage: public jsg::Object {
   static constexpr GPUFlagsConstant VERTEX = 0x1;
   static constexpr GPUFlagsConstant FRAGMENT = 0x2;
   static constexpr GPUFlagsConstant COMPUTE = 0x4;
@@ -76,7 +76,7 @@ struct GPUShaderStage : public jsg::Object {
   };
 };
 
-struct GPUBufferUsage : public jsg::Object {
+struct GPUBufferUsage: public jsg::Object {
   static constexpr GPUFlagsConstant MAP_READ = 0x0001;
   static constexpr GPUFlagsConstant MAP_WRITE = 0x0002;
   static constexpr GPUFlagsConstant COPY_SRC = 0x0004;
@@ -102,7 +102,7 @@ struct GPUBufferUsage : public jsg::Object {
   };
 };
 
-struct GPUColorWrite : public jsg::Object {
+struct GPUColorWrite: public jsg::Object {
   static constexpr GPUFlagsConstant RED = 0x1;
   static constexpr GPUFlagsConstant GREEN = 0x2;
   static constexpr GPUFlagsConstant BLUE = 0x4;
@@ -118,7 +118,7 @@ struct GPUColorWrite : public jsg::Object {
   };
 };
 
-struct GPUTextureUsage : public jsg::Object {
+struct GPUTextureUsage: public jsg::Object {
   static constexpr GPUFlagsConstant COPY_SRC = 0x01;
   static constexpr GPUFlagsConstant COPY_DST = 0x02;
   static constexpr GPUFlagsConstant TEXTURE_BINDING = 0x04;
@@ -155,4 +155,4 @@ wgpu::BlendOperation parseBlendOperation(kj::StringPtr operation);
 wgpu::LoadOp parseGPULoadOp(kj::StringPtr loadOp);
 wgpu::StoreOp parseGPUStoreOp(kj::StringPtr storeOp);
 
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

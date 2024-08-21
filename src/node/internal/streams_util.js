@@ -61,12 +61,14 @@ export function isReadableNodeStream(obj, strict = false) {
       obj &&
       typeof obj.pipe === 'function' &&
       typeof obj.on === 'function' &&
-      (!strict || (typeof obj.pause === 'function' &&
-                   typeof obj.resume === 'function')) &&
+      (!strict ||
+        (typeof obj.pause === 'function' &&
+          typeof obj.resume === 'function')) &&
       (!obj._writableState ||
         ((_obj$_readableState = obj._readableState) === null ||
-          _obj$_readableState === undefined ? undefined
-            : _obj$_readableState.readable) !== false) &&
+        _obj$_readableState === undefined
+          ? undefined
+          : _obj$_readableState.readable) !== false) &&
       // Duplex
       (!obj._writableState || obj._readableState)
     ) // Writable has .pipe.
@@ -82,8 +84,9 @@ export function isWritableNodeStream(obj) {
       typeof obj.on === 'function' &&
       (!obj._readableState ||
         ((_obj$_writableState = obj._writableState) === null ||
-          _obj$_writableState === undefined ? undefined
-            : _obj$_writableState.writable) !== false)
+        _obj$_writableState === undefined
+          ? undefined
+          : _obj$_writableState.writable) !== false)
     ) // Duplex
   );
 }
@@ -103,10 +106,8 @@ export function isNodeStream(obj) {
     obj &&
     (obj._readableState ||
       obj._writableState ||
-      (typeof obj.write === 'function' &&
-       typeof obj.on === 'function') ||
-      (typeof obj.pipe === 'function' &&
-       typeof obj.on === 'function'))
+      (typeof obj.write === 'function' && typeof obj.on === 'function') ||
+      (typeof obj.pipe === 'function' && typeof obj.on === 'function'))
   );
 }
 
@@ -114,8 +115,10 @@ export function isIterable(obj, isAsync = false) {
   if (obj == null) return false;
   if (isAsync === true) return typeof obj[Symbol.asyncIterator] === 'function';
   if (isAsync === false) return typeof obj[Symbol.iterator] === 'function';
-  return typeof obj[Symbol.asyncIterator] === 'function' ||
-         typeof obj[Symbol.iterator] === 'function';
+  return (
+    typeof obj[Symbol.asyncIterator] === 'function' ||
+    typeof obj[Symbol.iterator] === 'function'
+  );
 }
 
 export function isDestroyed(stream) {
@@ -123,7 +126,11 @@ export function isDestroyed(stream) {
   const wState = stream._writableState;
   const rState = stream._readableState;
   const state = wState || rState;
-  return !!(stream.destroyed || stream[kDestroyed] || (state !== null && state !== undefined && state.destroyed));
+  return !!(
+    stream.destroyed ||
+    stream[kDestroyed] ||
+    (state !== null && state !== undefined && state.destroyed)
+  );
 }
 
 export function isWritableEnded(stream) {
@@ -131,7 +138,12 @@ export function isWritableEnded(stream) {
   if (stream.writableEnded === true) return true;
   const wState = stream._writableState;
   if (wState !== null && wState !== undefined && wState.errored) return false;
-  if (typeof (wState === null || wState === undefined ? undefined : wState.ended) !== 'boolean') return null;
+  if (
+    typeof (wState === null || wState === undefined
+      ? undefined
+      : wState.ended) !== 'boolean'
+  )
+    return null;
   return wState.ended;
 }
 
@@ -140,8 +152,16 @@ export function isWritableFinished(stream, strict = false) {
   if (stream.writableFinished === true) return true;
   const wState = stream._writableState;
   if (wState !== null && wState !== undefined && wState.errored) return false;
-  if (typeof (wState === null || wState === undefined ? undefined : wState.finished) !== 'boolean') return null;
-  return !!(wState.finished || (strict === false && wState.ended === true && wState.length === 0));
+  if (
+    typeof (wState === null || wState === undefined
+      ? undefined
+      : wState.finished) !== 'boolean'
+  )
+    return null;
+  return !!(
+    wState.finished ||
+    (strict === false && wState.ended === true && wState.length === 0)
+  );
 }
 
 export function isReadableEnded(stream) {
@@ -149,7 +169,12 @@ export function isReadableEnded(stream) {
   if (stream.readableEnded === true) return true;
   const rState = stream._readableState;
   if (!rState || rState.errored) return false;
-  if (typeof (rState === null || rState === undefined ? undefined : rState.ended) !== 'boolean') return null;
+  if (
+    typeof (rState === null || rState === undefined
+      ? undefined
+      : rState.ended) !== 'boolean'
+  )
+    return null;
   return rState.ended;
 }
 
@@ -157,21 +182,45 @@ export function isReadableFinished(stream, strict = false) {
   if (!isReadableNodeStream(stream)) return null;
   const rState = stream._readableState;
   if (rState !== null && rState !== undefined && rState.errored) return false;
-  if (typeof (rState === null || rState === undefined ? undefined : rState.endEmitted) !== 'boolean') return null;
-  return !!(rState.endEmitted || (strict === false && rState.ended === true && rState.length === 0));
+  if (
+    typeof (rState === null || rState === undefined
+      ? undefined
+      : rState.endEmitted) !== 'boolean'
+  )
+    return null;
+  return !!(
+    rState.endEmitted ||
+    (strict === false && rState.ended === true && rState.length === 0)
+  );
 }
 
 export function isReadable(stream) {
   if (stream && stream[kIsReadable] != null) return stream[kIsReadable];
-  if (typeof (stream === null || stream === undefined ? undefined : stream.readable) !== 'boolean') return null;
+  if (
+    typeof (stream === null || stream === undefined
+      ? undefined
+      : stream.readable) !== 'boolean'
+  )
+    return null;
   if (isDestroyed(stream)) return false;
-  return isReadableNodeStream(stream) && stream.readable && !isReadableFinished(stream);
+  return (
+    isReadableNodeStream(stream) &&
+    stream.readable &&
+    !isReadableFinished(stream)
+  );
 }
 
 export function isWritable(stream) {
-  if (typeof (stream === null || stream === undefined ? undefined : stream.writable) !== 'boolean') return null;
+  if (
+    typeof (stream === null || stream === undefined
+      ? undefined
+      : stream.writable) !== 'boolean'
+  )
+    return null;
   if (isDestroyed(stream)) return false;
-  return isWritableNodeStream(stream) && stream.writable && !isWritableEnded(stream);
+  return (
+    isWritableNodeStream(stream) && stream.writable && !isWritableEnded(stream)
+  );
 }
 
 export function isFinished(stream, opts = {}) {
@@ -181,12 +230,18 @@ export function isFinished(stream, opts = {}) {
   if (isDestroyed(stream)) {
     return true;
   }
-  if ((opts === null || opts === undefined ? undefined : opts.readable) !== false &&
-       isReadable(stream)) {
+  if (
+    (opts === null || opts === undefined ? undefined : opts.readable) !==
+      false &&
+    isReadable(stream)
+  ) {
     return false;
   }
-  if ((opts === null || opts === undefined ? undefined : opts.writable) !== false &&
-       isWritable(stream)) {
+  if (
+    (opts === null || opts === undefined ? undefined : opts.writable) !==
+      false &&
+    isWritable(stream)
+  ) {
     return false;
   }
   return true;
@@ -201,9 +256,11 @@ export function isWritableErrored(stream) {
     return stream.writableErrored;
   }
   return (_stream$_writableStat =
-    (_stream$_writableStat2 = stream._writableState) === null || _stream$_writableStat2 === undefined
+    (_stream$_writableStat2 = stream._writableState) === null ||
+    _stream$_writableStat2 === undefined
       ? undefined
-      : _stream$_writableStat2.errored) !== null && _stream$_writableStat !== undefined
+      : _stream$_writableStat2.errored) !== null &&
+    _stream$_writableStat !== undefined
     ? _stream$_writableStat
     : null;
 }
@@ -217,35 +274,41 @@ export function isReadableErrored(stream) {
     return stream.readableErrored;
   }
   return (_stream$_readableStat =
-    (_stream$_readableStat2 = stream._readableState) === null || _stream$_readableStat2 === undefined
+    (_stream$_readableStat2 = stream._readableState) === null ||
+    _stream$_readableStat2 === undefined
       ? undefined
-      : _stream$_readableStat2.errored) !== null && _stream$_readableStat !== undefined
+      : _stream$_readableStat2.errored) !== null &&
+    _stream$_readableStat !== undefined
     ? _stream$_readableStat
     : null;
 }
 
 export function isClosed(stream) {
   if (!isNodeStream(stream)) {
-    return null
+    return null;
   }
   if (typeof stream.closed === 'boolean') {
-    return stream.closed
+    return stream.closed;
   }
-  const wState = stream._writableState
-  const rState = stream._readableState
+  const wState = stream._writableState;
+  const rState = stream._readableState;
   if (
-    typeof (wState === null || wState === undefined ? undefined : wState.closed) === 'boolean' ||
-    typeof (rState === null || rState === undefined ? undefined : rState.closed) === 'boolean'
+    typeof (wState === null || wState === undefined
+      ? undefined
+      : wState.closed) === 'boolean' ||
+    typeof (rState === null || rState === undefined
+      ? undefined
+      : rState.closed) === 'boolean'
   ) {
     return (
       (wState === null || wState === undefined ? undefined : wState.closed) ||
       (rState === null || rState === undefined ? undefined : rState.closed)
-    )
+    );
   }
   if (typeof stream._closed === 'boolean' && isOutgoingMessage(stream)) {
-    return stream._closed
+    return stream._closed;
   }
-  return null
+  return null;
 }
 
 // TODO(later): We do not actually support OutgoingMessage yet. Might not ever?
@@ -272,8 +335,9 @@ export function isServerRequest(stream) {
   return (
     typeof stream._consuming === 'boolean' &&
     typeof stream._dumped === 'boolean' &&
-    ((_stream$req = stream.req) === null || _stream$req === undefined ? undefined : _stream$req.upgradeOrConnect) ===
-      undefined
+    ((_stream$req = stream.req) === null || _stream$req === undefined
+      ? undefined
+      : _stream$req.upgradeOrConnect) === undefined
   );
 }
 
@@ -283,7 +347,8 @@ export function willEmitClose(stream) {
   const rState = stream._readableState;
   const state = wState || rState;
   return (
-    (!state && isServerResponse(stream)) || !!(state && state.autoDestroy && state.emitClose && state.closed === false)
+    (!state && isServerResponse(stream)) ||
+    !!(state && state.autoDestroy && state.emitClose && state.closed === false)
   );
 }
 
@@ -291,7 +356,8 @@ export function isDisturbed(stream) {
   let _stream$kIsDisturbed;
   return !!(
     stream &&
-    ((_stream$kIsDisturbed = stream[kIsDisturbed]) !== null && _stream$kIsDisturbed !== undefined
+    ((_stream$kIsDisturbed = stream[kIsDisturbed]) !== null &&
+    _stream$kIsDisturbed !== undefined
       ? _stream$kIsDisturbed
       : stream.readableDidRead || stream.readableAborted)
   );
@@ -307,7 +373,7 @@ export function isErrored(stream) {
     _stream$_readableStat3,
     _stream$_writableStat3,
     _stream$_readableStat4,
-    _stream$_writableStat4
+    _stream$_writableStat4;
   return !!(
     stream &&
     ((_ref =
@@ -315,61 +381,73 @@ export function isErrored(stream) {
         (_ref3 =
           (_ref4 =
             (_ref5 =
-              (_stream$kIsErrored = stream[kIsErrored]) !== null && _stream$kIsErrored !== undefined
+              (_stream$kIsErrored = stream[kIsErrored]) !== null &&
+              _stream$kIsErrored !== undefined
                 ? _stream$kIsErrored
                 : stream.readableErrored) !== null && _ref5 !== undefined
               ? _ref5
               : stream.writableErrored) !== null && _ref4 !== undefined
             ? _ref4
-            : (_stream$_readableStat3 = stream._readableState) === null || _stream$_readableStat3 === undefined
-            ? undefined
-            : _stream$_readableStat3.errorEmitted) !== null && _ref3 !== undefined
+            : (_stream$_readableStat3 = stream._readableState) === null ||
+                _stream$_readableStat3 === undefined
+              ? undefined
+              : _stream$_readableStat3.errorEmitted) !== null &&
+        _ref3 !== undefined
           ? _ref3
-          : (_stream$_writableStat3 = stream._writableState) === null || _stream$_writableStat3 === undefined
-          ? undefined
-          : _stream$_writableStat3.errorEmitted) !== null && _ref2 !== undefined
+          : (_stream$_writableStat3 = stream._writableState) === null ||
+              _stream$_writableStat3 === undefined
+            ? undefined
+            : _stream$_writableStat3.errorEmitted) !== null &&
+      _ref2 !== undefined
         ? _ref2
-        : (_stream$_readableStat4 = stream._readableState) === null || _stream$_readableStat4 === undefined
-        ? undefined
-        : _stream$_readableStat4.errored) !== null && _ref !== undefined
+        : (_stream$_readableStat4 = stream._readableState) === null ||
+            _stream$_readableStat4 === undefined
+          ? undefined
+          : _stream$_readableStat4.errored) !== null && _ref !== undefined
       ? _ref
-      : (_stream$_writableStat4 = stream._writableState) === null || _stream$_writableStat4 === undefined
-      ? undefined
-      : _stream$_writableStat4.errored)
-  )
+      : (_stream$_writableStat4 = stream._writableState) === null ||
+          _stream$_writableStat4 === undefined
+        ? undefined
+        : _stream$_writableStat4.errored)
+  );
 }
 
 export const nop = () => {};
 
 export function once(callback) {
-  let called = false
+  let called = false;
   return function (...args) {
     if (called) {
-      return
+      return;
     }
-    called = true
-    callback.apply(this, args)
-  }
+    called = true;
+    callback.apply(this, args);
+  };
 }
 
 // ======================================================================================
 // highWaterMark handling
 
 export function highWaterMarkFrom(options, isDuplex, duplexKey) {
-  return options.highWaterMark != null ? options.highWaterMark :
-      isDuplex ? options[duplexKey] : null
+  return options.highWaterMark != null
+    ? options.highWaterMark
+    : isDuplex
+      ? options[duplexKey]
+      : null;
 }
 
 export function getDefaultHighWaterMark(objectMode = false) {
-  return objectMode ? 16 : 16 * 1024
+  return objectMode ? 16 : 16 * 1024;
 }
 
 export function setDefaultHighWaterMark() {
-  throw new Error("Setting the default high water mark is currently not implemented");
+  throw new Error(
+    'Setting the default high water mark is currently not implemented'
+  );
 }
 
 export function getHighWaterMark(state, options, duplexKey, isDuplex) {
-  const hwm = highWaterMarkFrom(options, isDuplex, duplexKey)
+  const hwm = highWaterMarkFrom(options, isDuplex, duplexKey);
   if (hwm != null) {
     if (!Number.isInteger(hwm) || hwm < 0) {
       const name = isDuplex ? `options.${duplexKey}` : 'options.highWaterMark';
@@ -379,7 +457,7 @@ export function getHighWaterMark(state, options, duplexKey, isDuplex) {
   }
 
   // Default value
-  return getDefaultHighWaterMark(state.objectMode)
+  return getDefaultHighWaterMark(state.objectMode);
 }
 
 // ======================================================================================
@@ -393,10 +471,10 @@ export function addAbortSignal(signal, stream) {
   const onAbort = () => {
     stream.destroy(
       new AbortError(undefined, {
-        cause: signal.reason
+        cause: signal.reason,
       })
     );
-  }
+  };
   if (signal.aborted) {
     onAbort();
   } else {
@@ -418,7 +496,7 @@ export class BufferList {
     const entry = {
       data: v,
       next: null,
-    }
+    };
     if (this.length > 0) this.tail.next = entry;
     else this.head = entry;
     this.tail = entry;
@@ -428,7 +506,7 @@ export class BufferList {
     const entry = {
       data: v,
       next: this.head,
-    }
+    };
     if (this.length === 0) this.tail = entry;
     this.head = entry;
     ++this.length;
@@ -505,8 +583,8 @@ export class BufferList {
         n -= str.length;
       } else {
         if (n === str.length) {
-          ret += str
-          ++c
+          ret += str;
+          ++c;
           if (p.next) this.head = p.next;
           else this.head = this.tail = null;
         } else {
@@ -545,7 +623,7 @@ export class BufferList {
         }
         break;
       }
-      ++c
+      ++c;
     } while ((p = p.next) !== null);
     this.length -= c;
     return ret;
@@ -556,7 +634,7 @@ export class BufferList {
 
 // TODO(later): We do not current implement Node.js' Request object. Might never?
 function isRequest(stream) {
-  return stream && stream.setHeader && typeof stream.abort === 'function'
+  return stream && stream.setHeader && typeof stream.abort === 'function';
 }
 
 export function eos(stream, options, callback) {
@@ -573,11 +651,13 @@ export function eos(stream, options, callback) {
   validateAbortSignal(options.signal, 'options.signal');
   callback = once(callback);
   const readable =
-    (_options$readable = options.readable) !== null && _options$readable !== undefined
+    (_options$readable = options.readable) !== null &&
+    _options$readable !== undefined
       ? _options$readable
       : isReadableNodeStream(stream);
   const writable =
-    (_options$writable = options.writable) !== null && _options$writable !== undefined
+    (_options$writable = options.writable) !== null &&
+    _options$writable !== undefined
       ? _options$writable
       : isWritableNodeStream(stream);
   if (!isNodeStream(stream)) {
@@ -596,8 +676,10 @@ export function eos(stream, options, callback) {
   // common ecosystem modules that do properly emit 'close' but fail
   // this generic check.
   let _willEmitClose =
-    willEmitClose(stream) && isReadableNodeStream(stream) === readable && isWritableNodeStream(stream) === writable;
-  let writableFinished = isWritableFinished((stream), false);
+    willEmitClose(stream) &&
+    isReadableNodeStream(stream) === readable &&
+    isWritableNodeStream(stream) === writable;
+  let writableFinished = isWritableFinished(stream, false);
   const onfinish = () => {
     writableFinished = true;
     // Stream should not be destroyed here. If it is that
@@ -635,15 +717,17 @@ export function eos(stream, options, callback) {
   let closed = isClosed(stream);
   const onclose = () => {
     closed = true;
-    const errored = isWritableErrored(stream) || isReadableErrored(stream)
+    const errored = isWritableErrored(stream) || isReadableErrored(stream);
     if (errored && typeof errored !== 'boolean') {
       return callback.call(stream, errored);
     }
     if (readable && !readableFinished && isReadableNodeStream(stream, true)) {
-      if (!isReadableFinished(stream, false)) return callback.call(stream, new ERR_STREAM_PREMATURE_CLOSE());
+      if (!isReadableFinished(stream, false))
+        return callback.call(stream, new ERR_STREAM_PREMATURE_CLOSE());
     }
     if (writable && !writableFinished) {
-      if (!isWritableFinished(stream, false)) return callback.call(stream, new ERR_STREAM_PREMATURE_CLOSE());
+      if (!isWritableFinished(stream, false))
+        return callback.call(stream, new ERR_STREAM_PREMATURE_CLOSE());
     }
     callback.call(stream);
   };
@@ -706,32 +790,32 @@ export function eos(stream, options, callback) {
     stream.removeListener('complete', onfinish);
     stream.removeListener('abort', onclose);
     stream.removeListener('request', onrequest);
-    if (stream.req) stream .req.removeListener('finish', onfinish);
+    if (stream.req) stream.req.removeListener('finish', onfinish);
     stream.removeListener('end', onlegacyfinish);
     stream.removeListener('close', onlegacyfinish);
     stream.removeListener('finish', onfinish);
     stream.removeListener('end', onend);
     stream.removeListener('error', onerror);
     stream.removeListener('close', onclose);
-  }
+  };
   if (options.signal && !closed) {
     const abort = () => {
       // Keep it because cleanup removes it.
-      const endCallback = callback
-      cleanup()
+      const endCallback = callback;
+      cleanup();
       endCallback.call(
         stream,
         new AbortError(undefined, {
-          cause: options.signal?.reason
+          cause: options.signal?.reason,
         })
-      )
-    }
+      );
+    };
     if (options.signal.aborted) {
       process.nextTick(abort);
     } else {
       const originalCallback = callback;
       callback = once((...args) => {
-        options.signal.removeEventListener('abort', abort)
+        options.signal.removeEventListener('abort', abort);
         originalCallback.apply(stream, args);
       });
       options.signal.addEventListener('abort', abort);
@@ -748,7 +832,7 @@ export function finished(stream, opts) {
       } else {
         resolve();
       }
-    })
+    });
   });
 }
 
@@ -925,7 +1009,7 @@ export function errorOrDestroy(stream, err, sync = false) {
     if (sync) {
       process.nextTick(emitErrorNT, stream, err);
     } else {
-      emitErrorNT(stream, err)
+      emitErrorNT(stream, err);
     }
   }
 }
@@ -942,7 +1026,7 @@ export function construct(stream, cb) {
   if (w) {
     w.constructed = false;
   }
-  stream.once(kConstruct, cb)
+  stream.once(kConstruct, cb);
   if (stream.listenerCount(kConstruct) > 1) {
     // Duplex
     return;
@@ -954,7 +1038,10 @@ function constructNT(stream) {
   let called = false;
   function onConstruct(err) {
     if (called) {
-      errorOrDestroy(stream, err !== null && err !== undefined ? err : new ERR_MULTIPLE_CALLBACK());
+      errorOrDestroy(
+        stream,
+        err !== null && err !== undefined ? err : new ERR_MULTIPLE_CALLBACK()
+      );
       return;
     }
     called = true;
@@ -1026,4 +1113,3 @@ export function destroyer(stream, err) {
     stream[kDestroyed] = true;
   }
 }
-

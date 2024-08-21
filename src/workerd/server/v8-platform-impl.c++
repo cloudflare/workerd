@@ -11,4 +11,4 @@ double WorkerdPlatform::CurrentClockTimeMillis() noexcept {
   return (kj::systemPreciseCalendarClock().now() - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 }
 
-}
+}  // namespace workerd::server

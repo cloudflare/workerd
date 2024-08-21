@@ -18,15 +18,15 @@ export class DurableObjectExample {
 
     let pair = new WebSocketPair();
     let server = pair[0];
-    if (request.url.endsWith("/hibernation")) {
+    if (request.url.endsWith('/hibernation')) {
       this.state.acceptWebSocket(server);
     } else {
       server.accept();
-      server.addEventListener("message", () => {
-        server.send("regular message from DO");
-      })
-      server.addEventListener("close", () => {
-        server.close(1000, "regular close from DO");
+      server.addEventListener('message', () => {
+        server.send('regular message from DO');
+      });
+      server.addEventListener('close', () => {
+        server.close(1000, 'regular close from DO');
       });
     }
 
@@ -37,17 +37,17 @@ export class DurableObjectExample {
   }
 
   webSocketMessage(ws) {
-    ws.send(`Hibernatable message from DO.`)
+    ws.send(`Hibernatable message from DO.`);
   }
 
   webSocketClose(ws, code, reason, wasClean) {
-    ws.close(1000, "Hibernatable close from DO");
+    ws.close(1000, 'Hibernatable close from DO');
   }
 }
 
 export default {
   async test(ctrl, env, ctx) {
-    let id = env.ns.idFromName("foo");
+    let id = env.ns.idFromName('foo');
     let obj = env.ns.get(id);
 
     // Test to make sure that we can call ws.close() from the DO's close handler.
@@ -60,27 +60,31 @@ export default {
 
       let ws = req.webSocket;
       if (!ws) {
-        return new Error("Failed to get ws");
+        return new Error('Failed to get ws');
       }
       ws.accept();
       let prom = new Promise((resolve, reject) => {
-        ws.addEventListener("close", (close) => {
-          if (close.code != 1000 & close.reason != expected) {
+        ws.addEventListener('close', (close) => {
+          if ((close.code != 1000) & (close.reason != expected)) {
             reject(`got ${close.reason}`);
           }
           resolve();
         });
       });
 
-      ws.send("Hi from Worker!")
-      ws.close(1000, "bye from Worker!")
+      ws.send('Hi from Worker!');
+      ws.close(1000, 'bye from Worker!');
 
       await prom;
-    }
+    };
 
     // Normal websocket
-    await webSocketTest(obj, "http://example.com/", "regular close from DO");
+    await webSocketTest(obj, 'http://example.com/', 'regular close from DO');
     // Hibernatable Websocket.
-    await webSocketTest(obj, "http://example.com/hibernation", "Hibernatable close from DO");
-  }
-}
+    await webSocketTest(
+      obj,
+      'http://example.com/hibernation',
+      'Hibernatable close from DO'
+    );
+  },
+};

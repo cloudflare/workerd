@@ -2,10 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import {
-  notStrictEqual,
-  strictEqual,
-} from 'node:assert';
+import { notStrictEqual, strictEqual } from 'node:assert';
 
 export const identityTransformStream = {
   async test(ctrl, env, ctx) {
@@ -50,7 +47,7 @@ export const identityTransformStream = {
     // If we read again, the backpressure should be fully resolved.
     await reader.read();
     strictEqual(writer.desiredSize, 10);
-  }
+  },
 };
 
 export const identityTransformStreamNoHWM = {
@@ -96,7 +93,7 @@ export const identityTransformStreamNoHWM = {
     // If we read again, the backpressure should be fully resolved.
     await reader.read();
     strictEqual(writer.desiredSize, 1);
-  }
+  },
 };
 
 export const fixedLengthStream = {
@@ -141,5 +138,5 @@ export const fixedLengthStream = {
     // If we read again, the backpressure should be fully resolved.
     await reader.read();
     strictEqual(writer.desiredSize, 10);
-  }
+  },
 };

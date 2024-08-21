@@ -145,24 +145,6 @@ wd_cc_capnp_library(
     ],
 )
 
-sh_test(
-    name = "helloworld_compile_test",
-    size = "small",
-    srcs = ["tests/compile-tests/compile-test.sh"],
-    args = [
-        "$(location :workerd)",
-        "$(location //samples:helloworld/config.capnp)",
-        "$(location tests/compile-tests/compile-helloworld-test.ok)",
-    ],
-    data = [
-        "tests/compile-tests/compile-helloworld-test.ok",
-        ":workerd",
-        "//samples:helloworld/config.capnp",
-        "//samples:helloworld/worker.js",
-    ],
-    tags = ["no-qemu"],
-)
-
 kj_test(
     src = "server-test.c++",
     deps = [

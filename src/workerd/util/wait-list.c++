@@ -22,9 +22,10 @@ void CrossThreadWaitList::destroyed() {
   if (!createdFulfiller) state->lostFulfiller();
 }
 
-CrossThreadWaitList::Waiter::Waiter(const State& state,
-    kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfillerArg)
-    : state(kj::atomicAddRef(state)), fulfiller(kj::mv(fulfillerArg)) {
+CrossThreadWaitList::Waiter::Waiter(
+    const State& state, kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfillerArg)
+    : state(kj::atomicAddRef(state)),
+      fulfiller(kj::mv(fulfillerArg)) {
   auto lock = state.waiters.lockExclusive();
   if (__atomic_load_n(&state.done, __ATOMIC_ACQUIRE)) {
     KJ_IF_SOME(e, state.exception) {
@@ -66,12 +67,12 @@ kj::Promise<void> CrossThreadWaitList::addWaiter() const {
   if (state->useThreadLocalOptimization) {
     kj::Own<Waiter> ownWaiter;
 
-    auto& waiter = threadLocalWaiters.findOrCreate(state.get(),
-        [&]() -> decltype(threadLocalWaiters)::Entry {
+    auto& waiter =
+        threadLocalWaiters.findOrCreate(state.get(), [&]() -> decltype(threadLocalWaiters)::Entry {
       auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
       ownWaiter = kj::refcounted<Waiter>(*state, kj::mv(paf.fulfiller));
       ownWaiter->forkedPromise = paf.promise.fork();
-      return { state.get(), ownWaiter.get() };
+      return {state.get(), ownWaiter.get()};
     });
 
     if (ownWaiter.get() == nullptr) {
@@ -149,8 +150,8 @@ void CrossThreadWaitList::State::lostFulfiller() const {
   auto lock = waiters.lockExclusive();
   if (done) return;
   auto& exceptionRef = exception.emplace(kj::getDestructionReason(
-        reinterpret_cast<void*>(&END_WAIT_LIST_CANCELER_STACK_START_CANCELEE_STACK),
-        kj::Exception::Type::FAILED, __FILE__, __LINE__, "wait list was never fulfilled"_kj));
+      reinterpret_cast<void*>(&END_WAIT_LIST_CANCELER_STACK_START_CANCELEE_STACK),
+      kj::Exception::Type::FAILED, __FILE__, __LINE__, "wait list was never fulfilled"_kj));
   __atomic_store_n(&done, true, __ATOMIC_RELEASE);
 
   if (!lock->empty()) {

@@ -59,5 +59,4 @@ private:
   kj::Maybe<kj::OneOf<kj::String, jsg::JsRef<jsg::JsObject>>> value;
 };
 
-
-} // namespace workerd::api
+}  // namespace workerd::api

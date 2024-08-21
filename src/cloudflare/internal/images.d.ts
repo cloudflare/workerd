@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 type InfoResponse =
-  | { format: "image/svg+xml" }
+  | { format: 'image/svg+xml' }
   | {
       format: string;
       fileSize: number;
@@ -12,20 +12,20 @@ type InfoResponse =
     };
 
 type Transform = {
-  fit?: "scale-down" | "contain" | "pad" | "squeeze" | "cover" | "crop";
+  fit?: 'scale-down' | 'contain' | 'pad' | 'squeeze' | 'cover' | 'crop';
   gravity?:
-    | "left"
-    | "right"
-    | "top"
-    | "bottom"
-    | "center"
-    | "auto"
-    | "entropy"
-    | "face"
+    | 'left'
+    | 'right'
+    | 'top'
+    | 'bottom'
+    | 'center'
+    | 'auto'
+    | 'entropy'
+    | 'face'
     | {
         x?: number;
         y?: number;
-        mode: "remainder" | "box-center";
+        mode: 'remainder' | 'box-center';
       };
   trim?: {
     top?: number;
@@ -64,13 +64,13 @@ type Transform = {
 
 type OutputOptions = {
   format:
-    | "image/jpeg"
-    | "image/png"
-    | "image/gif"
-    | "image/webp"
-    | "image/avif"
-    | "rgb"
-    | "rgba";
+    | 'image/jpeg'
+    | 'image/png'
+    | 'image/gif'
+    | 'image/webp'
+    | 'image/avif'
+    | 'rgb'
+    | 'rgba';
   quality?: number;
   background?: string;
 };

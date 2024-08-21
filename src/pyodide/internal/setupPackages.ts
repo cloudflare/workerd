@@ -1,9 +1,9 @@
-import { parseTarInfo } from "pyodide-internal:tar";
-import { createTarFS } from "pyodide-internal:tarfs";
-import { createMetadataFS } from "pyodide-internal:metadatafs";
-import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
-import { REQUIREMENTS, WORKERD_INDEX_URL } from "pyodide-internal:metadata";
-import { simpleRunPython } from "pyodide-internal:util";
+import { parseTarInfo } from 'pyodide-internal:tar';
+import { createTarFS } from 'pyodide-internal:tarfs';
+import { createMetadataFS } from 'pyodide-internal:metadatafs';
+import { default as LOCKFILE } from 'pyodide-internal:generated/pyodide-lock.json';
+import { REQUIREMENTS, WORKERD_INDEX_URL } from 'pyodide-internal:metadata';
+import { simpleRunPython } from 'pyodide-internal:util';
 
 const canonicalizeNameRegex = /[-_.]+/g;
 
@@ -14,12 +14,12 @@ const canonicalizeNameRegex = /[-_.]+/g;
  * @private
  */
 function canonicalizePackageName(name: string): string {
-  return name.replace(canonicalizeNameRegex, "-").toLowerCase();
+  return name.replace(canonicalizeNameRegex, '-').toLowerCase();
 }
 
 // The "name" field in the lockfile is not canonicalized
 const STDLIB_PACKAGES: string[] = Object.values(LOCKFILE.packages)
-  .filter(({ install_dir }) => install_dir === "stdlib")
+  .filter(({ install_dir }) => install_dir === 'stdlib')
   .map(({ name }) => canonicalizePackageName(name));
 
 /**
@@ -34,11 +34,11 @@ class SitePackagesDir {
     this.rootInfo = {
       children: new Map(),
       mode: 0o777,
-      type: "5",
+      type: '5',
       modtime: 0,
       size: 0,
-      path: "",
-      name: "",
+      path: '',
+      name: '',
       parts: [],
     };
     this.soFiles = [];
@@ -55,7 +55,7 @@ class SitePackagesDir {
     overlayInfo.children!.forEach((val, key) => {
       if (this.rootInfo.children!.has(key)) {
         throw new Error(
-          `File/folder ${key} being written by multiple packages`,
+          `File/folder ${key} being written by multiple packages`
         );
       }
       this.rootInfo.children!.set(key, val);
@@ -72,10 +72,10 @@ class SitePackagesDir {
   addSmallBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
-    requirement: string,
+    requirement: string
   ): void {
     for (const soFile of soFiles) {
-      this.soFiles.push(soFile.split("/"));
+      this.soFiles.push(soFile.split('/'));
     }
     this.mountOverlay(tarInfo);
     this.loadedRequirements.add(requirement);
@@ -91,12 +91,12 @@ class SitePackagesDir {
   addBigBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
-    requirements: Set<string>,
+    requirements: Set<string>
   ): void {
     // add all the .so files we will need to preload from the big bundle
     for (const soFile of soFiles) {
       // If folder is in list of requirements include .so file in list to preload.
-      const [pkg, ...rest] = soFile.split("/");
+      const [pkg, ...rest] = soFile.split('/');
       if (requirements.has(pkg)) {
         this.soFiles.push(rest);
       }
@@ -123,7 +123,7 @@ class SitePackagesDir {
  * directory so we can preload them.
  */
 export function buildSitePackages(
-  requirements: Set<string>,
+  requirements: Set<string>
 ): [SitePackagesDir, boolean] {
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo();
 
@@ -154,7 +154,7 @@ export function patchLoadPackage(pyodide: Pyodide): void {
 
 function disabledLoadPackage(): never {
   throw new Error(
-    "pyodide.loadPackage is disabled because packages are encoded in the binary",
+    'pyodide.loadPackage is disabled because packages are encoded in the binary'
   );
 }
 
@@ -187,14 +187,14 @@ export function mountLib(Module: Module, info: TarFSInfo): void {
   const mdFS = createMetadataFS(Module);
   const site_packages = getSitePackagesPath(Module);
   Module.FS.mkdirTree(site_packages);
-  Module.FS.mkdirTree("/session/metadata");
+  Module.FS.mkdirTree('/session/metadata');
   if (!LOAD_WHEELS_FROM_R2) {
     // if we are not loading additional wheels from R2, then we're done
     // with site-packages and we can mount it here. Otherwise, we must mount it in
     // loadPackages().
     Module.FS.mount(tarFS, { info }, site_packages);
   }
-  Module.FS.mount(mdFS, {}, "/session/metadata");
+  Module.FS.mount(mdFS, {}, '/session/metadata');
 }
 
 /**
@@ -205,13 +205,13 @@ export function adjustSysPath(Module: Module): void {
   const site_packages = getSitePackagesPath(Module);
   simpleRunPython(
     Module,
-    `import sys; sys.path.append("/session/metadata"); sys.path.append("${site_packages}"); del sys`,
+    `import sys; sys.path.append("/session/metadata"); sys.path.append("${site_packages}"); del sys`
   );
 }
 
 function recursiveDependencies(
   lockfile: PackageLock,
-  names: string[],
+  names: string[]
 ): PackageDeclaration[] {
   const toLoad = new Map();
   for (const name of names) {
@@ -230,7 +230,7 @@ function recursiveDependencies(
 function addPackageToLoad(
   lockfile: PackageLock,
   name: string,
-  toLoad: Map<string, PackageDeclaration>,
+  toLoad: Map<string, PackageDeclaration>
 ): void {
   const normalizedName = canonicalizePackageName(name);
   if (toLoad.has(normalizedName)) {
@@ -240,7 +240,7 @@ function addPackageToLoad(
   if (!pkgInfo) {
     throw new Error(
       `It appears that a package ("${name}") you requested is not available yet in workerd. \n` +
-        "If you would like this package to be included, please open an issue at https://github.com/cloudflare/workerd/discussions/new?category=python-packages.",
+        'If you would like this package to be included, please open an issue at https://github.com/cloudflare/workerd/discussions/new?category=python-packages.'
     );
   }
 
@@ -254,5 +254,5 @@ function addPackageToLoad(
 export { REQUIREMENTS };
 export const TRANSITIVE_REQUIREMENTS = getTransitiveRequirements();
 export const [SITE_PACKAGES, LOAD_WHEELS_FROM_R2] = buildSitePackages(
-  TRANSITIVE_REQUIREMENTS,
+  TRANSITIVE_REQUIREMENTS
 );

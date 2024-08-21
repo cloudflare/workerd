@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import * as assert from 'node:assert'
+import * as assert from 'node:assert';
 
 export class DurableObjectExample {
   constructor(state, env) {
@@ -18,10 +18,14 @@ export class DurableObjectExample {
     try {
       await prom;
       if (Date.now() < scheduledTime.valueOf()) {
-        throw new Error(`Date.now() is before scheduledTime! ${Date.now()} vs ${scheduledTime.valueOf()}`);
+        throw new Error(
+          `Date.now() is before scheduledTime! ${Date.now()} vs ${scheduledTime.valueOf()}`
+        );
       }
     } catch (e) {
-      throw new Error(`error waiting for alarm at ${scheduledTime.valueOf()}: ${e}`);
+      throw new Error(
+        `error waiting for alarm at ${scheduledTime.valueOf()}: ${e}`
+      );
     }
 
     let alarm = await this.state.storage.getAlarm();
@@ -37,7 +41,7 @@ export class DurableObjectExample {
 
     await this.waitForAlarm(time);
 
-    return new Response("OK");
+    return new Response('OK');
   }
 
   async alarm() {
@@ -51,10 +55,10 @@ export class DurableObjectExample {
 
 export default {
   async test(ctrl, env, ctx) {
-    let id = env.ns.idFromName("A");
+    let id = env.ns.idFromName('A');
     let obj = env.ns.get(id);
-    let res = await obj.fetch("http://foo/test");
+    let res = await obj.fetch('http://foo/test');
     let text = await res.text();
-    assert.equal(text, "OK");
-  }
-}
+    assert.equal(text, 'OK');
+  },
+};

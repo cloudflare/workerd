@@ -1,5 +1,5 @@
-import { default as UnsafeEval } from "internal:unsafe-eval";
-export { getRandomValues } from "pyodide-internal:topLevelEntropy/lib";
+import { default as UnsafeEval } from 'internal:unsafe-eval';
+export { getRandomValues } from 'pyodide-internal:topLevelEntropy/lib';
 
 let lastTime: number;
 let lastDelta = 0;
@@ -73,7 +73,7 @@ function checkCallee(): void {
     Error.prepareStackTrace = origPrepareStackTrace;
   }
   if (!isOkay) {
-    console.warn("Invalid call to `WebAssembly.Module`");
+    console.warn('Invalid call to `WebAssembly.Module`');
     throw new Error();
   }
 }
@@ -95,10 +95,10 @@ function prepareStackTrace(_error: Error, stack: StackItem[]): boolean {
   try {
     const funcName = stack[2].getFunctionName();
     const fileName = stack[2].getFileName();
-    if (fileName !== "pyodide-internal:generated/pyodide.asm") {
+    if (fileName !== 'pyodide-internal:generated/pyodide.asm') {
       return false;
     }
-    return ["loadModule", "convertJsFunctionToWasm"].includes(funcName);
+    return ['loadModule', 'convertJsFunctionToWasm'].includes(funcName);
   } catch (e) {
     console.warn(e);
     return false;
@@ -107,7 +107,7 @@ function prepareStackTrace(_error: Error, stack: StackItem[]): boolean {
 
 export async function wasmInstantiate(
   mod: WebAssembly.Module | Uint8Array,
-  imports: WebAssembly.Imports,
+  imports: WebAssembly.Imports
 ): Promise<{ module: WebAssembly.Module; instance: WebAssembly.Instance }> {
   let module;
   if (mod instanceof WebAssembly.Module) {

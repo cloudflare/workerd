@@ -39,11 +39,11 @@ protected:
 template <typename T, void (*lolhtmlFree)(T*)>
 const LolHtmlDisposer<T, lolhtmlFree> LolHtmlDisposer<T, lolhtmlFree>::INSTANCE;
 
-#define LOL_HTML_OWN(name, ...) \
-  ({ \
-    using T = lol_html_##name##_t; \
-    constexpr auto* lolhtmlFree = lol_html_##name##_free; \
-    kj::Own<T>(&check(__VA_ARGS__), LolHtmlDisposer<T, lolhtmlFree>::INSTANCE); \
+#define LOL_HTML_OWN(name, ...)                                                                    \
+  ({                                                                                               \
+    using T = lol_html_##name##_t;                                                                 \
+    constexpr auto* lolhtmlFree = lol_html_##name##_free;                                          \
+    kj::Own<T>(&check(__VA_ARGS__), LolHtmlDisposer<T, lolhtmlFree>::INSTANCE);                    \
   })
 
 // RAII helper for lol_html_str_t.
@@ -56,7 +56,7 @@ class LolString {
 public:
   explicit LolString(lol_html_str_t s): chars(s.data, s.len) {}
   ~LolString() noexcept(false) {
-    lol_html_str_free({ chars.begin(), chars.size() });
+    lol_html_str_free({chars.begin(), chars.size()});
   }
   KJ_DISALLOW_COPY(LolString);
   LolString(LolString&& other): chars(other.chars) {
@@ -69,7 +69,9 @@ public:
     return *this;
   }
 
-  kj::ArrayPtr<const char> asChars() const { return chars; }
+  kj::ArrayPtr<const char> asChars() const {
+    return chars;
+  }
 
   kj::Maybe<kj::String> asKjString() {
     if (chars.begin() != nullptr) {
@@ -130,8 +132,8 @@ template <typename T>
 // content handler, you're gonna get this exception.
 template <typename T>
 decltype(auto) checkToken(kj::Maybe<T>& impl) {
-  return JSG_REQUIRE_NONNULL(impl,
-      TypeError, "This content token is no longer valid. Content tokens are only valid "
+  return JSG_REQUIRE_NONNULL(impl, TypeError,
+      "This content token is no longer valid. Content tokens are only valid "
       "during the execution of the relevant content handler.");
 }
 
@@ -143,14 +145,13 @@ decltype(auto) checkToken(kj::Maybe<T>& impl) {
 class HTMLRewriter::TokenScope {
 public:
   template <typename T>
-  explicit TokenScope(jsg::Ref<T>& value)
-      : contentToken(value.addRef()) {}
+  explicit TokenScope(jsg::Ref<T>& value): contentToken(value.addRef()) {}
   ~TokenScope() noexcept(false) {
     KJ_IF_SOME(token, contentToken) {
       token->htmlContentScopeEnd();
     }
   }
-  TokenScope(TokenScope&& o) : contentToken(kj::mv(o.contentToken)) {
+  TokenScope(TokenScope&& o): contentToken(kj::mv(o.contentToken)) {
     o.contentToken = kj::none;
   }
   KJ_DISALLOW_COPY(TokenScope);
@@ -216,8 +217,7 @@ using UnregisteredElementOrDocumentHandlers =
 // Wrapper around an actual rewriter (streaming parser).
 class Rewriter final: public WritableStreamSink {
 public:
-  explicit Rewriter(
-      jsg::Lock& js,
+  explicit Rewriter(jsg::Lock& js,
       kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
       kj::ArrayPtr<const char> encoding,
       kj::Own<WritableStreamSink> inner);
@@ -230,7 +230,7 @@ public:
   void abort(kj::Exception reason) override;
 
   // Implementation for `Element::onEndTag` to avoid exposing private details of Rewriter.
-  void onEndTag(lol_html_element_t *element, ElementCallbackFunction&& callback);
+  void onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback);
 
 private:
   // Wait for the write promise (if any) produced by our `output()` callback, then, if there is a
@@ -240,7 +240,8 @@ private:
 
   static kj::Own<lol_html_HtmlRewriter> buildRewriter(jsg::Lock& js,
       kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
-      kj::ArrayPtr<const char> encoding, Rewriter& rewriterWrapper);
+      kj::ArrayPtr<const char> encoding,
+      Rewriter& rewriterWrapper);
 
   static void output(const char* buffer, size_t size, void* userdata);
   void outputImpl(kj::ArrayPtr<const byte> buffer);
@@ -256,7 +257,7 @@ private:
       KJ_ASSERT(rc == -1);
       discardLastError();
 
-      throw kj::CanceledException { };
+      throw kj::CanceledException{};
     }
   }
 
@@ -283,9 +284,9 @@ private:
   template <typename T, typename CType = typename T::CType>
   static lol_html_rewriter_directive_t thunk(CType* content, void* userdata);
   template <typename T, typename CType = typename T::CType>
-  lol_html_rewriter_directive_t thunkImpl( CType* content, RegisteredHandler& registration);
+  lol_html_rewriter_directive_t thunkImpl(CType* content, RegisteredHandler& registration);
   template <typename T, typename CType = typename T::CType>
-  kj::Promise<void> thunkPromise( CType* content, RegisteredHandler& registration);
+  kj::Promise<void> thunkPromise(CType* content, RegisteredHandler& registration);
 
   // Eagerly free this handler. Should only be called if we're confident the handler will never be
   // used again.
@@ -325,14 +326,15 @@ private:
   }
 };
 
-kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(
-    jsg::Lock& js, kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
-    kj::ArrayPtr<const char> encoding, Rewriter& rewriter) {
+kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(jsg::Lock& js,
+    kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
+    kj::ArrayPtr<const char> encoding,
+    Rewriter& rewriter) {
   auto builder = LOL_HTML_OWN(rewriter_builder, lol_html_rewriter_builder_new());
 
   auto registerCallback = [&](ElementCallbackFunction& callback) {
-        auto registeredHandler = RegisteredHandler{rewriter, callback.addRef(js) };
-        return rewriter.registeredHandlers.add(kj::heap(kj::mv(registeredHandler))).get();
+    auto registeredHandler = RegisteredHandler{rewriter, callback.addRef(js)};
+    return rewriter.registeredHandlers.add(kj::heap(kj::mv(registeredHandler))).get();
   };
 
   for (auto& handlers: unregisteredHandlers) {
@@ -342,14 +344,10 @@ kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(
         auto comments = elementHandlers.comments.map(registerCallback);
         auto text = elementHandlers.text.map(registerCallback);
 
-        check(lol_html_rewriter_builder_add_element_content_handlers(
-            builder,
-            elementHandlers.selector,
-            element == kj::none ? nullptr : &Rewriter::thunk<Element>,
-            element.orDefault(nullptr),
-            comments == kj::none ? nullptr : &Rewriter::thunk<Comment>,
-            comments.orDefault(nullptr),
-            text == kj::none ? nullptr : &Rewriter::thunk<Text>,
+        check(lol_html_rewriter_builder_add_element_content_handlers(builder,
+            elementHandlers.selector, element == kj::none ? nullptr : &Rewriter::thunk<Element>,
+            element.orDefault(nullptr), comments == kj::none ? nullptr : &Rewriter::thunk<Comment>,
+            comments.orDefault(nullptr), text == kj::none ? nullptr : &Rewriter::thunk<Text>,
             text.orDefault(nullptr)));
       }
       KJ_CASE_ONEOF(documentHandlers, UnregisteredDocumentHandlers) {
@@ -359,16 +357,11 @@ kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(
         auto end = documentHandlers.end.map(registerCallback);
 
         // Adding document content handlers cannot fail, so no need for check().
-        lol_html_rewriter_builder_add_document_content_handlers(
-            builder,
-            doctype == kj::none ? nullptr : &Rewriter::thunk<Doctype>,
-            doctype.orDefault(nullptr),
-            comments == kj::none ? nullptr : &Rewriter::thunk<Comment>,
-            comments.orDefault(nullptr),
-            text == kj::none ? nullptr : &Rewriter::thunk<Text>,
-            text.orDefault(nullptr),
-            end == kj::none ? nullptr : &Rewriter::thunk<DocumentEnd>,
-            end.orDefault(nullptr));
+        lol_html_rewriter_builder_add_document_content_handlers(builder,
+            doctype == kj::none ? nullptr : &Rewriter::thunk<Doctype>, doctype.orDefault(nullptr),
+            comments == kj::none ? nullptr : &Rewriter::thunk<Comment>, comments.orDefault(nullptr),
+            text == kj::none ? nullptr : &Rewriter::thunk<Text>, text.orDefault(nullptr),
+            end == kj::none ? nullptr : &Rewriter::thunk<DocumentEnd>, end.orDefault(nullptr));
       }
     }
   }
@@ -381,22 +374,21 @@ kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(
   // Configure a maximum memory limit that `lol-html` is allowed to use and
   // preallocate some memory for its internal buffer.
   lol_html_memory_settings_t memorySettings = {
-      .preallocated_parsing_buffer_size = 1024,
-      .max_allowed_memory_usage = 3 * 1024 * 1024
-  };
+    .preallocated_parsing_buffer_size = 1024, .max_allowed_memory_usage = 3 * 1024 * 1024};
 
   if (FeatureFlags::get(js).getEsiIncludeIsVoidTag()) {
-    return LOL_HTML_OWN(rewriter, unstable_lol_html_rewriter_build_with_esi_tags(
-        builder, encoding.begin(), encoding.size(), memorySettings, &Rewriter::output, &rewriter, isStrict));
+    return LOL_HTML_OWN(rewriter,
+        unstable_lol_html_rewriter_build_with_esi_tags(builder, encoding.begin(), encoding.size(),
+            memorySettings, &Rewriter::output, &rewriter, isStrict));
 
   } else {
-    return LOL_HTML_OWN(rewriter, lol_html_rewriter_build(
-        builder, encoding.begin(), encoding.size(), memorySettings, &Rewriter::output, &rewriter, isStrict));
+    return LOL_HTML_OWN(rewriter,
+        lol_html_rewriter_build(builder, encoding.begin(), encoding.size(), memorySettings,
+            &Rewriter::output, &rewriter, isStrict));
   }
 }
 
-Rewriter::Rewriter(
-    jsg::Lock& js,
+Rewriter::Rewriter(jsg::Lock& js,
     kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
     kj::ArrayPtr<const char> encoding,
     kj::Own<WritableStreamSink> inner)
@@ -416,7 +408,7 @@ const kj::FiberPool& getFiberPool() {
   return FIBER_POOL;
 }
 
-} // namespace
+}  // namespace
 
 kj::Promise<void> Rewriter::write(kj::ArrayPtr<const byte> buffer) {
   KJ_ASSERT(maybeWaitScope == kj::none);
@@ -434,8 +426,7 @@ kj::Promise<void> Rewriter::write(kj::ArrayPtr<const byte> buffer) {
   });
 }
 
-kj::Promise<void> Rewriter::write(
-    kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
+kj::Promise<void> Rewriter::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
   KJ_ASSERT(maybeWaitScope == kj::none);
   return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
     maybeWaitScope = scope;
@@ -494,9 +485,7 @@ kj::Promise<void> Rewriter::finishWrite() {
 
   KJ_IF_SOME(wp, writePromise) {
     KJ_DEFER(writePromise = kj::none);
-    return wp.then([checkException]() {
-      return checkException();
-    });
+    return wp.then([checkException]() { return checkException(); });
   }
 
   return checkException();
@@ -524,7 +513,7 @@ lol_html_rewriter_directive_t Rewriter::thunkImpl(
       // here, we're in an entirely different stack that V8 doesn't know about, so it gets confused
       // and may think we've overflowed our stack. evalLater will run thunkPromise on the main stack
       // to keep V8 from getting confused.
-      auto promise = kj::evalLater([&] () { return thunkPromise<T>(content, registeredHandler); });
+      auto promise = kj::evalLater([&]() { return thunkPromise<T>(content, registeredHandler); });
       promise.wait(KJ_ASSERT_NONNULL(maybeWaitScope));
     })) {
       // Exception in handler. We need to abort the streaming parser, but can't do so just yet: we
@@ -562,9 +551,9 @@ void Rewriter::removeEndTagHandler(RegisteredHandler& handler) {
 }
 
 template <typename T, typename CType>
-kj::Promise<void> Rewriter::thunkPromise( CType* content, RegisteredHandler& registeredHandler) {
+kj::Promise<void> Rewriter::thunkPromise(CType* content, RegisteredHandler& registeredHandler) {
   return ioContext.run(
-      [this,content,&registeredHandler](Worker::Lock& lock) -> kj::Promise<void> {
+      [this, content, &registeredHandler](Worker::Lock& lock) -> kj::Promise<void> {
     // We enter the AsyncContextFrame that was current when the Rewriter was created
     // (when transform() was called). If someone wants, instead, to use the context
     // that was current when on(...) is called, the ElementHandler can use AsyncResource
@@ -587,8 +576,8 @@ kj::Promise<void> Rewriter::thunkPromise( CType* content, RegisteredHandler& reg
   });
 }
 
-void Rewriter::onEndTag(lol_html_element_t *element, ElementCallbackFunction&& callback) {
-  auto registeredHandler = Rewriter::RegisteredHandler { *this, kj::mv(callback) };
+void Rewriter::onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback) {
+  auto registeredHandler = Rewriter::RegisteredHandler{*this, kj::mv(callback)};
   // NOTE: this gets freed in `thunkPromise` above.
   // TODO(someday): this uses more memory than necessary for implied end tags, which lol-html
   // doesn't actually call `thunk` on.  LOL HTML drops the handler after it finishes transforming
@@ -600,7 +589,8 @@ void Rewriter::onEndTag(lol_html_element_t *element, ElementCallbackFunction&& c
   // this will cause a memory leak!
   auto& registeredHandlerPtr = registeredEndTagHandlers.add(kj::heap(kj::mv(registeredHandler)));
   lol_html_element_clear_end_tag_handlers(element);
-  check(lol_html_element_add_end_tag_handler(element, Rewriter::thunk<EndTag>, registeredHandlerPtr.get()));
+  check(lol_html_element_add_end_tag_handler(
+      element, Rewriter::thunk<EndTag>, registeredHandlerPtr.get()));
 }
 
 void Rewriter::output(const char* buffer, size_t size, void* userdata) {
@@ -652,8 +642,7 @@ kj::StringPtr Element::getNamespaceURI() {
 jsg::Ref<Element::AttributesIterator> Element::getAttributes() {
   auto& implRef = checkToken(impl);
 
-  auto iter = LOL_HTML_OWN(
-      attributes_iterator, lol_html_attributes_iterator_get(&implRef.element));
+  auto iter = LOL_HTML_OWN(attributes_iterator, lol_html_attributes_iterator_get(&implRef.element));
 
   auto jsIter = jsg::alloc<Element::AttributesIterator>(kj::mv(iter));
   implRef.attributesIterators.add(jsIter.addRef());
@@ -663,9 +652,9 @@ jsg::Ref<Element::AttributesIterator> Element::getAttributes() {
 kj::Maybe<kj::String> Element::getAttribute(kj::String name) {
   // NOTE: lol_html_element_get_attribute() returns NULL for both nonexistent attributes and for
   //   errors, so we can't use check() here.
-  LolString attr(lol_html_element_get_attribute(
-      &checkToken(impl).element, name.cStr(), name.size()));
-    // TODO(perf): We could construct a v8::String directly here, saving a copy.
+  LolString attr(
+      lol_html_element_get_attribute(&checkToken(impl).element, name.cStr(), name.size()));
+  // TODO(perf): We could construct a v8::String directly here, saving a copy.
   kj::Maybe kjAttr = attr.asKjString();
   if (kjAttr != kj::none) {
     return kj::mv(kjAttr);
@@ -680,15 +669,13 @@ kj::Maybe<kj::String> Element::getAttribute(kj::String name) {
 }
 
 bool Element::hasAttribute(kj::String name) {
-  return !!check(lol_html_element_has_attribute(
-      &checkToken(impl).element, name.cStr(), name.size()));
+  return !!check(
+      lol_html_element_has_attribute(&checkToken(impl).element, name.cStr(), name.size()));
 }
 
 jsg::Ref<Element> Element::setAttribute(kj::String name, kj::String value) {
   check(lol_html_element_set_attribute(
-      &checkToken(impl).element,
-      name.cStr(), name.size(),
-      value.cStr(), value.size()));
+      &checkToken(impl).element, name.cStr(), name.size(), value.cStr(), value.size()));
 
   return JSG_THIS;
 }
@@ -702,22 +689,20 @@ jsg::Ref<Element> Element::removeAttribute(kj::String name) {
 namespace {
 
 kj::String unwrapContent(Content content) {
-return kj::mv(JSG_REQUIRE_NONNULL(content.tryGet<kj::String>(),
-    TypeError, "Replacing HTML content using a ReadableStream or Response object is not "
-    "implemented. You must provide a string."));
+  return kj::mv(JSG_REQUIRE_NONNULL(content.tryGet<kj::String>(), TypeError,
+      "Replacing HTML content using a ReadableStream or Response object is not "
+      "implemented. You must provide a string."));
 }
 
 }  // namespace
 
-#define DEFINE_CONTENT_REWRITER_FUNCTION(camel, snake) \
-    jsg::Ref<Element> Element::camel(Content content, jsg::Optional<ContentOptions> options) { \
-      auto stringContent = unwrapContent(kj::mv(content)); \
-      check(lol_html_element_##snake( \
-          &checkToken(impl).element, \
-          stringContent.cStr(), stringContent.size(), \
-          options.orDefault({}).html.orDefault(false))); \
-      return JSG_THIS; \
-    }
+#define DEFINE_CONTENT_REWRITER_FUNCTION(camel, snake)                                             \
+  jsg::Ref<Element> Element::camel(Content content, jsg::Optional<ContentOptions> options) {       \
+    auto stringContent = unwrapContent(kj::mv(content));                                           \
+    check(lol_html_element_##snake(&checkToken(impl).element, stringContent.cStr(),                \
+        stringContent.size(), options.orDefault({}).html.orDefault(false)));                       \
+    return JSG_THIS;                                                                               \
+  }
 
 DEFINE_CONTENT_REWRITER_FUNCTION(before, before)
 DEFINE_CONTENT_REWRITER_FUNCTION(after, after)
@@ -760,9 +745,7 @@ void EndTag::setName(kj::String text) {
 
 jsg::Ref<EndTag> EndTag::before(Content content, jsg::Optional<ContentOptions> options) {
   auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_end_tag_before(
-      &checkToken(impl),
-      stringContent.cStr(), stringContent.size(),
+  check(lol_html_end_tag_before(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
 
   return JSG_THIS;
@@ -770,9 +753,7 @@ jsg::Ref<EndTag> EndTag::before(Content content, jsg::Optional<ContentOptions> o
 
 jsg::Ref<EndTag> EndTag::after(Content content, jsg::Optional<ContentOptions> options) {
   auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_end_tag_after(
-      &checkToken(impl),
-      stringContent.cStr(), stringContent.size(),
+  check(lol_html_end_tag_after(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
 
   return JSG_THIS;
@@ -798,8 +779,7 @@ Element::Impl::~Impl() noexcept(false) {
 // =======================================================================================
 // Element::AttributesIterator
 
-Element::AttributesIterator::AttributesIterator(kj::Own<CType> iter)
-    : impl(kj::mv(iter)) {}
+Element::AttributesIterator::AttributesIterator(kj::Own<CType> iter): impl(kj::mv(iter)) {}
 
 jsg::Ref<Element::AttributesIterator> Element::AttributesIterator::self() {
   return JSG_THIS;
@@ -812,13 +792,13 @@ Element::AttributesIterator::Next Element::AttributesIterator::next() {
     // End of iteration.
     // TODO(someday): Eagerly deallocate. Can't seem to nullify the Own without also nullifying the
     //   enclosing Maybe, however.
-    return { true, kj::none };
+    return {true, kj::none};
   }
 
   auto name = LolString(lol_html_attribute_name_get(attribute));
   auto value = LolString(lol_html_attribute_value_get(attribute));
 
-  return { false, kj::arr(kj::str(name.asChars()), kj::str(value.asChars())) };
+  return {false, kj::arr(kj::str(name.asChars()), kj::str(value.asChars()))};
 }
 
 void Element::AttributesIterator::htmlContentScopeEnd() {
@@ -846,9 +826,7 @@ bool Comment::getRemoved() {
 
 jsg::Ref<Comment> Comment::before(Content content, jsg::Optional<ContentOptions> options) {
   auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_comment_before(
-      &checkToken(impl),
-      stringContent.cStr(), stringContent.size(),
+  check(lol_html_comment_before(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
 
   return JSG_THIS;
@@ -856,9 +834,7 @@ jsg::Ref<Comment> Comment::before(Content content, jsg::Optional<ContentOptions>
 
 jsg::Ref<Comment> Comment::after(Content content, jsg::Optional<ContentOptions> options) {
   auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_comment_after(
-      &checkToken(impl),
-      stringContent.cStr(), stringContent.size(),
+  check(lol_html_comment_after(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
 
   return JSG_THIS;
@@ -866,9 +842,7 @@ jsg::Ref<Comment> Comment::after(Content content, jsg::Optional<ContentOptions> 
 
 jsg::Ref<Comment> Comment::replace(Content content, jsg::Optional<ContentOptions> options) {
   auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_comment_replace(
-      &checkToken(impl),
-      stringContent.cStr(), stringContent.size(),
+  check(lol_html_comment_replace(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
 
   return JSG_THIS;
@@ -906,9 +880,7 @@ bool Text::getRemoved() {
 
 jsg::Ref<Text> Text::before(Content content, jsg::Optional<ContentOptions> options) {
   auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_text_chunk_before(
-      &checkToken(impl),
-      stringContent.cStr(), stringContent.size(),
+  check(lol_html_text_chunk_before(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
 
   return JSG_THIS;
@@ -916,9 +888,7 @@ jsg::Ref<Text> Text::before(Content content, jsg::Optional<ContentOptions> optio
 
 jsg::Ref<Text> Text::after(Content content, jsg::Optional<ContentOptions> options) {
   auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_text_chunk_after(
-      &checkToken(impl),
-      stringContent.cStr(), stringContent.size(),
+  check(lol_html_text_chunk_after(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
 
   return JSG_THIS;
@@ -926,9 +896,7 @@ jsg::Ref<Text> Text::after(Content content, jsg::Optional<ContentOptions> option
 
 jsg::Ref<Text> Text::replace(Content content, jsg::Optional<ContentOptions> options) {
   auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_text_chunk_replace(
-      &checkToken(impl),
-      stringContent.cStr(), stringContent.size(),
+  check(lol_html_text_chunk_replace(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
 
   return JSG_THIS;
@@ -975,9 +943,7 @@ DocumentEnd::DocumentEnd(CType& documentEnd, Rewriter&): impl(documentEnd) {}
 
 jsg::Ref<DocumentEnd> DocumentEnd::append(Content content, jsg::Optional<ContentOptions> options) {
   auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_doc_end_append(
-      &checkToken(impl),
-      stringContent.cStr(), stringContent.size(),
+  check(lol_html_doc_end_append(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
 
   return JSG_THIS;
@@ -1003,7 +969,7 @@ struct HTMLRewriter::Impl {
   //   order, on the builder object that we create inside of .transform().
 
   JSG_MEMORY_INFO(HTMLRewriter::Impl) {
-    for (const auto& handlers : unregisteredHandlers) {
+    for (const auto& handlers: unregisteredHandlers) {
       KJ_SWITCH_ONEOF(handlers) {
         KJ_CASE_ONEOF(h, UnregisteredElementHandlers) {
           tracker.trackField(nullptr, h);
@@ -1027,28 +993,20 @@ jsg::Ref<HTMLRewriter> HTMLRewriter::constructor() {
   return jsg::alloc<HTMLRewriter>();
 }
 
-jsg::Ref<HTMLRewriter> HTMLRewriter::on(kj::String stringSelector, ElementContentHandlers&& handlers) {
+jsg::Ref<HTMLRewriter> HTMLRewriter::on(
+    kj::String stringSelector, ElementContentHandlers&& handlers) {
   kj::Own<lol_html_Selector> selector =
-      LOL_HTML_OWN(selector, lol_html_selector_parse(stringSelector.cStr(),
-                                                         stringSelector.size()));
+      LOL_HTML_OWN(selector, lol_html_selector_parse(stringSelector.cStr(), stringSelector.size()));
 
-  impl->unregisteredHandlers.add(UnregisteredElementHandlers {
-    kj::mv(selector),
-    kj::mv(handlers.element),
-    kj::mv(handlers.comments),
-    kj::mv(handlers.text)
-  });
+  impl->unregisteredHandlers.add(UnregisteredElementHandlers{
+    kj::mv(selector), kj::mv(handlers.element), kj::mv(handlers.comments), kj::mv(handlers.text)});
 
   return JSG_THIS;
 }
 
 jsg::Ref<HTMLRewriter> HTMLRewriter::onDocument(DocumentContentHandlers&& handlers) {
-  impl->unregisteredHandlers.add(UnregisteredDocumentHandlers {
-    kj::mv(handlers.doctype),
-    kj::mv(handlers.comments),
-    kj::mv(handlers.text),
-    kj::mv(handlers.end)
-  });
+  impl->unregisteredHandlers.add(UnregisteredDocumentHandlers{kj::mv(handlers.doctype),
+    kj::mv(handlers.comments), kj::mv(handlers.text), kj::mv(handlers.end)});
 
   return JSG_THIS;
 }
@@ -1064,9 +1022,8 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
   auto& ioContext = IoContext::current();
 
   auto pipe = newIdentityPipe();
-  response = Response::constructor(js,
-      kj::Maybe(jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in))),
-      kj::mv(response));
+  response = Response::constructor(
+      js, kj::Maybe(jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in))), kj::mv(response));
 
   kj::String ownContentType;
   kj::String encoding = kj::str("utf-8");

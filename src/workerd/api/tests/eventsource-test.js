@@ -1,16 +1,14 @@
 // Copyright (c) 2017-2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import {
-  strictEqual,
-  ok,
-  throws
-} from 'node:assert';
+import { strictEqual, ok, throws } from 'node:assert';
 
 export const acceptEventStreamTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/accept-event-stream',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource(
+      'http://example.org/accept-event-stream',
+      { fetcher: env.subrequest }
+    );
     strictEqual(eventsource.readyState, EventSource.CONNECTING);
     const { promise, resolve } = Promise.withResolvers();
     let opened = false;
@@ -27,13 +25,15 @@ export const acceptEventStreamTest = {
     };
     await promise;
     ok(opened);
-  }
+  },
 };
 
 export const cacheControlEventStreamTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/cache-control-event-stream',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource(
+      'http://example.org/cache-control-event-stream',
+      { fetcher: env.subrequest }
+    );
     const { promise, resolve } = Promise.withResolvers();
     eventsource.onmessage = (event) => {
       strictEqual(event.data, 'no-cache');
@@ -41,13 +41,14 @@ export const cacheControlEventStreamTest = {
       resolve();
     };
     await promise;
-  }
+  },
 };
 
 export const lastEventIdTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/last-event-id',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource('http://example.org/last-event-id', {
+      fetcher: env.subrequest,
+    });
     const { promise, resolve } = Promise.withResolvers();
     let first = true;
     eventsource.onmessage = (event) => {
@@ -61,13 +62,15 @@ export const lastEventIdTest = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const eventIdPersistsTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/event-id-persists',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource(
+      'http://example.org/event-id-persists',
+      { fetcher: env.subrequest }
+    );
     const { promise, resolve } = Promise.withResolvers();
     eventsource.onmessage = (event) => {
       switch (event.data) {
@@ -90,13 +93,14 @@ export const eventIdPersistsTest = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const eventIdResetsTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/event-id-resets',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource('http://example.org/event-id-resets', {
+      fetcher: env.subrequest,
+    });
     const { promise, resolve } = Promise.withResolvers();
     eventsource.onmessage = (event) => {
       switch (event.data) {
@@ -113,13 +117,15 @@ export const eventIdResetsTest = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const eventIdResets2Test = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/event-id-resets-2',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource(
+      'http://example.org/event-id-resets-2',
+      { fetcher: env.subrequest }
+    );
     const { promise, resolve } = Promise.withResolvers();
     eventsource.onmessage = (event) => {
       switch (event.data) {
@@ -136,13 +142,14 @@ export const eventIdResets2Test = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const messageTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/message',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource('http://example.org/message', {
+      fetcher: env.subrequest,
+    });
     const { promise, resolve } = Promise.withResolvers();
     // We should get two messages...
     let count = 0;
@@ -161,13 +168,14 @@ export const messageTest = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const reconnectFailTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/reconnect-fail',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource('http://example.org/reconnect-fail', {
+      fetcher: env.subrequest,
+    });
     const { promise, resolve } = Promise.withResolvers();
     let count = 0;
     eventsource.onmessage = (event) => {
@@ -194,13 +202,14 @@ export const reconnectFailTest = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const statusErrorTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/status-error',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource('http://example.org/status-error', {
+      fetcher: env.subrequest,
+    });
     const { promise, resolve } = Promise.withResolvers();
     eventsource.onopen = () => {
       throw new Error('should not be called');
@@ -210,13 +219,14 @@ export const statusErrorTest = {
       resolve();
     };
     await promise;
-  }
-}
+  },
+};
 
 export const eventTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/event',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource('http://example.org/event', {
+      fetcher: env.subrequest,
+    });
     const { promise, resolve } = Promise.withResolvers();
     let count = 0;
     eventsource.ontest = (event) => {
@@ -234,13 +244,14 @@ export const eventTest = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const retryTest = {
   async test(ctrl, env) {
-    const eventsource = new EventSource('http://example.org/retry',
-                                        { fetcher: env.subrequest });
+    const eventsource = new EventSource('http://example.org/retry', {
+      fetcher: env.subrequest,
+    });
     const { promise, resolve } = Promise.withResolvers();
     let count = 0;
     eventsource.onmessage = (event) => {
@@ -266,41 +277,46 @@ export const retryTest = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const constructorTest = {
   test() {
     throws(() => new EventSource('not a valid url'), {
       name: 'SyntaxError',
-      message: 'Cannot open an EventSource to \'not a valid url\'. The URL is invalid.'
+      message:
+        "Cannot open an EventSource to 'not a valid url'. The URL is invalid.",
     });
 
     throws(() => new EventSource(123), {
       name: 'SyntaxError',
-      message: 'Cannot open an EventSource to \'123\'. The URL is invalid.'
+      message: "Cannot open an EventSource to '123'. The URL is invalid.",
     });
 
-    throws(() => new EventSource('http://example.org', { withCredentials: true }), {
-      name: 'NotSupportedError',
-      message: 'The init.withCredentials option is not supported. It must be false or undefined.'
-    });
+    throws(
+      () => new EventSource('http://example.org', { withCredentials: true }),
+      {
+        name: 'NotSupportedError',
+        message:
+          'The init.withCredentials option is not supported. It must be false or undefined.',
+      }
+    );
 
     // Doesn't throw
-    (new EventSource('http://example.org/message')).close();
-    (new EventSource('http://example.org/message', { withCredentials: false })).close();
-    (new EventSource('http://example.org/message', { withCredentials: undefined })).close();
-  }
+    new EventSource('http://example.org/message').close();
+    new EventSource('http://example.org/message', {
+      withCredentials: false,
+    }).close();
+    new EventSource('http://example.org/message', {
+      withCredentials: undefined,
+    }).close();
+  },
 };
 
 export const eventSourceFromTest = {
   async test() {
     const enc = new TextEncoder();
-    const chunks = [
-      'data: first\n\n',
-      'data: second\n\n',
-      'data: third\n\n',
-    ];
+    const chunks = ['data: first\n\n', 'data: second\n\n', 'data: third\n\n'];
     const rs = new ReadableStream({
       async pull(c) {
         await scheduler.wait(10);
@@ -308,7 +324,7 @@ export const eventSourceFromTest = {
         if (chunks.length === 0) {
           c.close();
         }
-      }
+      },
     });
     const { promise, resolve } = Promise.withResolvers();
     const eventsource = EventSource.from(rs);
@@ -333,7 +349,7 @@ export const eventSourceFromTest = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const eventSourceFromWithBOMTest = {
@@ -353,7 +369,7 @@ export const eventSourceFromWithBOMTest = {
         if (chunks.length === 0) {
           c.close();
         }
-      }
+      },
     });
     const { promise, resolve } = Promise.withResolvers();
     const eventsource = EventSource.from(rs);
@@ -378,7 +394,7 @@ export const eventSourceFromWithBOMTest = {
       }
     };
     await promise;
-  }
+  },
 };
 
 export const prototypePropertyTest = {
@@ -394,7 +410,7 @@ export const prototypePropertyTest = {
     ok('readyState' in EventSource.prototype);
     ok('url' in EventSource.prototype);
     ok('withCredentials' in EventSource.prototype);
-  }
+  },
 };
 
 export const disposable = {
@@ -406,7 +422,7 @@ export const disposable = {
     strictEqual(eventsource.readyState, EventSource.OPEN);
     eventsource[Symbol.dispose]();
     strictEqual(eventsource.readyState, EventSource.CLOSED);
-  }
+  },
 };
 
 // ======================================================================================
@@ -449,14 +465,14 @@ async function lastEventId(request) {
     return new Response('id: 1\ndata: first\n\n', {
       headers: {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache'
+        'Cache-Control': 'no-cache',
       },
     });
   } else {
     return new Response(`data: ${lastEventId}\n\n`, {
       headers: {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache'
+        'Cache-Control': 'no-cache',
       },
     });
   }
@@ -465,34 +481,32 @@ async function lastEventId(request) {
 async function eventIdPersists(request) {
   return new Response(
     'id: 1\ndata: first\n\n' +
-    'data: second\n\n' +
-    'id: 2\ndata: third\n\n' +
-    'data: fourth\n\n', {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache'
-    },
-  });
+      'data: second\n\n' +
+      'id: 2\ndata: third\n\n' +
+      'data: fourth\n\n',
+    {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      },
+    }
+  );
 }
 
 async function eventIdResets(request) {
-  return new Response(
-    'id: 1\ndata: first\n\n' +
-    'id: \ndata: second\n\n', {
+  return new Response('id: 1\ndata: first\n\n' + 'id: \ndata: second\n\n', {
     headers: {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache'
+      'Cache-Control': 'no-cache',
     },
   });
 }
 
 async function eventIdResets2(request) {
-  return new Response(
-    'id: 1\ndata: first\n\n' +
-    'id\ndata: second\n\n', {
+  return new Response('id: 1\ndata: first\n\n' + 'id\ndata: second\n\n', {
     headers: {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache'
+      'Cache-Control': 'no-cache',
     },
   });
 }
@@ -502,87 +516,83 @@ async function message(request) {
   // including good messages, comments, and bad fields.
   return new Response(
     'data: one\n' +
-    'data: two\n\n' +
-    ': comment' +
-    'falsefield:msg\n\n' +
-    'falsefield:msg\n' +
-    'Data: data\n\n' +
-    'data\n\n' +
-    'data:end\n\n', {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache'
-    },
-  });
-
+      'data: two\n\n' +
+      ': comment' +
+      'falsefield:msg\n\n' +
+      'falsefield:msg\n' +
+      'Data: data\n\n' +
+      'data\n\n' +
+      'data:end\n\n',
+    {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      },
+    }
+  );
 }
 
 let reconnectTestCount = 0;
 async function reconnectFail(request) {
   switch (reconnectTestCount++) {
     case 0: {
-      return new Response(
-        'data: opened\n\n', {
+      return new Response('data: opened\n\n', {
         headers: {
           'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache'
+          'Cache-Control': 'no-cache',
         },
       });
     }
     case 1: {
-      return new Response(
-        'data: reconnected\n\n', {
+      return new Response('data: reconnected\n\n', {
         headers: {
           'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache'
+          'Cache-Control': 'no-cache',
         },
       });
     }
     case 2:
-      // Fall-through
+    // Fall-through
     case 3: {
-      return new Response(
-        null, {
+      return new Response(null, {
         headers: {
           'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache'
+          'Cache-Control': 'no-cache',
         },
-        status: 204
+        status: 204,
       });
-
     }
   }
 }
 
 async function statusError(request) {
   return new Response(null, {
-    status: 500
+    status: 500,
   });
 }
 
 async function event(request) {
   return new Response(
-    'event: test\n' +
-    'data: first\n\n' +
-    'event: test\n' +
-    'data: second\n\n', {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache'
-    },
-  });
+    'event: test\n' + 'data: first\n\n' + 'event: test\n' + 'data: second\n\n',
+    {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      },
+    }
+  );
 }
 
 async function retry(request) {
   return new Response(
-    'retry: 3000\n\n' +
-    'data: first\n\n' +
-    'data: second\n\n', {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache'
-    },
-  });
+    'retry: 3000\n\n' + 'data: first\n\n' + 'data: second\n\n',
+    {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      },
+    }
+  );
 }
 
 export default {
@@ -593,6 +603,5 @@ export default {
       throw new Error('Not found');
     }
     return await handler(request);
-  }
+  },
 };
-

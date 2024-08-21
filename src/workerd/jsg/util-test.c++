@@ -25,15 +25,14 @@ JSG_DECLARE_ISOLATE_TYPE(FreezeIsolate, FreezeContext);
 
 KJ_TEST("recursive freezing") {
   Evaluator<FreezeContext, FreezeIsolate> e(v8System);
-  e.expectEval(
-      "let obj = { foo: [ { bar: 1 } ] };\n"
-      "recursivelyFreeze(obj);\n"
-      // We rely on non-strict mode here to silently discard our mutations.
-      "obj.foo[0].bar = 2;\n"
-      "obj.foo[0].baz = 3;\n"
-      "obj.foo[1] = { qux: 4 };\n"
-      "obj.bar = {};\n"
-      "JSON.stringify(obj);\n",
+  e.expectEval("let obj = { foo: [ { bar: 1 } ] };\n"
+               "recursivelyFreeze(obj);\n"
+               // We rely on non-strict mode here to silently discard our mutations.
+               "obj.foo[0].bar = 2;\n"
+               "obj.foo[0].baz = 3;\n"
+               "obj.foo[1] = { qux: 4 };\n"
+               "obj.bar = {};\n"
+               "JSON.stringify(obj);\n",
       "string", "{\"foo\":[{\"bar\":1}]}");
 }
 
@@ -66,9 +65,7 @@ KJ_TEST("deep clone") {
 
 struct TypeErrorContext: public ContextGlobalObject {
   auto returnFunctionTakingBox(double value) {
-    return [value](Lock&, Ref<NumberBox> value2) mutable {
-      return value + value2->value;
-    };
+    return [value](Lock&, Ref<NumberBox> value2) mutable { return value + value2->value; };
   }
 
   JSG_RESOURCE_TYPE(TypeErrorContext) {
@@ -80,30 +77,24 @@ JSG_DECLARE_ISOLATE_TYPE(TypeErrorIsolate, TypeErrorContext, NumberBox);
 
 KJ_TEST("throw TypeError") {
   Evaluator<TypeErrorContext, TypeErrorIsolate> e(v8System);
-  e.expectEval(
-      "new NumberBox(123).addBox(321)",
-      "throws", "TypeError: Failed to execute 'addBox' on 'NumberBox': parameter 1 is not of "
-                "type 'NumberBox'.");
-  e.expectEval(
-      "new NumberBox(123).boxed = 321",
-      "throws", "TypeError: Failed to set the 'boxed' property on 'NumberBox': the provided "
-                "value is not of type 'NumberBox'.");
-  e.expectEval(
-      "NumberBox(123)",
-      "throws", "TypeError: Failed to construct 'NumberBox': Please use the 'new' operator, "
-                "this object constructor cannot be called as a function.");
-  e.expectEval(
-      "returnFunctionTakingBox(123)(321)",
-      "throws", "TypeError: Failed to execute function: parameter 1 is not of type 'NumberBox'.");
+  e.expectEval("new NumberBox(123).addBox(321)", "throws",
+      "TypeError: Failed to execute 'addBox' on 'NumberBox': parameter 1 is not of "
+      "type 'NumberBox'.");
+  e.expectEval("new NumberBox(123).boxed = 321", "throws",
+      "TypeError: Failed to set the 'boxed' property on 'NumberBox': the provided "
+      "value is not of type 'NumberBox'.");
+  e.expectEval("NumberBox(123)", "throws",
+      "TypeError: Failed to construct 'NumberBox': Please use the 'new' operator, "
+      "this object constructor cannot be called as a function.");
+  e.expectEval("returnFunctionTakingBox(123)(321)", "throws",
+      "TypeError: Failed to execute function: parameter 1 is not of type 'NumberBox'.");
 }
 
 // ========================================================================================
 
 struct ThrowContext: public ContextGlobalObject {
   auto returnFunctionThatThrows(double value) {
-    return [](Lock&, double) -> double {
-      KJ_FAIL_ASSERT("thrown from returnFunctionThatThrows");
-    };
+    return [](Lock&, double) -> double { KJ_FAIL_ASSERT("thrown from returnFunctionThatThrows"); };
   }
   void throwException() {
     KJ_FAIL_REQUIRE("thrown from throwException");
@@ -161,8 +152,7 @@ struct TunneledContext: public ContextGlobalObject {
   }
   void throwTunneledTypeErrorWithExpectation() {
     auto s = kj::str("Hello, world!");
-    JSG_REQUIRE(s.startsWith(";"), TypeError,
-                "thrown from throwTunneledTypeErrorWithExpectation");
+    JSG_REQUIRE(s.startsWith(";"), TypeError, "thrown from throwTunneledTypeErrorWithExpectation");
   }
   void throwTunneledOperationError() {
     JSG_FAIL_REQUIRE(DOMOperationError, "thrown from throwTunneledOperationError");
@@ -177,16 +167,17 @@ struct TunneledContext: public ContextGlobalObject {
   }
   void throwTunneledOperationErrorWithExpectation() {
     auto s = kj::str("Hello, world!");
-    JSG_REQUIRE(s.startsWith(";"), DOMOperationError, "thrown from "
-                                  "throwTunneledOperationErrorWithExpectation");
+    JSG_REQUIRE(s.startsWith(";"), DOMOperationError,
+        "thrown from "
+        "throwTunneledOperationErrorWithExpectation");
   }
   void throwTunneledInternalOperationError() {
-    JSG_FAIL_REQUIRE(InternalDOMOperationError,
-        "thrown from throwTunneledInternalOperationError");
+    JSG_FAIL_REQUIRE(InternalDOMOperationError, "thrown from throwTunneledInternalOperationError");
   }
   void throwRemoteCpuExceededError() {
-    kj::throwFatalException(KJ_EXCEPTION(
-          OVERLOADED, "remote exception: remote exception: worker_do_not_log; script exceeded time limit", "script exceeded time limit"));
+    kj::throwFatalException(KJ_EXCEPTION(OVERLOADED,
+        "remote exception: remote exception: worker_do_not_log; script exceeded time limit",
+        "script exceeded time limit"));
   }
   void throwBadTunneledError() {
     KJ_FAIL_REQUIRE(" jsg.TypeError");
@@ -210,16 +201,16 @@ struct TunneledContext: public ContextGlobalObject {
   }
   void throwTunneledMacroTypeErrorWithExpectation() {
     auto s = kj::str("Hello, world!");
-    JSG_REQUIRE(s.startsWith(";"), TypeError,
-        "thrown from throwTunneledMacroTypeErrorWithExpectation");
+    JSG_REQUIRE(
+        s.startsWith(";"), TypeError, "thrown from throwTunneledMacroTypeErrorWithExpectation");
   }
   void throwTunneledMacroOperationError() {
     JSG_FAIL_REQUIRE(DOMOperationError, "thrown ", "from throwTunneledMacroOperationError");
   }
   void throwTunneledMacroOperationErrorWithExpectation() {
     auto s = kj::str("Hello, world!");
-    JSG_REQUIRE(s.startsWith(";"), DOMOperationError,
-        "thrown from ", kj::str("throwTunneledMacroOperationErrorWithExpectation"));
+    JSG_REQUIRE(s.startsWith(";"), DOMOperationError, "thrown from ",
+        kj::str("throwTunneledMacroOperationErrorWithExpectation"));
   }
   // Test that the error types mapped to WasmCompileError are handled correctly
   void throwTunneledCompileError() {
@@ -274,142 +265,122 @@ JSG_DECLARE_ISOLATE_TYPE(TunneledIsolate, TunneledContext);
 KJ_TEST("throw tunneled exception") {
   Evaluator<TunneledContext, TunneledIsolate> e(v8System);
   e.expectEval(
-      "throwTunneledTypeError()",
-      "throws", "TypeError: thrown from throwTunneledTypeError"
-  );
-  e.expectEval(
-      "throwTunneledTypeErrorLateColon()",
-      "throws", "TypeError"
-  );
-  e.expectEval(
-      "throwTunneledTypeErrorWithExpectation()",
-      "throws", "TypeError: thrown from throwTunneledTypeErrorWithExpectation"
-  );
-  e.expectEval(
-      "throwTunneledOperationError()",
-      "throws", "OperationError: thrown from throwTunneledOperationError"
-  );
-  e.expectEval(
-      "throwTunneledOperationErrorWithoutMessage()",
-      "throws", "OperationError"
-  );
-  e.expectEval(
-      "throwTunneledOperationErrorLateColon()",
-      "throws", "OperationError"
-  );
-  e.expectEval(
-      "throwTunneledOperationErrorWithExpectation()",
-      "throws", "OperationError: thrown from throwTunneledOperationErrorWithExpectation"
-  );
+      "throwTunneledTypeError()", "throws", "TypeError: thrown from throwTunneledTypeError");
+  e.expectEval("throwTunneledTypeErrorLateColon()", "throws", "TypeError");
+  e.expectEval("throwTunneledTypeErrorWithExpectation()", "throws",
+      "TypeError: thrown from throwTunneledTypeErrorWithExpectation");
+  e.expectEval("throwTunneledOperationError()", "throws",
+      "OperationError: thrown from throwTunneledOperationError");
+  e.expectEval("throwTunneledOperationErrorWithoutMessage()", "throws", "OperationError");
+  e.expectEval("throwTunneledOperationErrorLateColon()", "throws", "OperationError");
+  e.expectEval("throwTunneledOperationErrorWithExpectation()", "throws",
+      "OperationError: thrown from throwTunneledOperationErrorWithExpectation");
   {
     KJ_EXPECT_LOG(ERROR, "thrown from throwTunneledInternalOperationError");
     e.expectEval(
-        "throwTunneledInternalOperationError()",
-        "throws", "OperationError: internal error"
-    );
+        "throwTunneledInternalOperationError()", "throws", "OperationError: internal error");
   }
   {
     KJ_EXPECT_LOG(ERROR, " jsg.TypeError");
-    e.expectEval(
-        "throwBadTunneledError()",
-        "throws", "Error: internal error"
-    );
+    e.expectEval("throwBadTunneledError()", "throws", "Error: internal error");
   }
   {
     KJ_EXPECT_LOG(ERROR, "expected s.startsWith(\";\");  jsg.TypeError");
-    e.expectEval(
-        "throwBadTunneledErrorWithExpectation()",
-        "throws", "Error: internal error"
-    );
+    e.expectEval("throwBadTunneledErrorWithExpectation()", "throws", "Error: internal error");
   }
+  e.expectEval("throwTunneledMacroTypeError()", "throws",
+      "TypeError: thrown from throwTunneledMacroTypeError");
+  e.expectEval("throwTunneledMacroTypeErrorWithExpectation()", "throws",
+      "TypeError: thrown from throwTunneledMacroTypeErrorWithExpectation");
+  e.expectEval("throwTunneledMacroOperationError()", "throws",
+      "OperationError: thrown from throwTunneledMacroOperationError");
+  e.expectEval("throwTunneledMacroOperationErrorWithExpectation()", "throws",
+      "OperationError: thrown from throwTunneledMacroOperationErrorWithExpectation");
+  e.expectEval("throwTunneledCompileError()", "throws",
+      "CompileError: thrown from throwTunneledCompileError");
   e.expectEval(
-     "throwTunneledMacroTypeError()",
-     "throws", "TypeError: thrown from throwTunneledMacroTypeError"
-  );
+      "throwTunneledLinkError()", "throws", "CompileError: thrown from throwTunneledLinkError");
+  e.expectEval("throwTunneledRuntimeError()", "throws",
+      "CompileError: thrown from throwTunneledRuntimeError");
   e.expectEval(
-      "throwTunneledMacroTypeErrorWithExpectation()",
-      "throws", "TypeError: thrown from throwTunneledMacroTypeErrorWithExpectation"
-  );
-  e.expectEval(
-      "throwTunneledMacroOperationError()",
-      "throws", "OperationError: thrown from throwTunneledMacroOperationError"
-  );
-  e.expectEval(
-      "throwTunneledMacroOperationErrorWithExpectation()",
-      "throws", "OperationError: thrown from throwTunneledMacroOperationErrorWithExpectation"
-  );
-  e.expectEval(
-      "throwTunneledCompileError()",
-      "throws", "CompileError: thrown from throwTunneledCompileError"
-  );
-  e.expectEval(
-      "throwTunneledLinkError()",
-      "throws", "CompileError: thrown from throwTunneledLinkError"
-  );
-  e.expectEval(
-      "throwTunneledRuntimeError()",
-      "throws", "CompileError: thrown from throwTunneledRuntimeError"
-  );
-  e.expectEval(
-      "throwTunneledDOMException()",
-      "throws", "Some error: thrown from throwTunneledDOMException"
-  );
+      "throwTunneledDOMException()", "throws", "Some error: thrown from throwTunneledDOMException");
   {
     KJ_EXPECT_LOG(ERROR, " thrown from throwTunneledInvalidDOMException");
-    e.expectEval(
-        "throwTunneledInvalidDOMException()",
-        "throws", "Error: internal error"
-    );
+    e.expectEval("throwTunneledInvalidDOMException()", "throws", "Error: internal error");
   }
   {
     KJ_EXPECT_LOG(ERROR, " thrown from throwTunneledGarbledDOMException");
-    e.expectEval(
-        "throwTunneledGarbledDOMException()",
-        "throws", "Error: internal error"
-    );
+    e.expectEval("throwTunneledGarbledDOMException()", "throws", "Error: internal error");
   }
 }
 
 KJ_TEST("runTunnelingExceptions") {
   Evaluator<TunneledContext, TunneledIsolate> e(v8System);
-  e.expectEval(
-      "throwRetunneledTypeError()",
-      "throws", "TypeError: Dummy error message."
-  );
+  e.expectEval("throwRetunneledTypeError()", "throws", "TypeError: Dummy error message.");
 }
 
 KJ_TEST("isTunneledException") {
   TunneledContext context;
-  try { context.throwTunneledTypeError(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwTunneledTypeError();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
-  try { context.throwTunneledTypeErrorWithoutMessage(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwTunneledTypeErrorWithoutMessage();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
-  try { context.throwTunneledTypeErrorLateColon(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwTunneledTypeErrorLateColon();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
-  try { context.throwTunneledTypeErrorWithExpectation(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwTunneledTypeErrorWithExpectation();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
-  try { context.throwTunneledOperationError(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwTunneledOperationError();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
-  try { context.throwTunneledOperationErrorLateColon(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwTunneledOperationErrorLateColon();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
-  try { context.throwTunneledOperationErrorWithExpectation(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwTunneledOperationErrorWithExpectation();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
 
-  try { context.throwBadTunneledError(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwBadTunneledError();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
   }
-  try { context.throwBadTunneledErrorWithExpectation(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwBadTunneledErrorWithExpectation();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
   }
 
-  try { context.throwRemoteCpuExceededError(); KJ_UNREACHABLE; } catch (kj::Exception e) {
+  try {
+    context.throwRemoteCpuExceededError();
+    KJ_UNREACHABLE;
+  } catch (kj::Exception e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
     KJ_EXPECT(isDoNotLogException(e.getDescription()), e.getDescription());
   }

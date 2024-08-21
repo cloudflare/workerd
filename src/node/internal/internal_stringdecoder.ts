@@ -63,10 +63,10 @@ export interface StringDecoder {
   readonly lastChar: Uint8Array;
   readonly lastNeed: number;
   readonly lastTotal: number;
-  new (encoding? : string): StringDecoder;
-  write(buf: ArrayBufferView|DataView|string): string;
-  end(buf?: ArrayBufferView|DataView|string): string;
-  text(buf: ArrayBufferView|DataView|string, offset?: number): string;
+  new (encoding?: string): StringDecoder;
+  write(buf: ArrayBufferView | DataView | string): string;
+  end(buf?: ArrayBufferView | DataView | string): string;
+  text(buf: ArrayBufferView | DataView | string, offset?: number): string;
   new (encoding?: string): StringDecoder;
 }
 
@@ -84,7 +84,10 @@ export function StringDecoder(this: StringDecoder, encoding: string = 'utf8') {
   this.encoding = encodings[normalizedEncoding]!;
 }
 
-function write(this: StringDecoder, buf: ArrayBufferView|DataView|string): string {
+function write(
+  this: StringDecoder,
+  buf: ArrayBufferView | DataView | string
+): string {
   if ((this as InternalDecoder)[kNativeDecoder] === undefined) {
     throw new ERR_INVALID_THIS('StringDecoder');
   }
@@ -92,15 +95,20 @@ function write(this: StringDecoder, buf: ArrayBufferView|DataView|string): strin
     return buf;
   }
   if (!ArrayBuffer.isView(buf)) {
-    throw new ERR_INVALID_ARG_TYPE('buf', [
-      'Buffer', 'TypedArray', 'DataView', 'string'
-    ], buf);
+    throw new ERR_INVALID_ARG_TYPE(
+      'buf',
+      ['Buffer', 'TypedArray', 'DataView', 'string'],
+      buf
+    );
   }
   const buffer = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
   return bufferUtil.decode(buffer, (this as InternalDecoder)[kNativeDecoder]);
 }
 
-function end(this: StringDecoder, buf?: ArrayBufferView|DataView|string): string {
+function end(
+  this: StringDecoder,
+  buf?: ArrayBufferView | DataView | string
+): string {
   if ((this as InternalDecoder)[kNativeDecoder] === undefined) {
     throw new ERR_INVALID_THIS('StringDecoder');
   }
@@ -114,7 +122,11 @@ function end(this: StringDecoder, buf?: ArrayBufferView|DataView|string): string
   return ret;
 }
 
-function text(this: StringDecoder, buf: ArrayBufferView|DataView|string, offset?: number) : string {
+function text(
+  this: StringDecoder,
+  buf: ArrayBufferView | DataView | string,
+  offset?: number
+): string {
   if ((this as InternalDecoder)[kNativeDecoder] === undefined) {
     throw new ERR_INVALID_THIS('StringDecoder');
   }
@@ -130,17 +142,19 @@ StringDecoder.prototype.text = text;
 Object.defineProperties(StringDecoder.prototype, {
   lastChar: {
     enumerable: true,
-    get(this: StringDecoder) : Buffer {
+    get(this: StringDecoder): Buffer {
       if ((this as InternalDecoder)[kNativeDecoder] === undefined) {
         throw new ERR_INVALID_THIS('StringDecoder');
       }
       return (this as InternalDecoder)[kNativeDecoder].subarray(
-        kIncompleteCharactersStart, kIncompleteCharactersEnd) as Buffer;
+        kIncompleteCharactersStart,
+        kIncompleteCharactersEnd
+      ) as Buffer;
     },
   },
   lastNeed: {
     enumerable: true,
-    get(this: StringDecoder) : number {
+    get(this: StringDecoder): number {
       if ((this as InternalDecoder)[kNativeDecoder] === undefined) {
         throw new ERR_INVALID_THIS('StringDecoder');
       }
@@ -149,16 +163,18 @@ Object.defineProperties(StringDecoder.prototype, {
   },
   lastTotal: {
     enumerable: true,
-    get(this: StringDecoder) : number {
+    get(this: StringDecoder): number {
       if ((this as InternalDecoder)[kNativeDecoder] === undefined) {
         throw new ERR_INVALID_THIS('StringDecoder');
       }
-      return (this as InternalDecoder)[kNativeDecoder][kBufferedBytes]! +
-        (this as InternalDecoder)[kNativeDecoder][kMissingBytes]!;
+      return (
+        (this as InternalDecoder)[kNativeDecoder][kBufferedBytes]! +
+        (this as InternalDecoder)[kNativeDecoder][kMissingBytes]!
+      );
     },
   },
 });
 
 export default {
-  StringDecoder
+  StringDecoder,
 };

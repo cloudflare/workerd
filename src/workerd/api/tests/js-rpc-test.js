@@ -1,5 +1,10 @@
 import assert from 'node:assert';
-import {WorkerEntrypoint,DurableObject,RpcStub,RpcTarget} from 'cloudflare:workers';
+import {
+  WorkerEntrypoint,
+  DurableObject,
+  RpcStub,
+  RpcTarget,
+} from 'cloudflare:workers';
 
 class MyCounter extends RpcTarget {
   constructor(i = 0) {
@@ -15,7 +20,9 @@ class MyCounter extends RpcTarget {
   disposed = false;
 
   #disposedResolver;
-  #onDisposedPromise = new Promise(resolve => this.#disposedResolver = resolve);
+  #onDisposedPromise = new Promise(
+    (resolve) => (this.#disposedResolver = resolve)
+  );
 
   [Symbol.dispose]() {
     this.disposed = true;
@@ -26,8 +33,8 @@ class MyCounter extends RpcTarget {
     return Promise.race([
       this.#onDisposedPromise,
       scheduler.wait(1000).then(() => {
-        throw new Error("timed out waiting for disposal");
-      })
+        throw new Error('timed out waiting for disposal');
+      }),
     ]);
   }
 
@@ -43,19 +50,21 @@ class NonRpcClass {
   }
   get bar() {
     return {
-      baz() { return 456; }
-    }
+      baz() {
+        return 456;
+      },
+    };
   }
-};
+}
 
 export let nonClass = {
   async noArgs(x, env, ctx) {
-    assert.strictEqual(typeof ctx.waitUntil, "function");
-    return (x === undefined) ? (env.twelve + 1) : "param not undefined?";
+    assert.strictEqual(typeof ctx.waitUntil, 'function');
+    return x === undefined ? env.twelve + 1 : 'param not undefined?';
   },
 
   async oneArg(i, env, ctx) {
-    assert.strictEqual(typeof ctx.waitUntil, "function");
+    assert.strictEqual(typeof ctx.waitUntil, 'function');
     return env.twelve * i;
   },
 
@@ -68,26 +77,26 @@ export let nonClass = {
   },
 
   async twoArgs(i, j, env, ctx) {
-    assert.strictEqual(typeof ctx.waitUntil, "function");
+    assert.strictEqual(typeof ctx.waitUntil, 'function');
     return i * j + env.twelve;
   },
 
   async fetch(req, env, ctx) {
     // This is used in the stream test to fetch some gziped data.
-    if (req.url.endsWith("/gzip")) {
-      return new Response("this text was gzipped", {
+    if (req.url.endsWith('/gzip')) {
+      return new Response('this text was gzipped', {
         headers: {
-          "Content-Encoding": "gzip"
-        }
+          'Content-Encoding': 'gzip',
+        },
       });
-    } else if (req.url.endsWith("/stream-from-rpc")) {
+    } else if (req.url.endsWith('/stream-from-rpc')) {
       let stream = await env.MyService.returnReadableStream();
       return new Response(stream);
     } else {
-      throw new Error("unknown route");
+      throw new Error('unknown route');
     }
-  }
-}
+  },
+};
 
 // Globals used to test passing RPC promises or properties across I/O contexts (which is expected
 // to fail).
@@ -105,8 +114,8 @@ export class MyService extends WorkerEntrypoint {
 
     // This shouldn't be callable!
     this.instanceMethod = () => {
-      return "nope";
-    }
+      return 'nope';
+    };
 
     this.instanceObject = {
       func: (a) => a * 5,
@@ -114,7 +123,7 @@ export class MyService extends WorkerEntrypoint {
   }
 
   async noArgsMethod(x) {
-    return (x === undefined) ? (this.env.twelve + 1) : "param not undefined?";
+    return x === undefined ? this.env.twelve + 1 : 'param not undefined?';
   }
 
   async oneArgMethod(i) {
@@ -134,21 +143,25 @@ export class MyService extends WorkerEntrypoint {
   }
 
   async getAnObject(i) {
-    return {foo: 123 + i, counter: new MyCounter(i)};
+    return { foo: 123 + i, counter: new MyCounter(i) };
   }
 
   async fetch(req, x) {
     assert.strictEqual(x, undefined);
-    return new Response("method = " + req.method + ", url = " + req.url);
+    return new Response('method = ' + req.method + ', url = ' + req.url);
   }
 
   // Define a property to test behavior of property accessors.
-  get nonFunctionProperty() { return {foo: 123}; }
+  get nonFunctionProperty() {
+    return { foo: 123 };
+  }
 
-  get functionProperty() { return (a, b) => a - b; }
+  get functionProperty() {
+    return (a, b) => a - b;
+  }
 
   get objectProperty() {
-    let nullPrototype = {foo: 123};
+    let nullPrototype = { foo: 123 };
     nullPrototype.__proto__ = null;
 
     return {
@@ -159,7 +172,7 @@ export class MyService extends WorkerEntrypoint {
       counter5: new MyCounter(5),
       nonRpc: new NonRpcClass(),
       nullPrototype,
-      someText: "hello",
+      someText: 'hello',
     };
   }
 
@@ -168,15 +181,15 @@ export class MyService extends WorkerEntrypoint {
   }
 
   get rejectingPromiseProperty() {
-    return Promise.reject(new Error("REJECTED"));
+    return Promise.reject(new Error('REJECTED'));
   }
 
   get throwingProperty() {
-    throw new Error("PROPERTY THREW");
+    throw new Error('PROPERTY THREW');
   }
 
   throwingMethod() {
-    throw new Error("METHOD THREW");
+    throw new Error('METHOD THREW');
   }
 
   async tryUseGlobalRpcPromise() {
@@ -187,11 +200,11 @@ export class MyService extends WorkerEntrypoint {
   }
 
   async getNonRpcClass() {
-    return {obj: new NonRpcClass()};
+    return { obj: new NonRpcClass() };
   }
 
   async getNullPrototypeObject() {
-    let obj = {foo: 123};
+    let obj = { foo: 123 };
     obj.__proto__ = null;
     return obj;
   }
@@ -206,7 +219,7 @@ export class MyService extends WorkerEntrypoint {
     return callback();
   }
   getNestedRpcPromise(callback) {
-    return {value: callback()};
+    return { value: callback() };
   }
   getRemoteNestedRpcPromise(callback) {
     // Use a function as a cheap way to return a JsRpcStub that has a remote property `value` which
@@ -219,7 +232,7 @@ export class MyService extends WorkerEntrypoint {
     return callback.foo;
   }
   getNestedRpcProperty(callback) {
-    return {value: callback.foo};
+    return { value: callback.foo };
   }
   getRemoteNestedRpcProperty(callback) {
     // Use a function as a cheap way to return a JsRpcStub that has a remote property `value` which
@@ -256,7 +269,7 @@ export class MyService extends WorkerEntrypoint {
 
     return {
       count,
-      counter: counter.dup(),  // need to dup() for return
+      counter: counter.dup(), // need to dup() for return
       async incrementOriginal(n) {
         // This will fail because after the call ends, the counter stub is disposed.
         return await counter.increment(n);
@@ -267,7 +280,7 @@ export class MyService extends WorkerEntrypoint {
       },
       [Symbol.dispose]() {
         counterDup[Symbol.dispose]();
-      }
+      },
     };
   }
 
@@ -280,16 +293,18 @@ export class MyService extends WorkerEntrypoint {
     // Return something that contains stubs, holding the context open.
     return {
       noop() {},
-      abort() { ctx.abort(new RangeError("foo bar abort reason")); }
+      abort() {
+        ctx.abort(new RangeError('foo bar abort reason'));
+      },
     };
   }
 
   async writeToStream(stream) {
     let writer = stream.getWriter();
     let enc = new TextEncoder();
-    await writer.write(enc.encode("foo, "));
-    await writer.write(enc.encode("bar, "));
-    await writer.write(enc.encode("baz!"));
+    await writer.write(enc.encode('foo, '));
+    await writer.write(enc.encode('bar, '));
+    await writer.write(enc.encode('baz!'));
     await writer.close();
   }
 
@@ -302,7 +317,7 @@ export class MyService extends WorkerEntrypoint {
     let writer = stream.getWriter();
     let enc = new TextEncoder();
     for (;;) {
-      await writer.write(enc.encode("foo, "));
+      await writer.write(enc.encode('foo, '));
     }
   }
 
@@ -348,37 +363,37 @@ export class MyService extends WorkerEntrypoint {
 
   async returnHeaders() {
     let result = new Headers();
-    result.append("foo", "bar");
-    result.append("Set-Cookie", "abc");
-    result.append("set-cookie", "def");
-    result.append("corge", "!@#");
-    result.append("Content-Length", "123");
+    result.append('foo', 'bar');
+    result.append('Set-Cookie', 'abc');
+    result.append('set-cookie', 'def');
+    result.append('corge', '!@#');
+    result.append('Content-Length', '123');
     return result;
   }
 
   async returnRequest() {
-    return new Request("http://my-url.com", {
-      method: "PUT",
+    return new Request('http://my-url.com', {
+      method: 'PUT',
       headers: {
-        "Accept-Encoding": "bazzip",
-        "Foo": "Bar"
+        'Accept-Encoding': 'bazzip',
+        Foo: 'Bar',
       },
-      redirect: "manual",
-      body: "Hello every body!",
+      redirect: 'manual',
+      body: 'Hello every body!',
       cf: {
         abc: 123,
-        hello: "goodbye",
-      }
+        hello: 'goodbye',
+      },
     });
   }
 
   async returnResponse() {
-    return new Response("Response body!", {
+    return new Response('Response body!', {
       status: 404,
       headers: {
-        "Content-Type": "abc"
+        'Content-Type': 'abc',
       },
-      cf: {foo: 123, bar: "def"},
+      cf: { foo: 123, bar: 'def' },
     });
   }
 
@@ -387,12 +402,16 @@ export class MyService extends WorkerEntrypoint {
     // later on. We'll perform a cross-context wait to verify that the waitUntil task actually
     // completes and resolves the promise.
     let resolve;
-    globalWaitUntilPromise = new Promise(r => { resolve = r; });
+    globalWaitUntilPromise = new Promise((r) => {
+      resolve = r;
+    });
 
-    this.ctx.waitUntil((async () => {
-      await scheduler.wait(100);
-      resolve();
-    })());
+    this.ctx.waitUntil(
+      (async () => {
+        await scheduler.wait(100);
+        resolve();
+      })()
+    );
   }
 }
 
@@ -414,7 +433,7 @@ export class MyActor extends DurableObject {
 
 export class ActorNoExtends {
   async fetch(req) {
-    return new Response("from ActorNoExtends");
+    return new Response('from ActorNoExtends');
   }
 
   // This can't be called!
@@ -426,7 +445,7 @@ export class ActorNoExtends {
 export default class DefaultService extends WorkerEntrypoint {
   async fetch(req) {
     // Test this.env here just to prove omitting the constructor entirely works.
-    return new Response("default service " + this.env.twelve);
+    return new Response('default service ' + this.env.twelve);
   }
 }
 
@@ -437,31 +456,31 @@ export let basicServiceBinding = {
     assert.strictEqual(await env.self.oneArgOmitCtx(3), 37);
     assert.strictEqual(await env.self.oneArgOmitEnvCtx(3), 6);
     await assert.rejects(() => env.self.twoArgs(123, 2), {
-      name: "TypeError",
+      name: 'TypeError',
       message:
-        "Cannot call handler function \"twoArgs\" over RPC because it has the wrong " +
-        "number of arguments. A simple function handler can only be called over RPC if it has " +
-        "exactly the arguments (arg, env, ctx), where only the first argument comes from the " +
-        "client. To support multi-argument RPC functions, use class-based syntax (extending " +
-        "WorkerEntrypoint) instead."
+        'Cannot call handler function "twoArgs" over RPC because it has the wrong ' +
+        'number of arguments. A simple function handler can only be called over RPC if it has ' +
+        'exactly the arguments (arg, env, ctx), where only the first argument comes from the ' +
+        'client. To support multi-argument RPC functions, use class-based syntax (extending ' +
+        'WorkerEntrypoint) instead.',
     });
     await assert.rejects(() => env.self.noArgs(), {
-      name: "TypeError",
+      name: 'TypeError',
       message:
-        "Attempted to call RPC function \"noArgs\" with the wrong number of arguments. " +
-        "When calling a top-level handler function that is not declared as part of a class, you " +
-        "must always send exactly one argument. In order to support variable numbers of " +
-        "arguments, the server must use class-based syntax (extending WorkerEntrypoint) " +
-        "instead."
+        'Attempted to call RPC function "noArgs" with the wrong number of arguments. ' +
+        'When calling a top-level handler function that is not declared as part of a class, you ' +
+        'must always send exactly one argument. In order to support variable numbers of ' +
+        'arguments, the server must use class-based syntax (extending WorkerEntrypoint) ' +
+        'instead.',
     });
     await assert.rejects(() => env.self.oneArg(1, 2), {
-      name: "TypeError",
+      name: 'TypeError',
       message:
-        "Attempted to call RPC function \"oneArg\" with the wrong number of arguments. " +
-        "When calling a top-level handler function that is not declared as part of a class, you " +
-        "must always send exactly one argument. In order to support variable numbers of " +
-        "arguments, the server must use class-based syntax (extending WorkerEntrypoint) " +
-        "instead."
+        'Attempted to call RPC function "oneArg" with the wrong number of arguments. ' +
+        'When calling a top-level handler function that is not declared as part of a class, you ' +
+        'must always send exactly one argument. In order to support variable numbers of ' +
+        'arguments, the server must use class-based syntax (extending WorkerEntrypoint) ' +
+        'instead.',
     });
 
     // If we restore multi-arg support, remove the `rejects` checks above and un-comment these:
@@ -469,7 +488,7 @@ export let basicServiceBinding = {
     // assert.strictEqual(await env.self.twoArgs(123, 2), 258);
     // assert.strictEqual(await env.self.twoArgs(123, 2, "foo", "bar", "baz"), 258);
   },
-}
+};
 
 export let extendingEntrypointClasses = {
   async test(controller, env, ctx) {
@@ -477,7 +496,7 @@ export let extendingEntrypointClasses = {
     let svc = new MyService(ctx, env);
     assert.equal(svc instanceof WorkerEntrypoint, true);
   },
-}
+};
 
 export let namedServiceBinding = {
   async test(controller, env, ctx) {
@@ -490,12 +509,21 @@ export let namedServiceBinding = {
 
     // Members of an object-typed property can be invoked.
     assert.strictEqual(await env.MyService.objectProperty.func(6, 4), 24);
-    assert.strictEqual(await env.MyService.objectProperty.deeper.deepFunc(6, 3), 2);
-    assert.strictEqual(await env.MyService.objectProperty.counter5.increment(3), 8);
+    assert.strictEqual(
+      await env.MyService.objectProperty.deeper.deepFunc(6, 3),
+      2
+    );
+    assert.strictEqual(
+      await env.MyService.objectProperty.counter5.increment(3),
+      8
+    );
 
     // Awaiting a property itself gets the value.
-    assert.strictEqual(JSON.stringify(await env.MyService.nonFunctionProperty), '{"foo":123}');
-    assert.strictEqual(await env.MyService.objectProperty.someText, "hello");
+    assert.strictEqual(
+      JSON.stringify(await env.MyService.nonFunctionProperty),
+      '{"foo":123}'
+    );
+    assert.strictEqual(await env.MyService.objectProperty.someText, 'hello');
     {
       let counter = await env.MyService.objectProperty.counter5;
       assert.strictEqual(await counter.increment(3), 8);
@@ -522,179 +550,203 @@ export let namedServiceBinding = {
     assert.strictEqual(await env.MyService.promiseProperty, 123);
 
     let sawFinally = false;
-    assert.strictEqual(await env.MyService.promiseProperty
-        .finally(() => {sawFinally = true;}), 123);
+    assert.strictEqual(
+      await env.MyService.promiseProperty.finally(() => {
+        sawFinally = true;
+      }),
+      123
+    );
     assert.strictEqual(sawFinally, true);
 
     // `fetch()` is special, the params get converted into a Request.
-    let resp = await env.MyService.fetch("http://foo/", {method: "POST"});
-    assert.strictEqual(await resp.text(), "method = POST, url = http://foo/");
+    let resp = await env.MyService.fetch('http://foo/', { method: 'POST' });
+    assert.strictEqual(await resp.text(), 'method = POST, url = http://foo/');
 
     await assert.rejects(() => env.MyService.instanceMethod(), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"instanceMethod\"."
+      name: 'TypeError',
+      message:
+        'The RPC receiver does not implement the method "instanceMethod".',
     });
 
     await assert.rejects(() => env.MyService.instanceObject.func(3), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"instanceObject\"."
+      name: 'TypeError',
+      message:
+        'The RPC receiver does not implement the method "instanceObject".',
     });
 
     await assert.rejects(() => env.MyService.instanceObject, {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"instanceObject\"."
+      name: 'TypeError',
+      message:
+        'The RPC receiver does not implement the method "instanceObject".',
     });
 
     await assert.rejects(() => env.MyService.throwingProperty, {
-      name: "Error",
-      message: "PROPERTY THREW"
+      name: 'Error',
+      message: 'PROPERTY THREW',
     });
     await assert.rejects(() => env.MyService.throwingMethod(), {
-      name: "Error",
-      message: "METHOD THREW"
+      name: 'Error',
+      message: 'METHOD THREW',
     });
 
     await assert.rejects(() => env.MyService.rejectingPromiseProperty, {
-      name: "Error",
-      message: "REJECTED"
+      name: 'Error',
+      message: 'REJECTED',
     });
-    assert.strictEqual(await env.MyService.rejectingPromiseProperty.catch(err => {
-      assert.strictEqual(err.message, "REJECTED");
-      return 234;
-    }), 234);
-    assert.strictEqual(await env.MyService.rejectingPromiseProperty.then(() => 432, err => {
-      assert.strictEqual(err.message, "REJECTED");
-      return 234;
-    }), 234);
+    assert.strictEqual(
+      await env.MyService.rejectingPromiseProperty.catch((err) => {
+        assert.strictEqual(err.message, 'REJECTED');
+        return 234;
+      }),
+      234
+    );
+    assert.strictEqual(
+      await env.MyService.rejectingPromiseProperty.then(
+        () => 432,
+        (err) => {
+          assert.strictEqual(err.message, 'REJECTED');
+          return 234;
+        }
+      ),
+      234
+    );
 
-    let getByName = name => {
+    let getByName = (name) => {
       return env.MyService.getRpcMethodForTestOnly(name);
     };
 
     // Check getRpcMethodForTestOnly() actually works.
-    assert.strictEqual(await getByName("twoArgsMethod")(2, 3), 18);
+    assert.strictEqual(await getByName('twoArgsMethod')(2, 3), 18);
 
     // Check we cannot call reserved methods.
-    await assert.rejects(() => getByName("constructor")(), {
-      name: "TypeError",
-      message: "'constructor' is a reserved method and cannot be called over RPC."
+    await assert.rejects(() => getByName('constructor')(), {
+      name: 'TypeError',
+      message:
+        "'constructor' is a reserved method and cannot be called over RPC.",
     });
-    await assert.rejects(() => getByName("fetch")(), {
-      name: "TypeError",
-      message: "'fetch' is a reserved method and cannot be called over RPC."
+    await assert.rejects(() => getByName('fetch')(), {
+      name: 'TypeError',
+      message: "'fetch' is a reserved method and cannot be called over RPC.",
     });
 
     // Check we cannot call methods of Object.
-    await assert.rejects(() => getByName("toString")(), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"toString\"."
+    await assert.rejects(() => getByName('toString')(), {
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "toString".',
     });
-    await assert.rejects(() => getByName("hasOwnProperty")(), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"hasOwnProperty\"."
+    await assert.rejects(() => getByName('hasOwnProperty')(), {
+      name: 'TypeError',
+      message:
+        'The RPC receiver does not implement the method "hasOwnProperty".',
     });
 
     // Check we cannot access `env` or `ctx`.
-    await assert.rejects(() => getByName("env")(), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"env\"."
+    await assert.rejects(() => getByName('env')(), {
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "env".',
     });
-    await assert.rejects(() => getByName("ctx")(), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"ctx\"."
+    await assert.rejects(() => getByName('ctx')(), {
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "ctx".',
     });
 
     // Check what happens if we access something that's actually declared as a property on the
     // class. The difference in error message proves to us that `env` and `ctx` weren't visible at
     // all, which is what we want.
-    await assert.rejects(() => getByName("nonFunctionProperty")(), {
-      name: "TypeError",
-      message: "\"nonFunctionProperty\" is not a function."
+    await assert.rejects(() => getByName('nonFunctionProperty')(), {
+      name: 'TypeError',
+      message: '"nonFunctionProperty" is not a function.',
     });
-    await assert.rejects(() => getByName("nonFunctionProperty").foo(), {
-      name: "TypeError",
-      message: "\"nonFunctionProperty.foo\" is not a function."
+    await assert.rejects(() => getByName('nonFunctionProperty').foo(), {
+      name: 'TypeError',
+      message: '"nonFunctionProperty.foo" is not a function.',
     });
 
     // Check that we can't access contents of a property that is a class but not derived from
     // RpcTarget.
     await assert.rejects(() => env.MyService.objectProperty.nonRpc.foo(), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"nonRpc\"."
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "nonRpc".',
     });
     await assert.rejects(() => env.MyService.objectProperty.nonRpc.bar.baz(), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"nonRpc\"."
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "nonRpc".',
     });
     await assert.rejects(() => env.MyService.objectProperty.nullPrototype.foo, {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"nullPrototype\"."
+      name: 'TypeError',
+      message:
+        'The RPC receiver does not implement the method "nullPrototype".',
     });
 
     // Extra-paranoid check that we can't access methods on env or ctx.
-    await assert.rejects(() => env.MyService.objectProperty.env.MyService.noArgsMethod(), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"env\"."
-    });
+    await assert.rejects(
+      () => env.MyService.objectProperty.env.MyService.noArgsMethod(),
+      {
+        name: 'TypeError',
+        message: 'The RPC receiver does not implement the method "env".',
+      }
+    );
     await assert.rejects(() => env.MyService.objectProperty.ctx.waitUntil(), {
-      name: "TypeError",
-      message: "The RPC receiver does not implement the method \"ctx\"."
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "ctx".',
     });
 
     // Can't serialize instances of classes that aren't derived from RpcTarget.
     await assert.rejects(() => env.MyService.getNonRpcClass(), {
-      name: "DataCloneError",
-      message: 'Could not serialize object of type "NonRpcClass". This type does not support ' +
-               'serialization.'
+      name: 'DataCloneError',
+      message:
+        'Could not serialize object of type "NonRpcClass". This type does not support ' +
+        'serialization.',
     });
     await assert.rejects(() => env.MyService.getNullPrototypeObject(), {
-      name: "DataCloneError",
-      message: 'Could not serialize object of type "Object". This type does not support ' +
-               'serialization.'
+      name: 'DataCloneError',
+      message:
+        'Could not serialize object of type "Object". This type does not support ' +
+        'serialization.',
     });
   },
-}
+};
 
 export let namedActorBinding = {
   async test(controller, env, ctx) {
-    let id = env.MyActor.idFromName("foo");
+    let id = env.MyActor.idFromName('foo');
     let stub = env.MyActor.get(id);
 
     assert.strictEqual(await stub.increment(5), 5);
     assert.strictEqual(await stub.increment(2), 7);
     assert.strictEqual(await stub.increment(8), 15);
   },
-}
+};
 
 // Test that if the actor class doesn't extend `DurableObject`, we don't allow RPC.
 export let actorWithoutExtendsRejectsRpc = {
   async test(controller, env, ctx) {
-    let id = env.ActorNoExtends.idFromName("foo");
+    let id = env.ActorNoExtends.idFromName('foo');
     let stub = env.ActorNoExtends.get(id);
 
     // fetch() works.
-    let resp = await stub.fetch("http://foo");
-    assert.strictEqual(await resp.text(), "from ActorNoExtends");
+    let resp = await stub.fetch('http://foo');
+    assert.strictEqual(await resp.text(), 'from ActorNoExtends');
 
     // RPC does not.
     await assert.rejects(() => stub.foo(), {
-      name: "TypeError",
+      name: 'TypeError',
       message:
-          "The receiving Durable Object does not support RPC, because its class was not declared " +
-          "with `extends DurableObject`. In order to enable RPC, make sure your class " +
-          "extends the special class `DurableObject`, which can be imported from the module " +
-          "\"cloudflare:workers\"."
+        'The receiving Durable Object does not support RPC, because its class was not declared ' +
+        'with `extends DurableObject`. In order to enable RPC, make sure your class ' +
+        'extends the special class `DurableObject`, which can be imported from the module ' +
+        '"cloudflare:workers".',
     });
   },
-}
+};
 
 // Test calling the default export when it is a class.
 export let defaultExportClass = {
   async test(controller, env, ctx) {
-    let resp = await env.defaultExport.fetch("http://foo");
-    assert.strictEqual(await resp.text(), "default service 12");
+    let resp = await env.defaultExport.fetch('http://foo');
+    assert.strictEqual(await resp.text(), 'default service 12');
   },
-}
+};
 
 export let loopbackJsRpcTarget = {
   async test(controller, env, ctx) {
@@ -703,20 +755,20 @@ export let loopbackJsRpcTarget = {
     assert.strictEqual(await stub.increment(5), 9);
     assert.strictEqual(await stub.increment(7), 16);
 
-    assert.strictEqual(await stub.fetch(true, 123, "baz"), "16 true 123 baz");
+    assert.strictEqual(await stub.fetch(true, 123, 'baz'), '16 true 123 baz');
 
     assert.strictEqual(counter.disposed, false);
     stub[Symbol.dispose]();
 
     await assert.rejects(stub.increment(2), {
-      name: "Error",
-      message: "RPC stub used after being disposed."
+      name: 'Error',
+      message: 'RPC stub used after being disposed.',
     });
 
     await counter.onDisposed();
     assert.strictEqual(counter.disposed, true);
   },
-}
+};
 
 export let sendStubOverRpc = {
   async test(controller, env, ctx) {
@@ -726,13 +778,13 @@ export let sendStubOverRpc = {
     assert.strictEqual(await env.MyService.incrementCounter(stub, 5), 9);
 
     await assert.rejects(() => stub.increment(7), {
-      name: "Error",
-      message: "RPC stub used after being disposed."
+      name: 'Error',
+      message: 'RPC stub used after being disposed.',
     });
 
     assert.strictEqual(await stubDup.increment(7), 16);
   },
-}
+};
 
 export let receiveStubOverRpc = {
   async test(controller, env, ctx) {
@@ -744,29 +796,35 @@ export let receiveStubOverRpc = {
     let promise1 = stub.increment(6);
     let promise2 = stub.increment(4);
     let promise3 = stub.increment(3);
-    assert.deepEqual(await Promise.all([promise1, promise2, promise3]), [15, 19, 22]);
+    assert.deepEqual(
+      await Promise.all([promise1, promise2, promise3]),
+      [15, 19, 22]
+    );
   },
-}
+};
 
 export let promisePipelining = {
   async test(controller, env, ctx) {
     assert.strictEqual(await env.MyService.makeCounter(12).increment(3), 15);
 
     assert.strictEqual(await env.MyService.getAnObject(5).foo, 128);
-    assert.strictEqual(await env.MyService.getAnObject(5).counter.increment(7), 12);
+    assert.strictEqual(
+      await env.MyService.getAnObject(5).counter.increment(7),
+      12
+    );
   },
-}
+};
 
 export let disposal = {
   async test(controller, env, ctx) {
     // Call function that returns plain stub. Dispose it.
     {
-      let counter = await env.MyService.makeCounter(12)
+      let counter = await env.MyService.makeCounter(12);
       assert.strictEqual(await counter.increment(3), 15);
       counter[Symbol.dispose]();
       await assert.rejects(counter.increment(2), {
-        name: "Error",
-        message: "RPC stub used after being disposed."
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
       });
     }
 
@@ -778,8 +836,8 @@ export let disposal = {
 
       obj[Symbol.dispose]();
       await assert.rejects(obj.counter.increment(2), {
-        name: "Error",
-        message: "RPC stub used after being disposed."
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
       });
     }
 
@@ -801,8 +859,8 @@ export let disposal = {
 
       // But after the call, the stub is disposed.
       await assert.rejects(obj.incrementOriginal(), {
-        name: "Error",
-        message: "RPC stub used after being disposed."
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
       });
 
       // The duplicate we created in the call still works though.
@@ -814,12 +872,12 @@ export let disposal = {
       // But of course, disposing the return value overall breaks everything.
       obj[Symbol.dispose]();
       await assert.rejects(obj.counter.increment(2), {
-        name: "Error",
-        message: "RPC stub used after being disposed."
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
       });
       await assert.rejects(obj.incrementDup(7), {
-        name: "Error",
-        message: "RPC stub used after being disposed."
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
       });
 
       await counter.onDisposed();
@@ -845,15 +903,15 @@ export let disposal = {
 
       // If we abort the server's I/O context, though, then the counter is disposed.
       await assert.rejects(obj.abort(), {
-        name: "RangeError",
-        message: "foo bar abort reason"
+        name: 'RangeError',
+        message: 'foo bar abort reason',
       });
 
       await counter.onDisposed();
       assert.strictEqual(counter.disposed, true);
     }
   },
-}
+};
 
 export let crossContextSharingDoesntWork = {
   async test(controller, env, ctx) {
@@ -871,16 +929,19 @@ export let crossContextSharingDoesntWork = {
     // tied to an I/O context. Awaiting the property actually initiates a new RPC session from
     // whatever context performed teh await.
     globalRpcPromise = env.MyService.nonFunctionProperty;
-    assert.strictEqual(JSON.stringify(await env.MyService.tryUseGlobalRpcPromise()), '{"foo":123}');
+    assert.strictEqual(
+      JSON.stringify(await env.MyService.tryUseGlobalRpcPromise()),
+      '{"foo":123}'
+    );
 
     // OK, now let's look at cases that do NOT work. These all produce the same error.
     let expectedError = {
-      name: "Error",
+      name: 'Error',
       message:
-          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, " +
-          "request/response bodies, and others) created in the context of one request handler " +
-          "cannot be accessed from a different request's handler. This is a limitation of " +
-          "Cloudflare Workers which allows us to improve overall performance."
+        'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
+        'request/response bodies, and others) created in the context of one request handler ' +
+        "cannot be accessed from a different request's handler. This is a limitation of " +
+        'Cloudflare Workers which allows us to improve overall performance.',
     };
 
     // A promise which resolves to a value that contains a stub. The stub cannot be used from a
@@ -892,23 +953,23 @@ export let crossContextSharingDoesntWork = {
     globalRpcPromise = env.MyService.makeCounter(12);
 
     await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), {
-      name: "Error",
+      name: 'Error',
       message:
-          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, " +
-          "request/response bodies, and others) created in the context of one request handler " +
-          "cannot be accessed from a different request's handler. This is a limitation of " +
-          "Cloudflare Workers which allows us to improve overall performance. (I/O type: Client)"
+        'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
+        'request/response bodies, and others) created in the context of one request handler ' +
+        "cannot be accessed from a different request's handler. This is a limitation of " +
+        'Cloudflare Workers which allows us to improve overall performance. (I/O type: Client)',
     });
 
     // Pipelining on someone else's promise straight-up doesn't work.
     await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), {
-      name: "Error",
+      name: 'Error',
       message:
-          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, " +
-          "request/response bodies, and others) created in the context of one request handler " +
-          "cannot be accessed from a different request's handler. This is a limitation of " +
-          "Cloudflare Workers which allows us to improve overall performance. " +
-          "(I/O type: JsRpcPromise)"
+        'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
+        'request/response bodies, and others) created in the context of one request handler ' +
+        "cannot be accessed from a different request's handler. This is a limitation of " +
+        'Cloudflare Workers which allows us to improve overall performance. ' +
+        '(I/O type: JsRpcPromise)',
     });
 
     // Now let's try accessing a JsRpcProperty, where the property is NOT a direct property of a
@@ -918,25 +979,25 @@ export let crossContextSharingDoesntWork = {
     globalRpcPromise = env.MyService.getAnObject(5).counter;
 
     await assert.rejects(() => env.MyService.tryUseGlobalRpcPromise(), {
-      name: "Error",
+      name: 'Error',
       message:
-          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, " +
-          "request/response bodies, and others) created in the context of one request handler " +
-          "cannot be accessed from a different request's handler. This is a limitation of " +
-          "Cloudflare Workers which allows us to improve overall performance. (I/O type: Pipeline)"
+        'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
+        'request/response bodies, and others) created in the context of one request handler ' +
+        "cannot be accessed from a different request's handler. This is a limitation of " +
+        'Cloudflare Workers which allows us to improve overall performance. (I/O type: Pipeline)',
     });
 
     await assert.rejects(() => env.MyService.tryUseGlobalRpcPromisePipeline(), {
-      name: "Error",
+      name: 'Error',
       message:
-          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, " +
-          "request/response bodies, and others) created in the context of one request handler " +
-          "cannot be accessed from a different request's handler. This is a limitation of " +
-          "Cloudflare Workers which allows us to improve overall performance. " +
-          "(I/O type: JsRpcPromise)"
+        'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
+        'request/response bodies, and others) created in the context of one request handler ' +
+        "cannot be accessed from a different request's handler. This is a limitation of " +
+        'Cloudflare Workers which allows us to improve overall performance. ' +
+        '(I/O type: JsRpcPromise)',
     });
   },
-}
+};
 
 export let waitUntilWorks = {
   async test(controller, env, ctx) {
@@ -945,8 +1006,8 @@ export let waitUntilWorks = {
 
     assert.strictEqual(globalWaitUntilPromise instanceof Promise, true);
     await globalWaitUntilPromise;
-  }
-}
+  },
+};
 
 function stripDispose(obj) {
   assert.deepEqual(!!obj[Symbol.dispose], true);
@@ -959,76 +1020,107 @@ export let serializeRpcPromiseOrProprety = {
     // What happens if we actually try to serialize a JsRpcPromise or JsRpcProperty? Let's make
     // sure these aren't, for instance, treated as functions because they are callable.
 
-    let func = () => {return {x: 123};};
-    func.foo = {x: 456};
+    let func = () => {
+      return { x: 123 };
+    };
+    func.foo = { x: 456 };
 
     // If we directly return returning a JsRpcPromise, the system automatically awaits it on the
     // server side because it's a thenable.
-    assert.deepEqual(stripDispose(await env.MyService.getRpcPromise(func)), {x: 123})
+    assert.deepEqual(stripDispose(await env.MyService.getRpcPromise(func)), {
+      x: 123,
+    });
 
     // Pipelining also works.
-    assert.strictEqual(await env.MyService.getRpcPromise(func).x, 123)
+    assert.strictEqual(await env.MyService.getRpcPromise(func).x, 123);
 
     // If a JsRpcPromise appears somewhere in the serialization tree, it'll just fail serialization.
     // NOTE: We could choose to make this work later.
     await assert.rejects(() => env.MyService.getNestedRpcPromise(func), {
-      name: "DataCloneError",
-      message: 'Could not serialize object of type "RpcPromise". This type does not support ' +
-               'serialization.'
+      name: 'DataCloneError',
+      message:
+        'Could not serialize object of type "RpcPromise". This type does not support ' +
+        'serialization.',
     });
     await assert.rejects(() => env.MyService.getNestedRpcPromise(func).value, {
-      name: "DataCloneError",
-      message: 'Could not serialize object of type "RpcPromise". This type does not support ' +
-               'serialization.'
+      name: 'DataCloneError',
+      message:
+        'Could not serialize object of type "RpcPromise". This type does not support ' +
+        'serialization.',
     });
-    await assert.rejects(() => env.MyService.getNestedRpcPromise(func).value.x, {
-      name: "DataCloneError",
-      message: 'Could not serialize object of type "RpcPromise". This type does not support ' +
-               'serialization.'
-    });
+    await assert.rejects(
+      () => env.MyService.getNestedRpcPromise(func).value.x,
+      {
+        name: 'DataCloneError',
+        message:
+          'Could not serialize object of type "RpcPromise". This type does not support ' +
+          'serialization.',
+      }
+    );
 
     // Things get a little weird when we return a stub which itself has properties that reflect
     // our RPC promise. If we await fetch the JsRpcPromise itself, this works, again because
     // somewhere along the line V8 says "oh look a thenable" and awaits it, before it can be
     // subject to serialization. That's fine.
-    assert.deepEqual(stripDispose(await env.MyService.getRemoteNestedRpcPromise(func).value),
-                     {x: 123});
-    await assert.rejects(() => env.MyService.getRemoteNestedRpcPromise(func).value.x, {
-      name: "TypeError",
-      message: 'The RPC receiver does not implement the method "value".'
-    });
+    assert.deepEqual(
+      stripDispose(await env.MyService.getRemoteNestedRpcPromise(func).value),
+      { x: 123 }
+    );
+    await assert.rejects(
+      () => env.MyService.getRemoteNestedRpcPromise(func).value.x,
+      {
+        name: 'TypeError',
+        message: 'The RPC receiver does not implement the method "value".',
+      }
+    );
 
     // The story is similar for a JsRpcProperty -- though the implementation details differ.
-    assert.deepEqual(stripDispose(await env.MyService.getRpcProperty(func)), {x: 456})
-    assert.strictEqual(await env.MyService.getRpcProperty(func).x, 456)
+    assert.deepEqual(stripDispose(await env.MyService.getRpcProperty(func)), {
+      x: 456,
+    });
+    assert.strictEqual(await env.MyService.getRpcProperty(func).x, 456);
     await assert.rejects(() => env.MyService.getNestedRpcProperty(func), {
-      name: "DataCloneError",
-      message: 'Could not serialize object of type "RpcProperty". This type does not support ' +
-               'serialization.'
+      name: 'DataCloneError',
+      message:
+        'Could not serialize object of type "RpcProperty". This type does not support ' +
+        'serialization.',
     });
     await assert.rejects(() => env.MyService.getNestedRpcProperty(func).value, {
-      name: "DataCloneError",
-      message: 'Could not serialize object of type "RpcProperty". This type does not support ' +
-               'serialization.'
+      name: 'DataCloneError',
+      message:
+        'Could not serialize object of type "RpcProperty". This type does not support ' +
+        'serialization.',
     });
-    await assert.rejects(() => env.MyService.getNestedRpcProperty(func).value.x, {
-      name: "DataCloneError",
-      message: 'Could not serialize object of type "RpcProperty". This type does not support ' +
-               'serialization.'
-    });
+    await assert.rejects(
+      () => env.MyService.getNestedRpcProperty(func).value.x,
+      {
+        name: 'DataCloneError',
+        message:
+          'Could not serialize object of type "RpcProperty". This type does not support ' +
+          'serialization.',
+      }
+    );
 
-    assert.deepEqual(stripDispose(await env.MyService.getRemoteNestedRpcProperty(func).value),
-                     {x: 456});
-    await assert.rejects(() => env.MyService.getRemoteNestedRpcProperty(func).value.x, {
-      name: "TypeError",
-      message: 'The RPC receiver does not implement the method "value".'
-    });
-    await assert.rejects(() => env.MyService.getRemoteNestedRpcProperty(func).value(), {
-      name: "TypeError",
-      message: '"value" is not a function.'
-    });
+    assert.deepEqual(
+      stripDispose(await env.MyService.getRemoteNestedRpcProperty(func).value),
+      { x: 456 }
+    );
+    await assert.rejects(
+      () => env.MyService.getRemoteNestedRpcProperty(func).value.x,
+      {
+        name: 'TypeError',
+        message: 'The RPC receiver does not implement the method "value".',
+      }
+    );
+    await assert.rejects(
+      () => env.MyService.getRemoteNestedRpcProperty(func).value(),
+      {
+        name: 'TypeError',
+        message: '"value" is not a function.',
+      }
+    );
   },
-}
+};
 
 export let streams = {
   async test(controller, env, ctx) {
@@ -1037,7 +1129,7 @@ export let streams = {
       let { readable, writable } = new IdentityTransformStream();
       let promise = env.MyService.writeToStream(writable);
       let text = await new Response(readable).text();
-      assert.strictEqual(text, "foo, bar, baz!");
+      assert.strictEqual(text, 'foo, bar, baz!');
       await promise;
     }
 
@@ -1047,7 +1139,7 @@ export let streams = {
       const { promise, resolve } = Promise.withResolvers();
       const writable = new WritableStream({
         write(chunk) {
-          result += dec.decode(chunk, {stream: true});
+          result += dec.decode(chunk, { stream: true });
         },
         close() {
           result += dec.decode();
@@ -1056,7 +1148,7 @@ export let streams = {
       });
       const p1 = env.MyService.writeToStream(writable);
       await promise;
-      assert.strictEqual(result, "foo, bar, baz!");
+      assert.strictEqual(result, 'foo, bar, baz!');
       await p1;
     }
 
@@ -1100,16 +1192,18 @@ export let streams = {
         write(chunk) {},
         abort(reason) {
           resolve(reason);
-        }
+        },
       });
       await env.MyService.writeToStreamAbort(writable);
       const reason = await promise;
       // TODO(someday): The reason should be the error that was passed to abort on the
       // remote side, but we currently do not propagate this. We end up with a generic
       // disconnection error instead, which certainly not ideal.
-      assert.strictEqual(reason.message,
-          'WritableStream received over RPC was disconnected because the remote execution ' +
-          'context has endeded.');
+      assert.strictEqual(
+        reason.message,
+        'WritableStream received over RPC was disconnected because the remote execution ' +
+          'context has endeded.'
+      );
     }
 
     // TODO(someday): Is there any way to construct an encoded WritableStream? Only system
@@ -1122,29 +1216,31 @@ export let streams = {
 
       let writer = writable.getWriter();
       let enc = new TextEncoder();
-      await writer.write(enc.encode("foo, "));
-      await writer.write(enc.encode("bar, "));
-      await writer.write(enc.encode("baz!"));
+      await writer.write(enc.encode('foo, '));
+      await writer.write(enc.encode('bar, '));
+      await writer.write(enc.encode('baz!'));
       await writer.close();
 
-      assert.strictEqual(await promise, "foo, bar, baz!");
+      assert.strictEqual(await promise, 'foo, bar, baz!');
     }
 
     // Send a JS-backed ReadableStream.
     {
       let controller;
       let readable = new ReadableStream({
-        start(c) { controller = c; }
+        start(c) {
+          controller = c;
+        },
       });
       let promise = env.MyService.readFromStream(readable);
 
       let enc = new TextEncoder();
-      controller.enqueue(enc.encode("foo, "));
-      controller.enqueue(enc.encode("bar, "));
-      controller.enqueue(enc.encode("baz!"));
+      controller.enqueue(enc.encode('foo, '));
+      controller.enqueue(enc.encode('bar, '));
+      controller.enqueue(enc.encode('baz!'));
       controller.close();
 
-      assert.strictEqual(await promise, "foo, bar, baz!");
+      assert.strictEqual(await promise, 'foo, bar, baz!');
     }
 
     // Send streams that are locked.
@@ -1153,25 +1249,25 @@ export let streams = {
 
       let writer = writable.getWriter();
       let enc = new TextEncoder();
-      writer.write(enc.encode("foo"));
+      writer.write(enc.encode('foo'));
 
       let reader = readable.getReader();
 
       assert.rejects(env.MyService.writeToStream(writable), {
-        name: "TypeError",
-        message: "The WritableStream has been locked to a writer."
+        name: 'TypeError',
+        message: 'The WritableStream has been locked to a writer.',
       });
       assert.rejects(env.MyService.readFromStream(readable), {
-        name: "TypeError",
-        message: "The ReadableStream has been locked to a reader."
+        name: 'TypeError',
+        message: 'The ReadableStream has been locked to a reader.',
       });
 
       // Verify the streams still work.
       let dec = new TextDecoder();
-      assert.strictEqual(dec.decode((await reader.read()).value), "foo");
+      assert.strictEqual(dec.decode((await reader.read()).value), 'foo');
 
-      writer.write(enc.encode("bar"));
-      assert.strictEqual(dec.decode((await reader.read()).value), "bar");
+      writer.write(enc.encode('bar'));
+      assert.strictEqual(dec.decode((await reader.read()).value), 'bar');
 
       writer.close();
       assert.strictEqual((await reader.read()).done, true);
@@ -1181,14 +1277,20 @@ export let streams = {
     {
       let readable = await env.MyService.returnReadableStream();
       let text = await new Response(readable).text();
-      assert.strictEqual(text, "foo, bar, baz!");
+      assert.strictEqual(text, 'foo, bar, baz!');
     }
 
     // Receive multiple ReadableStreams.
     {
       let readables = await env.MyService.returnMultipleReadableStreams();
-      assert.strictEqual(await new Response(readables[0]).text(), "foo, bar, baz!");
-      assert.strictEqual(await new Response(readables[1]).text(), "foo, bar, baz!");
+      assert.strictEqual(
+        await new Response(readables[0]).text(),
+        'foo, bar, baz!'
+      );
+      assert.strictEqual(
+        await new Response(readables[1]).text(),
+        'foo, bar, baz!'
+      );
     }
 
     // Send ReadableStream, but fail to fully write it.
@@ -1198,40 +1300,42 @@ export let streams = {
 
       let writer = writable.getWriter();
       let enc = new TextEncoder();
-      await writer.write(enc.encode("foo, "));
-      await writer.write(enc.encode("bar, "));
-      await writer.write(enc.encode("baz!"));
-      await writer.abort("foo");
+      await writer.write(enc.encode('foo, '));
+      await writer.write(enc.encode('bar, '));
+      await writer.write(enc.encode('baz!'));
+      await writer.abort('foo');
 
       await assert.rejects(promise, {
-        name: "Error",
+        name: 'Error',
         // TODO(someday): Propagate the actual error.
-        message: "ReadableStream received over RPC disconnected prematurely."
+        message: 'ReadableStream received over RPC disconnected prematurely.',
       });
     }
 
     // Send fixed-length ReadableStream.
     {
-      let { readable, writable } = new FixedLengthStream("foo, bar, baz!".length);
+      let { readable, writable } = new FixedLengthStream(
+        'foo, bar, baz!'.length
+      );
       let promise = env.MyService.readFromStream(readable);
 
       let writer = writable.getWriter();
       let enc = new TextEncoder();
-      await writer.write(enc.encode("foo, "));
-      await writer.write(enc.encode("bar, "));
-      await writer.write(enc.encode("baz!"));
+      await writer.write(enc.encode('foo, '));
+      await writer.write(enc.encode('bar, '));
+      await writer.write(enc.encode('baz!'));
       await writer.close();
 
-      assert.strictEqual(await promise, "foo, bar, baz!");
+      assert.strictEqual(await promise, 'foo, bar, baz!');
     }
 
     // Send an encoded ReadableStream
     {
-      let gzippedResp = await env.self.fetch("http://foo/gzip");
+      let gzippedResp = await env.self.fetch('http://foo/gzip');
 
       let text = await env.MyService.readFromStream(gzippedResp.body);
 
-      assert.strictEqual(text, "this text was gzipped");
+      assert.strictEqual(text, 'this text was gzipped');
     }
 
     // Round trip streams.
@@ -1245,22 +1349,22 @@ export let streams = {
 
       let writer = writable.getWriter();
       let enc = new TextEncoder();
-      await writer.write(enc.encode("foo, "));
-      await writer.write(enc.encode("bar, "));
-      await writer.write(enc.encode("baz!"));
+      await writer.write(enc.encode('foo, '));
+      await writer.write(enc.encode('bar, '));
+      await writer.write(enc.encode('baz!'));
       await writer.close();
 
-      assert.strictEqual(await readPromise, "foo, bar, baz!");
+      assert.strictEqual(await readPromise, 'foo, bar, baz!');
     }
 
     // Perform an HTTP request whose response uses a ReadableStream obtained over RPC.
     {
-      let resp = await env.self.fetch("http://foo/stream-from-rpc");
+      let resp = await env.self.fetch('http://foo/stream-from-rpc');
 
-      assert.strictEqual(await resp.text(), "foo, bar, baz!");
+      assert.strictEqual(await resp.text(), 'foo, bar, baz!');
     }
-  }
-}
+  },
+};
 
 export let serializeHttpTypes = {
   async test(controller, env, ctx) {
@@ -1274,55 +1378,63 @@ export let serializeHttpTypes = {
       assert.strictEqual(headers instanceof Headers, true);
 
       // Awkwardly, there's actually no API to get the non-lowercased header names.
-      assert.deepEqual([...headers], [
-        ["content-length", "123"],
-        ["corge", "!@#"],
-        ["foo", "bar"],
-        ["set-cookie", "abc"],
-        ["set-cookie", "def"],
-      ]);
+      assert.deepEqual(
+        [...headers],
+        [
+          ['content-length', '123'],
+          ['corge', '!@#'],
+          ['foo', 'bar'],
+          ['set-cookie', 'abc'],
+          ['set-cookie', 'def'],
+        ]
+      );
 
-      assert.deepEqual(headers.getSetCookie(), ["abc", "def"]);
+      assert.deepEqual(headers.getSetCookie(), ['abc', 'def']);
     }
 
     {
       let req = await env.MyService.returnRequest();
 
-      assert.strictEqual(req.url, "http://my-url.com");
-      assert.strictEqual(req.method, "PUT");
-      assert.strictEqual(req.headers.get("Accept-Encoding"), "bazzip");
-      assert.strictEqual(req.headers.get("Foo"), "Bar");
-      assert.strictEqual(req.redirect, "manual");
+      assert.strictEqual(req.url, 'http://my-url.com');
+      assert.strictEqual(req.method, 'PUT');
+      assert.strictEqual(req.headers.get('Accept-Encoding'), 'bazzip');
+      assert.strictEqual(req.headers.get('Foo'), 'Bar');
+      assert.strictEqual(req.redirect, 'manual');
 
-      assert.strictEqual(await req.text(), "Hello every body!");
+      assert.strictEqual(await req.text(), 'Hello every body!');
 
       assert.deepEqual(req.cf, {
         abc: 123,
-        hello: "goodbye",
+        hello: 'goodbye',
       });
     }
 
     // Check that a Request with an AbortSignal can't be sent. (We should fix this someday, by
     // making AbortSignal itself RPC-compatible.)
-    await assert.rejects(env.MyService.roundTrip(
-        new Request("http://foo", {signal: AbortSignal.timeout(100)})), {
-      name: "DataCloneError",
-      message: 'Could not serialize object of type "AbortSignal". This type does not support ' +
-               'serialization.'
-    });
+    await assert.rejects(
+      env.MyService.roundTrip(
+        new Request('http://foo', { signal: AbortSignal.timeout(100) })
+      ),
+      {
+        name: 'DataCloneError',
+        message:
+          'Could not serialize object of type "AbortSignal". This type does not support ' +
+          'serialization.',
+      }
+    );
 
     {
       let req = await env.MyService.returnResponse();
 
       assert.strictEqual(req.status, 404);
-      assert.strictEqual(req.statusText, "Not Found");
-      assert.strictEqual(req.headers.get("Content-Type"), "abc");
-      assert.deepEqual(req.cf, {foo: 123, bar: "def"});
+      assert.strictEqual(req.statusText, 'Not Found');
+      assert.strictEqual(req.headers.get('Content-Type'), 'abc');
+      assert.deepEqual(req.cf, { foo: 123, bar: 'def' });
 
-      assert.strictEqual(await req.text(), "Response body!");
+      assert.strictEqual(await req.text(), 'Response body!');
     }
-  }
-}
+  },
+};
 
 // Test that exceptions thrown from async native functions have a proper stack trace. (This is
 // not specific to RPC but RPC is a convenient place to test it since we can easily define the
@@ -1336,10 +1448,10 @@ export let testAsyncStackTrace = {
       await env.MyService.throwingMethod();
     } catch (e) {
       // verify stack trace was produced
-      assert.strictEqual(e.stack.includes("at async Object.test"), true);
+      assert.strictEqual(e.stack.includes('at async Object.test'), true);
     }
-  }
-}
+  },
+};
 
 // Test that exceptions thrown over RPC have the .remote property.
 export let testExceptionProperties = {
@@ -1348,10 +1460,10 @@ export let testExceptionProperties = {
       await env.MyService.throwingMethod();
     } catch (e) {
       assert.strictEqual(e.remote, true);
-      assert.strictEqual(e.message, "METHOD THREW");
+      assert.strictEqual(e.message, 'METHOD THREW');
     }
-  }
-}
+  },
+};
 
 // Test that get(), put(), and delete() are valid RPC method names, not hijacked by Fetcher.
 export let canUseGetPutDelete = {
@@ -1359,8 +1471,8 @@ export let canUseGetPutDelete = {
     assert.strictEqual(await env.MyService.get(12), 13);
     assert.strictEqual(await env.MyService.put(5, 7), 12);
     assert.strictEqual(await env.MyService.delete(3), 2);
-  }
-}
+  },
+};
 
 // Test that stubs can still be used after logging them.
 export let logging = {
@@ -1371,16 +1483,16 @@ export let logging = {
     assert.strictEqual(await stub.increment(1), 2);
     console.log(stub);
     assert.strictEqual(await stub.increment(1), 3);
-  }
-}
+  },
+};
 
 // DOMException is structured cloneable
 export let domExceptionClone = {
   test() {
-    const de1 = new DOMException("hello", "NotAllowedError");
+    const de1 = new DOMException('hello', 'NotAllowedError');
 
     // custom own properties on the instance are not preserved...
-    de1.foo = "ignored";
+    de1.foo = 'ignored';
 
     const de2 = structuredClone(de1);
     assert.strictEqual(de1.name, de2.name);
@@ -1390,5 +1502,5 @@ export let domExceptionClone = {
     assert.notStrictEqual(de1, de2);
     assert.notStrictEqual(de1.foo, de2.foo);
     assert.strictEqual(de2.foo, undefined);
-  }
-}
+  },
+};

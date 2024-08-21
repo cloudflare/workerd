@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { default as flags } from "workerd:compatibility-flags";
+import { default as flags } from 'workerd:compatibility-flags';
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -16,7 +16,7 @@ enum Operation {
   VECTOR_DELETE = 5,
 }
 
-type VectorizeVersion = "v1" | "v2";
+type VectorizeVersion = 'v1' | 'v2';
 
 /*
  * The Vectorize beta VectorizeIndex shares the same methods, so to keep things simple, they share one implementation.
@@ -32,9 +32,9 @@ class VectorizeIndexImpl implements Vectorize {
 
   public async describe(): Promise<VectorizeIndexInfo> {
     const endpoint =
-      this.indexVersion === "v2" ? `info` : `binding/indexes/${this.indexId}`;
+      this.indexVersion === 'v2' ? `info` : `binding/indexes/${this.indexId}`;
     const res = await this._send(Operation.INDEX_GET, endpoint, {
-      method: "GET",
+      method: 'GET',
     });
 
     return await toJson<VectorizeIndexInfo>(res);
@@ -44,27 +44,35 @@ class VectorizeIndexImpl implements Vectorize {
     vector: VectorFloatArray | number[],
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches> {
-    if (this.indexVersion === "v2") {
-      if (options && options.returnMetadata && !isVectorizeMetadataRetrievalLevel(options.returnMetadata) ) {
+    if (this.indexVersion === 'v2') {
+      if (
+        options &&
+        options.returnMetadata &&
+        !isVectorizeMetadataRetrievalLevel(options.returnMetadata)
+      ) {
         throw new Error(
           `Invalid returnMetadata option. Expected: "none", "indexed" or "all"; got: ${options.returnMetadata}`
         );
       }
       const res = await this._send(Operation.VECTOR_QUERY, `query`, {
-        method: "POST",
+        method: 'POST',
         body: JSON.stringify({
           ...options,
           vector: Array.isArray(vector) ? vector : Array.from(vector),
         }),
         headers: {
-          "content-type": "application/json",
-          accept: "application/json",
+          'content-type': 'application/json',
+          accept: 'application/json',
         },
       });
 
       return await toJson<VectorizeMatches>(res);
     } else {
-      if (options && options.returnMetadata && typeof options.returnMetadata !== 'boolean') {
+      if (
+        options &&
+        options.returnMetadata &&
+        typeof options.returnMetadata !== 'boolean'
+      ) {
         throw new Error(
           `Invalid returnMetadata option. Expected boolean; got: ${options.returnMetadata}`
         );
@@ -76,16 +84,16 @@ class VectorizeIndexImpl implements Vectorize {
         Operation.VECTOR_QUERY,
         `binding/indexes/${this.indexId}/query`,
         {
-          method: "POST",
+          method: 'POST',
           body: JSON.stringify({
             ...options,
             vector: Array.isArray(vector) ? vector : Array.from(vector),
             compat,
           }),
           headers: {
-            "content-type": "application/json",
-            accept: "application/json",
-            "cf-vector-search-query-compat": JSON.stringify(compat),
+            'content-type': 'application/json',
+            accept: 'application/json',
+            'cf-vector-search-query-compat': JSON.stringify(compat),
           },
         }
       );
@@ -98,11 +106,11 @@ class VectorizeIndexImpl implements Vectorize {
     vectors: VectorizeVector[]
   ): Promise<VectorizeAsyncMutation> {
     const endpoint =
-      this.indexVersion === "v2"
+      this.indexVersion === 'v2'
         ? `insert`
         : `binding/indexes/${this.indexId}/insert`;
     const res = await this._send(Operation.VECTOR_INSERT, endpoint, {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify({
         vectors: vectors.map((vec) => ({
           ...vec,
@@ -112,12 +120,12 @@ class VectorizeIndexImpl implements Vectorize {
         })),
       }),
       headers: {
-        "content-type": "application/json",
-        "cf-vector-search-dim-width": String(
+        'content-type': 'application/json',
+        'cf-vector-search-dim-width': String(
           vectors.length ? vectors[0]?.values?.length : 0
         ),
-        "cf-vector-search-dim-height": String(vectors.length),
-        accept: "application/json",
+        'cf-vector-search-dim-height': String(vectors.length),
+        accept: 'application/json',
       },
     });
 
@@ -128,11 +136,11 @@ class VectorizeIndexImpl implements Vectorize {
     vectors: VectorizeVector[]
   ): Promise<VectorizeAsyncMutation> {
     const endpoint =
-      this.indexVersion === "v2"
+      this.indexVersion === 'v2'
         ? `upsert`
         : `binding/indexes/${this.indexId}/upsert`;
     const res = await this._send(Operation.VECTOR_UPSERT, endpoint, {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify({
         vectors: vectors.map((vec) => ({
           ...vec,
@@ -142,12 +150,12 @@ class VectorizeIndexImpl implements Vectorize {
         })),
       }),
       headers: {
-        "content-type": "application/json",
-        "cf-vector-search-dim-width": String(
+        'content-type': 'application/json',
+        'cf-vector-search-dim-width': String(
           vectors.length ? vectors[0]?.values?.length : 0
         ),
-        "cf-vector-search-dim-height": String(vectors.length),
-        accept: "application/json",
+        'cf-vector-search-dim-height': String(vectors.length),
+        accept: 'application/json',
       },
     });
 
@@ -156,15 +164,15 @@ class VectorizeIndexImpl implements Vectorize {
 
   public async getByIds(ids: string[]): Promise<VectorizeVector[]> {
     const endpoint =
-      this.indexVersion === "v2"
+      this.indexVersion === 'v2'
         ? `getByIds`
         : `binding/indexes/${this.indexId}/getByIds`;
     const res = await this._send(Operation.VECTOR_GET, endpoint, {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify({ ids }),
       headers: {
-        "content-type": "application/json",
-        accept: "application/json",
+        'content-type': 'application/json',
+        accept: 'application/json',
       },
     });
 
@@ -173,15 +181,15 @@ class VectorizeIndexImpl implements Vectorize {
 
   public async deleteByIds(ids: string[]): Promise<VectorizeAsyncMutation> {
     const endpoint =
-      this.indexVersion === "v2"
+      this.indexVersion === 'v2'
         ? `deleteByIds`
         : `binding/indexes/${this.indexId}/deleteByIds`;
     const res = await this._send(Operation.VECTOR_DELETE, endpoint, {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify({ ids }),
       headers: {
-        "content-type": "application/json",
-        accept: "application/json",
+        'content-type': 'application/json',
+        accept: 'application/json',
       },
     });
 
@@ -204,9 +212,9 @@ class VectorizeIndexImpl implements Vectorize {
         const errResponse = (await res.json()) as VectorizeError;
         err = new Error(
           `${Operation[operation]}_ERROR${
-            typeof errResponse.code === "number"
+            typeof errResponse.code === 'number'
               ? ` (code = ${errResponse.code})`
-              : ""
+              : ''
           }: ${errResponse.error}`,
           {
             cause: new Error(errResponse.error),
@@ -230,8 +238,13 @@ class VectorizeIndexImpl implements Vectorize {
   }
 }
 
-function isVectorizeMetadataRetrievalLevel(value: unknown): value is VectorizeMetadataRetrievalLevel {
-  return typeof value === 'string' && (value === 'all' || value === 'indexed' || value === 'none');
+function isVectorizeMetadataRetrievalLevel(
+  value: unknown
+): value is VectorizeMetadataRetrievalLevel {
+  return (
+    typeof value === 'string' &&
+    (value === 'all' || value === 'indexed' || value === 'none')
+  );
 }
 
 const maxBodyLogChars = 1_000;
@@ -258,7 +271,7 @@ export function makeBinding(env: {
   return new VectorizeIndexImpl(
     env.fetcher,
     env.indexId,
-    env.indexVersion ?? "v1"
+    env.indexVersion ?? 'v1'
   );
 }
 

@@ -1,8 +1,4 @@
-import {
-  strictEqual,
-  ok,
-  throws
-} from 'node:assert';
+import { strictEqual, ok, throws } from 'node:assert';
 
 // Test for the AbortSignal and AbortController standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
@@ -12,12 +8,14 @@ export const abortControllerAlreadyAborted = {
     const ac = new AbortController();
     ac.abort();
     try {
-      const result = await env.subrequest.fetch('http://example.org', { signal: ac.signal });
+      const result = await env.subrequest.fetch('http://example.org', {
+        signal: ac.signal,
+      });
       throw new Error('should have failed');
     } catch (err) {
       strictEqual(err.message, 'The operation was aborted');
     }
-  }
+  },
 };
 
 export const alreadyAborted = {
@@ -29,7 +27,7 @@ export const alreadyAborted = {
     } catch (err) {
       strictEqual(err, 'boom');
     }
-  }
+  },
 };
 
 export const timedAbort = {
@@ -41,21 +39,23 @@ export const timedAbort = {
     } catch (err) {
       strictEqual(err.message, 'The operation was aborted due to timeout');
     }
-  }
+  },
 };
 
 export const abortControllerSyncAbort = {
   async test(ctrl, env) {
     const ac = new AbortController();
     try {
-      const promise = env.subrequest.fetch('http://example.org', { signal: ac.signal });
+      const promise = env.subrequest.fetch('http://example.org', {
+        signal: ac.signal,
+      });
       ac.abort();
       await promise;
       throw new Error('should have failed');
     } catch (err) {
       strictEqual(err.message, 'The operation was aborted');
     }
-  }
+  },
 };
 
 export const asyncSubrequest = {
@@ -66,7 +66,7 @@ export const asyncSubrequest = {
     } catch (err) {
       strictEqual(err.message, 'The operation was aborted due to timeout');
     }
-  }
+  },
 };
 
 export const syncSubrequest = {
@@ -77,7 +77,7 @@ export const syncSubrequest = {
     } catch (err) {
       strictEqual(err.message, 'The operation was aborted');
     }
-  }
+  },
 };
 
 export const requestAbortSignal = {
@@ -90,7 +90,7 @@ export const requestAbortSignal = {
     const ac = new AbortController();
     const req2 = new Request('', { signal: ac.signal });
     strictEqual(req2.signal, ac.signal);
-  }
+  },
 };
 
 export default {
@@ -104,13 +104,14 @@ export default {
       // Verifies that a fetch subrequest returned as the response can be synchronously
       // aborted.
       const ac = new AbortController();
-      const resp = env.subrequest.fetch('http://example.org', { signal: ac.signal });
+      const resp = env.subrequest.fetch('http://example.org', {
+        signal: ac.signal,
+      });
       ac.abort();
       return resp;
     } else {
       await scheduler.wait(10000);
-      return new Response("ok");
+      return new Response('ok');
     }
-  }
+  },
 };
-

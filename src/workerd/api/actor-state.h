@@ -34,17 +34,14 @@ public:
     jsg::Optional<bool> noCache;
 
     inline operator ActorCacheOps::ReadOptions() const {
-      return {
-        .noCache = noCache.orDefault(false)
-      };
+      return {.noCache = noCache.orDefault(false)};
     }
 
     JSG_STRUCT(allowConcurrency, noCache);
-    JSG_STRUCT_TS_OVERRIDE(DurableObjectGetOptions); // Rename from DurableObjectStorageOperationsGetOptions
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectGetOptions);  // Rename from DurableObjectStorageOperationsGetOptions
   };
 
-  jsg::Promise<jsg::JsRef<jsg::JsValue>> get(
-      jsg::Lock& js,
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> get(jsg::Lock& js,
       kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       jsg::Optional<GetOptions> options);
 
@@ -52,7 +49,7 @@ public:
     jsg::Optional<bool> allowConcurrency;
 
     JSG_STRUCT(allowConcurrency);
-    JSG_STRUCT_TS_OVERRIDE(DurableObjectGetAlarmOptions); // Rename from DurableObjectStorageOperationsGetAlarmOptions
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectGetAlarmOptions);  // Rename from DurableObjectStorageOperationsGetAlarmOptions
   };
 
   jsg::Promise<kj::Maybe<double>> getAlarm(jsg::Lock& js, jsg::Optional<GetAlarmOptions> options);
@@ -69,13 +66,11 @@ public:
     jsg::Optional<bool> noCache;
 
     inline operator ActorCacheOps::ReadOptions() const {
-      return {
-        .noCache = noCache.orDefault(false)
-      };
+      return {.noCache = noCache.orDefault(false)};
     }
 
     JSG_STRUCT(start, startAfter, end, prefix, reverse, limit, allowConcurrency, noCache);
-    JSG_STRUCT_TS_OVERRIDE(DurableObjectListOptions); // Rename from DurableObjectStorageOperationsListOptions
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectListOptions);  // Rename from DurableObjectStorageOperationsListOptions
   };
 
   jsg::Promise<jsg::JsRef<jsg::JsValue>> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
@@ -87,23 +82,20 @@ public:
 
     inline operator ActorCacheOps::WriteOptions() const {
       return {
-        .allowUnconfirmed = allowUnconfirmed.orDefault(false),
-        .noCache = noCache.orDefault(false)
-      };
+        .allowUnconfirmed = allowUnconfirmed.orDefault(false), .noCache = noCache.orDefault(false)};
     }
 
     JSG_STRUCT(allowConcurrency, allowUnconfirmed, noCache);
-    JSG_STRUCT_TS_OVERRIDE(DurableObjectPutOptions); // Rename from DurableObjectStorageOperationsPutOptions
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectPutOptions);  // Rename from DurableObjectStorageOperationsPutOptions
   };
 
   jsg::Promise<void> put(jsg::Lock& js,
-                         kj::OneOf<kj::String, jsg::Dict<jsg::JsValue>> keyOrEntries,
-                         jsg::Optional<jsg::JsValue> value,
-                         jsg::Optional<PutOptions> options,
-                         const jsg::TypeHandler<PutOptions>& optionsTypeHandler);
+      kj::OneOf<kj::String, jsg::Dict<jsg::JsValue>> keyOrEntries,
+      jsg::Optional<jsg::JsValue> value,
+      jsg::Optional<PutOptions> options,
+      const jsg::TypeHandler<PutOptions>& optionsTypeHandler);
 
-  kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> delete_(
-      jsg::Lock& js,
+  kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> delete_(jsg::Lock& js,
       kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       jsg::Optional<PutOptions> options);
 
@@ -119,12 +111,11 @@ public:
     }
 
     JSG_STRUCT(allowConcurrency, allowUnconfirmed);
-    JSG_STRUCT_TS_OVERRIDE(DurableObjectSetAlarmOptions); // Rename from DurableObjectStorageOperationsSetAlarmOptions
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectSetAlarmOptions);  // Rename from DurableObjectStorageOperationsSetAlarmOptions
   };
 
-  jsg::Promise<void> setAlarm(jsg::Lock& js,
-                              kj::Date scheduledTime,
-                              jsg::Optional<SetAlarmOptions> options);
+  jsg::Promise<void> setAlarm(
+      jsg::Lock& js, kj::Date scheduledTime, jsg::Optional<SetAlarmOptions> options);
   jsg::Promise<void> deleteAlarm(jsg::Lock& js, jsg::Optional<SetAlarmOptions> options);
 
 protected:
@@ -160,34 +151,30 @@ protected:
   }
 
 private:
-  jsg::Promise<jsg::JsRef<jsg::JsValue>> getOne(jsg::Lock& js,
-                                                kj::String key,
-                                                const GetOptions& options);
-  jsg::Promise<jsg::JsRef<jsg::JsValue>> getMultiple(jsg::Lock& js,
-                                                     kj::Array<kj::String> keys,
-                                                     const GetOptions& options);
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> getOne(
+      jsg::Lock& js, kj::String key, const GetOptions& options);
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> getMultiple(
+      jsg::Lock& js, kj::Array<kj::String> keys, const GetOptions& options);
 
-  jsg::Promise<void> putOne(jsg::Lock& js,
-                            kj::String key,
-                            jsg::JsValue value,
-                            const PutOptions& options);
-  jsg::Promise<void> putMultiple(jsg::Lock& js, jsg::Dict<jsg::JsValue> entries,
-                                 const PutOptions& options);
+  jsg::Promise<void> putOne(
+      jsg::Lock& js, kj::String key, jsg::JsValue value, const PutOptions& options);
+  jsg::Promise<void> putMultiple(
+      jsg::Lock& js, jsg::Dict<jsg::JsValue> entries, const PutOptions& options);
 
   jsg::Promise<bool> deleteOne(jsg::Lock& js, kj::String key, const PutOptions& options);
-  jsg::Promise<int> deleteMultiple(jsg::Lock& js,
-                                   kj::Array<kj::String> keys,
-                                   const PutOptions& options);
+  jsg::Promise<int> deleteMultiple(
+      jsg::Lock& js, kj::Array<kj::String> keys, const PutOptions& options);
 };
 
 class DurableObjectTransaction;
 
 class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOperations {
 public:
-  DurableObjectStorage(IoPtr<ActorCacheInterface> cache)
-    : cache(kj::mv(cache)) {}
+  DurableObjectStorage(IoPtr<ActorCacheInterface> cache): cache(kj::mv(cache)) {}
 
-  ActorCacheInterface& getActorCacheInterface() { return *cache; }
+  ActorCacheInterface& getActorCacheInterface() {
+    return *cache;
+  }
 
   struct TransactionOptions {
     jsg::Optional<kj::Date> asOfTime;
@@ -198,15 +185,13 @@ public:
     // Omit from definitions
   };
 
-  jsg::Promise<jsg::JsRef<jsg::JsValue>> transaction(
-      jsg::Lock& js,
-      jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>(
-          jsg::Ref<DurableObjectTransaction>)> closure,
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> transaction(jsg::Lock& js,
+      jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>(jsg::Ref<DurableObjectTransaction>)>
+          closure,
       jsg::Optional<TransactionOptions> options);
 
   jsg::JsRef<jsg::JsValue> transactionSync(
-      jsg::Lock& js,
-      jsg::Function<jsg::JsRef<jsg::JsValue>()> callback);
+      jsg::Lock& js, jsg::Function<jsg::JsRef<jsg::JsValue>()> callback);
 
   jsg::Promise<void> deleteAll(jsg::Lock& js, jsg::Optional<PutOptions> options);
 
@@ -287,7 +272,7 @@ private:
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {
 public:
   DurableObjectTransaction(IoOwn<ActorCacheInterface::Transaction> cacheTxn)
-    : cacheTxn(kj::mv(cacheTxn)) {}
+      : cacheTxn(kj::mv(cacheTxn)) {}
 
   // Called from C++, not JS, after the transaction callback has completed (successfully or not).
   // These methods do nothing if the transaction is already committed / rolled back.
@@ -352,8 +337,8 @@ class ActorState: public jsg::Object {
   // TODO(cleanup): Remove getPersistent method that isn't supported for colo-local actors anymore.
 public:
   ActorState(Worker::Actor::Id actorId,
-             kj::Maybe<jsg::JsRef<jsg::JsValue>> transient,
-             kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent);
+      kj::Maybe<jsg::JsRef<jsg::JsValue>> transient,
+      kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent);
 
   kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
 
@@ -397,14 +382,20 @@ private:
 class WebSocketRequestResponsePair: public jsg::Object {
 public:
   WebSocketRequestResponsePair(kj::String request, kj::String response)
-      : request(kj::mv(request)), response(kj::mv(response)) {};
+      : request(kj::mv(request)),
+        response(kj::mv(response)) {};
 
-  static jsg::Ref<WebSocketRequestResponsePair> constructor(kj::String request, kj::String response) {
-    return jsg::alloc<WebSocketRequestResponsePair>(kj::mv(request),kj::mv(response));
+  static jsg::Ref<WebSocketRequestResponsePair> constructor(
+      kj::String request, kj::String response) {
+    return jsg::alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
   };
 
-  kj::StringPtr getRequest() { return request.asPtr(); }
-  kj::StringPtr getResponse() { return response.asPtr(); }
+  kj::StringPtr getRequest() {
+    return request.asPtr();
+  }
+  kj::StringPtr getResponse() {
+    return response.asPtr();
+  }
 
   JSG_RESOURCE_TYPE(WebSocketRequestResponsePair) {
     JSG_READONLY_PROTOTYPE_PROPERTY(request, getRequest);
@@ -435,8 +426,7 @@ public:
   }
 
   jsg::Promise<jsg::JsRef<jsg::JsValue>> blockConcurrencyWhile(
-      jsg::Lock& js,
-      jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>()> callback);
+      jsg::Lock& js, jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>()> callback);
 
   // Reset the object, including breaking the output gate and canceling any writes that haven't
   // been committed yet.
@@ -475,7 +465,8 @@ public:
   // reply to the request with the matching response, then store the timestamp at which
   // the request was received.
   // If maybeReqResp is not set, we consider it as unset and remove any set request response pair.
-  void setWebSocketAutoResponse(jsg::Optional<jsg::Ref<api::WebSocketRequestResponsePair>> maybeReqResp);
+  void setWebSocketAutoResponse(
+      jsg::Optional<jsg::Ref<api::WebSocketRequestResponsePair>> maybeReqResp);
 
   // Gets the currently set object-wide websocket auto response.
   kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse();
@@ -548,17 +539,13 @@ private:
   const size_t MAX_TAG_LENGTH = 256;
 };
 
-#define EW_ACTOR_STATE_ISOLATE_TYPES                     \
-  api::ActorState,                                       \
-  api::DurableObjectState,                               \
-  api::DurableObjectTransaction,                         \
-  api::DurableObjectStorage,                             \
-  api::DurableObjectStorage::TransactionOptions,         \
-  api::DurableObjectStorageOperations::ListOptions,      \
-  api::DurableObjectStorageOperations::GetOptions,       \
-  api::DurableObjectStorageOperations::GetAlarmOptions,  \
-  api::DurableObjectStorageOperations::PutOptions,       \
-  api::DurableObjectStorageOperations::SetAlarmOptions,  \
-  api::WebSocketRequestResponsePair
+#define EW_ACTOR_STATE_ISOLATE_TYPES                                                               \
+  api::ActorState, api::DurableObjectState, api::DurableObjectTransaction,                         \
+      api::DurableObjectStorage, api::DurableObjectStorage::TransactionOptions,                    \
+      api::DurableObjectStorageOperations::ListOptions,                                            \
+      api::DurableObjectStorageOperations::GetOptions,                                             \
+      api::DurableObjectStorageOperations::GetAlarmOptions,                                        \
+      api::DurableObjectStorageOperations::PutOptions,                                             \
+      api::DurableObjectStorageOperations::SetAlarmOptions, api::WebSocketRequestResponsePair
 
 }  // namespace workerd::api

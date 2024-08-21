@@ -20,10 +20,10 @@ static_assert(webidl::nullableTypeCount<int> == 0);
 static_assert(webidl::nullableTypeCount<kj::Maybe<int>> == 1);
 static_assert(webidl::nullableTypeCount<kj::Maybe<int>, kj::Maybe<kj::String>> == 2);
 static_assert(webidl::nullableTypeCount<kj::OneOf<kj::Maybe<int>, kj::Maybe<kj::String>>> == 2);
-static_assert(webidl::nullableTypeCount<kj::Maybe<kj::OneOf<kj::Maybe<int>,
-                                                            kj::Maybe<kj::String>>>> == 3);
+static_assert(
+    webidl::nullableTypeCount<kj::Maybe<kj::OneOf<kj::Maybe<int>, kj::Maybe<kj::String>>>> == 3);
 static_assert(webidl::nullableTypeCount<kj::OneOf<kj::Maybe<int>, kj::Maybe<kj::String>>,
-                                        kj::OneOf<kj::Maybe<bool>, kj::Maybe<char>>> == 4);
+                  kj::OneOf<kj::Maybe<bool>, kj::Maybe<char>>> == 4);
 static_assert(webidl::nullableTypeCount<kj::Maybe<kj::OneOf<kj::Maybe<int>>>> == 2);
 
 static_assert(webidl::hasDuplicateTypes<int> == false);

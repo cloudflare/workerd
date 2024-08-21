@@ -32,11 +32,12 @@ enum class CompatibilityDateValidation {
   FUTURE_FOR_TEST
 };
 
-void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text>::Reader compatFlags,
-                         CompatibilityFlags::Builder output,
-                         Worker::ValidationErrorReporter& errorReporter,
-                         bool allowExperimentalFeatures,
-                         CompatibilityDateValidation dateValidation);
+void compileCompatibilityFlags(kj::StringPtr compatDate,
+    capnp::List<capnp::Text>::Reader compatFlags,
+    CompatibilityFlags::Builder output,
+    Worker::ValidationErrorReporter& errorReporter,
+    bool allowExperimentalFeatures,
+    CompatibilityDateValidation dateValidation);
 
 // Return an array of compatibility enable-flags which express the given FeatureFlags. The returned
 // StringPtrs point to FeatureFlags annotation parameters, which live in static storage.
@@ -52,6 +53,7 @@ kj::String currentDateStr();
 
 kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
     CompatibilityFlags::Reader featureFlags);
+kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease);
 
 // These values come from src/workerd/io/compatibility-date.capnp
 static constexpr uint64_t COMPAT_ENABLE_FLAG_ANNOTATION_ID = 0xb6dabbc87cd1b03eull;

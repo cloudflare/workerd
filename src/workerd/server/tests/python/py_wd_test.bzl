@@ -7,8 +7,8 @@ def py_wd_test(
   args = [],
   **kwargs
 ):
-    data += ["pyodide-dev.capnp.bin@rule"]
-    args += ["--pyodide-bundle-disk-cache-dir", "$(location pyodide-dev.capnp.bin@rule)/.."]
+    data += ["pyodide_dev.capnp.bin@rule"]
+    args += ["--pyodide-bundle-disk-cache-dir", "$(location pyodide_dev.capnp.bin@rule)/.."]
 
     wd_test(
         src = src,

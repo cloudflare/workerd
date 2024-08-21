@@ -6,12 +6,12 @@
  * entropy_patches.py. setupShouldAllowBadEntropy reads out the address of the
  * byte that we use to control calls to crypto.getRandomValues from Python.
  */
-import { default as entropyPatches } from "pyodide-internal:topLevelEntropy/entropy_patches.py";
-import { default as entropyImportContext } from "pyodide-internal:topLevelEntropy/entropy_import_context.py";
-import { default as importPatchManager } from "pyodide-internal:topLevelEntropy/import_patch_manager.py";
-import { IS_TRACING } from "pyodide-internal:metadata";
-import { LOADED_SNAPSHOT_VERSION } from "pyodide-internal:snapshot";
-import { simpleRunPython } from "pyodide-internal:util";
+import { default as entropyPatches } from 'pyodide-internal:topLevelEntropy/entropy_patches.py';
+import { default as entropyImportContext } from 'pyodide-internal:topLevelEntropy/entropy_import_context.py';
+import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
+import { IS_TRACING } from 'pyodide-internal:metadata';
+import { LOADED_SNAPSHOT_VERSION } from 'pyodide-internal:snapshot';
+import { simpleRunPython } from 'pyodide-internal:util';
 
 // TODO: When we've updated all the snapshots, remove this.
 const SHOULD_GATE_ENTROPY =
@@ -31,9 +31,9 @@ function setupShouldAllowBadEntropy(Module: Module) {
   // We parse this as an integer.
   const res = simpleRunPython(
     Module,
-    "from _cloudflare.entropy_import_context import get_bad_entropy_flag;" +
-      "get_bad_entropy_flag();" +
-      "del get_bad_entropy_flag",
+    'from _cloudflare.entropy_import_context import get_bad_entropy_flag;' +
+      'get_bad_entropy_flag();' +
+      'del get_bad_entropy_flag'
   );
   allowed_entropy_calls_addr = Number(res);
 }
@@ -69,7 +69,7 @@ export function getRandomValues(Module: Module, arr: Uint8Array) {
   }
   if (!shouldAllowBadEntropy(Module)) {
     Module._dump_traceback();
-    throw new Error("Disallowed operation called within global scope");
+    throw new Error('Disallowed operation called within global scope');
   }
   // "entropy" in the test suite is a bunch of 42's. Good to use a readily identifiable pattern
   // here which is different than the test suite.
@@ -87,22 +87,22 @@ export function entropyMountFiles(Module: Module) {
   Module.FS.writeFile(
     `/lib/python3.12/site-packages/_cloudflare/__init__.py`,
     new Uint8Array(0),
-    { canOwn: true },
+    { canOwn: true }
   );
   Module.FS.writeFile(
     `/lib/python3.12/site-packages/_cloudflare/entropy_patches.py`,
     new Uint8Array(entropyPatches),
-    { canOwn: true },
+    { canOwn: true }
   );
   Module.FS.writeFile(
     `/lib/python3.12/site-packages/_cloudflare/entropy_import_context.py`,
     new Uint8Array(entropyImportContext),
-    { canOwn: true },
+    { canOwn: true }
   );
   Module.FS.writeFile(
     `/lib/python3.12/site-packages/_cloudflare/import_patch_manager.py`,
     new Uint8Array(importPatchManager),
-    { canOwn: true },
+    { canOwn: true }
   );
 }
 
@@ -130,7 +130,7 @@ export function entropyBeforeTopLevel(Module: Module) {
 from _cloudflare.entropy_patches import before_top_level
 before_top_level()
 del before_top_level
-`,
+`
   );
 }
 
@@ -152,7 +152,7 @@ export function entropyBeforeRequest(Module: Module) {
 from _cloudflare.entropy_patches import before_first_request
 before_first_request()
 del before_first_request
-    `,
+    `
     );
   } else {
     // If we shouldn't gate entropy, we just need to reseed_rng. We first have
@@ -167,7 +167,7 @@ del invalidate_caches
 from _cloudflare.entropy_patches import reseed_rng
 reseed_rng()
 del reseed_rng
-    `,
+    `
     );
   }
 }

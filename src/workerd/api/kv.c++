@@ -23,8 +23,8 @@ static void checkForErrorStatus(kj::StringPtr method, const kj::HttpClient::Resp
     // Manually construct exception so that we can incorporate method and status into the text
     // that JavaScript sees.
     kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-        kj::str(JSG_EXCEPTION(Error) ": KV ", method, " failed: ",
-            response.statusCode, ' ', response.statusText)));
+        kj::str(JSG_EXCEPTION(Error) ": KV ", method, " failed: ", response.statusCode, ' ',
+            response.statusText)));
   }
 }
 
@@ -32,13 +32,13 @@ static void validateKeyName(kj::StringPtr method, kj::StringPtr name) {
   JSG_REQUIRE(name != "", TypeError, "Key name cannot be empty.");
   JSG_REQUIRE(name != ".", TypeError, "\".\" is not allowed as a key name.");
   JSG_REQUIRE(name != "..", TypeError, "\"..\" is not allowed as a key name.");
-  JSG_REQUIRE(name.size() <= kMaxKeyLength, Error, "KV ", method, " failed: ",
-      414, " UTF-8 encoded length of ", name.size(), " exceeds key length limit of ", kMaxKeyLength, ".");
+  JSG_REQUIRE(name.size() <= kMaxKeyLength, Error, "KV ", method, " failed: ", 414,
+      " UTF-8 encoded length of ", name.size(), " exceeds key length limit of ", kMaxKeyLength,
+      ".");
 }
 
-static void parseListMetadata(jsg::Lock& js,
-                              jsg::JsValue listResponse,
-                              kj::Maybe<jsg::JsValue> cacheStatus) {
+static void parseListMetadata(
+    jsg::Lock& js, jsg::JsValue listResponse, kj::Maybe<jsg::JsValue> cacheStatus) {
   static constexpr auto METADATA = "metadata"_kjc;
   static constexpr auto KEYS = "keys"_kjc;
 
@@ -63,8 +63,7 @@ static void parseListMetadata(jsg::Lock& js,
 
 constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;
 
-kj::Own<kj::HttpClient> KvNamespace::getHttpClient(
-    IoContext& context,
+kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     kj::HttpHeaders& headers,
     kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrUnknown,
     kj::StringPtr urlStr) {
@@ -102,15 +101,14 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(
   return client;
 }
 
-
-jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
-    jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
+jsg::Promise<KvNamespace::GetResult> KvNamespace::get(jsg::Lock& js,
+    kj::String name,
+    jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto resp = getWithMetadata(js, kj::mv(name), kj::mv(options));
-    return resp.then(js, [](jsg::Lock&, KvNamespace::GetWithMetadataResult result) {
-      return kj::mv(result.value);
-    });
+    return resp.then(js,
+        [](jsg::Lock&, KvNamespace::GetWithMetadataResult result) { return kj::mv(result.value); });
   });
 }
 
@@ -124,7 +122,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   url.scheme = kj::str("https");
   url.host = kj::str("fake-host");
   url.path.add(kj::mv(name));
-  url.query.add(kj::Url::QueryParam { kj::str("urlencoded"), kj::str("true") });
+  url.query.add(kj::Url::QueryParam{kj::str("urlencoded"), kj::str("true")});
 
   kj::Maybe<kj::String> type;
   KJ_IF_SOME(oneOfOptions, options) {
@@ -137,7 +135,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
           type = kj::mv(t);
         }
         KJ_IF_SOME(cacheTtl, options.cacheTtl) {
-          url.query.add(kj::Url::QueryParam { kj::str("cache_ttl"), kj::str(cacheTtl) });
+          url.query.add(kj::Url::QueryParam{kj::str("cache_ttl"), kj::str(cacheTtl)});
         }
       }
     }
@@ -149,19 +147,17 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::GET, urlStr);
 
   auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
-  return context.awaitIo(js,
-      kj::mv(request.response),
-      [type = kj::mv(type), &context, client = kj::mv(client)]
-          (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
-          -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
-
-    auto cacheStatus = response.headers->get(context.getHeaderIds().cfCacheStatus)
-        .map([&](kj::StringPtr cs) {
-          return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
-        });
+  return context.awaitIo(js, kj::mv(request.response),
+      [type = kj::mv(type), &context, client = kj::mv(client)](
+          jsg::Lock& js, kj::HttpClient::Response&& response) mutable
+      -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
+    auto cacheStatus =
+        response.headers->get(context.getHeaderIds().cfCacheStatus).map([&](kj::StringPtr cs) {
+      return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
+    });
 
     if (response.statusCode == 404 || response.statusCode == 410) {
-      return js.resolvedPromise(KvNamespace::GetWithMetadataResult {
+      return js.resolvedPromise(KvNamespace::GetWithMetadataResult{
         .value = kj::none,
         .metadata = kj::none,
         .cacheStatus = kj::mv(cacheStatus),
@@ -177,19 +173,18 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     }
 
     auto typeName =
-        type.map([](const kj::String& s) -> kj::StringPtr { return s; })
-            .orDefault("text");
+        type.map([](const kj::String& s) -> kj::StringPtr { return s; }).orDefault("text");
 
     auto& context = IoContext::current();
-    auto stream = newSystemStream(
-        response.body.attach(kj::mv(client)), getContentEncoding(context, *response.headers,
-            Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
+    auto stream = newSystemStream(response.body.attach(kj::mv(client)),
+        getContentEncoding(
+            context, *response.headers, Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
 
     jsg::Promise<KvNamespace::GetResult> result = nullptr;
 
     if (typeName == "stream") {
-      result = js.resolvedPromise(KvNamespace::GetResult(
-          jsg::alloc<ReadableStream>(context, kj::mv(stream))));
+      result = js.resolvedPromise(
+          KvNamespace::GetResult(jsg::alloc<ReadableStream>(context, kj::mv(stream))));
     } else if (typeName == "text") {
       // NOTE: In theory we should be using awaitIoLegacy() here since ReadableStreamSource is
       //   supposed to handle pending events on its own, but we also know that the HTTP client
@@ -197,16 +192,12 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
       result = context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
-          [](jsg::Lock&, kj::String text) {
-        return KvNamespace::GetResult(kj::mv(text));
-      });
+          [](jsg::Lock&, kj::String text) { return KvNamespace::GetResult(kj::mv(text)); });
     } else if (typeName == "arrayBuffer") {
       result = context.awaitIo(js,
           stream->readAllBytes(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
-          [](jsg::Lock&, kj::Array<byte> text) {
-        return KvNamespace::GetResult(kj::mv(text));
-      });
+          [](jsg::Lock&, kj::Array<byte> text) { return KvNamespace::GetResult(kj::mv(text)); });
     } else if (typeName == "json") {
       result = context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
@@ -220,10 +211,11 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
           "Unknown response type. Possible types are \"text\", \"arrayBuffer\", "
           "\"json\", and \"stream\".");
     }
-    return result.then(js, [maybeMeta = kj::mv(maybeMeta), cacheStatus = kj::mv(cacheStatus)]
-        (jsg::Lock& js, KvNamespace::GetResult result) mutable -> KvNamespace::GetWithMetadataResult {
+    return result.then(js,
+        [maybeMeta = kj::mv(maybeMeta), cacheStatus = kj::mv(cacheStatus)](jsg::Lock& js,
+            KvNamespace::GetResult result) mutable -> KvNamespace::GetWithMetadataResult {
       kj::Maybe<jsg::JsRef<jsg::JsValue>> meta;
-      KJ_IF_SOME (metaStr, maybeMeta) {
+      KJ_IF_SOME(metaStr, maybeMeta) {
         meta = jsg::JsRef(js, jsg::JsValue::fromJson(js, metaStr));
       }
       return KvNamespace::GetWithMetadataResult{
@@ -235,8 +227,8 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   });
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(jsg::Lock& js,
-                                                         jsg::Optional<ListOptions> options) {
+jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
+    jsg::Lock& js, jsg::Optional<ListOptions> options) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
@@ -246,17 +238,17 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(jsg::Lock& js,
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(limit, o.limit) {
         if (limit > 0) {
-          url.query.add(kj::Url::QueryParam { kj::str("key_count_limit"), kj::str(limit) });
+          url.query.add(kj::Url::QueryParam{kj::str("key_count_limit"), kj::str(limit)});
         }
       }
       KJ_IF_SOME(maybePrefix, o.prefix) {
         KJ_IF_SOME(prefix, maybePrefix) {
-          url.query.add(kj::Url::QueryParam { kj::str("prefix"), kj::str(prefix) });
+          url.query.add(kj::Url::QueryParam{kj::str("prefix"), kj::str(prefix)});
         }
       }
       KJ_IF_SOME(maybeCursor, o.cursor) {
         KJ_IF_SOME(cursor, maybeCursor) {
-          url.query.add(kj::Url::QueryParam { kj::str("cursor"), kj::str(cursor) });
+          url.query.add(kj::Url::QueryParam{kj::str("cursor"), kj::str(cursor)});
         }
       }
     }
@@ -267,25 +259,22 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(jsg::Lock& js,
     auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr);
 
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
-    return context.awaitIo(js,
-        kj::mv(request.response),
-        [&context, client = kj::mv(client)]
-        (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
-            -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
-
+    return context.awaitIo(js, kj::mv(request.response),
+        [&context, client = kj::mv(client)](jsg::Lock& js,
+            kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
       checkForErrorStatus("GET", response);
 
-      kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus = [&]()
-          -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
+      kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus =
+          [&]() -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
         KJ_IF_SOME(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
           return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
         }
         return kj::none;
       }();
 
-      auto stream = newSystemStream(
-          response.body.attach(kj::mv(client)), getContentEncoding(context, *response.headers,
-              Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
+      auto stream = newSystemStream(response.body.attach(kj::mv(client)),
+          getContentEncoding(
+              context, *response.headers, Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
 
       return context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
@@ -293,17 +282,15 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(jsg::Lock& js,
           [cacheStatus = kj::mv(cacheStatus)](jsg::Lock& js, kj::String text) mutable {
         auto result = jsg::JsValue::fromJson(js, text);
         parseListMetadata(js, result,
-            cacheStatus.map([&](jsg::JsRef<jsg::JsValue>& cs) -> jsg::JsValue {
-          return cs.getHandle(js);
-        }));
+            cacheStatus.map(
+                [&](jsg::JsRef<jsg::JsValue>& cs) -> jsg::JsValue { return cs.getHandle(js); }));
         return jsg::JsRef(js, result);
       });
     });
   });
 }
 
-jsg::Promise<void> KvNamespace::put(
-    jsg::Lock& js,
+jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     kj::String name,
     KvNamespace::PutBody body,
     jsg::Optional<PutOptions> options,
@@ -317,7 +304,7 @@ jsg::Promise<void> KvNamespace::put(
     url.scheme = kj::str("https");
     url.host = kj::str("fake-host");
     url.path.add(kj::mv(name));
-    url.query.add(kj::Url::QueryParam { kj::str("urlencoded"), kj::str("true") });
+    url.query.add(kj::Url::QueryParam{kj::str("urlencoded"), kj::str("true")});
 
     kj::HttpHeaders headers(context.getHeaderTable());
 
@@ -325,10 +312,10 @@ jsg::Promise<void> KvNamespace::put(
     // the URL's query parameters.
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(expiration, o.expiration) {
-        url.query.add(kj::Url::QueryParam { kj::str("expiration"), kj::str(expiration) });
+        url.query.add(kj::Url::QueryParam{kj::str("expiration"), kj::str(expiration)});
       }
       KJ_IF_SOME(expirationTtl, o.expirationTtl) {
-        url.query.add(kj::Url::QueryParam { kj::str("expiration_ttl"), kj::str(expirationTtl) });
+        url.query.add(kj::Url::QueryParam{kj::str("expiration_ttl"), kj::str(expirationTtl)});
       }
       KJ_IF_SOME(maybeMetadata, o.metadata) {
         KJ_IF_SOME(metadata, maybeMetadata) {
@@ -345,11 +332,11 @@ jsg::Promise<void> KvNamespace::put(
         supportedBody = kj::mv(text);
       }
       KJ_CASE_ONEOF(object, jsg::JsObject) {
-        supportedBody = JSG_REQUIRE_NONNULL(putTypeHandler.tryUnwrap(js, object),
-            TypeError, "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and "
+        supportedBody = JSG_REQUIRE_NONNULL(putTypeHandler.tryUnwrap(js, object), TypeError,
+            "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and "
             "ReadableStreams as values.");
-        JSG_REQUIRE(!supportedBody.is<kj::String>(),
-            TypeError, "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and "
+        JSG_REQUIRE(!supportedBody.is<kj::String>(), TypeError,
+            "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and "
             "ReadableStreams as values.");
         // TODO(someday): replace this with logic to do something smarter with Objects
       }
@@ -374,13 +361,10 @@ jsg::Promise<void> KvNamespace::put(
 
     auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::PUT, urlStr);
 
-    auto promise = context.waitForOutputLocks()
-        .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr),
-               headers = kj::mv(headers), expectedBodySize,
-               supportedBody = kj::mv(supportedBody)]() mutable {
-      auto innerReq = client->request(
-          kj::HttpMethod::PUT, urlStr,
-          headers, expectedBodySize);
+    auto promise = context.waitForOutputLocks().then(
+        [&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
+            expectedBodySize, supportedBody = kj::mv(supportedBody)]() mutable {
+      auto innerReq = client->request(kj::HttpMethod::PUT, urlStr, headers, expectedBodySize);
       struct RefcountedWrapper: public kj::Refcounted {
         explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
         kj::Own<kj::HttpClient> client;
@@ -398,17 +382,16 @@ jsg::Promise<void> KvNamespace::put(
           writePromise = req.body->write(data).attach(kj::mv(data));
         }
         KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-          writePromise = context.run([
-              dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
-              stream = kj::mv(stream)](jsg::Lock& js) mutable {
+          writePromise = context.run(
+              [dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
+                  stream = kj::mv(stream)](jsg::Lock& js) mutable {
             return IoContext::current().waitForDeferredProxy(
                 stream->pumpTo(js, kj::mv(dest), true));
           });
         }
       }
 
-      return writePromise.attach(kj::mv(req.body))
-          .then([resp = kj::mv(req.response)]() mutable {
+      return writePromise.attach(kj::mv(req.body)).then([resp = kj::mv(req.response)]() mutable {
         return resp.then([](kj::HttpClient::Response&& response) mutable {
           checkForErrorStatus("PUT", response);
 
@@ -434,11 +417,11 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
 
     auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::DELETE, urlStr);
 
-    auto promise = context.waitForOutputLocks()
-        .then([headers = kj::mv(headers), client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
-      return client->request(kj::HttpMethod::DELETE, urlStr, headers,
-                            uint64_t(0))
-          .response.then([](kj::HttpClient::Response&& response) mutable {
+    auto promise = context.waitForOutputLocks().then(
+        [headers = kj::mv(headers), client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
+      return client->request(kj::HttpMethod::DELETE, urlStr, headers, uint64_t(0))
+          .response
+          .then([](kj::HttpClient::Response&& response) mutable {
         checkForErrorStatus("DELETE", response);
       }).attach(kj::mv(client));
     });

@@ -3,5 +3,5 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export default {
-  caveKey: "0p3n s3sam3",
-}
+  caveKey: '0p3n s3sam3',
+};

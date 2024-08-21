@@ -1,8 +1,8 @@
-declare type Handler = ((...args: any[]) => any);
+declare type Handler = (...args: any[]) => any;
 
 interface PyModule {
   [handlerName: string]: {
-    callRelaxed: (...args: any[]) => any
+    callRelaxed: (...args: any[]) => any;
   };
 }
 

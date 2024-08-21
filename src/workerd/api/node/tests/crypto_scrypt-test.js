@@ -25,20 +25,11 @@
 
 'use strict';
 
-import {
-  strictEqual,
-  throws,
-  rejects,
-} from 'node:assert';
+import { strictEqual, throws, rejects } from 'node:assert';
 
-import {
-  scrypt,
-  scryptSync,
-} from 'node:crypto';
+import { scrypt, scryptSync } from 'node:crypto';
 
-import {
-  mock,
-} from 'node:test';
+import { mock } from 'node:test';
 
 const good = [
   // Zero-length key is legal, functions as a parameter validation check.
@@ -62,8 +53,8 @@ const good = [
     p: 1,
     r: 1,
     expected:
-        '77d6576238657b203b19ca42c18a0497f16b4844e3074ae8dfdffa3fede21442' +
-        'fcd0069ded0948f8326a753a0fc81f17e8d3e0fb2e0d3628cf35e20c38d18906',
+      '77d6576238657b203b19ca42c18a0497f16b4844e3074ae8dfdffa3fede21442' +
+      'fcd0069ded0948f8326a753a0fc81f17e8d3e0fb2e0d3628cf35e20c38d18906',
   },
   {
     pass: 'password',
@@ -73,8 +64,8 @@ const good = [
     p: 16,
     r: 8,
     expected:
-        'fdbabe1c9d3472007856e7190d01e9fe7c6ad7cbc8237830e77376634b373162' +
-        '2eaf30d92e22a3886ff109279d9830dac727afb94a83ee6d8360cbdfa2cc0640',
+      'fdbabe1c9d3472007856e7190d01e9fe7c6ad7cbc8237830e77376634b373162' +
+      '2eaf30d92e22a3886ff109279d9830dac727afb94a83ee6d8360cbdfa2cc0640',
   },
   {
     pass: 'pleaseletmein',
@@ -84,8 +75,8 @@ const good = [
     p: 1,
     r: 8,
     expected:
-        '7023bdcb3afd7348461c06cd81fd38ebfda8fbba904f8e3ea9b543f6545da1f2' +
-        'd5432955613f0fcf62d49705242a9af9e61e85dc0d651e40dfcf017b45575887',
+      '7023bdcb3afd7348461c06cd81fd38ebfda8fbba904f8e3ea9b543f6545da1f2' +
+      'd5432955613f0fcf62d49705242a9af9e61e85dc0d651e40dfcf017b45575887',
   },
   {
     pass: '',
@@ -95,8 +86,8 @@ const good = [
     parallelization: 1,
     blockSize: 1,
     expected:
-        '77d6576238657b203b19ca42c18a0497f16b4844e3074ae8dfdffa3fede21442' +
-        'fcd0069ded0948f8326a753a0fc81f17e8d3e0fb2e0d3628cf35e20c38d18906',
+      '77d6576238657b203b19ca42c18a0497f16b4844e3074ae8dfdffa3fede21442' +
+      'fcd0069ded0948f8326a753a0fc81f17e8d3e0fb2e0d3628cf35e20c38d18906',
   },
   {
     pass: 'password',
@@ -106,8 +97,8 @@ const good = [
     parallelization: 16,
     blockSize: 8,
     expected:
-        'fdbabe1c9d3472007856e7190d01e9fe7c6ad7cbc8237830e77376634b373162' +
-        '2eaf30d92e22a3886ff109279d9830dac727afb94a83ee6d8360cbdfa2cc0640',
+      'fdbabe1c9d3472007856e7190d01e9fe7c6ad7cbc8237830e77376634b373162' +
+      '2eaf30d92e22a3886ff109279d9830dac727afb94a83ee6d8360cbdfa2cc0640',
   },
   {
     pass: 'pleaseletmein',
@@ -117,21 +108,21 @@ const good = [
     parallelization: 1,
     blockSize: 8,
     expected:
-        '7023bdcb3afd7348461c06cd81fd38ebfda8fbba904f8e3ea9b543f6545da1f2' +
-        'd5432955613f0fcf62d49705242a9af9e61e85dc0d651e40dfcf017b45575887',
+      '7023bdcb3afd7348461c06cd81fd38ebfda8fbba904f8e3ea9b543f6545da1f2' +
+      'd5432955613f0fcf62d49705242a9af9e61e85dc0d651e40dfcf017b45575887',
   },
 ];
 
 // Test vectors that should fail.
 const bad = [
-  { N: 1, p: 1, r: 1 },         // N < 2
-  { N: 3, p: 1, r: 1 },         // Not power of 2.
+  { N: 1, p: 1, r: 1 }, // N < 2
+  { N: 3, p: 1, r: 1 }, // Not power of 2.
 ];
 
 // Test vectors where 128*N*r exceeds maxmem.
 const toobig = [
-  { N: 2 ** 16, p: 1, r: 1 },   // N >= 2**(r*16)
-  { N: 2, p: 2 ** 30, r: 1 },   // p > (2**30-1)/r
+  { N: 2 ** 16, p: 1, r: 1 }, // N >= 2**(r*16)
+  { N: 2, p: 2 ** 30, r: 1 }, // p > (2**30-1)/r
   { N: 2 ** 20, p: 1, r: 8 },
   { N: 2 ** 10, p: 1, r: 8, maxmem: 2 ** 20 },
 ];
@@ -162,7 +153,7 @@ const badargs = [
     expected: { code: 'ERR_INVALID_ARG_TYPE', message: /"keylen"/ },
   },
   {
-    args: ['', '', .42],
+    args: ['', '', 0.42],
     expected: { code: 'ERR_OUT_OF_RANGE', message: /"keylen"/ },
   },
   {
@@ -198,8 +189,8 @@ export const goodTests = {
       await promise;
       strictEqual(fn.mock.calls.length, 1);
     }
-  }
-}
+  },
+};
 
 export const badTests = {
   async test() {
@@ -215,23 +206,23 @@ export const badTests = {
     throws(() => scryptSync('pass', 'salt', 1, { N: 1, cost: 1 }));
     throws(() => scryptSync('pass', 'salt', 1, { p: 1, parallelization: 1 }));
     throws(() => scryptSync('pass', 'salt', 1, { r: 1, blockSize: 1 }));
-  }
+  },
 };
 
 export const tooBigTests = {
   async test() {
-  for (const options of toobig) {
-    const { promise, reject } = Promise.withResolvers();
-    const fn = mock.fn((err, actual) => {
-      if (err) reject(err);
-    });
-    scrypt('pass', 'salt', 1, options, fn);
-    await rejects(promise);
-    strictEqual(fn.mock.calls.length, 1);
+    for (const options of toobig) {
+      const { promise, reject } = Promise.withResolvers();
+      const fn = mock.fn((err, actual) => {
+        if (err) reject(err);
+      });
+      scrypt('pass', 'salt', 1, options, fn);
+      await rejects(promise);
+      strictEqual(fn.mock.calls.length, 1);
 
-    throws(() => scryptSync('pass', 'salt', 1, options));
-  }
-  }
+      throws(() => scryptSync('pass', 'salt', 1, options));
+    }
+  },
 };
 
 export const defaultsTest = {
@@ -248,7 +239,7 @@ export const defaultsTest = {
     scrypt('pass', 'salt', 1, fn);
     await promise;
     strictEqual(fn.mock.calls.length, 1);
-  }
+  },
 };
 
 export const badArgsTest = {
@@ -262,5 +253,5 @@ export const badArgsTest = {
     throws(() => scrypt('', '', 42, {}, null));
     throws(() => scrypt('', '', 42, {}));
     throws(() => scrypt('', '', 42, {}, {}));
-  }
-}
+  },
+};

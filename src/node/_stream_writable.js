@@ -3,12 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 /* eslint-disable */
+
+// prettier-ignore
 import {
   Writable,
   WritableState,
   fromWeb,
   toWeb,
 } from 'node-internal:streams_writable';
+
+// prettier-ignore
 export {
   Writable,
   WritableState,

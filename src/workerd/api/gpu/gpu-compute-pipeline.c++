@@ -9,4 +9,4 @@ jsg::Ref<GPUBindGroupLayout> GPUComputePipeline::getBindGroupLayout(uint32_t ind
   auto layout = pipeline_.GetBindGroupLayout(index);
   return jsg::alloc<GPUBindGroupLayout>(kj::mv(layout));
 }
-} // namespace workerd::api::gpu
+}  // namespace workerd::api::gpu

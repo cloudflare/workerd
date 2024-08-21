@@ -32,6 +32,7 @@ export default {
   async fetch(request) {
     doSomething();
 
+    // prettier-ignore
     console.log(c.runStores(1, (...args) => {
       console.log(this, ...args, als1.getStore(), als2.getStore());
       return 1;

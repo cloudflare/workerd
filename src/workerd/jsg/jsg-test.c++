@@ -54,10 +54,7 @@ KJ_TEST("throw") {
 
 KJ_TEST("context type is exposed in the global scope") {
   Evaluator<TestContext, TestIsolate> e(v8System);
-  e.expectEval(
-      "this instanceof TestContext",
-      "boolean", "true"
-  );
+  e.expectEval("this instanceof TestContext", "boolean", "true");
 }
 
 // ========================================================================================
@@ -79,48 +76,42 @@ struct InheritContext: public ContextGlobalObject {
     JSG_METHOD(newExtendedAsBase);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(InheritIsolate, InheritContext, NumberBox,
-    InheritContext::Other, ExtendedNumberBox);
+JSG_DECLARE_ISOLATE_TYPE(
+    InheritIsolate, InheritContext, NumberBox, InheritContext::Other, ExtendedNumberBox);
 
 KJ_TEST("inheritance") {
   Evaluator<InheritContext, InheritIsolate> e(v8System);
-  e.expectEval(
-      "var n = new ExtendedNumberBox(123, 'foo');\n"
-      "n.increment();\n"
-      "n.getValue()", "number", "124");
+  e.expectEval("var n = new ExtendedNumberBox(123, 'foo');\n"
+               "n.increment();\n"
+               "n.getValue()",
+      "number", "124");
 
-  e.expectEval(
-      "var n = new ExtendedNumberBox(123, 'foo');\n"
-      "n.increment();\n"
-      "n.value", "number", "124");
+  e.expectEval("var n = new ExtendedNumberBox(123, 'foo');\n"
+               "n.increment();\n"
+               "n.value",
+      "number", "124");
 
-  e.expectEval(
-      "new ExtendedNumberBox(123, 'foo').getText()", "string", "foo");
+  e.expectEval("new ExtendedNumberBox(123, 'foo').getText()", "string", "foo");
 
-  e.expectEval(
-      "var n = new ExtendedNumberBox(123, 'foo');\n"
-      "n.setText('bar');\n"
-      "n.text", "string", "bar");
+  e.expectEval("var n = new ExtendedNumberBox(123, 'foo');\n"
+               "n.setText('bar');\n"
+               "n.text",
+      "string", "bar");
 
-  e.expectEval(
-      "var n = new ExtendedNumberBox(123, 'foo');\n"
-      "n.text = 'bar';\n"
-      "n.getText()", "string", "bar");
+  e.expectEval("var n = new ExtendedNumberBox(123, 'foo');\n"
+               "n.text = 'bar';\n"
+               "n.getText()",
+      "string", "bar");
 
-  e.expectEval(
-      "new ExtendedNumberBox(123, 'foo') instanceof NumberBox", "boolean", "true");
+  e.expectEval("new ExtendedNumberBox(123, 'foo') instanceof NumberBox", "boolean", "true");
 
-  e.expectEval(
-      "new ExtendedNumberBox(123, 'foo') instanceof ExtendedNumberBox", "boolean", "true");
+  e.expectEval("new ExtendedNumberBox(123, 'foo') instanceof ExtendedNumberBox", "boolean", "true");
 
-  e.expectEval(
-      "new ExtendedNumberBox(123, 'foo') instanceof Other", "boolean", "false");
+  e.expectEval("new ExtendedNumberBox(123, 'foo') instanceof Other", "boolean", "false");
 
-  e.expectEval(
-      "newExtendedAsBase(123, 'foo') instanceof NumberBox", "boolean", "true");
+  e.expectEval("newExtendedAsBase(123, 'foo') instanceof NumberBox", "boolean", "true");
 
-  e.expectEval(
-      "newExtendedAsBase(123, 'foo') instanceof ExtendedNumberBox", "boolean", "true");
+  e.expectEval("newExtendedAsBase(123, 'foo') instanceof ExtendedNumberBox", "boolean", "true");
 }
 
 // ========================================================================================
@@ -177,16 +168,16 @@ JSG_DECLARE_ISOLATE_TYPE(RefIsolate, RefContext, NumberBox);
 KJ_TEST("Ref") {
   Evaluator<RefContext, RefIsolate> e(v8System);
   // addAndReturnCopy() creates a new object and returns it.
-  e.expectEval(
-      "var orig = new NumberBox(123);\n"
-      "var result = addAndReturnCopy(orig, 321);\n"
-      "[orig.value, result.value, orig == result].join(', ')", "string", "123, 444, false");
+  e.expectEval("var orig = new NumberBox(123);\n"
+               "var result = addAndReturnCopy(orig, 321);\n"
+               "[orig.value, result.value, orig == result].join(', ')",
+      "string", "123, 444, false");
 
   // addAndReturnOwn() modifies the original object and returns it by identity.
-  e.expectEval(
-      "var orig = new NumberBox(123);\n"
-      "var result = addAndReturnOwn(orig, 321);\n"
-      "[orig.value, result.value, orig == result].join(', ')", "string", "444, 444, true");
+  e.expectEval("var orig = new NumberBox(123);\n"
+               "var result = addAndReturnOwn(orig, 321);\n"
+               "[orig.value, result.value, orig == result].join(', ')",
+      "string", "444, 444, true");
 }
 
 // ========================================================================================
@@ -194,8 +185,12 @@ KJ_TEST("Ref") {
 struct ProtoContext: public ContextGlobalObject {
   ProtoContext(): contextProperty(kj::str("default-context-property-value")) {}
 
-  kj::StringPtr getContextProperty() { return contextProperty; }
-  void setContextProperty(kj::String s) { contextProperty = kj::mv(s); }
+  kj::StringPtr getContextProperty() {
+    return contextProperty;
+  }
+  void setContextProperty(kj::String s) {
+    contextProperty = kj::mv(s);
+  }
 
   JSG_RESOURCE_TYPE(ProtoContext) {
     JSG_NESTED_TYPE(NumberBox);
@@ -217,43 +212,33 @@ const auto kIllegalInvocation =
 
 KJ_TEST("can't invoke builtin methods with alternative 'this'") {
   Evaluator<ProtoContext, ProtoIsolate> e(v8System);
-  e.expectEval(
-      "NumberBox.prototype.getValue.call(123)",
-      "throws", kIllegalInvocation);
-  e.expectEval(
-      "NumberBox.prototype.getValue.call(new BoxBox(new NumberBox(123), 123))",
-      "throws", kIllegalInvocation);
-  e.expectEval(
-      "getContextProperty.call(new NumberBox(123))",
-      "throws", kIllegalInvocation);
+  e.expectEval("NumberBox.prototype.getValue.call(123)", "throws", kIllegalInvocation);
+  e.expectEval("NumberBox.prototype.getValue.call(new BoxBox(new NumberBox(123), 123))", "throws",
+      kIllegalInvocation);
+  e.expectEval("getContextProperty.call(new NumberBox(123))", "throws", kIllegalInvocation);
 }
 
 KJ_TEST("can't use builtin as prototype") {
   Evaluator<ProtoContext, ProtoIsolate> e(v8System);
-  e.expectEval(
-      "function JsType() {}\n"
-      "JsType.prototype = new NumberBox(123);\n"
-      "new JsType().getValue()",
+  e.expectEval("function JsType() {}\n"
+               "JsType.prototype = new NumberBox(123);\n"
+               "new JsType().getValue()",
       "throws", kIllegalInvocation);
-  e.expectEval(
-      "function JsType() {}\n"
-      "JsType.prototype = new ExtendedNumberBox(123, 'foo');\n"
-      "new JsType().getValue()",
+  e.expectEval("function JsType() {}\n"
+               "JsType.prototype = new ExtendedNumberBox(123, 'foo');\n"
+               "new JsType().getValue()",
       "throws", kIllegalInvocation);
-  e.expectEval(
-      "function JsType() {}\n"
-      "JsType.prototype = new NumberBox(123);\n"
-      "new JsType().value",
+  e.expectEval("function JsType() {}\n"
+               "JsType.prototype = new NumberBox(123);\n"
+               "new JsType().value",
       "throws", kIllegalInvocation);
-  e.expectEval(
-      "function JsType() {}\n"
-      "JsType.prototype = new ExtendedNumberBox(123, 'foo');\n"
-      "new JsType().value",
+  e.expectEval("function JsType() {}\n"
+               "JsType.prototype = new ExtendedNumberBox(123, 'foo');\n"
+               "new JsType().value",
       "throws", kIllegalInvocation);
-  e.expectEval(
-      "function JsType() {}\n"
-      "JsType.prototype = this;\n"
-      "new JsType().getContextProperty()",
+  e.expectEval("function JsType() {}\n"
+               "JsType.prototype = this;\n"
+               "new JsType().getContextProperty()",
       "throws", kIllegalInvocation);
 
   // For historical reasons, we allow using the global object as a prototype and accessing
@@ -265,10 +250,9 @@ KJ_TEST("can't use builtin as prototype") {
   // AccessorSignature entirely, forcing us to implement manual type checking. We could totally
   // make our manual type checking work correctly for global properties, but, again, it doesn't
   // really matter, and I'd rather not inadvertently break someone.)
-  e.expectEval(
-      "function JsType() {}\n"
-      "JsType.prototype = this;\n"
-      "new JsType().contextProperty",
+  e.expectEval("function JsType() {}\n"
+               "JsType.prototype = this;\n"
+               "new JsType().contextProperty",
       "string", "default-context-property-value");
 }
 
@@ -281,33 +265,30 @@ JSG_DECLARE_ISOLATE_TYPE(IcuIsolate, IcuContext);
 
 KJ_TEST("ICU is properly initialized") {
   Evaluator<IcuContext, IcuIsolate> e(v8System);
-  e.expectEval(
-      "function charCodes(str) {"
-      "  let result = [];\n"
-      "  for (let i = 0; i < str.length; i++) {\n"
-      "    result.push(str.charCodeAt(i));\n"
-      "  }\n"
-      "  return result.join(',');\n"
-      "}"
-      "[ charCodes('\u1E9B\u0323'),\n"
-      "  charCodes('\u1E9B\u0323'.normalize('NFC')),\n"
-      "  charCodes('\u1E9B\u0323'.normalize('NFD')),\n"
-      "  charCodes('\u1E9B\u0323'.normalize('NFKD')),\n"
-      "  charCodes('\u1E9B\u0323'.normalize('NFKC')) ].join(' ')",
+  e.expectEval("function charCodes(str) {"
+               "  let result = [];\n"
+               "  for (let i = 0; i < str.length; i++) {\n"
+               "    result.push(str.charCodeAt(i));\n"
+               "  }\n"
+               "  return result.join(',');\n"
+               "}"
+               "[ charCodes('\u1E9B\u0323'),\n"
+               "  charCodes('\u1E9B\u0323'.normalize('NFC')),\n"
+               "  charCodes('\u1E9B\u0323'.normalize('NFD')),\n"
+               "  charCodes('\u1E9B\u0323'.normalize('NFKD')),\n"
+               "  charCodes('\u1E9B\u0323'.normalize('NFKC')) ].join(' ')",
 
-      "string", "7835,803 7835,803 383,803,775 115,803,775 7785"
-  );
+      "string", "7835,803 7835,803 383,803,775 115,803,775 7785");
 }
 
 // ========================================================================================
 
 KJ_TEST("Uncaught JsExceptionThrown reports stack") {
-  auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
-    throw JsExceptionThrown();
-  }));
-  KJ_ASSERT(exception.getDescription().startsWith(
-                "std::exception: Uncaught JsExceptionThrown\nstack: "),
-            exception.getDescription());
+  auto exception =
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { throw JsExceptionThrown(); }));
+  KJ_ASSERT(
+      exception.getDescription().startsWith("std::exception: Uncaught JsExceptionThrown\nstack: "),
+      exception.getDescription());
 }
 
 // TODO(test): Find some way to verify that C++ objects get garbage-collected as expected (hard to
@@ -338,9 +319,13 @@ KJ_TEST("jsg::Lock logWarning") {
 struct CallableContext: public ContextGlobalObject {
   struct MyCallable: public Object {
   public:
-    static Ref<MyCallable> constructor() { return alloc<MyCallable>(); }
+    static Ref<MyCallable> constructor() {
+      return alloc<MyCallable>();
+    }
 
-    bool foo() { return true; }
+    bool foo() {
+      return true;
+    }
 
     JSG_RESOURCE_TYPE(MyCallable) {
       JSG_CALLABLE(foo);
@@ -348,7 +333,9 @@ struct CallableContext: public ContextGlobalObject {
     }
   };
 
-  Ref<MyCallable> getCallable() { return alloc<MyCallable>(); }
+  Ref<MyCallable> getCallable() {
+    return alloc<MyCallable>();
+  }
 
   JSG_RESOURCE_TYPE(CallableContext) {
     JSG_METHOD(getCallable);
@@ -372,9 +359,13 @@ KJ_TEST("Test JSG_CALLABLE") {
 // ========================================================================================
 struct InterceptContext: public ContextGlobalObject {
   struct ProxyImpl: public jsg::Object {
-    static jsg::Ref<ProxyImpl> constructor() { return jsg::alloc<ProxyImpl>(); }
+    static jsg::Ref<ProxyImpl> constructor() {
+      return jsg::alloc<ProxyImpl>();
+    }
 
-    int getBar() { return 123; }
+    int getBar() {
+      return 123;
+    }
 
     // JSG_WILDCARD_PROPERTY implementation
     kj::Maybe<kj::StringPtr> testGetNamed(jsg::Lock& js, kj::String name) {

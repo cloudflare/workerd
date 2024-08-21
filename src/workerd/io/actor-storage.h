@@ -36,4 +36,4 @@ public:
   static void checkMaxPairsCount(size_t count);
 };
 
-} // namespace workerd
+}  // namespace workerd

@@ -7,14 +7,12 @@
 // recommended in the full perfetto header (perfetto/tracing.h).
 #include "perfetto/tracing/track_event.h"
 
-PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(
-    workerd::traces,
-    perfetto::Category("workerd"));
+PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(workerd::traces, perfetto::Category("workerd"));
 
 namespace kj {
-  class StringPtr;
-  class String;
-}
+class StringPtr;
+class String;
+}  // namespace kj
 
 namespace workerd {
 
@@ -53,7 +51,7 @@ private:
 #define PERFETTO_TRACK_FROM_POINTER(ptr) perfetto::Track::FromPointer(ptr)
 
 KJ_DECLARE_NON_POLYMORPHIC(PerfettoSession::Impl);
-}  // workerd
+}  // namespace workerd
 
 #else  // defined(WORKERD_USE_PERFETTO)
 struct PerfettoNoop {};
@@ -65,7 +63,10 @@ struct PerfettoNoop {};
 #define TRACE_EVENT_INSTANT(...)
 #define TRACE_COUNTER(...)
 #define TRACE_EVENT_CATEGORY_ENABLED(...) false
-#define PERFETTO_FLOW_FROM_POINTER(ptr) PerfettoNoop {}
-#define PERFETTO_TERMINATING_FLOW_FROM_POINTER(ptr) PerfettoNoop {}
-#define PERFETTO_TRACK_FROM_POINTER(ptr) PerfettoNoop {}
+#define PERFETTO_FLOW_FROM_POINTER(ptr)                                                            \
+  PerfettoNoop {}
+#define PERFETTO_TERMINATING_FLOW_FROM_POINTER(ptr)                                                \
+  PerfettoNoop {}
+#define PERFETTO_TRACK_FROM_POINTER(ptr)                                                           \
+  PerfettoNoop {}
 #endif  // defined(WORKERD_USE_PERFETTO)

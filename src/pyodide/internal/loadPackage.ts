@@ -9,33 +9,33 @@
  * that contains all the packages ready to go.
  */
 
-import { default as LOCKFILE } from "pyodide-internal:generated/pyodide-lock.json";
-import { WORKERD_INDEX_URL } from "pyodide-internal:metadata";
+import { default as LOCKFILE } from 'pyodide-internal:generated/pyodide-lock.json';
+import { WORKERD_INDEX_URL } from 'pyodide-internal:metadata';
 import {
   SITE_PACKAGES,
   LOAD_WHEELS_FROM_R2,
   getSitePackagesPath,
-} from "pyodide-internal:setupPackages";
-import { parseTarInfo } from "pyodide-internal:tar";
-import { default as DiskCache } from "pyodide-internal:disk_cache";
-import { createTarFS } from "pyodide-internal:tarfs";
+} from 'pyodide-internal:setupPackages';
+import { parseTarInfo } from 'pyodide-internal:tar';
+import { default as DiskCache } from 'pyodide-internal:disk_cache';
+import { createTarFS } from 'pyodide-internal:tarfs';
 
 async function decompressArrayBuffer(
-  arrBuf: ArrayBuffer,
+  arrBuf: ArrayBuffer
 ): Promise<ArrayBuffer> {
   const resp = new Response(arrBuf);
   if (resp && resp.body) {
     return await new Response(
-      resp.body.pipeThrough(new DecompressionStream("gzip")),
+      resp.body.pipeThrough(new DecompressionStream('gzip'))
     ).arrayBuffer();
   } else {
-    throw new Error("Failed to decompress array buffer");
+    throw new Error('Failed to decompress array buffer');
   }
 }
 
 async function loadBundle(requirement: string): Promise<[string, ArrayBuffer]> {
   // first check if the disk cache has what we want
-  const filename = LOCKFILE["packages"][requirement]["file_name"];
+  const filename = LOCKFILE['packages'][requirement]['file_name'];
   const cached = DiskCache.get(filename);
   if (cached) {
     const decompressed = await decompressArrayBuffer(cached);
@@ -84,7 +84,7 @@ export async function loadPackages(Module: Module, requirements: Set<string>) {
     loading.push(req);
   }
 
-  console.log("Loading " + loading.join(", "));
+  console.log('Loading ' + loading.join(', '));
 
   const buffers = await Promise.all(loadPromises);
   for (const [requirement, buffer] of buffers) {
@@ -93,7 +93,7 @@ export async function loadPackages(Module: Module, requirements: Set<string>) {
     SITE_PACKAGES.addSmallBundle(tarInfo, soFiles, requirement);
   }
 
-  console.log("Loaded " + loading.join(", "));
+  console.log('Loaded ' + loading.join(', '));
 
   const tarFS = createTarFS(Module);
   const path = getSitePackagesPath(Module);

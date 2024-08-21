@@ -21,15 +21,15 @@ namespace workerd::api {
 //   heap objects, as the stream is allowed to outlive the isolate, especially in the case of
 //   deferred proxying. If the inner stream for some reason contains JS references, you'll need
 //   to provide your own implementation of ReadableStreamSource.
-kj::Own<ReadableStreamSource> newSystemStream(
-    kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding,
+kj::Own<ReadableStreamSource> newSystemStream(kj::Own<kj::AsyncInputStream> inner,
+    StreamEncoding encoding,
     IoContext& context = IoContext::current());
 
 // A WritableStreamSink which automatically encodes its underlying stream.
 //
 // NOTE: As with the other overload of newSystemStream(), `inner` must be wholly owned.
-kj::Own<WritableStreamSink> newSystemStream(
-    kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding,
+kj::Own<WritableStreamSink> newSystemStream(kj::Own<kj::AsyncOutputStream> inner,
+    StreamEncoding encoding,
     IoContext& context = IoContext::current());
 
 struct SystemMultiStream {
@@ -49,8 +49,9 @@ struct ContentEncodingOptions {
 
 // Get the Content-Encoding header from an HttpHeaders object as a StreamEncoding enum. Unsupported
 // encodings return IDENTITY.
-StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& headers,
-                                  Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
-                                  ContentEncodingOptions options = {});
+StreamEncoding getContentEncoding(IoContext& context,
+    const kj::HttpHeaders& headers,
+    Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
+    ContentEncodingOptions options = {});
 
 }  // namespace workerd::api

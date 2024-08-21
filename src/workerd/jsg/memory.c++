@@ -3,13 +3,17 @@
 
 namespace workerd::jsg {
 
-class MemoryRetainerNode final : public v8::EmbedderGraph::Node {
+class MemoryRetainerNode final: public v8::EmbedderGraph::Node {
 public:
   static constexpr auto PREFIX = "workerd /";
 
-  const char* Name() override { return name_.cStr(); }
+  const char* Name() override {
+    return name_.cStr();
+  }
 
-  const char* NamePrefix() override { return PREFIX; }
+  const char* NamePrefix() override {
+    return PREFIX;
+  }
 
   size_t SizeInBytes() override {
     return size_;
@@ -31,14 +35,15 @@ public:
     return detachedness_;
   }
 
-  inline Node* JSWrapperNode() { return wrapper_node_; }
+  inline Node* JSWrapperNode() {
+    return wrapper_node_;
+  }
 
   KJ_DISALLOW_COPY_AND_MOVE(MemoryRetainerNode);
   ~MemoryRetainerNode() noexcept(true) {}
 
 private:
-  static v8::EmbedderGraph::Node::Detachedness fromDetachedState(
-      MemoryInfoDetachedState state) {
+  static v8::EmbedderGraph::Node::Detachedness fromDetachedState(MemoryInfoDetachedState state) {
     switch (state) {
       case MemoryInfoDetachedState::UNKNOWN:
         return v8::EmbedderGraph::Node::Detachedness::kUnknown;
@@ -51,19 +56,18 @@ private:
   }
 
   static v8::EmbedderGraph::Node* maybeWrapperNode(
-      MemoryTracker* tracker,
-      v8::Local<v8::Object> obj) {
+      MemoryTracker* tracker, v8::Local<v8::Object> obj) {
     if (!obj.IsEmpty()) return tracker->graph_->V8Node(obj.As<v8::Value>());
     return nullptr;
   }
 
   MemoryRetainerNode(MemoryTracker* tracker,
-                     const void* retainer,
-                     const kj::StringPtr name,
-                     const size_t size,
-                     v8::Local<v8::Object> obj,
-                     kj::Maybe<kj::Function<bool()>> checkIsRootNode,
-                     MemoryInfoDetachedState detachedness)
+      const void* retainer,
+      const kj::StringPtr name,
+      const size_t size,
+      v8::Local<v8::Object> obj,
+      kj::Maybe<kj::Function<bool()>> checkIsRootNode,
+      MemoryInfoDetachedState detachedness)
       : name_(name),
         size_(size),
         wrapper_node_(maybeWrapperNode(tracker, obj)),
@@ -73,10 +77,8 @@ private:
     }
   }
 
-  MemoryRetainerNode(MemoryTracker* tracker,
-                     kj::StringPtr name,
-                     size_t size,
-                     bool isRootNode = false)
+  MemoryRetainerNode(
+      MemoryTracker* tracker, kj::StringPtr name, size_t size, bool isRootNode = false)
       : name_(name),
         size_(size),
         isRootNode(isRootNode) {}
@@ -98,24 +100,25 @@ kj::Maybe<MemoryRetainerNode&> getCurrentNode(const std::stack<MemoryRetainerNod
   if (stack.empty()) return kj::none;
   return *stack.top();
 }
-}
+}  // namespace
 
 MemoryTracker::MemoryTracker(v8::Isolate* isolate, v8::EmbedderGraph* graph)
     : isolate_(isolate),
       graph_(graph) {}
 
 MemoryRetainerNode* MemoryTracker::addNode(const void* retainer,
-                                           const kj::StringPtr name,
-                                           const size_t size,
-                                           v8::Local<v8::Object> obj,
-                                           kj::Maybe<kj::Function<bool()>> checkIsRootNode,
-                                           MemoryInfoDetachedState detachedness,
-                                           kj::Maybe<kj::StringPtr> edgeName) {
-  KJ_IF_SOME(found, seen_.find(retainer)) { return found; }
+    const kj::StringPtr name,
+    const size_t size,
+    v8::Local<v8::Object> obj,
+    kj::Maybe<kj::Function<bool()>> checkIsRootNode,
+    MemoryInfoDetachedState detachedness,
+    kj::Maybe<kj::StringPtr> edgeName) {
+  KJ_IF_SOME(found, seen_.find(retainer)) {
+    return found;
+  }
 
-  MemoryRetainerNode* n = new MemoryRetainerNode(this, retainer, name, size,
-                                                 obj, kj::mv(checkIsRootNode),
-                                                 detachedness);
+  MemoryRetainerNode* n = new MemoryRetainerNode(
+      this, retainer, name, size, obj, kj::mv(checkIsRootNode), detachedness);
   graph_->AddNode(std::unique_ptr<v8::EmbedderGraph::Node>(n));
   seen_.insert(retainer, n);
 
@@ -135,9 +138,8 @@ MemoryRetainerNode* MemoryTracker::addNode(const void* retainer,
   return n;
 }
 
-MemoryRetainerNode* MemoryTracker::addNode(kj::StringPtr nodeName,
-                                           size_t size,
-                                           kj::Maybe<kj::StringPtr> edgeName) {
+MemoryRetainerNode* MemoryTracker::addNode(
+    kj::StringPtr nodeName, size_t size, kj::Maybe<kj::StringPtr> edgeName) {
   MemoryRetainerNode* n = new MemoryRetainerNode(this, nodeName, size);
   graph_->AddNode(std::unique_ptr<v8::EmbedderGraph::Node>(n));
 
@@ -152,9 +154,8 @@ MemoryRetainerNode* MemoryTracker::addNode(kj::StringPtr nodeName,
   return n;
 }
 
-MemoryRetainerNode* MemoryTracker::pushNode(kj::StringPtr nodeName,
-                                            size_t size,
-                                            kj::Maybe<kj::StringPtr> edgeName) {
+MemoryRetainerNode* MemoryTracker::pushNode(
+    kj::StringPtr nodeName, size_t size, kj::Maybe<kj::StringPtr> edgeName) {
   MemoryRetainerNode* n = addNode(nodeName, size, edgeName);
   nodeStack_.push(n);
   return n;
@@ -188,27 +189,24 @@ HeapSnapshotActivity::HeapSnapshotActivity(Callback callback): callback(kj::mv(c
 
 v8::ActivityControl::ControlOption HeapSnapshotActivity::ReportProgressValue(
     uint32_t done, uint32_t total) {
-  return callback(done, total) ?
-      ControlOption::kContinue :
-      ControlOption::kAbort;
+  return callback(done, total) ? ControlOption::kContinue : ControlOption::kAbort;
 }
 
-
 HeapSnapshotWriter::HeapSnapshotWriter(Callback callback, size_t chunkSize)
-      : callback(kj::mv(callback)),
-        chunkSize(chunkSize) {}
+    : callback(kj::mv(callback)),
+      chunkSize(chunkSize) {}
 
 void HeapSnapshotWriter::EndOfStream() {
   callback(kj::none);
 }
 
-int HeapSnapshotWriter::GetChunkSize() { return chunkSize; }
+int HeapSnapshotWriter::GetChunkSize() {
+  return chunkSize;
+}
 
-v8::OutputStream::WriteResult HeapSnapshotWriter::WriteAsciiChunk(
-    char* data, int size) {
-  return callback(kj::ArrayPtr<char>(data, size)) ?
-      v8::OutputStream::WriteResult::kContinue :
-      v8::OutputStream::WriteResult::kAbort;
+v8::OutputStream::WriteResult HeapSnapshotWriter::WriteAsciiChunk(char* data, int size) {
+  return callback(kj::ArrayPtr<char>(data, size)) ? v8::OutputStream::WriteResult::kContinue
+                                                  : v8::OutputStream::WriteResult::kAbort;
 }
 
 }  // namespace workerd::jsg

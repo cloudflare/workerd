@@ -14,18 +14,21 @@ namespace workerd {
 // Keeps allocating new chunks of at least HeapChunkSize as needed.
 // Doesn't perform any heap allocations if string stays within
 // StackSize bytes (without \0)
-template<size_t StackSize>
+template <size_t StackSize>
 class StringBuffer {
 
 public:
   KJ_DISALLOW_COPY_AND_MOVE(StringBuffer);
 
-  explicit StringBuffer(size_t heapChunkSize): heapChunkSize(heapChunkSize), tail(&arr[0]), cap(StackSize) {}
+  explicit StringBuffer(size_t heapChunkSize)
+      : heapChunkSize(heapChunkSize),
+        tail(&arr[0]),
+        cap(StackSize) {}
 
   void append() {}
 
   template <typename First, typename... Rest>
-  void append(First&& first, Rest&&...rest) {
+  void append(First&& first, Rest&&... rest) {
     appendImpl(kj::fwd<First>(first));
     append(kj::fwd<Rest>(rest)...);
   }
@@ -47,7 +50,7 @@ private:
   kj::Vector<kj::Array<char>> chunks;
 
   // points after the last used bytes in current chunk
-  char *tail;
+  char* tail;
 
   // number of bytes available in current chunk
   size_t cap;
@@ -64,7 +67,7 @@ private:
     if (toCopy != size) {
       // prepare new chunk
       size_t remaining = size - toCopy;
-      size_t chunkSize = kj::max(remaining, heapChunkSize); // don't chunk large strings
+      size_t chunkSize = kj::max(remaining, heapChunkSize);  // don't chunk large strings
       auto chunk = kj::heapArray<char>(chunkSize);
 
       // copy the rest of the string to the new chunk
@@ -82,7 +85,7 @@ private:
     appendImpl(str.begin(), str.size());
   }
 
-  template<size_t size>
+  template <size_t size>
   void appendImpl(const char (&arr)[size]) {
     appendImpl(arr, size - 1 /* assume 0-terminated strings */);
   }
@@ -105,7 +108,7 @@ private:
     if (onStack < len) {
       size_t remaining = len - onStack;
       for (auto& chunk: chunks) {
-        size_t inChunk = kj::min(remaining, chunk.size()); // last chunk won't be full
+        size_t inChunk = kj::min(remaining, chunk.size());  // last chunk won't be full
         memcpy(dest, chunk.begin(), inChunk);
         dest += inChunk;
         remaining -= inChunk;
@@ -116,4 +119,4 @@ private:
   }
 };
 
-} // namespace workerd
+}  // namespace workerd
