@@ -1,8 +1,8 @@
-load("//:build/wd_test.bzl", "wd_test")
-
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
-
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("//:build/pyodide_bucket.bzl", "PYODIDE_IMPORTS_TO_TEST")
+load("//:build/wd_test.bzl", "wd_test")
+load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
 # pyodide_dev.capnp.bin represents a custom pyodide version "dev" that is generated
 # at build time using the latest contents of the src/pyodide directory.
@@ -11,7 +11,7 @@ load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 copy_file(
     name = "pyodide_dev.capnp.bin@rule",
     src = "//src/pyodide:pyodide.capnp.bin",
-    out = "pyodide-bundle-cache/pyodide_dev.capnp.bin"
+    out = "pyodide-bundle-cache/pyodide_dev.capnp.bin",
 )
 
 py_wd_test(
@@ -58,6 +58,4 @@ py_wd_test(
     ),
 )
 
-load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
-load("//:build/pyodide_bucket.bzl", "PYODIDE_IMPORTS_TO_TEST")
 gen_import_tests(PYODIDE_IMPORTS_TO_TEST)

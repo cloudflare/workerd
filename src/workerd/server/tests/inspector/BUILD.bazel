@@ -2,18 +2,17 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 
 js_test(
     name = "inspector-test",
+    data = [
+        ":config.capnp",
+        ":index.mjs",
+        "//:node_modules/@workerd/test",
+        "//:node_modules/chrome-remote-interface",
+        "//src/workerd/server:workerd",
+    ],
     entry_point = "driver.mjs",
     env = {
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
         "WORKERD_CONFIG": "$(rootpath :config.capnp)",
     },
-    data = [
-        "//:node_modules/chrome-remote-interface",
-        "//:node_modules/@workerd/test",
-        "//src/workerd/server:workerd",
-        ":config.capnp",
-        ":index.mjs",
-    ],
     tags = ["js-test"],
 )
-

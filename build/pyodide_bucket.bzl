@@ -9,167 +9,167 @@ PYODIDE_ALL_WHEELS_ZIP_SHA256 = "c17feb45fdcb4b41eab9c719e69c9e062a8fc88344fcb6b
 
 # IMPORTANT: when updating this file in git, check the diff to make sure none of the imports below are being removed unexpectedly
 PYODIDE_IMPORTS_TO_TEST = {
-   "aiohttp": [
-      "aiohttp"
-   ],
-   "aiosignal": [
-      "aiosignal"
-   ],
-   "annotated-types": [
-      "annotated_types"
-   ],
-   "anyio": [
-      "anyio"
-   ],
-   "async-timeout": [
-      "async_timeout"
-   ],
-   "attrs": [
-      "attr",
-      "attrs"
-   ],
-   "certifi": [
-      "certifi"
-   ],
-   "charset-normalizer": [
-      "charset_normalizer"
-   ],
-   "distro": [
-      "distro"
-   ],
-   "fastapi": [
-      "fastapi"
-   ],
-   "frozenlist": [
-      "frozenlist"
-   ],
-   "h11": [
-      "h11"
-   ],
-   "hashlib": [
-      "_hashlib"
-   ],
-   "httpcore": [
-      "httpcore"
-   ],
-   "httpx": [
-      "httpx"
-   ],
-   "idna": [
-      "idna"
-   ],
-   "jsonpatch": [
-      "jsonpatch"
-   ],
-   "jsonpointer": [
-      "jsonpointer"
-   ],
-   "langchain": [
-      "langchain"
-   ],
-   "langchain-core": [
-      "langchain_core",
-      "langchain_core.callbacks",
-      "langchain_core.language_models.llms",
-      "langchain_core.output_parsers",
-      "langchain_core.prompts"
-   ],
-   "langchain_openai": [
-      "langchain_openai",
-      "langchain_openai.chat_models.base"
-   ],
-   "langsmith": [
-      "langsmith",
-      "langsmith.client"
-   ],
-   "lzma": [
-      "_lzma",
-      "lzma"
-   ],
-   "micropip": [
-      "micropip"
-   ],
-   "multidict": [
-      "multidict"
-   ],
-   "numpy": [
-      "numpy"
-   ],
-   "openai": [
-      "openai"
-   ],
-   "packaging": [
-      "packaging"
-   ],
-   "pydantic": [
-      "pydantic"
-   ],
-   "pydantic_core": [
-      "pydantic_core"
-   ],
-   "pydecimal": [
-      "_pydecimal"
-   ],
-   "pydoc_data": [
-      "pydoc_data"
-   ],
-   "pyyaml": [
-      "_yaml",
-      "yaml"
-   ],
-   "regex": [
-      "regex"
-   ],
-   "requests": [
-      "requests"
-   ],
-   "six": [
-      "six"
-   ],
-   "sniffio": [
-      "sniffio"
-   ],
-   "sqlite3": [
-      "_sqlite3",
-      "sqlite3"
-   ],
-   "ssl": [
-      "_ssl",
-      "ssl"
-   ],
-   "starlette": [
-      "starlette",
-      "starlette.applications",
-      "starlette.authentication",
-      "starlette.background",
-      "starlette.concurrency",
-      "starlette.config",
-      "starlette.convertors",
-      "starlette.datastructures",
-      "starlette.endpoints",
-      "starlette.exceptions",
-      "starlette.formparsers",
-      "starlette.middleware",
-      "starlette.middleware.base",
-      "starlette.requests",
-      "starlette.responses",
-      "starlette.routing",
-      "starlette.schemas"
-   ],
-   "tenacity": [
-      "tenacity"
-   ],
-   "tiktoken": [
-      "tiktoken",
-      "tiktoken_ext"
-   ],
-   "typing-extensions": [
-      "typing_extensions"
-   ],
-   "urllib3": [
-      "urllib3"
-   ],
-   "yarl": [
-      "yarl"
-   ]
+    "aiohttp": [
+        "aiohttp",
+    ],
+    "aiosignal": [
+        "aiosignal",
+    ],
+    "annotated-types": [
+        "annotated_types",
+    ],
+    "anyio": [
+        "anyio",
+    ],
+    "async-timeout": [
+        "async_timeout",
+    ],
+    "attrs": [
+        "attr",
+        "attrs",
+    ],
+    "certifi": [
+        "certifi",
+    ],
+    "charset-normalizer": [
+        "charset_normalizer",
+    ],
+    "distro": [
+        "distro",
+    ],
+    "fastapi": [
+        "fastapi",
+    ],
+    "frozenlist": [
+        "frozenlist",
+    ],
+    "h11": [
+        "h11",
+    ],
+    "hashlib": [
+        "_hashlib",
+    ],
+    "httpcore": [
+        "httpcore",
+    ],
+    "httpx": [
+        "httpx",
+    ],
+    "idna": [
+        "idna",
+    ],
+    "jsonpatch": [
+        "jsonpatch",
+    ],
+    "jsonpointer": [
+        "jsonpointer",
+    ],
+    "langchain": [
+        "langchain",
+    ],
+    "langchain-core": [
+        "langchain_core",
+        "langchain_core.callbacks",
+        "langchain_core.language_models.llms",
+        "langchain_core.output_parsers",
+        "langchain_core.prompts",
+    ],
+    "langchain_openai": [
+        "langchain_openai",
+        "langchain_openai.chat_models.base",
+    ],
+    "langsmith": [
+        "langsmith",
+        "langsmith.client",
+    ],
+    "lzma": [
+        "_lzma",
+        "lzma",
+    ],
+    "micropip": [
+        "micropip",
+    ],
+    "multidict": [
+        "multidict",
+    ],
+    "numpy": [
+        "numpy",
+    ],
+    "openai": [
+        "openai",
+    ],
+    "packaging": [
+        "packaging",
+    ],
+    "pydantic": [
+        "pydantic",
+    ],
+    "pydantic_core": [
+        "pydantic_core",
+    ],
+    "pydecimal": [
+        "_pydecimal",
+    ],
+    "pydoc_data": [
+        "pydoc_data",
+    ],
+    "pyyaml": [
+        "_yaml",
+        "yaml",
+    ],
+    "regex": [
+        "regex",
+    ],
+    "requests": [
+        "requests",
+    ],
+    "six": [
+        "six",
+    ],
+    "sniffio": [
+        "sniffio",
+    ],
+    "sqlite3": [
+        "_sqlite3",
+        "sqlite3",
+    ],
+    "ssl": [
+        "_ssl",
+        "ssl",
+    ],
+    "starlette": [
+        "starlette",
+        "starlette.applications",
+        "starlette.authentication",
+        "starlette.background",
+        "starlette.concurrency",
+        "starlette.config",
+        "starlette.convertors",
+        "starlette.datastructures",
+        "starlette.endpoints",
+        "starlette.exceptions",
+        "starlette.formparsers",
+        "starlette.middleware",
+        "starlette.middleware.base",
+        "starlette.requests",
+        "starlette.responses",
+        "starlette.routing",
+        "starlette.schemas",
+    ],
+    "tenacity": [
+        "tenacity",
+    ],
+    "tiktoken": [
+        "tiktoken",
+        "tiktoken_ext",
+    ],
+    "typing-extensions": [
+        "typing_extensions",
+    ],
+    "urllib3": [
+        "urllib3",
+    ],
+    "yarl": [
+        "yarl",
+    ],
 }

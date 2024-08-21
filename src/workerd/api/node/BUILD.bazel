@@ -4,12 +4,15 @@ load("//:build/wd_test.bzl", "wd_test")
 
 wd_cc_library(
     name = "node",
-    srcs = glob(["**/*.c++"], exclude = ["**/*-test.c++"]),
+    srcs = glob(
+        ["**/*.c++"],
+        exclude = ["**/*-test.c++"],
+    ),
     hdrs = glob(["**/*.h"]),
     implementation_deps = [
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@simdutf",
         "@nbytes",
+        "@simdutf",
     ],
     visibility = ["//visibility:public"],
     deps = [

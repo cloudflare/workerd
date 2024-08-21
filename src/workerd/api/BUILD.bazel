@@ -71,10 +71,10 @@ wd_cc_library(
         ":html-rewriter",
         "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
+        "//src/workerd/api/node",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
         "//src/workerd/server:workerd_capnp",
-        "//src/workerd/api/node",
     ],
 )
 
@@ -146,19 +146,21 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
 )
 
-[kj_test(
-    src = f,
-    deps = [
-        "//src/workerd/io",
-    ],
-) for f in [
-    "actor-state-test.c++",
-    "basics-test.c++",
-    "crypto/aes-test.c++",
-    "crypto/impl-test.c++",
-    "streams/queue-test.c++",
-    "streams/standard-test.c++",
-    "util-test.c++",
+[
+    kj_test(
+        src = f,
+        deps = [
+            "//src/workerd/io",
+        ],
+    )
+    for f in [
+        "actor-state-test.c++",
+        "basics-test.c++",
+        "crypto/aes-test.c++",
+        "crypto/impl-test.c++",
+        "streams/queue-test.c++",
+        "streams/standard-test.c++",
+        "util-test.c++",
     ]
 ]
 
@@ -219,14 +221,17 @@ kj_test(
 
 wd_test(
     src = "tests/js-rpc-socket-test.wd-test",
-    args = ["--experimental", "--no-verbose"],
+    args = [
+        "--experimental",
+        "--no-verbose",
+    ],
     data = ["tests/js-rpc-test.js"],
 )
 
 [wd_test(
     src = f,
-    data = [f.removesuffix(".ts-wd-test") + ".ts"],
     args = ["--experimental"],
+    data = [f.removesuffix(".ts-wd-test") + ".ts"],
 ) for f in glob(
     ["**/*.ts-wd-test"],
 )]

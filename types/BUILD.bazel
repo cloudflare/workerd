@@ -5,12 +5,18 @@ load("//:build/wd_ts_type_test.bzl", "wd_ts_type_test")
 
 wd_ts_project(
     name = "types_lib",
-    srcs = glob(["src/**/*", "scripts/*.ts"], exclude = ["src/worker/**/*"]),
+    srcs = glob(
+        [
+            "src/**/*",
+            "scripts/*.ts",
+        ],
+        exclude = ["src/worker/**/*"],
+    ),
     deps = [
         "//:node_modules/@types",
-        "//:node_modules/esbuild",
         "//:node_modules/@workerd/jsg",
         "//:node_modules/capnp-ts",
+        "//:node_modules/esbuild",
         "//:node_modules/prettier",
         "//:node_modules/typescript",
     ],
@@ -29,9 +35,8 @@ js_run_binary(
     srcs = [
         "scripts/config.capnp",
         ":types_worker",
-        "//src/workerd/server:workerd",
         "//:node_modules/prettier",
-
+        "//src/workerd/server:workerd",
     ],
     out_dirs = ["definitions"],
     silent_on_success = False,  # Always enable logging for debugging
@@ -51,9 +56,9 @@ js_binary(
 js_run_binary(
     name = "types_worker",
     srcs = [
-        "//:node_modules/esbuild",
         "//:node_modules/@workerd/jsg",
         "//:node_modules/capnp-ts",
+        "//:node_modules/esbuild",
         "//:node_modules/typescript",
         "//src/workerd/tools:param_extractor",
     ] + glob(

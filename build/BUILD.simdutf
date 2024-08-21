@@ -2,6 +2,6 @@ cc_library(
     name = "simdutf",
     srcs = ["simdutf.cpp"],
     hdrs = ["simdutf.h"],
-    visibility = ["//visibility:public"],
     copts = ["-w"],
+    visibility = ["//visibility:public"],
 )

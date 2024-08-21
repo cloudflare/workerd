@@ -216,7 +216,6 @@ def wd_js_bundle_capnp(
     )
     return data
 
-
 def wd_js_bundle(name, import_name, *args, **kwargs):
     data = wd_js_bundle_capnp(name + ".capnp", import_name, *args, **kwargs)
     cc_capnp_library(
