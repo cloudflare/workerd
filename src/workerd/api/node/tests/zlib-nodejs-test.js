@@ -655,6 +655,30 @@ export const zlibDestroyTest = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-close-after-error.js
+export const closeAfterError = {
+  async test() {
+    const decompress = zlib.createGunzip(15);
+    const { promise, resolve } = Promise.withResolvers();
+    let errorHasBeenCalled = false;
+
+    decompress.on('error', () => {
+      errorHasBeenCalled = true;
+      strictEqual(decompress._closed, true);
+      decompress.close();
+    });
+
+    strictEqual(decompress._closed, false);
+    decompress.write('something invalid');
+    decompress.on('close', resolve);
+
+    await promise;
+
+    assert(errorHasBeenCalled, 'Error handler should have been called');
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -692,7 +716,7 @@ export const zlibDestroyTest = {
 // - [ ] test-zlib-from-gzip.js
 // - [ ] test-zlib-object-write.js
 // - [ ] test-zlib-write-after-flush.js
-// - [ ] test-zlib-close-after-error.js
+// - [x] test-zlib-close-after-error.js
 // - [ ] test-zlib-dictionary-fail.js
 // - [ ] test-zlib-from-gzip-with-trailing-garbage.js
 // - [ ] test-zlib-params.js
