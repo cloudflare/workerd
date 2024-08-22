@@ -28,8 +28,8 @@ import sys
 from functools import wraps
 
 from .entropy_import_context import (
-    is_bad_entropy_enabled,
     get_entropy_import_context,
+    is_bad_entropy_enabled,
     tempfile_restore_random_name_sequence,
 )
 from .import_patch_manager import (
@@ -46,15 +46,17 @@ def should_allow_entropy_call():
     It doesn't really matter that much since we're not likely to recover from
     these anyways but it feels better.
     """
-    # Allow if we've either entered request context or if we've temporarily enabled entropy.
+    # Allow if we've either entered request context or if we've temporarily
+    # enabled entropy.
     return IN_REQUEST_CONTEXT or is_bad_entropy_enabled()
 
 
 # Step 1.
 #
-# Prevent calls to getentropy(). The intended way for `getentropy()` to fail is to set an EIO error,
-# which turns into a Python OSError, so we raise this same error so that if we patch `getentropy`
-# from the Emscripten C stdlib we can remove these patches without changing the behavior.
+# Prevent calls to getentropy(). The intended way for `getentropy()` to fail is
+# to set an EIO error, which turns into a Python OSError, so we raise this same
+# error so that if we patch `getentropy` from the Emscripten C stdlib we can
+# remove these patches without changing the behavior.
 
 EIO = 29
 
@@ -70,11 +72,12 @@ def patch_urandom(*args):
 
 def disable_urandom():
     """
-    Python os.urandom() calls C getentropy() which calls JS crypto.getRandomValues() which throws at
-    top level, fatally crashing the interpreter.
+    Python os.urandom() calls C getentropy() which calls JS
+    crypto.getRandomValues() which throws at top level, fatally crashing the
+    interpreter.
 
-    TODO: Patch Emscripten's getentropy() to return EIO if `crypto.getRandomValues()` throws. Then
-    we can remove this.
+    TODO: Patch Emscripten's getentropy() to return EIO if
+    `crypto.getRandomValues()` throws. Then we can remove this.
     """
     os.urandom = patch_urandom
 
@@ -89,8 +92,8 @@ orig_Random_seed = _random.Random.seed
 @wraps(orig_Random_seed)
 def patched_seed(self, val):
     """
-    Random.seed calls _PyOs_URandom which will fatally fail in top level. Prevent this by raising a
-    RuntimeError instead.
+    Random.seed calls _PyOs_URandom which will fatally fail in top level.
+    Prevent this by raising a RuntimeError instead.
     """
     if val is None and not should_allow_entropy_call():
         raise OSError(EIO, "Cannot get entropy outside of request context")
@@ -109,8 +112,8 @@ def restore_random_seed():
 
 def reseed_rng():
     """
-    Step 5: Have to reseed randomness in the IoContext of the first request since we gave a low
-    quality seed when it was seeded at top level.
+    Step 5: Have to reseed randomness in the IoContext of the first request
+    since we gave a low quality seed when it was seeded at top level.
     """
     from random import seed
 

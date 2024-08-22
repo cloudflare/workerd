@@ -1,11 +1,8 @@
-from js import Response
-
-import io
-
 import code
-
-from io import StringIO
 import sys
+from io import StringIO
+
+from js import Response
 
 sys.stdout = StringIO()
 

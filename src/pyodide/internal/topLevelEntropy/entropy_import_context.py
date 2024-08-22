@@ -13,11 +13,11 @@ to be installed as part of their import context to prevent top level crashes.
 Other rust packages are likely to need similar treatment to pydantic_core.
 """
 
-from contextlib import contextmanager
-from array import array
-from .import_patch_manager import block_calls
-
 import sys
+from array import array
+from contextlib import contextmanager
+
+from .import_patch_manager import block_calls
 
 RUST_PACKAGES = ["pydantic_core", "tiktoken"]
 MODULES_TO_PATCH = [
@@ -34,8 +34,9 @@ ALLOWED_ENTROPY_CALLS = array("b", [0])
 
 
 def get_bad_entropy_flag():
-    # simpleRunPython reads out stderr. We put the address there so we can fish it out...
-    # We could use ctypes instead of array but ctypes weighs an extra 100kb compared to array.
+    # simpleRunPython reads out stderr. We put the address there so we can fish
+    # it out... We could use ctypes instead of array but ctypes weighs an extra
+    # 100kb compared to array.
     print(ALLOWED_ENTROPY_CALLS.buffer_info()[0], file=sys.stderr)
 
 
@@ -72,7 +73,8 @@ def get_entropy_import_context(name):
     if res:
         return res
     if name in RUST_PACKAGES:
-        # Initial import needs one entropy call to initialize std::collections::HashMap hash seed
+        # Initial import needs one entropy call to initialize
+        # std::collections::HashMap hash seed
         return rust_package_context
     raise Exception(f"Missing context for {name}")
 
@@ -95,7 +97,7 @@ def random_context(module):
     # instantiating it without a seed will call getentropy() and fail.
     # Instantiating SystemRandom is fine, calling it's methods will call
     # getentropy() and fail.
-    block_calls(module, allowlist=["Random", "SystemRandom"])
+    block_calls(module, allowlist=("Random", "SystemRandom"))
 
 
 @contextmanager
@@ -109,7 +111,7 @@ def numpy_random_context(module):
     yield
     # Calling default_rng() with a given seed is fine, calling it without a seed
     # will call getentropy() and fail.
-    block_calls(module, allowlist=["default_rng"])
+    block_calls(module, allowlist=("default_rng",))
 
 
 @contextmanager
@@ -125,15 +127,16 @@ def numpy_random_mtrand_context(module):
 @contextmanager
 def pydantic_core_context(module):
     try:
-        # Initial import needs one entropy call to initialize std::collections::HashMap hash seed
+        # Initial import needs one entropy call to initialize
+        # std::collections::HashMap hash seed
         with allow_bad_entropy_calls(1):
             yield
     finally:
         try:
             with allow_bad_entropy_calls(1):
-                # validate_core_schema makes an ahash::AHashMap which makes another entropy call for
-                # its hash seed. It will throw an error but only after making the needed entropy
-                # call.
+                # validate_core_schema makes an ahash::AHashMap which makes
+                # another entropy call for its hash seed. It will throw an error
+                # but only after making the needed entropy call.
                 module.validate_core_schema(None)
         except module.SchemaError:
             pass
@@ -152,7 +155,7 @@ def aiohttp_http_websocket_context(module):
     try:
         yield
     finally:
-        random.Random = random
+        random.Random = Random
 
 
 class DeterministicRandomNameSequence:

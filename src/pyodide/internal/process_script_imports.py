@@ -1,14 +1,17 @@
-# This script is used to prepare a worker prior to a _package_ memory snapshot being taken.
-# All it does is walk through the imports in each of the worker's modules and attempts to import
-# them. Local imports are not possible because the worker file path is explicitly removed from the
-# module search path.
+"""
+This script is used to prepare a worker prior to a _package_ memory snapshot
+being taken. All it does is walk through the imports in each of the worker's
+modules and attempts to import them. Local imports are not possible because
+the worker file path is explicitly removed from the module search path.
+"""
+
 CF_LOADED_MODULES = []
 
 
 def _do_it():
     import ast
-    from pathlib import Path
     import sys
+    from pathlib import Path
 
     def find_imports(source: str) -> list[str]:
         try:
@@ -36,10 +39,11 @@ def _do_it():
                 pass
 
     def process_scripts():
-        # Currently this script assumes that it is generating a _package_ snapshot- one that
-        # only includes non-vendored packages. Because of this we do not wish to import local
-        # modules, the easiest way to ensure they cannot be imported is to remove
-        # `/session/metadata` from the sys path.
+        # Currently this script assumes that it is generating a _package_
+        # snapshot- one that only includes non-vendored packages. Because of
+        # this we do not wish to import local modules, the easiest way to ensure
+        # they cannot be imported is to remove `/session/metadata` from the sys
+        # path.
         worker_files_path = "/session/metadata"
         sys.path.remove(worker_files_path)
         for script in Path(worker_files_path).glob("**/*.py"):

@@ -7,9 +7,9 @@ from httpx._models import Headers, Request, Response
 from httpx._transports.default import AsyncResponseStream
 from httpx._types import AsyncByteStream
 from httpx._utils import Timer
-
 from js import Headers as js_Headers
 from js import fetch
+
 from pyodide.ffi import create_proxy
 
 
@@ -29,8 +29,9 @@ def acquire_buffer(content):
 
 
 async def js_readable_stream_iter(js_readable_stream):
-    """Readable streams are supposed to be async iterators some day but they aren't yet.
-    In the meantime, this is an adaptor that produces an async iterator from a readable stream.
+    """Readable streams are supposed to be async iterators some day but they
+    aren't yet. In the meantime, this is an adaptor that produces an async
+    iterator from a readable stream.
     """
     reader = js_readable_stream.getReader()
     while True:
@@ -64,8 +65,8 @@ async def _send_single_request(self, request: Request) -> Response:
         )
 
     py_headers = Headers(js_resp.headers)
-    # Unset content-encoding b/c Javascript fetch already handled unpacking. If we leave it we will
-    # get errors when httpx tries to unpack a second time.
+    # Unset content-encoding b/c Javascript fetch already handled unpacking. If
+    # we leave it we will get errors when httpx tries to unpack a second time.
     py_headers.pop("content-encoding", None)
     response = Response(
         status_code=js_resp.status,

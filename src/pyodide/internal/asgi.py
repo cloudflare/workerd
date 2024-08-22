@@ -1,7 +1,8 @@
-from asyncio import Future, ensure_future, Queue, sleep
-from inspect import isawaitable
+from asyncio import Future, Queue, ensure_future, sleep
 from contextlib import contextmanager
-from fastapi import Request, Depends
+from inspect import isawaitable
+
+from fastapi import Depends, Request
 
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 
@@ -93,7 +94,8 @@ async def start_application(app):
 
 
 async def process_request(app, req, env):
-    from js import Response, Object
+    from js import Object, Response
+
     from pyodide.ffi import create_proxy
 
     status = None
