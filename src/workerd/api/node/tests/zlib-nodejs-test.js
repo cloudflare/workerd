@@ -1,6 +1,11 @@
-import { strictEqual, throws, deepStrictEqual } from 'node:assert';
+import {
+  strictEqual,
+  throws,
+  deepStrictEqual,
+  ok as assert,
+} from 'node:assert';
 import { Buffer } from 'node:buffer';
-import { crc32, constants } from 'node:zlib';
+import zlib from 'node:zlib';
 
 // The following test data comes from
 // https://github.com/zlib-ng/zlib-ng/blob/5401b24/test/test_crc32.cc
@@ -210,23 +215,23 @@ export const crc32Test = {
       const buf = Buffer.from(data, 'utf8');
       strictEqual(buf.length, len);
       strictEqual(
-        crc32(buf, crc),
+        zlib.crc32(buf, crc),
         expected,
         `crc32('${data}', ${crc}) in buffer is not ${expected}`
       );
       strictEqual(
-        crc32(buf.toString(), crc),
+        zlib.crc32(buf.toString(), crc),
         expected,
         `crc32('${data}', ${crc}) in string is not ${expected}`
       );
       if (crc === 0) {
         strictEqual(
-          crc32(buf),
+          zlib.crc32(buf),
           expected,
           `crc32('${data}') in buffer is not ${expected}`
         );
         strictEqual(
-          crc32(buf.toString()),
+          zlib.crc32(buf.toString()),
           expected,
           `crc32('${data}') in string is not ${expected}`
         );
@@ -236,7 +241,7 @@ export const crc32Test = {
     [undefined, null, true, 1, () => {}, {}].forEach((invalid) => {
       throws(
         () => {
-          crc32(invalid);
+          zlib.crc32(invalid);
         },
         { code: 'ERR_INVALID_ARG_TYPE' }
       );
@@ -245,7 +250,7 @@ export const crc32Test = {
     [null, true, () => {}, {}].forEach((invalid) => {
       throws(
         () => {
-          crc32('test', invalid);
+          zlib.crc32('test', invalid);
         },
         { code: 'ERR_INVALID_ARG_TYPE' }
       );
@@ -255,7 +260,7 @@ export const crc32Test = {
 
 export const constantsTest = {
   test() {
-    deepStrictEqual(Object.keys(constants).sort(), [
+    deepStrictEqual(Object.keys(zlib.constants).sort(), [
       'BROTLI_DECODE',
       'BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES',
       'BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MAP',
@@ -366,3 +371,299 @@ export const constantsTest = {
     ]);
   },
 };
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-zero-windowBits.js
+export const testZeroWindowBits = {
+  test() {
+    // windowBits is a special case in zlib. On the compression side, 0 is invalid.
+    // On the decompression side, it indicates that zlib should use the value from
+    // the header of the compressed stream.
+    {
+      const inflate = zlib.createInflate({ windowBits: 0 });
+      assert(inflate instanceof zlib.Inflate);
+    }
+
+    {
+      const gunzip = zlib.createGunzip({ windowBits: 0 });
+      assert(gunzip instanceof zlib.Gunzip);
+    }
+
+    {
+      const unzip = zlib.createUnzip({ windowBits: 0 });
+      assert(unzip instanceof zlib.Unzip);
+    }
+
+    throws(() => zlib.createGzip({ windowBits: 0 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-create-raw.js
+export const testCreateRaw = {
+  test() {
+    {
+      const inflateRaw = zlib.createInflateRaw();
+      assert(inflateRaw instanceof zlib.InflateRaw);
+    }
+
+    {
+      const deflateRaw = zlib.createDeflateRaw();
+      assert(deflateRaw instanceof zlib.DeflateRaw);
+    }
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-deflate-constructors.js
+export const testDeflateConstructors = {
+  test() {
+    assert(new zlib.Deflate() instanceof zlib.Deflate);
+    assert(new zlib.DeflateRaw() instanceof zlib.DeflateRaw);
+
+    // Throws if `options.chunkSize` is invalid
+    throws(() => new zlib.Deflate({ chunkSize: 'test' }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+    throws(() => new zlib.Deflate({ chunkSize: -Infinity }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate({ chunkSize: 0 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    // Throws if `options.windowBits` is invalid
+    throws(() => new zlib.Deflate({ windowBits: 'test' }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+    throws(() => new zlib.Deflate({ windowBits: -Infinity }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate({ windowBits: Infinity }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate({ windowBits: 0 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    // Throws if `options.level` is invalid
+    throws(() => new zlib.Deflate({ level: 'test' }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+    throws(() => new zlib.Deflate({ level: -Infinity }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate({ level: Infinity }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate({ level: -2 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    // Throws if `level` invalid in  `Deflate.prototype.params()`
+    throws(() => new zlib.Deflate().params('test'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+    throws(() => new zlib.Deflate().params(-Infinity), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate().params(Infinity), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate().params(-2), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    // Throws if options.memLevel is invalid
+    throws(() => new zlib.Deflate({ memLevel: 'test' }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+    throws(() => new zlib.Deflate({ memLevel: -Infinity }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate({ memLevel: Infinity }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate({ memLevel: -2 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    // Does not throw if opts.strategy is valid
+    new zlib.Deflate({ strategy: zlib.constants.Z_FILTERED });
+    new zlib.Deflate({ strategy: zlib.constants.Z_HUFFMAN_ONLY });
+    new zlib.Deflate({ strategy: zlib.constants.Z_RLE });
+    new zlib.Deflate({ strategy: zlib.constants.Z_FIXED });
+    new zlib.Deflate({ strategy: zlib.constants.Z_DEFAULT_STRATEGY });
+
+    // Throws if options.strategy is invalid
+    throws(() => new zlib.Deflate({ strategy: 'test' }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+    throws(() => new zlib.Deflate({ strategy: -Infinity }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate({ strategy: Infinity }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate({ strategy: -2 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    // Throws TypeError if `strategy` is invalid in `Deflate.prototype.params()`
+    throws(() => new zlib.Deflate().params(0, 'test'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+    throws(() => new zlib.Deflate().params(0, -Infinity), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate().params(0, Infinity), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    throws(() => new zlib.Deflate().params(0, -2), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    // Throws if opts.dictionary is not a Buffer
+    throws(() => new zlib.Deflate({ dictionary: 'not a buffer' }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-failed-init.js
+export const testFailedInit = {
+  test() {
+    assert.throws(() => zlib.createGzip({ chunkSize: 0 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    assert.throws(() => zlib.createGzip({ windowBits: 0 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    assert.throws(() => zlib.createGzip({ memLevel: 0 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+    });
+
+    {
+      const stream = zlib.createGzip({ level: NaN });
+      assert.strictEqual(stream._level, zlib.constants.Z_DEFAULT_COMPRESSION);
+    }
+
+    {
+      const stream = zlib.createGzip({ strategy: NaN });
+      assert.strictEqual(stream._strategy, zlib.constants.Z_DEFAULT_STRATEGY);
+    }
+  },
+};
+
+// Node.js tests relevant to zlib
+//
+// - [ ] test-zlib-brotli-16GB.js
+// - [ ] test-zlib-convenience-methods.js
+// - [ ] test-zlib-flush-drain.js
+// - [ ] test-zlib-invalid-input-memory.js
+// - [ ] test-zlib-sync-no-event.js
+// - [ ] test-zlib-brotli-flush.js
+// - [x] test-zlib-crc32.js
+// - [ ] test-zlib-flush-drain-longblock.js
+// - [ ] test-zlib.js
+// - [ ] test-zlib-truncated.js
+// - [ ] test-zlib-brotli-from-brotli.js
+// - [x] test-zlib-create-raw.js
+// - [ ] test-zlib-flush-flags.js
+// - [ ] test-zlib-kmaxlength-rangeerror.js
+// - [ ] test-zlib-unused-weak.js
+// - [ ] test-zlib-brotli-from-string.js
+// - [x] test-zlib-deflate-constructors.js
+// - [ ] test-zlib-flush.js
+// - [ ] test-zlib-maxOutputLength.js
+// - [ ] test-zlib-unzip-one-byte-chunks.js
+// - [ ] test-zlib-brotli.js
+// - [ ] test-zlib-deflate-raw-inherits.js
+// - [ ] test-zlib-flush-write-sync-interleaved.js
+// - [ ] test-zlib-no-stream.js
+// - [ ] test-zlib-write-after-close.js
+// - [ ] test-zlib-brotli-kmaxlength-rangeerror.js
+// - [ ] test-zlib-destroy.js
+// - [ ] test-zlib-from-concatenated-gzip.js
+// - [ ] test-zlib-not-string-or-buffer.js
+// - [ ] test-zlib-write-after-end.js
+// - [ ] test-zlib-bytes-read.js
+// - [ ] test-zlib-destroy-pipe.js
+// - [ ] test-zlib-from-gzip.js
+// - [ ] test-zlib-object-write.js
+// - [ ] test-zlib-write-after-flush.js
+// - [ ] test-zlib-close-after-error.js
+// - [ ] test-zlib-dictionary-fail.js
+// - [ ] test-zlib-from-gzip-with-trailing-garbage.js
+// - [ ] test-zlib-params.js
+// - [ ] test-zlib-zero-byte.js
+// - [ ] test-zlib-close-after-write.js
+// - [ ] test-zlib-dictionary.js
+// - [ ] test-zlib-from-string.js
+// - [ ] test-zlib-premature-end.js
+// - [x] test-zlib-zero-windowBits.js
+// - [ ] test-zlib-close-in-ondata.js
+// - [ ] test-zlib-empty-buffer.js
+// - [ ] test-zlib-invalid-arg-value-brotli-compress.js
+// - [ ] test-zlib-random-byte-pipes.js
+// - [ ] test-zlib-const.js
+// - [x] test-zlib-failed-init.js
+// - [ ] test-zlib-invalid-input.js
+// - [ ] test-zlib-reset-before-write.js

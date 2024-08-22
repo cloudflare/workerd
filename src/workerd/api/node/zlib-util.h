@@ -1,17 +1,197 @@
 // Copyright (c) 2017-2022 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
+// Copyright Joyent and Node contributors. All rights reserved. MIT license.
+#pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/exception.h>
 
+#include "zlib.h"
 #include <kj/array.h>
 #include <kj/compat/brotli.h>
-#include "zlib.h"
+#include <kj/vector.h>
 
-#include <limits>
-#include <cstdint>
+#include <cstdlib>
 
 namespace workerd::api::node {
+
+#ifndef ZLIB_ERROR_CODES
+#define ZLIB_ERROR_CODES(V)                                                                        \
+  V(Z_OK)                                                                                          \
+  V(Z_STREAM_END)                                                                                  \
+  V(Z_NEED_DICT)                                                                                   \
+  V(Z_ERRNO)                                                                                       \
+  V(Z_STREAM_ERROR)                                                                                \
+  V(Z_DATA_ERROR)                                                                                  \
+  V(Z_MEM_ERROR)                                                                                   \
+  V(Z_BUF_ERROR)                                                                                   \
+  V(Z_VERSION_ERROR)
+
+inline const char* ZlibStrerror(int err) {
+#define V(code)                                                                                    \
+  if (err == code) return #code;
+  ZLIB_ERROR_CODES(V)
+#undef V
+  return "Z_UNKNOWN_ERROR";
+}
+#endif  // ZLIB_ERROR_CODES
+
+// Certain zlib constants are defined by Node.js itself
+static constexpr auto Z_MIN_CHUNK = 64;
+static constexpr auto Z_MAX_CHUNK = 128 * 1024 * 1024;
+static constexpr auto Z_DEFAULT_CHUNK = 16 * 1024;
+static constexpr auto Z_MIN_MEMLEVEL = 1;
+
+static constexpr auto Z_MAX_MEMLEVEL = 9;
+static constexpr auto Z_DEFAULT_MEMLEVEL = 8;
+static constexpr auto Z_MIN_LEVEL = -1;
+static constexpr auto Z_MAX_LEVEL = 9;
+static constexpr auto Z_DEFAULT_LEVEL = Z_DEFAULT_COMPRESSION;
+static constexpr auto Z_MIN_WINDOWBITS = 8;
+static constexpr auto Z_MAX_WINDOWBITS = 15;
+static constexpr auto Z_DEFAULT_WINDOWBITS = 15;
+
+static constexpr uint8_t GZIP_HEADER_ID1 = 0x1f;
+static constexpr uint8_t GZIP_HEADER_ID2 = 0x8b;
+
+using ZlibModeValue = uint8_t;
+enum class ZlibMode : ZlibModeValue {
+  NONE,
+  DEFLATE,
+  INFLATE,
+  GZIP,
+  GUNZIP,
+  DEFLATERAW,
+  INFLATERAW,
+  UNZIP,
+  BROTLI_DECODE,
+  BROTLI_ENCODE
+};
+
+struct CompressionError {
+  CompressionError(kj::StringPtr _message, kj::StringPtr _code, int _err)
+      : message(kj::str(_message)),
+        code(kj::str(_code)),
+        err(_err) {
+    JSG_REQUIRE(message.size() != 0, Error, "Compression error message should not be null");
+  }
+
+  kj::String message;
+  kj::String code;
+  int err;
+};
+
+class ZlibContext final {
+public:
+  ZlibContext() = default;
+
+  KJ_DISALLOW_COPY(ZlibContext);
+
+  void close();
+  void setBuffers(kj::ArrayPtr<kj::byte> input,
+      uint32_t inputLength,
+      kj::ArrayPtr<kj::byte> output,
+      uint32_t outputLength);
+  int getFlush() const {
+    return flush;
+  };
+  void setFlush(int value) {
+    flush = value;
+  };
+  void getAfterWriteOffsets(kj::ArrayPtr<kj::byte> writeResult) const {
+    writeResult[0] = stream.avail_out;
+    writeResult[1] = stream.avail_in;
+  }
+  void setMode(ZlibMode value) {
+    mode = value;
+  };
+  kj::Maybe<CompressionError> resetStream();
+  kj::Maybe<CompressionError> getError() const;
+  void work();
+
+  uint getAvailIn() const {
+    return stream.avail_in;
+  };
+  void setAvailIn(uint value) {
+    stream.avail_in = value;
+  };
+  uint getAvailOut() const {
+    return stream.avail_out;
+  }
+  void setAvailOut(uint value) {
+    stream.avail_out = value;
+  };
+
+  // Zlib
+  void initialize(int _level,
+      int _windowBits,
+      int _memLevel,
+      int _strategy,
+      jsg::Optional<kj::Array<kj::byte>> _dictionary);
+  kj::Maybe<CompressionError> setParams(int level, int strategy);
+
+private:
+  bool initializeZlib();
+  kj::Maybe<CompressionError> setDictionary();
+
+  CompressionError constructError(kj::StringPtr message) const {
+    if (stream.msg != nullptr) message = kj::StringPtr(stream.msg);
+
+    return {kj::str(message), kj::str(ZlibStrerror(err)), err};
+  };
+
+  bool initialized = false;
+  ZlibMode mode = ZlibMode::NONE;
+  int flush = Z_NO_FLUSH;
+  int windowBits = 0;
+  int level = 0;
+  int memLevel = 0;
+  int strategy = 0;
+  kj::Vector<kj::byte> dictionary{};
+
+  int err = Z_OK;
+  unsigned int gzip_id_bytes_read = 0;
+  z_stream stream{};
+};
+
+using CompressionStreamErrorHandler = jsg::Function<void(int, kj::StringPtr, kj::StringPtr)>;
+
+template <typename CompressionContext>
+class CompressionStream {
+public:
+  CompressionStream() = default;
+  ~CompressionStream() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(CompressionStream);
+
+  void close();
+  bool checkError(jsg::Lock& js);
+  void emitError(jsg::Lock& js, const CompressionError& error);
+  void writeStream(jsg::Lock& js,
+      int flush,
+      kj::ArrayPtr<kj::byte> input,
+      uint32_t inputLength,
+      kj::ArrayPtr<kj::byte> output,
+      uint32_t outputLength);
+  void setErrorHandler(CompressionStreamErrorHandler handler) {
+    errorHandler = kj::mv(handler);
+  };
+  void initializeStream(kj::ArrayPtr<kj::byte> _write_result, jsg::Function<void()> writeCallback);
+
+protected:
+  CompressionContext context;
+
+private:
+  bool initialized = false;
+  bool writing = false;
+  bool pending_close = false;
+  bool closed = false;
+
+  // Equivalent to `write_js_callback` in Node.js
+  jsg::Optional<jsg::Function<void()>> writeCallback;
+  kj::ArrayPtr<kj::byte> writeResult = nullptr;
+  jsg::Optional<CompressionStreamErrorHandler> errorHandler;
+};
 
 // Implements utilities in support of the Node.js Zlib
 class ZlibUtil final: public jsg::Object {
@@ -19,39 +199,46 @@ public:
   ZlibUtil() = default;
   ZlibUtil(jsg::Lock&, const jsg::Url&) {}
 
-  // Certain zlib constants are defined by NodeJS itself
-  static constexpr auto Z_MIN_CHUNK = 64;
-  static constexpr auto Z_MAX_CHUNK = 128 * 1024;
-  static constexpr auto Z_DEFAULT_CHUNK = 16 * 1024;
-  static constexpr auto Z_MIN_MEMLEVEL = 1;
+  class ZlibStream final: public jsg::Object, public CompressionStream<ZlibContext> {
+  public:
+    ZlibStream(ZlibMode mode);
+    KJ_DISALLOW_COPY_AND_MOVE(ZlibStream);
+    static jsg::Ref<ZlibStream> constructor(ZlibModeValue mode);
 
-  static constexpr auto Z_MAX_MEMLEVEL = 9;
-  static constexpr auto Z_DEFAULT_MEMLEVEL = 8;
-  static constexpr auto Z_MIN_LEVEL = -1;
-  static constexpr auto Z_MAX_LEVEL = 9;
-  static constexpr auto Z_DEFAULT_LEVEL = Z_DEFAULT_COMPRESSION;
-  static constexpr auto Z_MIN_WINDOWBITS = 8;
-  static constexpr auto Z_MAX_WINDOWBITS = 15;
-  static constexpr auto Z_DEFAULT_WINDOWBITS = 15;
+    // Instance methods
+    void initialize(int windowBits,
+        int level,
+        int memLevel,
+        int strategy,
+        kj::Array<kj::byte> writeState,
+        jsg::Function<void()> writeCallback,
+        jsg::Optional<kj::Array<kj::byte>> dictionary);
+    void write(jsg::Lock& js,
+        int flush,
+        kj::Array<kj::byte> input,
+        int inputOffset,
+        int inputLength,
+        kj::Array<kj::byte> output,
+        int outputOffset,
+        int outputLength);
+    void params(int level, int strategy);
+    void reset(jsg::Lock& js);
 
-  using ZlibModeValue = uint8_t;
-  enum class ZlibMode : ZlibModeValue {
-    NONE,
-    DEFLATE,
-    INFLATE,
-    GZIP,
-    GUNZIP,
-    DEFLATERAW,
-    INFLATERAW,
-    UNZIP,
-    BROTLI_DECODE,
-    BROTLI_ENCODE
+    JSG_RESOURCE_TYPE(ZlibStream) {
+      JSG_METHOD(initialize);
+      JSG_METHOD(close);
+      JSG_METHOD(write);
+      JSG_METHOD(params);
+      JSG_METHOD(setErrorHandler);
+      JSG_METHOD(reset);
+    }
   };
 
   uint32_t crc32Sync(kj::Array<kj::byte> data, uint32_t value);
 
   JSG_RESOURCE_TYPE(ZlibUtil) {
     JSG_METHOD_NAMED(crc32, crc32Sync);
+    JSG_NESTED_TYPE(ZlibStream);
 
     // zlib.constants (part of the API contract for node:zlib)
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_NO_FLUSH, Z_NO_FLUSH);
@@ -93,7 +280,6 @@ public:
         CONST_BROTLI_DECODE, static_cast<ZlibModeValue>(ZlibMode::BROTLI_DECODE));
     JSG_STATIC_CONSTANT_NAMED(
         CONST_BROTLI_ENCODE, static_cast<ZlibModeValue>(ZlibMode::BROTLI_ENCODE));
-
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_MIN_WINDOWBITS, Z_MIN_WINDOWBITS);
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_MAX_WINDOWBITS, Z_MAX_WINDOWBITS);
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_DEFAULT_WINDOWBITS, Z_DEFAULT_WINDOWBITS);
@@ -203,6 +389,6 @@ public:
   };
 };
 
-#define EW_NODE_ZLIB_ISOLATE_TYPES api::node::ZlibUtil
+#define EW_NODE_ZLIB_ISOLATE_TYPES api::node::ZlibUtil, api::node::ZlibUtil::ZlibStream
 
 }  // namespace workerd::api::node

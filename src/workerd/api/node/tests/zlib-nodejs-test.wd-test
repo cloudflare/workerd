@@ -8,7 +8,7 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "zlib-nodejs-test.js")
         ],
         compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "nodejs_zlib"],
       )
     ),
   ],
