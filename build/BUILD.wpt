@@ -1,0 +1,8 @@
+filegroup(
+    name = "url",
+    srcs = glob(
+        include = ["url/**/*"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

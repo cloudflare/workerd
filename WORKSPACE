@@ -582,3 +582,14 @@ new_local_repository(
         visibility = ["//visibility:public"],)""",
     path = "empty",
 )
+
+# ========================================================================================
+# Web Platform Tests
+
+http_archive(
+    name = "wpt",
+    build_file = "//:build/BUILD.wpt",
+    integrity = "sha256-6mp9wOEkWuACXvSDmf1pL2Dlj5ruukYwQzwkNgcpCdI=",
+    strip_prefix = "wpt-merge_pr_47718",
+    url = "https://github.com/web-platform-tests/wpt/archive/refs/tags/merge_pr_47718.tar.gz",
+)

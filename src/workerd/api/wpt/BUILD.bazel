@@ -1,0 +1,12 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    name = "url-test",
+    src = "url-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "url-test.js",
+        "//src/wpt:wpt-test-harness",
+        "@wpt//:url",
+    ],
+)
