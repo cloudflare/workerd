@@ -123,7 +123,7 @@ jobs:
         run: |
           cat <<EOF >> .bazelrc
           build --build_tag_filters=-off-by-default
-          test --test_tag_filters=-off-by-default
+          test --test_tag_filters=-off-by-default --test_size_filters=small,medium,large,enormous
           EOF
       - name: Generate list of excluded Bazel targets
         # Exclude large benchmarking binaries created in debug and asan configurations to avoid

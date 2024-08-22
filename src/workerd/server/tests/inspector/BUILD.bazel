@@ -2,6 +2,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 
 js_test(
     name = "inspector-test",
+    size = "large",
     data = [
         ":config.capnp",
         ":index.mjs",

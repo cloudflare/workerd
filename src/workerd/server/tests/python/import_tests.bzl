@@ -44,13 +44,11 @@ def gen_import_tests(to_test):
             name = worker_py_fname + "@rule",
             out = worker_py_fname,
             content = [generate_import_py_file(to_test[lib])],
-            tags = ["slow"],
         )
         write_file(
             name = wd_test_fname + "@rule",
             out = wd_test_fname,
             content = [generate_wd_test_file(lib)],
-            tags = ["slow"],
         )
 
         py_wd_test(
@@ -58,4 +56,5 @@ def gen_import_tests(to_test):
             args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels"],
             data = [worker_py_fname, "@all_pyodide_wheels//:whls"],
             tags = ["slow"],
+            size = "enormous",
         )

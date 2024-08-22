@@ -26,10 +26,125 @@ kj_test(
     deps = ["//src/workerd/tests:test-fixture"],
 )
 
-[wd_test(
-    src = f,
+wd_test(
+    src = "tests/assert-test.wd-test",
     args = ["--experimental"],
-    data = [f.removesuffix(".wd-test") + ".js"],
-) for f in glob(
-    ["**/*.wd-test"],
-)]
+    data = ["tests/assert-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "tests/buffer-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/buffer-nodejs-test.js"],
+)
+
+wd_test(
+    size = "enormous",
+    src = "tests/crypto_dh-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_dh-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_hash-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_hash-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_hkdf-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_hkdf-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_hmac-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_hmac-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_keys-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_keys-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_pbkdf2-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_pbkdf2-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_random-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_random-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_scrypt-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_scrypt-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_spkac-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_spkac-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_x509-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto_x509-test.js"],
+)
+
+wd_test(
+    src = "tests/diagnostics-channel-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/diagnostics-channel-test.js"],
+)
+
+wd_test(
+    src = "tests/mimetype-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/mimetype-test.js"],
+)
+
+wd_test(
+    src = "tests/node-compat-v2-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/node-compat-v2-test.js"],
+)
+
+wd_test(
+    src = "tests/path-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/path-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "tests/streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/streams-test.js"],
+)
+
+wd_test(
+    src = "tests/string-decoder-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/string-decoder-test.js"],
+)
+
+wd_test(
+    src = "tests/util-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/util-nodejs-test.js"],
+)
+
+wd_test(
+    src = "tests/zlib-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/zlib-nodejs-test.js"],
+)
