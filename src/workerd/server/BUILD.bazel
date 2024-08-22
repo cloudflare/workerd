@@ -146,6 +146,7 @@ wd_cc_capnp_library(
 )
 
 kj_test(
+    size = "large",
     src = "server-test.c++",
     deps = [
         ":server",
