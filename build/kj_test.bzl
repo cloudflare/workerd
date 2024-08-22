@@ -2,7 +2,8 @@ def kj_test(
         src,
         data = [],
         deps = [],
-        tags = []):
+        tags = [],
+        size = "medium"):
     test_name = src.removesuffix(".c++")
     native.cc_test(
         name = test_name,
@@ -19,4 +20,5 @@ def kj_test(
         }),
         data = data,
         tags = tags,
+        size = size,
     )
