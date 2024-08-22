@@ -152,7 +152,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
       },
 
       abort(reason) {
-        destroy(streamWritable, reason);
+        destroy.call(streamWritable, reason);
       },
 
       close() {
@@ -223,7 +223,7 @@ export function newStreamWritableFromWritableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => destroy(writable, error));
+          process.nextTick(() => destroy.call(writable, error));
         }
       }
 
@@ -255,7 +255,7 @@ export function newStreamWritableFromWritableStream(
         try {
           callback(error);
         } catch (error) {
-          destroy(writable, error);
+          destroy.call(writable, error);
         }
       }
 
@@ -302,7 +302,7 @@ export function newStreamWritableFromWritableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => destroy(writable, error));
+          process.nextTick(() => destroy.call(writable, error));
         }
       }
 
@@ -318,13 +318,13 @@ export function newStreamWritableFromWritableStream(
       // ended, we signal an error on the stream.Writable.
       closed = true;
       if (!isWritableEnded(writable))
-        destroy(writable, new ERR_STREAM_PREMATURE_CLOSE());
+        destroy.call(writable, new ERR_STREAM_PREMATURE_CLOSE());
     },
     (error) => {
       // If the WritableStream errors before the stream.Writable has been
       // destroyed, signal an error on the stream.Writable.
       closed = true;
-      destroy(writable, error);
+      destroy.call(writable, error);
     }
   );
 
@@ -421,7 +421,7 @@ export function newReadableStreamFromStreamReadable(
       },
 
       cancel(reason) {
-        destroy(streamReadable, reason);
+        destroy.call(streamReadable, reason);
       },
     },
     strategy
@@ -476,7 +476,9 @@ export function newStreamReadableFromReadableStream(
             readable.push(chunk.value);
           }
         },
-        (error) => destroy(readable, error)
+        (error) => {
+          destroy.call(readable, error);
+        }
       );
     },
 
@@ -510,7 +512,7 @@ export function newStreamReadableFromReadableStream(
     },
     (error) => {
       closed = true;
-      destroy(readable, error);
+      destroy.call(readable, error);
     }
   );
 
@@ -636,7 +638,7 @@ export function newStreamDuplexFromReadableWritablePair(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => destroy(duplex, error));
+          process.nextTick(() => destroy.call(duplex, error));
         }
       }
 
@@ -669,7 +671,7 @@ export function newStreamDuplexFromReadableWritablePair(
         try {
           callback(error);
         } catch (error) {
-          destroy(duplex, error);
+          destroy.call(duplex, error);
         }
       }
 
@@ -688,7 +690,7 @@ export function newStreamDuplexFromReadableWritablePair(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => destroy(duplex, error));
+          process.nextTick(() => destroy.call(duplex, error));
         }
       }
 
@@ -706,7 +708,7 @@ export function newStreamDuplexFromReadableWritablePair(
             duplex.push(chunk.value);
           }
         },
-        (error) => destroy(duplex, error)
+        (error) => destroy.call(duplex, error)
       );
     },
 
@@ -747,12 +749,12 @@ export function newStreamDuplexFromReadableWritablePair(
     () => {
       writableClosed = true;
       if (!isWritableEnded(duplex))
-        destroy(duplex, new ERR_STREAM_PREMATURE_CLOSE());
+        destroy.call(duplex, new ERR_STREAM_PREMATURE_CLOSE());
     },
     (error) => {
       writableClosed = true;
       readableClosed = true;
-      destroy(duplex, error);
+      destroy.call(duplex, error);
     }
   );
 
@@ -763,7 +765,7 @@ export function newStreamDuplexFromReadableWritablePair(
     (error) => {
       writableClosed = true;
       readableClosed = true;
-      destroy(duplex, error);
+      destroy.call(duplex, error);
     }
   );
 

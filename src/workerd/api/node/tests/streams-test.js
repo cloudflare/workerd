@@ -11412,3 +11412,42 @@ export const readableAdapter = {
     }
   },
 };
+
+export const errorHandling = {
+  async test() {
+    const rs = new ReadableStream({
+      start(c) {
+        throw new Error('boom');
+      },
+    });
+    const ns = Readable.fromWeb(rs);
+    try {
+      for await (const chunk of ns) {
+      }
+      throw new Error('should have thrown');
+    } catch (err) {
+      // The error should have propagated correctly through the adapter
+      strictEqual(err.message, 'boom');
+    }
+  },
+};
+
+export const errorHandling2 = {
+  async test() {
+    const rs = new ReadableStream({
+      async pull(c) {
+        await scheduler.wait(100);
+        throw new Error('boom');
+      },
+    });
+    const ns = Readable.fromWeb(rs);
+    try {
+      for await (const chunk of ns) {
+      }
+      throw new Error('should have thrown');
+    } catch (err) {
+      // The error should have propagated correctly through the adapter
+      strictEqual(err.message, 'boom');
+    }
+  },
+};
