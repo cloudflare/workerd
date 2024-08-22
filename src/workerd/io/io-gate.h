@@ -54,6 +54,7 @@ public:
     static const Hooks DEFAULT;
   };
 
+  // Hooks has no member variables, so const_cast is acceptable.
   InputGate(Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
   ~InputGate() noexcept;
 
@@ -248,6 +249,7 @@ public:
     static const Hooks DEFAULT;
   };
 
+  // Hooks has no member variables, so const_cast is acceptable.
   OutputGate(Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
   ~OutputGate() noexcept(false);
 

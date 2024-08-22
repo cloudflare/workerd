@@ -42,6 +42,7 @@ public:
   explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       OutputGate& outputGate,
       kj::Function<kj::Promise<void>()> commitCallback,
+      // Hooks has no member variables, so const_cast is acceptable.
       Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
 
   bool isCommitScheduled() {

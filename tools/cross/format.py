@@ -197,7 +197,7 @@ FORMATTERS = [
     FormatConfig(directory=".", globs=("*.py",), formatter=ruff),
     FormatConfig(
         directory=".",
-        globs=("*.bzl", "*.bazel", "WORKSPACE", "BUILD", "BUILD.*"),
+        globs=("*.bzl", "WORKSPACE", "BUILD", "BUILD.*"),
         formatter=buildifier,
     ),
 ]
