@@ -41,19 +41,6 @@ strictEqual(ByteLengthQueuingStrategy, globalThis.ByteLengthQueuingStrategy);
 
 import { EventEmitter } from 'node:events';
 
-function deferredPromise() {
-  let resolve, reject;
-  const promise = new Promise((a, b) => {
-    resolve = a;
-    reject = b;
-  });
-  return {
-    promise,
-    resolve,
-    reject,
-  };
-}
-
 function countedDeferred(n, action) {
   let resolve;
   const promise = new Promise((a) => {
@@ -101,9 +88,9 @@ export const addAbortSignalTest = {
 export const autoDestroy = {
   async test(ctrl, env, ctx) {
     {
-      const rDestroyed = deferredPromise();
-      const rEnded = deferredPromise();
-      const rClosed = deferredPromise();
+      const rDestroyed = Promise.withResolvers();
+      const rEnded = Promise.withResolvers();
+      const rClosed = Promise.withResolvers();
 
       const r = new Readable({
         autoDestroy: true,
@@ -127,9 +114,9 @@ export const autoDestroy = {
     }
 
     {
-      const rDestroyed = deferredPromise();
-      const rFinished = deferredPromise();
-      const rClosed = deferredPromise();
+      const rDestroyed = Promise.withResolvers();
+      const rFinished = Promise.withResolvers();
+      const rClosed = Promise.withResolvers();
 
       const w = new Writable({
         autoDestroy: true,
@@ -157,10 +144,10 @@ export const autoDestroy = {
     }
 
     {
-      const rDestroyed = deferredPromise();
-      const rEnded = deferredPromise();
-      const rFinished = deferredPromise();
-      const rClosed = deferredPromise();
+      const rDestroyed = Promise.withResolvers();
+      const rEnded = Promise.withResolvers();
+      const rFinished = Promise.withResolvers();
+      const rClosed = Promise.withResolvers();
 
       const t = new Transform({
         autoDestroy: true,
@@ -192,7 +179,7 @@ export const autoDestroy = {
     }
 
     {
-      const rDestroyed = deferredPromise();
+      const rDestroyed = Promise.withResolvers();
 
       const err = new Error('fail');
 
@@ -215,7 +202,7 @@ export const autoDestroy = {
     }
 
     {
-      const rDestroyed = deferredPromise();
+      const rDestroyed = Promise.withResolvers();
       const err = new Error('fail');
       const r = new Readable({
         read() {
@@ -301,7 +288,7 @@ export const backpressure = {
       },
     });
 
-    const closed = deferredPromise();
+    const closed = Promise.withResolvers();
 
     const ws = Writable({
       write(data, enc, cb) {
@@ -318,7 +305,7 @@ export const backpressure = {
 
 export const bigPacket = {
   async test(ctrl, env, ctx) {
-    const rPassed = deferredPromise();
+    const rPassed = Promise.withResolvers();
 
     class TestStream extends Transform {
       _transform(chunk, encoding, done) {
@@ -382,7 +369,7 @@ export const bigPush = {
     }
 
     const read = countedDeferred(3, _read);
-    const ended = deferredPromise();
+    const ended = Promise.withResolvers();
 
     r._read = read.resolve;
     r.on('end', ended.resolve);
@@ -416,7 +403,7 @@ export const bigPush = {
 export const catchRejections = {
   async test(ctrl, env, ctx) {
     {
-      const rErrored = deferredPromise();
+      const rErrored = Promise.withResolvers();
 
       const r = new Readable({
         captureRejections: true,
@@ -441,7 +428,7 @@ export const catchRejections = {
     }
 
     {
-      const wErrored = deferredPromise();
+      const wErrored = Promise.withResolvers();
 
       const w = new Writable({
         captureRejections: true,
@@ -475,7 +462,7 @@ export const catchRejections = {
 export const construct = {
   async test(ctrl, env, ctx) {
     {
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       // Multiple callback.
       new Writable({
         construct: (callback) => {
@@ -491,7 +478,7 @@ export const construct = {
     }
 
     {
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       // Multiple callback.
       new Readable({
         construct: (callback) => {
@@ -508,7 +495,7 @@ export const construct = {
 
     {
       // Synchronous error.
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const err = new Error('test');
       new Writable({
         construct: (callback) => {
@@ -523,7 +510,7 @@ export const construct = {
     }
 
     {
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const err = new Error('test');
 
       new Readable({
@@ -540,7 +527,7 @@ export const construct = {
 
     {
       // Asynchronous error.
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const err = new Error('test');
 
       new Writable({
@@ -557,7 +544,7 @@ export const construct = {
 
     {
       // Asynchronous error.
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const err = new Error('test');
 
       new Readable({
@@ -572,8 +559,8 @@ export const construct = {
 
     async function testDestroy(factory) {
       {
-        const constructed = deferredPromise();
-        const closed = deferredPromise();
+        const constructed = Promise.withResolvers();
+        const closed = Promise.withResolvers();
         const s = factory({
           construct: (cb) => {
             constructed.resolve();
@@ -586,9 +573,9 @@ export const construct = {
       }
 
       {
-        const constructed = deferredPromise();
-        const closed = deferredPromise();
-        const destroyed = deferredPromise();
+        const constructed = Promise.withResolvers();
+        const closed = Promise.withResolvers();
+        const destroyed = Promise.withResolvers();
         const s = factory({
           construct: (cb) => {
             constructed.resolve();
@@ -608,8 +595,8 @@ export const construct = {
       }
 
       {
-        const constructed = deferredPromise();
-        const closed = deferredPromise();
+        const constructed = Promise.withResolvers();
+        const closed = Promise.withResolvers();
         const s = factory({
           construct: (cb) => {
             constructed.resolve();
@@ -622,9 +609,9 @@ export const construct = {
       }
 
       {
-        const constructed = deferredPromise();
-        const closed = deferredPromise();
-        const errored = deferredPromise();
+        const constructed = Promise.withResolvers();
+        const closed = Promise.withResolvers();
+        const errored = Promise.withResolvers();
 
         const s = factory({
           construct: (cb) => {
@@ -648,9 +635,9 @@ export const construct = {
       }
 
       {
-        const constructed = deferredPromise();
-        const errored = deferredPromise();
-        const closed = deferredPromise();
+        const constructed = Promise.withResolvers();
+        const errored = Promise.withResolvers();
+        const closed = Promise.withResolvers();
         const s = factory({
           construct: (cb) => {
             constructed.resolve();
@@ -691,9 +678,9 @@ export const construct = {
     );
 
     {
-      const constructed = deferredPromise();
-      const read = deferredPromise();
-      const closed = deferredPromise();
+      const constructed = Promise.withResolvers();
+      const read = Promise.withResolvers();
+      const closed = Promise.withResolvers();
 
       const r = new Readable({
         autoDestroy: true,
@@ -715,10 +702,10 @@ export const construct = {
     }
 
     {
-      const constructed = deferredPromise();
-      const write = deferredPromise();
-      const final = deferredPromise();
-      const closed = deferredPromise();
+      const constructed = Promise.withResolvers();
+      const write = Promise.withResolvers();
+      const final = Promise.withResolvers();
+      const closed = Promise.withResolvers();
 
       const w = new Writable({
         autoDestroy: true,
@@ -747,9 +734,9 @@ export const construct = {
     }
 
     {
-      const constructed = deferredPromise();
-      const final = deferredPromise();
-      const closed = deferredPromise();
+      const constructed = Promise.withResolvers();
+      const final = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const w = new Writable({
         autoDestroy: true,
         construct: (cb) => {
@@ -783,8 +770,8 @@ export const construct = {
     {
       // https://github.com/nodejs/node/issues/34448
 
-      const constructed = deferredPromise();
-      const closed = deferredPromise();
+      const constructed = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const d = new Duplex({
         readable: false,
         construct: (callback) => {
@@ -842,7 +829,7 @@ export const decoderObjectMode = {
 
 export const destroyEventOrder = {
   async test(ctrl, env, ctx) {
-    const destroyed = deferredPromise();
+    const destroyed = Promise.withResolvers();
     const events = [];
     const rs = new Readable({
       read() {},
@@ -867,8 +854,8 @@ export const destroyEventOrder = {
 export const destroyTests = {
   async test(ctrl, env, ctx) {
     {
-      const errored = deferredPromise();
-      const closed = deferredPromise();
+      const errored = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const r = new Readable({ read() {} });
       destroy(r);
       strictEqual(r.destroyed, true);
@@ -880,8 +867,8 @@ export const destroyTests = {
     }
 
     {
-      const errored = deferredPromise();
-      const closed = deferredPromise();
+      const errored = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const err = new Error('asd');
       const r = new Readable({ read() {} });
       destroy(r, err);
@@ -894,8 +881,8 @@ export const destroyTests = {
     }
 
     {
-      const errored = deferredPromise();
-      const closed = deferredPromise();
+      const errored = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const w = new Writable({ write() {} });
       destroy(w);
       strictEqual(w.destroyed, true);
@@ -907,8 +894,8 @@ export const destroyTests = {
     }
 
     {
-      const errored = deferredPromise();
-      const closed = deferredPromise();
+      const errored = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const err = new Error('asd');
       const w = new Writable({ write() {} });
       destroy(w, err);
@@ -925,7 +912,7 @@ export const destroyTests = {
 export const duplexDestroy = {
   async test(ctrl, env, ctx) {
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
 
       const duplex = new Duplex({
         write(chunk, enc, cb) {
@@ -950,8 +937,8 @@ export const duplexDestroy = {
     }
 
     {
-      const errored = deferredPromise();
-      const closed = deferredPromise();
+      const errored = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const duplex = new Duplex({
         write(chunk, enc, cb) {
           cb();
@@ -975,8 +962,8 @@ export const duplexDestroy = {
     }
 
     {
-      const errored = deferredPromise();
-      const destroyCalled = deferredPromise();
+      const errored = Promise.withResolvers();
+      const destroyCalled = Promise.withResolvers();
       const duplex = new Duplex({
         write(chunk, enc, cb) {
           cb();
@@ -1003,8 +990,8 @@ export const duplexDestroy = {
     }
 
     {
-      const closed = deferredPromise();
-      const destroyCalled = deferredPromise();
+      const closed = Promise.withResolvers();
+      const destroyCalled = Promise.withResolvers();
       const expected = new Error('kaboom');
       const duplex = new Duplex({
         write(chunk, enc, cb) {
@@ -1032,7 +1019,7 @@ export const duplexDestroy = {
     }
 
     {
-      const destroyCalled = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
       const duplex = new Duplex({
         write(chunk, enc, cb) {
           cb();
@@ -1052,8 +1039,8 @@ export const duplexDestroy = {
     }
 
     {
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const duplex = new Duplex({
         write(chunk, enc, cb) {
           cb();
@@ -1089,8 +1076,8 @@ export const duplexDestroy = {
     }
 
     {
-      const destroyCalled = deferredPromise();
-      const errored = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const duplex = new Duplex({
         write(chunk, enc, cb) {
           cb();
@@ -1116,7 +1103,7 @@ export const duplexDestroy = {
     }
 
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       const duplex = new Duplex({
         write(chunk, enc, cb) {
           cb();
@@ -1136,7 +1123,7 @@ export const duplexDestroy = {
     }
 
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       const duplex = new Duplex({
         write(chunk, enc, cb) {
           cb();
@@ -1167,7 +1154,7 @@ export const duplexDestroy = {
     }
 
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       const duplex = new Duplex({
         writable: false,
         autoDestroy: true,
@@ -1183,7 +1170,7 @@ export const duplexDestroy = {
     }
 
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       const duplex = new Duplex({
         readable: false,
         autoDestroy: true,
@@ -1198,7 +1185,7 @@ export const duplexDestroy = {
     }
 
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       const duplex = new Duplex({
         allowHalfOpen: false,
         autoDestroy: true,
@@ -1224,8 +1211,8 @@ export const duplexDestroy = {
 
     {
       // Check abort signal
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const controller = new AbortController();
       const { signal } = controller;
       const duplex = new Duplex({
@@ -1264,7 +1251,7 @@ export const duplexEnd = {
     }
 
     {
-      const finishedCalled = deferredPromise();
+      const finishedCalled = Promise.withResolvers();
       const stream = new Duplex({
         read() {},
         allowHalfOpen: false,
@@ -1326,7 +1313,7 @@ export const duplexProps = {
 
 export const duplexReadableEnd = {
   async test(ctrl, env, ctx) {
-    const ended = deferredPromise();
+    const ended = Promise.withResolvers();
     let loops = 5;
 
     const src = new Readable({
@@ -1358,7 +1345,7 @@ export const duplexReadableEnd = {
 export const duplexReadableWritable = {
   async test(ctrl, env, ctx) {
     {
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const duplex = new Duplex({
         readable: false,
       });
@@ -1374,8 +1361,8 @@ export const duplexReadableWritable = {
     }
 
     {
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const duplex = new Duplex({
         writable: false,
         write: closed.reject,
@@ -1392,7 +1379,7 @@ export const duplexReadableWritable = {
     }
 
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       const duplex = new Duplex({
         readable: false,
       });
@@ -1419,8 +1406,8 @@ export const duplexWritableFinished = {
 
     // event
     {
-      const finishedCalled = deferredPromise();
-      const ended = deferredPromise();
+      const finishedCalled = Promise.withResolvers();
+      const ended = Promise.withResolvers();
       const duplex = new Duplex();
 
       duplex._write = (chunk, encoding, cb) => {
@@ -1498,7 +1485,7 @@ export const duplex = {
       const duplex = Duplex.fromWeb(pair);
 
       duplex.write(dataToWrite);
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       duplex.once('data', (chunk) => {
         strictEqual(chunk, dataToRead);
         p.resolve();
@@ -1533,7 +1520,7 @@ export const duplex = {
       });
 
       duplex.write(dataToWrite);
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       duplex.once('data', (chunk) => {
         strictEqual(chunk, dataToRead);
         p.resolve();
@@ -1559,7 +1546,7 @@ export const duplex = {
       const { writable, readable } = Duplex.toWeb(duplex);
       writable.getWriter().write(dataToWrite);
 
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       readable
         .getReader()
         .read()
@@ -1593,8 +1580,8 @@ export const end_of_streams = {
 
 export const end_paused = {
   async test(ctrl, env, ctx) {
-    const calledRead = deferredPromise();
-    const ended = deferredPromise();
+    const calledRead = Promise.withResolvers();
+    const ended = Promise.withResolvers();
     const stream = new Readable();
     stream._read = function () {
       this.push(null);
@@ -1616,7 +1603,7 @@ export const end_paused = {
 export const error_once = {
   async test(ctrl, env, ctx) {
     {
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const writable = new Writable();
       writable.on('error', errored.resolve);
       writable.end();
@@ -1626,7 +1613,7 @@ export const error_once = {
     }
 
     {
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const readable = new Readable();
       readable.on('error', errored.resolve);
       readable.push(null);
@@ -1641,7 +1628,7 @@ export const finishedTest = {
   async test(ctrl, env, ctx) {
     const promisify = (await import('node:util')).promisify;
     {
-      const finishedOk = deferredPromise();
+      const finishedOk = Promise.withResolvers();
       const rs = new Readable({
         read() {},
       });
@@ -1658,7 +1645,7 @@ export const finishedTest = {
     }
 
     {
-      const finishedOk = deferredPromise();
+      const finishedOk = Promise.withResolvers();
 
       const ws = new Writable({
         write(data, enc, cb) {
@@ -1677,7 +1664,7 @@ export const finishedTest = {
     }
 
     {
-      const finishedOk = deferredPromise();
+      const finishedOk = Promise.withResolvers();
       const tr = new Transform({
         transform(data, enc, cb) {
           cb();
@@ -1709,7 +1696,7 @@ export const finishedTest = {
     }
 
     {
-      const finishedCalled = deferredPromise();
+      const finishedCalled = Promise.withResolvers();
       const rs = new Readable({
         read() {
           this.push(enc.encode('a'));
@@ -1754,7 +1741,7 @@ export const finishedTest = {
       signal.aborted = true;
 
       const rs = Readable.from((function* () {})());
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       finished(rs, { signal }, errored.resolve);
       const check = await errored.promise;
       strictEqual(check.name, 'AbortError');
@@ -1765,7 +1752,7 @@ export const finishedTest = {
       const ac = new AbortController();
       const { signal } = ac;
 
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const rs = Readable.from((function* () {})());
       finished(rs, { signal }, errored.resolve);
       ac.abort();
@@ -1780,7 +1767,7 @@ export const finishedTest = {
 
       const rs = Readable.from((function* () {})());
       setTimeout(() => ac.abort(), 1);
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       finished(rs, { signal }, errored.resolve);
       const check = await errored.promise;
       strictEqual(check.name, 'AbortError');
@@ -1798,7 +1785,7 @@ export const finishedTest = {
         })()
       );
       rs.resume();
-      const finishedOk = deferredPromise();
+      const finishedOk = Promise.withResolvers();
       finished(rs, { signal }, finishedOk.resolve);
       const check = await finishedOk.promise;
       strictEqual(check.name, 'AbortError');
@@ -1834,7 +1821,7 @@ export const finishedTest = {
     {
       const rs = new Readable();
 
-      const finishedOk = deferredPromise();
+      const finishedOk = Promise.withResolvers();
 
       finished(rs, finishedOk.resolve);
 
@@ -1848,7 +1835,7 @@ export const finishedTest = {
 
     {
       const rs = new Readable();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
 
       finished(rs, errored.resolve);
 
@@ -1879,7 +1866,7 @@ export const finishedTest = {
         message: /callback/,
       });
 
-      const finishedOk = deferredPromise();
+      const finishedOk = Promise.withResolvers();
       finished(rs, null, finishedOk.resolve);
 
       rs.push(null);
@@ -1933,7 +1920,7 @@ export const finishedTest = {
       const writable = new Writable({ write() {} });
       writable.writable = false;
       writable.destroy();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       finished(writable, errored.resolve);
       const check = await errored.promise;
       strictEqual(check.code, 'ERR_STREAM_PREMATURE_CLOSE');
@@ -1943,7 +1930,7 @@ export const finishedTest = {
       const readable = new Readable();
       readable.readable = false;
       readable.destroy();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       finished(readable, errored.resolve);
       const check = await errored.promise;
       strictEqual(check.code, 'ERR_STREAM_PREMATURE_CLOSE');
@@ -2006,13 +1993,13 @@ export const highWaterMark = {
       const readable = Readable({
         highWaterMark: 0,
       });
-      const readCalled = deferredPromise();
+      const readCalled = Promise.withResolvers();
       readable._read = readCalled.resolve;
       readable.read(0);
       await readCalled.promise;
     }
     {
-      const readCalled = deferredPromise();
+      const readCalled = Promise.withResolvers();
       // Parse size as decimal integer
       await Promise.all(
         ['1', '1.0', 1].map(async (size) => {
@@ -2045,7 +2032,7 @@ export const pauseThenRead = {
     const chunkSize = 99;
     const expectTotalData = totalChunks * chunkSize;
     let expectEndingData = expectTotalData;
-    const closed = deferredPromise();
+    const closed = Promise.withResolvers();
     const r = new Readable({
       highWaterMark: 1000,
     });
@@ -2177,7 +2164,7 @@ export const corkUncork = {
     //
     // node version target: 0.12
 
-    const closed = deferredPromise();
+    const closed = Promise.withResolvers();
     const expectedChunks = ['please', 'buffer', 'me', 'kindly'];
     const inputChunks = expectedChunks.slice(0);
     let seenChunks = [];
@@ -2262,7 +2249,7 @@ export const corkEnd = {
     //
     // node version target: 0.12
 
-    const closed = deferredPromise();
+    const closed = Promise.withResolvers();
     const expectedChunks = ['please', 'buffer', 'me', 'kindly'];
     const inputChunks = expectedChunks.slice(0);
     let seenChunks = [];
@@ -2370,7 +2357,7 @@ export const writable2Writable = {
       const tw = new TestWriter({
         highWaterMark: 100,
       });
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       tw.on('finish', function () {
         // Got chunks in the right order
         deepStrictEqual(tw.buffer, chunks);
@@ -2388,7 +2375,7 @@ export const writable2Writable = {
       const tw = new TestWriter({
         highWaterMark: 100,
       });
-      const finishedCalled = deferredPromise();
+      const finishedCalled = Promise.withResolvers();
       tw.on('finish', function () {
         //  Got chunks in the right order
         deepStrictEqual(tw.buffer, chunks);
@@ -2408,7 +2395,7 @@ export const writable2Writable = {
         highWaterMark: 50,
       });
       let drains = 0;
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       tw.on('finish', function () {
         // Got chunks in the right order
         deepStrictEqual(tw.buffer, chunks);
@@ -2449,7 +2436,7 @@ export const writable2Writable = {
           return set;
         }, {});
       callbacks._called = [];
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       const tw = new TestWriter({
         highWaterMark: 100,
       });
@@ -2471,7 +2458,7 @@ export const writable2Writable = {
     {
       // Verify end() callback
       const tw = new TestWriter();
-      const endCalled = deferredPromise();
+      const endCalled = Promise.withResolvers();
       tw.end(endCalled.resolve);
       await endCalled.promise;
     }
@@ -2479,21 +2466,21 @@ export const writable2Writable = {
     {
       // Verify end() callback with chunk
       const tw = new TestWriter();
-      const endCalled = deferredPromise();
+      const endCalled = Promise.withResolvers();
       tw.end(helloWorldBuffer, endCalled.resolve);
       await endCalled.promise;
     }
     {
       // Verify end() callback with chunk and encoding
       const tw = new TestWriter();
-      const endCalled = deferredPromise();
+      const endCalled = Promise.withResolvers();
       tw.end('hello world', 'ascii', endCalled.resolve);
       await endCalled.promise;
     }
     {
       // Verify end() callback after write() call
       const tw = new TestWriter();
-      const endCalled = deferredPromise();
+      const endCalled = Promise.withResolvers();
       tw.write(helloWorldBuffer);
       tw.end(endCalled.resolve);
       await endCalled.promise;
@@ -2501,7 +2488,7 @@ export const writable2Writable = {
     {
       // Verify end() callback after write() callback
       const tw = new TestWriter();
-      const endCalled = deferredPromise();
+      const endCalled = Promise.withResolvers();
       let writeCalledback = false;
       tw.write(helloWorldBuffer, function () {
         writeCalledback = true;
@@ -2516,7 +2503,7 @@ export const writable2Writable = {
       // Verify encoding is ignored for buffers
       const tw = new Writable();
       const hex = '018b5e9a8f6236ffe30e31baf80d2cf6eb';
-      const writeCalled = deferredPromise();
+      const writeCalled = Promise.withResolvers();
       tw._write = function (chunk) {
         strictEqual(chunk.toString('hex'), hex);
         writeCalled.resolve();
@@ -2530,7 +2517,7 @@ export const writable2Writable = {
       const w = new Writable({
         autoDestroy: false,
       });
-      const gotError = deferredPromise();
+      const gotError = Promise.withResolvers();
       w._write = gotError.reject;
       w.on('error', gotError.resolve);
       w.pipe(new Writable({ write() {} }));
@@ -2539,7 +2526,7 @@ export const writable2Writable = {
     {
       // Verify that duplex streams can be piped
       const d = new Duplex();
-      const readCalled = deferredPromise;
+      const readCalled = Promise.withResolvers();
       d._read = readCalled.resolve;
       d._write = () => {
         throw new Error('should not be called');
@@ -2554,8 +2541,8 @@ export const writable2Writable = {
     {
       // Verify that end(chunk) twice is an error
       const w = new Writable();
-      const writeCalled = deferredPromise();
-      const gotError = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const gotError = Promise.withResolvers();
       w._write = (msg) => {
         strictEqual(msg.toString(), 'this is the end');
         writeCalled.resolve();
@@ -2571,8 +2558,8 @@ export const writable2Writable = {
     {
       // Verify stream doesn't end while writing
       const w = new Writable();
-      const wrote = deferredPromise();
-      const finishCalled = deferredPromise();
+      const wrote = Promise.withResolvers();
+      const finishCalled = Promise.withResolvers();
       w._write = function (chunk, e, cb) {
         strictEqual(this.writing, undefined);
         wrote.resolve();
@@ -2593,7 +2580,7 @@ export const writable2Writable = {
     {
       // Verify finish does not come before write() callback
       const w = new Writable();
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       let writeCb = false;
       w._write = function (chunk, e, cb) {
         setTimeout(function () {
@@ -2612,7 +2599,7 @@ export const writable2Writable = {
     {
       // Verify finish does not come before synchronous _write() callback
       const w = new Writable();
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       let writeCb = false;
       w._write = function (chunk, e, cb) {
         cb();
@@ -2633,7 +2620,7 @@ export const writable2Writable = {
       w._write = function (chunk, e, cb) {
         queueMicrotask(cb);
       };
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       w.on('finish', finishCalled.resolve);
       w.write(Buffer.allocUnsafe(1));
       w.end(Buffer.alloc(0));
@@ -2643,8 +2630,8 @@ export const writable2Writable = {
       // Verify that finish is emitted after shutdown
       const w = new Writable();
       let shutdown = false;
-      const finalCalled = deferredPromise();
-      const finishCalled = deferredPromise();
+      const finalCalled = Promise.withResolvers();
+      const finishCalled = Promise.withResolvers();
       w._final = function (cb) {
         strictEqual(this, w);
         setTimeout(function () {
@@ -2667,8 +2654,8 @@ export const writable2Writable = {
     {
       // Verify that error is only emitted once when failing in _finish.
       const w = new Writable();
-      const finalCalled = deferredPromise();
-      const gotError = deferredPromise();
+      const finalCalled = Promise.withResolvers();
+      const gotError = Promise.withResolvers();
       w._final = function (cb) {
         cb(new Error('test'));
         finalCalled.resolve();
@@ -2700,7 +2687,7 @@ export const writable2Writable = {
     {
       // Verify that error is only emitted once when failing in write after end.
       const w = new Writable();
-      const gotError = deferredPromise();
+      const gotError = Promise.withResolvers();
       w.on('error', (err) => {
         strictEqual(w._writableState.errorEmitted, true);
         strictEqual(err.code, 'ERR_STREAM_WRITE_AFTER_END');
@@ -2714,8 +2701,8 @@ export const writable2Writable = {
     {
       // Verify that finish is not emitted after error
       const w = new Writable();
-      const finalCalled = deferredPromise();
-      const gotError = deferredPromise();
+      const finalCalled = Promise.withResolvers();
+      const gotError = Promise.withResolvers();
       w._final = function (cb) {
         cb(new Error());
         finalCalled.resolve();
@@ -2779,7 +2766,7 @@ export const unpipeDrain = {
 
     const dest = new TestWriter();
     class TestReader extends Readable {
-      done = deferredPromise();
+      done = Promise.withResolvers();
       constructor() {
         super();
         this.reads = 0;
@@ -2940,7 +2927,7 @@ export const transformTest = {
       pt.write(Buffer.from('bazy'));
       pt.write(Buffer.from('kuel'));
       pt.end();
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       pt.on('finish', function () {
         strictEqual(pt.read(5).toString(), 'foogb');
         strictEqual(pt.read(5).toString(), 'arkba');
@@ -2969,7 +2956,7 @@ export const transformTest = {
       pt.write(Buffer.from('bazy'));
       pt.write(Buffer.from('kuel'));
       pt.end();
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       pt.on('finish', function () {
         strictEqual(pt.read(5).toString(), 'foogf');
         strictEqual(pt.read(5).toString(), 'oogba');
@@ -3023,7 +3010,7 @@ export const transformTest = {
       pt.write(Buffer.from('dddd'));
       pt.end();
 
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       // 'abcdeabcdeabcd'
       pt.on('finish', function () {
         strictEqual(pt.read(5).toString(), 'abcde');
@@ -3054,7 +3041,7 @@ export const transformTest = {
         }
         cb();
       };
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       pt.on('finish', finishCalled.resolve);
       pt.once('readable', function () {
         queueMicrotask(function () {
@@ -3106,9 +3093,9 @@ export const transformTest = {
       strictEqual(emits, 0);
       strictEqual(pt.read(5).toString(), 'foogb');
       strictEqual(pt.read(5), null);
-      const readable1 = deferredPromise();
-      const readable2 = deferredPromise();
-      const readable3 = deferredPromise();
+      const readable1 = Promise.withResolvers();
+      const readable2 = Promise.withResolvers();
+      const readable3 = Promise.withResolvers();
       pt.once('readable', function () {
         strictEqual(pt.read(5).toString(), 'arkba');
         strictEqual(pt.read(5), null);
@@ -3141,7 +3128,7 @@ export const transformTest = {
       pt.on('data', function (chunk) {
         datas.push(chunk.toString());
       });
-      const endCalled = deferredPromise();
+      const endCalled = Promise.withResolvers();
       pt.on('end', function () {
         deepStrictEqual(datas, ['foog', 'bark', 'bazy', 'kuel']);
         endCalled.resolve();
@@ -3196,7 +3183,7 @@ export const transformTest = {
           },
         },
       ];
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       jp.on('end', ended.resolve);
       objects.forEach(function (obj) {
         jp.write(JSON.stringify(obj));
@@ -3242,7 +3229,7 @@ export const transformTest = {
           },
         },
       ];
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       js.on('end', ended.resolve);
       objects.forEach(function (obj) {
         js.write(obj);
@@ -3305,7 +3292,7 @@ export const set_encoding = {
         let chunk;
         while (null !== (chunk = tr.read(10))) out.push(chunk);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       tr.on('end', function () {
         deepStrictEqual(out, expect);
         ended.resolve();
@@ -3343,7 +3330,7 @@ export const set_encoding = {
         let chunk;
         while (null !== (chunk = tr.read(10))) out.push(chunk);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       tr.on('end', function () {
         deepStrictEqual(out, expect);
         ended.resolve();
@@ -3377,7 +3364,7 @@ export const set_encoding = {
         let chunk;
         while (null !== (chunk = tr.read(13))) out.push(chunk);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       tr.on('end', function () {
         deepStrictEqual(out, expect);
         ended.resolve();
@@ -3409,7 +3396,7 @@ export const set_encoding = {
         let chunk;
         while (null !== (chunk = tr.read(10))) out.push(chunk);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       tr.on('end', function () {
         deepStrictEqual(out, expect);
         ended.resolve();
@@ -3438,7 +3425,7 @@ export const set_encoding = {
         let chunk;
         while (null !== (chunk = tr.read(10))) out.push(chunk);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       tr.on('end', function () {
         deepStrictEqual(out, expect);
         ended.resolve();
@@ -3477,7 +3464,7 @@ export const set_encoding = {
         let chunk;
         while (null !== (chunk = tr.read(10))) out.push(chunk);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       tr.on('end', function () {
         deepStrictEqual(out, expect);
         ended.resolve();
@@ -3512,7 +3499,7 @@ export const set_encoding = {
         let chunk;
         while (null !== (chunk = tr.read(13))) out.push(chunk);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       tr.on('end', function () {
         deepStrictEqual(out, expect);
         ended.resolve();
@@ -3545,7 +3532,7 @@ export const set_encoding = {
         let chunk;
         while (null !== (chunk = tr.read(10))) out.push(chunk);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       tr.on('end', function () {
         deepStrictEqual(out, expect);
         ended.resolve();
@@ -3563,7 +3550,7 @@ export const set_encoding = {
 export const readable_wrap = {
   async test(ctrl, env, ctx) {
     async function runTest(highWaterMark, objectMode, produce) {
-      const rEnded = deferredPromise();
+      const rEnded = Promise.withResolvers();
       const old = new EventEmitter();
       const r = new Readable({
         highWaterMark,
@@ -3615,7 +3602,7 @@ export const readable_wrap = {
         written.push(chunk);
         setTimeout(cb, 1);
       };
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       w.on('finish', function () {
         performAsserts();
         finishCalled.resolve();
@@ -3668,7 +3655,7 @@ export const readable_wrap_error = {
     {
       const err = new Error();
       const oldStream = new LegacyStream();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const r = new Readable({
         autoDestroy: true,
       })
@@ -3685,7 +3672,7 @@ export const readable_wrap_error = {
     {
       const err = new Error();
       const oldStream = new LegacyStream();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       const r = new Readable({
         autoDestroy: false,
       })
@@ -3708,7 +3695,7 @@ export const readable_wrap_empty = {
     oldStream.pause = () => {};
     oldStream.resume = () => {};
     const newStream = new Readable().wrap(oldStream);
-    const ended = deferredPromise();
+    const ended = Promise.withResolvers();
     newStream.on('readable', () => {}).on('end', ended.resolve);
     oldStream.emit('end');
     await ended.promise;
@@ -3721,7 +3708,7 @@ export const readable_wrap_destroy = {
     oldStream.pause = () => {};
     oldStream.resume = () => {};
     {
-      const destroyCalled = deferredPromise;
+      const destroyCalled = Promise.withResolvers();
       new Readable({
         autoDestroy: false,
         destroy: destroyCalled.resolve,
@@ -3730,7 +3717,7 @@ export const readable_wrap_destroy = {
       await destroyCalled.promise;
     }
     {
-      const destroyCalled = deferredPromise;
+      const destroyCalled = Promise.withResolvers();
       new Readable({
         autoDestroy: false,
         destroy: destroyCalled.resolve,
@@ -3762,7 +3749,7 @@ export const readable_non_empty_end = {
       throw new Error('this should not happen!');
     }
     let bytesread = 0;
-    const ended = deferredPromise();
+    const ended = Promise.withResolvers();
     test.on('readable', function () {
       const b = len - bytesread - 1;
       const res = test.read(b);
@@ -3797,7 +3784,7 @@ export const readable_legacy_drain = {
     r._read = function (n) {
       return r.push(++reads === N ? null : Buffer.allocUnsafe(1));
     };
-    const ended1 = deferredPromise();
+    const ended1 = Promise.withResolvers();
     r.on('end', ended1.resolve);
     const w = new Stream();
     w.writable = true;
@@ -3812,7 +3799,7 @@ export const readable_legacy_drain = {
       buffered = 0;
       w.emit('drain');
     }
-    const ended2 = deferredPromise();
+    const ended2 = Promise.withResolvers();
     w.end = ended2.resolve;
     r.pipe(w);
     await Promise.all([ended1.promise, ended2.promise]);
@@ -3834,7 +3821,7 @@ export const read_sync_stack = {
     r.on('readable', function onReadable() {
       r.read(N * 2);
     });
-    const ended = deferredPromise();
+    const ended = Promise.withResolvers();
     r.on('end', ended.resolve);
     r.read(0);
     await ended.promise;
@@ -3851,7 +3838,7 @@ export const stream2_push = {
     stream._read = function () {
       readStart();
     };
-    const ended = deferredPromise();
+    const ended = Promise.withResolvers();
     stream.on('end', ended.resolve);
     source.on('data', function (chunk) {
       const ret = stream.push(chunk);
@@ -3935,7 +3922,7 @@ export const stream2_pipe_error_once_listener = {
     }
     const read = new Read();
     const write = new Write();
-    const errored = deferredPromise();
+    const errored = Promise.withResolvers();
     write.once('error', errored.resolve);
     read.pipe(write);
 
@@ -4029,7 +4016,7 @@ export const stream2_objects = {
         callback(list);
         this.ended.resolve();
       };
-      stream.ended = deferredPromise();
+      stream.ended = Promise.withResolvers();
       return stream;
     }
     function fromArray(list) {
@@ -4261,7 +4248,7 @@ export const stream2_objects = {
         });
         cb();
       };
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       w.on('finish', finishCalled.resolve);
       w.write({
         foo: 'bar',
@@ -4279,7 +4266,7 @@ export const stream2_objects = {
         list.push(chunk);
         cb();
       };
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       w.on('finish', function () {
         deepStrictEqual(list, [0, 1, 2, 3, 4]);
         finishCalled.resolve();
@@ -4302,7 +4289,7 @@ export const stream2_objects = {
         list.push(chunk);
         queueMicrotask(cb);
       };
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       w.on('finish', function () {
         deepStrictEqual(list, ['0', '1', '2', '3', '4']);
         finishCalled.resolve();
@@ -4328,7 +4315,7 @@ export const stream2_objects = {
           cb();
         });
       };
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       w.on('finish', function () {
         strictEqual(called, true);
         finishCalled.resolve();
@@ -4360,7 +4347,7 @@ export const stream2_large_read_stall = {
         ret = r.read(READSIZE);
       } while (ret && ret.length === READSIZE);
     });
-    const ended = deferredPromise();
+    const ended = Promise.withResolvers();
     r.on('end', function () {
       strictEqual(pushes, PUSHCOUNT + 1);
       ended.resolve();
@@ -4393,7 +4380,7 @@ export const stream2_decode_partial = {
     readable.on('data', function (data) {
       buf += data;
     });
-    const closed = deferredPromise();
+    const closed = Promise.withResolvers();
     readable.on('close', closed.resolve);
     await closed.promise;
 
@@ -4434,8 +4421,8 @@ export const stream2_compatibility = {
     }
     const writer = new TestWriter();
 
-    const readerClose = deferredPromise();
-    const writerClose = deferredPromise();
+    const readerClose = Promise.withResolvers();
+    const writerClose = Promise.withResolvers();
     reader.on('close', readerClose.resolve);
     writer.on('close', writerClose.resolve);
 
@@ -4716,7 +4703,7 @@ export const stream2_basic = {
         }, 10);
         return false;
       };
-      const ended2 = deferredPromise();
+      const ended2 = Promise.withResolvers();
       w2.end = ended2.resolve;
       const w3 = new Readable();
       w3.write = function (chunk) {
@@ -4732,7 +4719,7 @@ export const stream2_basic = {
         }, 50);
         return false;
       };
-      const ended3 = deferredPromise();
+      const ended3 = Promise.withResolvers();
       w3.end = function () {
         strictEqual(counter, 2);
         strictEqual(expected.length, 0);
@@ -4753,14 +4740,14 @@ export const stream2_basic = {
       const v = r.read(0);
       strictEqual(v, null);
       const w = new Readable();
-      const writeCalled = deferredPromise();
+      const writeCalled = Promise.withResolvers();
       w.write = function (buffer) {
         written = true;
         strictEqual(ended, false);
         strictEqual(buffer.toString(), 'foo');
         writeCalled.resolve();
       };
-      const endCalled = deferredPromise();
+      const endCalled = Promise.withResolvers();
       w.end = function () {
         ended = true;
         strictEqual(written, true);
@@ -4800,7 +4787,7 @@ export const stream2_basic = {
         onReadable = true;
         r.read();
       });
-      const endCalled = deferredPromise();
+      const endCalled = Promise.withResolvers();
       r.on('end', function () {
         strictEqual(readCalled, 3);
         ok(onReadable);
@@ -4811,7 +4798,7 @@ export const stream2_basic = {
     {
       // Verify that streams are chainable
       const r = new Readable();
-      const readCalled = deferredPromise();
+      const readCalled = Promise.withResolvers();
       r._read = readCalled.resolve;
       const r2 = r.setEncoding('utf8').pause().resume().pause();
       strictEqual(r, r2);
@@ -4986,8 +4973,8 @@ export const writev = {
       });
     }
     {
-      const writeCalled = deferredPromise();
-      const writeFinished = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const writeFinished = Promise.withResolvers();
       const w = new Writable({
         writev: function (chunks, cb) {
           cb();
@@ -5002,8 +4989,8 @@ export const writev = {
 
 export const writeFinal = {
   async test(ctrl, env, ctx) {
-    const finalCalled = deferredPromise();
-    const finishCalled = deferredPromise();
+    const finalCalled = Promise.withResolvers();
+    const finishCalled = Promise.withResolvers();
     let shutdown = false;
     const w = new Writable({
       final: function (cb) {
@@ -5100,8 +5087,8 @@ export const writeDestroy = {
 export const writableState_uncorked_bufferedRequestCount = {
   async test(ctrl, env, ctx) {
     const writable = new Writable();
-    const writevCalled = deferredPromise();
-    const writeCalled = deferredPromise();
+    const writevCalled = Promise.withResolvers();
+    const writeCalled = Promise.withResolvers();
     writable._writev = (chunks, cb) => {
       strictEqual(chunks.length, 2);
       cb();
@@ -5135,7 +5122,7 @@ export const writableState_uncorked_bufferedRequestCount = {
     writable.write('second chunk');
     strictEqual(writable._writableState.corked, 1);
     strictEqual(writable._writableState.bufferedRequestCount, 2);
-    const uncorkCalled = deferredPromise();
+    const uncorkCalled = Promise.withResolvers();
     function uncork() {
       // Second uncork flushes the buffer
       writable.uncork();
@@ -5196,7 +5183,7 @@ export const writable_write_writev_finish = {
   async test(ctrl, env, ctx) {
     {
       const writable = new Writable();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       writable._write = (chunks, encoding, cb) => {
         cb(new Error('write test error'));
       };
@@ -5211,7 +5198,7 @@ export const writable_write_writev_finish = {
     }
     {
       const writable = new Writable();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       writable._write = (chunks, encoding, cb) => {
         queueMicrotask(() => cb(new Error('write test error')));
       };
@@ -5226,7 +5213,7 @@ export const writable_write_writev_finish = {
     }
     {
       const writable = new Writable();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       writable._write = (chunks, encoding, cb) => {
         cb(new Error('write test error'));
       };
@@ -5248,7 +5235,7 @@ export const writable_write_writev_finish = {
     }
     {
       const writable = new Writable();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       writable._write = (chunks, encoding, cb) => {
         queueMicrotask(() => cb(new Error('write test error')));
       };
@@ -5278,7 +5265,7 @@ export const writable_write_writev_finish = {
       rs.push(null);
       rs._read = () => {};
       const ws = new Writable();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       ws.on('finish', errored.reject);
       ws.on('error', errored.resolve);
       ws._write = (chunk, encoding, done) => {
@@ -5293,7 +5280,7 @@ export const writable_write_writev_finish = {
       rs.push(null);
       rs._read = () => {};
       const ws = new Writable();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       ws.on('finish', errored.reject);
       ws.on('error', errored.resolve);
       ws._write = (chunk, encoding, done) => {
@@ -5307,7 +5294,7 @@ export const writable_write_writev_finish = {
       w._write = (chunk, encoding, cb) => {
         queueMicrotask(cb);
       };
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       w.on('error', errored.resolve);
       w.on('finish', errored.reject);
       w.on('prefinish', () => {
@@ -5321,7 +5308,7 @@ export const writable_write_writev_finish = {
       w._write = (chunk, encoding, cb) => {
         queueMicrotask(cb);
       };
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       w.on('error', errored.resolve);
       w.on('finish', () => {
         w.write("shouldn't write in finish listener");
@@ -5345,8 +5332,8 @@ export const writable_write_error = {
         }
       } else {
         let ticked = false;
-        const writeCalled = deferredPromise();
-        const errorCalled = deferredPromise();
+        const writeCalled = Promise.withResolvers();
+        const errorCalled = Promise.withResolvers();
         w.write(...args, (err) => {
           strictEqual(ticked, true);
           strictEqual(err.code, code);
@@ -5413,8 +5400,8 @@ export const writable_write_cb_twice = {
   async test(ctrl, env, ctx) {
     {
       // Sync + Sync
-      const writeCalled = deferredPromise();
-      const errored = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const writable = new Writable({
         write: (buf, enc, cb) => {
           cb();
@@ -5431,8 +5418,8 @@ export const writable_write_cb_twice = {
     }
     {
       // Sync + Async
-      const writeCalled = deferredPromise();
-      const errored = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const writable = new Writable({
         write: (buf, enc, cb) => {
           cb();
@@ -5451,8 +5438,8 @@ export const writable_write_cb_twice = {
     }
     {
       // Async + Async
-      const writeCalled = deferredPromise();
-      const errored = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const writable = new Writable({
         write: (buf, enc, cb) => {
           queueMicrotask(cb);
@@ -5477,9 +5464,9 @@ export const writable_write_cb_error = {
     {
       let callbackCalled = false;
       // Sync Error
-      const writeCalled = deferredPromise();
-      const errored = deferredPromise();
-      const writeFinished = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
+      const writeFinished = Promise.withResolvers();
       const writable = new Writable({
         write: (buf, enc, cb) => {
           cb(new Error());
@@ -5503,9 +5490,9 @@ export const writable_write_cb_error = {
     {
       let callbackCalled = false;
       // Async Error
-      const writeCalled = deferredPromise();
-      const errored = deferredPromise();
-      const writeFinished = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
+      const writeFinished = Promise.withResolvers();
       const writable = new Writable({
         write: (buf, enc, cb) => {
           queueMicrotask(() => cb(new Error()));
@@ -5528,8 +5515,8 @@ export const writable_write_cb_error = {
     }
     {
       // Sync Error
-      const errored = deferredPromise();
-      const writeCalled = deferredPromise();
+      const errored = Promise.withResolvers();
+      const writeCalled = Promise.withResolvers();
       const writable = new Writable({
         write: (buf, enc, cb) => {
           cb(new Error());
@@ -5557,8 +5544,8 @@ export const writable_writable = {
       strictEqual(w.writable, false);
     }
     {
-      const writeCalled = deferredPromise();
-      const errored = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const w = new Writable({
         write: (chunk, encoding, callback) => {
           callback(new Error());
@@ -5572,8 +5559,8 @@ export const writable_writable = {
       await Promise.all([writeCalled.promise, errored.promise]);
     }
     {
-      const writeCalled = deferredPromise();
-      const errored = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const w = new Writable({
         write: (chunk, encoding, callback) => {
           queueMicrotask(() => {
@@ -5588,7 +5575,7 @@ export const writable_writable = {
       await Promise.all([writeCalled.promise, errored.promise]);
     }
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       const w = new Writable({
         write: closed.reject,
       });
@@ -5691,8 +5678,8 @@ export const writable_needdrain_state = {
       transform: _transform,
       highWaterMark: 1,
     });
-    const transformCalled = deferredPromise();
-    const writeFinished = deferredPromise();
+    const transformCalled = Promise.withResolvers();
+    const writeFinished = Promise.withResolvers();
     function _transform(chunk, encoding, cb) {
       queueMicrotask(() => {
         strictEqual(transform._writableState.needDrain, true);
@@ -5766,8 +5753,8 @@ export const writable_finished = {
         strictEqual(writable.writableFinished, false);
         cb();
       };
-      const finishCalled = deferredPromise();
-      const endCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
+      const endCalled = Promise.withResolvers();
       writable.on('finish', () => {
         strictEqual(writable.writableFinished, true);
         finishCalled.resolve();
@@ -5787,7 +5774,7 @@ export const writable_finished = {
         },
       });
       w.end();
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       w.on('finish', finishCalled.resolve);
       await finishCalled.promise;
     }
@@ -5851,8 +5838,8 @@ export const writable_finished_state = {
       strictEqual(writable._writableState.finished, false);
       cb();
     };
-    const finishCalled = deferredPromise();
-    const endCalled = deferredPromise();
+    const finishCalled = Promise.withResolvers();
+    const endCalled = Promise.withResolvers();
     writable.on('finish', () => {
       strictEqual(writable._writableState.finished, true);
       finishCalled.resolve();
@@ -5868,8 +5855,8 @@ export const writable_finished_state = {
 export const writable_finish_destroyed = {
   async test(ctrl, env, ctx) {
     {
-      const writeCalled = deferredPromise();
-      const closed = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const w = new Writable({
         write: (chunk, encoding, cb) => {
           w.on('close', () => {
@@ -5885,8 +5872,8 @@ export const writable_finish_destroyed = {
       await Promise.all([writeCalled.promise, closed.promise]);
     }
     {
-      const writeCalled = deferredPromise();
-      const closed = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const w = new Writable({
         write: (chunk, encoding, cb) => {
           w.on('close', () => {
@@ -5906,7 +5893,7 @@ export const writable_finish_destroyed = {
       const w = new Writable({
         write() {},
       });
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       w.on('finish', closed.reject);
       w.on('close', closed.resolve);
       w.end();
@@ -5924,9 +5911,9 @@ export const writable_final_throw = {
       }
       _read() {}
     }
-    const writeCalled = deferredPromise();
-    const endFinished = deferredPromise();
-    const errored = deferredPromise();
+    const writeCalled = Promise.withResolvers();
+    const endFinished = Promise.withResolvers();
+    const errored = Promise.withResolvers();
     const foo = new Foo();
     foo._write = (chunk, encoding, cb) => {
       cb();
@@ -5955,7 +5942,7 @@ export const writable_final_destroy = {
         queueMicrotask(callback);
       },
     });
-    const closed = deferredPromise();
+    const closed = Promise.withResolvers();
     w.end();
     w.destroy();
     w.on('prefinish', closed.reject);
@@ -5976,8 +5963,8 @@ export const writable_final_async = {
         _read() {}
       }
       const foo = new Foo();
-      const writeCalled = deferredPromise();
-      const endCalled = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const endCalled = Promise.withResolvers();
       foo._write = (chunk, encoding, cb) => {
         cb();
         writeCalled.resolve();
@@ -5992,8 +5979,8 @@ export const writable_final_async = {
 export const writable_ended_state = {
   async test(ctrl, env, ctx) {
     const writable = new Writable();
-    const writeCalled = deferredPromise();
-    const endCalled = deferredPromise();
+    const writeCalled = Promise.withResolvers();
+    const endCalled = Promise.withResolvers();
     writable._write = (chunk, encoding, cb) => {
       strictEqual(writable._writableState.ended, false);
       strictEqual(writable._writableState.writable, undefined);
@@ -6026,9 +6013,9 @@ export const writable_end_multiple = {
     writable._write = (chunk, encoding, cb) => {
       setTimeout(() => cb(), 10);
     };
-    const endCalled1 = deferredPromise();
-    const endCalled2 = deferredPromise();
-    const finishCalled = deferredPromise();
+    const endCalled1 = Promise.withResolvers();
+    const endCalled2 = Promise.withResolvers();
+    const finishCalled = Promise.withResolvers();
     writable.end('testing ended state', endCalled1.resolve);
     writable.end(endCalled2.resolve);
     writable.on('finish', () => {
@@ -6057,9 +6044,9 @@ export const writable_end_cb_error = {
       writable._write = (chunk, encoding, cb) => {
         queueMicrotask(() => cb(_err));
       };
-      const errored = deferredPromise();
-      const endCalled1 = deferredPromise();
-      const endCalled2 = deferredPromise();
+      const errored = Promise.withResolvers();
+      const endCalled1 = Promise.withResolvers();
+      const endCalled2 = Promise.withResolvers();
       writable.on('error', (err) => {
         strictEqual(err, _err);
         errored.resolve();
@@ -6086,9 +6073,9 @@ export const writable_end_cb_error = {
         queueMicrotask(cb);
       };
       let called = false;
-      const endCalled = deferredPromise();
-      const errored = deferredPromise();
-      const finishCalled = deferredPromise();
+      const endCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
+      const finishCalled = Promise.withResolvers();
       writable.end('asd', (err) => {
         called = true;
         strictEqual(err, undefined);
@@ -6118,10 +6105,10 @@ export const writable_end_cb_error = {
           queueMicrotask(callback);
         },
       });
-      const endCalled1 = deferredPromise();
-      const endCalled2 = deferredPromise();
-      const endCalled3 = deferredPromise();
-      const errored = deferredPromise();
+      const endCalled1 = Promise.withResolvers();
+      const endCalled2 = Promise.withResolvers();
+      const endCalled3 = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       w.end('testing ended state', (err) => {
         strictEqual(err.code, 'ERR_STREAM_WRITE_AFTER_END');
         endCalled1.resolve();
@@ -6162,7 +6149,7 @@ export const writable_destroy = {
           cb();
         },
       });
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       write.on('finish', closed.reject);
       write.on('close', closed.resolve);
       write.destroy();
@@ -6176,7 +6163,7 @@ export const writable_destroy = {
           cb();
         },
       });
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       write.on('error', errored.resolve);
       write.on('finish', errored.reject);
       write.end('asd');
@@ -6190,8 +6177,8 @@ export const writable_destroy = {
         },
       });
       const expected = new Error('kaboom');
-      const errored = deferredPromise();
-      const closed = deferredPromise();
+      const errored = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       write.on('finish', closed.reject);
       write.on('close', closed.resolve);
       write.on('error', (err) => {
@@ -6212,8 +6199,8 @@ export const writable_destroy = {
         strictEqual(err, expected);
         cb(err);
       };
-      const errored = deferredPromise();
-      const closed = deferredPromise();
+      const errored = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const expected = new Error('kaboom');
       write.on('finish', closed.reject);
       write.on('close', closed.resolve);
@@ -6226,8 +6213,8 @@ export const writable_destroy = {
       await Promise.all([closed.promise, errored.promise]);
     }
     {
-      const closed = deferredPromise();
-      const destroyCalled = deferredPromise();
+      const closed = Promise.withResolvers();
+      const destroyCalled = Promise.withResolvers();
       const write = new Writable({
         write(chunk, enc, cb) {
           cb();
@@ -6254,7 +6241,7 @@ export const writable_destroy = {
           cb();
         },
       });
-      const destroyCalled = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
       write._destroy = function (err, cb) {
         strictEqual(err, null);
         cb();
@@ -6270,8 +6257,8 @@ export const writable_destroy = {
           cb();
         },
       });
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       write._destroy = function (err, cb) {
         strictEqual(err, null);
         queueMicrotask(() => {
@@ -6293,9 +6280,9 @@ export const writable_destroy = {
         },
       });
       const expected = new Error('kaboom');
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       write._destroy = function (err, cb) {
         strictEqual(err, null);
         cb(expected);
@@ -6323,8 +6310,8 @@ export const writable_destroy = {
         },
       });
       let ticked = false;
-      const writeFinished = deferredPromise();
-      const errored = deferredPromise();
+      const writeFinished = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       write.on('close', () => {
         strictEqual(ticked, true);
         writeFinished.resolve();
@@ -6354,8 +6341,8 @@ export const writable_destroy = {
         },
       });
       let ticked = false;
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       writable.on('close', () => {
         writable.on('error', () => {
           throw new Error('should not have been called');
@@ -6419,7 +6406,7 @@ export const writable_destroy = {
       });
       write.destroy();
       const expected = new Error('kaboom');
-      const destroyed = deferredPromise();
+      const destroyed = Promise.withResolvers();
       write.destroy(expected, (err) => {
         strictEqual(err, undefined);
         destroyed.resolve();
@@ -6429,9 +6416,9 @@ export const writable_destroy = {
     {
       // Checks that `._undestroy()` restores the state so that `final` will be
       // called again.
-      const writeCalled = deferredPromise();
-      const finalCalled = deferredPromise();
-      const closed = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const finalCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       let finalCounter = 0;
       const write = new Writable({
         write: writeCalled.resolve(),
@@ -6456,7 +6443,7 @@ export const writable_destroy = {
     {
       const write = new Writable();
       write.destroy();
-      const writeFinished = deferredPromise();
+      const writeFinished = Promise.withResolvers();
       write.on('error', writeFinished.reject);
       write.write('asd', function (err) {
         strictEqual(err.code, 'ERR_STREAM_DESTROYED');
@@ -6470,9 +6457,9 @@ export const writable_destroy = {
           cb();
         },
       });
-      const writeFinished1 = deferredPromise();
-      const writeFinished2 = deferredPromise();
-      const writeFinished3 = deferredPromise();
+      const writeFinished1 = Promise.withResolvers();
+      const writeFinished2 = Promise.withResolvers();
+      const writeFinished3 = Promise.withResolvers();
       write.on('error', writeFinished1.reject);
       write.cork();
       write.write('asd', writeFinished1.resolve);
@@ -6502,7 +6489,7 @@ export const writable_destroy = {
           cb(new Error('asd'));
         },
       });
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       write.on('error', () => {
         write.destroy();
         let ticked = false;
@@ -6524,7 +6511,7 @@ export const writable_destroy = {
           cb();
         },
       });
-      const finishCalled = deferredPromise();
+      const finishCalled = Promise.withResolvers();
       write.on('finish', () => {
         write.destroy();
         let ticked = false;
@@ -6548,8 +6535,8 @@ export const writable_destroy = {
         },
       });
       const _err = new Error('asd');
-      const errored = deferredPromise();
-      const ended = deferredPromise();
+      const errored = Promise.withResolvers();
+      const ended = Promise.withResolvers();
       write.once('error', (err) => {
         strictEqual(err.message, 'asd');
         errored.resolve();
@@ -6572,9 +6559,9 @@ export const writable_destroy = {
         autoDestroy: false,
       });
       write.cork();
-      const writeFinished1 = deferredPromise();
-      const writeFinished2 = deferredPromise();
-      const errored = deferredPromise();
+      const writeFinished1 = Promise.withResolvers();
+      const writeFinished2 = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       write.write('asd', (err) => {
         strictEqual(err, _err);
         writeFinished1.resolve();
@@ -6605,8 +6592,8 @@ export const writable_destroy = {
           queueMicrotask(cb);
         },
       });
-      const writeFinished1 = deferredPromise();
-      const writeFinished2 = deferredPromise();
+      const writeFinished1 = Promise.withResolvers();
+      const writeFinished2 = Promise.withResolvers();
       write.write('asd', () => {
         strictEqual(state++, 0);
         writeFinished1.resolve();
@@ -6627,7 +6614,7 @@ export const writable_destroy = {
           cb();
         },
       });
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       write.on('error', () => {
         ok(write._writableState.errored);
         errored.resolve();
@@ -6645,7 +6632,7 @@ export const writable_destroy = {
           },
         })
       );
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       write.on('error', (e) => {
         strictEqual(e.name, 'AbortError');
         strictEqual(write.destroyed, true);
@@ -6663,7 +6650,7 @@ export const writable_destroy = {
           cb();
         },
       });
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       write.on('error', (e) => {
         strictEqual(e.name, 'AbortError');
         strictEqual(write.destroyed, true);
@@ -6681,7 +6668,7 @@ export const writable_destroy = {
           cb();
         },
       });
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       write.on('error', (e) => {
         strictEqual(e.name, 'AbortError');
         strictEqual(write.destroyed, true);
@@ -6696,7 +6683,7 @@ export const writable_destroy = {
           cb();
         },
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       write.end(ended.resolve);
       write.destroy();
       write.destroy();
@@ -6709,8 +6696,8 @@ export const writable_destroy = {
       });
       const _err = new Error('oh no');
       // Remove `callback` and it works
-      const ended = deferredPromise();
-      const errored = deferredPromise();
+      const ended = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       s.end((err) => {
         strictEqual(err, _err);
         ended.resolve();
@@ -6784,8 +6771,8 @@ export const writable_constructor_set_methods = {
         message: 'The _write() method is not implemented',
       }
     );
-    const writeCalled = deferredPromise();
-    const writevCalled = deferredPromise();
+    const writeCalled = Promise.withResolvers();
+    const writevCalled = Promise.withResolvers();
     const _write = (chunk, _, next) => {
       next();
       writeCalled.resolve();
@@ -6830,7 +6817,7 @@ export const writable_clear_buffer = {
     testStream.cork();
     const writePromises = [];
     for (let i = 1; i <= 5; i++) {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       writePromises.push(p.promise);
       testStream.write(i, () => {
         strictEqual(
@@ -6993,7 +6980,7 @@ export const unshift_read_race = {
     }
     const w = Writable();
     const written = [];
-    const finishCalled = deferredPromise();
+    const finishCalled = Promise.withResolvers();
     w._write = function (chunk, encoding, cb) {
       written.push(chunk.toString());
       cb();
@@ -7109,8 +7096,8 @@ export const unpipe_event = {
       _read() {}
     }
     {
-      const pipeCalled = deferredPromise();
-      const unpipeCalled = deferredPromise();
+      const pipeCalled = Promise.withResolvers();
+      const unpipeCalled = Promise.withResolvers();
       const dest = new NullWriteable();
       const src = new QuickEndReadable();
       dest.on('pipe', pipeCalled.resolve);
@@ -7120,7 +7107,7 @@ export const unpipe_event = {
       strictEqual(src._readableState.pipes.length, 0);
     }
     {
-      const pipeCalled = deferredPromise();
+      const pipeCalled = Promise.withResolvers();
       const dest = new NullWriteable();
       const src = new NeverEndReadable();
       dest.on('pipe', pipeCalled.resolve);
@@ -7130,8 +7117,8 @@ export const unpipe_event = {
       strictEqual(src._readableState.pipes.length, 1);
     }
     {
-      const pipeCalled = deferredPromise();
-      const unpipeCalled = deferredPromise();
+      const pipeCalled = Promise.withResolvers();
+      const unpipeCalled = Promise.withResolvers();
       const dest = new NullWriteable();
       const src = new NeverEndReadable();
       dest.on('pipe', pipeCalled.resolve);
@@ -7142,8 +7129,8 @@ export const unpipe_event = {
       strictEqual(src._readableState.pipes.length, 0);
     }
     {
-      const pipeCalled = deferredPromise();
-      const unpipeCalled = deferredPromise();
+      const pipeCalled = Promise.withResolvers();
+      const unpipeCalled = Promise.withResolvers();
       const dest = new NullWriteable();
       const src = new QuickEndReadable();
       dest.on('pipe', pipeCalled.resolve);
@@ -7155,7 +7142,7 @@ export const unpipe_event = {
       strictEqual(src._readableState.pipes.length, 0);
     }
     {
-      const pipeCalled = deferredPromise();
+      const pipeCalled = Promise.withResolvers();
       const dest = new NullWriteable();
       const src = new NeverEndReadable();
       dest.on('pipe', pipeCalled.resolve);
@@ -7167,8 +7154,8 @@ export const unpipe_event = {
       strictEqual(src._readableState.pipes.length, 1);
     }
     {
-      const pipeCalled = deferredPromise();
-      const unpipeCalled = deferredPromise();
+      const pipeCalled = Promise.withResolvers();
+      const unpipeCalled = Promise.withResolvers();
       const dest = new NullWriteable();
       const src = new NeverEndReadable();
       dest.on('pipe', pipeCalled.resolve);
@@ -7192,7 +7179,7 @@ export const uint8array = {
       // Simple Writable test.
 
       let n = 0;
-      const writeCalled = deferredPromise();
+      const writeCalled = Promise.withResolvers();
       let writeCount = 0;
       const writable = new Writable({
         write: (chunk, encoding, cb) => {
@@ -7212,7 +7199,7 @@ export const uint8array = {
     }
     {
       // Writable test, pass in Uint8Array in object mode.
-      const writeCalled = deferredPromise();
+      const writeCalled = Promise.withResolvers();
       const writable = new Writable({
         objectMode: true,
         write: (chunk, encoding, cb) => {
@@ -7230,8 +7217,8 @@ export const uint8array = {
     {
       // Writable test, multiple writes carried out via writev.
       let callback;
-      const writeCalled = deferredPromise();
-      const writevCalled = deferredPromise();
+      const writeCalled = Promise.withResolvers();
+      const writevCalled = Promise.withResolvers();
       const writable = new Writable({
         write: (chunk, encoding, cb) => {
           ok(chunk instanceof Buffer);
@@ -7445,8 +7432,8 @@ export const transform_objectmode_falsey_value = {
     });
     const expect = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const results = [];
-    const dataCalled = deferredPromise();
-    const intervalFinished = deferredPromise();
+    const dataCalled = Promise.withResolvers();
+    const intervalFinished = Promise.withResolvers();
     let dataCount = 0;
     let intCount = 0;
     dest.on('data', function (x) {
@@ -7479,8 +7466,8 @@ export const transform_hwm0 = {
       },
     });
     strictEqual(t.write(1), false);
-    const drainCalled = deferredPromise();
-    const readableCalled = deferredPromise();
+    const drainCalled = Promise.withResolvers();
+    const readableCalled = Promise.withResolvers();
     t.on('drain', () => {
       strictEqual(t.write(2), false);
       t.end();
@@ -7524,13 +7511,13 @@ export const transform_flush_data = {
 export const transform_final = {
   async test(ctrl, env, ctx) {
     let state = 0;
-    const transformCalled = deferredPromise();
-    const finalCalled = deferredPromise();
-    const flushCalled = deferredPromise();
-    const finishCalled = deferredPromise();
-    const endCalled = deferredPromise();
-    const dataCalled = deferredPromise();
-    const endFinished = deferredPromise();
+    const transformCalled = Promise.withResolvers();
+    const finalCalled = Promise.withResolvers();
+    const flushCalled = Promise.withResolvers();
+    const finishCalled = Promise.withResolvers();
+    const endCalled = Promise.withResolvers();
+    const dataCalled = Promise.withResolvers();
+    const endFinished = Promise.withResolvers();
     let dataCount = 0;
     let transformCount = 0;
     const t = new Transform({
@@ -7609,13 +7596,13 @@ export const transform_final = {
 export const transform_final_sync = {
   async test(ctrl, env, ctx) {
     let state = 0;
-    const transformCalled = deferredPromise();
-    const finalCalled = deferredPromise();
-    const flushCalled = deferredPromise();
-    const finishCalled = deferredPromise();
-    const endCalled = deferredPromise();
-    const dataCalled = deferredPromise();
-    const endFinished = deferredPromise();
+    const transformCalled = Promise.withResolvers();
+    const finalCalled = Promise.withResolvers();
+    const flushCalled = Promise.withResolvers();
+    const finishCalled = Promise.withResolvers();
+    const endCalled = Promise.withResolvers();
+    const dataCalled = Promise.withResolvers();
+    const endFinished = Promise.withResolvers();
     let transformCount = 0;
     let dataCount = 0;
     const t = new Transform({
@@ -7696,7 +7683,7 @@ export const transform_destroy = {
         transform(chunk, enc, cb) {},
       });
       transform.resume();
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       transform.on('end', closed.reject);
       transform.on('close', closed.resolve);
       transform.on('finish', closed.reject);
@@ -7709,8 +7696,8 @@ export const transform_destroy = {
       });
       transform.resume();
       const expected = new Error('kaboom');
-      const errored = deferredPromise();
-      const closed = deferredPromise();
+      const errored = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       transform.on('end', closed.reject);
       transform.on('finish', closed.reject);
       transform.on('close', closed.resolve);
@@ -7730,8 +7717,8 @@ export const transform_destroy = {
         cb(err);
       };
       const expected = new Error('kaboom');
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       transform.on('finish', closed.reject);
       transform.on('close', closed.resolve);
       transform.on('error', (err) => {
@@ -7743,8 +7730,8 @@ export const transform_destroy = {
     }
     {
       const expected = new Error('kaboom');
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const transform = new Transform({
         transform(chunk, enc, cb) {},
         destroy: function (err, cb) {
@@ -7767,7 +7754,7 @@ export const transform_destroy = {
       const transform = new Transform({
         transform(chunk, enc, cb) {},
       });
-      const destroyCalled = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
       transform._destroy = function (err, cb) {
         strictEqual(err, null);
         cb();
@@ -7781,9 +7768,9 @@ export const transform_destroy = {
         transform(chunk, enc, cb) {},
       });
       transform.resume();
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
-      const endCalled = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
+      const endCalled = Promise.withResolvers();
       transform._destroy = function (err, cb) {
         strictEqual(err, null);
         queueMicrotask(() => {
@@ -7812,9 +7799,9 @@ export const transform_destroy = {
         transform(chunk, enc, cb) {},
       });
       const expected = new Error('kaboom');
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       transform._destroy = function (err, cb) {
         strictEqual(err, null);
         cb(expected);
@@ -7850,9 +7837,9 @@ export const transform_constructor_set_methods = {
         message: 'The _transform() method is not implemented',
       }
     );
-    const transformCalled = deferredPromise();
-    const finalCalled = deferredPromise();
-    const flushCalled = deferredPromise();
+    const transformCalled = Promise.withResolvers();
+    const finalCalled = Promise.withResolvers();
+    const flushCalled = Promise.withResolvers();
     const _transform = (chunk, _, next) => {
       next();
       transformCalled.resolve();
@@ -7891,7 +7878,7 @@ export const transform_callback_twice = {
         cb();
       },
     });
-    const errored = deferredPromise();
+    const errored = Promise.withResolvers();
     stream.on('error', function (err) {
       strictEqual(err.code, 'ERR_MULTIPLE_CALLBACK');
       errored.resolve();
@@ -8371,8 +8358,8 @@ export const readablelistening_state = {
 
     // readableListening state should start in `false`.
     strictEqual(r._readableState.readableListening, false);
-    const readableCalled = deferredPromise();
-    const dataCalled = deferredPromise();
+    const readableCalled = Promise.withResolvers();
+    const dataCalled = Promise.withResolvers();
     r.on('readable', () => {
       // Inside the readable event this state should be true.
       strictEqual(r._readableState.readableListening, true);
@@ -8400,8 +8387,8 @@ export const readable_with_unimplemented_read = {
   async test(ctrl, env, ctx) {
     const readable = new Readable();
     readable.read();
-    const errored = deferredPromise();
-    const closed = deferredPromise();
+    const errored = Promise.withResolvers();
+    const closed = Promise.withResolvers();
     readable.on('error', function (err) {
       strictEqual(err.code, 'ERR_METHOD_NOT_IMPLEMENTED');
       errored.resolve();
@@ -8419,7 +8406,7 @@ export const readable_unshift = {
         read() {},
       });
       const string = 'abc';
-      const dataCalled = deferredPromise();
+      const dataCalled = Promise.withResolvers();
       readable.on('data', (chunk) => {
         ok(Buffer.isBuffer(chunk));
         strictEqual(chunk.toString('utf8'), string);
@@ -8436,7 +8423,7 @@ export const readable_unshift = {
       const unshift = 'front';
       const push = 'back';
       const expected = [unshift, push];
-      const dataCalled = deferredPromise();
+      const dataCalled = Promise.withResolvers();
       let dataCount = 0;
       readable.on('data', (chunk) => {
         strictEqual(chunk.toString('utf8'), expected.shift());
@@ -8453,7 +8440,7 @@ export const readable_unshift = {
       });
       const encoding = 'base64';
       const string = Buffer.from('abc').toString(encoding);
-      const dataCalled = deferredPromise();
+      const dataCalled = Promise.withResolvers();
       readable.on('data', (chunk) => {
         strictEqual(chunk.toString(encoding), string);
         dataCalled.resolve();
@@ -8463,7 +8450,7 @@ export const readable_unshift = {
     }
     {
       const streamEncoding = 'base64';
-      const dataCalled = deferredPromise();
+      const dataCalled = Promise.withResolvers();
       function checkEncoding(readable) {
         // chunk encodings
         const encodings = ['utf8', 'binary', 'hex', 'base64'];
@@ -8506,7 +8493,7 @@ export const readable_unshift = {
       // Both .push & .unshift should have the same behaviour
       // When setting an encoding, each chunk should be emitted with that encoding
       const encoding = 'base64';
-      const dataCalled = deferredPromise();
+      const dataCalled = Promise.withResolvers();
       function checkEncoding(readable) {
         const string = 'abc';
         let dataCount = 0;
@@ -8536,7 +8523,7 @@ export const readable_unshift = {
         read() {},
       });
       const chunks = ['a', 1, {}, []];
-      const dataCalled = deferredPromise();
+      const dataCalled = Promise.withResolvers();
       let dataCount = 0;
       readable.on('data', (chunk) => {
         strictEqual(chunk, chunks.pop());
@@ -8570,7 +8557,7 @@ export const readable_unshift = {
           }
         }
       }
-      const readCalled = deferredPromise();
+      const readCalled = Promise.withResolvers();
       function onRead() {
         while (null !== stream.read()) {
           // Remove the 'readable' listener before unshifting
@@ -8728,7 +8715,7 @@ export const readable_resume_hwm = {
     // The .pause() is just so that we don’t empty the buffer fully, which would
     // be a valid reason to call ._read().
     readable.resume();
-    const dataCalled = deferredPromise();
+    const dataCalled = Promise.withResolvers();
     readable.once('data', () => {
       readable.pause();
       dataCalled.resolve();
@@ -8750,9 +8737,9 @@ export const readable_reading_readingmore = {
       strictEqual(state.readingMore, false);
       let dataCount = 0;
       let readableCount = 0;
-      const dataCalled = deferredPromise();
-      const readableCalled = deferredPromise();
-      const ended = deferredPromise();
+      const dataCalled = Promise.withResolvers();
+      const readableCalled = Promise.withResolvers();
+      const ended = Promise.withResolvers();
       readable.on('data', (data) => {
         // While in a flowing state with a 'readable' listener
         // we should not be reading more
@@ -8814,8 +8801,8 @@ export const readable_reading_readingmore = {
       strictEqual(state.reading, false);
       strictEqual(state.readingMore, false);
       let dataCount = 0;
-      const dataCalled = deferredPromise();
-      const ended = deferredPromise();
+      const dataCalled = Promise.withResolvers();
+      const ended = Promise.withResolvers();
       readable.on('data', (data) => {
         // While in a flowing state without a 'readable' listener
         // we should be reading more
@@ -8860,8 +8847,8 @@ export const readable_reading_readingmore = {
       const state = readable._readableState;
 
       let dataCount = 0;
-      const dataCalled = deferredPromise();
-      const ended = deferredPromise();
+      const dataCalled = Promise.withResolvers();
+      const ended = Promise.withResolvers();
 
       // Starting off with false initially.
       strictEqual(state.reading, false);
@@ -8931,15 +8918,15 @@ export const readable_readable = {
       r.push(null);
       strictEqual(r.readable, true);
       r.off('end', fail);
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       r.on('end', () => {
         strictEqual(r.readable, false);
         ended.resolve();
       });
     }
     {
-      const readCalled = deferredPromise();
-      const errored = deferredPromise();
+      const readCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const r = new Readable({
         read: () => {
           queueMicrotask(() => {
@@ -8976,7 +8963,7 @@ export const readable_readable_then_resume = {
       })
     );
     async function check(s) {
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       s.on('readable', ended.reject);
       s.on('end', ended.resolve);
       strictEqual(s.removeListener, s.off);
@@ -8999,8 +8986,8 @@ export const readable_pause_and_resume = {
         rs.push(null);
       },
     });
-    const ended = deferredPromise();
-    const ondataCalled = deferredPromise();
+    const ended = Promise.withResolvers();
+    const ondataCalled = Promise.withResolvers();
     rs.on('end', ended.resolve);
     await readAndPause();
     async function readAndPause() {
@@ -9040,7 +9027,7 @@ export const readable_pause_and_resume = {
       const chunk = Buffer.allocUnsafe(1000);
       while (target3.write(chunk));
       source3.pipe(target3);
-      const drainCalled = deferredPromise();
+      const drainCalled = Promise.withResolvers();
       target3.on('drain', () => {
         ok(!source3.isPaused());
         drainCalled.resolve();
@@ -9056,8 +9043,8 @@ export const readable_object_multi_push_async = {
     const MAX = 42;
     const BATCH = 10;
     {
-      const readCalled = deferredPromise();
-      const ended = deferredPromise();
+      const readCalled = Promise.withResolvers();
+      const ended = Promise.withResolvers();
       let readCount = 0;
       const readable = new Readable({
         objectMode: true,
@@ -9100,8 +9087,8 @@ export const readable_object_multi_push_async = {
       await Promise.all([readCalled.promise, ended.promise]);
     }
     {
-      const readCalled = deferredPromise();
-      const ended = deferredPromise();
+      const readCalled = Promise.withResolvers();
+      const ended = Promise.withResolvers();
       let readCount = 0;
       const readable = new Readable({
         objectMode: true,
@@ -9141,8 +9128,8 @@ export const readable_object_multi_push_async = {
       await Promise.all([readCalled.promise, ended.promise]);
     }
     {
-      const readCalled = deferredPromise();
-      const ended = deferredPromise();
+      const readCalled = Promise.withResolvers();
+      const ended = Promise.withResolvers();
       let readCount = 0;
       const readable = new Readable({
         objectMode: true,
@@ -9177,7 +9164,7 @@ export const readable_object_multi_push_async = {
       await Promise.all([readCalled.promise, ended.promise]);
     }
     {
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       const readable = new Readable({
         objectMode: true,
         read() {},
@@ -9195,8 +9182,8 @@ export const readable_object_multi_push_async = {
       await ended.promise;
     }
     {
-      const ended = deferredPromise();
-      const readCalled = deferredPromise();
+      const ended = Promise.withResolvers();
+      const readCalled = Promise.withResolvers();
       const readable = new Readable({
         objectMode: true,
         read: readCalled.resolve,
@@ -9235,7 +9222,7 @@ export const readable_no_unneeded_readable = {
       r.once('end', function () {
         wrapper.push(null);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       wrapper.resume();
       wrapper.once('end', ended.resolve);
       await ended.promise;
@@ -9276,7 +9263,7 @@ export const readable_next_no_null = {
       yield null;
     }
     const stream = Readable.from(generate());
-    const errored = deferredPromise();
+    const errored = Promise.withResolvers();
     stream.on('error', function (err) {
       strictEqual(err.code, 'ERR_STREAM_NULL_VALUES');
       errored.resolve();
@@ -9295,8 +9282,8 @@ export const readable_needreadable = {
 
     // Initialized to false.
     strictEqual(readable._readableState.needReadable, false);
-    const readableCalled1 = deferredPromise();
-    const ended = deferredPromise();
+    const readableCalled1 = Promise.withResolvers();
+    const ended = Promise.withResolvers();
     readable.on('readable', () => {
       // When the readable event fires, needReadable is reset.
       strictEqual(readable._readableState.needReadable, false, '1');
@@ -9315,9 +9302,9 @@ export const readable_needreadable = {
     });
     await Promise.all([readableCalled1.promise, ended.promise]);
 
-    const readableCalled2 = deferredPromise();
-    const ended2 = deferredPromise();
-    const dataCalled = deferredPromise();
+    const readableCalled2 = Promise.withResolvers();
+    const ended2 = Promise.withResolvers();
+    const dataCalled = Promise.withResolvers();
     let readableCount = 0;
     let dataCount = 0;
     const asyncReadable = new Readable({
@@ -9369,7 +9356,7 @@ export const readable_needreadable = {
     // const slowProducer = new Readable({
     //   read: () => {}
     // });
-    // const readableCalled3 = deferredPromise();
+    // const readableCalled3 = Promise.withResolvers();;
     // readableCount = 0;
     // slowProducer.on(
     //   'readable',
@@ -9415,7 +9402,7 @@ export const readable_invalid_chunk = {
       const readable = new Readable({
         read: () => {},
       });
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       readable.on('error', function (err) {
         strictEqual(err.code, 'ERR_INVALID_ARG_TYPE');
         errored.resolve();
@@ -9428,7 +9415,7 @@ export const readable_invalid_chunk = {
       const readable = new Readable({
         read: () => {},
       });
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       readable.on('error', function (err) {
         strictEqual(err.code, 'ERR_INVALID_ARG_TYPE');
         errored.resolve();
@@ -9446,9 +9433,9 @@ export const readable_invalid_chunk = {
 
 export const readable_hwm_0 = {
   async test(ctrl, env, ctx) {
-    const readableCalled = deferredPromise();
-    const readCalled = deferredPromise();
-    const ended = deferredPromise();
+    const readableCalled = Promise.withResolvers();
+    const readCalled = Promise.withResolvers();
+    const ended = Promise.withResolvers();
     const r = new Readable({
       // Must be called only once upon setting 'readable' listener
       read: readCalled.resolve,
@@ -9479,9 +9466,9 @@ export const readable_hwm_0 = {
 export const readable_hwm_0_async = {
   async test(ctrl, env, ctx) {
     let count = 5;
-    const readCalled = deferredPromise();
-    const ended = deferredPromise();
-    const dataCalled = deferredPromise();
+    const readCalled = Promise.withResolvers();
+    const ended = Promise.withResolvers();
+    const dataCalled = Promise.withResolvers();
     let readCount = 0;
     let dataCount = 0;
     const r = new Readable({
@@ -9511,7 +9498,7 @@ export const readable_event = {
       const r = new Readable({
         highWaterMark: 3,
       });
-      const readableCalled = deferredPromise();
+      const readableCalled = Promise.withResolvers();
       r._read = readableCalled.reject;
 
       // This triggers a 'readable' event, which is lost.
@@ -9530,8 +9517,8 @@ export const readable_event = {
       const r = new Readable({
         highWaterMark: 3,
       });
-      const readCalled = deferredPromise();
-      const readableCalled = deferredPromise();
+      const readCalled = Promise.withResolvers();
+      const readableCalled = Promise.withResolvers();
       r._read = readCalled.resolve;
 
       // This triggers a 'readable' event, which is lost.
@@ -9553,7 +9540,7 @@ export const readable_event = {
       // This triggers a 'readable' event, which is lost.
       r.push(Buffer.from('blerg'));
       r.push(null);
-      const readableCalled = deferredPromise();
+      const readableCalled = Promise.withResolvers();
       r._read = readableCalled.reject;
       setTimeout(function () {
         // Assert we're testing what we think we are
@@ -9584,7 +9571,7 @@ export const readable_event = {
         const data = r.read();
         if (data !== null) result.push(data);
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       r.on('end', () => {
         deepStrictEqual(result, expected);
         ended.resolve();
@@ -9609,8 +9596,8 @@ export const readable_error_end = {
     const r = new Readable({
       read() {},
     });
-    const data = deferredPromise();
-    const errored = deferredPromise();
+    const data = Promise.withResolvers();
+    const errored = Promise.withResolvers();
     r.on('end', errored.reject);
     r.on('data', data.resolve);
     r.on('error', errored.resolve);
@@ -9639,8 +9626,8 @@ export const readable_ended = {
         readable.push(null);
         strictEqual(readable.readableEnded, false);
       };
-      const ended = deferredPromise();
-      const dataCalled = deferredPromise();
+      const ended = Promise.withResolvers();
+      const dataCalled = Promise.withResolvers();
       readable.on('end', () => {
         strictEqual(readable.readableEnded, true);
         ended.resolve();
@@ -9658,7 +9645,7 @@ export const readable_ended = {
       readable.on('readable', () => {
         readable.read();
       });
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       readable.on('error', ended.reject);
       readable.on('end', ended.resolve);
       readable.push('a');
@@ -9672,7 +9659,7 @@ export const readable_ended = {
 export const readable_end_destroyed = {
   async test(ctrl, env, ctx) {
     const r = new Readable();
-    const closed = deferredPromise();
+    const closed = Promise.withResolvers();
     r.on('end', fail);
     r.resume();
     r.destroy();
@@ -9687,10 +9674,10 @@ export const readable_end_destroyed = {
 export const readable_short_stream = {
   async test(ctrl, env, ctx) {
     {
-      const readCalled = deferredPromise();
-      const transformCalled = deferredPromise();
-      const flushCalled = deferredPromise();
-      const readableCalled = deferredPromise();
+      const readCalled = Promise.withResolvers();
+      const transformCalled = Promise.withResolvers();
+      const flushCalled = Promise.withResolvers();
+      const readableCalled = Promise.withResolvers();
       let readableCount = 0;
       const r = new Readable({
         read: function () {
@@ -9727,9 +9714,9 @@ export const readable_short_stream = {
       ]);
     }
     {
-      const transformCalled = deferredPromise();
-      const flushCalled = deferredPromise();
-      const readableCalled = deferredPromise();
+      const transformCalled = Promise.withResolvers();
+      const flushCalled = Promise.withResolvers();
+      const readableCalled = Promise.withResolvers();
       const t = new Transform({
         transform: function (chunk, encoding, callback) {
           transformCalled.resolve();
@@ -9757,9 +9744,9 @@ export const readable_short_stream = {
       ]);
     }
     {
-      const transformCalled = deferredPromise();
-      const flushCalled = deferredPromise();
-      const readableCalled = deferredPromise();
+      const transformCalled = Promise.withResolvers();
+      const flushCalled = Promise.withResolvers();
+      const readableCalled = Promise.withResolvers();
       const t = new Transform({
         transform: function (chunk, encoding, callback) {
           transformCalled.resolve();
@@ -9791,7 +9778,7 @@ export const readable_short_stream = {
       const t = new Readable({
         read() {},
       });
-      const readableCalled = deferredPromise();
+      const readableCalled = Promise.withResolvers();
       t.on('readable', function () {
         while (true) {
           const chunk = t.read();
@@ -9808,7 +9795,7 @@ export const readable_short_stream = {
       const t = new Readable({
         read() {},
       });
-      const readableCalled = deferredPromise();
+      const readableCalled = Promise.withResolvers();
       let readableCount = 0;
       t.on('readable', function () {
         while (true) {
@@ -9825,9 +9812,9 @@ export const readable_short_stream = {
       await readableCalled.promise;
     }
     {
-      const transformCalled = deferredPromise();
-      const flushCalled = deferredPromise();
-      const readableCalled = deferredPromise();
+      const transformCalled = Promise.withResolvers();
+      const flushCalled = Promise.withResolvers();
+      const readableCalled = Promise.withResolvers();
       let readableCount = 0;
       const t = new Transform({
         transform: function (chunk, encoding, callback) {
@@ -9863,7 +9850,7 @@ export const readable_didread = {
   async test(ctrl, env, ctx) {
     function noop() {}
     async function check(readable, data, fn) {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       strictEqual(readable.readableDidRead, false);
       strictEqual(isDisturbed(readable), false);
       strictEqual(isErrored(readable), false);
@@ -9965,7 +9952,7 @@ export const readable_didread = {
 export const readable_destroy = {
   async test(ctrl, env, ctx) {
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       const read = new Readable({
         read() {},
       });
@@ -9980,8 +9967,8 @@ export const readable_destroy = {
       const read = new Readable({
         read() {},
       });
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       read.resume();
       const expected = new Error('kaboom');
       read.on('end', closed.reject);
@@ -9996,9 +9983,9 @@ export const readable_destroy = {
       await Promise.all([closed.promise, errored.promise]);
     }
     {
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const read = new Readable({
         read() {},
       });
@@ -10023,8 +10010,8 @@ export const readable_destroy = {
       ]);
     }
     {
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
       const read = new Readable({
         read() {},
         destroy: function (err, cb) {
@@ -10047,7 +10034,7 @@ export const readable_destroy = {
       const read = new Readable({
         read() {},
       });
-      const destroyCalled = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
       read._destroy = function (err, cb) {
         strictEqual(err, null);
         cb();
@@ -10062,8 +10049,8 @@ export const readable_destroy = {
         read() {},
       });
       read.resume();
-      const closed = deferredPromise();
-      const destroyCalled = deferredPromise();
+      const closed = Promise.withResolvers();
+      const destroyCalled = Promise.withResolvers();
       read._destroy = function (err, cb) {
         strictEqual(err, null);
         queueMicrotask(() => {
@@ -10085,9 +10072,9 @@ export const readable_destroy = {
         read() {},
       });
       const expected = new Error('kaboom');
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       read._destroy = function (err, cb) {
         strictEqual(err, null);
         cb(expected);
@@ -10132,9 +10119,9 @@ export const readable_destroy = {
       read.resume();
       const expected = new Error('kaboom');
       let ticked = false;
-      const closed = deferredPromise();
-      const destroyCalled = deferredPromise();
-      const errored = deferredPromise();
+      const closed = Promise.withResolvers();
+      const destroyCalled = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       read.on('close', () => {
         strictEqual(read._readableState.errorEmitted, true);
         strictEqual(ticked, true);
@@ -10161,9 +10148,9 @@ export const readable_destroy = {
       ]);
     }
     {
-      const destroyCalled = deferredPromise();
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const destroyCalled = Promise.withResolvers();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       const readable = new Readable({
         destroy: function (err, cb) {
           queueMicrotask(() => cb(new Error('kaboom 1')));
@@ -10205,7 +10192,7 @@ export const readable_destroy = {
       const read = new Readable({
         read() {},
       });
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       read.destroy();
       read.push('hi');
       read.on('data', fail);
@@ -10213,7 +10200,7 @@ export const readable_destroy = {
       await closed.promise;
     }
     {
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       const read = new Readable({
         read: closed.reject,
       });
@@ -10231,7 +10218,7 @@ export const readable_destroy = {
           this.push('asd');
         },
       });
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       read.on('error', () => {
         ok(read._readableState.errored);
         errored.resolve();
@@ -10249,8 +10236,8 @@ export const readable_destroy = {
           },
         })
       );
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       read.on('error', (e) => {
         strictEqual(e.name, 'AbortError');
         errored.resolve();
@@ -10268,8 +10255,8 @@ export const readable_destroy = {
           this.push('asd');
         },
       });
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       read.on('error', (e) => {
         strictEqual(e.name, 'AbortError');
         errored.resolve();
@@ -10291,7 +10278,7 @@ export const readable_destroy = {
         })
       );
       read.push('asd');
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       read.on('error', (e) => {
         strictEqual(e.name, 'AbortError');
         errored.resolve();
@@ -10311,8 +10298,8 @@ export const readable_destroy = {
       const read = new Readable({
         read() {},
       });
-      const closed = deferredPromise();
-      const errored = deferredPromise();
+      const closed = Promise.withResolvers();
+      const errored = Promise.withResolvers();
       read.on('data', closed.reject);
       read.on('error', (e) => {
         read.push('asd');
@@ -10331,7 +10318,7 @@ export const readable_destroy = {
       const read = new Readable({
         read() {},
       });
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       read.on('data', closed.reject);
       read.on('close', (e) => {
         read.push('asd');
@@ -10345,7 +10332,7 @@ export const readable_destroy = {
       const read = new Readable({
         read() {},
       });
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       read.on('data', closed.reject);
       read.on('close', (e) => {
         read.push('asd');
@@ -10359,7 +10346,7 @@ export const readable_destroy = {
       const read = new Readable({
         read() {},
       });
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       read.on('data', closed.reject);
       read.on('close', closed.resolve);
       read.destroy();
@@ -10371,7 +10358,7 @@ export const readable_destroy = {
         read() {},
       });
       read.resume();
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       read.on('data', closed.reject);
       read.on('close', (e) => {
         read.push('asd');
@@ -10384,7 +10371,7 @@ export const readable_destroy = {
       const read = new Readable({
         read() {},
       });
-      const closed = deferredPromise();
+      const closed = Promise.withResolvers();
       read.on('data', closed.reject);
       read.on('close', closed.resolve);
       read.destroy();
@@ -10403,7 +10390,7 @@ export const readable_data = {
     readable.setEncoding('utf8');
     readable.on('readable', read);
     readable.removeListener('readable', read);
-    const dataCalled = deferredPromise();
+    const dataCalled = Promise.withResolvers();
     queueMicrotask(function () {
       readable.on('data', dataCalled.resolve);
       readable.push('hello');
@@ -10414,7 +10401,7 @@ export const readable_data = {
 
 export const readable_constructor_set_methods = {
   async test(ctrl, env, ctx) {
-    const readCalled = deferredPromise();
+    const readCalled = Promise.withResolvers();
     const _read = function _read(n) {
       this.push(null);
       readCalled.resolve();
@@ -10429,7 +10416,7 @@ export const readable_constructor_set_methods = {
 
 export const readable_add_chunk_during_data = {
   async test(ctrl, env, ctx) {
-    const dataCalled = deferredPromise();
+    const dataCalled = Promise.withResolvers();
     let dataCount = 0;
     for (const method of ['push', 'unshift']) {
       const r = new Readable({
@@ -10485,7 +10472,7 @@ export const readable_aborted = {
       readable.push('asd');
       readable.push(null);
       strictEqual(readable.readableAborted, false);
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       readable.on('end', () => {
         strictEqual(readable.readableAborted, false);
         readable.destroy();
@@ -10636,7 +10623,7 @@ export const filter = {
     }
     {
       function once(ee, event) {
-        const deferred = deferredPromise();
+        const deferred = Promise.withResolvers();
         ee.once(event, deferred.resolve);
         return deferred.promise;
       }
@@ -10714,8 +10701,8 @@ export const pipeWithoutListenerCount = {
       r.emit('error', new Error('Readable Error'));
       w.emit('error', new Error('Writable Error'));
     });
-    const rErrored = deferredPromise();
-    const wErrored = deferredPromise();
+    const rErrored = Promise.withResolvers();
+    const wErrored = Promise.withResolvers();
     r.on('error', rErrored.resolve);
     w.on('error', wErrored.resolve);
     r.pipe(w);
@@ -10737,8 +10724,8 @@ export const pipeUnpipeStreams = {
     source.pipe(dest1);
     source.pipe(dest2);
 
-    const unpipe1 = deferredPromise();
-    const unpipe2 = deferredPromise();
+    const unpipe1 = Promise.withResolvers();
+    const unpipe2 = Promise.withResolvers();
 
     dest1.on('unpipe', unpipe1.resolve);
     dest2.on('unpipe', unpipe2.resolve);
@@ -10787,7 +10774,7 @@ export const pipeUnpipeStreams = {
         });
       };
       async function checkDestCleanup(dest) {
-        const done = deferredPromise();
+        const done = Promise.withResolvers();
         const currentDestId = ++destCount;
         source.pipe(dest);
         const unpipeChecker = () => {
@@ -10818,7 +10805,7 @@ export const pipeUnpipeStreams = {
         write: () => {},
       });
       src.pipe(dst);
-      const resumeCalled = deferredPromise();
+      const resumeCalled = Promise.withResolvers();
       src.on('resume', () => {
         src.on('pause', resumeCalled.resolve);
         src.unpipe(dst);
@@ -10835,7 +10822,7 @@ export const pipeSameDestinationTwice = {
     // works, and that a subsequent unpipe() call only removes the pipe *once*.
     {
       const passThrough = new PassThrough();
-      const writeCalled = deferredPromise();
+      const writeCalled = Promise.withResolvers();
       const dest = new Writable({
         write: (chunk, encoding, cb) => {
           strictEqual(`${chunk}`, 'foobar');
@@ -10859,7 +10846,7 @@ export const pipeSameDestinationTwice = {
     }
     {
       const passThrough = new PassThrough();
-      const writeCalled = deferredPromise();
+      const writeCalled = Promise.withResolvers();
       let writeCount = 0;
       const dest = new Writable({
         write: (chunk, encoding, cb) => {
@@ -10914,8 +10901,8 @@ export const pipeNeedDrain = {
         this.push(null);
       },
     });
-    const pauseCalled = deferredPromise();
-    const endCalled = deferredPromise();
+    const pauseCalled = Promise.withResolvers();
+    const endCalled = Promise.withResolvers();
     let pauseCount = 0;
     r.on('pause', () => {
       if (++pauseCount === 2) pauseCalled.resolve();
@@ -10934,7 +10921,7 @@ export const pipeMultiplePipes = {
     const writables = [];
     const promises = [];
     for (let i = 0; i < 5; i++) {
-      const writeCalled = deferredPromise();
+      const writeCalled = Promise.withResolvers();
       promises.push(writeCalled.promise);
       const target = new Writable({
         write: (chunk, encoding, callback) => {
@@ -10943,7 +10930,7 @@ export const pipeMultiplePipes = {
           writeCalled.resolve();
         },
       });
-      const pipeCalled = deferredPromise();
+      const pipeCalled = Promise.withResolvers();
       promises.push(pipeCalled.promise);
       target.output = [];
       target.on('pipe', pipeCalled.resolve);
@@ -10966,7 +10953,7 @@ export const pipeMultiplePipes = {
     readable.push(null);
     readable.resume(); // Make sure the 'end' event gets emitted.
 
-    const ended = deferredPromise();
+    const ended = Promise.withResolvers();
     readable.on('end', () => {
       for (const target of writables) {
         deepStrictEqual(target.output, [input]);
@@ -10985,8 +10972,8 @@ export const pipeManualResume = {
 
       const n = 1000;
       let counter = n;
-      const rClosed = deferredPromise();
-      const wClosed = deferredPromise();
+      const rClosed = Promise.withResolvers();
+      const wClosed = Promise.withResolvers();
       const rs = Readable({
         objectMode: true,
         read: () => {
@@ -11032,8 +11019,8 @@ export const pipeFlow = {
         objectMode: true,
         write: (data, end, cb) => queueMicrotask(cb),
       });
-      const ended = deferredPromise();
-      const finished = deferredPromise();
+      const ended = Promise.withResolvers();
+      const finished = Promise.withResolvers();
       rs.on('end', ended.resolve);
       ws.on('finish', finished.resolve);
       rs.pipe(ws);
@@ -11081,7 +11068,7 @@ export const pipeFlow = {
         },
       });
       wrapper.resume();
-      const ended = deferredPromise();
+      const ended = Promise.withResolvers();
       wrapper.on('end', ended.resolve);
       await ended.promise;
     }
@@ -11102,7 +11089,7 @@ export const pipeFlow = {
       });
       rs.push('asd');
       strictEqual(pt.listenerCount('drain'), 0);
-      const done = deferredPromise();
+      const done = Promise.withResolvers();
       queueMicrotask(() => {
         rs.push('asd');
         strictEqual(pt.listenerCount('drain'), 0);
@@ -11176,7 +11163,7 @@ export const pipeErrorHandling = {
           w.emit('error', new Error('fail'));
         }, 1);
       };
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       w.on('error', errored.resolve);
       w._write = () => {};
       r.pipe(w);
@@ -11188,7 +11175,7 @@ export const pipeErrorHandling = {
     {
       const _err = new Error('this should be handled');
       const destination = new PassThrough();
-      const errored = deferredPromise();
+      const errored = Promise.withResolvers();
       destination.once('error', (err) => {
         strictEqual(err, _err);
         errored.resolve();
@@ -11292,7 +11279,7 @@ export const pipeCleanup = {
 
 export const pipeCleanupPause = {
   async test(ctrl, env, ctx) {
-    const done = deferredPromise();
+    const done = Promise.withResolvers();
     const reader = new Readable();
     const writer1 = new Writable();
     const writer2 = new Writable();
@@ -11333,7 +11320,7 @@ export const writableAdapter = {
     const dec = new TextDecoder();
     // toWeb
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       const w = new Writable({
         write(chunk, encoding, callback) {
           strictEqual(dec.decode(chunk), 'ok');
@@ -11347,7 +11334,7 @@ export const writableAdapter = {
 
     // fromWeb
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       const ws = new WritableStream({
         write(chunk) {
           strictEqual(dec.decode(chunk), 'ok');
@@ -11355,7 +11342,7 @@ export const writableAdapter = {
         },
       });
       const w = Writable.fromWeb(ws);
-      const p2 = deferredPromise();
+      const p2 = Promise.withResolvers();
       w.write(enc.encode('ok'), p2.resolve);
       await Promise.all([p.promise, p2.promise]);
     }
@@ -11403,7 +11390,7 @@ export const readableAdapter = {
         },
       });
       const r = Readable.fromWeb(rs);
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       r.on('data', (chunk) => {
         strictEqual(dec.decode(chunk), 'ok');
         p.resolve();
