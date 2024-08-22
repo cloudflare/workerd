@@ -4,7 +4,10 @@ Verify that calling `random` at the top-level throws.
 Calls to random should only work inside a request context.
 """
 
-from random import random, randbytes, choice
+# Disable do not `assert False` lint
+# ruff: noqa: B011
+
+from random import choice, randbytes, random
 
 try:
     random()
@@ -38,7 +41,7 @@ else:
 
 
 def t1():
-    from random import random, randbytes
+    from random import randbytes, random
 
     random()
     randbytes(5)

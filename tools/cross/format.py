@@ -6,10 +6,9 @@ import re
 import shutil
 import subprocess
 from argparse import ArgumentParser, Namespace
-from typing import Optional, Callable
-from pathlib import Path
 from dataclasses import dataclass
-
+from pathlib import Path
+from typing import Callable, Optional
 
 CLANG_FORMAT = os.environ.get("CLANG_FORMAT", "clang-format")
 PRETTIER = os.environ.get("PRETTIER", "node_modules/.bin/prettier")
@@ -31,7 +30,10 @@ def parse_args() -> Namespace:
     )
     git_parser.add_argument(
         "--source",
-        help="consider files modified in the specified commit-ish; if not specified, defaults to all changes in the working directory",
+        help=(
+            "consider files modified in the specified commit-ish; "
+            "if not specified, defaults to all changes in the working directory"
+        ),
         type=str,
         required=False,
         default=None,
@@ -56,7 +58,8 @@ def parse_args() -> Namespace:
         and (options.source is not None or options.target != "HEAD")
     ):
         logging.error(
-            "--staged cannot be used with --source or --target; use --staged with --source=HEAD"
+            "--staged cannot be used with --source or --target; "
+            "use --staged with --source=HEAD"
         )
         exit(1)
     return options

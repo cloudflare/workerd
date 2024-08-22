@@ -2,11 +2,9 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
-from js import Float32Array
-from js import JSON
+from js import Float32Array, Object
 
 from pyodide.ffi import to_js as _to_js
-from js import Object
 
 
 def to_js(obj):

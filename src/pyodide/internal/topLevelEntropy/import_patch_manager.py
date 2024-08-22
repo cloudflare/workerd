@@ -9,8 +9,8 @@ as the originals after we put them back. This is controlled by the
 IN_REQUEST_CONTEXT variable.
 """
 
-from functools import wraps
 import sys
+from functools import wraps
 
 
 class PatchLoader:
@@ -71,7 +71,7 @@ class PatchFinder:
 
     @staticmethod
     def remove():
-        for idx, val in enumerate(sys.meta_path):
+        for idx, val in enumerate(sys.meta_path):  # noqa:B007
             if isinstance(val, PatchFinder):
                 break
         del sys.meta_path[idx]
@@ -96,7 +96,7 @@ IN_REQUEST_CONTEXT = False
 ORIG_MODULES = {}
 
 
-def block_calls(module, *, allowlist=[]):
+def block_calls(module, *, allowlist=()):
     # Called from the import context for modules that need to block calls.
     sys.modules[module.__name__] = BlockedCallModule(module, allowlist)
     ORIG_MODULES[module.__name__] = module
@@ -141,8 +141,9 @@ class BlockedCallModule:
         if key in super().__getattribute__("_allow_list"):
             return orig
 
-        # If we aren't in a request scope, the value is a callable, and it's not in the allow_list,
-        # return a wrapper that raises an error if it's called before entering the request scope.
+        # If we aren't in a request scope, the value is a callable, and it's not
+        # in the allow_list, return a wrapper that raises an error if it's
+        # called before entering the request scope.
         # TODO: this doesn't wrap classes correctly, does it matter?
         @wraps(orig)
         def wrapper(*args, **kwargs):

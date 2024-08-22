@@ -1,14 +1,20 @@
-# Monkeypatch aiohttp to introduce Fetch API support.
-#
-# Based on https://github.com/pyodide/pyodide/issues/3711#issuecomment-1773523301
-# with some modifications.
+"""
+Monkeypatch aiohttp to introduce Fetch API support.
 
-from multidict import CIMultiDict, istr
-from aiohttp import payload, InvalidURL, hdrs, ClientSession, ClientTimeout
-from aiohttp.client_reqrep import _merge_ssl_params
-from aiohttp.helpers import TimeoutHandle, strip_auth_from_url, get_env_proxy_for_url
+Based on https://github.com/pyodide/pyodide/issues/3711#issuecomment-1773523301
+with some modifications.
+"""
+
+# ruff: noqa
+
+from collections.abc import Iterable
 from contextlib import suppress
-from typing import Any, Optional, Iterable
+from typing import Any
+
+from aiohttp import ClientSession, ClientTimeout, InvalidURL, hdrs, payload
+from aiohttp.client_reqrep import _merge_ssl_params
+from aiohttp.helpers import TimeoutHandle, get_env_proxy_for_url, strip_auth_from_url
+from multidict import CIMultiDict, istr
 from yarl import URL
 
 
@@ -43,25 +49,25 @@ async def _request(
     json: Any = None,
     cookies=None,
     headers=None,
-    skip_auto_headers: Optional[Iterable[str]] = None,
+    skip_auto_headers: Iterable[str] | None = None,
     auth=None,
     allow_redirects: bool = True,
     max_redirects: int = 10,
-    compress: Optional[str] = None,
-    chunked: Optional[bool] = None,
+    compress: str | None = None,
+    chunked: bool | None = None,
     expect100: bool = False,
     raise_for_status=None,
     read_until_eof: bool = True,
     proxy=None,
     proxy_auth=None,
     timeout=None,
-    verify_ssl: Optional[bool] = None,
-    fingerprint: Optional[bytes] = None,
+    verify_ssl: bool | None = None,
+    fingerprint: bytes | None = None,
     ssl_context=None,
     ssl=None,
     proxy_headers=None,
     trace_request_ctx=None,
-    read_bufsize: Optional[int] = None,
+    read_bufsize: int | None = None,
 ):
     # NOTE: timeout clamps existing connect and read timeouts.  We cannot
     # set the default to None because we need to detect if the user wants
@@ -191,7 +197,8 @@ async def _request(
                 loop=req.loop,
                 session=req._session,
             )
-            from js import fetch, Headers
+            from js import Headers, fetch
+
             from pyodide.ffi import to_js
 
             body = None
