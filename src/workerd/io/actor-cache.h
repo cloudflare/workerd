@@ -267,6 +267,7 @@ public:
   ActorCache(rpc::ActorStorage::Stage::Client storage,
       const SharedLru& lru,
       OutputGate& gate,
+      // Hooks has no member variables, so const_cast is acceptable.
       Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
   ~ActorCache() noexcept(false);
 

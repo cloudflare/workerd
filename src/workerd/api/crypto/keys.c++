@@ -90,6 +90,7 @@ kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::exportKeyExt(kj::StringPtr forma
   auto bio = OSSL_BIO_MEM();
 
   struct EncDetail {
+    // const_cast is acceptable, pass will be reassigned before it is written to.
     char* pass = const_cast<char*>(&EMPTY_PASSPHRASE[0]);
     size_t pass_len = 0;
     const EVP_CIPHER* cipher = nullptr;
