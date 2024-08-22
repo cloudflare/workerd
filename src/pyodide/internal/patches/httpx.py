@@ -53,7 +53,7 @@ async def _send_single_request(self, request: Request) -> Response:
     await timer.async_start()
 
     if not isinstance(request.stream, AsyncByteStream):
-        raise RuntimeError(
+        raise TypeError(
             "Attempted to send an sync request with an AsyncClient instance."
         )
 
