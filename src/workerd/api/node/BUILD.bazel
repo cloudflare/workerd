@@ -40,7 +40,7 @@ wd_test(
 )
 
 wd_test(
-    size = "large",
+    size = "enormous",
     src = "tests/crypto_dh-test.wd-test",
     args = ["--experimental"],
     data = ["tests/crypto_dh-test.js"],
