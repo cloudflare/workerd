@@ -6,7 +6,6 @@
 #include <kj/debug.h>
 #include <kj/string-tree.h>
 #include <workerd/util/string-buffer.h>
-#include <array>
 
 namespace workerd {
 
@@ -16,8 +15,8 @@ constexpr bool isWhitespace(const char c) noexcept {
   return (c == '\r' || c == '\n' || c == '\t' || c == ' ');
 }
 
-constexpr std::array<uint8_t, 256> token_table = []() consteval {
-  std::array<uint8_t, 256> result{};
+static constexpr kj::FixedArray<uint8_t, 256> token_table = []() consteval {
+  kj::FixedArray<uint8_t, 256> result{};
 
   for (uint8_t c:
       {'!', '#', '$', '%', '&', '\'', '*', '+', '\\', '-', '.', '^', '_', '`', '|', '~'}) {
@@ -46,8 +45,8 @@ constexpr bool isTokenChar(const uint8_t c) noexcept {
   return token_table[c];
 }
 
-constexpr std::array<uint8_t, 256> quoted_string_token_table = []() consteval {
-  std::array<uint8_t, 256> result{};
+static constexpr kj::FixedArray<uint8_t, 256> quoted_string_token_table = []() consteval {
+  kj::FixedArray<uint8_t, 256> result{};
   result['\t'] = true;
 
   for (uint8_t c = 0x20; c <= 0x7e; c++) {

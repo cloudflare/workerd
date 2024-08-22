@@ -86,11 +86,11 @@ void parseFormData(kj::Maybe<jsg::Lock&> js,
   const auto done = [](kj::ArrayPtr<const char>& body) {
     // Consume any (CR)LF characters that trailed the boundary and indicate continuation, or consume
     // the terminal "--" characters and indicate termination, or throw an error.
-    if (startsWith(body, "\n")) {
+    if (startsWith(body, "\n"_kj)) {
       body = body.slice(1, body.size());
-    } else if (startsWith(body, "\r\n")) {
+    } else if (startsWith(body, "\r\n"_kj)) {
       body = body.slice(2, body.size());
-    } else if (startsWith(body, "--")) {
+    } else if (startsWith(body, "--"_kj)) {
       // We're done!
       return true;
     } else {

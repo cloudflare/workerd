@@ -10,6 +10,18 @@ kj::Maybe<DataUrl> DataUrl::tryParse(kj::StringPtr url) {
   return kj::none;
 }
 
+static constexpr kj::FixedArray<uint8_t, 256> ascii_whitespace_table = []() consteval {
+  kj::FixedArray<uint8_t, 256> result{};
+  for (uint8_t c: {0x09, 0x0a, 0x0c, 0x0d, 0x20}) {
+    result[c] = true;
+  }
+  return result;
+}();
+
+constexpr bool isAsciiWhitespace(uint8_t c) noexcept {
+  return ascii_whitespace_table[c];
+}
+
 kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
   if (url.getProtocol() != "data:"_kj) return kj::none;
   auto clone = url.clone(jsg::Url::EquivalenceOption::IGNORE_FRAGMENTS);
@@ -20,11 +32,6 @@ kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
   // We scan for the first comma, which separates the MIME type from the data.
   // Per the fetch spec, it doesn't matter if the comma is within a quoted
   // string value in the MIME type... which is fun.
-
-  static const auto isAsciiWhitespace = [](auto c) {
-    return c == 0x09 /* tab */ || c == 0x0a /* lf  */ || c == 0x0c /* ff  */ ||
-        c == 0x0d /* cr  */ || c == 0x20 /* sp  */;
-  };
 
   static const auto trim = [](auto label) {
     size_t start = 0;
