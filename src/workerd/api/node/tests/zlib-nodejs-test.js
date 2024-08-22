@@ -679,6 +679,27 @@ export const closeAfterError = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-write-after-close.js
+// TODO(soon): Enable the test once `gzip` implementation lands.
+// export const writeAfterClose = {
+//   async test() {
+//     const { promise, resolve } = Promise.withResolvers();
+//     let closeCalled = false;
+//     zlib.gzip('hello', function (err, out) {
+//       const unzip = zlib.createGunzip();
+//       unzip.close(() => (closeCalled = true));
+//       unzip.write('asd', (err) => {
+//         strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+//         strictEqual(err.name, 'Error');
+//         resolve();
+//       });
+//     });
+//     await promise;
+//     assert(closeCalled, 'Close should have been called');
+//   },
+// };
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -705,7 +726,7 @@ export const closeAfterError = {
 // - [ ] test-zlib-deflate-raw-inherits.js
 // - [ ] test-zlib-flush-write-sync-interleaved.js
 // - [ ] test-zlib-no-stream.js
-// - [ ] test-zlib-write-after-close.js
+// - [x] test-zlib-write-after-close.js
 // - [ ] test-zlib-brotli-kmaxlength-rangeerror.js
 // - [x] test-zlib-destroy.js
 // - [ ] test-zlib-from-concatenated-gzip.js
