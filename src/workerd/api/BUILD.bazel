@@ -208,16 +208,258 @@ kj_test(
     deps = ["//src/workerd/tests:test-fixture"],
 )
 
-[wd_test(
-    src = f,
+wd_test(
+    src = "actor-alarms-delete-test.wd-test",
     args = ["--experimental"],
-    data = [f.removesuffix(".wd-test") + ".js"],
-) for f in glob(
-    ["**/*.wd-test"],
-    exclude = [
-        "tests/js-rpc-socket-test.wd-test",
-    ],
-)]
+    data = ["actor-alarms-delete-test.js"],
+)
+
+wd_test(
+    src = "actor-alarms-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-alarms-test.js"],
+)
+
+wd_test(
+    src = "analytics-engine-test.wd-test",
+    args = ["--experimental"],
+    data = ["analytics-engine-test.js"],
+)
+
+wd_test(
+    src = "http-standard-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-standard-test.js"],
+)
+
+wd_test(
+    src = "http-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-test.js"],
+)
+
+wd_test(
+    src = "queue-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-test.js"],
+)
+
+wd_test(
+    src = "rtti-test.wd-test",
+    args = ["--experimental"],
+    data = ["rtti-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "sql-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-test.js"],
+)
+
+wd_test(
+    src = "streams/identitytransformstream-backpressure-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams/identitytransformstream-backpressure-test.js"],
+)
+
+wd_test(
+    src = "streams/streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams/streams-test.js"],
+)
+
+wd_test(
+    src = "tests/abort-internal-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/abort-internal-streams-test.js"],
+)
+
+wd_test(
+    src = "tests/abortable-fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/abortable-fetch-test.js"],
+)
+
+wd_test(
+    src = "tests/abortsignal-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/abortsignal-test.js"],
+)
+
+wd_test(
+    src = "tests/actor-stub-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/actor-stub-test.js"],
+)
+
+wd_test(
+    src = "tests/als-only-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/als-only-test.js"],
+)
+
+wd_test(
+    src = "tests/als-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/als-test.js"],
+)
+
+wd_test(
+    src = "tests/blob-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/blob-test.js"],
+)
+
+wd_test(
+    src = "tests/blob2-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/blob2-test.js"],
+)
+
+wd_test(
+    src = "tests/commonjs-module-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/commonjs-module-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto-extras-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto-extras-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto-impl-asymmetric-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto-impl-asymmetric-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/crypto-streams-test.js"],
+)
+
+wd_test(
+    src = "tests/data-url-fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/data-url-fetch-test.js"],
+)
+
+wd_test(
+    src = "tests/encoding-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/encoding-test.js"],
+)
+
+wd_test(
+    src = "tests/events-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/events-test.js"],
+)
+
+wd_test(
+    src = "tests/eventsource-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/eventsource-test.js"],
+)
+
+wd_test(
+    src = "tests/form-data-legacy-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/form-data-legacy-test.js"],
+)
+
+wd_test(
+    src = "tests/form-data-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/form-data-test.js"],
+)
+
+wd_test(
+    src = "tests/global-scope-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/global-scope-test.js"],
+)
+
+wd_test(
+    src = "tests/htmlrewriter-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/htmlrewriter-test.js"],
+)
+
+wd_test(
+    src = "tests/js-rpc-flag.wd-test",
+    args = ["--experimental"],
+    data = ["tests/js-rpc-flag.js"],
+)
+
+wd_test(
+    src = "tests/js-rpc-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/js-rpc-test.js"],
+)
+
+wd_test(
+    src = "tests/memory-cache-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/memory-cache-test.js"],
+)
+
+wd_test(
+    src = "tests/module-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/module-test.js"],
+)
+
+wd_test(
+    src = "tests/navigator-beacon-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/navigator-beacon-test.js"],
+)
+
+wd_test(
+    src = "tests/reporterror-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/reporterror-test.js"],
+)
+
+wd_test(
+    src = "tests/response-json.wd-test",
+    args = ["--experimental"],
+    data = ["tests/response-json.js"],
+)
+
+wd_test(
+    src = "tests/scheduler-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/scheduler-test.js"],
+)
+
+wd_test(
+    src = "tests/streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/streams-test.js"],
+)
+
+wd_test(
+    src = "tests/unsafe-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/unsafe-test.js"],
+)
+
+wd_test(
+    src = "tests/url-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/url-test.js"],
+)
+
+wd_test(
+    src = "tests/websocket-hibernation.wd-test",
+    args = ["--experimental"],
+    data = ["tests/websocket-hibernation.js"],
+)
 
 wd_test(
     src = "tests/js-rpc-socket-test.wd-test",
@@ -228,26 +470,66 @@ wd_test(
     data = ["tests/js-rpc-test.js"],
 )
 
-[wd_test(
-    src = f,
+wd_test(
+    src = "http-test-ts.ts-wd-test",
     args = ["--experimental"],
-    data = [f.removesuffix(".ts-wd-test") + ".ts"],
-) for f in glob(
-    ["**/*.ts-wd-test"],
-)]
+    data = ["http-test-ts.ts"],
+)
 
 # Enable GPU tests if experimental GPU support is enabled. Unfortunately, this depends on the right
 # drivers being available on Linux and macOS, so turn it off by default. Run GPU tests with
 # `bazel test //src/workerd/api:gpu/<test name>`.
-[wd_test(
-    src = f,
+wd_test(
+    src = "gpu/webgpu-buffer-test.gpu-wd-test",
     args = ["--experimental"],
-    data = [f.removesuffix(".gpu-wd-test") + ".js"],
+    data = ["gpu/webgpu-buffer-test.js"],
     tags = ["off-by-default"],
     target_compatible_with = select({
         "//src/workerd/io:set_enable_experimental_webgpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-) for f in glob(
-    ["**/*.gpu-wd-test"],
-)]
+)
+
+wd_test(
+    src = "gpu/webgpu-compute-test.gpu-wd-test",
+    args = ["--experimental"],
+    data = ["gpu/webgpu-compute-test.js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+wd_test(
+    src = "gpu/webgpu-errors-test.gpu-wd-test",
+    args = ["--experimental"],
+    data = ["gpu/webgpu-errors-test.js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+wd_test(
+    src = "gpu/webgpu-windowless-test.gpu-wd-test",
+    args = ["--experimental"],
+    data = ["gpu/webgpu-windowless-test.js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+wd_test(
+    src = "gpu/webgpu-write-test.gpu-wd-test",
+    args = ["--experimental"],
+    data = ["gpu/webgpu-write-test.js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
