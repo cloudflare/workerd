@@ -359,7 +359,6 @@ void CompressionStream<CompressionContext>::writeStream(jsg::Lock& js,
   JSG_REQUIRE(!writing, Error, "Writing is in progress"_kj);
   JSG_REQUIRE(!pending_close, Error, "Pending close"_kj);
 
-  // Ref();
   context.setBuffers(input, inputLength, output, outputLength);
   context.setFlush(flush);
 
@@ -369,7 +368,6 @@ void CompressionStream<CompressionContext>::writeStream(jsg::Lock& js,
     context.getAfterWriteOffsets(writeResult);
     writing = false;
   }
-  // Unref();
 }
 
 template <typename CompressionContext>
@@ -429,10 +427,10 @@ void ZlibUtil::ZlibStream::write(jsg::Lock& js,
   }
 
   // Check bounds
-  JSG_REQUIRE(inputOffset > 0 && inputOffset < input.size(), Error,
+  JSG_REQUIRE(inputOffset >= 0 && inputOffset < input.size(), Error,
       "Offset should be smaller than size and bigger than 0"_kj);
   JSG_REQUIRE(input.size() >= inputLength, Error, "Invalid inputLength"_kj);
-  JSG_REQUIRE(outputOffset > 0 && outputOffset < output.size(), Error,
+  JSG_REQUIRE(outputOffset >= 0 && outputOffset < output.size(), Error,
       "Offset should be smaller than size and bigger than 0"_kj);
   JSG_REQUIRE(output.size() >= outputLength, Error, "Invalid outputLength"_kj);
 

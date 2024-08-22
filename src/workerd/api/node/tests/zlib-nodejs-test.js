@@ -612,6 +612,49 @@ export const testFailedInit = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-destroy.js
+export const zlibDestroyTest = {
+  async test() {
+    const promises = [];
+    // Verify that the zlib transform does clean up
+    // the handle when calling destroy.
+    {
+      const ts = zlib.createGzip();
+      ts.destroy();
+      assert.strictEqual(ts._handle, null);
+
+      const { promise, resolve, reject } = Promise.withResolvers();
+      promises.push(promise);
+      ts.on('error', reject);
+      ts.on('close', () => {
+        ts.close(() => {
+          resolve();
+        });
+      });
+    }
+
+    {
+      // Ensure 'error' is only emitted once.
+      const decompress = zlib.createGunzip(15);
+      const { promise, resolve, reject } = Promise.withResolvers();
+      promises.push(promise);
+      let errorCount = 0;
+      decompress.on('error', (err) => {
+        errorCount++;
+        decompress.close();
+        assert.strictEqual(errorCount, 1, 'Error should only be emitted once');
+        resolve();
+      });
+
+      decompress.write('something invalid');
+      decompress.destroy(new Error('asd'));
+    }
+
+    await Promise.all(promises);
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -640,7 +683,7 @@ export const testFailedInit = {
 // - [ ] test-zlib-no-stream.js
 // - [ ] test-zlib-write-after-close.js
 // - [ ] test-zlib-brotli-kmaxlength-rangeerror.js
-// - [ ] test-zlib-destroy.js
+// - [x] test-zlib-destroy.js
 // - [ ] test-zlib-from-concatenated-gzip.js
 // - [ ] test-zlib-not-string-or-buffer.js
 // - [ ] test-zlib-write-after-end.js
