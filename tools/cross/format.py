@@ -118,7 +118,9 @@ def buildifier(files: list[Path], check: bool = False) -> bool:
 
 
 def ruff(files: list[Path], check: bool = False) -> bool:
-    if files and not shutil.which(RUFF):
+    if not files:
+        return True
+    if not shutil.which(RUFF):
         msg = "Cannot find ruff, will not format Python"
         if check:
             # In ci, fail.
@@ -129,11 +131,17 @@ def ruff(files: list[Path], check: bool = False) -> bool:
             # formatting they can install ruff and run again.
             logging.warning(msg)
             return True
+    # lint
+    cmd = [RUFF, "check"]
+    if not check:
+        cmd.append("--fix")
+    result1 = subprocess.run(cmd + files)
+    # format
     cmd = [RUFF, "format"]
     if check:
         cmd.append("--diff")
-    result = subprocess.run(cmd + files)
-    return result.returncode == 0
+    result2 = subprocess.run(cmd + files)
+    return result1.returncode == 0 and result2.returncode == 0
 
 
 def git_get_modified_files(

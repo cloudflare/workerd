@@ -1,0 +1,25 @@
+target-version = "py312"
+
+[lint]
+select = [
+  "B0",     # bugbear (all B0* checks enabled by default)
+  "B904",   # bugbear (Within an except clause, raise exceptions with raise ... from err)
+  "B905",   # bugbear (zip() without an explicit strict= parameter set.)
+  "E",      # pycodestyles
+  "W",      # pycodestyles
+  "F",      # pyflakes
+  "I",      # isort
+  "PGH",    # pygrep-hooks
+  "PLC",    # pylint conventions
+  "PLE",    # pylint errors
+  "UP",     # pyupgrade
+]
+ignore = [
+  "E402",  # module import not at top of file
+  "UP038",  # Use X | Y in isinstance check instead of (X, Y)
+]
+
+[lint.per-file-ignores]
+# Want to preserve compatibility for old Python versions in tools directory so
+# disable pyupgrade. Oldest supported version is currently 3.9.
+"tools/*" = ["UP"]
