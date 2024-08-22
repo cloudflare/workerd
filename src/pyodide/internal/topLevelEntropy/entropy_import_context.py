@@ -26,7 +26,8 @@ MODULES_TO_PATCH = [
     "numpy.random.mtrand",
     "tempfile",
     "aiohttp.http_websocket",
-] + RUST_PACKAGES
+    *RUST_PACKAGES,
+]
 
 # Control number of allowed entropy calls.
 
@@ -76,7 +77,7 @@ def get_entropy_import_context(name):
         # Initial import needs one entropy call to initialize
         # std::collections::HashMap hash seed
         return rust_package_context
-    raise Exception(f"Missing context for {name}")
+    raise RuntimeError(f"Missing context for {name}")
 
 
 @contextmanager

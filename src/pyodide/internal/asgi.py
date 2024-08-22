@@ -7,6 +7,15 @@ from fastapi import Depends, Request
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 
 
+background_tasks = set()
+
+
+def run_in_background(coro):
+    fut = ensure_future(coro)
+    background_tasks.add(fut)
+    fut.add_done_callback(background_tasks.discard)
+
+
 @Depends
 async def env(request: Request):
     return request.scope["env"]
@@ -78,7 +87,7 @@ async def start_application(app):
             print("Application shutdown complete")
         raise RuntimeError(f"Unexpected lifespan event {got['type']}")
 
-    ensure_future(
+    run_in_background(
         app(
             {
                 "asgi": ASGI,
@@ -184,7 +193,7 @@ async def process_websocket(app, req):
         return received
 
     env = {}
-    ensure_future(app(request_to_scope(req, env, ws=True), ws_receive, ws_send))
+    run_in_background(app(request_to_scope(req, env, ws=True), ws_receive, ws_send))
 
     return Response.new(None, status=101, webSocket=client)
 

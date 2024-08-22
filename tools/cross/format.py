@@ -8,6 +8,7 @@ import subprocess
 from argparse import ArgumentParser, Namespace
 from dataclasses import dataclass
 from pathlib import Path
+from sys import exit
 from typing import Callable, Optional
 
 CLANG_FORMAT = os.environ.get("CLANG_FORMAT", "clang-format")
@@ -80,7 +81,7 @@ def check_clang_format() -> None:
             exit(1)
     except FileNotFoundError:
         # Clang-format is not in the PATH
-        logging.error("clang-format not found in the PATH")
+        logging.exception("clang-format not found in the PATH")
         exit(1)
 
 
