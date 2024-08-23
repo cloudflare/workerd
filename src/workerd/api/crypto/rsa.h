@@ -2,7 +2,7 @@
 
 #include "crypto.h"
 #include "keys.h"
-#include <openssl/rsa.h>
+#include <openssl/base.h>
 #include <openssl/evp.h>
 #include <kj/common.h>
 

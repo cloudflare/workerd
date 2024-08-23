@@ -8,7 +8,6 @@
 #include <workerd/api/crypto/digest.h>
 #include <workerd/api/crypto/dh.h>
 #include <workerd/api/crypto/x509.h>
-#include <openssl/evp.h>
 
 namespace workerd::api::node {
 

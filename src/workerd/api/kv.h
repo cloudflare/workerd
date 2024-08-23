@@ -4,10 +4,14 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
-#include "streams.h"
+#include <workerd/api/streams/readable.h>
 #include <workerd/io/limit-enforcer.h>
+#include <workerd/jsg/jsg.h>
 
+namespace kj {
+class HttpClient;
+class HttpHeaders;
+}  // namespace kj
 namespace workerd {
 class IoContext;
 }

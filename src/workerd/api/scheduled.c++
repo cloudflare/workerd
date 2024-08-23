@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "scheduled.h"
+#include <workerd/io/io-context.h>
 
 namespace workerd::api {
 

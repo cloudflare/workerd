@@ -6,9 +6,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <openssl/aes.h>
+#include <openssl/base.h>
 #include <openssl/bn.h>
-#include <openssl/crypto.h>
-#include <openssl/err.h>
+#include <openssl/cipher.h>
+#include <openssl/mem.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {

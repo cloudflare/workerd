@@ -8,16 +8,21 @@
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/encoding.h>
+#include <workerd/api/events.h>
+#include <workerd/api/eventsource.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/scheduled.h>
+#include <workerd/api/streams.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/sql.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/jsg/rtti.h>
+#include <workerd/io/compatibility-date.h>
 
 // Test building rtti for various APIs.
 

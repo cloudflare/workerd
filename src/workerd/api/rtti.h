@@ -6,7 +6,7 @@
 
 #include <kj/array.h>
 #include <kj/string.h>
-#include <workerd/io/compatibility-date.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>

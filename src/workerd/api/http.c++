@@ -14,6 +14,7 @@
 #include <kj/memory.h>
 #include <kj/parse/char.h>
 #include <workerd/io/features.h>
+#include <workerd/util/abortable.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>

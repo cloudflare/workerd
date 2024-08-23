@@ -7,7 +7,8 @@
 #include <workerd/jsg/jsg.h>
 #include <kj/compat/http.h>
 #include "basics.h"
-#include <workerd/io/io-context.h>
+#include <workerd/io/io-gate.h>
+#include <workerd/io/observer.h>
 #include <workerd/util/weak-refs.h>
 #include <cstdlib>
 

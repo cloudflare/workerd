@@ -7,8 +7,6 @@
 #include <kj/common.h>
 #include <kj/string.h>
 
-#include <workerd/io/actor-storage.capnp.h>
-
 namespace workerd {
 // This class wraps common values and functions for interacting durable object (actor) storage.
 class ActorStorageLimits {

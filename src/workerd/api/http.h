@@ -6,24 +6,20 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/async-context.h>
-#include <workerd/util/abortable.h>
 #include <kj/compat/http.h>
 #include <map>
 #include "basics.h"
 #include "cf-property.h"
-#include "streams.h"
+#include <workerd/api/streams/readable.h>
 #include "form-data.h"
 #include "web-socket.h"
 #include "url.h"
-#include "url-standard.h"
 #include "blob.h"
 #include <workerd/io/compatibility-date.capnp.h>
 #include "worker-rpc.h"
 #include "queue.h"
 
 namespace workerd::api {
-
-struct QueueResponse;
 
 class Headers final: public jsg::Object {
 private:

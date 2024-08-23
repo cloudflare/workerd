@@ -8,7 +8,8 @@
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
-#include "streams.h"
+#include <workerd/api/streams/readable.h>
+#include <workerd/api/streams/writable.h>
 
 namespace workerd::api {
 
@@ -240,9 +241,7 @@ public:
   SocketsModule(jsg::Lock&, const jsg::Url&) {}
 
   jsg::Ref<Socket> connect(
-      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options) {
-    return connectImpl(js, kj::none, kj::mv(address), kj::mv(options));
-  }
+      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options);
 
   JSG_RESOURCE_TYPE(SocketsModule) {
     JSG_METHOD(connect);

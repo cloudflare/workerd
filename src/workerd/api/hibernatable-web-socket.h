@@ -7,6 +7,7 @@
 #include <kj/debug.h>
 #include <kj/time.h>
 
+#include <workerd/io/worker.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/api/basics.h>

@@ -10,8 +10,8 @@
 #include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/buffersource.h>
-#include <openssl/err.h>
-#include "../streams.h"
+#include <workerd/api/streams/writable.h>
+#include <openssl/base.h>  // for EVP_MD_CTX, X509
 
 namespace workerd::api {
 namespace node {

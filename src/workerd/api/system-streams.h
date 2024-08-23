@@ -6,7 +6,7 @@
 // Implementations of ReadableStreamSource / WritableStreamSink which wrap system streams (sockets),
 // handle encoding/decoding, and optimize pumping between them when possible.
 
-#include "streams.h"
+#include <workerd/api/streams/common.h>  // for StreamEncoding, ...
 #include "http.h"
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>

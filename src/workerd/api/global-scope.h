@@ -6,9 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include "basics.h"
-#include "events.h"
 #include "http.h"
-#include "eventsource.h"
 #include "hibernation-event-params.h"
 #include <workerd/io/io-timers.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
@@ -26,12 +24,17 @@ class Cache;
 class CacheStorage;
 class Crypto;
 class CryptoKey;
+class ErrorEvent;
+class EventSource;
+class FixedLengthStream;
 class SubtleCrypto;
 class TextDecoder;
 class TextEncoder;
 class HTMLRewriter;
+class IdentityTransformStream;
 class Response;
 class TraceItem;
+class TransformStream;
 class ScheduledController;
 class ScheduledEvent;
 class ReadableStream;
