@@ -59,7 +59,7 @@ type VectorizeDistanceMetric = "euclidean" | "cosine" | "dot-product";
  */
 type VectorizeMetadataRetrievalLevel = "all" | "indexed" | "none";
 
-interface VectorizeQueryOptions{
+interface VectorizeQueryOptions {
   topK?: number;
   namespace?: string;
   returnValues?: boolean;
