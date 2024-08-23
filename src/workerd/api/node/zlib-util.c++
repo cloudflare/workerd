@@ -305,7 +305,7 @@ void ZlibContext::close() {
       status = inflateEnd(&stream);
       break;
     default:
-      KJ_UNREACHABLE;
+      break;
   }
 
   JSG_REQUIRE(
