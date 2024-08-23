@@ -81,7 +81,7 @@ jobs:
           sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 16
-          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev libclang-rt-16-dev
+          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev libclang-rt-16-dev llvm-16
           echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
           echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
           echo "build:linux --copt='-Werror'" >> .bazelrc
