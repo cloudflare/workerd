@@ -36,6 +36,7 @@ void ZlibContext::initialize(int _level,
   memLevel = _memLevel;
   strategy = _strategy;
   flush = Z_NO_FLUSH;
+  err = Z_OK;
 
   switch (mode) {
     case ZlibMode::GZIP:
@@ -87,6 +88,8 @@ kj::Maybe<CompressionError> ZlibContext::setDictionary() {
   if (dictionary.empty()) {
     return kj::none;
   }
+
+  err = Z_OK;
 
   switch (mode) {
     case ZlibMode::DEFLATE:
@@ -144,6 +147,7 @@ kj::Maybe<CompressionError> ZlibContext::resetStream() {
   if (initialized_now && err != Z_OK) {
     return constructError("Failed to init stream before reset");
   }
+  err = Z_OK;
   switch (mode) {
     case ZlibMode::DEFLATE:
     case ZlibMode::DEFLATERAW:
@@ -171,9 +175,8 @@ void ZlibContext::work() {
   if (initialized_now && err != Z_OK) {
     return;
   }
-  const Bytef* next_expected_header_byte = nullptr;
 
-  err = Z_OK;
+  const Bytef* next_expected_header_byte = nullptr;
 
   // If the avail_out is left at 0, then it means that it ran out
   // of room.  If there was avail_out left over, then it means
@@ -189,12 +192,12 @@ void ZlibContext::work() {
         next_expected_header_byte = stream.next_in;
       }
 
-      if (next_expected_header_byte == nullptr) {
-        break;
-      }
-
       switch (gzip_id_bytes_read) {
         case 0:
+          if (next_expected_header_byte == nullptr) {
+            break;
+          }
+
           if (*next_expected_header_byte == GZIP_HEADER_ID1) {
             gzip_id_bytes_read = 1;
             next_expected_header_byte++;
@@ -210,6 +213,10 @@ void ZlibContext::work() {
 
           [[fallthrough]];
         case 1:
+          if (next_expected_header_byte == nullptr) {
+            break;
+          }
+
           if (*next_expected_header_byte == GZIP_HEADER_ID2) {
             gzip_id_bytes_read = 2;
             mode = ZlibMode::GUNZIP;
@@ -233,6 +240,7 @@ void ZlibContext::work() {
       // If data was encoded with dictionary (INFLATERAW will have it set in
       // SetDictionary, don't repeat that here)
       if (mode != ZlibMode::INFLATERAW && err == Z_NEED_DICT && !dictionary.empty()) {
+        // Load it
         err = inflateSetDictionary(&stream, dictionary.begin(), dictionary.size());
         if (err == Z_OK) {
           // And try to decode again
@@ -246,7 +254,7 @@ void ZlibContext::work() {
       }
 
       while (stream.avail_in > 0 && mode == ZlibMode::GUNZIP && err == Z_STREAM_END &&
-          stream.next_in[0] != '\0') {
+          stream.next_in[0] != 0x00) {
         // Bytes remain in input buffer. Perhaps this is another compressed
         // member in the same archive, or just trailing garbage.
         // Trailing zero bytes are okay, though, since they are frequently
@@ -271,13 +279,13 @@ kj::Maybe<CompressionError> ZlibContext::setParams(int _level, int _strategy) {
   switch (mode) {
     case ZlibMode::DEFLATE:
     case ZlibMode::DEFLATERAW:
-      err = deflateParams(&stream, level, strategy);
+      err = deflateParams(&stream, _level, _strategy);
       break;
     default:
       break;
   }
 
-  if (err != Z_OK) {
+  if (err != Z_OK && err != Z_BUF_ERROR) {
     return constructError("Failed to set parameters");
   }
 
@@ -348,6 +356,7 @@ void CompressionStream<CompressionContext>::emitError(
 }
 
 template <typename CompressionContext>
+template <bool async>
 void CompressionStream<CompressionContext>::writeStream(jsg::Lock& js,
     int flush,
     kj::ArrayPtr<kj::byte> input,
@@ -359,14 +368,36 @@ void CompressionStream<CompressionContext>::writeStream(jsg::Lock& js,
   JSG_REQUIRE(!writing, Error, "Writing is in progress"_kj);
   JSG_REQUIRE(!pending_close, Error, "Pending close"_kj);
 
+  writing = true;
+
   context.setBuffers(input, inputLength, output, outputLength);
   context.setFlush(flush);
 
-  // This implementation always follow the sync version.
+  if constexpr (!async) {
+    context.work();
+    if (checkError(js)) {
+      updateWriteResult();
+      writing = false;
+    }
+    return;
+  }
+
+  // On Node.js, this is called as a result of `ScheduleWork()` call.
+  // Since, we implement the whole thing as sync, we're going to ahead and call the whole thing here.
   context.work();
-  if (checkError(js)) {
-    context.getAfterWriteOffsets(writeResult);
-    writing = false;
+
+  // This is implemented slightly differently in Node.js
+  // Node.js calls AfterThreadPoolWork().
+  // Ref: https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/src/node_zlib.cc#L402
+  writing = false;
+  if (!checkError(js)) return;
+  updateWriteResult();
+  KJ_IF_SOME(cb, writeCallback) {
+    cb(js);
+  }
+
+  if (pending_close) {
+    close();
   }
 }
 
@@ -392,10 +423,18 @@ bool CompressionStream<CompressionContext>::checkError(jsg::Lock& js) {
 
 template <typename CompressionContext>
 void CompressionStream<CompressionContext>::initializeStream(
-    kj::ArrayPtr<kj::byte> _writeResult, jsg::Function<void()> _writeCallback) {
+    jsg::BufferSource _writeResult, jsg::Function<void()> _writeCallback) {
   writeResult = kj::mv(_writeResult);
   writeCallback = kj::mv(_writeCallback);
   initialized = true;
+}
+
+template <typename CompressionContext>
+void CompressionStream<CompressionContext>::updateWriteResult() {
+  KJ_IF_SOME(wr, writeResult) {
+    auto ptr = wr.template asArrayPtr<uint32_t>();
+    context.getAfterWriteResult(&ptr[1], &ptr[0]);
+  }
 }
 
 ZlibUtil::ZlibStream::ZlibStream(ZlibMode mode): CompressionStream() {
@@ -406,19 +445,20 @@ void ZlibUtil::ZlibStream::initialize(int windowBits,
     int level,
     int memLevel,
     int strategy,
-    kj::Array<kj::byte> writeState,
+    jsg::BufferSource writeState,
     jsg::Function<void()> writeCallback,
     jsg::Optional<kj::Array<kj::byte>> dictionary) {
-  initializeStream(writeState.asPtr(), kj::mv(writeCallback));
+  initializeStream(kj::mv(writeState), kj::mv(writeCallback));
   context.initialize(level, windowBits, memLevel, strategy, kj::mv(dictionary));
 }
 
-void ZlibUtil::ZlibStream::write(jsg::Lock& js,
+template <bool async = false>
+void ZlibUtil::ZlibStream::write_(jsg::Lock& js,
     int flush,
-    kj::Array<kj::byte> input,
+    jsg::Optional<kj::Array<kj::byte>> input,
     int inputOffset,
     int inputLength,
-    kj::Array<kj::byte> output,
+    kj::ArrayPtr<kj::byte> output,
     int outputOffset,
     int outputLength) {
   if (flush != Z_NO_FLUSH && flush != Z_PARTIAL_FLUSH && flush != Z_SYNC_FLUSH &&
@@ -426,20 +466,53 @@ void ZlibUtil::ZlibStream::write(jsg::Lock& js,
     JSG_FAIL_REQUIRE(Error, "Invalid flush value");
   }
 
-  // Check bounds
-  JSG_REQUIRE(inputOffset >= 0 && inputOffset < input.size(), Error,
-      "Offset should be smaller than size and bigger than 0"_kj);
-  JSG_REQUIRE(input.size() >= inputLength, Error, "Invalid inputLength"_kj);
-  JSG_REQUIRE(outputOffset >= 0 && outputOffset < output.size(), Error,
-      "Offset should be smaller than size and bigger than 0"_kj);
-  JSG_REQUIRE(output.size() >= outputLength, Error, "Invalid outputLength"_kj);
+  // Use default values if input is not determined
+  if (input == kj::none) {
+    inputLength = 0;
+    inputOffset = 0;
+  }
 
-  writeStream(
-      js, flush, input.slice(inputOffset), inputLength, output.slice(outputOffset), outputLength);
+  JSG_REQUIRE((inputLength > inputOffset) || inputLength == 0, Error,
+      kj::str("Input offset should be smaller or equal to length, but received offset: ",
+          inputOffset, " and length: ", inputLength));
+  JSG_REQUIRE((outputLength > outputOffset) || outputLength == 0, Error,
+      kj::str("Output offset should be smaller or equal to length, but received offset: ",
+          outputOffset, " and length: ", outputLength));
+
+  auto input_ensured = input.map([](auto& val) { return val.asPtr(); }).orDefault({});
+  writeStream<async>(js, flush, input_ensured.slice(inputOffset), inputLength,
+      output.slice(outputOffset), outputLength);
 }
 
-void ZlibUtil::ZlibStream::params(int level, int strategy) {
-  context.setParams(level, strategy);
+void ZlibUtil::ZlibStream::write(jsg::Lock& js,
+    int flush,
+    jsg::Optional<kj::Array<kj::byte>> input,
+    int inputOffset,
+    int inputLength,
+    kj::Array<kj::byte> output,
+    int outputOffset,
+    int outputLength) {
+  write_<true>(js, flush, kj::mv(input), inputOffset, inputLength, output.asPtr(), outputOffset,
+      outputLength);
+}
+
+void ZlibUtil::ZlibStream::writeSync(jsg::Lock& js,
+    int flush,
+    jsg::Optional<kj::Array<kj::byte>> input,
+    int inputOffset,
+    int inputLength,
+    kj::Array<kj::byte> output,
+    int outputOffset,
+    int outputLength) {
+  write_<false>(js, flush, kj::mv(input), inputOffset, inputLength, output.asPtr(), outputOffset,
+      outputLength);
+}
+
+void ZlibUtil::ZlibStream::params(jsg::Lock& js, int _level, int _strategy) {
+  context.setParams(_level, _strategy);
+  KJ_IF_SOME(err, context.getError()) {
+    emitError(js, kj::mv(err));
+  }
 }
 
 void ZlibUtil::ZlibStream::reset(jsg::Lock& js) {

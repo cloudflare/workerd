@@ -83,7 +83,8 @@ function processCallback(this: zlibUtil.ZlibStream): void {
     return;
   }
 
-  const [availOutAfter, availInAfter] = state as unknown as [number, number];
+  const availOutAfter = state[0] as number;
+  const availInAfter = state[1] as number;
 
   const inDelta = handle.availInBefore - availInAfter;
   self.bytesWritten += inDelta;
@@ -119,9 +120,10 @@ function processCallback(this: zlibUtil.ZlibStream): void {
     handle.availInBefore = availInAfter;
 
     if (!streamBufferIsFull) {
+      ok(this.buffer, 'Buffer should not have been null');
       this.write(
         handle.flushFlag,
-        this.buffer as NodeJS.TypedArray, // in
+        this.buffer, // in
         handle.inOff, // in_off
         handle.availInBefore, // in_len
         self._outBuffer, // out
@@ -132,10 +134,11 @@ function processCallback(this: zlibUtil.ZlibStream): void {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       const oldRead = self._read;
       self._read = (n): void => {
+        ok(this.buffer, 'Buffer should not have been null');
         self._read = oldRead;
         this.write(
           handle.flushFlag,
-          this.buffer as NodeJS.TypedArray, // in
+          this.buffer, // in
           handle.inOff, // in_off
           handle.availInBefore, // in_len
           self._outBuffer, // out
@@ -171,7 +174,7 @@ function processCallback(this: zlibUtil.ZlibStream): void {
 // Z_NO_FLUSH (< Z_TREES) < Z_BLOCK < Z_PARTIAL_FLUSH <
 //     Z_SYNC_FLUSH < Z_FULL_FLUSH < Z_FINISH
 const flushiness: number[] = [];
-const kFlushFlagList = [
+const kFlushFlagList: number[] = [
   CONST_Z_NO_FLUSH,
   CONST_Z_BLOCK,
   CONST_Z_PARTIAL_FLUSH,
@@ -239,16 +242,16 @@ function processChunkSync(
   });
 
   while (true) {
-    // TODO(soon): This was `writeSync` before, but it's not anymore.
-    handle?.write(
+    ok(handle, 'Handle should have been defined');
+    handle.writeSync(
       flushFlag,
       chunk, // in
       inOff, // in_off
       availInBefore, // in_len
       buffer, // out
       offset, // out_off
-      availOutBefore
-    ); // out_len
+      availOutBefore // out_len
+    );
     if (error) throw error;
     else if (self[kError]) throw self[kError];
 
@@ -461,8 +464,7 @@ export class ZlibBase extends Transform {
       }
     } else if (this.writableEnded) {
       if (callback) {
-        /* eslint-disable-next-line @typescript-eslint/no-unsafe-call */
-        queueMicrotask(callback);
+        this.once('end', callback);
       }
     } else {
       this.write(kFlushBuffers[kind as number], 'utf8', callback);
@@ -517,16 +519,17 @@ export class ZlibBase extends Transform {
   }
 
   #processChunk(chunk: Buffer, flushFlag: number, cb: () => void): void {
-    if (this._handle == null) {
+    if (!this._handle) {
       /* eslint-disable-next-line @typescript-eslint/no-unsafe-call */
       queueMicrotask(cb);
       return;
     }
 
-    this._handle.buffer = null;
+    this._handle.buffer = chunk;
     this._handle.cb = cb;
     this._handle.availOutBefore = this._chunkSize - this._outOffset;
     this._handle.availInBefore = chunk.byteLength;
+    this._handle.inOff = 0;
     this._handle.flushFlag = flushFlag;
 
     this._handle.write(
@@ -603,7 +606,7 @@ export class Zlib extends ZlibBase {
       );
       dictionary = options.dictionary;
 
-      if (dictionary != null && !isArrayBufferView(dictionary)) {
+      if (dictionary !== undefined && !isArrayBufferView(dictionary)) {
         if (isAnyArrayBuffer(dictionary)) {
           dictionary = Buffer.from(dictionary);
         } else {
@@ -618,13 +621,18 @@ export class Zlib extends ZlibBase {
 
     const writeState = new Uint32Array(2);
     const handle = new zlibUtil.ZlibStream(mode);
+
     handle.initialize(
       windowBits,
       level,
       memLevel,
       strategy,
       writeState,
-      processCallback,
+
+      () => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        queueMicrotask(processCallback.bind(handle));
+      },
       dictionary
     );
     super(options ?? {}, mode, handle);
@@ -635,7 +643,7 @@ export class Zlib extends ZlibBase {
     this._writeState = writeState;
   }
 
-  public params(level: number, strategy: number, callback: () => never): void {
+  public params(level: number, strategy: number, callback: () => void): void {
     checkRangesOrGetDefault(
       level,
       'level',
@@ -656,7 +664,7 @@ export class Zlib extends ZlibBase {
       );
     } else {
       /* eslint-disable-next-line @typescript-eslint/no-unsafe-call */
-      queueMicrotask(callback);
+      queueMicrotask(() => callback());
     }
   }
 

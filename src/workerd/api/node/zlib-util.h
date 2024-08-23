@@ -6,8 +6,9 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/exception.h>
+#include <workerd/jsg/buffersource.h>
+#include <zlib.h>
 
-#include "zlib.h"
 #include <kj/array.h>
 #include <kj/compat/brotli.h>
 #include <kj/vector.h>
@@ -99,15 +100,20 @@ public:
   void setFlush(int value) {
     flush = value;
   };
-  void getAfterWriteOffsets(kj::ArrayPtr<kj::byte> writeResult) const {
-    writeResult[0] = stream.avail_out;
-    writeResult[1] = stream.avail_in;
+  // Function signature is same as Node.js implementation.
+  // Ref: https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/src/node_zlib.cc#L880
+  void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const {
+    *availIn = stream.avail_in;
+    *availOut = stream.avail_out;
   }
   void setMode(ZlibMode value) {
     mode = value;
   };
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> getError() const;
+
+  // Equivalent to Node.js' `DoThreadPoolWork` function.
+  // Ref: https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/src/node_zlib.cc#L760
   void work();
 
   uint getAvailIn() const {
@@ -167,6 +173,7 @@ public:
   void close();
   bool checkError(jsg::Lock& js);
   void emitError(jsg::Lock& js, const CompressionError& error);
+  template <bool async>
   void writeStream(jsg::Lock& js,
       int flush,
       kj::ArrayPtr<kj::byte> input,
@@ -176,7 +183,8 @@ public:
   void setErrorHandler(CompressionStreamErrorHandler handler) {
     errorHandler = kj::mv(handler);
   };
-  void initializeStream(kj::ArrayPtr<kj::byte> _write_result, jsg::Function<void()> writeCallback);
+  void initializeStream(jsg::BufferSource _write_result, jsg::Function<void()> writeCallback);
+  void updateWriteResult();
 
 protected:
   CompressionContext context;
@@ -189,7 +197,7 @@ private:
 
   // Equivalent to `write_js_callback` in Node.js
   jsg::Optional<jsg::Function<void()>> writeCallback;
-  kj::ArrayPtr<kj::byte> writeResult = nullptr;
+  jsg::Optional<jsg::BufferSource> writeResult;
   jsg::Optional<CompressionStreamErrorHandler> errorHandler;
 };
 
@@ -210,24 +218,44 @@ public:
         int level,
         int memLevel,
         int strategy,
-        kj::Array<kj::byte> writeState,
+        jsg::BufferSource writeState,
         jsg::Function<void()> writeCallback,
         jsg::Optional<kj::Array<kj::byte>> dictionary);
+    template <bool async>
+    void write_(jsg::Lock& js,
+        int flush,
+        jsg::Optional<kj::Array<kj::byte>> input,
+        int inputOffset,
+        int inputLength,
+        kj::ArrayPtr<kj::byte> output,
+        int outputOffset,
+        int outputLength);
+
+    // TODO(soon): Find a way to expose functions with templates using JSG_METHOD.
     void write(jsg::Lock& js,
         int flush,
-        kj::Array<kj::byte> input,
+        jsg::Optional<kj::Array<kj::byte>> input,
         int inputOffset,
         int inputLength,
         kj::Array<kj::byte> output,
         int outputOffset,
         int outputLength);
-    void params(int level, int strategy);
+    void writeSync(jsg::Lock& js,
+        int flush,
+        jsg::Optional<kj::Array<kj::byte>> input,
+        int inputOffset,
+        int inputLength,
+        kj::Array<kj::byte> output,
+        int outputOffset,
+        int outputLength);
+    void params(jsg::Lock& js, int level, int strategy);
     void reset(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(ZlibStream) {
       JSG_METHOD(initialize);
       JSG_METHOD(close);
       JSG_METHOD(write);
+      JSG_METHOD(writeSync);
       JSG_METHOD(params);
       JSG_METHOD(setErrorHandler);
       JSG_METHOD(reset);
