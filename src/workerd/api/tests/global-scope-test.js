@@ -6,6 +6,8 @@ import {
   ok,
 } from 'node:assert';
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 export const navigatorUserAgent = {
   async test() {
     strictEqual(navigator.userAgent, 'Cloudflare-Workers');
@@ -685,5 +687,39 @@ export const webSocketPairIterable = {
     const [a, b] = new WebSocketPair();
     ok(a instanceof WebSocket);
     ok(b instanceof WebSocket);
+  },
+};
+
+export const queueMicrotaskError = {
+  async test() {
+    const als = new AsyncLocalStorage();
+    const { promise, resolve } = Promise.withResolvers();
+    const err = new Error('boom');
+    err.resolve = resolve;
+
+    addEventListener(
+      'error',
+      (event) => {
+        // Verify that async context propagates correctly
+        // in the error event.
+        strictEqual(als.getStore(), 123);
+        // We got the correct expected error.
+        strictEqual(event.error, err);
+        event.error.resolve();
+        // Returning true suppresses the default logging.
+        return true;
+      },
+      { once: true }
+    );
+
+    als.run(123, () =>
+      globalThis.queueMicrotask(() => {
+        // Throwing inside a queueMicrotask should trigger the error event.
+        strictEqual(als.getStore(), 123);
+        throw err;
+      })
+    );
+
+    await promise;
   },
 };
