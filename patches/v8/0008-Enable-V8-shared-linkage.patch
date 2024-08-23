@@ -1,14 +1,14 @@
-From 5480b515df0bdf43042a29ff03e0e45f98755ba1 Mon Sep 17 00:00:00 2001
+From fa01326c1efc2c25d635619b163fb4fe65d57289 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index e1779cc185fb6c2614b3a7d5b39305baea9a5efa..3f1a94c7bd2c31a1581ff3aaa215fb5a682c51b3 100644
+index 55eaca3189c6b9464c2a0a795efea9bdc83ab8da..4a831b0d190ea85eebb7796a1bc9bb5eae3a13ea 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1490,7 +1490,6 @@ filegroup(
+@@ -1542,7 +1542,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
@@ -16,7 +16,7 @@ index e1779cc185fb6c2614b3a7d5b39305baea9a5efa..3f1a94c7bd2c31a1581ff3aaa215fb5a
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3784,6 +3783,10 @@ filegroup(
+@@ -3860,6 +3859,10 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -27,7 +27,7 @@ index e1779cc185fb6c2614b3a7d5b39305baea9a5efa..3f1a94c7bd2c31a1581ff3aaa215fb5a
      ],
  )
  
-@@ -4239,6 +4242,8 @@ v8_library(
+@@ -4315,6 +4318,8 @@ v8_library(
      name = "v8",
      srcs = [
          ":v8_inspector_files",
@@ -37,7 +37,7 @@ index e1779cc185fb6c2614b3a7d5b39305baea9a5efa..3f1a94c7bd2c31a1581ff3aaa215fb5a
          ":is_not_v8_enable_turbofan": [
              # With Turbofan disabled, we only include the stubbed-out API.
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index f8dfd9b5eb9c65547db3b17814c84e4fbc312d07..ad8bd53dcc19c50144a6e94ed899983e014e0033 100644
+index bb75ea080ed4a4e441e212b067c27b6d9316f81c..78079ecf921f9eb22dda8ce6c208e9a510e8a224 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -297,7 +297,6 @@ def v8_library(
