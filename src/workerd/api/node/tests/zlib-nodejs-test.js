@@ -612,6 +612,94 @@ export const testFailedInit = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-destroy.js
+export const zlibDestroyTest = {
+  async test() {
+    const promises = [];
+    // Verify that the zlib transform does clean up
+    // the handle when calling destroy.
+    {
+      const ts = zlib.createGzip();
+      ts.destroy();
+      assert.strictEqual(ts._handle, null);
+
+      const { promise, resolve, reject } = Promise.withResolvers();
+      promises.push(promise);
+      ts.on('error', reject);
+      ts.on('close', () => {
+        ts.close(() => {
+          resolve();
+        });
+      });
+    }
+
+    {
+      // Ensure 'error' is only emitted once.
+      const decompress = zlib.createGunzip(15);
+      const { promise, resolve, reject } = Promise.withResolvers();
+      promises.push(promise);
+      let errorCount = 0;
+      decompress.on('error', (err) => {
+        errorCount++;
+        decompress.close();
+        assert.strictEqual(errorCount, 1, 'Error should only be emitted once');
+        resolve();
+      });
+
+      decompress.write('something invalid');
+      decompress.destroy(new Error('asd'));
+    }
+
+    await Promise.all(promises);
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-close-after-error.js
+export const closeAfterError = {
+  async test() {
+    const decompress = zlib.createGunzip(15);
+    const { promise, resolve } = Promise.withResolvers();
+    let errorHasBeenCalled = false;
+
+    decompress.on('error', () => {
+      errorHasBeenCalled = true;
+      strictEqual(decompress._closed, true);
+      decompress.close();
+    });
+
+    strictEqual(decompress._closed, false);
+    decompress.write('something invalid');
+    decompress.on('close', resolve);
+
+    await promise;
+
+    assert(errorHasBeenCalled, 'Error handler should have been called');
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-write-after-close.js
+// TODO(soon): Enable the test once `gzip` implementation lands.
+// export const writeAfterClose = {
+//   async test() {
+//     const { promise, resolve } = Promise.withResolvers();
+//     let closeCalled = false;
+//     zlib.gzip('hello', function (err, out) {
+//       const unzip = zlib.createGunzip();
+//       unzip.close(() => (closeCalled = true));
+//       unzip.write('asd', (err) => {
+//         strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+//         strictEqual(err.name, 'Error');
+//         resolve();
+//       });
+//     });
+//     await promise;
+//     assert(closeCalled, 'Close should have been called');
+//   },
+// };
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -638,9 +726,9 @@ export const testFailedInit = {
 // - [ ] test-zlib-deflate-raw-inherits.js
 // - [ ] test-zlib-flush-write-sync-interleaved.js
 // - [ ] test-zlib-no-stream.js
-// - [ ] test-zlib-write-after-close.js
+// - [x] test-zlib-write-after-close.js
 // - [ ] test-zlib-brotli-kmaxlength-rangeerror.js
-// - [ ] test-zlib-destroy.js
+// - [x] test-zlib-destroy.js
 // - [ ] test-zlib-from-concatenated-gzip.js
 // - [ ] test-zlib-not-string-or-buffer.js
 // - [ ] test-zlib-write-after-end.js
@@ -649,7 +737,7 @@ export const testFailedInit = {
 // - [ ] test-zlib-from-gzip.js
 // - [ ] test-zlib-object-write.js
 // - [ ] test-zlib-write-after-flush.js
-// - [ ] test-zlib-close-after-error.js
+// - [x] test-zlib-close-after-error.js
 // - [ ] test-zlib-dictionary-fail.js
 // - [ ] test-zlib-from-gzip-with-trailing-garbage.js
 // - [ ] test-zlib-params.js

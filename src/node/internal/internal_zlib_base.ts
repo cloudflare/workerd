@@ -74,6 +74,7 @@ function processCallback(this: zlibUtil.ZlibStream): void {
   // eslint-disable-next-line @typescript-eslint/no-this-alias
   const handle = this;
   const self = this[owner_symbol];
+  ok(self, 'Owner symbol should exist');
   const state = self._writeState;
 
   if (self.destroyed) {
@@ -204,6 +205,7 @@ function zlibOnError(
   message: string
 ): void {
   const self = this[owner_symbol];
+  ok(self, 'Owner symbol should exist');
   const error = new NodeError(code, message);
   // @ts-expect-error Err number is expected.
   error.errno = errno;
@@ -301,7 +303,7 @@ function processChunkSync(
 
 function _close(engine: ZlibBase): void {
   engine._handle?.close();
-  engine._handle = undefined;
+  engine._handle = null;
 }
 
 type ZlibDefaultOptions = {
@@ -323,11 +325,11 @@ export class ZlibBase extends Transform {
   public _outBuffer: Buffer;
   public _outOffset: number = 0;
   public _chunkSize: number;
-  public _defaultFlushFlag: number | undefined;
-  public _finishFlushFlag: number | undefined;
-  public _defaultFullFlushFlag: number | undefined;
+  public _defaultFlushFlag: number;
+  public _finishFlushFlag: number;
+  public _defaultFullFlushFlag: number;
   public _info: unknown;
-  public _handle: zlibUtil.ZlibStream | undefined;
+  public _handle: zlibUtil.ZlibStream | null = null;
   public _writeState = new Uint32Array(2);
 
   public [kError]: NodeError | undefined;
@@ -398,7 +400,7 @@ export class ZlibBase extends Transform {
     super({ autoDestroy: true, ...opts } as unknown);
 
     // Error handler by processCallback() and zlibOnError()
-    handle.setErrorHandler(zlibOnError);
+    handle.setErrorHandler(zlibOnError.bind(handle));
     handle[owner_symbol] = this as never;
     this._handle = handle;
     this._outBuffer = Buffer.allocUnsafe(chunkSize);
@@ -449,7 +451,7 @@ export class ZlibBase extends Transform {
   ): void {
     if (typeof kind === 'function' || (kind == null && !callback)) {
       callback = kind as (() => void) | undefined;
-      kind = this._defaultFlushFlag as number;
+      kind = this._defaultFlushFlag;
     }
 
     if (this.writableFinished) {
@@ -496,12 +498,9 @@ export class ZlibBase extends Transform {
 
     // For the last chunk, also apply `_finishFlushFlag`.
     if (this.writableEnded && this.writableLength === chunk.byteLength) {
-      flushFlag = maxFlush(
-        flushFlag as number,
-        this._finishFlushFlag as number
-      );
+      flushFlag = maxFlush(flushFlag, this._finishFlushFlag);
     }
-    this.#processChunk(chunk, flushFlag as number, cb);
+    this.#processChunk(chunk, flushFlag, cb);
   }
 
   // This function is left for backwards compatibility.
