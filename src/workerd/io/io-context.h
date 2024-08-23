@@ -8,9 +8,9 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/io-gate.h>
 #include "io-own.h"
-#include "io-timers.h"
-#include "io-thread-context.h"
-#include "limit-enforcer.h"
+#include "workerd/io/io-timers.h"
+#include "workerd/io/io-thread-context.h"
+#include "workerd/io/limit-enforcer.h"
 #include <workerd/io/trace.h>
 #include "worker.h"
 #include <workerd/api/deferred-proxy.h>
@@ -308,8 +308,6 @@ public:
   // Log an uncaught exception from an asynchronous context, i.e. when the IoContext is not
   // "current".
   void logUncaughtExceptionAsync(UncaughtExceptionSource source, kj::Exception&& e);
-
-  void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
   // Returns a promise that will reject with an exception if and when the request should be
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for

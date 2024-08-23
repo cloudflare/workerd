@@ -376,10 +376,6 @@ void IoContext::logUncaughtExceptionAsync(
   runImpl(runnable, false, Worker::Lock::TakeSynchronously(metrics), kj::none, true);
 }
 
-void IoContext::reportPromiseRejectEvent(v8::PromiseRejectMessage& message) {
-  KJ_REQUIRE_NONNULL(currentLock).reportPromiseRejectEvent(message);
-}
-
 void IoContext::addTask(kj::Promise<void> promise) {
   ++addTaskCounter;
 

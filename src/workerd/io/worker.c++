@@ -1091,7 +1091,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       // doesn't currently provide an easy way to do this.
       if (IoContext::hasCurrent()) {
         try {
-          IoContext::current().reportPromiseRejectEvent(message);
+          IoContext::current().getCurrentLock().reportPromiseRejectEvent(message);
         } catch (jsg::JsExceptionThrown&) {
           // V8 expects us to just return.
           return;
