@@ -685,14 +685,26 @@ jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
 }
 
 void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task) {
-  // TODO(later): It currently does not appear as if v8 attaches the continuation embedder data
-  // to microtasks scheduled using EnqueueMicrotask, so we have to wrap in order to propagate
-  // the context to those. Once V8 is fixed to correctly associate continuation data with
-  // microtasks automatically, we can remove this workaround.
-  KJ_IF_SOME(context, jsg::AsyncContextFrame::current(js)) {
-    task = context.wrap(js, task);
-  }
-  js.v8Isolate->EnqueueMicrotask(task);
+  auto fn = js.wrapReturningFunction(js.v8Context(),
+      JSG_VISITABLE_LAMBDA((this, fn = js.v8Ref(task)), (fn),
+          (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args)->v8::Local<v8::Value> {
+            return js.tryCatch([&]() -> v8::Local<v8::Value> {
+              auto function = fn.getHandle(js);
+              auto context = js.v8Context();
+
+              kj::Vector<v8::Local<v8::Value>> argv(args.Length());
+              for (int n = 0; n < args.Length(); n++) {
+              argv.add(args[n]);
+              }
+
+              return jsg::check(function->Call(context, js.v8Null(), args.Length(), argv.begin()));
+            }, [&](jsg::Value exception) {
+              reportError(js, jsg::JsValue(exception.getHandle(js)));
+              return js.v8Undefined();
+            });
+          }));
+
+  js.v8Isolate->EnqueueMicrotask(fn);
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::structuredClone(
