@@ -124,9 +124,9 @@ http_archive(
 http_archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "7867c118a11bb7ccaea0f999a28684b06040027506b424b706146cc912b80ff6",
+    sha256 = "71a9fd3892e2771106f457b9bee614c06b6e841386b531a87b2db0234bb30f6a",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v5.2.8/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v5.4.15/singleheader.zip",
 )
 
 http_archive(
