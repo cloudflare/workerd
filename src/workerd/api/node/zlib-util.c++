@@ -4,109 +4,13 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 #include "zlib-util.h"
-#include "workerd/jsg/exception.h"
 
 namespace workerd::api::node {
-kj::ArrayPtr<kj::byte> ZlibUtil::getInputFromSource(InputSource& data) {
-  KJ_SWITCH_ONEOF(data) {
-    KJ_CASE_ONEOF(dataBuf, kj::Array<kj::byte>) {
-      JSG_REQUIRE(dataBuf.size() < Z_MAX_CHUNK, RangeError, "Memory limit exceeded");
-      return dataBuf.asPtr();
-    }
 
-    KJ_CASE_ONEOF(dataStr, jsg::NonCoercible<kj::String>) {
-      JSG_REQUIRE(dataStr.value.size() < Z_MAX_CHUNK, RangeError, "Memory limit exceeded");
-      return dataStr.value.asBytes();
-    }
-  }
-
-  KJ_UNREACHABLE;
+uint32_t ZlibUtil::crc32Sync(kj::Array<kj::byte> data, uint32_t value) {
+  // Note: Bytef is defined in zlib.h
+  return crc32(value, reinterpret_cast<const Bytef*>(data.begin()), data.size());
 }
-
-uint32_t ZlibUtil::crc32Sync(InputSource data, uint32_t value) {
-  auto dataPtr = getInputFromSource(data);
-  return crc32(value, dataPtr.begin(), dataPtr.size());
-}
-
-namespace {
-class GrowableBuffer final {
-  // A copy of kj::Vector with some additional methods for use as a growable buffer with a maximum
-  // size
-public:
-  inline explicit GrowableBuffer(size_t _chunkSize, size_t _maxCapacity) {
-    auto maxChunkSize = kj::min(_chunkSize, _maxCapacity);
-    builder = kj::heapArrayBuilder<kj::byte>(maxChunkSize);
-    chunkSize = maxChunkSize;
-    maxCapacity = _maxCapacity;
-  }
-
-  inline size_t size() const {
-    return builder.size();
-  }
-  inline bool empty() const {
-    return size() == 0;
-  }
-  inline size_t capacity() const {
-    return builder.capacity();
-  }
-  inline size_t available() const {
-    return capacity() - size();
-  }
-
-  inline kj::byte* begin() KJ_LIFETIMEBOUND {
-    return builder.begin();
-  }
-  inline kj::byte* end() KJ_LIFETIMEBOUND {
-    return builder.end();
-  }
-
-  inline kj::Array<kj::byte> releaseAsArray() {
-    // TODO(perf):  Avoid a copy/move by allowing Array<T> to point to incomplete space?
-    if (!builder.isFull()) {
-      setCapacity(size());
-    }
-    return builder.finish();
-  }
-
-  inline void adjustUnused(size_t unused) {
-    resize(capacity() - unused);
-  }
-
-  inline void resize(size_t size) {
-    if (size > builder.capacity()) grow(size);
-    builder.resize(size);
-  }
-
-  inline void addChunk() {
-    reserve(size() + chunkSize);
-  }
-
-  inline void reserve(size_t size) {
-    if (size > builder.capacity()) {
-      grow(size);
-    }
-  }
-
-private:
-  kj::ArrayBuilder<kj::byte> builder;
-  size_t chunkSize;
-  size_t maxCapacity;
-
-  void grow(size_t minCapacity = 0) {
-    JSG_REQUIRE(minCapacity <= maxCapacity, RangeError, "Memory limit exceeded");
-    setCapacity(kj::min(maxCapacity, kj::max(minCapacity, capacity() == 0 ? 4 : capacity() * 2)));
-  }
-  void setCapacity(size_t newSize) {
-    if (builder.size() > newSize) {
-      builder.truncate(newSize);
-    }
-
-    kj::ArrayBuilder<kj::byte> newBuilder = kj::heapArrayBuilder<kj::byte>(newSize);
-    newBuilder.addAll(kj::mv(builder));
-    builder = kj::mv(newBuilder);
-  }
-};
-}  // namespace
 
 void ZlibContext::initialize(int _level,
     int _windowBits,
@@ -167,11 +71,10 @@ kj::Maybe<CompressionError> ZlibContext::getError() const {
       // normal statuses, not fatal
       break;
     case Z_NEED_DICT:
-      if (dictionary.empty()) {
+      if (dictionary.empty())
         return constructError("Missing dictionary"_kj);
-      } else {
+      else
         return constructError("Bad dictionary"_kj);
-      }
     default:
       // something else.
       return constructError("Zlib error");
@@ -189,6 +92,7 @@ kj::Maybe<CompressionError> ZlibContext::setDictionary() {
     case ZlibMode::DEFLATE:
     case ZlibMode::DEFLATERAW:
       err = deflateSetDictionary(&stream, dictionary.begin(), dictionary.size());
+      ;
       break;
     case ZlibMode::INFLATERAW:
       err = inflateSetDictionary(&stream, dictionary.begin(), dictionary.size());
@@ -420,16 +324,6 @@ void ZlibContext::setBuffers(kj::ArrayPtr<kj::byte> input,
   stream.next_out = output.begin();
 }
 
-void ZlibContext::setInputBuffer(kj::ArrayPtr<kj::byte> input) {
-  stream.next_in = input.begin();
-  stream.avail_in = input.size();
-}
-
-void ZlibContext::setOutputBuffer(kj::ArrayPtr<kj::byte> output) {
-  stream.next_out = output.begin();
-  stream.avail_out = output.size();
-}
-
 jsg::Ref<ZlibUtil::ZlibStream> ZlibUtil::ZlibStream::constructor(ZlibModeValue mode) {
   return jsg::alloc<ZlibStream>(static_cast<ZlibMode>(mode));
 }
@@ -554,59 +448,4 @@ void ZlibUtil::ZlibStream::reset(jsg::Lock& js) {
   }
 }
 
-kj::Array<kj::byte> syncProcessBuffer(ZlibContext& ctx, GrowableBuffer& result) {
-  do {
-    result.addChunk();
-    ctx.setOutputBuffer(kj::ArrayPtr(result.end(), result.available()));
-
-    ctx.work();
-
-    KJ_IF_SOME(error, ctx.getError()) {
-      JSG_FAIL_REQUIRE(Error, error.message);
-    }
-
-    result.adjustUnused(ctx.getAvailOut());
-  } while (ctx.getAvailOut() == 0);
-
-  return result.releaseAsArray();
-}
-
-// It's ZlibContext but it's RAII
-class ZlibContextRAII: public ZlibContext {
-public:
-  using ZlibContext::ZlibContext;
-
-  ~ZlibContextRAII() {
-    close();
-  }
-};
-
-kj::Array<kj::byte> ZlibUtil::zlibSync(InputSource data, Options opts, ZlibModeValue mode) {
-  ZlibContextRAII ctx;
-
-  auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
-  auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
-
-  JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, Error, "Invalid chunkSize");
-  JSG_REQUIRE(maxOutputLength <= Z_MAX_CHUNK, Error, "Invalid maxOutputLength");
-  GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
-
-  ctx.setMode(static_cast<ZlibMode>(mode));
-  ctx.initialize(opts.level.orDefault(Z_DEFAULT_LEVEL),
-      opts.windowBits.orDefault(Z_DEFAULT_WINDOWBITS), opts.memLevel.orDefault(Z_DEFAULT_MEMLEVEL),
-      opts.strategy.orDefault(Z_DEFAULT_STRATEGY), kj::mv(opts.dictionary));
-  ctx.setFlush(opts.finishFlush.orDefault(Z_FINISH));
-  ctx.setInputBuffer(getInputFromSource(data));
-  return syncProcessBuffer(ctx, result);
-}
-
-void ZlibUtil::zlibWithCallback(
-    jsg::Lock& js, InputSource data, Options options, ZlibModeValue mode, CompressCallback cb) {
-  try {
-    cb(js, kj::none, zlibSync(kj::mv(data), kj::mv(options), mode));
-  } catch (kj::Exception& ex) {
-    auto tunneledError = jsg::tunneledErrorType(ex.getDescription());
-    cb(js, tunneledError.message, kj::none);
-  }
-}
 }  // namespace workerd::api::node

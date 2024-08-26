@@ -29,24 +29,6 @@ const createInflate = protectMethod(zlib.createInflate);
 const createInflateRaw = protectMethod(zlib.createInflateRaw);
 const createUnzip = protectMethod(zlib.createUnzip);
 
-const inflate = protectMethod(zlib.inflate);
-const inflateSync = protectMethod(zlib.inflateSync);
-const deflate = protectMethod(zlib.deflate);
-const deflateSync = protectMethod(zlib.deflateSync);
-
-const inflateRaw = protectMethod(zlib.inflateRaw);
-const inflateRawSync = protectMethod(zlib.inflateRawSync);
-const deflateRaw = protectMethod(zlib.deflateRaw);
-const deflateRawSync = protectMethod(zlib.deflateRawSync);
-
-const gzip = protectMethod(zlib.gzip);
-const gzipSync = protectMethod(zlib.gzipSync);
-const gunzip = protectMethod(zlib.gunzip);
-const gunzipSync = protectMethod(zlib.gunzipSync);
-
-const unzip = protectMethod(zlib.unzip);
-const unzipSync = protectMethod(zlib.unzipSync);
-
 export {
   crc32,
   constants,
@@ -68,22 +50,6 @@ export {
   createInflate,
   createInflateRaw,
   createUnzip,
-
-  // One-shot methods
-  inflate,
-  inflateSync,
-  deflate,
-  deflateSync,
-  inflateRaw,
-  inflateRawSync,
-  deflateRaw,
-  deflateRawSync,
-  gzip,
-  gzipSync,
-  gunzip,
-  gunzipSync,
-  unzip,
-  unzipSync,
 };
 
 export default {
@@ -107,20 +73,4 @@ export default {
   createInflate,
   createInflateRaw,
   createUnzip,
-
-  // One-shot methods
-  inflate,
-  inflateSync,
-  deflate,
-  deflateSync,
-  inflateRaw,
-  inflateRawSync,
-  deflateRaw,
-  deflateRawSync,
-  gzip,
-  gzipSync,
-  gunzip,
-  gunzipSync,
-  unzip,
-  unzipSync,
 };
