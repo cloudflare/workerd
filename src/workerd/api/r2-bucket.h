@@ -7,10 +7,7 @@
 #include "r2-rpc.h"
 
 #include <workerd/jsg/jsg.h>
-#include "streams.h"
-#include <workerd/api/r2-api.capnp.h>
-#include <capnp/compat/json.h>
-#include <workerd/util/http-util.h>
+#include <workerd/api/streams/readable.h>
 
 namespace workerd::api {
 class Headers;

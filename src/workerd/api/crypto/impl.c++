@@ -9,10 +9,11 @@
 #include <openssl/bn.h>
 #include <openssl/err.h>
 #include <openssl/ec.h>
+#include <openssl/evp.h>
 #include <openssl/rsa.h>
 #include <openssl/rand.h>
 #include <openssl/crypto.h>
-#include <workerd/jsg/setup.h>
+#include <workerd/jsg/memory.h>
 
 namespace workerd::api {
 namespace {

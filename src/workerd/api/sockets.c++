@@ -460,4 +460,8 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
       }));
 }
 
+jsg::Ref<Socket> SocketsModule::connect(
+    jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options) {
+  return connectImpl(js, kj::none, kj::mv(address), kj::mv(options));
+}
 }  // namespace workerd::api

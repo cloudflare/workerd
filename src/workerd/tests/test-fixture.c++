@@ -13,6 +13,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/observer.h>
 #include <workerd/jsg/modules.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/server/server.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>

@@ -8,8 +8,10 @@
 // See actor.h for APIs used by other Workers to talk to Actors.
 
 #include <workerd/jsg/jsg.h>
-#include <workerd/io/io-context.h>
-#include <workerd/io/actor-storage.capnp.h>
+#include <workerd/io/actor-id.h>
+#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/io-own.h>
+#include <workerd/io/worker.h>
 #include <kj/async.h>
 #include <workerd/io/actor-cache.h>
 

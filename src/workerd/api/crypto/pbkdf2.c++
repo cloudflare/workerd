@@ -4,7 +4,8 @@
 
 #include "impl.h"
 #include <workerd/api/crypto/kdf.h>
-#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/mem.h>
 
 namespace workerd::api {
 namespace {

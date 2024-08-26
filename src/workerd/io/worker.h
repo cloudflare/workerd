@@ -17,7 +17,6 @@
 #include <kj/mutex.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/actor-id.h>
-#include <workerd/io/actor-storage.capnp.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/util/weak-refs.h>

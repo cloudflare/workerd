@@ -24,6 +24,7 @@
 #include <workerd/api/sockets.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sql.h>
+#include <workerd/api/streams.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/urlpattern.h>
@@ -32,8 +33,10 @@
 #include <workerd/api/hyperdrive.h>
 #include <workerd/api/eventsource.h>
 #include <workerd/api/unsafe.h>
+#include <workerd/api/url-standard.h>
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/io/compatibility-date.h>
 
 #include <cloudflare/cloudflare.capnp.h>
 

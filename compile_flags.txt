@@ -50,6 +50,7 @@
 -isystemexternal/sqlite3
 -isystemexternal/perfetto-sdk/sdk
 -D_FORTIFY_SOURCE=1
+-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 -DCAPNP_VERSION=11000
 -DDEBUG
 -DGOOGLE3

@@ -5,8 +5,8 @@
 #include "crypto.h"
 #include "impl.h"
 #include <workerd/api/streams/standard.h>
-#include <openssl/crypto.h>
-#include <openssl/err.h>
+#include <openssl/digest.h>
+#include <openssl/mem.h>
 #include <workerd/api/util.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-context.h>

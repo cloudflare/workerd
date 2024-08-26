@@ -8,10 +8,9 @@
 #include <workerd/util/sqlite.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>
+#include <workerd/api/actor-state.h>
 
 namespace workerd::api {
-
-class DurableObjectStorage;
 
 class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 public:

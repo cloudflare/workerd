@@ -4,9 +4,12 @@
 
 #pragma once
 
-#include <workerd/api/basics.h>
 #include <workerd/api/blob.h>
 #include <workerd/jsg/jsg.h>
+
+namespace kj {
+class HttpClient;
+}
 
 namespace workerd::api {
 

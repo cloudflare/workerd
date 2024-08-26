@@ -83,6 +83,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "tests/crypto_scrypt-test.wd-test",
     args = ["--experimental"],
     data = ["tests/crypto_scrypt-test.js"],
