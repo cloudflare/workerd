@@ -458,8 +458,11 @@ JsSymbol Lock::symbolInternal(kj::StringPtr str) {
 }
 
 JsArray Lock::arr(kj::ArrayPtr<JsValue> values) {
-  auto items = KJ_MAP(i, values) { return v8::Local<v8::Value>(i); };
-  return JsArray(v8::Array::New(v8Isolate, items.begin(), items.size()));
+  v8::LocalVector<v8::Value> items(v8Isolate, values.size());
+  for (size_t n = 0; n < values.size(); n++) {
+    items[n] = values[n];
+  }
+  return JsArray(v8::Array::New(v8Isolate, items.data(), items.size()));
 }
 
 #define V(Name)                                                                                    \

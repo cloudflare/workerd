@@ -501,17 +501,18 @@ JsRpcPromiseAndPipleine callImpl(jsg::Lock& js,
       kj::Maybe<StreamSinkFulfiller> paramsStreamSinkFulfiller;
 
       KJ_IF_SOME(args, maybeArgs) {
-        // This is a function call with arguments.
-        kj::Vector<jsg::JsValue> argv(args.Length());
-        for (int n = 0; n < args.Length(); n++) {
-          argv.add(jsg::JsValue(args[n]));
-        }
-
         // If we have arguments, serialize them.
         // Note that we may fail to serialize some element, in which case this will throw back to
         // JS.
-        if (argv.size() > 0) {
-          serializeJsValue(js, js.arr(argv.asPtr()), [&](capnp::MessageSize hint) {
+        if (args.Length() > 0) {
+          // This is a function call with arguments.
+          v8::LocalVector<v8::Value> argv(js.v8Isolate, args.Length());
+          for (int n = 0; n < args.Length(); n++) {
+            argv[n] = args[n];
+          }
+          auto arr = v8::Array::New(js.v8Isolate, argv.data(), argv.size());
+
+          serializeJsValue(js, jsg::JsValue(arr), [&](capnp::MessageSize hint) {
             // TODO(perf): Actually use the size hint.
             return builder.getOperation().initCallWithArgs();
           }, [&]() -> rpc::JsValue::StreamSink::Client {
@@ -1275,14 +1276,15 @@ private:
       auto args = KJ_REQUIRE_NONNULL(
           value.tryCast<jsg::JsArray>(), "expected JsArray when deserializing arguments.");
       // Call() expects a `Local<Value> []`... so we populate an array.
-      KJ_STACK_ARRAY(v8::Local<v8::Value>, arguments, args.size(), 8, 8);
+
+      v8::LocalVector<v8::Value> arguments(js.v8Isolate, args.size());
       for (size_t i = 0; i < args.size(); ++i) {
         arguments[i] = args.get(js, i);
       }
 
       InvocationResult result{
         .returnValue =
-            jsg::check(fn->Call(js.v8Context(), thisArg, args.size(), arguments.begin())),
+            jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.data())),
         .streamSink = kj::mv(streamSink),
       };
       if (!disposalGroup->empty()) {
@@ -1361,7 +1363,7 @@ private:
         "arguments, the server must use class-based syntax (extending WorkerEntrypoint) "
         "instead.");
 
-    KJ_STACK_ARRAY(v8::Local<v8::Value>, arguments, kj::max(argCountFromClient + 2, arity), 8, 8);
+    v8::LocalVector<v8::Value> arguments(js.v8Isolate, kj::max(argCountFromClient + 2, arity));
 
     for (auto i: kj::zeroTo(arity - 2)) {
       if (argCountFromClient > i) {
@@ -1382,7 +1384,7 @@ private:
 
     return {
       .returnValue =
-          jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.begin())),
+          jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.data())),
       .paramDisposalGroup = kj::mv(paramDisposalGroup),
       .streamSink = kj::mv(streamSink),
     };

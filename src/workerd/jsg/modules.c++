@@ -486,9 +486,10 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
 
 v8::Local<v8::Module> createSyntheticModule(
     jsg::Lock& js, kj::StringPtr name, kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports) {
-  std::vector<v8::Local<v8::String>> exportNames;
+  v8::LocalVector<v8::String> exportNames(js.v8Isolate);
   exportNames.push_back(v8StrIntern(js.v8Isolate, "default"_kj));
   KJ_IF_SOME(exports, maybeExports) {
+    exportNames.reserve(exports.size());
     for (auto& name: exports) {
       exportNames.push_back(v8StrIntern(js.v8Isolate, name));
     }

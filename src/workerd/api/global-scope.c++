@@ -690,14 +690,14 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, v8::Local<v8::Funct
           (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args)->v8::Local<v8::Value> {
             return js.tryCatch([&]() -> v8::Local<v8::Value> {
               auto function = fn.getHandle(js);
-              auto context = js.v8Context();
 
-              kj::Vector<v8::Local<v8::Value>> argv(args.Length());
+              v8::LocalVector<v8::Value> argv(js.v8Isolate, args.Length());
               for (int n = 0; n < args.Length(); n++) {
-              argv.add(args[n]);
+              argv[n] = args[n];
               }
 
-              return jsg::check(function->Call(context, js.v8Null(), args.Length(), argv.begin()));
+              return jsg::check(
+                  function->Call(js.v8Context(), js.v8Null(), argv.size(), argv.data()));
             }, [&](jsg::Value exception) {
               reportError(js, jsg::JsValue(exception.getHandle(js)));
               return js.v8Undefined();

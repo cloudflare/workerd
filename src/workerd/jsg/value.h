@@ -792,14 +792,13 @@ public:
     v8::Isolate* isolate = context->GetIsolate();
     v8::EscapableHandleScope handleScope(isolate);
 
-    auto len = array.size();
-    KJ_STACK_ARRAY(v8::Local<v8::Value>, items, len, MAX_STACK, MAX_STACK);
-    for (auto n = 0; n < len; n++) {
+    v8::LocalVector<v8::Value> items(isolate, array.size());
+    for (auto n = 0; n < items.size(); n++) {
       items[n] = static_cast<TypeWrapper*>(this)
                      ->wrap(context, creator, kj::mv(array[n]))
                      .template As<v8::Value>();
     }
-    auto out = v8::Array::New(isolate, items.begin(), len);
+    auto out = v8::Array::New(isolate, items.data(), items.size());
 
     return handleScope.Escape(out);
   }
@@ -810,14 +809,13 @@ public:
     v8::Isolate* isolate = context->GetIsolate();
     v8::EscapableHandleScope handleScope(isolate);
 
-    auto len = array.size();
-    KJ_STACK_ARRAY(v8::Local<v8::Value>, items, len, MAX_STACK, MAX_STACK);
-    for (auto n = 0; n < len; n++) {
+    v8::LocalVector<v8::Value> items(isolate, array.size());
+    for (auto n = 0; n < items.size(); n++) {
       items[n] = static_cast<TypeWrapper*>(this)
                      ->wrap(context, creator, kj::mv(array[n]))
                      .template As<v8::Value>();
     }
-    auto out = v8::Array::New(isolate, items.begin(), len);
+    auto out = v8::Array::New(isolate, items.data(), items.size());
 
     return handleScope.Escape(out);
   }

@@ -763,9 +763,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
         KJ_ASSERT(fn->IsFunction(), "Entrypoint is not a function", wrapped.entrypoint);
 
         // invoke the function, its result will be binding value
-        auto args = kj::arr(env.As<v8::Value>());
-        value = jsg::check(
-            v8::Function::Cast(*fn)->Call(context, context->Global(), args.size(), args.begin()));
+        v8::Local<v8::Value> arg = env.As<v8::Value>();
+        value = jsg::check(v8::Function::Cast(*fn)->Call(context, context->Global(), 1, &arg));
       } else {
         KJ_LOG(
             ERROR, "wrapped binding module can't be resolved (internal modules only)", moduleName);

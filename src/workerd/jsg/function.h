@@ -418,10 +418,12 @@ public:
 
       return js.withinHandleScope([&] {
         auto context = js.v8Context();
-        v8::Local<v8::Value> argv[sizeof...(Args)]{
-          typeWrapper.wrap(context, kj::none, kj::fwd<Args>(args))...};
+        v8::LocalVector<v8::Value> argv(js.v8Isolate,
+            std::initializer_list<v8::Local<v8::Value>>{
+              typeWrapper.wrap(context, kj::none, kj::fwd<Args>(args))
+                  .template As<v8::Value>()...});
 
-        auto result = check(func->Call(context, receiver, sizeof...(Args), argv));
+        auto result = check(func->Call(context, receiver, argv.size(), argv.data()));
         if constexpr (!isVoid<Ret>()) {
           return typeWrapper.template unwrap<Ret>(
               context, result, TypeErrorContext::callbackReturn());
@@ -457,11 +459,11 @@ public:
 
         v8::Local<v8::Value> result;
         if (args.size() > 0) {
-          KJ_STACK_ARRAY(v8::Local<v8::Value>, argv, args.size(), 20, 20);
+          v8::LocalVector<v8::Value> argv(js.v8Isolate, args.size());
           for (size_t n = 0; n < args.size(); n++) {
             argv[n] = args[n].getHandle(js);
           }
-          result = check(func->Call(context, receiver, argv.size(), argv.begin()));
+          result = check(func->Call(context, receiver, argv.size(), argv.data()));
         } else {
           result = check(func->Call(context, receiver, 0, nullptr));
         }

@@ -1631,9 +1631,9 @@ void Worker::handleLog(jsg::Lock& js,
   // Call original V8 implementation so messages sent to connected inspector if any
   auto context = js.v8Context();
   int length = info.Length();
-  KJ_STACK_ARRAY(v8::Local<v8::Value>, args, length + 1, 64, 64);  // + 1 used for `colors` later
+  v8::LocalVector<v8::Value> args(js.v8Isolate, length + 1);
   for (auto i: kj::zeroTo(length)) args[i] = info[i];
-  jsg::check(original.Get(js.v8Isolate)->Call(context, info.This(), length, args.begin()));
+  jsg::check(original.Get(js.v8Isolate)->Call(context, info.This(), length, args.data()));
 
   // The TryCatch is initialised here to catch cases where the v8 isolate's execution is
   // terminating, usually as a result of an infinite loop. We need to perform the initialisation
@@ -1750,7 +1750,7 @@ void Worker::handleLog(jsg::Lock& js,
     auto recv = js.v8Undefined();
     args[length] = v8::Boolean::New(js.v8Isolate, colors);
     auto formatted =
-        js.toString(jsg::check(formatLog->Call(context, recv, length + 1, args.begin())));
+        js.toString(jsg::check(formatLog->Call(context, recv, length + 1, args.data())));
     fprintf(fd, "%s\n", formatted.cStr());
     fflush(fd);
   }

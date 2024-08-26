@@ -192,14 +192,14 @@ public:
   }
 
   v8::MaybeLocal<v8::Module> getDescriptor(Lock& js, const CompilationObserver&) const override {
-    KJ_STACK_ARRAY(v8::Local<v8::String>, exports, namedExports.size() + 1, 10, 10);
+    v8::LocalVector<v8::String> exports(js.v8Isolate, namedExports.size() + 1);
     int n = 0;
     exports[n++] = js.str(DEFAULT);
     for (const auto& exp: namedExports) {
       exports[n++] = js.str(exp);
     }
     return v8::Module::CreateSyntheticModule(js.v8Isolate, js.str(specifier().getHref()),
-        v8::MemorySpan<const v8::Local<v8::String>>(exports.begin(), exports.size()),
+        v8::MemorySpan<const v8::Local<v8::String>>(exports.data(), exports.size()),
         evaluationSteps);
   }
 

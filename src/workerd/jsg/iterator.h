@@ -688,11 +688,11 @@ public:
       jsg::Sequence<U> sequence) {
     v8::Isolate* isolate = context->GetIsolate();
     v8::EscapableHandleScope handleScope(isolate);
-    KJ_STACK_ARRAY(v8::Local<v8::Value>, items, sequence.size(), MAX_STACK, MAX_STACK);
+    v8::LocalVector<v8::Value> items(isolate, sequence.size());
     for (auto i: kj::indices(sequence)) {
       items[i] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(sequence[i]));
     }
-    return handleScope.Escape(v8::Array::New(isolate, items.begin(), items.size()));
+    return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
   }
 
   template <typename U>
@@ -701,11 +701,11 @@ public:
       jsg::Sequence<U>& sequence) {
     v8::Isolate* isolate = context->GetIsolate();
     v8::EscapableHandleScope handleScope(isolate);
-    KJ_STACK_ARRAY(v8::Local<v8::Value>, items, sequence.size(), MAX_STACK, MAX_STACK);
+    v8::LocalVector<v8::Value> items(isolate, sequence.size());
     for (auto i: kj::indices(sequence)) {
       items[i] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(sequence[i]));
     }
-    return handleScope.Escape(v8::Array::New(isolate, items.begin(), items.size()));
+    return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
   }
 
   template <typename U>
