@@ -6045,6 +6045,13 @@ export const transcodeTest = {
       ok(copied_value.buffer.detached);
       ok(!original.buffer.detached);
     }
+
+    // Same encoding types should return in a value that replaces
+    // invalid characters with replacement characters.
+    deepStrictEqual(
+      transcode(Buffer.from([0x80]), 'utf8', 'utf8'),
+      Buffer.from([0xef, 0xbf, 0xbd])
+    );
   },
 };
 

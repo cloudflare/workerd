@@ -215,14 +215,6 @@ void Converter::setSubstituteChars(kj::StringPtr sub) {
 
 kj::Array<kj::byte> transcode(
     kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
-  // Optimization:
-  // If both encodings are same, we just return a copy of the buffer.
-  if (fromEncoding == toEncoding) {
-    auto destbuf = kj::heapArray<kj::byte>(source.size());
-    destbuf.asPtr().copyFrom(source);
-    return destbuf.asBytes().attach(kj::mv(destbuf));
-  }
-
   TranscodeImpl transcode_function = &TranscodeDefault;
   switch (fromEncoding) {
     case Encoding::ASCII:
