@@ -164,6 +164,15 @@ export class ZlibStream {
     outputOffset: number,
     outputLength: number
   ): void;
+  public writeSync(
+    flushFlag: number,
+    inputBuffer: NodeJS.TypedArray,
+    inputOffset: number,
+    inputLength: number,
+    outputBuffer: NodeJS.TypedArray,
+    outputOffset: number,
+    outputLength: number
+  ): void;
   public params(level: number, strategy: number): void;
   public reset(): void;
 

@@ -602,12 +602,12 @@ export const testFailedInit = {
 
     {
       const stream = zlib.createGzip({ level: NaN });
-      assert.strictEqual(stream._level, zlib.constants.Z_DEFAULT_COMPRESSION);
+      strictEqual(stream._level, zlib.constants.Z_DEFAULT_COMPRESSION);
     }
 
     {
       const stream = zlib.createGzip({ strategy: NaN });
-      assert.strictEqual(stream._strategy, zlib.constants.Z_DEFAULT_STRATEGY);
+      strictEqual(stream._strategy, zlib.constants.Z_DEFAULT_STRATEGY);
     }
   },
 };
@@ -622,7 +622,7 @@ export const zlibDestroyTest = {
     {
       const ts = zlib.createGzip();
       ts.destroy();
-      assert.strictEqual(ts._handle, null);
+      strictEqual(ts._handle, null);
 
       const { promise, resolve, reject } = Promise.withResolvers();
       promises.push(promise);
@@ -643,7 +643,7 @@ export const zlibDestroyTest = {
       decompress.on('error', (err) => {
         errorCount++;
         decompress.close();
-        assert.strictEqual(errorCount, 1, 'Error should only be emitted once');
+        strictEqual(errorCount, 1, 'Error should only be emitted once');
         resolve();
       });
 
@@ -700,6 +700,65 @@ export const closeAfterError = {
 //   },
 // };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/test/parallel/test-zlib-bytes-read.js
+export const testZlibBytesRead = {
+  async test() {
+    const expectStr = 'abcdefghijklmnopqrstuvwxyz'.repeat(2);
+    const expectBuf = Buffer.from(expectStr);
+
+    function createWriter(target, buffer) {
+      const writer = { size: 0 };
+      const write = () => {
+        target.write(Buffer.from([buffer[writer.size++]]), () => {
+          if (writer.size < buffer.length) {
+            target.flush(write);
+          } else {
+            target.end();
+          }
+        });
+      };
+      write();
+      return writer;
+    }
+
+    // This test is simplified a lot because of test runner limitations.
+    // TODO(soon): Add createBrotliCompress once it is implemented.
+    for (const method of ['createGzip', 'createDeflate', 'createDeflateRaw']) {
+      assert(method in zlib, `${method} is not available in "node:zlib"`);
+      const { promise, resolve, reject } = Promise.withResolvers();
+      let compData = Buffer.alloc(0);
+      const comp = zlib[method]();
+      const compWriter = createWriter(comp, expectBuf);
+      comp.on('data', function (d) {
+        compData = Buffer.concat([compData, d]);
+        strictEqual(
+          this.bytesWritten,
+          compWriter.size,
+          `Should get write size on ${method} data.`
+        );
+      });
+      comp.on('error', reject);
+      comp.on('end', function () {
+        strictEqual(
+          this.bytesWritten,
+          compWriter.size,
+          `Should get write size on ${method} end.`
+        );
+        strictEqual(
+          this.bytesWritten,
+          expectStr.length,
+          `Should get data size on ${method} end.`
+        );
+
+        resolve();
+      });
+
+      await promise;
+    }
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -732,7 +791,7 @@ export const closeAfterError = {
 // - [ ] test-zlib-from-concatenated-gzip.js
 // - [ ] test-zlib-not-string-or-buffer.js
 // - [ ] test-zlib-write-after-end.js
-// - [ ] test-zlib-bytes-read.js
+// - [x] test-zlib-bytes-read.js
 // - [ ] test-zlib-destroy-pipe.js
 // - [ ] test-zlib-from-gzip.js
 // - [ ] test-zlib-object-write.js

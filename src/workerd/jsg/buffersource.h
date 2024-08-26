@@ -112,26 +112,32 @@ public:
   BackingStore& operator=(BackingStore&& other) = default;
   KJ_DISALLOW_COPY(BackingStore);
 
-  inline kj::ArrayPtr<kj::byte> asArrayPtr() KJ_LIFETIMEBOUND {
+  template <typename T = kj::byte>
+  inline kj::ArrayPtr<T> asArrayPtr() KJ_LIFETIMEBOUND {
     KJ_ASSERT(backingStore != nullptr, "Invalid access after move.");
-    return kj::ArrayPtr<kj::byte>(
-        static_cast<kj::byte*>(backingStore->Data()) + byteOffset, byteLength);
+    KJ_ASSERT(byteLength % sizeof(T) == 0);
+    return kj::ArrayPtr<T>(
+        static_cast<T*>(backingStore->Data()) + byteOffset, byteLength / sizeof(T));
   }
 
-  inline operator kj::ArrayPtr<kj::byte>() KJ_LIFETIMEBOUND {
-    return asArrayPtr();
+  template <typename T = kj::byte>
+  inline operator kj::ArrayPtr<T>() KJ_LIFETIMEBOUND {
+    return asArrayPtr<T>();
   }
 
   bool operator==(const BackingStore& other);
 
-  inline const kj::ArrayPtr<const kj::byte> asArrayPtr() const KJ_LIFETIMEBOUND {
+  template <typename T = kj::byte>
+  inline const kj::ArrayPtr<const T> asArrayPtr() const KJ_LIFETIMEBOUND {
     KJ_ASSERT(backingStore != nullptr, "Invalid access after move.");
-    return kj::ArrayPtr<kj::byte>(
-        static_cast<kj::byte*>(backingStore->Data()) + byteOffset, byteLength);
+    KJ_ASSERT(byteLength % sizeof(T) == 0);
+    return kj::ArrayPtr<T>(
+        static_cast<T*>(backingStore->Data()) + byteOffset, byteLength / sizeof(T));
   }
 
-  inline operator const kj::ArrayPtr<const kj::byte>() const KJ_LIFETIMEBOUND {
-    return asArrayPtr();
+  template <typename T = kj::byte>
+  inline operator const kj::ArrayPtr<const T>() const KJ_LIFETIMEBOUND {
+    return asArrayPtr<T>();
   }
 
   inline size_t size() const {
@@ -303,20 +309,24 @@ public:
 
   v8::Local<v8::Value> getHandle(Lock& js);
 
-  inline kj::ArrayPtr<kj::byte> asArrayPtr() KJ_LIFETIMEBOUND {
-    return KJ_ASSERT_NONNULL(maybeBackingStore).asArrayPtr();
+  template <typename T = kj::byte>
+  inline kj::ArrayPtr<T> asArrayPtr() KJ_LIFETIMEBOUND {
+    return KJ_ASSERT_NONNULL(maybeBackingStore).asArrayPtr<T>();
   }
 
-  inline operator kj::ArrayPtr<kj::byte>() KJ_LIFETIMEBOUND {
-    return asArrayPtr();
+  template <typename T = kj::byte>
+  inline operator kj::ArrayPtr<T>() KJ_LIFETIMEBOUND {
+    return asArrayPtr<T>();
   }
 
-  inline const kj::ArrayPtr<const kj::byte> asArrayPtr() const KJ_LIFETIMEBOUND {
-    return KJ_ASSERT_NONNULL(maybeBackingStore).asArrayPtr();
+  template <typename T = kj::byte>
+  inline const kj::ArrayPtr<const T> asArrayPtr() const KJ_LIFETIMEBOUND {
+    return KJ_ASSERT_NONNULL(maybeBackingStore).asArrayPtr<T>();
   }
 
-  inline operator const kj::ArrayPtr<const kj::byte>() const KJ_LIFETIMEBOUND {
-    return asArrayPtr();
+  template <typename T = kj::byte>
+  inline operator const kj::ArrayPtr<const T>() const KJ_LIFETIMEBOUND {
+    return asArrayPtr<T>();
   }
 
   inline size_t size() const {
