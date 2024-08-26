@@ -166,6 +166,21 @@ public:
   }
 };
 
+// Similar to PackagesTarReader, but reads from a dynamic buffer rather than a buffer linked into
+// the binary
+class SmallPackagesTarReader: public jsg::Object {
+  kj::ArrayPtr<const kj::byte> source;
+
+public:
+  SmallPackagesTarReader(kj::ArrayPtr<const kj::byte> src): source(src) {};
+
+  int read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf);
+
+  JSG_RESOURCE_TYPE(SmallPackagesTarReader) {
+    JSG_METHOD(read);
+  }
+};
+
 struct MemorySnapshotResult {
   kj::Array<kj::byte> snapshot;
   kj::Array<kj::String> importedModulesList;
@@ -176,15 +191,20 @@ struct MemorySnapshotResult {
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler: public jsg::Object {
 public:
+  typedef kj::HashMap<kj::String, kj::Promise<kj::Own<SmallPackagesTarReader>>> PackagePromiseMap;
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
+  kj::Own<PackagePromiseMap> loadedPackages;
 
-  ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
+  ArtifactBundler(kj::Own<PackagePromiseMap> loadedPackages,
+      kj::Maybe<kj::Array<kj::byte>> existingSnapshot = kj::none)
       : storedSnapshot(kj::none),
+        loadedPackages(kj::mv(loadedPackages)),
         existingSnapshot(kj::mv(existingSnapshot)),
         isValidating(false) {};
 
   ArtifactBundler(bool isValidating = false)
       : storedSnapshot(kj::none),
+        loadedPackages(kj::heap<PackagePromiseMap>()),
         existingSnapshot(kj::none),
         isValidating(isValidating) {};
 
@@ -214,8 +234,9 @@ public:
     return isValidating;
   }
 
-  static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
-    return jsg::alloc<ArtifactBundler>();
+  static jsg::Ref<ArtifactBundler> makeDisabledBundler(
+      kj::Own<PackagePromiseMap> loadedPackages = kj::heap<PackagePromiseMap>()) {
+    return jsg::alloc<ArtifactBundler>(kj::mv(loadedPackages));
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

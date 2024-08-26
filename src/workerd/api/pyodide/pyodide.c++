@@ -56,6 +56,10 @@ int PackagesTarReader::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) 
   return readToTarget(PYODIDE_PACKAGES_TAR.get(), offset, buf);
 }
 
+int SmallPackagesTarReader::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
+  return readToTarget(source, offset, buf);
+}
+
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(jsg::Lock& js) {
   auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(this->names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
