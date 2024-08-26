@@ -638,36 +638,6 @@ struct HasStructTypeScriptDefine<T, decltype(T::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE
     : std::true_type {};
 }  // namespace
 
-#define _JSG_STRUCT_INTERNAL_KIND_AND_FIELDS_AND_TYPE_WRAPPER(...)                                 \
-  static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::STRUCT;   \
-  static constexpr char JSG_FOR_EACH(JSG_STRUCT_FIELD_NAME, , __VA_ARGS__);                        \
-  template <typename TypeWrapper, typename Self>                                                   \
-  using JsgFieldWrappers =                                                                         \
-      ::workerd::jsg::TypeTuple<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>
-
-#define _JSG_STRUCT_REGISTER_MEMBERS_TS_ROOT()                                                     \
-  if constexpr (::workerd::jsg::HasStructTypeScriptRoot<Self>::value) {                            \
-    registry.registerTypeScriptRoot();                                                             \
-  }
-
-#define _JSG_STRUCT_REGISTER_MEMBERS_TS_OVERRIDE()                                                 \
-  if constexpr (::workerd::jsg::HasStructTypeScriptOverride<Self>::value) {                        \
-    registry                                                                                       \
-        .template registerTypeScriptOverride<Self::_JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY>(); \
-  }
-
-#define _JSG_STRUCT_REGISTER_MEMBERS_TS_DYNAMIC_OVERRIDE()                                         \
-  if constexpr (requires(jsg::GetConfiguration<Self> arg) {                                        \
-                  registerTypeScriptDynamicOverride<Registry>(registry, arg);                      \
-                }) {                                                                               \
-    registerTypeScriptDynamicOverride<Registry>(registry, arg);                                    \
-  }
-
-#define _JSG_STRUCT_REGISTER_MEMBERS_TS_DEFINE()                                                   \
-  if constexpr (::workerd::jsg::HasStructTypeScriptDefine<Self>::value) {                          \
-    registry.template registerTypeScriptDefine<Self::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY>(); \
-  }
-
 // Nest this inside a simple struct declaration in order to support translating it to/from a
 // JavaScript object / Web IDL dictionary.
 //
