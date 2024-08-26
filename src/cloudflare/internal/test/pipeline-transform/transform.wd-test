@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "transform-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "transform-test.js")
+        ],
+        compatibilityDate = "2024-08-15",
+        compatibilityFlags = ["nodejs_compat", "experimental"]
+      )
+    )
+  ]
+);

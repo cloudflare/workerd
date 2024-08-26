@@ -286,6 +286,7 @@
       "options": [
         "src/cloudflare/internal/test/d1/d1-api-test.wd-test",
         "src/cloudflare/internal/test/vectorize/vectorize-api-test.wd-test",
+        "src/cloudflare/internal/test/pipeline-transform/pipeline-transform.wd-test",
         "src/workerd/api/actor-alarms-delete-test.wd-test",
         "src/workerd/api/actor-alarms-test.wd-test",
         "src/workerd/api/analytics-engine-test.wd-test",
