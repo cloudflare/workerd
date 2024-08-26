@@ -759,6 +759,49 @@ export const testZlibBytesRead = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/3a71ccf6c473357e89be61b26739fd9139dce4db/test/parallel/test-zlib-const.js
+export const zlibConst = {
+  test() {
+    strictEqual(zlib.constants.Z_OK, 0, 'Expected Z_OK to be 0');
+    throws(() => {
+      zlib.constants.Z_OK = 1;
+    }, /Cannot assign to read only property/);
+    strictEqual(zlib.constants.Z_OK, 0, 'Z_OK should be immutable');
+    strictEqual(
+      zlib.codes.Z_OK,
+      0,
+      `Expected Z_OK to be 0; got ${zlib.codes.Z_OK}`
+    );
+    throws(() => {
+      zlib.codes.Z_OK = 1;
+    }, /Cannot assign to read only property/);
+    strictEqual(zlib.codes.Z_OK, 0, 'Z_OK should be immutable');
+    assert(Object.isFrozen(zlib.codes), 'Expected zlib.codes to be frozen');
+
+    deepStrictEqual(zlib.codes, {
+      '-1': 'Z_ERRNO',
+      '-2': 'Z_STREAM_ERROR',
+      '-3': 'Z_DATA_ERROR',
+      '-4': 'Z_MEM_ERROR',
+      '-5': 'Z_BUF_ERROR',
+      '-6': 'Z_VERSION_ERROR',
+      0: 'Z_OK',
+      1: 'Z_STREAM_END',
+      2: 'Z_NEED_DICT',
+      Z_BUF_ERROR: -5,
+      Z_DATA_ERROR: -3,
+      Z_ERRNO: -1,
+      Z_MEM_ERROR: -4,
+      Z_NEED_DICT: 2,
+      Z_OK: 0,
+      Z_STREAM_END: 1,
+      Z_STREAM_ERROR: -2,
+      Z_VERSION_ERROR: -6,
+    });
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -810,7 +853,7 @@ export const testZlibBytesRead = {
 // - [ ] test-zlib-empty-buffer.js
 // - [ ] test-zlib-invalid-arg-value-brotli-compress.js
 // - [ ] test-zlib-random-byte-pipes.js
-// - [ ] test-zlib-const.js
+// - [x] test-zlib-const.js
 // - [x] test-zlib-failed-init.js
 // - [ ] test-zlib-invalid-input.js
 // - [ ] test-zlib-reset-before-write.js
