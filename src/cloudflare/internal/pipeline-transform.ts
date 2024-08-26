@@ -37,7 +37,7 @@ async function* readLines(
 type Batch = {
   id: string; // unique identifier for the batch
   shard: string; // assigned shard
-  ts: number; // timestamp of the event
+  ts: number; // creation timestamp of the batch
 
   format: Format;
   size: {
@@ -118,6 +118,10 @@ export class PipelineTransformImpl extends entrypoints.WorkerEntrypoint {
   }
 
   #sendJson(data: object[]): JsonStream {
+    if (!(data instanceof Array)) {
+      throw new Error('transformJson must return an array of objects');
+    }
+
     let written = 0;
     const encoder = new TextEncoder();
     const readable = new ReadableStream<Uint8Array>({

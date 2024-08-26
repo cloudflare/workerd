@@ -15,6 +15,8 @@ const customTransform = class MyEntrypoint extends PipelineTransform {
   async transformJson(batch) {
     for (const obj of batch) {
       obj.dispatcher = 'was here!';
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      obj.wait = 'happened!';
     }
 
     return batch;
@@ -96,11 +98,14 @@ export const tests = {
       for (const line of resultLines) {
         objects.push(JSON.parse(line));
       }
+      assert.equal(objects.length, 3);
 
       let index = 0;
       for (const obj of objects) {
         assert.equal(obj.dispatcher, 'was here!');
         delete obj.dispatcher;
+        assert.equal(obj.wait, 'happened!');
+        delete obj.wait;
 
         assert.equal(`${JSON.stringify(obj)}\n`, lines[index]);
         index++;
