@@ -25,40 +25,53 @@ async function assertRequestCacheThrowsError(
 async function assertFetchCacheRejectsError(
   cacheHeader: RequestCache,
   errorName: String = 'Error',
-  errorMessage: String = "The 'cache' field on 'RequestInitializerDict' is not implemented.") {
-  await assert.rejects((async () => {
-    const header = { cache : cacheHeader};
-    const req: RequestInit = header;
-    await fetch('https://example.org', req);
-  })(), {
-    name: errorName,
-    message: errorMessage,
-  });
+  errorMessage: String = "The 'cache' field on 'RequestInitializerDict' is not implemented."
+) {
+  await assert.rejects(
+    (async () => {
+      const header = { cache: cacheHeader };
+      const req: RequestInit = header;
+      await fetch('https://example.org', req);
+    })(),
+    {
+      name: errorName,
+      message: errorMessage,
+    }
+  );
 }
 
 export const cacheMode = {
-
   async test(ctrl: any, env: any, ctx: any) {
-    let allowedCacheModes: Array<RequestCache> =
-      ["default", "force-cache", "no-cache", "no-store", "only-if-cached", "reload"];
-    assert.strictEqual("cache" in Request.prototype, env.CACHE_ENABLED);
+    let allowedCacheModes: Array<RequestCache> = [
+      'default',
+      'force-cache',
+      'no-cache',
+      'no-store',
+      'only-if-cached',
+      'reload',
+    ];
+    assert.strictEqual('cache' in Request.prototype, env.CACHE_ENABLED);
     {
       const req = new Request('https://example.org', {});
       assert.strictEqual(req.cache, undefined);
     }
-    if(!env.CACHE_ENABLED) {
-      for(var cacheMode of allowedCacheModes) {
+    if (!env.CACHE_ENABLED) {
+      for (var cacheMode of allowedCacheModes) {
         await assertRequestCacheThrowsError(cacheMode);
         await assertFetchCacheRejectsError(cacheMode);
       }
     } else {
-      for(var cacheMode of allowedCacheModes) {
-        await assertRequestCacheThrowsError(cacheMode,
+      for (var cacheMode of allowedCacheModes) {
+        await assertRequestCacheThrowsError(
+          cacheMode,
           'TypeError',
-          'Unsupported cache mode: ' + cacheMode);
-        await assertFetchCacheRejectsError(cacheMode,
+          'Unsupported cache mode: ' + cacheMode
+        );
+        await assertFetchCacheRejectsError(
+          cacheMode,
           'TypeError',
-          'Unsupported cache mode: ' + cacheMode);
+          'Unsupported cache mode: ' + cacheMode
+        );
       }
     }
   },
