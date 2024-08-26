@@ -392,6 +392,7 @@ public:
       // Evaluate the module and grab the default export from the module namespace.
       auto promise =
           check(entry.module.evaluate(js, module, observer, maybeEvalCallback)).As<v8::Promise>();
+      js.runMicrotasks();
 
       switch (promise->State()) {
         case v8::Promise::kFulfilled: {
