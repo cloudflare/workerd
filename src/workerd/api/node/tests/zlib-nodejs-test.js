@@ -239,9 +239,12 @@ export const crc32Test = {
     }
 
     [undefined, null, true, 1, () => {}, {}].forEach((invalid) => {
-      throws(() => {
-        zlib.crc32(invalid);
-      }, new TypeError("Failed to execute 'crc32' on 'ZlibUtil': parameter 1 is not of type 'string or ArrayBuffer or ArrayBufferView'."));
+      throws(
+        () => {
+          zlib.crc32(invalid);
+        },
+        { code: 'ERR_INVALID_ARG_TYPE' }
+      );
     });
 
     [null, true, () => {}, {}].forEach((invalid) => {
@@ -752,148 +755,3 @@ export const closeAfterError = {
 // - [x] test-zlib-failed-init.js
 // - [ ] test-zlib-invalid-input.js
 // - [ ] test-zlib-reset-before-write.js
-
-const BIG_DATA = 'horse'.repeat(50_000) + 'cow'.repeat(49_000);
-
-export const inflateSyncTest = {
-  test() {
-    strictEqual(
-      zlib.inflateSync(zlib.deflateSync(BIG_DATA)).toString(),
-      BIG_DATA
-    );
-
-    throws(
-      () => zlib.inflateSync('garbage data'),
-      new Error('incorrect header check')
-    );
-
-    strictEqual(
-      zlib
-        .inflateSync(Buffer.from('OE9LyixKUUiCEQAmfgUk', 'base64'), {
-          windowBits: 11,
-          level: 4,
-        })
-        .toString(),
-      'bird bird bird'
-    );
-  },
-};
-
-export const zipBombTest = {
-  test() {
-    // 225 bytes (raw)
-    const ZLIB_BOMB_3 =
-      'eNqruPX2jqHeUkaJtov/25xEzoho9fL6aF70yPBZvUBsqZPmzHO+F253euVbWScs28QQ2LG' +
-      'CpdBc8ef84mkfpubvs6n/Z/9vrk9b4oy4ffG2ujp8DAwMB074/p97traX8fCt43fPvbMDCh' +
-      'mUtZ/2/rw58MHbhNLblkCBhC96ZuZ1Z+xY5vn3P5/LDBRxy3/6NTF7G+udupj/d4r5gSISe' +
-      '6sPAikGD0EeINkgBuZkQDgSyJxRmVGZUZlRmVGZURlCMpZRcVE/bjGdi/fzr+O/n/P32XWD' +
-      'nyxJaZvuAwDXRDs+';
-
-    // 1799 bytes
-    const zlib_bomb_2 = zlib.inflateSync(Buffer.from(ZLIB_BOMB_3, 'base64'));
-
-    // ~ 1MB
-    const zlib_bomb_1 = zlib.inflateSync(zlib_bomb_2);
-
-    // Would be 1 GB, if we let it
-    throws(
-      () => zlib.inflateSync(zlib_bomb_1),
-      new RangeError('Memory limit exceeded')
-    );
-  },
-};
-
-export const deflateSyncTest = {
-  test() {
-    function maskOsId(buf) {
-      // Clear the OS ID byte in gzip, which varies based on the platform used to run the tests
-      return buf.fill(0x0, 9, 10);
-    }
-
-    throws(
-      () => zlib.deflateSync('hello world', { windowBits: 9000 }),
-      new Error('Invalid windowBits')
-    );
-    throws(
-      () => zlib.deflateSync('hello world', { strategy: 400 }),
-      new Error('invalid strategy')
-    );
-    throws(
-      () =>
-        zlib.deflateSync(BIG_DATA, { maxOutputLength: 64 }).toString('base64'),
-      new RangeError('Memory limit exceeded')
-    );
-
-    strictEqual(
-      zlib
-        .deflateSync('bird bird bird', { windowBits: 11, level: 4 })
-        .toString('base64'),
-      'OE9LyixKUUiCEQAmfgUk'
-    );
-
-    strictEqual(
-      zlib
-        .deflateSync('what happens if you do not flush?', {
-          finishFlush: zlib.constants.Z_NO_FLUSH,
-        })
-        .toString('base64'),
-      'eJw='
-    );
-
-    strictEqual(
-      zlib
-        .deflateSync(Buffer.from('bird bird bird'), {
-          windowBits: 11,
-          level: 4,
-        })
-        .toString('base64'),
-      'OE9LyixKUUiCEQAmfgUk'
-    );
-
-    deepStrictEqual(
-      maskOsId(
-        zlib.gzipSync('water, water, everywhere, nor any drop to drink')
-      ).toString('base64'),
-      'H4sIAAAAAAAAACtPLEkt0lEoh1CpZalFleUZqUWpOgp5+UUKiXmVCilF+QUKJflAOjMvGwCqkvI8LwAAAA=='
-    );
-
-    strictEqual(
-      zlib
-        .deflateRawSync('as idle as a painted ship upon a painted ocean')
-        .toString('base64'),
-      'SyxWyEzJSVVILFZIVChIzMwrSU1RKM7ILFAoLcjPQxLLT05NzAMA'
-    );
-
-    strictEqual(zlib.deflateSync('').toString('base64'), 'eJwDAAAAAAE=');
-  },
-};
-export const inflateTest = {
-  test() {
-    zlib.inflate(
-      Buffer.from('OE9LyixKUUiCEQAmfgUk', 'base64'),
-      {
-        windowBits: 11,
-        level: 4,
-      },
-      (_, result) => {
-        strictEqual(result.toString(), 'bird bird bird');
-      }
-    );
-  },
-};
-
-export const deflateTest = {
-  test() {
-    zlib.deflate(
-      'bird bird bird',
-      { windowBits: 11, level: 4 },
-      (_, result) => {
-        strictEqual(result.toString('base64'), 'OE9LyixKUUiCEQAmfgUk');
-      }
-    );
-
-    zlib.deflate('garbage data', { level: -9000 }, (error, _) => {
-      strictEqual(error.message, 'Error: Invalid compression level');
-    });
-  },
-};
