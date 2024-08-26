@@ -45,7 +45,7 @@ class VectorizeIndexImpl implements Vectorize {
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches> {
     if (this.indexVersion === 'v2') {
-      if (options && options.returnMetadata) {
+      if (options?.returnMetadata) {
         if (
           typeof options.returnMetadata !== 'boolean' &&
           !isVectorizeMetadataRetrievalLevel(options.returnMetadata)
