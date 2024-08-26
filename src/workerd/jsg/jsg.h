@@ -589,11 +589,6 @@ using HasGetTemplateOverload =
   template <typename Registry>                                                                     \
   static void registerTypeScriptDynamicOverride(Registry& registry, ##__VA_ARGS__)
 
-#define JSG_STRUCT_TS_OVERRIDE_DYNAMIC(...)                                                        \
-  static void jsgConfiguration(__VA_ARGS__);                                                       \
-  template <typename Registry>                                                                     \
-  static void registerTypeScriptDynamicOverride(Registry& registry, ##__VA_ARGS__)
-
 // Like JSG_TS_DEFINE but for use with JSG_STRUCT. Should be placed adjacent to the JSG_STRUCT
 // declaration, inside the same `struct` definition. See the `## TypeScript`section of the JSG README.md
 // for more details.
