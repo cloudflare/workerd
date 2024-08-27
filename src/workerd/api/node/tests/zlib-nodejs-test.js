@@ -1014,6 +1014,79 @@ export const zlibResetBeforeWrite = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/6bf7b6e342f97cf48319e0bc251200fabe132c21/test/parallel/test-zlib-invalid-input.js
+export const zlibInvalidInput = {
+  async test() {
+    const nonStringInputs = [1, true, { a: 1 }, ['a']];
+
+    // zlib.Unzip classes need to get valid data, or else they'll throw.
+    const unzips = [
+      new zlib.Unzip(),
+      new zlib.Gunzip(),
+      new zlib.Inflate(),
+      new zlib.InflateRaw(),
+      // TODO(soon): Enable once BrotliDecompress is implemented.
+      // zlib.BrotliDecompress(),
+    ];
+
+    for (const input of nonStringInputs) {
+      assert.throws(
+        () => {
+          zlib.gunzip(input);
+        },
+        {
+          name: 'TypeError',
+        }
+      );
+    }
+
+    for (const uz of unzips) {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      uz.on('error', resolve);
+      uz.on('end', reject);
+
+      // This will trigger error event
+      uz.write('this is not valid compressed data.');
+      await promise;
+    }
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/5e6aab0ecad6394e538e06357d6e16e155951a8b/test/parallel/test-zlib-unzip-one-byte-chunks.js
+export const zlibUnzipOneByteChunks = {
+  async test() {
+    // TODO(soon): Enable this once zlib.gzipSync is implemented.
+    // const { promise, resolve, reject } = Promise.withResolvers();
+    // const data = Buffer.concat([zlib.gzipSync('abc'), zlib.gzipSync('def')]);
+    //
+    // const resultBuffers = [];
+    //
+    // const unzip = zlib
+    //   .createUnzip()
+    //   .on('error', reject)
+    //   .on('data', (data) => resultBuffers.push(data))
+    //   .on('finish', function () {
+    //     const unzipped = Buffer.concat(resultBuffers).toString();
+    //     strictEqual(
+    //       unzipped,
+    //       'abcdef',
+    //       `'${unzipped}' should match 'abcdef' after zipping ` + 'and unzipping'
+    //     );
+    //     resolve();
+    //   });
+    //
+    // for (let i = 0; i < data.length; i++) {
+    //   // Write each single byte individually.
+    //   unzip.write(Buffer.from([data[i]]));
+    // }
+    //
+    // unzip.end();
+    // await promise;
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -1035,7 +1108,7 @@ export const zlibResetBeforeWrite = {
 // - [x] test-zlib-deflate-constructors.js
 // - [ ] test-zlib-flush.js
 // - [ ] test-zlib-maxOutputLength.js
-// - [ ] test-zlib-unzip-one-byte-chunks.js
+// - [x] test-zlib-unzip-one-byte-chunks.js
 // - [ ] test-zlib-brotli.js
 // - [ ] test-zlib-deflate-raw-inherits.js
 // - [ ] test-zlib-flush-write-sync-interleaved.js
@@ -1067,5 +1140,5 @@ export const zlibResetBeforeWrite = {
 // - [ ] test-zlib-random-byte-pipes.js
 // - [x] test-zlib-const.js
 // - [x] test-zlib-failed-init.js
-// - [ ] test-zlib-invalid-input.js
+// - [x] test-zlib-invalid-input.js
 // - [x] test-zlib-reset-before-write.js
