@@ -240,6 +240,7 @@ protected:
 
 class BrotliEncoderContext final: public BrotliContext {
 public:
+  BrotliEncoderContext(): BrotliContext(ZlibMode::NONE) {}  // This is fake just for testing
   BrotliEncoderContext(ZlibMode _mode);
 
   void close();
@@ -258,6 +259,7 @@ private:
 
 class BrotliDecoderContext final: public BrotliContext {
 public:
+  BrotliDecoderContext(): BrotliContext(ZlibMode::NONE) {}  // This is fake just for testing
   BrotliDecoderContext(ZlibMode _mode);
   void close();
   // Equivalent to Node.js' `DoThreadPoolWork` implementation.
@@ -339,9 +341,10 @@ public:
   template <typename CompressionContext>
   class BrotliCompressionStream: public jsg::Object, public CompressionStream<CompressionContext> {
   public:
-    BrotliCompressionStream(ZlibMode _mode): CompressionStream<CompressionContext>() {
-      // No need to set mode here. It is handled by the CompressionContext constructor.
-    };
+    BrotliCompressionStream(ZlibMode _mode)
+        : CompressionStream<CompressionContext>() {
+            // No need to set mode here. It is handled by the CompressionContext constructor.
+          };
     KJ_DISALLOW_COPY_AND_MOVE(BrotliCompressionStream);
     static jsg::Ref<BrotliCompressionStream> constructor(ZlibModeValue mode);
 
@@ -364,9 +367,6 @@ public:
   };
 
   uint32_t crc32Sync(kj::Array<kj::byte> data, uint32_t value);
-
-  template class BrotliCompressionStream<BrotliEncoderContext>;
-  template class BrotliCompressionStream<BrotliDecoderContext>;
 
   JSG_RESOURCE_TYPE(ZlibUtil) {
     JSG_METHOD_NAMED(crc32, crc32Sync);
@@ -525,7 +525,9 @@ public:
 };
 
 #define EW_NODE_ZLIB_ISOLATE_TYPES                                                                 \
-  api::node::ZlibUtil, api::node::ZlibUtil::ZlibStream
+  api::node::ZlibUtil, api::node::ZlibUtil::ZlibStream,                                            \
+      api::node::ZlibUtil::BrotliCompressionStream<api::node::BrotliEncoderContext>,               \
+      api::node::ZlibUtil::BrotliCompressionStream<api::node::BrotliDecoderContext>
 
 }  // namespace workerd::api::node
 

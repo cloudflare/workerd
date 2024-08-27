@@ -621,7 +621,7 @@ kj::Maybe<CompressionError> BrotliEncoderContext::getErrorInfo() const {
   return kj::none;
 }
 
-BrotliDecoderContext::BrotliDecoderContext(ZlibMode _mode) : BrotliContext(_mode) {
+BrotliDecoderContext::BrotliDecoderContext(ZlibMode _mode): BrotliContext(_mode) {
   auto instance = BrotliDecoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
   state = kj::disposeWith<BrotliDecoderDestroyInstance>(instance);
 }
@@ -699,5 +699,6 @@ bool ZlibUtil::BrotliCompressionStream<CompressionContext>::initialize(
     jsg::BufferSource params, jsg::BufferSource writeResult, jsg::Function<void()> writeCallback) {
   return false;
 }
-
+template class ZlibUtil::BrotliCompressionStream<BrotliEncoderContext>;
+template class ZlibUtil::BrotliCompressionStream<BrotliDecoderContext>;
 }  // namespace workerd::api::node
