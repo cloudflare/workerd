@@ -802,6 +802,29 @@ export const zlibConst = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/3a71ccf6c473357e89be61b26739fd9139dce4db/test/parallel/test-zlib-object-write.js
+
+export const zlibObjectWrite = {
+  async test() {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const gunzip = new zlib.Gunzip({ objectMode: true });
+    gunzip.on('error', reject);
+    assert.throws(
+      () => {
+        gunzip.write({});
+      },
+      {
+        name: 'TypeError',
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+    gunzip.on('close', resolve);
+    gunzip.close();
+    await promise;
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -837,7 +860,7 @@ export const zlibConst = {
 // - [x] test-zlib-bytes-read.js
 // - [ ] test-zlib-destroy-pipe.js
 // - [ ] test-zlib-from-gzip.js
-// - [ ] test-zlib-object-write.js
+// - [x] test-zlib-object-write.js
 // - [ ] test-zlib-write-after-flush.js
 // - [x] test-zlib-close-after-error.js
 // - [ ] test-zlib-dictionary-fail.js
