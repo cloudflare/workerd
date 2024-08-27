@@ -282,34 +282,12 @@ http_archive(
 # the build process. To update the dependency, update the reference commit in
 # rust-deps/BUILD.bazel and run `bazel run //rust-deps:crates_vendor -- --repin`
 
-# Based on https://github.com/bazelbuild/bazel/blob/master/third_party/zlib/BUILD.
-_zlib_build = """
-cc_library(
+git_repository(
     name = "zlib",
-    srcs = glob(["*.c"]),
-    hdrs = glob(["*.h"]),
-    includes = ["."],
-    # Workaround for zlib warnings and mac compilation. Some issues were resolved in v1.3, but there are still implicit function declarations.
-    copts = [
-        "-w",
-        "-Dverbose=-1",
-    ] + select({
-        "@platforms//os:linux": [ "-Wno-implicit-function-declaration" ],
-        "@platforms//os:macos": [ "-Wno-implicit-function-declaration" ],
-        "//conditions:default": [],
-    }),
-    visibility = ["//visibility:public"],
-)
-"""
-
-http_archive(
-    name = "zlib",
-    build_file_content = _zlib_build,
-    sha256 = "38ef96b8dfe510d42707d9c781877914792541133e1870841463bfa73f883e32",
-    strip_prefix = "zlib-1.3.1",
-    # Using the .tar.xz artifact from the release page – for many other dependencies we use a
-    # snapshot based on the tag of a release instead.
-    urls = ["https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.xz"],
+    build_file = "//:build/BUILD.zlib",
+    # Must match the version used by v8
+    commit = "c2469fdd73f192383d2d94288da0ff5b9a3869f5",
+    remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
 http_file(
