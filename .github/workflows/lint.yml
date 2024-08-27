@@ -6,6 +6,12 @@ on:
     branches:
     - main
 
+concurrency:
+  # Cancel existing builds for the same PR.
+  # Otherwise, all other builds will be allowed to run through.
+  group: lint.yml-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-24.04
