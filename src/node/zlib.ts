@@ -1,5 +1,5 @@
 import * as zlib from 'node-internal:internal_zlib';
-import { crc32, constants } from 'node-internal:internal_zlib';
+import { crc32, constants, codes } from 'node-internal:internal_zlib';
 import { default as compatFlags } from 'workerd:compatibility-flags';
 
 const { nodeJsZlib } = compatFlags;
@@ -31,6 +31,7 @@ const createUnzip = protectMethod(zlib.createUnzip);
 
 export {
   crc32,
+  codes,
   constants,
 
   // Classes
@@ -54,6 +55,7 @@ export {
 
 export default {
   crc32,
+  codes,
   constants,
 
   // Classes

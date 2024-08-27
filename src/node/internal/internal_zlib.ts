@@ -11,6 +11,15 @@ import { isArrayBufferView } from 'node-internal:internal_types';
 import { Zlib } from 'node-internal:internal_zlib_base';
 
 const {
+  CONST_Z_OK,
+  CONST_Z_STREAM_END,
+  CONST_Z_NEED_DICT,
+  CONST_Z_ERRNO,
+  CONST_Z_STREAM_ERROR,
+  CONST_Z_DATA_ERROR,
+  CONST_Z_MEM_ERROR,
+  CONST_Z_BUF_ERROR,
+  CONST_Z_VERSION_ERROR,
   CONST_DEFLATE,
   CONST_DEFLATERAW,
   CONST_INFLATE,
@@ -40,6 +49,25 @@ Object.defineProperties(
       ])
   )
 );
+
+// Translation table for return codes.
+const rawCodes: Record<string, number | string> = {
+  Z_OK: CONST_Z_OK,
+  Z_STREAM_END: CONST_Z_STREAM_END,
+  Z_NEED_DICT: CONST_Z_NEED_DICT,
+  Z_ERRNO: CONST_Z_ERRNO,
+  Z_STREAM_ERROR: CONST_Z_STREAM_ERROR,
+  Z_DATA_ERROR: CONST_Z_DATA_ERROR,
+  Z_MEM_ERROR: CONST_Z_MEM_ERROR,
+  Z_BUF_ERROR: CONST_Z_BUF_ERROR,
+  Z_VERSION_ERROR: CONST_Z_VERSION_ERROR,
+};
+
+for (const key of Object.keys(rawCodes)) {
+  rawCodes[rawCodes[key] as number] = key;
+}
+
+export const codes = Object.freeze(rawCodes);
 
 export function crc32(
   data: ArrayBufferView | string,
