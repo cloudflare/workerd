@@ -30,3 +30,6 @@ test-asan *args="//...":
 
 format:
   python3 tools/cross/format.py
+
+internal-pr:
+  ./tools/unix/create-internal-pr.sh
