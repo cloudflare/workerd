@@ -1,8 +1,9 @@
 # Based on https://www.neilmacy.co.uk/blog/github-action-to-block-merging
 name: "Internal PR Required"
 on:
+  workflow_call:
   pull_request:
-    types: [synchronize, opened, reopened, labeled, unlabeled]
+    types: [labeled, unlabeled]
 
 jobs:
   InternalPRRequired:

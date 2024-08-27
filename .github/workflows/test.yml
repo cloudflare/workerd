@@ -8,7 +8,18 @@ on:
     branches:
     - main
 
+concurrency:
+  # Cancel existing builds for the same PR.
+  # Otherwise, all other builds will be allowed to run through.
+  group: test.yml-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+
 jobs:
+  fixup:
+    uses: ./.github/workflows/fixup.yml
+  labels:
+   uses: ./.github/workflows/labels.yml 
   test:
     strategy:
       matrix:

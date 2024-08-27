@@ -1,7 +1,6 @@
 name: "Just say no to fixup commits"
 on:
-  pull_request:
-    types: [synchronize, opened, reopened]
+  workflow_call:
 
 jobs:
   block-fixup:
