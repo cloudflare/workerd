@@ -129,12 +129,23 @@ export interface ZlibOptions {
   maxOutputLength?: number | undefined;
 }
 
+export interface BrotliOptions {
+  flush?: number | undefined;
+  finishFlush?: number | undefined;
+  chunkSize?: number | undefined;
+  params?:
+    | {
+        [key: number]: boolean | number;
+      }
+    | undefined;
+  maxOutputLength?: number | undefined;
+}
+
 type ErrorHandler = (errno: number, code: string, message: string) => void;
 type ProcessHandler = () => void;
 
-export class ZlibStream {
+export abstract class HandlerCommon {
   public [owner_symbol]: Zlib;
-
   // Not used by C++ implementation but required to be Node.js compatible.
   public inOff: number;
   /* eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents */
@@ -145,15 +156,7 @@ export class ZlibStream {
   public flushFlag: number;
 
   public constructor(mode: number);
-  public initialize(
-    windowBits: number,
-    level: number,
-    memLevel: number,
-    strategy: number,
-    writeState: NodeJS.TypedArray,
-    processCallback: ProcessHandler,
-    dictionary: ZlibOptions['dictionary']
-  ): void;
+
   public close(): void;
   public write(
     flushFlag: number,
@@ -176,5 +179,39 @@ export class ZlibStream {
   public params(level: number, strategy: number): void;
   public reset(): void;
 
+  // Workerd specific functions
   public setErrorHandler(cb: ErrorHandler): void;
+}
+
+export class ZlibStream extends HandlerCommon {
+  public initialize(
+    windowBits: number,
+    level: number,
+    memLevel: number,
+    strategy: number,
+    writeState: NodeJS.TypedArray,
+    processCallback: ProcessHandler,
+    dictionary: ZlibOptions['dictionary']
+  ): void;
+}
+
+export class BrotliDecoder extends HandlerCommon {
+  public initialize(
+    params: Uint32Array,
+    writeResult: Uint32Array,
+    writeCallback: () => void
+  ): boolean;
+  public override params(): void;
+
+  // Workerd specific functions
+  public setErrorHandler(cb: ErrorHandler): void;
+}
+
+export class BrotliEncoder extends HandlerCommon {
+  public initialize(
+    params: Uint32Array,
+    writeResult: Uint32Array,
+    writeCallback: () => void
+  ): boolean;
+  public override params(): void;
 }

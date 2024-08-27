@@ -21,6 +21,9 @@ const DeflateRaw = protectMethod(zlib.DeflateRaw);
 const Inflate = protectMethod(zlib.Inflate);
 const InflateRaw = protectMethod(zlib.InflateRaw);
 const Unzip = protectMethod(zlib.Unzip);
+const BrotliCompress = protectMethod(zlib.BrotliCompress);
+const BrotliDecompress = protectMethod(zlib.BrotliDecompress);
+
 const createGzip = protectMethod(zlib.createGzip);
 const createGunzip = protectMethod(zlib.createGunzip);
 const createDeflate = protectMethod(zlib.createDeflate);
@@ -28,6 +31,8 @@ const createDeflateRaw = protectMethod(zlib.createDeflateRaw);
 const createInflate = protectMethod(zlib.createInflate);
 const createInflateRaw = protectMethod(zlib.createInflateRaw);
 const createUnzip = protectMethod(zlib.createUnzip);
+const createBrotliCompress = protectMethod(zlib.createBrotliCompress);
+const createBrotliDecompress = protectMethod(zlib.createBrotliDecompress);
 
 export {
   crc32,
@@ -41,6 +46,8 @@ export {
   Inflate,
   InflateRaw,
   Unzip,
+  BrotliCompress,
+  BrotliDecompress,
 
   // Convenience methods to create classes
   createGzip,
@@ -50,6 +57,8 @@ export {
   createInflate,
   createInflateRaw,
   createUnzip,
+  createBrotliCompress,
+  createBrotliDecompress,
 };
 
 export default {
@@ -64,6 +73,8 @@ export default {
   Inflate,
   InflateRaw,
   Unzip,
+  BrotliCompress,
+  BrotliDecompress,
 
   // Convenience methods to create classes
   createGzip,
@@ -73,4 +84,6 @@ export default {
   createInflate,
   createInflateRaw,
   createUnzip,
+  createBrotliCompress,
+  createBrotliDecompress,
 };

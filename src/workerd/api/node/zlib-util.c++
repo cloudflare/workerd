@@ -5,7 +5,30 @@
 
 #include "zlib-util.h"
 
+#include "src/workerd/jsg/exception.h"
+
 namespace workerd::api::node {
+
+// namespace {
+//
+// struct BrotliEncoderDisposer: public kj::Disposer {
+//   static const BrotliEncoderDisposer INSTANCE;
+//   void disposeImpl(void* pointer) const override {
+//     BrotliEncoderDestroyInstance(reinterpret_cast<BrotliEncoderState*>(pointer));
+//   }
+// };
+//
+// struct BrotliDecoderDisposer: public kj::Disposer {
+//   static const BrotliDecoderDisposer INSTANCE;
+//   void disposeImpl(void* pointer) const override {
+//     BrotliDecoderDestroyInstance(reinterpret_cast<BrotliDecoderState*>(pointer));
+//   }
+// };
+//
+// const BrotliEncoderDisposer BrotliEncoderDisposer::INSTANCE;
+// const BrotliDecoderDisposer BrotliDecoderDisposer::INSTANCE;
+//
+// }
 
 uint32_t ZlibUtil::crc32Sync(kj::Array<kj::byte> data, uint32_t value) {
   // Note: Bytef is defined in zlib.h
@@ -519,6 +542,162 @@ void ZlibUtil::ZlibStream::reset(jsg::Lock& js) {
   KJ_IF_SOME(error, context.resetStream()) {
     emitError(js, kj::mv(error));
   }
+}
+
+void BrotliContext::setBuffers(kj::ArrayPtr<kj::byte> input,
+    uint32_t inputLength,
+    kj::ArrayPtr<kj::byte> output,
+    uint32_t outputLength) {
+  nextIn = reinterpret_cast<const uint8_t*>(input.begin());
+  nextOut = output.begin();
+  availIn = inputLength;
+  availOut = outputLength;
+}
+
+void BrotliContext::setFlush(int _flush) {
+  flush = static_cast<BrotliEncoderOperation>(_flush);
+}
+
+void BrotliContext::getAfterWriteOffsets(uint32_t* _availIn, uint32_t* _availOut) {
+  *_availIn = availIn;
+  *_availOut = availOut;
+}
+
+BrotliEncoderContext::BrotliEncoderContext(ZlibMode _mode): BrotliContext(_mode) {
+  auto instance = BrotliEncoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
+  state = kj::disposeWith<BrotliEncoderDestroyInstance>(instance);
+}
+
+void BrotliEncoderContext::close() {
+  auto instance = BrotliEncoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
+  state = kj::disposeWith<BrotliEncoderDestroyInstance>(kj::mv(instance));
+  mode = ZlibMode::NONE;
+}
+
+void BrotliEncoderContext::work() {
+  JSG_REQUIRE(mode == ZlibMode::BROTLI_ENCODE, Error, "Mode should be BROTLI_ENCODE"_kj);
+  JSG_REQUIRE_NONNULL(state.get(), Error, "State should not be empty"_kj);
+
+  const uint8_t* internalNext = nextIn;
+  lastResult = BrotliEncoderCompressStream(
+      state.get(), flush, &availIn, &internalNext, &availOut, &nextOut, nullptr);
+  nextIn += internalNext - nextIn;
+}
+
+kj::Maybe<CompressionError> BrotliEncoderContext::initialize(
+    brotli_alloc_func alloc_func, brotli_free_func free_func, void* opaque_func) {
+  alloc_brotli = alloc_func;
+  free_brotli = free_func;
+  alloc_opaque_brotli = opaque_func;
+
+  auto instance = BrotliEncoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
+  state = kj::disposeWith<BrotliEncoderDestroyInstance>(kj::mv(instance));
+
+  if (state.get() == nullptr) {
+    return CompressionError(
+        "Could not initialize Brotli instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
+  }
+
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> BrotliEncoderContext::resetStream() {
+  return initialize(alloc_brotli, free_brotli, alloc_opaque_brotli);
+}
+
+kj::Maybe<CompressionError> BrotliEncoderContext::setParams(int key, uint32_t value) {
+  if (!BrotliEncoderSetParameter(state.get(), static_cast<BrotliEncoderParameter>(key), value)) {
+    return CompressionError("Setting parameter failed", "ERR_BROTLI_PARAM_SET_FAILED", -1);
+  }
+
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> BrotliEncoderContext::getErrorInfo() const {
+  if (!lastResult) {
+    return CompressionError("Compression failed", "ERR_BROTLI_COMPRESSION_FAILED", -1);
+  }
+
+  return kj::none;
+}
+
+BrotliDecoderContext::BrotliDecoderContext(ZlibMode _mode) : BrotliContext(_mode) {
+  auto instance = BrotliDecoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
+  state = kj::disposeWith<BrotliDecoderDestroyInstance>(instance);
+}
+
+void BrotliDecoderContext::close() {
+  auto instance = BrotliDecoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
+  state = kj::disposeWith<BrotliDecoderDestroyInstance>(kj::mv(instance));
+  mode = ZlibMode::NONE;
+}
+
+kj::Maybe<CompressionError> BrotliDecoderContext::initialize(
+    brotli_alloc_func alloc_func, brotli_free_func free_func, void* opaque_func) {
+  alloc_brotli = alloc_func;
+  free_brotli = free_func;
+  alloc_opaque_brotli = opaque_func;
+
+  auto instance = BrotliDecoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
+  state = kj::disposeWith<BrotliDecoderDestroyInstance>(kj::mv(instance));
+
+  if (state.get() == nullptr) {
+    return CompressionError(
+        "Could not initialize Brotli instance", "ERR_ZLIB_INITIALIZATION_FAILED", -1);
+  }
+
+  return kj::none;
+}
+
+void BrotliDecoderContext::work() {
+  JSG_REQUIRE(mode == ZlibMode::BROTLI_DECODE, Error, "Mode should have been BROTLI_DECODE"_kj);
+  JSG_REQUIRE_NONNULL(state.get(), Error, "State should not be empty"_kj);
+  const uint8_t* internalNext = nextIn;
+  lastResult = BrotliDecoderDecompressStream(
+      state.get(), &availIn, &internalNext, &availOut, &nextOut, nullptr);
+  nextIn += internalNext - nextIn;
+
+  if (lastResult == BROTLI_DECODER_RESULT_ERROR) {
+    error = BrotliDecoderGetErrorCode(state.get());
+    errorString = kj::str("ERR_", BrotliDecoderErrorString(error));
+  }
+}
+
+kj::Maybe<CompressionError> BrotliDecoderContext::resetStream() {
+  return initialize(alloc_brotli, free_brotli, alloc_opaque_brotli);
+}
+
+kj::Maybe<CompressionError> BrotliDecoderContext::setParams(int key, uint32_t value) {
+  if (!BrotliDecoderSetParameter(state.get(), static_cast<BrotliDecoderParameter>(key), value)) {
+    return CompressionError("Setting parameter failed", "ERR_BROTLI_PARAM_SET_FAILED", -1);
+  }
+
+  return kj::none;
+}
+
+kj::Maybe<CompressionError> BrotliDecoderContext::getErrorInfo() const {
+  if (error != BROTLI_DECODER_NO_ERROR) {
+    return CompressionError("Compression failed", errorString, -1);
+  }
+
+  if (flush == BROTLI_OPERATION_FINISH && lastResult == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
+    // Match zlib's behaviour, as brotli doesn't have its own code for this.
+    return CompressionError("Unexpected end of file", "Z_BUF_ERROR", Z_BUF_ERROR);
+  }
+
+  return kj::none;
+}
+
+template <typename CompressionContext>
+jsg::Ref<ZlibUtil::BrotliCompressionStream<CompressionContext>> ZlibUtil::BrotliCompressionStream<
+    CompressionContext>::constructor(ZlibModeValue mode) {
+  return jsg::alloc<BrotliCompressionStream>(static_cast<ZlibMode>(mode));
+}
+
+template <typename CompressionContext>
+bool ZlibUtil::BrotliCompressionStream<CompressionContext>::initialize(
+    jsg::BufferSource params, jsg::BufferSource writeResult, jsg::Function<void()> writeCallback) {
+  return false;
 }
 
 }  // namespace workerd::api::node

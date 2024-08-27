@@ -3,12 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import { default as zlibUtil, type ZlibOptions } from 'node-internal:zlib';
+import {
+  default as zlibUtil,
+  type ZlibOptions,
+  type BrotliOptions,
+} from 'node-internal:zlib';
 import { Buffer } from 'node-internal:internal_buffer';
 import { validateUint32 } from 'node-internal:validators';
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
 import { isArrayBufferView } from 'node-internal:internal_types';
-import { Zlib } from 'node-internal:internal_zlib_base';
+import { Zlib, Brotli } from 'node-internal:internal_zlib_base';
 
 const {
   CONST_DEFLATE,
@@ -18,6 +22,8 @@ const {
   CONST_GUNZIP,
   CONST_GZIP,
   CONST_UNZIP,
+  CONST_BROTLI_DECODE,
+  CONST_BROTLI_ENCODE,
 } = zlibUtil;
 
 const constPrefix = 'CONST_';
@@ -99,6 +105,18 @@ export class Unzip extends Zlib {
   }
 }
 
+export class BrotliCompress extends Brotli {
+  public constructor(options: BrotliOptions) {
+    super(options, CONST_BROTLI_ENCODE);
+  }
+}
+
+export class BrotliDecompress extends Brotli {
+  public constructor(options: BrotliOptions) {
+    super(options, CONST_BROTLI_DECODE);
+  }
+}
+
 export function createGzip(options: ZlibOptions): Gzip {
   return new Gzip(options);
 }
@@ -125,4 +143,14 @@ export function createInflateRaw(options: ZlibOptions): InflateRaw {
 
 export function createUnzip(options: ZlibOptions): Unzip {
   return new Unzip(options);
+}
+
+export function createBrotliCompress(options: BrotliOptions): BrotliCompress {
+  return new BrotliCompress(options);
+}
+
+export function createBrotliDecompress(
+  options: BrotliOptions
+): BrotliDecompress {
+  return new BrotliDecompress(options);
 }
