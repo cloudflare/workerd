@@ -588,4 +588,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables node:zlib implementation while it is in-development.
   # Once the node:zlib implementation is complete, this will be automatically enabled when
   # nodejs_compat is enabled.
+
+  replicaRouting @60 :Bool
+      $compatEnableFlag("replica_routing")
+      $experimental;
+  # Enables routing to a replica on the client-side.
+  # Doesn't mean requests *will* be routed to a replica, only that they can be.
 }
