@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "r2-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "r2-test.js" )
+        ],
+        bindings = [
+          ( name = "BUCKET", r2Bucket = "r2-test" ),
+          ( name = "SERVICE", service = "r2-test" ),
+        ],
+        compatibilityDate = "2023-07-24",
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+      )
+    ),
+  ],
+);
