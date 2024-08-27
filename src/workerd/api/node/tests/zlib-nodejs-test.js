@@ -585,17 +585,17 @@ export const testDeflateConstructors = {
 // https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-failed-init.js
 export const testFailedInit = {
   test() {
-    assert.throws(() => zlib.createGzip({ chunkSize: 0 }), {
+    throws(() => zlib.createGzip({ chunkSize: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    assert.throws(() => zlib.createGzip({ windowBits: 0 }), {
+    throws(() => zlib.createGzip({ windowBits: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    assert.throws(() => zlib.createGzip({ memLevel: 0 }), {
+    throws(() => zlib.createGzip({ memLevel: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
@@ -810,7 +810,7 @@ export const zlibObjectWrite = {
     const { promise, resolve, reject } = Promise.withResolvers();
     const gunzip = new zlib.Gunzip({ objectMode: true });
     gunzip.on('error', reject);
-    assert.throws(
+    throws(
       () => {
         gunzip.write({});
       },
@@ -860,6 +860,160 @@ export const zlibZeroByte = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/431ac161e65698152de197703fb30c89da2b6686/test/parallel/test-zlib-dictionary-fail.js
+export const zlibDictionaryFail = {
+  async test() {
+    // String "test" encoded with dictionary "dict".
+    const input = Buffer.from([0x78, 0xbb, 0x04, 0x09, 0x01, 0xa5]);
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const stream = zlib.createInflate();
+
+      stream.on('error', function (err) {
+        assert.match(err.message, /Missing dictionary/);
+        resolve();
+      });
+
+      stream.write(input);
+      await promise;
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const stream = zlib.createInflate({ dictionary: Buffer.from('fail') });
+
+      stream.on('error', function (err) {
+        assert.match(err.message, /Bad dictionary/);
+        resolve();
+      });
+
+      stream.write(input);
+      await promise;
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const stream = zlib.createInflateRaw({ dictionary: Buffer.from('fail') });
+
+      stream.on('error', function (err) {
+        // It's not possible to separate invalid dict and invalid data when using
+        // the raw format
+        assert.match(
+          err.message,
+          /(invalid|Operation-Ending-Supplemental Code is 0x12)/
+        );
+        resolve();
+      });
+
+      stream.write(input);
+      await promise;
+    }
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/431ac161e65698152de197703fb30c89da2b6686/test/parallel/test-zlib-close-in-ondata.js
+export const zlibCloseInOnData = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const ts = zlib.createGzip();
+    const buf = Buffer.alloc(1024 * 1024 * 20);
+
+    ts.on('data', function () {
+      ts.close();
+      resolve();
+    });
+    ts.end(buf);
+    await promise;
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/431ac161e65698152de197703fb30c89da2b6686/test/parallel/test-zlib-flush-flags.js
+export const zlibFlushFlags = {
+  test() {
+    zlib.createGzip({ flush: zlib.constants.Z_SYNC_FLUSH });
+
+    throws(() => zlib.createGzip({ flush: 'foobar' }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+      message:
+        'The "options.flush" property must be of type number. ' +
+        "Received type string ('foobar')",
+    });
+
+    throws(() => zlib.createGzip({ flush: 10000 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+      message:
+        'The value of "options.flush" is out of range. It must ' +
+        'be >= 0 and <= 5. Received 10000',
+    });
+
+    zlib.createGzip({ finishFlush: zlib.constants.Z_SYNC_FLUSH });
+
+    throws(() => zlib.createGzip({ finishFlush: 'foobar' }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+      message:
+        'The "options.finishFlush" property must be of type number. ' +
+        "Received type string ('foobar')",
+    });
+
+    throws(() => zlib.createGzip({ finishFlush: 10000 }), {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+      message:
+        'The value of "options.finishFlush" is out of range. It must ' +
+        'be >= 0 and <= 5. Received 10000',
+    });
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/431ac161e65698152de197703fb30c89da2b6686/test/parallel/test-zlib-reset-before-write.js
+export const zlibResetBeforeWrite = {
+  async test() {
+    // Tests that zlib streams support .reset() and .params()
+    // before the first write. That is important to ensure that
+    // lazy init of zlib native library handles these cases.
+
+    for (const fn of [
+      (z, cb) => {
+        z.reset();
+        cb();
+      },
+      (z, cb) => z.params(0, zlib.constants.Z_DEFAULT_STRATEGY, cb),
+    ]) {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const deflate = zlib.createDeflate();
+      const inflate = zlib.createInflate();
+
+      deflate.pipe(inflate);
+
+      const output = [];
+      inflate
+        .on('error', reject)
+        .on('data', (chunk) => output.push(chunk))
+        .on('end', function () {
+          strictEqual(Buffer.concat(output).toString(), 'abc');
+          resolve();
+        });
+
+      fn(deflate, () => {
+        fn(inflate, () => {
+          deflate.write('abc');
+          deflate.end();
+        });
+      });
+
+      await promise;
+    }
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -874,7 +1028,7 @@ export const zlibZeroByte = {
 // - [ ] test-zlib-truncated.js
 // - [ ] test-zlib-brotli-from-brotli.js
 // - [x] test-zlib-create-raw.js
-// - [ ] test-zlib-flush-flags.js
+// - [x] test-zlib-flush-flags.js
 // - [ ] test-zlib-kmaxlength-rangeerror.js
 // - [ ] test-zlib-unused-weak.js
 // - [ ] test-zlib-brotli-from-string.js
@@ -898,7 +1052,7 @@ export const zlibZeroByte = {
 // - [x] test-zlib-object-write.js
 // - [ ] test-zlib-write-after-flush.js
 // - [x] test-zlib-close-after-error.js
-// - [ ] test-zlib-dictionary-fail.js
+// - [x] test-zlib-dictionary-fail.js
 // - [ ] test-zlib-from-gzip-with-trailing-garbage.js
 // - [ ] test-zlib-params.js
 // - [x] test-zlib-zero-byte.js
@@ -907,11 +1061,11 @@ export const zlibZeroByte = {
 // - [ ] test-zlib-from-string.js
 // - [ ] test-zlib-premature-end.js
 // - [x] test-zlib-zero-windowBits.js
-// - [ ] test-zlib-close-in-ondata.js
+// - [x] test-zlib-close-in-ondata.js
 // - [ ] test-zlib-empty-buffer.js
 // - [ ] test-zlib-invalid-arg-value-brotli-compress.js
 // - [ ] test-zlib-random-byte-pipes.js
 // - [x] test-zlib-const.js
 // - [x] test-zlib-failed-init.js
 // - [ ] test-zlib-invalid-input.js
-// - [ ] test-zlib-reset-before-write.js
+// - [x] test-zlib-reset-before-write.js
