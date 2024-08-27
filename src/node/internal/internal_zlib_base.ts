@@ -3,7 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import { default as zlibUtil, type ZlibOptions } from 'node-internal:zlib';
+import {
+  default as zlibUtil,
+  type ZlibOptions,
+  type BrotliOptions,
+} from 'node-internal:zlib';
 import { Buffer, kMaxLength } from 'node-internal:internal_buffer';
 import {
   checkRangesOrGetDefault,
@@ -13,6 +17,8 @@ import {
   ERR_OUT_OF_RANGE,
   ERR_BUFFER_TOO_LARGE,
   ERR_INVALID_ARG_TYPE,
+  ERR_BROTLI_INVALID_PARAM,
+  ERR_ZLIB_INITIALIZATION_FAILED,
   NodeError,
 } from 'node-internal:internal_errors';
 import { Transform, type DuplexOptions } from 'node-internal:streams_transform';
@@ -21,6 +27,7 @@ import {
   isArrayBufferView,
   isAnyArrayBuffer,
 } from 'node-internal:internal_types';
+import { constants } from 'node-internal:internal_zlib_constants';
 
 // Explicitly import `ok()` to avoid typescript error requiring every name in the call target to
 // be annotated with an explicit type annotation.
@@ -53,8 +60,15 @@ const {
   CONST_BROTLI_DECODE,
   CONST_BROTLI_OPERATION_PROCESS,
   CONST_BROTLI_OPERATION_EMIT_METADATA,
+  CONST_BROTLI_OPERATION_FINISH,
+  CONST_BROTLI_OPERATION_FLUSH,
 } = zlibUtil;
 
+// This type contains all possible handler types.
+type ZlibHandleType =
+  | zlibUtil.ZlibStream
+  | zlibUtil.BrotliEncoder
+  | zlibUtil.BrotliDecoder;
 export const owner_symbol = Symbol('owner');
 
 const FLUSH_BOUND_IDX_NORMAL: number = 0;
@@ -67,7 +81,7 @@ const FLUSH_BOUND: [[number, number], [number, number]] = [
 const kFlushFlag = Symbol('kFlushFlag');
 const kError = Symbol('kError');
 
-function processCallback(this: zlibUtil.ZlibStream): void {
+function processCallback(this: ZlibHandleType): void {
   // This callback's context (`this`) is the `_handle` (ZCtx) object. It is
   // important to null out the values once they are no longer needed since
   // `_handle` can stay in memory long after the buffer is needed.
@@ -186,23 +200,27 @@ for (let i = 0; i < kFlushFlagList.length; i++) {
   flushiness[kFlushFlagList[i] as number] = i;
 }
 
-type BufferWithFlushFlag = Buffer & { [kFlushFlag]: number };
+function maxFlush(a: number, b: number): number {
+  return (flushiness[a] as number) > (flushiness[b] as number) ? a : b;
+}
 
 // Set up a list of 'special' buffers that can be written using .write()
 // from the .flush() code as a way of introducing flushing operations into the
 // write sequence.
-const kFlushBuffers: BufferWithFlushFlag[] = [];
+const kFlushBuffers: (Buffer & { [kFlushFlag]: number })[] = [];
 {
   const dummyArrayBuffer = new ArrayBuffer(0);
   for (const flushFlag of kFlushFlagList) {
-    const buf = Buffer.from(dummyArrayBuffer) as BufferWithFlushFlag;
+    const buf = Buffer.from(dummyArrayBuffer) as Buffer & {
+      [kFlushFlag]: number;
+    };
     buf[kFlushFlag] = flushFlag;
     kFlushBuffers[flushFlag] = buf;
   }
 }
 
 function zlibOnError(
-  this: zlibUtil.ZlibStream,
+  this: ZlibHandleType,
   errno: number,
   code: string,
   message: string
@@ -332,7 +350,7 @@ export class ZlibBase extends Transform {
   public _finishFlushFlag: number;
   public _defaultFullFlushFlag: number;
   public _info: unknown;
-  public _handle: zlibUtil.ZlibStream | null = null;
+  public _handle: ZlibHandleType | null = null;
   public _writeState = new Uint32Array(2);
 
   public [kError]: NodeError | undefined;
@@ -340,7 +358,7 @@ export class ZlibBase extends Transform {
   public constructor(
     opts: ZlibOptions & DuplexOptions,
     mode: number,
-    handle: zlibUtil.ZlibStream,
+    handle: ZlibHandleType,
     { flush, finishFlush, fullFlush }: ZlibDefaultOptions = zlibDefaultOptions
   ) {
     let chunkSize = CONST_Z_DEFAULT_CHUNK;
@@ -544,10 +562,6 @@ export class ZlibBase extends Transform {
   }
 }
 
-function maxFlush(a: number, b: number): number {
-  return (flushiness[a] as number) > (flushiness[b] as number) ? a : b;
-}
-
 export class Zlib extends ZlibBase {
   public _level = CONST_Z_DEFAULT_COMPRESSION;
   public _strategy = CONST_Z_DEFAULT_STRATEGY;
@@ -683,6 +697,72 @@ export class Zlib extends ZlibBase {
       this._level = level;
       this._strategy = strategy;
       callback?.();
+    }
+  }
+}
+
+const kMaxBrotliParam = Math.max(
+  ...Object.entries(constants).map(([key, value]) =>
+    key.startsWith('BROTLI_PARAM_') ? value : 0
+  )
+);
+const brotliInitParamsArray = new Uint32Array(kMaxBrotliParam + 1);
+const brotliDefaultOptions: ZlibDefaultOptions = {
+  flush: CONST_BROTLI_OPERATION_PROCESS,
+  finishFlush: CONST_BROTLI_OPERATION_FINISH,
+  fullFlush: CONST_BROTLI_OPERATION_FLUSH,
+};
+
+export class Brotli extends ZlibBase {
+  public constructor(options: BrotliOptions | undefined | null, mode: number) {
+    ok(mode === CONST_BROTLI_DECODE || mode === CONST_BROTLI_ENCODE);
+    brotliInitParamsArray.fill(-1);
+
+    if (options?.params) {
+      for (const [origKey, value] of Object.entries(options.params)) {
+        const key = +origKey;
+        if (
+          Number.isNaN(key) ||
+          key < 0 ||
+          key > kMaxBrotliParam ||
+          ((brotliInitParamsArray[key] as number) | 0) !== -1
+        ) {
+          throw new ERR_BROTLI_INVALID_PARAM(origKey);
+        }
+
+        if (typeof value !== 'number' && typeof value !== 'boolean') {
+          throw new ERR_INVALID_ARG_TYPE(
+            'options.params[key]',
+            'number',
+            value
+          );
+        }
+        // as number is required to avoid force type coercion on runtime.
+        // boolean has number representation, but typescript doesn't understand it.
+        brotliInitParamsArray[key] = value as number;
+      }
+    }
+
+    const handle =
+      mode === CONST_BROTLI_DECODE
+        ? new zlibUtil.BrotliDecoder(mode)
+        : new zlibUtil.BrotliEncoder(mode);
+
+    const _writeState = new Uint32Array(2);
+    super(options ?? {}, mode, handle, brotliDefaultOptions);
+    this._writeState = _writeState;
+
+    // TODO(addaleax): Sometimes we generate better error codes in C++ land,
+    // e.g. ERR_BROTLI_PARAM_SET_FAILED -- it's hard to access them with
+    // the current bindings setup, though.
+    if (
+      !handle.initialize(
+        brotliInitParamsArray,
+        _writeState,
+        processCallback.bind(handle)
+      )
+    ) {
+      throw new ERR_ZLIB_INITIALIZATION_FAILED();
     }
   }
 }

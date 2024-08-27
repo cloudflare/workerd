@@ -14,6 +14,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
         "@simdutf",
+        "@zlib",
     ],
     visibility = ["//visibility:public"],
     deps = [

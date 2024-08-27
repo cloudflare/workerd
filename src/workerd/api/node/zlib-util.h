@@ -11,13 +11,16 @@
 #include <zlib.h>
 
 #include <kj/array.h>
-#include <kj/compat/brotli.h>
 #include <kj/one-of.h>
 #include <kj/vector.h>
 
-#include <cstdint>
-#include <cstdlib>
+#include <brotli/decode.h>
+#include <brotli/encode.h>
 
+// The following implementation is adapted from Node.js
+// and therefore follows Node.js style as opposed to kj style.
+// Latest implementation of Node.js zlib can be found at:
+// https://github.com/nodejs/node/blob/main/src/node_zlib.cc
 namespace workerd::api::node {
 
 #ifndef ZLIB_ERROR_CODES
@@ -91,6 +94,7 @@ struct CompressionError {
 
 class ZlibContext {
 public:
+  explicit ZlibContext(ZlibMode _mode): mode(_mode) {}
   ZlibContext() = default;
 
   KJ_DISALLOW_COPY(ZlibContext);
@@ -121,6 +125,11 @@ public:
   };
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> getError() const;
+  void setAllocationFunctions(alloc_func alloc, free_func free, void* opaque) {
+    stream.zalloc = alloc;
+    stream.zfree = free;
+    stream.opaque = opaque;
+  }
 
   // Equivalent to Node.js' `DoThreadPoolWork` function.
   // Ref: https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/src/node_zlib.cc#L760
@@ -173,42 +182,72 @@ private:
 
 using CompressionStreamErrorHandler = jsg::Function<void(int, kj::StringPtr, kj::StringPtr)>;
 
-template <typename CompressionContext>
-class CompressionStream {
+class BrotliContext {
 public:
-  CompressionStream() = default;
-  ~CompressionStream() noexcept(false);
-  KJ_DISALLOW_COPY_AND_MOVE(CompressionStream);
-
-  void close();
-  bool checkError(jsg::Lock& js);
-  void emitError(jsg::Lock& js, const CompressionError& error);
-  template <bool async>
-  void writeStream(jsg::Lock& js,
-      int flush,
-      kj::ArrayPtr<kj::byte> input,
+  explicit BrotliContext(ZlibMode _mode): mode(_mode) {}
+  KJ_DISALLOW_COPY(BrotliContext);
+  void setBuffers(kj::ArrayPtr<kj::byte> input,
       uint32_t inputLength,
       kj::ArrayPtr<kj::byte> output,
       uint32_t outputLength);
-  void setErrorHandler(CompressionStreamErrorHandler handler) {
-    errorHandler = kj::mv(handler);
-  };
-  void initializeStream(jsg::BufferSource _write_result, jsg::Function<void()> writeCallback);
-  void updateWriteResult();
+  void setFlush(int flush);
+  void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const;
+  void setMode(ZlibMode _mode) {
+    mode = _mode;
+  }
 
 protected:
-  CompressionContext context;
+  ZlibMode mode;
+  const uint8_t* nextIn = nullptr;
+  uint8_t* nextOut = nullptr;
+  size_t availIn = 0;
+  size_t availOut = 0;
+  BrotliEncoderOperation flush = BROTLI_OPERATION_PROCESS;
+
+  // TODO(addaleax): These should not need to be stored here.
+  // This is currently only done this way to make implementing ResetStream()
+  // easier.
+  brotli_alloc_func alloc_brotli = nullptr;
+  brotli_free_func free_brotli = nullptr;
+  void* alloc_opaque_brotli = nullptr;
+};
+
+class BrotliEncoderContext final: public BrotliContext {
+public:
+  explicit BrotliEncoderContext(ZlibMode _mode);
+
+  void close();
+  // Equivalent to Node.js' `DoThreadPoolWork` implementation.
+  void work();
+  kj::Maybe<CompressionError> initialize(
+      brotli_alloc_func init_alloc_func, brotli_free_func init_free_func, void* init_opaque_func);
+  kj::Maybe<CompressionError> resetStream();
+  kj::Maybe<CompressionError> setParams(int key, uint32_t value);
+  kj::Maybe<CompressionError> getError() const;
 
 private:
-  bool initialized = false;
-  bool writing = false;
-  bool pending_close = false;
-  bool closed = false;
+  bool lastResult = false;
+  kj::Own<BrotliEncoderStateStruct> state;
+};
 
-  // Equivalent to `write_js_callback` in Node.js
-  jsg::Optional<jsg::Function<void()>> writeCallback;
-  jsg::Optional<jsg::BufferSource> writeResult;
-  jsg::Optional<CompressionStreamErrorHandler> errorHandler;
+class BrotliDecoderContext final: public BrotliContext {
+public:
+  explicit BrotliDecoderContext(ZlibMode _mode);
+
+  void close();
+  // Equivalent to Node.js' `DoThreadPoolWork` implementation.
+  void work();
+  kj::Maybe<CompressionError> initialize(
+      brotli_alloc_func init_alloc_func, brotli_free_func init_free_func, void* init_opaque_func);
+  kj::Maybe<CompressionError> resetStream();
+  kj::Maybe<CompressionError> setParams(int key, uint32_t value);
+  kj::Maybe<CompressionError> getError() const;
+
+private:
+  BrotliDecoderResult lastResult = BROTLI_DECODER_RESULT_SUCCESS;
+  BrotliDecoderErrorCode error = BROTLI_DECODER_NO_ERROR;
+  kj::String errorString;
+  kj::Own<BrotliDecoderStateStruct> state;
 };
 
 // Implements utilities in support of the Node.js Zlib
@@ -217,9 +256,86 @@ public:
   ZlibUtil() = default;
   ZlibUtil(jsg::Lock&, const jsg::Url&) {}
 
-  class ZlibStream final: public jsg::Object, public CompressionStream<ZlibContext> {
+  template <class CompressionContext>
+  class CompressionStream: public jsg::Object {
   public:
-    ZlibStream(ZlibMode mode);
+    explicit CompressionStream(ZlibMode _mode): context_(_mode) {}
+    CompressionStream() = default;
+    ~CompressionStream();
+    KJ_DISALLOW_COPY_AND_MOVE(CompressionStream);
+
+    static jsg::Ref<CompressionStream> constructor(ZlibModeValue mode);
+
+    void close();
+    bool checkError(jsg::Lock& js);
+    void emitError(jsg::Lock& js, const CompressionError& error);
+    template <bool async>
+    void writeStream(jsg::Lock& js,
+        int flush,
+        kj::ArrayPtr<kj::byte> input,
+        uint32_t inputLength,
+        kj::ArrayPtr<kj::byte> output,
+        uint32_t outputLength);
+    void setErrorHandler(CompressionStreamErrorHandler handler) {
+      errorHandler = kj::mv(handler);
+    }
+
+    void updateWriteResult();
+
+    template <bool async>
+    void write(jsg::Lock& js,
+        int flush,
+        jsg::Optional<kj::Array<kj::byte>> input,
+        int inputOffset,
+        int inputLength,
+        kj::Array<kj::byte> output,
+        int outputOffset,
+        int outputLength);
+    void reset(jsg::Lock& js);
+
+    JSG_RESOURCE_TYPE(CompressionStream) {
+      JSG_METHOD(close);
+      JSG_METHOD_NAMED(write, template write<true>);
+      JSG_METHOD_NAMED(writeSync, template write<false>);
+      JSG_METHOD(reset);
+      JSG_METHOD(setErrorHandler);
+    }
+
+  protected:
+    CompressionContext* context() {
+      return &context_;
+    }
+
+    void initializeStream(jsg::BufferSource _write_result, jsg::Function<void()> writeCallback);
+
+    // Allocation functions provided to zlib itself. We store the real size of
+    // the allocated memory chunk just before the "payload" memory we return
+    // to zlib.
+    static void* AllocForZlib(void* data, uInt items, uInt size);
+    static void* AllocForBrotli(void* data, size_t size);
+    static void FreeForZlib(void* data, void* pointer);
+
+  private:
+    // Used to store allocations in Brotli* operations.
+    // This declaration should be physically positioned before
+    // context to avoid `heap-use-after-free` ASan error.
+    kj::HashMap<uint8_t*, kj::Array<uint8_t>> allocations;
+
+    CompressionContext context_;
+    bool initialized = false;
+    bool writing = false;
+    bool pending_close = false;
+    bool closed = false;
+
+    // Equivalent to `write_js_callback` in Node.js
+    jsg::Optional<jsg::Function<void()>> writeCallback;
+    jsg::Optional<jsg::BufferSource> writeResult;
+    jsg::Optional<CompressionStreamErrorHandler> errorHandler;
+  };
+
+  class ZlibStream final: public CompressionStream<ZlibContext> {
+  public:
+    explicit ZlibStream(ZlibMode mode): CompressionStream(mode) {}
     KJ_DISALLOW_COPY_AND_MOVE(ZlibStream);
     static jsg::Ref<ZlibStream> constructor(ZlibModeValue mode);
 
@@ -231,57 +347,57 @@ public:
         jsg::BufferSource writeState,
         jsg::Function<void()> writeCallback,
         jsg::Optional<kj::Array<kj::byte>> dictionary);
-    template <bool async>
-    void write_(jsg::Lock& js,
-        int flush,
-        jsg::Optional<kj::Array<kj::byte>> input,
-        int inputOffset,
-        int inputLength,
-        kj::ArrayPtr<kj::byte> output,
-        int outputOffset,
-        int outputLength);
-
-    // TODO(soon): Find a way to expose functions with templates using JSG_METHOD.
-    void write(jsg::Lock& js,
-        int flush,
-        jsg::Optional<kj::Array<kj::byte>> input,
-        int inputOffset,
-        int inputLength,
-        kj::Array<kj::byte> output,
-        int outputOffset,
-        int outputLength);
-    void writeSync(jsg::Lock& js,
-        int flush,
-        jsg::Optional<kj::Array<kj::byte>> input,
-        int inputOffset,
-        int inputLength,
-        kj::Array<kj::byte> output,
-        int outputOffset,
-        int outputLength);
     void params(jsg::Lock& js, int level, int strategy);
-    void reset(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(ZlibStream) {
+      JSG_INHERIT(CompressionStream<ZlibContext>);
+
       JSG_METHOD(initialize);
-      JSG_METHOD(close);
-      JSG_METHOD(write);
-      JSG_METHOD(writeSync);
       JSG_METHOD(params);
-      JSG_METHOD(setErrorHandler);
-      JSG_METHOD(reset);
+    }
+  };
+
+  template <typename CompressionContext>
+  class BrotliCompressionStream: public CompressionStream<CompressionContext> {
+  public:
+    explicit BrotliCompressionStream(ZlibMode _mode)
+        : CompressionStream<CompressionContext>(_mode) {}
+    KJ_DISALLOW_COPY_AND_MOVE(BrotliCompressionStream);
+    static jsg::Ref<BrotliCompressionStream> constructor(ZlibModeValue mode);
+
+    bool initialize(jsg::Lock& js,
+        jsg::BufferSource params,
+        jsg::BufferSource writeResult,
+        jsg::Function<void()> writeCallback);
+
+    void params() {
+      // Currently a no-op, and not accessed from JS land.
+      // At some point Brotli may support changing parameters on the fly,
+      // in which case we can implement this and a JS equivalent similar to
+      // the zlib Params() function.
+    }
+
+    JSG_RESOURCE_TYPE(BrotliCompressionStream) {
+      JSG_INHERIT(CompressionStream<CompressionContext>);
+
+      JSG_METHOD(initialize);
+      JSG_METHOD(params);
+    }
+
+    CompressionContext* context() {
+      return this->CompressionStream<CompressionContext>::context();
     }
   };
 
   struct Options {
     jsg::Optional<int> flush;
     jsg::Optional<int> finishFlush;
-    jsg::Optional<int> chunkSize;
+    jsg::Optional<uint> chunkSize;
     jsg::Optional<kj::uint> windowBits;
     jsg::Optional<int> level;
     jsg::Optional<kj::uint> memLevel;
     jsg::Optional<kj::uint> strategy;
     jsg::Optional<kj::Array<kj::byte>> dictionary;
-    // We'll handle info on the JS side for now
     jsg::Optional<kj::uint> maxOutputLength;
 
     JSG_STRUCT(flush,
@@ -307,9 +423,12 @@ public:
 
   JSG_RESOURCE_TYPE(ZlibUtil) {
     JSG_METHOD_NAMED(crc32, crc32Sync);
-    JSG_NESTED_TYPE(ZlibStream);
     JSG_METHOD(zlibSync);
     JSG_METHOD_NAMED(zlib, zlibWithCallback);
+
+    JSG_NESTED_TYPE(ZlibStream);
+    JSG_NESTED_TYPE_NAMED(BrotliCompressionStream<BrotliEncoderContext>, BrotliEncoder);
+    JSG_NESTED_TYPE_NAMED(BrotliCompressionStream<BrotliDecoderContext>, BrotliDecoder);
 
     // zlib.constants (part of the API contract for node:zlib)
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_NO_FLUSH, Z_NO_FLUSH);
@@ -458,9 +577,19 @@ public:
         BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES);
     JSG_STATIC_CONSTANT_NAMED(
         CONST_BROTLI_DECODER_ERROR_UNREACHABLE, BROTLI_DECODER_ERROR_UNREACHABLE);
-  };
+  }
 };
 
 #define EW_NODE_ZLIB_ISOLATE_TYPES                                                                 \
-  api::node::ZlibUtil, api::node::ZlibUtil::ZlibStream, api::node::ZlibUtil::Options
+  api::node::ZlibUtil, api::node::ZlibUtil::ZlibStream,                                            \
+      api::node::ZlibUtil::BrotliCompressionStream<api::node::BrotliEncoderContext>,               \
+      api::node::ZlibUtil::BrotliCompressionStream<api::node::BrotliDecoderContext>,               \
+      api::node::ZlibUtil::CompressionStream<api::node::ZlibContext>,                              \
+      api::node::ZlibUtil::CompressionStream<api::node::BrotliEncoderContext>,                     \
+      api::node::ZlibUtil::CompressionStream<api::node::BrotliDecoderContext>,                     \
+      api::node::ZlibUtil::Options
+
 }  // namespace workerd::api::node
+
+KJ_DECLARE_NON_POLYMORPHIC(BrotliEncoderStateStruct)
+KJ_DECLARE_NON_POLYMORPHIC(BrotliDecoderStateStruct)

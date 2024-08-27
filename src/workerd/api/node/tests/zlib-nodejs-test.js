@@ -717,8 +717,12 @@ export const testZlibBytesRead = {
     }
 
     // This test is simplified a lot because of test runner limitations.
-    // TODO(soon): Add createBrotliCompress once it is implemented.
-    for (const method of ['createGzip', 'createDeflate', 'createDeflateRaw']) {
+    for (const method of [
+      'createGzip',
+      'createDeflate',
+      'createDeflateRaw',
+      'createBrotliCompress',
+    ]) {
       assert(method in zlib, `${method} is not available in "node:zlib"`);
       const { promise, resolve, reject } = Promise.withResolvers();
       let compData = Buffer.alloc(0);
@@ -823,8 +827,7 @@ export const zlibObjectWrite = {
 // https://github.com/nodejs/node/blob/3a71ccf6c473357e89be61b26739fd9139dce4db/test/parallel/test-zlib-zero-byte.js
 export const zlibZeroByte = {
   async test() {
-    // TODO(soon): Add BrotliCompress once it is implemented
-    for (const Compressor of [zlib.Gzip]) {
+    for (const Compressor of [zlib.Gzip, zlib.BrotliCompress]) {
       const { promise, resolve, reject } = Promise.withResolvers();
       let endCalled = false;
       const gz = new Compressor();
@@ -1020,8 +1023,7 @@ export const zlibInvalidInput = {
       new zlib.Gunzip(),
       new zlib.Inflate(),
       new zlib.InflateRaw(),
-      // TODO(soon): Enable once BrotliDecompress is implemented.
-      // zlib.BrotliDecompress(),
+      new zlib.BrotliDecompress(),
     ];
 
     for (const input of nonStringInputs) {
