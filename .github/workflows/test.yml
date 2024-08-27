@@ -17,9 +17,11 @@ concurrency:
 
 jobs:
   fixup:
+    if: github.event_name == 'pull_request'
     uses: ./.github/workflows/fixup.yml
-  labels:
-   uses: ./.github/workflows/labels.yml 
+  labels:    
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/labels.yml 
   test:
     strategy:
       matrix:
