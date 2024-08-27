@@ -1590,6 +1590,8 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           .then(js,
               ioContext.addFunctor(
                   [this, check, maybeAbort, amountToWrite](jsg::Lock& js) -> jsg::Promise<void> {
+        // Under some conditions, the clean up has already happened.
+        if (queue.empty()) return js.resolvedPromise();
         auto& request = check();
         maybeResolvePromise(js, request.promise);
         decreaseCurrentWriteBufferSize(js, amountToWrite);
@@ -1599,6 +1601,8 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       }),
               ioContext.addFunctor([this, check, maybeAbort, amountToWrite](
                                        jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
+        // Under some conditions, the clean up has already happened.
+        if (queue.empty()) return js.resolvedPromise();
         auto handle = reason.getHandle(js);
         auto& request = check();
         auto& writable = state.get<IoOwn<Writable>>();
@@ -1742,12 +1746,16 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
       return ioContext.awaitIo(js, writable->canceler.wrap(writable->sink->end()))
           .then(js, ioContext.addFunctor([this, check](jsg::Lock& js) {
+        // Under some conditions, the clean up has already happened.
+        if (queue.empty()) return;
         auto& request = check();
         maybeResolvePromise(js, request.promise);
         queue.pop_front();
         finishClose(js);
       }),
               ioContext.addFunctor([this, check](jsg::Lock& js, jsg::Value reason) {
+        // Under some conditions, the clean up has already happened.
+        if (queue.empty()) return;
         auto handle = reason.getHandle(js);
         auto& request = check();
         maybeRejectPromise<void>(js, request.promise, handle);
