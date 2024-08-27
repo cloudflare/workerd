@@ -825,6 +825,41 @@ export const zlibObjectWrite = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/3a71ccf6c473357e89be61b26739fd9139dce4db/test/parallel/test-zlib-zero-byte.js
+export const zlibZeroByte = {
+  async test() {
+    // TODO(soon): Add BrotliCompress once it is implemented
+    for (const Compressor of [zlib.Gzip]) {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      let endCalled = false;
+      const gz = new Compressor();
+      const emptyBuffer = Buffer.alloc(0);
+      let received = 0;
+      gz.on('data', function (c) {
+        received += c.length;
+      });
+
+      gz.on('end', function () {
+        const expected = Compressor === zlib.Gzip ? 20 : 1;
+        assert.strictEqual(
+          received,
+          expected,
+          `${received}, ${expected}, ${Compressor.name}`
+        );
+        endCalled = true;
+      });
+      gz.on('error', reject);
+      gz.on('finish', resolve);
+      gz.write(emptyBuffer);
+      gz.end();
+
+      await promise;
+      assert(endCalled, 'End should have been called');
+    }
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -866,7 +901,7 @@ export const zlibObjectWrite = {
 // - [ ] test-zlib-dictionary-fail.js
 // - [ ] test-zlib-from-gzip-with-trailing-garbage.js
 // - [ ] test-zlib-params.js
-// - [ ] test-zlib-zero-byte.js
+// - [x] test-zlib-zero-byte.js
 // - [ ] test-zlib-close-after-write.js
 // - [ ] test-zlib-dictionary.js
 // - [ ] test-zlib-from-string.js
