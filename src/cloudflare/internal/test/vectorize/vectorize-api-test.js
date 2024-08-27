@@ -58,6 +58,69 @@ export const test_vector_search_vector_query = {
     }
 
     {
+      // with returnValues = unset (false), returnMetadata = false ("none")
+      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+        topK: 3,
+        returnMetadata: false,
+      });
+      assert.equal(true, results.count > 0);
+      /** @type {VectorizeMatches}  */
+      const expected = {
+        matches: [
+          {
+            id: 'b0daca4a-ffd8-4865-926b-e24800af2a2d',
+            score: 0.71151,
+          },
+          {
+            id: 'a44706aa-a366-48bc-8cc1-3feffd87d548',
+            score: 0.68913,
+          },
+          {
+            id: '43cfcb31-07e2-411f-8bf9-f82a95ba8b96',
+            score: 0.94812,
+          },
+        ],
+        count: 3,
+      };
+      assert.deepStrictEqual(results, expected);
+    }
+
+    {
+      // with returnValues = unset (false), returnMetadata = true ("all")
+      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+        topK: 3,
+        returnMetadata: true,
+      });
+      assert.equal(true, results.count > 0);
+      /** @type {VectorizeMatches}  */
+      const expected = {
+        matches: [
+          {
+            id: 'b0daca4a-ffd8-4865-926b-e24800af2a2d',
+            metadata: { text: 'She sells seashells by the seashore' },
+            score: 0.71151,
+          },
+          {
+            id: 'a44706aa-a366-48bc-8cc1-3feffd87d548',
+            metadata: {
+              text: 'Peter Piper picked a peck of pickled peppers',
+            },
+            score: 0.68913,
+          },
+          {
+            id: '43cfcb31-07e2-411f-8bf9-f82a95ba8b96',
+            metadata: {
+              text: 'You know New York, you need New York, you know you need unique New York',
+            },
+            score: 0.94812,
+          },
+        ],
+        count: 3,
+      };
+      assert.deepStrictEqual(results, expected);
+    }
+
+    {
       // with returnValues = unset (false), returnMetadata = unset (none)
       const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
         topK: 3,
