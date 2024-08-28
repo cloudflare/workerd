@@ -11,10 +11,8 @@ namespace workerd::api::pyodide {
 
 const kj::Maybe<jsg::Bundle::Reader> PyodideBundleManager::getPyodideBundle(
     kj::StringPtr version) const {
-  KJ_IF_SOME(t, bundles.lockShared()->find(version)) {
-    return t.bundle;
-  }
-  return kj::none;
+  return bundles.lockShared()->find(version).map(
+      [](const MessageBundlePair& t) { return t.bundle; });
 }
 
 void PyodideBundleManager::setPyodideBundleData(
