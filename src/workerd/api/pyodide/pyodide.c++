@@ -211,4 +211,43 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
   return false;
 }
 
+void PackagePromiseMap::insert(
+    kj::String path, kj::Promise<kj::Own<SmallPackagesTarReader>> promise) {
+  KJ_ASSERT(waitlists.find(kj::str(path)) == kj::none);
+  waitlists.insert(kj::str(path), CrossThreadWaitList());
+
+  promise
+      .then([this, p = kj::mv(path)](auto a) {
+    auto path = kj::str(p);
+    auto maybeWaitlist = waitlists.find(p);
+    KJ_IF_SOME(waitlist, maybeWaitlist) {
+      fetchedPackages.insert(kj::mv(path), kj::mv(a));
+      waitlist.fulfill();
+    } else {
+      JSG_FAIL_REQUIRE(Error, "Failed to get waitlist for package", path);
+    }
+  }).detach([](kj::Exception&& exception) {
+    JSG_FAIL_REQUIRE(Error, "Failed to get package", exception);
+  });
+}
+
+kj::Promise<kj::Own<SmallPackagesTarReader>> PackagePromiseMap::getPromise(kj::StringPtr path) {
+  auto maybeWaitlist = waitlists.find(path);
+
+  KJ_IF_SOME(waitlist, maybeWaitlist) {
+    co_await waitlist.addWaiter();
+    auto maybeEntry = fetchedPackages.findEntry(path);
+    KJ_IF_SOME(entryRef, maybeEntry) {
+      auto entry = fetchedPackages.release(entryRef);
+
+      co_return kj::mv(entry.value);
+    } else {
+      JSG_FAIL_REQUIRE(Error, "Failed to get package when trying to get promise", path);
+    }
+
+  } else {
+    JSG_FAIL_REQUIRE(Error, "Failed to get waitlist for package when trying to get promise", path);
+  }
+}
+
 }  // namespace workerd::api::pyodide

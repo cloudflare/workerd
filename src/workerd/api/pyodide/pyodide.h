@@ -1,5 +1,6 @@
 #pragma once
 
+#include "workerd/util/wait-list.h"
 #include <kj/array.h>
 #include <kj/debug.h>
 #include <kj/common.h>
@@ -187,12 +188,27 @@ struct MemorySnapshotResult {
   JSG_STRUCT(snapshot, importedModulesList);
 };
 
+// Before a Pyodide isolate starts up, all its packages begin loading. This struct provides an
+// interface for the Pyodide startup code to request promises for each package that was loaded.
+class PackagePromiseMap {
+  // This implementation is complex because we're not allowed to store kj::Promises on an object
+  // stored on the V8 heap. Ideally, we'd like to simply store a map from package paths to Promises.
+  // Instead, we store a CrossThreadWaitList and get a new Promise from the waitlist as needed.
+  kj::HashMap<kj::String, kj::Own<SmallPackagesTarReader>> fetchedPackages;
+  kj::HashMap<kj::String, CrossThreadWaitList> waitlists;
+
+public:
+  void insert(kj::String path, kj::Promise<kj::Own<SmallPackagesTarReader>> promise);
+
+  // Note it is explicitly not allowed to call getPromise more than once on the same package
+  // This is because allowing this causes ownership of the SmallPackagesTarReader to be muddied.
+  kj::Promise<kj::Own<SmallPackagesTarReader>> getPromise(kj::StringPtr path);
+};
+
 // A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler: public jsg::Object {
 public:
-  typedef kj::HashMap<kj::String, IoOwn<kj::Promise<kj::Own<SmallPackagesTarReader>>>>
-      PackagePromiseMap;
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
   kj::Own<PackagePromiseMap> loadedPackages;
 
@@ -249,6 +265,10 @@ public:
 
   bool isEnabled() {
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
+  }
+
+  kj::Promise<kj::Own<SmallPackagesTarReader>> getPackage(kj::StringPtr path) {
+    return loadedPackages->getPromise(path);
   }
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
