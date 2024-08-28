@@ -962,6 +962,9 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
         a.getMetrics().receivedWebSocketMessage(size);
       }
 
+      // This should count as a new IO event, so we should call syncTime
+      context.getIoChannelFactory().getTimer().syncTime();
+
       // Re-enter the context with context.run(). This is arguably a bit unusual compared to other
       // I/O which is delivered by return from context.awaitIo(), but the difference here is that we
       // have a long stream of events over time. It makes sense to use context.run() each time a new
