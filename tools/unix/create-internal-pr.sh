@@ -7,7 +7,7 @@ set -euo pipefail
 BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
 SYNC_BRANCH_NAME=sync/$BRANCH_NAME
 
-cd ../edgeworker
+cd $(git rev-parse --show-toplevel)/../edgeworker
 git fetch origin master
 
 if git rev-parse --verify $SYNC_BRANCH_NAME; then
@@ -33,6 +33,7 @@ if [ $BRANCH_EXISTS -eq 1 ]; then
 	git push --no-verify --force origin HEAD
 else
 	git commit --no-verify -m "Sync with $BRANCH_NAME"
-	git push --no-verify origin HEAD 
-	open "https://bitbucket.cfdata.org/projects/EW/repos/edgeworker/pull-requests?create&sourceBranch=refs/heads/$SYNC_BRANCH_NAME"
+	GIT_OUT="$(git push --no-verify origin HEAD 2>&1)"
+	echo "$GIT_OUT"
+	open $(echo "$GIT_OUT" | sed -n '/remote: *http/ s/remote: *\(.*\)/\1/p')
 fi
