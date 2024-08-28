@@ -2578,6 +2578,7 @@ public:
   JsSymbol symbolShared(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsSymbol symbolInternal(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
   JsObject obj() KJ_WARN_UNUSED_RESULT;
+  JsObject objNoProto() KJ_WARN_UNUSED_RESULT;
   JsMap map() KJ_WARN_UNUSED_RESULT;
   JsValue external(void*) KJ_WARN_UNUSED_RESULT;
   JsValue error(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;

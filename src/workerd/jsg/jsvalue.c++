@@ -60,6 +60,12 @@ void JsObject::set(Lock& js, kj::StringPtr name, const JsValue& value) {
   set(js, js.strIntern(name), value);
 }
 
+void JsObject::setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value) {
+  v8::Local<v8::String> nameStr = js.strIntern(name);
+  check(inner->DefineOwnProperty(js.v8Context(), nameStr, value,
+      static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete)));
+}
+
 JsValue JsObject::get(Lock& js, const JsValue& name) {
   return JsValue(check(inner->Get(js.v8Context(), name.inner)));
 }
@@ -133,6 +139,10 @@ JsArray JsObject::previewEntries(bool* isKeyValue) {
 
 void JsObject::recursivelyFreeze(Lock& js) {
   jsg::recursivelyFreeze(js.v8Context(), inner);
+}
+
+void JsObject::seal(Lock& js) {
+  check(inner->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kSealed));
 }
 
 JsObject JsObject::jsonClone(Lock& js) {
@@ -419,6 +429,10 @@ JsRegExp Lock::regexp(kj::StringPtr str, RegExpFlags flags, kj::Maybe<uint32_t> 
 
 JsObject Lock::obj() {
   return JsObject(v8::Object::New(v8Isolate));
+}
+
+JsObject Lock::objNoProto() {
+  return JsObject(v8::Object::New(v8Isolate, v8::Null(v8Isolate), nullptr, nullptr, 0));
 }
 
 JsMap Lock::map() {

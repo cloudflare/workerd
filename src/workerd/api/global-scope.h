@@ -113,6 +113,22 @@ public:
   }
 };
 
+// Exposed as a global to provide access to certain Cloudflare-specific
+// configuration details. This is not a standard API and great care should
+// be taken when deciding to expose new properties or methods here.
+class Cloudflare: public jsg::Object {
+public:
+  // Return an object containing the state of all compatibility flags known to the runtime.
+  jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(Cloudflare) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(compatibilityFlags, getCompatibilityFlags);
+
+    JSG_TS_OVERRIDE({ readonly compatibilityFlags: Record<string, boolean>;
+    });
+  }
+};
+
 class PromiseRejectionEvent: public Event {
 public:
   PromiseRejectionEvent(
@@ -510,6 +526,10 @@ public:
     return jsg::alloc<Performance>();
   }
 
+  jsg::Ref<Cloudflare> getCloudflare() {
+    return jsg::alloc<Cloudflare>();
+  }
+
   // The origin is unknown, return "null" as described in
   // https://html.spec.whatwg.org/multipage/browsers.html#concept-origin-opaque.
   kj::StringPtr getOrigin() {
@@ -573,6 +593,7 @@ public:
     JSG_LAZY_INSTANCE_PROPERTY(caches, getCaches);
     JSG_LAZY_INSTANCE_PROPERTY(scheduler, getScheduler);
     JSG_LAZY_INSTANCE_PROPERTY(performance, getPerformance);
+    JSG_LAZY_INSTANCE_PROPERTY(Cloudflare, getCloudflare);
     JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
 
     JSG_NESTED_TYPE(Event);
@@ -827,6 +848,6 @@ private:
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::PromiseRejectionEvent,           \
-      api::Navigator, api::Performance, api::AlarmInvocationInfo, api::Immediate
+      api::Navigator, api::Performance, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
