@@ -191,7 +191,8 @@ struct MemorySnapshotResult {
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler: public jsg::Object {
 public:
-  typedef kj::HashMap<kj::String, kj::Promise<kj::Own<SmallPackagesTarReader>>> PackagePromiseMap;
+  typedef kj::HashMap<kj::String, IoOwn<kj::Promise<kj::Own<SmallPackagesTarReader>>>>
+      PackagePromiseMap;
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
   kj::Own<PackagePromiseMap> loadedPackages;
 
