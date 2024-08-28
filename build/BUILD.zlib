@@ -1,13 +1,39 @@
 # This config closely follows the original GN build file
 # Ref: https://chromium.googlesource.com/chromium/src/third_party/zlib.git/+/refs/heads/main/BUILD.gn
-# The main difference is that we don't set ZLIB_DLL because it messes things up on Windows
+# The main difference is that we don't set ZLIB_DLL because it messes things up on Windows.
+# Other aspects that are not ported to make this easier to maintain: Support for architectures other
+# than x86_64 or arm64
 
-package(default_visibility = ["//visibility:public"])
+load("@bazel_skylib//lib:selects.bzl", "selects")
 
 zlib_warnings = [
     "-Wno-incompatible-pointer-types",
     "-Wunused-variable",
 ]
+
+selects.config_setting_group(
+    name = "x86_linux",
+    match_all = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
+selects.config_setting_group(
+    name = "x86_macos",
+    match_all = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:macos",
+    ],
+)
+
+selects.config_setting_group(
+    name = "x86_windows",
+    match_all = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+)
 
 cc_library(
     name = "zlib_common_headers",
@@ -23,16 +49,8 @@ cc_library(
         "zutil.h",
     ],
     defines = ["ZLIB_IMPLEMENTATION"],
+    # For zlib to be found using <zlib.h> before system zlib, use this flag for the include to also be added using isystem.
     includes = ["."],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "x86_defines",
-    defines = select({
-        "@platforms//os:windows": ["X86_WINDOWS"],
-        "//conditions:default": ["X86_NOT_WINDOWS"],
-    }),
 )
 
 cc_library(
@@ -48,12 +66,13 @@ cc_library(
     defines = select({
         "@platforms//cpu:x86_64": ["ADLER32_SIMD_SSSE3"],
         "@platforms//cpu:aarch64": ["ADLER32_SIMD_NEON"],
-    }),
-    visibility = ["//visibility:public"],
-    deps = [":zlib_common_headers"] + select({
-        "@platforms//cpu:x86_64": [":x86_defines"],
+    }) + select({
+        ":x86_linux": ["X86_NOT_WINDOWS"],
+        ":x86_macos": ["X86_NOT_WINDOWS"],
+        ":x86_windows": ["X86_WINDOWS"],
         "//conditions:default": [],
     }),
+    deps = [":zlib_common_headers"],
 )
 
 cc_library(
@@ -67,7 +86,10 @@ cc_library(
         "@platforms//os:macos": ["ARMV8_OS_MACOS"],
         "@platforms//os:windows": ["ARMV8_OS_WINDOWS"],
     }),
-    visibility = ["//visibility:public"],
+    target_compatible_with = select({
+        "@platforms//cpu:aarch64": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [":zlib_common_headers"],
 )
 
@@ -90,7 +112,6 @@ cc_library(
             "INFLATE_CHUNK_READ_64LE",
         ],
     }),
-    visibility = ["//visibility:public"],
     deps = [":zlib_common_headers"],
 )
 
@@ -105,10 +126,11 @@ cc_library(
         "-msse4.2",
         "-mpclmul",
     ],
-    defines = select({
-        "@platforms//cpu:x86_64": ["CRC32_SIMD_SSE42_PCLMUL"],
+    defines = ["CRC32_SIMD_SSE42_PCLMUL"],
+    target_compatible_with = select({
+        "@platforms//cpu:x86_64": [],
+        "//conditions:default": ["@platforms//:incompatible"],
     }),
-    visibility = ["//visibility:public"],
     deps = [":zlib_common_headers"],
 )
 
@@ -121,16 +143,7 @@ cc_library(
         "@platforms//cpu:x86_64": ["DEFLATE_SLIDE_HASH_SSE2"],
         "@platforms//cpu:aarch64": ["DEFLATE_SLIDE_HASH_NEON"],
     }),
-    visibility = ["//visibility:public"],
     deps = [":zlib_common_headers"],
-)
-
-filegroup(
-    name = "inflate_c",
-    srcs = [
-        "inflate.c",
-    ],
-    visibility = ["//visibility:public"],
 )
 
 filegroup(
@@ -166,22 +179,12 @@ filegroup(
         "zutil.c",
         "zutil.h",
     ],
-    visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "zlib",
-    srcs = [":zlib_files"] + select({
-        "@platforms//cpu:x86_64": [],
-        "@platforms//cpu:aarch64": [],
-        "//conditions:default": [":inflate_c"],
-    }),
+    srcs = [":zlib_files"],
     copts = zlib_warnings,
-    defines = select({
-        "@platforms//cpu:x86_64": [],
-        "@platforms//cpu:aarch64": [],
-        "//conditions:default": ["CPU_NO_SIMD"],
-    }),
     visibility = ["//visibility:public"],
     deps = [
         ":zlib_adler32_simd",
