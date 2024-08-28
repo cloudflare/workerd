@@ -279,6 +279,7 @@ public:
     JSG_METHOD(isEwValidating);
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
+    JSG_METHOD(getPackage);
   }
 
 private:
