@@ -4,15 +4,18 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/exception.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/buffersource.h>
+
 #include <zlib.h>
 
 #include <kj/array.h>
 #include <kj/compat/brotli.h>
+#include <kj/one-of.h>
 #include <kj/vector.h>
 
+#include <cstdint>
 #include <cstdlib>
 
 namespace workerd::api::node {
@@ -70,6 +73,9 @@ enum class ZlibMode : ZlibModeValue {
   BROTLI_ENCODE
 };
 
+// When possible, we intentionally override chunkSize to a value that is likely to perform better
+static constexpr auto ZLIB_PERFORMANT_CHUNK_SIZE = 40 * 1024;
+
 struct CompressionError {
   CompressionError(kj::StringPtr _message, kj::StringPtr _code, int _err)
       : message(kj::str(_message)),
@@ -83,7 +89,7 @@ struct CompressionError {
   int err;
 };
 
-class ZlibContext final {
+class ZlibContext {
 public:
   ZlibContext() = default;
 
@@ -94,6 +100,10 @@ public:
       uint32_t inputLength,
       kj::ArrayPtr<kj::byte> output,
       uint32_t outputLength);
+
+  void setInputBuffer(kj::ArrayPtr<kj::byte> input);
+  void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
+
   int getFlush() const {
     return flush;
   };
@@ -262,11 +272,44 @@ public:
     }
   };
 
-  uint32_t crc32Sync(kj::Array<kj::byte> data, uint32_t value);
+  struct Options {
+    jsg::Optional<int> flush;
+    jsg::Optional<int> finishFlush;
+    jsg::Optional<int> chunkSize;
+    jsg::Optional<kj::uint> windowBits;
+    jsg::Optional<int> level;
+    jsg::Optional<kj::uint> memLevel;
+    jsg::Optional<kj::uint> strategy;
+    jsg::Optional<kj::Array<kj::byte>> dictionary;
+    // We'll handle info on the JS side for now
+    jsg::Optional<kj::uint> maxOutputLength;
+
+    JSG_STRUCT(flush,
+        finishFlush,
+        chunkSize,
+        windowBits,
+        level,
+        memLevel,
+        strategy,
+        dictionary,
+        maxOutputLength);
+  };
+
+  using InputSource = kj::OneOf<jsg::NonCoercible<kj::String>, kj::Array<kj::byte>>;
+  using CompressCallback =
+      jsg::Function<void(jsg::Optional<kj::StringPtr>, jsg::Optional<kj::Array<kj::byte>>)>;
+
+  static kj::ArrayPtr<kj::byte> getInputFromSource(InputSource& data);
+  uint32_t crc32Sync(InputSource data, uint32_t value);
+  void zlibWithCallback(
+      jsg::Lock& js, InputSource data, Options options, ZlibModeValue mode, CompressCallback cb);
+  kj::Array<kj::byte> zlibSync(InputSource data, Options options, ZlibModeValue mode);
 
   JSG_RESOURCE_TYPE(ZlibUtil) {
     JSG_METHOD_NAMED(crc32, crc32Sync);
     JSG_NESTED_TYPE(ZlibStream);
+    JSG_METHOD(zlibSync);
+    JSG_METHOD_NAMED(zlib, zlibWithCallback);
 
     // zlib.constants (part of the API contract for node:zlib)
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_NO_FLUSH, Z_NO_FLUSH);
@@ -308,6 +351,7 @@ public:
         CONST_BROTLI_DECODE, static_cast<ZlibModeValue>(ZlibMode::BROTLI_DECODE));
     JSG_STATIC_CONSTANT_NAMED(
         CONST_BROTLI_ENCODE, static_cast<ZlibModeValue>(ZlibMode::BROTLI_ENCODE));
+
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_MIN_WINDOWBITS, Z_MIN_WINDOWBITS);
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_MAX_WINDOWBITS, Z_MAX_WINDOWBITS);
     JSG_STATIC_CONSTANT_NAMED(CONST_Z_DEFAULT_WINDOWBITS, Z_DEFAULT_WINDOWBITS);
@@ -417,6 +461,6 @@ public:
   };
 };
 
-#define EW_NODE_ZLIB_ISOLATE_TYPES api::node::ZlibUtil, api::node::ZlibUtil::ZlibStream
-
+#define EW_NODE_ZLIB_ISOLATE_TYPES                                                                 \
+  api::node::ZlibUtil, api::node::ZlibUtil::ZlibStream, api::node::ZlibUtil::Options
 }  // namespace workerd::api::node
