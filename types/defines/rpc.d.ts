@@ -204,9 +204,11 @@ declare module "cloudflare:workers" {
     | "month"
     | "year";
 
-  export type WorkflowSleepDuration = `${number} ${WorkflowDurationLabel}${"s" | ""}` | number;
+  export type WorkflowSleepDuration =
+    | `${number} ${WorkflowDurationLabel}${"s" | ""}`
+    | number;
 
-  export type WorkflowBackoff = 'constant' | 'linear' | 'exponential';
+  export type WorkflowBackoff = "constant" | "linear" | "exponential";
 
   export type WorkflowStepConfig = {
     retries?: {
@@ -217,13 +219,21 @@ declare module "cloudflare:workers" {
     timeout?: string | number;
   };
 
+  export type WorkflowEvent<T> = {
+    payload: T;
+    timestamp: Date;
+  };
+
   export type WorkflowStep = {
     do: <T extends Rpc.Serializable>(
       name: string,
       callback: () => Promise<T>,
-	    config?: WorkflowStepConfig,
+      config?: WorkflowStepConfig
     ) => Promise<T>;
-    sleep: (name: string, duration: WorkflowSleepDuration) => void | Promise<void>;
+    sleep: (
+      name: string,
+      duration: WorkflowSleepDuration
+    ) => void | Promise<void>;
   };
 
   export abstract class Workflow<
@@ -236,12 +246,6 @@ declare module "cloudflare:workers" {
     protected ctx: ExecutionContext;
     protected env: Env;
 
-    run(
-      events: Array<{
-        payload: T;
-        timestamp: Date;
-      }>,
-      step: WorkflowStep
-    ): Promise<unknown>;
+    run(events: Array<WorkflowEvent<T>>, step: WorkflowStep): Promise<unknown>;
   }
 }
