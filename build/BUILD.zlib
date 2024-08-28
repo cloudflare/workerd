@@ -35,6 +35,30 @@ selects.config_setting_group(
     ],
 )
 
+selects.config_setting_group(
+    name = "arm64_linux",
+    match_all = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:linux",
+    ],
+)
+
+selects.config_setting_group(
+    name = "arm64_macos",
+    match_all = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:macos",
+    ],
+)
+
+selects.config_setting_group(
+    name = "arm64_windows",
+    match_all = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:windows",
+    ],
+)
+
 cc_library(
     name = "zlib_common_headers",
     hdrs = [
@@ -48,9 +72,9 @@ cc_library(
         "zlib.h",
         "zutil.h",
     ],
-    defines = ["ZLIB_IMPLEMENTATION"],
     # For zlib to be found using <zlib.h> before system zlib, use this flag for the include to also be added using isystem.
     includes = ["."],
+    local_defines = ["ZLIB_IMPLEMENTATION"],
 )
 
 cc_library(
@@ -63,7 +87,7 @@ cc_library(
         "@platforms//cpu:x86_64": ["-mssse3"],
         "//conditions:default": [],
     }),
-    defines = select({
+    local_defines = ["ZLIB_IMPLEMENTATION"] + select({
         "@platforms//cpu:x86_64": ["ADLER32_SIMD_SSSE3"],
         "@platforms//cpu:aarch64": ["ADLER32_SIMD_NEON"],
     }) + select({
@@ -81,7 +105,10 @@ cc_library(
         "crc32_simd.c",
         "crc32_simd.h",
     ],
-    defines = ["CRC32_ARMV8_CRC32"] + select({
+    local_defines = [
+        "CRC32_ARMV8_CRC32",
+        "ZLIB_IMPLEMENTATION",
+    ] + select({
         "@platforms//os:linux": ["ARMV8_OS_LINUX"],
         "@platforms//os:macos": ["ARMV8_OS_MACOS"],
         "@platforms//os:windows": ["ARMV8_OS_WINDOWS"],
@@ -102,14 +129,15 @@ cc_library(
         "contrib/optimizations/inflate.c",
     ],
     copts = zlib_warnings,
-    defines = select({
+    local_defines = [
+        "INFLATE_CHUNK_READ_64LE",
+        "ZLIB_IMPLEMENTATION",
+    ] + select({
         "@platforms//cpu:x86_64": [
             "INFLATE_CHUNK_SIMD_SSE2",
-            "INFLATE_CHUNK_READ_64LE",
         ],
         "@platforms//cpu:aarch64": [
             "INFLATE_CHUNK_SIMD_NEON",
-            "INFLATE_CHUNK_READ_64LE",
         ],
     }),
     deps = [":zlib_common_headers"],
@@ -126,7 +154,10 @@ cc_library(
         "-msse4.2",
         "-mpclmul",
     ],
-    defines = ["CRC32_SIMD_SSE42_PCLMUL"],
+    local_defines = [
+        "CRC32_SIMD_SSE42_PCLMUL",
+        "ZLIB_IMPLEMENTATION",
+    ],
     target_compatible_with = select({
         "@platforms//cpu:x86_64": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -139,7 +170,9 @@ cc_library(
     srcs = [
         "slide_hash_simd.h",
     ],
-    defines = select({
+    # This target is header only so these are not needed to compile correctly, but still useful for
+    # header parsing (i.e. parse_headers feature).
+    local_defines = ["ZLIB_IMPLEMENTATION"] + select({
         "@platforms//cpu:x86_64": ["DEFLATE_SLIDE_HASH_SSE2"],
         "@platforms//cpu:aarch64": ["DEFLATE_SLIDE_HASH_NEON"],
     }),
@@ -185,6 +218,28 @@ cc_library(
     name = "zlib",
     srcs = [":zlib_files"],
     copts = zlib_warnings,
+    # Duplicate definitions here since we want to avoid non-local defines, some of them are needed
+    # here. This excludes INFLATE_CHUNK_* which is only needed in zlib_inflate_chunk_simd.
+    local_defines = ["ZLIB_IMPLEMENTATION"] + select({
+        "@platforms//cpu:x86_64": [
+            "ADLER32_SIMD_SSSE3",
+            "CRC32_SIMD_SSE42_PCLMUL",
+            "DEFLATE_SLIDE_HASH_SSE2",
+        ],
+        "@platforms//cpu:aarch64": [
+            "ADLER32_SIMD_NEON",
+            "CRC32_ARMV8_CRC32",
+            "DEFLATE_SLIDE_HASH_NEON",
+        ],
+    }) + select({
+        ":x86_linux": ["X86_NOT_WINDOWS"],
+        ":x86_macos": ["X86_NOT_WINDOWS"],
+        ":x86_windows": ["X86_WINDOWS"],
+        ":arm64_linux": ["ARMV8_OS_LINUX"],
+        "arm64_macos": ["ARMV8_OS_MACOS"],
+        "arm64_windows": ["ARMV8_OS_WINDOWS"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":zlib_adler32_simd",
