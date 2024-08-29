@@ -151,6 +151,7 @@ public:
       const ActorIdFactory::ActorId& id,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
+      bool enableReplicaRouting,
       SpanParent parentSpan) = 0;
 
   // Get an actor stub from the given namespace for the actor with the given name.

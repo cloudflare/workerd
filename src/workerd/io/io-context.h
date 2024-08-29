@@ -721,9 +721,10 @@ public:
       const ActorIdFactory::ActorId& id,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
+      bool enableReplicaRouting,
       SpanParent parentSpan) {
     return getIoChannelFactory().getGlobalActor(
-        channel, id, kj::mv(locationHint), mode, kj::mv(parentSpan));
+        channel, id, kj::mv(locationHint), mode, enableReplicaRouting, kj::mv(parentSpan));
   }
   kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(
       uint channel, kj::StringPtr id, SpanParent parentSpan) {

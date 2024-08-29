@@ -53,11 +53,13 @@ public:
   GlobalActorOutgoingFactory(uint channelId,
       jsg::Ref<DurableObjectId> id,
       kj::Maybe<kj::String> locationHint,
-      ActorGetMode mode)
+      ActorGetMode mode,
+      bool enableReplicaRouting)
       : channelId(channelId),
         id(kj::mv(id)),
         locationHint(kj::mv(locationHint)),
-        mode(mode) {}
+        mode(mode),
+        enableReplicaRouting(enableReplicaRouting) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
@@ -71,7 +73,7 @@ public:
       // Lazily initialize actorChannel
       if (actorChannel == kj::none) {
         actorChannel = context.getGlobalActorChannel(
-            channelId, id->getInner(), kj::mv(locationHint), mode, span);
+            channelId, id->getInner(), kj::mv(locationHint), mode, enableReplicaRouting, span);
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)
@@ -87,6 +89,7 @@ private:
   jsg::Ref<DurableObjectId> id;
   kj::Maybe<kj::String> locationHint;
   ActorGetMode mode;
+  bool enableReplicaRouting;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
@@ -147,8 +150,10 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
     locationHint = kj::mv(o.locationHint);
   }
 
-  auto outgoingFactory = context.addObject<Fetcher::OutgoingFactory>(
-      kj::heap<GlobalActorOutgoingFactory>(channel, id.addRef(), kj::mv(locationHint), mode));
+  bool enableReplicaRouting = FeatureFlags::get(js).getReplicaRouting();
+  auto outgoingFactory =
+      context.addObject<Fetcher::OutgoingFactory>(kj::heap<GlobalActorOutgoingFactory>(
+          channel, id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting));
   auto requiresHost = FeatureFlags::get(js).getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
