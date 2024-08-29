@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 from argparse import ArgumentParser, Namespace
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from sys import exit
@@ -203,13 +204,23 @@ FORMATTERS = [
 ]
 
 
-def format(config: FormatConfig, files: list[Path], check: bool) -> bool:
+def format(config: FormatConfig, files: list[Path], check: bool) -> tuple[bool, str]:
     matching_files = filter_files_by_globs(files, Path(config.directory), config.globs)
 
     if not matching_files:
-        return True
+        return (
+            True,
+            f"No matching files for {config.directory} ({', '.join(config.globs)})",
+        )
 
-    return config.formatter(matching_files, check)
+    result = config.formatter(matching_files, check)
+    message = (
+        f"{len(matching_files)} files in {config.directory} ({', '.join(config.globs)})"
+    )
+    return (
+        result,
+        f"{'Checked' if check else 'Formatted'} {message}",
+    )
 
 
 def main() -> None:
@@ -222,8 +233,22 @@ def main() -> None:
 
     all_ok = True
 
-    for config in FORMATTERS:
-        all_ok &= format(config, files, options.check)
+    with ThreadPoolExecutor() as executor:
+        future_to_config = {
+            executor.submit(format, config, files, options.check): config
+            for config in FORMATTERS
+        }
+        for future in as_completed(future_to_config):
+            config = future_to_config[future]
+            try:
+                result, message = future.result()
+                all_ok &= result
+                logging.info(message)
+            except Exception:
+                logging.exception(
+                    f"Formatter for {config.directory} generated an exception"
+                )
+                all_ok = False
 
     if not all_ok:
         logging.error(
