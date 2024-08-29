@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # This tool will open a PR to update workerd in Cloudflare's internal repository
 # to match the current branch.
 
