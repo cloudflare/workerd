@@ -90,9 +90,7 @@ export function unzipSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
 ): Buffer {
-  return Buffer.from(
-    zlibUtil.zlibSync(data, options, zlibUtil.CONST_DEFLATERAW)
-  );
+  return Buffer.from(zlibUtil.zlibSync(data, options, zlibUtil.CONST_UNZIP));
 }
 
 function normalizeArgs(

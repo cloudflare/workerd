@@ -1,10 +1,8 @@
-import {
-  strictEqual,
-  throws,
-  deepStrictEqual,
-  ok as assert,
-} from 'node:assert';
+import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
+import { Readable } from 'node:stream';
+import { inspect, promisify } from 'node:util';
+import { mock } from 'node:test';
 import zlib from 'node:zlib';
 
 // The following test data comes from
@@ -213,24 +211,24 @@ export const crc32Test = {
         continue;
       }
       const buf = Buffer.from(data, 'utf8');
-      strictEqual(buf.length, len);
-      strictEqual(
+      assert.strictEqual(buf.length, len);
+      assert.strictEqual(
         zlib.crc32(buf, crc),
         expected,
         `crc32('${data}', ${crc}) in buffer is not ${expected}`
       );
-      strictEqual(
+      assert.strictEqual(
         zlib.crc32(buf.toString(), crc),
         expected,
         `crc32('${data}', ${crc}) in string is not ${expected}`
       );
       if (crc === 0) {
-        strictEqual(
+        assert.strictEqual(
           zlib.crc32(buf),
           expected,
           `crc32('${data}') in buffer is not ${expected}`
         );
-        strictEqual(
+        assert.strictEqual(
           zlib.crc32(buf.toString()),
           expected,
           `crc32('${data}') in string is not ${expected}`
@@ -238,26 +236,26 @@ export const crc32Test = {
       }
     }
 
-    [undefined, null, true, 1, () => {}, {}].forEach((invalid) => {
-      throws(() => {
+    for (const invalid of [undefined, null, true, 1, () => {}, {}]) {
+      assert.throws(() => {
         zlib.crc32(invalid);
       }, new TypeError("Failed to execute 'crc32' on 'ZlibUtil': parameter 1 is not of type 'string or ArrayBuffer or ArrayBufferView'."));
-    });
+    }
 
-    [null, true, () => {}, {}].forEach((invalid) => {
-      throws(
+    for (const invalid of [null, true, () => {}, {}]) {
+      assert.throws(
         () => {
           zlib.crc32('test', invalid);
         },
         { code: 'ERR_INVALID_ARG_TYPE' }
       );
-    });
+    }
   },
 };
 
 export const constantsTest = {
   test() {
-    deepStrictEqual(Object.keys(zlib.constants).sort(), [
+    assert.deepStrictEqual(Object.keys(zlib.constants).sort(), [
       'BROTLI_DECODE',
       'BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES',
       'BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MAP',
@@ -391,7 +389,7 @@ export const testZeroWindowBits = {
       assert(unzip instanceof zlib.Unzip);
     }
 
-    throws(() => zlib.createGzip({ windowBits: 0 }), {
+    assert.throws(() => zlib.createGzip({ windowBits: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
@@ -422,101 +420,101 @@ export const testDeflateConstructors = {
     assert(new zlib.DeflateRaw() instanceof zlib.DeflateRaw);
 
     // Throws if `options.chunkSize` is invalid
-    throws(() => new zlib.Deflate({ chunkSize: 'test' }), {
+    assert.throws(() => new zlib.Deflate({ chunkSize: 'test' }), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
 
-    throws(() => new zlib.Deflate({ chunkSize: -Infinity }), {
+    assert.throws(() => new zlib.Deflate({ chunkSize: -Infinity }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate({ chunkSize: 0 }), {
+    assert.throws(() => new zlib.Deflate({ chunkSize: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
     // Throws if `options.windowBits` is invalid
-    throws(() => new zlib.Deflate({ windowBits: 'test' }), {
+    assert.throws(() => new zlib.Deflate({ windowBits: 'test' }), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
 
-    throws(() => new zlib.Deflate({ windowBits: -Infinity }), {
+    assert.throws(() => new zlib.Deflate({ windowBits: -Infinity }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate({ windowBits: Infinity }), {
+    assert.throws(() => new zlib.Deflate({ windowBits: Infinity }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate({ windowBits: 0 }), {
+    assert.throws(() => new zlib.Deflate({ windowBits: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
     // Throws if `options.level` is invalid
-    throws(() => new zlib.Deflate({ level: 'test' }), {
+    assert.throws(() => new zlib.Deflate({ level: 'test' }), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
 
-    throws(() => new zlib.Deflate({ level: -Infinity }), {
+    assert.throws(() => new zlib.Deflate({ level: -Infinity }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate({ level: Infinity }), {
+    assert.throws(() => new zlib.Deflate({ level: Infinity }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate({ level: -2 }), {
+    assert.throws(() => new zlib.Deflate({ level: -2 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
     // Throws if `level` invalid in  `Deflate.prototype.params()`
-    throws(() => new zlib.Deflate().params('test'), {
+    assert.throws(() => new zlib.Deflate().params('test'), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
 
-    throws(() => new zlib.Deflate().params(-Infinity), {
+    assert.throws(() => new zlib.Deflate().params(-Infinity), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate().params(Infinity), {
+    assert.throws(() => new zlib.Deflate().params(Infinity), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate().params(-2), {
+    assert.throws(() => new zlib.Deflate().params(-2), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
     // Throws if options.memLevel is invalid
-    throws(() => new zlib.Deflate({ memLevel: 'test' }), {
+    assert.throws(() => new zlib.Deflate({ memLevel: 'test' }), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
 
-    throws(() => new zlib.Deflate({ memLevel: -Infinity }), {
+    assert.throws(() => new zlib.Deflate({ memLevel: -Infinity }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate({ memLevel: Infinity }), {
+    assert.throws(() => new zlib.Deflate({ memLevel: Infinity }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate({ memLevel: -2 }), {
+    assert.throws(() => new zlib.Deflate({ memLevel: -2 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
@@ -529,49 +527,49 @@ export const testDeflateConstructors = {
     new zlib.Deflate({ strategy: zlib.constants.Z_DEFAULT_STRATEGY });
 
     // Throws if options.strategy is invalid
-    throws(() => new zlib.Deflate({ strategy: 'test' }), {
+    assert.throws(() => new zlib.Deflate({ strategy: 'test' }), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
 
-    throws(() => new zlib.Deflate({ strategy: -Infinity }), {
+    assert.throws(() => new zlib.Deflate({ strategy: -Infinity }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate({ strategy: Infinity }), {
+    assert.throws(() => new zlib.Deflate({ strategy: Infinity }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate({ strategy: -2 }), {
+    assert.throws(() => new zlib.Deflate({ strategy: -2 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
     // Throws TypeError if `strategy` is invalid in `Deflate.prototype.params()`
-    throws(() => new zlib.Deflate().params(0, 'test'), {
+    assert.throws(() => new zlib.Deflate().params(0, 'test'), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
 
-    throws(() => new zlib.Deflate().params(0, -Infinity), {
+    assert.throws(() => new zlib.Deflate().params(0, -Infinity), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate().params(0, Infinity), {
+    assert.throws(() => new zlib.Deflate().params(0, Infinity), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => new zlib.Deflate().params(0, -2), {
+    assert.throws(() => new zlib.Deflate().params(0, -2), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
     // Throws if opts.dictionary is not a Buffer
-    throws(() => new zlib.Deflate({ dictionary: 'not a buffer' }), {
+    assert.throws(() => new zlib.Deflate({ dictionary: 'not a buffer' }), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
@@ -582,29 +580,29 @@ export const testDeflateConstructors = {
 // https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-failed-init.js
 export const testFailedInit = {
   test() {
-    throws(() => zlib.createGzip({ chunkSize: 0 }), {
+    assert.throws(() => zlib.createGzip({ chunkSize: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => zlib.createGzip({ windowBits: 0 }), {
+    assert.throws(() => zlib.createGzip({ windowBits: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
-    throws(() => zlib.createGzip({ memLevel: 0 }), {
+    assert.throws(() => zlib.createGzip({ memLevel: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
     });
 
     {
       const stream = zlib.createGzip({ level: NaN });
-      strictEqual(stream._level, zlib.constants.Z_DEFAULT_COMPRESSION);
+      assert.strictEqual(stream._level, zlib.constants.Z_DEFAULT_COMPRESSION);
     }
 
     {
       const stream = zlib.createGzip({ strategy: NaN });
-      strictEqual(stream._strategy, zlib.constants.Z_DEFAULT_STRATEGY);
+      assert.strictEqual(stream._strategy, zlib.constants.Z_DEFAULT_STRATEGY);
     }
   },
 };
@@ -619,7 +617,7 @@ export const zlibDestroyTest = {
     {
       const ts = zlib.createGzip();
       ts.destroy();
-      strictEqual(ts._handle, null);
+      assert.strictEqual(ts._handle, null);
 
       const { promise, resolve, reject } = Promise.withResolvers();
       promises.push(promise);
@@ -640,7 +638,7 @@ export const zlibDestroyTest = {
       decompress.on('error', (err) => {
         errorCount++;
         decompress.close();
-        strictEqual(errorCount, 1, 'Error should only be emitted once');
+        assert.strictEqual(errorCount, 1, 'Error should only be emitted once');
         resolve();
       });
 
@@ -662,11 +660,11 @@ export const closeAfterError = {
 
     decompress.on('error', () => {
       errorHasBeenCalled = true;
-      strictEqual(decompress._closed, true);
+      assert.strictEqual(decompress._closed, true);
       decompress.close();
     });
 
-    strictEqual(decompress._closed, false);
+    assert.strictEqual(decompress._closed, false);
     decompress.write('something invalid');
     decompress.on('close', resolve);
 
@@ -678,24 +676,23 @@ export const closeAfterError = {
 
 // Tests are taken from:
 // https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-write-after-close.js
-// TODO(soon): Enable the test once `gzip` implementation lands.
-// export const writeAfterClose = {
-//   async test() {
-//     const { promise, resolve } = Promise.withResolvers();
-//     let closeCalled = false;
-//     zlib.gzip('hello', function (err, out) {
-//       const unzip = zlib.createGunzip();
-//       unzip.close(() => (closeCalled = true));
-//       unzip.write('asd', (err) => {
-//         strictEqual(err.code, 'ERR_STREAM_DESTROYED');
-//         strictEqual(err.name, 'Error');
-//         resolve();
-//       });
-//     });
-//     await promise;
-//     assert(closeCalled, 'Close should have been called');
-//   },
-// };
+export const writeAfterClose = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    let close = mock.fn();
+    zlib.gzip('hello', function (err, out) {
+      const unzip = zlib.createGunzip();
+      unzip.close(close);
+      unzip.write('asd', (err) => {
+        assert.strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+        assert.strictEqual(err.name, 'Error');
+        resolve();
+      });
+    });
+    await promise;
+    assert.strictEqual(close.mock.callCount(), 1);
+  },
+};
 
 // Tests are taken from:
 // https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/test/parallel/test-zlib-bytes-read.js
@@ -729,7 +726,7 @@ export const testZlibBytesRead = {
       const compWriter = createWriter(comp, expectBuf);
       comp.on('data', function (d) {
         compData = Buffer.concat([compData, d]);
-        strictEqual(
+        assert.strictEqual(
           this.bytesWritten,
           compWriter.size,
           `Should get write size on ${method} data.`
@@ -737,12 +734,12 @@ export const testZlibBytesRead = {
       });
       comp.on('error', reject);
       comp.on('end', function () {
-        strictEqual(
+        assert.strictEqual(
           this.bytesWritten,
           compWriter.size,
           `Should get write size on ${method} end.`
         );
-        strictEqual(
+        assert.strictEqual(
           this.bytesWritten,
           expectStr.length,
           `Should get data size on ${method} end.`
@@ -760,23 +757,23 @@ export const testZlibBytesRead = {
 // https://github.com/nodejs/node/blob/3a71ccf6c473357e89be61b26739fd9139dce4db/test/parallel/test-zlib-const.js
 export const zlibConst = {
   test() {
-    strictEqual(zlib.constants.Z_OK, 0, 'Expected Z_OK to be 0');
-    throws(() => {
+    assert.strictEqual(zlib.constants.Z_OK, 0, 'Expected Z_OK to be 0');
+    assert.throws(() => {
       zlib.constants.Z_OK = 1;
     }, /Cannot assign to read only property/);
-    strictEqual(zlib.constants.Z_OK, 0, 'Z_OK should be immutable');
-    strictEqual(
+    assert.strictEqual(zlib.constants.Z_OK, 0, 'Z_OK should be immutable');
+    assert.strictEqual(
       zlib.codes.Z_OK,
       0,
       `Expected Z_OK to be 0; got ${zlib.codes.Z_OK}`
     );
-    throws(() => {
+    assert.throws(() => {
       zlib.codes.Z_OK = 1;
     }, /Cannot assign to read only property/);
-    strictEqual(zlib.codes.Z_OK, 0, 'Z_OK should be immutable');
+    assert.strictEqual(zlib.codes.Z_OK, 0, 'Z_OK should be immutable');
     assert(Object.isFrozen(zlib.codes), 'Expected zlib.codes to be frozen');
 
-    deepStrictEqual(zlib.codes, {
+    assert.deepStrictEqual(zlib.codes, {
       '-1': 'Z_ERRNO',
       '-2': 'Z_STREAM_ERROR',
       '-3': 'Z_DATA_ERROR',
@@ -807,7 +804,7 @@ export const zlibObjectWrite = {
     const { promise, resolve, reject } = Promise.withResolvers();
     const gunzip = new zlib.Gunzip({ objectMode: true });
     gunzip.on('error', reject);
-    throws(
+    assert.throws(
       () => {
         gunzip.write({});
       },
@@ -933,7 +930,7 @@ export const zlibFlushFlags = {
   test() {
     zlib.createGzip({ flush: zlib.constants.Z_SYNC_FLUSH });
 
-    throws(() => zlib.createGzip({ flush: 'foobar' }), {
+    assert.throws(() => zlib.createGzip({ flush: 'foobar' }), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
       message:
@@ -941,7 +938,7 @@ export const zlibFlushFlags = {
         "Received type string ('foobar')",
     });
 
-    throws(() => zlib.createGzip({ flush: 10000 }), {
+    assert.throws(() => zlib.createGzip({ flush: 10000 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
       message:
@@ -951,7 +948,7 @@ export const zlibFlushFlags = {
 
     zlib.createGzip({ finishFlush: zlib.constants.Z_SYNC_FLUSH });
 
-    throws(() => zlib.createGzip({ finishFlush: 'foobar' }), {
+    assert.throws(() => zlib.createGzip({ finishFlush: 'foobar' }), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
       message:
@@ -959,7 +956,7 @@ export const zlibFlushFlags = {
         "Received type string ('foobar')",
     });
 
-    throws(() => zlib.createGzip({ finishFlush: 10000 }), {
+    assert.throws(() => zlib.createGzip({ finishFlush: 10000 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
       message:
@@ -995,7 +992,7 @@ export const zlibResetBeforeWrite = {
         .on('error', reject)
         .on('data', (chunk) => output.push(chunk))
         .on('end', function () {
-          strictEqual(Buffer.concat(output).toString(), 'abc');
+          assert.strictEqual(Buffer.concat(output).toString(), 'abc');
           resolve();
         });
 
@@ -1054,33 +1051,474 @@ export const zlibInvalidInput = {
 // https://github.com/nodejs/node/blob/5e6aab0ecad6394e538e06357d6e16e155951a8b/test/parallel/test-zlib-unzip-one-byte-chunks.js
 export const zlibUnzipOneByteChunks = {
   async test() {
-    // TODO(soon): Enable this once zlib.gzipSync is implemented.
-    // const { promise, resolve, reject } = Promise.withResolvers();
-    // const data = Buffer.concat([zlib.gzipSync('abc'), zlib.gzipSync('def')]);
-    //
-    // const resultBuffers = [];
-    //
-    // const unzip = zlib
-    //   .createUnzip()
-    //   .on('error', reject)
-    //   .on('data', (data) => resultBuffers.push(data))
-    //   .on('finish', function () {
-    //     const unzipped = Buffer.concat(resultBuffers).toString();
-    //     strictEqual(
-    //       unzipped,
-    //       'abcdef',
-    //       `'${unzipped}' should match 'abcdef' after zipping ` + 'and unzipping'
-    //     );
-    //     resolve();
-    //   });
-    //
-    // for (let i = 0; i < data.length; i++) {
-    //   // Write each single byte individually.
-    //   unzip.write(Buffer.from([data[i]]));
-    // }
-    //
-    // unzip.end();
-    // await promise;
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const data = Buffer.concat([zlib.gzipSync('abc'), zlib.gzipSync('def')]);
+
+    const resultBuffers = [];
+
+    const unzip = zlib
+      .createUnzip()
+      .on('error', reject)
+      .on('data', (data) => resultBuffers.push(data))
+      .on('finish', function () {
+        const unzipped = Buffer.concat(resultBuffers).toString();
+        assert.strictEqual(
+          unzipped,
+          'abcdef',
+          `'${unzipped}' should match 'abcdef' after zipping ` + 'and unzipping'
+        );
+        resolve();
+      });
+
+    for (let i = 0; i < data.length; i++) {
+      // Write each single byte individually.
+      unzip.write(Buffer.from([data[i]]));
+    }
+
+    unzip.end();
+    await promise;
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/4f14eb15454b9f6ae7f0145947debd2c79a2a84f/test/parallel/test-zlib-truncated.js
+export const zlibTruncated = {
+  async test() {
+    const inputString =
+      'ΩΩLorem ipsum dolor sit amet, consectetur adipiscing eli' +
+      't. Morbi faucibus, purus at gravida dictum, libero arcu ' +
+      'convallis lacus, in commodo libero metus eu nisi. Nullam' +
+      ' commodo, neque nec porta placerat, nisi est fermentum a' +
+      'ugue, vitae gravida tellus sapien sit amet tellus. Aenea' +
+      'n non diam orci. Proin quis elit turpis. Suspendisse non' +
+      ' diam ipsum. Suspendisse nec ullamcorper odio. Vestibulu' +
+      'm arcu mi, sodales non suscipit id, ultrices ut massa. S' +
+      'ed ac sem sit amet arcu malesuada fermentum. Nunc sed. ';
+
+    const errMessage = /unexpected end of file/;
+
+    const cases = [
+      { comp: 'gzip', decomp: 'gunzip', decompSync: 'gunzipSync' },
+      { comp: 'gzip', decomp: 'unzip', decompSync: 'unzipSync' },
+      { comp: 'deflate', decomp: 'inflate', decompSync: 'inflateSync' },
+      {
+        comp: 'deflateRaw',
+        decomp: 'inflateRaw',
+        decompSync: 'inflateRawSync',
+      },
+    ];
+    for (const methods of cases) {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib[methods.comp](inputString, async function (err, compressed) {
+        assert.ifError(err);
+        const truncated = compressed.slice(0, compressed.length / 2);
+        const toUTF8 = (buffer) => buffer.toString('utf-8');
+
+        // sync sanity
+        const decompressed = zlib[methods.decompSync](compressed);
+        assert.strictEqual(toUTF8(decompressed), inputString);
+
+        // async sanity
+        {
+          const { promise, resolve } = Promise.withResolvers();
+          zlib[methods.decomp](compressed, function (err, result) {
+            assert.ifError(err);
+            assert.strictEqual(toUTF8(result), inputString);
+            resolve();
+          });
+
+          await promise;
+        }
+
+        // Sync truncated input test
+        assert.throws(function () {
+          zlib[methods.decompSync](truncated);
+        }, errMessage);
+
+        // Async truncated input test
+        {
+          const { promise, resolve } = Promise.withResolvers();
+          zlib[methods.decomp](truncated, function (err, result) {
+            assert.match(err.message, errMessage);
+            resolve();
+          });
+
+          await promise;
+        }
+
+        const syncFlushOpt = { finishFlush: zlib.constants.Z_SYNC_FLUSH };
+
+        // Sync truncated input test, finishFlush = Z_SYNC_FLUSH
+        const result = toUTF8(
+          zlib[methods.decompSync](truncated, syncFlushOpt)
+        );
+        assert.strictEqual(result, inputString.slice(0, result.length));
+
+        // Async truncated input test, finishFlush = Z_SYNC_FLUSH
+        {
+          const { promise, resolve } = Promise.withResolvers();
+          zlib[methods.decomp](
+            truncated,
+            syncFlushOpt,
+            function (err, decompressed) {
+              assert.ifError(err);
+              const result = toUTF8(decompressed);
+              assert.strictEqual(result, inputString.slice(0, result.length));
+              resolve();
+            }
+          );
+          await promise;
+        }
+
+        resolve();
+      });
+
+      await promise;
+    }
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/beabcec41ca456e7e895e276acbc5f2d93db032f/test/parallel/test-zlib-from-concatenated-gzip.js
+export const zlibFromConcatenatedGzip = {
+  async test() {
+    const abc = 'abc';
+    const def = 'def';
+
+    const abcEncoded = zlib.gzipSync(abc);
+    const defEncoded = zlib.gzipSync(def);
+
+    const data = Buffer.concat([abcEncoded, defEncoded]);
+
+    assert.strictEqual(zlib.gunzipSync(data).toString(), abc + def);
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.gunzip(data, (err, result) => {
+        assert.ifError(err);
+        assert.strictEqual(result.toString(), abc + def);
+        resolve();
+      });
+
+      await promise;
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.unzip(data, (err, result) => {
+        assert.ifError(err);
+        assert.strictEqual(result.toString(), abc + def);
+        resolve();
+      });
+
+      await promise;
+    }
+
+    // Multi-member support does not apply to zlib inflate/deflate.
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.unzip(
+        Buffer.concat([zlib.deflateSync('abc'), zlib.deflateSync('def')]),
+        (err, result) => {
+          assert.ifError(err);
+          assert.strictEqual(result.toString(), abc);
+          resolve();
+        }
+      );
+
+      await promise;
+    }
+
+    // Files that have the "right" magic bytes for starting a new gzip member
+    // in the middle of themselves, even if they are part of a single
+    // regularly compressed member
+    const pmmDataZlib = Buffer.from(
+      'eJztwTEBAAAAwqD1T+1vBqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+        'AAAAAAAAAAAAAAAAAAAAAAAAAAAIAz+w4AAQ==',
+      'base64'
+    );
+
+    const pmmDataGz = Buffer.from(
+      'H4sIAMyK8lYCA+3BMQEAAADCoPVP7WENoAAAAAAAAAAAAAAAAAAAAAAAH4sAAAAAAAAAAAAAAAAA' +
+        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABuGn4Inv/6AQA=',
+      'base64'
+    );
+
+    const pmmExpected = zlib.inflateSync(pmmDataZlib);
+    const pmmResultBuffers = [];
+
+    // TODO(soon): fix this test case
+    // {
+    //   const {promise, resolve, reject } =  Promise.withResolvers();
+
+    //   Readable.from([pmmDataGz])
+    //     .pipe(zlib.createGunzip())
+    //     .on('error', reject)
+    //     .on('data', (data) => pmmResultBuffers.push(data))
+    //     .on('finish', () => {
+    //       // Result should match original random garbage
+    //       assert.deepStrictEqual(Buffer.concat(pmmResultBuffers), pmmExpected);
+    //       resolve();
+    //     });
+
+    //     await promise;
+    //   }
+
+    // Test that the next gzip member can wrap around the input buffer boundary
+    for (const offset of [0, 1, 2, 3, 4, defEncoded.length]) {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const resultBuffers = [];
+
+      const unzip = zlib
+        .createGunzip()
+        .on('error', reject)
+        .on('data', (data) => resultBuffers.push(data))
+        .on('finish', () => {
+          assert.strictEqual(
+            Buffer.concat(resultBuffers).toString(),
+            'abcdef',
+            `result should match original input (offset = ${offset})`
+          );
+          resolve();
+        });
+
+      // First write: write "abc" + the first bytes of "def"
+      unzip.write(Buffer.concat([abcEncoded, defEncoded.slice(0, offset)]));
+
+      // Write remaining bytes of "def"
+      unzip.end(defEncoded.slice(offset));
+
+      await promise;
+    }
+  },
+};
+
+// Test taken from:
+// https://github.com/nodejs/node/blob/fc02b88f89f8d5abf5ee4414a1026444c18d77b3/test/parallel/test-zlib-not-string-or-buffer.js
+export const zlibNotStringOrBuffer = {
+  test() {
+    for (const input of [
+      undefined,
+      null,
+      true,
+      false,
+      0,
+      1,
+      [1, 2, 3],
+      { foo: 'bar' },
+    ]) {
+      assert.throws(
+        () => zlib.deflateSync(input),
+        // TODO(soon): Use same error code as NodeJS
+        {
+          name: 'TypeError',
+        }
+      );
+    }
+  },
+};
+
+// Test taken from:
+// https://github.com/nodejs/node/blob/fc02b88f89f8d5abf5ee4414a1026444c18d77b3/test/parallel/test-zlib-from-gzip-with-trailing-garbage.js
+export const zlibFromGzipWithTrailingGarbage = {
+  async test() {
+    // Should ignore trailing null-bytes
+    let data = Buffer.concat([
+      zlib.gzipSync('abc'),
+      zlib.gzipSync('def'),
+      Buffer.alloc(10),
+    ]);
+
+    assert.strictEqual(zlib.gunzipSync(data).toString(), 'abcdef');
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+
+      zlib.gunzip(data, (err, result) => {
+        assert.ifError(err);
+        assert.strictEqual(
+          result.toString(),
+          'abcdef',
+          `result '${result.toString()}' should match original string`
+        );
+        resolve();
+      });
+
+      await promise;
+    }
+
+    // If the trailing garbage happens to look like a gzip header, it should
+    // throw an error.
+    data = Buffer.concat([
+      zlib.gzipSync('abc'),
+      zlib.gzipSync('def'),
+      Buffer.from([0x1f, 0x8b, 0xff, 0xff]),
+      Buffer.alloc(10),
+    ]);
+
+    assert.throws(
+      () => zlib.gunzipSync(data),
+      /^Error: unknown compression method$/
+    );
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.gunzip(data, (err, result) => {
+        // TODO(soon): use same error code as NodeJS
+        // TODO(soon): Do our messages have a redundant "Error: " word?
+        assert.strictEqual(err.name, 'Error');
+        assert.match(err.message, /unknown compression method/);
+        assert.strictEqual(result, undefined);
+        resolve();
+      });
+
+      await promise;
+    }
+
+    // In this case the trailing junk is too short to be a gzip segment
+    // So we ignore it and decompression succeeds.
+    data = Buffer.concat([
+      zlib.gzipSync('abc'),
+      zlib.gzipSync('def'),
+      Buffer.from([0x1f, 0x8b, 0xff, 0xff]),
+    ]);
+
+    assert.throws(
+      () => zlib.gunzipSync(data),
+      /^Error: unknown compression method$/
+    );
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.gunzip(data, (err, result) => {
+        // TOOD(soon): Use same error code as NodeJS
+        // TODO(soon): Do our messages have a redundant "Error: " word?
+        assert.strictEqual(err.name, 'Error');
+        assert.match(err.message, /unknown compression method/);
+        assert.strictEqual(result, undefined);
+        resolve();
+      });
+
+      await promise;
+    }
+  },
+};
+
+// Test taken from
+// https://github.com/nodejs/node/blob/fc02b88f89f8d5abf5ee4414a1026444c18d77b3/test/parallel/test-zlib-from-string.js
+export const zlibFromString = {
+  async test() {
+    const inputString =
+      'ΩΩLorem ipsum dolor sit amet, consectetur adipiscing eli' +
+      't. Morbi faucibus, purus at gravida dictum, libero arcu ' +
+      'convallis lacus, in commodo libero metus eu nisi. Nullam' +
+      ' commodo, neque nec porta placerat, nisi est fermentum a' +
+      'ugue, vitae gravida tellus sapien sit amet tellus. Aenea' +
+      'n non diam orci. Proin quis elit turpis. Suspendisse non' +
+      ' diam ipsum. Suspendisse nec ullamcorper odio. Vestibulu' +
+      'm arcu mi, sodales non suscipit id, ultrices ut massa. S' +
+      'ed ac sem sit amet arcu malesuada fermentum. Nunc sed. ';
+    const expectedBase64Deflate =
+      'eJxdUUtOQzEMvMoc4OndgT0gJCT2buJWlpI4jePeqZfpmX' +
+      'AKLRKbLOzx/HK73q6vOrhCunlF1qIDJhNUeW5I2ozT5OkD' +
+      'lKWLJWkncJG5403HQXAkT3Jw29B9uIEmToMukglZ0vS6oc' +
+      'iBh4JG8sV4oVLEUCitK2kxq1WzPnChHDzsaGKy491LofoA' +
+      'bWh8do43oeuYhB5EPCjcLjzYJo48KrfQBvnJecNFJvHT1+' +
+      'RSQsGoC7dn2t/xjhduTA1NWyQIZR0pbHwMDatnD+crPqKS' +
+      'qGPHp1vnlsWM/07ubf7bheF7kqSj84Bm0R1fYTfaK8vqqq' +
+      'fKBtNMhe3OZh6N95CTvMX5HJJi4xOVzCgUOIMSLH7wmeOH' +
+      'aFE4RdpnGavKtrB5xzfO/Ll9';
+    const expectedBase64Gzip =
+      'H4sIAAAAAAAAA11RS05DMQy8yhzg6d2BPSAkJPZu4laWkjiN4' +
+      '96pl+mZcAotEpss7PH8crverq86uEK6eUXWogMmE1R5bkjajN' +
+      'Pk6QOUpYslaSdwkbnjTcdBcCRPcnDb0H24gSZOgy6SCVnS9Lq' +
+      'hyIGHgkbyxXihUsRQKK0raTGrVbM+cKEcPOxoYrLj3Uuh+gBt' +
+      'aHx2jjeh65iEHkQ8KNwuPNgmjjwqt9AG+cl5w0Um8dPX5FJCw' +
+      'agLt2fa3/GOF25MDU1bJAhlHSlsfAwNq2cP5ys+opKoY8enW+' +
+      'eWxYz/Tu5t/tuF4XuSpKPzgGbRHV9hN9ory+qqp8oG00yF7c5' +
+      'mHo33kJO8xfkckmLjE5XMKBQ4gxIsfvCZ44doUThF2mcZq8q2' +
+      'sHnHNzRtagj5AQAA';
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.deflate(inputString, (err, buffer) => {
+        zlib.inflate(buffer, (err, inflated) => {
+          assert.strictEqual(inflated.toString(), inputString);
+          resolve();
+        });
+      });
+      await promise;
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.gzip(inputString, (err, buffer) => {
+        // Can't actually guarantee that we'll get exactly the same
+        // deflated bytes when we compress a string, since the header
+        // depends on stuff other than the input string itself.
+        // However, decrypting it should definitely yield the same
+        // result that we're expecting, and this should match what we get
+        // from inflating the known valid deflate data.
+        zlib.gunzip(buffer, (err, gunzipped) => {
+          assert.strictEqual(gunzipped.toString(), inputString);
+          resolve();
+        });
+      });
+      await promise;
+    }
+
+    let buffer = Buffer.from(expectedBase64Deflate, 'base64');
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.unzip(buffer, (err, buffer) => {
+        assert.strictEqual(buffer.toString(), inputString);
+        resolve();
+      });
+
+      await promise;
+    }
+
+    buffer = Buffer.from(expectedBase64Gzip, 'base64');
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.unzip(buffer, (err, buffer) => {
+        assert.strictEqual(buffer.toString(), inputString);
+        resolve();
+      });
+      await promise;
+    }
+  },
+};
+
+// Test taken from
+// https://github.com/nodejs/node/blob/fc02b88f89f8d5abf5ee4414a1026444c18d77b3/test/parallel/test-zlib-empty-buffer.js
+// TODO(soon): enable brotli cases once implemented
+export const zlibEmptyBuffer = {
+  async test() {
+    const emptyBuffer = Buffer.alloc(0);
+
+    for (const [compress, decompress, method] of [
+      [zlib.deflateRawSync, zlib.inflateRawSync, 'raw sync'],
+      [zlib.deflateSync, zlib.inflateSync, 'deflate sync'],
+      [zlib.gzipSync, zlib.gunzipSync, 'gzip sync'],
+      //[ zlib.brotliCompressSync, zlib.brotliDecompressSync, 'br sync' ],
+      [promisify(zlib.deflateRaw), promisify(zlib.inflateRaw), 'raw'],
+      [promisify(zlib.deflate), promisify(zlib.inflate), 'deflate'],
+      [promisify(zlib.gzip), promisify(zlib.gunzip), 'gzip'],
+      //[ promisify(zlib.brotliCompress), promisify(zlib.brotliDecompress), 'br' ],
+    ]) {
+      const compressed = await compress(emptyBuffer);
+      const decompressed = await decompress(compressed);
+      assert.deepStrictEqual(
+        emptyBuffer,
+        decompressed,
+        `Expected ${inspect(compressed)} to match ${inspect(decompressed)} ` +
+          `to match for ${method}`
+      );
+    }
   },
 };
 
@@ -1095,7 +1533,7 @@ export const zlibUnzipOneByteChunks = {
 // - [x] test-zlib-crc32.js
 // - [ ] test-zlib-flush-drain-longblock.js
 // - [ ] test-zlib.js
-// - [ ] test-zlib-truncated.js
+// - [x] test-zlib-truncated.js
 // - [ ] test-zlib-brotli-from-brotli.js
 // - [x] test-zlib-create-raw.js
 // - [x] test-zlib-flush-flags.js
@@ -1109,12 +1547,12 @@ export const zlibUnzipOneByteChunks = {
 // - [ ] test-zlib-brotli.js
 // - [ ] test-zlib-deflate-raw-inherits.js
 // - [ ] test-zlib-flush-write-sync-interleaved.js
-// - [ ] test-zlib-no-stream.js
+// - [N/A] test-zlib-no-stream.js
 // - [x] test-zlib-write-after-close.js
 // - [ ] test-zlib-brotli-kmaxlength-rangeerror.js
 // - [x] test-zlib-destroy.js
-// - [ ] test-zlib-from-concatenated-gzip.js
-// - [ ] test-zlib-not-string-or-buffer.js
+// - [x] test-zlib-from-concatenated-gzip.js
+// - [x] test-zlib-not-string-or-buffer.js
 // - [ ] test-zlib-write-after-end.js
 // - [x] test-zlib-bytes-read.js
 // - [ ] test-zlib-destroy-pipe.js
@@ -1123,16 +1561,16 @@ export const zlibUnzipOneByteChunks = {
 // - [ ] test-zlib-write-after-flush.js
 // - [x] test-zlib-close-after-error.js
 // - [x] test-zlib-dictionary-fail.js
-// - [ ] test-zlib-from-gzip-with-trailing-garbage.js
+// - [x] test-zlib-from-gzip-with-trailing-garbage.js
 // - [ ] test-zlib-params.js
 // - [x] test-zlib-zero-byte.js
 // - [ ] test-zlib-close-after-write.js
 // - [ ] test-zlib-dictionary.js
-// - [ ] test-zlib-from-string.js
+// - [x] test-zlib-from-string.js
 // - [ ] test-zlib-premature-end.js
 // - [x] test-zlib-zero-windowBits.js
 // - [x] test-zlib-close-in-ondata.js
-// - [ ] test-zlib-empty-buffer.js
+// - [x] test-zlib-empty-buffer.js
 // - [ ] test-zlib-invalid-arg-value-brotli-compress.js
 // - [ ] test-zlib-random-byte-pipes.js
 // - [x] test-zlib-const.js
@@ -1144,17 +1582,17 @@ const BIG_DATA = 'horse'.repeat(50_000) + 'cow'.repeat(49_000);
 
 export const inflateSyncTest = {
   test() {
-    strictEqual(
+    assert.strictEqual(
       zlib.inflateSync(zlib.deflateSync(BIG_DATA)).toString(),
       BIG_DATA
     );
 
-    throws(
+    assert.throws(
       () => zlib.inflateSync('garbage data'),
       new Error('incorrect header check')
     );
 
-    strictEqual(
+    assert.strictEqual(
       zlib
         .inflateSync(Buffer.from('OE9LyixKUUiCEQAmfgUk', 'base64'), {
           windowBits: 11,
@@ -1183,7 +1621,7 @@ export const zipBombTest = {
     const zlib_bomb_1 = zlib.inflateSync(zlib_bomb_2);
 
     // Would be 1 GB, if we let it
-    throws(
+    assert.throws(
       () => zlib.inflateSync(zlib_bomb_1),
       new RangeError('Memory limit exceeded')
     );
@@ -1197,28 +1635,20 @@ export const deflateSyncTest = {
       return buf.fill(0x0, 9, 10);
     }
 
-    throws(
-      () => zlib.deflateSync('hello world', { windowBits: 9000 }),
-      new Error('Invalid windowBits')
-    );
-    throws(
-      () => zlib.deflateSync('hello world', { strategy: 400 }),
-      new Error('invalid strategy')
-    );
-    throws(
+    assert.throws(
       () =>
         zlib.deflateSync(BIG_DATA, { maxOutputLength: 64 }).toString('base64'),
       new RangeError('Memory limit exceeded')
     );
 
-    strictEqual(
+    assert.strictEqual(
       zlib
         .deflateSync('bird bird bird', { windowBits: 11, level: 4 })
         .toString('base64'),
       'OE9LyixKUUiCEQAmfgUk'
     );
 
-    strictEqual(
+    assert.strictEqual(
       zlib
         .deflateSync('what happens if you do not flush?', {
           finishFlush: zlib.constants.Z_NO_FLUSH,
@@ -1227,60 +1657,11 @@ export const deflateSyncTest = {
       'eJw='
     );
 
-    strictEqual(
-      zlib
-        .deflateSync(Buffer.from('bird bird bird'), {
-          windowBits: 11,
-          level: 4,
-        })
-        .toString('base64'),
-      'OE9LyixKUUiCEQAmfgUk'
-    );
-
-    deepStrictEqual(
+    assert.deepStrictEqual(
       maskOsId(
         zlib.gzipSync('water, water, everywhere, nor any drop to drink')
       ).toString('base64'),
       'H4sIAAAAAAAAACtPLEkt0lEoh1CpZalFleUZqUWpOgp5+UUKiXmVCilF+QUKJfkKKUWZedkAqpLyPC8AAAA='
     );
-
-    strictEqual(
-      zlib
-        .deflateRawSync('as idle as a painted ship upon a painted ocean')
-        .toString('base64'),
-      'SyxWyEzJSVVILFZIVChIzMwrSU1RKM7ILFAoLcjPQxLLT05NzAMA'
-    );
-
-    strictEqual(zlib.deflateSync('').toString('base64'), 'eJwDAAAAAAE=');
-  },
-};
-export const inflateTest = {
-  test() {
-    zlib.inflate(
-      Buffer.from('OE9LyixKUUiCEQAmfgUk', 'base64'),
-      {
-        windowBits: 11,
-        level: 4,
-      },
-      (_, result) => {
-        strictEqual(result.toString(), 'bird bird bird');
-      }
-    );
-  },
-};
-
-export const deflateTest = {
-  test() {
-    zlib.deflate(
-      'bird bird bird',
-      { windowBits: 11, level: 4 },
-      (_, result) => {
-        strictEqual(result.toString('base64'), 'OE9LyixKUUiCEQAmfgUk');
-      }
-    );
-
-    zlib.deflate('garbage data', { level: -9000 }, (error, _) => {
-      strictEqual(error.message, 'Error: Invalid compression level');
-    });
   },
 };
