@@ -182,6 +182,7 @@ Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these.
 * On macOS:
   * macOS 11.5 or higher
   * The Xcode command line tools, which can be installed with `xcode-select --install`
+* x86_64 CPU with at least SSE4.2 and CLMUL ISA extensions, or arm64 CPU with CRC extension (enabled by default under armv8.1-a). These extensions are supported by all recent x86 and arm64 CPUs.
 
 ### Local Worker development with `wrangler`
 
