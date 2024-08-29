@@ -4,6 +4,7 @@
 #include "buffer.h"
 #include "crypto.h"
 #include "diagnostics-channel.h"
+#include "url.h"
 #include "util.h"
 #include "zlib-util.h"
 #include <workerd/jsg/jsg.h>
@@ -44,7 +45,8 @@ public:
   V(CryptoImpl, "node-internal:crypto")                                                            \
   V(UtilModule, "node-internal:util")                                                              \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
-  V(ZlibUtil, "node-internal:zlib")
+  V(ZlibUtil, "node-internal:zlib")                                                                \
+  V(UrlUtil, "node-internal:url")
 
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
 // node.js compat C++ modules that should be guarded by the experimental compat
@@ -135,4 +137,4 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
 #define EW_NODE_ISOLATE_TYPES                                                                      \
   api::node::CompatibilityFlags, EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,       \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
-      EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES
+      EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES, EW_NODE_URL_ISOLATE_TYPES
