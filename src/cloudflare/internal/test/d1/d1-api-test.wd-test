@@ -20,6 +20,10 @@ const unitTests :Workerd.Config = (
               service = "d1-mock"
             )],
           )
+        ),
+        (
+          name = "d1MockFetcher",
+          service = "d1-mock"
         )
         ],
       )
