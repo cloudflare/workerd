@@ -6,11 +6,15 @@ import * as assert from 'node:assert';
 
 // Test helpers, since I want everything to run in sequence but I don't
 // want to lose context about which assertion failed.
-const test = (fn) => ({
+const test = (fn, getDB = getDBFromEnv) => ({
   async test(ctr, env) {
-    await fn(env.d1);
+    await fn(getDB(env));
   },
 });
+
+function getDBFromEnv(env) {
+  return env.d1;
+}
 
 // Recurse through nested objects/arrays looking for 'anything' and deleting that
 // key/value from both objects. Gives us a way to get expect.toMatchObject behaviour
@@ -38,7 +42,7 @@ const itShould = async (description, ...assertions) => {
       const actual = await cb();
       deleteAnything(expected, actual);
       try {
-        assert.deepEqual(actual, expected);
+        assert.deepEqual(expected, actual);
       } catch (e) {
         console.log(actual);
         throw e;
@@ -62,7 +66,27 @@ const meta = (values) => ({
   ...values,
 });
 
-export const test_d1_api = test(async (DB) => {
+export const test_d1_api_happy_path = test(
+  testD1ApiQueriesHappyPath,
+  getDBFromEnv
+);
+
+export const test_d1_api_happy_path_withsessions_default = test(
+  testD1ApiQueriesHappyPath,
+  (env) => getDBFromEnv(env).withSession()
+);
+
+export const test_d1_api_happy_path_withsessions_first_unconstrained = test(
+  testD1ApiQueriesHappyPath,
+  (env) => getDBFromEnv(env).withSession('first-unconstrained')
+);
+
+export const test_d1_api_happy_path_withsessions_first_primary = test(
+  testD1ApiQueriesHappyPath,
+  (env) => getDBFromEnv(env).withSession('first-primary')
+);
+
+async function testD1ApiQueriesHappyPath(DB) {
   await itShould(
     'create a Users table',
     () =>
@@ -475,4 +499,49 @@ export const test_d1_api = test(async (DB) => {
       meta: meta({ rows_read: 3, rows_written: 0 }),
     }
   );
-});
+
+  await itShould(
+    'delete all created tables',
+    () =>
+      DB.batch([
+        DB.prepare(`DROP TABLE users;`),
+        DB.prepare(`DROP TABLE abc;`),
+        DB.prepare(`DROP TABLE cde;`),
+      ]),
+    [
+      {
+        success: true,
+        results: [],
+        meta: meta({
+          changed_db: true,
+          changes: 0,
+          last_row_id: 3,
+          rows_read: 4,
+          rows_written: 0,
+        }),
+      },
+      {
+        success: true,
+        results: [],
+        meta: meta({
+          changed_db: true,
+          changes: 0,
+          last_row_id: 3,
+          rows_read: 3,
+          rows_written: 0,
+        }),
+      },
+      {
+        success: true,
+        results: [],
+        meta: meta({
+          changed_db: true,
+          changes: 0,
+          last_row_id: 3,
+          rows_read: 2,
+          rows_written: 0,
+        }),
+      },
+    ]
+  );
+}
