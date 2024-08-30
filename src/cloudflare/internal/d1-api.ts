@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import flags from 'workerd:compatibility-flags';
+
 interface Fetcher {
   fetch: typeof fetch;
 }
@@ -59,28 +61,14 @@ type D1SessionCommitToken = string;
 const D1_SESSION_COMMIT_TOKEN_HTTP_HEADER = 'x-cf-d1-session-commit-token';
 
 class D1Database {
-  private readonly envFetcher: Fetcher;
   private readonly alwaysPrimarySession: D1DatabaseSessionAlwaysPrimary;
+  protected readonly envFetcher: Fetcher;
 
   public constructor(envFetcher: Fetcher) {
     this.envFetcher = envFetcher;
     this.alwaysPrimarySession = new D1DatabaseSessionAlwaysPrimary(
       this.envFetcher
     );
-  }
-
-  public withSession(
-    constraintOrToken: D1SessionCommitTokenOrConstraint | null | undefined
-  ): D1DatabaseSession {
-    constraintOrToken = constraintOrToken?.trim();
-    if (
-      constraintOrToken === null ||
-      constraintOrToken === undefined ||
-      constraintOrToken === ''
-    ) {
-      constraintOrToken = 'first-unconstrained';
-    }
-    return new D1DatabaseSession(this.envFetcher, constraintOrToken);
   }
 
   public prepare(query: string): D1PreparedStatement {
@@ -100,6 +88,26 @@ class D1Database {
   // DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
   public async dump(): Promise<ArrayBuffer> {
     return this.alwaysPrimarySession.dump();
+  }
+}
+
+class D1DatabaseWithSessionAPI extends D1Database {
+  public constructor(envFetcher: Fetcher) {
+    super(envFetcher);
+  }
+
+  public withSession(
+    constraintOrToken: D1SessionCommitTokenOrConstraint | null | undefined
+  ): D1DatabaseSession {
+    constraintOrToken = constraintOrToken?.trim();
+    if (
+      constraintOrToken === null ||
+      constraintOrToken === undefined ||
+      constraintOrToken === ''
+    ) {
+      constraintOrToken = 'first-unconstrained';
+    }
+    return new D1DatabaseSession(this.envFetcher, constraintOrToken);
   }
 }
 
@@ -553,5 +561,8 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): D1Database {
+  if (flags.enableD1WithSessionsAPI) {
+    return new D1DatabaseWithSessionAPI(env.fetcher);
+  }
   return new D1Database(env.fetcher);
 }

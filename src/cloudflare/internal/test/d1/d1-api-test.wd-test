@@ -9,7 +9,7 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "d1-api-test.js")
         ],
         compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat", "enable_d1_with_sessions_api"],
         bindings = [
         (
           name = "d1",
