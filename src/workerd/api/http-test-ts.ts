@@ -31,7 +31,7 @@ async function assertFetchCacheRejectsError(
     (async () => {
       const header = { cache: cacheHeader };
       const req: RequestInit = header;
-      await fetch('http://example.org', req);
+      await fetch('https://example.org', req);
     })(),
     {
       name: errorName,
@@ -41,8 +41,8 @@ async function assertFetchCacheRejectsError(
 }
 
 export const cacheMode = {
-  async test() {
-    let cacheModes: Array<RequestCache> = [
+  async test(ctrl: any, env: any, ctx: any) {
+    let allowedCacheModes: Array<RequestCache> = [
       'default',
       'force-cache',
       'no-cache',
@@ -50,14 +50,29 @@ export const cacheMode = {
       'only-if-cached',
       'reload',
     ];
-    assert.strictEqual('cache' in Request.prototype, false);
+    assert.strictEqual('cache' in Request.prototype, env.CACHE_ENABLED);
     {
       const req = new Request('https://example.org', {});
       assert.strictEqual(req.cache, undefined);
     }
-    for (var cacheMode of cacheModes) {
-      await assertRequestCacheThrowsError(cacheMode);
-      await assertFetchCacheRejectsError(cacheMode);
+    if (!env.CACHE_ENABLED) {
+      for (var cacheMode of allowedCacheModes) {
+        await assertRequestCacheThrowsError(cacheMode);
+        await assertFetchCacheRejectsError(cacheMode);
+      }
+    } else {
+      for (var cacheMode of allowedCacheModes) {
+        await assertRequestCacheThrowsError(
+          cacheMode,
+          'TypeError',
+          'Unsupported cache mode: ' + cacheMode
+        );
+        await assertFetchCacheRejectsError(
+          cacheMode,
+          'TypeError',
+          'Unsupported cache mode: ' + cacheMode
+        );
+      }
     }
   },
 };
