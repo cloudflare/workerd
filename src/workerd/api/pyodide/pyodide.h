@@ -29,6 +29,15 @@ private:
   const kj::MutexGuarded<kj::HashMap<kj::String, MessageBundlePair>> bundles;
 };
 
+class PyodidePackageManager {
+public:
+  void setPyodidePackageData(kj::String id, kj::Array<unsigned char> data) const;
+  const kj::Maybe<kj::ArrayPtr<const unsigned char>> getPyodidePackage(kj::StringPtr id) const;
+
+private:
+  const kj::MutexGuarded<kj::HashMap<kj::String, kj::Array<unsigned char>>> packages;
+};
+
 struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
