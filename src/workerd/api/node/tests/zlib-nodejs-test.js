@@ -1523,6 +1523,42 @@ export const zlibEmptyBuffer = {
     }
   },
 };
+// Test taken from:
+// https://github.com/nodejs/node/blob/d75e253c506310ea6728329981beb3284fa431b5/test/parallel/test-zlib-flush.js
+// TODO(soon): Enable this test once the bug is fixed
+export const zlibFlush = {
+  async test() {
+    const opts = { level: 0 };
+    const deflater = zlib.createDeflate(opts);
+
+    const chunk = Buffer.from('/9j/4AAQSkZJRgABAQEASA==', 'base64');
+    const expectedNone = Buffer.from([0x78, 0x01]);
+    const blkhdr = Buffer.from([0x00, 0x10, 0x00, 0xef, 0xff]);
+    const adler32 = Buffer.from([0x00, 0x00, 0x00, 0xff, 0xff]);
+    const expectedFull = Buffer.concat([blkhdr, chunk, adler32]);
+    let actualNone;
+    let actualFull;
+
+    const { promise, resolve } = Promise.withResolvers();
+    deflater.write(chunk, function () {
+      deflater.flush(zlib.constants.Z_NO_FLUSH, function () {
+        actualNone = deflater.read();
+        deflater.flush(function () {
+          const bufs = [];
+          let buf;
+          while ((buf = deflater.read()) !== null) bufs.push(buf);
+          actualFull = Buffer.concat(bufs);
+
+          resolve();
+        });
+      });
+    });
+
+    await promise;
+    assert.deepStrictEqual(actualNone, expectedNone);
+    assert.deepStrictEqual(actualFull, expectedFull);
+  },
+};
 
 // Node.js tests relevant to zlib
 //
