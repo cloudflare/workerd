@@ -1743,6 +1743,29 @@ export const zlibDictionary = {
   },
 };
 
+// Test taken from
+// https://github.com/nodejs/node/blob/ef6b9ffc8dfc7b2a395c864d2729a0ce1be9ef18/test/parallel/test-zlib-close-after-write.js
+export const closeAfterWrite = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const close = mock.fn();
+
+    zlib.gzip('hello', (err, out) => {
+      assert.ifError(err);
+
+      const unzip = zlib.createGunzip();
+      unzip.write(out);
+      unzip.close(() => {
+        close();
+        resolve();
+      });
+    });
+
+    await promise;
+    assert.strictEqual(close.mock.callCount(), 1);
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -1785,7 +1808,7 @@ export const zlibDictionary = {
 // - [x] test-zlib-from-gzip-with-trailing-garbage.js
 // - [ ] test-zlib-params.js
 // - [x] test-zlib-zero-byte.js
-// - [ ] test-zlib-close-after-write.js
+// - [x] test-zlib-close-after-write.js
 // - [x] test-zlib-dictionary.js
 // - [x] test-zlib-from-string.js
 // - [ ] test-zlib-premature-end.js
