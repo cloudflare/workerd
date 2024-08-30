@@ -173,7 +173,7 @@ class D1DatabaseSession {
   // fetch will append the commit token header to all outgoing fetch calls.
   // The response headers are parsed automatically, extracting the commit token
   // from the response headers and updating it through `_updateCommitToken(token)`.
-  public async fetch(
+  protected async _wrappedFetch(
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> {
@@ -239,7 +239,7 @@ class D1DatabaseSession {
 
     const url = new URL(endpoint, 'http://d1');
     url.searchParams.set('resultsFormat', resultsFormat);
-    const response = await this.fetch(url.href, {
+    const response = await this._wrappedFetch(url.href, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -327,7 +327,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
 
   // DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
   public async dump(): Promise<ArrayBuffer> {
-    const response = await this.fetch('http://d1/dump', {
+    const response = await this._wrappedFetch('http://d1/dump', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
