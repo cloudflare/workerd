@@ -10,6 +10,7 @@ wd_cc_library(
     ),
     hdrs = glob(["**/*.h"]),
     implementation_deps = [
+        "@ada-url",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
         "@simdutf",
@@ -136,6 +137,12 @@ wd_test(
     src = "tests/string-decoder-test.wd-test",
     args = ["--experimental"],
     data = ["tests/string-decoder-test.js"],
+)
+
+wd_test(
+    src = "tests/url-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/url-nodejs-test.js"],
 )
 
 wd_test(
