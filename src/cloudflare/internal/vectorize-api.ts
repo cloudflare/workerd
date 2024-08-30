@@ -45,14 +45,20 @@ class VectorizeIndexImpl implements Vectorize {
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches> {
     if (this.indexVersion === 'v2') {
-      if (
-        options &&
-        options.returnMetadata &&
-        !isVectorizeMetadataRetrievalLevel(options.returnMetadata)
-      ) {
-        throw new Error(
-          `Invalid returnMetadata option. Expected: "none", "indexed" or "all"; got: ${options.returnMetadata}`
-        );
+      if (options?.returnMetadata) {
+        if (
+          typeof options.returnMetadata !== 'boolean' &&
+          !isVectorizeMetadataRetrievalLevel(options.returnMetadata)
+        ) {
+          throw new Error(
+            `Invalid returnMetadata option. Expected: true, false, "none", "indexed" or "all"; got: ${options.returnMetadata}`
+          );
+        }
+
+        if (typeof options.returnMetadata === 'boolean') {
+          // Allow boolean returnMetadata for backward compatibility. true converts to 'all' and false converts to 'none'
+          options.returnMetadata = options.returnMetadata ? 'all' : 'none';
+        }
       }
       const res = await this._send(Operation.VECTOR_QUERY, `query`, {
         method: 'POST',
@@ -238,9 +244,7 @@ class VectorizeIndexImpl implements Vectorize {
   }
 }
 
-function isVectorizeMetadataRetrievalLevel(
-  value: unknown
-): value is VectorizeMetadataRetrievalLevel {
+function isVectorizeMetadataRetrievalLevel(value: unknown): boolean {
   return (
     typeof value === 'string' &&
     (value === 'all' || value === 'indexed' || value === 'none')
