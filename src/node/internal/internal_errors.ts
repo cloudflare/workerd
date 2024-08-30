@@ -535,6 +535,21 @@ export class ERR_BUFFER_TOO_LARGE extends NodeRangeError {
   }
 }
 
+export class ERR_BROTLI_INVALID_PARAM extends NodeRangeError {
+  constructor(value: unknown) {
+    super(
+      'ERR_BROTLI_INVALID_PARAM',
+      `${value} is not a valid Brotli parameter`
+    );
+  }
+}
+
+export class ERR_ZLIB_INITIALIZATION_FAILED extends NodeError {
+  constructor() {
+    super('ERR_ZLIB_INITIALIZATION_FAILED', 'Initialization failed');
+  }
+}
+
 export function aggregateTwoErrors(innerError: any, outerError: any) {
   if (innerError && outerError && innerError !== outerError) {
     if (Array.isArray(outerError.errors)) {
