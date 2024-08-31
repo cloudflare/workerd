@@ -4,6 +4,7 @@
 #include "buffer.h"
 #include "crypto.h"
 #include "diagnostics-channel.h"
+#include "module.h"
 #include "url.h"
 #include "util.h"
 #include "zlib-util.h"
@@ -43,6 +44,7 @@ public:
   V(AsyncHooksModule, "node-internal:async_hooks")                                                 \
   V(BufferUtil, "node-internal:buffer")                                                            \
   V(CryptoImpl, "node-internal:crypto")                                                            \
+  V(ModuleUtil, "node-internal:module")                                                            \
   V(UtilModule, "node-internal:util")                                                              \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
@@ -137,4 +139,5 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
 #define EW_NODE_ISOLATE_TYPES                                                                      \
   api::node::CompatibilityFlags, EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,       \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
-      EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES, EW_NODE_URL_ISOLATE_TYPES
+      EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES, EW_NODE_URL_ISOLATE_TYPES,           \
+      EW_NODE_MODULE_ISOLATE_TYPES\

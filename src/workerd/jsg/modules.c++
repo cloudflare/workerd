@@ -23,7 +23,7 @@ static const std::set<kj::StringPtr> NODEJS_BUILTINS{"_http_agent", "_http_clien
   "module", "net", "os", "path", "path/posix", "path/win32", "perf_hooks", "process", "punycode",
   "querystring", "readline", "readline/promises", "repl", "stream", "stream/consumers",
   "stream/promises", "stream/web", "string_decoder", "sys", "timers", "timers/promises", "tls",
-  "trace_events", "tty", "url", "util", "util/types", "v8", "vm", "worker_threads", "zlib"};
+  "trace_events", "tty", "url", "util", "util/types", "v8", "vm", "wasi", "worker_threads", "zlib"};
 
 // The CompileCache is used to hold cached compilation data for built-in JavaScript modules.
 //
