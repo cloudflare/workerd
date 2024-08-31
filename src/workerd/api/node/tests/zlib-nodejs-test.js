@@ -994,10 +994,7 @@ export const zlibResetBeforeWrite = {
       inflate
         .on('error', reject)
         .on('data', (chunk) => output.push(chunk))
-        .on('end', function () {
-          assert.strictEqual(Buffer.concat(output).toString(), 'abc');
-          resolve();
-        });
+        .on('end', resolve);
 
       fn(deflate, () => {
         fn(inflate, () => {
@@ -1007,6 +1004,8 @@ export const zlibResetBeforeWrite = {
       });
 
       await promise;
+
+      assert.strictEqual(Buffer.concat(output).toString(), 'abc');
     }
   },
 };
@@ -1062,15 +1061,7 @@ export const zlibUnzipOneByteChunks = {
       .createUnzip()
       .on('error', reject)
       .on('data', (data) => resultBuffers.push(data))
-      .on('finish', function () {
-        const unzipped = Buffer.concat(resultBuffers).toString();
-        assert.strictEqual(
-          unzipped,
-          'abcdef',
-          `'${unzipped}' should match 'abcdef' after zipping ` + 'and unzipping'
-        );
-        resolve();
-      });
+      .on('finish', resolve);
 
     for (let i = 0; i < data.length; i++) {
       // Write each single byte individually.
@@ -1079,6 +1070,7 @@ export const zlibUnzipOneByteChunks = {
 
     unzip.end();
     await promise;
+    assert.strictEqual(Buffer.concat(resultBuffers).toString(), 'abcdef');
   },
 };
 
@@ -1140,7 +1132,7 @@ export const zlibTruncated = {
         // Async truncated input test
         {
           const { promise, resolve } = Promise.withResolvers();
-          zlib[methods.decomp](truncated, function (err, result) {
+          zlib[methods.decomp](truncated, function (err) {
             assert.match(err.message, errMessage);
             resolve();
           });
@@ -1277,14 +1269,7 @@ export const zlibFromConcatenatedGzip = {
         .createGunzip()
         .on('error', reject)
         .on('data', (data) => resultBuffers.push(data))
-        .on('finish', () => {
-          assert.strictEqual(
-            Buffer.concat(resultBuffers).toString(),
-            'abcdef',
-            `result should match original input (offset = ${offset})`
-          );
-          resolve();
-        });
+        .on('finish', resolve);
 
       // First write: write "abc" + the first bytes of "def"
       unzip.write(Buffer.concat([abcEncoded, defEncoded.slice(0, offset)]));
@@ -1293,6 +1278,12 @@ export const zlibFromConcatenatedGzip = {
       unzip.end(defEncoded.slice(offset));
 
       await promise;
+
+      assert.strictEqual(
+        Buffer.concat(resultBuffers).toString(),
+        'abcdef',
+        `result should match original input (offset = ${offset})`
+      );
     }
   },
 };
@@ -1457,6 +1448,7 @@ export const zlibFromString = {
     {
       const { promise, resolve } = Promise.withResolvers();
       zlib.gzip(inputString, (err, buffer) => {
+        assert.ifError(err);
         // Can't actually guarantee that we'll get exactly the same
         // deflated bytes when we compress a string, since the header
         // depends on stuff other than the input string itself.
@@ -1464,6 +1456,7 @@ export const zlibFromString = {
         // result that we're expecting, and this should match what we get
         // from inflating the known valid deflate data.
         zlib.gunzip(buffer, (err, gunzipped) => {
+          assert.ifError(err);
           assert.strictEqual(gunzipped.toString(), inputString);
           resolve();
         });
@@ -1475,6 +1468,7 @@ export const zlibFromString = {
     {
       const { promise, resolve } = Promise.withResolvers();
       zlib.unzip(buffer, (err, buffer) => {
+        assert.ifError(err);
         assert.strictEqual(buffer.toString(), inputString);
         resolve();
       });
@@ -1487,6 +1481,7 @@ export const zlibFromString = {
     {
       const { promise, resolve } = Promise.withResolvers();
       zlib.unzip(buffer, (err, buffer) => {
+        assert.ifError(err);
         assert.strictEqual(buffer.toString(), inputString);
         resolve();
       });
@@ -1598,30 +1593,26 @@ export const zlibDictionary = {
       const inflate = zlib.createInflate({ dictionary: spdyDict });
       inflate.setEncoding('utf-8');
 
-      deflate.on('data', function (chunk) {
-        inflate.write(chunk);
-      });
+      deflate
+        .on('data', function (chunk) {
+          inflate.write(chunk);
+        })
+        .on('error', reject)
+        .on('end', function () {
+          inflate.end();
+        });
 
-      deflate.on('error', reject);
-
-      inflate.on('data', function (chunk) {
-        output += chunk;
-      });
-
-      inflate.on('error', reject);
-
-      deflate.on('end', function () {
-        inflate.end();
-      });
-
-      inflate.on('end', function () {
-        assert.strictEqual(input, output);
-        resolve();
-      });
+      inflate
+        .on('error', reject)
+        .on('end', resolve)
+        .on('data', function (chunk) {
+          output += chunk;
+        });
 
       deflate.write(input);
       deflate.end();
       await promise;
+      assert.strictEqual(input, output);
     }
 
     // deflateResetDictionaryTest
@@ -1633,26 +1624,21 @@ export const zlibDictionary = {
       const inflate = zlib.createInflate({ dictionary: spdyDict });
       inflate.setEncoding('utf-8');
 
-      deflate.on('data', function (chunk) {
-        if (doneReset) inflate.write(chunk);
-      });
+      deflate
+        .on('data', function (chunk) {
+          if (doneReset) inflate.write(chunk);
+        })
+        .on('error', reject)
+        .on('end', function () {
+          inflate.end();
+        });
 
-      deflate.on('error', reject);
-
-      inflate.on('data', function (chunk) {
-        output += chunk;
-      });
-
-      inflate.on('error', reject);
-
-      deflate.on('end', function () {
-        inflate.end();
-      });
-
-      inflate.on('end', function () {
-        assert.strictEqual(input, output);
-        resolve();
-      });
+      inflate
+        .on('data', function (chunk) {
+          output += chunk;
+        })
+        .on('error', reject)
+        .on('end', resolve);
 
       deflate.write(input);
       deflate.flush(function () {
@@ -1663,6 +1649,7 @@ export const zlibDictionary = {
       });
 
       await promise;
+      assert.strictEqual(input, output);
     }
 
     // rawDictionaryTest
@@ -1673,31 +1660,26 @@ export const zlibDictionary = {
       const inflate = zlib.createInflateRaw({ dictionary: spdyDict });
       inflate.setEncoding('utf-8');
 
-      deflate.on('data', function (chunk) {
-        inflate.write(chunk);
-      });
-
-      deflate.on('error', reject);
-
-      inflate.on('data', function (chunk) {
-        output += chunk;
-      });
-
-      inflate.on('error', reject);
-
-      deflate.on('end', function () {
-        inflate.end();
-      });
-
-      inflate.on('end', function () {
-        assert.strictEqual(input, output);
-        resolve();
-      });
+      deflate
+        .on('data', function (chunk) {
+          inflate.write(chunk);
+        })
+        .on('error', reject)
+        .on('end', function () {
+          inflate.end();
+        });
+      inflate
+        .on('data', function (chunk) {
+          output += chunk;
+        })
+        .on('error', reject)
+        .on('end', resolve);
 
       deflate.write(input);
       deflate.end();
 
       await promise;
+      assert.strictEqual(input, output);
     }
 
     // deflateRawResetDictionaryTest
@@ -1709,26 +1691,21 @@ export const zlibDictionary = {
       const inflate = zlib.createInflateRaw({ dictionary: spdyDict });
       inflate.setEncoding('utf-8');
 
-      deflate.on('data', function (chunk) {
-        if (doneReset) inflate.write(chunk);
-      });
+      deflate
+        .on('data', function (chunk) {
+          if (doneReset) inflate.write(chunk);
+        })
+        .on('error', reject)
+        .on('end', function () {
+          inflate.end();
+        });
 
-      deflate.on('error', reject);
-
-      inflate.on('data', function (chunk) {
-        output += chunk;
-      });
-
-      inflate.on('error', reject);
-
-      deflate.on('end', function () {
-        inflate.end();
-      });
-
-      inflate.on('end', function () {
-        assert.strictEqual(input, output);
-        resolve();
-      });
+      inflate
+        .on('data', function (chunk) {
+          output += chunk;
+        })
+        .on('error', reject)
+        .on('end', resolve);
 
       deflate.write(input);
       deflate.flush(function () {
@@ -1739,6 +1716,7 @@ export const zlibDictionary = {
       });
 
       await promise;
+      assert.strictEqual(input, output);
     }
   },
 };
@@ -1748,79 +1726,16 @@ export const zlibDictionary = {
 export const closeAfterWrite = {
   async test() {
     const { promise, resolve } = Promise.withResolvers();
-    const close = mock.fn();
-
     zlib.gzip('hello', (err, out) => {
       assert.ifError(err);
 
       const unzip = zlib.createGunzip();
       unzip.write(out);
-      unzip.close(() => {
-        close();
-        resolve();
-      });
+      unzip.close(resolve);
     });
-
     await promise;
-    assert.strictEqual(close.mock.callCount(), 1);
   },
 };
-
-// Node.js tests relevant to zlib
-//
-// - [ ] test-zlib-brotli-16GB.js
-// - [ ] test-zlib-convenience-methods.js
-// - [ ] test-zlib-flush-drain.js
-// - [ ] test-zlib-invalid-input-memory.js
-// - [ ] test-zlib-sync-no-event.js
-// - [ ] test-zlib-brotli-flush.js
-// - [x] test-zlib-crc32.js
-// - [ ] test-zlib-flush-drain-longblock.js
-// - [ ] test-zlib.js
-// - [x] test-zlib-truncated.js
-// - [ ] test-zlib-brotli-from-brotli.js
-// - [x] test-zlib-create-raw.js
-// - [x] test-zlib-flush-flags.js
-// - [ ] test-zlib-kmaxlength-rangeerror.js
-// - [ ] test-zlib-unused-weak.js
-// - [ ] test-zlib-brotli-from-string.js
-// - [x] test-zlib-deflate-constructors.js
-// - [x] test-zlib-flush.js
-// - [ ] test-zlib-maxOutputLength.js
-// - [x] test-zlib-unzip-one-byte-chunks.js
-// - [ ] test-zlib-brotli.js
-// - [ ] test-zlib-deflate-raw-inherits.js
-// - [ ] test-zlib-flush-write-sync-interleaved.js
-// - [N/A] test-zlib-no-stream.js
-// - [x] test-zlib-write-after-close.js
-// - [ ] test-zlib-brotli-kmaxlength-rangeerror.js
-// - [x] test-zlib-destroy.js
-// - [x] test-zlib-from-concatenated-gzip.js
-// - [x] test-zlib-not-string-or-buffer.js
-// - [ ] test-zlib-write-after-end.js
-// - [x] test-zlib-bytes-read.js
-// - [ ] test-zlib-destroy-pipe.js
-// - [ ] test-zlib-from-gzip.js
-// - [x] test-zlib-object-write.js
-// - [ ] test-zlib-write-after-flush.js
-// - [x] test-zlib-close-after-error.js
-// - [x] test-zlib-dictionary-fail.js
-// - [x] test-zlib-from-gzip-with-trailing-garbage.js
-// - [ ] test-zlib-params.js
-// - [x] test-zlib-zero-byte.js
-// - [x] test-zlib-close-after-write.js
-// - [x] test-zlib-dictionary.js
-// - [x] test-zlib-from-string.js
-// - [ ] test-zlib-premature-end.js
-// - [x] test-zlib-zero-windowBits.js
-// - [x] test-zlib-close-in-ondata.js
-// - [x] test-zlib-empty-buffer.js
-// - [ ] test-zlib-invalid-arg-value-brotli-compress.js
-// - [ ] test-zlib-random-byte-pipes.js
-// - [x] test-zlib-const.js
-// - [x] test-zlib-failed-init.js
-// - [x] test-zlib-invalid-input.js
-// - [x] test-zlib-reset-before-write.js
 
 const BIG_DATA = 'horse'.repeat(50_000) + 'cow'.repeat(49_000);
 
@@ -1909,3 +1824,59 @@ export const deflateSyncTest = {
     );
   },
 };
+
+// Node.js tests relevant to zlib
+//
+// - [ ] test-zlib-brotli-16GB.js
+// - [ ] test-zlib-convenience-methods.js
+// - [ ] test-zlib-flush-drain.js
+// - [ ] test-zlib-invalid-input-memory.js
+// - [ ] test-zlib-sync-no-event.js
+// - [ ] test-zlib-brotli-flush.js
+// - [x] test-zlib-crc32.js
+// - [ ] test-zlib-flush-drain-longblock.js
+// - [ ] test-zlib.js
+// - [x] test-zlib-truncated.js
+// - [ ] test-zlib-brotli-from-brotli.js
+// - [x] test-zlib-create-raw.js
+// - [x] test-zlib-flush-flags.js
+// - [ ] test-zlib-kmaxlength-rangeerror.js
+// - [ ] test-zlib-unused-weak.js
+// - [ ] test-zlib-brotli-from-string.js
+// - [x] test-zlib-deflate-constructors.js
+// - [x] test-zlib-flush.js
+// - [ ] test-zlib-maxOutputLength.js
+// - [x] test-zlib-unzip-one-byte-chunks.js
+// - [ ] test-zlib-brotli.js
+// - [ ] test-zlib-deflate-raw-inherits.js
+// - [ ] test-zlib-flush-write-sync-interleaved.js
+// - [N/A] test-zlib-no-stream.js
+// - [x] test-zlib-write-after-close.js
+// - [ ] test-zlib-brotli-kmaxlength-rangeerror.js
+// - [x] test-zlib-destroy.js
+// - [x] test-zlib-from-concatenated-gzip.js
+// - [x] test-zlib-not-string-or-buffer.js
+// - [ ] test-zlib-write-after-end.js
+// - [x] test-zlib-bytes-read.js
+// - [ ] test-zlib-destroy-pipe.js
+// - [ ] test-zlib-from-gzip.js
+// - [x] test-zlib-object-write.js
+// - [ ] test-zlib-write-after-flush.js
+// - [x] test-zlib-close-after-error.js
+// - [x] test-zlib-dictionary-fail.js
+// - [x] test-zlib-from-gzip-with-trailing-garbage.js
+// - [ ] test-zlib-params.js
+// - [x] test-zlib-zero-byte.js
+// - [x] test-zlib-close-after-write.js
+// - [x] test-zlib-dictionary.js
+// - [x] test-zlib-from-string.js
+// - [ ] test-zlib-premature-end.js
+// - [x] test-zlib-zero-windowBits.js
+// - [x] test-zlib-close-in-ondata.js
+// - [x] test-zlib-empty-buffer.js
+// - [ ] test-zlib-invalid-arg-value-brotli-compress.js
+// - [ ] test-zlib-random-byte-pipes.js
+// - [x] test-zlib-const.js
+// - [x] test-zlib-failed-init.js
+// - [x] test-zlib-invalid-input.js
+// - [x] test-zlib-reset-before-write.js
