@@ -19,8 +19,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "test-workerd"_kj;
     case AutogateKey::PYODIDE_LOAD_EXTERNAL:
       return "pyodide-load-external"_kj;
-    case AutogateKey::RESPONSE_STREAM_DISCONNECTED_STATUS:
-      return "response-stream-disconnected-status"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

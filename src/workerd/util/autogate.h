@@ -15,8 +15,6 @@ namespace workerd::util {
 enum class AutogateKey {
   TEST_WORKERD,
   PYODIDE_LOAD_EXTERNAL,
-  // Enables reporting of disconnection during deferred proxying as a new status.
-  RESPONSE_STREAM_DISCONNECTED_STATUS,
   NumOfKeys  // Reserved for iteration.
 };
 
