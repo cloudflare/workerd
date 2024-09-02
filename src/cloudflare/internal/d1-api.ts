@@ -56,18 +56,20 @@ type ResultsFormat = 'ARRAY_OF_OBJECTS' | 'ROWS_AND_COLUMNS' | 'NONE';
 
 type D1SessionCommitTokenOrConstraint = string;
 type D1SessionCommitToken = string;
+const D1_SESSION_CONSTRAINT_FIRST_PRIMARY = "first-primary";
+const D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED = "first-unconstrained";
 
 // TODO Figure out what header to use.
 const D1_SESSION_COMMIT_TOKEN_HTTP_HEADER = 'x-cf-d1-session-commit-token';
 
 class D1Database {
   private readonly alwaysPrimarySession: D1DatabaseSessionAlwaysPrimary;
-  protected readonly envFetcher: Fetcher;
+  protected readonly fetcher: Fetcher;
 
-  public constructor(envFetcher: Fetcher) {
-    this.envFetcher = envFetcher;
+  public constructor(fetcher: Fetcher) {
+    this.fetcher = fetcher;
     this.alwaysPrimarySession = new D1DatabaseSessionAlwaysPrimary(
-      this.envFetcher
+      this.fetcher
     );
   }
 
@@ -92,8 +94,8 @@ class D1Database {
 }
 
 class D1DatabaseWithSessionAPI extends D1Database {
-  public constructor(envFetcher: Fetcher) {
-    super(envFetcher);
+  public constructor(fetcher: Fetcher) {
+    super(fetcher);
   }
 
   public withSession(
@@ -105,9 +107,9 @@ class D1DatabaseWithSessionAPI extends D1Database {
       constraintOrToken === undefined ||
       constraintOrToken === ''
     ) {
-      constraintOrToken = 'first-unconstrained';
+      constraintOrToken = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
     }
-    return new D1DatabaseSession(this.envFetcher, constraintOrToken);
+    return new D1DatabaseSession(this.fetcher, constraintOrToken);
   }
 }
 
@@ -116,25 +118,28 @@ class D1DatabaseSession {
   protected commitTokenOrConstraint: D1SessionCommitTokenOrConstraint;
 
   public constructor(
-    envFetcher: Fetcher,
+    fetcher: Fetcher,
     commitTokenOrConstraint: D1SessionCommitTokenOrConstraint
   ) {
-    this.fetcher = envFetcher;
+    this.fetcher = fetcher;
     this.commitTokenOrConstraint = commitTokenOrConstraint;
 
-    // TODO Do format validation for the commit token?
     if (!this.commitTokenOrConstraint) {
       throw new Error('D1_SESSION_ERROR: invalid commit token or constraint');
     }
   }
 
   // Update the commit token IFF the given newCommitToken is more recent.
-  // Returns the final commit token after the update.
+  // The commit token held in the session should always be the latest value we
+  // have observed in the responses to our API. There can be cases where we have concurrent
+  // queries running within the same session, and therefore here we ensure we only
+  // retain the latest commit token received.
+  // @returns the final commit token after the update.
   protected _updateCommitToken(
     newCommitToken: D1SessionCommitToken
   ): D1SessionCommitToken | null {
     newCommitToken = newCommitToken.trim();
-    if (newCommitToken === '') {
+    if (!newCommitToken) {
       // We should not be receiving invalid commit tokens, but just be defensive.
       return this.getCommitToken();
     }
@@ -169,9 +174,9 @@ class D1DatabaseSession {
   public getCommitToken(): D1SessionCommitToken | null {
     switch (this.commitTokenOrConstraint) {
       // First to any replica, and then anywhere that satisfies the commit token.
-      case 'first-unconstrained':
+      case D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED:
       // First to primary, and then anywhere that satisfies the commit token.
-      case 'first-primary':
+      case D1_SESSION_CONSTRAINT_FIRST_PRIMARY:
         return null;
       default:
         return this.commitTokenOrConstraint;
@@ -281,19 +286,19 @@ class D1DatabaseSession {
 class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
   public constructor(fetcher: Fetcher) {
     // Will always go to primary, since we won't be ever updating this constraint.
-    super(fetcher, 'first-primary');
+    super(fetcher, D1_SESSION_CONSTRAINT_FIRST_PRIMARY);
   }
 
-  // We ignore commit tokens for this special type of session, since all queries are sent
-  // to the primary replica.
+  // We ignore commit tokens for this special type of session,
+  // since all queries are sent to the primary.
   public override _updateCommitToken(
     _newCommitToken: D1SessionCommitToken
   ): D1SessionCommitToken | null {
     return null;
   }
 
-  // There is not commit token returned every by this special type of session, since all queries
-  // are sent to the primary replica.
+  // There is not commit token returned every by this special type of session,
+  // since all queries are sent to the primary.
   public override getCommitToken(): D1SessionCommitToken | null {
     return null;
   }
