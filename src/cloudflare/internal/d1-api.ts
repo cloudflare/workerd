@@ -56,10 +56,16 @@ type ResultsFormat = 'ARRAY_OF_OBJECTS' | 'ROWS_AND_COLUMNS' | 'NONE';
 
 type D1SessionCommitTokenOrConstraint = string;
 type D1SessionCommitToken = string;
-const D1_SESSION_CONSTRAINT_FIRST_PRIMARY = "first-primary";
-const D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED = "first-unconstrained";
+// Indicates that the first query should go to the primary, and the rest queries
+// using the same D1DatabaseSession will go to any replica that is consistent with
+// the commit token maintained by the session (returned by the first query).
+const D1_SESSION_CONSTRAINT_FIRST_PRIMARY = 'first-primary';
+// Indicates that the first query can go anywhere (primary or replica), and the rest queries
+// using the same D1DatabaseSession will go to any replica that is consistent with
+// the commit token maintained by the session (returned by the first query).
+const D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED = 'first-unconstrained';
 
-// TODO Figure out what header to use.
+// Parsed by the D1 eyeball worker.
 const D1_SESSION_COMMIT_TOKEN_HTTP_HEADER = 'x-cf-d1-session-commit-token';
 
 class D1Database {
@@ -208,6 +214,8 @@ class D1DatabaseSession {
       const newCommitToken = resp.headers.get(
         D1_SESSION_COMMIT_TOKEN_HTTP_HEADER
       );
+      // TODO(soon): Add validation of the received commit token, in case we sent a commit token,
+      //             otherwise sessions functionality could be inconsistent.
       if (newCommitToken) {
         this._updateCommitToken(newCommitToken);
       }

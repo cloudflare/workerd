@@ -3,6 +3,15 @@ load("//:build/wd_test.bzl", "wd_test")
 wd_test(
     src = "d1-api-test.wd-test",
     args = ["--experimental"],
+    data = glob(
+        ["*.js"],
+        exclude = ["d1-api-test-with-sessions.js"],
+    ),
+)
+
+wd_test(
+    src = "d1-api-test-with-sessions.wd-test",
+    args = ["--experimental"],
     data = glob(["*.js"]),
 )
 
