@@ -242,13 +242,21 @@ SharedMemoryCache::Use::~Use() noexcept(false) {
 
 kj::Maybe<kj::Own<CacheValue>> SharedMemoryCache::Use::getWithoutFallback(
     const kj::String& key) const {
+  // record start
   auto data = cache->data.lockExclusive();
+  // record end
   return cache->getWhileLocked(*data, key);
 }
 
 kj::OneOf<kj::Own<CacheValue>, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>
 SharedMemoryCache::Use::getWithFallback(const kj::String& key) const {
-  auto data = cache->data.lockExclusive();
+  // record start
+  kj::Locked<ThreadUnsafeData> data;
+  {
+    auto memoryCacheLockRecord = IsolateObserver::MemoryCacheLockRecord(IoContext::current().getMetrics().tryCreateMemoryCacheObserver());
+    data = cache->data.lockExclusive();
+  }
+  // record end
   KJ_IF_SOME(existingValue, cache->getWhileLocked(*data, key)) {
     return kj::mv(existingValue);
   } else KJ_IF_SOME(existingInProgress, data->inProgress.find(key)) {
@@ -291,7 +299,7 @@ SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::Use::prepareFall
              kj::Maybe<FallbackResult> maybeResult) mutable {
     KJ_IF_SOME(result, maybeResult) {
       // The fallback succeeded. Store the value in the cache and propagate it to
-      // all waiting requests, even if it has expired already.
+      // all waiting rbquests, even if it has expired already.
       status.hasSettled = true;
       auto data = cache->data.lockExclusive();
       cache->putWhileLocked(

@@ -28,6 +28,12 @@ public:
   virtual void receivedMessage(size_t bytes) { };
 };
 
+class MemoryCacheObserver : public kj::Refcounted {
+public:
+  virtual void start() { };
+  virtual void end() { };
+};
+
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
 //
 // Observing anything is optional. Default implementations of all methods observe nothing.
@@ -40,6 +46,8 @@ public:
   // This means that, when the returned observer observes a message being sent, the message is being
   // sent from the worker to the client making the request.
   virtual kj::Maybe<kj::Own<WebSocketObserver>> tryCreateWebSocketObserver() { return kj::none; };
+
+  virtual kj::Maybe<kj::Own<MemoryCacheObserver>> tryCreateMemoryCacheObserver() { return kj::none; };
 
   // Invoked when the request is actually delivered.
   //
@@ -201,6 +209,35 @@ public:
     // we have no `lockTiming`, then this LockRecord wrapper is just a big nothingburger.
     kj::Maybe<kj::Own<LockTiming>> lockTiming;
   };
+  
+  // turn into requestobserver
+  class MemoryCacheLockTiming {
+  public:
+    // Unlikely we'll get to report this without exposing internals of lock
+    //virtual void waitingForLock() {}
+    virtual void start() {}
+    virtual void stop() {}
+    virtual void locked() {}
+  };
+
+  class MemoryCacheLockRecord {
+  public:
+    explicit MemoryCacheLockRecord(kj::Maybe<kj::Own<MemoryCacheObserver>> observer)
+        : memoryCacheObserver(kj::mv(observer)) {
+      KJ_IF_SOME(o, memoryCacheObserver) o.get()->start();
+    }
+    ~MemoryCacheLockRecord() noexcept(false) {
+      KJ_IF_SOME(o, memoryCacheObserver) o.get()->end();
+    }
+    KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheLockRecord);
+
+  private:
+    kj::Maybe<kj::Own<MemoryCacheObserver>> memoryCacheObserver;
+  };
+
+  // For now, don't accept param to selectivly record
+  virtual kj::Maybe<kj::Own<MemoryCacheLockTiming>> tryCreateMemoryCacheLockTiming() const { return kj::none; }
+
 };
 
 class WorkerObserver: public kj::AtomicRefcounted {

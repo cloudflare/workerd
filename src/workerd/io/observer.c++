@@ -9,6 +9,7 @@ namespace workerd {
 namespace {
 kj::Maybe<kj::Own<FeatureObserver>> featureObserver;
 
+// This is another possible pattern
 class FeatureObserverImpl final: public FeatureObserver {
 public:
   void use(Feature feature) const override {
