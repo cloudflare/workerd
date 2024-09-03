@@ -103,26 +103,19 @@ function normalizeArgs(
 function wrapCallback(
   callback: CompressCallback<Error, Buffer>
 ): CompressCallback<string, ArrayBuffer> {
-  return (error: string | undefined, result: ArrayBuffer | undefined) => {
+  return (error: string | null, result: ArrayBuffer | undefined) => {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call
     queueMicrotask(() => {
-      callback(
-        error ? new Error(error) : undefined,
-        result ? Buffer.from(result) : undefined
-      );
+      if (error) {
+        callback(new Error(error));
+      } else {
+        // To avoid having a runtime assertion, let's use type assertion.
+        callback(null, Buffer.from(result as ArrayBuffer));
+      }
     });
   };
 }
 
-export function inflate(
-  data: ArrayBufferView | string,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function inflate(
-  data: ArrayBufferView | string,
-  options: ZlibOptions,
-  callback: CompressCallback<Error, Buffer>
-): void;
 export function inflate(
   data: ArrayBufferView | string,
   optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
@@ -137,15 +130,6 @@ export function inflate(
 
 export function unzip(
   data: ArrayBufferView | string,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function unzip(
-  data: ArrayBufferView | string,
-  options: ZlibOptions,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function unzip(
-  data: ArrayBufferView | string,
   optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
   callbackOrUndefined?: CompressCallback<Error, Buffer>
 ): void {
@@ -156,15 +140,6 @@ export function unzip(
   zlibUtil.zlib(data, options, zlibUtil.CONST_UNZIP, wrapCallback(callback));
 }
 
-export function inflateRaw(
-  data: ArrayBufferView | string,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function inflateRaw(
-  data: ArrayBufferView | string,
-  options: ZlibOptions,
-  callback: CompressCallback<Error, Buffer>
-): void;
 export function inflateRaw(
   data: ArrayBufferView | string,
   optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
@@ -184,15 +159,6 @@ export function inflateRaw(
 
 export function gunzip(
   data: ArrayBufferView | string,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function gunzip(
-  data: ArrayBufferView | string,
-  options: ZlibOptions,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function gunzip(
-  data: ArrayBufferView | string,
   optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
   callbackOrUndefined?: CompressCallback<Error, Buffer>
 ): void {
@@ -205,15 +171,6 @@ export function gunzip(
 
 export function deflate(
   data: ArrayBufferView | string,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function deflate(
-  data: ArrayBufferView | string,
-  options: ZlibOptions,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function deflate(
-  data: ArrayBufferView | string,
   optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
   callbackOrUndefined?: CompressCallback<Error, Buffer>
 ): void {
@@ -224,15 +181,6 @@ export function deflate(
   zlibUtil.zlib(data, options, zlibUtil.CONST_DEFLATE, wrapCallback(callback));
 }
 
-export function deflateRaw(
-  data: ArrayBufferView | string,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function deflateRaw(
-  data: ArrayBufferView | string,
-  options: ZlibOptions,
-  callback: CompressCallback<Error, Buffer>
-): void;
 export function deflateRaw(
   data: ArrayBufferView | string,
   optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
@@ -250,15 +198,6 @@ export function deflateRaw(
   );
 }
 
-export function gzip(
-  data: ArrayBufferView | string,
-  callback: CompressCallback<Error, Buffer>
-): void;
-export function gzip(
-  data: ArrayBufferView | string,
-  options: ZlibOptions,
-  callback: CompressCallback<Error, Buffer>
-): void;
 export function gzip(
   data: ArrayBufferView | string,
   optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
