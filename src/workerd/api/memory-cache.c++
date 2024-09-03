@@ -242,7 +242,9 @@ SharedMemoryCache::Use::~Use() noexcept(false) {
 
 kj::Maybe<kj::Own<CacheValue>> SharedMemoryCache::Use::getWithoutFallback(
     const kj::String& key) const {
+  // record start
   auto data = cache->data.lockExclusive();
+  // record end
   return cache->getWhileLocked(*data, key);
 }
 

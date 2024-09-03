@@ -128,6 +128,7 @@ public:
       }
     };
 
+    // Potential route for any metrics configuration required
     struct MemoryCache {
       kj::Maybe<kj::String> cacheId = kj::none;
       uint32_t maxKeys;
