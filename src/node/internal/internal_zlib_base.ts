@@ -157,8 +157,8 @@ function processCallback(this: ZlibHandleType): void {
           handle.availInBefore, // in_len
           self._outBuffer, // out
           self._outOffset, // out_off
-          self._chunkSize
-        ); // out_len
+          self._chunkSize // out_len
+        );
         self._read(n);
       };
     }
@@ -470,9 +470,9 @@ export class ZlibBase extends Transform {
     kind?: number | (() => void),
     callback: (() => void) | undefined = undefined
   ): void {
-    if (typeof kind === 'function' || (kind == null && !callback)) {
+    if (typeof kind === 'function' || (kind === undefined && !callback)) {
       callback = kind as (() => void) | undefined;
-      kind = this._defaultFlushFlag;
+      kind = this._defaultFullFlushFlag;
     }
 
     if (this.writableFinished) {
@@ -650,7 +650,6 @@ export class Zlib extends ZlibBase {
       dictionary
     );
     super(options ?? {}, mode, handle);
-    handle[owner_symbol] = this;
     this._level = level;
     this._strategy = strategy;
     this._handle = handle;
@@ -678,7 +677,7 @@ export class Zlib extends ZlibBase {
       );
     } else {
       /* eslint-disable-next-line @typescript-eslint/no-unsafe-call */
-      queueMicrotask(() => callback());
+      queueMicrotask(callback);
     }
   }
 
