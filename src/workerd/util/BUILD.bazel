@@ -87,10 +87,12 @@ wd_cc_library(
     srcs = [
         "sqlite.c++",
         "sqlite-kv.c++",
+        "sqlite-metadata.c++",
     ],
     hdrs = [
         "sqlite.h",
         "sqlite-kv.h",
+        "sqlite-metadata.h",
     ],
     implementation_deps = [
         "@sqlite3",
@@ -198,6 +200,13 @@ kj_test(
 
 kj_test(
     src = "sqlite-kv-test.c++",
+    deps = [
+        ":sqlite",
+    ],
+)
+
+kj_test(
+    src = "sqlite-metadata-test.c++",
     deps = [
         ":sqlite",
     ],
