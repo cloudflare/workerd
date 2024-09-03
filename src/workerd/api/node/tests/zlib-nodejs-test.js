@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
-import { Writable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { inspect, promisify } from 'node:util';
 import { mock } from 'node:test';
 import zlib from 'node:zlib';
@@ -1223,42 +1223,36 @@ export const zlibFromConcatenatedGzip = {
       await promise;
     }
 
-    // Files that have the "right" magic bytes for starting a new gzip member
-    // in the middle of themselves, even if they are part of a single
-    // regularly compressed member
-    const pmmDataZlib = Buffer.from(
-      'eJztwTEBAAAAwqD1T+1vBqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-        'AAAAAAAAAAAAAAAAAAAAAAAAAAAIAz+w4AAQ==',
-      'base64'
-    );
+    {
+      // Files that have the "right" magic bytes for starting a new gzip member
+      // in the middle of themselves, even if they are part of a single
+      // regularly compressed member
+      const pmmDataZlib = Buffer.from(
+        'eJztwTEBAAAAwqD1T+1vBqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+          'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+          'AAAAAAAAAAAAAAAAAAAAAAAAAAAIAz+w4AAQ==',
+        'base64'
+      );
+      const pmmDataGz = Buffer.from(
+        'H4sIAMyK8lYCA+3BMQEAAADCoPVP7WENoAAAAAAAAAAAAAAAAAAAAAAAH4sAAAAAAAAAAAAAAAAA' +
+          'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+          'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABuGn4Inv/6AQA=',
+        'base64'
+      );
+      const pmmExpected = zlib.inflateSync(pmmDataZlib);
+      const pmmResultBuffers = [];
+      const { promise, resolve, reject } = Promise.withResolvers();
 
-    const pmmDataGz = Buffer.from(
-      'H4sIAMyK8lYCA+3BMQEAAADCoPVP7WENoAAAAAAAAAAAAAAAAAAAAAAAH4sAAAAAAAAAAAAAAAAA' +
-        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
-        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABuGn4Inv/6AQA=',
-      'base64'
-    );
+      Readable.from([pmmDataGz])
+        .pipe(zlib.createGunzip())
+        .on('error', reject)
+        .on('data', (data) => pmmResultBuffers.push(data))
+        .on('finish', resolve);
 
-    const pmmExpected = zlib.inflateSync(pmmDataZlib);
-    const pmmResultBuffers = [];
-
-    // TODO(soon): fix this test case
-    // {
-    //   const {promise, resolve, reject } =  Promise.withResolvers();
-
-    //   Readable.from([pmmDataGz])
-    //     .pipe(zlib.createGunzip())
-    //     .on('error', reject)
-    //     .on('data', (data) => pmmResultBuffers.push(data))
-    //     .on('finish', () => {
-    //       // Result should match original random garbage
-    //       assert.deepStrictEqual(Buffer.concat(pmmResultBuffers), pmmExpected);
-    //       resolve();
-    //     });
-
-    //     await promise;
-    //   }
+      await promise;
+      // Result should match original random garbage
+      assert.deepStrictEqual(Buffer.concat(pmmResultBuffers), pmmExpected);
+    }
 
     // Test that the next gzip member can wrap around the input buffer boundary
     for (const offset of [0, 1, 2, 3, 4, defEncoded.length]) {

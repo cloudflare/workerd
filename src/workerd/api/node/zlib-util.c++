@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
+#include "util.h"
 #include "zlib-util.h"
 
 #include "nbytes.h"
@@ -572,14 +573,13 @@ void ZlibUtil::CompressionStream<CompressionContext>::write(jsg::Lock& js,
     inputOffset = 0;
   }
 
-  JSG_REQUIRE((inputLength > inputOffset) || inputLength == 0, Error,
-      kj::str("Input offset should be smaller or equal to length, but received offset: ",
-          inputOffset, " and length: ", inputLength));
-  JSG_REQUIRE((outputLength > outputOffset) || outputLength == 0, Error,
-      kj::str("Output offset should be smaller or equal to length, but received offset: ",
-          outputOffset, " and length: ", outputLength));
-
   auto input_ensured = input.map([](auto& val) { return val.asPtr(); }).orDefault({});
+
+  JSG_REQUIRE(IsWithinBounds(inputOffset, inputLength, input_ensured.size()), Error,
+      "Input access is not within bounds"_kj);
+  JSG_REQUIRE(IsWithinBounds(outputOffset, outputLength, output.size()), Error,
+      "Input access is not within bounds"_kj);
+
   writeStream<async>(js, flush, input_ensured.slice(inputOffset), inputLength,
       output.slice(outputOffset), outputLength);
 }

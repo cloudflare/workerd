@@ -8,6 +8,21 @@
 
 namespace workerd::api::node {
 
+// Originally implemented by Node.js contributors.
+// Available at https://github.com/nodejs/node/blob/b7b96282b212a2274b9db605ac29d388246754de/src/node_buffer.h#L75
+// This is verbose to be explicit with inline commenting
+static constexpr bool IsWithinBounds(size_t off, size_t len, size_t max) noexcept {
+  // Asking to seek too far into the buffer
+  // check to avoid wrapping in subsequent subtraction
+  if (off > max) return false;
+
+  // Asking for more than is left over in the buffer
+  if (max - off < len) return false;
+
+  // Otherwise we're in bounds
+  return true;
+}
+
 class MIMEType;
 
 class MIMEParams final: public jsg::Object {
