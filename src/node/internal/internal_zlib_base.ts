@@ -349,7 +349,7 @@ export class ZlibBase extends Transform {
   public _defaultFlushFlag: number;
   public _finishFlushFlag: number;
   public _defaultFullFlushFlag: number;
-  public _info: unknown;
+  public _info: boolean;
   public _handle: ZlibHandleType | null = null;
   public _writeState = new Uint32Array(2);
 
@@ -430,7 +430,7 @@ export class ZlibBase extends Transform {
     this._defaultFlushFlag = flush;
     this._finishFlushFlag = finishFlush;
     this._defaultFullFlushFlag = fullFlush;
-    this._info = opts && opts.info;
+    this._info = Boolean(opts?.info);
     this._maxOutputLength = maxOutputLength;
   }
 

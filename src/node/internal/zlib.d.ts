@@ -3,7 +3,7 @@ import { owner_symbol, type Zlib } from 'node-internal:internal_zlib_base';
 export function crc32(data: ArrayBufferView, value: number): number;
 
 export type CompressCallback<ErrT, BufT> = (
-  error?: ErrT,
+  error: ErrT | null,
   result?: BufT
 ) => void;
 
