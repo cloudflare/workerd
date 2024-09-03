@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
-import { Readable } from 'node:stream';
+import { Writable } from 'node:stream';
 import { inspect, promisify } from 'node:util';
 import { mock } from 'node:test';
 import zlib from 'node:zlib';
@@ -1825,10 +1825,282 @@ export const deflateSyncTest = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/5949e169bd886fcc965172f671671b47ac07d2e2/test/parallel/test-zlib-premature-end.js
+export const prematureEnd = {
+  async test() {
+    const input = '0123456789'.repeat(4);
+
+    for (const [compress, decompressor] of [
+      [zlib.deflateRawSync, zlib.createInflateRaw],
+      [zlib.deflateSync, zlib.createInflate],
+      // TODO(soon): Enable this once brotli is implemented.
+      // [zlib.brotliCompressSync, zlib.createBrotliDecompress],
+    ]) {
+      const compressed = compress(input);
+      const trailingData = Buffer.from('not valid compressed data');
+
+      for (const variant of [
+        (stream) => {
+          stream.end(compressed);
+        },
+        (stream) => {
+          stream.write(compressed);
+          stream.write(trailingData);
+        },
+        (stream) => {
+          stream.write(compressed);
+          stream.end(trailingData);
+        },
+        (stream) => {
+          stream.write(Buffer.concat([compressed, trailingData]));
+        },
+        (stream) => {
+          stream.end(Buffer.concat([compressed, trailingData]));
+        },
+      ]) {
+        let output = '';
+        const { promise, resolve, reject } = Promise.withResolvers();
+        const stream = decompressor();
+        stream.setEncoding('utf8');
+        stream
+          .on('data', (chunk) => (output += chunk))
+          .on('end', () => {
+            assert.strictEqual(output, input);
+            assert.strictEqual(stream.bytesWritten, compressed.length);
+            resolve();
+          })
+          .on('error', reject);
+        variant(stream);
+        await promise;
+      }
+    }
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/5949e169bd886fcc965172f671671b47ac07d2e2/test/parallel/test-zlib-write-after-flush.js
+export const writeAfterFlush = {
+  async test() {
+    for (const [createCompress, createDecompress] of [
+      [zlib.createGzip, zlib.createGunzip],
+      [zlib.createBrotliCompress, zlib.createBrotliDecompress],
+    ]) {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const gzip = createCompress();
+      const gunz = createDecompress();
+
+      gzip.pipe(gunz);
+
+      let output = '';
+      const input = 'A line of data\n';
+      gunz.setEncoding('utf8');
+      gunz
+        .on('error', reject)
+        .on('data', (c) => (output += c))
+        .on('end', resolve);
+
+      // Make sure that flush/write doesn't trigger an assert failure
+      gzip.flush();
+      gzip.write(input);
+      gzip.end();
+      gunz.read(0);
+      await promise;
+      assert.strictEqual(output, input);
+    }
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/5949e169bd886fcc965172f671671b47ac07d2e2/test/parallel/test-zlib-destroy-pipe.js
+export const destroyPipe = {
+  async test() {
+    const ts = zlib.createGzip();
+    const { promise, resolve } = Promise.withResolvers();
+
+    const ws = new Writable({
+      write: (chunk, enc, cb) => {
+        queueMicrotask(cb);
+        ts.destroy();
+        resolve();
+      },
+    });
+
+    const buf = Buffer.allocUnsafe(1024 * 1024 * 20);
+    ts.end(buf);
+    ts.pipe(ws);
+    await promise;
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/5949e169bd886fcc965172f671671b47ac07d2e2/test/parallel/test-zlib-write-after-end.js
+export const writeAfterEnd = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const data = zlib.deflateRawSync('Welcome');
+    const inflate = zlib.createInflateRaw();
+    const writeCallback = mock.fn();
+    inflate.resume();
+    inflate.write(data, writeCallback);
+    inflate.write(Buffer.from([0x00]), writeCallback);
+    inflate.write(Buffer.from([0x00]), writeCallback);
+    inflate.flush(resolve);
+    await promise;
+    assert.strictEqual(writeCallback.mock.callCount(), 3);
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/5949e169bd886fcc965172f671671b47ac07d2e2/test/parallel/test-zlib-convenience-methods.js
+export const convenienceMethods = {
+  async test() {
+    // Must be a multiple of 4 characters in total to test all ArrayBufferView
+    // types.
+    const expectStr = 'blah'.repeat(8);
+    const expectBuf = Buffer.from(expectStr);
+
+    const opts = {
+      level: 9,
+      chunkSize: 1024,
+    };
+
+    const optsInfo = {
+      info: true,
+    };
+
+    for (const [type, expect] of [
+      ['string', expectStr],
+      ['Buffer', expectBuf],
+    ]) {
+      for (const method of [
+        ['gzip', 'gunzip', 'Gzip', 'Gunzip'],
+        ['gzip', 'unzip', 'Gzip', 'Unzip'],
+        ['deflate', 'inflate', 'Deflate', 'Inflate'],
+        ['deflateRaw', 'inflateRaw', 'DeflateRaw', 'InflateRaw'],
+        // TODO(soon): Enable this once brotli functions are implemented
+        // [
+        //   'brotliCompress',
+        //   'brotliDecompress',
+        //   'BrotliCompress',
+        //   'BrotliDecompress',
+        // ],
+      ]) {
+        {
+          const { promise, resolve } = Promise.withResolvers();
+          zlib[method[0]](expect, opts, (err, result) => {
+            assert.ifError(err);
+            zlib[method[1]](result, opts, (err, result) => {
+              assert.ifError(err);
+              assert.strictEqual(
+                result.toString(),
+                expectStr,
+                `Should get original string after ${method[0]}/` +
+                  `${method[1]} ${type} with options.`
+              );
+              resolve();
+            });
+          });
+          await promise;
+        }
+
+        {
+          const { promise, resolve } = Promise.withResolvers();
+          zlib[method[0]](expect, (err, result) => {
+            assert.ifError(err);
+            zlib[method[1]](result, (err, result) => {
+              assert.ifError(err);
+              assert.strictEqual(
+                result.toString(),
+                expectStr,
+                `Should get original string after ${method[0]}/` +
+                  `${method[1]} ${type} without options.`
+              );
+              resolve();
+            });
+          });
+          await promise;
+        }
+
+        // TODO(soon): Enable this test
+        // {
+        //   const { promise, resolve } = Promise.withResolvers();
+        //   zlib[method[0]](expect, optsInfo, (err, result) => {
+        //     assert.ifError(err);
+        //
+        //     const compressed = result.buffer;
+        //     zlib[method[1]](compressed, optsInfo, (err, result) => {
+        //       assert.ifError(err);
+        //       assert.strictEqual(
+        //         result.buffer.toString(),
+        //         expectStr,
+        //         `Should get original string after ${method[0]}/` +
+        //           `${method[1]} ${type} with info option.`
+        //       );
+        //       resolve();
+        //     });
+        //   });
+        //   await promise;
+        // }
+
+        {
+          const compressed = zlib[`${method[0]}Sync`](expect, opts);
+          const decompressed = zlib[`${method[1]}Sync`](compressed, opts);
+          assert.strictEqual(
+            decompressed.toString(),
+            expectStr,
+            `Should get original string after ${method[0]}Sync/` +
+              `${method[1]}Sync ${type} with options.`
+          );
+        }
+
+        {
+          const compressed = zlib[`${method[0]}Sync`](expect);
+          const decompressed = zlib[`${method[1]}Sync`](compressed);
+          assert.strictEqual(
+            decompressed.toString(),
+            expectStr,
+            `Should get original string after ${method[0]}Sync/` +
+              `${method[1]}Sync ${type} without options.`
+          );
+        }
+
+        // TODO(soon): Enable this test
+        // {
+        //   const compressed = zlib[`${method[0]}Sync`](expect, optsInfo);
+        //   const decompressed = zlib[`${method[1]}Sync`](
+        //     compressed.buffer,
+        //     optsInfo
+        //   );
+        //   assert.strictEqual(
+        //     decompressed.buffer.toString(),
+        //     expectStr,
+        //     `Should get original string after ${method[0]}Sync/` +
+        //       `${method[1]}Sync ${type} without options.`
+        //   );
+        //   assert.ok(
+        //     decompressed.engine instanceof zlib[method[3]],
+        //     `Should get engine ${method[3]} after ${method[0]} ` +
+        //       `${type} with info option.`
+        //   );
+        // }
+      }
+    }
+
+    assert.throws(() => zlib.gzip('abc'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+      message:
+        'The "callback" argument must be of type function. ' +
+        'Received undefined',
+    });
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
-// - [ ] test-zlib-convenience-methods.js
+// - [x] test-zlib-convenience-methods.js
 // - [ ] test-zlib-flush-drain.js
 // - [ ] test-zlib-invalid-input-memory.js
 // - [ ] test-zlib-sync-no-event.js
@@ -1856,12 +2128,12 @@ export const deflateSyncTest = {
 // - [x] test-zlib-destroy.js
 // - [x] test-zlib-from-concatenated-gzip.js
 // - [x] test-zlib-not-string-or-buffer.js
-// - [ ] test-zlib-write-after-end.js
+// - [x] test-zlib-write-after-end.js
 // - [x] test-zlib-bytes-read.js
-// - [ ] test-zlib-destroy-pipe.js
+// - [x] test-zlib-destroy-pipe.js
 // - [ ] test-zlib-from-gzip.js
 // - [x] test-zlib-object-write.js
-// - [ ] test-zlib-write-after-flush.js
+// - [x] test-zlib-write-after-flush.js
 // - [x] test-zlib-close-after-error.js
 // - [x] test-zlib-dictionary-fail.js
 // - [x] test-zlib-from-gzip-with-trailing-garbage.js
@@ -1870,7 +2142,7 @@ export const deflateSyncTest = {
 // - [x] test-zlib-close-after-write.js
 // - [x] test-zlib-dictionary.js
 // - [x] test-zlib-from-string.js
-// - [ ] test-zlib-premature-end.js
+// - [x] test-zlib-premature-end.js
 // - [x] test-zlib-zero-windowBits.js
 // - [x] test-zlib-close-in-ondata.js
 // - [x] test-zlib-empty-buffer.js
