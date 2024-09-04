@@ -11,3 +11,18 @@ export abstract class PipelineTransform {
    */
   public transformJson(data: object[]): Promise<object[]>;
 }
+
+export type PipelineResponse = {
+  success: boolean
+  error?: string
+}
+
+export interface Pipeline {
+  /**
+   * send recieves an array of javascript objects which are sent
+   * into the pipeline for processing via binding
+   * @param data The data to be send
+   * @returns A promise containing the outcome of the send
+   */
+  send(data: object[]): Promise<PipelineResponse>
+}
