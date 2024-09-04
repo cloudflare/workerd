@@ -26,6 +26,8 @@
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uncaught-exception-source.h>
 
+#include "simdutf.h"
+
 namespace workerd::api {
 
 namespace {
@@ -655,8 +657,9 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(jsg::Lock& js,
   }
 }
 
-kj::String ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsValue data) {
+jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsValue data) {
   auto str = data.toJsString(js);
+  auto strArray = str.toArray<kj::byte>(js);
 
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's
@@ -664,12 +667,11 @@ kj::String ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsValue data) {
   JSG_REQUIRE(str.containsOnlyOneByte(), DOMInvalidCharacterError,
       "btoa() can only operate on characters in the Latin1 (ISO/IEC 8859-1) range.");
 
-  // TODO(perf): v8::String sometimes holds a char pointer rather than a uint16_t pointer, which is
-  //   why v8::String::IsOneByte() is both faster than ContainsOnlyOneByte() and prone to false
-  //   negatives. Conceivably we could take advantage of this fact to completely avoid the later
-  //   WriteOneByte() call in some cases!
-
-  return kj::encodeBase64(str.toArray<kj::byte>(js));
+  auto expected_length = simdutf::base64_length_from_binary(strArray.size());
+  auto result = kj::heapArray<kj::byte>(expected_length);
+  auto written = simdutf::binary_to_base64(
+      strArray.asChars().begin(), strArray.size(), result.asChars().begin());
+  return js.str(result.slice(0, written).attach(kj::mv(result)));
 }
 jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   auto decoded = kj::decodeBase64(data.asArray());
