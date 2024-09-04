@@ -253,7 +253,8 @@ SharedMemoryCache::Use::getWithFallback(const kj::String& key) const {
   // record start
   kj::Locked<ThreadUnsafeData> data;
   {
-    auto memoryCacheLockRecord = IsolateObserver::MemoryCacheLockRecord(IoContext::current().getMetrics().tryCreateMemoryCacheObserver());
+    //auto memoryCacheLockRecord = IsolateObserver::MemoryCacheLockRecord(IoContext::current().getMetrics().tryCreateMemoryCacheObserver());
+    auto memoryCacheLockRecord = IsolateObserver::MemoryCacheLockRecord(IoContext::current().getMetrics().getMemoryCacheObserver());
     data = cache->data.lockExclusive();
   }
   // record end

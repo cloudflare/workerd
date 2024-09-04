@@ -49,6 +49,8 @@ public:
 
   virtual kj::Maybe<kj::Own<MemoryCacheObserver>> tryCreateMemoryCacheObserver() { return kj::none; };
 
+  virtual kj::Maybe<kj::Own<MemoryCacheObserver>> getMemoryCacheObserver() const { return kj::none; };
+
   // Invoked when the request is actually delivered.
   //
   // If, for some reason, this is not invoked before the object is destroyed, this indicate that
