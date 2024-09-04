@@ -473,7 +473,7 @@ public:
   // ---------------------------------------------------------------------------
   // JS API
 
-  kj::String btoa(jsg::Lock& js, jsg::JsValue data);
+  jsg::JsString btoa(jsg::Lock& js, jsg::JsValue data);
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
   void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
