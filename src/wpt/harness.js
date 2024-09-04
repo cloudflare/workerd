@@ -21,9 +21,21 @@ globalThis.test = (callback, message) => {
   try {
     callback();
   } catch (err) {
-    const aerr = new AggregateError([err], message);
-    globalThis.errors.push(aerr);
+    globalThis.errors.push(new AggregateError([err], message));
   }
 };
 
 globalThis.errors = [];
+
+export function prepare() {
+  globalThis.errors = [];
+}
+
+export function validate() {
+  if (globalThis.errors.length > 0) {
+    for (const err of globalThis.errors) {
+      console.error(err);
+    }
+    throw new Error('Test failed');
+  }
+}
