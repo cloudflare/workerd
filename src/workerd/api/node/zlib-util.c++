@@ -825,7 +825,6 @@ bool ZlibUtil::BrotliCompressionStream<CompressionContext>::initialize(jsg::Lock
     jsg::BufferSource params,
     jsg::BufferSource writeResult,
     jsg::Function<void()> writeCallback) {
-  auto results = writeResult.template asArrayPtr<uint32_t>();
   this->initializeStream(kj::mv(writeResult), kj::mv(writeCallback));
   auto maybeError =
       this->context()->initialize(CompressionStream<CompressionContext>::AllocForBrotli,
@@ -836,6 +835,8 @@ bool ZlibUtil::BrotliCompressionStream<CompressionContext>::initialize(jsg::Lock
     this->emitError(js, kj::mv(err));
     return false;
   }
+
+  auto results = params.template asArrayPtr<uint32_t>();
 
   for (int i = 0; i < results.size(); i++) {
     if (results[i] == static_cast<uint32_t>(-1)) {
