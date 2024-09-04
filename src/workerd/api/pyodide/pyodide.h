@@ -267,9 +267,8 @@ public:
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
-  kj::Promise<kj::Own<SmallPackagesTarReader>> getPackage(kj::StringPtr path) {
-    return loadedPackages->getPromise(path);
-  }
+  void onPackageReceived(
+      kj::String path, jsg::Function<void(jsg::Ref<SmallPackagesTarReader>)> resolve) {}
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(hasMemorySnapshot);
@@ -279,7 +278,7 @@ public:
     JSG_METHOD(isEwValidating);
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
-    JSG_METHOD(getPackage);
+    JSG_METHOD(onPackageReceived);
   }
 
 private:
