@@ -1,6 +1,7 @@
 alias b := build
 alias t := test
 alias f := format
+alias st := stream-test
 
 default:
   @just --list
@@ -27,6 +28,14 @@ test *args="//...":
 
 test-asan *args="//...":
   just test {{args}} --config=asan
+
+# e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
+stream-test args:
+  bazel test {{args}} --test_output=streamed --test_env=LLVM_SYMBOLIZER=llvm-symbolizer-{{clang_version}}
+
+# e.g. just node-test zlib
+node-test test_name:
+  just stream-test //src/workerd/api/node:tests/{{test_name}}-nodejs-test
 
 format:
   python3 tools/cross/format.py
