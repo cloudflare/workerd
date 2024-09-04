@@ -3,14 +3,17 @@ using Workerd = import "/workerd/workerd.capnp";
 const unitTests :Workerd.Config = (
   services = [
     ( name = "TEST_TMPDIR", disk = (writable = true) ),
-    ( name = "d1-api-test",
+    ( name = "d1-api-test-with-sessions",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "d1-api-test.js"),
+          (name = "worker", esModule = embed "d1-api-test-with-sessions.js"),
           (name = "d1-api-test-common", esModule = embed "d1-api-test-common.js"),
         ],
         compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat"],
+
+        # NOTE: We provide the extra compatibility flag to enable the Sessions API.
+        compatibilityFlags = ["nodejs_compat", "enable_d1_with_sessions_api"],
+
         bindings = [
         (
           name = "d1",
@@ -20,8 +23,12 @@ const unitTests :Workerd.Config = (
               name = "fetcher",
               service = "d1-mock"
             )],
-          )
-        )
+          ),
+        ),
+        (
+          name = "d1MockFetcher",
+          service = "d1-mock"
+        ),
         ],
       )
     ),
