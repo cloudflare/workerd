@@ -1,12 +1,4 @@
 load("//:build/wd_test.bzl", "wd_test")
+load("//src/workerd/api/wpt:generate-tests.bzl", "gen_wpt_tests")
 
-wd_test(
-    name = "url-test",
-    src = "url-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "url-test.js",
-        "//src/wpt:wpt-test-harness",
-        "@wpt//:url",
-    ],
-)
+gen_wpt_tests(glob(["**/*.js"]))
