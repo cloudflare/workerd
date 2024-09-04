@@ -25,10 +25,6 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
-/* eslint-disable */
-//import { codes } from "node-internal:error-codes";
-
-// import { hideStackFrames } from "node-internal:hide-stack-frames";
 import { isArrayBufferView } from 'node-internal:internal_types';
 import { normalizeEncoding } from 'node-internal:internal_utils';
 import {
@@ -40,10 +36,19 @@ import { default as bufferUtil } from 'node-internal:buffer';
 
 // TODO(someday): Not current implementing parseFileMode, validatePort
 
-export const isInt32 = (value: any) => value === (value | 0);
-export const isUint32 = (value: any) => value === value >>> 0;
+export function isInt32(value: unknown): value is number {
+  // @ts-expect-error Due to value being unknown
+  return value === (value | 0);
+}
+export function isUint32(value: unknown): value is number {
+  // @ts-expect-error Due to value being unknown
+  return value === value >>> 0;
+}
 
-export function validateBuffer(buffer: unknown, name = 'buffer') {
+export function validateBuffer(
+  buffer: unknown,
+  name = 'buffer'
+): asserts buffer is Buffer {
   if (!isArrayBufferView(buffer)) {
     throw new ERR_INVALID_ARG_TYPE(
       name,
@@ -58,7 +63,7 @@ export function validateInteger(
   name: string,
   min = Number.MIN_SAFE_INTEGER,
   max = Number.MAX_SAFE_INTEGER
-) {
+): asserts value is number {
   if (typeof value !== 'number') {
     throw new ERR_INVALID_ARG_TYPE(name, 'number', value);
   }
@@ -80,7 +85,7 @@ export function validateObject(
   value: unknown,
   name: string,
   options?: ValidateObjectOptions
-) {
+): asserts value is Record<string, unknown> {
   const useDefaultOptions = options == null;
   const allowArray = useDefaultOptions ? false : options.allowArray;
   const allowFunction = useDefaultOptions ? false : options.allowFunction;
@@ -96,11 +101,11 @@ export function validateObject(
 }
 
 export function validateInt32(
-  value: any,
+  value: unknown,
   name: string,
   min = -2147483648,
   max = 2147483647
-) {
+): asserts value is number {
   if (!isInt32(value)) {
     if (typeof value !== 'number') {
       throw new ERR_INVALID_ARG_TYPE(name, 'number', value);
@@ -122,7 +127,7 @@ export function validateUint32(
   value: unknown,
   name: string,
   positive?: boolean
-) {
+): asserts value is number {
   if (!isUint32(value)) {
     if (typeof value !== 'number') {
       throw new ERR_INVALID_ARG_TYPE(name, 'number', value);
@@ -139,25 +144,38 @@ export function validateUint32(
   }
 }
 
-export function validateString(value: unknown, name: string) {
+export function validateString(
+  value: unknown,
+  name: string
+): asserts value is string {
   if (typeof value !== 'string') {
     throw new ERR_INVALID_ARG_TYPE(name, 'string', value);
   }
 }
 
-export function validateNumber(value: unknown, name: string) {
+export function validateNumber(
+  value: unknown,
+  name: string
+): asserts value is number {
   if (typeof value !== 'number') {
     throw new ERR_INVALID_ARG_TYPE(name, 'number', value);
   }
 }
 
-export function validateBoolean(value: unknown, name: string) {
+export function validateBoolean(
+  value: unknown,
+  name: string
+): asserts value is boolean {
   if (typeof value !== 'boolean') {
     throw new ERR_INVALID_ARG_TYPE(name, 'boolean', value);
   }
 }
 
-export function validateOneOf(value: unknown, name: string, oneOf: any[]) {
+export function validateOneOf(
+  value: unknown,
+  name: string,
+  oneOf: unknown[]
+): void {
   if (!Array.prototype.includes.call(oneOf, value)) {
     const allowed = Array.prototype.join.call(
       Array.prototype.map.call(oneOf, (v) =>
@@ -171,9 +189,12 @@ export function validateOneOf(value: unknown, name: string, oneOf: any[]) {
   }
 }
 
-export function validateEncoding(data: unknown, encoding: string): void {
+export function validateEncoding(
+  data: unknown,
+  encoding: string
+): asserts data is string {
   const normalizedEncoding = normalizeEncoding(encoding);
-  const length = (data as any).length;
+  const length = (data as any).length; // eslint-disable-line
 
   if (normalizedEncoding === bufferUtil.HEX && length % 2 !== 0) {
     throw new ERR_INVALID_ARG_VALUE(
@@ -184,7 +205,10 @@ export function validateEncoding(data: unknown, encoding: string): void {
   }
 }
 
-export function validateAbortSignal(signal: unknown, name: string) {
+export function validateAbortSignal(
+  signal: unknown,
+  name: string
+): asserts signal is AbortSignal {
   if (
     signal !== undefined &&
     (signal === null || typeof signal !== 'object' || !('aborted' in signal))
@@ -193,13 +217,20 @@ export function validateAbortSignal(signal: unknown, name: string) {
   }
 }
 
-export function validateFunction(value: unknown, name: string) {
+export function validateFunction(
+  value: unknown,
+  name: string
+): asserts value is (...args: unknown[]) => unknown {
   if (typeof value !== 'function') {
     throw new ERR_INVALID_ARG_TYPE(name, 'Function', value);
   }
 }
 
-export function validateArray(value: unknown, name: string, minLength = 0) {
+export function validateArray(
+  value: unknown,
+  name: string,
+  minLength = 0
+): asserts value is unknown[] {
   if (!Array.isArray(value)) {
     throw new ERR_INVALID_ARG_TYPE(name, 'Array', value);
   }

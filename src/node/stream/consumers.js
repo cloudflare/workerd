@@ -24,7 +24,6 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 /* todo: the following is adopted code, enabling linting one day */
-/* eslint-disable */
 import { Buffer } from 'node-internal:internal_buffer';
 
 export async function blob(stream) {
