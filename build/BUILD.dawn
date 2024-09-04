@@ -1103,9 +1103,9 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/tint/lang/wgsl/features",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
-        "@dawn//src/tint/lang/wgsl/features",
     ],
 )
 
@@ -1144,6 +1144,6 @@ cc_library(
     includes = ["include"],
     visibility = ["//visibility:public"],
     deps = [
-        "@dawn//src/tint/api",
+        "//src/tint/api",
     ],
 )
