@@ -29,7 +29,6 @@
 import { Buffer } from 'node-internal:internal_buffer';
 
 import {
-  CryptoKey,
   KeyData,
   KeyObjectType,
   KeyExportResult,

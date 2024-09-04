@@ -166,13 +166,6 @@ export type KeyAlgorithm =
   | HmacKeyAlgorithm
   | AesKeyAlgorithm;
 
-export interface CryptoKey {
-  algorithm: KeyAlgorithm;
-  extractable: boolean;
-  type: KeyObjectType;
-  usages: string[];
-}
-
 export interface RsaOtherPrimesInfo {
   d?: string;
   r?: string;
