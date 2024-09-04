@@ -73,7 +73,13 @@ def _wd_test_impl(ctx):
         executable = ctx.outputs.executable
         ctx.actions.write(
             output = executable,
-            content = "#! /bin/sh\nexec \"$@\" -dTEST_TMPDIR=$TEST_TMPDIR\n",
+            content = """
+                #! /bin/sh
+                echo
+                echo \\(cd `pwd` \\&\\& \"$@\" -dTEST_TMPDIR=$TEST_TMPDIR\\)
+                echo
+                exec \"$@\" -dTEST_TMPDIR=$TEST_TMPDIR
+                """,
             is_executable = True,
         )
 
