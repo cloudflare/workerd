@@ -199,7 +199,7 @@ export function createHmac(
 let Hmac = function (
   this: Hmac,
   hmac: string,
-  key: ArrayLike | KeyObject | cryptoImpl.CryptoKey,
+  key: CryptoKey,
   options?: TransformOptions
 ): Hmac {
   if (!(this instanceof Hmac)) {
@@ -214,11 +214,8 @@ let Hmac = function (
     }
     this[kHandle] = new cryptoImpl.HmacHandle(hmac, key[kHandle]);
   } else if (isCryptoKey(key)) {
-    if ((key as cryptoImpl.CryptoKey).type !== 'secret') {
-      throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(
-        (key as cryptoImpl.CryptoKey).type,
-        'secret'
-      );
+    if (key.type !== 'secret') {
+      throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(key.type, 'secret');
     }
     this[kHandle] = new cryptoImpl.HmacHandle(hmac, key);
   } else if (
@@ -241,7 +238,7 @@ let Hmac = function (
   } else {
     this[kHandle] = new cryptoImpl.HmacHandle(
       hmac,
-      getArrayBufferOrView(key as ArrayLike, 'key', encoding)
+      getArrayBufferOrView(key, 'key', encoding)
     );
   }
 

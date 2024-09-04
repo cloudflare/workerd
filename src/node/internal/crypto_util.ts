@@ -90,7 +90,7 @@ export const numberToHexCharCode = (number: number): number =>
  */
 export function arrayBufferToUnsignedBigInt(buf: ArrayBuffer): bigint {
   const length = buf.byteLength;
-  const chars = Array<number>(length * 2);
+  const chars = new Array<number>(length * 2);
   const view = new DataView(buf);
 
   for (let i = 0; i < length; i++) {

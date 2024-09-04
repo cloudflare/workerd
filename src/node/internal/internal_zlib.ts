@@ -104,7 +104,6 @@ function wrapCallback(
   callback: CompressCallback<Error, Buffer>
 ): CompressCallback<string, ArrayBuffer> {
   return (error: string | null, result: ArrayBuffer | undefined) => {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
     queueMicrotask(() => {
       if (error) {
         callback(new Error(error));

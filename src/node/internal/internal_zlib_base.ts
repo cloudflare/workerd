@@ -477,7 +477,6 @@ export class ZlibBase extends Transform {
 
     if (this.writableFinished) {
       if (callback) {
-        /* eslint-disable-next-line @typescript-eslint/no-unsafe-call */
         queueMicrotask(callback);
       }
     } else if (this.writableEnded) {
@@ -538,7 +537,6 @@ export class ZlibBase extends Transform {
 
   #processChunk(chunk: Buffer, flushFlag: number, cb: () => void): void {
     if (!this._handle) {
-      /* eslint-disable-next-line @typescript-eslint/no-unsafe-call */
       queueMicrotask(cb);
       return;
     }
@@ -644,7 +642,6 @@ export class Zlib extends ZlibBase {
       writeState,
 
       () => {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
         queueMicrotask(processCallback.bind(handle));
       },
       dictionary
@@ -676,7 +673,6 @@ export class Zlib extends ZlibBase {
         this.#paramsAfterFlushCallback.bind(this, level, strategy, callback)
       );
     } else {
-      /* eslint-disable-next-line @typescript-eslint/no-unsafe-call */
       queueMicrotask(callback);
     }
   }
