@@ -158,24 +158,13 @@ const handlers: {
 } = {};
 
 try {
-  // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
-  // needs to be called inside an IO context.
-  if (!IS_TRACING) {
-    if (IS_WORKERD) {
-      // If we're in workerd, we have to do setupPackages in the IoContext, so don't start it yet.
-      // TODO: fix this.
-      await getPyodide();
-    } else {
-      // If we're not in workerd, setupPackages doesn't require IO so we can do it all here.
-      await getMainModule();
-    }
-  }
+  // We have to do setupPackages in the IoContext, so don't start it yet.
+  await getPyodide();
 
   if (IS_WORKERD || IS_TRACING) {
     handlers.fetch = makeHandler('on_fetch');
     handlers.test = makeHandler('test');
   } else {
-    const mainModule = await getMainModule();
     for (const handlerName of [
       'fetch',
       'alarm',
@@ -185,9 +174,7 @@ try {
       'pubsub',
     ]) {
       const pyHandlerName = 'on_' + handlerName;
-      if (typeof mainModule[pyHandlerName] === 'function') {
-        handlers[handlerName] = makeHandler(pyHandlerName);
-      }
+      handlers[handlerName] = makeHandler(pyHandlerName);
     }
   }
   /**

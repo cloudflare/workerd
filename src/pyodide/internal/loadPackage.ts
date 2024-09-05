@@ -9,16 +9,21 @@
  * that contains all the packages ready to go.
  */
 
-import { default as LOCKFILE } from 'pyodide-internal:generated/pyodide-lock.json';
-import { WORKERD_INDEX_URL } from 'pyodide-internal:metadata';
+import {
+  WORKERD_INDEX_URL,
+  LOCKFILE,
+  LOAD_WHEELS_FROM_R2,
+  LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
+  PACKAGES_VERSION,
+} from 'pyodide-internal:metadata';
 import {
   SITE_PACKAGES,
-  LOAD_WHEELS_FROM_R2,
   getSitePackagesPath,
 } from 'pyodide-internal:setupPackages';
 import { parseTarInfo } from 'pyodide-internal:tar';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';
 import { createTarFS } from 'pyodide-internal:tarfs';
+import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 
 async function decompressArrayBuffer(
   arrBuf: ArrayBuffer
@@ -33,13 +38,18 @@ async function decompressArrayBuffer(
   }
 }
 
-async function loadBundle(requirement: string): Promise<[string, ArrayBuffer]> {
+// loadBundleFromR2 loads the package from the internet (through fetch) and uses the DiskCache as
+// a backing store. This is only used in local dev.
+async function loadBundleFromR2(
+  requirement: string
+): Promise<[string, Reader]> {
   // first check if the disk cache has what we want
   const filename = LOCKFILE['packages'][requirement]['file_name'];
   const cached = DiskCache.get(filename);
   if (cached) {
     const decompressed = await decompressArrayBuffer(cached);
-    return [requirement, decompressed];
+    const reader = new ArrayBufferReader(decompressed);
+    return [requirement, reader];
   }
 
   // we didn't find it in the disk cache, continue with original fetch
@@ -50,7 +60,21 @@ async function loadBundle(requirement: string): Promise<[string, ArrayBuffer]> {
   const decompressed = await decompressArrayBuffer(compressed);
 
   DiskCache.put(filename, compressed);
-  return [requirement, decompressed];
+  const reader = new ArrayBufferReader(decompressed);
+  return [requirement, reader];
+}
+
+async function loadBundleFromArtifactBundler(
+  requirement: string
+): Promise<[string, Reader]> {
+  const packagesVersion = PACKAGES_VERSION;
+  const filename = LOCKFILE['packages'][requirement]['file_name'];
+  const fullPath = 'python-package-bucket/' + packagesVersion + '/' + filename;
+  return new Promise((resolve) => {
+    ArtifactBundler.onPackageReceived(fullPath, (r: Reader) =>
+      resolve([requirement, r])
+    );
+  });
 }
 
 /**
@@ -73,9 +97,11 @@ class ArrayBufferReader {
   }
 }
 
-export async function loadPackages(Module: Module, requirements: Set<string>) {
-  if (!LOAD_WHEELS_FROM_R2) return;
-
+async function loadPackagesImpl(
+  Module: Module,
+  requirements: Set<string>,
+  loadBundle: (req: string) => Promise<[string, Reader]>
+) {
   let loadPromises = [];
   let loading = [];
   for (const req of requirements) {
@@ -87,8 +113,7 @@ export async function loadPackages(Module: Module, requirements: Set<string>) {
   console.log('Loading ' + loading.join(', '));
 
   const buffers = await Promise.all(loadPromises);
-  for (const [requirement, buffer] of buffers) {
-    const reader = new ArrayBufferReader(buffer);
+  for (const [requirement, reader] of buffers) {
     const [tarInfo, soFiles] = parseTarInfo(reader);
     SITE_PACKAGES.addSmallBundle(tarInfo, soFiles, requirement);
   }
@@ -99,4 +124,12 @@ export async function loadPackages(Module: Module, requirements: Set<string>) {
   const path = getSitePackagesPath(Module);
   const info = SITE_PACKAGES.rootInfo;
   Module.FS.mount(tarFS, { info }, path);
+}
+
+export async function loadPackages(Module: Module, requirements: Set<string>) {
+  if (LOAD_WHEELS_FROM_R2) {
+    await loadPackagesImpl(Module, requirements, loadBundleFromR2);
+  } else if (LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
+    await loadPackagesImpl(Module, requirements, loadBundleFromArtifactBundler);
+  }
 }

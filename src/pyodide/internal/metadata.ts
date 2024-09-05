@@ -1,5 +1,4 @@
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
-export { default as LOCKFILE } from 'pyodide-internal:generated/pyodide-lock.json';
 import { default as PYODIDE_BUCKET } from 'pyodide-internal:generated/pyodide-bucket.json';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 
@@ -9,6 +8,13 @@ export const SHOULD_SNAPSHOT_TO_DISK = MetadataReader.shouldSnapshotToDisk();
 export const IS_CREATING_BASELINE_SNAPSHOT =
   MetadataReader.isCreatingBaselineSnapshot();
 export const WORKERD_INDEX_URL = PYODIDE_BUCKET.PYODIDE_PACKAGE_BUCKET_URL;
+export const LOAD_WHEELS_FROM_R2: boolean = IS_WORKERD;
+export const LOAD_WHEELS_FROM_ARTIFACT_BUNDLER =
+  MetadataReader.shouldUsePackagesInArtifactBundler();
+export const PACKAGES_VERSION = MetadataReader.getPackagesVersion();
+export const LOCKFILE: PackageLock = JSON.parse(
+  MetadataReader.getPackagesLock()
+);
 export const REQUIREMENTS = MetadataReader.getRequirements();
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()

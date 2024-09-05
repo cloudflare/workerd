@@ -161,10 +161,13 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
     names.finish(),
     contents.finish(),
     requirements.finish(),
+    kj::str("20240829.4"), // TODO: hardcoded version & lock
+    kj::str(PYODIDE_LOCK.toString()),
     true      /* isWorkerd */,
     false     /* isTracing */,
     snapshotToDisk,
     createBaselineSnapshot,
+    false,    /* usePackagesInArtifactBundler */
     kj::none  /* memorySnapshot */
   );
   // clang-format on
@@ -212,7 +215,7 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
 }
 
 void PackagePromiseMap::insert(
-    kj::String path, kj::Promise<kj::Own<SmallPackagesTarReader>> promise) {
+    kj::String path, kj::Promise<kj::ArrayPtr<const unsigned char>> promise) {
   KJ_ASSERT(waitlists.find(kj::str(path)) == kj::none);
   waitlists.insert(kj::str(path), CrossThreadWaitList());
 
@@ -224,29 +227,32 @@ void PackagePromiseMap::insert(
       fetchedPackages.insert(kj::mv(path), kj::mv(a));
       waitlist.fulfill();
     } else {
-      JSG_FAIL_REQUIRE(Error, "Failed to get waitlist for package", path);
+      JSG_FAIL_REQUIRE(Error, "Failed to get waitlist for package: ", path);
     }
   }).detach([](kj::Exception&& exception) {
-    JSG_FAIL_REQUIRE(Error, "Failed to get package", exception);
+    JSG_FAIL_REQUIRE(Error, "Failed to get package: ", exception);
   });
 }
 
-kj::Promise<kj::Own<SmallPackagesTarReader>> PackagePromiseMap::getPromise(kj::StringPtr path) {
+void PackagePromiseMap::onPackageReceived(jsg::Lock& lock,
+    kj::String path,
+    jsg::Function<void(jsg::Ref<SmallPackagesTarReader>)> resolve) {
   auto maybeWaitlist = waitlists.find(path);
 
   KJ_IF_SOME(waitlist, maybeWaitlist) {
-    co_await waitlist.addWaiter();
-    auto maybeEntry = fetchedPackages.findEntry(path);
-    KJ_IF_SOME(entryRef, maybeEntry) {
-      auto entry = fetchedPackages.release(entryRef);
-
-      co_return kj::mv(entry.value);
-    } else {
-      JSG_FAIL_REQUIRE(Error, "Failed to get package when trying to get promise", path);
-    }
+    IoContext::current().awaitIo(lock, waitlist.addWaiter(),
+        [this, path = kj::mv(path), resolve = kj::mv(resolve)](jsg::Lock& js) mutable {
+      auto maybeEntry = fetchedPackages.findEntry(path);
+      KJ_IF_SOME(entry, maybeEntry) {
+        resolve(js, jsg::alloc<SmallPackagesTarReader>(entry.value));
+      } else {
+        JSG_FAIL_REQUIRE(Error, "Failed to get package after waitlist fulfilled: ", path);
+      }
+    });
 
   } else {
-    JSG_FAIL_REQUIRE(Error, "Failed to get waitlist for package when trying to get promise", path);
+    JSG_FAIL_REQUIRE(
+        Error, "Failed to get waitlist for package when trying to get promise: ", path);
   }
 }
 

@@ -13,6 +13,7 @@ declare namespace ArtifactBundler {
   const getMemorySnapshotSize: () => number;
   const disposeMemorySnapshot: () => void;
   const storeMemorySnapshot: (snap: MemorySnapshotResult) => void;
+  const onPackageReceived: (path: string, resolve: (r: Reader) => void) => void;
 }
 
 export default ArtifactBundler;

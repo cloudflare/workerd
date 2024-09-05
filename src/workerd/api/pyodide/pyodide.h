@@ -68,10 +68,13 @@ private:
   kj::Array<kj::String> names;
   kj::Array<kj::Array<kj::byte>> contents;
   kj::Array<kj::String> requirements;
+  kj::String packagesVersion;
+  kj::String packagesLock;
   bool isWorkerdFlag;
   bool isTracingFlag;
   bool snapshotToDisk;
   bool createBaselineSnapshot;
+  bool usePackagesInArtifactBundler;
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
 public:
@@ -79,19 +82,25 @@ public:
       kj::Array<kj::String> names,
       kj::Array<kj::Array<kj::byte>> contents,
       kj::Array<kj::String> requirements,
+      kj::String packagesVersion,
+      kj::String packagesLock,
       bool isWorkerd,
       bool isTracing,
       bool snapshotToDisk,
       bool createBaselineSnapshot,
+      bool usePackagesInArtifactBundler,
       kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
       : mainModule(kj::mv(mainModule)),
         names(kj::mv(names)),
         contents(kj::mv(contents)),
         requirements(kj::mv(requirements)),
+        packagesVersion(kj::mv(packagesVersion)),
+        packagesLock(kj::mv(packagesLock)),
         isWorkerdFlag(isWorkerd),
         isTracingFlag(isTracing),
         snapshotToDisk(snapshotToDisk),
         createBaselineSnapshot(createBaselineSnapshot),
+        usePackagesInArtifactBundler(usePackagesInArtifactBundler),
         memorySnapshot(kj::mv(memorySnapshot)) {}
 
   bool isWorkerd() {
@@ -137,6 +146,18 @@ public:
   }
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
 
+  bool shouldUsePackagesInArtifactBundler() {
+    return usePackagesInArtifactBundler;
+  }
+
+  kj::String getPackagesVersion() {
+    return kj::str(packagesVersion);
+  }
+
+  kj::String getPackagesLock() {
+    return kj::str(packagesLock);
+  }
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -150,6 +171,9 @@ public:
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
+    JSG_METHOD(shouldUsePackagesInArtifactBundler);
+    JSG_METHOD(getPackagesVersion);
+    JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
   }
 
@@ -194,15 +218,15 @@ class PackagePromiseMap {
   // This implementation is complex because we're not allowed to store kj::Promises on an object
   // stored on the V8 heap. Ideally, we'd like to simply store a map from package paths to Promises.
   // Instead, we store a CrossThreadWaitList and get a new Promise from the waitlist as needed.
-  kj::HashMap<kj::String, kj::Own<SmallPackagesTarReader>> fetchedPackages;
+  kj::HashMap<kj::String, kj::ArrayPtr<const unsigned char>> fetchedPackages;
   kj::HashMap<kj::String, CrossThreadWaitList> waitlists;
 
 public:
-  void insert(kj::String path, kj::Promise<kj::Own<SmallPackagesTarReader>> promise);
+  void insert(kj::String path, kj::Promise<kj::ArrayPtr<const unsigned char>> promise);
 
-  // Note it is explicitly not allowed to call getPromise more than once on the same package
-  // This is because allowing this causes ownership of the SmallPackagesTarReader to be muddied.
-  kj::Promise<kj::Own<SmallPackagesTarReader>> getPromise(kj::StringPtr path);
+  void onPackageReceived(jsg::Lock& lock,
+      kj::String path,
+      jsg::Function<void(jsg::Ref<SmallPackagesTarReader>)> resolve);
 };
 
 // A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
@@ -267,8 +291,11 @@ public:
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
-  void onPackageReceived(
-      kj::String path, jsg::Function<void(jsg::Ref<SmallPackagesTarReader>)> resolve) {}
+  void onPackageReceived(jsg::Lock& lock,
+      kj::String path,
+      jsg::Function<void(jsg::Ref<SmallPackagesTarReader>)> resolve) {
+    loadedPackages->onPackageReceived(lock, kj::mv(path), kj::mv(resolve));
+  }
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(hasMemorySnapshot);
@@ -378,7 +405,7 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
   api::pyodide::PackagesTarReader, api::pyodide::PyodideMetadataReader,                            \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
       api::pyodide::DisabledInternalJaeger, api::pyodide::SimplePythonLimiter,                     \
-      api::pyodide::MemorySnapshotResult
+      api::pyodide::MemorySnapshotResult, api::pyodide::SmallPackagesTarReader
 
 template <class Registry>
 void registerPyodideModules(Registry& registry, auto featureFlags) {
