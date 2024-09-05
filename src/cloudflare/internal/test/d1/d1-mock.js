@@ -14,9 +14,13 @@ export class D1MockDO {
     const is_execute = pathname === '/execute';
     if (request.method === 'POST' && (is_query || is_execute)) {
       const body = await request.json();
+      const resultsFormatParam = searchParams.get('resultsFormat');
       const resultsFormat =
-        searchParams.get('resultsFormat') ??
-        (is_query ? 'ARRAY_OF_OBJECTS' : 'NONE');
+        resultsFormatParam === 'ROWS_AND_COLUMNS'
+          ? 'ROWS_AND_COLUMNS'
+          : resultsFormatParam === 'NONE'
+            ? 'NONE'
+            : 'ARRAY_OF_OBJECTS';
       return Response.json(
         Array.isArray(body)
           ? body.map((query) => this.runQuery(query, resultsFormat))
@@ -42,9 +46,14 @@ export class D1MockDO {
     const columnNames = stmt.columnNames;
     const rawResults = Array.from(stmt.raw());
 
+    // Convert to object-style results if necessary (for backwards compatibility)
+    // .run() previously returned results. Folks relied on that, and we broke their running Workers, we shouldn't have done that.
+    // To make the existing workers (those that didn't update to fix their .run to be .all) work again, we're hardcoding ResultFormat.NONE to do the same thing as what .all used to do (send back the array of results)
     const results =
       resultsFormat === 'NONE'
-        ? undefined
+        ? rawResults.map((row) =>
+            Object.fromEntries(columnNames.map((c, i) => [c, row[i]]))
+          )
         : resultsFormat === 'ROWS_AND_COLUMNS'
           ? { columns: columnNames, rows: rawResults }
           : rawResults.map((row) =>

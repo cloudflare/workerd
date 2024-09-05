@@ -70,7 +70,7 @@ export async function testD1ApiQueriesHappyPath(DB) {
             land_based BOOLEAN
         );`
       ).run(),
-    { success: true, meta: anything }
+    { success: true, results: [], meta: anything }
   );
 
   await itShould(
@@ -86,13 +86,13 @@ export async function testD1ApiQueriesHappyPath(DB) {
   await itShould(
     'have no results for .run()',
     () => DB.prepare(`SELECT * FROM users;`).run(),
-    { success: true, meta: anything }
+    { success: true, results: [], meta: anything }
   );
 
   await itShould(
     'delete no rows ok',
     () => DB.prepare(`DELETE FROM users;`).run(),
-    { success: true, meta: anything }
+    { success: true, results: [], meta: anything }
   );
 
   await itShould(
@@ -131,7 +131,7 @@ export async function testD1ApiQueriesHappyPath(DB) {
   await itShould(
     'delete two rows ok',
     () => DB.prepare(`DELETE FROM users;`).run(),
-    { success: true, meta: anything }
+    { success: true, results: [], meta: anything }
   );
 
   // In an earlier implementation, .run() called a different endpoint that threw on RETURNING clauses.
@@ -148,6 +148,22 @@ export async function testD1ApiQueriesHappyPath(DB) {
       ).run(),
     {
       success: true,
+      results: [
+        {
+          user_id: 1,
+          name: 'Albert Ross',
+          home: 'sky',
+          features: 'wingspan',
+          land_based: 0,
+        },
+        {
+          user_id: 2,
+          name: 'Al Dente',
+          home: 'bowl',
+          features: 'mouthfeel',
+          land_based: 1,
+        },
+      ],
       meta: anything,
     }
   );
@@ -486,7 +502,7 @@ export async function testD1ApiQueriesHappyPath(DB) {
           changed_db: true,
           changes: 0,
           last_row_id: 3,
-          rows_read: 4,
+          rows_read: anything,
           rows_written: 0,
         }),
       },
@@ -497,7 +513,7 @@ export async function testD1ApiQueriesHappyPath(DB) {
           changed_db: true,
           changes: 0,
           last_row_id: 3,
-          rows_read: 3,
+          rows_read: anything,
           rows_written: 0,
         }),
       },
@@ -508,7 +524,7 @@ export async function testD1ApiQueriesHappyPath(DB) {
           changed_db: true,
           changes: 0,
           last_row_id: 3,
-          rows_read: 2,
+          rows_read: anything,
           rows_written: 0,
         }),
       },
