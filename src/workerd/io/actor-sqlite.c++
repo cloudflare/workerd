@@ -18,6 +18,7 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       commitCallback(kj::mv(commitCallback)),
       hooks(hooks),
       kv(*db),
+      metadata(*db),
       commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
 }
@@ -109,7 +110,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
   if (parent == kj::none) {
     // We committed the root transaction, so it's time to signal any replication layer and lock
     // the output gate in the meantime.
-    actorSqlite.commitTasks.add(actorSqlite.outputGate.lockWhile(actorSqlite.commitCallback()));
+    actorSqlite.commitTasks.add(actorSqlite.outputGate.lockWhile(actorSqlite.commitImpl()));
   }
 
   // No backpressure for SQLite.
@@ -157,8 +158,65 @@ void ActorSqlite::onWrite() {
       // rather than after the callback.
       { auto drop = kj::mv(txn); }
 
-      return commitCallback();
+      return commitImpl();
     })));
+  }
+}
+
+kj::Promise<void> ActorSqlite::commitImpl() {
+  bool needsAlarmFlush = false;
+  kj::Maybe<kj::Date> newAlarmTime;
+  KJ_SWITCH_ONEOF(currentAlarmTime) {
+    KJ_CASE_ONEOF(_, UnknownAlarmTime) {
+      // Haven't tried to write alarm yet, so don't need to flush.
+    }
+    KJ_CASE_ONEOF(knownAlarmTime, KnownAlarmTime) {
+      if (knownAlarmTime.status == KnownAlarmTime::Status::DIRTY) {
+        knownAlarmTime.status = KnownAlarmTime::Status::FLUSHING;
+        needsAlarmFlush = true;
+        newAlarmTime = knownAlarmTime.time;
+      }
+    }
+    KJ_CASE_ONEOF(deferredDelete, DeferredAlarmDelete) {
+      if (deferredDelete.status == DeferredAlarmDelete::Status::READY) {
+        deferredDelete.status = DeferredAlarmDelete::Status::FLUSHING;
+        needsAlarmFlush = true;
+        newAlarmTime = kj::none;
+      }
+    }
+  }
+
+  // TODO(soon): ActorCache implements a 4x retry of failed flushes... Do we need anything similar
+  // for alarm scheduling?
+
+  // We assume that exceptions thrown during commit will propagate to the caller, such that they
+  // will ensure cancelDeferredAlarmDeletion() is called, if necessary.
+
+  if (needsAlarmFlush) {
+    // TODO(soon): fix sequencing of alarm scheduling vs. commitCallback().
+    co_await hooks.setAlarm(newAlarmTime);
+    co_await commitCallback();
+  } else {
+    co_await commitCallback();
+  }
+
+  KJ_SWITCH_ONEOF(currentAlarmTime) {
+    KJ_CASE_ONEOF(_, UnknownAlarmTime) {
+      // Hadn't tried to write alarm yet, so don't need to update state.
+    }
+    KJ_CASE_ONEOF(knownAlarmTime, KnownAlarmTime) {
+      if (knownAlarmTime.status == KnownAlarmTime::Status::FLUSHING) {
+        knownAlarmTime.status = KnownAlarmTime::Status::CLEAN;
+      }
+    }
+    KJ_CASE_ONEOF(deferredDelete, DeferredAlarmDelete) {
+      if (deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
+        currentAlarmTime = KnownAlarmTime{
+          .status = KnownAlarmTime::Status::CLEAN,
+          .time = kj::none,
+        };
+      }
+    }
   }
 }
 
@@ -174,6 +232,29 @@ void ActorSqlite::taskFailed(kj::Exception&& exception) {
 void ActorSqlite::requireNotBroken() {
   KJ_IF_SOME(e, broken) {
     kj::throwFatalException(kj::cp(e));
+  }
+}
+
+void ActorSqlite::maybeDeleteDeferredAlarm() {
+  KJ_IF_SOME(d, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+    // TODO(now): Do we need to do anything special, if we've already started flushing the alarm?
+    d.status = DeferredAlarmDelete::Status::READY;
+    // TODO(now): Do we need to do anything special to ensure that the commit code for this sqlite
+    // state change completes?
+    metadata.setAlarm(kj::none);
+  }
+}
+
+void ActorSqlite::ensureAlarmTimeInitialized() {
+  // If we ensure that we call this function before each mutation of db alarm state, it should
+  // ensure that it can be called anywhere else and still get a "CLEAN" (committed) alarm time
+  // from the database.
+
+  if (currentAlarmTime.is<UnknownAlarmTime>()) {
+    currentAlarmTime = KnownAlarmTime{
+      .status = KnownAlarmTime::Status::CLEAN,
+      .time = metadata.getAlarm(),
+    };
   }
 }
 
@@ -205,8 +286,22 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::getAlarm(
     ReadOptions options) {
   requireNotBroken();
+  ensureAlarmTimeInitialized();
 
-  return hooks.getAlarm();
+  KJ_SWITCH_ONEOF(currentAlarmTime) {
+    KJ_CASE_ONEOF(_, UnknownAlarmTime) {
+      KJ_FAIL_ASSERT("expected known alarm time");
+    }
+    KJ_CASE_ONEOF(knownAlarmTime, KnownAlarmTime) {
+      return knownAlarmTime.time;
+    }
+    KJ_CASE_ONEOF(_, DeferredAlarmDelete) {
+      // An alarm handler is currently running, and a new alarm time has not been set yet.
+      // We need to return that there is no alarm.
+      return kj::Maybe<kj::Date>(kj::none);
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::
@@ -270,8 +365,33 @@ kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, Wri
 kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
+  ensureAlarmTimeInitialized();
 
-  return hooks.setAlarm(newAlarmTime);
+  // TODO(soon): Need special logic to handle case where actor is using alarms without using
+  // other storage?
+
+  KJ_IF_SOME(t, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+    // If we're in the alarm handler and haven't set the time yet,
+    // we can't perform this optimization as currentAlarmTime will be equal
+    // to the currently running time but we indicate to the actor in getAlarm() that there
+    // is no alarm set, therefore we need to act like that in setAlarm().
+    //
+    // After the first write in the handler occurs, which would set KnownAlarmTime,
+    // the logic here is correct again as currentAlarmTime would match what we are reporting
+    // to the user from getAlarm().
+    //
+    // So, we only apply this for KnownAlarmTime.
+
+    if (t.time == newAlarmTime) {
+      return kj::none;
+    }
+  }
+  metadata.setAlarm(newAlarmTime);
+  currentAlarmTime = KnownAlarmTime{
+    .status = ActorSqlite::KnownAlarmTime::Status::DIRTY,
+    .time = newAlarmTime,
+  };
+  return kj::none;
 }
 
 kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
@@ -281,6 +401,7 @@ kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
 }
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions options) {
+  // TODO(soon): handle deleteAll and alarm state interaction.
   requireNotBroken();
 
   uint count = kv.deleteAll();
@@ -331,11 +452,52 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
 }
 
 kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
-  return hooks.armAlarmHandler(scheduledTime, noCache);
+  ensureAlarmTimeInitialized();
+
+  KJ_ASSERT(!currentAlarmTime.is<DeferredAlarmDelete>());
+
+  bool alarmDeleteNeeded = true;
+  KJ_IF_SOME(t, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+    if (t.time != scheduledTime) {
+      if (t.status == KnownAlarmTime::Status::CLEAN) {
+        // If there's a clean scheduledTime that is different from ours, this run should be
+        // canceled.
+        return kj::none;
+      } else {
+        // There's a alarm write that hasn't been set yet pending for a time different than ours --
+        // We won't cancel the alarm because it hasn't been confirmed, but we shouldn't delete
+        // the pending write.
+        alarmDeleteNeeded = false;
+      }
+    }
+  }
+
+  // TODO(now): Here, similar to the ActorCache code, we're assuming that if the alarm time
+  // matches but is not in a clean state (i.e. is dirty or flushing), that it's OK to schedule the
+  // delete, and that it's OK to use the current alarm time to initialize the alarm state back to
+  // "clean" if the alarm is cancelled.  Is that OK?
+
+  if (alarmDeleteNeeded) {
+    currentAlarmTime = DeferredAlarmDelete{
+      .status = DeferredAlarmDelete::Status::WAITING,
+      .timeToDelete = scheduledTime,
+    };
+  }
+
+  static const DeferredAlarmDeleter disposer;
+  return kj::Own<void>(this, disposer);
 }
 
 void ActorSqlite::cancelDeferredAlarmDeletion() {
-  hooks.cancelDeferredAlarmDeletion();
+  if (currentAlarmTime.is<DeferredAlarmDelete>()) {
+    // TODO(now): Should we do anything special if client tries to cancel alarm deletion after
+    // flush has already been issued?
+    // TODO(now): Is it correct to reset alarm to CLEAN state here?
+    currentAlarmTime = KnownAlarmTime{
+      .status = KnownAlarmTime::Status::CLEAN,
+      .time = metadata.getAlarm(),
+    };
+  }
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {

@@ -6,6 +6,7 @@
 
 #include "actor-cache.h"
 #include <workerd/util/sqlite-kv.h>
+#include <workerd/util/sqlite-metadata.h>
 
 namespace workerd {
 
@@ -22,8 +23,11 @@ public:
   // for alarm operations.
   class Hooks {
   public:
+    // TODO(cleanup): rename to scheduleAlarm()/getScheduledAlarm()?:
     virtual kj::Promise<kj::Maybe<kj::Date>> getAlarm();
     virtual kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime);
+
+    // TODO(cleanup): no longer used, remove:
     virtual kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date scheduledTime, bool noCache);
     virtual void cancelDeferredAlarmDeletion();
 
@@ -86,6 +90,7 @@ private:
   kj::Function<kj::Promise<void>()> commitCallback;
   Hooks& hooks;
   SqliteKv kv;
+  SqliteMetadata metadata;
 
   SqliteDatabase::Statement beginTxn = db->prepare("BEGIN TRANSACTION");
   SqliteDatabase::Statement commitTxn = db->prepare("COMMIT TRANSACTION");
@@ -156,13 +161,57 @@ private:
   // transactions should be used in the meantime.
   kj::OneOf<NoTxn, ImplicitTxn*, ExplicitTxn*> currentTxn = NoTxn();
 
+  // Backs the `kj::Own<void>` returned by `armAlarmHandler()`.
+  class DeferredAlarmDeleter: public kj::Disposer {
+  public:
+    // The `Own<void>` returned by `armAlarmHandler()` is actually set up to point to the
+    // `ActorSqlite` itself, but with an alternate disposer that deletes the alarm rather than
+    // the whole object.
+    void disposeImpl(void* pointer) const {
+      reinterpret_cast<ActorSqlite*>(pointer)->maybeDeleteDeferredAlarm();
+    }
+  };
+
+  struct UnknownAlarmTime {};
+  struct KnownAlarmTime {
+    enum class Status {
+      CLEAN,    // Alarm time has been committed
+      DIRTY,    // Alarm time has been changed and not yet committed
+      FLUSHING  // Alarm time is being committed in an ongoing transaction
+    } status;
+    kj::Maybe<kj::Date> time;
+  };
+  struct DeferredAlarmDelete {
+    enum class Status {
+      WAITING,  // Alarm handler is running, and alarm value has not changed
+      READY,    // Alarm handler completed, deletion is pending, but has not yet been committed
+      FLUSHING  // Alarm deletion is being committed in an ongoing transaction
+    } status;
+    kj::Date timeToDelete;
+    // TODO(correctness): ActorCache tracks a "wasDeleted" flag; needed here too?
+  };
+  kj::OneOf<UnknownAlarmTime, KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime =
+      UnknownAlarmTime{};
+
   kj::TaskSet commitTasks;
 
   void onWrite();
+  kj::Promise<void> commitImpl();
 
   void taskFailed(kj::Exception&& exception) override;
 
   void requireNotBroken();
+
+  // If alarm is in an uninitialized state, sets alarm time from db state.
+  //
+  // TODO(cleanup): Alternately, we could eliminate the UnknownAlarmTime state and just init the
+  // alarm to a known time at startup, but that requires a db query in the constructor.  Are the
+  // perf savings worth the extra complexity?
+  void ensureAlarmTimeInitialized();
+
+  // Called when alarm handler token object is destroyed, to delete alarm if not reset or
+  // cancelled during handler.
+  void maybeDeleteDeferredAlarm();
 };
 
 }  // namespace workerd
