@@ -3,4 +3,3 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export function createRequire(path: string): (specifier: string) => unknown;
-export function isBuiltin(specifier: string): boolean;

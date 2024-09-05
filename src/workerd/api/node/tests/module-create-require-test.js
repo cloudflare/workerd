@@ -1,7 +1,7 @@
 // Copyright (c) 2017-2022 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { createRequire, isBuiltin, builtinModules } from 'node:module';
+import { createRequire } from 'node:module';
 import { ok, strictEqual, throws } from 'node:assert';
 
 export const doTheTest = {
@@ -50,26 +50,5 @@ export const doTheTest = {
     createRequire('file:///');
     createRequire('file:///tmp');
     createRequire(new URL('file:///'));
-  },
-};
-
-export const isBuiltinTest = {
-  test() {
-    ok(isBuiltin('fs'));
-    ok(isBuiltin('http'));
-    ok(isBuiltin('https'));
-    ok(isBuiltin('path'));
-    ok(isBuiltin('node:fs'));
-    ok(isBuiltin('node:http'));
-    ok(isBuiltin('node:https'));
-    ok(isBuiltin('node:path'));
-    ok(isBuiltin('node:test'));
-    ok(!isBuiltin('test'));
-    ok(!isBuiltin('worker'));
-    ok(!isBuiltin('worker/qux'));
-
-    builtinModules.forEach((module) => {
-      ok(isBuiltin(module));
-    });
   },
 };

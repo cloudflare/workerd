@@ -6,10 +6,6 @@
 
 namespace workerd::api::node {
 
-bool ModuleUtil::isBuiltin(kj::String specifier) {
-  return jsg::checkNodeSpecifier(specifier) != kj::none;
-}
-
 jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
   // Node.js requires that the specifier path is a File URL or an absolute
   // file path string. To be compliant, we will convert whatever specifier

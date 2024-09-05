@@ -14,14 +14,8 @@ public:
 
   jsg::JsValue createRequire(jsg::Lock& js, kj::String specifier);
 
-  // Returns true if the specifier is a known node.js built-in module specifier.
-  // Ignores whether or not the module actually exists (use process.getBuiltinModule()
-  // for that purpose).
-  bool isBuiltin(kj::String specifier);
-
   JSG_RESOURCE_TYPE(ModuleUtil) {
     JSG_METHOD(createRequire);
-    JSG_METHOD(isBuiltin);
   }
 };
 
