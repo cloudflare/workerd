@@ -175,15 +175,16 @@ async function instantiateEmscriptenModule(
     // They used to have an `environment` setting that did this but it has been
     // removed =(
     // If/when we link our own Pyodide we can remove this.
-    // @ts-ignore
-    globalThis.window = {}; // makes ENVIRONMENT_IS_WEB    = true
-    // @ts-ignore
-    globalThis.importScripts = 1; // makes ENVIRONMENT_IS_WORKER = false
+    const global = globalThis as any;
+    global.window = {}; // makes ENVIRONMENT_IS_WEB    = true
+    global.document = { createElement() {} };
+    global.sessionStorage = {};
+    global.importScripts = 1; // makes ENVIRONMENT_IS_WORKER = false
     const p = _createPyodideModule(emscriptenSettings);
-    // @ts-ignore
-    delete globalThis.window;
-    // @ts-ignore
-    delete globalThis.importScripts;
+    delete global.window;
+    delete global.document;
+    delete global.sessionStorage;
+    delete global.importScripts;
     const emscriptenModule = await p;
     return emscriptenModule;
   } catch (e) {
