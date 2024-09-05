@@ -238,11 +238,9 @@ public:
     JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
     JSG_METHOD(transactionSync);
 
-    if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(getCurrentBookmark);
-      JSG_METHOD(getBookmarkForTime);
-      JSG_METHOD(onNextSessionRestoreBookmark);
-    }
+    JSG_METHOD(getCurrentBookmark);
+    JSG_METHOD(getBookmarkForTime);
+    JSG_METHOD(onNextSessionRestoreBookmark);
 
     JSG_TS_OVERRIDE({
       get<T = unknown>(key: string, options?: DurableObjectGetOptions): Promise<T | undefined>;
@@ -504,12 +502,7 @@ public:
     JSG_METHOD(getHibernatableWebSocketEventTimeout);
     JSG_METHOD(getTags);
 
-    if (flags.getWorkerdExperimental()) {
-      // TODO(someday): This currently exists for testing purposes only but maybe it could be
-      //   useful to apps in actual production? It's a convenient way to bail out when you discover
-      //   your state is inconsistent.
-      JSG_METHOD(abort);
-    }
+    JSG_METHOD(abort);
 
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE({
