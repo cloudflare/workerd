@@ -172,7 +172,9 @@ class DurableObjectTransaction;
 
 class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOperations {
 public:
-  DurableObjectStorage(IoPtr<ActorCacheInterface> cache): cache(kj::mv(cache)) {}
+  DurableObjectStorage(IoPtr<ActorCacheInterface> cache, bool enableSql)
+      : cache(kj::mv(cache)),
+        enableSql(enableSql) {}
 
   ActorCacheInterface& getActorCacheInterface() {
     return *cache;
@@ -199,7 +201,7 @@ public:
 
   jsg::Promise<void> sync(jsg::Lock& js);
 
-  jsg::Ref<SqlStorage> getSql(jsg::Lock& js);
+  jsg::Optional<jsg::Ref<SqlStorage>> getSql(jsg::Lock& js, CompatibilityFlags::Reader flags);
 
   // Get a bookmark for the current state of the database. Note that since this is async, the
   // bookmark will include any writes in the current atomic batch, including writes that are
@@ -233,10 +235,10 @@ public:
     JSG_METHOD(deleteAlarm);
     JSG_METHOD(sync);
 
-    if (flags.getWorkerdExperimental()) {
-      JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
-      JSG_METHOD(transactionSync);
+    JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
+    JSG_METHOD(transactionSync);
 
+    if (flags.getWorkerdExperimental()) {
       JSG_METHOD(getCurrentBookmark);
       JSG_METHOD(getBookmarkForTime);
       JSG_METHOD(onNextSessionRestoreBookmark);
@@ -268,6 +270,7 @@ protected:
 
 private:
   IoPtr<ActorCacheInterface> cache;
+  bool enableSql;
   uint transactionSyncDepth = 0;
 };
 

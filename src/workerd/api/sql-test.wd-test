@@ -11,6 +11,8 @@ const config :Workerd.Config = (
 
 const mainWorker :Workerd.Worker = (
   compatibilityDate = "2024-03-04",
+
+  # "experimental" flag is needed to test `sql.ingest()`
   compatibilityFlags = ["experimental", "nodejs_compat"],
 
   modules = [
@@ -18,7 +20,9 @@ const mainWorker :Workerd.Worker = (
   ],
 
   durableObjectNamespaces = [
-    (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+    ( className = "DurableObjectExample",
+      uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e",
+      enableSql = true ),
   ],
 
   durableObjectStorage = (localDisk = "TEST_TMPDIR"),

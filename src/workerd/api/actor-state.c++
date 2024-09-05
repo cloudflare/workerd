@@ -700,11 +700,34 @@ jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   }
 }
 
-jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
+jsg::Optional<jsg::Ref<SqlStorage>> DurableObjectStorage::getSql(
+    jsg::Lock& js, CompatibilityFlags::Reader flags) {
   KJ_IF_SOME(db, cache->getSqliteDatabase()) {
+    // Actor is SQLite-backed but let's make sure SQL is configured to be enabled.
+    if (!enableSql) {
+      // For backwards-compatibility, if the `experimental` compat flag is on, enable SQL. This is
+      // deprecated, though, so warn in this case.
+      if (flags.getWorkerdExperimental()) {
+        // TODO(soon): Uncomment this warning after the D1 simulator has been updated to use
+        //   `enableSql`. Otherwise, people doing local dev against D1 may see the warning
+        //   spuriously.
+
+        // IoContext::current().logWarningOnce(
+        //     "Enabling SQL API based on the 'experimental' flag, but this will stop working soon. "
+        //     "Instead, please set `enableSql = true` in your workerd config for the DO namespace. "
+        //     "If using wrangler, under `[[migrations]]` in wrangler.toml, change `new_classes` to "
+        //     "`new_sqlite_classes`.");
+      } else {
+        // SQL is not enabled at all.
+        return kj::none;
+      }
+    }
+
     return jsg::alloc<SqlStorage>(db, JSG_THIS);
   } else {
-    JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
+    // Not SQLite-backed.
+    KJ_REQUIRE(!enableSql, "Durable Object is not backed by SQL but enableSql was true?");
+    return kj::none;
   }
 }
 

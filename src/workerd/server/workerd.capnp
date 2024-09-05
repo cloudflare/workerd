@@ -579,6 +579,14 @@ struct Worker {
     # pinned to memory forever, so we provide this flag to change the default behavior.
     #
     # Note that this is only supported in Workerd; production Durable Objects cannot toggle eviction.
+
+    enableSql @4 :Bool;
+    # Whether or not Durable Objects in this namespace can use the `storage.sql` API to execute SQL
+    # queries.
+    #
+    # workerd uses SQLite to back all Durable Objects, but the SQL API is hidden by default to
+    # emulate behavior of traditional DO namespaces on Cloudflare that aren't SQLite-backed. This
+    # flag should be enabled when testing code that will run on a SQLite-backed namespace.
   }
 
   durableObjectUniqueKeyModifier @8 :Text;

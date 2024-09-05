@@ -1956,11 +1956,21 @@ public:
             });
           };
 
+          bool enableSql = true;
+          KJ_SWITCH_ONEOF(config) {
+            KJ_CASE_ONEOF(c, Durable) {
+              enableSql = c.enableSql;
+            }
+            KJ_CASE_ONEOF(c, Ephemeral) {
+              enableSql = c.enableSql;
+            }
+          }
+
           auto makeStorage =
-              [](jsg::Lock& js, const Worker::Api& api,
+              [enableSql = enableSql](jsg::Lock& js, const Worker::Api& api,
                   ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
             return jsg::alloc<api::DurableObjectStorage>(
-                IoContext::current().addObject(actorCache));
+                IoContext::current().addObject(actorCache), enableSql);
           };
 
           TimerChannel& timerChannel = service;
@@ -3560,7 +3570,8 @@ void Server::startServices(jsg::V8System& v8System,
             hadDurable = true;
             serviceActorConfigs.insert(kj::str(ns.getClassName()),
                 Durable{.uniqueKey = kj::str(ns.getUniqueKey()),
-                  .isEvictable = !ns.getPreventEviction()});
+                  .isEvictable = !ns.getPreventEviction(),
+                  .enableSql = ns.getEnableSql()});
             continue;
           case config::Worker::DurableObjectNamespace::EPHEMERAL_LOCAL:
             if (!experimental) {
@@ -3569,8 +3580,8 @@ void Server::startServices(jsg::V8System& v8System,
                   "experimental feature which may change or go away in the future. You must run "
                   "workerd with `--experimental` to use this feature."));
             }
-            serviceActorConfigs.insert(
-                kj::str(ns.getClassName()), Ephemeral{.isEvictable = !ns.getPreventEviction()});
+            serviceActorConfigs.insert(kj::str(ns.getClassName()),
+                Ephemeral{.isEvictable = !ns.getPreventEviction(), .enableSql = ns.getEnableSql()});
             continue;
         }
         reportConfigError(kj::str("Encountered unknown DurableObjectNamespace type in service \"",

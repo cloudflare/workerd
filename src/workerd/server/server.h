@@ -97,9 +97,11 @@ public:
   struct Durable {
     kj::String uniqueKey;
     bool isEvictable;
+    bool enableSql;
   };
   struct Ephemeral {
     bool isEvictable;
+    bool enableSql;
   };
   using ActorConfig = kj::OneOf<Durable, Ephemeral>;
 
