@@ -240,13 +240,23 @@ SharedMemoryCache::Use::~Use() noexcept(false) {
 
 kj::Maybe<kj::Own<CacheValue>> SharedMemoryCache::Use::getWithoutFallback(
     const kj::String& key) const {
-  auto data = cache->data.lockExclusive();
+  kj::Locked<ThreadUnsafeData> data;
+  {
+    auto memoryCacheLockRecord =
+        MemoryCacheLockRecord(IoContext::current().getMetrics().getMemoryCacheObserver());
+    data = cache->data.lockExclusive();
+  }
   return cache->getWhileLocked(*data, key);
 }
 
 kj::OneOf<kj::Own<CacheValue>, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>
 SharedMemoryCache::Use::getWithFallback(const kj::String& key) const {
-  auto data = cache->data.lockExclusive();
+  kj::Locked<ThreadUnsafeData> data;
+  {
+    auto memoryCacheLockRecord =
+        MemoryCacheLockRecord(IoContext::current().getMetrics().getMemoryCacheObserver());
+    data = cache->data.lockExclusive();
+  }
   KJ_IF_SOME(existingValue, cache->getWhileLocked(*data, key)) {
     return kj::mv(existingValue);
   } else KJ_IF_SOME(existingInProgress, data->inProgress.find(key)) {
