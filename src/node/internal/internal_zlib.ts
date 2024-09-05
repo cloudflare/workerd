@@ -7,6 +7,7 @@ import {
   default as zlibUtil,
   type ZlibOptions,
   type CompressCallback,
+  type InternalCompressCallback,
   type BrotliOptions,
 } from 'node-internal:zlib';
 import { Buffer } from 'node-internal:internal_buffer';
@@ -87,10 +88,24 @@ export function unzipSync(
   return Buffer.from(zlibUtil.zlibSync(data, options, zlibUtil.CONST_UNZIP));
 }
 
+export function brotliDecompressSync(
+  data: ArrayBufferView | string,
+  options: BrotliOptions = {}
+): Buffer {
+  return Buffer.from(zlibUtil.brotliDecompressSync(data, options));
+}
+
+export function brotliCompressSync(
+  data: ArrayBufferView | string,
+  options: BrotliOptions = {}
+): Buffer {
+  return Buffer.from(zlibUtil.brotliCompressSync(data, options));
+}
+
 function normalizeArgs(
-  optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
-  callbackOrUndefined?: CompressCallback<Error, Buffer>
-): [ZlibOptions, CompressCallback<Error, Buffer>] {
+  optionsOrCallback: ZlibOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
+): [ZlibOptions, CompressCallback] {
   if (typeof optionsOrCallback === 'function') {
     return [{}, optionsOrCallback];
   } else if (typeof callbackOrUndefined === 'function') {
@@ -100,16 +115,13 @@ function normalizeArgs(
   throw new ERR_INVALID_ARG_TYPE('callback', 'Function', callbackOrUndefined);
 }
 
-function wrapCallback(
-  callback: CompressCallback<Error, Buffer>
-): CompressCallback<string, ArrayBuffer> {
-  return (error: string | null, result: ArrayBuffer | undefined) => {
+function wrapCallback(callback: CompressCallback): InternalCompressCallback {
+  return (res: Error | ArrayBuffer) => {
     queueMicrotask(() => {
-      if (error) {
-        callback(new Error(error));
+      if (res instanceof Error) {
+        callback(res);
       } else {
-        // To avoid having a runtime assertion, let's use type assertion.
-        callback(null, Buffer.from(result as ArrayBuffer));
+        callback(null, Buffer.from(res));
       }
     });
   };
@@ -117,8 +129,8 @@ function wrapCallback(
 
 export function inflate(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
-  callbackOrUndefined?: CompressCallback<Error, Buffer>
+  optionsOrCallback: ZlibOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
 ): void {
   const [options, callback] = normalizeArgs(
     optionsOrCallback,
@@ -129,8 +141,8 @@ export function inflate(
 
 export function unzip(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
-  callbackOrUndefined?: CompressCallback<Error, Buffer>
+  optionsOrCallback: ZlibOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
 ): void {
   const [options, callback] = normalizeArgs(
     optionsOrCallback,
@@ -141,8 +153,8 @@ export function unzip(
 
 export function inflateRaw(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
-  callbackOrUndefined?: CompressCallback<Error, Buffer>
+  optionsOrCallback: ZlibOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
 ): void {
   const [options, callback] = normalizeArgs(
     optionsOrCallback,
@@ -158,8 +170,8 @@ export function inflateRaw(
 
 export function gunzip(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
-  callbackOrUndefined?: CompressCallback<Error, Buffer>
+  optionsOrCallback: ZlibOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
 ): void {
   const [options, callback] = normalizeArgs(
     optionsOrCallback,
@@ -170,8 +182,8 @@ export function gunzip(
 
 export function deflate(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
-  callbackOrUndefined?: CompressCallback<Error, Buffer>
+  optionsOrCallback: ZlibOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
 ): void {
   const [options, callback] = normalizeArgs(
     optionsOrCallback,
@@ -182,8 +194,8 @@ export function deflate(
 
 export function deflateRaw(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
-  callbackOrUndefined?: CompressCallback<Error, Buffer>
+  optionsOrCallback: ZlibOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
 ): void {
   const [options, callback] = normalizeArgs(
     optionsOrCallback,
@@ -199,14 +211,38 @@ export function deflateRaw(
 
 export function gzip(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback<Error, Buffer>,
-  callbackOrUndefined?: CompressCallback<Error, Buffer>
+  optionsOrCallback: ZlibOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
 ): void {
   const [options, callback] = normalizeArgs(
     optionsOrCallback,
     callbackOrUndefined
   );
   zlibUtil.zlib(data, options, zlibUtil.CONST_GZIP, wrapCallback(callback));
+}
+
+export function brotliDecompress(
+  data: ArrayBufferView | string,
+  optionsOrCallback: BrotliOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
+): void {
+  const [options, callback] = normalizeArgs(
+    optionsOrCallback,
+    callbackOrUndefined
+  );
+  zlibUtil.brotliDecompress(data, options, wrapCallback(callback));
+}
+
+export function brotliCompress(
+  data: ArrayBufferView | string,
+  optionsOrCallback: BrotliOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
+): void {
+  const [options, callback] = normalizeArgs(
+    optionsOrCallback,
+    callbackOrUndefined
+  );
+  zlibUtil.brotliCompress(data, options, wrapCallback(callback));
 }
 
 export class Gzip extends Zlib {

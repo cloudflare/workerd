@@ -49,6 +49,10 @@ const gunzip = protectMethod(zlib.gunzip);
 const gunzipSync = protectMethod(zlib.gunzipSync);
 const unzip = protectMethod(zlib.unzip);
 const unzipSync = protectMethod(zlib.unzipSync);
+const brotliCompress = protectMethod(zlib.brotliCompress);
+const brotliCompressSync = protectMethod(zlib.brotliCompressSync);
+const brotliDecompress = protectMethod(zlib.brotliDecompress);
+const brotliDecompressSync = protectMethod(zlib.brotliDecompressSync);
 
 export {
   crc32,
@@ -92,6 +96,10 @@ export {
   gunzipSync,
   unzip,
   unzipSync,
+  brotliDecompress,
+  brotliDecompressSync,
+  brotliCompress,
+  brotliCompressSync,
 };
 
 export default {
@@ -136,4 +144,8 @@ export default {
   gunzipSync,
   unzip,
   unzipSync,
+  brotliDecompress,
+  brotliDecompressSync,
+  brotliCompress,
+  brotliCompressSync,
 };

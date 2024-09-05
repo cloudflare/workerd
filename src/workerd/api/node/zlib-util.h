@@ -4,9 +4,7 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 #pragma once
 
-#include <workerd/jsg/exception.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/buffersource.h>
 
 #include <zlib.h>
 
@@ -92,6 +90,7 @@ struct CompressionError {
   int err;
 };
 
+// TODO(soon): See if RAII support can be added directly to this class, and we can mark it final
 class ZlibContext {
 public:
   explicit ZlibContext(ZlibMode _mode): mode(_mode) {}
@@ -105,7 +104,7 @@ public:
       kj::ArrayPtr<kj::byte> output,
       uint32_t outputLength);
 
-  void setInputBuffer(kj::ArrayPtr<kj::byte> input);
+  void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
   void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
 
   int getFlush() const {
@@ -155,6 +154,27 @@ public:
       int _strategy,
       jsg::Optional<kj::Array<kj::byte>> _dictionary);
   kj::Maybe<CompressionError> setParams(int level, int strategy);
+  struct Options {
+    jsg::Optional<int> flush;
+    jsg::Optional<int> finishFlush;
+    jsg::Optional<uint> chunkSize;
+    jsg::Optional<kj::uint> windowBits;
+    jsg::Optional<int> level;
+    jsg::Optional<kj::uint> memLevel;
+    jsg::Optional<kj::uint> strategy;
+    jsg::Optional<kj::Array<kj::byte>> dictionary;
+    jsg::Optional<kj::uint> maxOutputLength;
+
+    JSG_STRUCT(flush,
+        finishFlush,
+        chunkSize,
+        windowBits,
+        level,
+        memLevel,
+        strategy,
+        dictionary,
+        maxOutputLength);
+  };
 
 private:
   bool initializeZlib();
@@ -190,11 +210,23 @@ public:
       uint32_t inputLength,
       kj::ArrayPtr<kj::byte> output,
       uint32_t outputLength);
+  void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
+  void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
   void setFlush(int flush);
+  kj::uint getAvailOut() const;
   void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const;
   void setMode(ZlibMode _mode) {
     mode = _mode;
   }
+
+  struct Options {
+    jsg::Optional<int> flush;
+    jsg::Optional<int> finishFlush;
+    jsg::Optional<kj::uint> chunkSize;
+    jsg::Optional<jsg::Dict<int>> params;
+    jsg::Optional<kj::uint> maxOutputLength;
+    JSG_STRUCT(flush, finishFlush, chunkSize, params, maxOutputLength);
+  };
 
 protected:
   ZlibMode mode;
@@ -212,8 +244,10 @@ protected:
   void* alloc_opaque_brotli = nullptr;
 };
 
-class BrotliEncoderContext final: public BrotliContext {
+// TODO(soon): See if RAII support can be added directly to this class, and we can mark it final
+class BrotliEncoderContext: public BrotliContext {
 public:
+  static const ZlibMode Mode = ZlibMode::BROTLI_ENCODE;
   explicit BrotliEncoderContext(ZlibMode _mode);
 
   void close();
@@ -230,8 +264,10 @@ private:
   kj::Own<BrotliEncoderStateStruct> state;
 };
 
-class BrotliDecoderContext final: public BrotliContext {
+// TODO(soon): See if RAII support can be added directly to this class, and we can mark it final
+class BrotliDecoderContext: public BrotliContext {
 public:
+  static const ZlibMode Mode = ZlibMode::BROTLI_DECODE;
   explicit BrotliDecoderContext(ZlibMode _mode);
 
   void close();
@@ -389,42 +425,33 @@ public:
     }
   };
 
-  struct Options {
-    jsg::Optional<int> flush;
-    jsg::Optional<int> finishFlush;
-    jsg::Optional<uint> chunkSize;
-    jsg::Optional<kj::uint> windowBits;
-    jsg::Optional<int> level;
-    jsg::Optional<kj::uint> memLevel;
-    jsg::Optional<kj::uint> strategy;
-    jsg::Optional<kj::Array<kj::byte>> dictionary;
-    jsg::Optional<kj::uint> maxOutputLength;
-
-    JSG_STRUCT(flush,
-        finishFlush,
-        chunkSize,
-        windowBits,
-        level,
-        memLevel,
-        strategy,
-        dictionary,
-        maxOutputLength);
-  };
-
   using InputSource = kj::OneOf<jsg::NonCoercible<kj::String>, kj::Array<kj::byte>>;
-  using CompressCallback =
-      jsg::Function<void(jsg::Optional<kj::StringPtr>, jsg::Optional<kj::Array<kj::byte>>)>;
+  using CompressCallbackArg = kj::OneOf<jsg::JsValue, kj::Array<kj::byte>>;
+  using CompressCallback = jsg::Function<void(CompressCallbackArg)>;
 
-  static kj::ArrayPtr<kj::byte> getInputFromSource(InputSource& data);
   uint32_t crc32Sync(InputSource data, uint32_t value);
-  void zlibWithCallback(
-      jsg::Lock& js, InputSource data, Options options, ZlibModeValue mode, CompressCallback cb);
-  kj::Array<kj::byte> zlibSync(InputSource data, Options options, ZlibModeValue mode);
+  void zlibWithCallback(jsg::Lock& js,
+      InputSource data,
+      ZlibContext::Options options,
+      ZlibModeValue mode,
+      CompressCallback cb);
+  kj::Array<kj::byte> zlibSync(InputSource data, ZlibContext::Options options, ZlibModeValue mode);
+
+  template <typename Context>
+  kj::Array<kj::byte> brotliSync(InputSource data, BrotliContext::Options options);
+  template <typename Context>
+  void brotliWithCallback(
+      jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb);
 
   JSG_RESOURCE_TYPE(ZlibUtil) {
     JSG_METHOD_NAMED(crc32, crc32Sync);
     JSG_METHOD(zlibSync);
     JSG_METHOD_NAMED(zlib, zlibWithCallback);
+
+    JSG_METHOD_NAMED(brotliDecompressSync, template brotliSync<BrotliDecoderContext>);
+    JSG_METHOD_NAMED(brotliCompressSync, template brotliSync<BrotliEncoderContext>);
+    JSG_METHOD_NAMED(brotliDecompress, template brotliWithCallback<BrotliDecoderContext>);
+    JSG_METHOD_NAMED(brotliCompress, template brotliWithCallback<BrotliEncoderContext>);
 
     JSG_NESTED_TYPE(ZlibStream);
     JSG_NESTED_TYPE_NAMED(BrotliCompressionStream<BrotliEncoderContext>, BrotliEncoder);
@@ -587,7 +614,7 @@ public:
       api::node::ZlibUtil::CompressionStream<api::node::ZlibContext>,                              \
       api::node::ZlibUtil::CompressionStream<api::node::BrotliEncoderContext>,                     \
       api::node::ZlibUtil::CompressionStream<api::node::BrotliDecoderContext>,                     \
-      api::node::ZlibUtil::Options
+      api::node::ZlibContext::Options, api::node::BrotliContext::Options
 
 }  // namespace workerd::api::node
 
