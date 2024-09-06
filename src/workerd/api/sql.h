@@ -14,7 +14,7 @@ namespace workerd::api {
 
 class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 public:
-  SqlStorage(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
+  SqlStorage(jsg::Ref<DurableObjectStorage> storage);
   ~SqlStorage();
 
   using BindingValue = kj::Maybe<kj::OneOf<kj::Array<const byte>, kj::String, double>>;
@@ -28,7 +28,7 @@ public:
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
-  double getDatabaseSize();
+  double getDatabaseSize(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
@@ -58,7 +58,10 @@ private:
   void onError(kj::StringPtr message) const override;
   bool allowTransactions() const override;
 
-  IoPtr<SqliteDatabase> sqlite;
+  SqliteDatabase& getDb(jsg::Lock& js) {
+    return storage->getSqliteDb(js);
+  }
+
   jsg::Ref<DurableObjectStorage> storage;
 
   kj::Maybe<uint> pageSize;
@@ -66,7 +69,8 @@ private:
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaGetMaxPageCount;
 
   template <size_t size, typename... Params>
-  SqliteDatabase::Query execMemoized(kj::Maybe<IoOwn<SqliteDatabase::Statement>>& slot,
+  SqliteDatabase::Query execMemoized(SqliteDatabase& db,
+      kj::Maybe<IoOwn<SqliteDatabase::Statement>>& slot,
       const char (&sqlCode)[size],
       Params&&... params) {
     // Run a (trusted) statement, preparing it on the first call and reusing the prepared version
@@ -76,16 +80,16 @@ private:
     KJ_IF_SOME(s, slot) {
       stmt = &*s;
     } else {
-      stmt = &*slot.emplace(IoContext::current().addObject(kj::heap(sqlite->prepare(sqlCode))));
+      stmt = &*slot.emplace(IoContext::current().addObject(kj::heap(db.prepare(sqlCode))));
     }
     return stmt->run(kj::fwd<Params>(params)...);
   }
 
-  uint64_t getPageSize() {
+  uint64_t getPageSize(SqliteDatabase& db) {
     KJ_IF_SOME(p, pageSize) {
       return p;
     } else {
-      return pageSize.emplace(sqlite->run("PRAGMA page_size;").getInt64(0));
+      return pageSize.emplace(db.run("PRAGMA page_size;").getInt64(0));
     }
   }
 };

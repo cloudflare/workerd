@@ -180,6 +180,9 @@ public:
     return *cache;
   }
 
+  // Throws if not SQLite-backed.
+  SqliteDatabase& getSqliteDb(jsg::Lock& js);
+
   struct TransactionOptions {
     jsg::Optional<kj::Date> asOfTime;
     jsg::Optional<bool> lowPriority;
@@ -201,7 +204,7 @@ public:
 
   jsg::Promise<void> sync(jsg::Lock& js);
 
-  jsg::Optional<jsg::Ref<SqlStorage>> getSql(jsg::Lock& js, CompatibilityFlags::Reader flags);
+  jsg::Ref<SqlStorage> getSql(jsg::Lock& js);
 
   // Get a bookmark for the current state of the database. Note that since this is async, the
   // bookmark will include any writes in the current atomic batch, including writes that are
