@@ -16,7 +16,8 @@ import { simpleRunPython } from 'pyodide-internal:util';
 // created without entropy gating and will crash if they are used with it. If we are creating a new
 // snapshot or using one of version at least 2 we should gate.
 // TODO: When we've updated all the snapshots, remove this.
-const SHOULD_GATE_ENTROPY = LOADED_SNAPSHOT_VERSION !== 0 && LOADED_SNAPSHOT_VERSION !== 1;
+const SHOULD_GATE_ENTROPY =
+  LOADED_SNAPSHOT_VERSION !== 0 && LOADED_SNAPSHOT_VERSION !== 1;
 
 let allowed_entropy_calls_addr: number;
 
