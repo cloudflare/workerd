@@ -14,8 +14,9 @@ export class DurableObjectExample {
 
   async waitForAlarm(scheduledTime) {
     let self = this;
-    let prom = new Promise((resolve) => {
+    let prom = new Promise((resolve, reject) => {
       self.resolve = resolve;
+      self.reject = reject;
     });
 
     try {
@@ -38,22 +39,26 @@ export class DurableObjectExample {
   }
 
   async alarm() {
-    this.state.alarmsTriggered++;
-    let time = await this.state.storage.getAlarm();
-    if (time) {
-      throw new Error(`time not null inside alarm handler ${time}`);
+    try {
+      this.state.alarmsTriggered++;
+      let time = await this.state.storage.getAlarm();
+      if (time !== null) {
+        throw new Error(`time not null inside alarm handler ${time}`);
+      }
+      // Deleting an alarm inside `alarm()` will not have any effect, unless there's another queued alarm
+      // already.
+      await this.state.storage.deleteAlarm();
+
+      // On the other hand, if we have an alarm queued, it will be deleted. If this is working properly,
+      // we'll only have one alarm triggered.
+      await this.state.storage.setAlarm(Date.now() + 50);
+      await this.state.storage.deleteAlarm();
+
+      // All done inside `alarm()`.
+      this.resolve();
+    } catch (e) {
+      this.reject(e);
     }
-    // Deleting an alarm inside `alarm()` will not have any effect, unless there's another queued alarm
-    // already.
-    await this.state.storage.deleteAlarm();
-
-    // On the other hand, if we have an alarm queued, it will be deleted. If this is working properly,
-    // we'll only have one alarm triggered.
-    await this.state.storage.setAlarm(Date.now() + 50);
-    await this.state.storage.deleteAlarm();
-
-    // All done inside `alarm()`.
-    this.resolve();
   }
 
   async fetch() {

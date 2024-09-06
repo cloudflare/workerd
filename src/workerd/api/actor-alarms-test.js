@@ -11,8 +11,9 @@ export class DurableObjectExample {
 
   async waitForAlarm(scheduledTime) {
     let self = this;
-    let prom = new Promise((resolve) => {
+    let prom = new Promise((resolve, reject) => {
       self.resolve = resolve;
+      self.reject = reject;
     });
 
     try {
@@ -45,11 +46,15 @@ export class DurableObjectExample {
   }
 
   async alarm() {
-    let time = await this.state.storage.getAlarm();
-    if (time) {
-      throw new Error(`time not null inside alarm handler ${time}`);
+    try {
+      let time = await this.state.storage.getAlarm();
+      if (time !== null) {
+        throw new Error(`time not null inside alarm handler ${time}`);
+      }
+      this.resolve();
+    } catch (e) {
+      this.reject(e);
     }
-    this.resolve();
   }
 }
 
