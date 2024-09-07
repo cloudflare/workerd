@@ -101,6 +101,7 @@ private:
     KJ_DISALLOW_COPY_AND_MOVE(ImplicitTxn);
 
     void commit();
+    void rollback();
 
   private:
     ActorSqlite& parent;

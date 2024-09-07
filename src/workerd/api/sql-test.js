@@ -1177,6 +1177,11 @@ export class DurableObjectExample {
     } else if (req.url.endsWith('/streaming-ingestion')) {
       await testStreamingIngestion(req, this.state.storage);
       return Response.json({ ok: true });
+    } else if (req.url.endsWith('/deleteAll')) {
+      this.state.storage.put('counter', 888); // will be deleted
+      this.state.storage.deleteAll();
+      assert.strictEqual(await this.state.storage.get('counter'), undefined);
+      return Response.json({ ok: true });
     }
 
     throw new Error('unknown url: ' + req.url);
@@ -1251,6 +1256,11 @@ export default {
 
     // Everything's still consistent.
     assert.equal(await doReq('increment'), 3);
+
+    // Delete all: increments start over
+    await doReq('deleteAll');
+    assert.equal(await doReq('increment'), 1);
+    assert.equal(await doReq('increment'), 2);
   },
 };
 

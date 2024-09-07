@@ -50,6 +50,18 @@ void ActorSqlite::ImplicitTxn::commit() {
   }
 }
 
+void ActorSqlite::ImplicitTxn::rollback() {
+  // Ignore redundant commit()s.
+  if (!committed) {
+    // As of this writing, rollback() is only called when the database is about to be reset.
+    // Preparing a statement for it would be a waste since that statement would never be executed
+    // more than once, since resetting requires repreparing all statements anyway. So we don't
+    // bother.
+    parent.db->run("ROLLBACK TRANSACTION");
+    committed = true;
+  }
+}
+
 ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(actorSqlite) {
   KJ_SWITCH_ONEOF(actorSqlite.currentTxn) {
     KJ_CASE_ONEOF(_, NoTxn) {
@@ -282,6 +294,34 @@ kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions options) {
   requireNotBroken();
+
+  // deleteAll() cannot be part of a transaction because it deletes the database altogether. So,
+  // we have to close our transactions or fail.
+  KJ_SWITCH_ONEOF(currentTxn) {
+    KJ_CASE_ONEOF(_, NoTxn) {
+      // good
+    }
+    KJ_CASE_ONEOF(implicit, ImplicitTxn*) {
+      // Whatever the implicit transaction did, it's about to be blown away anyway. Roll it back
+      // so we don't waste time flushing these writes anywhere.
+      implicit->rollback();
+      currentTxn = NoTxn();
+    }
+    KJ_CASE_ONEOF(exp, ExplicitTxn*) {
+      // Keep in mind:
+      //
+      //   ctx.storage.transaction(txn => {
+      //     txn.deleteAll();          // calls `DurableObjectTransaction::deleteAll()`
+      //     ctx.storage.deleteAll();  // calls this method, `ActorSqlite::deleteAll()`
+      //   });
+      //
+      // `DurableObjectTransaction::deleteAll()` throws this exception, since `deleteAll()` is not
+      // supported inside a transaction. Under the new SQLite-backed storage system, directly
+      // calling `cxt.storage` inside a transaction (as opposed to using the `txn` object) should
+      // still be treated as part of the transaction, and so should throw the same thing.
+      JSG_FAIL_REQUIRE(Error, "Cannot call deleteAll() within a transaction");
+    }
+  }
 
   uint count = kv.deleteAll();
   return {
