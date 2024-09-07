@@ -6,6 +6,7 @@
 
 #include <kj/filesystem.h>
 #include <kj/one-of.h>
+#include <kj/list.h>
 #include <utility>
 
 struct sqlite3;
@@ -42,15 +43,13 @@ public:
     uint64_t statementCount;
   };
 
-  SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::Maybe<kj::WriteMode> maybeMode = kj::none);
+  SqliteDatabase(const Vfs& vfs, kj::Path path, kj::Maybe<kj::WriteMode> maybeMode = kj::none);
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
   // Allows a SqliteDatabase to be passed directly into SQLite API functions where `sqlite*` is
   // expected.
-  operator sqlite3*() {
-    return db;
-  }
+  operator sqlite3*();
 
   // Class which regulates a SQL query, especially to control how queries created in JavaScript
   // application code are handled.
@@ -130,6 +129,9 @@ public:
   // callback is called just before executing the query.
   //
   // Durable Objects uses this to automatically begin a transaction and close the output gate.
+  //
+  // Note that the write callback is NOT called before a reset(). Use the `ResetListener` mechanism
+  // instead for that case.
   void onWrite(kj::Function<void()> callback) {
     onWriteCallback = kj::mv(callback);
   }
@@ -157,8 +159,49 @@ public:
   // Execute a function with the given regulator.
   void executeWithRegulator(const Regulator& regulator, kj::FunctionParam<void()> func);
 
+  // Resets the database to an empty state by deleting the underlying database file and creating
+  // a new one in its place. This is the recommended way to "drop database" in SQLite, and is used
+  // to implement deleteAll() in Workers.
+  //
+  // reset() will cancel all outstanding queries (further attempts to use the cursors will throw).
+  // Prepared statements will be automatically reprepared the next time they are executed (which
+  // may throw if they depend on tables that haven't been recreated yet).
+  void reset();
+
+  // Objects that need to be notified when reset() is called may inherit `ResetListener`.
+  class ResetListener {
+  public:
+    ResetListener(SqliteDatabase& db): db(db) {
+      db.resetListeners.add(*this);
+    }
+    ~ResetListener() {
+      if (link.isLinked()) db.resetListeners.remove(*this);
+    }
+    ResetListener(ResetListener&& other): db(other.db) {
+      db.resetListeners.remove(other);
+      db.resetListeners.add(*this);
+    }
+
+    // When the database's `reset()` method is called, all listeners' `beforeSqliteReset()` will be
+    // called before actually resetting the database.
+    virtual void beforeSqliteReset() = 0;
+
+  protected:  // so that subclasess don't have to store their own copy of the `db` reference
+    SqliteDatabase& db;
+
+  private:
+    kj::ListLink<ResetListener> link;
+
+    friend class SqliteDatabase;
+  };
+
 private:
-  sqlite3* db;
+  const Vfs& vfs;
+  kj::Path path;
+  bool readOnly;
+
+  // This pointer can be left null if a call to reset() failed to re-open the database.
+  kj::Maybe<sqlite3&> maybeDb;
 
   // Set while a query is compiling.
   kj::Maybe<const Regulator&> currentRegulator;
@@ -168,7 +211,9 @@ private:
 
   kj::Maybe<kj::Function<void()>> onWriteCallback;
 
-  void close();
+  kj::List<ResetListener, &ResetListener::link> resetListeners;
+
+  void init(kj::Maybe<kj::WriteMode> maybeMode);
 
   enum Multi { SINGLE, MULTI };
 
@@ -194,11 +239,11 @@ private:
       const kj::Maybe<kj::StringPtr>& param2,
       const Regulator& regulator);
 
-  void setupSecurity();
+  void setupSecurity(sqlite3* db);
 };
 
 // Represents a prepared SQL statement, which can be executed many times.
-class SqliteDatabase::Statement {
+class SqliteDatabase::Statement final: private ResetListener {
 public:
   // Convenience method to start a query. This is equivalent to:
   //
@@ -214,19 +259,19 @@ public:
   template <typename... Params>
   Query run(Params&&... bindings);
 
-  operator sqlite3_stmt*() {
-    return stmt;
-  }
+  // Convert to sqlite3_stmt, creating it on-demand if needed.
+  operator sqlite3_stmt*();
 
 private:
-  SqliteDatabase& db;
   const Regulator& regulator;
-  kj::Own<sqlite3_stmt> stmt;
+  kj::OneOf<kj::String, kj::Own<sqlite3_stmt>> stmt;
 
   Statement(SqliteDatabase& db, const Regulator& regulator, kj::Own<sqlite3_stmt> stmt)
-      : db(db),
+      : ResetListener(db),
         regulator(regulator),
         stmt(kj::mv(stmt)) {}
+
+  void beforeSqliteReset() override;
 
   friend class SqliteDatabase;
 };
@@ -235,7 +280,7 @@ private:
 //
 // Only one Query can exist at a time, for a given database. It should probably be allocated on
 // the stack.
-class SqliteDatabase::Query {
+class SqliteDatabase::Query final: private ResetListener {
 public:
   using ValuePtr =
       kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double, decltype(nullptr)>;
@@ -329,10 +374,9 @@ public:
   }
 
 private:
-  SqliteDatabase& db;
   const Regulator& regulator;
-  kj::Own<sqlite3_stmt> ownStatement;  // for one-off queries
-  sqlite3_stmt* statement;
+  kj::Own<sqlite3_stmt> ownStatement;       // for one-off queries
+  kj::Maybe<sqlite3_stmt&> maybeStatement;  // null if database was reset
   bool done = false;
 
   friend class SqliteDatabase;
@@ -347,17 +391,17 @@ private:
       kj::ArrayPtr<const ValuePtr> bindings);
   template <typename... Params>
   Query(SqliteDatabase& db, const Regulator& regulator, Statement& statement, Params&&... bindings)
-      : db(db),
+      : ResetListener(db),
         regulator(regulator),
-        statement(statement) {
+        maybeStatement(statement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   template <typename... Params>
   Query(SqliteDatabase& db, const Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings)
-      : db(db),
+      : ResetListener(db),
         regulator(regulator),
         ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
-        statement(ownStatement) {
+        maybeStatement(ownStatement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
 
@@ -394,6 +438,10 @@ private:
     (bind(i, value), ...);
     nextRow();
   }
+
+  sqlite3_stmt* getStatement();
+
+  void beforeSqliteReset() override;
 };
 
 // Options affecting SqliteDatabase::Vfs onstructor.

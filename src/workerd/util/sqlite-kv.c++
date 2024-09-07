@@ -9,12 +9,12 @@ namespace workerd {
 SqliteKv::SqliteKv(SqliteDatabase& db) {
   if (db.run("SELECT name FROM sqlite_master WHERE type='table' AND name='_cf_KV'").isDone()) {
     // The _cf_KV table doesn't exist. Defer initialization.
-    state = Uninitialized{db};
+    state.init<Uninitialized>(Uninitialized {db});
   } else {
     // The KV table was initialized in the past. We can go ahead and prepare our statements.
     // (We don't call ensureInitialized() here because the `CREATE TABLE IF NOT EXISTS` query it
     // executes would be redundant.)
-    state = Initialized(db);
+    state.init<Initialized>(db);
   }
 }
 
