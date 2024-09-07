@@ -15,7 +15,7 @@ namespace workerd {
 // perform direct SQL queries, we can block it from accessing any table prefixed with `_cf_`.
 // (Ideally this class would allow configuring the table name, but this would require a somewhat
 // obnoxious amount of string allocation.)
-class SqliteKv {
+class SqliteKv: private SqliteDatabase::ResetListener {
 public:
   explicit SqliteKv(SqliteDatabase& db);
 
@@ -51,11 +51,11 @@ public:
   //   byte blobs or strings containing NUL bytes.
 
 private:
-  struct Uninitialized {
-    SqliteDatabase& db;
-  };
+  struct Uninitialized {};
 
   struct Initialized {
+    // This reference is redundant but storing it here makes the prepared statement code below
+    // easier to manage.
     SqliteDatabase& db;
 
     SqliteDatabase::Statement stmtGet = db.prepare(R"(
@@ -112,8 +112,8 @@ private:
       ORDER BY key DESC
       LIMIT ?
     )");
-    SqliteDatabase::Statement stmtDeleteAll = db.prepare(R"(
-      DELETE FROM _cf_KV
+    SqliteDatabase::Statement stmtCountKeys = db.prepare(R"(
+      SELECT count(*) FROM _cf_KV
     )");
 
     Initialized(SqliteDatabase& db): db(db) {}
@@ -121,11 +121,15 @@ private:
 
   kj::OneOf<Uninitialized, Initialized> state;
 
+  // Has the _cf_KV table been created? This is separate from Uninitialized/Initialized since it
+  // has to be repeated after a reset, whereas the statements do not need to be recreated.
+  bool tableCreated = false;
+
   Initialized& ensureInitialized();
   // Make sure the KV table is created and prepared statements are ready. Not called until the
   // first write.
 
-  SqliteKv(SqliteDatabase& db, bool);
+  void beforeSqliteReset() override;
 };
 
 // =======================================================================================
@@ -137,6 +141,7 @@ private:
 
 template <typename Func>
 bool SqliteKv::get(KeyPtr key, Func&& callback) {
+  if (!tableCreated) return 0;
   auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return false);
 
   auto query = stmts.stmtGet.run(key);
@@ -152,6 +157,7 @@ bool SqliteKv::get(KeyPtr key, Func&& callback) {
 template <typename Func>
 uint SqliteKv::list(
     KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order, Func&& callback) {
+  if (!tableCreated) return 0;
   auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return 0);
 
   auto iterate = [&](SqliteDatabase::Query&& query) {

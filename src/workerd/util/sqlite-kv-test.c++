@@ -87,8 +87,27 @@ KJ_TEST("SQLite-KV") {
   kv.put("foo", "hello"_kj.asBytes());
   KJ_EXPECT(list(nullptr, kj::none, kj::none, F) == "bar=def, foo=hello, qux=321");
 
-  kv.deleteAll();
+  // deleteAll()
+  KJ_EXPECT(kv.deleteAll() == 3);
   KJ_EXPECT(list(nullptr, kj::none, kj::none, F) == "");
+
+  KJ_EXPECT(!kv.get("bar", [&](kj::ArrayPtr<const byte> value) {
+    KJ_FAIL_EXPECT("should not call callback when no match", value.asChars());
+  }));
+
+  kv.put("bar", "ghi"_kj.asBytes());
+  kv.put("corge", "garply"_kj.asBytes());
+
+  KJ_EXPECT(list(nullptr, kj::none, kj::none, F) == "bar=ghi, corge=garply");
+
+  {
+    bool called = false;
+    KJ_EXPECT(kv.get("bar", [&](kj::ArrayPtr<const byte> value) {
+      KJ_EXPECT(kj::str(value.asChars()) == "ghi");
+      called = true;
+    }));
+    KJ_EXPECT(called);
+  }
 }
 
 }  // namespace
