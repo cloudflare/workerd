@@ -130,8 +130,8 @@ public:
   //
   // Durable Objects uses this to automatically begin a transaction and close the output gate.
   //
-  // Note that the write callback is NOT called before a reset(). Use the `ResetListener` mechanism
-  // instead for that case.
+  // Note that the write callback is NOT called before (or at any point during) a reset(). Use the
+  // `ResetListener` mechanism or `afterReset()` instead for that case.
   void onWrite(kj::Function<void()> callback) {
     onWriteCallback = kj::mv(callback);
   }
@@ -195,6 +195,16 @@ public:
     friend class SqliteDatabase;
   };
 
+  // Registers a callback to call after a reset completes. This can be used to do basic database
+  // initialization, e.g. set WAL mode. (To get notified *before* a reset, use `ResetListener`.)
+  //
+  // Note that the on-write callback is disabled during reset(), including while calling the
+  // after-reset callback. So, queries performed by the after-reset callback will not trigger the
+  // on-write callback.
+  void afterReset(kj::Function<void(SqliteDatabase&)> callback) {
+    afterResetCallback = kj::mv(callback);
+  }
+
 private:
   const Vfs& vfs;
   kj::Path path;
@@ -210,6 +220,7 @@ private:
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
   kj::Maybe<kj::Function<void()>> onWriteCallback;
+  kj::Maybe<kj::Function<void(SqliteDatabase&)>> afterResetCallback;
 
   kj::List<ResetListener, &ResetListener::link> resetListeners;
 

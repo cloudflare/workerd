@@ -567,6 +567,10 @@ void SqliteDatabase::executeWithRegulator(
 void SqliteDatabase::reset() {
   KJ_REQUIRE(!readOnly, "can't reset() read-only database");
 
+  // Temporarily disable the on-write callback while resetting.
+  auto writeCb = kj::mv(onWriteCallback);
+  KJ_DEFER(onWriteCallback = kj::mv(writeCb));
+
   KJ_IF_SOME(db, maybeDb) {
     for (auto& listener: resetListeners) {
       listener.beforeSqliteReset();
@@ -582,6 +586,10 @@ void SqliteDatabase::reset() {
 
   KJ_ON_SCOPE_FAILURE(maybeDb = kj::none);
   init(kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  KJ_IF_SOME(resetCb, afterResetCallback) {
+    resetCb(*this);
+  }
 }
 
 bool SqliteDatabase::isAuthorized(int actionCode,

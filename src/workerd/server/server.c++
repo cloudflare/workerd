@@ -1941,8 +1941,11 @@ public:
                     kj::Path({d.uniqueKey, kj::str(idPtr, ".sqlite")}),
                     kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
 
-                // Before we do anything, make sure the database is in WAL mode.
-                db->run("PRAGMA journal_mode=WAL;");
+                // Before we do anything, make sure the database is in WAL mode. We also need to
+                // do this after reset() is used, so register a callback for that.
+                auto setWalMode = [](SqliteDatabase& db) { db.run("PRAGMA journal_mode=WAL;"); };
+                setWalMode(*db);
+                db->afterReset(kj::mv(setWalMode));
 
                 return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
                     []() -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
