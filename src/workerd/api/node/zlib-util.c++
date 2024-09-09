@@ -121,14 +121,17 @@ void ZlibContext::initialize(int _level,
     jsg::Optional<kj::Array<kj::byte>> _dictionary) {
   if (!((_windowBits == 0) &&
           (mode == ZlibMode::INFLATE || mode == ZlibMode::GUNZIP || mode == ZlibMode::UNZIP))) {
-    JSG_ASSERT(_windowBits >= Z_MIN_WINDOWBITS && _windowBits <= Z_MAX_WINDOWBITS, Error,
-        "Invalid windowBits"_kj);
+    JSG_ASSERT(_windowBits >= Z_MIN_WINDOWBITS && _windowBits <= Z_MAX_WINDOWBITS, RangeError,
+        kj::str("The value of \"options.windowBits\" is out of range. It must be >= ",
+            Z_MIN_WINDOWBITS, " and <= ", Z_MAX_WINDOWBITS, ". Received ", _windowBits));
   }
 
-  JSG_REQUIRE(
-      _level >= Z_MIN_LEVEL && _level <= Z_MAX_LEVEL, Error, "Invalid compression level"_kj);
-  JSG_REQUIRE(
-      _memLevel >= Z_MIN_MEMLEVEL && _memLevel <= Z_MAX_MEMLEVEL, Error, "Invalid memlevel"_kj);
+  JSG_REQUIRE(_level >= Z_MIN_LEVEL && _level <= Z_MAX_LEVEL, RangeError,
+      kj::str("The value of \"options.level\" is out of range. It must be >= ", Z_MIN_LEVEL,
+          " and <= ", Z_MAX_LEVEL, ". Received ", _level));
+  JSG_REQUIRE(_memLevel >= Z_MIN_MEMLEVEL && _memLevel <= Z_MAX_MEMLEVEL, RangeError,
+      kj::str("The value of \"options.memLevel\" is out of range. It must be >= ", Z_MIN_MEMLEVEL,
+          " and <= ", Z_MAX_MEMLEVEL, ". Received ", _memLevel));
   JSG_REQUIRE(_strategy == Z_FILTERED || _strategy == Z_HUFFMAN_ONLY || _strategy == Z_RLE ||
           _strategy == Z_FIXED || _strategy == Z_DEFAULT_STRATEGY,
       Error, "invalid strategy"_kj);
@@ -876,8 +879,10 @@ kj::Array<kj::byte> ZlibUtil::zlibSync(
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
 
   // TODO(soon): Extend JSG_REQUIRE so we can pass the full level of info NodeJS provides, like the code field
-  JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, Error, "Invalid chunkSize"_kj);
-  JSG_REQUIRE(maxOutputLength <= Z_MAX_CHUNK, Error, "Invalid maxOutputLength"_kj);
+  JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, RangeError,
+      kj::str("The value of \"options.chunkSize\" is out of range. It must be >= ", Z_MIN_CHUNK,
+          " and <= ", Z_MAX_CHUNK, ". Received ", chunkSize));
+  JSG_REQUIRE(maxOutputLength <= Z_MAX_CHUNK, RangeError, "Invalid maxOutputLength"_kj);
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
   ctx.initialize(opts.level.orDefault(Z_DEFAULT_LEVEL),
@@ -885,11 +890,14 @@ kj::Array<kj::byte> ZlibUtil::zlibSync(
       opts.strategy.orDefault(Z_DEFAULT_STRATEGY), kj::mv(opts.dictionary));
 
   auto flush = opts.flush.orDefault(Z_NO_FLUSH);
-  JSG_REQUIRE(Z_NO_FLUSH <= flush && flush <= Z_TREES, RangeError, "invalid flush value"_kj);
+  JSG_REQUIRE(Z_NO_FLUSH <= flush && flush <= Z_TREES, RangeError,
+      kj::str("The value of \"options.flush\" is out of range. It must be >= ", Z_NO_FLUSH,
+          " and <= ", Z_TREES, ". Received ", flush));
 
   auto finishFlush = opts.finishFlush.orDefault(Z_FINISH);
   JSG_REQUIRE(Z_NO_FLUSH <= finishFlush && finishFlush <= Z_TREES, RangeError,
-      "invalid finishFlush value"_kj);
+      kj::str("The value of \"options.finishFlush\" is out of range. It must be >= ", Z_NO_FLUSH,
+          " and <= ", Z_TREES, ". Received ", flush));
 
   ctx.setFlush(finishFlush);
   ctx.setInputBuffer(getInputFromSource(data));
@@ -920,7 +928,9 @@ kj::Array<kj::byte> ZlibUtil::brotliSync(InputSource data, BrotliContext::Option
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
 
   // TODO(soon): Extend JSG_REQUIRE so we can pass the full level of info NodeJS provides, like the code field
-  JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, Error, "Invalid chunkSize"_kj);
+  JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, RangeError,
+      kj::str("The value of \"options.chunkSize\" is out of range. It must be >= ", Z_MIN_CHUNK,
+          " and <= ", Z_MAX_CHUNK, ". Received ", chunkSize));
   JSG_REQUIRE(maxOutputLength <= Z_MAX_CHUNK, Error, "Invalid maxOutputLength"_kj);
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
@@ -939,12 +949,18 @@ kj::Array<kj::byte> ZlibUtil::brotliSync(InputSource data, BrotliContext::Option
 
   auto flush = opts.flush.orDefault(BROTLI_OPERATION_PROCESS);
   JSG_REQUIRE(BROTLI_OPERATION_PROCESS <= flush && flush <= BROTLI_OPERATION_EMIT_METADATA,
-      RangeError, "invalid flush value"_kj);
+      RangeError,
+      kj::str("The value of \"options.flush\" is out of range. It must be >= ",
+          BROTLI_OPERATION_PROCESS, " and <= ", BROTLI_OPERATION_EMIT_METADATA, ". Received ",
+          flush));
 
   auto finishFlush = opts.finishFlush.orDefault(BROTLI_OPERATION_FINISH);
   JSG_REQUIRE(
       BROTLI_OPERATION_PROCESS <= finishFlush && finishFlush <= BROTLI_OPERATION_EMIT_METADATA,
-      RangeError, "invalid finishFlush value"_kj);
+      RangeError,
+      kj::str("The value of \"options.finishFlush\" is out of range. It must be >= ",
+          BROTLI_OPERATION_PROCESS, " and <= ", BROTLI_OPERATION_EMIT_METADATA, ". Received ",
+          finishFlush));
 
   ctx.setFlush(finishFlush);
   ctx.setInputBuffer(getInputFromSource(data));
