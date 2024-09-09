@@ -16,6 +16,7 @@
 #include "sql.h"
 #include <workerd/api/web-socket.h>
 #include <workerd/io/hibernation-manager.h>
+#include <workerd/io/features.h>
 
 namespace workerd::api {
 
@@ -700,12 +701,49 @@ jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   }
 }
 
-jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
+SqliteDatabase& DurableObjectStorage::getSqliteDb(jsg::Lock& js) {
   KJ_IF_SOME(db, cache->getSqliteDatabase()) {
-    return jsg::alloc<SqlStorage>(db, JSG_THIS);
+    // Actor is SQLite-backed but let's make sure SQL is configured to be enabled.
+    if (enableSql) {
+      return db;
+    } else if (FeatureFlags::get(js).getWorkerdExperimental()) {
+      // For backwards-compatibility, if the `experimental` compat flag is on, enable SQL. This is
+      // deprecated, though, so warn in this case.
+
+      // TODO(soon): Uncomment this warning after the D1 simulator has been updated to use
+      //   `enableSql`. Otherwise, people doing local dev against D1 may see the warning
+      //   spuriously.
+
+      // IoContext::current().logWarningOnce(
+      //     "Enabling SQL API based on the 'experimental' flag, but this will stop working soon. "
+      //     "Instead, please set `enableSql = true` in your workerd config for the DO namespace. "
+      //     "If using wrangler, under `[[migrations]]` in wrangler.toml, change `new_classes` to "
+      //     "`new_sqlite_classes`.");
+
+      return db;
+    } else {
+      // We're presumably running local workerd, which always uses SQLite for DO storage, but we're
+      // trying to simulate a non-SQLite DO namespace for testing purposes.
+      JSG_FAIL_REQUIRE(Error,
+          "SQL is not enabled for this Durable Object class. To enable it, set "
+          "`enableSql = true` in your workerd config for the class. If using wrangler, "
+          "under `[[migrations]]` in wrangler.toml, change `new_classes` to "
+          "`new_sqlite_classes`. Note that this change cannot be made after the class is "
+          "already deployed to production.");
+    }
   } else {
-    JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
+    // We're in production (not local workerd) and this DO namespace is not backed by SQLite.
+    JSG_FAIL_REQUIRE(Error,
+        "This Durable Object is not backed by SQLite storage, so the SQL API is not available. "
+        "SQL can be enabled on a new Durable Object class by using the `new_sqlite_classes` "
+        "instead of `new_classes` under `[[migrations]]` in your wrangler.toml, but an "
+        "already-deployed class cannot be converted to SQLite (except by deleting the existing "
+        "data).");
   }
+}
+
+jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
+  return jsg::alloc<SqlStorage>(JSG_THIS);
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {

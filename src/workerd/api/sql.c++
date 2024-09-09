@@ -8,34 +8,33 @@
 
 namespace workerd::api {
 
-SqlStorage::SqlStorage(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
-    : sqlite(IoContext::current().addObject(sqlite)),
-      storage(kj::mv(storage)) {}
+SqlStorage::SqlStorage(jsg::Ref<DurableObjectStorage> storage): storage(kj::mv(storage)) {}
 
 SqlStorage::~SqlStorage() {}
 
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, kj::String querySql, jsg::Arguments<BindingValue> bindings) {
   SqliteDatabase::Regulator& regulator = *this;
-  return jsg::alloc<Cursor>(*sqlite, regulator, querySql, kj::mv(bindings));
+  return jsg::alloc<Cursor>(getDb(js), regulator, querySql, kj::mv(bindings));
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
   SqliteDatabase::Regulator& regulator = *this;
-  auto result = sqlite->ingestSql(regulator, querySql);
+  auto result = getDb(js).ingestSql(regulator, querySql);
   return IngestResult(
       kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }
 
 jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, kj::String query) {
-  return jsg::alloc<Statement>(sqlite->prepare(*this, query));
+  return jsg::alloc<Statement>(getDb(js).prepare(*this, query));
 }
 
-double SqlStorage::getDatabaseSize() {
-  int64_t pages = execMemoized(pragmaPageCount,
+double SqlStorage::getDatabaseSize(jsg::Lock& js) {
+  auto& db = getDb(js);
+  int64_t pages = execMemoized(db, pragmaPageCount,
       "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
                       .getInt64(0);
-  return pages * getPageSize();
+  return pages * getPageSize(db);
 }
 
 bool SqlStorage::isAllowedName(kj::StringPtr name) const {
