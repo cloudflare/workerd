@@ -534,3 +534,9 @@ wd_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
 )
+
+wd_test(
+    src = "tests/new-module-registry-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/new-module-registry-test.js"],
+)

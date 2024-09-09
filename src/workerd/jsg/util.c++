@@ -7,6 +7,7 @@
 #include "ser.h"
 #include <kj/debug.h>
 #include <cstdlib>
+#include <set>
 
 #if !_WIN32
 #include <cxxabi.h>
@@ -675,6 +676,41 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char
 
 v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf) {
   return check(ExternTwoByteString::createExtern(js.v8Isolate, buf));
+}
+
+// ======================================================================================
+// Node.js Compat
+
+namespace {
+// This list must be kept in sync with the list of builtins from Node.js.
+// It should be unlikely that anything is ever removed from this list, and
+// adding items to it is considered a semver-major change in Node.js.
+static const std::set<kj::StringPtr> NODEJS_BUILTINS{"_http_agent"_kj, "_http_client"_kj,
+  "_http_common"_kj, "_http_incoming"_kj, "_http_outgoing"_kj, "_http_server"_kj,
+  "_stream_duplex"_kj, "_stream_passthrough"_kj, "_stream_readable"_kj, "_stream_transform"_kj,
+  "_stream_wrap"_kj, "_stream_writable"_kj, "_tls_common"_kj, "_tls_wrap"_kj, "assert"_kj,
+  "assert/strict"_kj, "async_hooks"_kj, "buffer"_kj, "child_process"_kj, "cluster"_kj, "console"_kj,
+  "constants"_kj, "crypto"_kj, "dgram"_kj, "diagnostics_channel"_kj, "dns"_kj, "dns/promises"_kj,
+  "domain"_kj, "events"_kj, "fs"_kj, "fs/promises"_kj, "http"_kj, "http2"_kj, "https"_kj,
+  "inspector"_kj, "inspector/promises"_kj, "module"_kj, "net"_kj, "os"_kj, "path"_kj,
+  "path/posix"_kj, "path/win32"_kj, "perf_hooks"_kj, "process"_kj, "punycode"_kj, "querystring"_kj,
+  "readline"_kj, "readline/promises"_kj, "repl"_kj, "stream"_kj, "stream/consumers"_kj,
+  "stream/promises"_kj, "stream/web"_kj, "string_decoder"_kj, "sys"_kj, "timers"_kj,
+  "timers/promises"_kj, "tls"_kj, "trace_events"_kj, "tty"_kj, "url"_kj, "util"_kj, "util/types"_kj,
+  "v8"_kj, "vm"_kj, "wasi"_kj, "worker_threads"_kj, "zlib"_kj};
+}  // namespace
+
+kj::Maybe<kj::String> checkNodeSpecifier(kj::StringPtr specifier) {
+  if (NODEJS_BUILTINS.contains(specifier)) {
+    return kj::str("node:", specifier);
+  } else if (specifier.startsWith("node:")) {
+    return kj::str(specifier);
+  }
+  return kj::none;
+}
+
+bool isNodeJsCompatEnabled(jsg::Lock& js) {
+  return IsolateBase::from(js.v8Isolate).isNodeJsCompatEnabled();
 }
 
 }  // namespace workerd::jsg

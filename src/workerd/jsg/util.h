@@ -476,4 +476,10 @@ struct Unimplemented {};
 // standard ServiceWorker APIs that don't make sense for Workers.
 using WontImplement = Unimplemented;
 
+// ======================================================================================
+// Node.js Compat
+
+kj::Maybe<kj::String> checkNodeSpecifier(kj::StringPtr specifier);
+bool isNodeJsCompatEnabled(jsg::Lock& js);
+
 }  // namespace workerd::jsg
