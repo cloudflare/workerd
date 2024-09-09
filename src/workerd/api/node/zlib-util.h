@@ -338,8 +338,8 @@ public:
     }
 
   protected:
-    CompressionContext* context() {
-      return &context_;
+    CompressionContext& context() {
+      return *&context_;
     }
 
     void initializeStream(jsg::BufferSource _write_result, jsg::Function<void()> writeCallback);
@@ -420,7 +420,7 @@ public:
       JSG_METHOD(params);
     }
 
-    CompressionContext* context() {
+    CompressionContext& context() {
       return this->CompressionStream<CompressionContext>::context();
     }
   };

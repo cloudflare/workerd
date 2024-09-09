@@ -49,9 +49,6 @@ public:
   size_t size() const {
     return builder.size();
   }
-  bool empty() const {
-    return size() == 0;
-  }
   size_t capacity() const {
     return builder.capacity();
   }
@@ -484,11 +481,11 @@ void ZlibUtil::CompressionStream<CompressionContext>::writeStream(jsg::Lock& js,
 
   writing = true;
 
-  context()->setBuffers(input, inputLength, output, outputLength);
-  context()->setFlush(flush);
+  context().setBuffers(input, inputLength, output, outputLength);
+  context().setFlush(flush);
 
   if constexpr (!async) {
-    context()->work();
+    context().work();
     if (checkError(js)) {
       updateWriteResult();
       writing = false;
@@ -498,7 +495,7 @@ void ZlibUtil::CompressionStream<CompressionContext>::writeStream(jsg::Lock& js,
 
   // On Node.js, this is called as a result of `ScheduleWork()` call.
   // Since, we implement the whole thing as sync, we're going to ahead and call the whole thing here.
-  context()->work();
+  context().work();
 
   // This is implemented slightly differently in Node.js
   // Node.js calls AfterThreadPoolWork().
@@ -528,7 +525,7 @@ void ZlibUtil::CompressionStream<CompressionContext>::close() {
 
 template <typename CompressionContext>
 bool ZlibUtil::CompressionStream<CompressionContext>::checkError(jsg::Lock& js) {
-  KJ_IF_SOME(error, context()->getError()) {
+  KJ_IF_SOME(error, context().getError()) {
     emitError(js, kj::mv(error));
     return false;
   }
@@ -547,7 +544,7 @@ template <typename CompressionContext>
 void ZlibUtil::CompressionStream<CompressionContext>::updateWriteResult() {
   KJ_IF_SOME(wr, writeResult) {
     auto ptr = wr.template asArrayPtr<uint32_t>();
-    context()->getAfterWriteResult(&ptr[1], &ptr[0]);
+    context().getAfterWriteResult(&ptr[1], &ptr[0]);
   }
 }
 
@@ -585,7 +582,7 @@ void ZlibUtil::CompressionStream<CompressionContext>::write(jsg::Lock& js,
 
 template <typename CompressionContext>
 void ZlibUtil::CompressionStream<CompressionContext>::reset(jsg::Lock& js) {
-  KJ_IF_SOME(error, context()->resetStream()) {
+  KJ_IF_SOME(error, context().resetStream()) {
     emitError(js, kj::mv(error));
   }
 }
@@ -602,13 +599,13 @@ void ZlibUtil::ZlibStream::initialize(int windowBits,
     jsg::Function<void()> writeCallback,
     jsg::Optional<kj::Array<kj::byte>> dictionary) {
   initializeStream(kj::mv(writeState), kj::mv(writeCallback));
-  context()->setAllocationFunctions(AllocForZlib, FreeForZlib, this);
-  context()->initialize(level, windowBits, memLevel, strategy, kj::mv(dictionary));
+  context().setAllocationFunctions(AllocForZlib, FreeForZlib, this);
+  context().initialize(level, windowBits, memLevel, strategy, kj::mv(dictionary));
 }
 
 void ZlibUtil::ZlibStream::params(jsg::Lock& js, int _level, int _strategy) {
-  context()->setParams(_level, _strategy);
-  KJ_IF_SOME(err, context()->getError()) {
+  context().setParams(_level, _strategy);
+  KJ_IF_SOME(err, context().getError()) {
     emitError(js, kj::mv(err));
   }
 }
@@ -771,10 +768,9 @@ bool ZlibUtil::BrotliCompressionStream<CompressionContext>::initialize(jsg::Lock
     jsg::BufferSource writeResult,
     jsg::Function<void()> writeCallback) {
   this->initializeStream(kj::mv(writeResult), kj::mv(writeCallback));
-  auto maybeError =
-      this->context()->initialize(CompressionStream<CompressionContext>::AllocForBrotli,
-          CompressionStream<CompressionContext>::FreeForZlib,
-          static_cast<CompressionStream<CompressionContext>*>(this));
+  auto maybeError = context().initialize(CompressionStream<CompressionContext>::AllocForBrotli,
+      CompressionStream<CompressionContext>::FreeForZlib,
+      static_cast<CompressionStream<CompressionContext>*>(this));
 
   KJ_IF_SOME(err, maybeError) {
     this->emitError(js, kj::mv(err));
@@ -788,7 +784,7 @@ bool ZlibUtil::BrotliCompressionStream<CompressionContext>::initialize(jsg::Lock
       continue;
     }
 
-    KJ_IF_SOME(err, this->context()->setParams(i, results[i])) {
+    KJ_IF_SOME(err, context().setParams(i, results[i])) {
       this->emitError(js, kj::mv(err));
       return false;
     }
@@ -810,8 +806,6 @@ void* ZlibUtil::CompressionStream<CompressionContext>::AllocForBrotli(void* data
   auto* ctx = static_cast<CompressionStream*>(data);
   auto memory = kj::heapArray<uint8_t>(size);
   auto begin = memory.begin();
-  // TODO(soon): Check if we need to store the size of the block in the pointer like Node.js
-  *reinterpret_cast<size_t*>(begin) = size;
   ctx->allocations.insert(begin, kj::mv(memory));
   return begin + sizeof(size_t);
 }
@@ -825,7 +819,7 @@ void ZlibUtil::CompressionStream<CompressionContext>::FreeForZlib(void* data, vo
 }
 namespace {
 template <typename Context>
-static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& result) {
+kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& result) {
   do {
     result.addChunk();
     ctx.setOutputBuffer(kj::ArrayPtr(result.end(), result.available()));
