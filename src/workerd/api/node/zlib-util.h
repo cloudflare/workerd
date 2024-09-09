@@ -294,7 +294,7 @@ public:
   template <class CompressionContext>
   class CompressionStream: public jsg::Object {
   public:
-    explicit CompressionStream(ZlibMode _mode): context_(_mode) {}
+    explicit CompressionStream(ZlibMode _mode): context(_mode) {}
     CompressionStream() = default;
     // TODO(soon): Find a way to add noexcept(false) to this destructor.
     ~CompressionStream();
@@ -338,8 +338,10 @@ public:
     }
 
   protected:
-    CompressionContext& context() {
-      return *&context_;
+    CompressionContext context;
+
+    CompressionContext& getContext() {
+      return *&context;
     }
 
     void initializeStream(jsg::BufferSource _write_result, jsg::Function<void()> writeCallback);
@@ -357,7 +359,6 @@ public:
     // context to avoid `heap-use-after-free` ASan error.
     kj::HashMap<uint8_t*, kj::Array<uint8_t>> allocations;
 
-    CompressionContext context_;
     bool initialized = false;
     bool writing = false;
     bool pending_close = false;
@@ -421,7 +422,7 @@ public:
     }
 
     CompressionContext& context() {
-      return this->CompressionStream<CompressionContext>::context();
+      return this->CompressionStream<CompressionContext>::getContext();
     }
   };
 
