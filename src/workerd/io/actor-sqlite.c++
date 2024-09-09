@@ -323,6 +323,18 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
     }
   }
 
+  if (!deleteAllCommitScheduled) {
+    // We'll want to make sure the commit callback is called for the deleteAll().
+    commitTasks.add(outputGate.lockWhile(kj::evalLater([this]() mutable -> kj::Promise<void> {
+      // Don't commit if shutdown() has been called.
+      requireNotBroken();
+
+      deleteAllCommitScheduled = false;
+      return commitCallback();
+    })));
+    deleteAllCommitScheduled = true;
+  }
+
   uint count = kv.deleteAll();
   return {
     .backpressure = kj::none,
