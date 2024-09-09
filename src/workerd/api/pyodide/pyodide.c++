@@ -51,10 +51,6 @@ static int readToTarget(
 }
 
 int PackagesTarReader::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
-  return readToTarget(PYODIDE_PACKAGES_TAR.get(), offset, buf);
-}
-
-int SmallPackagesTarReader::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
   return readToTarget(source, offset, buf);
 }
 
@@ -212,48 +208,6 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
     }
   }
   return false;
-}
-
-void PackagePromiseMap::insert(
-    kj::String path, kj::Promise<kj::ArrayPtr<const unsigned char>> promise) {
-  KJ_ASSERT(waitlists.find(kj::str(path)) == kj::none);
-  waitlists.insert(kj::str(path), CrossThreadWaitList());
-
-  promise
-      .then([this, p = kj::mv(path)](auto a) {
-    auto path = kj::str(p);
-    auto maybeWaitlist = waitlists.find(p);
-    KJ_IF_SOME(waitlist, maybeWaitlist) {
-      fetchedPackages.insert(kj::mv(path), kj::mv(a));
-      waitlist.fulfill();
-    } else {
-      JSG_FAIL_REQUIRE(Error, "Failed to get waitlist for package: ", path);
-    }
-  }).detach([](kj::Exception&& exception) {
-    JSG_FAIL_REQUIRE(Error, "Failed to get package: ", exception);
-  });
-}
-
-void PackagePromiseMap::onPackageReceived(jsg::Lock& lock,
-    kj::String path,
-    jsg::Function<void(jsg::Ref<SmallPackagesTarReader>)> resolve) {
-  auto maybeWaitlist = waitlists.find(path);
-
-  KJ_IF_SOME(waitlist, maybeWaitlist) {
-    IoContext::current().awaitIo(lock, waitlist.addWaiter(),
-        [this, path = kj::mv(path), resolve = kj::mv(resolve)](jsg::Lock& js) mutable {
-      auto maybeEntry = fetchedPackages.findEntry(path);
-      KJ_IF_SOME(entry, maybeEntry) {
-        resolve(js, jsg::alloc<SmallPackagesTarReader>(entry.value));
-      } else {
-        JSG_FAIL_REQUIRE(Error, "Failed to get package after waitlist fulfilled: ", path);
-      }
-    });
-
-  } else {
-    JSG_FAIL_REQUIRE(
-        Error, "Failed to get waitlist for package when trying to get promise: ", path);
-  }
 }
 
 }  // namespace workerd::api::pyodide

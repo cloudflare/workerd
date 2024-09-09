@@ -70,11 +70,13 @@ async function loadBundleFromArtifactBundler(
   const packagesVersion = PACKAGES_VERSION;
   const filename = LOCKFILE['packages'][requirement]['file_name'];
   const fullPath = 'python-package-bucket/' + packagesVersion + '/' + filename;
-  return new Promise((resolve) => {
-    ArtifactBundler.onPackageReceived(fullPath, (r: Reader) =>
-      resolve([requirement, r])
+  const reader = ArtifactBundler.getPackage(fullPath);
+  if (!reader)
+    throw new Error(
+      'Failed to get package ' + fullPath + ' from ArtifactBundler'
     );
-  });
+  return Promise.resolve([requirement, reader]);
+  // ^ this is okay to do during startup since it resolves immediately
 }
 
 /**

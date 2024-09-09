@@ -50,8 +50,10 @@ struct PythonConfig {
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
 class PackagesTarReader: public jsg::Object {
+  kj::ArrayPtr<const kj::byte> source;
+
 public:
-  PackagesTarReader() = default;
+  PackagesTarReader(kj::ArrayPtr<const kj::byte> src = PYODIDE_PACKAGES_TAR.get()): source(src) {};
 
   int read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf);
 
@@ -191,61 +193,30 @@ public:
   }
 };
 
-// Similar to PackagesTarReader, but reads from a dynamic buffer rather than a buffer linked into
-// the binary
-class SmallPackagesTarReader: public jsg::Object {
-  kj::ArrayPtr<const kj::byte> source;
-
-public:
-  SmallPackagesTarReader(kj::ArrayPtr<const kj::byte> src): source(src) {};
-
-  int read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf);
-
-  JSG_RESOURCE_TYPE(SmallPackagesTarReader) {
-    JSG_METHOD(read);
-  }
-};
-
 struct MemorySnapshotResult {
   kj::Array<kj::byte> snapshot;
   kj::Array<kj::String> importedModulesList;
   JSG_STRUCT(snapshot, importedModulesList);
 };
 
-// Before a Pyodide isolate starts up, all its packages begin loading. This struct provides an
-// interface for the Pyodide startup code to request promises for each package that was loaded.
-class PackagePromiseMap {
-  // This implementation is complex because we're not allowed to store kj::Promises on an object
-  // stored on the V8 heap. Ideally, we'd like to simply store a map from package paths to Promises.
-  // Instead, we store a CrossThreadWaitList and get a new Promise from the waitlist as needed.
-  kj::HashMap<kj::String, kj::ArrayPtr<const unsigned char>> fetchedPackages;
-  kj::HashMap<kj::String, CrossThreadWaitList> waitlists;
-
-public:
-  void insert(kj::String path, kj::Promise<kj::ArrayPtr<const unsigned char>> promise);
-
-  void onPackageReceived(jsg::Lock& lock,
-      kj::String path,
-      jsg::Function<void(jsg::Ref<SmallPackagesTarReader>)> resolve);
-};
-
 // A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler: public jsg::Object {
 public:
+  kj::Maybe<const PyodidePackageManager&> packageManager;
+  // ^ lifetime should be static since there is normally one worker set for the whole process. see worker-set.h
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
-  kj::Own<PackagePromiseMap> loadedPackages;
 
-  ArtifactBundler(kj::Own<PackagePromiseMap> loadedPackages,
-      kj::Maybe<kj::Array<kj::byte>> existingSnapshot = kj::none)
-      : storedSnapshot(kj::none),
-        loadedPackages(kj::mv(loadedPackages)),
+  ArtifactBundler(kj::Maybe<const PyodidePackageManager&> packageManager,
+      kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
+      : packageManager(packageManager),
+        storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
         isValidating(false) {};
 
   ArtifactBundler(bool isValidating = false)
-      : storedSnapshot(kj::none),
-        loadedPackages(kj::heap<PackagePromiseMap>()),
+      : packageManager(kj::none),
+        storedSnapshot(kj::none),
         existingSnapshot(kj::none),
         isValidating(isValidating) {};
 
@@ -276,8 +247,8 @@ public:
   }
 
   static jsg::Ref<ArtifactBundler> makeDisabledBundler(
-      kj::Own<PackagePromiseMap> loadedPackages = kj::heap<PackagePromiseMap>()) {
-    return jsg::alloc<ArtifactBundler>(kj::mv(loadedPackages));
+      kj::Maybe<const PyodidePackageManager&> packageManager = kj::none) {
+    return jsg::alloc<ArtifactBundler>(packageManager, kj::none);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -291,10 +262,14 @@ public:
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
-  void onPackageReceived(jsg::Lock& lock,
-      kj::String path,
-      jsg::Function<void(jsg::Ref<SmallPackagesTarReader>)> resolve) {
-    loadedPackages->onPackageReceived(lock, kj::mv(path), kj::mv(resolve));
+  kj::Maybe<jsg::Ref<PackagesTarReader>> getPackage(kj::String path) {
+    KJ_IF_SOME(pacman, packageManager) {
+      KJ_IF_SOME(ptr, pacman.getPyodidePackage(path)) {
+        return jsg::alloc<PackagesTarReader>(ptr);
+      }
+    }
+
+    return kj::none;
   }
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
@@ -305,7 +280,7 @@ public:
     JSG_METHOD(isEwValidating);
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
-    JSG_METHOD(onPackageReceived);
+    JSG_METHOD(getPackage);
   }
 
 private:
@@ -405,7 +380,7 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
   api::pyodide::PackagesTarReader, api::pyodide::PyodideMetadataReader,                            \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
       api::pyodide::DisabledInternalJaeger, api::pyodide::SimplePythonLimiter,                     \
-      api::pyodide::MemorySnapshotResult, api::pyodide::SmallPackagesTarReader
+      api::pyodide::MemorySnapshotResult
 
 template <class Registry>
 void registerPyodideModules(Registry& registry, auto featureFlags) {
