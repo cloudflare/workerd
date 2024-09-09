@@ -397,10 +397,8 @@ kj::Maybe<CompressionError> ZlibContext::setParams(int _level, int _strategy) {
   return kj::none;
 }
 
-void ZlibContext::close() {
+ZlibContext::~ZlibContext() noexcept(false) {
   if (!initialized) {
-    dictionary.clear();
-    mode = ZlibMode::NONE;
     return;
   }
 
@@ -423,8 +421,6 @@ void ZlibContext::close() {
 
   JSG_REQUIRE(
       status == Z_OK || status == Z_DATA_ERROR, Error, "Uncaught error on closing zlib stream");
-  mode = ZlibMode::NONE;
-  dictionary.clear();
 }
 
 void ZlibContext::setBuffers(kj::ArrayPtr<kj::byte> input,
@@ -527,7 +523,7 @@ void ZlibUtil::CompressionStream<CompressionContext>::close() {
   }
   closed = true;
   JSG_ASSERT(initialized, Error, "Closing before initialized"_kj);
-  context()->close();
+  // Context is closed on the destructor of the CompressionContext.
 }
 
 template <typename CompressionContext>
@@ -655,12 +651,6 @@ BrotliEncoderContext::BrotliEncoderContext(ZlibMode _mode): BrotliContext(_mode)
   state = kj::disposeWith<BrotliEncoderDestroyInstance>(instance);
 }
 
-void BrotliEncoderContext::close() {
-  auto instance = BrotliEncoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
-  state = kj::disposeWith<BrotliEncoderDestroyInstance>(kj::mv(instance));
-  mode = ZlibMode::NONE;
-}
-
 void BrotliEncoderContext::work() {
   JSG_REQUIRE(mode == ZlibMode::BROTLI_ENCODE, Error, "Mode should be BROTLI_ENCODE"_kj);
   JSG_REQUIRE_NONNULL(state.get(), Error, "State should not be empty"_kj);
@@ -711,12 +701,6 @@ kj::Maybe<CompressionError> BrotliEncoderContext::getError() const {
 BrotliDecoderContext::BrotliDecoderContext(ZlibMode _mode): BrotliContext(_mode) {
   auto instance = BrotliDecoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
   state = kj::disposeWith<BrotliDecoderDestroyInstance>(instance);
-}
-
-void BrotliDecoderContext::close() {
-  auto instance = BrotliDecoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
-  state = kj::disposeWith<BrotliDecoderDestroyInstance>(kj::mv(instance));
-  mode = ZlibMode::NONE;
 }
 
 kj::Maybe<CompressionError> BrotliDecoderContext::initialize(
@@ -840,18 +824,6 @@ void ZlibUtil::CompressionStream<CompressionContext>::FreeForZlib(void* data, vo
   JSG_REQUIRE(ctx->allocations.erase(real_pointer), Error, "Zlib allocation should exist"_kj);
 }
 namespace {
-// A RAII wrapper around a compression context class
-// TODO(soon): See if this functionality can just be embedded into each CompressionContext
-template <typename CompressionContext>
-class ContextRAII: public CompressionContext {
-public:
-  using CompressionContext::CompressionContext;
-
-  ~ContextRAII() {
-    static_cast<CompressionContext*>(this)->close();
-  }
-};
-
 template <typename Context>
 static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& result) {
   do {
@@ -873,7 +845,7 @@ static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& resul
 
 kj::Array<kj::byte> ZlibUtil::zlibSync(
     ZlibUtil::InputSource data, ZlibContext::Options opts, ZlibModeValue mode) {
-  ContextRAII<ZlibContext> ctx(static_cast<ZlibMode>(mode));
+  ZlibContext ctx(static_cast<ZlibMode>(mode));
 
   auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
@@ -922,7 +894,7 @@ void ZlibUtil::zlibWithCallback(jsg::Lock& js,
 
 template <typename Context>
 kj::Array<kj::byte> ZlibUtil::brotliSync(InputSource data, BrotliContext::Options opts) {
-  ContextRAII<Context> ctx(Context::Mode);
+  Context ctx(Context::Mode);
 
   auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);

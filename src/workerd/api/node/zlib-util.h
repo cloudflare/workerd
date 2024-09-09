@@ -90,15 +90,14 @@ struct CompressionError {
   int err;
 };
 
-// TODO(soon): See if RAII support can be added directly to this class, and we can mark it final
-class ZlibContext {
+class ZlibContext final {
 public:
   explicit ZlibContext(ZlibMode _mode): mode(_mode) {}
   ZlibContext() = default;
+  ~ZlibContext() noexcept(false);
 
-  KJ_DISALLOW_COPY(ZlibContext);
+  KJ_DISALLOW_COPY_AND_MOVE(ZlibContext);
 
-  void close();
   void setBuffers(kj::ArrayPtr<kj::byte> input,
       uint32_t inputLength,
       kj::ArrayPtr<kj::byte> output,
@@ -244,13 +243,13 @@ protected:
   void* alloc_opaque_brotli = nullptr;
 };
 
-// TODO(soon): See if RAII support can be added directly to this class, and we can mark it final
-class BrotliEncoderContext: public BrotliContext {
+class BrotliEncoderContext final: public BrotliContext {
 public:
   static const ZlibMode Mode = ZlibMode::BROTLI_ENCODE;
   explicit BrotliEncoderContext(ZlibMode _mode);
 
-  void close();
+  KJ_DISALLOW_COPY_AND_MOVE(BrotliEncoderContext);
+
   // Equivalent to Node.js' `DoThreadPoolWork` implementation.
   void work();
   kj::Maybe<CompressionError> initialize(
@@ -264,13 +263,13 @@ private:
   kj::Own<BrotliEncoderStateStruct> state;
 };
 
-// TODO(soon): See if RAII support can be added directly to this class, and we can mark it final
-class BrotliDecoderContext: public BrotliContext {
+class BrotliDecoderContext final: public BrotliContext {
 public:
   static const ZlibMode Mode = ZlibMode::BROTLI_DECODE;
   explicit BrotliDecoderContext(ZlibMode _mode);
 
-  void close();
+  KJ_DISALLOW_COPY_AND_MOVE(BrotliDecoderContext);
+
   // Equivalent to Node.js' `DoThreadPoolWork` implementation.
   void work();
   kj::Maybe<CompressionError> initialize(
@@ -297,6 +296,7 @@ public:
   public:
     explicit CompressionStream(ZlibMode _mode): context_(_mode) {}
     CompressionStream() = default;
+    // TODO(soon): Find a way to add noexcept(false) to this destructor.
     ~CompressionStream();
     KJ_DISALLOW_COPY_AND_MOVE(CompressionStream);
 
