@@ -2,10 +2,11 @@ import { owner_symbol, type Zlib } from 'node-internal:internal_zlib_base';
 
 export function crc32(data: ArrayBufferView, value: number): number;
 
-export type CompressCallback<ErrT, BufT> = (
-  error: ErrT | null,
-  result?: BufT
+export type CompressCallback = (
+  err: Error | null,
+  buffer?: ArrayBuffer
 ) => void;
+export type InternalCompressCallback = (res: Error | ArrayBuffer) => void;
 
 export function crc32(data: ArrayBufferView | string, value: number): number;
 export function zlibSync(
@@ -17,8 +18,28 @@ export function zlib(
   data: ArrayBufferView | string,
   options: ZlibOptions,
   mode: number,
-  cb: CompressCallback<string, ArrayBuffer>
+  cb: InternalCompressCallback
+): void;
+
+export function brotliDecompressSync(
+  data: ArrayBufferView | string,
+  options: BrotliOptions
 ): ArrayBuffer;
+export function brotliDecompress(
+  data: ArrayBufferView | string,
+  options: BrotliOptions,
+  cb: InternalCompressCallback
+): void;
+
+export function brotliCompressSync(
+  data: ArrayBufferView | string,
+  options: BrotliOptions
+): ArrayBuffer;
+export function brotliCompress(
+  data: ArrayBufferView | string,
+  options: BrotliOptions,
+  cb: InternalCompressCallback
+): void;
 
 // zlib.constants (part of the API contract for node:zlib)
 export const CONST_Z_NO_FLUSH: number;

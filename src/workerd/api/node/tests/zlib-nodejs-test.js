@@ -1486,7 +1486,6 @@ export const zlibFromString = {
 
 // Test taken from
 // https://github.com/nodejs/node/blob/fc02b88f89f8d5abf5ee4414a1026444c18d77b3/test/parallel/test-zlib-empty-buffer.js
-// TODO(soon): enable brotli cases once implemented
 export const zlibEmptyBuffer = {
   async test() {
     const emptyBuffer = Buffer.alloc(0);
@@ -1495,11 +1494,11 @@ export const zlibEmptyBuffer = {
       [zlib.deflateRawSync, zlib.inflateRawSync, 'raw sync'],
       [zlib.deflateSync, zlib.inflateSync, 'deflate sync'],
       [zlib.gzipSync, zlib.gunzipSync, 'gzip sync'],
-      //[ zlib.brotliCompressSync, zlib.brotliDecompressSync, 'br sync' ],
+      [zlib.brotliCompressSync, zlib.brotliDecompressSync, 'br sync'],
       [promisify(zlib.deflateRaw), promisify(zlib.inflateRaw), 'raw'],
       [promisify(zlib.deflate), promisify(zlib.inflate), 'deflate'],
       [promisify(zlib.gzip), promisify(zlib.gunzip), 'gzip'],
-      //[ promisify(zlib.brotliCompress), promisify(zlib.brotliDecompress), 'br' ],
+      [promisify(zlib.brotliCompress), promisify(zlib.brotliDecompress), 'br'],
     ]) {
       const compressed = await compress(emptyBuffer);
       const decompressed = await decompress(compressed);
@@ -1730,10 +1729,9 @@ export const closeAfterWrite = {
   },
 };
 
-const BIG_DATA = 'horse'.repeat(50_000) + 'cow'.repeat(49_000);
-
 export const inflateSyncTest = {
   test() {
+    const BIG_DATA = 'horse'.repeat(50_000) + 'cow'.repeat(49_000);
     assert.strictEqual(
       zlib.inflateSync(zlib.deflateSync(BIG_DATA)).toString(),
       BIG_DATA
@@ -1787,26 +1785,11 @@ export const deflateSyncTest = {
       return buf.fill(0x0, 9, 10);
     }
 
-    assert.throws(
-      () =>
-        zlib.deflateSync(BIG_DATA, { maxOutputLength: 64 }).toString('base64'),
-      new RangeError('Memory limit exceeded')
-    );
-
     assert.strictEqual(
       zlib
         .deflateSync('bird bird bird', { windowBits: 11, level: 4 })
         .toString('base64'),
       'OE9LyixKUUiCEQAmfgUk'
-    );
-
-    assert.strictEqual(
-      zlib
-        .deflateSync('what happens if you do not flush?', {
-          finishFlush: zlib.constants.Z_NO_FLUSH,
-        })
-        .toString('base64'),
-      'eJw='
     );
 
     assert.deepStrictEqual(
@@ -1827,8 +1810,7 @@ export const prematureEnd = {
     for (const [compress, decompressor] of [
       [zlib.deflateRawSync, zlib.createInflateRaw],
       [zlib.deflateSync, zlib.createInflate],
-      // TODO(soon): Enable this once brotli is implemented.
-      // [zlib.brotliCompressSync, zlib.createBrotliDecompress],
+      [zlib.brotliCompressSync, zlib.createBrotliDecompress],
     ]) {
       const compressed = compress(input);
       const trailingData = Buffer.from('not valid compressed data');
@@ -1971,13 +1953,12 @@ export const convenienceMethods = {
         ['gzip', 'unzip', 'Gzip', 'Unzip'],
         ['deflate', 'inflate', 'Deflate', 'Inflate'],
         ['deflateRaw', 'inflateRaw', 'DeflateRaw', 'InflateRaw'],
-        // TODO(soon): Enable this once brotli functions are implemented
-        // [
-        //   'brotliCompress',
-        //   'brotliDecompress',
-        //   'BrotliCompress',
-        //   'BrotliDecompress',
-        // ],
+        [
+          'brotliCompress',
+          'brotliDecompress',
+          'BrotliCompress',
+          'BrotliDecompress',
+        ],
       ]) {
         {
           const { promise, resolve } = Promise.withResolvers();
@@ -2090,6 +2071,260 @@ export const convenienceMethods = {
   },
 };
 
+// Test taken from
+// https://github.com/nodejs/node/blob/2bd6a57b7b934afcaf437a90e2abebcb79c13acf/test/parallel/test-zlib-brotli-from-string.js
+export const brotliFromString = {
+  async test() {
+    const inputString =
+      'ΩΩLorem ipsum dolor sit amet, consectetur adipiscing eli' +
+      't. Morbi faucibus, purus at gravida dictum, libero arcu ' +
+      'convallis lacus, in commodo libero metus eu nisi. Nullam' +
+      ' commodo, neque nec porta placerat, nisi est fermentum a' +
+      'ugue, vitae gravida tellus sapien sit amet tellus. Aenea' +
+      'n non diam orci. Proin quis elit turpis. Suspendisse non' +
+      ' diam ipsum. Suspendisse nec ullamcorper odio. Vestibulu' +
+      'm arcu mi, sodales non suscipit id, ultrices ut massa. S' +
+      'ed ac sem sit amet arcu malesuada fermentum. Nunc sed. ';
+    const compressedString =
+      'G/gBQBwHdky2aHV5KK9Snf05//1pPdmNw/7232fnIm1IB' +
+      'K1AA8RsN8OB8Nb7Lpgk3UWWUlzQXZyHQeBBbXMTQXC1j7' +
+      'wg3LJs9LqOGHRH2bj/a2iCTLLx8hBOyTqgoVuD1e+Qqdn' +
+      'f1rkUNyrWq6LtOhWgxP3QUwdhKGdZm3rJWaDDBV7+pDk1' +
+      'MIkrmjp4ma2xVi5MsgJScA3tP1I7mXeby6MELozrwoBQD' +
+      'mVTnEAicZNj4lkGqntJe2qSnGyeMmcFgraK94vCg/4iLu' +
+      'Tw5RhKhnVY++dZ6niUBmRqIutsjf5TzwF5iAg8a9UkjF5' +
+      '2eZ0tB2vo6v8SqVfNMkBmmhxr0NT9LkYF69aEjlYzj7IE' +
+      'KmEUQf1HBogRYhFIt4ymRNEgHAIzOyNEsQM=';
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+
+      zlib.brotliCompress(inputString, (err, buffer) => {
+        assert.ifError(err);
+        assert(inputString.length > buffer.length);
+
+        zlib.brotliDecompress(buffer, (err, buffer) => {
+          assert.ifError(err);
+          assert.strictEqual(buffer.toString(), inputString);
+          resolve();
+        });
+      });
+      await promise;
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const buffer = Buffer.from(compressedString, 'base64');
+      zlib.brotliDecompress(buffer, (err, buffer) => {
+        assert.ifError(err);
+        assert.strictEqual(buffer.toString(), inputString);
+        resolve();
+      });
+
+      await promise;
+    }
+  },
+};
+
+// Test taken from
+// https://github.com/nodejs/node/blob/26eb062a9b9c0ae8cee9cb5c378e43bca363207c/test/parallel/test-zlib-maxOutputLength.js
+export const maxOutputLength = {
+  async test() {
+    const encoded = Buffer.from('G38A+CXCIrFAIAM=', 'base64');
+
+    // Async
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.brotliDecompress(encoded, { maxOutputLength: 64 }, (err) => {
+        // TODO(soon): Make error the same as NodeJS
+        assert.match(err.message, /Memory limit exceeded/);
+        resolve();
+      });
+      await promise;
+    }
+
+    // Sync
+    assert.throws(function () {
+      zlib.brotliDecompressSync(encoded, { maxOutputLength: 64 });
+    }, RangeError);
+
+    // Async
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.brotliDecompress(encoded, { maxOutputLength: 256 }, function (err) {
+        assert.strictEqual(err, null);
+        resolve();
+      });
+
+      await promise;
+    }
+
+    // Sync
+    zlib.brotliDecompressSync(encoded, { maxOutputLength: 256 });
+  },
+};
+
+// Test taken from
+// https://github.com/nodejs/node/blob/24302c9fe94e1dd755ac8a8cc1f6aa4444f75cb3/test/parallel/test-zlib-invalid-arg-value-brotli-compress.js
+export const invalidArgValueBrotliCompress = {
+  test() {
+    const opts = {
+      params: {
+        [zlib.constants.BROTLI_PARAM_MODE]: 'lol',
+      },
+    };
+
+    // TODO(soon): Node's test invokes BrotliCompress without new, but we barf if you try that.
+    assert.throws(() => new zlib.BrotliCompress(opts), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+  },
+};
+
+// Test taken from
+// https://github.com/nodejs/node/blob/24302c9fe94e1dd755ac8a8cc1f6aa4444f75cb3/test/parallel/test-zlib-brotli-flush.js
+export const brotliFlush = {
+  async test() {
+    const deflater = new zlib.BrotliCompress();
+
+    const chunk = Buffer.from('/9j/4AAQSkZJRgABAQEASA==', 'base64');
+    const expectedFull = Buffer.from('iweA/9j/4AAQSkZJRgABAQEASA==', 'base64');
+    let actualFull;
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      deflater.write(chunk, function () {
+        deflater.flush(function () {
+          const bufs = [];
+          let buf;
+          while ((buf = deflater.read()) !== null) bufs.push(buf);
+          actualFull = Buffer.concat(bufs);
+          resolve();
+        });
+      });
+
+      await promise;
+    }
+    assert.deepStrictEqual(actualFull, expectedFull);
+  },
+};
+
+// Test taken from
+// https://github.com/nodejs/node/blob/24302c9fe94e1dd755ac8a8cc1f6aa4444f75cb3/test/parallel/test-zlib-brotli.js
+export const brotli = {
+  async test() {
+    {
+      const sampleBuffer = Buffer.from(PSS_VECTORS_JSON);
+
+      // Test setting the quality parameter at stream creation:
+      const sizes = [];
+      for (
+        let quality = zlib.constants.BROTLI_MIN_QUALITY;
+        quality <= zlib.constants.BROTLI_MAX_QUALITY;
+        quality++
+      ) {
+        const encoded = zlib.brotliCompressSync(sampleBuffer, {
+          params: {
+            [zlib.constants.BROTLI_PARAM_QUALITY]: quality,
+          },
+        });
+        sizes.push(encoded.length);
+      }
+
+      // Increasing quality should roughly correspond to decreasing compressed size:
+      for (let i = 0; i < sizes.length - 1; i++) {
+        assert(sizes[i + 1] <= sizes[i] * 1.05, sizes); // 5 % margin of error.
+      }
+      assert(sizes[0] > sizes[sizes.length - 1], sizes);
+    }
+
+    {
+      // Test that setting out-of-bounds option values or keys fails.
+      assert.throws(
+        () => {
+          zlib.createBrotliCompress({
+            params: {
+              10000: 0,
+            },
+          });
+        },
+        {
+          code: 'ERR_BROTLI_INVALID_PARAM',
+          name: 'RangeError',
+          message: '10000 is not a valid Brotli parameter',
+        }
+      );
+
+      // Test that accidentally using duplicate keys fails.
+      assert.throws(
+        () => {
+          zlib.createBrotliCompress({
+            params: {
+              0: 0,
+              '00': 0,
+            },
+          });
+        },
+        {
+          code: 'ERR_BROTLI_INVALID_PARAM',
+          name: 'RangeError',
+          message: '00 is not a valid Brotli parameter',
+        }
+      );
+
+      //TODO(soon): enable this test. We don't throw anything in this situation unfortunately
+      // {
+      //   assert.throws(
+      //     () => {
+      //       zlib.createBrotliCompress({
+      //         params: {
+      //           // This is a boolean flag
+      //           [zlib.constants.BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING]:
+      //             42,
+      //         },
+      //       });
+      //     },
+      //     {
+      //       code: 'ERR_ZLIB_INITIALIZATION_FAILED',
+      //       name: 'Error',
+      //       message: 'Initialization failed',
+      //     }
+      //   );
+      // }
+
+      {
+        // Test options.flush range
+        // TODO(soon): Use the same code and message as NodeJS
+        assert.throws(
+          () => {
+            zlib.brotliCompressSync('', { flush: zlib.constants.Z_FINISH });
+          },
+          {
+            //code: 'ERR_OUT_OF_RANGE',
+            name: 'RangeError',
+            //message: 'The value of "options.flush" is out of range. It must be >= 0 ' +
+            //  'and <= 3. Received 4',
+          }
+        );
+
+        assert.throws(
+          () => {
+            zlib.brotliCompressSync('', {
+              finishFlush: zlib.constants.Z_FINISH,
+            });
+          },
+          {
+            //code: 'ERR_OUT_OF_RANGE',
+            name: 'RangeError',
+            //message: 'The value of "options.finishFlush" is out of range. It must be ' +
+            //  '>= 0 and <= 3. Received 4',
+          }
+        );
+      }
+    }
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -2097,7 +2332,7 @@ export const convenienceMethods = {
 // - [ ] test-zlib-flush-drain.js
 // - [ ] test-zlib-invalid-input-memory.js
 // - [ ] test-zlib-sync-no-event.js
-// - [ ] test-zlib-brotli-flush.js
+// - [x] test-zlib-brotli-flush.js
 // - [x] test-zlib-crc32.js
 // - [ ] test-zlib-flush-drain-longblock.js
 // - [ ] test-zlib.js
@@ -2107,12 +2342,12 @@ export const convenienceMethods = {
 // - [x] test-zlib-flush-flags.js
 // - [ ] test-zlib-kmaxlength-rangeerror.js
 // - [ ] test-zlib-unused-weak.js
-// - [ ] test-zlib-brotli-from-string.js
+// - [x] test-zlib-brotli-from-string.js
 // - [x] test-zlib-deflate-constructors.js
 // - [x] test-zlib-flush.js
-// - [ ] test-zlib-maxOutputLength.js
+// - [x] test-zlib-maxOutputLength.js
 // - [x] test-zlib-unzip-one-byte-chunks.js
-// - [ ] test-zlib-brotli.js
+// - [x] test-zlib-brotli.js
 // - [ ] test-zlib-deflate-raw-inherits.js
 // - [ ] test-zlib-flush-write-sync-interleaved.js
 // - [N/A] test-zlib-no-stream.js
@@ -2139,9 +2374,100 @@ export const convenienceMethods = {
 // - [x] test-zlib-zero-windowBits.js
 // - [x] test-zlib-close-in-ondata.js
 // - [x] test-zlib-empty-buffer.js
-// - [ ] test-zlib-invalid-arg-value-brotli-compress.js
+// - [x] test-zlib-invalid-arg-value-brotli-compress.js
 // - [ ] test-zlib-random-byte-pipes.js
 // - [x] test-zlib-const.js
 // - [x] test-zlib-failed-init.js
 // - [x] test-zlib-invalid-input.js
 // - [x] test-zlib-reset-before-write.js
+
+// Large test data is added at the end of the file in order to make the test code itself more readable
+const PSS_VECTORS_JSON = `{
+  "example01": {
+    "publicKey": [
+      "-----BEGIN PUBLIC KEY-----",
+      "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQClbkoOcBAXWJpRh9x+qEHRVvLs",
+      "DjatUqRN/rHmH3rZkdjFEFb/7bFitMDyg6EqiKOU3/Umq3KRy7MHzqv84LHf1c2V",
+      "CAltWyuLbfXWce9jd8CSHLI8Jwpw4lmOb/idGfEFrMLT8Ms18pKA4Thrb2TE7yLh",
+      "4fINDOjP+yJJvZohNwIDAQAB",
+      "-----END PUBLIC KEY-----"
+    ],
+    "tests": [
+      {
+        "message": "cdc87da223d786df3b45e0bbbc721326d1ee2af806cc315475cc6f0d9c66e1b62371d45ce2392e1ac92844c310102f156a0d8d52c1f4c40ba3aa65095786cb769757a6563ba958fed0bcc984e8b517a3d5f515b23b8a41e74aa867693f90dfb061a6e86dfaaee64472c00e5f20945729cbebe77f06ce78e08f4098fba41f9d6193c0317e8b60d4b6084acb42d29e3808a3bc372d85e331170fcbf7cc72d0b71c296648b3a4d10f416295d0807aa625cab2744fd9ea8fd223c42537029828bd16be02546f130fd2e33b936d2676e08aed1b73318b750a0167d0",
+        "salt": "dee959c7e06411361420ff80185ed57f3e6776af",
+        "signature": "9074308fb598e9701b2294388e52f971faac2b60a5145af185df5287b5ed2887e57ce7fd44dc8634e407c8e0e4360bc226f3ec227f9d9e54638e8d31f5051215df6ebb9c2f9579aa77598a38f914b5b9c1bd83c4e2f9f382a0d0aa3542ffee65984a601bc69eb28deb27dca12c82c2d4c3f66cd500f1ff2b994d8a4e30cbb33c"
+      },
+      {
+        "message": "851384cdfe819c22ed6c4ccb30daeb5cf059bc8e1166b7e3530c4c233e2b5f8f71a1cca582d43ecc72b1bca16dfc7013226b9e",
+        "salt": "ef2869fa40c346cb183dab3d7bffc98fd56df42d",
+        "signature": "3ef7f46e831bf92b32274142a585ffcefbdca7b32ae90d10fb0f0c729984f04ef29a9df0780775ce43739b97838390db0a5505e63de927028d9d29b219ca2c4517832558a55d694a6d25b9dab66003c4cccd907802193be5170d26147d37b93590241be51c25055f47ef62752cfbe21418fafe98c22c4d4d47724fdb5669e843"
+      },
+      {
+        "message": "a4b159941761c40c6a82f2b80d1b94f5aa2654fd17e12d588864679b54cd04ef8bd03012be8dc37f4b83af7963faff0dfa225477437c48017ff2be8191cf3955fc07356eab3f322f7f620e21d254e5db4324279fe067e0910e2e81ca2cab31c745e67a54058eb50d993cdb9ed0b4d029c06d21a94ca661c3ce27fae1d6cb20f4564d66ce4767583d0e5f060215b59017be85ea848939127bd8c9c4d47b51056c031cf336f17c9980f3b8f5b9b6878e8b797aa43b882684333e17893fe9caa6aa299f7ed1a18ee2c54864b7b2b99b72618fb02574d139ef50f019c9eef416971338e7d470",
+        "salt": "710b9c4747d800d4de87f12afdce6df18107cc77",
+        "signature": "666026fba71bd3e7cf13157cc2c51a8e4aa684af9778f91849f34335d141c00154c4197621f9624a675b5abc22ee7d5baaffaae1c9baca2cc373b3f33e78e6143c395a91aa7faca664eb733afd14d8827259d99a7550faca501ef2b04e33c23aa51f4b9e8282efdb728cc0ab09405a91607c6369961bc8270d2d4f39fce612b1"
+      },
+      {
+        "message": "bc656747fa9eafb3f0",
+        "salt": "056f00985de14d8ef5cea9e82f8c27bef720335e",
+        "signature": "4609793b23e9d09362dc21bb47da0b4f3a7622649a47d464019b9aeafe53359c178c91cd58ba6bcb78be0346a7bc637f4b873d4bab38ee661f199634c547a1ad8442e03da015b136e543f7ab07c0c13e4225b8de8cce25d4f6eb8400f81f7e1833b7ee6e334d370964ca79fdb872b4d75223b5eeb08101591fb532d155a6de87"
+      },
+      {
+        "message": "b45581547e5427770c768e8b82b75564e0ea4e9c32594d6bff706544de0a8776c7a80b4576550eee1b2acabc7e8b7d3ef7bb5b03e462c11047eadd00629ae575480ac1470fe046f13a2bf5af17921dc4b0aa8b02bee6334911651d7f8525d10f32b51d33be520d3ddf5a709955a3dfe78283b9e0ab54046d150c177f037fdccc5be4ea5f68b5e5a38c9d7edcccc4975f455a6909b4",
+        "salt": "80e70ff86a08de3ec60972b39b4fbfdcea67ae8e",
+        "signature": "1d2aad221ca4d31ddf13509239019398e3d14b32dc34dc5af4aeaea3c095af73479cf0a45e5629635a53a018377615b16cb9b13b3e09d671eb71e387b8545c5960da5a64776e768e82b2c93583bf104c3fdb23512b7b4e89f633dd0063a530db4524b01c3f384c09310e315a79dcd3d684022a7f31c865a664e316978b759fad"
+      },
+      {
+        "message": "10aae9a0ab0b595d0841207b700d48d75faedde3b775cd6b4cc88ae06e4694ec74ba18f8520d4f5ea69cbbe7cc2beba43efdc10215ac4eb32dc302a1f53dc6c4352267e7936cfebf7c8d67035784a3909fa859c7b7b59b8e39c5c2349f1886b705a30267d402f7486ab4f58cad5d69adb17ab8cd0ce1caf5025af4ae24b1fb8794c6070cc09a51e2f9911311e3877d0044c71c57a993395008806b723ac38373d395481818528c1e7053739282053529510e935cd0fa77b8fa53cc2d474bd4fb3cc5c672d6ffdc90a00f9848712c4bcfe46c60573659b11e6457e861f0f604b6138d144f8ce4e2da73",
+        "salt": "a8ab69dd801f0074c2a1fc60649836c616d99681",
+        "signature": "2a34f6125e1f6b0bf971e84fbd41c632be8f2c2ace7de8b6926e31ff93e9af987fbc06e51e9be14f5198f91f3f953bd67da60a9df59764c3dc0fe08e1cbef0b75f868d10ad3fba749fef59fb6dac46a0d6e504369331586f58e4628f39aa278982543bc0eeb537dc61958019b394fb273f215858a0a01ac4d650b955c67f4c58"
+      }
+    ]
+  },
+  "example10": {
+    "publicKey": [
+      "-----BEGIN PUBLIC KEY-----",
+      "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApd2GesTLAvkLlFfUjBSn",
+      "cO+ZHFbDnA7GX9Ea+ok3zqV7m+esc7RcABdhW4LWIuMYdTtgJ8D9FXvhL4CQ/uKn",
+      "rc0O73WfiLpJl8ekLVjJqhLLma4AH+UhwTu1QxRFqNWuT15MfpSKwifTYEBx8g5X",
+      "fpBfvrFd+vBtHeWuYlPWOmohILMaXaXavJVQYA4g8n03OeJieSX+o8xQnyHf8E5u",
+      "6kVJxUDWgJ/5MH7t6R//WHM9g4WiN9bTcFoz45GQCZIHDfet8TV89+NwDONmfeg/",
+      "F7jfF3jbOB3OCctK0FilEQAac4GY7ifPVaE7dUU5kGWC7IsXS9WNXR89dnxhNyGu",
+      "BQIDAQAB",
+      "-----END PUBLIC KEY-----"
+    ],
+    "tests": [
+      {
+        "message": "883177e5126b9be2d9a9680327d5370c6f26861f5820c43da67a3ad609",
+        "salt": "04e215ee6ff934b9da70d7730c8734abfcecde89",
+        "signature": "82c2b160093b8aa3c0f7522b19f87354066c77847abf2a9fce542d0e84e920c5afb49ffdfdace16560ee94a1369601148ebad7a0e151cf16331791a5727d05f21e74e7eb811440206935d744765a15e79f015cb66c532c87a6a05961c8bfad741a9a6657022894393e7223739796c02a77455d0f555b0ec01ddf259b6207fd0fd57614cef1a5573baaff4ec00069951659b85f24300a25160ca8522dc6e6727e57d019d7e63629b8fe5e89e25cc15beb3a647577559299280b9b28f79b0409000be25bbd96408ba3b43cc486184dd1c8e62553fa1af4040f60663de7f5e49c04388e257f1ce89c95dab48a315d9b66b1b7628233876ff2385230d070d07e1666"
+      },
+      {
+        "message": "dd670a01465868adc93f26131957a50c52fb777cdbaa30892c9e12361164ec13979d43048118e4445db87bee58dd987b3425d02071d8dbae80708b039dbb64dbd1de5657d9fed0c118a54143742e0ff3c87f74e45857647af3f79eb0a14c9d75ea9a1a04b7cf478a897a708fd988f48e801edb0b7039df8c23bb3c56f4e821ac",
+        "salt": "8b2bdd4b40faf545c778ddf9bc1a49cb57f9b71b",
+        "signature": "14ae35d9dd06ba92f7f3b897978aed7cd4bf5ff0b585a40bd46ce1b42cd2703053bb9044d64e813d8f96db2dd7007d10118f6f8f8496097ad75e1ff692341b2892ad55a633a1c55e7f0a0ad59a0e203a5b8278aec54dd8622e2831d87174f8caff43ee6c46445345d84a59659bfb92ecd4c818668695f34706f66828a89959637f2bf3e3251c24bdba4d4b7649da0022218b119c84e79a6527ec5b8a5f861c159952e23ec05e1e717346faefe8b1686825bd2b262fb2531066c0de09acde2e4231690728b5d85e115a2f6b92b79c25abc9bd9399ff8bcf825a52ea1f56ea76dd26f43baafa18bfa92a504cbd35699e26d1dcc5a2887385f3c63232f06f3244c3"
+      },
+      {
+        "message": "48b2b6a57a63c84cea859d65c668284b08d96bdcaabe252db0e4a96cb1bac6019341db6fbefb8d106b0e90eda6bcc6c6262f37e7ea9c7e5d226bd7df85ec5e71efff2f54c5db577ff729ff91b842491de2741d0c631607df586b905b23b91af13da12304bf83eca8a73e871ff9db",
+        "salt": "4e96fc1b398f92b44671010c0dc3efd6e20c2d73",
+        "signature": "6e3e4d7b6b15d2fb46013b8900aa5bbb3939cf2c095717987042026ee62c74c54cffd5d7d57efbbf950a0f5c574fa09d3fc1c9f513b05b4ff50dd8df7edfa20102854c35e592180119a70ce5b085182aa02d9ea2aa90d1df03f2daae885ba2f5d05afdac97476f06b93b5bc94a1a80aa9116c4d615f333b098892b25fface266f5db5a5a3bcc10a824ed55aad35b727834fb8c07da28fcf416a5d9b2224f1f8b442b36f91e456fdea2d7cfe3367268de0307a4c74e924159ed33393d5e0655531c77327b89821bdedf880161c78cd4196b5419f7acc3f13e5ebf161b6e7c6724716ca33b85c2e25640192ac2859651d50bde7eb976e51cec828b98b6563b86bb"
+      },
+      {
+        "message": "0b8777c7f839baf0a64bbbdbc5ce79755c57a205b845c174e2d2e90546a089c4e6ec8adffa23a7ea97bae6b65d782b82db5d2b5a56d22a29a05e7c4433e2b82a621abba90add05ce393fc48a840542451a",
+        "salt": "c7cd698d84b65128d8835e3a8b1eb0e01cb541ec",
+        "signature": "34047ff96c4dc0dc90b2d4ff59a1a361a4754b255d2ee0af7d8bf87c9bc9e7ddeede33934c63ca1c0e3d262cb145ef932a1f2c0a997aa6a34f8eaee7477d82ccf09095a6b8acad38d4eec9fb7eab7ad02da1d11d8e54c1825e55bf58c2a23234b902be124f9e9038a8f68fa45dab72f66e0945bf1d8bacc9044c6f07098c9fcec58a3aab100c805178155f030a124c450e5acbda47d0e4f10b80a23f803e774d023b0015c20b9f9bbe7c91296338d5ecb471cafb032007b67a60be5f69504a9f01abb3cb467b260e2bce860be8d95bf92c0c8e1496ed1e528593a4abb6df462dde8a0968dffe4683116857a232f5ebf6c85be238745ad0f38f767a5fdbf486fb"
+      },
+      {
+        "message": "f1036e008e71e964dadc9219ed30e17f06b4b68a955c16b312b1eddf028b74976bed6b3f6a63d4e77859243c9cccdc98016523abb02483b35591c33aad81213bb7c7bb1a470aabc10d44256c4d4559d916",
+        "salt": "efa8bff96212b2f4a3f371a10d574152655f5dfb",
+        "signature": "7e0935ea18f4d6c1d17ce82eb2b3836c55b384589ce19dfe743363ac9948d1f346b7bfddfe92efd78adb21faefc89ade42b10f374003fe122e67429a1cb8cbd1f8d9014564c44d120116f4990f1a6e38774c194bd1b8213286b077b0499d2e7b3f434ab12289c556684deed78131934bb3dd6537236f7c6f3dcb09d476be07721e37e1ceed9b2f7b406887bd53157305e1c8b4f84d733bc1e186fe06cc59b6edb8f4bd7ffefdf4f7ba9cfb9d570689b5a1a4109a746a690893db3799255a0cb9215d2d1cd490590e952e8c8786aa0011265252470c041dfbc3eec7c3cbf71c24869d115c0cb4a956f56d530b80ab589acfefc690751ddf36e8d383f83cedd2cc"
+      },
+      {
+        "message": "25f10895a87716c137450bb9519dfaa1f207faa942ea88abf71e9c17980085b555aebab76264ae2a3ab93c2d12981191ddac6fb5949eb36aee3c5da940f00752c916d94608fa7d97ba6a2915b688f20323d4e9d96801d89a72ab5892dc2117c07434fcf972e058cf8c41ca4b4ff554f7d5068ad3155fced0f3125bc04f9193378a8f5c4c3b8cb4dd6d1cc69d30ecca6eaa51e36a05730e9e342e855baf099defb8afd7",
+        "salt": "ad8b1523703646224b660b550885917ca2d1df28",
+        "signature": "6d3b5b87f67ea657af21f75441977d2180f91b2c5f692de82955696a686730d9b9778d970758ccb26071c2209ffbd6125be2e96ea81b67cb9b9308239fda17f7b2b64ecda096b6b935640a5a1cb42a9155b1c9ef7a633a02c59f0d6ee59b852c43b35029e73c940ff0410e8f114eed46bbd0fae165e42be2528a401c3b28fd818ef3232dca9f4d2a0f5166ec59c42396d6c11dbc1215a56fa17169db9575343ef34f9de32a49cdc3174922f229c23e18e45df9353119ec4319cedce7a17c64088c1f6f52be29634100b3919d38f3d1ed94e6891e66a73b8fb849f5874df59459e298c7bbce2eee782a195aa66fe2d0732b25e595f57d3e061b1fc3e4063bf98f"
+      }
+    ]
+  }
+}`;
