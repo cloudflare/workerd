@@ -392,6 +392,9 @@ export const testZeroWindowBits = {
     assert.throws(() => zlib.createGzip({ windowBits: 0 }), {
       code: 'ERR_OUT_OF_RANGE',
       name: 'RangeError',
+      message:
+        'The value of "options.windowBits" is out of range. ' +
+        'It must be >= 9 and <= 15. Received 0',
     });
   },
 };
@@ -2301,8 +2304,9 @@ export const brotli = {
           {
             //code: 'ERR_OUT_OF_RANGE',
             name: 'RangeError',
-            //message: 'The value of "options.flush" is out of range. It must be >= 0 ' +
-            //  'and <= 3. Received 4',
+            message:
+              'The value of "options.flush" is out of range. It must be >= 0 ' +
+              'and <= 3. Received 4',
           }
         );
 
@@ -2315,8 +2319,9 @@ export const brotli = {
           {
             //code: 'ERR_OUT_OF_RANGE',
             name: 'RangeError',
-            //message: 'The value of "options.finishFlush" is out of range. It must be ' +
-            //  '>= 0 and <= 3. Received 4',
+            message:
+              'The value of "options.finishFlush" is out of range. It must be ' +
+              '>= 0 and <= 3. Received 4',
           }
         );
       }
