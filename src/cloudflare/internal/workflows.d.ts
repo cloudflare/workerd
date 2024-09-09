@@ -1,3 +1,15 @@
+// Copyright (c) 2022-2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+/*****************************
+ *
+ * NOTE: this is copy & pasted from the types/ folder, as when bazel
+ * runs it doesn't have access to that directly and thusly is sad.
+ * TODO: come up with a better system for this.
+ *
+ ****************************** /
+
 /**
  * NonRetryableError allows for a user to throw a fatal error
  * that makes a Workflow instance fail immediately without triggering a retry
@@ -29,13 +41,13 @@ declare abstract class Workflow {
 
 type InstanceStatus = {
   status:
-    | "queued"
-    | "running"
-    | "paused"
-    | "errored"
-    | "terminated"
-    | "complete"
-    | "unknown";
+    | 'queued'
+    | 'running'
+    | 'paused'
+    | 'errored'
+    | 'terminated'
+    | 'complete'
+    | 'unknown';
   error?: string;
   output?: object;
 };
