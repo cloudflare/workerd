@@ -341,7 +341,7 @@ public:
     CompressionContext context;
 
     CompressionContext& getContext() {
-      return *&context;
+      return context;
     }
 
     void initializeStream(jsg::BufferSource _write_result, jsg::Function<void()> writeCallback);
