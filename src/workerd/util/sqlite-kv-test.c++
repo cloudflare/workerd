@@ -91,5 +91,38 @@ KJ_TEST("SQLite-KV") {
   KJ_EXPECT(list(nullptr, kj::none, kj::none, F) == "");
 }
 
+KJ_TEST("SQLite-KV getDatabaseSize") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteKv kv(db);
+
+  // Get initial database size
+  double initialSize = kv.getDatabaseSize();
+  KJ_EXPECT(initialSize > 0, "Initial database size should be greater than 0");
+
+  // Add first large data item
+  const int largeDataSize = 100 * 1024;  // 100 KB
+  auto largeData = kj::heapArray<kj::byte>(largeDataSize);
+  for (int i = 0; i < largeDataSize; ++i) {
+    largeData[i] = static_cast<kj::byte>(i % 256);
+  }
+  kv.put("large_data_1", largeData.asPtr());
+  double sizeAfterFirstAdd = kv.getDatabaseSize();
+  KJ_EXPECT(sizeAfterFirstAdd > initialSize, "Database size should increase after adding data");
+
+  // Add second large data item
+  kv.put("large_data_2", largeData.asPtr());
+  double sizeAfterSecondAdd = kv.getDatabaseSize();
+  KJ_EXPECT(
+      sizeAfterSecondAdd > sizeAfterFirstAdd, "Database size should increase after adding data");
+
+  // Delete first large data item
+  kv.delete_("large_data_1");
+  double sizeAfterDelete = kv.getDatabaseSize();
+  KJ_EXPECT(sizeAfterDelete < sizeAfterSecondAdd,
+      "Database size should not increase after deleting data");
+}
+
 }  // namespace
 }  // namespace workerd

@@ -45,6 +45,8 @@ public:
 
   uint deleteAll();
 
+  uint64_t getDatabaseSize();
+
   // TODO(perf): Should we provide multi-get, multi-put, and multi-delete? It's a bit tricky to
   //   implement them as single SQL queries, while still using prepared statements. The c-array
   //   extension might help here, though it can only support arrays of NUL-terminated strings, not
@@ -57,6 +59,7 @@ private:
 
   struct Initialized {
     SqliteDatabase& db;
+    const uint pageSize;
 
     SqliteDatabase::Statement stmtGet = db.prepare(R"(
       SELECT value FROM _cf_KV WHERE key = ?
@@ -116,7 +119,17 @@ private:
       DELETE FROM _cf_KV
     )");
 
-    Initialized(SqliteDatabase& db): db(db) {}
+    uint64_t getDatabaseSize() {
+      uint64_t pages = stmtGetDatabaseSize.run().getInt64(0);
+      return pages * pageSize;
+    }
+
+    Initialized(SqliteDatabase& db): db(db), pageSize(db.run("PRAGMA page_size;").getInt64(0)) {}
+
+  private:
+    SqliteDatabase::Statement stmtGetDatabaseSize = db.prepare(R"(
+        SELECT (SELECT * FROM pragma_page_count) - (SELECT * FROM pragma_freelist_count)
+    )");
   };
 
   kj::OneOf<Uninitialized, Initialized> state;

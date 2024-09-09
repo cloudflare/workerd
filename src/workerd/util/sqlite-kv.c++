@@ -53,4 +53,8 @@ uint SqliteKv::deleteAll() {
   return query.changeCount();
 }
 
+uint64_t SqliteKv::getDatabaseSize() {
+  return ensureInitialized().getDatabaseSize();
+}
+
 }  // namespace workerd
