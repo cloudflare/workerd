@@ -995,7 +995,8 @@ public:
     kj::Path path = fs->getCurrentPath().eval(pathStr);
     kj::Maybe<kj::Own<const kj::Directory>> dir =
         fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
-    server->setPackageDiskCacheRoot(kj::mv(dir));
+    server->setPackageDiskCacheRoot(
+        kj::mv(KJ_UNWRAP_OR(dir, CLI_ERROR("package disk cache dir must exist"))));
   }
 
   void setPyodideDiskCacheDir(kj::StringPtr pathStr) {
