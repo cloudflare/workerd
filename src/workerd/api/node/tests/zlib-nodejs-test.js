@@ -1,9 +1,10 @@
 import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
-import { Readable, Writable } from 'node:stream';
+import { Readable, Writable, Stream } from 'node:stream';
 import { inspect, promisify } from 'node:util';
 import { mock } from 'node:test';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 
 // The following test data comes from
 // https://github.com/zlib-ng/zlib-ng/blob/5401b24/test/test_crc32.cc
@@ -2329,6 +2330,135 @@ export const brotli = {
   },
 };
 
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/2ef4b15604082abfd7aa26a4619a46802258ff3c/test/parallel/test-zlib-random-byte-pipes.js
+export const zlibRandomBytePipes = {
+  async test() {
+    // Emit random bytes, and keep a shasum
+    class RandomReadStream extends Stream {
+      constructor(opt) {
+        super();
+
+        this.readable = true;
+        this._paused = false;
+        this._processing = false;
+        this._hasher = crypto.createHash('sha1');
+        opt ??= {};
+
+        // base block size.
+        opt.block ??= 256 * 1024;
+        // Total number of bytes to emit
+        opt.total ??= 256 * 1024 * 1024;
+        this._remaining = opt.total;
+        // How variable to make the block sizes
+        opt.jitter ??= 1024;
+        this._opt = opt;
+        this._process = this._process.bind(this);
+        queueMicrotask(this._process);
+      }
+
+      pause() {
+        this._paused = true;
+        this.emit('pause');
+      }
+
+      resume() {
+        this._paused = false;
+        this.emit('resume');
+        this._process();
+      }
+
+      _process() {
+        if (this._processing) return;
+        if (this._paused) return;
+        this._processing = true;
+
+        if (!this._remaining) {
+          this._hash = this._hasher.digest('hex').toLowerCase().trim();
+          this._processing = false;
+
+          this.emit('end');
+          return;
+        }
+
+        // Figure out how many bytes to output
+        // if finished, then just emit end.
+        let block = this._opt.block;
+        const jitter = this._opt.jitter;
+        if (jitter) {
+          block += Math.ceil(Math.random() * jitter - jitter / 2);
+        }
+        block = Math.min(block, this._remaining);
+        const buf = Buffer.allocUnsafe(block);
+        for (let i = 0; i < block; i++) {
+          buf[i] = Math.random() * 256;
+        }
+
+        this._hasher.update(buf);
+        this._remaining -= block;
+        this._processing = false;
+        this.emit('data', buf);
+        queueMicrotask(this._process);
+      }
+    }
+
+    // A filter that just verifies a shasum
+    class HashStream extends Stream {
+      constructor() {
+        super();
+        this.readable = this.writable = true;
+        this._hasher = crypto.createHash('sha1');
+      }
+
+      write(c) {
+        // Simulate the way that an fs.ReadStream returns false
+        // on *every* write, only to resume a moment later.
+        this._hasher.update(c);
+        queueMicrotask(() => this.resume());
+        return false;
+      }
+
+      resume() {
+        this.emit('resume');
+        queueMicrotask(() => this.emit('drain'));
+      }
+
+      end(c) {
+        if (c) {
+          this.write(c);
+        }
+        this._hash = this._hasher.digest('hex').toLowerCase().trim();
+        this.emit('data', this._hash);
+        this.emit('end');
+      }
+    }
+
+    for (const [createCompress, createDecompress] of [
+      [zlib.createGzip, zlib.createGunzip],
+      [zlib.createBrotliCompress, zlib.createBrotliDecompress],
+    ]) {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const inp = new RandomReadStream({ total: 1024, block: 256, jitter: 16 });
+      const out = new HashStream();
+      const gzip = createCompress();
+      const gunz = createDecompress();
+
+      inp.pipe(gzip).pipe(gunz).pipe(out);
+
+      const onDataFn = mock.fn();
+      onDataFn.mock.mockImplementation((c) => {
+        assert.strictEqual(c, inp._hash, `Hash '${c}' equals '${inp._hash}'.`);
+      });
+
+      out.on('data', onDataFn).on('end', resolve).on('error', reject);
+
+      await promise;
+
+      assert.ok(onDataFn.mock.callCount() > 0, 'Should have called onData');
+    }
+  },
+};
+
 // Node.js tests relevant to zlib
 //
 // - [ ] test-zlib-brotli-16GB.js
@@ -2379,7 +2509,7 @@ export const brotli = {
 // - [x] test-zlib-close-in-ondata.js
 // - [x] test-zlib-empty-buffer.js
 // - [x] test-zlib-invalid-arg-value-brotli-compress.js
-// - [ ] test-zlib-random-byte-pipes.js
+// - [x] test-zlib-random-byte-pipes.js
 // - [x] test-zlib-const.js
 // - [x] test-zlib-failed-init.js
 // - [x] test-zlib-invalid-input.js
