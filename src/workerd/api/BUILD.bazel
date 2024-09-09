@@ -378,6 +378,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "tests/global-scope-test.wd-test",
     args = ["--experimental"],
     data = ["tests/global-scope-test.js"],
