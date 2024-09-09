@@ -2272,25 +2272,24 @@ export const brotli = {
         }
       );
 
-      //TODO(soon): enable this test. We don't throw anything in this situation unfortunately
-      // {
-      //   assert.throws(
-      //     () => {
-      //       zlib.createBrotliCompress({
-      //         params: {
-      //           // This is a boolean flag
-      //           [zlib.constants.BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING]:
-      //             42,
-      //         },
-      //       });
-      //     },
-      //     {
-      //       code: 'ERR_ZLIB_INITIALIZATION_FAILED',
-      //       name: 'Error',
-      //       message: 'Initialization failed',
-      //     }
-      //   );
-      // }
+      {
+        assert.throws(
+          () => {
+            zlib.createBrotliCompress({
+              params: {
+                // This is a boolean flag
+                [zlib.constants.BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING]:
+                  42,
+              },
+            });
+          },
+          {
+            code: 'ERR_ZLIB_INITIALIZATION_FAILED',
+            name: 'Error',
+            message: 'Initialization failed',
+          }
+        );
+      }
 
       {
         // Test options.flush range
