@@ -109,6 +109,24 @@ private:
     builder = kj::mv(newBuilder);
   }
 };
+
+template <typename Context>
+kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& result) {
+  do {
+    result.addChunk();
+    ctx.setOutputBuffer(kj::ArrayPtr(result.end(), result.available()));
+
+    ctx.work();
+
+    KJ_IF_SOME(error, ctx.getError()) {
+      JSG_FAIL_REQUIRE(Error, error.message);
+    }
+
+    result.adjustUnused(ctx.getAvailOut());
+  } while (ctx.getAvailOut() == 0);
+
+  return result.releaseAsArray();
+}
 }  // namespace
 
 void ZlibContext::initialize(int _level,
@@ -817,25 +835,6 @@ void ZlibUtil::CompressionStream<CompressionContext>::FreeForZlib(void* data, vo
   auto real_pointer = static_cast<uint8_t*>(pointer) - sizeof(size_t);
   JSG_REQUIRE(ctx->allocations.erase(real_pointer), Error, "Zlib allocation should exist"_kj);
 }
-namespace {
-template <typename Context>
-kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& result) {
-  do {
-    result.addChunk();
-    ctx.setOutputBuffer(kj::ArrayPtr(result.end(), result.available()));
-
-    ctx.work();
-
-    KJ_IF_SOME(error, ctx.getError()) {
-      JSG_FAIL_REQUIRE(Error, error.message);
-    }
-
-    result.adjustUnused(ctx.getAvailOut());
-  } while (ctx.getAvailOut() == 0);
-
-  return result.releaseAsArray();
-}
-}  // namespace
 
 kj::Array<kj::byte> ZlibUtil::zlibSync(
     ZlibUtil::InputSource data, ZlibContext::Options opts, ZlibModeValue mode) {
