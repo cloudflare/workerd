@@ -510,24 +510,9 @@ jsg::Promise<void> DurableObjectStorage::deleteAll(
     jsg::Lock& js, jsg::Optional<PutOptions> maybeOptions) {
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
 
-  auto& context = IoContext::current();
-  {
-    // Log to get a sense of whether users are potentially depending on alarms being kept around
-    // after deleteAll is called.
-    auto getOptions = configureOptions(GetOptions{});
-    context.addTask(context
-                        .awaitJs(js,
-                            transformCacheResult(js, cache->getAlarm(getOptions), getOptions,
-                                [](jsg::Lock&, kj::Maybe<kj::Date> alarmValue) {
-      if (alarmValue != kj::none) {
-        LOG_WARNING_PERIODICALLY("NOSENTRY deleteAll called with an alarm still set");
-      }
-      return alarmValue;
-    })).ignoreResult());
-  }
-
   auto deleteAll = cache->deleteAll(options);
 
+  auto& context = IoContext::current();
   context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 
   return transformMaybeBackpressure(js, options, kj::mv(deleteAll.backpressure));
