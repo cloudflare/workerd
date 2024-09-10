@@ -130,6 +130,13 @@ export function buildSitePackages(requirements: Set<string>): SitePackagesDir {
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo();
 
   let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
+
+  // Currently, we include all packages within the big bundle in Edgeworker.
+  // During this transitionary period, we add the option (via autogate)
+  // to load packages from GCS (in which case they are accessible through the ArtifactBundler)
+  // or to simply use the packages within the big bundle. The latter is not ideal
+  // since we're locked to a specific packages version, so we will want to move away
+  // from it eventually.
   if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
     requirements.forEach((r) => requirementsInBigBundle.add(r));
   }

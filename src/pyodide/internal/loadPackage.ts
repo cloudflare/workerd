@@ -40,16 +40,14 @@ async function decompressArrayBuffer(
 
 // loadBundleFromR2 loads the package from the internet (through fetch) and uses the DiskCache as
 // a backing store. This is only used in local dev.
-async function loadBundleFromR2(
-  requirement: string
-): Promise<[string, Reader]> {
+async function loadBundleFromR2(requirement: string): Promise<Reader> {
   // first check if the disk cache has what we want
   const filename = LOCKFILE['packages'][requirement]['file_name'];
   const cached = DiskCache.get(filename);
   if (cached) {
     const decompressed = await decompressArrayBuffer(cached);
     const reader = new ArrayBufferReader(decompressed);
-    return [requirement, reader];
+    return reader;
   }
 
   // we didn't find it in the disk cache, continue with original fetch
@@ -61,22 +59,22 @@ async function loadBundleFromR2(
 
   DiskCache.put(filename, compressed);
   const reader = new ArrayBufferReader(decompressed);
-  return [requirement, reader];
+  return reader;
 }
 
 async function loadBundleFromArtifactBundler(
   requirement: string
-): Promise<[string, Reader]> {
+): Promise<Reader> {
   const packagesVersion = PACKAGES_VERSION;
   const filename = LOCKFILE['packages'][requirement]['file_name'];
   const fullPath = 'python-package-bucket/' + packagesVersion + '/' + filename;
   const reader = ArtifactBundler.getPackage(fullPath);
-  if (!reader)
+  if (!reader) {
     throw new Error(
       'Failed to get package ' + fullPath + ' from ArtifactBundler'
     );
-  return Promise.resolve([requirement, reader]);
-  // ^ this is okay to do during startup since it resolves immediately
+  }
+  return reader;
 }
 
 /**
@@ -102,13 +100,13 @@ class ArrayBufferReader {
 async function loadPackagesImpl(
   Module: Module,
   requirements: Set<string>,
-  loadBundle: (req: string) => Promise<[string, Reader]>
+  loadBundle: (req: string) => Promise<Reader>
 ) {
-  let loadPromises = [];
+  let loadPromises: Promise<[string, Reader]>[] = [];
   let loading = [];
   for (const req of requirements) {
     if (SITE_PACKAGES.loadedRequirements.has(req)) continue;
-    loadPromises.push(loadBundle(req));
+    loadPromises.push(loadBundle(req).then((r) => [req, r]));
     loading.push(req);
   }
 

@@ -188,7 +188,6 @@ try {
       if (typeof mainModule[pyHandlerName] === 'function') {
         handlers[handlerName] = makeHandler(pyHandlerName);
       }
-      handlers[handlerName] = makeHandler(pyHandlerName);
     }
   }
   /**

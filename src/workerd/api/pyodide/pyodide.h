@@ -204,7 +204,9 @@ struct MemorySnapshotResult {
 class ArtifactBundler: public jsg::Object {
 public:
   kj::Maybe<const PyodidePackageManager&> packageManager;
-  // ^ lifetime should be static since there is normally one worker set for the whole process. see worker-set.h
+  // ^ lifetime should be contained by lifetime of ArtifactBundler since there is normally one worker set for the whole process. see worker-set.h
+  // In other words:
+  // WorkerSet lifetime = PackageManager lifetime and Worker lifetime = ArtifactBundler lifetime and WorkerSet owns and will outlive Worker, so PackageManager outlives ArtifactBundler
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
   ArtifactBundler(kj::Maybe<const PyodidePackageManager&> packageManager,
