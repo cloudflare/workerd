@@ -1,4 +1,4 @@
-From 541e832ea27e547eb7a648f07153dcd9a9e92357 Mon Sep 17 00:00:00 2001
+From c29d6c7d0b23dd9cbdea7c8b2d8269a9bf5fd409 Mon Sep 17 00:00:00 2001
 From: Garrett Gu <garrett@cloudflare.com>
 Date: Wed, 10 Apr 2024 14:31:33 -0500
 Subject: Set torque generator path to external/v8. This allows bazel to find
@@ -8,7 +8,7 @@ Subject: Set torque generator path to external/v8. This allows bazel to find
 See https://chromium-review.googlesource.com/c/v8/v8/+/5339896
 
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index ad8bd53dcc19c50144a6e94ed899983e014e0033..ff95ab431effc3ed5ebfe0985aff3341997204bb 100644
+index 78079ecf921f9eb22dda8ce6c208e9a510e8a224..5da50d5b863f96b77add82b3e50a1492f0516a66 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -350,7 +350,7 @@ def get_cfg():

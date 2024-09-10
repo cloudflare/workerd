@@ -1,4 +1,4 @@
-From 06de20cf51080e17afe7984ca98458a3653e18c9 Mon Sep 17 00:00:00 2001
+From 4e6144fe190189f10ac3eee21d5d0bb437ba3afb Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 2 Mar 2024 09:00:18 -0600
 Subject: Add ValueSerializer::SetTreatFunctionsAsHostObjects().
@@ -28,10 +28,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 8b8633b5e35ddc1a3c6eab202116c68bdf4cb56b..dc1044ba427c5bd2bd7ac995adccd2472afbcfe2 100644
+index 8d4e6dee69b355baaadd3e144c7514e55dd88907..8db94796eb44db416f38fb5488ea4c83eeec1bf0 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3477,6 +3477,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3481,6 +3481,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  
@@ -43,7 +43,7 @@ index 8b8633b5e35ddc1a3c6eab202116c68bdf4cb56b..dc1044ba427c5bd2bd7ac995adccd247
                                          Local<Value> value) {
    auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 96ad656a42173b66974539472467c497b89dc587..95ba1aa83f71dd34c63230899840081cf555042d 100644
+index f7da4eefa361807dec4a76bfaf0025299cfb6b86..32441451d4d5c05484dd0a68ff8baea2a9283140 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -328,6 +328,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
@@ -74,7 +74,7 @@ index 96ad656a42173b66974539472467c497b89dc587..95ba1aa83f71dd34c63230899840081c
    }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 27d5d03518e7bfecde240b658f63456c899f378c..faeb7879130b3d32feeb3a0435b3c21e9be44a14 100644
+index cb9f1f3d9750da8914d5bd73c6742d6459c48e06..a657bb7f6def9d795d6504eb62f49b5b34c46406 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -102,6 +102,15 @@ class ValueSerializer {

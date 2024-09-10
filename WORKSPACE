@@ -216,7 +216,7 @@ http_archive(
 #   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
-    commit = "9d1552f25c3d9e9114b7d7aed55790570a99bc4d",
+    commit = "ed3733b91e472a1e7a641c1f0c1e6c0ea698e958",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
@@ -286,7 +286,7 @@ git_repository(
     name = "zlib",
     build_file = "//:build/BUILD.zlib",
     # Must match the version used by v8
-    commit = "c2469fdd73f192383d2d94288da0ff5b9a3869f5",
+    commit = "d3aea2341cdeaf7e717bc257a59aa7a9407d318a",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
@@ -444,7 +444,7 @@ npm_repositories()
 
 http_archive(
     name = "v8",
-    integrity = "sha256-yoLczQj1XEZL4EHVRjAwpVjgr9/q0YlRGnNX47Ke2ws=",
+    integrity = "sha256-oOgRa4akl02v8tcMbpmbHu21VL1qOYBjerq1CzekLxc=",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -465,14 +465,9 @@ http_archive(
         "//:patches/v8/0016-Revert-TracedReference-deref-API-removal.patch",
         "//:patches/v8/0017-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
         "//:patches/v8/0018-Update-illegal-invocation-error-message-in-v8.patch",
-        # TODO(cleanup): Patches backported from V8 12.9 – adding these fixes a race condition
-        # leading to a segfault in several wasm-related tests under ASan. These are already included
-        # in 12.9 so remove the patches when updating to that version.
-        "//:patches/v8/0019-wasm-Fix-more-code-logging-races.patch",
-        "//:patches/v8/0020-wasm-Remove-destructor-of-LogCodesTask.patch",
     ],
-    strip_prefix = "v8-12.8.374.10",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.8.374.10.tar.gz",
+    strip_prefix = "v8-12.9.202.13",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.9.202.13.tar.gz",
 )
 
 git_repository(
