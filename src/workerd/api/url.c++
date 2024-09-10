@@ -31,7 +31,7 @@ bool isSpecialScheme(kj::StringPtr scheme) noexcept {
   if (scheme.size() == 0) {
     return false;
   }
-  int hash_value = (2 * scheme.size() + (unsigned)(scheme[0])) & 7;
+  int hash_value = (2 * scheme.size() + static_cast<unsigned>(scheme[0])) & 7;
   const auto target = is_special_list[hash_value];
   return (target[0] == scheme[0]) && (target.slice(1) == scheme.slice(1));
 }
