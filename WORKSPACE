@@ -444,7 +444,7 @@ npm_repositories()
 
 http_archive(
     name = "v8",
-    integrity = "sha256-6SCOvnA6lG231FXKcBHt9ghwqDhVuEUYwIqxlFOQu3Y=",
+    integrity = "sha256-oOgRa4akl02v8tcMbpmbHu21VL1qOYBjerq1CzekLxc=",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
