@@ -6,14 +6,15 @@
 import {
   default as zlibUtil,
   type ZlibOptions,
-  type CompressCallback,
-  type InternalCompressCallback,
   type BrotliOptions,
 } from 'node-internal:zlib';
 import { Buffer } from 'node-internal:internal_buffer';
 import { validateUint32 } from 'node-internal:validators';
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
-import { Zlib, Brotli } from 'node-internal:internal_zlib_base';
+import { Zlib, Brotli, type ZlibBase } from 'node-internal:internal_zlib_base';
+
+type ZlibResult = Buffer | { buffer: Buffer; engine: ZlibBase };
+type CompressCallback = (err: Error | null, result?: ZlibResult) => void;
 
 const {
   CONST_DEFLATE,
@@ -35,190 +36,229 @@ export function crc32(
   return zlibUtil.crc32(data, value);
 }
 
+function processChunk(
+  engine: ZlibBase,
+  data: ArrayBufferView | string
+): ZlibResult {
+  return {
+    engine,
+    // TODO(soon): What is the proper way to deal with ArrayBufferView to Buffer typing issues?
+    buffer: engine._processChunk(
+      typeof data === 'string' ? Buffer.from(data) : (data as Buffer),
+      engine._finishFlushFlag
+    ),
+  };
+}
+
+function zlibSyncImpl(
+  data: ArrayBufferView | string,
+  options: ZlibOptions,
+  mode: ZlibMode
+): ZlibResult {
+  if (!options.info) {
+    // Fast path, where we send the data directly to C++
+    return Buffer.from(zlibUtil.zlibSync(data, options, mode));
+  }
+
+  // Else, use the Engine class in sync mode
+  return processChunk(new CLASS_BY_MODE[mode](options), data);
+}
+
 export function inflateSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
-): Buffer {
-  return Buffer.from(zlibUtil.zlibSync(data, options, zlibUtil.CONST_INFLATE));
+): ZlibResult {
+  return zlibSyncImpl(data, options, CONST_INFLATE);
 }
 
 export function deflateSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
-): Buffer {
-  return Buffer.from(zlibUtil.zlibSync(data, options, zlibUtil.CONST_DEFLATE));
+): ZlibResult {
+  return zlibSyncImpl(data, options, CONST_DEFLATE);
 }
 
 export function gunzipSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
-): Buffer {
-  return Buffer.from(zlibUtil.zlibSync(data, options, zlibUtil.CONST_GUNZIP));
+): ZlibResult {
+  return zlibSyncImpl(data, options, CONST_GUNZIP);
 }
 
 export function gzipSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
-): Buffer {
-  return Buffer.from(zlibUtil.zlibSync(data, options, zlibUtil.CONST_GZIP));
+): ZlibResult {
+  return zlibSyncImpl(data, options, CONST_GZIP);
 }
 
 export function inflateRawSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
-): Buffer {
-  return Buffer.from(
-    zlibUtil.zlibSync(data, options, zlibUtil.CONST_INFLATERAW)
-  );
+): ZlibResult {
+  return zlibSyncImpl(data, options, CONST_INFLATERAW);
 }
 
 export function deflateRawSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
-): Buffer {
-  return Buffer.from(
-    zlibUtil.zlibSync(data, options, zlibUtil.CONST_DEFLATERAW)
-  );
+): ZlibResult {
+  return zlibSyncImpl(data, options, CONST_DEFLATERAW);
 }
 
 export function unzipSync(
   data: ArrayBufferView | string,
   options: ZlibOptions = {}
-): Buffer {
-  return Buffer.from(zlibUtil.zlibSync(data, options, zlibUtil.CONST_UNZIP));
+): ZlibResult {
+  return zlibSyncImpl(data, options, CONST_UNZIP);
 }
 
 export function brotliDecompressSync(
   data: ArrayBufferView | string,
   options: BrotliOptions = {}
-): Buffer {
-  return Buffer.from(zlibUtil.brotliDecompressSync(data, options));
+): ZlibResult {
+  if (!options.info) {
+    // Fast path, where we send the data directly to C++
+    return Buffer.from(zlibUtil.brotliDecompressSync(data, options));
+  }
+
+  // Else, use the Engine class in sync mode
+  return processChunk(new BrotliDecompress(options), data);
 }
 
 export function brotliCompressSync(
   data: ArrayBufferView | string,
   options: BrotliOptions = {}
-): Buffer {
-  return Buffer.from(zlibUtil.brotliCompressSync(data, options));
+): ZlibResult {
+  if (!options.info) {
+    // Fast path, where we send the data directly to C++
+    return Buffer.from(zlibUtil.brotliCompressSync(data, options));
+  }
+
+  // Else, use the Engine class in sync mode
+  return processChunk(new BrotliCompress(options), data);
 }
 
 function normalizeArgs(
-  optionsOrCallback: ZlibOptions | CompressCallback,
-  callbackOrUndefined?: CompressCallback
+  options: ZlibOptions | CompressCallback,
+  callback?: CompressCallback
 ): [ZlibOptions, CompressCallback] {
-  if (typeof optionsOrCallback === 'function') {
-    return [{}, optionsOrCallback];
-  } else if (typeof callbackOrUndefined === 'function') {
-    return [optionsOrCallback, callbackOrUndefined];
+  if (typeof options === 'function') {
+    return [{}, options];
+  } else if (typeof callback === 'function') {
+    return [options, callback];
   }
 
-  throw new ERR_INVALID_ARG_TYPE('callback', 'Function', callbackOrUndefined);
+  throw new ERR_INVALID_ARG_TYPE('callback', 'Function', callback);
 }
 
-function wrapCallback(callback: CompressCallback): InternalCompressCallback {
-  return (res: Error | ArrayBuffer) => {
+function processChunkCaptureError(
+  engine: ZlibBase,
+  data: ArrayBufferView | string,
+  cb: CompressCallback
+): void {
+  try {
+    const res = processChunk(engine, data);
     queueMicrotask(() => {
-      if (res instanceof Error) {
-        callback(res);
-      } else {
-        callback(null, Buffer.from(res));
-      }
+      cb(null, res);
     });
-  };
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      queueMicrotask(() => {
+        cb(err);
+      });
+      return;
+    }
+
+    const unreachable = new Error('Unreachable');
+    unreachable.cause = err;
+    throw unreachable;
+  }
+}
+
+function zlibImpl(
+  mode: ZlibMode,
+  data: ArrayBufferView | string,
+  optionsOrCallback: ZlibOptions | CompressCallback,
+  callbackOrUndefined?: CompressCallback
+): void {
+  const [options, callback] = normalizeArgs(
+    optionsOrCallback,
+    callbackOrUndefined
+  );
+
+  if (!options.info) {
+    // Fast path
+    zlibUtil.zlib(data, options, mode, (res) => {
+      queueMicrotask(() => {
+        if (res instanceof Error) {
+          callback(res);
+        } else {
+          callback(null, Buffer.from(res));
+        }
+      });
+    });
+
+    return;
+  }
+
+  processChunkCaptureError(new CLASS_BY_MODE[mode](options), data, callback);
 }
 
 export function inflate(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback,
-  callbackOrUndefined?: CompressCallback
+  options: ZlibOptions | CompressCallback,
+  callback?: CompressCallback
 ): void {
-  const [options, callback] = normalizeArgs(
-    optionsOrCallback,
-    callbackOrUndefined
-  );
-  zlibUtil.zlib(data, options, zlibUtil.CONST_INFLATE, wrapCallback(callback));
+  zlibImpl(CONST_INFLATE, data, options, callback);
 }
 
 export function unzip(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback,
-  callbackOrUndefined?: CompressCallback
+  options: ZlibOptions | CompressCallback,
+  callback?: CompressCallback
 ): void {
-  const [options, callback] = normalizeArgs(
-    optionsOrCallback,
-    callbackOrUndefined
-  );
-  zlibUtil.zlib(data, options, zlibUtil.CONST_UNZIP, wrapCallback(callback));
+  zlibImpl(CONST_UNZIP, data, options, callback);
 }
 
 export function inflateRaw(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback,
-  callbackOrUndefined?: CompressCallback
+  options: ZlibOptions | CompressCallback,
+  callback?: CompressCallback
 ): void {
-  const [options, callback] = normalizeArgs(
-    optionsOrCallback,
-    callbackOrUndefined
-  );
-  zlibUtil.zlib(
-    data,
-    options,
-    zlibUtil.CONST_INFLATERAW,
-    wrapCallback(callback)
-  );
+  zlibImpl(CONST_INFLATERAW, data, options, callback);
 }
 
 export function gunzip(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback,
-  callbackOrUndefined?: CompressCallback
+  options: ZlibOptions | CompressCallback,
+  callback?: CompressCallback
 ): void {
-  const [options, callback] = normalizeArgs(
-    optionsOrCallback,
-    callbackOrUndefined
-  );
-  zlibUtil.zlib(data, options, zlibUtil.CONST_GUNZIP, wrapCallback(callback));
+  zlibImpl(CONST_GUNZIP, data, options, callback);
 }
 
 export function deflate(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback,
-  callbackOrUndefined?: CompressCallback
+  options: ZlibOptions | CompressCallback,
+  callback?: CompressCallback
 ): void {
-  const [options, callback] = normalizeArgs(
-    optionsOrCallback,
-    callbackOrUndefined
-  );
-  zlibUtil.zlib(data, options, zlibUtil.CONST_DEFLATE, wrapCallback(callback));
+  zlibImpl(CONST_DEFLATE, data, options, callback);
 }
 
 export function deflateRaw(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback,
-  callbackOrUndefined?: CompressCallback
+  options: ZlibOptions | CompressCallback,
+  callback?: CompressCallback
 ): void {
-  const [options, callback] = normalizeArgs(
-    optionsOrCallback,
-    callbackOrUndefined
-  );
-  zlibUtil.zlib(
-    data,
-    options,
-    zlibUtil.CONST_DEFLATERAW,
-    wrapCallback(callback)
-  );
+  zlibImpl(CONST_DEFLATERAW, data, options, callback);
 }
 
 export function gzip(
   data: ArrayBufferView | string,
-  optionsOrCallback: ZlibOptions | CompressCallback,
-  callbackOrUndefined?: CompressCallback
+  options: ZlibOptions | CompressCallback,
+  callback?: CompressCallback
 ): void {
-  const [options, callback] = normalizeArgs(
-    optionsOrCallback,
-    callbackOrUndefined
-  );
-  zlibUtil.zlib(data, options, zlibUtil.CONST_GZIP, wrapCallback(callback));
+  zlibImpl(CONST_GZIP, data, options, callback);
 }
 
 export function brotliDecompress(
@@ -230,7 +270,23 @@ export function brotliDecompress(
     optionsOrCallback,
     callbackOrUndefined
   );
-  zlibUtil.brotliDecompress(data, options, wrapCallback(callback));
+
+  if (!options.info) {
+    // Fast path
+    zlibUtil.brotliDecompress(data, options, (res) => {
+      queueMicrotask(() => {
+        if (res instanceof Error) {
+          callback(res);
+        } else {
+          callback(null, Buffer.from(res));
+        }
+      });
+    });
+
+    return;
+  }
+
+  processChunkCaptureError(new BrotliDecompress(options), data, callback);
 }
 
 export function brotliCompress(
@@ -242,9 +298,24 @@ export function brotliCompress(
     optionsOrCallback,
     callbackOrUndefined
   );
-  zlibUtil.brotliCompress(data, options, wrapCallback(callback));
-}
 
+  if (!options.info) {
+    // Fast path
+    zlibUtil.brotliCompress(data, options, (res) => {
+      queueMicrotask(() => {
+        if (res instanceof Error) {
+          callback(res);
+        } else {
+          callback(null, Buffer.from(res));
+        }
+      });
+    });
+
+    return;
+  }
+
+  processChunkCaptureError(new BrotliCompress(options), data, callback);
+}
 export class Gzip extends Zlib {
   public constructor(options: ZlibOptions) {
     super(options, CONST_GZIP);
@@ -302,6 +373,16 @@ export class BrotliDecompress extends Brotli {
   }
 }
 
+const CLASS_BY_MODE = {
+  [ZlibMode.DEFLATE]: Deflate,
+  [ZlibMode.INFLATE]: Inflate,
+  [ZlibMode.DEFLATERAW]: DeflateRaw,
+  [ZlibMode.INFLATERAW]: InflateRaw,
+  [ZlibMode.GZIP]: Gzip,
+  [ZlibMode.GUNZIP]: Gunzip,
+  [ZlibMode.UNZIP]: Unzip,
+};
+
 export function createGzip(options: ZlibOptions): Gzip {
   return new Gzip(options);
 }
@@ -338,4 +419,14 @@ export function createBrotliDecompress(
   options: BrotliOptions
 ): BrotliDecompress {
   return new BrotliDecompress(options);
+}
+
+const enum ZlibMode {
+  DEFLATE = 1,
+  INFLATE = 2,
+  GZIP = 3,
+  GUNZIP = 4,
+  DEFLATERAW = 5,
+  INFLATERAW = 6,
+  UNZIP = 7,
 }
