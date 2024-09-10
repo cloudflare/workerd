@@ -9,14 +9,15 @@
 import { default as entropyPatches } from 'pyodide-internal:topLevelEntropy/entropy_patches.py';
 import { default as entropyImportContext } from 'pyodide-internal:topLevelEntropy/entropy_import_context.py';
 import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
-import { IS_TRACING } from 'pyodide-internal:metadata';
 import { LOADED_SNAPSHOT_VERSION } from 'pyodide-internal:snapshot';
 import { simpleRunPython } from 'pyodide-internal:util';
 
+// Disable entropy gating when we've restored a snapshot of version 1. Version 1 snapshots were
+// created without entropy gating and will crash if they are used with it. If we are creating a new
+// snapshot or using one of version at least 2 we should gate.
 // TODO: When we've updated all the snapshots, remove this.
 const SHOULD_GATE_ENTROPY =
-  !IS_TRACING &&
-  (LOADED_SNAPSHOT_VERSION === undefined || LOADED_SNAPSHOT_VERSION === 2);
+  LOADED_SNAPSHOT_VERSION !== 0 && LOADED_SNAPSHOT_VERSION !== 1;
 
 let allowed_entropy_calls_addr: number;
 

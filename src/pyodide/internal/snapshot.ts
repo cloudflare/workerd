@@ -437,9 +437,8 @@ let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
 })();
 
 export function finishSnapshotSetup(pyodide: Pyodide): void {
-  if (DSO_METADATA?.settings?.baselineSnapshot) {
-    // Invalidate caches if we have a baseline snapshot because the contents of site-packages may
-    // have changed.
+  if (LOADED_SNAPSHOT_VERSION !== undefined) {
+    // Invalidate caches if we have a snapshot because the contents of site-packages may have changed.
     simpleRunPython(
       pyodide._module,
       'from importlib import invalidate_caches as f; f(); del f'
