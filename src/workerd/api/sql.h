@@ -23,6 +23,12 @@ public:
   class Statement;
   struct IngestResult;
 
+  // One value returned from SQL. Note that we intentionally return StringPtr instead of String
+  // because we know that the underlying buffer returned by SQLite will be valid long enough to be
+  // converted by JSG into a V8 string. For byte arrays, on the other hand, we pass ownership to
+  // JSG, which does not need to make a copy.
+  using SqlValue = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
+
   jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
   IngestResult ingest(jsg::Lock& js, kj::String query);
 
@@ -134,15 +140,9 @@ public:
     });
   }
 
-  // One value returned from SQL. Note that we intentionally return StringPtr instead of String
-  // because we know that the underlying buffer returned by SQLite will be valid long enough to be
-  // converted by JSG into a V8 string. For byte arrays, on the other hand, we pass ownership to
-  // JSG, which does not need to make a copy.
-  using Value = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
-
-  using RowDict = jsg::Dict<Value, jsg::JsString>;
+  using RowDict = jsg::Dict<SqlValue, jsg::JsString>;
   JSG_ITERATOR(RowIterator, rows, RowDict, jsg::Ref<Cursor>, rowIteratorNext);
-  JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<Cursor>, rawIteratorNext);
+  JSG_ITERATOR(RawIterator, raw, kj::Array<SqlValue>, jsg::Ref<Cursor>, rawIteratorNext);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     if (state != kj::none) {
@@ -230,11 +230,11 @@ private:
       kj::ArrayPtr<BindingValue> values);
 
   static kj::Maybe<RowDict> rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
-  static kj::Maybe<kj::Array<Value>> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
+  static kj::Maybe<kj::Array<SqlValue>> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
   template <typename Func>
   static auto iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
       -> kj::Maybe<
-          kj::Array<decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>>;
+          kj::Array<decltype(func(kj::instance<State&>(), uint(), kj::instance<SqlValue&&>()))>>;
 
   friend class Statement;
 };

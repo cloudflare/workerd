@@ -125,7 +125,7 @@ jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js
 kj::Maybe<SqlStorage::Cursor::RowDict> SqlStorage::Cursor::rowIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   auto names = obj->cachedColumnNames.get();
-  return iteratorImpl(js, obj, [&](State& state, uint i, Value&& value) {
+  return iteratorImpl(js, obj, [&](State& state, uint i, SqlValue&& value) {
     return RowDict::Field{
       // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
       // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
@@ -151,16 +151,17 @@ kj::Array<jsg::JsRef<jsg::JsString>> SqlStorage::Cursor::getColumnNames(jsg::Loc
   }
 }
 
-kj::Maybe<kj::Array<SqlStorage::Cursor::Value>> SqlStorage::Cursor::rawIteratorNext(
+kj::Maybe<kj::Array<SqlStorage::SqlValue>> SqlStorage::Cursor::rawIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
-  return iteratorImpl(js, obj, [&](State& state, uint i, Value&& value) { return kj::mv(value); });
+  return iteratorImpl(
+      js, obj, [&](State& state, uint i, SqlValue&& value) { return kj::mv(value); });
 }
 
 template <typename Func>
 auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
     -> kj::Maybe<
-        kj::Array<decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>> {
-  using Element = decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()));
+        kj::Array<decltype(func(kj::instance<State&>(), uint(), kj::instance<SqlValue&&>()))>> {
+  using Element = decltype(func(kj::instance<State&>(), uint(), kj::instance<SqlValue&&>()));
 
   auto& state = *KJ_UNWRAP_OR(obj->state, {
     if (obj->canceled) {
@@ -195,7 +196,7 @@ auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func
 
   auto results = kj::heapArrayBuilder<Element>(query.columnCount());
   for (auto i: kj::zeroTo(results.capacity())) {
-    Value value;
+    SqlValue value;
     KJ_SWITCH_ONEOF(query.getValue(i)) {
       KJ_CASE_ONEOF(data, kj::ArrayPtr<const byte>) {
         value.emplace(kj::heapArray(data));
