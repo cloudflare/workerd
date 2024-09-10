@@ -20,6 +20,8 @@ namespace {
 
 // Helper functions for the origin, pathname, and search getters and setters.
 
+// The folowing two lists needs to be kept in sync since the length and the order
+// of them are needed to properly calculate the hash/index.
 constexpr kj::StringPtr is_special_list[] = {
   "http"_kj, " "_kj, "https"_kj, "ws"_kj, "ftp"_kj, "wss"_kj, "file"_kj, " "_kj};
 constexpr kj::StringPtr special_ports[] = {
@@ -31,6 +33,12 @@ bool isSpecialScheme(kj::StringPtr scheme) noexcept {
   if (scheme.size() == 0) {
     return false;
   }
+  // Depending on the first character and the size of the input, this line calculates
+  // the index from the list above.
+  //
+  // Generate a simple hash value that will always be between 0 and 7 (inclusive),
+  // regardless of the input. This is because the bitwise AND with 7 ensures that
+  // only the last 3 bits of the result are kept.
   int hash_value = (2 * scheme.size() + static_cast<unsigned>(scheme[0])) & 7;
   const auto target = is_special_list[hash_value];
   return (target[0] == scheme[0]) && (target.slice(1) == scheme.slice(1));
@@ -42,7 +50,7 @@ kj::Maybe<kj::StringPtr> defaultPortForScheme(kj::StringPtr scheme) noexcept {
   if (scheme.size() == 0) {
     return kj::none;
   }
-  int hash_value = (2 * scheme.size() + (unsigned)(scheme[0])) & 7;
+  int hash_value = (2 * scheme.size() + static_cast<unsigned>(scheme[0])) & 7;
   const auto target = is_special_list[hash_value];
   if ((target[0] == scheme[0]) && (target.slice(1) == scheme.slice(1))) {
     auto port = special_ports[hash_value];
