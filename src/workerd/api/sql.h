@@ -29,6 +29,9 @@ public:
   // JSG, which does not need to make a copy.
   using SqlValue = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
 
+  // One row of a SQL query result. This is an Object whose properties correspond to columns.
+  using SqlRow = jsg::Dict<SqlValue, jsg::JsString>;
+
   jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
   IngestResult ingest(jsg::Lock& js, kj::String query);
 
@@ -140,8 +143,7 @@ public:
     });
   }
 
-  using RowDict = jsg::Dict<SqlValue, jsg::JsString>;
-  JSG_ITERATOR(RowIterator, rows, RowDict, jsg::Ref<Cursor>, rowIteratorNext);
+  JSG_ITERATOR(RowIterator, rows, SqlRow, jsg::Ref<Cursor>, rowIteratorNext);
   JSG_ITERATOR(RawIterator, raw, kj::Array<SqlValue>, jsg::Ref<Cursor>, rawIteratorNext);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -229,7 +231,7 @@ private:
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<BindingValue> values);
 
-  static kj::Maybe<RowDict> rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
+  static kj::Maybe<SqlRow> rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
   static kj::Maybe<kj::Array<SqlValue>> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
   template <typename Func>
   static auto iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
