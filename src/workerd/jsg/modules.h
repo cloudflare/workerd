@@ -14,9 +14,6 @@
 
 namespace workerd::jsg {
 
-kj::Maybe<kj::String> checkNodeSpecifier(kj::StringPtr specifier);
-bool isNodeJsCompatEnabled(jsg::Lock& js);
-
 class CommonJsModuleContext;
 
 class CommonJsModuleObject: public jsg::Object {

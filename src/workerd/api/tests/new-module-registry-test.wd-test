@@ -1,0 +1,43 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "new-module-registry-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-test.js"),
+          (name = "foo", esModule = "export const foo = 1; export default 2; export const bar = import.meta.url"),
+          (name = "bar", esModule = "export const foo = 1; export default 2;"),
+          (name = "node:fs", esModule = "export default 'abc'"),
+
+          # Intentionally bad module to test error handling.
+          # Evaluation will error because i/o is not permitted at top-level scope.
+          (name = "bad", esModule = "export default 1; setTimeout(() => {}, 10)"),
+
+          # Ensure that async context is propagated into a dynamic import.
+          (name = "als", esModule = "export default globalThis.als.getStore()"),
+
+          # Import assertions are not supported currently
+          (name = "ia", esModule = "import * as def from 'foo' with { a: 'test' }"),
+
+          # Errors on ESM eval should be reported properly in both static and
+          # dynamic imports.
+          (name = "esm-error", esModule = "export default 1; throw new Error('boom');"),
+          (name = "esm-error-dynamic", esModule = "export * as d from 'esm-error'"),
+
+          # Other module types work
+          (name = "text", text = "abc"),
+          (name = "data", data = "abcdef"),
+          (name = "json", json = "{ \"foo\": 1 }"),
+          (name = "invalid-json", json = "1n"),
+        ],
+        compatibilityDate = "2024-07-01",
+        compatibilityFlags = [
+          "nodejs_compat_v2",
+          "new_module_registry",
+          "experimental",
+        ],
+      )
+    ),
+  ],
+);

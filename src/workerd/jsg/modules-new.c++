@@ -649,11 +649,9 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
       //
       // For now, we do not support any import attributes, so if there are any at all
       // we will reject the import.
-      if (!import_assertions.IsEmpty()) {
-        if (import_assertions->Length() > 0) {
-          return rejected(js, js.typeError("Import attributes are not supported"));
-        };
-      }
+      if (!import_assertions.IsEmpty() && import_assertions->Length() > 0) {
+        return rejected(js, js.typeError("Import attributes are not supported"));
+      };
 
       Url referrer = ([&] {
         if (resource_name.IsEmpty()) {
@@ -662,6 +660,14 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
         auto str = js.toString(resource_name);
         return KJ_ASSERT_NONNULL(Url::tryParse(str.asPtr()));
       })();
+
+      // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
+      // is a bare node specifier and resolve it to a full node: URL.
+      if (isNodeJsCompatEnabled(js)) {
+        KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
+          spec = kj::mv(nodeSpec);
+        }
+      }
 
       KJ_IF_SOME(url, referrer.tryResolve(spec.asPtr())) {
         auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
@@ -691,7 +697,6 @@ IsolateModuleRegistry::IsolateModuleRegistry(
   auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
   KJ_ASSERT(!context.IsEmpty());
-  KJ_ASSERT(context->GetAlignedPointerFromEmbedderData(2) == nullptr);
   context->SetAlignedPointerInEmbedderData(2, this);
   isolate->SetHostImportModuleDynamicallyCallback(&dynamicImport);
   isolate->SetHostInitializeImportMetaObjectCallback(&importMeta);
@@ -706,76 +711,78 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
   auto& registry = IsolateModuleRegistry::from(isolate);
   auto& js = Lock::from(isolate);
 
-  try {
-    return js.tryCatch([&]() -> v8::MaybeLocal<v8::Module> {
-      auto spec = kj::str(specifier);
+  return js.tryCatch([&]() -> v8::MaybeLocal<v8::Module> {
+    auto spec = kj::str(specifier);
 
-      // The proposed specification for import assertions strongly recommends that
-      // embedders reject import attributes and types they do not understand/implement.
-      // This is because import attributes can alter the interpretation of a module.
-      // Throwing an error for things we do not understand is the safest thing to do
-      // for backwards compatibility.
-      //
-      // For now, we do not support any import attributes, so if there are any at all
-      // we will reject the import.
-      if (!import_assertions.IsEmpty()) {
-        if (import_assertions->Length() > 0) {
-          js.throwException(js.typeError("Import attributes are not supported"));
-        };
-      }
+    // The proposed specification for import assertions strongly recommends that
+    // embedders reject import attributes and types they do not understand/implement.
+    // This is because import attributes can alter the interpretation of a module.
+    // Throwing an error for things we do not understand is the safest thing to do
+    // for backwards compatibility.
+    //
+    // For now, we do not support any import attributes, so if there are any at all
+    // we will reject the import.
+    if (!import_assertions.IsEmpty() && import_assertions->Length() > 0) {
+      js.throwException(js.typeError("Import attributes are not supported"));
+    }
 
-      ResolveContext::Type type = ResolveContext::Type::BUNDLE;
+    ResolveContext::Type type = ResolveContext::Type::BUNDLE;
 
-      auto& referrerUrl = registry.lookup(js, referrer)
-                              .map([&](IsolateModuleRegistry::Entry& entry) -> const Url& {
-        switch (entry.module.type()) {
-          case Module::Type::BUNDLE: {
-            type = ResolveContext::Type::BUNDLE;
-            break;
-          }
-          case Module::Type::BUILTIN: {
-            type = ResolveContext::Type::BUILTIN;
-            break;
-          }
-          case Module::Type::BUILTIN_ONLY: {
-            type = ResolveContext::Type::BUILTIN_ONLY;
-            break;
-          }
-          case Module::Type::FALLBACK: {
-            type = ResolveContext::Type::BUNDLE;
-            break;
-          }
+    auto& referrerUrl = registry.lookup(js, referrer)
+                            .map([&](IsolateModuleRegistry::Entry& entry) -> const Url& {
+      switch (entry.module.type()) {
+        case Module::Type::BUNDLE: {
+          type = ResolveContext::Type::BUNDLE;
+          break;
         }
-        return entry.specifier.specifier;
-      }).orDefault(ModuleBundle::BundleBuilder::BASE);
-
-      KJ_IF_SOME(url, referrerUrl.tryResolve(spec)) {
-        // Make sure that percent-encoding in the path is normalized so we can match correctly.
-        auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-        ResolveContext resolveContext = {
-          .type = type,
-          .source = ResolveContext::Source::STATIC_IMPORT,
-          .specifier = normalized,
-          .referrer = referrerUrl,
-          .rawSpecifier = spec.asPtr(),
-        };
-        // TODO(soon): Add import assertions to the context.
-
-        return registry.resolve(js, resolveContext);
+        case Module::Type::BUILTIN: {
+          type = ResolveContext::Type::BUILTIN;
+          break;
+        }
+        case Module::Type::BUILTIN_ONLY: {
+          type = ResolveContext::Type::BUILTIN_ONLY;
+          break;
+        }
+        case Module::Type::FALLBACK: {
+          type = ResolveContext::Type::BUNDLE;
+          break;
+        }
       }
+      return entry.specifier.specifier;
+    }).orDefault(ModuleBundle::BundleBuilder::BASE);
 
-      js.throwException(js.error(kj::str("Invalid module specifier: "_kj, specifier)));
-    }, [&](Value exception) -> v8::MaybeLocal<v8::Module> {
-      // If there are any synchronously thrown exceptions, we want to catch them
-      // here and convert them into a rejected promise. The only exception are
-      // fatal cases where the isolate is terminating which won't make it here
-      // anyway.
-      js.v8Isolate->ThrowException(exception.getHandle(js));
-      return v8::MaybeLocal<v8::Module>();
-    });
-  } catch (...) {
-    kj::throwFatalException(kj::getCaughtExceptionAsKj());
-  }
+    // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
+    // is a bare node specifier and resolve it to a full node: URL.
+    if (isNodeJsCompatEnabled(js)) {
+      KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
+        spec = kj::mv(nodeSpec);
+      }
+    }
+
+    KJ_IF_SOME(url, referrerUrl.tryResolve(spec)) {
+      // Make sure that percent-encoding in the path is normalized so we can match correctly.
+      auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+      ResolveContext resolveContext = {
+        .type = type,
+        .source = ResolveContext::Source::STATIC_IMPORT,
+        .specifier = normalized,
+        .referrer = referrerUrl,
+        .rawSpecifier = spec.asPtr(),
+      };
+      // TODO(soon): Add import assertions to the context.
+
+      return registry.resolve(js, resolveContext);
+    }
+
+    js.throwException(js.error(kj::str("Invalid module specifier: "_kj, specifier)));
+  }, [&](Value exception) -> v8::MaybeLocal<v8::Module> {
+    // If there are any synchronously thrown exceptions, we want to catch them
+    // here and convert them into a rejected promise. The only exception are
+    // fatal cases where the isolate is terminating which won't make it here
+    // anyway.
+    js.v8Isolate->ThrowException(exception.getHandle(js));
+    return v8::MaybeLocal<v8::Module>();
+  });
 }
 
 // The fallback module bundle calls a single resolve callback to resolve all modules
