@@ -1,0 +1,24 @@
+title: "Node.js API Request"
+labels: ["Node.js API Request"]
+body:
+  - type: input
+    id: module
+    attributes:
+      label: Module
+      description: "Name of the Node.js module you want to work on Workers. Ex: fs"
+      value:
+    validations:
+      required: true
+  - type: input
+    id: method
+    attributes:
+      label: API Method
+      description: "Name of the specific API method you want to work on Workers. Ex: fs.readFile"
+      value:
+    validations:
+      required: true
+  - type: markdown
+    id: context
+    attributes:
+      value: |
+        ## Context
