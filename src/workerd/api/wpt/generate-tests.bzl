@@ -4,6 +4,7 @@ load("//:build/wd_test.bzl", "wd_test")
 # 0 - name of the service
 # 1 - es module file path (ex: url-test for url-test.js)
 # 2 - external modules required for the test suite to succeed
+# 3 - current date in YYYY-MM-DD format
 WPT_TEST_TEMPLATE = """
 using Workerd = import "/workerd/workerd.capnp";
 
@@ -19,8 +20,8 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "wpt", service = "wpt"),
         ],
-        compatibilityDate = "2024-07-01",
-        compatibilityFlags = ["nodejs_compat_v2"],
+        compatibilityDate = "{}",
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
       )
     ),
     (
@@ -30,9 +31,24 @@ const unitTests :Workerd.Config = (
   ],
 );"""
 
+def _current_date_impl(repository_ctx):
+    result = repository_ctx.execute(["date", "+%Y-%m-%d"])
+    if result.return_code != 0:
+        fail("Failed to get current date")
+
+    current_date = result.stdout.strip()
+
+    repository_ctx.file("BUILD", "")
+    repository_ctx.file("date.bzl", "CURRENT_DATE = '%s'" % current_date)
+
+current_date = repository_rule(
+    implementation = _current_date_impl,
+    local = True,
+)
+
 # Example: generate_wd_test_file("url-test")
 def generate_wd_test_file(name, modules = ""):
-    return WPT_TEST_TEMPLATE.format(name, name, modules)
+    return WPT_TEST_TEMPLATE.format(name, name, modules, current_date())
 
 def generate_external_modules(directory):
     """
