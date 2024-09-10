@@ -2005,26 +2005,25 @@ export const convenienceMethods = {
           await promise;
         }
 
-        // TODO(soon): Enable this test
-        // {
-        //   const { promise, resolve } = Promise.withResolvers();
-        //   zlib[method[0]](expect, optsInfo, (err, result) => {
-        //     assert.ifError(err);
-        //
-        //     const compressed = result.buffer;
-        //     zlib[method[1]](compressed, optsInfo, (err, result) => {
-        //       assert.ifError(err);
-        //       assert.strictEqual(
-        //         result.buffer.toString(),
-        //         expectStr,
-        //         `Should get original string after ${method[0]}/` +
-        //           `${method[1]} ${type} with info option.`
-        //       );
-        //       resolve();
-        //     });
-        //   });
-        //   await promise;
-        // }
+        {
+          const { promise, resolve } = Promise.withResolvers();
+          zlib[method[0]](expect, optsInfo, (err, result) => {
+            assert.ifError(err);
+
+            const compressed = result.buffer;
+            zlib[method[1]](compressed, optsInfo, (err, result) => {
+              assert.ifError(err);
+              assert.strictEqual(
+                result.buffer.toString(),
+                expectStr,
+                `Should get original string after ${method[0]}/` +
+                  `${method[1]} ${type} with info option.`
+              );
+              resolve();
+            });
+          });
+          await promise;
+        }
 
         {
           const compressed = zlib[`${method[0]}Sync`](expect, opts);
@@ -2048,25 +2047,24 @@ export const convenienceMethods = {
           );
         }
 
-        // TODO(soon): Enable this test
-        // {
-        //   const compressed = zlib[`${method[0]}Sync`](expect, optsInfo);
-        //   const decompressed = zlib[`${method[1]}Sync`](
-        //     compressed.buffer,
-        //     optsInfo
-        //   );
-        //   assert.strictEqual(
-        //     decompressed.buffer.toString(),
-        //     expectStr,
-        //     `Should get original string after ${method[0]}Sync/` +
-        //       `${method[1]}Sync ${type} without options.`
-        //   );
-        //   assert.ok(
-        //     decompressed.engine instanceof zlib[method[3]],
-        //     `Should get engine ${method[3]} after ${method[0]} ` +
-        //       `${type} with info option.`
-        //   );
-        // }
+        {
+          const compressed = zlib[`${method[0]}Sync`](expect, optsInfo);
+          const decompressed = zlib[`${method[1]}Sync`](
+            compressed.buffer,
+            optsInfo
+          );
+          assert.strictEqual(
+            decompressed.buffer.toString(),
+            expectStr,
+            `Should get original string after ${method[0]}Sync/` +
+              `${method[1]}Sync ${type} without options.`
+          );
+          assert.ok(
+            decompressed.engine instanceof zlib[method[3]],
+            `Should get engine ${method[3]} after ${method[0]} ` +
+              `${type} with info option.`
+          );
+        }
       }
     }
 

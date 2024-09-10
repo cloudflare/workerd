@@ -529,6 +529,16 @@ export class ZlibBase extends Transform {
   public _processChunk(
     chunk: Buffer,
     flushFlag: number,
+    cb?: undefined
+  ): Buffer;
+  public _processChunk(
+    chunk: Buffer,
+    flushFlag: number,
+    cb: () => void
+  ): undefined;
+  public _processChunk(
+    chunk: Buffer,
+    flushFlag: number,
     cb?: () => void
   ): Buffer | Uint8Array | undefined {
     if (cb != null && typeof cb === 'function') {

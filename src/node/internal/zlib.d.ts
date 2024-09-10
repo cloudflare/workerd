@@ -1,14 +1,9 @@
 import { owner_symbol, type Zlib } from 'node-internal:internal_zlib_base';
 
-export function crc32(data: ArrayBufferView, value: number): number;
-
-export type CompressCallback = (
-  err: Error | null,
-  buffer?: ArrayBuffer
-) => void;
-export type InternalCompressCallback = (res: Error | ArrayBuffer) => void;
+type InternalCompressCallback = (res: Error | ArrayBuffer) => void;
 
 export function crc32(data: ArrayBufferView | string, value: number): number;
+
 export function zlibSync(
   data: ArrayBufferView | string,
   options: ZlibOptions,
@@ -178,6 +173,8 @@ export interface BrotliOptions {
       }
     | undefined;
   maxOutputLength?: number | undefined;
+  // Not specified in NodeJS docs but the tests expect it
+  info?: boolean | undefined;
 }
 
 type ErrorHandler = (errno: number, code: string, message: string) => void;
