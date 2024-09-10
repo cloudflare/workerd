@@ -1,3 +1,6 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
 #include "workerd/util/wait-list.h"
@@ -62,8 +65,11 @@ public:
   }
 };
 
-// A function to read a segment of the tar file into a buffer
-// Set up this way to avoid copying files that aren't accessed.
+// A class wrapping the information stored in a WorkerBundle, in particular the Python source files
+// and metadata about the worker.
+//
+// This is done this way to avoid copying files as much as possible. We set up a Metadata File
+// System which reads the contents as they are needed.
 class PyodideMetadataReader: public jsg::Object {
 private:
   kj::String mainModule;
@@ -127,6 +133,10 @@ public:
 
   kj::Array<jsg::JsRef<jsg::JsString>> getNames(jsg::Lock& js);
 
+  // Returns files inside the WorkerBundle that end with the specified file extension.
+  // Usually called to get all the Python source files with a `py` extension.
+  kj::Array<jsg::JsRef<jsg::JsString>> getWorkerFiles(jsg::Lock& js, kj::String ext);
+
   kj::Array<jsg::JsRef<jsg::JsString>> getRequirements(jsg::Lock& js);
 
   kj::Array<int> getSizes(jsg::Lock& js);
@@ -166,6 +176,7 @@ public:
     JSG_METHOD(getMainModule);
     JSG_METHOD(getRequirements);
     JSG_METHOD(getNames);
+    JSG_METHOD(getWorkerFiles);
     JSG_METHOD(getSizes);
     JSG_METHOD(read);
     JSG_METHOD(hasMemorySnapshot);
@@ -279,6 +290,20 @@ public:
     return kj::none;
   }
 
+  // Takes in a list of Python files (their contents). Parses these files to find the import
+  // statements, then returns a list of modules imported via those statements.
+  //
+  // For example:
+  // import a, b, c
+  // from z import x
+  // import t.y.u
+  // from . import k
+  //
+  // -> ["a", "b", "c", "z", "t.y.u"]
+  //
+  // Package relative imports are ignored.
+  static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
+
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
@@ -288,6 +313,7 @@ public:
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
     JSG_METHOD(getPackage);
+    JSG_STATIC_METHOD(parsePythonScriptImports);
   }
 
 private:

@@ -112,6 +112,14 @@ wd_cc_library(
     ],
 )
 
+kj_test(
+    src = "pyodide/pyodide-test.c++",
+    deps = [
+        ":pyodide",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
 wd_cc_library(
     name = "data-url",
     srcs = ["data-url.c++"],
