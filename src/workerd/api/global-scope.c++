@@ -659,14 +659,13 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(jsg::Lock& js,
 
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsValue data) {
   auto str = data.toJsString(js);
-  auto strArray = str.toArray<kj::byte>(js);
 
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's
   // ContainsOnlyOneByte() function.
   JSG_REQUIRE(str.containsOnlyOneByte(), DOMInvalidCharacterError,
       "btoa() can only operate on characters in the Latin1 (ISO/IEC 8859-1) range.");
-
+  auto strArray = str.toArray<kj::byte>(js);
   auto expected_length = simdutf::base64_length_from_binary(strArray.size());
   auto result = kj::heapArray<kj::byte>(expected_length);
   auto written = simdutf::binary_to_base64(
