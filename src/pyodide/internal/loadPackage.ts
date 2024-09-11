@@ -38,11 +38,20 @@ async function decompressArrayBuffer(
   }
 }
 
+function getFilenameOfPackage(requirement: string): string {
+  const obj = LOCKFILE['packages'][requirement];
+  if (!obj) {
+    throw new Error('Requirement ' + requirement + ' not found in lockfile');
+  }
+
+  return obj.file_name;
+}
+
 // loadBundleFromR2 loads the package from the internet (through fetch) and uses the DiskCache as
 // a backing store. This is only used in local dev.
 async function loadBundleFromR2(requirement: string): Promise<Reader> {
   // first check if the disk cache has what we want
-  const filename = LOCKFILE['packages'][requirement]['file_name'];
+  const filename = getFilenameOfPackage(requirement);
   const cached = DiskCache.get(filename);
   if (cached) {
     const decompressed = await decompressArrayBuffer(cached);
@@ -65,9 +74,8 @@ async function loadBundleFromR2(requirement: string): Promise<Reader> {
 async function loadBundleFromArtifactBundler(
   requirement: string
 ): Promise<Reader> {
-  const packagesVersion = PACKAGES_VERSION;
-  const filename = LOCKFILE['packages'][requirement]['file_name'];
-  const fullPath = 'python-package-bucket/' + packagesVersion + '/' + filename;
+  const filename = getFilenameOfPackage(requirement);
+  const fullPath = 'python-package-bucket/' + PACKAGES_VERSION + '/' + filename;
   const reader = ArtifactBundler.getPackage(fullPath);
   if (!reader) {
     throw new Error(
