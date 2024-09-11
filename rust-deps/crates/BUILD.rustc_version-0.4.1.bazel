@@ -14,7 +14,7 @@ rust_library(
     name = "rustc_version",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     compile_data = glob(
         include = ["**"],
@@ -40,7 +40,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.4.0",
+    version = "0.4.1",
     deps = [
         "@crates_vendor__semver-1.0.23//:semver",
     ],

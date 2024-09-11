@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "precomputed_hash",
+    name = "shlex",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2015",
     rustc_flags = [
@@ -35,10 +39,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=precomputed-hash",
+        "crate-name=shlex",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.1",
+    version = "1.3.0",
 )

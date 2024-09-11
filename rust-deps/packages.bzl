@@ -26,6 +26,6 @@ RTTI_PACKAGES = {
 PACKAGES = RTTI_PACKAGES | {
     "lolhtml": crate.spec(
         git = "https://github.com/cloudflare/lol-html.git",
-        rev = "53469c5acf5bf2955cbf3848544028ec835d38a4",
+        rev = "7db3d8d9fa9f3fee6ffe36c3f68f14e160476e07",
     ),
 }

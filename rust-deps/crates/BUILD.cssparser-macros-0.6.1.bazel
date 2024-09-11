@@ -14,7 +14,7 @@ rust_proc_macro(
     name = "cssparser_macros",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     compile_data = glob(
         include = ["**"],
@@ -42,7 +42,7 @@ rust_proc_macro(
     ],
     version = "0.6.1",
     deps = [
-        "@crates_vendor__quote-1.0.36//:quote",
-        "@crates_vendor__syn-2.0.72//:syn",
+        "@crates_vendor__quote-1.0.37//:quote",
+        "@crates_vendor__syn-2.0.77//:syn",
     ],
 )

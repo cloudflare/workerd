@@ -14,7 +14,7 @@ rust_library(
     name = "zerocopy",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     compile_data = glob(
         include = ["**"],
@@ -29,10 +29,17 @@ rust_library(
         ],
     ),
     crate_features = [
+        "byteorder",
+        "default",
+        "derive",
         "simd",
+        "zerocopy-derive",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
+    proc_macro_deps = [
+        "@crates_vendor__zerocopy-derive-0.7.35//:zerocopy_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -44,4 +51,7 @@ rust_library(
         "norustfmt",
     ],
     version = "0.7.35",
+    deps = [
+        "@crates_vendor__byteorder-1.5.0//:byteorder",
+    ],
 )
