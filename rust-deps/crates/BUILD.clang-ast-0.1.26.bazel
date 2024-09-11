@@ -14,7 +14,7 @@ rust_library(
     name = "clang_ast",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     compile_data = glob(
         include = ["**"],
@@ -40,9 +40,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.25",
+    version = "0.1.26",
     deps = [
         "@crates_vendor__rustc-hash-2.0.0//:rustc_hash",
-        "@crates_vendor__serde-1.0.204//:serde",
+        "@crates_vendor__serde-1.0.210//:serde",
     ],
 )

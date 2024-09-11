@@ -14,7 +14,7 @@ rust_library(
     name = "rand",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     aliases = {
         "@crates_vendor__getrandom-0.1.16//:getrandom": "getrandom_package",
@@ -56,7 +56,7 @@ rust_library(
     version = "0.7.3",
     deps = [
         "@crates_vendor__getrandom-0.1.16//:getrandom",
-        "@crates_vendor__libc-0.2.155//:libc",
+        "@crates_vendor__libc-0.2.158//:libc",
         "@crates_vendor__rand_core-0.5.1//:rand_core",
         "@crates_vendor__rand_pcg-0.2.1//:rand_pcg",
     ] + select({

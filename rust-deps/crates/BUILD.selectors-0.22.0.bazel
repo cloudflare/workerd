@@ -15,7 +15,7 @@ rust_library(
     name = "selectors",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     compile_data = glob(
         include = ["**"],
@@ -64,7 +64,7 @@ cargo_build_script(
     name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     crate_name = "build_script_build",
     crate_root = "build.rs",

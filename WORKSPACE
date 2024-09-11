@@ -320,9 +320,9 @@ http_file(
 http_file(
     name = "cargo_bazel_macos_arm64",
     executable = True,
-    sha256 = "30b01033e7b534c6e1927d9225f52a239a41bad402aac12fb6410683a3daa8b1",
+    integrity = "sha256-RJ6t4W3oO4jdtMjea+3SF3OplpGuBY8/TGxTNiHDn0w=",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.46.0/cargo-bazel-aarch64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.50.0/cargo-bazel-aarch64-apple-darwin",
     ],
 )
 
@@ -341,9 +341,9 @@ http_file(
 # since cargo_bazel is only used to generate build files.
 http_archive(
     name = "rules_rust",
-    integrity = "sha256-F8U7+AC5MvMtPKGdLLnorVM84cDXKfDRgwd7/dq3rUY=",
+    integrity = "sha256-NE2PXqlFFVnUDR4msCyI3kZtv1y1Io2MCsrlVxsdqI4=",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.46.0/rules_rust-v0.46.0.tar.gz",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.50.0/rules_rust-v0.50.0.tar.gz",
     ],
 )
 
@@ -355,7 +355,7 @@ rust_register_toolchains(
     edition = "2021",
     # Rust registers wasm targets by default which we don't need, workerd is only built for its native platform.
     extra_target_triples = [],
-    versions = ["1.77.0"],  # LLVM 17
+    versions = ["1.81.0"],  # LLVM 18
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")

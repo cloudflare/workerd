@@ -14,7 +14,7 @@ rust_proc_macro(
     name = "phf_macros",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     compile_data = glob(
         include = ["**"],
@@ -48,7 +48,7 @@ rust_proc_macro(
         "@crates_vendor__phf_generator-0.8.0//:phf_generator",
         "@crates_vendor__phf_shared-0.8.0//:phf_shared",
         "@crates_vendor__proc-macro2-1.0.86//:proc_macro2",
-        "@crates_vendor__quote-1.0.36//:quote",
+        "@crates_vendor__quote-1.0.37//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )

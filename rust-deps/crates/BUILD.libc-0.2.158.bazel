@@ -12,10 +12,10 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "anyhow",
+    name = "libc",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     compile_data = glob(
         include = ["**"],
@@ -34,20 +34,20 @@ rust_library(
         "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2015",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=anyhow",
+        "crate-name=libc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.86",
+    version = "0.2.158",
     deps = [
-        "@crates_vendor__anyhow-1.0.86//:build_script_build",
+        "@crates_vendor__libc-0.2.158//:build_script_build",
     ],
 )
 
@@ -55,7 +55,7 @@ cargo_build_script(
     name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     crate_features = [
         "default",
@@ -75,19 +75,19 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2018",
-    pkg_name = "anyhow",
+    edition = "2015",
+    pkg_name = "libc",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=anyhow",
+        "crate-name=libc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.86",
+    version = "0.2.158",
     visibility = ["//visibility:private"],
 )
 

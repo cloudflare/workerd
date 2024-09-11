@@ -15,7 +15,7 @@ rust_library(
     name = "cssparser",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     compile_data = glob(
         include = ["**"],
@@ -59,7 +59,7 @@ cargo_build_script(
     name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -91,7 +91,7 @@ cargo_build_script(
     visibility = ["//visibility:private"],
     deps = [
         "@crates_vendor__proc-macro2-1.0.86//:proc_macro2",
-        "@crates_vendor__quote-1.0.36//:quote",
+        "@crates_vendor__quote-1.0.37//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )

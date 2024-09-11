@@ -15,7 +15,7 @@ rust_library(
     name = "getrandom",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     compile_data = glob(
         include = ["**"],
@@ -50,16 +50,16 @@ rust_library(
         "@crates_vendor__getrandom-0.1.16//:build_script_build",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.155//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.158//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.155//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.158//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.155//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.158//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.155//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.158//:libc",  # cfg(unix)
         ],
         "//conditions:default": [],
     }),
@@ -69,7 +69,7 @@ cargo_build_script(
     name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     crate_features = [
         "std",
