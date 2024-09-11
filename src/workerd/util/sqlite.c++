@@ -369,8 +369,11 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
 
-SqliteDatabase::SqliteDatabase(
-    const Vfs& vfs, kj::PathPtr path, kj::Maybe<kj::WriteMode> maybeMode) {
+SqliteDatabase::SqliteDatabase(const Vfs& vfs,
+    kj::PathPtr path,
+    SqliteObserver& sqliteObserver,
+    kj::Maybe<kj::WriteMode> maybeMode)
+    : sqliteObserver(sqliteObserver) {
   KJ_IF_SOME(mode, maybeMode) {
     int flags = SQLITE_OPEN_READWRITE;
     if (kj::has(mode, kj::WriteMode::CREATE)) {
@@ -926,6 +929,8 @@ SqliteDatabase::Query::~Query() noexcept(false) {
     // should be interpreted, so we ignore it.
     sqlite3_clear_bindings(statement);
   }
+  db.sqliteObserver.addRowsRead(getRowsRead());
+  db.sqliteObserver.addRowsWritten(getRowsWritten());
 }
 
 void SqliteDatabase::Query::checkRequirements(size_t size) {

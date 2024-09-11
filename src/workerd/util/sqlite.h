@@ -5,6 +5,7 @@
 #pragma once
 
 #include <kj/filesystem.h>
+#include <kj/refcount.h>
 #include <kj/one-of.h>
 #include <utility>
 
@@ -18,6 +19,20 @@ namespace workerd {
 
 using kj::byte;
 using kj::uint;
+
+class SqliteObserver {
+public:
+  virtual void addRowsRead(uint64_t rowsRead) {}
+  virtual void addRowsWritten(uint64_t rowsWritten) {}
+  virtual void setSrsStoredBytesCallback(kj::Function<uint64_t()> callback) {}
+
+  virtual ~SqliteObserver() noexcept(false) {}
+
+  static SqliteObserver& getDefaultObserver() {
+    static SqliteObserver defaultObserver;
+    return defaultObserver;
+  }
+};
 
 // C++/KJ API for SQLite.
 //
@@ -42,7 +57,13 @@ public:
     uint64_t statementCount;
   };
 
-  SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::Maybe<kj::WriteMode> maybeMode = kj::none);
+  SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::Maybe<kj::WriteMode> maybeMode = kj::none)
+      : SqliteDatabase(vfs, path, SqliteObserver::getDefaultObserver(), maybeMode) {}
+
+  SqliteDatabase(const Vfs& vfs,
+      kj::PathPtr path,
+      SqliteObserver& sqliteObserver,
+      kj::Maybe<kj::WriteMode> maybeMode = kj::none);
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
@@ -159,6 +180,8 @@ public:
 
 private:
   sqlite3* db;
+
+  SqliteObserver& sqliteObserver;
 
   // Set while a query is compiling.
   kj::Maybe<const Regulator&> currentRegulator;

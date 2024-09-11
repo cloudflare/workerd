@@ -1982,11 +1982,11 @@ public:
             // work for local development we need to pass an event type.
             static constexpr uint16_t hibernationEventTypeId = 8;
 
-            actorContainer->actor.emplace(
-                kj::refcounted<Worker::Actor>(*service.worker, actorContainer->getTracker(),
-                    kj::str(idPtr), true, kj::mv(makeActorCache), className, kj::mv(makeStorage),
-                    lock, kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-                    actorContainer->tryGetManagerRef(), hibernationEventTypeId));
+            actorContainer->actor.emplace(kj::refcounted<Worker::Actor>(*service.worker,
+                actorContainer->getTracker(), kj::str(idPtr), true, kj::mv(makeActorCache),
+                className, kj::mv(makeStorage), lock, kj::mv(loopback), timerChannel,
+                kj::refcounted<ActorObserver>(), kj::Own<SqliteObserver>(),
+                actorContainer->tryGetManagerRef(), hibernationEventTypeId));
 
             // If the actor becomes broken, remove it from the map, so a new one will be created
             // next time.

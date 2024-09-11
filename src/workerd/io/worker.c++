@@ -3042,6 +3042,7 @@ struct Worker::Actor::Impl {
   MakeStorageFunc makeStorage;
 
   kj::Own<ActorObserver> metrics;
+  kj::Own<SqliteObserver> sqliteObserver;
 
   kj::Maybe<jsg::JsRef<jsg::JsValue>> transient;
   kj::Maybe<kj::Own<ActorCacheInterface>> actorCache;
@@ -3204,12 +3205,14 @@ struct Worker::Actor::Impl {
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
       kj::Own<ActorObserver> metricsParam,
+      kj::Own<SqliteObserver> sqliteObserver,
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)),
         makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
+        sqliteObserver(kj::mv(sqliteObserver)),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
         outputGate(hooks),
@@ -3264,13 +3267,14 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Own<Loopback> loopback,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics,
+    kj::Own<SqliteObserver> sqliteObserver,
     kj::Maybe<kj::Own<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
-      kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
-      hibernationEventType);
+      kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(sqliteObserver),
+      kj::mv(manager), hibernationEventType);
 
   KJ_IF_SOME(c, className) {
     KJ_IF_SOME(cls, lock.getWorker().impl->actorClasses.find(c)) {
@@ -3608,6 +3612,10 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
 
 ActorObserver& Worker::Actor::getMetrics() {
   return *impl->metrics;
+}
+
+SqliteObserver& Worker::Actor::getSqliteObserver() {
+  return *impl->sqliteObserver;
 }
 
 InputGate& Worker::Actor::getInputGate() {

@@ -5,6 +5,7 @@
 #pragma once
 // Classes to manage lifetime of workers, scripts, and isolates.
 
+#include "workerd/util/sqlite.h"
 #include <workerd/util/xthreadnotifier.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/limit-enforcer.h>
@@ -731,6 +732,7 @@ public:
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
       kj::Own<ActorObserver> metrics,
+      kj::Own<SqliteObserver> sqliteObserver,
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t> hibernationEventType);
 
@@ -777,6 +779,7 @@ public:
   kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
 
   ActorObserver& getMetrics();
+  SqliteObserver& getSqliteObserver();
 
   InputGate& getInputGate();
   OutputGate& getOutputGate();
