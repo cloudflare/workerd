@@ -46,7 +46,7 @@ public:
       Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
 
   bool isCommitScheduled() {
-    return !currentTxn.is<NoTxn>();
+    return !currentTxn.is<NoTxn>() || deleteAllCommitScheduled;
   }
 
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override {
@@ -101,6 +101,7 @@ private:
     KJ_DISALLOW_COPY_AND_MOVE(ImplicitTxn);
 
     void commit();
+    void rollback();
 
   private:
     ActorSqlite& parent;
@@ -155,6 +156,9 @@ private:
   // When set to `ExplicitTxn*`, an explicit transaction is currently open, so no implicit
   // transactions should be used in the meantime.
   kj::OneOf<NoTxn, ImplicitTxn*, ExplicitTxn*> currentTxn = NoTxn();
+
+  // If true, then a commit is scheduled as a result of deleteAll() having been called.
+  bool deleteAllCommitScheduled = false;
 
   kj::TaskSet commitTasks;
 

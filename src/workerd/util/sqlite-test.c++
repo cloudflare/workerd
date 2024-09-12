@@ -740,5 +740,47 @@ KJ_TEST("DELETE with LIMIT") {
   KJ_EXPECT(q.getInt(0) == 3);
 }
 
+KJ_TEST("reset database") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run("PRAGMA journal_mode=WAL;");
+
+  db.run("CREATE TABLE things (id INTEGER PRIMARY KEY)");
+
+  db.run("INSERT INTO things VALUES (123)");
+  db.run("INSERT INTO things VALUES (321)");
+
+  auto stmt = db.prepare("SELECT * FROM things");
+
+  auto query = stmt.run();
+  KJ_ASSERT(!query.isDone());
+  KJ_EXPECT(query.getInt(0) == 123);
+
+  db.reset();
+  db.run("PRAGMA journal_mode=WAL;");
+
+  // The query was canceled.
+  KJ_EXPECT_THROW_MESSAGE("query canceled because reset()", query.nextRow());
+  KJ_EXPECT_THROW_MESSAGE("query canceled because reset()", query.getInt(0));
+
+  // The statement doesn't work because the table is gone.
+  KJ_EXPECT_THROW_MESSAGE("no such table: things: SQLITE_ERROR", stmt.run());
+
+  // But we can recreate it.
+  db.run("CREATE TABLE things (id INTEGER PRIMARY KEY)");
+  db.run("INSERT INTO things VALUES (456)");
+
+  // Now the statement works.
+  {
+    auto q2 = stmt.run();
+    KJ_ASSERT(!q2.isDone());
+    KJ_EXPECT(q2.getInt(0) == 456);
+    q2.nextRow();
+    KJ_EXPECT(q2.isDone());
+  }
+}
+
 }  // namespace
 }  // namespace workerd
