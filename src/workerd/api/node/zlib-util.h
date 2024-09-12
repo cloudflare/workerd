@@ -291,6 +291,19 @@ public:
   ZlibUtil() = default;
   ZlibUtil(jsg::Lock&, const jsg::Url&) {}
 
+  // A custom allocator to be used by the zlib and brotli libraries
+  // The current implementation stores allocations in a hash map.
+  // TODO: Use an arena allocator implementation instead of hashing pointers in order to improve performance
+  class Allocator final {
+  public:
+    static void* AllocForZlib(void* data, uInt items, uInt size);
+    static void* AllocForBrotli(void* data, size_t size);
+    static void FreeForZlib(void* data, void* pointer);
+
+  private:
+    kj::HashMap<void*, kj::Array<kj::byte>> allocations;
+  };
+
   template <class CompressionContext>
   class CompressionStream: public jsg::Object {
   public:
@@ -344,19 +357,12 @@ public:
 
     void initializeStream(jsg::BufferSource _write_result, jsg::Function<void()> writeCallback);
 
-    // Allocation functions provided to zlib itself. We store the real size of
-    // the allocated memory chunk just before the "payload" memory we return
-    // to zlib.
-    static void* AllocForZlib(void* data, uInt items, uInt size);
-    static void* AllocForBrotli(void* data, size_t size);
-    static void FreeForZlib(void* data, void* pointer);
-
-  private:
     // Used to store allocations in Brotli* operations.
     // This declaration should be physically positioned before
     // context to avoid `heap-use-after-free` ASan error.
-    kj::HashMap<uint8_t*, kj::Array<uint8_t>> allocations;
+    Allocator allocator;
 
+  private:
     CompressionContext context_;
     bool initialized = false;
     bool writing = false;
