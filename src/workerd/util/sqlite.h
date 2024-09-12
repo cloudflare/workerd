@@ -20,6 +20,15 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 
+// Used to collect periodic metrics about queries and size of sqlite db
+class SqliteObserver {
+public:
+  virtual void addQueryStats(uint64_t rowsRead, uint64_t rowsWritten) {}
+  virtual void setSqliteStoredBytes(uint64_t sqliteStoredBytes) {}
+
+  static SqliteObserver DEFAULT;
+};
+
 // C++/KJ API for SQLite.
 //
 // In addition to providing a more modern C++ interface vs. the classic C API, this API layers
@@ -43,7 +52,12 @@ public:
     uint64_t statementCount;
   };
 
-  SqliteDatabase(const Vfs& vfs, kj::Path path, kj::Maybe<kj::WriteMode> maybeMode = kj::none);
+  // Whoever creates the database, is required to make sure the SqliteObserver is alive at least
+  // as long as the SqliteDatabase is alive.
+  SqliteDatabase(const Vfs& vfs,
+      kj::Path path,
+      kj::Maybe<kj::WriteMode> maybeMode = kj::none,
+      SqliteObserver& sqliteObserver = SqliteObserver::DEFAULT);
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
@@ -205,10 +219,15 @@ public:
     afterResetCallback = kj::mv(callback);
   }
 
+  SqliteObserver& getSqliteObserver() {
+    return sqliteObserver;
+  }
+
 private:
   const Vfs& vfs;
   kj::Path path;
   bool readOnly;
+  SqliteObserver& sqliteObserver;
 
   // This pointer can be left null if a call to reset() failed to re-open the database.
   kj::Maybe<sqlite3&> maybeDb;
@@ -389,6 +408,12 @@ private:
   kj::Own<sqlite3_stmt> ownStatement;       // for one-off queries
   kj::Maybe<sqlite3_stmt&> maybeStatement;  // null if database was reset
   bool done = false;
+
+  // Storing the rowsRead and rowsWritten here to use in cases where a DB is reset.
+  // When the DB is reset, getRowdRead and getRowsWritten will fail as the statement they
+  // refer to gets destroyed as part of the reset process.
+  uint64_t rowsRead = 0;
+  uint64_t rowsWritten = 0;
 
   friend class SqliteDatabase;
 
