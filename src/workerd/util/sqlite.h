@@ -405,6 +405,7 @@ private:
       : ResetListener(db),
         regulator(regulator),
         maybeStatement(statement) {
+    resetRowCounters();
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   template <typename... Params>
