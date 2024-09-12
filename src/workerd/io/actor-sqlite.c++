@@ -194,7 +194,7 @@ kj::Promise<void> ActorSqlite::commitImpl() {
 
   if (needsAlarmFlush) {
     // TODO(soon): fix sequencing of alarm scheduling vs. commitCallback().
-    co_await hooks.setAlarm(newAlarmTime);
+    co_await hooks.scheduleRun(newAlarmTime);
     co_await commitCallback();
   } else {
     co_await commitCallback();
@@ -511,6 +511,10 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
 }
 
 const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
+
+kj::Promise<void> ActorSqlite::Hooks::scheduleRun(kj::Maybe<kj::Date> newAlarmTime) {
+  return kj::READY_NOW;
+}
 
 kj::Maybe<kj::Own<void>> ActorSqlite::Hooks::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
   JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");

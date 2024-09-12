@@ -23,11 +23,13 @@ public:
   // for alarm operations.
   class Hooks {
   public:
-    // TODO(cleanup): rename to scheduleAlarm()/getScheduledAlarm()?:
-    virtual kj::Promise<kj::Maybe<kj::Date>> getAlarm();
-    virtual kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime);
+    // Makes a request to the alarm manager to run the alarm handler at the given time, returning
+    // a promise that resolves when the scheduling has succeeded.
+    virtual kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime);
 
     // TODO(cleanup): no longer used, remove:
+    virtual kj::Promise<kj::Maybe<kj::Date>> getAlarm();
+    virtual kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime);
     virtual kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date scheduledTime, bool noCache);
     virtual void cancelDeferredAlarmDeletion();
 

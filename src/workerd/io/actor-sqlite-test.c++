@@ -41,8 +41,6 @@ struct ActorSqliteTestOptions final {
   bool monitorOutputGate = true;
 };
 
-class ActorSqliteTestHooks;
-
 struct ActorSqliteTest final {
   kj::EventLoop loop;
   kj::WaitScope ws;
@@ -55,22 +53,16 @@ struct ActorSqliteTest final {
   kj::Vector<kj::Own<kj::PromiseFulfiller<void>>> commitFulfillers;
   kj::Vector<kj::String> calls;
 
-  class ActorSqliteTestHooks final: public ActorSqlite::Hooks {
+  struct ActorSqliteTestHooks final: public ActorSqlite::Hooks {
   public:
-    ActorSqliteTestHooks(ActorSqliteTest& parent): parent(parent) {}
+    explicit ActorSqliteTestHooks(ActorSqliteTest& parent): parent(parent) {}
 
-    kj::Promise<kj::Maybe<kj::Date>> getAlarm() override {
-      parent.calls.add(kj::str("getAlarm"));
-      return kj::Maybe<kj::Date>(kj::none);
-    }
-
-    kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime) override {
+    kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {
       auto time = newAlarmTime.map([](auto& t) { return kj::str(t); }).orDefault(kj::str("none"));
-      parent.calls.add(kj::str("setAlarm(", time, ")"));
+      parent.calls.add(kj::str("scheduleRun(", time, ")"));
       return kj::READY_NOW;
     }
 
-  private:
     ActorSqliteTest& parent;
   };
   ActorSqliteTestHooks hooks = ActorSqliteTestHooks(*this);
@@ -80,7 +72,7 @@ struct ActorSqliteTest final {
   kj::Promise<void> gateBrokenPromise;
   kj::UnwindDetector unwindDetector;
 
-  ActorSqliteTest(ActorSqliteTestOptions options = {})
+  explicit ActorSqliteTest(ActorSqliteTestOptions options = {})
       : ws(loop),
         vfsDir(kj::newInMemoryDirectory(kj::nullClock())),
         vfs(*vfsDir),
@@ -156,7 +148,7 @@ KJ_TEST("can set and get alarm") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   auto time = expectSync(test.getAlarm());
   KJ_ASSERT(time == oneMs);
@@ -171,7 +163,7 @@ KJ_TEST("alarm write happens transactionally with storage ops") {
   test.setAlarm(oneMs);
   test.put("foo", "bar");
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   auto time = expectSync(test.getAlarm());
   KJ_ASSERT(time == oneMs);
@@ -183,7 +175,7 @@ KJ_TEST("can clear alarm") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   auto initTime = expectSync(test.getAlarm());
   KJ_ASSERT(initTime == oneMs);
@@ -191,7 +183,7 @@ KJ_TEST("can clear alarm") {
 
   test.setAlarm(kj::none);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(none)", "commit"});
+  test.expectCalls({"scheduleRun(none)", "commit"});
 
   auto time = expectSync(test.getAlarm());
   KJ_ASSERT(time == kj::none);
@@ -203,7 +195,7 @@ KJ_TEST("can set alarm twice") {
   test.setAlarm(oneMs);
   test.setAlarm(twoMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(2ms)", "commit"});
+  test.expectCalls({"scheduleRun(2ms)", "commit"});
 
   auto time = expectSync(test.getAlarm());
   KJ_ASSERT(time == twoMs);
@@ -218,7 +210,7 @@ KJ_TEST("setting duplicate alarm is no-op") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   test.setAlarm(oneMs);
   test.resolveCommits(0);
@@ -229,11 +221,11 @@ KJ_TEST("tells alarm handler to cancel when committed alarm is empty") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   test.setAlarm(kj::none);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(none)", "commit"});
+  test.expectCalls({"scheduleRun(none)", "commit"});
   test.ws.poll();  // needs additional poll?
 
   KJ_ASSERT(test.actor.armAlarmHandler(oneMs, false) == kj::none);
@@ -245,7 +237,7 @@ KJ_TEST("tells alarm handler to cancel when committed alarm does not match reque
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
   test.ws.poll();  // needs additional poll?
 
   KJ_ASSERT(test.actor.armAlarmHandler(twoMs, false) == kj::none);
@@ -257,11 +249,11 @@ KJ_TEST("dirty alarm during handler does not cancel alarm") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
   test.setAlarm(twoMs);
   { auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false)); }
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(2ms)", "commit"});
+  test.expectCalls({"scheduleRun(2ms)", "commit"});
 }
 
 KJ_TEST("getAlarm() returns null during handler") {
@@ -269,7 +261,7 @@ KJ_TEST("getAlarm() returns null during handler") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   {
     auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false));
@@ -279,7 +271,7 @@ KJ_TEST("getAlarm() returns null during handler") {
     KJ_ASSERT(time == kj::none);
   }
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(none)", "commit"});
+  test.expectCalls({"scheduleRun(none)", "commit"});
 }
 
 KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
@@ -287,11 +279,11 @@ KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   { auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false)); }
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(none)", "commit"});
+  test.expectCalls({"scheduleRun(none)", "commit"});
   auto time = expectSync(test.getAlarm());
   KJ_ASSERT(time == kj::none);
 }
@@ -301,14 +293,14 @@ KJ_TEST("alarm handler handle does not clear alarm when dropped with writes") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   {
     auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false));
     test.setAlarm(twoMs);
   }
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(2ms)", "commit"});
+  test.expectCalls({"scheduleRun(2ms)", "commit"});
   auto time = expectSync(test.getAlarm());
   KJ_ASSERT(time == twoMs);
 }
@@ -318,7 +310,7 @@ KJ_TEST("can cancel deferred alarm deletion during handler") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   {
     auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false));
@@ -335,12 +327,12 @@ KJ_TEST("canceling deferred alarm deletion outside handler has no effect") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   { auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false)); }
   test.resolveCommits(1);
   test.actor.cancelDeferredAlarmDeletion();
-  test.expectCalls({"setAlarm(none)", "commit"});
+  test.expectCalls({"scheduleRun(none)", "commit"});
 
   auto time = expectSync(test.getAlarm());
   KJ_ASSERT(time == kj::none);
@@ -354,7 +346,7 @@ KJ_TEST("canceling deferred alarm deletion outside handler edge case") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   { auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false)); }
   test.actor.cancelDeferredAlarmDeletion();
@@ -371,7 +363,7 @@ KJ_TEST("canceling deferred alarm deletion is idempotent") {
   // Not sure if important, but matches ActorCache behavior.
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   {
     auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false));
@@ -391,7 +383,7 @@ KJ_TEST("handler alarm is not deleted when commit fails") {
 
   test.setAlarm(oneMs);
   test.resolveCommits(1);
-  test.expectCalls({"setAlarm(1ms)", "commit"});
+  test.expectCalls({"scheduleRun(1ms)", "commit"});
   {
     auto time = expectSync(test.getAlarm());
     KJ_ASSERT(time == oneMs);
@@ -406,7 +398,7 @@ KJ_TEST("handler alarm is not deleted when commit fails") {
   // TODO(soon): shouldn't call setAlarm to clear on rejected commit?  Or OK to assume client will
   // detect and call cancelDeferredAlarmDeletion() on failure?
   test.rejectCommits(1);
-  test.expectCalls({"setAlarm(none)", "commit"});
+  test.expectCalls({"scheduleRun(none)", "commit"});
 
   KJ_EXPECT_THROW_MESSAGE("a_rejected_commit", promise.wait(test.ws));
 }
