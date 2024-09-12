@@ -357,7 +357,7 @@ TestFixture::TestFixture(SetupParams&& params)
   KJ_IF_SOME(id, params.actorId) {
     worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
       auto makeActorCache = [](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
-                                ActorCache::Hooks& hooks) {
+                                ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
         return kj::heap<ActorCache>(
             kj::heap<server::EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate, hooks);
       };
