@@ -9,6 +9,7 @@ export const acceptEventStreamTest = {
       'http://example.org/accept-event-stream',
       { fetcher: env.subrequest }
     );
+    ok(eventsource instanceof EventTarget);
     strictEqual(eventsource.readyState, EventSource.CONNECTING);
     const { promise, resolve } = Promise.withResolvers();
     let opened = false;
