@@ -138,8 +138,7 @@ struct ActorSqliteTest final {
 KJ_TEST("initial alarm value is unset") {
   ActorSqliteTest test;
 
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == kj::none);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
   test.resolveCommits(0);
 }
 
@@ -150,8 +149,7 @@ KJ_TEST("can set and get alarm") {
   test.resolveCommits(1);
   test.expectCalls({"scheduleRun(1ms)", "commit"});
 
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == oneMs);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
   test.resolveCommits(0);
 }
 
@@ -165,8 +163,7 @@ KJ_TEST("alarm write happens transactionally with storage ops") {
   test.resolveCommits(1);
   test.expectCalls({"scheduleRun(1ms)", "commit"});
 
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == oneMs);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
   test.resolveCommits(0);
 }
 
@@ -177,16 +174,14 @@ KJ_TEST("can clear alarm") {
   test.resolveCommits(1);
   test.expectCalls({"scheduleRun(1ms)", "commit"});
 
-  auto initTime = expectSync(test.getAlarm());
-  KJ_ASSERT(initTime == oneMs);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
   test.resolveCommits(0);
 
   test.setAlarm(kj::none);
   test.resolveCommits(1);
   test.expectCalls({"scheduleRun(none)", "commit"});
 
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == kj::none);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
 KJ_TEST("can set alarm twice") {
@@ -197,8 +192,7 @@ KJ_TEST("can set alarm twice") {
   test.resolveCommits(1);
   test.expectCalls({"scheduleRun(2ms)", "commit"});
 
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == twoMs);
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
   test.resolveCommits(0);
 }
 
@@ -267,8 +261,7 @@ KJ_TEST("getAlarm() returns null during handler") {
     auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false));
     test.resolveCommits(0);
 
-    auto time = expectSync(test.getAlarm());
-    KJ_ASSERT(time == kj::none);
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
   }
   test.resolveCommits(1);
   test.expectCalls({"scheduleRun(none)", "commit"});
@@ -284,8 +277,7 @@ KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
   { auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false)); }
   test.resolveCommits(1);
   test.expectCalls({"scheduleRun(none)", "commit"});
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == kj::none);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
 KJ_TEST("alarm handler handle does not clear alarm when dropped with writes") {
@@ -301,8 +293,7 @@ KJ_TEST("alarm handler handle does not clear alarm when dropped with writes") {
   }
   test.resolveCommits(1);
   test.expectCalls({"scheduleRun(2ms)", "commit"});
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == twoMs);
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
 }
 
 KJ_TEST("can cancel deferred alarm deletion during handler") {
@@ -318,8 +309,7 @@ KJ_TEST("can cancel deferred alarm deletion during handler") {
   }
   test.resolveCommits(0);
 
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == oneMs);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
 KJ_TEST("canceling deferred alarm deletion outside handler has no effect") {
@@ -334,8 +324,7 @@ KJ_TEST("canceling deferred alarm deletion outside handler has no effect") {
   test.actor.cancelDeferredAlarmDeletion();
   test.expectCalls({"scheduleRun(none)", "commit"});
 
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == kj::none);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
 KJ_TEST("canceling deferred alarm deletion outside handler edge case") {
@@ -353,8 +342,7 @@ KJ_TEST("canceling deferred alarm deletion outside handler edge case") {
   test.resolveCommits(1);
   test.expectCalls({"commit"});
 
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == kj::none);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
 KJ_TEST("canceling deferred alarm deletion is idempotent") {
@@ -372,8 +360,7 @@ KJ_TEST("canceling deferred alarm deletion is idempotent") {
   }
   test.resolveCommits(0);
 
-  auto time = expectSync(test.getAlarm());
-  KJ_ASSERT(time == oneMs);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
 KJ_TEST("handler alarm is not deleted when commit fails") {
@@ -384,16 +371,12 @@ KJ_TEST("handler alarm is not deleted when commit fails") {
   test.setAlarm(oneMs);
   test.resolveCommits(1);
   test.expectCalls({"scheduleRun(1ms)", "commit"});
-  {
-    auto time = expectSync(test.getAlarm());
-    KJ_ASSERT(time == oneMs);
-  }
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
   {
     auto handle = test.actor.armAlarmHandler(oneMs, false);
 
-    auto time = expectSync(test.getAlarm());
-    KJ_ASSERT(time == kj::none);
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
   }
   // TODO(soon): shouldn't call setAlarm to clear on rejected commit?  Or OK to assume client will
   // detect and call cancelDeferredAlarmDeletion() on failure?
