@@ -99,22 +99,15 @@ async function profileAndExpectDeriveBitsFrames(inspectorClient) {
   assert.notEqual(max.count, 0);
 }
 
-// Regression test for https://github.com/cloudflare/workerd/issues/1754.
+// Regression test for:
+// - https://github.com/cloudflare/workerd/issues/1754
+// - https://github.com/cloudflare/workerd/issues/2564
 //
-// At one time, workerd produced only "(program)" frames.
-test('Profiler mostly sees deriveBits() frames', async () => {
-  let inspectorClient = await connectInspector(
-    await workerd.getListenInspectorPort()
-  );
-  await profileAndExpectDeriveBitsFrames(inspectorClient);
-  await inspectorClient.close();
-});
-
-// Regression test for https://github.com/cloudflare/workerd/issues/2564.
-//
-// At one time, workerd segfaulted on the second inspector connection.
-test('Can repeatedly reconnect the inspector and profiling still works', async () => {
-  for (let i = 0; i < 4; ++i) {
+// At one time, workerd profiling broke, and started producing only "(program)" frames. My original
+// attempt at a fix subsequently caused workerd to segfault on the second inspector connection. This
+// rather expensive test case exercises both regressions.
+test('Profiler mostly sees deriveBits() frames, and can safely reconnect', async () => {
+  for (let i = 0; i < 2; ++i) {
     let inspectorClient = await connectInspector(
       await workerd.getListenInspectorPort()
     );
