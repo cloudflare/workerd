@@ -248,9 +248,14 @@ public:
     return isValidating;
   }
 
-  static jsg::Ref<ArtifactBundler> makeDisabledBundler(
-      kj::Maybe<const PyodidePackageManager&> packageManager = kj::none) {
-    return jsg::alloc<ArtifactBundler>(packageManager, kj::none);
+  static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
+    return jsg::alloc<ArtifactBundler>(kj::none, kj::none);
+  }
+
+  // Creates an ArtifactBundler that only grants access to packages, and not a memory snapshot.
+  static jsg::Ref<ArtifactBundler> makePackagesOnlyBundler(
+      kj::Maybe<const PyodidePackageManager&> manager) {
+    return jsg::alloc<ArtifactBundler>(manager, kj::none);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
