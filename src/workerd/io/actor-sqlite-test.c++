@@ -82,18 +82,20 @@ struct ActorSqliteTest final {
                                                     : kj::Promise<void>(kj::READY_NOW)) {}
 
   ~ActorSqliteTest() noexcept(false) {
-    // Make sure if the output gate has been broken, the exception was reported. This is important
-    // to report errors thrown inside flush(), since those won't otherwise propagate into the test
-    // body.
     if (!unwindDetector.isUnwinding()) {
+      // Make sure if the output gate has been broken, the exception was reported. This is
+      // important to report errors thrown inside flush(), since those won't otherwise propagate
+      // into the test body.
       gateBrokenPromise.poll(ws);
+
+      ws.poll();
       expectCalls({}, "unexpected calls at end of test");
     }
   }
 
   kj::Promise<void> commitCallback() {
-    auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
     calls.add(kj::str("commit"));
+    auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
     commitFulfillers.add(kj::mv(fulfiller));
     return kj::mv(promise);
   }
@@ -139,7 +141,6 @@ KJ_TEST("initial alarm value is unset") {
   ActorSqliteTest test;
 
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
-  test.resolveCommits(0);
 }
 
 KJ_TEST("can set and get alarm") {
@@ -150,7 +151,6 @@ KJ_TEST("can set and get alarm") {
   test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
-  test.resolveCommits(0);
 }
 
 KJ_TEST("alarm write happens transactionally with storage ops") {
@@ -164,7 +164,6 @@ KJ_TEST("alarm write happens transactionally with storage ops") {
   test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
-  test.resolveCommits(0);
 }
 
 KJ_TEST("can clear alarm") {
@@ -193,7 +192,6 @@ KJ_TEST("can set alarm twice") {
   test.expectCalls({"scheduleRun(2ms)", "commit"});
 
   KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
-  test.resolveCommits(0);
 }
 
 KJ_TEST("setting duplicate alarm is no-op") {
@@ -207,7 +205,6 @@ KJ_TEST("setting duplicate alarm is no-op") {
   test.expectCalls({"scheduleRun(1ms)", "commit"});
 
   test.setAlarm(oneMs);
-  test.resolveCommits(0);
 }
 
 KJ_TEST("tells alarm handler to cancel when committed alarm is empty") {
@@ -223,7 +220,6 @@ KJ_TEST("tells alarm handler to cancel when committed alarm is empty") {
   test.ws.poll();  // needs additional poll?
 
   KJ_ASSERT(test.actor.armAlarmHandler(oneMs, false) == kj::none);
-  test.resolveCommits(0);
 }
 
 KJ_TEST("tells alarm handler to cancel when committed alarm does not match requested alarm") {
@@ -235,7 +231,6 @@ KJ_TEST("tells alarm handler to cancel when committed alarm does not match reque
   test.ws.poll();  // needs additional poll?
 
   KJ_ASSERT(test.actor.armAlarmHandler(twoMs, false) == kj::none);
-  test.resolveCommits(0);
 }
 
 KJ_TEST("dirty alarm during handler does not cancel alarm") {
@@ -307,7 +302,6 @@ KJ_TEST("can cancel deferred alarm deletion during handler") {
     auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false));
     test.actor.cancelDeferredAlarmDeletion();
   }
-  test.resolveCommits(0);
 
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
@@ -358,7 +352,6 @@ KJ_TEST("canceling deferred alarm deletion is idempotent") {
     test.actor.cancelDeferredAlarmDeletion();
     test.actor.cancelDeferredAlarmDeletion();
   }
-  test.resolveCommits(0);
 
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
