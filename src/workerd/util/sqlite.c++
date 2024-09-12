@@ -886,6 +886,12 @@ SqliteDatabase::Statement SqliteDatabase::prepare(
       *this, regulator, prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
 
+uint SqliteDatabase::Statement::bindingCount() {
+  int result = sqlite3_bind_parameter_count(stmt);
+  KJ_ASSERT(result >= 0);
+  return result;
+}
+
 SqliteDatabase::Query::Query(SqliteDatabase& db,
     const Regulator& regulator,
     Statement& statement,

@@ -214,6 +214,8 @@ public:
   template <typename... Params>
   Query run(Params&&... bindings);
 
+  uint bindingCount();
+
   operator sqlite3_stmt*() {
     return stmt;
   }

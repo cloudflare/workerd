@@ -17,10 +17,12 @@ public:
   SqlStorage(jsg::Ref<DurableObjectStorage> storage);
   ~SqlStorage();
 
-  using BindingValue = kj::Maybe<kj::OneOf<kj::Array<const byte>, kj::String, double>>;
+  using NonNullBindingValue = kj::OneOf<kj::Array<const byte>, kj::String, double>;
+  using BindingValue = kj::Maybe<NonNullBindingValue>;
 
   class Cursor;
   class Statement;
+  class BoundStatement;
   struct IngestResult;
 
   // One value returned from SQL. Note that we intentionally return StringPtr instead of String
@@ -37,11 +39,20 @@ public:
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
+  // Backwards-compatibility API for D1. There's no reason to use this in DO.
+  //
+  // Return value is an array of arrays of SqlRows which have already been converted to JS values.
+  // This conversion has to be done as we go because the StringPtrs in each row are invalidated
+  // as soon as we proceed to the next row.
+  jsg::JsArray batch(jsg::Lock& js,
+      kj::Array<kj::OneOf<jsg::Ref<Statement>, jsg::Ref<BoundStatement>>> statements);
+
   double getDatabaseSize(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
     JSG_METHOD(prepare);
+    JSG_METHOD(batch);
 
     // Make sure that the 'ingest' function is still experimental-only if and when
     // the SQL API becomes publicly available.
@@ -76,6 +87,9 @@ private:
   kj::Maybe<uint> pageSize;
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaPageCount;
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaGetMaxPageCount;
+  kj::Maybe<IoOwn<SqliteDatabase::Statement>> beginBatch;
+  kj::Maybe<IoOwn<SqliteDatabase::Statement>> commitBatch;
+  kj::Maybe<IoOwn<SqliteDatabase::Statement>> rollbackBatch;
 
   template <size_t size, typename... Params>
   SqliteDatabase::Query execMemoized(SqliteDatabase& db,
@@ -101,6 +115,19 @@ private:
       return pageSize.emplace(db.run("PRAGMA page_size;").getInt64(0));
     }
   }
+
+  // Utility functions to convert SqlValue, SqlRow, and Array<SqlValue> to JS values. In some
+  // cases we end up having to do this conversion before actually returning, so we can't have
+  // JSG do it. We can't use jsg::TypeHandler because SqlValue contains StringPtr, which doesn't
+  // support unwrapping. We don't actually ever use unwrapping, but requesting a TypeHandler forces
+  // JSG to try to generate the code for unwrapping, leading to compiler errors.
+  //
+  // TODO(cleanup): Think hard about how to make JSG support this better. Part of the problem is
+  //   that we're being too clever with optimizations to avoid copying strings when we don't need
+  //   to.
+  static jsg::JsValue wrapSqlValue(jsg::Lock& js, SqlValue value);
+  static jsg::JsObject wrapSqlRow(jsg::Lock& js, SqlRow row);
+  static jsg::JsArray wrapSqlRowRaw(jsg::Lock& js, kj::Array<SqlValue> row);
 };
 
 class SqlStorage::Cursor final: public jsg::Object {
@@ -122,13 +149,65 @@ public:
   double getRowsRead();
   double getRowsWritten();
 
-  kj::Array<jsg::JsRef<jsg::JsString>> getColumnNames(jsg::Lock& js);
+  // Get all results as an array and consume the cursor.
+  //
+  // Returns an array of SqlRows. However, each row must be converted into JS as we go because
+  // it could contain StringPtrs that are invalidated as soon as we proceed to the next row.
+  jsg::JsArray getResults(jsg::Lock& js);
+
+  // `meta` property, for compatibility with D1 API.
+  class Meta final: public jsg::Object {
+  public:
+    Meta(jsg::Ref<Cursor> cursor): cursor(kj::mv(cursor)) {}
+
+    // We can't actually provide duration for Spectre reasons, so we always return zero.
+    double getDuration() { return 0; }
+
+    double getRowsRead() { return cursor->getRowsRead(); }
+    double getRowsWritten() { return cursor->getRowsWritten(); }
+
+    JSG_RESOURCE_TYPE(Meta) {
+      // Instance properties so that if you log the whole thing you actually see the values.
+      JSG_READONLY_INSTANCE_PROPERTY(duration, getDuration);
+      JSG_READONLY_INSTANCE_PROPERTY(rowsRead, getRowsRead);
+      JSG_READONLY_INSTANCE_PROPERTY(rowsWritten, getRowsWritten);
+
+      // Unfortunately, D1 named these properties with underscores, so fake it out.
+      JSG_READONLY_PROTOTYPE_PROPERTY(rows_read, getRowsRead);
+      JSG_READONLY_PROTOTYPE_PROPERTY(rows_written, getRowsWritten);
+    }
+
+    void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+      tracker.trackField("cursor", cursor);
+    }
+
+  private:
+    jsg::Ref<Cursor> cursor;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(cursor);
+    }
+  };
+
+  jsg::Ref<Meta> getMeta();
+
+  // Returns array of strings. We don't return KJ types because for performance we already have
+  // the column names in V8 strings so we just need this to build a V8 array from them.
+  jsg::JsArray getColumnNames(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(Cursor) {
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);
     JSG_READONLY_PROTOTYPE_PROPERTY(columnNames, getColumnNames);
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsRead, getRowsRead);
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
+
+    // Reading this property consumes the cursor. We make it a lazy instance property, rather than
+    // a regular getter property, so that if you read it twice you don't get an empty array the
+    // second time.
+    JSG_LAZY_INSTANCE_PROPERTY(results, getResults);
+
+    JSG_READONLY_PROTOTYPE_PROPERTY(meta, getMeta);
   }
 
   JSG_ITERATOR(RowIterator, rows, SqlRow, jsg::Ref<Cursor>, rowIteratorNext);
@@ -234,9 +313,42 @@ public:
   Statement(SqliteDatabase::Statement&& statement);
 
   jsg::Ref<Cursor> run(jsg::Arguments<BindingValue> bindings);
+  jsg::Ref<BoundStatement> bind(jsg::Arguments<BindingValue> bindings);
+
+  struct RawOptions {
+    bool columnNames = false;
+
+    JSG_STRUCT(columnNames);
+  };
+
+  // D1 compatibility methods: raw() and first(). These get a little hacky because they both take
+  // optional additional options, which must appear after the argument bindings, but the number of
+  // bindings depends on the query, so we can't have JSG unpack this for us.
+
+  // Returns an array of rows, where each row is represented as an array of values, not SqlRow.
+  // Like Cursor::getResults(), raw() must translate each result row to JS as it iterates.
+  jsg::JsArray raw(
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      const jsg::TypeHandler<BindingValue>& bindingTypeHandler,
+      const jsg::TypeHandler<RawOptions>& optionsTypeHandler);
+
+  // Returns either one SqlRow or one SqlValue depending on options.
+  // This returns JsValue mainly because `kj::Maybe<kj::OneOf<SqlRow, SqlValue>>` expands to
+  // too many nested layers of Maybe and OneOf for JSG to handle and it ends up barfing up 3MB
+  // worth of compiler errors.
+  jsg::JsValue first(
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      const jsg::TypeHandler<BindingValue>& bindingTypeHandler);
 
   JSG_RESOURCE_TYPE(Statement) {
     JSG_CALLABLE(run);
+    JSG_METHOD(run);
+    JSG_METHOD_NAMED(all, run);
+
+    // D1 compatibility APIs.
+    JSG_METHOD(bind);
+    JSG_METHOD(raw);
+    JSG_METHOD(first);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -254,6 +366,48 @@ private:
   // All queries from the same prepared statement have the same column names, so we can cache them
   // on the statement.
   Cursor::CachedColumnNames cachedColumnNames;
+
+  jsg::JsArray rawImpl(jsg::Lock& js, jsg::Arguments<BindingValue> bindings,
+      const Statement::RawOptions& options);
+  jsg::JsValue firstImpl(
+      jsg::Lock& js, jsg::Arguments<BindingValue> bindings, jsg::Optional<jsg::JsString> column);
+
+  friend class Cursor;
+  friend class BoundStatement;
+};
+
+// Compatibility shim to emulate the D1 API, which uses `.bind(...).run()` instead of `.run(...)`.
+class SqlStorage::BoundStatement final: public jsg::Object {
+public:
+  BoundStatement(jsg::Ref<Statement> statement, jsg::Arguments<BindingValue> bindings)
+      : statement(kj::mv(statement)), bindings(kj::mv(bindings)) {}
+
+  jsg::Ref<Cursor> run();
+
+  // Like the methods of `Statement` but this time we don't have to deal with bindings.
+  jsg::JsArray raw(jsg::Lock& js, jsg::Optional<Statement::RawOptions> options);
+  jsg::JsValue first(jsg::Lock& js, jsg::Optional<jsg::JsString> column);
+
+  JSG_RESOURCE_TYPE(BoundStatement) {
+    JSG_METHOD(run);
+    JSG_METHOD_NAMED(all, run);
+    JSG_METHOD(raw);
+    JSG_METHOD(first);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("statement", statement);
+  }
+
+private:
+  jsg::Ref<Statement> statement;
+  jsg::Arguments<BindingValue> bindings;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(statement);
+  }
+
+  jsg::Arguments<BindingValue> cloneBindings();
 
   friend class Cursor;
 };
@@ -277,7 +431,8 @@ struct SqlStorage::IngestResult {
   api::SqlStorage, api::SqlStorage::Statement, api::SqlStorage::Cursor,                            \
       api::SqlStorage::IngestResult, api::SqlStorage::Cursor::RowIterator,                         \
       api::SqlStorage::Cursor::RowIterator::Next, api::SqlStorage::Cursor::RawIterator,            \
-      api::SqlStorage::Cursor::RawIterator::Next
+      api::SqlStorage::Cursor::RawIterator::Next, api::SqlStorage::BoundStatement,                 \
+      api::SqlStorage::Cursor::Meta, api::SqlStorage::Statement::RawOptions
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

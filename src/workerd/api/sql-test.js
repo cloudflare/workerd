@@ -61,6 +61,32 @@ async function test(state) {
     assert.equal(result[2]['value'], 3);
   }
 
+  {
+    // Test multiple rows using .results
+    const cursor =
+      sql.exec(
+        'SELECT 1 AS value\n' +
+          'UNION ALL\n' +
+          'SELECT "foo" AS value\n' +
+          'UNION ALL\n' +
+          'SELECT 3 AS value;'
+      );
+    assert.deepEqual(cursor.results, [{value: 1}, {value: "foo"}, {value: 3}]);
+
+    // Reading again works.
+    assert.deepEqual(cursor.results, [{value: 1}, {value: "foo"}, {value: 3}]);
+
+    // The cursor was consumed, though.
+    assert.deepEqual([...cursor], []);
+
+    // This query didn't read or write anything.
+    assert.deepEqual({...cursor.meta}, {duration: 0, rowsRead: 0, rowsWritten: 0});
+
+    // Deep D1 back-compat for fields that were named with underscores...
+    assert.strictEqual(cursor.meta.rows_read, 0);
+    assert.strictEqual(cursor.meta.rows_written, 0);
+  }
+
   // Test partial query ingestion
   assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;    `).remainder, '    ');
   assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;`).remainder, '');
@@ -740,7 +766,11 @@ async function test(state) {
     sql.exec(`CREATE TABLE abc (a INT, b INT, c INT);`);
     sql.exec(`CREATE TABLE cde (c INT, d INT, e INT);`);
     sql.exec(`INSERT INTO abc VALUES (1,2,3),(4,5,6);`);
-    sql.exec(`INSERT INTO cde VALUES (7,8,9),(1,2,3);`);
+    const ins = sql.exec(`INSERT INTO cde VALUES (7,8,9),(1,2,3);`);
+
+    // Test cursor.meta.rowsWritten
+    assert.deepEqual({...ins.meta}, {duration: 0, rowsRead: 0, rowsWritten: 2});
+    assert.strictEqual(ins.meta.rows_written, 2);
 
     const stmt = sql.prepare(`SELECT * FROM abc, cde`);
 
@@ -775,6 +805,10 @@ async function test(state) {
     const execIterator = sql.exec(`SELECT * FROM abc, cde`);
     assert.deepEqual(execIterator.columnNames, ['a', 'b', 'c', 'c', 'd', 'e']);
     assert.equal(Array.from(execIterator.raw())[0].length, 6);
+
+    // Test cursor.meta.rowsRead
+    assert.deepEqual({...execIterator.meta}, {duration: 0, rowsRead: 6, rowsWritten: 0});
+    assert.strictEqual(execIterator.meta.rows_read, 6);
   }
 
   await scheduler.wait(1);
@@ -1040,6 +1074,57 @@ async function testIoStats(storage) {
     const rows = Array.from(cursor);
     assert.deepEqual(cursor.rowsRead, 2);
     assert.deepEqual(cursor.rowsWritten, 0);
+  }
+
+  // Test bind() and batch()
+  {
+    sql.exec("CREATE TABLE counter (count INTEGER)");
+    sql.exec("INSERT INTO counter VALUES (1)");
+
+    let increment = sql.prepare("UPDATE counter SET count = count + ? RETURNING count");
+
+    assert.deepEqual(increment.run(2).results, [{count: 3}]);
+
+    let bound = increment.bind(3);
+    assert.deepEqual(bound.run().results, [{count: 6}]);
+    assert.deepEqual(bound.raw(), [[9]]);
+
+    let results = sql.batch([
+      increment.bind(2),
+      increment.bind(5),
+      sql.prepare("SELECT count AS foo FROM counter"),
+      increment.bind(3),
+    ]);
+
+    assert.deepEqual(results, [
+      [{ count: 11 }],
+      [{ count: 16 }],
+      [{ foo: 16 }],
+      [{ count: 19 }],
+    ]);
+
+    // Batches are transactional -- an error rolls back the batch.
+    assert.throws(
+      () =>
+        sql.batch([
+          increment.bind(11),
+          sql.prepare("SELECT * FROM no_such_table"),
+        ]),
+      /Error: no such table: no_such_table/
+    );
+
+    // Increment of 11 was rolled back.
+    assert.deepEqual(sql.exec("SELECT count FROM counter").results, [{count: 19}]);
+
+    // Try passing `columnNames` option to `raw()`.
+    assert.deepEqual(increment.raw(1, {columnNames: true}), [["count"], [20]]);
+    assert.deepEqual(bound.raw({columnNames: true}), [["count"], [23]]);
+
+    // Try first()
+    assert.deepEqual(increment.first(2), {count: 25});
+    assert.deepEqual(increment.first(2, "count"), 27);
+    assert.deepEqual(bound.first(), {count: 30});
+    assert.deepEqual(bound.first("count"), 33);
   }
 }
 
