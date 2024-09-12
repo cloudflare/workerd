@@ -747,8 +747,6 @@ export class Brotli extends ZlibBase {
         : new zlibUtil.BrotliEncoder(mode);
 
     const _writeState = new Uint32Array(2);
-    super(options ?? {}, mode, handle, brotliDefaultOptions);
-    this._writeState = _writeState;
 
     // TODO(addaleax): Sometimes we generate better error codes in C++ land,
     // e.g. ERR_BROTLI_PARAM_SET_FAILED -- it's hard to access them with
@@ -762,5 +760,8 @@ export class Brotli extends ZlibBase {
     ) {
       throw new ERR_ZLIB_INITIALIZATION_FAILED();
     }
+
+    super(options ?? {}, mode, handle, brotliDefaultOptions);
+    this._writeState = _writeState;
   }
 }
