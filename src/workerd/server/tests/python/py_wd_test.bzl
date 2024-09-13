@@ -17,6 +17,6 @@ def py_wd_test(
         name = name,
         args = args,
         size = size,
-        tags = tags + ["py_wd_test"]
+        tags = tags + ["py_wd_test"],
         **kwargs
     )
