@@ -234,7 +234,8 @@ KJ_TEST("compatibility flag parsing") {
       " globalFetchStrictlyPublic = false,"
       " newModuleRegistry = false,"
       " allowCustomPorts = true,"
-      " internalWritableStreamAbortClearsQueue = true)",
+      " internalWritableStreamAbortClearsQueue = true,"
+      " nodeJsZlib = true)",
       {}, CompatibilityDateValidation::FUTURE_FOR_TEST, false, false);
   expectCompileCompatibilityFlags("2024-09-22", {"nodejs_compat"},
       "(formDataParserSupportsFiles = true,"

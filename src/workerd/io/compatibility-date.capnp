@@ -584,7 +584,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   nodeJsZlib @59 :Bool
       $compatEnableFlag("nodejs_zlib")
       $compatDisableFlag("no_nodejs_zlib")
-      $experimental;
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-23");
   # Enables node:zlib implementation while it is in-development.
   # Once the node:zlib implementation is complete, this will be automatically enabled when
   # nodejs_compat is enabled.
