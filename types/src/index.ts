@@ -15,6 +15,7 @@ import {
   createIteratorTransformer,
   createOverrideDefineTransformer,
 } from "./transforms";
+import { createClassToInterfaceTransformer } from "./transforms/class-to-interface";
 
 const definitionsHeader = `/*! *****************************************************************************
 Copyright (c) Cloudflare. All rights reserved.
@@ -75,6 +76,7 @@ export function printDefinitions(
     // Run global scope transformer after overrides so members added in
     // overrides are extracted
     createGlobalScopeTransformer(checker),
+    createClassToInterfaceTransformer(["Request", "Response", "WebSocket"]),
     // TODO: enable this once we've figured out how not to expose internal modules
     // createInternalNamespaceTransformer(root, structureMap),
     createCommentsTransformer(commentData),
