@@ -5,9 +5,34 @@
 #include "actor-sqlite.h"
 #include <algorithm>
 #include <workerd/jsg/exception.h>
+#include <workerd/util/sentry.h>
 #include "io-gate.h"
 
 namespace workerd {
+
+kj::StringPtr KJ_STRINGIFY(ActorSqlite::KnownAlarmTime::Status status) {
+  switch (status) {
+    case ActorSqlite::KnownAlarmTime::Status::CLEAN:
+      return "clean";
+    case ActorSqlite::KnownAlarmTime::Status::DIRTY:
+      return "dirty";
+    case ActorSqlite::KnownAlarmTime::Status::FLUSHING:
+      return "flushing";
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::StringPtr KJ_STRINGIFY(ActorSqlite::DeferredAlarmDelete::Status status) {
+  switch (status) {
+    case ActorSqlite::DeferredAlarmDelete::Status::WAITING:
+      return "waiting";
+    case ActorSqlite::DeferredAlarmDelete::Status::READY:
+      return "ready";
+    case ActorSqlite::DeferredAlarmDelete::Status::FLUSHING:
+      return "flushing";
+  }
+  KJ_UNREACHABLE;
+}
 
 ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
     OutputGate& outputGate,
@@ -235,10 +260,11 @@ void ActorSqlite::requireNotBroken() {
 
 void ActorSqlite::maybeDeleteDeferredAlarm() {
   KJ_IF_SOME(d, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-    // TODO(now): Do we need to do anything special, if we've already started flushing the alarm?
+    // Pretty sure this can't happen; just logging for now, could eventually be made an assert.
+    if (d.status != DeferredAlarmDelete::Status::WAITING) {
+      LOG_WARNING_ONCE("unexpected status when trying to delete alarm", d.status);
+    }
     d.status = DeferredAlarmDelete::Status::READY;
-    // TODO(now): Do we need to do anything special to ensure that the commit code for this sqlite
-    // state change completes?
     metadata.setAlarm(kj::none);
   }
 }
@@ -467,10 +493,13 @@ kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bo
 }
 
 void ActorSqlite::cancelDeferredAlarmDeletion() {
-  if (currentAlarmTime.is<DeferredAlarmDelete>()) {
-    // TODO(now): Should we do anything special if client tries to cancel alarm deletion after
-    // flush has already been issued?
-    // TODO(now): Is it correct to reset alarm to CLEAN state here?
+  KJ_IF_SOME(d, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+    if (d.status != DeferredAlarmDelete::Status::WAITING) {
+      // Pretty sure this can't happen.
+      LOG_WARNING_ONCE("unexpected status when trying to cancel deleted alarm", d.status);
+    }
+    // Unsure if it's necessarily correct to reset status to CLEAN here, but it's worked OK for
+    // ActorCache so far.
     currentAlarmTime = KnownAlarmTime{
       .status = KnownAlarmTime::Status::CLEAN,
       .time = metadata.getAlarm(),

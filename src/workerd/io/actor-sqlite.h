@@ -210,6 +210,9 @@ private:
   // Called when DeferredAlarmDeleter is destroyed, to delete alarm if not reset or cancelled
   // during handler.
   void maybeDeleteDeferredAlarm();
+
+  friend kj::StringPtr KJ_STRINGIFY(KnownAlarmTime::Status status);
+  friend kj::StringPtr KJ_STRINGIFY(DeferredAlarmDelete::Status status);
 };
 
 }  // namespace workerd
