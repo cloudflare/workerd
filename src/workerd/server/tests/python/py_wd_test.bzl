@@ -6,6 +6,7 @@ def py_wd_test(
         name = None,
         args = [],
         size = "enormous",
+        tags = [],
         **kwargs):
     data += ["pyodide_dev.capnp.bin@rule"]
     args += ["--pyodide-bundle-disk-cache-dir", "$(location pyodide_dev.capnp.bin@rule)/.."]
@@ -16,5 +17,6 @@ def py_wd_test(
         name = name,
         args = args,
         size = size,
+        tags = tags + ["py_wd_test"],
         **kwargs
     )
