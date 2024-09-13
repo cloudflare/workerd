@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/api/streams/compression.h>
 
 #include <zlib.h>
 
@@ -98,10 +99,7 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(ZlibContext);
 
-  void setBuffers(kj::ArrayPtr<kj::byte> input,
-      uint32_t inputLength,
-      kj::ArrayPtr<kj::byte> output,
-      uint32_t outputLength);
+  void setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
 
   void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
   void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
@@ -145,6 +143,10 @@ public:
   void setAvailOut(uint value) {
     stream.avail_out = value;
   };
+
+  z_stream* getStream() {
+    return &stream;
+  }
 
   // Zlib
   void initialize(int _level,
@@ -205,10 +207,7 @@ class BrotliContext {
 public:
   explicit BrotliContext(ZlibMode _mode): mode(_mode) {}
   KJ_DISALLOW_COPY(BrotliContext);
-  void setBuffers(kj::ArrayPtr<kj::byte> input,
-      uint32_t inputLength,
-      kj::ArrayPtr<kj::byte> output,
-      uint32_t outputLength);
+  void setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
   void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
   void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
   void setFlush(int flush);
@@ -291,19 +290,6 @@ public:
   ZlibUtil() = default;
   ZlibUtil(jsg::Lock&, const jsg::Url&) {}
 
-  // A custom allocator to be used by the zlib and brotli libraries
-  // The current implementation stores allocations in a hash map.
-  // TODO: Use an arena allocator implementation instead of hashing pointers in order to improve performance
-  class Allocator final {
-  public:
-    static void* AllocForZlib(void* data, uInt items, uInt size);
-    static void* AllocForBrotli(void* data, size_t size);
-    static void FreeForZlib(void* data, void* pointer);
-
-  private:
-    kj::HashMap<void*, kj::Array<kj::byte>> allocations;
-  };
-
   template <class CompressionContext>
   class CompressionStream: public jsg::Object {
   public:
@@ -319,12 +305,8 @@ public:
     bool checkError(jsg::Lock& js);
     void emitError(jsg::Lock& js, const CompressionError& error);
     template <bool async>
-    void writeStream(jsg::Lock& js,
-        int flush,
-        kj::ArrayPtr<kj::byte> input,
-        uint32_t inputLength,
-        kj::ArrayPtr<kj::byte> output,
-        uint32_t outputLength);
+    void writeStream(
+        jsg::Lock& js, int flush, kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
     void setErrorHandler(CompressionStreamErrorHandler handler) {
       errorHandler = kj::mv(handler);
     }
@@ -360,7 +342,7 @@ public:
     // Used to store allocations in Brotli* operations.
     // This declaration should be physically positioned before
     // context to avoid `heap-use-after-free` ASan error.
-    Allocator allocator;
+    CompressionAllocator allocator;
 
   private:
     CompressionContext context_;
