@@ -12,21 +12,12 @@ import { createClassToInterfaceTransformer } from "../../src/transforms/class-to
 
 test("createClassToInterfaceTransformer: transforms class to interface", () => {
   const source = `
-    /**
-     * MyClass
-     */
     class MyClass<T = void, U = void> {
-      /* constructor */
       constructor(str: string): MyClass;
-      /* prop */
       prop: T;
-      /* method */
       method(): U {}
-      /* getter */
       get accessor(): number { return 42; }
-      /* static method */
       static staticMethod(str?: string): void {}
-      /* private method */
       private privateMethod() {}
     }
   `;
@@ -34,20 +25,12 @@ test("createClassToInterfaceTransformer: transforms class to interface", () => {
   const expectedOutput = `
     declare var MyClass: {
       prototype: MyClass;
-      /* constructor */
       new <T = void, U = void>(str: string): MyClass<T, U>;
-      /* static method */
       staticMethod(str?: string): void;
     };
-    /**
-     * MyClass
-     */
     interface MyClass<T = void, U = void> {
-      /* prop */
       prop: T;
-      /* method */
       method(): U;
-      /* getter */
       accessor: number;
     }
   `;
