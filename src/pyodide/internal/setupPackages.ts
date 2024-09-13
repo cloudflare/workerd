@@ -1,8 +1,12 @@
 import { parseTarInfo } from 'pyodide-internal:tar';
 import { createTarFS } from 'pyodide-internal:tarfs';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
-import { default as LOCKFILE } from 'pyodide-internal:generated/pyodide-lock.json';
-import { REQUIREMENTS, WORKERD_INDEX_URL } from 'pyodide-internal:metadata';
+import {
+  REQUIREMENTS,
+  LOAD_WHEELS_FROM_R2,
+  LOCKFILE,
+  LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
+} from 'pyodide-internal:metadata';
 import { simpleRunPython } from 'pyodide-internal:util';
 
 const canonicalizeNameRegex = /[-_.]+/g;
@@ -122,22 +126,25 @@ class SitePackagesDir {
  * This also returns the list of soFiles in the resulting site-packages
  * directory so we can preload them.
  */
-export function buildSitePackages(
-  requirements: Set<string>
-): [SitePackagesDir, boolean] {
+export function buildSitePackages(requirements: Set<string>): SitePackagesDir {
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo();
 
-  let LOAD_WHEELS_FROM_R2 = true;
   let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
-  if (bigTarInfo.children!.size > 10) {
-    LOAD_WHEELS_FROM_R2 = false;
+
+  // Currently, we include all packages within the big bundle in Edgeworker.
+  // During this transitionary period, we add the option (via autogate)
+  // to load packages from GCS (in which case they are accessible through the ArtifactBundler)
+  // or to simply use the packages within the big bundle. The latter is not ideal
+  // since we're locked to a specific packages version, so we will want to move away
+  // from it eventually.
+  if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
     requirements.forEach((r) => requirementsInBigBundle.add(r));
   }
 
   const res = new SitePackagesDir();
   res.addBigBundle(bigTarInfo, bigTarSoFiles, requirementsInBigBundle);
 
-  return [res, LOAD_WHEELS_FROM_R2];
+  return res;
 }
 
 /**
@@ -188,8 +195,8 @@ export function mountLib(Module: Module, info: TarFSInfo): void {
   const site_packages = getSitePackagesPath(Module);
   Module.FS.mkdirTree(site_packages);
   Module.FS.mkdirTree('/session/metadata');
-  if (!LOAD_WHEELS_FROM_R2) {
-    // if we are not loading additional wheels from R2, then we're done
+  if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
+    // if we are not loading additional wheels, then we're done
     // with site-packages and we can mount it here. Otherwise, we must mount it in
     // loadPackages().
     Module.FS.mount(tarFS, { info }, site_packages);
@@ -253,6 +260,4 @@ function addPackageToLoad(
 
 export { REQUIREMENTS };
 export const TRANSITIVE_REQUIREMENTS = getTransitiveRequirements();
-export const [SITE_PACKAGES, LOAD_WHEELS_FROM_R2] = buildSitePackages(
-  TRANSITIVE_REQUIREMENTS
-);
+export const SITE_PACKAGES = buildSitePackages(TRANSITIVE_REQUIREMENTS);

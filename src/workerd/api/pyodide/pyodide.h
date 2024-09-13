@@ -1,5 +1,6 @@
 #pragma once
 
+#include "workerd/util/wait-list.h"
 #include <kj/array.h>
 #include <kj/debug.h>
 #include <kj/common.h>
@@ -49,8 +50,10 @@ struct PythonConfig {
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
 class PackagesTarReader: public jsg::Object {
+  kj::ArrayPtr<const kj::byte> source;
+
 public:
-  PackagesTarReader() = default;
+  PackagesTarReader(kj::ArrayPtr<const kj::byte> src = PYODIDE_PACKAGES_TAR.get()): source(src) {};
 
   int read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf);
 
@@ -67,10 +70,13 @@ private:
   kj::Array<kj::String> names;
   kj::Array<kj::Array<kj::byte>> contents;
   kj::Array<kj::String> requirements;
+  kj::String packagesVersion;
+  kj::String packagesLock;
   bool isWorkerdFlag;
   bool isTracingFlag;
   bool snapshotToDisk;
   bool createBaselineSnapshot;
+  bool usePackagesInArtifactBundler;
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
 public:
@@ -78,19 +84,25 @@ public:
       kj::Array<kj::String> names,
       kj::Array<kj::Array<kj::byte>> contents,
       kj::Array<kj::String> requirements,
+      kj::String packagesVersion,
+      kj::String packagesLock,
       bool isWorkerd,
       bool isTracing,
       bool snapshotToDisk,
       bool createBaselineSnapshot,
+      bool usePackagesInArtifactBundler,
       kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
       : mainModule(kj::mv(mainModule)),
         names(kj::mv(names)),
         contents(kj::mv(contents)),
         requirements(kj::mv(requirements)),
+        packagesVersion(kj::mv(packagesVersion)),
+        packagesLock(kj::mv(packagesLock)),
         isWorkerdFlag(isWorkerd),
         isTracingFlag(isTracing),
         snapshotToDisk(snapshotToDisk),
         createBaselineSnapshot(createBaselineSnapshot),
+        usePackagesInArtifactBundler(usePackagesInArtifactBundler),
         memorySnapshot(kj::mv(memorySnapshot)) {}
 
   bool isWorkerd() {
@@ -136,6 +148,18 @@ public:
   }
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
 
+  bool shouldUsePackagesInArtifactBundler() {
+    return usePackagesInArtifactBundler;
+  }
+
+  kj::String getPackagesVersion() {
+    return kj::str(packagesVersion);
+  }
+
+  kj::String getPackagesLock() {
+    return kj::str(packagesLock);
+  }
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -149,6 +173,9 @@ public:
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
+    JSG_METHOD(shouldUsePackagesInArtifactBundler);
+    JSG_METHOD(getPackagesVersion);
+    JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
   }
 
@@ -176,15 +203,22 @@ struct MemorySnapshotResult {
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler: public jsg::Object {
 public:
+  kj::Maybe<const PyodidePackageManager&> packageManager;
+  // ^ lifetime should be contained by lifetime of ArtifactBundler since there is normally one worker set for the whole process. see worker-set.h
+  // In other words:
+  // WorkerSet lifetime = PackageManager lifetime and Worker lifetime = ArtifactBundler lifetime and WorkerSet owns and will outlive Worker, so PackageManager outlives ArtifactBundler
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
-  ArtifactBundler(kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
-      : storedSnapshot(kj::none),
+  ArtifactBundler(kj::Maybe<const PyodidePackageManager&> packageManager,
+      kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
+      : packageManager(packageManager),
+        storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
         isValidating(false) {};
 
   ArtifactBundler(bool isValidating = false)
-      : storedSnapshot(kj::none),
+      : packageManager(kj::none),
+        storedSnapshot(kj::none),
         existingSnapshot(kj::none),
         isValidating(isValidating) {};
 
@@ -215,7 +249,13 @@ public:
   }
 
   static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
-    return jsg::alloc<ArtifactBundler>();
+    return jsg::alloc<ArtifactBundler>(kj::none, kj::none);
+  }
+
+  // Creates an ArtifactBundler that only grants access to packages, and not a memory snapshot.
+  static jsg::Ref<ArtifactBundler> makePackagesOnlyBundler(
+      kj::Maybe<const PyodidePackageManager&> manager) {
+    return jsg::alloc<ArtifactBundler>(manager, kj::none);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -229,6 +269,16 @@ public:
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
+  kj::Maybe<jsg::Ref<PackagesTarReader>> getPackage(kj::String path) {
+    KJ_IF_SOME(pacman, packageManager) {
+      KJ_IF_SOME(ptr, pacman.getPyodidePackage(path)) {
+        return jsg::alloc<PackagesTarReader>(ptr);
+      }
+    }
+
+    return kj::none;
+  }
+
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
@@ -237,6 +287,7 @@ public:
     JSG_METHOD(isEwValidating);
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
+    JSG_METHOD(getPackage);
   }
 
 private:

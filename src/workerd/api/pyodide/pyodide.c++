@@ -11,10 +11,8 @@ namespace workerd::api::pyodide {
 
 const kj::Maybe<jsg::Bundle::Reader> PyodideBundleManager::getPyodideBundle(
     kj::StringPtr version) const {
-  KJ_IF_SOME(t, bundles.lockShared()->find(version)) {
-    return t.bundle;
-  }
-  return kj::none;
+  return bundles.lockShared()->find(version).map(
+      [](const MessageBundlePair& t) { return t.bundle; });
 }
 
 void PyodideBundleManager::setPyodideBundleData(
@@ -53,7 +51,7 @@ static int readToTarget(
 }
 
 int PackagesTarReader::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
-  return readToTarget(PYODIDE_PACKAGES_TAR.get(), offset, buf);
+  return readToTarget(source, offset, buf);
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(jsg::Lock& js) {
@@ -159,10 +157,13 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
     names.finish(),
     contents.finish(),
     requirements.finish(),
+    kj::str("20240829.4"), // TODO: hardcoded version & lock
+    kj::str(PYODIDE_LOCK.toString()),
     true      /* isWorkerd */,
     false     /* isTracing */,
     snapshotToDisk,
     createBaselineSnapshot,
+    false,    /* usePackagesInArtifactBundler */
     kj::none  /* memorySnapshot */
   );
   // clang-format on
