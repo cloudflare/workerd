@@ -123,6 +123,9 @@ struct ActorSqliteTest final {
   }
 
   // A few driver methods for convenience.
+  auto get(kj::StringPtr key, ActorCache::ReadOptions options = {}) {
+    return actor.get(kj::str(key), options);
+  }
   auto getAlarm(ActorCache::ReadOptions options = {}) {
     return actor.getAlarm(options);
   }
@@ -159,6 +162,7 @@ KJ_TEST("alarm write happens transactionally with storage ops") {
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
 }
 
 KJ_TEST("can clear alarm") {
