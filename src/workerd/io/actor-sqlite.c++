@@ -21,6 +21,10 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       metadata(*db),
       commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
+  currentAlarmTime = KnownAlarmTime{
+    .status = KnownAlarmTime::Status::CLEAN,
+    .time = metadata.getAlarm(),
+  };
 }
 
 ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent): parent(parent) {
@@ -167,9 +171,6 @@ kj::Promise<void> ActorSqlite::commitImpl() {
   bool needsAlarmFlush = false;
   kj::Maybe<kj::Date> newAlarmTime;
   KJ_SWITCH_ONEOF(currentAlarmTime) {
-    KJ_CASE_ONEOF(_, UnknownAlarmTime) {
-      // Haven't tried to write alarm yet, so don't need to flush.
-    }
     KJ_CASE_ONEOF(knownAlarmTime, KnownAlarmTime) {
       if (knownAlarmTime.status == KnownAlarmTime::Status::DIRTY) {
         knownAlarmTime.status = KnownAlarmTime::Status::FLUSHING;
@@ -201,9 +202,6 @@ kj::Promise<void> ActorSqlite::commitImpl() {
   }
 
   KJ_SWITCH_ONEOF(currentAlarmTime) {
-    KJ_CASE_ONEOF(_, UnknownAlarmTime) {
-      // Hadn't tried to write alarm yet, so don't need to update state.
-    }
     KJ_CASE_ONEOF(knownAlarmTime, KnownAlarmTime) {
       if (knownAlarmTime.status == KnownAlarmTime::Status::FLUSHING) {
         knownAlarmTime.status = KnownAlarmTime::Status::CLEAN;
@@ -245,19 +243,6 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
   }
 }
 
-void ActorSqlite::ensureAlarmTimeInitialized() {
-  // If we ensure that we call this function before each mutation of db alarm state, it should
-  // ensure that it can be called anywhere else and still get a "CLEAN" (committed) alarm time
-  // from the database.
-
-  if (currentAlarmTime.is<UnknownAlarmTime>()) {
-    currentAlarmTime = KnownAlarmTime{
-      .status = KnownAlarmTime::Status::CLEAN,
-      .time = metadata.getAlarm(),
-    };
-  }
-}
-
 // =======================================================================================
 // ActorCacheInterface implementation
 
@@ -286,12 +271,8 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::getAlarm(
     ReadOptions options) {
   requireNotBroken();
-  ensureAlarmTimeInitialized();
 
   KJ_SWITCH_ONEOF(currentAlarmTime) {
-    KJ_CASE_ONEOF(_, UnknownAlarmTime) {
-      KJ_FAIL_ASSERT("expected known alarm time");
-    }
     KJ_CASE_ONEOF(knownAlarmTime, KnownAlarmTime) {
       return knownAlarmTime.time;
     }
@@ -365,7 +346,6 @@ kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, Wri
 kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
-  ensureAlarmTimeInitialized();
 
   // TODO(soon): Need special logic to handle case where actor is using alarms without using
   // other storage?
@@ -452,8 +432,6 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
 }
 
 kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
-  ensureAlarmTimeInitialized();
-
   KJ_ASSERT(!currentAlarmTime.is<DeferredAlarmDelete>());
 
   bool alarmDeleteNeeded = true;

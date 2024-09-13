@@ -174,7 +174,11 @@ private:
     }
   };
 
-  struct UnknownAlarmTime {};
+  // We need to track some additional alarm state to guarantee at-least-once alarm delivery:
+  // Within an alarm handler, we want the observable alarm state to look like the running alarm
+  // was deleted at the start of the handler (when armAlarmHandler() is called), but we don't
+  // actually want to persist that deletion until after the handler has successfully completed
+  // (DeferredAlarmDeleter freed prior to any setAlarm() or cancelDeferredAlarmDeletion() calls).
   struct KnownAlarmTime {
     enum class Status {
       CLEAN,    // Alarm time has been committed
@@ -192,8 +196,7 @@ private:
     kj::Date timeToDelete;
     // TODO(correctness): ActorCache tracks a "wasDeleted" flag; needed here too?
   };
-  kj::OneOf<UnknownAlarmTime, KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime =
-      UnknownAlarmTime{};
+  kj::OneOf<KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime;
 
   kj::TaskSet commitTasks;
 
@@ -204,15 +207,8 @@ private:
 
   void requireNotBroken();
 
-  // If alarm is in an uninitialized state, sets alarm time from db state.
-  //
-  // TODO(cleanup): Alternately, we could eliminate the UnknownAlarmTime state and just init the
-  // alarm to a known time at startup, but that requires a db query in the constructor.  Are the
-  // perf savings worth the extra complexity?
-  void ensureAlarmTimeInitialized();
-
-  // Called when alarm handler token object is destroyed, to delete alarm if not reset or
-  // cancelled during handler.
+  // Called when DeferredAlarmDeleter is destroyed, to delete alarm if not reset or cancelled
+  // during handler.
   void maybeDeleteDeferredAlarm();
 };
 
