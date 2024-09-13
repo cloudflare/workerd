@@ -16,7 +16,7 @@ import {
   createOverrideDefineTransformer,
 } from "./transforms";
 import { createClassToInterfaceTransformer } from "./transforms/class-to-interface";
-import { addOnMessageDeclarationTransformer } from "./transforms/onmessage-declaration";
+import { createAddOnMessageDeclarationTransformer } from "./transforms/onmessage-declaration";
 
 const definitionsHeader = `/*! *****************************************************************************
 Copyright (c) Cloudflare. All rights reserved.
@@ -81,7 +81,7 @@ export function printDefinitions(
     // TODO: enable this once we've figured out how not to expose internal modules
     // createInternalNamespaceTransformer(root, structureMap),
     createCommentsTransformer(commentData),
-    addOnMessageDeclarationTransformer(),
+    createAddOnMessageDeclarationTransformer(),
   ]);
 
   // TODO: enable this once we've figured out how not to expose internal modules

@@ -19,7 +19,7 @@ import ts from "typescript";
  *   prototype: MyClass;
  *   new <T>(str: string): MyClass<T>;
  *   staticMethod(str?: string): void;
- *  ;
+ * }
  * interface MyClass<T = void, U = void> {
  *   prop: T;
  *   method(): U;

@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-export function addOnMessageDeclarationTransformer(): ts.TransformerFactory<ts.SourceFile> {
+export function createAddOnMessageDeclarationTransformer(): ts.TransformerFactory<ts.SourceFile> {
   return (context) => {
     return (sourceFile) => {
       // Create the new variable declaration
