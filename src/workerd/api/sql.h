@@ -175,6 +175,11 @@ public:
       // Unfortunately, D1 named these properties with underscores, so fake it out.
       JSG_READONLY_PROTOTYPE_PROPERTY(rows_read, getRowsRead);
       JSG_READONLY_PROTOTYPE_PROPERTY(rows_written, getRowsWritten);
+
+      JSG_TS_OVERRIDE({
+        rows_read: never;
+        rows_written: never;
+      });
     }
 
     void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -208,6 +213,14 @@ public:
     JSG_LAZY_INSTANCE_PROPERTY(results, getResults);
 
     JSG_READONLY_PROTOTYPE_PROPERTY(meta, getMeta);
+
+    JSG_TS_DEFINE(type SqlStorageResultValue = ArrayBuffer | string | number | null);
+    JSG_TS_OVERRIDE(<T = Record<string, SqlStorageResultValue>> {
+      get columnNames(): string[];
+      get results(): T[];
+      [Symbol.iterator](): IterableIterator<T>;
+      raw(): IterableIterator<SqlStorageResultValue[]>;
+    });
   }
 
   JSG_ITERATOR(RowIterator, rows, SqlRow, jsg::Ref<Cursor>, rowIteratorNext);
@@ -319,6 +332,7 @@ public:
     bool columnNames = false;
 
     JSG_STRUCT(columnNames);
+    JSG_STRUCT_TS_OVERRIDE(type RawOptions = never);
   };
 
   // D1 compatibility methods: raw() and first(). These get a little hacky because they both take
@@ -349,6 +363,16 @@ public:
     JSG_METHOD(bind);
     JSG_METHOD(raw);
     JSG_METHOD(first);
+
+    JSG_TS_OVERRIDE({
+      bind(...values: unknown[]): SqlStorageBoundStatement;
+      run<T = Record<string, unknown>>(...values: unknown[]): SqlStorageCursor<T>;
+      all<T = Record<string, unknown>>(...values: unknown[]): SqlStorageCursor<T>;
+      raw<T = unknown[]>(options: {columnNames: true}): [string[], ...T[]];
+      raw<T = unknown[]>(options?: {columnNames?: false}): T[];
+      first<T = unknown>(colName: string): T | null;
+      first<T = Record<string, unknown>>(): T | null;
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -393,6 +417,15 @@ public:
     JSG_METHOD_NAMED(all, run);
     JSG_METHOD(raw);
     JSG_METHOD(first);
+
+    JSG_TS_OVERRIDE({
+      run<T = Record<string, unknown>>(): SqlStorageCursor<T>;
+      all<T = Record<string, unknown>>(): SqlStorageCursor<T>;
+      raw<T = unknown[]>(options: {columnNames: true}): [string[], ...T[]];
+      raw<T = unknown[]>(options?: {columnNames?: false}): T[];
+      first<T = unknown>(colName: string): T | null;
+      first<T = Record<string, unknown>>(): T | null;
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
