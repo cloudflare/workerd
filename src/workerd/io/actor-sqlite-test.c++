@@ -61,6 +61,9 @@ struct ActorSqliteTest final {
     explicit ActorSqliteTestHooks(ActorSqliteTest& parent): parent(parent) {}
 
     kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {
+      KJ_IF_SOME(h, parent.scheduleRunHandler) {
+        return h(newAlarmTime);
+      }
       auto desc = newAlarmTime.map([](auto& t) {
         return kj::str("scheduleRun(", t, ")");
       }).orDefault(kj::str("scheduleRun(none)"));
@@ -71,6 +74,7 @@ struct ActorSqliteTest final {
 
     ActorSqliteTest& parent;
   };
+  kj::Maybe<kj::Function<kj::Promise<void>(kj::Maybe<kj::Date>)>> scheduleRunHandler;
   ActorSqliteTestHooks hooks = ActorSqliteTestHooks(*this);
 
   ActorSqlite actor;
@@ -163,6 +167,117 @@ KJ_TEST("alarm write happens transactionally with storage ops") {
 
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("alarm scheduling starts synchronously before implicit local db commit") {
+  ActorSqliteTest test;
+
+  // In workerd (unlike edgeworker), there is no remote storage, so there is no work done in
+  // commitCallback(); the local db is considered durably stored after the synchronous sqlite
+  // commit() call returns.  If a commit includes an alarm state change that requires scheduling
+  // before the commit call, it needs to happen synchronously.  Since workerd synchronously
+  // schedules alarms, we just need to ensure that the database is in a pre-commit state when
+  // scheduleRun() is called.
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  bool startedScheduleRun = false;
+  test.scheduleRunHandler = [&](kj::Maybe<kj::Date>) -> kj::Promise<void> {
+    startedScheduleRun = true;
+
+    KJ_EXPECT_THROW_MESSAGE(
+        "cannot start a transaction within a transaction", test.db.run("BEGIN TRANSACTION"));
+
+    return kj::READY_NOW;
+  };
+
+  test.setAlarm(oneMs);
+  KJ_ASSERT(!startedScheduleRun);
+  test.ws.poll();
+  KJ_ASSERT(startedScheduleRun);
+
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("alarm scheduling starts synchronously before explicit local db commit") {
+  ActorSqliteTest test;
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  bool startedScheduleRun = false;
+  test.scheduleRunHandler = [&](kj::Maybe<kj::Date>) -> kj::Promise<void> {
+    startedScheduleRun = true;
+
+    // Not sure if there is a good way to detect savepoint presence without mutating the db state,
+    // but this is sufficient to verify the test properties:
+
+    // Verify that we are not within a nested savepoint.
+    KJ_EXPECT_THROW_MESSAGE(
+        "no such savepoint: _cf_savepoint_1", test.db.run("RELEASE _cf_savepoint_1"));
+
+    // Verify that we are within the root savepoint.
+    test.db.run("RELEASE _cf_savepoint_0");
+    KJ_EXPECT_THROW_MESSAGE(
+        "no such savepoint: _cf_savepoint_0", test.db.run("RELEASE _cf_savepoint_0"));
+
+    // We don't actually care what happens in the test after this point, but it's slightly simpler
+    // to readd the savepoint to allow the test to complete cleanly:
+    test.db.run("SAVEPOINT _cf_savepoint_0");
+
+    return kj::READY_NOW;
+  };
+
+  {
+    auto txn = test.actor.startTransaction();
+    txn->setAlarm(oneMs, {});
+
+    KJ_ASSERT(!startedScheduleRun);
+    txn->commit();
+    KJ_ASSERT(startedScheduleRun);
+
+    test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  }
+
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("alarm scheduling does not start synchronously before nested explicit local db commit") {
+  ActorSqliteTest test;
+
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  bool startedScheduleRun = false;
+  test.scheduleRunHandler = [&](kj::Maybe<kj::Date>) -> kj::Promise<void> {
+    startedScheduleRun = true;
+    return kj::READY_NOW;
+  };
+
+  {
+    auto txn1 = test.actor.startTransaction();
+
+    {
+      auto txn2 = test.actor.startTransaction();
+      txn2->setAlarm(oneMs, {});
+
+      txn2->commit();
+      KJ_ASSERT(!startedScheduleRun);
+    }
+
+    txn1->commit();
+    KJ_ASSERT(startedScheduleRun);
+
+    test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  }
+
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
 KJ_TEST("can clear alarm") {

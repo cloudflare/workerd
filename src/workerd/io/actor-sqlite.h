@@ -201,7 +201,12 @@ private:
   kj::TaskSet commitTasks;
 
   void onWrite();
-  kj::Promise<void> commitImpl();
+
+  // If the alarm notification needs to be updated prior to a commit, issues the scheduling
+  // request and returns a promise for its completion.
+  kj::Maybe<kj::Promise<void>> schedulePrecommitAlarm();
+
+  kj::Promise<void> commitImpl(kj::Maybe<kj::Promise<void>> precommitAlarmPromise);
 
   void taskFailed(kj::Exception&& exception) override;
 

@@ -133,13 +133,20 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
       "critical sections should have prevented committing transaction while "
       "nested txn is outstanding");
 
+  // Start the schedule request before root transaction commit(), for correctness in workerd.
+  kj::Maybe<kj::Promise<void>> precommitAlarmPromise;
+  if (parent == kj::none) {
+    precommitAlarmPromise = actorSqlite.schedulePrecommitAlarm();
+  }
+
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
   committed = true;
 
   if (parent == kj::none) {
     // We committed the root transaction, so it's time to signal any replication layer and lock
     // the output gate in the meantime.
-    actorSqlite.commitTasks.add(actorSqlite.outputGate.lockWhile(actorSqlite.commitImpl()));
+    actorSqlite.commitTasks.add(
+        actorSqlite.outputGate.lockWhile(actorSqlite.commitImpl(kj::mv(precommitAlarmPromise))));
   }
 
   // No backpressure for SQLite.
@@ -170,6 +177,9 @@ void ActorSqlite::onWrite() {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
 
+      // Start the schedule request before commit(), for correctness in workerd.
+      auto precommitAlarmPromise = schedulePrecommitAlarm();
+
       try {
         txn->commit();
       } catch (...) {
@@ -187,14 +197,14 @@ void ActorSqlite::onWrite() {
       // rather than after the callback.
       { auto drop = kj::mv(txn); }
 
-      return commitImpl();
+      return commitImpl(kj::mv(precommitAlarmPromise));
     })));
   }
 }
 
-kj::Promise<void> ActorSqlite::commitImpl() {
-  bool needsAlarmFlush = false;
+kj::Maybe<kj::Promise<void>> ActorSqlite::schedulePrecommitAlarm() {
   kj::Maybe<kj::Date> newAlarmTime;
+  bool needsAlarmFlush = false;
   KJ_SWITCH_ONEOF(currentAlarmTime) {
     KJ_CASE_ONEOF(knownAlarmTime, KnownAlarmTime) {
       if (knownAlarmTime.status == KnownAlarmTime::Status::DIRTY) {
@@ -211,16 +221,20 @@ kj::Promise<void> ActorSqlite::commitImpl() {
       }
     }
   }
+  if (needsAlarmFlush) {
+    return hooks.scheduleRun(newAlarmTime);
+  } else {
+    return kj::none;
+  }
+}
 
-  // TODO(soon): ActorCache implements a 4x retry of failed flushes... Do we need anything similar
-  // for alarm scheduling?
-
+kj::Promise<void> ActorSqlite::commitImpl(kj::Maybe<kj::Promise<void>> precommitAlarmPromise) {
   // We assume that exceptions thrown during commit will propagate to the caller, such that they
   // will ensure cancelDeferredAlarmDeletion() is called, if necessary.
 
-  if (needsAlarmFlush) {
+  KJ_IF_SOME(p, precommitAlarmPromise) {
     // TODO(soon): fix sequencing of alarm scheduling vs. commitCallback().
-    co_await hooks.scheduleRun(newAlarmTime);
+    co_await p;
     co_await commitCallback();
   } else {
     co_await commitCallback();
