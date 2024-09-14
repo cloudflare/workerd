@@ -227,6 +227,12 @@ public:
   // by calling state.abort() or by throwing from a blockConcurrencyWhile() callback.
   kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::String bookmark);
 
+  // Arrange to create replicas for this Durable Object.
+  //
+  // Once a Durable Object instance calls `ensureReplicas`, all subsequent calls will be no-ops,
+  // thus it is idempotent.
+  kj::Promise<void> ensureReplicas();
+
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
@@ -245,6 +251,10 @@ public:
     JSG_METHOD(getCurrentBookmark);
     JSG_METHOD(getBookmarkForTime);
     JSG_METHOD(onNextSessionRestoreBookmark);
+
+    if (flags.getReplicaRouting()) {
+      JSG_METHOD(ensureReplicas);
+    }
 
     JSG_TS_OVERRIDE({
       get<T = unknown>(key: string, options?: DurableObjectGetOptions): Promise<T | undefined>;
