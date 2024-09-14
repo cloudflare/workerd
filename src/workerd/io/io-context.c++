@@ -1265,16 +1265,15 @@ void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeTyp
             "Cannot perform I/O on behalf of a different Durable Object. I/O objects "
             "(such as streams, request/response bodies, and others) created in the context of one "
             "Durable Object cannot be accessed from a different Durable Object in the same isolate. "
-            "This is a limitation of Cloudflare Workers which allows us to improve overall "
-            "performance.",
+            "Refer to: https://developers.cloudflare.com/workers/observability/errors ",
             type));
   } else {
     JSG_FAIL_REQUIRE(Error,
         kj::str(
             "Cannot perform I/O on behalf of a different request. I/O objects (such as "
             "streams, request/response bodies, and others) created in the context of one request "
-            "handler cannot be accessed from a different request's handler. This is a limitation "
-            "of Cloudflare Workers which allows us to improve overall performance.",
+            "handler cannot be accessed from a different request's handler. Refer to "
+            "https://developers.cloudflare.com/workers/observability/errors",
             type));
   }
 }
