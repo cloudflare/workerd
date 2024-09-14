@@ -235,6 +235,12 @@ public:
   // `bookmark`.
   kj::Promise<void> waitForBookmark(kj::String bookmark);
 
+  // Arrange to create replicas for this Durable Object.
+  //
+  // Once a Durable Object instance calls `ensureReplicas`, all subsequent calls will be no-ops,
+  // thus it is idempotent.
+  void ensureReplicas();
+
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
@@ -256,6 +262,10 @@ public:
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(waitForBookmark);
+    }
+
+    if (flags.getReplicaRouting()) {
+      JSG_METHOD(ensureReplicas);
     }
 
     JSG_TS_OVERRIDE({
