@@ -940,8 +940,8 @@ export let crossContextSharingDoesntWork = {
       message:
         'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
         'request/response bodies, and others) created in the context of one request handler ' +
-        "cannot be accessed from a different request's handler. This is a limitation of " +
-        'Cloudflare Workers which allows us to improve overall performance.',
+        "cannot be accessed from a different request's handler. Refer to: " +
+        'https://developers.cloudflare.com/workers/observability/errors',
     };
 
     // A promise which resolves to a value that contains a stub. The stub cannot be used from a
@@ -957,8 +957,8 @@ export let crossContextSharingDoesntWork = {
       message:
         'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
         'request/response bodies, and others) created in the context of one request handler ' +
-        "cannot be accessed from a different request's handler. This is a limitation of " +
-        'Cloudflare Workers which allows us to improve overall performance. (I/O type: Client)',
+        "cannot be accessed from a different request's handler. Refer to: " +
+        'https://developers.cloudflare.com/workers/observability/errors (I/O type: Client)',
     });
 
     // Pipelining on someone else's promise straight-up doesn't work.
