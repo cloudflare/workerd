@@ -1924,7 +1924,7 @@ public:
           auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
 
           auto makeActorCache = [&](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
-                                    ActorCache::Hooks& hooks) {
+                                    ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
             return config.tryGet<Durable>().map(
                 [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
               KJ_IF_SOME(as, channels.actorStorage) {
