@@ -1265,7 +1265,7 @@ void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeTyp
             "Cannot perform I/O on behalf of a different Durable Object. I/O objects "
             "(such as streams, request/response bodies, and others) created in the context of one "
             "Durable Object cannot be accessed from a different Durable Object in the same isolate. "
-            "Refer to: https://developers.cloudflare.com/workers/observability/errors ",
+            "Refer to: https://developers.cloudflare.com/workers/observability/errors",
             type));
   } else {
     JSG_FAIL_REQUIRE(Error,
