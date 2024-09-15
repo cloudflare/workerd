@@ -9,6 +9,15 @@
 
 namespace workerd::api {
 
+struct shmem_data {
+    uint32_t num_edges;
+    unsigned char edges[];
+};
+
+#define SHM_SIZE 0x200000
+#define MAX_EDGES ((SHM_SIZE - 4) * 8)
+void __sanitizer_cov_reset_edgeguards();
+
 // A special binding object that allows for dynamic evaluation.
 class UnsafeEval: public jsg::Object {
  public:
@@ -63,19 +72,20 @@ class UnsafeEval: public jsg::Object {
   }
 };
 
+
+// Define the REPRL file descriptors
 #define REPRL_CRFD 100
 #define REPRL_CWFD 101
 #define REPRL_DRFD 102
 #define REPRL_DWFD 103
 
-#define CHECK(condition)                    \
-    do {                                    \
-        if (!(condition)) {                 \
-            fprintf(stderr, "Error: %s:%d: condition failed: %s\n", __FILE__, __LINE__, #condition); \
-            exit(EXIT_FAILURE);             \
-        }                                   \
-    } while (0)
-
+#define CHECK(condition) \
+do { \
+    if (!(condition)) { \
+        fprintf(stderr, "Error: %s:%d: condition failed: %s\n", __FILE__, __LINE__, #condition); \
+        exit(EXIT_FAILURE); \
+    } \
+} while (0)
 // A special binding that allows access to stdin. Used for REPL.
 class Stdin: public jsg::Object {
 public:
@@ -100,40 +110,47 @@ public:
 
     do {
       size_t script_size = 0;
-      char action[4];
-      CHECK(read(REPRL_CRFD, action, 4) == 4);
-      if (strcmp(action, "cexe") == 0) {
-        CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
-      } else {
-        fprintf(stderr, "Unknown action: %s\n", action);
-        _exit(-1);
+      unsigned action = 0;
+      ssize_t nread = read(REPRL_CRFD, &action, 4);
+      fflush(0);
+      fflush(stderr);
+      if (nread != 4 || action != 0x63657865) { // 'exec'
+          fprintf(stderr, "Unknown action: %x\n", action);
+          _exit(-1);
       }
 
-      char script[script_size+1];
-      char *ptr = script;
-      size_t remaining = script_size;
-      while(remaining > 0) {
-        ssize_t rv = read(REPRL_DRFD, ptr, remaining);
-        if(rv <= 0) {
+      CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
+
+      char* script = (char*)malloc(script_size + 1);
+      char* source_buffer_tail = script;
+      ssize_t remaining = (ssize_t) script_size;
+
+      printf("Reading in script with size: %zu\n",script_size);
+      fflush(stdout);
+
+      while (remaining > 0) {
+        ssize_t rv = read(REPRL_DRFD, source_buffer_tail, (size_t) remaining);
+        if (rv <= 0) {
           fprintf(stderr, "Failed to load script\n");
           _exit(-1);
         }
         remaining -= rv;
-        ptr += rv;
+        source_buffer_tail += rv;
       }
 
-      script[script_size] = 0;
+      script[script_size] = '\0';
+
+      printf("Executing script...\n");
 
       //eval the script
       int status = 0;
       auto compiled = jsg::NonModuleScript::compile(script, js, "reprl"_kj);
-      auto val = jsg::JsValue(compiled.runAndReturn(js.v8Context()));
+      auto result = jsg::JsValue(compiled.runAndReturn(js.v8Context()));
 
       fflush(stdout);
       fflush(stderr);
-
       CHECK(write(REPRL_CWFD, &status, 4) == 4);
-
+      __sanitizer_cov_reset_edgeguards();
     } while(true);
   }
 
