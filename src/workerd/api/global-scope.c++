@@ -29,6 +29,8 @@
 
 #include <kj/encoding.h>
 
+#include <workerd/api/immediate-crash.h>
+
 namespace workerd::api {
 
 namespace {
@@ -727,6 +729,141 @@ jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
       strArray.asChars().begin(), strArray.size(), result.asChars().begin());
   return js.str(result.first(written));
 }
+
+
+//Fuzzilli required macros
+#define REPRL_CRFD 100
+#define REPRL_CWFD 101
+#define REPRL_DRFD 102
+#define REPRL_DWFD 103
+#define USE(...)                            \
+  do {                                      \
+    (void)(__VA_ARGS__);                    \
+  } while (false)
+
+#ifndef DCHECK
+#define DCHECK(condition) assert(condition)
+#endif
+
+#ifndef CHECK
+#define CHECK(condition) assert(condition)
+#endif
+
+void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args) {
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+  v8::Local<v8::Value> value = v8::Local<v8::Value>::Cast(args[0].getHandle(isolate));
+  v8::Local<v8::String> str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
+  v8::String::Utf8Value operation(js.v8Isolate, str);
+  if (*operation == nullptr) {
+    printf("Operation was null...\n");
+    fflush(stdout);
+    return;
+  }
+
+  if (strcmp(*operation, "FUZZILLI_CRASH") == 0) {
+    auto maybeArg = v8::Local<v8::Int32>::Cast(args[1].getHandle(isolate))->Int32Value(js.v8Context());
+    if (!maybeArg.IsJust()) {
+      printf("Maybe arg is empty...\n");
+      fflush(stdout);
+      return;
+    }
+    int32_t arg = maybeArg.FromJust();
+    switch (arg) {
+      case 0:
+        IMMEDIATE_CRASH();
+        break;
+      case 1:
+        CHECK(false);
+        break;
+      case 2:
+        DCHECK(false);
+        break;
+      case 3: {
+        // Access an invalid address.
+        // We want to use an "interesting" address for the access (instead of
+        // e.g. nullptr). In the (unlikely) case that the address is actually
+        // mapped, simply increment the pointer until it crashes.
+        // The cast ensures that this works correctly on both 32-bit and 64-bit.
+        v8::internal::Address addr = static_cast<v8::internal::Address>(0x414141414141ull);
+        // If we're in sandbox testing mode, use the target page as address.
+        // This is the page that must be written to to demonstrate a sandbox
+        // bypass, in which case there should be a detectable crash.
+#ifdef V8_ENABLE_SANDBOX
+        if (SandboxTesting::mode() == SandboxTesting::Mode::kForTesting) {
+          addr = SandboxTesting::target_page_base();
+        }
+#endif  // V8_ENABLE_SANDBOX
+        char* ptr = reinterpret_cast<char*>(addr);
+        for (int i = 0; i < 1024; i++) {
+          *ptr = 'A';
+          ptr += 1 * v8::internal::MB;
+        }
+        break;
+      }
+      case 4: {
+        // Use-after-free, likely only crashes in ASan builds.
+        auto* vec = new std::vector<int>(4);
+        delete vec;
+        USE(vec->at(0));
+        break;
+      }
+      case 5: {
+        // Out-of-bounds access (1), likely only crashes in ASan or
+        // "hardened"/"safe" libc++ builds.
+        std::vector<int> vec(5);
+        USE(vec[5]);
+        break;
+      }
+      case 6: {
+        // Out-of-bounds access (2), likely only crashes in ASan builds.
+        std::vector<int> vec(6);
+        memset(vec.data(), 42, 0x100);
+        break;
+      }
+      case 7: {
+        // if (i::v8_flags.hole_fuzzing) {
+        //   // This should crash with a segmentation fault only
+        //   // when --hole-fuzzing is used.
+        //   char* ptr = reinterpret_cast<char*>(0x414141414141ull);
+        //   for (int i = 0; i < 1024; i++) {
+        //     *ptr = 'A';
+        //     ptr += 1 * GB;
+        //   }
+        // }
+        break;
+      }
+      case 8: {
+        // This allows Fuzzilli to check that DEBUG is defined, which should be
+        // the case if dcheck_always_on is set. This is useful for fuzzing as
+        // there are some integrity checks behind DEBUG.
+// #ifdef DEBUG
+//         IMMEDIATE_CRASH();
+// #endif
+        break;
+      }
+      default:
+        break;
+    }
+  } else if (strcmp(*operation, "FUZZILLI_PRINT") == 0) {
+    static FILE* fzliout = fdopen(REPRL_DWFD, "w");
+    if (!fzliout) {
+      fprintf(
+          stderr,
+          "Fuzzer output channel not available, printing to stdout instead\n");
+      fzliout = stdout;
+    }
+
+  value = v8::Local<v8::Value>::Cast(args[1].getHandle(isolate));
+  str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
+  v8::String::Utf8Value string(js.v8Isolate, str);
+  if (*string == nullptr) {
+    return;
+  }
+  fprintf(fzliout, "%s\n", *string);
+  fflush(fzliout);
+  }
+}
+
 jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   auto decoded = kj::decodeBase64(data.asArray());
 

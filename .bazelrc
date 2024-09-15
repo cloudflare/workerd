@@ -194,6 +194,11 @@ build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --per_file_copt='external/v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
 
+# reprl
+build:reprl --config=sanitizer-common
+build:reprl --copt="-fsanitize-coverage=trace-pc-guard"
+build:reprl --linkopt="-fsanitize-coverage=trace-pc-guard"
+
 #
 # Linux and macOS
 #

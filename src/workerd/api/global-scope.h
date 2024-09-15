@@ -539,7 +539,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::JsString btoa(jsg::Lock& js, jsg::JsString data);
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
-  void queueMicrotask(jsg::Lock& js, jsg::Function<void()> task);
+  void fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args);
+
+  void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
 
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
@@ -640,6 +642,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_METHOD(reportError);
 
     JSG_METHOD(fetch);
+
+    //TODO: only enable w/ define
+    JSG_METHOD(fuzzilli);
 
     // Unlike regular interface attributes, which Web IDL requires us to
     // implement as prototype properties, the global scope is special --
