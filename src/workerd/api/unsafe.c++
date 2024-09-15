@@ -6,6 +6,17 @@
 
 namespace workerd::api {
 
+  struct shmem_data* __shmem = nullptr;
+uint32_t* __edges_start = nullptr;
+uint32_t* __edges_stop = nullptr;
+
+void __sanitizer_cov_reset_edgeguards()
+{
+    uint64_t N = 0;
+    for (uint32_t *x = __edges_start; x < __edges_stop && N < MAX_EDGES; x++)
+        *x = ++N;
+}
+
 namespace {
 static constexpr auto EVAL_STR = "eval"_kjc;
 static constexpr auto ANON_STR = "anonymous"_kjc;
@@ -13,6 +24,7 @@ static constexpr auto ASYNC_FN_PREFIX = "async function "_kjc;
 static constexpr auto ASYNC_FN_ARG_OPEN = "("_kjc;
 static constexpr auto ASYNC_FN_ARG_CLOSE = ") {"_kjc;
 static constexpr auto ASYNC_FN_SUFFIX = "}"_kjc;
+
 
 inline kj::StringPtr getName(jsg::Optional<kj::String>& name, kj::StringPtr def) {
   return name.map([](kj::String& str) { return str.asPtr(); }).orDefault(def);
