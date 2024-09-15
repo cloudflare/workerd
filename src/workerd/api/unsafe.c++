@@ -6,7 +6,7 @@
 
 namespace workerd::api {
 
-  struct shmem_data* __shmem = nullptr;
+struct shmem_data* __shmem = nullptr;
 uint32_t* __edges_start = nullptr;
 uint32_t* __edges_stop = nullptr;
 

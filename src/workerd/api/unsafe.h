@@ -99,6 +99,11 @@ public:
 
   void reprl(jsg::Lock& js) {
     js.setAllowEval(true);
+
+    v8::HandleScope handle_scope(js.v8Isolate);
+    v8::TryCatch try_catch(js.v8Isolate);
+    try_catch.SetVerbose(true);
+
     char helo[] = "HELO";
     if (write(REPRL_CWFD, helo, 4) != 4 || read(REPRL_CRFD, helo, 4) != 4) {
       printf("Invalid HELO response from parent\n");
@@ -145,7 +150,17 @@ public:
       //eval the script
       int status = 0;
       auto compiled = jsg::NonModuleScript::compile(script, js, "reprl"_kj);
-      auto result = jsg::JsValue(compiled.runAndReturn(js.v8Context()));
+      auto result = compiled.runAndReturn(js.v8Context())->Int32Value(js.v8Context());
+      if (!result.IsJust()) {
+        printf("Result arg is not just...\n");
+        fflush(stdout);
+        return;
+      }
+      int32_t res_val = result.FromJust();
+
+      status = res_val << 8;
+      printf("Status: %d\n",res_val);
+      fflush(stdout);
 
       fflush(stdout);
       fflush(stderr);
