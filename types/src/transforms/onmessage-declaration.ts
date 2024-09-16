@@ -18,7 +18,7 @@ export function createAddOnMessageDeclarationTransformer(): ts.TransformerFactor
         )
       );
 
-      // Append the new declaration to the source file
+      // Prepend the new declaration to the source file
       const updatedStatements = ts.factory.createNodeArray([
         onMessageDeclaration,
         ...sourceFile.statements,
