@@ -154,6 +154,7 @@ wd_cc_library(
         ":trace",
         ":worker-interface",
         "//src/workerd/jsg:observer",
+        "//src/workerd/util:sqlite",
     ],
 )
 

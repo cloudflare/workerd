@@ -663,6 +663,40 @@ KJ_TEST("SQLite write row counters (basic)") {
   }
 }
 
+KJ_TEST("SQLite read/write row counters (large row insert)") {
+  // This is used to verify reading/writing a large row (bigger than the size of one page in sqlite)
+  // results only in 1 read/row count as returned by the DB
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run("CREATE TABLE large_things (id INTEGER PRIMARY KEY, large_value TEXT)");
+
+  // SQLite's default page size is 4096 bytes
+  // So create a string significantly larger than that
+  KJ_EXPECT(db.run("PRAGMA page_size").getInt(0) == 4096);
+  kj::String largeValue = kj::str(kj::repeat('A', 100000));
+
+  // Insert the large row
+  RowCounts insertStats = countRowsTouched(
+      db, "INSERT INTO large_things (id, large_value) VALUES (?, ?)", 1, kj::mv(largeValue));
+
+  KJ_EXPECT(insertStats.found == 0);
+  KJ_EXPECT(insertStats.read == 1);
+  KJ_EXPECT(insertStats.written == 1);
+
+  // Verify the insert
+  auto verifyStmt = db.prepare("SELECT COUNT(*) FROM large_things");
+  KJ_EXPECT(verifyStmt.run().getInt(0) == 1);
+
+  // Read the large row
+  RowCounts readStats = countRowsTouched(db, "SELECT * FROM large_things WHERE id = ?", 1);
+  KJ_EXPECT(readStats.found == 1);
+  KJ_EXPECT(readStats.read == 1);
+  KJ_EXPECT(readStats.written == 0);
+}
+
 KJ_TEST("SQLite row counters with triggers") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -780,6 +814,76 @@ KJ_TEST("reset database") {
     q2.nextRow();
     KJ_EXPECT(q2.isDone());
   }
+}
+
+KJ_TEST("SQLite observer addQueryStats") {
+  class TestSqliteObserver: public SqliteObserver {
+  public:
+    void addQueryStats(uint64_t read, uint64_t written) override {
+      rowsRead += read;
+      rowsWritten += written;
+    }
+
+    uint64_t rowsRead = 0;
+    uint64_t rowsWritten = 0;
+  };
+
+  TempDirOnDisk dir;
+  SqliteDatabase::Vfs vfs(*dir);
+  TestSqliteObserver sqliteObserver = TestSqliteObserver();
+  SqliteDatabase db(
+      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+
+  db.run(R"(
+    CREATE TABLE things (
+      id INTEGER PRIMARY KEY
+    );
+  )");
+
+  // There are some rows read and written when we create the db, we offset this in the test
+  int rowsReadBefore = sqliteObserver.rowsRead;
+  int rowsWrittenBefore = sqliteObserver.rowsWritten;
+  constexpr int dbRowCount = 3;
+  {
+    db.run("INSERT INTO things (id) VALUES (10)");
+    db.run("INSERT INTO things (id) VALUES (11)");
+    db.run("INSERT INTO things (id) VALUES (12)");
+  }
+  KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == dbRowCount);
+  KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == dbRowCount);
+
+  rowsReadBefore = sqliteObserver.rowsRead;
+  rowsWrittenBefore = sqliteObserver.rowsWritten;
+  {
+    auto getCount = db.prepare("SELECT COUNT(*) FROM things");
+    KJ_EXPECT(getCount.run().getInt(0) == dbRowCount);
+  }
+  KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == dbRowCount);
+  KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == 0);
+
+  // Verify if addQueryStats works correctly when we call query.nextRow()
+  rowsReadBefore = sqliteObserver.rowsRead;
+  rowsWrittenBefore = sqliteObserver.rowsWritten;
+  {
+    auto stmt = db.prepare("SELECT * FROM things");
+    auto query = stmt.run();
+    KJ_ASSERT(!query.isDone());
+    while (!query.isDone()) {
+      query.nextRow();
+    }
+  }
+  KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == dbRowCount);
+  KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == 0);
+
+  // Verify addQueryStats works correctly when db is reset
+  rowsReadBefore = sqliteObserver.rowsRead;
+  rowsWrittenBefore = sqliteObserver.rowsWritten;
+  {
+    auto query = db.run("INSERT INTO things (id) VALUES (100)");
+    db.reset();
+  }
+  KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == 1);
+  KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == 1);
 }
 
 }  // namespace

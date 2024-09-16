@@ -367,12 +367,18 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 // =======================================================================================
 
+SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
+
 constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
 
-SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::Path path, kj::Maybe<kj::WriteMode> maybeMode)
+SqliteDatabase::SqliteDatabase(const Vfs& vfs,
+    kj::Path path,
+    kj::Maybe<kj::WriteMode> maybeMode,
+    SqliteObserver& sqliteObserver)
     : vfs(vfs),
       path(kj::mv(path)),
-      readOnly(maybeMode == kj::none) {
+      readOnly(maybeMode == kj::none),
+      sqliteObserver(sqliteObserver) {
   init(maybeMode);
 }
 
@@ -979,6 +985,9 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
 }
 
 SqliteDatabase::Query::~Query() noexcept(false) {
+  //Update the db stats that we have collected for the query
+  db.sqliteObserver.addQueryStats(rowsRead, rowsWritten);
+
   // We only need to reset the statement if we don't own it. If we own it, it's about to be
   // destroyed anyway.
   if (ownStatement.get() == nullptr) {
@@ -1096,6 +1105,11 @@ void SqliteDatabase::Query::nextRow() {
   db.currentRegulator = regulator;
 
   int err = sqlite3_step(statement);
+  // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
+  // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
+  // in the Dtor, and handle the case where the statement could be null when the Query gets destructed
+  rowsRead = getRowsRead();
+  rowsWritten = getRowsWritten();
   if (err == SQLITE_DONE) {
     done = true;
   } else if (err != SQLITE_ROW) {
