@@ -3224,7 +3224,8 @@ struct Worker::Actor::Impl {
         transient.emplace(js, js.obj());
       }
 
-      actorCache = makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks);
+      actorCache = makeActorCache(
+          self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks, *metrics);
     });
   }
 };

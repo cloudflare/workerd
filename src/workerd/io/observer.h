@@ -13,6 +13,7 @@
 #include <workerd/io/trace.h>
 #include <workerd/io/features.capnp.h>
 #include <workerd/jsg/observer.h>
+#include <workerd/util/sqlite.h>
 
 namespace workerd {
 
@@ -237,7 +238,7 @@ public:
   virtual void teardownFinished() {}
 };
 
-class ActorObserver: public kj::Refcounted {
+class ActorObserver: public kj::Refcounted, public SqliteObserver {
 public:
   // Allows the observer to run in the background, periodically making observations. Owner must
   // call this and store the promise. `limitEnforcer` is used to collect CPU usage metrics, it
