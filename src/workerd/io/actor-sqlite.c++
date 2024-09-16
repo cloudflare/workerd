@@ -10,6 +10,23 @@
 
 namespace workerd {
 
+namespace {
+
+// Returns true if a given (set or unset) alarm will fire earlier than another.
+static bool willFireEarlier(kj::Maybe<kj::Date> alarm1, kj::Maybe<kj::Date> alarm2) {
+  KJ_IF_SOME(t2, alarm2) {
+    KJ_IF_SOME(t1, alarm1) {
+      return (t1 < t2);
+    } else {
+      return false;
+    }
+  } else {
+    return (alarm1 != kj::none);
+  }
+}
+
+}  // namespace
+
 ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
     OutputGate& outputGate,
     kj::Function<kj::Promise<void>()> commitCallback,
@@ -22,7 +39,7 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       metadata(*db),
       commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
-  // TODO(now): should probably populate this asynchronously from alarm manager:
+  // TODO(now): populate lastConfirmedScheduledAlarm asynchronously from alarm manager.
   lastConfirmedAlarmDbState = metadata.getAlarm();
 }
 
@@ -110,7 +127,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
   // Start the schedule request before root transaction commit(), for correctness in workerd.
   kj::Maybe<kj::Promise<void>> precommitAlarmPromise;
   if (parent == kj::none) {
-    precommitAlarmPromise = actorSqlite.schedulePrecommitAlarm();
+    precommitAlarmPromise = actorSqlite.startPrecommitAlarmScheduling();
   }
 
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
@@ -152,7 +169,7 @@ void ActorSqlite::onWrite() {
       requireNotBroken();
 
       // Start the schedule request before commit(), for correctness in workerd.
-      auto precommitAlarmPromise = schedulePrecommitAlarm();
+      auto precommitAlarmPromise = startPrecommitAlarmScheduling();
 
       try {
         txn->commit();
@@ -176,11 +193,19 @@ void ActorSqlite::onWrite() {
   }
 }
 
-kj::Maybe<kj::Promise<void>> ActorSqlite::schedulePrecommitAlarm() {
-  auto dirtyAlarmState = metadata.getAlarm();
-  if (dirtyAlarmState != lastPrecommitAlarmState) {
-    lastPrecommitAlarmState = dirtyAlarmState;
-    return hooks.scheduleRun(dirtyAlarmState);
+kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime) {
+  co_await hooks.scheduleRun(requestedTime);
+  lastConfirmedScheduledAlarm = requestedTime;
+}
+
+kj::Maybe<kj::Promise<void>> ActorSqlite::startPrecommitAlarmScheduling() {
+  auto localAlarmState = metadata.getAlarm();
+  if (pendingCommit == kj::none && willFireEarlier(localAlarmState, lastConfirmedScheduledAlarm)) {
+    // Basically, this is the first scheduling request that commitImpl() would make prior to
+    // commitCallback().  We start the request separately, ahead of calling sqlite functions that
+    // commit to local disk, for correctness in workerd, where alarm scheduling and db commits are
+    // both synchronous.
+    return requestScheduledAlarm(localAlarmState);
   } else {
     return kj::none;
   }
@@ -190,14 +215,36 @@ kj::Promise<void> ActorSqlite::commitImpl(kj::Maybe<kj::Promise<void>> precommit
   // We assume that exceptions thrown during commit will propagate to the caller, such that they
   // will ensure cancelDeferredAlarmDeletion() is called, if necessary.
 
+  KJ_IF_SOME(pending, pendingCommit) {
+    co_await pending.addBranch();
+    co_return;
+  }
+  auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
+  pendingCommit = promise.fork();
+
+  // Wait for any precommit alarm scheduling work to complete.
   KJ_IF_SOME(p, precommitAlarmPromise) {
-    // TODO(soon): fix sequencing of alarm scheduling vs. commitCallback().
-    auto dirtyAlarmState = lastPrecommitAlarmState;
     co_await p;
-    co_await commitCallback();
-    lastConfirmedAlarmDbState = dirtyAlarmState;
-  } else {
-    co_await commitCallback();
+  }
+
+  // TODO(perf): might be able to reduce alarm reads with more state tracking?
+  auto localAlarmState = metadata.getAlarm();
+  while (willFireEarlier(localAlarmState, lastConfirmedScheduledAlarm)) {
+    co_await requestScheduledAlarm(localAlarmState);
+    localAlarmState = metadata.getAlarm();
+  }
+
+  auto commitCallbackPromise = commitCallback();
+
+  // Fulfill and clear the pending commit.
+  fulfiller->fulfill();
+  pendingCommit = kj::none;
+  co_await commitCallbackPromise;
+
+  lastConfirmedAlarmDbState = localAlarmState;
+
+  if (willFireEarlier(lastConfirmedScheduledAlarm, localAlarmState)) {
+    co_await requestScheduledAlarm(localAlarmState);
   }
 }
 

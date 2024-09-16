@@ -184,19 +184,27 @@ private:
   // Some state only used for tracking calling invariants.
   bool inAlarmHandler = false;
 
-  // The state the local alarm db was in when we started the last commit.
-  kj::Maybe<kj::Date> lastPrecommitAlarmState;
-
   // The alarm state for which we last received confirmation that the db was durably stored.
   kj::Maybe<kj::Date> lastConfirmedAlarmDbState;
+
+  // The alarm state for which we last received confirmation that the notification was
+  // successfully scheduled.
+  kj::Maybe<kj::Date> lastConfirmedScheduledAlarm;
+
+  // A promise for an in-progress alarm notification update and database commit.
+  kj::Maybe<kj::ForkedPromise<void>> pendingCommit;
 
   kj::TaskSet commitTasks;
 
   void onWrite();
 
+  // Issues a request to the alarm scheduler for the given time, returning a promise that resolves
+  // when the request is confirmed.
+  kj::Promise<void> requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime);
+
   // If the alarm notification needs to be updated prior to a commit, issues the scheduling
-  // request and returns a promise for its completion.
-  kj::Maybe<kj::Promise<void>> schedulePrecommitAlarm();
+  // request synchronously and returns a promise for its completion.  Otherwise returns none.
+  kj::Maybe<kj::Promise<void>> startPrecommitAlarmScheduling();
 
   kj::Promise<void> commitImpl(kj::Maybe<kj::Promise<void>> precommitAlarmPromise);
 
