@@ -79,6 +79,8 @@ class UnsafeEval: public jsg::Object {
 #define REPRL_DRFD 102
 #define REPRL_DWFD 103
 
+
+
 #define CHECK(condition) \
 do { \
     if (!(condition)) { \
@@ -126,7 +128,7 @@ public:
 
       CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
 
-      char* script = (char*)malloc(script_size + 1);
+      char* script = new char[script_size + 1];
       char* source_buffer_tail = script;
       ssize_t remaining = (ssize_t) script_size;
 
@@ -145,25 +147,32 @@ public:
 
       script[script_size] = '\0';
 
-      printf("Executing script...\n");
-
       //eval the script
       int status = 0;
+      int32_t res_val = 0;
       auto compiled = jsg::NonModuleScript::compile(script, js, "reprl"_kj);
-      auto result = compiled.runAndReturn(js.v8Context())->Int32Value(js.v8Context());
-      if (!result.IsJust()) {
-        printf("Result arg is not just...\n");
-        fflush(stdout);
-        return;
+      try {
+        auto result = compiled.runAndReturn(js.v8Context())->Int32Value(js.v8Context());
+        if (!result.IsJust()) {
+          printf("Result arg is not just...\n");
+          fflush(stdout);
+          return;
+        }
+        res_val = result.FromJust();
+      } catch(jsg::JsExceptionThrown&) {
+        if(try_catch.HasCaught()) {
+          status = -1;
+          // auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
+          // v8::String::Utf8Value string(js.v8Isolate, str);
+          // printf("%s\n",*string);
+          // fflush(stdout);
+        }
       }
-      int32_t res_val = result.FromJust();
 
-      status = res_val << 8;
-      printf("Status: %d\n",res_val);
-      fflush(stdout);
 
       fflush(stdout);
       fflush(stderr);
+      status = (res_val & 0xFF) << 8;
       CHECK(write(REPRL_CWFD, &status, 4) == 4);
       __sanitizer_cov_reset_edgeguards();
     } while(true);
