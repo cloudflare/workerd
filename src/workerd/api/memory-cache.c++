@@ -370,6 +370,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
     return js.rejectedPromise<jsg::JsRef<jsg::JsValue>>(js.rangeError("Key too large."_kj));
   }
 
+  auto readSpan = IoContext::current().makeTraceSpan("memory_cache_read"_kjc);
+
   KJ_IF_SOME(fallback, optionalFallback) {
     KJ_SWITCH_ONEOF(cacheUse.getWithFallback(key.value)) {
       KJ_CASE_ONEOF(result, kj::Own<CacheValue>) {
@@ -379,7 +381,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
       }
       KJ_CASE_ONEOF(promise, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>) {
         return IoContext::current().awaitIo(js, kj::mv(promise),
-            [fallback = kj::mv(fallback), key = kj::str(key.value)](
+            [fallback = kj::mv(fallback), key = kj::str(key.value), span = kj::mv(readSpan)](
                 jsg::Lock& js, SharedMemoryCache::Use::GetWithFallbackOutcome cacheResult) mutable
             -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
           KJ_SWITCH_ONEOF(cacheResult) {
