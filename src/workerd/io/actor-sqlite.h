@@ -179,24 +179,16 @@ private:
   // was deleted at the start of the handler (when armAlarmHandler() is called), but we don't
   // actually want to persist that deletion until after the handler has successfully completed
   // (DeferredAlarmDeleter freed prior to any setAlarm() or cancelDeferredAlarmDeletion() calls).
-  struct KnownAlarmTime {
-    enum class Status {
-      CLEAN,    // Alarm time has been committed
-      DIRTY,    // Alarm time has been changed and not yet committed
-      FLUSHING  // Alarm time is being committed in an ongoing transaction
-    } status;
-    kj::Maybe<kj::Date> time;
-  };
-  struct DeferredAlarmDelete {
-    enum class Status {
-      WAITING,  // Alarm handler is running, and alarm value has not changed
-      READY,    // Alarm handler completed, deletion is pending, but has not yet been committed
-      FLUSHING  // Alarm deletion is being committed in an ongoing transaction
-    } status;
-    kj::Date timeToDelete;
-    // TODO(correctness): ActorCache tracks a "wasDeleted" flag; needed here too?
-  };
-  kj::OneOf<KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime;
+  bool haveDeferredDelete = false;
+
+  // Some state only used for tracking calling invariants.
+  bool inAlarmHandler = false;
+
+  // The state the local alarm db was in when we started the last commit.
+  kj::Maybe<kj::Date> lastPrecommitAlarmState;
+
+  // The alarm state for which we last received confirmation that the db was durably stored.
+  kj::Maybe<kj::Date> lastConfirmedAlarmDbState;
 
   kj::TaskSet commitTasks;
 
@@ -215,9 +207,6 @@ private:
   // Called when DeferredAlarmDeleter is destroyed, to delete alarm if not reset or cancelled
   // during handler.
   void maybeDeleteDeferredAlarm();
-
-  friend kj::StringPtr KJ_STRINGIFY(KnownAlarmTime::Status status);
-  friend kj::StringPtr KJ_STRINGIFY(DeferredAlarmDelete::Status status);
 };
 
 }  // namespace workerd

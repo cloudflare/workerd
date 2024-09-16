@@ -453,6 +453,7 @@ KJ_TEST("canceling deferred alarm deletion outside handler edge case") {
 
   { auto maybeWrite = KJ_ASSERT_NONNULL(test.actor.armAlarmHandler(oneMs, false)); }
   test.actor.cancelDeferredAlarmDeletion();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
