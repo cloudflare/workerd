@@ -379,7 +379,18 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
   if (key.value.size() > MAX_KEY_SIZE) {
     return js.rejectedPromise<jsg::JsRef<jsg::JsValue>>(js.rangeError("Key too large."_kj));
   }
-
+  auto requestSpan = IoContext::current().getMetrics().getSpan();
+  SpanBuilder readSpan(nullptr);
+  
+  // if (requestSpan != nullptr?)
+  if (requestSpan.isObserved()) {
+    readSpan = requestSpan.newChild("memory_cache_read"_kjc);
+    //readSpan.setTag("lock_wait_time"_kjc, );
+  }
+  // span
+  /*KJ_IF_SOME(tracer, IoContext::current()->getWorkerTracer()) {*/
+  /*  tracer*/
+  /*}*/
   KJ_IF_SOME(fallback, optionalFallback) {
     KJ_SWITCH_ONEOF(cacheUse.getWithFallback(key.value)) {
       KJ_CASE_ONEOF(result, kj::Own<CacheValue>) {
