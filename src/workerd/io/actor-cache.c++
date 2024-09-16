@@ -4,6 +4,7 @@
 
 #include "actor-cache.h"
 
+#include <workerd/io/actor-storage.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/util/duration-exceeded-logger.h>
@@ -399,6 +400,8 @@ void ActorCache::verifyConsistencyForTest() {
 
 kj::OneOf<kj::Maybe<ActorCache::Value>, kj::Promise<kj::Maybe<ActorCache::Value>>> ActorCache::get(
     Key key, ReadOptions options) {
+  ActorStorageLimits::checkMaxKeySize(key);
+
   options.noCache = options.noCache || lru.options.noCache;
   requireNotTerminal();
 
@@ -562,6 +565,8 @@ public:
 
 kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> ActorCache::get(
     kj::Array<Key> keys, ReadOptions options) {
+  ActorStorageLimits::checkMaxPairsCount(keys.size());
+
   options.noCache = options.noCache || lru.options.noCache;
   requireNotTerminal();
 
@@ -1843,6 +1848,9 @@ ActorCache::ReadCompletionChain::~ReadCompletionChain() noexcept(false) {
 // write operations
 
 kj::Maybe<kj::Promise<void>> ActorCache::put(Key key, Value value, WriteOptions options) {
+  ActorStorageLimits::checkMaxKeySize(key);
+  ActorStorageLimits::checkMaxValueSize(key, value);
+
   options.noCache = options.noCache || lru.options.noCache;
   requireNotTerminal();
   {
@@ -1856,6 +1864,12 @@ kj::Maybe<kj::Promise<void>> ActorCache::put(Key key, Value value, WriteOptions 
 }
 
 kj::Maybe<kj::Promise<void>> ActorCache::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
+  for (auto& pair: pairs) {
+    // We check limits in a separate loop to fail the whole operation when any pair fails a check
+    ActorStorageLimits::checkMaxKeySize(pair.key);
+    ActorStorageLimits::checkMaxValueSize(pair.key, pair.value);
+  }
+
   options.noCache = options.noCache || lru.options.noCache;
   requireNotTerminal();
   {
@@ -1912,6 +1926,8 @@ kj::OneOf<std::invoke_result_t<F>, kj::PromiseForResult<F, void>> mapPromise(
 }  // namespace
 
 kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions options) {
+  ActorStorageLimits::checkMaxKeySize(key);
+
   options.noCache = options.noCache || lru.options.noCache;
   requireNotTerminal();
 
@@ -1936,6 +1952,10 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
 }
 
 kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, WriteOptions options) {
+  for (auto& key: keys) {
+    ActorStorageLimits::checkMaxKeySize(key);
+  }
+
   options.noCache = options.noCache || lru.options.noCache;
   requireNotTerminal();
 

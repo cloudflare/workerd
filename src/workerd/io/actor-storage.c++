@@ -16,7 +16,7 @@ void ActorStorageLimits::checkMaxKeySize(kj::StringPtr key) {
           " was provided."));
 }
 
-void ActorStorageLimits::checkMaxValueSize(kj::StringPtr, kj::ArrayPtr<kj::byte> value) {
+void ActorStorageLimits::checkMaxValueSize(kj::StringPtr, kj::ArrayPtr<const kj::byte> value) {
   // It's tempting to put the key in this message, but that key could be surprisingly large so let's
   // return a simple message.
   JSG_REQUIRE(value.size() <= ENFORCED_MAX_VALUE_SIZE, RangeError,

@@ -12,7 +12,6 @@
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/actor-sqlite.h>
-#include <workerd/io/actor-storage.h>
 #include <workerd/io/features.h>
 #include <workerd/io/hibernation-manager.h>
 #include <workerd/jsg/jsg.h>
@@ -248,8 +247,6 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::get(jsg::
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getOne(
     jsg::Lock& js, kj::String key, const GetOptions& options) {
-  ActorStorageLimits::checkMaxKeySize(key);
-
   auto result = getCache(OP_GET).get(kj::str(key), options);
   return transformCacheResultWithCacheStatus(js, kj::mv(result), options,
       [key = kj::mv(key)](jsg::Lock& js, kj::Maybe<ActorCacheOps::Value> value, bool cached) {
@@ -462,10 +459,7 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
 
 jsg::Promise<void> DurableObjectStorageOperations::putOne(
     jsg::Lock& js, kj::String key, jsg::JsValue value, const PutOptions& options) {
-  ActorStorageLimits::checkMaxKeySize(key);
-
   kj::Array<byte> buffer = serializeV8Value(js, value);
-  ActorStorageLimits::checkMaxValueSize(key, buffer);
 
   auto units = billingUnits(key.size() + buffer.size());
 
@@ -527,8 +521,6 @@ void DurableObjectTransaction::deleteAll() {
 
 jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
     jsg::Lock& js, kj::String key, const PutOptions& options) {
-  ActorStorageLimits::checkMaxKeySize(key);
-
   return transformCacheResult(
       js, getCache(OP_DELETE).delete_(kj::mv(key), options), options, [](jsg::Lock&, bool value) {
     currentActorMetrics().addStorageDeletes(1);
@@ -538,8 +530,6 @@ jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getMultiple(
     jsg::Lock& js, kj::Array<kj::String> keys, const GetOptions& options) {
-  ActorStorageLimits::checkMaxPairsCount(keys.size());
-
   auto numKeys = keys.size();
 
   return transformCacheResult(
@@ -557,10 +547,7 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     // deleting an undefined field is confusing, throwing could break otherwise working code, and
     // a stray undefined here or there is probably closer to what the user desires.
 
-    ActorStorageLimits::checkMaxKeySize(field.name);
-
     kj::Array<byte> buffer = serializeV8Value(js, field.value);
-    ActorStorageLimits::checkMaxValueSize(field.name, buffer);
 
     units += billingUnits(field.name.size() + buffer.size());
 
@@ -578,10 +565,6 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
 
 jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
     jsg::Lock& js, kj::Array<kj::String> keys, const PutOptions& options) {
-  for (auto& key: keys) {
-    ActorStorageLimits::checkMaxKeySize(key);
-  }
-
   auto numKeys = keys.size();
 
   return transformCacheResult(js, getCache(OP_DELETE).delete_(kj::mv(keys), options), options,
