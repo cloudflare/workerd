@@ -509,7 +509,9 @@ KJ_TEST("SQLite read row counters (basic)") {
   constexpr int dbRowCount = 1000;
   auto insertStmt = db.prepare("INSERT INTO things (id, unindexed_int, value) VALUES (?, ?, ?)");
   for (int i = 0; i < dbRowCount; i++) {
-    insertStmt.run(i, i * 1000, kj::str("value", i));
+    auto query = insertStmt.run(i, i * 1000, kj::str("value", i));
+    KJ_EXPECT(query.getRowsRead() == 1);
+    KJ_EXPECT(query.getRowsWritten() == 1);
   }
 
   // Sanity check that the inserts worked.
