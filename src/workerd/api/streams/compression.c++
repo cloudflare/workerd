@@ -3,13 +3,42 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "compression.h"
+
+#include "nbytes.h"
 #include <workerd/io/features.h>
-#include <zlib.h>
 #include <deque>
 #include <vector>
 #include <iterator>
 
 namespace workerd::api {
+
+void CompressionAllocator::configure(z_stream* stream) {
+  stream->zalloc = AllocForZlib;
+  stream->zfree = FreeForZlib;
+  stream->opaque = this;
+}
+
+void* CompressionAllocator::AllocForZlib(void* data, uInt items, uInt size) {
+  size_t real_size =
+      nbytes::MultiplyWithOverflowCheck(static_cast<size_t>(items), static_cast<size_t>(size));
+  return AllocForBrotli(data, real_size);
+}
+
+// TODO(soon): Enabling V8 reporting breaks CompressionStreamImpl on edgeworker. Investigate.
+// This is mostly likely due to running CompressionStream without an isolate lock.
+void* CompressionAllocator::AllocForBrotli(void* opaque, size_t size) {
+  auto* thisAllocator = static_cast<CompressionAllocator*>(opaque);
+  auto data = kj::heapArray<uint8_t>(size);
+  auto begin = data.begin();
+  thisAllocator->allocations.insert(begin, kj::mv(data));
+  return begin;
+}
+
+void CompressionAllocator::FreeForZlib(void* opaque, void* pointer) {
+  if (KJ_UNLIKELY(pointer == nullptr)) return;
+  auto* thisAllocator = static_cast<CompressionAllocator*>(opaque);
+  JSG_REQUIRE(thisAllocator->allocations.erase(pointer), Error, "Zlib allocation should exist"_kj);
+}
 
 namespace {
 
@@ -33,6 +62,8 @@ public:
   explicit Context(Mode mode, kj::StringPtr format, ContextFlags flags)
       : mode(mode),
         strictCompression(flags) {
+    // Configure allocator before any stream operations.
+    allocator.configure(&ctx);
     int result = Z_OK;
     switch (mode) {
       case Mode::COMPRESS:
@@ -46,7 +77,7 @@ public:
       default:
         KJ_UNREACHABLE;
     }
-    JSG_REQUIRE(result == Z_OK, Error, "Failed to initialize compression context.");
+    JSG_REQUIRE(result == Z_OK, Error, "Failed to initialize compression context."_kj);
   }
 
   ~Context() noexcept(false) {
@@ -128,6 +159,7 @@ private:
   Mode mode;
   z_stream ctx = {};
   kj::byte buffer[16384];
+  CompressionAllocator allocator;
 
   // For the eponymous compatibility flag
   ContextFlags strictCompression;
