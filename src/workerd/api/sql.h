@@ -32,7 +32,12 @@ public:
 
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
-    JSG_METHOD(prepare);
+
+    // Prepared statement API is experimental-only and deprecated. exec() will automatically
+    // handle caching prepared statements, so apps don't need to worry about it.
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(prepare);
+    }
 
     // Make sure that the 'ingest' function is still experimental-only if and when
     // the SQL API becomes publicly available.
