@@ -293,7 +293,6 @@ public:
   class CompressionStream: public jsg::Object {
   public:
     explicit CompressionStream(ZlibMode _mode): context_(_mode) {}
-    CompressionStream() = default;
     // TODO(soon): Find a way to add noexcept(false) to this destructor.
     ~CompressionStream();
     KJ_DISALLOW_COPY_AND_MOVE(CompressionStream);

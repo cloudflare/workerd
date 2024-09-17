@@ -26,20 +26,28 @@ void* CompressionAllocator::AllocForZlib(void* data, uInt items, uInt size) {
   return AllocForBrotli(data, real_size);
 }
 
-// TODO(soon): Enabling V8 reporting breaks CompressionStreamImpl on edgeworker. Investigate.
-// This is mostly likely due to running CompressionStream without an isolate lock.
 void* CompressionAllocator::AllocForBrotli(void* opaque, size_t size) {
-  auto* thisAllocator = static_cast<CompressionAllocator*>(opaque);
-  auto data = kj::heapArray<uint8_t>(size);
+  auto* allocator = static_cast<CompressionAllocator*>(opaque);
+  auto data = kj::heapArray<kj::byte>(size);
   auto begin = data.begin();
-  thisAllocator->allocations.insert(begin, kj::mv(data));
+  auto isolate = v8::Isolate::GetCurrent();
+  KJ_REQUIRE_NONNULL(isolate, "Isolate lock is required"_kj);
+  auto& js = jsg::Lock::from(isolate);
+  allocator->allocations.insert(begin,
+      {
+        .data = kj::mv(data),
+        .memoryAdjustment = js.getExternalMemoryAdjustment(size),
+      });
   return begin;
 }
 
 void CompressionAllocator::FreeForZlib(void* opaque, void* pointer) {
   if (KJ_UNLIKELY(pointer == nullptr)) return;
-  auto* thisAllocator = static_cast<CompressionAllocator*>(opaque);
-  JSG_REQUIRE(thisAllocator->allocations.erase(pointer), Error, "Zlib allocation should exist"_kj);
+  auto* allocator = static_cast<CompressionAllocator*>(opaque);
+  // No need to destroy memoryAdjustment here.
+  // Dropping the allocation from the hashmap will defer the adjustment
+  // until the isolate lock is held.
+  JSG_REQUIRE(allocator->allocations.erase(pointer), Error, "Zlib allocation should exist"_kj);
 }
 
 namespace {
@@ -138,6 +146,9 @@ public:
     };
   }
 
+protected:
+  CompressionAllocator allocator;
+
 private:
   static int getWindowBits(kj::StringPtr format) {
     // We use a windowBits value of 15 combined with the magic value
@@ -161,7 +172,6 @@ private:
   Mode mode;
   z_stream ctx = {};
   kj::byte buffer[16384];
-  CompressionAllocator allocator;
 
   // For the eponymous compatibility flag
   ContextFlags strictCompression;
@@ -469,7 +479,7 @@ private:
 };
 }  // namespace
 
-jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::String format) {
+jsg::Ref<CompressionStream> CompressionStream::constructor(kj::String format) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
       "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 

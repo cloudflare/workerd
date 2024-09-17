@@ -18,7 +18,6 @@ namespace workerd::api {
 // isolate pointer and use that to get the external memory adjustment.
 class CompressionAllocator final {
 public:
-  CompressionAllocator() = default;
   void configure(z_stream* stream);
 
   static void* AllocForZlib(void* data, uInt items, uInt size);
@@ -26,20 +25,18 @@ public:
   static void FreeForZlib(void* data, void* pointer);
 
 private:
-  // TODO(soon): Use this instead of array<byte> after fixing edgeworker.
-  // struct Allocation {
-  //   kj::Array<kj::byte> data;
-  //   kj::Maybe<jsg::ExternalMemoryAdjustment> memoryAdjustment;
-  // };
-
-  kj::HashMap<void*, kj::Array<kj::byte>> allocations;
+  struct Allocation {
+    kj::Array<kj::byte> data;
+    jsg::ExternalMemoryAdjustment memoryAdjustment;
+  };
+  kj::HashMap<void*, Allocation> allocations;
 };
 
 class CompressionStream: public TransformStream {
 public:
   using TransformStream::TransformStream;
 
-  static jsg::Ref<CompressionStream> constructor(jsg::Lock& js, kj::String format);
+  static jsg::Ref<CompressionStream> constructor(kj::String format);
 
   JSG_RESOURCE_TYPE(CompressionStream) {
     JSG_INHERIT(TransformStream);
