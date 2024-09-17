@@ -60,7 +60,7 @@ private:
 
   bool isAllowedName(kj::StringPtr name) const override;
   bool isAllowedTrigger(kj::StringPtr name) const override;
-  void onError(kj::StringPtr message) const override;
+  void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override;
   bool allowTransactions() const override;
 
   SqliteDatabase& getDb(jsg::Lock& js) {

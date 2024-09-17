@@ -4,7 +4,28 @@
 
 #include "sqlite-kv.h"
 
+#include <sqlite3.h>
+
 namespace workerd {
+
+void SqliteKvRegulator::onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const {
+  KJ_IF_SOME(ec, sqliteErrorCode) {
+    switch (ec) {
+      case SQLITE_TOOBIG:
+        // We want to return SQLITE_TOOBIG to the user since it's usually because of user error.
+        JSG_ASSERT(false, Error, message);
+        return;
+      // We don't want to return other errors to the user since they're usually our fault.
+      // In that case we do nothing because the contract of onError is not to handle the error in
+      // its entirity, but instead to optionally handle it, and do nothing otherwise.
+      // When onError does nothing, the code calling into onError is still responsible for
+      // handling the error by other means, usually by throwing a KJ exception itself.
+      default:
+        return;
+    }
+    KJ_UNREACHABLE;
+  }
+}
 
 SqliteKv::SqliteKv(SqliteDatabase& db): ResetListener(db) {
   if (db.run("SELECT name FROM sqlite_master WHERE type='table' AND name='_cf_KV'").isDone()) {

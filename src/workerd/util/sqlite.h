@@ -101,7 +101,7 @@ public:
     // KJ exceptions in all cases. This is because SQLITE_MISUSE indicates a bug that could lead to
     // undefined behavior. Such bugs are always in C++ code; JavaScript application code must be
     // prohibited from causing such errors in the first place.
-    virtual void onError(kj::StringPtr message) const {}
+    virtual void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const {}
 
     // Are BEGIN TRANSACTION and SAVEPOINT statements allowed? Note that if allowed, SAVEPOINT will
     // also be subject to `isAllowedName()` for the savepoint name. If denied, the application will
@@ -134,6 +134,9 @@ public:
 
   template <size_t size>
   Statement prepare(const char (&sqlCode)[size]);
+
+  template <size_t size>
+  Statement prepare(const Regulator& regulator, const char (&sqlCode)[size]);
 
   // When the input is a string literal, we automatically use the TRUSTED regulator.
   template <size_t size, typename... Params>
@@ -723,13 +726,19 @@ SqliteDatabase::Query SqliteDatabase::Statement::run(Params&&... params) {
   return Query(db, regulator, *this, kj::fwd<Params>(params)...);
 }
 
+template <size_t size, typename... Params>
+SqliteDatabase::Query SqliteDatabase::run(const char (&sqlCode)[size], Params&&... params) {
+  return Query(*this, TRUSTED, sqlCode, kj::fwd<Params>(params)...);
+}
+
 template <size_t size>
 SqliteDatabase::Statement SqliteDatabase::prepare(const char (&sqlCode)[size]) {
   return prepare(TRUSTED, kj::StringPtr(sqlCode, size - 1));
 }
-template <size_t size, typename... Params>
-SqliteDatabase::Query SqliteDatabase::run(const char (&sqlCode)[size], Params&&... params) {
-  return Query(*this, TRUSTED, sqlCode, kj::fwd<Params>(params)...);
+template <size_t size>
+SqliteDatabase::Statement SqliteDatabase::prepare(
+    const Regulator& regulator, const char (&sqlCode)[size]) {
+  return prepare(regulator, kj::StringPtr(sqlCode, size - 1));
 }
 
 }  // namespace workerd
