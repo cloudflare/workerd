@@ -12,7 +12,7 @@ const config :Workerd.Config = (
 const mainWorker :Workerd.Worker = (
   compatibilityDate = "2024-03-04",
 
-  # "experimental" flag is needed to test `sql.ingest()`
+  # "experimental" flag is needed to test `sql.ingest()` and `sql.prepare()`.
   compatibilityFlags = ["experimental", "nodejs_compat"],
 
   modules = [
