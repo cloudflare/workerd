@@ -880,7 +880,7 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // This limit is set highter than what is suggested on sqlite.org/security.html
   // because we want to allow storing values of 1MiB, and we added some extra
   // padding on top of that
-  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 2000000);
+  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 2200000);
   sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
   sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
   sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 100);
