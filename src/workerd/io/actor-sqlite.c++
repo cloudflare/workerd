@@ -420,8 +420,12 @@ kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
 }
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions options) {
-  // TODO(soon): handle deleteAll and alarm state interaction.
   requireNotBroken();
+
+  // kv.deleteAll() clears the database, so we need to save and possibly restore alarm state in
+  // the metadata table, to try to match the behavior of ActorCache, which preserves the set alarm
+  // when running deleteAll().
+  auto localAlarmState = metadata.getAlarm();
 
   // deleteAll() cannot be part of a transaction because it deletes the database altogether. So,
   // we have to close our transactions or fail.
@@ -451,8 +455,9 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
     }
   }
 
-  if (!deleteAllCommitScheduled) {
-    // We'll want to make sure the commit callback is called for the deleteAll().
+  if (localAlarmState == kj::none && !deleteAllCommitScheduled) {
+    // If we're not going to perform a write to restore alarm state, we'll want to make sure the
+    // commit callback is called for the deleteAll().
     commitTasks.add(outputGate.lockWhile(kj::evalLater([this]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
@@ -464,6 +469,21 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
   }
 
   uint count = kv.deleteAll();
+
+  // TODO(correctness): Since workerd doesn't have a separate durability step, in the unlikely
+  // event of a failure here, between deleteAll() and setAlarm(), we could theoretically lose the
+  // current alarm state when running under workerd.  Not sure if there's a practical way to avoid
+  // this.
+
+  // Reinitialize metadata wrapper, to allow on-demand recreation of metadata table.
+  metadata = SqliteMetadata(*db);
+
+  // Reset alarm state, if necessary.  If no alarm is set, OK to just leave metadata table
+  // uninitialized.
+  if (localAlarmState != kj::none) {
+    metadata.setAlarm(localAlarmState);
+  }
+
   return {
     .backpressure = kj::none,
     .count = count,

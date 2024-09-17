@@ -738,5 +738,84 @@ KJ_TEST("getAlarm/setAlarm check for brokenness") {
   test.pollAndExpectCalls({});
 }
 
+KJ_TEST("calling deleteAll() preserves alarm state if alarm is set") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  ActorCache::DeleteAllResults results = test.actor.deleteAll({});
+  KJ_ASSERT(results.backpressure == kj::none);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  KJ_ASSERT(results.count.wait(test.ws) == 0);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  commitFulfiller->fulfill();
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("calling deleteAll() preserves alarm state if alarm is not set") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to empty value in metadata table.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+  test.setAlarm(kj::none);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+  ActorCache::DeleteAllResults results = test.actor.deleteAll({});
+  KJ_ASSERT(results.backpressure == kj::none);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+  auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  KJ_ASSERT(results.count.wait(test.ws) == 0);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+  commitFulfiller->fulfill();
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+  // We can also assert that we leave the database empty, in case that turns out to be useful later:
+  auto q = test.db.run("SELECT name FROM sqlite_master WHERE type='table' AND name='_cf_METADATA'");
+  KJ_ASSERT(q.isDone());
+}
+
+KJ_TEST("calling deleteAll() during an implicit transaction preserves alarm state") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+
+  ActorCache::DeleteAllResults results = test.actor.deleteAll({});
+  KJ_ASSERT(results.backpressure == kj::none);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+
+  auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  KJ_ASSERT(results.count.wait(test.ws) == 0);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  commitFulfiller->fulfill();
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
 }  // namespace
 }  // namespace workerd
