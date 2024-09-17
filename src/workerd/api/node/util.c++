@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "util.h"
 
-#include <workerd/jsg/modules.h>
+#include <workerd/jsg/jsg.h>
 
 #include <kj/vector.h>
 

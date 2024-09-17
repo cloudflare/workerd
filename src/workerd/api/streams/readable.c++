@@ -10,7 +10,7 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
-#include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 

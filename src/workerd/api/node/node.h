@@ -13,7 +13,6 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/modules.h>
 #include <workerd/jsg/url.h>
 
 #include <capnp/dynamic.h>

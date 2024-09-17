@@ -7,7 +7,7 @@
 #include "readable.h"
 #include "writable.h"
 
-#include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/debug.h>

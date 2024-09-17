@@ -19,7 +19,6 @@
 #include <workerd/jsg/inspector.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>

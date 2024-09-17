@@ -8,7 +8,6 @@
 #include "gpu-command-buffer.h"
 
 #include <webgpu/webgpu_cpp.h>
-#include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
