@@ -3,14 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
-#include <algorithm>
-#include <cstdint>
+
 #include <openssl/aes.h>
 #include <openssl/base.h>
 #include <openssl/bn.h>
 #include <openssl/cipher.h>
 #include <openssl/mem.h>
 #include <workerd/io/io-context.h>
+
+#include <algorithm>
+#include <cstdint>
 
 namespace workerd::api {
 namespace {

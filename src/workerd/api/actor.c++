@@ -3,14 +3,17 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor.h"
+
 #include "util.h"
+
 #include <workerd/io/features.h>
-#include <kj/encoding.h>
-#include <kj/compat/http.h>
+
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
-#include <capnp/schema.h>
 #include <capnp/message.h>
+#include <capnp/schema.h>
+#include <kj/compat/http.h>
+#include <kj/encoding.h>
 
 namespace workerd::api {
 

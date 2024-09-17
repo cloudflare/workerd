@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #pragma once
+#include "basics.h"
+
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
-#include "basics.h"
 
 namespace workerd::api {
 

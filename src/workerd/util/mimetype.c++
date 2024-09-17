@@ -2,10 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 #include "mimetype.h"
+
 #include "strings.h"
+
+#include <workerd/util/string-buffer.h>
+
 #include <kj/debug.h>
 #include <kj/string-tree.h>
-#include <workerd/util/string-buffer.h>
 
 namespace workerd {
 

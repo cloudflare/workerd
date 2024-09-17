@@ -8,13 +8,14 @@
 // This file defines basic helpers involved in wrapping C++ objects for JavaScript consumption,
 // including garbage-collecting those objects.
 
-#include <kj/common.h>
-#include <kj/debug.h>
-#include <kj/refcount.h>
-#include <kj/vector.h>
-#include <kj/list.h>
 #include <v8-context.h>
 #include <v8-object.h>
+
+#include <kj/common.h>
+#include <kj/debug.h>
+#include <kj/list.h>
+#include <kj/refcount.h>
+#include <kj/vector.h>
 
 namespace cppgc {
 class Visitor;

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "r2-bucket.h"
+
 #include <workerd/jsg/jsg.h>
 
 namespace edgeworker::api {

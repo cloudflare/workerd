@@ -4,6 +4,7 @@
 
 #pragma once
 #include "canceler.h"
+
 #include <kj/compat/http.h>
 
 namespace workerd {

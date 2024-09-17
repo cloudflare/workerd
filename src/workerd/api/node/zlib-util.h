@@ -4,17 +4,15 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 #pragma once
 
-#include <workerd/jsg/jsg.h>
+#include <brotli/decode.h>
+#include <brotli/encode.h>
 #include <workerd/api/streams/compression.h>
-
+#include <workerd/jsg/jsg.h>
 #include <zlib.h>
 
 #include <kj/array.h>
 #include <kj/one-of.h>
 #include <kj/vector.h>
-
-#include <brotli/decode.h>
-#include <brotli/encode.h>
 
 // The following implementation is adapted from Node.js
 // and therefore follows Node.js style as opposed to kj style.

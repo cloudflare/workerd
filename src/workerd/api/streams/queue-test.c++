@@ -3,8 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "queue.h"
-#include <workerd/jsg/jsg.h>
+
 #include <workerd/jsg/jsg-test.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 namespace {

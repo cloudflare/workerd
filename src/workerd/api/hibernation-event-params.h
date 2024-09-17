@@ -4,11 +4,12 @@
 
 #pragma once
 
-#include <cstdint>
 #include <kj/common.h>
-#include <kj/string.h>
 #include <kj/debug.h>
 #include <kj/one-of.h>
+#include <kj/string.h>
+
+#include <cstdint>
 
 namespace workerd::api {
 // Event types and their corresponding parameters.

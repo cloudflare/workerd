@@ -4,9 +4,9 @@
 
 #pragma once
 
+#include <v8.h>
 #include <workerd/api/http.h>
 #include <workerd/jsg/jsg.h>
-#include <v8.h>
 
 struct lol_html_HtmlRewriterBuilder;
 struct lol_html_HtmlRewriter;

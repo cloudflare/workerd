@@ -4,12 +4,12 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
-#include <workerd/jsg/modules.h>
-#include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/url.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/api/streams/writable.h>
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/modules.h>
+#include <workerd/jsg/url.h>
 
 namespace workerd::api {
 

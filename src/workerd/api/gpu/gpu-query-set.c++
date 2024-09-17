@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-query-set.h"
+
 #include <workerd/jsg/exception.h>
 
 namespace workerd::api::gpu {

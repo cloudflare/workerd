@@ -1,7 +1,7 @@
 #pragma once
 
-#include <kj/compat/http.h>
 #include <capnp/compat/http-over-capnp.h>
+#include <kj/compat/http.h>
 
 namespace workerd {
 

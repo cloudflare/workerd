@@ -4,13 +4,13 @@
 
 #pragma once
 
-#include <kj/async.h>
-#include <kj/common.h>
-
 #include <workerd/api/basics.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
+
+#include <kj/async.h>
+#include <kj/common.h>
 
 namespace workerd::api {
 

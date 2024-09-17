@@ -5,15 +5,17 @@
 #pragma once
 // Public API for setting up JavaScript context. Only high-level code needs to include this file.
 
-#include "jsg.h"
 #include "async-context.h"
+#include "jsg.h"
 #include "type-wrapper.h"
 #include "v8-platform-wrapper.h"
+
 #include <v8-profiler.h>
+#include <workerd/jsg/observer.h>
 #include <workerd/util/batch-queue.h>
+
 #include <kj/map.h>
 #include <kj/mutex.h>
-#include <workerd/jsg/observer.h>
 
 namespace workerd::jsg {
 

@@ -3,15 +3,17 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor-cache.h"
-#include <kj/test.h>
-#include <kj/debug.h>
-#include <capnp/dynamic.h>
-#include <kj/list.h>
 #include "io-gate.h"
-#include <kj/thread.h>
-#include <kj/source-location.h>
+
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/test.h>
+
+#include <capnp/dynamic.h>
+#include <kj/debug.h>
+#include <kj/list.h>
+#include <kj/source-location.h>
+#include <kj/test.h>
+#include <kj/thread.h>
 
 namespace workerd {
 namespace {

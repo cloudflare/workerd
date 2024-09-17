@@ -6,14 +6,15 @@
 // test without pulling in the world.
 #define WORKERD_API_BASICS_TEST 1
 
-#include "basics.h"
-#include "actor.h"
 #include "actor-state.h"
+#include "actor.h"
+#include "basics.h"
 #include "util.h"
-#include <workerd/jsg/jsg.h>
-#include <workerd/jsg/jsg-test.h>
-#include <workerd/jsg/dom-exception.h>
+
 #include <workerd/io/promise-wrapper.h>
+#include <workerd/jsg/dom-exception.h>
+#include <workerd/jsg/jsg-test.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 namespace {

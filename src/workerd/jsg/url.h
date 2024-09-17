@@ -1,8 +1,9 @@
 #pragma once
-#include <kj/string.h>
+#include <workerd/jsg/memory.h>
+
 #include <kj/common.h>
 #include <kj/one-of.h>
-#include <workerd/jsg/memory.h>
+#include <kj/string.h>
 
 namespace workerd::jsg {
 

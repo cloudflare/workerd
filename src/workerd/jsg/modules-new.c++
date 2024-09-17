@@ -3,9 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "modules-new.h"
-#include <workerd/jsg/jsg.h>
+
 #include <workerd/jsg/function.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>
+
 #include <kj/mutex.h>
 #include <kj/table.h>
 

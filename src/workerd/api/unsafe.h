@@ -1,9 +1,9 @@
 #pragma once
 
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
-#include <workerd/io/io-context.h>
 
 namespace workerd::api {
 

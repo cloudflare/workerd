@@ -3,12 +3,15 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "io-context.h"
+
 #include <workerd/io/io-gate.h>
 #include <workerd/io/worker.h>
-#include <kj/debug.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
+
+#include <kj/debug.h>
+
 #include <map>
 
 namespace workerd {

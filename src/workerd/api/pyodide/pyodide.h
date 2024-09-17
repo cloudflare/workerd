@@ -1,19 +1,21 @@
 #pragma once
 
 #include "workerd/util/wait-list.h"
-#include <kj/array.h>
-#include <kj/debug.h>
-#include <kj/common.h>
-#include <kj/filesystem.h>
+
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide.capnp.h>
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
 #include <workerd/server/workerd.capnp.h>
-#include <workerd/io/io-context.h>
 #include <workerd/util/autogate.h>
+
 #include <capnp/serialize.h>
+#include <kj/array.h>
+#include <kj/common.h>
+#include <kj/debug.h>
+#include <kj/filesystem.h>
 
 namespace workerd::api::pyodide {
 

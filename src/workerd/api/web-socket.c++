@@ -3,13 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "web-socket.h"
+
 #include "events.h"
-#include <workerd/jsg/jsg.h>
-#include <workerd/jsg/ser.h>
+
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/util/sentry.h>
+
 #include <kj/compat/url.h>
 
 namespace workerd::api {

@@ -4,10 +4,10 @@
 
 #pragma once
 
-#include <kj/mutex.h>
 #include <kj/async.h>
 #include <kj/list.h>
 #include <kj/map.h>
+#include <kj/mutex.h>
 
 namespace workerd {
 

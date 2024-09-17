@@ -4,11 +4,11 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
-#include <workerd/util/sqlite.h>
+#include <workerd/api/actor-state.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>
-#include <workerd/api/actor-state.h>
+#include <workerd/jsg/jsg.h>
+#include <workerd/util/sqlite.h>
 
 namespace workerd::api {
 

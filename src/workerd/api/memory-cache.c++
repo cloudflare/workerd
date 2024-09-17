@@ -1,9 +1,9 @@
 #include "memory-cache.h"
 
+#include <workerd/api/util.h>
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
-#include <workerd/io/io-context.h>
-#include <workerd/api/util.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api {

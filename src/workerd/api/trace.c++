@@ -9,11 +9,12 @@
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/ser.h>
-#include <capnp/schema.h>
-#include <workerd/util/thread-scopes.h>
 #include <workerd/util/own-util.h>
-#include <workerd/util/uuid.h>
+#include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/util/uuid.h>
+
+#include <capnp/schema.h>
 
 namespace workerd::api {
 

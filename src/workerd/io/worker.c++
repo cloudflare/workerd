@@ -2,46 +2,50 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <cstdint>
-#include <workerd/io/worker.h>
-#include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
+
+#include <v8-inspector.h>
+#include <v8-profiler.h>
+#include <workerd/api/actor-state.h>
+#include <workerd/api/global-scope.h>
+#include <workerd/api/sockets.h>
+#include <workerd/api/streams.h>  // for api::StreamEncoding
+#include <workerd/io/cdp.capnp.h>
+#include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
+#include <workerd/io/promise-wrapper.h>
+#include <workerd/io/worker.h>
+#include <workerd/jsg/async-context.h>
+#include <workerd/jsg/inspector.h>
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/modules.h>
+#include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/xthreadnotifier.h>
-#include <workerd/api/actor-state.h>
-#include <workerd/api/global-scope.h>
-#include <workerd/api/sockets.h>
-#include <workerd/api/streams.h>  // for api::StreamEncoding
-#include <workerd/jsg/async-context.h>
-#include <workerd/jsg/jsg.h>
-#include <workerd/jsg/inspector.h>
-#include <workerd/jsg/modules.h>
-#include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/util.h>
-#include <workerd/io/cdp.capnp.h>
-#include <workerd/io/compatibility-date.h>
-#include <workerd/io/features.h>
-#include <capnp/message.h>
+
 #include <capnp/compat/json.h>
-#include <kj/compat/gzip.h>
+#include <capnp/message.h>
 #include <kj/compat/brotli.h>
+#include <kj/compat/gzip.h>
 #include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/map.h>
-#include <v8-inspector.h>
-#include <v8-profiler.h>
-#include <map>
+
+#include <cstdint>
 #include <ctime>
+#include <map>
 #include <numeric>
 
 #if _WIN32
-#include <kj/win32-api-version.h>
 #include <io.h>
 #include <windows.h>
+
+#include <kj/win32-api-version.h>
 #include <kj/windows-sanity.h>
 #else
 #include <sys/syscall.h>

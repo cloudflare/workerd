@@ -8,15 +8,17 @@
 
 #pragma once
 
+#include <v8-array-buffer.h>
+#include <v8-profiler.h>
+
 #include <kj/common.h>
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/hash.h>
 #include <kj/map.h>
-#include <kj/table.h>
 #include <kj/string.h>
-#include <v8-profiler.h>
-#include <v8-array-buffer.h>
+#include <kj/table.h>
+
 #include <stack>
 #include <string>
 

@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "transform.h"
-#include "standard.h"
+
 #include "internal.h"
+#include "standard.h"
+
 #include <workerd/io/features.h>
 #include <workerd/jsg/function.h>
 

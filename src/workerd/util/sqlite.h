@@ -5,8 +5,9 @@
 #pragma once
 
 #include <kj/filesystem.h>
-#include <kj/one-of.h>
 #include <kj/list.h>
+#include <kj/one-of.h>
+
 #include <utility>
 
 struct sqlite3;

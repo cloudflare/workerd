@@ -3,9 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "dom-exception.h"
+
 #include "ser.h"
+
 #include <workerd/jsg/memory.h>
+
 #include <kj/string.h>
+
 #include <map>
 
 namespace workerd::jsg {

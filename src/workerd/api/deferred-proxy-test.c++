@@ -1,4 +1,5 @@
 #include "deferred-proxy.h"
+
 #include <kj/test.h>
 
 namespace workerd::api {

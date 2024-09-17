@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "urlpattern.h"
+
 #include <kj/vector.h>
 
 namespace workerd::api {

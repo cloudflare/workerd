@@ -1,8 +1,10 @@
 #pragma once
 
-#include <openssl/dh.h>
-#include <kj/common.h>
 #include "impl.h"
+
+#include <openssl/dh.h>
+
+#include <kj/common.h>
 
 namespace workerd::api {
 

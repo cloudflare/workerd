@@ -5,6 +5,7 @@
 #pragma once
 
 #include "gpu-bindgroup-layout.h"
+
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 

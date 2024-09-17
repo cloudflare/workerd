@@ -1,5 +1,7 @@
 #include "data-url.h"
+
 #include <workerd/jsg/url.h>
+
 #include <kj/test.h>
 
 namespace workerd::api {

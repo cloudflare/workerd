@@ -2,16 +2,18 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <workerd/jsg/setup.h>
-#include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/modules.capnp.h>
 #include "observer.h"
 #include "url.h"
+
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/modules.capnp.h>
+#include <workerd/jsg/setup.h>
+
+#include <capnp/message.h>
 #include <kj/async-io.h>
+#include <kj/test.h>
 #include <kj/thread.h>
 #include <kj/vector.h>
-#include <kj/test.h>
-#include <capnp/message.h>
 
 namespace workerd::jsg::test {
 namespace {

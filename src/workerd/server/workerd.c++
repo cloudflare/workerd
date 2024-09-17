@@ -2,44 +2,49 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <kj/main.h>
-#include <kj/encoding.h>
-#include <kj/filesystem.h>
-#include <kj/map.h>
-#include <kj/async-queue.h>
-#include <capnp/message.h>
-#include <capnp/serialize.h>
-#include <capnp/schema-parser.h>
-#include <capnp/dynamic.h>
-#include <workerd/server/v8-platform-impl.h>
-#include <workerd/server/workerd.capnp.h>
-#include <workerd/server/workerd-meta.capnp.h>
-#include <fcntl.h>
-#include <sys/stat.h>
 #include "server.h"
-#include <workerd/jsg/setup.h>
+
+#include <fcntl.h>
 #include <openssl/rand.h>
+#include <pyodide/generated/pyodide_extra.capnp.h>
+#include <sys/stat.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/supported-compatibility-date.capnp.h>
+#include <workerd/jsg/setup.h>
+#include <workerd/server/v8-platform-impl.h>
+#include <workerd/server/workerd-meta.capnp.h>
+#include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
-#include <pyodide/generated/pyodide_extra.capnp.h>
+
+#include <capnp/dynamic.h>
+#include <capnp/message.h>
+#include <capnp/schema-parser.h>
+#include <capnp/serialize.h>
+#include <kj/async-queue.h>
+#include <kj/encoding.h>
+#include <kj/filesystem.h>
+#include <kj/main.h>
+#include <kj/map.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
 #endif
 
 #if _WIN32
-#include <iostream>
+#include <windows.h>
+#include <winsock2.h>
+
 #include <kj/async-win32.h>
 #include <kj/win32-api-version.h>
-#include <windows.h>
 #include <kj/windows-sanity.h>
-#include <winsock2.h>
+
+#include <iostream>
 #else
-#include <unistd.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
-#include <sys/ioctl.h>
+#include <unistd.h>
+
 #include <kj/async-unix.h>
 #endif
 
@@ -47,9 +52,9 @@
 #include <sys/inotify.h>
 #elif __APPLE__ || __FreeBSD__ || __OpenBSD__ || __NetBSD__ || __DragonFly__
 #define WORKERD_USE_KQUEUE_FOR_FILE_WATCHER 1
-#include <sys/types.h>
 #include <sys/event.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #endif
 
 #ifdef __GLIBC__
@@ -57,8 +62,8 @@
 #endif
 
 #ifdef __APPLE__
-#include <libproc.h>
 #include <crt_externs.h>
+#include <libproc.h>
 #define environ (*_NSGetEnviron())
 #endif
 

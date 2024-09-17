@@ -5,8 +5,10 @@
 #pragma once
 
 #include "common.h"
-#include <workerd/jsg/jsg.h>
+
 #include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/jsg.h>
+
 #include <deque>
 #include <set>
 

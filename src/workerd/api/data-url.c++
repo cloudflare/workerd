@@ -1,4 +1,5 @@
 #include "data-url.h"
+
 #include <kj/encoding.h>
 
 namespace workerd::api {

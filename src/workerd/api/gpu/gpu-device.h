@@ -20,11 +20,12 @@
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
 #include "gpu-texture.h"
-#include <workerd/jsg/promise.h>
+
 #include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/api/basics.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/promise.h>
 
 namespace workerd::api::gpu {
 

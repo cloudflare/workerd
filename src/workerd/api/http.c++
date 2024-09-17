@@ -3,27 +3,31 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "http.h"
+
 #include "data-url.h"
+#include "queue.h"
 #include "sockets.h"
 #include "system-streams.h"
 #include "util.h"
-#include "queue.h"
 #include "worker-rpc.h"
-#include <kj/encoding.h>
-#include <kj/compat/url.h>
-#include <kj/memory.h>
-#include <kj/parse/char.h>
+
 #include <workerd/io/features.h>
+#include <workerd/io/io-context.h>
+#include <workerd/jsg/ser.h>
+#include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
-#include <workerd/jsg/ser.h>
-#include <workerd/jsg/url.h>
-#include <workerd/io/io-context.h>
-#include <set>
+
 #include <capnp/compat/http-over-capnp.capnp.h>
+#include <kj/compat/url.h>
+#include <kj/encoding.h>
+#include <kj/memory.h>
+#include <kj/parse/char.h>
+
+#include <set>
 
 namespace workerd::api {
 

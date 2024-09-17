@@ -5,8 +5,8 @@
 #pragma once
 
 #include <kj/common.h>
-#include <kj/string.h>
 #include <kj/exception.h>
+#include <kj/string.h>
 
 // Forward declare v8::Isolate here, this allows us to avoid including the V8 header and compile
 // some targets without depending on V8.

@@ -4,11 +4,12 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include "basics.h"
-#include "http.h"
 #include "hibernation-event-params.h"
+#include "http.h"
+
 #include <workerd/io/io-timers.h>
+#include <workerd/jsg/jsg.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
 #endif

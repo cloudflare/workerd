@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "v8-platform-wrapper.h"
-#include <v8-isolate.h>
+
 #include "jsg.h"
+
+#include <v8-isolate.h>
 
 namespace workerd::jsg {
 

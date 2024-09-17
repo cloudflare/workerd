@@ -3,8 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <kj/string.h>
 #include <workerd/jsg/jsg.h>
+
+#include <kj/string.h>
 
 namespace workerd::api::node {
 

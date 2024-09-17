@@ -6,14 +6,15 @@
 // Defines abstract interfaces for observing the activity of various components of the system,
 // e.g. to collect logs and metrics.
 
-#include <kj/string.h>
-#include <kj/refcount.h>
-#include <kj/exception.h>
-#include <kj/time.h>
-#include <workerd/io/trace.h>
 #include <workerd/io/features.capnp.h>
+#include <workerd/io/trace.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/util/sqlite.h>
+
+#include <kj/exception.h>
+#include <kj/refcount.h>
+#include <kj/string.h>
+#include <kj/time.h>
 
 namespace workerd {
 

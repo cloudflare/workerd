@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "macro-meta.h"
+
 #include <kj/test.h>
 
 namespace workerd::jsg {

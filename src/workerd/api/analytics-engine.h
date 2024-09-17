@@ -4,10 +4,10 @@
 
 #pragma once
 
-#include <workerd/api/util.h>
 #include <workerd/api/analytics-engine-impl.h>
-#include <workerd/jsg/jsg.h>
 #include <workerd/api/analytics-engine.capnp.h>
+#include <workerd/api/util.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 

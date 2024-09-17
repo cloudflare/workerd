@@ -7,8 +7,8 @@
 #include <kj/common.h>
 #include <kj/debug.h>
 #include <kj/function.h>
-#include <kj/refcount.h>
 #include <kj/list.h>
+#include <kj/refcount.h>
 
 namespace workerd {
 

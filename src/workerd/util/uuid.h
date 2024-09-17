@@ -4,9 +4,10 @@
 
 #pragma once
 
-#include <cstdint>
-#include <kj/string.h>
 #include <kj/hash.h>
+#include <kj/string.h>
+
+#include <cstdint>
 
 namespace kj {
 class EntropySource;

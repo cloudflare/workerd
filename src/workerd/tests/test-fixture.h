@@ -4,15 +4,15 @@
 
 #pragma once
 
-#include <kj/function.h>
-#include <kj/test.h>
-#include <capnp/message.h>
-
-#include <workerd/jsg/jsg.h>
+#include <workerd/api/memory-cache.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/server/workerd.capnp.h>
-#include <workerd/api/memory-cache.h>
+
+#include <capnp/message.h>
+#include <kj/function.h>
+#include <kj/test.h>
 
 namespace workerd {
 

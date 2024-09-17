@@ -1,9 +1,11 @@
 #include "spkac.h"
+
 #include "impl.h"
-#include <workerd/jsg/jsg.h>
-#include <workerd/io/io-context.h>
-#include <openssl/x509.h>
+
 #include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <workerd/io/io-context.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 namespace {

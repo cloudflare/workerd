@@ -3,14 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "queue.h"
+
 #include "util.h"
 
+#include <workerd/api/global-scope.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/util/mimetype.h>
-#include <workerd/api/global-scope.h>
+
 #include <kj/encoding.h>
 
 namespace workerd::api {

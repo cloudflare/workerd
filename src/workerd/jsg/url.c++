@@ -1,21 +1,24 @@
 #include "url.h"
+
 #include <kj/hash.h>
 
 extern "C" {
 #include "ada_c.h"
 }
 #include "ada.h"
-#include <string>
-#include <vector>
+
+#include <unicode/uchar.h>
+#include <unicode/utf8.h>
 
 #include <kj/debug.h>
 #include <kj/string-tree.h>
 #include <kj/vector.h>
-#include <unicode/utf8.h>
-#include <unicode/uchar.h>
+
 #include <algorithm>
 #include <map>
 #include <regex>
+#include <string>
+#include <vector>
 
 namespace workerd::jsg {
 

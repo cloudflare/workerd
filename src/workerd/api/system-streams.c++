@@ -3,10 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "system-streams.h"
+
 #include "util.h"
-#include <kj/one-of.h>
-#include <kj/compat/gzip.h>
+
 #include <kj/compat/brotli.h>
+#include <kj/compat/gzip.h>
+#include <kj/one-of.h>
 
 namespace workerd::api {
 

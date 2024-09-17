@@ -3,10 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-adapter.h"
+
 #include "gpu-adapter-info.h"
 #include "gpu-device.h"
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
+
 #include <workerd/jsg/exception.h>
 
 #define WGPU_FOR_EACH_LIMIT(X)                                                                     \

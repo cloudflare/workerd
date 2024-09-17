@@ -9,6 +9,7 @@
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
 #include "gpu-utils.h"
+
 #include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>

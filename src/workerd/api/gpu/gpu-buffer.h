@@ -6,6 +6,7 @@
 
 #include "gpu-async-runner.h"
 #include "gpu-utils.h"
+
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {

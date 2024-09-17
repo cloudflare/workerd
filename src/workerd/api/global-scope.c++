@@ -4,29 +4,29 @@
 
 #include "global-scope.h"
 
-#include <kj/encoding.h>
+#include "simdutf.h"
 
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/util.h>
+#include <workerd/io/features.h>
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
-#include <workerd/io/io-context.h>
-#include <workerd/io/features.h>
 #include <workerd/util/sentry.h>
-#include <workerd/util/thread-scopes.h>
-#include <workerd/api/hibernatable-web-socket.h>
-#include <workerd/api/util.h>
 #include <workerd/util/stream-utils.h>
-#include <workerd/util/use-perfetto-categories.h>
+#include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/util/use-perfetto-categories.h>
 
-#include "simdutf.h"
+#include <kj/encoding.h>
 
 namespace workerd::api {
 

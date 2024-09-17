@@ -4,9 +4,9 @@
 
 #pragma once
 
+#include <kj/debug.h>
 #include <kj/string.h>
 #include <kj/time.h>
-#include <kj/debug.h>
 
 namespace workerd::util {
 

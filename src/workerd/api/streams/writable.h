@@ -5,6 +5,7 @@
 #pragma once
 
 #include "common.h"
+
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api {

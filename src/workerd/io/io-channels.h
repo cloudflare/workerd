@@ -4,11 +4,12 @@
 
 #pragma once
 
-#include <workerd/io/actor-id.h>
-#include <kj/string.h>
-#include <kj/debug.h>
-#include <workerd/io/trace.h>
 #include <workerd/api/util.h>
+#include <workerd/io/actor-id.h>
+#include <workerd/io/trace.h>
+
+#include <kj/debug.h>
+#include <kj/string.h>
 
 namespace kj {
 class HttpClient;

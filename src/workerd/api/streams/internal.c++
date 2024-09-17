@@ -3,13 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "internal.h"
+
 #include "readable.h"
 #include "writable.h"
-#include <workerd/jsg/jsg.h>
-#include <kj/vector.h>
+
 #include <workerd/api/util.h>
-#include <workerd/util/string-buffer.h>
 #include <workerd/io/features.h>
+#include <workerd/jsg/jsg.h>
+#include <workerd/util/string-buffer.h>
+
+#include <kj/vector.h>
 
 namespace workerd::api {
 

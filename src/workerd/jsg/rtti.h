@@ -9,10 +9,11 @@
 // Can be used to generate typescript type, dynamically invoke methods, fuzz, check backward
 // compatibility etc.
 
-#include <kj/map.h>
-#include <capnp/message.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/rtti.capnp.h>
+
+#include <capnp/message.h>
+#include <kj/map.h>
 
 namespace workerd::jsg::rtti {
 

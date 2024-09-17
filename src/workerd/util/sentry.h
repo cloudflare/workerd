@@ -8,9 +8,10 @@
 
 #include <kj/common.h>
 #include <kj/debug.h>
-#include <kj/string.h>
 #include <kj/exception.h>
+#include <kj/string.h>
 #include <kj/time.h>
+
 #include <cstdint>
 
 namespace workerd {

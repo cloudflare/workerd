@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 #include "module.h"
+
 #include <workerd/jsg/url.h>
 
 namespace workerd::api::node {

@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include <kj/string.h>
 #include <kj/debug.h>
+#include <kj/string.h>
 
 namespace workerd::jsg {
 

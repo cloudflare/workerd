@@ -5,10 +5,11 @@
 
 #pragma once
 
-#include <kj/timer.h>
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/io-timers.h>
+
+#include <kj/timer.h>
 
 namespace workerd::api::gpu {
 

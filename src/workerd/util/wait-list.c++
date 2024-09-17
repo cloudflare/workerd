@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "wait-list.h"
+
 #include <kj/debug.h>
 
 namespace workerd {

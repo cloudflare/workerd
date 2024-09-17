@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "thread-scopes.h"
-#include <atomic>
+
 #include <kj/debug.h>
+
+#include <atomic>
 
 namespace workerd {
 

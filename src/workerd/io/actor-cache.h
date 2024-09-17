@@ -4,14 +4,16 @@
 
 #pragma once
 
-#include <kj/debug.h>
-#include <kj/async.h>
 #include <workerd/io/actor-storage.capnp.h>
-#include <kj/one-of.h>
-#include <kj/map.h>
+
+#include <kj/async.h>
+#include <kj/debug.h>
 #include <kj/list.h>
-#include <kj/time.h>
+#include <kj/map.h>
 #include <kj/mutex.h>
+#include <kj/one-of.h>
+#include <kj/time.h>
+
 #include <atomic>
 
 namespace workerd {

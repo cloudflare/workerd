@@ -4,9 +4,9 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 #include "zlib-util.h"
-#include "util.h"
 
 #include "nbytes.h"
+#include "util.h"
 
 // The following implementation is adapted from Node.js
 // and therefore follows Node.js style as opposed to kj style.

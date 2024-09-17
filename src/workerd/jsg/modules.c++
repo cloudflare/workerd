@@ -5,7 +5,9 @@
 #include "jsg.h"
 #include "promise.h"
 #include "setup.h"
+
 #include <kj/mutex.h>
+
 #include <set>
 
 namespace workerd::jsg {

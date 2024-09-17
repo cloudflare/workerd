@@ -7,12 +7,13 @@
 //
 // TODO(cleanp): Rename to events.h?
 
-#include <workerd/jsg/jsg.h>
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-own.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/canceler.h>
+
 #include <kj/function.h>
 #include <kj/map.h>
-#include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
 

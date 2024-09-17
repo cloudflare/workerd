@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "cf-property.h"
+
 #include <workerd/io/features.h>
 
 namespace workerd::api {

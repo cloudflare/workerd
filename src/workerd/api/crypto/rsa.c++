@@ -1,14 +1,18 @@
 #include "rsa.h"
+
 #include "impl.h"
 #include "keys.h"
-#include <kj/common.h>
-#include <kj/array.h>
+#include "simdutf.h"
+
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
+
+#include <kj/array.h>
+#include <kj/common.h>
+
 #include <map>
-#include "simdutf.h"
 
 namespace workerd::api {
 

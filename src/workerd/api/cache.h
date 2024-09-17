@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include "http.h"
+
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 

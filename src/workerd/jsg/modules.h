@@ -4,13 +4,14 @@
 
 #pragma once
 
-#include <kj/filesystem.h>
-#include <kj/map.h>
-#include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/promise.h>
+#include <workerd/util/thread-scopes.h>
+
+#include <kj/filesystem.h>
+#include <kj/map.h>
 
 namespace workerd::jsg {
 

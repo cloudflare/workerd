@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "sockets.h"
-#include "system-streams.h"
-#include <workerd/io/worker-interface.h>
 
+#include "system-streams.h"
+
+#include <workerd/io/worker-interface.h>
 #include <workerd/jsg/url.h>
 
 namespace workerd::api {

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/tests/bench-tools.h>
+
 #include <kj/compat/http.h>
 
 namespace workerd {

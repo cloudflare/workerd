@@ -2,14 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <algorithm>
-
-#include <kj/test.h>
-#include <kj/encoding.h>
-
 #include <workerd/api/actor-state.h>
-#include <workerd/tests/test-fixture.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/tests/test-fixture.h>
+
+#include <kj/encoding.h>
+#include <kj/test.h>
+
+#include <algorithm>
 
 namespace workerd::api {
 namespace {

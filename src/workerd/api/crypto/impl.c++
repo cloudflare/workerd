@@ -3,17 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
+
+#include <openssl/bn.h>
+#include <openssl/crypto.h>
+#include <openssl/ec.h>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <openssl/rsa.h>
 #include <workerd/api/util.h>
+#include <workerd/jsg/memory.h>
+
 #include <algorithm>
 #include <map>
-#include <openssl/bn.h>
-#include <openssl/err.h>
-#include <openssl/ec.h>
-#include <openssl/evp.h>
-#include <openssl/rsa.h>
-#include <openssl/rand.h>
-#include <openssl/crypto.h>
-#include <workerd/jsg/memory.h>
 
 namespace workerd::api {
 namespace {

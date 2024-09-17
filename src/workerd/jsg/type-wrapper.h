@@ -7,15 +7,15 @@
 //
 // The TypeWrapper knows how to convert a variety of types between C++ and JavaScript.
 
-#include "util.h"
-#include "wrappable.h"
-#include "value.h"
-#include "struct.h"
-#include "resource.h"
-#include "function.h"
 #include "buffersource.h"
+#include "function.h"
 #include "jsvalue.h"
+#include "resource.h"
+#include "struct.h"
+#include "util.h"
+#include "value.h"
 #include "web-idl.h"
+#include "wrappable.h"
 
 namespace workerd::jsg {
 

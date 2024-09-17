@@ -4,8 +4,10 @@
 
 #include "uuid.h"
 
-#include <kj/compat/http.h>
 #include <openssl/rand.h>
+
+#include <kj/compat/http.h>
+
 #include <cstdlib>
 
 namespace workerd {

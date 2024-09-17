@@ -3,39 +3,43 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "server.h"
-#include <kj/debug.h>
-#include <kj/glob-filter.h>
+
+#include "workerd-api.h"
+
+#include <openssl/bio.h>
+#include <openssl/pem.h>
+#include <workerd/api/actor-state.h>
+#include <workerd/api/analytics-engine.capnp.h>
+#include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/worker-rpc.h>
+#include <workerd/io/actor-cache.h>
+#include <workerd/io/actor-id.h>
+#include <workerd/io/actor-sqlite.h>
+#include <workerd/io/compatibility-date.h>
+#include <workerd/io/hibernation-manager.h>
+#include <workerd/io/io-context.h>
+#include <workerd/io/request-tracker.h>
+#include <workerd/io/worker-entrypoint.h>
+#include <workerd/io/worker-interface.h>
+#include <workerd/io/worker.h>
+#include <workerd/util/http-util.h>
+#include <workerd/util/mimetype.h>
+#include <workerd/util/use-perfetto-categories.h>
+#include <workerd/util/uuid.h>
+
+#include <capnp/compat/json.h>
+#include <capnp/message.h>
+#include <capnp/rpc-twoparty.h>
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
+#include <kj/debug.h>
 #include <kj/encoding.h>
+#include <kj/glob-filter.h>
 #include <kj/map.h>
-#include <capnp/message.h>
-#include <capnp/rpc-twoparty.h>
-#include <capnp/compat/json.h>
-#include <workerd/api/analytics-engine.capnp.h>
-#include <workerd/io/actor-id.h>
-#include <workerd/io/worker-interface.h>
-#include <workerd/io/worker-entrypoint.h>
-#include <workerd/io/compatibility-date.h>
-#include <workerd/io/io-context.h>
-#include <workerd/io/worker.h>
-#include <ctime>
-#include <openssl/bio.h>
-#include <openssl/pem.h>
-#include <workerd/io/actor-cache.h>
-#include <workerd/io/actor-sqlite.h>
-#include <workerd/io/request-tracker.h>
-#include <workerd/util/http-util.h>
-#include <workerd/api/actor-state.h>
-#include <workerd/util/mimetype.h>
-#include <workerd/util/uuid.h>
-#include <workerd/util/use-perfetto-categories.h>
-#include <workerd/api/worker-rpc.h>
-#include "workerd-api.h"
-#include <workerd/api/pyodide/pyodide.h>
-#include <workerd/io/hibernation-manager.h>
+
 #include <cstdlib>
+#include <ctime>
 
 namespace workerd::server {
 

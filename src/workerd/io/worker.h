@@ -5,23 +5,24 @@
 #pragma once
 // Classes to manage lifetime of workers, scripts, and isolates.
 
-#include <workerd/util/xthreadnotifier.h>
-#include <workerd/io/worker-interface.h>
-#include <workerd/io/limit-enforcer.h>
-#include <kj/compat/http.h>
-#include <workerd/io/outcome.capnp.h>
-#include <workerd/io/worker-interface.capnp.h>
-#include <workerd/io/compatibility-date.capnp.h>
-#include <workerd/jsg/jsg.h>
-#include <workerd/jsg/async-context.h>
-#include <kj/mutex.h>
-#include <workerd/io/io-channels.h>
-#include <workerd/io/actor-id.h>
-#include <workerd/io/request-tracker.h>
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
-#include <workerd/util/weak-refs.h>
+#include <workerd/io/actor-id.h>
+#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/io-channels.h>
+#include <workerd/io/limit-enforcer.h>
+#include <workerd/io/outcome.capnp.h>
+#include <workerd/io/request-tracker.h>
+#include <workerd/io/worker-interface.capnp.h>
+#include <workerd/io/worker-interface.h>
+#include <workerd/jsg/async-context.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/util/weak-refs.h>
+#include <workerd/util/xthreadnotifier.h>
+
+#include <kj/compat/http.h>
+#include <kj/mutex.h>
 
 namespace v8 {
 class Isolate;

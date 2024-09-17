@@ -3,9 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jsg.h"  // can't include util.h directly due to weird cyclic dependency...
-#include "setup.h"
 #include "ser.h"
+#include "setup.h"
+
 #include <kj/debug.h>
+
 #include <cstdlib>
 #include <set>
 

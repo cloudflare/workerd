@@ -2,21 +2,25 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "r2-multipart.h"
 #include "r2-bucket.h"
+
+#include "r2-multipart.h"
 #include "r2-rpc.h"
 #include "util.h"
+
+#include <workerd/api/http.h>
+#include <workerd/api/r2-api.capnp.h>
+#include <workerd/api/streams.h>
+#include <workerd/util/http-util.h>
+#include <workerd/util/mimetype.h>
+
+#include <capnp/compat/json.h>
+#include <capnp/message.h>
+#include <kj/compat/http.h>
+#include <kj/encoding.h>
+
 #include <array>
 #include <cmath>
-#include <workerd/api/http.h>
-#include <workerd/api/streams.h>
-#include <workerd/util/mimetype.h>
-#include <kj/encoding.h>
-#include <kj/compat/http.h>
-#include <capnp/message.h>
-#include <capnp/compat/json.h>
-#include <workerd/util/http-util.h>
-#include <workerd/api/r2-api.capnp.h>
 
 namespace workerd::api::public_beta {
 static bool isWholeNumber(double x) {

@@ -6,8 +6,9 @@
 // Used to provide support tools for benchmarking. Many use cases will already be covered by the
 // microbenchmark API.
 
-#include <kj/test.h>
 #include <benchmark/benchmark.h>
+
+#include <kj/test.h>
 
 // Define a benchmark. Use microseconds instead of nanoseconds by default, most tests run long
 // enough to not need ns precision.

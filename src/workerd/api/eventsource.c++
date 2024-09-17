@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "eventsource.h"
+
 #include "http.h"
 #include "streams/common.h"
+
 #include <workerd/io/features.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/util/mimetype.h>

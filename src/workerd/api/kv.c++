@@ -3,15 +3,18 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "kv.h"
-#include "util.h"
+
 #include "system-streams.h"
+#include "util.h"
+
 #include <workerd/io/features.h>
+#include <workerd/io/io-context.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
-#include <workerd/io/io-context.h>
-#include <kj/encoding.h>
+
 #include <kj/compat/http.h>
+#include <kj/encoding.h>
 
 namespace workerd::api {
 
