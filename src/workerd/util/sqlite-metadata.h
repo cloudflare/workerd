@@ -8,9 +8,9 @@
 
 namespace workerd {
 
-// Class which implements a simple metadata kv storage on top of SQLite.  Currently only used to
-// store Durable Object alarm times (hardcoded as key = 1), but could later be used for other
-// properties.
+// Class which implements a simple metadata kv storage and cache on top of SQLite.  Currently only
+// used to store Durable Object alarm times (hardcoded as key = 1), but could later be used for
+// other properties.
 //
 // The table is named `_cf_METADATA`. The naming is designed so that if the application is allowed to
 // perform direct SQL queries, we can block it from accessing any table prefixed with `_cf_`.
@@ -23,6 +23,9 @@ public:
 
   // Sets current alarm time, or none.
   void setAlarm(kj::Maybe<kj::Date> currentTime);
+
+  // Invalidates cached values.  Needs to be called when rolling back db state.
+  void invalidate();
 
 private:
   struct Uninitialized {
@@ -43,7 +46,15 @@ private:
     Initialized(SqliteDatabase& db): db(db) {}
   };
 
-  kj::OneOf<Uninitialized, Initialized> state;
+  kj::OneOf<Uninitialized, Initialized> dbState;
+
+  struct Cache {
+    kj::Maybe<kj::Date> alarmTime;
+  };
+  kj::Maybe<Cache> cacheState;
+
+  kj::Maybe<kj::Date> getAlarmUncached();
+  void setAlarmUncached(kj::Maybe<kj::Date> currentTime);
 
   Initialized& ensureInitialized();
   // Make sure the metadata table is created and prepared statements are ready. Not called until the

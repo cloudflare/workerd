@@ -817,5 +817,25 @@ KJ_TEST("calling deleteAll() during an implicit transaction preserves alarm stat
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
+KJ_TEST("rolling back transaction leaves alarm in expected state") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 2ms.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  {
+    auto txn = test.actor.startTransaction();
+    KJ_ASSERT(expectSync(txn->getAlarm({})) == twoMs);
+    txn->setAlarm(oneMs, {});
+    KJ_ASSERT(expectSync(txn->getAlarm({})) == oneMs);
+    // Dropping transaction without committing; should roll back.
+  }
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+}
+
 }  // namespace
 }  // namespace workerd
