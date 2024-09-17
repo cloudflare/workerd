@@ -3,12 +3,15 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "r2-admin.h"
+
 #include "r2-rpc.h"
-#include <kj/compat/http.h>
-#include <capnp/message.h>
-#include <capnp/compat/json.h>
-#include <workerd/util/http-util.h>
+
 #include <workerd/api/r2-api.capnp.h>
+#include <workerd/util/http-util.h>
+
+#include <capnp/compat/json.h>
+#include <capnp/message.h>
+#include <kj/compat/http.h>
 
 namespace workerd::api::public_beta {
 jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {

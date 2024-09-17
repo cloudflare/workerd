@@ -5,6 +5,7 @@
 #pragma once
 
 #include "actor-cache.h"
+
 #include <workerd/util/sqlite-kv.h>
 
 namespace workerd {

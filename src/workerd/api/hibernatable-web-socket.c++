@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "hibernatable-web-socket.h"
+
 #include <workerd/api/global-scope.h>
-#include <workerd/jsg/ser.h>
 #include <workerd/io/hibernation-manager.h>
+#include <workerd/jsg/ser.h>
 
 namespace workerd::api {
 

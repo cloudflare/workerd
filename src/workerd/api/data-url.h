@@ -2,6 +2,7 @@
 
 #include <workerd/jsg/url.h>
 #include <workerd/util/mimetype.h>
+
 #include <kj/array.h>
 
 namespace workerd::api {

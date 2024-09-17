@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "writable.h"
-#include <workerd/io/features.h>
-#include <workerd/api/worker-rpc.h>
+
 #include <workerd/api/system-streams.h>
+#include <workerd/api/worker-rpc.h>
+#include <workerd/io/features.h>
 
 namespace workerd::api {
 

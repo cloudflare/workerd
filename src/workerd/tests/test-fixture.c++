@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <algorithm>
+#include "test-fixture.h"
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
@@ -19,7 +19,7 @@
 #include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
 
-#include "test-fixture.h"
+#include <algorithm>
 
 namespace workerd {
 

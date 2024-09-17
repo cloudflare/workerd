@@ -3,25 +3,30 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "sqlite.h"
+
+#include <workerd/util/sentry.h>
+
 #include <kj/debug.h>
 #include <kj/refcount.h>
 #include <kj/string-tree.h>
-#include <workerd/util/sentry.h>
 
 #if _WIN32
-#include <kj/win32-api-version.h>
 #include <windows.h>
+
+#include <kj/win32-api-version.h>
 #include <kj/windows-sanity.h>
 #else
 #include <unistd.h>
 #endif
 
 #include <fcntl.h>
-#include <sys/stat.h>
 #include <sqlite3.h>
-#include <kj/vector.h>
+#include <sys/stat.h>
+
 #include <kj/map.h>
 #include <kj/mutex.h>
+#include <kj/vector.h>
+
 #include <atomic>
 
 #if _WIN32

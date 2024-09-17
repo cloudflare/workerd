@@ -1,9 +1,11 @@
 #include "inspector.h"
 
+#include "jsg.h"
+
+#include <v8-inspector.h>
+
 #include <kj/encoding.h>
 #include <kj/string.h>
-#include <v8-inspector.h>
-#include "jsg.h"
 
 namespace v8_inspector {
 kj::String KJ_STRINGIFY(const v8_inspector::StringView& view) {

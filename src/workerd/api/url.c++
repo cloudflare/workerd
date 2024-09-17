@@ -3,10 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "url.h"
+
 #include "util.h"
+
 #include <kj/encoding.h>
-#include <kj/string-tree.h>
 #include <kj/parse/char.h>
+#include <kj/string-tree.h>
+
 #include <algorithm>
 #include <map>
 #include <set>

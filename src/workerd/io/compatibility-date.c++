@@ -2,14 +2,17 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <cstdio>
 #include "compatibility-date.h"
+
 #include "time.h"
-#include <capnp/schema.h>
+
 #include <capnp/dynamic.h>
+#include <capnp/schema.h>
 #include <kj/debug.h>
 #include <kj/map.h>
 #include <kj/vector.h>
+
+#include <cstdio>
 
 namespace workerd {
 

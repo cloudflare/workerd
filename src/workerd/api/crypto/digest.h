@@ -1,6 +1,7 @@
 #pragma once
 
 #include "impl.h"
+
 #include <workerd/api/crypto/crypto.h>
 
 KJ_DECLARE_NON_POLYMORPHIC(HMAC_CTX)

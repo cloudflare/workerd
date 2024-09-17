@@ -3,11 +3,14 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "standard.h"
-#include <kj/debug.h>
+
 #include "readable.h"
 #include "writable.h"
+
 #include <workerd/jsg/buffersource.h>
 #include <workerd/util/weak-refs.h>
+
+#include <kj/debug.h>
 #include <kj/vector.h>
 
 namespace workerd::api {

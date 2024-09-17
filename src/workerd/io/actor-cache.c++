@@ -3,14 +3,15 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor-cache.h"
-#include <algorithm>
+
+#include <workerd/io/io-gate.h>
+#include <workerd/jsg/exception.h>
+#include <workerd/util/duration-exceeded-logger.h>
+#include <workerd/util/sentry.h>
 
 #include <kj/debug.h>
 
-#include <workerd/jsg/exception.h>
-#include <workerd/io/io-gate.h>
-#include <workerd/util/sentry.h>
-#include <workerd/util/duration-exceeded-logger.h>
+#include <algorithm>
 
 namespace workerd {
 

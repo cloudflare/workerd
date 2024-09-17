@@ -4,10 +4,11 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
-#include <workerd/io/io-context.h>
 #include "../basics.h"
+
+#include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.capnp.h>
+#include <workerd/jsg/jsg.h>
 
 #if _MSC_VER
 typedef long long ssize_t;

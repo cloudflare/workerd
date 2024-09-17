@@ -2,11 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <workerd/api/actor-state.h>
+#include <workerd/api/global-scope.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
-#include <workerd/api/global-scope.h>
-#include <workerd/api/actor-state.h>
 #include <workerd/jsg/ser.h>
+
 #include <capnp/membrane.h>
 
 namespace workerd::api {

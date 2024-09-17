@@ -6,7 +6,9 @@
 
 #include "jsg.h"
 #include "struct.h"
+
 #include <workerd/jsg/memory.h>
+
 #include <concepts>
 #include <deque>
 

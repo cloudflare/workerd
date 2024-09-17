@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-device.h"
+
 #include "gpu-bindgroup-layout.h"
 #include "gpu-bindgroup.h"
 #include "gpu-buffer.h"
@@ -14,6 +15,7 @@
 #include "gpu-sampler.h"
 #include "gpu-texture.h"
 #include "gpu-utils.h"
+
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/jsg.h>
 

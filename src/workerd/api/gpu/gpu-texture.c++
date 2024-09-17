@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-texture.h"
+
 #include <workerd/api/gpu/gpu-texture-view.h>
 #include <workerd/api/gpu/gpu-utils.h>
 #include <workerd/jsg/exception.h>

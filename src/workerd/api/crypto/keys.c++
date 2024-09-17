@@ -1,6 +1,7 @@
 #include "keys.h"
-#include <openssl/ec_key.h>
+
 #include <openssl/crypto.h>
+#include <openssl/ec_key.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 

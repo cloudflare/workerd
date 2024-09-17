@@ -2,13 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <kj/test.h>
-
 #include "impl.h"
 
+#include <openssl/ec.h>
 #include <openssl/err.h>
 #include <openssl/rsa.h>
-#include <openssl/ec.h>
+
+#include <kj/test.h>
 
 namespace workerd::api {
 namespace {

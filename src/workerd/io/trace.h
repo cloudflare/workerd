@@ -4,17 +4,18 @@
 
 #pragma once
 
+#include <workerd/io/outcome.capnp.h>
+#include <workerd/io/worker-interface.capnp.h>
+#include <workerd/jsg/memory.h>
+#include <workerd/util/own-util.h>
+
 #include <kj/async.h>
+#include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/time.h>
 #include <kj/vector.h>
-#include <kj/map.h>
-#include <workerd/io/outcome.capnp.h>
-#include <workerd/io/worker-interface.capnp.h>
-#include <workerd/util/own-util.h>
-#include <workerd/jsg/memory.h>
 
 namespace kj {
 enum class HttpMethod;

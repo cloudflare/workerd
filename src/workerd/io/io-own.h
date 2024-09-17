@@ -1,13 +1,15 @@
 #pragma once
 
+#include <workerd/jsg/util.h>
+#include <workerd/util/weak-refs.h>
+
 #include <kj/common.h>
 #include <kj/mutex.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/vector.h>
+
 #include <typeinfo>
-#include <workerd/jsg/util.h>
-#include <workerd/util/weak-refs.h>
 
 namespace workerd {
 

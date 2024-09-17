@@ -3,9 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "hyperdrive.h"
-#include "sockets.h"
+
 #include "http.h"
+#include "sockets.h"
+
 #include <openssl/rand.h>
+
 #include <kj/compat/http.h>
 #include <kj/encoding.h>
 #include <kj/string.h>

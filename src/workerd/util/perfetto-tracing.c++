@@ -2,15 +2,17 @@
 
 #if defined(WORKERD_USE_PERFETTO)
 
+#include "protos/perfetto/config/data_source_config.gen.h"
+#include "protos/perfetto/config/trace_config.gen.h"
+#include "protos/perfetto/config/track_event/track_event_config.gen.h"
+
+#include <fcntl.h>
+#include <perfetto/tracing/track_event_legacy.h>
+
 #include <kj/debug.h>
 #include <kj/filesystem.h>
 #include <kj/memory.h>
 #include <kj/vector.h>
-#include <fcntl.h>
-#include <perfetto/tracing/track_event_legacy.h>
-#include "protos/perfetto/config/data_source_config.gen.h"
-#include "protos/perfetto/config/trace_config.gen.h"
-#include "protos/perfetto/config/track_event/track_event_config.gen.h"
 
 PERFETTO_TRACK_EVENT_STATIC_STORAGE_IN_NAMESPACE(workerd::traces);
 

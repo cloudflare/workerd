@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-utils.h"
-#include <map>
+
 #include <webgpu/webgpu_cpp.h>
+
+#include <map>
 
 namespace workerd::api::gpu {
 

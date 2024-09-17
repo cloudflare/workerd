@@ -3,8 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "duration-exceeded-logger.h"
-#include <kj/timer.h>
+
 #include <kj/test.h>
+#include <kj/timer.h>
 
 namespace workerd::util {
 namespace {

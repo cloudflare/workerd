@@ -5,8 +5,8 @@
 #pragma once
 
 #include <workerd/io/worker.h>
-#include <workerd/server/workerd.capnp.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/server/workerd.capnp.h>
 
 namespace workerd {
 namespace api {

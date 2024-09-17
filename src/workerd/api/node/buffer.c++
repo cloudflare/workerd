@@ -4,12 +4,15 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 #include "buffer.h"
+
 #include "buffer-string-search.h"
 #include "nbytes.h"
 #include "simdutf.h"
+
+#include <workerd/jsg/buffersource.h>
+
 #include <kj/array.h>
 #include <kj/encoding.h>
-#include <workerd/jsg/buffersource.h>
 
 #include <algorithm>
 

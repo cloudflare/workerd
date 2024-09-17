@@ -5,10 +5,12 @@
 #include "compression.h"
 
 #include "nbytes.h"
+
 #include <workerd/io/features.h>
+
 #include <deque>
-#include <vector>
 #include <iterator>
+#include <vector>
 
 namespace workerd::api {
 

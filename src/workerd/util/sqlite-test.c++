@@ -3,13 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "sqlite.h"
-#include <cstdint>
+
+#include <fcntl.h>
+
 #include <kj/test.h>
 #include <kj/thread.h>
-#include <cstdlib>
-#include <cerrno>
-#include <fcntl.h>
+
 #include <atomic>
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
 
 #if _WIN32
 #include <io.h>

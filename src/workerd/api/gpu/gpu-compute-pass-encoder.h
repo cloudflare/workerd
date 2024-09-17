@@ -8,6 +8,7 @@
 #include "gpu-compute-pipeline.h"
 #include "gpu-query-set.h"
 #include "gpu-utils.h"
+
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 

@@ -9,12 +9,13 @@
 // to expect something that looked more specifically like Erlang, whereas our actors are much more
 // abstractly related.
 
-#include <capnp/compat/byte-stream.h>
-#include <capnp/compat/http-over-capnp.h>
 #include <workerd/api/http.h>
 #include <workerd/api/worker-rpc.h>
-#include <workerd/jsg/jsg.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/jsg/jsg.h>
+
+#include <capnp/compat/byte-stream.h>
+#include <capnp/compat/http-over-capnp.h>
 
 namespace workerd {
 template <typename T>

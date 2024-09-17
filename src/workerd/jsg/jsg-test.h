@@ -7,6 +7,7 @@
 
 #include "jsg.h"
 #include "setup.h"
+
 #include <kj/test.h>
 
 namespace workerd::jsg::test {

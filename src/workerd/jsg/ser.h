@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/jsg.h>
+
 #include <kj/vector.h>
 
 namespace workerd::jsg {

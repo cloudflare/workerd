@@ -3,10 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "util.h"
-#include <kj/encoding.h>
+
 #include <workerd/io/io-context.h>
-#include <workerd/util/thread-scopes.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/thread-scopes.h>
+
+#include <kj/encoding.h>
 
 namespace workerd::api {
 

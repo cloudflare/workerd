@@ -4,41 +4,40 @@
 
 #include "rtti.h"
 
-#include <kj/map.h>
-#include <capnp/serialize-packed.h>
-
-#include <workerd/api/actor.h>
+#include <cloudflare/cloudflare.capnp.h>
 #include <workerd/api/actor-state.h>
+#include <workerd/api/actor.h>
 #include <workerd/api/analytics-engine.h>
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
+#include <workerd/api/eventsource.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
+#include <workerd/api/hyperdrive.h>
 #include <workerd/api/kv.h>
+#include <workerd/api/memory-cache.h>
 #include <workerd/api/modules.h>
+#include <workerd/api/node/node.h>
 #include <workerd/api/queue.h>
-#include <workerd/api/r2.h>
 #include <workerd/api/r2-admin.h>
-#include <workerd/api/sockets.h>
+#include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
+#include <workerd/api/sockets.h>
 #include <workerd/api/sql.h>
 #include <workerd/api/streams.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/trace.h>
-#include <workerd/api/urlpattern.h>
-#include <workerd/api/node/node.h>
-#include <workerd/jsg/modules.capnp.h>
-#include <workerd/api/hyperdrive.h>
-#include <workerd/api/eventsource.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
-#include <workerd/api/memory-cache.h>
+#include <workerd/api/urlpattern.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/jsg/modules.capnp.h>
 
-#include <cloudflare/cloudflare.capnp.h>
+#include <capnp/serialize-packed.h>
+#include <kj/map.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>

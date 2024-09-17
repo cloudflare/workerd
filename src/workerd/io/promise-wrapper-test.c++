@@ -2,12 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <kj/test.h>
-
 #include <workerd/io/promise-wrapper.h>
+#include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/jsg/jsg-test.h>
+
+#include <kj/test.h>
 
 namespace workerd::jsg::test {  // workerd
 namespace {

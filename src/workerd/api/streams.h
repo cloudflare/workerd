@@ -7,11 +7,11 @@
 //
 // This is the most over-engineered spec...
 
-#include "streams/readable.h"
-#include "streams/writable.h"
-#include "streams/transform.h"
 #include "streams/compression.h"
 #include "streams/encoding.h"
+#include "streams/readable.h"
+#include "streams/transform.h"
+#include "streams/writable.h"
 
 namespace workerd::api {
 

@@ -28,8 +28,8 @@
 // found in the LICENSE file.
 #pragma once
 
-#include <cstring>
 #include <algorithm>
+#include <cstring>
 
 namespace workerd::api::node {
 namespace stringsearch {

@@ -3,8 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include "i18n.h"
+
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api::node {
 

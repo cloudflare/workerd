@@ -3,7 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "blob.h"
+
 #include "util.h"
+
 #include <workerd/api/streams/readable.h>
 #include <workerd/io/observer.h>
 #include <workerd/util/mimetype.h>

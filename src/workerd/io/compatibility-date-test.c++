@@ -3,10 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "compatibility-date.h"
-#include <kj/debug.h>
-#include <kj/test.h>
+
 #include <capnp/message.h>
 #include <capnp/serialize-text.h>
+#include <kj/debug.h>
+#include <kj/test.h>
 
 namespace workerd {
 namespace {

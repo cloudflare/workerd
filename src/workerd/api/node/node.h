@@ -8,13 +8,15 @@
 #include "url.h"
 #include "util.h"
 #include "zlib-util.h"
-#include <workerd/jsg/jsg.h>
-#include <workerd/jsg/url.h>
-#include <workerd/jsg/modules.h>
-#include <workerd/jsg/modules-new.h>
-#include <capnp/dynamic.h>
+
 #include <node/node.capnp.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/modules.h>
+#include <workerd/jsg/url.h>
+
+#include <capnp/dynamic.h>
 
 namespace workerd::api::node {
 

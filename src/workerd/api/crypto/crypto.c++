@@ -3,18 +3,21 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "crypto.h"
+
 #include "impl.h"
-#include <workerd/api/streams/standard.h>
+
 #include <openssl/digest.h>
 #include <openssl/mem.h>
+#include <workerd/api/streams/standard.h>
 #include <workerd/api/util.h>
-#include <workerd/jsg/jsg.h>
 #include <workerd/io/io-context.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
-#include <set>
-#include <array>
+
 #include <algorithm>
+#include <array>
 #include <limits>
+#include <set>
 #include <typeinfo>
 
 namespace workerd::api {

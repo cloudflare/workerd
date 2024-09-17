@@ -2,19 +2,23 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "impl.h"
 #include "ec.h"
+
+#include "impl.h"
 #include "keys.h"
-#include <openssl/ec_key.h>
+
 #include <openssl/bn.h>
-#include <openssl/x509.h>
 #include <openssl/crypto.h>
 #include <openssl/curve25519.h>
-#include <map>
-#include <kj/function.h>
-#include <type_traits>
+#include <openssl/ec_key.h>
+#include <openssl/x509.h>
 #include <workerd/api/util.h>
 #include <workerd/io/features.h>
+
+#include <kj/function.h>
+
+#include <map>
+#include <type_traits>
 
 namespace workerd::api {
 

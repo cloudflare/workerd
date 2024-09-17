@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jsg-test.h"
+
 #include <workerd/jsg/resource-test.capnp.h>
 
 namespace workerd::jsg::test {

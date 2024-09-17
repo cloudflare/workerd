@@ -4,11 +4,12 @@
 
 #pragma once
 
-#include <kj/debug.h>
-#include <workerd/api/web-socket.h>
-#include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/actor-state.h>
+#include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/web-socket.h>
 #include <workerd/jsg/jsg.h>
+
+#include <kj/debug.h>
 
 #include <list>
 

@@ -3,10 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <benchmark/benchmark.h>
-#include <workerd/tests/bench-tools.h>
 #include <workerd/api/r2-api.capnp.h>
-#include <capnp/message.h>
+#include <workerd/tests/bench-tools.h>
+
 #include <capnp/compat/json.h>
+#include <capnp/message.h>
 #include <kj/string.h>
 #include <kj/test.h>
 

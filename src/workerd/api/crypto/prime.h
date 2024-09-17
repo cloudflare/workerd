@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kj/common.h>
+
 #include <cstdint>
 
 namespace workerd::api {

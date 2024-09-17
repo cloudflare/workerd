@@ -1,12 +1,14 @@
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/function.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
+
 #include <kj/hash.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <kj/table.h>
+
 #include <set>
 
 namespace workerd::api {

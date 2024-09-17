@@ -4,14 +4,14 @@
 
 #pragma once
 
+#include <capnp/dynamic.h>
+#include <capnp/message.h>
+#include <capnp/serialize-text.h>
 #include <kj/debug.h>
 #include <kj/list.h>
 #include <kj/map.h>
 #include <kj/refcount.h>
 #include <kj/source-location.h>
-#include <capnp/dynamic.h>
-#include <capnp/message.h>
-#include <capnp/serialize-text.h>
 
 namespace workerd {
 

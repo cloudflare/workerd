@@ -6,8 +6,8 @@
 
 #include "r2-rpc.h"
 
-#include <workerd/jsg/jsg.h>
 #include <workerd/api/streams/readable.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 class Headers;

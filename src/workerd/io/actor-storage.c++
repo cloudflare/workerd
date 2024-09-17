@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor-storage.h"
-#include <workerd/io/actor-storage.capnp.h>
 
+#include <workerd/io/actor-storage.capnp.h>
 #include <workerd/jsg/exception.h>
 
 namespace workerd {

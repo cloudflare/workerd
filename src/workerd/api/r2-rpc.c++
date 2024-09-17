@@ -3,15 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "r2-rpc.h"
-#include <workerd/api/util.h>
-#include <workerd/api/system-streams.h>
-#include <workerd/util/http-util.h>
+
 #include <workerd/api/r2-api.capnp.h>
+#include <workerd/api/system-streams.h>
+#include <workerd/api/util.h>
+#include <workerd/util/http-util.h>
 // This is imported for the error type and that's shared between internal and public beta.
 
-#include <kj/compat/http.h>
-#include <capnp/message.h>
 #include <capnp/compat/json.h>
+#include <capnp/message.h>
+#include <kj/compat/http.h>
 
 namespace workerd::api {
 static kj::Own<R2Error> toError(uint statusCode, kj::StringPtr responseBody) {

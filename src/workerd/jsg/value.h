@@ -9,11 +9,12 @@
 // arrays, buffers, dicts.
 
 #include "util.h"
-#include "wrappable.h"
 #include "web-idl.h"
-#include <kj/time.h>
+#include "wrappable.h"
+
 #include <kj/debug.h>
 #include <kj/one-of.h>
+#include <kj/time.h>
 
 namespace workerd::jsg {
 

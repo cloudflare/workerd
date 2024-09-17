@@ -2,8 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "io-channels.h"
 #include "hibernation-manager.h"
+
+#include "io-channels.h"
+
 #include <workerd/util/uuid.h>
 
 namespace workerd {

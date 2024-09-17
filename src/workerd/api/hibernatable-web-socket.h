@@ -4,15 +4,15 @@
 
 #pragma once
 
-#include <kj/debug.h>
-#include <kj/time.h>
-
-#include <workerd/io/worker.h>
+#include <workerd/api/basics.h>
+#include <workerd/api/hibernation-event-params.h>
+#include <workerd/api/web-socket.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
-#include <workerd/api/basics.h>
-#include <workerd/api/web-socket.h>
-#include <workerd/api/hibernation-event-params.h>
+#include <workerd/io/worker.h>
+
+#include <kj/debug.h>
+#include <kj/time.h>
 
 namespace workerd::api {
 

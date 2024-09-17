@@ -7,13 +7,14 @@
 //
 // This file contains misc utility functions used elsewhere.
 
-#include <kj/debug.h>
-#include <kj/string.h>
-#include <kj/exception.h>
 #include <v8.h>
-#include <typeinfo>
-
 #include <workerd/util/sentry.h>
+
+#include <kj/debug.h>
+#include <kj/exception.h>
+#include <kj/string.h>
+
+#include <typeinfo>
 
 namespace workerd::jsg {
 

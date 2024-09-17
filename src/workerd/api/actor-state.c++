@@ -3,20 +3,22 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor-state.h"
+
 #include "actor.h"
+#include "sql.h"
 #include "util.h"
+
+#include <v8.h>
+#include <workerd/api/web-socket.h>
+#include <workerd/io/actor-cache.h>
+#include <workerd/io/actor-id.h>
+#include <workerd/io/actor-sqlite.h>
+#include <workerd/io/actor-storage.h>
+#include <workerd/io/features.h>
+#include <workerd/io/hibernation-manager.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
-#include <v8.h>
-#include <workerd/io/actor-cache.h>
-#include <workerd/io/actor-id.h>
-#include <workerd/io/actor-storage.h>
-#include <workerd/io/actor-sqlite.h>
-#include "sql.h"
-#include <workerd/api/web-socket.h>
-#include <workerd/io/hibernation-manager.h>
-#include <workerd/io/features.h>
 
 namespace workerd::api {
 

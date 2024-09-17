@@ -4,10 +4,11 @@
 
 #pragma once
 
-#include <kj/compat/http.h>
-#include <capnp/compat/http-over-capnp.h>
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
+
+#include <capnp/compat/http-over-capnp.h>
+#include <kj/compat/http.h>
 
 namespace workerd {
 

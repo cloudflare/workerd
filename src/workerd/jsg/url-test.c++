@@ -3,10 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "url.h"
+
+#include <openssl/rand.h>
+
 #include <kj/table.h>
 #include <kj/test.h>
+
 #include <regex>
-#include <openssl/rand.h>
 
 namespace workerd::jsg::test {
 namespace {

@@ -3,11 +3,14 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "encoding.h"
+
 #include "util.h"
-#include <workerd/jsg/jsg.h>
-#include <workerd/jsg/buffersource.h>
+
 #include <unicode/ucnv.h>
 #include <unicode/utf8.h>
+#include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/jsg.h>
+
 #include <algorithm>
 
 namespace workerd::api {

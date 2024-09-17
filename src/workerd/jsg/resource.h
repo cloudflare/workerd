@@ -10,16 +10,19 @@
 // can call back to the class's methods. This differs from, say, a struct type, which will be deeply
 // converted into a JS object when passed into JS.
 
-#include <kj/tuple.h>
-#include <kj/debug.h>
-#include <type_traits>
-#include <kj/map.h>
+#include "meta.h"
 #include "util.h"
 #include "wrappable.h"
-#include <typeindex>
-#include "meta.h"
+
 #include <workerd/jsg/memory.h>
 #include <workerd/jsg/modules.capnp.h>
+
+#include <kj/debug.h>
+#include <kj/map.h>
+#include <kj/tuple.h>
+
+#include <type_traits>
+#include <typeindex>
 
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {

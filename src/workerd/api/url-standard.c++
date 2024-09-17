@@ -3,18 +3,22 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "url-standard.h"
+
 #include "blob.h"
 #include "util.h"
-#include <workerd/io/features.h>
-#include <kj/array.h>
-#include <cmath>
-#include <map>
-#include <cstring>
-#include <unicode/ustring.h>
+
 #include <unicode/uchar.h>
 #include <unicode/uidna.h>
+#include <unicode/ustring.h>
 #include <unicode/utf8.h>
+#include <workerd/io/features.h>
+
+#include <kj/array.h>
+
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <map>
 #include <numeric>
 
 #if _WIN32

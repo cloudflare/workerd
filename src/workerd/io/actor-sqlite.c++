@@ -3,9 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor-sqlite.h"
-#include <algorithm>
-#include <workerd/jsg/exception.h>
+
 #include "io-gate.h"
+
+#include <workerd/jsg/exception.h>
+
+#include <algorithm>
 
 namespace workerd {
 

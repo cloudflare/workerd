@@ -4,12 +4,15 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
-#include <kj/compat/http.h>
 #include "basics.h"
+
 #include <workerd/io/io-gate.h>
 #include <workerd/io/observer.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/weak-refs.h>
+
+#include <kj/compat/http.h>
+
 #include <cstdlib>
 
 namespace workerd {

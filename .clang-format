@@ -11,19 +11,24 @@ WhitespaceSensitiveMacros:
   - JSG_STRUCT_TS_DEFINE
 AllowShortFunctionsOnASingleLine: Empty
 
-# We should have "true" here but adding an include header would result in too many changed lines.
-# Once we turn this on we should use IncludeCategories so that things are consistently sorted.
-# For example, to protect against brittle headers (a header not including everything its using
-# because existing users happened to include a dependency for it), one could use the following
-# order:
-#   local folder files
-#   project files
-#   3p dependency includes
-#   standard language headers (put kj/ here?)
-#   system headers
-# While this would be ideal it's also important to note that this isn't the (non-documented) style
-# that KJ uses, so it may be worth documenting the style & making it consistent.
-SortIncludes: false
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  # c++ system headers
+  - Regex: <[a-zA-Z0-9_]+>
+    Priority: 5
+  # kj/capnp headers
+  - Regex: <(kj|capnp)/.+>
+    Priority: 4
+  # 3rd party headers
+  - Regex: <.+>
+    Priority: 3
+  # workerd headers
+  - Regex: <workerd/.+>
+    Priority: 2
+  # local headers
+  - Regex: '".*"'
+    Priority: 1
 
 AllowShortIfStatementsOnASingleLine: true
 AllowShortLoopsOnASingleLine: true
@@ -95,6 +100,7 @@ SpaceBeforeCtorInitializerColon: false
 SpaceBeforeInheritanceColon: false
 SpaceBeforeParens: ControlStatementsExceptControlMacros
 SpaceBeforeRangeBasedForLoopColon: false
+SpaceBeforeCpp11BracedList: false
 SpacesBeforeTrailingComments: 2
 ---
 # Some files with embedded typescript are incorrectly recognized by clang-format as Objective-C

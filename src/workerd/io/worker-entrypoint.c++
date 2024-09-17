@@ -3,16 +3,18 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "worker-entrypoint.h"
-#include <workerd/io/io-context.h>
-#include <capnp/message.h>
-#include <workerd/jsg/jsg.h>
+
 #include <workerd/api/global-scope.h>
 #include <workerd/api/util.h>
+#include <workerd/io/io-context.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
-#include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/util/use-perfetto-categories.h>
+
+#include <capnp/message.h>
 #include <kj/compat/http.h>
 
 namespace workerd {

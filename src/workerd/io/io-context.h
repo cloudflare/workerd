@@ -4,25 +4,26 @@
 
 #pragma once
 
+#include "io-own.h"
+#include "worker.h"
+
+#include <workerd/api/deferred-proxy.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/io-gate.h>
-#include "io-own.h"
-#include <workerd/io/io-timers.h>
 #include <workerd/io/io-thread-context.h>
+#include <workerd/io/io-timers.h>
 #include <workerd/io/trace.h>
-#include "worker.h"
-#include <workerd/api/deferred-proxy.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/uncaught-exception-source.h>
+#include <workerd/util/weak-refs.h>
+
+#include <capnp/dynamic.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
-#include <kj/mutex.h>
 #include <kj/function.h>
-#include <capnp/dynamic.h>
-#include <workerd/util/weak-refs.h>
-#include <workerd/io/io-channels.h>
-#include <workerd/util/uncaught-exception-source.h>
+#include <kj/mutex.h>
 
 namespace workerd {
 class LimitEnforcer;

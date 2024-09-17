@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <cstring>
 #include <kj/string.h>
 #include <kj/vector.h>
+
+#include <cstring>
 
 namespace workerd {
 

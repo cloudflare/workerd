@@ -4,6 +4,7 @@
 
 #include <workerd/tests/bench-tools.h>
 #include <workerd/tests/test-fixture.h>
+
 #include <kj/test.h>
 
 // A benchmark for regular expressions performance. Note that this is at least in part benchmarking

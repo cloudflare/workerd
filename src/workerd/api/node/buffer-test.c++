@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <kj/test.h>
 #include <workerd/tests/test-fixture.h>
+
+#include <kj/test.h>
 
 namespace workerd::api {
 namespace {

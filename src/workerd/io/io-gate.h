@@ -21,8 +21,8 @@
 //   never be sent, so that the rest of the world cannot observe a prematurely-confirmed write.
 
 #include <kj/async.h>
-#include <kj/one-of.h>
 #include <kj/list.h>
+#include <kj/one-of.h>
 
 #include <type_traits>
 

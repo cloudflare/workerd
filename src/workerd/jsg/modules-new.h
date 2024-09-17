@@ -4,17 +4,18 @@
 
 #pragma once
 
+#include <v8.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/observer.h>
 #include <workerd/jsg/modules.capnp.h>
+#include <workerd/jsg/observer.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+
 #include <kj/common.h>
 #include <kj/function.h>
-#include <kj/refcount.h>
 #include <kj/map.h>
+#include <kj/refcount.h>
 #include <kj/table.h>
-#include <v8.h>
 
 namespace workerd::jsg::modules {
 

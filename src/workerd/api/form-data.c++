@@ -3,12 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "form-data.h"
+
 #include "util.h"
-#include <kj/vector.h>
+
+#include <workerd/util/mimetype.h>
+
+#include <kj/compat/http.h>
 #include <kj/encoding.h>
 #include <kj/parse/char.h>
-#include <kj/compat/http.h>
-#include <workerd/util/mimetype.h>
+#include <kj/vector.h>
+
 #include <algorithm>
 #include <regex>
 

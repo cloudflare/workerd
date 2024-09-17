@@ -3,15 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "r2-multipart.h"
+
 #include "r2-bucket.h"
 #include "r2-rpc.h"
+
+#include <workerd/api/r2-api.capnp.h>
+#include <workerd/util/http-util.h>
+
+#include <capnp/compat/json.h>
+#include <capnp/message.h>
+#include <kj/compat/http.h>
+
 #include <array>
 #include <cmath>
-#include <kj/compat/http.h>
-#include <capnp/message.h>
-#include <capnp/compat/json.h>
-#include <workerd/util/http-util.h>
-#include <workerd/api/r2-api.capnp.h>
 
 namespace workerd::api::public_beta {
 
