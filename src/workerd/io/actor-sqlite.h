@@ -27,12 +27,6 @@ public:
     // a promise that resolves when the scheduling has succeeded.
     virtual kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime);
 
-    // TODO(cleanup): no longer used, remove:
-    virtual kj::Promise<kj::Maybe<kj::Date>> getAlarm();
-    virtual kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime);
-    virtual kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date scheduledTime, bool noCache);
-    virtual void cancelDeferredAlarmDeletion();
-
     static const Hooks DEFAULT;
   };
 

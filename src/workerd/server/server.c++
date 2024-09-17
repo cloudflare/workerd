@@ -1872,30 +1872,6 @@ public:
         return kj::READY_NOW;
       }
 
-      kj::Promise<kj::Maybe<kj::Date>> getAlarm() override {
-        return alarmScheduler.getAlarm(actor);
-      }
-
-      kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime) override {
-        KJ_IF_SOME(scheduledTime, newAlarmTime) {
-          alarmScheduler.setAlarm(actor, scheduledTime);
-        } else {
-          alarmScheduler.deleteAlarm(actor);
-        }
-        return kj::READY_NOW;
-      }
-
-      // No-op -- armAlarmHandler() is normally used to schedule a delete after the alarm runs.
-      // But since alarm read/write operations happen on the same thread as the scheduler in
-      // workerd, we can just handle the delete in the scheduler instead.
-      kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date, bool) override {
-        // We return this weird kj::Own<void> to `this` since just doing kj::Own<void>() creates an
-        // empty maybe.
-        return kj::Own<void>(this, kj::NullDisposer::instance);
-      }
-
-      void cancelDeferredAlarmDeletion() override {}
-
     private:
       AlarmScheduler& alarmScheduler;
       ActorKey actor;

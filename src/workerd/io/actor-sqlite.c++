@@ -580,23 +580,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
 const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
 
 kj::Promise<void> ActorSqlite::Hooks::scheduleRun(kj::Maybe<kj::Date> newAlarmTime) {
-  return kj::READY_NOW;
-}
-
-kj::Maybe<kj::Own<void>> ActorSqlite::Hooks::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
   JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
-}
-
-void ActorSqlite::Hooks::cancelDeferredAlarmDeletion() {
-  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
-}
-
-kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::Hooks::getAlarm() {
-  JSG_FAIL_REQUIRE(Error, "getAlarm() is not yet implemented for SQLite-backed Durable Objects");
-}
-
-kj::Promise<void> ActorSqlite::Hooks::setAlarm(kj::Maybe<kj::Date>) {
-  JSG_FAIL_REQUIRE(Error, "setAlarm() is not yet implemented for SQLite-backed Durable Objects");
 }
 
 kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>

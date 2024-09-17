@@ -81,6 +81,8 @@ void AlarmScheduler::registerNamespace(kj::StringPtr uniqueKey, GetActorFn getAc
 }
 
 kj::Maybe<kj::Date> AlarmScheduler::getAlarm(ActorKey actor) {
+  // TODO(someday): Might be able to simplify AlarmScheduler somewhat, now that ActorSqlite no
+  // longer relies on it for getAlarm()?
   KJ_IF_SOME(alarm, alarms.find(actor)) {
     if (alarm.status == AlarmStatus::STARTED) {
       // getAlarm() when the alarm handler is running should return null,
