@@ -1,6 +1,5 @@
 #pragma once
 
-#include <workerd/jsg/function.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
 

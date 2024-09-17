@@ -7,20 +7,22 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
-#include <kj/string.h>
-#include <kj/function.h>
-#include <kj/exception.h>
-#include <kj/one-of.h>
-#include <kj/debug.h>
-#include <type_traits>
-#include <v8.h>
-#include <v8-profiler.h>
-#include <workerd/jsg/memory.h>
 #include "macro-meta.h"
-#include "wrappable.h"
 #include "util.h"
+#include "wrappable.h"
 
+#include <v8-profiler.h>
+#include <v8.h>
 #include <workerd/jsg/exception.h>
+#include <workerd/jsg/memory.h>
+
+#include <kj/debug.h>
+#include <kj/exception.h>
+#include <kj/function.h>
+#include <kj/one-of.h>
+#include <kj/string.h>
+
+#include <type_traits>
 
 using kj::byte;
 using kj::uint;
@@ -2784,6 +2786,7 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) {
 
 }  // namespace workerd::jsg
 
+// clang-format off
 // These two includes are needed for the JSG type glue macros to work.
 #include "buffersource.h"
 #include "modules.h"
@@ -2794,3 +2797,4 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) {
 #include "function.h"
 #include "iterator.h"
 #include "jsvalue.h"
+// clang-format on

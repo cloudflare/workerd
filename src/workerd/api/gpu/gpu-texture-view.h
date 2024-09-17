@@ -7,8 +7,6 @@
 #include "gpu-utils.h"
 
 #include <webgpu/webgpu_cpp.h>
-#include <workerd/jsg/buffersource.h>
-#include <workerd/jsg/iterator.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {

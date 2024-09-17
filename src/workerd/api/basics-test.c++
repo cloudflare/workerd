@@ -12,7 +12,6 @@
 #include "util.h"
 
 #include <workerd/io/promise-wrapper.h>
-#include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
 

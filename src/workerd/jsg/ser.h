@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/vector.h>

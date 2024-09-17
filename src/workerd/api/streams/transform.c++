@@ -8,7 +8,7 @@
 #include "standard.h"
 
 #include <workerd/io/features.h>
-#include <workerd/jsg/function.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 

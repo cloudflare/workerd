@@ -7,7 +7,7 @@
 #include "../encoding.h"
 #include "standard.h"
 
-#include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 

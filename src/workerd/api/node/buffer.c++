@@ -9,7 +9,7 @@
 #include "nbytes.h"
 #include "simdutf.h"
 
-#include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/jsg.h>
 
 #include <kj/array.h>
 #include <kj/encoding.h>

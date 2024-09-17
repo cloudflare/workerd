@@ -7,7 +7,7 @@
 #include "common.h"
 #include "queue.h"
 
-#include <workerd/jsg/function.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
