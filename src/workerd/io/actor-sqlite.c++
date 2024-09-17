@@ -14,15 +14,8 @@ namespace {
 
 // Returns true if a given (set or unset) alarm will fire earlier than another.
 static bool willFireEarlier(kj::Maybe<kj::Date> alarm1, kj::Maybe<kj::Date> alarm2) {
-  KJ_IF_SOME(t2, alarm2) {
-    KJ_IF_SOME(t1, alarm1) {
-      return (t1 < t2);
-    } else {
-      return false;
-    }
-  } else {
-    return (alarm1 != kj::none);
-  }
+  // Intuitively, an unset alarm is effectively indistinguishable from an alarm set at infinity.
+  return alarm1.orDefault(kj::maxValue) < alarm2.orDefault(kj::maxValue);
 }
 
 }  // namespace
@@ -39,8 +32,13 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       metadata(*db),
       commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
-  // TODO(now): populate lastConfirmedScheduledAlarm asynchronously from alarm manager.
   lastConfirmedAlarmDbState = metadata.getAlarm();
+
+  // Because we preserve an invariant that scheduled alarms are always at or earlier than
+  // persisted db alarm state, it should be OK to populate our idea of the currently scheduled
+  // alarm using the current db alarm state.  At worst, it may perform one unnecessary scheduling
+  // request in the case where an earlier alarm-state-altering transaction failed.
+  lastConfirmedScheduledAlarm = metadata.getAlarm();
 }
 
 ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent): parent(parent) {
@@ -184,7 +182,7 @@ void ActorSqlite::onWrite() {
       requireNotBroken();
 
       // Start the schedule request before commit(), for correctness in workerd.
-      auto precommitAlarmPromise = startPrecommitAlarmScheduling();
+      auto precommitAlarmState = startPrecommitAlarmScheduling();
 
       try {
         txn->commit();
@@ -203,7 +201,7 @@ void ActorSqlite::onWrite() {
       // rather than after the callback.
       { auto drop = kj::mv(txn); }
 
-      return commitImpl(kj::mv(precommitAlarmPromise));
+      return commitImpl(kj::mv(precommitAlarmState));
     })));
   }
 }
@@ -232,33 +230,45 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // will ensure cancelDeferredAlarmDeletion() is called, if necessary.
 
   KJ_IF_SOME(pending, pendingCommit) {
+    // If an earlier commitImpl() invocation is already in the process of updating precommit
+    // alarms but has not yet made the commitCallback() call, it should be OK to wait on it to
+    // perform the precommit alarm update and db commit for this invocation, too.
     co_await pending.addBranch();
     co_return;
   }
   auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
   pendingCommit = promise.fork();
 
-  // Wait for any precommit alarm scheduling work to complete.
+  // Wait for the first precommit alarm scheduling request to complete, if any.
   auto localAlarmState = precommitAlarmState.localAlarmState;
   KJ_IF_SOME(p, precommitAlarmState.schedulingPromise) {
     co_await p;
     localAlarmState = metadata.getAlarm();
   }
 
+  // While the local db state requires an earlier alarm than is known to be scheduled, issue an
+  // alarm update request for the earlier time.  This helps ensure that the successfully scheduled
+  // alarm time is always earlier or equal to the alarm state in the successfully persisted db.
   while (willFireEarlier(localAlarmState, lastConfirmedScheduledAlarm)) {
     co_await requestScheduledAlarm(localAlarmState);
     localAlarmState = metadata.getAlarm();
   }
 
+  // Issue the commitCallback() request to persist the db state, then synchronously clear the
+  // pending commit so that the next commitImpl() invocation starts its own set of precommit alarm
+  // updates and db commit.
   auto commitCallbackPromise = commitCallback();
-
-  // Fulfill and clear the pending commit.
-  fulfiller->fulfill();
   pendingCommit = kj::none;
-  co_await commitCallbackPromise;
 
+  // Wait for the db to persist.
+  co_await commitCallbackPromise;
   lastConfirmedAlarmDbState = localAlarmState;
 
+  // Notify any merged commitImpl() requests that the db update completed.
+  fulfiller->fulfill();
+
+  // If the db state is now later than the known-scheduled alarm, issue a request to update it to
+  // match the db state.
   if (willFireEarlier(lastConfirmedScheduledAlarm, localAlarmState)) {
     co_await requestScheduledAlarm(localAlarmState);
   }
