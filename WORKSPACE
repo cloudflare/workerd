@@ -375,6 +375,23 @@ rust_analyzer_dependencies()
 #
 # workerd uses Node.js scripts for generating TypeScript types.
 
+# TODO(soon): rules_js depends on bazel-lib, which broke on Windows after a dependency binary was
+# deleted. There is a fix available at https://github.com/bazel-contrib/bazel-lib/pull/940, but it
+# is based off of a commit where WORKSPACE dependencies appear to be broken. Create a patch for the
+# latest release build instead. Remove this ASAP once the fix has been merged and rules_js has been
+# updated with the fixed version.
+http_archive(
+    name = "aspect_bazel_lib",
+    patch_args = ["-p1"],
+    patches = [
+        # based on https://github.com/bazel-contrib/bazel-lib/pull/940.
+        "//:patches/bazel-lib/0001-chore-deps-upgrade-to-newest-bsdtar.patch",
+    ],
+    sha256 = "688354ee6beeba7194243d73eb0992b9a12e8edeeeec5b6544f4b531a3112237",
+    strip_prefix = "bazel-lib-2.8.1",
+    url = "https://github.com/aspect-build/bazel-lib/releases/download/v2.8.1/bazel-lib-v2.8.1.tar.gz",
+)
+
 http_archive(
     name = "aspect_rules_js",
     sha256 = "6b7e73c35b97615a09281090da3645d9f03b2a09e8caa791377ad9022c88e2e6",
