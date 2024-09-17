@@ -98,6 +98,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":sentry",
+        "//src/workerd/jsg:exception",
         "@capnp-cpp//src/kj:kj-async",
     ],
 )

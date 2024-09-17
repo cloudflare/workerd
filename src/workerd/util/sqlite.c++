@@ -97,9 +97,10 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
 // Like KJ_REQUIRE() but give the Regulator a chance to report the error. `errorMessage` is either
 // the return value of sqlite3_errmsg() or a string literal containing a similarly
 // application-approriate error message. A reference called `regulator` must be in-scope.
-#define SQLITE_REQUIRE(condition, errorMessage, ...)                                               \
+// sqliteErrorCode is a kj::Maybe<int> and represents the error code from sqlite.
+#define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, ...)                              \
   if (!(condition)) {                                                                              \
-    regulator.onError(errorMessage);                                                               \
+    regulator.onError(sqliteErrorCode, errorMessage);                                              \
     KJ_FAIL_REQUIRE("SQLite failed", errorMessage, ##__VA_ARGS__);                                 \
   }
 
@@ -119,7 +120,7 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
     int _ec = code;                                                                                \
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */      \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__);                      \
-    SQLITE_REQUIRE(_ec == SQLITE_OK, dbErrorMessage(_ec, db), ##__VA_ARGS__);                      \
+    SQLITE_REQUIRE(_ec == SQLITE_OK, _ec, dbErrorMessage(_ec, db), ##__VA_ARGS__);                 \
   } while (false)
 
 // Version of `SQLITE_CALL` that can be called after inspecting the error code, in case some codes
@@ -127,7 +128,7 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
 #define SQLITE_CALL_FAILED(code, error, ...)                                                       \
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
-    SQLITE_REQUIRE(error == SQLITE_OK, dbErrorMessage(error, db), ##__VA_ARGS__);                  \
+    SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
   } while (false);
 
 namespace {
@@ -480,7 +481,7 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
     const char* tail;
 
     SQLITE_CALL(sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail));
-    SQLITE_REQUIRE(result != nullptr, "SQL code did not contain a statement.", sqlCode);
+    SQLITE_REQUIRE(result != nullptr, kj::none, "SQL code did not contain a statement.", sqlCode);
     auto ownResult = ownSqlite(result);
 
     while (*tail == ' ' || *tail == '\t' || *tail == '\n' || *tail == '\r' || *tail == '\v' ||
@@ -489,7 +490,7 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
 
     switch (multi) {
       case SINGLE:
-        SQLITE_REQUIRE(tail == sqlCode.end(),
+        SQLITE_REQUIRE(tail == sqlCode.end(), kj::none,
             "A prepared SQL statement must contain only one statement.", tail);
         break;
 
@@ -497,7 +498,7 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
         if (tail != sqlCode.end()) {
           // There are more statements after this one, so execute this statement now.
 
-          SQLITE_REQUIRE(sqlite3_bind_parameter_count(result) == 0,
+          SQLITE_REQUIRE(sqlite3_bind_parameter_count(result) == 0, kj::none,
               "When executing multiple SQL statements in a single call, only the last statement "
               "can have parameters.");
 
@@ -1011,9 +1012,9 @@ SqliteDatabase::Query::~Query() noexcept(false) {
 void SqliteDatabase::Query::checkRequirements(size_t size) {
   sqlite3_stmt* statement = getStatement();
 
-  SQLITE_REQUIRE(!sqlite3_stmt_busy(statement),
+  SQLITE_REQUIRE(!sqlite3_stmt_busy(statement), kj::none,
       "A SQL prepared statement can only be executed once at a time.");
-  SQLITE_REQUIRE(size == sqlite3_bind_parameter_count(statement),
+  SQLITE_REQUIRE(size == sqlite3_bind_parameter_count(statement), kj::none,
       "Wrong number of parameter bindings for SQL query.");
 
   KJ_IF_SOME(cb, db.onWriteCallback) {
@@ -1190,7 +1191,7 @@ bool SqliteDatabase::Query::isNull(uint column) {
 
 sqlite3_stmt* SqliteDatabase::Query::getStatement() {
   return &KJ_UNWRAP_OR(maybeStatement, {
-    regulator.onError("SQLite query was canceled because the database was deleted.");
+    regulator.onError(kj::none, "SQLite query was canceled because the database was deleted.");
     KJ_FAIL_REQUIRE("query canceled because reset() was called on the database");
   });
 }

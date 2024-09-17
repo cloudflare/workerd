@@ -47,7 +47,7 @@ bool SqlStorage::isAllowedTrigger(kj::StringPtr name) const {
   return true;
 }
 
-void SqlStorage::onError(kj::StringPtr message) const {
+void SqlStorage::onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const {
   JSG_ASSERT(false, Error, message);
 }
 
