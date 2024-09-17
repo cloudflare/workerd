@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workerd/io/trace.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
 
@@ -176,7 +177,8 @@ public:
     // Returns a cached value for the given key if one exists (and has not
     // expired). If no such value exists, nothing is returned, regardless of any
     // in-progress fallbacks trying to produce such a value.
-    kj::Maybe<kj::Own<CacheValue>> getWithoutFallback(const kj::String& key) const;
+    kj::Maybe<kj::Own<CacheValue>> getWithoutFallback(
+        const kj::String& key, SpanBuilder& span) const;
 
     struct FallbackResult {
       kj::Own<CacheValue> value;
@@ -191,7 +193,7 @@ public:
     //    or to a FallbackDoneCallback. In the latter case, the caller should
     //    invoke the fallback function.
     kj::OneOf<kj::Own<CacheValue>, kj::Promise<GetWithFallbackOutcome>> getWithFallback(
-        const kj::String& key) const;
+        const kj::String& key, SpanBuilder& span) const;
 
   private:
     // Creates a new FallbackDoneCallback associated with the given

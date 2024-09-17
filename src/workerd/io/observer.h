@@ -11,6 +11,7 @@
 #include <workerd/jsg/observer.h>
 #include <workerd/util/sqlite.h>
 
+#include <kj/common.h>
 #include <kj/exception.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
@@ -28,6 +29,37 @@ public:
   virtual void sentMessage(size_t bytes) {};
   // Called when a worker receives a message on this WebSocket (includes close messages).
   virtual void receivedMessage(size_t bytes) {};
+};
+
+// Collects metrics on memory cache.
+class MemoryCacheObserver: public kj::AtomicRefcounted {
+public:
+  class MemoryCacheLockTiming {
+  public:
+    virtual void start() {}
+    virtual void stop() {}
+    virtual ~MemoryCacheLockTiming() noexcept(false) {}
+  };
+
+  class MemoryCacheLockRecord {
+  public:
+    explicit MemoryCacheLockRecord(
+        kj::Maybe<kj::Own<MemoryCacheLockTiming>> memoryCacheLockTimingParam)
+        : memoryCacheLockTiming(kj::mv(memoryCacheLockTimingParam)) {
+      KJ_IF_SOME(timing, memoryCacheLockTiming) timing.get()->start();
+    }
+    ~MemoryCacheLockRecord() noexcept(false) {
+      KJ_IF_SOME(timing, memoryCacheLockTiming) timing.get()->stop();
+    }
+    KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheLockRecord);
+
+  private:
+    kj::Maybe<kj::Own<MemoryCacheLockTiming>> memoryCacheLockTiming;
+  };
+
+  virtual kj::Maybe<kj::Own<MemoryCacheLockTiming>> lock(SpanBuilder& span) {
+    return kj::none;
+  };
 };
 
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
@@ -113,6 +145,10 @@ public:
   virtual uint64_t clockRead() {
     return 0;
   }
+
+  virtual kj::Maybe<kj::Own<MemoryCacheObserver>> getMemoryCacheObserver() {
+    return kj::none;
+  };
 };
 
 class IsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver {

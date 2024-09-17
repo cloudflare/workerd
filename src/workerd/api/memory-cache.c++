@@ -239,14 +239,32 @@ SharedMemoryCache::Use::~Use() noexcept(false) {
 }
 
 kj::Maybe<kj::Own<CacheValue>> SharedMemoryCache::Use::getWithoutFallback(
-    const kj::String& key) const {
-  auto data = cache->data.lockExclusive();
+    const kj::String& key, SpanBuilder& span) const {
+  kj::Locked<ThreadUnsafeData> data;
+  {
+    kj::Maybe<kj::Own<MemoryCacheObserver::MemoryCacheLockTiming>> memoryCacheLockTiming;
+    KJ_IF_SOME(observer, IoContext::current().getMetrics().getMemoryCacheObserver()) {
+      memoryCacheLockTiming = observer->lock(span);
+    }
+    auto memoryCacheLockRecord =
+        MemoryCacheObserver::MemoryCacheLockRecord(kj::mv(memoryCacheLockTiming));
+    data = cache->data.lockExclusive();
+  }
   return cache->getWhileLocked(*data, key);
 }
 
 kj::OneOf<kj::Own<CacheValue>, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>
-SharedMemoryCache::Use::getWithFallback(const kj::String& key) const {
-  auto data = cache->data.lockExclusive();
+SharedMemoryCache::Use::getWithFallback(const kj::String& key, SpanBuilder& span) const {
+  kj::Locked<ThreadUnsafeData> data;
+  {
+    kj::Maybe<kj::Own<MemoryCacheObserver::MemoryCacheLockTiming>> memoryCacheLockTiming;
+    KJ_IF_SOME(observer, IoContext::current().getMetrics().getMemoryCacheObserver()) {
+      memoryCacheLockTiming = observer->lock(span);
+    }
+    auto memoryCacheLockRecord =
+        MemoryCacheObserver::MemoryCacheLockRecord(kj::mv(memoryCacheLockTiming));
+    data = cache->data.lockExclusive();
+  }
   KJ_IF_SOME(existingValue, cache->getWhileLocked(*data, key)) {
     return kj::mv(existingValue);
   } else KJ_IF_SOME(existingInProgress, data->inProgress.find(key)) {
@@ -373,7 +391,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
   auto readSpan = IoContext::current().makeTraceSpan("memory_cache_read"_kjc);
 
   KJ_IF_SOME(fallback, optionalFallback) {
-    KJ_SWITCH_ONEOF(cacheUse.getWithFallback(key.value)) {
+    KJ_SWITCH_ONEOF(cacheUse.getWithFallback(key.value, readSpan)) {
       KJ_CASE_ONEOF(result, kj::Own<CacheValue>) {
         // Optimization: Don't even release the isolate lock if the value is aleady in cache.
         jsg::Deserializer deserializer(js, result->bytes.asPtr());
@@ -422,7 +440,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
     }
     KJ_UNREACHABLE;
   } else {
-    KJ_IF_SOME(cacheValue, cacheUse.getWithoutFallback(key.value)) {
+    KJ_IF_SOME(cacheValue, cacheUse.getWithoutFallback(key.value, readSpan)) {
       jsg::Deserializer deserializer(js, cacheValue->bytes.asPtr());
       return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
     }
