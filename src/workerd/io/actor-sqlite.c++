@@ -461,8 +461,9 @@ kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bo
   KJ_ASSERT(!haveDeferredDelete);
   KJ_ASSERT(!inAlarmHandler);
 
-  if (metadata.getAlarm() != scheduledTime) {
-    if (metadata.getAlarm() == lastConfirmedAlarmDbState) {
+  auto localAlarmState = metadata.getAlarm();
+  if (localAlarmState != scheduledTime) {
+    if (localAlarmState == lastConfirmedAlarmDbState) {
       // If there's a clean scheduledTime that is different from ours, this run should be
       // canceled.
       // TODO(now): should probably also check that no other db requests are in-flight?
