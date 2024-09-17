@@ -704,4 +704,21 @@ struct TraceParentContext {
   SpanParent limeParentSpan;
 };
 
+// RAII object that measures the time duration over its lifetime. It tags this duration onto a
+// given request span using a specified tag name. Ideal for automatically tracking and logging
+// execution times within a scoped block.
+class ScopedDurationTagger {
+public:
+  explicit ScopedDurationTagger(
+      SpanBuilder& span, kj::ConstString key, const kj::MonotonicClock& timer);
+  ~ScopedDurationTagger() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(ScopedDurationTagger);
+
+private:
+  SpanBuilder& span;
+  kj::ConstString key;
+  const kj::MonotonicClock& timer;
+  const kj::TimePoint startTime;
+};
+
 }  // namespace workerd

@@ -164,7 +164,7 @@ Server::Server(kj::Filesystem& fs,
       entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)),
       consoleMode(consoleMode),
-      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
+      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
       tasks(*this) {}
 
 Server::~Server() noexcept(false) {}

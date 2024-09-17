@@ -321,7 +321,7 @@ TestFixture::TestFixture(SetupParams&& params)
           false),
       isolateLimitEnforcer(kj::heap<MockIsolateLimitEnforcer>()),
       errorReporter(kj::heap<MockErrorReporter>()),
-      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
+      memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(*timer)),
       api(kj::heap<server::WorkerdApi>(testV8System,
           params.featureFlags.orDefault(CompatibilityFlags::Reader()),
           *isolateLimitEnforcer,
