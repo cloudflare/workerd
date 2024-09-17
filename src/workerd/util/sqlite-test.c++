@@ -665,6 +665,40 @@ KJ_TEST("SQLite write row counters (basic)") {
   }
 }
 
+KJ_TEST("SQLite read/write row counters (large row insert)") {
+  // This is used to verify reading/writing a large row (bigger than the size of one page in sqlite)
+  // results only in 1 read/row count as returned by the DB
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run("CREATE TABLE large_things (id INTEGER PRIMARY KEY, large_value TEXT)");
+
+  // SQLite's default page size is 4096 bytes
+  // So create a string significantly larger than that
+  KJ_EXPECT(db.run("PRAGMA page_size").getInt(0) == 4096);
+  kj::String largeValue = kj::str(kj::repeat('A', 100000));
+
+  // Insert the large row
+  RowCounts insertStats = countRowsTouched(
+      db, "INSERT INTO large_things (id, large_value) VALUES (?, ?)", 1, kj::mv(largeValue));
+
+  KJ_EXPECT(insertStats.found == 0);
+  KJ_EXPECT(insertStats.read == 1);
+  KJ_EXPECT(insertStats.written == 1);
+
+  // Verify the insert
+  auto verifyStmt = db.prepare("SELECT COUNT(*) FROM large_things");
+  KJ_EXPECT(verifyStmt.run().getInt(0) == 1);
+
+  // Read the large row
+  RowCounts readStats = countRowsTouched(db, "SELECT * FROM large_things WHERE id = ?", 1);
+  KJ_EXPECT(readStats.found == 1);
+  KJ_EXPECT(readStats.read == 1);
+  KJ_EXPECT(readStats.written == 0);
+}
+
 KJ_TEST("SQLite row counters with triggers") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
