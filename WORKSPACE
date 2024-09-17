@@ -465,6 +465,7 @@ http_archive(
         "//:patches/v8/0016-Revert-TracedReference-deref-API-removal.patch",
         "//:patches/v8/0017-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
         "//:patches/v8/0018-Update-illegal-invocation-error-message-in-v8.patch",
+        "//:patches/v8/0019-Implement-cross-request-context-promise-resolve-hand.patch",
     ],
     strip_prefix = "v8-12.9.202.13",
     url = "https://github.com/v8/v8/archive/refs/tags/12.9.202.13.tar.gz",

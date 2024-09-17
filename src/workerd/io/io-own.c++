@@ -33,6 +33,38 @@ void DeleteQueue::scheduleDeletion(OwnedObject* object) const {
   }
 }
 
+void DeleteQueue::scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action) const {
+  KJ_IF_SOME(state, *crossThreadDeleteQueue.lockExclusive()) {
+    state.actions.add(kj::mv(action));
+    KJ_REQUIRE_NONNULL(state.crossThreadFulfiller)->fulfill();
+    return;
+  }
+
+  // The queue was deleted, likely because the IoContext was destroyed and the
+  // DeleteQueuePtr was invalidated. We are going to emit a warning and drop the
+  // actions on the floor without scheduling them.
+  if (IoContext::hasCurrent()) {
+    // We are creating an error here just so we can include the JavaScript stack
+    // with the warning if it exists. We are not going to throw this error.
+    auto err = v8::Exception::Error(
+        js.str("A promise was resolved or rejected from a different request context than "
+               "the one it was created in. However, the creating request has already been "
+               "completed or canceled. Continuations for that request are unlikely to "
+               "run safely and have been canceled. If this behavior breaks your worker, "
+               "consider setting the `no_handle_cross_request_promise_resolution` "
+               "compatibility flag for your worker."_kj))
+                   .As<v8::Object>();
+    // TODO(soon): Add documentation link to this warning.
+    // Changing the name property to "Warning" will make the serialize stack start with
+    // "Warning: " rather that "Error: "
+    jsg::check(err->Set(js.v8Context(), js.str("name"_kj), js.str("Warning"_kj)));
+    auto stack = jsg::check(err->Get(js.v8Context(), js.str("stack"_kj)));
+
+    // Safe to mutate here since we have the exclusive lock on the queue above.
+    IoContext::current().logWarning(kj::str(stack));
+  }
+}
+
 void DeleteQueue::checkFarGet(const DeleteQueue* deleteQueue, const std::type_info& type) {
   IoContext::current().checkFarGet(deleteQueue, type);
 }
@@ -41,6 +73,21 @@ void DeleteQueue::checkWeakGet(workerd::WeakRef<IoContext>& weak) {
   if (!weak.isValid()) {
     JSG_FAIL_REQUIRE(
         Error, kj::str("Couldn't complete operation because the execution context has ended."));
+  }
+}
+
+kj::Promise<void> DeleteQueue::resetCrossThreadSignal() {
+  auto lock = crossThreadDeleteQueue.lockExclusive();
+  KJ_IF_SOME(state, *lock) {
+    KJ_IF_SOME(fulfiller, state.crossThreadFulfiller) {
+      // We should only reset the signal if it has been fulfilled.
+      KJ_ASSERT(!fulfiller->isWaiting());
+    }
+    auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
+    state.crossThreadFulfiller = kj::mv(paf.fulfiller);
+    return kj::mv(paf.promise);
+  } else {
+    return kj::NEVER_DONE;
   }
 }
 
@@ -100,6 +147,10 @@ kj::Vector<kj::StringPtr> OwnedObjectList::finalize() {
   }
 
   return warnings;
+}
+
+void IoCrossContextExecutor::execute(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& func) {
+  deleteQueue->scheduleAction(js, kj::mv(func));
 }
 
 }  // namespace workerd

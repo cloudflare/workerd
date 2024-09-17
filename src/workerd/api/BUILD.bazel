@@ -548,3 +548,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/new-module-registry-test.js"],
 )
+
+wd_test(
+    src = "tests/cross-context-promise-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/cross-context-promise-test.js"],
+)

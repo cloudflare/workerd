@@ -1146,6 +1146,91 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
         return v8::MaybeLocal<v8::Promise>();
       }
     });
+
+    // The PromiseCrossContextResolveCallback is used to ensure that promise reactions
+    // are only scheduled on the microtask queue from the appropriate IoContext for the
+    // promise. Huh? Yeah, that's not super clear... let me explain a bit more.
+    // Every request runs in it's own IoContext.
+    // Some I/O objects are bound to the IoContext when they are created.
+    // If these objects are accessed from the wrong IoContext, things blow up.
+    // If I create a promise in one request and pass the resolve/reject functions
+    // off to a different request, bad things can happen because the IoContext can
+    // actually change in the promise continuation. Take the following case for example:
+    //
+    // In request one:
+    //
+    //  const ab = AbortSignal.abort();  // AbortSignal is bound to the IoContext
+    //  const { promise, resolve } = Promise.withResolvers();
+    //  globalThis.resolve = resolve;
+    //  await promise;
+    //  console.log(ab.aborted);
+    //
+    // In request two:
+    //
+    //  globalThis.resolve();
+    //
+    // What previously would happen is that the `console.log(ab.aborted) after the
+    // `await promise` in request one would fail with an error because the current
+    // IoContext would change! (it would be the IoContext from request two!).
+    //
+    // That's bad.
+    //
+    // So this callback is added to ensure that the promise reactions for the promise
+    // being resolved are not scheduled until we are back in the correct IoContext for
+    // the promise.
+    //
+    // This happens by (ab)using the DeleteQueue that is specific to the owning
+    // IoContext. When the IoContext is entered, the isolate is updated with a
+    // current "promise tag". Whenever a promise is created, it is associated with
+    // the isolate's current tag. Whenever a promise is followed (calling .then, etc),
+    // we check the tag and arrange for a cross-thread resolve. When the promise is
+    // resolved or rejected, we check the tag also. If the promise tag and the current
+    // isolate tag do not match, the function below is called.
+    if (features.getHandleCrossRequestPromiseResolution()) {
+      lock->v8Isolate->SetPromiseCrossContextResolveCallback(
+          [](v8::Isolate* isolate, v8::Local<v8::Value> tag, v8::Local<v8::Data> reactions,
+              v8::Local<v8::Value> argument,
+              std::function<void(v8::Isolate * isolate, v8::Local<v8::Data> reactions,
+                  v8::Local<v8::Value> argument)> callback) -> v8::Maybe<void> {
+        try {
+          auto& js = jsg::Lock::from(isolate);
+          // The promise tag is generally opaque except for right here. The tag
+          // wraps an instanceof kj::Own<IoCrossContextExecutor>, which wraps an atomically
+          // refcounted pointer to the DeleteQueue for the correct isolate.
+          // We simply pass the given callback, reactions, and argument to
+          // a function that will be added to the queue inside DeleteQueue.
+          // The next time the relevant IoContext is entered, this queue will
+          // be drained and the actions will be run. Adding the task to the
+          // delete queue will also signal the IoContext that it should wake
+          // up and drain the queue. Simple, eh?
+          //
+          // A word of warning tho! It is possible for the IoContext to be
+          // destroyed before the promise is resolved. Any actions that have
+          // already been added to the queue would end up being dropped silently
+          // on the floor. Actions that are added to the queue now will be run
+          // immediately in the wrong IoContext.
+          auto& ref = jsg::unwrapOpaqueRef<kj::Own<IoCrossContextExecutor>>(isolate, tag);
+          ref->execute(js,
+              [reactions = v8::Global<v8::Data>(isolate, reactions),
+                  argument = jsg::JsRef(js, jsg::JsValue(argument)),
+                  callback = kj::mv(callback)](jsg::Lock& js) mutable {
+            callback(js.v8Isolate, reactions.Get(js.v8Isolate), argument.getHandle(js));
+          });
+          return v8::JustVoid();
+        } catch (jsg::JsExceptionThrown&) {
+          // Exceptions here are generally unexpected but possible because the jsg::Promise
+          // then can fail if the isolate is in the process of being torn down. Let's just
+          // return control back to V8 which should handle the case.
+          // Note that errors thrown here and below should cause the resolve() or reject()
+          // function calls to throw, which is unusual. Just important to keep that in mind.
+          // Most likely errors thrown here are fatal so that should be ok.
+          return v8::Nothing<void>();
+        } catch (...) {
+          jsg::throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+          return v8::Nothing<void>();
+        }
+      });
+    }
   });
 }
 

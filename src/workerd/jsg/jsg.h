@@ -2591,6 +2591,11 @@ public:
   JsDate date(kj::Date date) KJ_WARN_UNUSED_RESULT;
   JsDate date(kj::StringPtr date) KJ_WARN_UNUSED_RESULT;
 
+  // Returns a JsObject that is backed internally by a v8::External object that
+  // takes ownership over the inner.
+  template <typename T>
+  JsObject opaque(T&& inner) KJ_WARN_UNUSED_RESULT;
+
   // Returns a jsg::BufferSource whose underlying JavaScript handle is a Uint8Array.
   BufferSource bytes(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 

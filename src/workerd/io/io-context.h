@@ -945,6 +945,9 @@ private:
       kj::Maybe<InputGate::Lock> inputLock,
       kj::Function<void(Worker::Lock&)> func);
 
+  kj::Promise<void> deleteQueueSignalTask;
+  static kj::Promise<void> startDeleteQueueSignalTask(IoContext* context);
+
   friend class Finalizeable;
   friend class DeleteQueue;
   template <typename T>

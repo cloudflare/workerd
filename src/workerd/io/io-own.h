@@ -3,6 +3,7 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/weak-refs.h>
 
+#include <kj/async-io.h>
 #include <kj/common.h>
 #include <kj/mutex.h>
 #include <kj/refcount.h>
@@ -120,9 +121,21 @@ public:
   DeleteQueue(): crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}) {}
 
   void scheduleDeletion(OwnedObject* object) const;
+  void scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action) const;
 
   struct State {
     kj::Vector<OwnedObject*> queue;
+    // Actions that some other IoContext has requested be executed in this IoContext. When
+    // adding an action to this list, crossThreadFulfiller should be fulfilled, signaling the
+    // target IoContext to wake up and run actions. After draining the actions queue, the target
+    // IoContext should replace crossThreadFulfiller with a new one which will wake it up again.
+    //
+    // In particular, these actions are used to implement cross-context promise resolution.
+    //
+    // Keep in mind the IoContext could be destroyed before the cross-thread signal runs, in
+    // which case the actions will never run.
+    kj::Vector<kj::Function<void(jsg::Lock&)>> actions;
+    kj::Maybe<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> crossThreadFulfiller;
   };
 
   // Pointers from IoOwns that were dropped in other threads, and therefore should be deleted
@@ -145,6 +158,30 @@ public:
 private:
   template <typename T>
   SpecificOwnedObject<T>* addObjectImpl(kj::Own<T> obj, OwnedObjectList& ownedObjects);
+
+  kj::Promise<void> resetCrossThreadSignal();
+
+  friend class IoContext;
+};
+
+// Object which can push actions into a specific DeleteQueue then signal it's
+// owning IoContext to wake up to process the queue. This is a bit of a hack of
+// the DeleteQueue concept that allows us to use the same queue for more than
+// just deletions.
+class IoCrossContextExecutor {
+public:
+  IoCrossContextExecutor(kj::Own<const DeleteQueue> deleteQueue)
+      : deleteQueue(kj::mv(deleteQueue)) {}
+
+  // Tries to execute the specified action to the owning IoContext.
+  // The target IoContext will be signaled to run the action as soon as it is able.
+  void execute(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action);
+
+private:
+  friend class IoContext;
+  friend class DeleteQueue;
+
+  kj::Own<const DeleteQueue> deleteQueue;
 };
 
 template <typename T>
@@ -186,7 +223,7 @@ inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(
 
 // When the IoContext is destroyed, we need to null out the DeleteQueue. Complicating
 // matters a bit, we need to cancel all tasks (destroy the TaskSet) before this happens, so
-// we can't just do it in IoContext's destrucrtor. As a hack, we customize our pointer
+// we can't just do it in IoContext's destructor. As a hack, we customize our pointer
 // to the delete queue to get the tear-down order right.
 class DeleteQueuePtr: public kj::Own<DeleteQueue> {
 public:
@@ -195,7 +232,16 @@ public:
   ~DeleteQueuePtr() noexcept(false) {
     auto ptr = get();
     if (ptr != nullptr) {
-      *ptr->crossThreadDeleteQueue.lockExclusive() = kj::none;
+      auto lock = ptr->crossThreadDeleteQueue.lockExclusive();
+      KJ_IF_SOME(state, *lock) {
+        // The delete queue state may include a kj::CrossThreadPromiseFulfiller that
+        // needs to be destroyed. To do so, we need to allow async destructors here.
+        // We only want to destroy the crossThreadFulfiller in this scope tho, not
+        // everything that may be in the queue.
+        kj::AllowAsyncDestructorsScope scope;
+        state.crossThreadFulfiller = kj::none;
+      }
+      *lock = kj::none;
     }
   }
 };
