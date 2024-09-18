@@ -268,9 +268,10 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   fulfiller->fulfill();
 
   // If the db state is now later than the known-scheduled alarm, issue a request to update it to
-  // match the db state.
+  // match the db state.  We don't need to hold open the output gate, so we add the scheduling
+  // request to commitTasks.
   if (willFireEarlier(lastConfirmedScheduledAlarm, localAlarmState)) {
-    co_await requestScheduledAlarm(localAlarmState);
+    commitTasks.add(requestScheduledAlarm(localAlarmState));
   }
 }
 

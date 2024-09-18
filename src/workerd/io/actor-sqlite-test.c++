@@ -683,24 +683,23 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
   auto gateWait3Ms = test.gate.wait();
   KJ_ASSERT(!gateWait3Ms.poll(test.ws));
 
-  // Fulfill 2ms db commit.  Expect 2ms alarm to be scheduled.
+  // Fulfill 2ms db commit.  Expect 2ms alarm to be scheduled and 2ms gate to be unblocked.
+  KJ_ASSERT(!gateWait2Ms.poll(test.ws));
   commit2MsFulfiller->fulfill();
+  KJ_ASSERT(gateWait2Ms.poll(test.ws));
   auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
   test.pollAndExpectCalls({});
 
-  // Fulfill 3ms db commit.  Expect 3ms alarm to be scheduled.
+  // Fulfill 3ms db commit.  Expect 3ms alarm to be scheduled and 3ms gate to be unblocked.
+  KJ_ASSERT(!gateWait3Ms.poll(test.ws));
   commit3MsFulfiller->fulfill();
+  KJ_ASSERT(gateWait3Ms.poll(test.ws));
   auto fulfiller3Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]);
   test.pollAndExpectCalls({});
 
-  // Gate is blocked until outstanding alarm scheduling is fulfilled.
-  KJ_ASSERT(!gateWait2Ms.poll(test.ws));
+  // Outstanding alarm scheduling can complete asynchronously.
   fulfiller2Ms->fulfill();
-  KJ_ASSERT(gateWait2Ms.poll(test.ws));
-
-  KJ_ASSERT(!gateWait3Ms.poll(test.ws));
   fulfiller3Ms->fulfill();
-  KJ_ASSERT(gateWait3Ms.poll(test.ws));
 }
 
 KJ_TEST("rejected alarm scheduling request breaks gate") {
