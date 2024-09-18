@@ -547,7 +547,8 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
   }
 }
 
-kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
+kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSqlite::
+    armAlarmHandler(kj::Date scheduledTime, bool noCache) {
   KJ_ASSERT(!haveDeferredDelete);
   KJ_ASSERT(!inAlarmHandler);
 
@@ -557,7 +558,7 @@ kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bo
       // If there's a clean scheduledTime that is different from ours, this run should be
       // canceled.
       // TODO(now): should probably also check that no other db requests are in-flight?
-      return kj::none;
+      return CancelAlarmHandler{.waitBeforeCancel = kj::none};
     } else {
       // There's a alarm write that hasn't been set yet pending for a time different than ours --
       // We won't cancel the alarm because it hasn't been confirmed, but we shouldn't delete
@@ -570,7 +571,7 @@ kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bo
   inAlarmHandler = true;
 
   static const DeferredAlarmDeleter disposer;
-  return kj::Own<void>(this, disposer);
+  return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
 }
 
 void ActorSqlite::cancelDeferredAlarmDeletion() {
