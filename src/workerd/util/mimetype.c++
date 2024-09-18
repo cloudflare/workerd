@@ -430,8 +430,7 @@ kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
     for (size_t i = 0; i < input.size(); ++i) {
       if (input[i] == '"' && (i == 0 || input[i - 1] != '\\')) {
         // Skip to the end of the quoted section
-        while (++i < input.size() && (input[i] != '"' || input[i - 1] == '\\')) {
-        }
+        while (++i < input.size() && (input[i] != '"' || input[i - 1] == '\\')) {}
       } else if (input[i] == ',' && (i == 0 || input[i - 1] != '\\')) {
         return i;
       }

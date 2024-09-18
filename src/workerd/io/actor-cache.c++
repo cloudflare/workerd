@@ -2179,8 +2179,7 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
           hooks.updateAlarmInMemory(kj::none);
         }
       }
-      KJ_CASE_ONEOF(_, UnknownAlarmTime) {
-      }
+      KJ_CASE_ONEOF(_, UnknownAlarmTime) {}
     }
 
     return;
@@ -2450,8 +2449,7 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
         maybeAlarmChange = DirtyAlarm{kj::none};
       }
     }
-    KJ_CASE_ONEOF(_, UnknownAlarmTime) {
-    }
+    KJ_CASE_ONEOF(_, UnknownAlarmTime) {}
   }
 
   // We have to remember _before_ waiting for the flush whether or not it was a pre-deleteAll()
@@ -2568,8 +2566,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
           }
         }
       }
-      KJ_CASE_ONEOF(_, ActorCache::UnknownAlarmTime) {
-      }
+      KJ_CASE_ONEOF(_, ActorCache::UnknownAlarmTime) {}
     }
     if (flushingBeforeDeleteAll) {
       // The writes we flushed were writes that had occurred before a deleteAll. Now that they are
@@ -2960,8 +2957,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
         }
       }
     }
-    KJ_CASE_ONEOF(_, CleanAlarm) {
-    }
+    KJ_CASE_ONEOF(_, CleanAlarm) {}
   }
 
   // We have to wait on the transaction promise so we don't cancel the catch_ branch that triggers

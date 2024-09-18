@@ -2483,8 +2483,7 @@ size_t WritableStreamInternalController::jsgGetMemorySelfSize() const {
 }
 void WritableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-    }
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       tracker.trackField("error", errored);
     }
@@ -2528,8 +2527,7 @@ size_t ReadableStreamInternalController::jsgGetMemorySelfSize() const {
 
 void ReadableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-    }
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(error, StreamStates::Errored) {
       tracker.trackField("error", error);
     }
@@ -2542,10 +2540,8 @@ void ReadableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& trac
     }
   }
   KJ_SWITCH_ONEOF(readState) {
-    KJ_CASE_ONEOF(unlocked, Unlocked) {
-    }
-    KJ_CASE_ONEOF(locked, Locked) {
-    }
+    KJ_CASE_ONEOF(unlocked, Unlocked) {}
+    KJ_CASE_ONEOF(locked, Locked) {}
     KJ_CASE_ONEOF(pipeLocked, PipeLocked) {
       tracker.trackField("pipeLocked", pipeLocked);
     }

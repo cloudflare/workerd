@@ -983,8 +983,7 @@ private:
                   KJ_ASSERT(ranges.size() > 0);
                   if (ranges.size() == 1) range = ranges[0];
                 }
-                KJ_CASE_ONEOF(_, kj::HttpEverythingRange) {
-                }
+                KJ_CASE_ONEOF(_, kj::HttpEverythingRange) {}
                 KJ_CASE_ONEOF(_, kj::HttpUnsatisfiableRange) {
                   kj::HttpHeaders headers(headerTable);
                   headers.set(kj::HttpHeaderId::CONTENT_RANGE, kj::str("bytes */", meta.size));

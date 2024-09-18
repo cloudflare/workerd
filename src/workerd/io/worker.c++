@@ -1691,8 +1691,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 KJ_CASE_ONEOF(startupTimeElapsed, kj::Duration) {
                   s = startupTimeElapsed;
                 }
-                KJ_CASE_ONEOF(limitError, kj::Exception) {
-                }
+                KJ_CASE_ONEOF(limitError, kj::Exception) {}
               }
             } else {
             }
@@ -2574,8 +2573,7 @@ public:
           inspector.contextDestroyed(dummyContext);
         });
       }
-      KJ_CASE_ONEOF(startupTimeElapsed, kj::Duration) {
-      }
+      KJ_CASE_ONEOF(startupTimeElapsed, kj::Duration) {}
     }
 
     if (recordedLock.checkInWithLimitEnforcer(isolate)) {

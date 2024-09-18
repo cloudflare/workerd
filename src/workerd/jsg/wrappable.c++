@@ -101,8 +101,7 @@ public:
           next.state.get<Freelisted>().prev = freelisted.prev;
         }
       }
-      KJ_CASE_ONEOF(d, Dead) {
-      }
+      KJ_CASE_ONEOF(d, Dead) {}
     }
   }
 
@@ -116,8 +115,7 @@ public:
         // due to conservative GC or due to incremental marking. Unfortunately the shim won't be
         // collected on this pass but hopefully it can be on the next pass.
       }
-      KJ_CASE_ONEOF(d, Dead) {
-      }
+      KJ_CASE_ONEOF(d, Dead) {}
     }
   }
 

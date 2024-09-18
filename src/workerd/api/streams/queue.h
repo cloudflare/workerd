@@ -352,10 +352,8 @@ public:
 
   void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
     KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {
-      }
-      KJ_CASE_ONEOF(errored, Errored) {
-      }
+      KJ_CASE_ONEOF(closed, Closed) {}
+      KJ_CASE_ONEOF(errored, Errored) {}
       KJ_CASE_ONEOF(ready, Ready) {
         for (auto& request: ready.readRequests) {
           request.resolveAsDone(js);
@@ -505,10 +503,8 @@ public:
 
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
     KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {
-      }
-      KJ_CASE_ONEOF(errored, Errored) {
-      }
+      KJ_CASE_ONEOF(closed, Closed) {}
+      KJ_CASE_ONEOF(errored, Errored) {}
       KJ_CASE_ONEOF(ready, Ready) {
         for (auto& request: ready.readRequests) {
           request.resolver.reject(js, reason);
@@ -520,8 +516,7 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {
-      }
+      KJ_CASE_ONEOF(closed, Closed) {}
       KJ_CASE_ONEOF(errored, Errored) {
         // Technically we shouldn't really have to gc visit the stored error here but there
         // should not be any harm in doing so.
@@ -1016,10 +1011,8 @@ size_t QueueImpl<Self>::jsgGetMemorySelfSize() const {
 template <typename Self>
 void QueueImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(ready, Ready) {
-    }
-    KJ_CASE_ONEOF(closed, Closed) {
-    }
+    KJ_CASE_ONEOF(ready, Ready) {}
+    KJ_CASE_ONEOF(closed, Closed) {}
     KJ_CASE_ONEOF(errored, Errored) {
       tracker.trackField("error", errored);
     }
@@ -1039,8 +1032,7 @@ size_t ConsumerImpl<Self>::jsgGetMemorySelfSize() const {
 template <typename Self>
 void ConsumerImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(close, Closed) {
-    }
+    KJ_CASE_ONEOF(close, Closed) {}
     KJ_CASE_ONEOF(error, Errored) {
       tracker.trackField("error", error);
     }
