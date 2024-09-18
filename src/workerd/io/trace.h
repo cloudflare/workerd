@@ -350,6 +350,7 @@ public:
     return kj::refcounted<PipelineTracer>(kj::addRef(*this));
   }
 
+  // Makes a tracer for a worker stage.
   kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
       kj::Maybe<kj::String> scriptId,
       kj::Maybe<kj::String> stableId,
@@ -358,7 +359,10 @@ public:
       kj::Maybe<kj::String> dispatchNamespace,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint);
-  // Makes a tracer for a worker stage.
+
+  // Adds a trace from the contents of `reader` this is used in sharded workers to send traces back
+  // to the host where tracing was initiated.
+  void addTrace(rpc::Trace::Reader reader);
 
 private:
   kj::Vector<kj::Own<Trace>> traces;

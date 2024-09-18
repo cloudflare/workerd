@@ -580,6 +580,10 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
 
+void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
+  traces.add(kj::refcounted<Trace>(reader));
+}
+
 WorkerTracer::WorkerTracer(
     kj::Own<PipelineTracer> parentPipeline, kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel),
