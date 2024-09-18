@@ -111,5 +111,22 @@ KJ_TEST("SQLite-KV") {
   }
 }
 
+KJ_TEST("large key") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteKv kv(db);
+
+  // 2MB because we document a 2MB limit for SQLite Durable Objects
+  kj::String closeToLimitString = kj::heapString(2000000);
+  kv.put(closeToLimitString, "hello"_kj.asBytes());
+
+  // Actual limit is 2.2MB, so we test more than that to see if it throws
+  kj::String tooBigString = kj::heapString(2400000);
+
+  KJ_EXPECT_THROW_MESSAGE(
+      "string or blob too big: SQLITE_TOOBIG", kv.put(tooBigString, "hello"_kj.asBytes()));
+}
+
 }  // namespace
 }  // namespace workerd
