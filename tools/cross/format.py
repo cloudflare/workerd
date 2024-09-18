@@ -76,9 +76,9 @@ def check_clang_format() -> None:
             logging.error("unable to read clang version")
             exit(1)
 
-        major, _, _ = match.groups()
-        if int(major) != 18:
-            logging.error("clang-format version must be 18")
+        major, minor, patch = match.groups()
+        if int(major) != 18 or int(minor) != 1 or int(patch) != 8:
+            logging.error("clang-format version must be 18.1.8")
             exit(1)
     except FileNotFoundError:
         # Clang-format is not in the PATH
