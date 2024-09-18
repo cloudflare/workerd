@@ -4,8 +4,7 @@
 //
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
-export const getRandomValues = crypto.getRandomValues;
+export const getRandomValues = crypto.getRandomValues.bind(crypto);
 export const subtle = crypto.subtle;
 export const webcrypto = crypto;
 

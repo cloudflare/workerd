@@ -413,3 +413,27 @@ export const timingSafeEqualTest = {
     timingSafeEqual(new Uint8Array(1), new Uint8Array(1));
   },
 };
+
+// Ref: https://github.com/cloudflare/workerd/issues/2716
+export const getRandomValuesIllegalInvocation = {
+  async test() {
+    const crypto = await import('node:crypto');
+    {
+      // The following assertion doesn't fail as of Node.js v20.17.0
+      const getRandomValues = crypto.getRandomValues;
+      strictEqual(getRandomValues(new Uint8Array(6)).length, 6);
+    }
+    throws(
+      () => {
+        // This ensures that we are replicating Node.js behavior as of v20.17.0
+        const getRandomValues = crypto.webcrypto.getRandomValues;
+        strictEqual(getRandomValues(new Uint8Array(6)).length, 6);
+      },
+      {
+        name: 'TypeError',
+        message: /Illegal invocation/,
+      }
+    );
+    strictEqual(crypto.getRandomValues(new Uint8Array(6)).length, 6);
+  },
+};
