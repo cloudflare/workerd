@@ -1041,6 +1041,7 @@ public:
     JSG_STRUCT_TS_OVERRIDE(ResponseInit {
       headers?: HeadersInit;
       encodeBody?: "automatic" | "manual";
+      webSocket?: WebSocket;
     });
   };
 
@@ -1161,7 +1162,7 @@ public:
       // JSG_READONLY_INSTANCE_PROPERTY(type, getType);
     }
 
-    JSG_TS_OVERRIDE({ constructor(body?: BodyInit | null, init?: ResponseInit); });
+    JSG_TS_OVERRIDE({ constructor(body?: BodyInit | null, init?: ResponseInit, webSocket?: WebSocket); });
     // Use `BodyInit` and `ResponseInit` type aliases in constructor instead of inlining
   }
 
