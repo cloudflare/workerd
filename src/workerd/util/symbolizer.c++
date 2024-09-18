@@ -4,9 +4,10 @@
 
 #include "dlfcn.h"
 
+#include <workerd/util/sentry.h>
+
 #include <sys/wait.h>
 #include <unistd.h>
-#include <workerd/util/sentry.h>
 
 #include <kj/common.h>
 #include <kj/debug.h>

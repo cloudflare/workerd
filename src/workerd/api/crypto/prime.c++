@@ -1,7 +1,8 @@
 #include "prime.h"
 
-#include <openssl/bn.h>
 #include <workerd/api/crypto/impl.h>
+
+#include <openssl/bn.h>
 
 namespace workerd::api {
 

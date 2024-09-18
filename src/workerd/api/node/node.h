@@ -9,11 +9,12 @@
 #include "util.h"
 #include "zlib-util.h"
 
-#include <node/node.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
+
+#include <node/node.capnp.h>
 
 #include <capnp/dynamic.h>
 

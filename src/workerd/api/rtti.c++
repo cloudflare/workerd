@@ -4,7 +4,6 @@
 
 #include "rtti.h"
 
-#include <cloudflare/cloudflare.capnp.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/api/actor.h>
 #include <workerd/api/analytics-engine.h>
@@ -35,6 +34,8 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/modules.capnp.h>
+
+#include <cloudflare/cloudflare.capnp.h>
 
 #include <capnp/serialize-packed.h>
 #include <kj/map.h>

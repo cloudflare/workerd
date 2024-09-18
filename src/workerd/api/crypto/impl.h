@@ -9,10 +9,11 @@
 
 #include "crypto.h"
 
+#include <workerd/api/util.h>
+
 #include <openssl/base.h>
 #include <openssl/bn.h>
 #include <openssl/err.h>
-#include <workerd/api/util.h>
 
 #include <kj/encoding.h>
 

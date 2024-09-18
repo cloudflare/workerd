@@ -5,10 +5,11 @@
 #pragma once
 // WebCrypto API
 
-#include <openssl/base.h>  // for EVP_MD_CTX, X509
 #include <workerd/api/streams/writable.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+
+#include <openssl/base.h>  // for EVP_MD_CTX, X509
 
 #include <bit>
 

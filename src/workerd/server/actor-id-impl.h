@@ -1,7 +1,8 @@
 #pragma once
 
-#include <openssl/sha.h>
 #include <workerd/io/actor-id.h>
+
+#include <openssl/sha.h>
 
 namespace workerd::server {
 class ActorIdFactoryImpl final: public ActorIdFactory {

@@ -20,12 +20,12 @@ IncludeCategories:
   # kj/capnp headers
   - Regex: <(kj|capnp)/.+>
     Priority: 4
-  # 3rd party headers
-  - Regex: <.+>
-    Priority: 3
   # workerd headers
   - Regex: <workerd/.+>
     Priority: 2
+  # 3rd party headers
+  - Regex: <.+>
+    Priority: 3
   # local headers
   - Regex: '".*"'
     Priority: 1

@@ -4,6 +4,9 @@
 
 #include "impl.h"
 
+#include <workerd/api/util.h>
+#include <workerd/jsg/memory.h>
+
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/ec.h>
@@ -11,8 +14,6 @@
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <openssl/rsa.h>
-#include <workerd/api/util.h>
-#include <workerd/jsg/memory.h>
 
 #include <algorithm>
 #include <map>

@@ -6,10 +6,11 @@
 
 #include "impl.h"
 
-#include <openssl/hmac.h>
-#include <openssl/mem.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/io/io-context.h>
+
+#include <openssl/hmac.h>
+#include <openssl/mem.h>
 
 namespace workerd::api {
 namespace {

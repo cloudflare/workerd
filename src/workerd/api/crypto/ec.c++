@@ -7,13 +7,14 @@
 #include "impl.h"
 #include "keys.h"
 
+#include <workerd/api/util.h>
+#include <workerd/io/features.h>
+
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/curve25519.h>
 #include <openssl/ec_key.h>
 #include <openssl/x509.h>
-#include <workerd/api/util.h>
-#include <workerd/io/features.h>
 
 #include <kj/function.h>
 

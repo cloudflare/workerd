@@ -3,8 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "crypto.h"
 
-#include <openssl/crypto.h>
 #include <workerd/api/crypto/impl.h>
+
+#include <openssl/crypto.h>
 
 #include <map>
 

@@ -4,10 +4,11 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 #pragma once
 
-#include <brotli/decode.h>
-#include <brotli/encode.h>
 #include <workerd/api/streams/compression.h>
 #include <workerd/jsg/jsg.h>
+
+#include <brotli/decode.h>
+#include <brotli/encode.h>
 #include <zlib.h>
 
 #include <kj/array.h>

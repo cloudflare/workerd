@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <cloudflare/cloudflare.capnp.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
@@ -13,6 +12,8 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
+
+#include <cloudflare/cloudflare.capnp.h>
 
 namespace workerd::api {
 

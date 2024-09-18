@@ -6,13 +6,14 @@
 
 #include "impl.h"
 
-#include <openssl/digest.h>
-#include <openssl/mem.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
+
+#include <openssl/digest.h>
+#include <openssl/mem.h>
 
 #include <algorithm>
 #include <array>

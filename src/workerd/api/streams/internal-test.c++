@@ -6,10 +6,11 @@
 #include "readable.h"
 #include "writable.h"
 
-#include <openssl/rand.h>
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/tests/test-fixture.h>
+
+#include <openssl/rand.h>
 
 namespace workerd::api {
 namespace {

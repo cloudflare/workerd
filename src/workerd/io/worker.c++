@@ -4,8 +4,6 @@
 
 #include "actor-cache.h"
 
-#include <v8-inspector.h>
-#include <v8-profiler.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/sockets.h>
@@ -26,6 +24,9 @@
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/xthreadnotifier.h>
+
+#include <v8-inspector.h>
+#include <v8-profiler.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>

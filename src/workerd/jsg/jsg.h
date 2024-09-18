@@ -11,10 +11,11 @@
 #include "util.h"
 #include "wrappable.h"
 
-#include <v8-profiler.h>
-#include <v8.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/memory.h>
+
+#include <v8-profiler.h>
+#include <v8.h>
 
 #include <kj/debug.h>
 #include <kj/exception.h>

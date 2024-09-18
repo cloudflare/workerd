@@ -5,9 +5,10 @@
 
 #pragma once
 
-#include <webgpu/webgpu_cpp.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/io-timers.h>
+
+#include <webgpu/webgpu_cpp.h>
 
 #include <kj/timer.h>
 

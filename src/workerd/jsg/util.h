@@ -7,8 +7,9 @@
 //
 // This file contains misc utility functions used elsewhere.
 
-#include <v8.h>
 #include <workerd/util/sentry.h>
+
+#include <v8.h>
 
 #include <kj/debug.h>
 #include <kj/exception.h>

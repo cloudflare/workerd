@@ -2,10 +2,11 @@
 
 #include "impl.h"
 
-#include <openssl/pem.h>
-#include <openssl/x509.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 
 namespace workerd::api {
 namespace {

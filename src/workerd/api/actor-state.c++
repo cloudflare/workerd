@@ -8,7 +8,6 @@
 #include "sql.h"
 #include "util.h"
 
-#include <v8.h>
 #include <workerd/api/web-socket.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
@@ -19,6 +18,8 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
+
+#include <v8.h>
 
 namespace workerd::api {
 

@@ -1,8 +1,9 @@
 #include "dh.h"
 
+#include <workerd/io/io-context.h>
+
 #include <openssl/bn.h>
 #include <openssl/dh.h>
-#include <workerd/io/io-context.h>
 
 #include <kj/one-of.h>
 #include <kj/string.h>

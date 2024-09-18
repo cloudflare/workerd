@@ -7,11 +7,12 @@
 #include "blob.h"
 #include "util.h"
 
+#include <workerd/io/features.h>
+
 #include <unicode/uchar.h>
 #include <unicode/uidna.h>
 #include <unicode/ustring.h>
 #include <unicode/utf8.h>
-#include <workerd/io/features.h>
 
 #include <kj/array.h>
 

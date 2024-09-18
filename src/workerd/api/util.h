@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include <v8.h>
 #include <workerd/jsg/jsg.h>
+
+#include <v8.h>
 
 #include <kj/async-io.h>
 #include <kj/compat/url.h>

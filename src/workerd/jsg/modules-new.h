@@ -4,12 +4,13 @@
 
 #pragma once
 
-#include <v8.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+
+#include <v8.h>
 
 #include <kj/common.h>
 #include <kj/function.h>
