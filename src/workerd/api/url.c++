@@ -20,26 +20,46 @@ namespace {
 
 // Helper functions for the origin, pathname, and search getters and setters.
 
-bool isSpecialScheme(kj::StringPtr scheme) {
-  // TODO(cleanup): Move this to kj::Url.
-  static const std::set<kj::StringPtr> specialSchemes{
-    "ftp", "file", "gopher", "http", "https", "ws", "wss"};
-  return specialSchemes.count(scheme);
+// The folowing two lists needs to be kept in sync since the length and the order
+// of them are needed to properly calculate the hash/index.
+constexpr kj::StringPtr is_special_list[] = {
+  "http"_kj, " "_kj, "https"_kj, "ws"_kj, "ftp"_kj, "wss"_kj, "file"_kj, " "_kj};
+constexpr kj::StringPtr special_ports[] = {
+  "80"_kj, ""_kj, "443"_kj, "80"_kj, "21"_kj, "443"_kj, ""_kj, ""_kj};
+
+// Taken from Ada URL library.
+// Ref: https://github.com/ada-url/ada/blob/b431670699cf4f3ebb2e2c394c23a89850bb6f3f/include/ada/scheme-inl.h#L49
+bool isSpecialScheme(kj::StringPtr scheme) noexcept {
+  if (scheme.size() == 0) {
+    return false;
+  }
+  // Depending on the first character and the size of the input, this line calculates
+  // the index from the list above.
+  //
+  // Generate a simple hash value that will always be between 0 and 7 (inclusive),
+  // regardless of the input. This is because the bitwise AND with 7 ensures that
+  // only the last 3 bits of the result are kept.
+  int hash_value = (2 * scheme.size() + static_cast<unsigned>(scheme[0])) & 7;
+  const auto target = is_special_list[hash_value];
+  return (target[0] == scheme[0]) && (target.slice(1) == scheme.slice(1));
 }
 
-kj::Maybe<kj::StringPtr> defaultPortForScheme(kj::StringPtr scheme) {
-  static const std::map<kj::StringPtr, kj::StringPtr> defaultPorts{
-    {"ftp", "21"},
-    {"gopher", "70"},
-    {"http", "80"},
-    {"https", "443"},
-    {"ws", "80"},
-    {"wss", "443"},
-  };
-  auto port = defaultPorts.find(scheme);
-  if (port != defaultPorts.end()) {
-    return port->second;
+// Taken from Ada URL library.
+// Ref: https://github.com/ada-url/ada/blob/b431670699cf4f3ebb2e2c394c23a89850bb6f3f/include/ada/scheme-inl.h#L57
+kj::Maybe<kj::StringPtr> defaultPortForScheme(kj::StringPtr scheme) noexcept {
+  if (scheme.size() == 0) {
+    return kj::none;
   }
+  int hash_value = (2 * scheme.size() + static_cast<unsigned>(scheme[0])) & 7;
+  const auto target = is_special_list[hash_value];
+  if ((target[0] == scheme[0]) && (target.slice(1) == scheme.slice(1))) {
+    auto port = special_ports[hash_value];
+    if (port.size() == 0) {
+      return kj::none;
+    }
+    return port;
+  }
+
   return kj::none;
 }
 
