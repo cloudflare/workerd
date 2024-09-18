@@ -529,8 +529,15 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       });
     }
     KJ_CASE_ONEOF(armResult, ActorCacheInterface::CancelAlarmHandler) {
-      // TODO(now): wait for promise before cancelling.
-      return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::CANCELED};
+      // TODO(cleanup): might be possible to use kj::READY_NOW promises instead of kj::none to
+      // simplify?  Not sure if the sync/async difference is important to correctness.
+      KJ_IF_SOME(p, armResult.waitBeforeCancel) {
+        return p.then([]() {
+          return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::CANCELED};
+        });
+      } else {
+        return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::CANCELED};
+      }
     }
   }
   KJ_UNREACHABLE;

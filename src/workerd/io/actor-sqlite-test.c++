@@ -393,7 +393,24 @@ KJ_TEST("tells alarm handler to cancel when committed alarm is empty") {
       kj::none);
 }
 
-KJ_TEST("tells alarm handler to cancel when committed alarm does not match handler alarm") {
+KJ_TEST("tells alarm handler to cancel when committed alarm is later than handler alarm") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 2ms.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  // Request handler run at 1ms.  Expect cancellation without rescheduling.
+  auto armResult = test.actor.armAlarmHandler(oneMs, false);
+  KJ_ASSERT(armResult.is<ActorSqlite::CancelAlarmHandler>());
+  auto cancelResult = kj::mv(armResult.get<ActorSqlite::CancelAlarmHandler>());
+  KJ_ASSERT(cancelResult.waitBeforeCancel == kj::none);
+}
+
+KJ_TEST("tells alarm handler to reschedule when committed alarm is earlier than handler alarm") {
   ActorSqliteTest test;
 
   // Initialize alarm state to 1ms.
@@ -403,13 +420,20 @@ KJ_TEST("tells alarm handler to cancel when committed alarm does not match handl
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
+  // Expect that armAlarmHandler() tells caller to cancel after rescheduling completes.
   auto armResult = test.actor.armAlarmHandler(twoMs, false);
-  KJ_ASSERT(
-      KJ_ASSERT_NONNULL(armResult.tryGet<ActorSqlite::CancelAlarmHandler>()).waitBeforeCancel ==
-      kj::none);
+  KJ_ASSERT(armResult.is<ActorSqlite::CancelAlarmHandler>());
+  auto cancelResult = kj::mv(armResult.get<ActorSqlite::CancelAlarmHandler>());
+
+  // Expect rescheduling was requested and that returned promise resolves after fulfillment.
+  auto waitBeforeCancel = kj::mv(KJ_ASSERT_NONNULL(cancelResult.waitBeforeCancel));
+  auto rescheduleFulfiller = kj::mv(test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]);
+  KJ_ASSERT(!waitBeforeCancel.poll(test.ws));
+  rescheduleFulfiller->fulfill();
+  KJ_ASSERT(waitBeforeCancel.poll(test.ws));
 }
 
-KJ_TEST("dirty alarm during handler does not cancel alarm") {
+KJ_TEST("does not cancel handler when local db alarm state is later than scheduled alarm") {
   ActorSqliteTest test;
 
   // Initialize alarm state to 1ms.
@@ -426,6 +450,25 @@ KJ_TEST("dirty alarm during handler does not cancel alarm") {
   }
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+}
+
+KJ_TEST("does not cancel handler when local db alarm state is earlier than scheduled alarm") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 2ms.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  test.setAlarm(oneMs);
+  {
+    auto armResult = test.actor.armAlarmHandler(twoMs, false);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+  }
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 }
 
 KJ_TEST("getAlarm() returns null during handler") {
