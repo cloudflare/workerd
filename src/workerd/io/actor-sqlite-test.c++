@@ -714,6 +714,41 @@ KJ_TEST("rejected alarm scheduling request breaks gate") {
   KJ_EXPECT_THROW_MESSAGE("a_rejected_scheduleRun", promise.wait(test.ws));
 }
 
+KJ_TEST("an exception thrown during merged commits does not hang") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  auto promise = test.gate.onBroken();
+
+  // Initialize alarm state to 5ms.
+  test.setAlarm(fiveMs);
+  test.pollAndExpectCalls({"scheduleRun(5ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == fiveMs);
+
+  // Update alarm to be earlier (4ms).  We expect the alarm scheduling to start.
+  test.setAlarm(fourMs);
+  auto fulfiller4Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(4ms)"})[0]);
+  auto gateWait4ms = test.gate.wait();
+
+  // While 4ms scheduling request is in-flight, update alarm to be earlier (3ms).  We expect
+  // the two commit requests to merge and be blocked on the alarm scheduling request.
+  test.setAlarm(threeMs);
+  test.pollAndExpectCalls({});
+  auto gateWait3ms = test.gate.wait();
+
+  // Reject the 4ms request.  We expect both gate waiting promises to unblock with exceptions.
+  KJ_ASSERT(!gateWait4ms.poll(test.ws));
+  KJ_ASSERT(!gateWait3ms.poll(test.ws));
+  fulfiller4Ms->reject(KJ_EXCEPTION(FAILED, "a_rejected_scheduleRun"));
+  KJ_ASSERT(gateWait4ms.poll(test.ws));
+  KJ_ASSERT(gateWait3ms.poll(test.ws));
+
+  KJ_EXPECT_THROW_MESSAGE("a_rejected_scheduleRun", gateWait4ms.wait(test.ws));
+  KJ_EXPECT_THROW_MESSAGE("a_rejected_scheduleRun", gateWait3ms.wait(test.ws));
+  KJ_EXPECT_THROW_MESSAGE("a_rejected_scheduleRun", promise.wait(test.ws));
+}
+
 KJ_TEST("getAlarm/setAlarm check for brokenness") {
   ActorSqliteTest test({.monitorOutputGate = false});
 
