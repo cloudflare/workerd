@@ -372,6 +372,13 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
     auto fetchResponseInfoBuilder = builder.initResponse();
     fetchResponseInfo.copyTo(fetchResponseInfoBuilder);
   }
+
+  {
+    auto list = builder.initDiagnosticChannelEvents(diagnosticChannelEvents.size());
+    for (auto i: kj::indices(diagnosticChannelEvents)) {
+      diagnosticChannelEvents[i].copyTo(list[i]);
+    }
+  }
 }
 
 void Trace::Log::copyTo(rpc::Trace::Log::Builder builder) {
