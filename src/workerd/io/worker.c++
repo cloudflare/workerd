@@ -1211,10 +1211,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
           // immediately in the wrong IoContext.
           auto& ref = jsg::unwrapOpaqueRef<kj::Own<IoCrossContextExecutor>>(isolate, tag);
           ref->execute(js,
-              [reactions = v8::Global<v8::Data>(isolate, reactions),
-                  argument = jsg::JsRef(js, jsg::JsValue(argument)),
+              [reactions = jsg::Data(isolate, reactions), argument = jsg::V8Ref(isolate, argument),
                   callback = kj::mv(callback)](jsg::Lock& js) mutable {
-            callback(js.v8Isolate, reactions.Get(js.v8Isolate), argument.getHandle(js));
+            callback(js.v8Isolate, reactions.getHandle(js), argument.getHandle(js));
           });
           return v8::JustVoid();
         } catch (jsg::JsExceptionThrown&) {
