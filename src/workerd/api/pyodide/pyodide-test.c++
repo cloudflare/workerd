@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "pyodide.h"
+
 #include <kj/test.h>
 
 namespace workerd::api {
