@@ -6,13 +6,13 @@ import {
   getSitePackagesPath,
 } from 'pyodide-internal:setupPackages';
 import { default as TarReader } from 'pyodide-internal:packages_tar_reader';
-import processScriptImports from 'pyodide-internal:process_script_imports.py';
 import {
   SHOULD_SNAPSHOT_TO_DISK,
   IS_CREATING_BASELINE_SNAPSHOT,
   MEMORY_SNAPSHOT_READER,
 } from 'pyodide-internal:metadata';
 import { reportError, simpleRunPython } from 'pyodide-internal:util';
+import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 let LOADED_BASELINE_SNAPSHOT: number;
 
@@ -261,24 +261,28 @@ function memorySnapshotDoImports(Module: Module): Array<string> {
     return [];
   }
 
-  // Process the Python modules in the user worker looking for imports of packages which are not
-  // vendored. Vendored packages are skipped because they may contain sensitive information which
-  // we do not want to include in the package snapshot.
-  //
-  // See process_script_imports.py.
-  const processScriptImportsString = new TextDecoder().decode(
-    new Uint8Array(processScriptImports)
+  // The `importedModules` list will contain all modules that have been imported, including local
+  // modules, the usual `js` and other stdlib modules. We want to filter out local imports, so we
+  // grab them and put them into a set for fast filtering.
+  const localModulePaths: Set<string> = new Set<string>(
+    MetadataReader.getNames()
   );
-  simpleRunPython(Module, processScriptImportsString);
+  const importedModules: Array<string> = ArtifactBundler.constructor
+    // @ts-ignore parsePythonScriptImports is a static method.
+    .parsePythonScriptImports(MetadataReader.getWorkerFiles('py'))
+    .filter((module: string) => {
+      const moduleFilename = module.replace('.', '/') + '.py';
+      return !localModulePaths.has(moduleFilename) && module != 'js';
+    });
 
-  const importedModules: Array<string> = JSON.parse(
-    simpleRunPython(
-      Module,
-      'import sys, json; print(json.dumps(CF_LOADED_MODULES), file=sys.stderr)'
-    )
-  );
+  const deduplicatedModules = [...new Set(importedModules)];
 
-  return importedModules;
+  // Import the modules list so they are included in the snapshot.
+  if (deduplicatedModules.length > 0) {
+    simpleRunPython(Module, 'import ' + deduplicatedModules.join(','));
+  }
+
+  return deduplicatedModules;
 }
 
 function checkLoadedSoFiles(dsoJSON: DylinkInfo): void {

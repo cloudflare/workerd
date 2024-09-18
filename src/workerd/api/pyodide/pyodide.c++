@@ -1,3 +1,6 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 #include "pyodide.h"
 
 #include <workerd/util/string-buffer.h>
@@ -64,6 +67,17 @@ kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(jsg::Lock& 
   return builder.finish();
 }
 
+kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getWorkerFiles(
+    jsg::Lock& js, kj::String ext) {
+  auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(this->names.size());
+  for (auto i: kj::zeroTo(builder.capacity())) {
+    if (this->names[i].endsWith(ext)) {
+      builder.add(js, js.str(this->contents[i]));
+    }
+  }
+  return builder.finish();
+}
+
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg::Lock& js) {
   auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(this->requirements.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
@@ -100,6 +114,165 @@ int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
     return 0;
   }
   return readToTarget(KJ_REQUIRE_NONNULL(existingSnapshot), offset, buf);
+}
+
+kj::Array<kj::String> ArtifactBundler::parsePythonScriptImports(kj::Array<kj::String> files) {
+  auto result = kj::Vector<kj::String>();
+
+  for (auto& file: files) {
+    // Returns the number of characters skipped. When `oneOf` is not found, skips to the end of
+    // the string.
+    auto skipUntil = [](kj::StringPtr str, std::initializer_list<char> oneOf, int start) -> int {
+      int result = 0;
+      while (start + result < str.size()) {
+        char c = str[start + result];
+        for (char expected: oneOf) {
+          if (c == expected) {
+            return result;
+          }
+        }
+
+        result++;
+      }
+
+      return result;
+    };
+
+    // Skips while current character is in `oneOf`. Returns the number of characters skipped.
+    auto skipWhile = [](kj::StringPtr str, std::initializer_list<char> oneOf, int start) -> int {
+      int result = 0;
+      while (start + result < str.size()) {
+        char c = str[start + result];
+        bool found = false;
+        for (char expected: oneOf) {
+          if (c == expected) {
+            result++;
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          break;
+        }
+      }
+
+      return result;
+    };
+
+    // Skips one of the characters (specified in `oneOf`) at the current position. Otherwise
+    // throws. Returns the number of characters skipped.
+    auto skipChar = [](kj::StringPtr str, std::initializer_list<char> oneOf, int start) -> int {
+      for (char expected: oneOf) {
+        if (str[start] == expected) {
+          return 1;
+        }
+      }
+
+      KJ_FAIL_REQUIRE("Expected ", oneOf, "but received", str[start]);
+    };
+
+    auto parseKeyword = [](kj::StringPtr str, kj::StringPtr ident, int start) -> bool {
+      int i = 0;
+      for (; i < ident.size() && start + i < str.size(); i++) {
+        if (str[start + i] != ident[i]) {
+          return false;
+        }
+      }
+
+      return i == ident.size();
+    };
+
+    // Returns the size of the import identifier or 0 if no identifier exists at `start`.
+    auto parseIdent = [](kj::StringPtr str, int start) -> int {
+      // https://docs.python.org/3/reference/lexical_analysis.html#identifiers
+      //
+      // We also accept `.` because import idents can contain it.
+      // TODO: We don't currently support unicode, but if we see packages that utilise it we will
+      // implement that support.
+      if (std::isdigit(str[start])) {
+        return 0;
+      }
+      int i = 0;
+      for (; start + i < str.size(); i++) {
+        char c = str[start + i];
+        bool validIdentChar = std::isalpha(c) || std::isdigit(c) || c == '_' || c == '.';
+        if (!validIdentChar) {
+          return i;
+        }
+      }
+
+      return i;
+    };
+
+    int i = 0;
+    while (i < file.size()) {
+      auto keywordToParse = file[i] == 'i' ? "import"_kj : "from"_kj;
+      switch (file[i]) {
+        case 'i':
+        case 'f':
+          if (!parseKeyword(file, keywordToParse, i)) {
+            i += skipUntil(file, {'\n', '\r'}, i);
+            continue;
+          }
+          i += keywordToParse.size();  // skip "import" or "from"
+
+          while (i < file.size()) {
+            // Python expects a `\` to be paired with a newline, but we don't have to be as strict
+            // here because we rely on the fact that the script has gone through validation already.
+            i += skipWhile(
+                file, {'\r', '\n', ' ', '\t', '\\'}, i);  // skip whitespace and backslash.
+
+            if (file[i] == '.') {
+              // ignore relative imports
+              break;
+            }
+
+            int identLen = parseIdent(file, i);
+            KJ_REQUIRE(identLen > 0);
+
+            kj::String ident = kj::heapString(file.slice(i, i + identLen));
+            if (ident[identLen - 1] != '.') {  // trailing period means the import is invalid
+              result.add(kj::mv(ident));
+            }
+
+            i += identLen;
+
+            // If "import" statement then look for comma.
+            if (keywordToParse == "import") {
+              i += skipWhile(
+                  file, {'\r', '\n', ' ', '\t', '\\'}, i);  // skip whitespace and backslash.
+              // Check if next char is a comma.
+              if (file[i] == ',') {
+                i += 1;  // Skip comma.
+                // Allow while loop to continue
+              } else {
+                // No more idents, so break out of loop.
+                break;
+              }
+            } else {
+              // The "from" statement doesn't support commas.
+              break;
+            }
+          }
+          break;
+        default:
+          // Skip to the next line.
+          i += skipUntil(file, {'\n', '\r'}, i);
+          if (file[i] != '\0') {
+            i += skipChar(file, {'\n', '\r'}, i);  // skip newline.
+          }
+      }
+    }
+  }
+
+  // XXX: jsg doesn't support kj::Vector return types, so this seems to be the only way to do this.
+  auto builder = kj::heapArrayBuilder<kj::String>(result.size());
+  for (auto i = 0; i < result.size(); i++) {
+    builder.add(kj::mv(result[i]));
+  }
+
+  return builder.finish();
 }
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
