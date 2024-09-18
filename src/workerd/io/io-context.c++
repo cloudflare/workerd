@@ -127,7 +127,8 @@ IoContext::IoContext(ThreadContext& thread,
       deleteQueue(kj::atomicRefcounted<DeleteQueue>()),
       cachePutSerializer(kj::READY_NOW),
       waitUntilTasks(*this),
-      timeoutManager(kj::heap<TimeoutManagerImpl>()) {
+      timeoutManager(kj::heap<TimeoutManagerImpl>()),
+      deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
   auto localAbortPromise = kj::mv(paf.promise);
@@ -1304,9 +1305,35 @@ void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeTyp
 
 jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
   if (promiseContextTag == kj::none) {
-    promiseContextTag = jsg::JsRef(js, js.obj());
+    auto deferral = kj::heap<IoCrossContextExecutor>(kj::atomicAddRef(*deleteQueue));
+    promiseContextTag = jsg::JsRef(js, js.opaque(kj::mv(deferral)));
   }
   return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);
+}
+
+kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
+  // The promise that is returned is held by the IoContext itself, so when the
+  // IoContext is destroyed, the promise will be canceled and the loop will
+  // end. On each iteration of the loop we want to reset the cross thread
+  // signal in the delete queue, then wait on the promise. Once the promise
+  // is fulfilled, we will run an empty task to prompt the IoContext to drain
+  // the DeleteQueue.
+  try {
+    for (;;) {
+      co_await context->deleteQueue->resetCrossThreadSignal();
+      co_await context->run([](auto& lock) {
+        auto& context = IoContext::current();
+        auto l = context.deleteQueue->crossThreadDeleteQueue.lockExclusive();
+        auto& state = KJ_ASSERT_NONNULL(*l);
+        for (auto& action: state.actions) {
+          action(lock);
+        }
+        state.actions.clear();
+      });
+    }
+  } catch (...) {
+    context->abort(kj::getCaughtExceptionAsKj());
+  }
 }
 
 // ======================================================================================

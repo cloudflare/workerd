@@ -453,6 +453,14 @@ inline JsSet Lock::set(const Args&... args) {
   return JsSet(set);
 }
 
+template <typename T>
+inline JsObject Lock::opaque(T&& inner) {
+  auto wrapped = wrapOpaque(v8Context(), kj::mv(inner));
+  KJ_ASSERT(!wrapped.IsEmpty());
+  KJ_ASSERT(wrapped->IsObject());
+  return JsObject(wrapped.template As<v8::Object>());
+}
+
 // A persistent handle for a Js* type suitable for storage and gc visitable.
 //
 // For example,

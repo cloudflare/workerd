@@ -601,4 +601,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables the withSessions(commitTokenOrConstraint) method that allows users
   # to use read-replication for D1.
   # Experimental since this is not yet ready and is only meant for internal testing during development.
+
+  handleCrossRequestPromiseResolution @62 :Bool
+      $compatEnableFlag("handle_cross_request_promise_resolution")
+      $compatDisableFlag("no_handle_cross_request_promise_resolution")
+      $compatEnableDate("2024-10-14");
+  # Historically, it has been possible to resolve a promise from an incorrect request
+  # IoContext. This leads to issues with promise continuations being scheduled to run
+  # in the wrong IoContext leading to errors and difficult to diagnose bugs. With this
+  # compatibility flag we arrange to have such promise continuations scheduled to run
+  # in the correct IoContext if it is still alive, or dropped on the floor with a warning
+  # if the correct IoContext is not still alive.
 }
