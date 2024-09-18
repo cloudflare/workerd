@@ -299,6 +299,49 @@ KJ_TEST("alarm scheduling does not start synchronously before nested explicit lo
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
+KJ_TEST("synchronous alarm scheduling failure causes local db commit to fail synchronously") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+  auto promise = test.gate.onBroken();
+
+  auto getLocalAlarm = [&]() -> kj::Maybe<kj::Date> {
+    auto query = test.db.run("SELECT value FROM _cf_METADATA WHERE key = 1");
+    if (query.isDone() || query.isNull(0)) {
+      return kj::none;
+    } else {
+      return kj::UNIX_EPOCH + query.getInt64(0) * kj::NANOSECONDS;
+    }
+  };
+
+  // Initialize alarm state to 2ms.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  // Override scheduleRun handler with one that throws synchronously.
+  bool startedScheduleRun = false;
+  test.scheduleRunHandler = [&](kj::Maybe<kj::Date>) -> kj::Promise<void> {
+    startedScheduleRun = true;
+    // Must throw synchronously; returning an exception is insufficient.
+    kj::throwFatalException(KJ_EXCEPTION(FAILED, "a_sync_fail"));
+  };
+
+  KJ_ASSERT(!promise.poll(test.ws));
+  test.setAlarm(oneMs);
+
+  // Expect that polling will attempt to commit the implicit transaction, which should
+  // synchronously fail when attempting to call scheduleRun() before the db commit, and roll back the
+  // local db state to the 2ms alarm.
+  KJ_ASSERT(!startedScheduleRun);
+  KJ_ASSERT(KJ_REQUIRE_NONNULL(getLocalAlarm()) == oneMs);
+  test.ws.poll();
+  KJ_ASSERT(startedScheduleRun);
+  KJ_ASSERT(KJ_REQUIRE_NONNULL(getLocalAlarm()) == twoMs);
+
+  KJ_ASSERT(promise.poll(test.ws));
+  KJ_EXPECT_THROW_MESSAGE("a_sync_fail", promise.wait(test.ws));
+}
+
 KJ_TEST("can clear alarm") {
   ActorSqliteTest test;
 

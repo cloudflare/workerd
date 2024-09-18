@@ -207,8 +207,11 @@ void ActorSqlite::onWrite() {
 }
 
 kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime) {
-  co_await hooks.scheduleRun(requestedTime);
-  lastConfirmedScheduledAlarm = requestedTime;
+  // Not using coroutines here, because it's important for correctness in workerd that a
+  // synchronously thrown exception in scheduleRun() can escape synchronously to the caller.
+  return hooks.scheduleRun(requestedTime).then([this, requestedTime]() {
+    lastConfirmedScheduledAlarm = requestedTime;
+  });
 }
 
 ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
