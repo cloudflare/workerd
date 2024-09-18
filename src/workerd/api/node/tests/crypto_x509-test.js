@@ -29,6 +29,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 
 import { Buffer } from 'node:buffer';
+import assert from 'node:assert';
 
 import { X509Certificate, PublicKeyObject } from 'node:crypto';
 
@@ -348,3 +349,11 @@ export const test_ok = {
 //     throws(() => new X509Certificate(badCert));
 //   }
 // };
+
+// Ref: https://github.com/unjs/unenv/pull/310
+export const shouldImportCertificate = {
+  test() {
+    // This is allowed by Node.js as well.
+    assert(process.getBuiltinModule('crypto').Certificate);
+  },
+};
