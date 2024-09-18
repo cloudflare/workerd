@@ -239,6 +239,8 @@ export default {
   // WebCrypto
   subtle,
   webcrypto,
+  // Spkac
+  Certificate,
   // X509
   X509Certificate,
 };
