@@ -125,7 +125,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   url.scheme = kj::str("https");
   url.host = kj::str("fake-host");
   url.path.add(kj::mv(name));
-  url.query.add(kj::Url::QueryParam{kj::str("urlencoded"), kj::str("true")});
+  url.query.add(kj::Url::QueryParam {kj::str("urlencoded"), kj::str("true")});
 
   kj::Maybe<kj::String> type;
   KJ_IF_SOME(oneOfOptions, options) {
@@ -138,7 +138,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
           type = kj::mv(t);
         }
         KJ_IF_SOME(cacheTtl, options.cacheTtl) {
-          url.query.add(kj::Url::QueryParam{kj::str("cache_ttl"), kj::str(cacheTtl)});
+          url.query.add(kj::Url::QueryParam {kj::str("cache_ttl"), kj::str(cacheTtl)});
         }
       }
     }
@@ -160,7 +160,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     });
 
     if (response.statusCode == 404 || response.statusCode == 410) {
-      return js.resolvedPromise(KvNamespace::GetWithMetadataResult{
+      return js.resolvedPromise(KvNamespace::GetWithMetadataResult {
         .value = kj::none,
         .metadata = kj::none,
         .cacheStatus = kj::mv(cacheStatus),
@@ -221,7 +221,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
       KJ_IF_SOME(metaStr, maybeMeta) {
         meta = jsg::JsRef(js, jsg::JsValue::fromJson(js, metaStr));
       }
-      return KvNamespace::GetWithMetadataResult{
+      return KvNamespace::GetWithMetadataResult {
         kj::mv(result),
         kj::mv(meta),
         kj::mv(cacheStatus),
@@ -241,17 +241,17 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(limit, o.limit) {
         if (limit > 0) {
-          url.query.add(kj::Url::QueryParam{kj::str("key_count_limit"), kj::str(limit)});
+          url.query.add(kj::Url::QueryParam {kj::str("key_count_limit"), kj::str(limit)});
         }
       }
       KJ_IF_SOME(maybePrefix, o.prefix) {
         KJ_IF_SOME(prefix, maybePrefix) {
-          url.query.add(kj::Url::QueryParam{kj::str("prefix"), kj::str(prefix)});
+          url.query.add(kj::Url::QueryParam {kj::str("prefix"), kj::str(prefix)});
         }
       }
       KJ_IF_SOME(maybeCursor, o.cursor) {
         KJ_IF_SOME(cursor, maybeCursor) {
-          url.query.add(kj::Url::QueryParam{kj::str("cursor"), kj::str(cursor)});
+          url.query.add(kj::Url::QueryParam {kj::str("cursor"), kj::str(cursor)});
         }
       }
     }
@@ -307,7 +307,7 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     url.scheme = kj::str("https");
     url.host = kj::str("fake-host");
     url.path.add(kj::mv(name));
-    url.query.add(kj::Url::QueryParam{kj::str("urlencoded"), kj::str("true")});
+    url.query.add(kj::Url::QueryParam {kj::str("urlencoded"), kj::str("true")});
 
     kj::HttpHeaders headers(context.getHeaderTable());
 
@@ -315,10 +315,10 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     // the URL's query parameters.
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(expiration, o.expiration) {
-        url.query.add(kj::Url::QueryParam{kj::str("expiration"), kj::str(expiration)});
+        url.query.add(kj::Url::QueryParam {kj::str("expiration"), kj::str(expiration)});
       }
       KJ_IF_SOME(expirationTtl, o.expirationTtl) {
-        url.query.add(kj::Url::QueryParam{kj::str("expiration_ttl"), kj::str(expirationTtl)});
+        url.query.add(kj::Url::QueryParam {kj::str("expiration_ttl"), kj::str(expirationTtl)});
       }
       KJ_IF_SOME(maybeMetadata, o.metadata) {
         KJ_IF_SOME(metadata, maybeMetadata) {

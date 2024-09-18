@@ -126,13 +126,13 @@ kj::Maybe<SqlStorage::Cursor::RowDict> SqlStorage::Cursor::rowIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   auto names = obj->cachedColumnNames.get();
   return iteratorImpl(js, obj, [&](State& state, uint i, Value&& value) {
-    return RowDict::Field{
+    return RowDict::Field {
       // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
       // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
       // which would be relatively slower.
       .name = names[i].getHandle(js),
       .value = kj::mv(value)};
-  }).map([&](kj::Array<RowDict::Field>&& fields) { return RowDict{.fields = kj::mv(fields)}; });
+  }).map([&](kj::Array<RowDict::Field>&& fields) { return RowDict {.fields = kj::mv(fields)}; });
 }
 
 jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {

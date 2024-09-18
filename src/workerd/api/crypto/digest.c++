@@ -233,7 +233,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateHmac(jsg:
   IoContext::current().getEntropySource().generate(keyDataArray);
   zeroOutTrailingKeyBits(keyDataArray, length);
 
-  auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm{
+  auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm {
     normalizedName, {normalizedHashName}, static_cast<uint16_t>(length)};
 
   return jsg::alloc<CryptoKey>(
@@ -306,7 +306,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(jsg::Lock& js,
   zeroOutTrailingKeyBits(keyDataArray, length);
 
   auto normalizedHashName = lookupDigestAlgorithm(hash).first;
-  auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm{
+  auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm {
     normalizedName, {normalizedHashName}, static_cast<uint16_t>(length)};
   return kj::heap<HmacKey>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages);
 }

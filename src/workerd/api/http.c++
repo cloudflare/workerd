@@ -146,7 +146,7 @@ Headers::Headers(jsg::Dict<jsg::ByteString, jsg::ByteString> dict): guard(Guard:
 
 Headers::Headers(const Headers& other): guard(Guard::NONE) {
   for (auto& header: other.headers) {
-    Header copy{
+    Header copy {
       jsg::ByteString(kj::str(header.second.key)),
       jsg::ByteString(kj::str(header.second.name)),
       KJ_MAP(value, header.second.values) { return jsg::ByteString(kj::str(value)); },
@@ -197,13 +197,13 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) 
         // For set-cookie entries, we iterate each individually without
         // combining them.
         for (auto& value: entry.second.values) {
-          copy.add(Headers::DisplayedHeader{
+          copy.add(Headers::DisplayedHeader {
             .key = jsg::ByteString(kj::str(entry.first)),
             .value = jsg::ByteString(kj::str(value)),
           });
         }
       } else {
-        copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(kj::str(entry.first)),
+        copy.add(Headers::DisplayedHeader {.key = jsg::ByteString(kj::str(entry.first)),
           .value = jsg::ByteString(kj::strArray(entry.second.values, ", "))});
       }
     }
@@ -212,7 +212,7 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) 
     // The old behavior before the standard getSetCookie() API was introduced...
     auto headersCopy = KJ_MAP(mapEntry, headers) {
       const auto& header = mapEntry.second;
-      return DisplayedHeader{
+      return DisplayedHeader {
         jsg::ByteString(kj::str(header.key)), jsg::ByteString(kj::strArray(header.values, ", "))};
     };
     return headersCopy;
@@ -254,9 +254,9 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
           JSG_REQUIRE(entry.size() == 2, TypeError,
               "To initialize a Headers object from a sequence, each inner sequence "
               "must have exactly two elements.");
-          return StringDict::Field{kj::mv(entry[0]), kj::mv(entry[1])};
+          return StringDict::Field {kj::mv(entry[0]), kj::mv(entry[1])};
         };
-        return jsg::alloc<Headers>(StringDict{kj::mv(dict)});
+        return jsg::alloc<Headers>(StringDict {kj::mv(dict)});
       }
     }
   }
@@ -363,7 +363,7 @@ void Headers::delete_(jsg::ByteString name) {
 //   invalidation, but the elements would be cheaper to copy.
 
 jsg::Ref<Headers::EntryIterator> Headers::entries(jsg::Lock& js) {
-  return jsg::alloc<EntryIterator>(IteratorState<DisplayedHeader>{getDisplayedHeaders(js)});
+  return jsg::alloc<EntryIterator>(IteratorState<DisplayedHeader> {getDisplayedHeaders(js)});
 }
 jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
   if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
@@ -380,11 +380,11 @@ jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
         keysCopy.add(jsg::ByteString(kj::str(entry.first)));
       }
     }
-    return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString>{keysCopy.releaseAsArray()});
+    return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString> {keysCopy.releaseAsArray()});
   } else {
     auto keysCopy =
         KJ_MAP(mapEntry, headers) { return jsg::ByteString(kj::str(mapEntry.second.key)); };
-    return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString>{kj::mv(keysCopy)});
+    return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString> {kj::mv(keysCopy)});
   }
 }
 jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
@@ -401,12 +401,12 @@ jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
         values.add(jsg::ByteString(kj::strArray(entry.second.values, ", ")));
       }
     }
-    return jsg::alloc<ValueIterator>(IteratorState<jsg::ByteString>{values.releaseAsArray()});
+    return jsg::alloc<ValueIterator>(IteratorState<jsg::ByteString> {values.releaseAsArray()});
   } else {
     auto valuesCopy = KJ_MAP(mapEntry, headers) {
       return jsg::ByteString(kj::strArray(mapEntry.second.values, ", "));
     };
-    return jsg::alloc<ValueIterator>(IteratorState<jsg::ByteString>{kj::mv(valuesCopy)});
+    return jsg::alloc<ValueIterator>(IteratorState<jsg::ByteString> {kj::mv(valuesCopy)});
   }
 }
 
@@ -650,7 +650,7 @@ Body::Buffer Body::Buffer::clone(jsg::Lock& js) {
 
 Body::ExtractedBody::ExtractedBody(
     jsg::Ref<ReadableStream> stream, kj::Maybe<Buffer> buffer, kj::Maybe<kj::String> contentType)
-    : impl{kj::mv(stream), kj::mv(buffer)},
+    : impl {kj::mv(stream), kj::mv(buffer)},
       contentType(kj::mv(contentType)) {
   // This check is in the constructor rather than `extractBody()`, because we often construct
   // ExtractedBodys from ReadableStreams directly.
@@ -884,7 +884,8 @@ kj::Maybe<Body::ExtractedBody> Body::clone(jsg::Lock& js) {
 
     i.stream = kj::mv(branches[0]);
 
-    return ExtractedBody{kj::mv(branches[1]), i.buffer.map([&](Buffer& b) { return b.clone(js); })};
+    return ExtractedBody {
+      kj::mv(branches[1]), i.buffer.map([&](Buffer& b) { return b.clone(js); })};
   }
 
   return kj::none;
@@ -1203,7 +1204,7 @@ void Request::serialize(jsg::Lock& js,
   // gives us extensibility: we can add new fields without having to bump the serialization tag.
   serializer.write(js,
       jsg::JsValue(initDictHandler.wrap(js,
-          RequestInitializerDict{
+          RequestInitializerDict {
             // GET is the default, so only serialize the method if it's something else.
             .method = method == kj::HttpMethod::GET ? jsg::Optional<kj::String>() : kj::str(method),
 
@@ -1425,7 +1426,7 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
         jsg::Url::tryParse(url.asPtr()), TypeError, "Unable to parse URL: ", url);
     parsedUrl = kj::str(parsed.getHref());
   } else {
-    auto urlOptions = kj::Url::Options{.percentDecode = false, .allowEmpty = true};
+    auto urlOptions = kj::Url::Options {.percentDecode = false, .allowEmpty = true};
     auto maybeParsedUrl = kj::Url::tryParse(kj::str(url), kj::Url::REMOTE_HREF, urlOptions);
     if (maybeParsedUrl == kj::none) {
       JSG_FAIL_REQUIRE(TypeError, kj::str("Unable to parse URL: ", url));
@@ -1479,7 +1480,7 @@ jsg::Ref<Response> Response::json_(
         }
       }
       KJ_CASE_ONEOF(res, jsg::Ref<Response>) {
-        auto newInit = InitializerDict{
+        auto newInit = InitializerDict {
           .status = res->statusCode,
           .statusText = kj::str(res->statusText),
           .headers = maybeSetContentType(Headers::constructor(js, res->headers.addRef())),
@@ -1496,7 +1497,7 @@ jsg::Ref<Response> Response::json_(
       }
     }
   } else {
-    maybeInit = InitializerDict{
+    maybeInit = InitializerDict {
       .headers = maybeSetContentType(jsg::alloc<Headers>()),
     };
   }
@@ -1649,7 +1650,7 @@ void Response::serialize(jsg::Lock& js,
   // As with Request, we serialize the initializer dict as a JS object.
   serializer.write(js,
       jsg::JsValue(initDictHandler.wrap(js,
-          InitializerDict{
+          InitializerDict {
             .status = statusCode == 200 ? jsg::Optional<int>() : statusCode,
             .statusText = statusText == defaultStatusText(statusCode) ? jsg::Optional<kj::String>()
                                                                       : kj::str(statusText),
@@ -1719,7 +1720,7 @@ void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> pro
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(_, AwaitingRespondWith) {
-      state = RespondWithCalled{kj::mv(promise)};
+      state = RespondWithCalled {kj::mv(promise)};
     }
     KJ_CASE_ONEOF(called, RespondWithCalled) {
       JSG_FAIL_REQUIRE(DOMInvalidStateError,
@@ -1995,7 +1996,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
       KJ_IF_SOME(parsed, jsg::Url::tryParse(location, base.asPtr())) {
         auto str = kj::str(parsed.getHref());
         return kj::Url::tryParse(str.asPtr(), kj::Url::Context::REMOTE_HREF,
-            kj::Url::Options{
+            kj::Url::Options {
               .percentDecode = false,
               .allowEmpty = true,
             });
@@ -2157,7 +2158,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       headers->set(jsg::ByteString(kj::str("content-type")),
           jsg::ByteString(dataUrl.getMimeType().toString()));
       return js.resolvedPromise(Response::constructor(js, kj::Maybe(kj::mv(data)),
-          Response::InitializerDict{
+          Response::InitializerDict {
             .status = 200,
             .statusText = kj::str("OK"),
             .headers = kj::mv(headers),
@@ -2351,10 +2352,11 @@ jsg::Promise<void> Fetcher::put(jsg::Lock& js,
     // the URL's query parameters.
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(expiration, o.expiration) {
-        parsedUrl.query.add(kj::Url::QueryParam{kj::str("expiration"), kj::str(expiration)});
+        parsedUrl.query.add(kj::Url::QueryParam {kj::str("expiration"), kj::str(expiration)});
       }
       KJ_IF_SOME(expirationTtl, o.expirationTtl) {
-        parsedUrl.query.add(kj::Url::QueryParam{kj::str("expiration_ttl"), kj::str(expirationTtl)});
+        parsedUrl.query.add(
+            kj::Url::QueryParam {kj::str("expiration_ttl"), kj::str(expirationTtl)});
       }
     }
 
@@ -2380,17 +2382,17 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
       JSG_REQUIRE(msg.serializedBody == nullptr, TypeError,
           "Expected one of body or serializedBody for each message");
       jsg::Serializer serializer(js,
-          jsg::Serializer::Options{
+          jsg::Serializer::Options {
             .version = 15,
             .omitHeader = false,
           });
       serializer.write(js, jsg::JsValue(b.getHandle(js)));
-      encodedMessages.add(IncomingQueueMessage{.id = kj::mv(msg.id),
+      encodedMessages.add(IncomingQueueMessage {.id = kj::mv(msg.id),
         .timestamp = msg.timestamp,
         .body = serializer.release().data,
         .attempts = msg.attempts});
     } else KJ_IF_SOME(b, msg.serializedBody) {
-      encodedMessages.add(IncomingQueueMessage{.id = kj::mv(msg.id),
+      encodedMessages.add(IncomingQueueMessage {.id = kj::mv(msg.id),
         .timestamp = msg.timestamp,
         .body = kj::mv(b),
         .attempts = msg.attempts});
@@ -2399,7 +2401,7 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
     }
   }
 
-  auto event = kj::refcounted<api::QueueCustomEventImpl>(QueueEvent::Params{
+  auto event = kj::refcounted<api::QueueCustomEventImpl>(QueueEvent::Params {
     .queueName = kj::mv(queueName),
     .messages = encodedMessages.finish(),
   });
@@ -2408,7 +2410,7 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
       kj::addRef(*event);  // attempt to work around windows-specific null pointer deref.
   return ioContext.awaitIo(js, worker->customEvent(kj::mv(eventRef)).attach(kj::mv(worker)),
       [event = kj::mv(event)](jsg::Lock& js, WorkerInterface::CustomEvent::Result result) {
-    return Fetcher::QueueResult{
+    return Fetcher::QueueResult {
       .outcome = kj::str(result.outcome),
       .ackAll = event->getAckAll(),
       .retryBatch = event->getRetryBatch(),
@@ -2437,7 +2439,7 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
   return ioContext.awaitIo(js,
       worker->runScheduled(scheduledTime, cron).attach(kj::mv(worker), kj::mv(cron)),
       [](jsg::Lock& js, WorkerInterface::ScheduledResult result) {
-    return Fetcher::ScheduledResult{
+    return Fetcher::ScheduledResult {
       .outcome = kj::str(result.outcome),
       .noRetry = !result.retry,
     };
@@ -2466,7 +2468,7 @@ kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
   // "." and ".." components as well as fragments (stuff after '#'), all of which needs to be
   // removed/collapsed before the URL is HTTP-ready. Luckily our URL parser does all this if we
   // tell it the context is REMOTE_HREF.
-  constexpr auto urlOptions = kj::Url::Options{.percentDecode = false, .allowEmpty = true};
+  constexpr auto urlOptions = kj::Url::Options {.percentDecode = false, .allowEmpty = true};
   kj::Maybe<kj::Url> maybeParsed;
   if (this->requiresHost == RequiresHostAndProtocol::YES) {
     maybeParsed = kj::Url::tryParse(url, kj::Url::REMOTE_HREF, urlOptions);

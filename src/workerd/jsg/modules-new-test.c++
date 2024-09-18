@@ -46,7 +46,7 @@ struct ResolveObserverImpl: public ResolveObserver {
 
   kj::Own<ResolveObserver::ResolveStatus> onResolveModule(
       const Url& specifier, Context context, Source source) const override {
-    modules.add(Request{
+    modules.add(Request {
       .specifier = specifier.clone(),
       .context = context,
       .source = source,
@@ -517,7 +517,7 @@ KJ_TEST("Fallback bundle that returns something") {
   const auto specifier = "file:///foo"_url;
 
   {
-    ResolveContext context{
+    ResolveContext context {
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::OTHER,
       .specifier = specifier,
@@ -532,7 +532,7 @@ KJ_TEST("Fallback bundle that returns something") {
 
   // Built-in and built-in only contexts do not use the fallback
   {
-    ResolveContext context{
+    ResolveContext context {
       .type = ResolveContext::Type::BUILTIN,
       .source = ResolveContext::Source::OTHER,
       .specifier = specifier,
@@ -543,7 +543,7 @@ KJ_TEST("Fallback bundle that returns something") {
   }
 
   {
-    ResolveContext context{
+    ResolveContext context {
       .type = ResolveContext::Type::BUILTIN_ONLY,
       .source = ResolveContext::Source::OTHER,
       .specifier = specifier,
@@ -630,7 +630,7 @@ KJ_TEST("Compound Registry") {
 
   constexpr auto resolve = [](ModuleRegistry& registry, ResolveContext::Type type,
                                const Url& specifier) {
-    ResolveContext context{
+    ResolveContext context {
       .type = type,
       .source = ResolveContext::Source::OTHER,
       .specifier = specifier,
@@ -729,7 +729,7 @@ KJ_TEST("Bundle shadows built-in") {
 
   auto registry = registryBuilder.finish();
 
-  ResolveContext context{
+  ResolveContext context {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::OTHER,
     .specifier = foo,
@@ -766,7 +766,7 @@ KJ_TEST("Attaching a module registry works") {
 
     const auto specifier = "file:///main"_url;
 
-    ResolveContext resolveContext{
+    ResolveContext resolveContext {
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::OTHER,
       .specifier = specifier,
@@ -876,7 +876,7 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
 
     const auto specifier = "file:///worker"_url;
 
-    ResolveContext resolveContext{
+    ResolveContext resolveContext {
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::OTHER,
       .specifier = specifier,
@@ -1523,7 +1523,7 @@ KJ_TEST("Building a bundle from a capnp description works") {
 
   {
     const auto foo = "foo:bar"_url;
-    ResolveContext context{
+    ResolveContext context {
       .type = ResolveContext::Type::BUILTIN,
       .source = ResolveContext::Source::OTHER,
       .specifier = foo,
@@ -1535,7 +1535,7 @@ KJ_TEST("Building a bundle from a capnp description works") {
 
   {
     const auto bar = "foo:baz"_url;
-    ResolveContext context{
+    ResolveContext context {
       .type = ResolveContext::Type::BUILTIN,
       .source = ResolveContext::Source::OTHER,
       .specifier = bar,
@@ -1547,7 +1547,7 @@ KJ_TEST("Building a bundle from a capnp description works") {
 
   {
     const auto qux = "foo:qux"_url;
-    ResolveContext context{
+    ResolveContext context {
       .type = ResolveContext::Type::BUILTIN,
       .source = ResolveContext::Source::OTHER,
       .specifier = qux,
@@ -1767,14 +1767,14 @@ KJ_TEST("Aliased modules (import maps) work") {
 
   auto registry = ModuleRegistry::Builder(resolveObserver).add(builder.finish()).finish();
 
-  ResolveContext contextBar{
+  ResolveContext contextBar {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::OTHER,
     .specifier = "file:///bar"_url,
     .referrer = ModuleBundle::BundleBuilder::BASE,
   };
 
-  ResolveContext contextFoo{
+  ResolveContext contextFoo {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::OTHER,
     .specifier = "http://example/foo"_url,

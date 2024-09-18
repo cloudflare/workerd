@@ -60,11 +60,11 @@ struct CompatDate {
     if (year < 2000 || year >= 3000) return kj::none;
     if (month < 1 || month > 12) return kj::none;
     if (day < 1 || day > 31) return kj::none;
-    return CompatDate{year, month, day};
+    return CompatDate {year, month, day};
   }
 
   static CompatDate parse(kj::StringPtr text, Worker::ValidationErrorReporter& errorReporter) {
-    static constexpr CompatDate DEFAULT_DATE{2021, 5, 1};
+    static constexpr CompatDate DEFAULT_DATE {2021, 5, 1};
     KJ_IF_SOME(v, parse(text)) {
       return v;
     } else {
@@ -184,7 +184,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
           // This flag will be marked as enabled if the flag identified by
           // s.getName() is enabled, but only on or after the specified date.
           if (parsedCompatDate >= parsedDate && !disableByFlag) {
-            maybeImpliedBy.emplace(ImpliedBy{
+            maybeImpliedBy.emplace(ImpliedBy {
               .field = field,
               .other = schema.getFieldByName(s.getName()),
             });
@@ -267,7 +267,7 @@ kj::Array<const ParsedField> makeFieldTable(capnp::StructSchema::FieldList field
     }
 
     if (neededByFl) {
-      table.add(ParsedField{
+      table.add(ParsedField {
         .enableFlag = KJ_REQUIRE_NONNULL(enableFlag),
         .field = field,
       });
@@ -318,7 +318,7 @@ kj::Array<const PythonSnapshotParsedField> makePythonSnapshotFieldTable(
     }
 
     KJ_IF_SOME(pythonSnapshotRelease, maybePythonSnapshotRelease) {
-      table.add(PythonSnapshotParsedField{
+      table.add(PythonSnapshotParsedField {
         .pythonSnapshotRelease = pythonSnapshotRelease,
         .field = field,
       });

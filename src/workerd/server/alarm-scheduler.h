@@ -32,7 +32,7 @@ struct ActorKey {
     auto ownUniqueKey = kj::str(uniqueKey);
     auto ownActorId = kj::str(actorId);
 
-    return kj::attachVal(ActorKey{.uniqueKey = ownUniqueKey, .actorId = ownActorId},
+    return kj::attachVal(ActorKey {.uniqueKey = ownUniqueKey, .actorId = ownActorId},
         kj::mv(ownUniqueKey), kj::mv(ownActorId));
   }
 };

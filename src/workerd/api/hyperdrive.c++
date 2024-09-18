@@ -21,7 +21,7 @@ Hyperdrive::Hyperdrive(
       user(kj::mv(user)),
       password(kj::mv(password)),
       scheme(kj::mv(scheme)) {
-  kj::byte randomBytes[16]{};
+  kj::byte randomBytes[16] {};
   KJ_ASSERT(RAND_bytes(randomBytes, sizeof(randomBytes)) == 1);
   randomHost = kj::str(kj::encodeHex(randomBytes), ".hyperdrive.local");
 }
@@ -93,7 +93,7 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
   kj::HttpHeaders headers(headerTable);
 
   auto connectReq = kj::newHttpClient(*service)->connect(
-      kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
+      kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings {});
 
   auto status = co_await connectReq.status;
 

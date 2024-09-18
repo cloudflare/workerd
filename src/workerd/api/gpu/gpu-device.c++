@@ -22,7 +22,7 @@
 namespace workerd::api::gpu {
 
 jsg::Ref<GPUBuffer> GPUDevice::createBuffer(jsg::Lock& js, GPUBufferDescriptor descriptor) {
-  wgpu::BufferDescriptor desc{};
+  wgpu::BufferDescriptor desc {};
   desc.label = descriptor.label.cStr();
   desc.mappedAtCreation = descriptor.mappedAtCreation;
   desc.size = descriptor.size;
@@ -32,7 +32,7 @@ jsg::Ref<GPUBuffer> GPUDevice::createBuffer(jsg::Lock& js, GPUBufferDescriptor d
 }
 
 jsg::Ref<GPUTexture> GPUDevice::createTexture(jsg::Lock& js, GPUTextureDescriptor descriptor) {
-  wgpu::TextureDescriptor desc{};
+  wgpu::TextureDescriptor desc {};
   desc.label = descriptor.label.cStr();
 
   KJ_SWITCH_ONEOF(descriptor.size) {
@@ -167,7 +167,7 @@ wgpu::MipmapFilterMode parseMipmapFilterMode(kj::StringPtr mode) {
 }
 
 jsg::Ref<GPUSampler> GPUDevice::createSampler(GPUSamplerDescriptor descriptor) {
-  wgpu::SamplerDescriptor desc{};
+  wgpu::SamplerDescriptor desc {};
 
   KJ_IF_SOME(addressModeU, descriptor.addressModeU) {
     desc.addressModeU = parseAddressMode(addressModeU);
@@ -208,7 +208,7 @@ jsg::Ref<GPUSampler> GPUDevice::createSampler(GPUSamplerDescriptor descriptor) {
 
 jsg::Ref<GPUBindGroupLayout> GPUDevice::createBindGroupLayout(
     GPUBindGroupLayoutDescriptor descriptor) {
-  wgpu::BindGroupLayoutDescriptor desc{};
+  wgpu::BindGroupLayoutDescriptor desc {};
 
   KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
@@ -226,7 +226,7 @@ jsg::Ref<GPUBindGroupLayout> GPUDevice::createBindGroupLayout(
 }
 
 jsg::Ref<GPUBindGroup> GPUDevice::createBindGroup(GPUBindGroupDescriptor descriptor) {
-  wgpu::BindGroupDescriptor desc{};
+  wgpu::BindGroupDescriptor desc {};
 
   KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
@@ -247,8 +247,8 @@ jsg::Ref<GPUBindGroup> GPUDevice::createBindGroup(GPUBindGroupDescriptor descrip
 }
 
 jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescriptor descriptor) {
-  wgpu::ShaderModuleDescriptor desc{};
-  wgpu::ShaderModuleWGSLDescriptor wgsl_desc{};
+  wgpu::ShaderModuleDescriptor desc {};
+  wgpu::ShaderModuleWGSLDescriptor wgsl_desc {};
   desc.nextInChain = &wgsl_desc;
 
   KJ_IF_SOME(label, descriptor.label) {
@@ -295,7 +295,7 @@ struct ParsedRenderPipelineDescriptor {
 
 ParsedRenderPipelineDescriptor parseRenderPipelineDescriptor(
     GPURenderPipelineDescriptor& descriptor) {
-  ParsedRenderPipelineDescriptor parsedDesc{};
+  ParsedRenderPipelineDescriptor parsedDesc {};
 
   KJ_IF_SOME(label, descriptor.label) {
     parsedDesc.desc.label = label.cStr();
@@ -497,7 +497,7 @@ jsg::Ref<GPURenderPipeline> GPUDevice::createRenderPipeline(
 
 jsg::Ref<GPUPipelineLayout> GPUDevice::createPipelineLayout(
     GPUPipelineLayoutDescriptor descriptor) {
-  wgpu::PipelineLayoutDescriptor desc{};
+  wgpu::PipelineLayoutDescriptor desc {};
 
   KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
@@ -517,7 +517,7 @@ jsg::Ref<GPUPipelineLayout> GPUDevice::createPipelineLayout(
 
 jsg::Ref<GPUCommandEncoder> GPUDevice::createCommandEncoder(
     jsg::Optional<GPUCommandEncoderDescriptor> descriptor) {
-  wgpu::CommandEncoderDescriptor desc{};
+  wgpu::CommandEncoderDescriptor desc {};
 
   kj::String label = kj::str("");
   KJ_IF_SOME(d, descriptor) {
@@ -537,7 +537,7 @@ jsg::Ref<GPUCommandEncoder> GPUDevice::createCommandEncoder(
 // vector jumps to mind since we're just returning a pointer to a local variable.
 wgpu::ComputePipelineDescriptor parseComputePipelineDescriptor(
     GPUComputePipelineDescriptor& descriptor) {
-  wgpu::ComputePipelineDescriptor desc{};
+  wgpu::ComputePipelineDescriptor desc {};
 
   KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
@@ -692,7 +692,7 @@ GPUDevice::GPUDevice(jsg::Lock& js,
 };
 
 jsg::Ref<GPUQuerySet> GPUDevice::createQuerySet(GPUQuerySetDescriptor descriptor) {
-  wgpu::QuerySetDescriptor desc{};
+  wgpu::QuerySetDescriptor desc {};
 
   KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
@@ -738,7 +738,7 @@ jsg::Ref<GPUSupportedFeatures> GPUDevice::getFeatures() {
 }
 
 jsg::Ref<GPUSupportedLimits> GPUDevice::getLimits() {
-  wgpu::SupportedLimits limits{};
+  wgpu::SupportedLimits limits {};
   JSG_REQUIRE(device_.GetLimits(&limits), TypeError, "failed to get device limits");
   return jsg::alloc<GPUSupportedLimits>(kj::mv(limits));
 }

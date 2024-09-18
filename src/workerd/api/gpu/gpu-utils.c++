@@ -11,7 +11,7 @@
 namespace workerd::api::gpu {
 
 wgpu::StoreOp parseGPUStoreOp(kj::StringPtr storeOp) {
-  static std::map<kj::StringPtr, wgpu::StoreOp> mapping{
+  static std::map<kj::StringPtr, wgpu::StoreOp> mapping {
     {"store", wgpu::StoreOp::Store},
     {"discard", wgpu::StoreOp::Discard},
   };
@@ -21,7 +21,7 @@ wgpu::StoreOp parseGPUStoreOp(kj::StringPtr storeOp) {
 }
 
 wgpu::LoadOp parseGPULoadOp(kj::StringPtr loadOp) {
-  static std::map<kj::StringPtr, wgpu::LoadOp> mapping{
+  static std::map<kj::StringPtr, wgpu::LoadOp> mapping {
     {"load", wgpu::LoadOp::Load},
     {"clear", wgpu::LoadOp::Clear},
   };

@@ -28,7 +28,7 @@ void Channel::publish(jsg::Lock& js, jsg::Value message) {
   auto& context = IoContext::current();
   KJ_IF_SOME(tracer, context.getWorkerTracer()) {
     jsg::Serializer ser(js,
-        jsg::Serializer::Options{
+        jsg::Serializer::Options {
           .omitHeader = false,
         });
     ser.write(js, jsg::JsValue(message.getHandle(js)));

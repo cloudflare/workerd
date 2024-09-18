@@ -112,7 +112,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHkdf(jsg::Lock& js,
   // NOTE: Checked in SubtleCrypto::importKey().
   auto keyDataArray = kj::mv(keyData.get<kj::Array<kj::byte>>());
 
-  auto keyAlgorithm = CryptoKey::KeyAlgorithm{normalizedName};
+  auto keyAlgorithm = CryptoKey::KeyAlgorithm {normalizedName};
   return kj::heap<HkdfKey>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages);
 }
 

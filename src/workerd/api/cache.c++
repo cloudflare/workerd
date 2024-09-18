@@ -47,7 +47,7 @@ kj::StringPtr validateUrl(kj::StringPtr url) {
   //   But, that might mean e.g. discarding fragments ("hashes", stuff after a '#'), which would
   //   be a change in behavior that could subtly affect production workers...
 
-  static constexpr auto urlOptions = kj::Url::Options{
+  static constexpr auto urlOptions = kj::Url::Options {
     .percentDecode = false,
     .allowEmpty = true,
   };
@@ -220,7 +220,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       auto headersPromises =
           handleHeaders(kj::mv(payloadPipe.out), kj::mv(serializedHeaders)).split();
 
-      payload = Payload{.stream = kj::mv(payloadPipe.in),
+      payload = Payload {.stream = kj::mv(payloadPipe.in),
         .writeHeadersPromise = kj::get<1>(headersPromises).ignoreResult()};
 
       return kj::newPromisedStream(kj::mv(kj::get<0>(headersPromises)));

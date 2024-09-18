@@ -39,12 +39,12 @@ struct DeferredProxy {
 };
 
 inline DeferredProxy<void> newNoopDeferredProxy() {
-  return DeferredProxy<void>{kj::READY_NOW};
+  return DeferredProxy<void> {kj::READY_NOW};
 }
 
 template <typename T>
 inline DeferredProxy<T> newNoopDeferredProxy(T&& value) {
-  return DeferredProxy<T>{kj::mv(value)};
+  return DeferredProxy<T> {kj::mv(value)};
 }
 
 // Helper method to use when you need to return `Promise<DeferredProxy<T>>` but no part of the
@@ -101,7 +101,7 @@ namespace workerd::api {
 class BeginDeferredProxyingConstant final {};
 // A magic constant which a DeferredProxyPromise<T> coroutine can `KJ_CO_MAGIC` to indicate that the
 // deferred proxying phase of its operation has begun.
-constexpr BeginDeferredProxyingConstant BEGIN_DEFERRED_PROXYING{};
+constexpr BeginDeferredProxyingConstant BEGIN_DEFERRED_PROXYING {};
 
 // A concept which is true if C is a coroutine adapter which supports the `co_yield` operator for
 // type T. We could also check that the expression results in an awaitable, but that is already a
@@ -136,7 +136,7 @@ public:
     // called. This gives us the opportunity (that is, in `destroy()`) to destroy our
     // `inner.get_return_object()` Promise, breaking the ownership cycle and destroying `this`.
 
-    result.value = DeferredProxy<T>{inner.get_return_object()};
+    result.value = DeferredProxy<T> {inner.get_return_object()};
     return kj::_::PromiseNode::to<kj::Promise<DeferredProxy<T>>>(kj::_::OwnPromiseNode(this));
   }
 

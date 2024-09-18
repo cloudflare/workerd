@@ -19,7 +19,7 @@ constexpr bool isWhitespace(const char c) noexcept {
 }
 
 static constexpr kj::FixedArray<uint8_t, 256> token_table = []() consteval {
-  kj::FixedArray<uint8_t, 256> result{};
+  kj::FixedArray<uint8_t, 256> result {};
 
   for (uint8_t c:
       {'!', '#', '$', '%', '&', '\'', '*', '+', '\\', '-', '.', '^', '_', '`', '|', '~'}) {
@@ -49,7 +49,7 @@ constexpr bool isTokenChar(const uint8_t c) noexcept {
 }
 
 static constexpr kj::FixedArray<uint8_t, 256> quoted_string_token_table = []() consteval {
-  kj::FixedArray<uint8_t, 256> result{};
+  kj::FixedArray<uint8_t, 256> result {};
   result['\t'] = true;
 
   for (uint8_t c = 0x20; c <= 0x7e; c++) {

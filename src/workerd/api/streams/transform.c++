@@ -50,12 +50,12 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
     // one to one as long as the writer is respecting backpressure signals. If buffering
     // occurs, it will happen in the writable side of the transform stream.
     auto readableStrategy = kj::mv(maybeReadableStrategy)
-                                .orDefault(StreamQueuingStrategy{
+                                .orDefault(StreamQueuingStrategy {
                                   .highWaterMark = 0,
                                 });
 
     auto readable = ReadableStream::constructor(js,
-        UnderlyingSource{
+        UnderlyingSource {
           .type = kj::none,
           .autoAllocateChunkSize = kj::none,
           .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>(
@@ -73,7 +73,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
         kj::mv(readableStrategy));
 
     auto writable = WritableStream::constructor(js,
-        UnderlyingSink{
+        UnderlyingSink {
           .type = kj::none,
           .start = maybeAddFunctor<UnderlyingSink::StartAlgorithm>(
               JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
@@ -153,7 +153,7 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(jsg::Lock& js,
 OneWayPipe newIdentityPipe(kj::Maybe<uint64_t> expectedLength) {
   auto readableSide = kj::refcounted<IdentityTransformStreamImpl>(expectedLength);
   auto writableSide = kj::addRef(*readableSide);
-  return OneWayPipe{.in = kj::mv(readableSide), .out = kj::mv(writableSide)};
+  return OneWayPipe {.in = kj::mv(readableSide), .out = kj::mv(writableSide)};
 }
 
 }  // namespace workerd::api

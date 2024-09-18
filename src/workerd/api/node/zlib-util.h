@@ -192,11 +192,11 @@ private:
   int level = 0;
   int memLevel = 0;
   int strategy = 0;
-  kj::Vector<kj::byte> dictionary{};
+  kj::Vector<kj::byte> dictionary {};
 
   int err = Z_OK;
   unsigned int gzip_id_bytes_read = 0;
-  z_stream stream{};
+  z_stream stream {};
 };
 
 using CompressionStreamErrorHandler = jsg::Function<void(int, kj::StringPtr, kj::StringPtr)>;

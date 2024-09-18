@@ -349,11 +349,11 @@ jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::
   for (const auto& header: detail->headers) {
     auto v = (redacted && shouldRedact(header.name)) ? "REDACTED"_kj : header.value;
     builder.add(
-        HeaderDict::Field{jsg::ByteString(kj::str(header.name)), jsg::ByteString(kj::str(v))});
+        HeaderDict::Field {jsg::ByteString(kj::str(header.name)), jsg::ByteString(kj::str(v))});
   }
 
   // TODO(conform): Better to return a frozen JS Object?
-  return HeaderDict{builder.finish()};
+  return HeaderDict {builder.finish()};
 }
 
 kj::StringPtr TraceItem::FetchEventInfo::Request::getMethod() {
@@ -480,17 +480,17 @@ double TraceDiagnosticChannelEvent::getTimestamp() {
 }
 
 ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
-    : id{[&]() -> kj::Maybe<kj::String> {
+    : id {[&]() -> kj::Maybe<kj::String> {
         return UUID::fromUpperLower(version.getId().getUpper(), version.getId().getLower())
             .map([](const auto& uuid) { return uuid.toString(); });
       }()},
-      tag{[&]() -> kj::Maybe<kj::String> {
+      tag {[&]() -> kj::Maybe<kj::String> {
         if (version.hasTag()) {
           return kj::str(version.getTag());
         }
         return kj::none;
       }()},
-      message{[&]() -> kj::Maybe<kj::String> {
+      message {[&]() -> kj::Maybe<kj::String> {
         if (version.hasMessage()) {
           return kj::str(version.getMessage());
         }
@@ -498,9 +498,9 @@ ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
       }()} {}
 
 ScriptVersion::ScriptVersion(const ScriptVersion& other)
-    : id{other.id.map([](const auto& id) { return kj::str(id); })},
-      tag{other.tag.map([](const auto& tag) { return kj::str(tag); })},
-      message{other.message.map([](const auto& message) { return kj::str(message); })} {}
+    : id {other.id.map([](const auto& id) { return kj::str(id); })},
+      tag {other.tag.map([](const auto& tag) { return kj::str(tag); })},
+      message {other.message.map([](const auto& message) { return kj::str(message); })} {}
 
 TraceItem::CustomEventInfo::CustomEventInfo(
     const Trace& trace, const Trace::CustomEventInfo& eventInfo)
@@ -639,7 +639,7 @@ auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingReque
   waitUntilTasks.add(
       sendTracesToExportedHandler(kj::mv(incomingRequest), entrypointNamePtr, traces));
 
-  return Result{
+  return Result {
     .outcome = EventOutcome::OK,
   };
 }
@@ -657,7 +657,7 @@ auto TraceCustomEventImpl::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFac
   waitUntilTasks.add(req.send().ignoreResult());
 
   // As long as we sent it, we consider the result to be okay.
-  co_return Result{
+  co_return Result {
     .outcome = workerd::EventOutcome::OK,
   };
 }

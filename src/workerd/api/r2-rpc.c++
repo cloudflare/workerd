@@ -105,7 +105,7 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     KJ_ASSERT(
         metadataReadLength == metadataBuffer.size(), "R2 metadata buffer not read fully/overflow?");
 
-    co_return R2Result{.httpStatus = response.statusCode,
+    co_return R2Result {.httpStatus = response.statusCode,
       .metadataPayload = kj::mv(metadataBuffer),
       .stream = kj::mv(stream)};
   };
@@ -142,7 +142,7 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
   KJ_IF_SOME(m, response.headers->get(headerIds.cfBlobMetadataSize)) {
     co_return co_await processStream(m, response, kj::mv(client), flags, context);
   } else {
-    co_return R2Result{.httpStatus = response.statusCode};
+    co_return R2Result {.httpStatus = response.statusCode};
   }
 }
 
@@ -245,7 +245,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
         response.headers->get(headerIds.cfR2ErrorHeader)
             .orDefault("{\"version\":0,\"v4code\":0,\"message\":\"Unspecified error\"}"_kj);
 
-    co_return R2Result{
+    co_return R2Result {
       .httpStatus = response.statusCode,
       .toThrow = toError(response.statusCode, error),
     };
@@ -253,7 +253,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
 
   auto responseBody = co_await response.body->readAllText();
 
-  co_return R2Result{
+  co_return R2Result {
     .httpStatus = response.statusCode,
     .metadataPayload = responseBody.releaseArray(),
   };

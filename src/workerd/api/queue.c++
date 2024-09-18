@@ -51,7 +51,7 @@ Serialized serializeV8(jsg::Lock& js, const jsg::JsValue& body) {
   // Use a specific serialization version to avoid sending messages using a new version before all
   // runtimes at the edge know how to read it.
   jsg::Serializer serializer(js,
-      jsg::Serializer::Options{
+      jsg::Serializer::Options {
         .version = 15,
         .omitHeader = false,
       });
@@ -485,9 +485,9 @@ jsg::Ref<QueueEvent> startQueueEvent(EventTarget& globalEventTarget,
       auto promise = f(lock, jsg::alloc<QueueController>(event.addRef()),
           jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx());
       event->waitUntil(promise.then([event = event.addRef()]() mutable {
-        event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
+        event->setCompletionStatus(QueueEvent::CompletedSuccessfully {});
       }, [event = event.addRef()](kj::Exception&& e) mutable {
-        event->setCompletionStatus(QueueEvent::CompletedWithError{kj::cp(e)});
+        event->setCompletionStatus(QueueEvent::CompletedWithError {kj::cp(e)});
         return kj::mv(e);
       }));
     } else {
@@ -502,7 +502,7 @@ jsg::Ref<QueueEvent> startQueueEvent(EventTarget& globalEventTarget,
       JSG_FAIL_REQUIRE(Error, "No event listener registered for queue messages.");
     }
     globalEventTarget.dispatchEventImpl(lock, event.addRef());
-    event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
+    event->setCompletionStatus(QueueEvent::CompletedSuccessfully {});
   }
 
   return event.addRef();
@@ -588,7 +588,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     KJ_LOG(WARNING, "NOSENTRY queue event hit timeout", scriptId, status, tasks);
   }
 
-  co_return WorkerInterface::CustomEvent::Result{
+  co_return WorkerInterface::CustomEvent::Result {
     .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU,
   };
 }
@@ -640,7 +640,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
       }
     }
 
-    return WorkerInterface::CustomEvent::Result{
+    return WorkerInterface::CustomEvent::Result {
       .outcome = respResult.getOutcome(),
     };
   });
@@ -649,7 +649,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
 kj::Array<QueueRetryMessage> QueueCustomEventImpl::getRetryMessages() const {
   auto retryMsgs = kj::heapArrayBuilder<QueueRetryMessage>(result.retries.size());
   for (const auto& entry: result.retries) {
-    retryMsgs.add(QueueRetryMessage{
+    retryMsgs.add(QueueRetryMessage {
       .msgId = kj::heapString(entry.key), .delaySeconds = entry.value.delaySeconds});
   }
   return retryMsgs.finish();

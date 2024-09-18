@@ -12,7 +12,7 @@ kj::Maybe<DataUrl> DataUrl::tryParse(kj::StringPtr url) {
 }
 
 static constexpr kj::FixedArray<uint8_t, 256> ascii_whitespace_table = []() consteval {
-  kj::FixedArray<uint8_t, 256> result{};
+  kj::FixedArray<uint8_t, 256> result {};
   for (uint8_t c: {0x09, 0x0a, 0x0c, 0x0d, 0x20}) {
     result[c] = true;
   }

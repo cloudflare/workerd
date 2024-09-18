@@ -152,7 +152,7 @@ Serializer::Released Serializer::release() {
   sharedArrayBuffers.clear();
   arrayBuffers.clear();
   auto pair = ser.Release();
-  return Released{
+  return Released {
     .data = kj::Array(pair.first, pair.second, jsg::SERIALIZED_BUFFER_DISPOSER),
     .sharedArrayBuffers = sharedBackingStores.releaseAsArray(),
     .transferredArrayBuffers = backingStores.releaseAsArray(),

@@ -171,18 +171,18 @@ void parseFormData(kj::Maybe<jsg::Lock&> js,
     }
 
     if (filename == kj::none || convertFilesToStrings) {
-      data.add(FormData::Entry{kj::mv(name), kj::str(message)});
+      data.add(FormData::Entry {kj::mv(name), kj::str(message)});
     } else {
       auto bytes = kj::heapArray(message.asBytes());
       KJ_IF_SOME(lock, js) {
-        data.add(FormData::Entry{kj::mv(name),
+        data.add(FormData::Entry {kj::mv(name),
           jsg::alloc<File>(lock, kj::mv(bytes), KJ_ASSERT_NONNULL(kj::mv(filename)),
               kj::str(type.orDefault(nullptr)), dateNow())});
       } else {
         // This variation is used when we do not have an isolate lock. In this
         // case, the external memory held by the File is not tracked towards
         // the isolate's external memory.
-        data.add(FormData::Entry{kj::mv(name),
+        data.add(FormData::Entry {kj::mv(name),
           jsg::alloc<File>(kj::mv(bytes), KJ_ASSERT_NONNULL(kj::mv(filename)),
               kj::str(type.orDefault(nullptr)), dateNow())});
       }
@@ -268,7 +268,7 @@ kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
 
   // TODO(perf): We should be able to trivially calculate the length of the serialized form data
   //   beforehand. I tried, but apparently my math REALLY sucks and I hate memory overruns, so ...
-  auto builder = kj::Vector<char>{};
+  auto builder = kj::Vector<char> {};
 
   for (auto& kv: data) {
     builder.addAll("--"_kj);
@@ -344,7 +344,7 @@ void FormData::parse(kj::Maybe<jsg::Lock&> js,
       parseQueryString(query, kj::mv(rawText));
       data.reserve(query.size());
       for (auto& param: query) {
-        data.add(Entry{kj::mv(param.name), kj::mv(param.value)});
+        data.add(Entry {kj::mv(param.name), kj::mv(param.value)});
       }
       return;
     }
@@ -364,7 +364,7 @@ void FormData::append(jsg::Lock& js,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
     jsg::Optional<kj::String> filename) {
   auto filifiedValue = blobToFile(js, name, kj::mv(value), kj::mv(filename));
-  data.add(Entry{kj::mv(name), kj::mv(filifiedValue)});
+  data.add(Entry {kj::mv(name), kj::mv(filifiedValue)});
 }
 
 void FormData::delete_(kj::String name) {
@@ -418,15 +418,15 @@ void FormData::set(jsg::Lock& js,
 }
 
 jsg::Ref<FormData::EntryIterator> FormData::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState{JSG_THIS});
+  return jsg::alloc<EntryIterator>(IteratorState {JSG_THIS});
 }
 
 jsg::Ref<FormData::KeyIterator> FormData::keys(jsg::Lock&) {
-  return jsg::alloc<KeyIterator>(IteratorState{JSG_THIS});
+  return jsg::alloc<KeyIterator>(IteratorState {JSG_THIS});
 }
 
 jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock&) {
-  return jsg::alloc<ValueIterator>(IteratorState{JSG_THIS});
+  return jsg::alloc<ValueIterator>(IteratorState {JSG_THIS});
 }
 
 void FormData::forEach(jsg::Lock& js,

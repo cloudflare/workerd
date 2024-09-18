@@ -115,7 +115,7 @@ private:
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
-  PythonConfig pythonConfig = PythonConfig{.packageDiskCacheRoot = kj::none,
+  PythonConfig pythonConfig = PythonConfig {.packageDiskCacheRoot = kj::none,
     .pyodideDiskCacheRoot = kj::none,
     .createSnapshot = false,
     .createBaselineSnapshot = false};
@@ -256,14 +256,14 @@ public:
   kj::Promise<void> getMultiple(GetMultipleContext context) override {
     return context.getParams()
         .getStream()
-        .endRequest(capnp::MessageSize{2, 0})
+        .endRequest(capnp::MessageSize {2, 0})
         .send()
         .ignoreResult();
   }
   kj::Promise<void> list(ListContext context) override {
     return context.getParams()
         .getStream()
-        .endRequest(capnp::MessageSize{2, 0})
+        .endRequest(capnp::MessageSize {2, 0})
         .send()
         .ignoreResult();
   }
@@ -271,7 +271,7 @@ public:
     return kj::READY_NOW;
   }
   kj::Promise<void> txn(TxnContext context) override {
-    auto results = context.getResults(capnp::MessageSize{2, 1});
+    auto results = context.getResults(capnp::MessageSize {2, 1});
     results.setTransaction(kj::heap<TransactionImpl>());
     return kj::READY_NOW;
   }
@@ -285,14 +285,14 @@ private:
     kj::Promise<void> getMultiple(GetMultipleContext context) override {
       return context.getParams()
           .getStream()
-          .endRequest(capnp::MessageSize{2, 0})
+          .endRequest(capnp::MessageSize {2, 0})
           .send()
           .ignoreResult();
     }
     kj::Promise<void> list(ListContext context) override {
       return context.getParams()
           .getStream()
-          .endRequest(capnp::MessageSize{2, 0})
+          .endRequest(capnp::MessageSize {2, 0})
           .send()
           .ignoreResult();
     }

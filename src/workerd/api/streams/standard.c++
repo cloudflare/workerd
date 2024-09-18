@@ -452,7 +452,7 @@ bool WritableLockImpl<Controller>::pipeLock(
 
   auto& sourceLock = KJ_ASSERT_NONNULL(source->getController().tryPipeLock(owner.addRef()));
 
-  state.template init<PipeLocked>(PipeLocked{
+  state.template init<PipeLocked>(PipeLocked {
     .source = sourceLock,
     .readableStreamRef = kj::mv(source),
     .preventAbort = options.preventAbort.orDefault(false),
@@ -963,7 +963,7 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
       }
 
       auto prp = js.newPromiseAndResolver<void>();
-      maybePendingCancel = PendingCancel{
+      maybePendingCancel = PendingCancel {
         .fulfiller = kj::mv(prp.resolver),
         .promise = kj::mv(prp.promise),
       };
@@ -1563,7 +1563,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
   KJ_ASSERT(isWritable());
 
   auto prp = js.newPromiseAndResolver<void>();
-  writeRequests.push_back(WriteRequest{
+  writeRequests.push_back(WriteRequest {
     .resolver = kj::mv(prp.resolver),
     .value = js.v8Ref(value),
     .size = size,
@@ -1679,14 +1679,14 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     KJ_IF_SOME(s, state) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
       s.consumer->read(js,
-          ValueQueue::ReadRequest{
+          ValueQueue::ReadRequest {
             .resolver = kj::mv(prp.resolver),
           });
       return kj::mv(prp.promise);
     }
 
     // We are canceled! There's nothing to do.
-    return js.resolvedPromise(ReadResult{.done = true});
+    return js.resolvedPromise(ReadResult {.done = true});
   }
 
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
@@ -1841,12 +1841,12 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
       jsg::BufferSource source(js, byob.bufferView.getHandle(js));
       auto store = source.detach(js);
       store.consume(store.size());
-      return js.resolvedPromise(ReadResult{
+      return js.resolvedPromise(ReadResult {
         .value = js.v8Ref(store.createHandle(js)),
         .done = true,
       });
     } else {
-      return js.resolvedPromise(ReadResult{.done = true});
+      return js.resolvedPromise(ReadResult {.done = true});
     }
   }
 
@@ -2384,7 +2384,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       auto source = jsg::BufferSource(js, byobOptions.bufferView.getHandle(js));
       auto store = source.detach(js);
       store.consume(store.size());
-      return js.resolvedPromise(ReadResult{
+      return js.resolvedPromise(ReadResult {
         .value = js.v8Ref(store.createHandle(js)),
         .done = true,
       });
@@ -2396,7 +2396,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         // The closed state for BYOB reads is handled in the maybeByobOptions check above.
         KJ_ASSERT(maybeByobOptions == kj::none);
-        return js.resolvedPromise(ReadResult{.done = true});
+        return js.resolvedPromise(ReadResult {.done = true});
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
         return js.rejectedPromise<ReadResult>(errored.addRef(js));
@@ -2408,7 +2408,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       // The closed state for BYOB reads is handled in the maybeByobOptions check above.
       KJ_ASSERT(maybeByobOptions == kj::none);
-      return js.resolvedPromise(ReadResult{.done = true});
+      return js.resolvedPromise(ReadResult {.done = true});
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return js.rejectedPromise<ReadResult>(errored.addRef(js));
@@ -2441,7 +2441,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
   KJ_IF_SOME(pendingState, maybePendingState) {
     KJ_SWITCH_ONEOF(pendingState) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return Tee{
+        return Tee {
           .branch1 = jsg::alloc<ReadableStream>(
               kj::heap<ReadableStreamJsController>(StreamStates::Closed())),
           .branch2 = jsg::alloc<ReadableStream>(
@@ -2449,7 +2449,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
         };
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-        return Tee{
+        return Tee {
           .branch1 =
               jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(errored.addRef(js))),
           .branch2 =
@@ -2461,7 +2461,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return Tee{
+      return Tee {
         .branch1 = jsg::alloc<ReadableStream>(
             kj::heap<ReadableStreamJsController>(StreamStates::Closed())),
         .branch2 = jsg::alloc<ReadableStream>(
@@ -2469,7 +2469,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       };
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return Tee{
+      return Tee {
         .branch1 =
             jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(errored.addRef(js))),
         .branch2 =
@@ -2480,7 +2480,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       KJ_DEFER(state.init<StreamStates::Closed>());
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
-      return Tee{
+      return Tee {
         .branch1 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
         .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
       };
@@ -2489,7 +2489,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       KJ_DEFER(state.init<StreamStates::Closed>());
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
-      return Tee{
+      return Tee {
         .branch1 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
         .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
       };
@@ -2784,7 +2784,7 @@ public:
       : ioContext(IoContext::current()),
         state(kj::mv(stream)),
         sink(kj::mv(sink)),
-        self(kj::refcounted<WeakRef<PumpToReader>>(kj::Badge<PumpToReader>{}, *this)),
+        self(kj::refcounted<WeakRef<PumpToReader>>(kj::Badge<PumpToReader> {}, *this)),
         end(end) {}
   KJ_DISALLOW_COPY_AND_MOVE(PumpToReader);
 
@@ -2924,7 +2924,7 @@ private:
           jsg::BufferSource bufferSource(js, handle);
           if (bufferSource.size() == 0) {
             // Weird, but allowed. We'll skip it.
-            return Pumping{};
+            return Pumping {};
           }
 
           if (byteStream) {
@@ -3436,7 +3436,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
   // Let's also acquire the destination pipe lock.
   lock.pipeLock(KJ_ASSERT_NONNULL(owner), kj::mv(source), options);
 
-  return pipeLoop(js).then(js, JSG_VISITABLE_LAMBDA((ref = addRef()), (ref), (auto& js){}));
+  return pipeLoop(js).then(js, JSG_VISITABLE_LAMBDA((ref = addRef()), (ref), (auto& js) {}));
 }
 
 jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
@@ -4073,7 +4073,7 @@ jsg::Ref<ReadableStream> ReadableStream::from(
   auto rcGenerator = kj::refcounted<RefcountedGenerator>(kj::mv(generator));
 
   return constructor(js,
-      UnderlyingSource{
+      UnderlyingSource {
         .pull =
             [generator = kj::addRef(*rcGenerator)](jsg::Lock& js, auto controller) mutable {
     auto& c = controller.template get<DefaultController>();
@@ -4100,7 +4100,7 @@ jsg::Ref<ReadableStream> ReadableStream::from(
         .then(js, [genertor = kj::mv(generator)](auto& lock) {});
   },
       },
-      StreamQueuingStrategy{
+      StreamQueuingStrategy {
         .highWaterMark = 0,
       });
 }

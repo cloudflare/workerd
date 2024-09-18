@@ -21,8 +21,8 @@ private:
 
 jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
   auto transformer = TransformStream::constructor(js,
-      Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>(
-                      [](jsg::Lock& js, auto chunk, auto controller) {
+      Transformer {.transform = jsg::Function<Transformer::TransformAlgorithm>(
+                       [](jsg::Lock& js, auto chunk, auto controller) {
     auto str = jsg::check(chunk->ToString(js.v8Context()));
     auto maybeBuffer = v8::ArrayBuffer::MaybeNew(js.v8Isolate, str->Utf8Length(js.v8Isolate));
     JSG_ASSERT(!maybeBuffer.IsEmpty(), RangeError, "Cannot allocate space for TextEncoder.encode");
@@ -38,7 +38,7 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
     controller->enqueue(js, v8::Uint8Array::New(buffer, 0, buffer->ByteLength()));
     return js.resolvedPromise();
   })},
-      StreamQueuingStrategy{}, StreamQueuingStrategy{});
+      StreamQueuingStrategy {}, StreamQueuingStrategy {});
 
   return jsg::alloc<TextEncoderStream>(transformer->getReadable(), transformer->getWritable());
 }
@@ -53,7 +53,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     jsg::Lock& js, jsg::Optional<kj::String> label, jsg::Optional<TextDecoderStreamInit> options) {
 
   auto decoder = TextDecoder::constructor(kj::mv(label), options.map([](auto& opts) {
-    return TextDecoder::ConstructorOptions{
+    return TextDecoder::ConstructorOptions {
       .fatal = opts.fatal.orDefault(true),
       .ignoreBOM = opts.ignoreBOM.orDefault(false),
     };
@@ -62,15 +62,16 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
   // The controller will store c++ references to both the readable and writable
   // streams underlying controllers.
   auto transformer = TransformStream::constructor(js,
-      Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>( JSG_VISITABLE_LAMBDA(
-                      (decoder = decoder.addRef()), (decoder),
-                      (jsg::Lock& js, auto chunk, auto controller) {
-                        jsg::BufferSource source(js, chunk);
-                        controller->enqueue(js,
-                            JSG_REQUIRE_NONNULL(decoder->decodePtr(js, source.asArrayPtr(), false),
-                                TypeError, "Failed to decode input."));
-                        return js.resolvedPromise();
-                      })),
+      Transformer {.transform = jsg::Function<Transformer::TransformAlgorithm>(
+                       JSG_VISITABLE_LAMBDA((decoder = decoder.addRef()), (decoder),
+                           (jsg::Lock& js, auto chunk, auto controller) {
+                             jsg::BufferSource source(js, chunk);
+                             controller->enqueue(js,
+                                 JSG_REQUIRE_NONNULL(
+                                     decoder->decodePtr(js, source.asArrayPtr(), false), TypeError,
+                                     "Failed to decode input."));
+                             return js.resolvedPromise();
+                           })),
         .flush = jsg::Function<Transformer::FlushAlgorithm>(
             JSG_VISITABLE_LAMBDA((decoder = decoder.addRef()), (decoder),
                 (jsg::Lock& js, auto controller) {
@@ -79,7 +80,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
                           TypeError, "Failed to decode input."));
                   return js.resolvedPromise();
                 }))},
-      StreamQueuingStrategy{}, StreamQueuingStrategy{});
+      StreamQueuingStrategy {}, StreamQueuingStrategy {});
 
   return jsg::alloc<TextDecoderStream>(
       kj::mv(decoder), transformer->getReadable(), transformer->getWritable());

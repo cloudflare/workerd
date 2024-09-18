@@ -247,7 +247,7 @@ public:
         "functions passed to .then() must return exactly the same type");
 
     typedef ThenCatchPair<Func, ErrorFunc> FuncPair;
-    return thenImpl<Output>(js, FuncPair{kj::fwd<Func>(func), kj::fwd<ErrorFunc>(errorFunc)},
+    return thenImpl<Output>(js, FuncPair {kj::fwd<Func>(func), kj::fwd<ErrorFunc>(errorFunc)},
         &promiseContinuation<FuncPair, false, T, Output>,
         &promiseContinuation<FuncPair, true, Value, Output>);
   }
@@ -261,7 +261,7 @@ public:
 
     // HACK: The error function is never called, so it need not actually be a functor.
     typedef ThenCatchPair<Func, bool> FuncPair;
-    return thenImpl<Output>(js, FuncPair{kj::fwd<Func>(func), false},
+    return thenImpl<Output>(js, FuncPair {kj::fwd<Func>(func), false},
         &promiseContinuation<FuncPair, false, T, Output>,
         &identityPromiseContinuation<FuncPair, true>);
   }
@@ -273,7 +273,7 @@ public:
 
     // HACK: The non-error function is never called, so it need not actually be a functor.
     typedef ThenCatchPair<bool, ErrorFunc> FuncPair;
-    return thenImpl<T>(js, FuncPair{false, kj::fwd<ErrorFunc>(errorFunc)},
+    return thenImpl<T>(js, FuncPair {false, kj::fwd<ErrorFunc>(errorFunc)},
         &identityPromiseContinuation<FuncPair, false>,
         &promiseContinuation<FuncPair, true, Value, T>);
   }

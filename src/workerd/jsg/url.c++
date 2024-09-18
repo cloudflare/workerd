@@ -469,7 +469,7 @@ kj::Maybe<UrlSearchParams::EntryIterator::Entry> UrlSearchParams::EntryIterator:
   if (!hasNext()) return kj::none;
   auto next =
       ada_search_params_entries_iter_next(getInner<ada_url_search_params_entries_iter>(inner));
-  return Entry{
+  return Entry {
     .key = kj::ArrayPtr<const char>(next.key.data, next.key.length),
     .value = kj::ArrayPtr<const char>(next.value.data, next.value.length),
   };
@@ -1154,7 +1154,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       pendingFixedValue = kj::none;
       if (value.size() == 0) return true;
       KJ_IF_SOME(canonical, canonicalizer(value, kj::none)) {
-        partList.add(Part{
+        partList.add(Part {
           .type = Part::Type::FIXED_TEXT,
           .modifier = Part::Modifier::NONE,
           .value = kj::mv(canonical),
@@ -1237,7 +1237,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       KJ_IF_SOME(prefix, maybePrefix) {
         if (prefix.size() > 0) {
           KJ_IF_SOME(canonical, canonicalizer(prefix, kj::none)) {
-            partList.add(Part{
+            partList.add(Part {
               .type = Part::Type::FIXED_TEXT,
               .modifier = modifier,
               .value = kj::mv(canonical),
@@ -1295,7 +1295,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       }
     }
 
-    partList.add(Part{
+    partList.add(Part {
       .type = type,
       .modifier = modifier,
       .value = kj::mv(regexValue),
@@ -1448,7 +1448,7 @@ RegexAndNameList generateRegexAndNameList(
 
   regex = kj::strTree(kj::mv(regex), "$");
 
-  return RegexAndNameList{
+  return RegexAndNameList {
     .regex = regex.flatten(),
     .names = nameList.releaseAsArray(),
   };
@@ -1634,7 +1634,7 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
   size_t ipv6Depth = 0;
   bool protocolMatchesSpecialScheme = false;
 
-  UrlPattern::Init result{
+  UrlPattern::Init result {
     .baseUrl = strFromMaybePtr(options.baseUrl),
   };
 

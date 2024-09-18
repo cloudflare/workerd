@@ -243,7 +243,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       auto promise = adapter->request(method, url, headers, requestBody, response);
       // Default handling doesn't rely on the IoContext at all so we can return it as a
       // deferred proxy task.
-      return DeferredProxy<void>{promise.attach(kj::mv(adapter), kj::mv(client))};
+      return DeferredProxy<void> {promise.attach(kj::mv(adapter), kj::mv(client))};
     }
   } else KJ_IF_SOME(promise, event->getResponsePromise(lock)) {
     auto body2 = kj::addRef(*ownRequestBody);
@@ -393,7 +393,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
 
       lock.logWarningOnce("Attempted to run a scheduled alarm without a handler, "
                           "did you remember to export an alarm() function?");
-      return WorkerInterface::AlarmResult{
+      return WorkerInterface::AlarmResult {
         .retry = false, .outcome = EventOutcome::SCRIPT_NOT_FOUND};
     }
 
@@ -427,13 +427,13 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         // retriable, and we'll count the retries against the alarm retries limit. This will ensure
         // that the handler will attempt to run for a number of times before giving up and deleting
         // the alarm.
-        return WorkerInterface::AlarmResult{
+        return WorkerInterface::AlarmResult {
           .retry = true, .retryCountsAgainstLimit = true, .outcome = EventOutcome::EXCEEDED_CPU};
       });
 
       return alarm(lock, jsg::alloc<AlarmInvocationInfo>(retryCount))
           .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
-        return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
+        return WorkerInterface::AlarmResult {.retry = false, .outcome = EventOutcome::OK};
       }).exclusiveJoin(kj::mv(timeoutPromise));
     })
         .catch_([&context, deferredDelete = kj::mv(deferredDelete)](kj::Exception&& e) mutable {
@@ -481,7 +481,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           shouldRetryCountsAgainstLimits = true;
         }
       }
-      return WorkerInterface::AlarmResult{.retry = true,
+      return WorkerInterface::AlarmResult {.retry = true,
         .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
         .outcome = outcome};
     })
@@ -522,13 +522,13 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
             shouldRetryCountsAgainstLimits = true;
           }
         }
-        return WorkerInterface::AlarmResult{.retry = true,
+        return WorkerInterface::AlarmResult {.retry = true,
           .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
           .outcome = EventOutcome::EXCEPTION};
       });
     });
   } else {
-    return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::CANCELED};
+    return WorkerInterface::AlarmResult {.retry = false, .outcome = EventOutcome::CANCELED};
   }
 }
 
@@ -787,7 +787,7 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   // that we do not throw the error at all.
   auto message = v8::Exception::CreateMessage(js.v8Isolate, error);
   auto event = jsg::alloc<ErrorEvent>(kj::str("error"),
-      ErrorEvent::ErrorEventInit{.message = kj::str(message->Get()),
+      ErrorEvent::ErrorEventInit {.message = kj::str(message->Get()),
         .filename = kj::str(message->GetScriptResourceName()),
         .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
         .colno = jsg::check(message->GetStartColumn(js.v8Context())),
@@ -875,7 +875,7 @@ bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::In
     auto& global =
         jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(v8Context, v8Context->Global());
     auto promise = global.fetch(js, kj::mv(url),
-        Request::InitializerDict{
+        Request::InitializerDict {
           .method = kj::str("POST"),
           .body = kj::mv(body),
         });

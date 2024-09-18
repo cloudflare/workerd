@@ -12,7 +12,7 @@ namespace {
 static constexpr auto INITIAL_CAPACITY = 8, MAX_CAPACITY = 100;
 
 KJ_TEST("BatchQueue basic operations") {
-  BatchQueue<int> batchQueue{INITIAL_CAPACITY, MAX_CAPACITY};
+  BatchQueue<int> batchQueue {INITIAL_CAPACITY, MAX_CAPACITY};
 
   KJ_EXPECT(batchQueue.empty());
   KJ_EXPECT(batchQueue.size() == 0);
@@ -43,7 +43,7 @@ KJ_TEST("BatchQueue::Batch clears the pop buffer when it is destroyed") {
     uint& count;
   };
 
-  BatchQueue<kj::Own<DestructionDetector>> batchQueue{INITIAL_CAPACITY, MAX_CAPACITY};
+  BatchQueue<kj::Own<DestructionDetector>> batchQueue {INITIAL_CAPACITY, MAX_CAPACITY};
 
   uint count = 0;
   batchQueue.push(kj::heap<DestructionDetector>(count));
@@ -55,7 +55,7 @@ KJ_TEST("BatchQueue::Batch clears the pop buffer when it is destroyed") {
 }
 
 KJ_TEST("BatchQueue throws if two pop() operations run concurrently") {
-  BatchQueue<int> batchQueue{INITIAL_CAPACITY, MAX_CAPACITY};
+  BatchQueue<int> batchQueue {INITIAL_CAPACITY, MAX_CAPACITY};
 
   batchQueue.push(123);
   auto batch0 = batchQueue.pop();
@@ -63,7 +63,7 @@ KJ_TEST("BatchQueue throws if two pop() operations run concurrently") {
 }
 
 KJ_TEST("BatchQueue uses two buffers") {
-  BatchQueue<int> batchQueue{INITIAL_CAPACITY, MAX_CAPACITY};
+  BatchQueue<int> batchQueue {INITIAL_CAPACITY, MAX_CAPACITY};
 
   batchQueue.push(123);
   auto buffer0 = batchQueue.pop().asArrayPtr();
@@ -80,7 +80,7 @@ KJ_TEST("BatchQueue uses two buffers") {
 }
 
 KJ_TEST("BatchQueue reconstructs buffers if they grow above maxCapacity") {
-  BatchQueue<int> batchQueue{INITIAL_CAPACITY, MAX_CAPACITY};
+  BatchQueue<int> batchQueue {INITIAL_CAPACITY, MAX_CAPACITY};
 
   for (auto i = 0; i < MAX_CAPACITY + 1; ++i) {
     batchQueue.push(i);

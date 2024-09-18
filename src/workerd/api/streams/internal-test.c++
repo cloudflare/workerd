@@ -231,7 +231,7 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
     jsg::Ref<ReadableStream> source = ReadableStream::constructor(env.js, kj::none, kj::none);
     jsg::Ref<WritableStream> sink = jsg::alloc<WritableStream>(env.context, kj::heap<MySink>());
 
-    auto pipeTo = source->pipeTo(env.js, sink.addRef(), PipeToOptions{.preventClose = true});
+    auto pipeTo = source->pipeTo(env.js, sink.addRef(), PipeToOptions {.preventClose = true});
 
     KJ_ASSERT(sink->isLocked());
     try {

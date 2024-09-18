@@ -154,7 +154,7 @@ public:
 
   // Construct jsg::Function wrapping a JavaScript function.
   Function(Wrapper* wrapper, Value receiver, V8Ref<v8::Function> function)
-      : impl(JsImpl{
+      : impl(JsImpl {
           .wrapper = kj::mv(wrapper), .receiver = kj::mv(receiver), .handle = kj::mv(function)}) {}
 
   // Construct jsg::Function wrapping a C++ function. The parameter can be a lambda or anything
@@ -387,7 +387,7 @@ public:
 
       return js.withinHandleScope([&] {
         auto context = js.v8Context();
-        v8::Local<v8::Value> argv[sizeof...(Args)]{
+        v8::Local<v8::Value> argv[sizeof...(Args)] {
           typeWrapper.wrap(context, kj::none, kj::fwd<Args>(args))...};
 
         v8::Local<v8::Object> result = check(func->NewInstance(context, sizeof...(Args), argv));
@@ -420,7 +420,7 @@ public:
       return js.withinHandleScope([&] {
         auto context = js.v8Context();
         v8::LocalVector<v8::Value> argv(js.v8Isolate,
-            std::initializer_list<v8::Local<v8::Value>>{
+            std::initializer_list<v8::Local<v8::Value>> {
               typeWrapper.wrap(context, kj::none, kj::fwd<Args>(args))
                   .template As<v8::Value>()...});
 

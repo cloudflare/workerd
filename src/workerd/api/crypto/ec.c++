@@ -112,7 +112,7 @@ kj::Array<kj::byte> Ec::getRawPublicKey() const {
 
 CryptoKey::AsymmetricKeyDetails Ec::getAsymmetricKeyDetail() const {
   // Adapted from Node.js' GetEcKeyDetail
-  return CryptoKey::AsymmetricKeyDetails{
+  return CryptoKey::AsymmetricKeyDetails {
     .namedCurve = kj::str(OBJ_nid2sn(EC_GROUP_get_curve_name(group)))};
 }
 
@@ -427,7 +427,7 @@ struct EllipticCurveInfo {
 };
 
 EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
-  static const std::map<kj::StringPtr, EllipticCurveInfo, CiLess> registeredCurves{
+  static const std::map<kj::StringPtr, EllipticCurveInfo, CiLess> registeredCurves {
     {"P-256", {"P-256", NID_X9_62_prime256v1, 32}},
     {"P-384", {"P-384", NID_secp384r1, 48}},
     {"P-521", {"P-521", NID_secp521r1, 66}},
@@ -450,7 +450,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
 
   auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(namedCurve);
 
-  auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm{
+  auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
     normalizedName,
     normalizedNamedCurve,
   };
@@ -475,12 +475,12 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   auto publicEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_EC_KEY(publicEvpPKey.get(), ecPublicKey.get()));
 
-  AsymmetricKeyData privateKeyData{
+  AsymmetricKeyData privateKeyData {
     .evpPkey = kj::mv(privateEvpPKey),
     .keyType = KeyType::PRIVATE,
     .usages = privateKeyUsages,
   };
-  AsymmetricKeyData publicKeyData{
+  AsymmetricKeyData publicKeyData {
     .evpPkey = kj::mv(publicEvpPKey),
     .keyType = KeyType::PUBLIC,
     .usages = publicKeyUsages,
@@ -491,7 +491,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   auto publicKey = jsg::alloc<CryptoKey>(
       kj::heap<EllipticKey>(kj::mv(publicKeyData), keyAlgorithm, rsSize, true));
 
-  return CryptoKeyPair{.publicKey = kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
+  return CryptoKeyPair {.publicKey = kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
 
 AsymmetricKeyData importEllipticRaw(SubtleCrypto::ImportKeyData keyData,
@@ -539,7 +539,7 @@ AsymmetricKeyData importEllipticRaw(SubtleCrypto::ImportKeyData keyData,
   auto evpPkey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
 
-  return AsymmetricKeyData{kj::mv(evpPkey), KeyType::PUBLIC, usages};
+  return AsymmetricKeyData {kj::mv(evpPkey), KeyType::PUBLIC, usages};
 }
 
 kj::Own<EVP_PKEY> ellipticJwkReader(
@@ -604,7 +604,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
     KJ_IF_SOME(alg, keyDataJwk.alg) {
       // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
       // importKey().
-      static const std::map<kj::StringPtr, int> ecdsaAlgorithms{
+      static const std::map<kj::StringPtr, int> ecdsaAlgorithms {
         {"ES256", NID_X9_62_prime256v1},
         {"ES384", NID_secp384r1},
         {"ES512", NID_secp521r1},
@@ -711,7 +711,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(jsg::Lock& js,
       "input key data",
       tryDescribeOpensslErrors());
 
-  auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm{
+  auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
     normalizedName,
     normalizedNamedCurve,
   };
@@ -774,7 +774,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(jsg::Lock& js,
       "specified by the input key data",
       tryDescribeOpensslErrors());
 
-  auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm{
+  auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
     normalizedName,
     normalizedNamedCurve,
   };
@@ -805,12 +805,12 @@ public:
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
     // For legacy node-based keys with NODE-ED25519, algorithm contains a namedCurve field.
     if (keyAlgorithm == "NODE-ED25519") {
-      return CryptoKey::EllipticKeyAlgorithm{
+      return CryptoKey::EllipticKeyAlgorithm {
         keyAlgorithm,
         keyAlgorithm,
       };
     } else {
-      return CryptoKey::KeyAlgorithm{keyAlgorithm};
+      return CryptoKey::KeyAlgorithm {keyAlgorithm};
     }
   }
 
@@ -961,7 +961,7 @@ public:
 
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
     // Node.js implementation for EdDsa keys currently does not provide any detail
-    return CryptoKey::AsymmetricKeyDetails{};
+    return CryptoKey::AsymmetricKeyDetails {};
   }
 
   kj::StringPtr jsgGetMemoryName() const override {
@@ -981,7 +981,7 @@ private:
     KJ_ASSERT(getAlgorithmName() == "X25519"_kj || getAlgorithmName() == "Ed25519"_kj ||
         getAlgorithmName() == "NODE-ED25519"_kj);
 
-    uint8_t rawPublicKey[ED25519_PUBLIC_KEY_LEN]{};
+    uint8_t rawPublicKey[ED25519_PUBLIC_KEY_LEN] {};
     size_t publicKeyLen = sizeof(rawPublicKey);
     JSG_REQUIRE(1 == EVP_PKEY_get_raw_public_key(getEvpPkey(), rawPublicKey, &publicKeyLen),
         InternalDOMOperationError, "Failed to retrieve public key",
@@ -1002,7 +1002,7 @@ private:
       // boringssl defines ED25519_PRIVATE_KEY_LEN as 64B since it stores the private key together
       // with public key data in some functions, but in the EVP interface only the 32B private key
       // itself is returned.
-      uint8_t rawPrivateKey[ED25519_PUBLIC_KEY_LEN]{};
+      uint8_t rawPrivateKey[ED25519_PUBLIC_KEY_LEN] {};
       size_t privateKeyLen = ED25519_PUBLIC_KEY_LEN;
       JSG_REQUIRE(1 == EVP_PKEY_get_raw_private_key(getEvpPkey(), rawPrivateKey, &privateKeyLen),
           InternalDOMOperationError, "Failed to retrieve private key",
@@ -1057,12 +1057,12 @@ CryptoKeyPair generateKeyImpl(kj::StringPtr normalizedName,
       EVP_PKEY_new_raw_public_key(nid, nullptr, rawPublicKey, keySize), InternalDOMOperationError,
       "Internal error construct ", curveName, "public key", internalDescribeOpensslErrors());
 
-  AsymmetricKeyData privateKeyData{
+  AsymmetricKeyData privateKeyData {
     .evpPkey = kj::mv(privateEvpPKey),
     .keyType = KeyType::PRIVATE,
     .usages = privateKeyUsages,
   };
-  AsymmetricKeyData publicKeyData{
+  AsymmetricKeyData publicKeyData {
     .evpPkey = kj::mv(publicEvpPKey),
     .keyType = KeyType::PUBLIC,
     .usages = publicKeyUsages,
@@ -1073,7 +1073,7 @@ CryptoKeyPair generateKeyImpl(kj::StringPtr normalizedName,
   auto publicKey =
       jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(publicKeyData), normalizedName, true));
 
-  return CryptoKeyPair{.publicKey = kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
+  return CryptoKeyPair {.publicKey = kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(kj::StringPtr normalizedName,
@@ -1173,18 +1173,18 @@ kj::Own<CryptoKey::Impl> fromEcKey(kj::Own<EVP_PKEY> key) {
   auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(curveName);
 
   return kj::heap<EllipticKey>(
-      AsymmetricKeyData{
+      AsymmetricKeyData {
         .evpPkey = kj::mv(key),
         .keyType = KeyType::PUBLIC,
         .usages = CryptoKeyUsageSet::verify(),
       },
-      CryptoKey::EllipticKeyAlgorithm{.name = "ECDSA"_kj, .namedCurve = normalizedNamedCurve},
+      CryptoKey::EllipticKeyAlgorithm {.name = "ECDSA"_kj, .namedCurve = normalizedNamedCurve},
       rsSize, true);
 }
 
 kj::Own<CryptoKey::Impl> fromEd25519Key(kj::Own<EVP_PKEY> key) {
   return kj::heap<EdDsaKey>(
-      AsymmetricKeyData{
+      AsymmetricKeyData {
         .evpPkey = kj::mv(key),
         .keyType = KeyType::PUBLIC,
         .usages = CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify(),

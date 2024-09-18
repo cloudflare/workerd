@@ -15,11 +15,11 @@ namespace workerd::api {
 #pragma region ValueQueue::ReadRequest
 
 void ValueQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
-  resolver.resolve(js, ReadResult{.done = true});
+  resolver.resolve(js, ReadResult {.done = true});
 }
 
 void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::Value value) {
-  resolver.resolve(js, ReadResult{.value = kj::mv(value), .done = false});
+  resolver.resolve(js, ReadResult {.value = kj::mv(value), .done = false});
 }
 
 void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
@@ -53,7 +53,7 @@ kj::Own<ValueQueue::Entry> ValueQueue::Entry::clone(jsg::Lock& js) {
 }
 
 ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
-  return QueueEntry{.entry = entry->clone(js)};
+  return QueueEntry {.entry = entry->clone(js)};
 }
 
 #pragma endregion ValueQueue::QueueEntry
@@ -153,7 +153,7 @@ void ValueQueue::handlePush(
   // the size of the queue in the process.
   if (state.readRequests.empty()) {
     state.queueTotalSize += entry->getSize();
-    state.buffer.push_back(QueueEntry{.entry = kj::mv(entry)});
+    state.buffer.push_back(QueueEntry {.entry = kj::mv(entry)});
     return;
   }
 
@@ -274,19 +274,20 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
     // set done to true since that's what the streams spec requires.
     pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
     resolver.resolve(
-        js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
+        js, ReadResult {.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
   } else {
     // Otherwise, we set the length to zero
     pullInto.store.trim(js, pullInto.store.size());
     KJ_ASSERT(pullInto.store.size() == 0);
-    resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = true});
+    resolver.resolve(
+        js, ReadResult {.value = js.v8Ref(pullInto.store.getHandle(js)), .done = true});
   }
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
-  resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
+  resolver.resolve(js, ReadResult {.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
@@ -327,7 +328,7 @@ void ByteQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {}
 #pragma region ByteQueue::QueueEntry
 
 ByteQueue::QueueEntry ByteQueue::QueueEntry::clone(jsg::Lock& js) {
-  return QueueEntry{
+  return QueueEntry {
     .entry = entry->clone(js),
     .offset = offset,
   };
@@ -581,7 +582,7 @@ void ByteQueue::handlePush(
     jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Own<Entry> newEntry) {
   const auto bufferData = [&](size_t offset) {
     state.queueTotalSize += newEntry->getSize() - offset;
-    state.buffer.emplace_back(QueueEntry{
+    state.buffer.emplace_back(QueueEntry {
       .entry = kj::mv(newEntry),
       .offset = offset,
     });

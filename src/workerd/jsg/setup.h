@@ -250,7 +250,7 @@ private:
   // We use a double buffer for our deferred destruction queue. This allows us to avoid any
   // allocations in the general, steady state case, and forces us to clear the vector (a O(n)
   // operation) outside of the queue lock.
-  const kj::MutexGuarded<BatchQueue<Item>> queue{
+  const kj::MutexGuarded<BatchQueue<Item>> queue {
     DESTRUCTION_QUEUE_INITIAL_SIZE, DESTRUCTION_QUEUE_MAX_CAPACITY};
   std::atomic<int64_t> pendingExternalMemoryDecrement = {0};
 
@@ -574,7 +574,7 @@ public:
     // global object. `args...` are passed to the type's constructor.
     template <typename T, typename... Args>
     JsContext<T> newContext(Args&&... args) {
-      return newContext<T>(NewContextOptions{}, kj::fwd<Args>(args)...);
+      return newContext<T>(NewContextOptions {}, kj::fwd<Args>(args)...);
     }
 
     void reportError(const JsValue& value) override {

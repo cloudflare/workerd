@@ -81,7 +81,7 @@ static kj::Maybe<PemData> decodePem(kj::ArrayPtr<const char> text) {
   KJ_DEFER(OPENSSL_free(headerPtr));
   kj::Array<kj::byte> data(dataPtr, dataLen, disposer);
 
-  return PemData{kj::String(kj::mv(nameArr)), kj::mv(data)};
+  return PemData {kj::String(kj::mv(nameArr)), kj::mv(data)};
 }
 
 // Returns a time string in the format HTTP likes to use.
@@ -94,7 +94,7 @@ static kj::String httpTime(kj::Date date) {
   struct tm tm;
   KJ_ASSERT(gmtime_r(&time, &tm) == &tm);
 #endif
-  char buf[256]{};
+  char buf[256] {};
   size_t n = strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", &tm);
   KJ_ASSERT(n > 0);
   return kj::heapString(buf, n);
@@ -216,7 +216,7 @@ kj::Own<kj::TlsContext> Server::makeTlsContext(config::TlsOptions::Reader conf) 
   if (conf.hasKeypair()) {
     auto pairConf = conf.getKeypair();
     options.defaultKeypair = attachments->keypair.emplace(
-        kj::TlsKeypair{.privateKey = kj::TlsPrivateKey(pairConf.getPrivateKey()),
+        kj::TlsKeypair {.privateKey = kj::TlsPrivateKey(pairConf.getPrivateKey()),
           .certificate = kj::TlsCertificate(pairConf.getCertificateChain())});
   }
 
@@ -320,11 +320,11 @@ public:
 
   Rewritten rewriteOutgoingRequest(
       kj::StringPtr& url, const kj::HttpHeaders& headers, kj::Maybe<kj::StringPtr> cfBlobJson) {
-    Rewritten result{kj::heap(headers.cloneShallow()), nullptr};
+    Rewritten result {kj::heap(headers.cloneShallow()), nullptr};
 
     if (style == config::HttpOptions::Style::HOST) {
       auto parsed = kj::Url::parse(url, kj::Url::HTTP_PROXY_REQUEST,
-          kj::Url::Options{.percentDecode = false, .allowEmpty = true});
+          kj::Url::Options {.percentDecode = false, .allowEmpty = true});
       result.headers->set(kj::HttpHeaderId::HOST, kj::mv(parsed.host));
       KJ_IF_SOME(h, forwardedProtoHeader) {
         result.headers->set(h, kj::mv(parsed.scheme));
@@ -349,11 +349,11 @@ public:
       kj::StringPtr physicalProtocol,
       const kj::HttpHeaders& headers,
       kj::Maybe<kj::String>& cfBlobJson) {
-    Rewritten result{kj::heap(headers.cloneShallow()), nullptr};
+    Rewritten result {kj::heap(headers.cloneShallow()), nullptr};
 
     if (style == config::HttpOptions::Style::HOST) {
-      auto parsed = kj::Url::parse(
-          url, kj::Url::HTTP_REQUEST, kj::Url::Options{.percentDecode = false, .allowEmpty = true});
+      auto parsed = kj::Url::parse(url, kj::Url::HTTP_REQUEST,
+          kj::Url::Options {.percentDecode = false, .allowEmpty = true});
       parsed.host = kj::str(KJ_UNWRAP_OR_RETURN(headers.get(kj::HttpHeaderId::HOST), kj::none));
 
       KJ_IF_SOME(h, forwardedProtoHeader) {
@@ -544,7 +544,7 @@ private:
       connection.shutdownWrite();
     }));
 
-    tunnel.accept(200, "OK", kj::HttpHeaders(kj::HttpHeaderTable{}));
+    tunnel.accept(200, "OK", kj::HttpHeaders(kj::HttpHeaderTable {}));
 
     co_await kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(io_stream));
   }
@@ -698,7 +698,7 @@ private:
       // We'll use capnp RPC for custom events.
       auto bootstrap = parent.getOutgoingCapnp(*parent.inner);
       auto dispatcher =
-          bootstrap.startEventRequest(capnp::MessageSize{4, 0}).send().getDispatcher();
+          bootstrap.startEventRequest(capnp::MessageSize {4, 0}).send().getDispatcher();
       return event
           ->sendRpc(parent.httpOverCapnpFactory, parent.byteStreamFactory, parent.waitUntilTasks,
               kj::mv(dispatcher))
@@ -1241,7 +1241,7 @@ public:
       : isolateThreadExecutor(kj::mv(isolateThreadExecutor)),
         timer(timer),
         headerTable(headerTableBuilder.getFutureTable()),
-        server(timer, headerTable, *this, kj::HttpServerSettings{.errorHandler = *this}),
+        server(timer, headerTable, *this, kj::HttpServerSettings {.errorHandler = *this}),
         registrar(registrar) {
     registrar.attach(this);
   }
@@ -1907,7 +1907,7 @@ public:
         auto& actorContainer = actors.findOrCreate(id, [&]() mutable {
           auto container = kj::heap<ActorContainer>(idPtr, *this, timer);
 
-          return kj::HashMap<kj::String, kj::Own<ActorContainer>>::Entry{
+          return kj::HashMap<kj::String, kj::Own<ActorContainer>>::Entry {
             kj::mv(id), kj::mv(container)};
         });
 
@@ -1916,12 +1916,12 @@ public:
           KJ_IF_SOME(a, actorContainer->actor) {
             // This actor was used recently and hasn't been evicted, let's reuse it.
             KJ_IF_SOME(ref, actorContainer->getContainerRef()) {
-              return GetActorResult{.actor = a->addRef(), .ref = ref.addRef()};
+              return GetActorResult {.actor = a->addRef(), .ref = ref.addRef()};
             }
             // We have an actor, but all the clients dropped their reference to the DO so we need
             // make a new `ActorContainerRef`. Note that `hasClients()` will return true now,
             // preventing cleanupLoop from evicting us.
-            return GetActorResult{
+            return GetActorResult {
               .actor = a->addRef(), .ref = kj::refcounted<ActorContainerRef>(*actorContainer)};
           }
           // We don't have an actor so we need to create it.
@@ -1938,7 +1938,7 @@ public:
                 // TODO(cleanup): Is there a better way to handle the ActorKey in general here?
                 auto idStr = kj::str(idPtr);
                 auto sqliteHooks = kj::heap<ActorSqliteHooks>(
-                    channels.alarmScheduler, ActorKey{.uniqueKey = d.uniqueKey, .actorId = idStr})
+                    channels.alarmScheduler, ActorKey {.uniqueKey = d.uniqueKey, .actorId = idStr})
                                        .attach(kj::mv(idStr));
 
                 auto db = kj::heap<SqliteDatabase>(*as,
@@ -1999,7 +1999,7 @@ public:
             // next time.
             auto& actorRef = KJ_REQUIRE_NONNULL(actorContainer->actor);
             auto& entry = onBrokenTasks.findOrCreateEntry(actorContainer->getKey(), [&]() {
-              return decltype(onBrokenTasks)::Entry{kj::str(actorContainer->getKey()), kj::none};
+              return decltype(onBrokenTasks)::Entry {kj::str(actorContainer->getKey()), kj::none};
             });
             entry.value = onActorBroken(actorRef->onBroken(), *actorContainer)
                               .eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
@@ -2011,11 +2011,11 @@ public:
               // refcounted ActorContainerRef's tracking the same ActorContainer. This would likely
               // result in memory corruption because the ActorContainer's `containerRef` would
               // lose access to one of the ActorContainerRef's.
-              return GetActorResult{.actor = actorRef->addRef(), .ref = ref.addRef()};
+              return GetActorResult {.actor = actorRef->addRef(), .ref = ref.addRef()};
             }
 
             // `hasClients()` will return true now, preventing cleanupLoop from evicting us.
-            return GetActorResult{.actor = actorRef->addRef(),
+            return GetActorResult {.actor = actorRef->addRef(),
               .ref = kj::refcounted<ActorContainerRef>(*actorContainer)};
           });
         }();
@@ -2331,7 +2331,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
   TRACE_EVENT("workerd", "Server::WorkerService::createBinding()", "name", workerName.cStr(),
       "binding", bindingName.cStr());
   auto makeGlobal = [&](auto&& value) {
-    return Global{.name = kj::str(bindingName), .value = kj::mv(value)};
+    return Global {.name = kj::str(bindingName), .value = kj::mv(value)};
   };
 
   auto errorContext = kj::str("Worker \"", workerName, "\"'s binding \"", bindingName, "\"");
@@ -2349,7 +2349,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     case config::Worker::Binding::DATA:
       return makeGlobal(kj::heapArray<byte>(binding.getData()));
     case config::Worker::Binding::JSON:
-      return makeGlobal(Global::Json{kj::str(binding.getJson())});
+      return makeGlobal(Global::Json {kj::str(binding.getJson())});
 
     case config::Worker::Binding::WASM_MODULE:
       if (conf.isServiceWorkerScript()) {
@@ -2426,7 +2426,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
         }
         case config::Worker::Binding::CryptoKey::JWK:
           keyGlobal.format = kj::str("jwk");
-          keyGlobal.keyData = Global::Json{kj::str(keyConf.getJwk())};
+          keyGlobal.keyData = Global::Json {kj::str(keyConf.getJwk())};
           goto validFormat;
       }
       errorReporter.addError(kj::str("Encountered unknown CryptoKey type for binding \"",
@@ -2438,10 +2438,10 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       switch (algorithmConf.which()) {
         case config::Worker::Binding::CryptoKey::Algorithm::NAME:
           keyGlobal.algorithm =
-              Global::Json{kj::str('"', escapeJsonString(algorithmConf.getName()), '"')};
+              Global::Json {kj::str('"', escapeJsonString(algorithmConf.getName()), '"')};
           goto validAlgorithm;
         case config::Worker::Binding::CryptoKey::Algorithm::JSON:
-          keyGlobal.algorithm = Global::Json{kj::str(algorithmConf.getJson())};
+          keyGlobal.algorithm = Global::Json {kj::str(algorithmConf.getJson())};
           goto validAlgorithm;
       }
       errorReporter.addError(kj::str("Encountered unknown CryptoKey algorithm type for binding \"",
@@ -2458,9 +2458,9 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
 
     case config::Worker::Binding::SERVICE: {
       uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
-      subrequestChannels.add(FutureSubrequestChannel{binding.getService(), kj::mv(errorContext)});
+      subrequestChannels.add(FutureSubrequestChannel {binding.getService(), kj::mv(errorContext)});
       return makeGlobal(
-          Global::Fetcher{.channel = channel, .requiresHost = true, .isInHouse = false});
+          Global::Fetcher {.channel = channel, .requiresHost = true, .isInHouse = false});
     }
 
     case config::Worker::Binding::DURABLE_OBJECT_NAMESPACE: {
@@ -2492,15 +2492,15 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       }
 
       uint channel = (uint)actorChannels.size();
-      actorChannels.add(FutureActorChannel{actorBinding, kj::mv(errorContext)});
+      actorChannels.add(FutureActorChannel {actorBinding, kj::mv(errorContext)});
 
       KJ_SWITCH_ONEOF(*actorConfig) {
         KJ_CASE_ONEOF(durable, Server::Durable) {
-          return makeGlobal(Global::DurableActorNamespace{
+          return makeGlobal(Global::DurableActorNamespace {
             .actorChannel = channel, .uniqueKey = durable.uniqueKey});
         }
         KJ_CASE_ONEOF(_, Server::Ephemeral) {
-          return makeGlobal(Global::EphemeralActorNamespace{.actorChannel = channel});
+          return makeGlobal(Global::EphemeralActorNamespace {.actorChannel = channel});
         }
       }
 
@@ -2510,28 +2510,28 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     case config::Worker::Binding::KV_NAMESPACE: {
       uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
-          FutureSubrequestChannel{binding.getKvNamespace(), kj::mv(errorContext)});
+          FutureSubrequestChannel {binding.getKvNamespace(), kj::mv(errorContext)});
 
-      return makeGlobal(Global::KvNamespace{.subrequestChannel = channel});
+      return makeGlobal(Global::KvNamespace {.subrequestChannel = channel});
     }
 
     case config::Worker::Binding::R2_BUCKET: {
       uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
-      subrequestChannels.add(FutureSubrequestChannel{binding.getR2Bucket(), kj::mv(errorContext)});
-      return makeGlobal(Global::R2Bucket{.subrequestChannel = channel});
+      subrequestChannels.add(FutureSubrequestChannel {binding.getR2Bucket(), kj::mv(errorContext)});
+      return makeGlobal(Global::R2Bucket {.subrequestChannel = channel});
     }
 
     case config::Worker::Binding::R2_ADMIN: {
       uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
-      subrequestChannels.add(FutureSubrequestChannel{binding.getR2Admin(), kj::mv(errorContext)});
-      return makeGlobal(Global::R2Admin{.subrequestChannel = channel});
+      subrequestChannels.add(FutureSubrequestChannel {binding.getR2Admin(), kj::mv(errorContext)});
+      return makeGlobal(Global::R2Admin {.subrequestChannel = channel});
     }
 
     case config::Worker::Binding::QUEUE: {
       uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
-      subrequestChannels.add(FutureSubrequestChannel{binding.getQueue(), kj::mv(errorContext)});
+      subrequestChannels.add(FutureSubrequestChannel {binding.getQueue(), kj::mv(errorContext)});
 
-      return makeGlobal(Global::QueueBinding{.subrequestChannel = channel});
+      return makeGlobal(Global::QueueBinding {.subrequestChannel = channel});
     }
 
     case config::Worker::Binding::WRAPPED: {
@@ -2547,7 +2547,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
           return kj::none;
         }
       }
-      return makeGlobal(Global::Wrapped{
+      return makeGlobal(Global::Wrapped {
         .moduleName = kj::str(wrapped.getModuleName()),
         .entrypoint = kj::str(wrapped.getEntrypoint()),
         .innerBindings = innerGlobals.releaseAsArray(),
@@ -2559,7 +2559,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       if (value == nullptr) {
         // TODO(cleanup): Maybe make a Global::Null? (Can't use nullptr_t in OneOf.) For now,
         // using JSON gets the job done hackily.
-        return makeGlobal(Global::Json{kj::str("null")});
+        return makeGlobal(Global::Json {kj::str("null")});
       } else {
         return makeGlobal(kj::str(value));
       }
@@ -2574,9 +2574,9 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
 
       uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
-          FutureSubrequestChannel{binding.getAnalyticsEngine(), kj::mv(errorContext)});
+          FutureSubrequestChannel {binding.getAnalyticsEngine(), kj::mv(errorContext)});
 
-      return makeGlobal(Global::AnalyticsEngine{
+      return makeGlobal(Global::AnalyticsEngine {
         .subrequestChannel = channel,
         .dataset = kj::str(binding.getAnalyticsEngine().getName()),
         .version = 0,
@@ -2585,8 +2585,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     case config::Worker::Binding::HYPERDRIVE: {
       uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
-          FutureSubrequestChannel{binding.getHyperdrive().getDesignator(), kj::mv(errorContext)});
-      return makeGlobal(Global::Hyperdrive{
+          FutureSubrequestChannel {binding.getHyperdrive().getDesignator(), kj::mv(errorContext)});
+      return makeGlobal(Global::Hyperdrive {
         .subrequestChannel = channel,
         .database = kj::str(binding.getHyperdrive().getDatabase()),
         .user = kj::str(binding.getHyperdrive().getUser()),
@@ -2600,7 +2600,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
             "You must run workerd with `--experimental` to use this feature."));
         return kj::none;
       }
-      return makeGlobal(Global::UnsafeEval{});
+      return makeGlobal(Global::UnsafeEval {});
     }
     case config::Worker::Binding::MEMORY_CACHE: {
       if (!experimental) {
@@ -2829,7 +2829,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
             segment.startsWith("workerd:")) {
           actualSpecifier = segment;
           url.query.add(
-              kj::Url::QueryParam{.name = kj::str("specifier"), .value = kj::str(segment)});
+              kj::Url::QueryParam {.name = kj::str("specifier"), .value = kj::str(segment)});
           prefixed = true;
         }
       }
@@ -2838,13 +2838,13 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
         if (actualSpecifier.startsWith("/")) {
           actualSpecifier = specifier.slice(1);
         }
-        url.query.add(kj::Url::QueryParam{kj::str("specifier"), kj::str(specifier)});
+        url.query.add(kj::Url::QueryParam {kj::str("specifier"), kj::str(specifier)});
       }
       KJ_IF_SOME(ref, referrer) {
-        url.query.add(kj::Url::QueryParam{kj::str("referrer"), kj::mv(ref)});
+        url.query.add(kj::Url::QueryParam {kj::str("referrer"), kj::mv(ref)});
       }
       KJ_IF_SOME(raw, rawSpecifier) {
-        url.query.add(kj::Url::QueryParam{kj::str("rawSpecifier"), kj::str(raw)});
+        url.query.add(kj::Url::QueryParam {kj::str("rawSpecifier"), kj::str(raw)});
       }
 
       auto spec = url.toString(kj::Url::HTTP_REQUEST);
@@ -2995,7 +2995,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   auto linkCallback = [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
                           actorChannels = kj::mv(actorChannels)](
                           WorkerService& workerService) mutable {
-    WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
+    WorkerService::LinkedIoChannels result {.alarmScheduler = *alarmScheduler};
 
     auto services = kj::heapArrayBuilder<Service*>(
         subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT);
@@ -3072,7 +3072,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
         alarmScheduler->registerNamespace(
             config.uniqueKey, [&actorNs](kj::String id) -> kj::Own<WorkerInterface> {
-          return actorNs->getActor(kj::mv(id), IoChannelFactory::SubrequestMetadata{});
+          return actorNs->getActor(kj::mv(id), IoChannelFactory::SubrequestMetadata {});
         });
       }
     }
@@ -3263,7 +3263,7 @@ private:
       //   priority; we should only accept a cf blob from the client if we have a cfBlobHeader
       //   configured, which hints that this service trusts the client to provide the cf blob.)
 
-      context.initResults(capnp::MessageSize{4, 1})
+      context.initResults(capnp::MessageSize {4, 1})
           .setDispatcher(kj::heap<EventDispatcherImpl>(parent, parent.service.startRequest({})));
       return kj::READY_NOW;
     }
@@ -3279,7 +3279,7 @@ private:
           worker(kj::mv(worker)) {}
 
     kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
-      context.initResults(capnp::MessageSize{4, 1})
+      context.initResults(capnp::MessageSize {4, 1})
           .setHttp(parent.httpOverCapnpFactory.kjToCapnp(getWorker()));
       return kj::READY_NOW;
     }
@@ -3342,7 +3342,7 @@ private:
               parent.timer,
               parent.headerTable,
               *this,
-              kj::HttpServerSettings{.errorHandler = *this,
+              kj::HttpServerSettings {.errorHandler = *this,
                 .webSocketCompressionMode = kj::HttpServerSettings::MANUAL_COMPRESSION}) {}
 
     HttpListener& parent;
@@ -3577,7 +3577,7 @@ void Server::startServices(jsg::V8System& v8System,
           case config::Worker::DurableObjectNamespace::UNIQUE_KEY:
             hadDurable = true;
             serviceActorConfigs.insert(kj::str(ns.getClassName()),
-                Durable{.uniqueKey = kj::str(ns.getUniqueKey()),
+                Durable {.uniqueKey = kj::str(ns.getUniqueKey()),
                   .isEvictable = !ns.getPreventEviction(),
                   .enableSql = ns.getEnableSql()});
             continue;
@@ -3589,7 +3589,8 @@ void Server::startServices(jsg::V8System& v8System,
                   "workerd with `--experimental` to use this feature."));
             }
             serviceActorConfigs.insert(kj::str(ns.getClassName()),
-                Ephemeral{.isEvictable = !ns.getPreventEviction(), .enableSql = ns.getEnableSql()});
+                Ephemeral {
+                  .isEvictable = !ns.getPreventEviction(), .enableSql = ns.getEnableSql()});
             continue;
         }
         reportConfigError(kj::str("Encountered unknown DurableObjectNamespace type in service \"",
@@ -3666,7 +3667,7 @@ void Server::startServices(jsg::V8System& v8System,
         kj::mv(publicNetwork), kj::mv(tlsNetwork), *tls)
                        .attach(kj::mv(tls));
 
-    return decltype(services)::Entry{kj::str("internet"_kj), kj::mv(service)};
+    return decltype(services)::Entry {kj::str("internet"_kj), kj::mv(service)};
   });
 
   // Start the alarm scheduler before linking services

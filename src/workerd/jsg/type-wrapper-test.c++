@@ -51,7 +51,7 @@ public:
       v8::Local<v8::Value> handle,
       TestExtensionType*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return TestExtensionType{handle->Int32Value(context).ToChecked()};
+    return TestExtensionType {handle->Int32Value(context).ToChecked()};
   }
 
   template <bool isContext = false>

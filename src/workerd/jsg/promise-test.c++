@@ -177,7 +177,7 @@ KJ_TEST("whenResolved") {
 }
 
 KJ_TEST("thenable") {
-  static const auto config = JsgConfig{
+  static const auto config = JsgConfig {
     .unwrapCustomThenables = true,
   };
 

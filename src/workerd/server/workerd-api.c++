@@ -120,7 +120,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     jsg::NodeJsModuleObject,
     jsg::NodeJsModuleContext);
 
-static const PythonConfig defaultConfig{
+static const PythonConfig defaultConfig {
   .packageDiskCacheRoot = kj::none,
   .pyodideDiskCacheRoot = kj::none,
   .createSnapshot = false,
@@ -139,7 +139,7 @@ struct WorkerdApi::Impl final {
   public:
     Configuration(Impl& impl)
         : features(*impl.features),
-          jsgConfig(jsg::JsgConfig{
+          jsgConfig(jsg::JsgConfig {
             .noSubstituteNull = features.getNoSubstituteNull(),
             .unwrapCustomThenables = features.getUnwrapCustomThenables(),
           }) {}
@@ -230,7 +230,7 @@ CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
   return *impl->features;
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(jsg::Lock& lock) const {
-  jsg::NewContextOptions options{
+  jsg::NewContextOptions options {
     .newModuleRegistry = impl->tryGetModuleRegistry(),
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
@@ -280,13 +280,13 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
       }
 
       bool isPython = api::pyodide::hasPythonModules(modules);
-      return Worker::Script::ModulesSource{modules[0].getName(),
+      return Worker::Script::ModulesSource {modules[0].getName(),
         [conf, &errorReporter, extensions](jsg::Lock& lock, const Worker::Api& api) {
         return WorkerdApi::from(api).compileModules(lock, conf, errorReporter, extensions);
       }, isPython};
     }
     case config::Worker::SERVICE_WORKER_SCRIPT:
-      return Worker::Script::ScriptSource{conf.getServiceWorkerScript(), name,
+      return Worker::Script::ScriptSource {conf.getServiceWorkerScript(), name,
         [conf, &errorReporter](
             jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer) {
         return WorkerdApi::from(api).compileScriptGlobals(lock, conf, errorReporter, observer);
@@ -299,7 +299,7 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
   errorReporter.addError(kj::str("Encountered unknown Worker code type. Was the "
                                  "config compiled with a newer version of the schema?"));
 invalid:
-  return Worker::Script::ScriptSource{""_kj, name,
+  return Worker::Script::ScriptSource {""_kj, name,
     [](jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer)
         -> kj::Array<Worker::Script::CompiledGlobal> { return nullptr; }};
 }
@@ -325,7 +325,7 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileScriptGlobals(jsg::
       auto name = lock.str(binding.getName());
       auto value = Impl::compileWasmGlobal(lock, binding.getWasmModule(), observer);
 
-      compiledGlobals.add(Worker::Script::CompiledGlobal{
+      compiledGlobals.add(Worker::Script::CompiledGlobal {
         {lock.v8Isolate, name},
         {lock.v8Isolate, value},
       });
@@ -661,7 +661,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     KJ_CASE_ONEOF(ns, Global::KvNamespace) {
       value = lock.wrap(context,
           jsg::alloc<api::KvNamespace>(
-              kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
+              kj::Array<api::KvNamespace::AdditionalHeader> {}, ns.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(r2, Global::R2Bucket) {
@@ -863,7 +863,7 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
       result.value = hyperdrive.clone();
     }
     KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
-      result.value = Global::UnsafeEval{};
+      result.value = Global::UnsafeEval {};
     }
   }
 

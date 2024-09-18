@@ -94,13 +94,13 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
   } else if (std::find(expectedOptionalFields.begin(), expectedOptionalFields.end(),
                  OptionalMetadata::Http) != expectedOptionalFields.end()) {
     // HTTP metadata was asked for but the object didn't have anything.
-    httpMetadata = R2Bucket::HttpMetadata{};
+    httpMetadata = R2Bucket::HttpMetadata {};
   }
 
   jsg::Optional<jsg::Dict<kj::String>> customMetadata;
   if (responseReader.hasCustomFields()) {
-    customMetadata = jsg::Dict<kj::String>{.fields =
-                                               KJ_MAP(field, responseReader.getCustomFields()) {
+    customMetadata =
+        jsg::Dict<kj::String> {.fields = KJ_MAP(field, responseReader.getCustomFields()) {
       jsg::Dict<kj::String>::Field item;
       item.name = kj::str(field.getK());
       item.value = kj::str(field.getV());
@@ -109,14 +109,14 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
   } else if (std::find(expectedOptionalFields.begin(), expectedOptionalFields.end(),
                  OptionalMetadata::Custom) != expectedOptionalFields.end()) {
     // Custom metadata was asked for but the object didn't have anything.
-    customMetadata = jsg::Dict<kj::String>{};
+    customMetadata = jsg::Dict<kj::String> {};
   }
 
   jsg::Optional<R2Bucket::Range> range;
 
   if (responseReader.hasRange()) {
     auto rangeBuilder = responseReader.getRange();
-    range = R2Bucket::Range{
+    range = R2Bucket::Range {
       .offset = static_cast<double>(rangeBuilder.getOffset()),
       .length = static_cast<double>(rangeBuilder.getLength()),
     };
@@ -764,11 +764,11 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
       KJ_IF_SOME(i, o.include) {
         using Field = typename jsg::Dict<uint16_t>::Field;
         static const std::array<Field, 2> fields = {
-          Field{
+          Field {
             .name = kj::str("httpMetadata"),
             .value = static_cast<uint16_t>(R2ListRequest::IncludeField::HTTP),
           },
-          Field{
+          Field {
             .name = kj::str("customMetadata"),
             .value = static_cast<uint16_t>(R2ListRequest::IncludeField::CUSTOM),
           },

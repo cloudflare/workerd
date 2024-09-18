@@ -102,12 +102,12 @@ KJ_TEST("AES-CTR key wrap") {
 
   static constexpr auto getWrappingKey = [](jsg::Lock& js, SubtleCrypto& subtle) {
     return subtle.importKeySync(js, "raw", kj::heapArray<kj::byte>(KEY_DATA),
-        SubtleCrypto::ImportKeyAlgorithm{.name = kj::str("AES-CTR")}, false /* extractable */,
+        SubtleCrypto::ImportKeyAlgorithm {.name = kj::str("AES-CTR")}, false /* extractable */,
         {kj::str("wrapKey"), kj::str("unwrapKey")});
   };
 
   static constexpr auto getEnc = [] {
-    return SubtleCrypto::EncryptAlgorithm{
+    return SubtleCrypto::EncryptAlgorithm {
       .name = kj::str("AES-CTR"),
       .counter = kj::arr<uint8_t>(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16),
       .length = 5,
@@ -115,7 +115,7 @@ KJ_TEST("AES-CTR key wrap") {
   };
 
   static constexpr auto getImportKeyAlg = [] {
-    return SubtleCrypto::ImportKeyAlgorithm{
+    return SubtleCrypto::ImportKeyAlgorithm {
       .name = kj::str("AES-CBC"),
       .length = 256,
     };

@@ -132,7 +132,7 @@ public:
         KJ_UNREACHABLE;
     }
 
-    return Result{
+    return Result {
       .success = result == Z_OK,
       .buffer = kj::arrayPtr(buffer, sizeof(buffer) - ctx.avail_out),
     };
@@ -344,7 +344,7 @@ private:
 
     // Otherwise, create a pending read.
     auto promise = kj::newPromiseAndFulfiller<size_t>();
-    auto pendingRead = PendingRead{
+    auto pendingRead = PendingRead {
       .buffer = dest,
       .minBytes = minBytes,
       .filled = 0,

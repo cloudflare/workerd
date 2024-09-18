@@ -259,7 +259,7 @@ private:
       KJ_ASSERT(rc == -1);
       discardLastError();
 
-      throw kj::CanceledException{};
+      throw kj::CanceledException {};
     }
   }
 
@@ -335,7 +335,7 @@ kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(jsg::Lock& js,
   auto builder = LOL_HTML_OWN(rewriter_builder, lol_html_rewriter_builder_new());
 
   auto registerCallback = [&](ElementCallbackFunction& callback) {
-    auto registeredHandler = RegisteredHandler{rewriter, callback.addRef(js)};
+    auto registeredHandler = RegisteredHandler {rewriter, callback.addRef(js)};
     return rewriter.registeredHandlers.add(kj::heap(kj::mv(registeredHandler))).get();
   };
 
@@ -579,7 +579,7 @@ kj::Promise<void> Rewriter::thunkPromise(CType* content, RegisteredHandler& regi
 }
 
 void Rewriter::onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback) {
-  auto registeredHandler = Rewriter::RegisteredHandler{*this, kj::mv(callback)};
+  auto registeredHandler = Rewriter::RegisteredHandler {*this, kj::mv(callback)};
   // NOTE: this gets freed in `thunkPromise` above.
   // TODO(someday): this uses more memory than necessary for implied end tags, which lol-html
   // doesn't actually call `thunk` on.  LOL HTML drops the handler after it finishes transforming
@@ -1000,14 +1000,14 @@ jsg::Ref<HTMLRewriter> HTMLRewriter::on(
   kj::Own<lol_html_Selector> selector =
       LOL_HTML_OWN(selector, lol_html_selector_parse(stringSelector.cStr(), stringSelector.size()));
 
-  impl->unregisteredHandlers.add(UnregisteredElementHandlers{
+  impl->unregisteredHandlers.add(UnregisteredElementHandlers {
     kj::mv(selector), kj::mv(handlers.element), kj::mv(handlers.comments), kj::mv(handlers.text)});
 
   return JSG_THIS;
 }
 
 jsg::Ref<HTMLRewriter> HTMLRewriter::onDocument(DocumentContentHandlers&& handlers) {
-  impl->unregisteredHandlers.add(UnregisteredDocumentHandlers{kj::mv(handlers.doctype),
+  impl->unregisteredHandlers.add(UnregisteredDocumentHandlers {kj::mv(handlers.doctype),
     kj::mv(handlers.comments), kj::mv(handlers.text), kj::mv(handlers.end)});
 
   return JSG_THIS;

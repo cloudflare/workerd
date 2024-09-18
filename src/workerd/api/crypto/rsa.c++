@@ -310,7 +310,7 @@ kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(KeyType keyType, const SubtleCrypto::J
 
   auto usages = keyType == KeyType::PRIVATE ? CryptoKeyUsageSet::privateKeyMask()
                                             : CryptoKeyUsageSet::publicKeyMask();
-  return AsymmetricKeyData{kj::mv(evpPkey), keyType, usages};
+  return AsymmetricKeyData {kj::mv(evpPkey), keyType, usages};
 }
 
 kj::String Rsa::toPem(
@@ -704,12 +704,12 @@ CryptoKeyPair generateRsaPair(jsg::Lock& js,
     CryptoKeyUsageSet usages) {
   auto privateKeyAlgorithm = keyAlgorithm.clone(js);
 
-  AsymmetricKeyData publicKeyData{
+  AsymmetricKeyData publicKeyData {
     .evpPkey = kj::mv(publicEvpPKey),
     .keyType = KeyType::PUBLIC,
     .usages = usages & CryptoKeyUsageSet::publicKeyMask(),
   };
-  AsymmetricKeyData privateKeyData{
+  AsymmetricKeyData privateKeyData {
     .evpPkey = kj::mv(privateEvpPKey),
     .keyType = KeyType::PRIVATE,
     .usages = usages & CryptoKeyUsageSet::privateKeyMask(),
@@ -717,7 +717,7 @@ CryptoKeyPair generateRsaPair(jsg::Lock& js,
 
   static constexpr auto createPair = [](kj::Own<CryptoKey::Impl> publicKey,
                                          kj::Own<CryptoKey::Impl> privateKey) {
-    return CryptoKeyPair{.publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
+    return CryptoKeyPair {.publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
       .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey))};
   };
 
@@ -851,10 +851,10 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(jsg::
   auto publicEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_RSA(publicEvpPKey.get(), rsaPublicKey));
 
-  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm{.name = normalizedName,
+  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {.name = normalizedName,
     .modulusLength = static_cast<uint16_t>(modulusLength),
     .publicExponent = kj::mv(publicExponent),
-    .hash = KeyAlgorithm{normalizedHashName}};
+    .hash = KeyAlgorithm {normalizedHashName}};
 
   return generateRsaPair(js, normalizedName, kj::mv(privateEvpPKey), kj::mv(publicEvpPKey),
       kj::mv(keyAlgorithm), extractable, usages);
@@ -890,19 +890,19 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(jsg::Lock& js,
     KJ_IF_SOME(alg, keyDataJwk.alg) {
       // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
       // importKey().
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaShaAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> rsaShaAlgorithms {
         {"RS1", EVP_sha1()},
         {"RS256", EVP_sha256()},
         {"RS384", EVP_sha384()},
         {"RS512", EVP_sha512()},
       };
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaPssAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> rsaPssAlgorithms {
         {"PS1", EVP_sha1()},
         {"PS256", EVP_sha256()},
         {"PS384", EVP_sha384()},
         {"PS512", EVP_sha512()},
       };
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaOaepAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> rsaOaepAlgorithms {
         {"RSA-OAEP", EVP_sha1()},
         {"RSA-OAEP-256", EVP_sha256()},
         {"RSA-OAEP-384", EVP_sha384()},
@@ -951,10 +951,10 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(jsg::Lock& js,
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
   Rsa::validateRsaParams(js, modulusLength, publicExponent, true);
 
-  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm{.name = normalizedName,
+  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {.name = normalizedName,
     .modulusLength = static_cast<uint16_t>(modulusLength),
     .publicExponent = kj::mv(publicExponent),
-    .hash = KeyAlgorithm{normalizedHashName}};
+    .hash = KeyAlgorithm {normalizedHashName}};
   if (normalizedName == "RSASSA-PKCS1-v1_5") {
     return kj::heap<RsassaPkcs1V15Key>(kj::mv(importedKey), kj::mv(keyAlgorithm), extractable);
   } else if (normalizedName == "RSA-PSS") {
@@ -988,7 +988,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(jsg::Lock& js,
     KJ_IF_SOME(alg, keyDataJwk.alg) {
       // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
       // importKey().
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> rsaAlgorithms {
         {"RS1", EVP_sha1()},
         {"RS256", EVP_sha256()},
         {"RS384", EVP_sha384()},
@@ -1016,7 +1016,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(jsg::Lock& js,
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
   Rsa::validateRsaParams(js, modulusLength, publicExponent, true);
 
-  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm{.name = "RSA-RAW"_kj,
+  auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {.name = "RSA-RAW"_kj,
     .modulusLength = static_cast<uint16_t>(modulusLength),
     .publicExponent = kj::mv(publicExponent)};
 
@@ -1024,11 +1024,11 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(jsg::Lock& js,
 }
 
 kj::Own<CryptoKey::Impl> fromRsaKey(kj::Own<EVP_PKEY> key) {
-  return kj::heap<RsassaPkcs1V15Key>(AsymmetricKeyData{.evpPkey = kj::mv(key),
+  return kj::heap<RsassaPkcs1V15Key>(AsymmetricKeyData {.evpPkey = kj::mv(key),
                                        .keyType = KeyType::PUBLIC,
                                        .usages = CryptoKeyUsageSet::decrypt() |
                                            CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify()},
-      CryptoKey::RsaKeyAlgorithm{.name = "RSA"_kj}, true);
+      CryptoKey::RsaKeyAlgorithm {.name = "RSA"_kj}, true);
 }
 
 }  // namespace workerd::api

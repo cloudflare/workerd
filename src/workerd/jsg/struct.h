@@ -118,7 +118,7 @@ public:
       if constexpr (((webidl::isOptional<typename FieldWrappers::Type> ||
                          kj::isSameType<typename FieldWrappers::Type, Unimplemented>()) &&
                         ...)) {
-        return T{};
+        return T {};
       }
       jsg::throwTypeError(isolate,
           kj::str("Cannot initialize ", typeid(T).name(),
@@ -137,7 +137,8 @@ public:
     //   it prescribes lexicographically-ordered member initialization, with base members ordered
     //   before derived members. Objects with mutating getters might be broken by this, but it
     //   doesn't seem worth fixing absent a compelling use case.
-    auto t = T{kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), isolate, context, in)...};
+    auto t =
+        T {kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), isolate, context, in)...};
 
     // Note that if a `validate` function is provided, then it will be called after the struct is
     // unwrapped from v8. This would be an appropriate time to throw an error.

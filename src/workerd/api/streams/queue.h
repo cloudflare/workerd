@@ -370,7 +370,7 @@ public:
     KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
       // If we are not already closing, enqueue a Close sentinel.
       if (!isClosing()) {
-        ready.buffer.push_back(Close{});
+        ready.buffer.push_back(Close {});
       }
 
       // Then check to see if we need to drain pending reads and
@@ -477,7 +477,7 @@ public:
         for (auto& item: ready.buffer) {
           KJ_SWITCH_ONEOF(item) {
             KJ_CASE_ONEOF(c, Close) {
-              otherReady.buffer.push_back(Close{});
+              otherReady.buffer.push_back(Close {});
             }
             KJ_CASE_ONEOF(entry, QueueEntry) {
               otherReady.buffer.push_back(entry.clone(js));

@@ -382,7 +382,8 @@ kj::Promise<void> RpcWorkerInterface::connect(kj::StringPtr host,
 }
 
 void RpcWorkerInterface::prewarm(kj::StringPtr url) {
-  auto req = dispatcher.prewarmRequest(capnp::MessageSize{url.size() / sizeof(capnp::word) + 4, 0});
+  auto req =
+      dispatcher.prewarmRequest(capnp::MessageSize {url.size() / sizeof(capnp::word) + 4, 0});
   req.setUrl(url);
   waitUntilTasks.add(req.send().ignoreResult());
 }
@@ -394,7 +395,7 @@ kj::Promise<WorkerInterface::ScheduledResult> RpcWorkerInterface::runScheduled(
   req.setCron(cron);
   return req.send().then([](auto resp) {
     auto respResult = resp.getResult();
-    return WorkerInterface::ScheduledResult{
+    return WorkerInterface::ScheduledResult {
       .retry = respResult.getRetry(), .outcome = respResult.getOutcome()};
   });
 }
@@ -406,7 +407,7 @@ kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(
   req.setRetryCount(retryCount);
   return req.send().then([](auto resp) {
     auto respResult = resp.getResult();
-    return WorkerInterface::AlarmResult{.retry = respResult.getRetry(),
+    return WorkerInterface::AlarmResult {.retry = respResult.getRetry(),
       .retryCountsAgainstLimit = respResult.getRetryCountsAgainstLimit(),
       .outcome = respResult.getOutcome()};
   });
@@ -443,7 +444,7 @@ void WorkerInterface::AlarmFulfiller::reject(const kj::Exception& e) {
 
 void WorkerInterface::AlarmFulfiller::cancel() {
   KJ_IF_SOME(fulfiller, getFulfiller()) {
-    fulfiller.fulfill(AlarmResult{
+    fulfiller.fulfill(AlarmResult {
       .retry = false,
       .outcome = EventOutcome::CANCELED,
     });

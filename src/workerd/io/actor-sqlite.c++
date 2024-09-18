@@ -210,8 +210,8 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
   kj::Vector<KeyValuePair> results;
   for (auto& key: keys) {
-    kv.get(
-        key, [&](ValuePtr value) { results.add(KeyValuePair{kj::mv(key), kj::heapArray(value)}); });
+    kv.get(key,
+        [&](ValuePtr value) { results.add(KeyValuePair {kj::mv(key), kj::heapArray(value)}); });
   }
   std::sort(results.begin(), results.end(), [](auto& a, auto& b) { return a.key < b.key; });
   return GetResultList(kj::mv(results));
@@ -230,7 +230,7 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
   kj::Vector<KeyValuePair> results;
   kv.list(begin, end, limit, SqliteKv::FORWARD, [&](KeyPtr key, ValuePtr value) {
-    results.add(KeyValuePair{kj::str(key), kj::heapArray(value)});
+    results.add(KeyValuePair {kj::str(key), kj::heapArray(value)});
   });
 
   // Already guaranteed sorted.
@@ -243,7 +243,7 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
   kj::Vector<KeyValuePair> results;
   kv.list(begin, end, limit, SqliteKv::REVERSE, [&](KeyPtr key, ValuePtr value) {
-    results.add(KeyValuePair{kj::str(key), kj::heapArray(value)});
+    results.add(KeyValuePair {kj::str(key), kj::heapArray(value)});
   });
 
   // Already guaranteed sorted (reversed).
@@ -403,7 +403,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   return outputGate.wait();
 }
 
-const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
+const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks {};
 
 kj::Maybe<kj::Own<void>> ActorSqlite::Hooks::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
   JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");

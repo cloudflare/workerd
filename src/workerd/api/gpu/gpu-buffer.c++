@@ -56,7 +56,7 @@ v8::Local<v8::ArrayBuffer> GPUBuffer::getMappedRange(
   // callback is invoked. It owns a persistent reference to this GPUBuffer
   // object to ensure that it still lives while the arraybuffer is in scope.
   // This object will be deallocated when the callback finishes.
-  auto ctx = new Context{ref.addRef()};
+  auto ctx = new Context {ref.addRef()};
   std::shared_ptr<v8::BackingStore> backing =
       v8::ArrayBuffer::NewBackingStore(ptr, s, [](void* data, size_t length, void* deleter_data) {
     // we have a persistent reference to GPUBuffer so that it lives at least
@@ -68,7 +68,7 @@ v8::Local<v8::ArrayBuffer> GPUBuffer::getMappedRange(
   v8::Local<v8::ArrayBuffer> arrayBuffer = v8::ArrayBuffer::New(js.v8Isolate, backing);
   arrayBuffer->SetDetachKey(detachKey_.getHandle(js));
 
-  mapped_.add(Mapping{start, end, js.v8Ref(arrayBuffer)});
+  mapped_.add(Mapping {start, end, js.v8Ref(arrayBuffer)});
   return arrayBuffer;
 }
 

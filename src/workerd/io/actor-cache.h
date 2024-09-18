@@ -318,7 +318,7 @@ private:
       auto p = reinterpret_cast<ActorCache*>(pointer);
       KJ_IF_SOME(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
         d.status = DeferredAlarmDelete::Status::READY;
-        p->ensureFlushScheduled(WriteOptions{.noCache = d.noCache});
+        p->ensureFlushScheduled(WriteOptions {.noCache = d.noCache});
       }
     }
   };
@@ -653,7 +653,7 @@ private:
   };
 
   kj::OneOf<UnknownAlarmTime, KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime =
-      UnknownAlarmTime{};
+      UnknownAlarmTime {};
 
   struct ReadCompletionChain: public kj::Refcounted {
     kj::Maybe<kj::Own<ReadCompletionChain>> next;

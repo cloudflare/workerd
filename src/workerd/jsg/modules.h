@@ -608,7 +608,7 @@ public:
       // by module a bit problematic. Iterating through the entries is slower but it works.
       KJ_IF_SOME(info, entry->info.template tryGet<ModuleInfo>()) {
         if (info.module == module) {
-          return ModuleRef{
+          return ModuleRef {
             .specifier = entry->specifier,
             .type = entry->type,
             .module = const_cast<ModuleInfo&>(info),

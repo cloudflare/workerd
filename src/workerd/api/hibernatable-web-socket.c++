@@ -79,17 +79,17 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         [&]() -> Trace::HibernatableWebSocketEventInfo::Type {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
         KJ_CASE_ONEOF(_, HibernatableSocketParams::Text) {
-          return Trace::HibernatableWebSocketEventInfo::Message{};
+          return Trace::HibernatableWebSocketEventInfo::Message {};
         }
         KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
-          return Trace::HibernatableWebSocketEventInfo::Message{};
+          return Trace::HibernatableWebSocketEventInfo::Message {};
         }
         KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
-          return Trace::HibernatableWebSocketEventInfo::Close{
+          return Trace::HibernatableWebSocketEventInfo::Close {
             .code = close.code, .wasClean = close.wasClean};
         }
         KJ_CASE_ONEOF(_, HibernatableSocketParams::Error) {
-          return Trace::HibernatableWebSocketEventInfo::Error{};
+          return Trace::HibernatableWebSocketEventInfo::Error {};
         }
       }
       KJ_UNREACHABLE;
@@ -136,7 +136,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
 
-  co_return Result{
+  co_return Result {
     .outcome = outcome,
   };
 }
@@ -181,7 +181,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   return req.send().then([](auto resp) {
     auto respResult = resp.getResult();
-    return WorkerInterface::CustomEvent::Result{
+    return WorkerInterface::CustomEvent::Result {
       .outcome = respResult.getOutcome(),
     };
   });

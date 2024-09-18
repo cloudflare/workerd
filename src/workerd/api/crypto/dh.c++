@@ -82,7 +82,7 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
           struct Status {
             IoContext& context;
             kj::Maybe<EventOutcome> status;
-          } status{.context = IoContext::current()};
+          } status {.context = IoContext::current()};
 
           auto dh = OSSL_NEW(DH);
           BN_GENCB cb;

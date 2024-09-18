@@ -109,7 +109,7 @@ struct FunctionTraits<R (This::*)(Args...) const> {
 template <typename Configuration, typename Tuple>
 struct TupleRttiBuilder {
   static inline void build(capnp::List<Type>::Builder builder, Builder<Configuration>& rtti) {
-    build(std::make_integer_sequence<size_t, std::tuple_size_v<Tuple>>{}, builder, rtti);
+    build(std::make_integer_sequence<size_t, std::tuple_size_v<Tuple>> {}, builder, rtti);
   }
 
 private:
@@ -427,7 +427,7 @@ struct BuildRtti<Configuration, kj::OneOf<Variants...>> {
 
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     auto variants = builder.initOneOf().initVariants(Seq::size());
-    buildVariants(Seq{}, variants, rtti);
+    buildVariants(Seq {}, variants, rtti);
   }
 };
 

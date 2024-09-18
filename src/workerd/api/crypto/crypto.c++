@@ -120,7 +120,7 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
     {"RSA-RAW"_kj, &CryptoKey::Impl::importRsaRaw},
   };
 
-  auto iter = ALGORITHMS.find(CryptoAlgorithm{name});
+  auto iter = ALGORITHMS.find(CryptoAlgorithm {name});
   if (iter == ALGORITHMS.end()) {
     // No such built-in algorithm, so fall back to checking if the Api has a custom
     // algorithm registered.
@@ -158,7 +158,7 @@ kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derived
   // TODO(cleanup): This should be a method of CryptoKey::Impl so it can be abstracted. Currently
   //   we ad-hoc match various algorithms below, so the set of supported algorithms must be
   //   hard-coded.
-  static const std::set<kj::StringPtr, CiLess> registeredAlgorithms{
+  static const std::set<kj::StringPtr, CiLess> registeredAlgorithms {
     {"AES-CTR"},
     {"AES-CBC"},
     {"AES-GCM"},
@@ -767,7 +767,7 @@ jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algori
       interpretAlgorithmParam(kj::mv(algorithm)), kj::mv(paf.resolver), kj::mv(paf.promise));
 
   stream->getController().setup(js,
-      UnderlyingSink{
+      UnderlyingSink {
         .write =
             [&stream = *stream](jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
     return js.tryCatch([&] {

@@ -192,7 +192,7 @@ JSG_DECLARE_ISOLATE_TYPE(MaybeIsolate, MaybeContext);
 
 KJ_TEST("maybes - don't substitute null") {
 
-  static const auto config = JsgConfig{
+  static const auto config = JsgConfig {
     .noSubstituteNull = true,
   };
 
@@ -356,9 +356,9 @@ struct DictContext: public ContextGlobalObject {
   }
   Dict<Ref<NumberBox>> returnDict() {
     auto builder = kj::heapArrayBuilder<Dict<Ref<NumberBox>>::Field>(3);
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("foo"), jsg::alloc<NumberBox>(123)});
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("bar"), jsg::alloc<NumberBox>(456)});
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("baz"), jsg::alloc<NumberBox>(789)});
+    builder.add(Dict<Ref<NumberBox>>::Field {kj::str("foo"), jsg::alloc<NumberBox>(123)});
+    builder.add(Dict<Ref<NumberBox>>::Field {kj::str("bar"), jsg::alloc<NumberBox>(456)});
+    builder.add(Dict<Ref<NumberBox>>::Field {kj::str("baz"), jsg::alloc<NumberBox>(789)});
     return {builder.finish()};
   }
 

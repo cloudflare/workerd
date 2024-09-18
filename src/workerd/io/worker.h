@@ -160,7 +160,7 @@ private:
 
   // metrics needs to be first to be destroyed last to correctly capture destruction timing.
   // it needs script to report destruction time, so it comes right after that.
-  TeardownFinishedGuard<WorkerObserver&> teardownGuard{*metrics};
+  TeardownFinishedGuard<WorkerObserver&> teardownGuard {*metrics};
 
   struct Impl;
   kj::Own<Impl> impl;
@@ -399,7 +399,7 @@ private:
   kj::Maybe<kj::String> featureFlagsForFl;
 
   kj::Own<IsolateObserver> metrics;
-  TeardownFinishedGuard<IsolateObserver&> teardownGuard{*metrics};
+  TeardownFinishedGuard<IsolateObserver&> teardownGuard {*metrics};
 
   struct Impl;
   kj::Own<Impl> impl;

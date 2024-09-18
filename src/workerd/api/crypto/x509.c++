@@ -323,7 +323,7 @@ void addFingerprintDigest(
 }
 
 kj::Maybe<kj::String> getFingerprintDigest(const EVP_MD* method, X509* cert) {
-  unsigned char md[EVP_MAX_MD_SIZE]{};
+  unsigned char md[EVP_MAX_MD_SIZE] {};
   unsigned int md_size;
   auto fingerprint = kj::heapArray<char>(EVP_MD_size(method) * 3);
   if (X509_digest(cert, method, md, &md_size)) {
@@ -618,7 +618,7 @@ kj::Maybe<kj::Array<kj::String>> X509Certificate::getKeyUsage() {
   auto eku = kj::Own<STACK_OF(ASN1_OBJECT)>(ptr, stackOfXASN1Disposer);
   const int count = sk_ASN1_OBJECT_num(eku.get());
   kj::Vector<kj::String> ext_key_usage(count);
-  char buf[256]{};
+  char buf[256] {};
 
   int j = 0;
   for (int i = 0; i < count; i++) {

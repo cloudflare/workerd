@@ -233,7 +233,7 @@ kj::Maybe<kj::String> getCurrentActorId() {
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::get(jsg::Lock& js,
     kj::OneOf<kj::String, kj::Array<kj::String>> keys,
     jsg::Optional<GetOptions> maybeOptions) {
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(GetOptions{}));
+  auto options = configureOptions(kj::mv(maybeOptions).orDefault(GetOptions {}));
   KJ_SWITCH_ONEOF(keys) {
     KJ_CASE_ONEOF(s, kj::String) {
       return getOne(js, kj::mv(s), options);
@@ -272,8 +272,8 @@ jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
   // whatever a previous alarm setting or a falsy result.
   auto options = configureOptions(maybeOptions
                                       .map([](auto& o) {
-    return GetOptions{.allowConcurrency = o.allowConcurrency, .noCache = false};
-  }).orDefault(GetOptions{}));
+    return GetOptions {.allowConcurrency = o.allowConcurrency, .noCache = false};
+  }).orDefault(GetOptions {}));
   auto result = getCache(OP_GET_ALARM).getAlarm(options);
 
   return transformCacheResult(
@@ -382,7 +382,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
     }
   }
 
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(ListOptions{}));
+  auto options = configureOptions(kj::mv(maybeOptions).orDefault(ListOptions {}));
   ActorCacheOps::ReadOptions readOptions = options;
 
   auto result = reverse
@@ -399,7 +399,7 @@ jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
   // TODO(soon): Add tests of data generated at current versions to ensure we'll
   // know before releasing any backwards-incompatible serializer changes,
   // potentially checking the header in addition to the value.
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
+  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions {}));
   KJ_SWITCH_ONEOF(keyOrEntries) {
     KJ_CASE_ONEOF(k, kj::String) {
       KJ_IF_SOME(v, value) {
@@ -438,10 +438,10 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
 
   auto options = configureOptions(maybeOptions
                                       .map([](auto& o) {
-    return PutOptions{.allowConcurrency = o.allowConcurrency,
+    return PutOptions {.allowConcurrency = o.allowConcurrency,
       .allowUnconfirmed = o.allowUnconfirmed,
       .noCache = false};
-  }).orDefault(PutOptions{}));
+  }).orDefault(PutOptions {}));
 
   // We fudge times set in the past to Date.now() to ensure that any one user can't DDOS the alarm
   // polling system by putting dates far in the past and therefore getting sorted earlier by the index.
@@ -481,7 +481,7 @@ kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> DurableObjectStorageOperations:
     jsg::Lock& js,
     kj::OneOf<kj::String, kj::Array<kj::String>> keys,
     jsg::Optional<PutOptions> maybeOptions) {
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
+  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions {}));
   KJ_SWITCH_ONEOF(keys) {
     KJ_CASE_ONEOF(s, kj::String) {
       return deleteOne(js, kj::mv(s), options);
@@ -499,10 +499,10 @@ jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
   // alarm or noop on the absence of one.
   auto options = configureOptions(maybeOptions
                                       .map([](auto& o) {
-    return PutOptions{.allowConcurrency = o.allowConcurrency,
+    return PutOptions {.allowConcurrency = o.allowConcurrency,
       .allowUnconfirmed = o.allowUnconfirmed,
       .noCache = false};
-  }).orDefault(PutOptions{}));
+  }).orDefault(PutOptions {}));
 
   return transformMaybeBackpressure(
       js, options, getCache(OP_DELETE_ALARM).setAlarm(kj::none, options));
@@ -510,7 +510,7 @@ jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
 
 jsg::Promise<void> DurableObjectStorage::deleteAll(
     jsg::Lock& js, jsg::Optional<PutOptions> maybeOptions) {
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
+  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions {}));
 
   auto deleteAll = cache->deleteAll(options);
 
@@ -563,7 +563,7 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
 
     units += billingUnits(field.name.size() + buffer.size());
 
-    kvs.add(ActorCacheOps::KeyValuePair{kj::mv(field.name), kj::mv(buffer)});
+    kvs.add(ActorCacheOps::KeyValuePair {kj::mv(field.name), kj::mv(buffer)});
   }
 
   jsg::Promise<void> maybeBackpressure =
@@ -629,13 +629,13 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
       // IoContext::current() again here, rather than capture it in the lambda.
       auto& context = IoContext::current();
       return context.awaitIoWithInputLock(js, txn->maybeCommit(),
-          [value = kj::mv(value)](jsg::Lock&) mutable { return TxnResult{kj::mv(value), false}; });
+          [value = kj::mv(value)](jsg::Lock&) mutable { return TxnResult {kj::mv(value), false}; });
     }, [txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
       // The transaction callback threw an exception. We don't actually want to reset the object,
       // we only want to roll back the transaction and propagate the exception. So, we carefully
       // pack the exception away into a value.
       txn->maybeRollback();
-      return js.resolvedPromise(TxnResult{
+      return js.resolvedPromise(TxnResult {
         // TODO(cleanup): Simplify this once exception is passed using jsg::JsRef instead
         // of jsg::V8Ref
         jsg::JsValue(exception.getHandle(js)).addRef(js), true});
@@ -979,7 +979,7 @@ kj::Array<kj::StringPtr> DurableObjectState::getTags(jsg::Lock& js, jsg::Ref<api
 
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value) {
   jsg::Serializer serializer(js,
-      jsg::Serializer::Options{
+      jsg::Serializer::Options {
         .version = 15,
         .omitHeader = false,
       });
@@ -998,7 +998,7 @@ jsg::JsValue deserializeV8Value(
     // terminal for the isolate, causing exception to be rethrown, in which case
     // we throw a kj::Exception wrapping a jsg.Error.
     return js.tryCatch([&]() -> jsg::JsValue {
-      jsg::Deserializer::Options options{};
+      jsg::Deserializer::Options options {};
       if (buf[0] != 0xFF) {
         // When Durable Objects was first released, it did not properly write headers when serializing
         // to storage. If we find that the header is missing (as indicated by the first byte not being

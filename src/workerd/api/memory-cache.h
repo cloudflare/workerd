@@ -124,7 +124,7 @@ public:
 
       // If a binding specifies a maxValueSize that exceeds the maxTotalValueSize, remedy
       // that by reducing the maxValueSize.
-      return Limits{
+      return Limits {
         .maxKeys = maxKeys,
         .maxValueSize = static_cast<uint32_t>(kj::min(maxValueSize, maxTotalValueSize)),
         .maxTotalValueSize = maxTotalValueSize,
@@ -136,7 +136,7 @@ public:
     }
 
     static Limits max(const Limits& a, const Limits& b) {
-      return Limits{
+      return Limits {
         std::max(a.maxKeys, b.maxKeys),
         std::max(a.maxValueSize, b.maxValueSize),
         std::max(a.maxTotalValueSize, b.maxTotalValueSize),

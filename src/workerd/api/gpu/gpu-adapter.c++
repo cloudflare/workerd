@@ -82,7 +82,7 @@ kj::String parseDeviceLostReason(wgpu::DeviceLostReason reason) {
 
 jsg::Promise<jsg::Ref<GPUDevice>> GPUAdapter::requestDevice(
     jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> descriptor) {
-  wgpu::DeviceDescriptor desc{};
+  wgpu::DeviceDescriptor desc {};
   kj::Vector<wgpu::FeatureName> requiredFeatures;
   wgpu::RequiredLimits limits;
   KJ_IF_SOME(d, descriptor) {
@@ -143,7 +143,7 @@ jsg::Promise<jsg::Ref<GPUDevice>> GPUAdapter::requestDevice(
             break;
         }
 
-        auto init = GPUUncapturedErrorEventInit{kj::mv(error)};
+        auto init = GPUUncapturedErrorEventInit {kj::mv(error)};
         auto ev = jsg::alloc<GPUUncapturedErrorEvent>("uncapturederror"_kj, kj::mv(init));
         target->dispatchEventImpl(IoContext::current().getCurrentLock(), kj::mv(ev));
         return;
@@ -187,11 +187,11 @@ jsg::Ref<GPUSupportedFeatures> GPUAdapter::getFeatures() {
 }
 
 jsg::Ref<GPUSupportedLimits> GPUAdapter::getLimits() {
-  WGPUSupportedLimits limits{};
+  WGPUSupportedLimits limits {};
   JSG_REQUIRE(adapter_.GetLimits(&limits), TypeError, "failed to get adapter limits");
 
   // need to copy to the C++ version of the object
-  wgpu::SupportedLimits wgpuLimits{};
+  wgpu::SupportedLimits wgpuLimits {};
 
 #define COPY_LIMIT(LIMIT) wgpuLimits.limits.LIMIT = limits.limits.LIMIT;
   WGPU_FOR_EACH_LIMIT(COPY_LIMIT)

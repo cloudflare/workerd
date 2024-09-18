@@ -372,7 +372,7 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 // =======================================================================================
 
-SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
+SqliteObserver SqliteObserver::DEFAULT = SqliteObserver {};
 
 constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
 
@@ -1493,13 +1493,13 @@ struct SqliteDatabase::Vfs::FileImpl: public sqlite3_file {
   // We leave this null if the file is not the main database file.
 
   FileImpl(const Vfs& vfs, kj::Own<const kj::File> file, kj::Maybe<kj::Own<Lock>> lock)
-      : sqlite3_file{.pMethods = &FILE_METHOD_TABLE},
+      : sqlite3_file {.pMethods = &FILE_METHOD_TABLE},
         vfs(vfs),
         writableFile(*file),
         file(kj::mv(file)),
         lock(kj::mv(lock)) {}
   FileImpl(const Vfs& vfs, kj::Own<const kj::ReadableFile> file, kj::Maybe<kj::Own<Lock>> lock)
-      : sqlite3_file{.pMethods = &FILE_METHOD_TABLE},
+      : sqlite3_file {.pMethods = &FILE_METHOD_TABLE},
         vfs(vfs),
         file(kj::mv(file)),
         lock(kj::mv(lock)) {}
@@ -1882,7 +1882,7 @@ private:
       auto mlock = lockManager.lockMap.lockExclusive();
       auto& slot = mlock->findOrCreate(path, [&]() {
         state = kj::refcounted<LockState>(path.clone());
-        return LockMap::Entry{.key = state->path, .value = state.get()};
+        return LockMap::Entry {.key = state->path, .value = state.get()};
       });
       if (state.get() == nullptr) {
         state = kj::addRef(*slot);

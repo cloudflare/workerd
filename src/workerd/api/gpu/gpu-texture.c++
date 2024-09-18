@@ -13,7 +13,7 @@ namespace workerd::api::gpu {
 
 jsg::Ref<GPUTextureView> GPUTexture::createView(
     jsg::Optional<GPUTextureViewDescriptor> descriptor) {
-  wgpu::TextureViewDescriptor desc{};
+  wgpu::TextureViewDescriptor desc {};
   KJ_IF_SOME(d, descriptor) {
     desc.label = d.label.cStr();
     desc.format = parseTextureFormat(d.format);

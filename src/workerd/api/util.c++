@@ -67,7 +67,7 @@ void parseQueryString(kj::Vector<kj::Url::QueryParam>& query,
     auto value = split(text, '&');
     if (value.size() == 0) continue;
     auto name = split(value, '=');
-    query.add(kj::Url::QueryParam{kj::decodeWwwForm(name), kj::decodeWwwForm(value)});
+    query.add(kj::Url::QueryParam {kj::decodeWwwForm(name), kj::decodeWwwForm(value)});
   }
 }
 

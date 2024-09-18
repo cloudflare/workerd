@@ -57,7 +57,7 @@ jsg::Ref<MIMEParams::EntryIterator> MIMEParams::entries(jsg::Lock&) {
       vec.add(kj::arr(kj::str(entry.key), kj::str(entry.value)));
     }
   }
-  return jsg::alloc<EntryIterator>(IteratorState<kj::Array<kj::String>>{vec.releaseAsArray()});
+  return jsg::alloc<EntryIterator>(IteratorState<kj::Array<kj::String>> {vec.releaseAsArray()});
 }
 
 jsg::Ref<MIMEParams::KeyIterator> MIMEParams::keys(jsg::Lock&) {
@@ -67,7 +67,7 @@ jsg::Ref<MIMEParams::KeyIterator> MIMEParams::keys(jsg::Lock&) {
       vec.add(kj::str(entry.key));
     }
   }
-  return jsg::alloc<KeyIterator>(IteratorState<kj::String>{vec.releaseAsArray()});
+  return jsg::alloc<KeyIterator>(IteratorState<kj::String> {vec.releaseAsArray()});
 }
 
 jsg::Ref<MIMEParams::ValueIterator> MIMEParams::values(jsg::Lock&) {
@@ -77,7 +77,7 @@ jsg::Ref<MIMEParams::ValueIterator> MIMEParams::values(jsg::Lock&) {
       vec.add(kj::str(entry.value));
     }
   }
-  return jsg::alloc<ValueIterator>(IteratorState<kj::String>{vec.releaseAsArray()});
+  return jsg::alloc<ValueIterator>(IteratorState<kj::String> {vec.releaseAsArray()});
 }
 
 MIMEType::MIMEType(MimeType inner)
@@ -134,9 +134,9 @@ jsg::Optional<UtilModule::PromiseDetails> UtilModule::getPromiseDetails(jsg::JsV
   auto state = promise.state();
   if (state != jsg::PromiseState::PENDING) {
     auto result = promise.result();
-    return PromiseDetails{.state = state, .result = result};
+    return PromiseDetails {.state = state, .result = result};
   } else {
-    return PromiseDetails{.state = state, .result = kj::none};
+    return PromiseDetails {.state = state, .result = kj::none};
   }
 }
 
@@ -144,14 +144,14 @@ jsg::Optional<UtilModule::ProxyDetails> UtilModule::getProxyDetails(jsg::JsValue
   auto proxy = KJ_UNWRAP_OR_RETURN(value.tryCast<jsg::JsProxy>(), kj::none);
   auto target = proxy.target();
   auto handler = proxy.handler();
-  return ProxyDetails{.target = target, .handler = handler};
+  return ProxyDetails {.target = target, .handler = handler};
 }
 
 jsg::Optional<UtilModule::PreviewedEntries> UtilModule::previewEntries(jsg::JsValue value) {
   auto object = KJ_UNWRAP_OR_RETURN(value.tryCast<jsg::JsObject>(), kj::none);
   bool isKeyValue;
   auto entries = object.previewEntries(&isKeyValue);
-  return PreviewedEntries{.entries = entries, .isKeyValue = isKeyValue};
+  return PreviewedEntries {.entries = entries, .isKeyValue = isKeyValue};
 }
 
 jsg::JsString UtilModule::getConstructorName(jsg::Lock& js, jsg::JsObject value) {

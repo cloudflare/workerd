@@ -74,7 +74,7 @@ void HeapTracer::clearWrappers() {
 // condemned after that point and will be deleted shortly thereafter.
 class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
 public:
-  CppgcShim(Wrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
+  CppgcShim(Wrappable& wrappable): state(Active {kj::addRef(wrappable)}) {
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
     wrappable.cppgcShim = *this;
   }
@@ -172,7 +172,7 @@ Wrappable::CppgcShim* HeapTracer::allocateShim(Wrappable& wrappable) {
     KJ_IF_SOME(next, freelistedShims) {
       next.state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
     }
-    shim.state = Wrappable::CppgcShim::Active{kj::addRef(wrappable)};
+    shim.state = Wrappable::CppgcShim::Active {kj::addRef(wrappable)};
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
     wrappable.cppgcShim = shim;
     return &shim;
@@ -186,7 +186,7 @@ void HeapTracer::clearFreelistedShims() {
   for (;;) {
     KJ_IF_SOME(shim, freelistedShims) {
       freelistedShims = shim.state.get<Wrappable::CppgcShim::Freelisted>().next;
-      shim.state = Wrappable::CppgcShim::Dead{};
+      shim.state = Wrappable::CppgcShim::Dead {};
     } else {
       break;
     }
@@ -227,7 +227,7 @@ kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
     if (shouldFreelistShim) {
       tracer.addToFreelist(shim);
     } else {
-      shim.state = CppgcShim::Dead{};
+      shim.state = CppgcShim::Dead {};
     }
     wrapper = kj::none;
     cppgcShim = kj::none;

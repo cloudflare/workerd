@@ -403,7 +403,7 @@ public:
 
   void setInspectorTimerInfo(kj::Timer& timer, kj::Duration timerOffset) {
     auto lockedState = state.lockExclusive();
-    lockedState->inspectorTimerInfo = InspectorTimerInfo{timer, timerOffset, getCurrentThreadId()};
+    lockedState->inspectorTimerInfo = InspectorTimerInfo {timer, timerOffset, getCurrentThreadId()};
   }
 
   void setChannel(Worker::Isolate::InspectorChannelImpl& channel) {
@@ -686,7 +686,7 @@ struct Worker::Isolate::Impl {
   // destructor if it owns the last `kj::Own<const Script>` reference.
   //
   // Fairly obviously, this member is protected by its own mutex, not the isolate lock.
-  const kj::MutexGuarded<BatchQueue<kj::Own<Worker::Impl>>> workerDestructionQueue{
+  const kj::MutexGuarded<BatchQueue<kj::Own<Worker::Impl>>> workerDestructionQueue {
     WORKER_DESTRUCTION_QUEUE_INITIAL_SIZE, WORKER_DESTRUCTION_QUEUE_MAX_CAPACITY};
   // TODO(cleanup): The only reason this exists and we can't just rely on the isolate's regular
   //   deferred destruction queue to lazily destroy the various V8 objects in Worker::Impl is
@@ -724,7 +724,7 @@ public:
   static const CpuProfilerDisposer instance;
 };
 
-const CpuProfilerDisposer CpuProfilerDisposer::instance{};
+const CpuProfilerDisposer CpuProfilerDisposer::instance {};
 
 static constexpr kj::StringPtr PROFILE_NAME = "Default Profile"_kj;
 
@@ -1560,7 +1560,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                           for (;;) {
                             if (handle == entrypointClasses.durableObject) {
                               impl->actorClasses.insert(kj::mv(handler.name),
-                                  Impl::ActorClassInfo{
+                                  Impl::ActorClassInfo {
                                     .cls = kj::mv(cls),
                                     .missingSuperclass = false,
                                   });
@@ -1583,7 +1583,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                               // TODO(someday): Log a warning suggesting extending DurableObject.
                               // TODO(someday): Introduce a compat flag that makes this required.
                               impl->actorClasses.insert(kj::mv(handler.name),
-                                  Impl::ActorClassInfo{
+                                  Impl::ActorClassInfo {
                                     .cls = kj::mv(cls),
                                     .missingSuperclass = true,
                                   });
@@ -3480,7 +3480,7 @@ void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> new
 
     for (auto i: kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
       co_await timerChannel.atTime(scheduledTime);
-      auto result = co_await loopback->getWorker(IoChannelFactory::SubrequestMetadata{})
+      auto result = co_await loopback->getWorker(IoChannelFactory::SubrequestMetadata {})
                         ->runAlarm(originalTime, i);
 
       if (result.outcome == EventOutcome::OK || !result.retry) {
@@ -3566,7 +3566,7 @@ kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::handleAlarm(
   auto scheduledAlarm = KJ_ASSERT_NONNULL(kj::mv(impl->maybeScheduledAlarm));
   impl->maybeScheduledAlarm = kj::none;
 
-  impl->maybeRunningAlarm.emplace(Impl::RunningAlarm{
+  impl->maybeRunningAlarm.emplace(Impl::RunningAlarm {
     .scheduledTime = scheduledAlarm.scheduledTime,
     .resultPromise = kj::mv(scheduledAlarm.resultPromise),
   });

@@ -22,13 +22,13 @@ namespace {
 
 bool isSpecialScheme(kj::StringPtr scheme) {
   // TODO(cleanup): Move this to kj::Url.
-  static const std::set<kj::StringPtr> specialSchemes{
+  static const std::set<kj::StringPtr> specialSchemes {
     "ftp", "file", "gopher", "http", "https", "ws", "wss"};
   return specialSchemes.count(scheme);
 }
 
 kj::Maybe<kj::StringPtr> defaultPortForScheme(kj::StringPtr scheme) {
-  static const std::map<kj::StringPtr, kj::StringPtr> defaultPorts{
+  static const std::map<kj::StringPtr, kj::StringPtr> defaultPorts {
     {"ftp", "21"},
     {"gopher", "70"},
     {"http", "80"},
@@ -243,7 +243,7 @@ void URL::setUsername(kj::String value) {
   KJ_IF_SOME(ui, copy.userInfo) {
     ui.username = kj::mv(value);
   } else {
-    copy.userInfo = kj::Url::UserInfo{.username = kj::mv(value)};
+    copy.userInfo = kj::Url::UserInfo {.username = kj::mv(value)};
   }
 
   KJ_IF_SOME(u, kj::Url::tryParse(kjUrlToString(copy))) {
@@ -270,7 +270,7 @@ void URL::setPassword(kj::String value) {
       ui.password = kj::none;
     }
   } else if (value.size() > 0) {
-    copy.userInfo = kj::Url::UserInfo{.password = kj::mv(value)};
+    copy.userInfo = kj::Url::UserInfo {.password = kj::mv(value)};
   }
 
   KJ_IF_SOME(u, kj::Url::tryParse(kjUrlToString(copy))) {
@@ -437,9 +437,9 @@ void URL::setSearch(kj::String value) {
       //   See step 1.3.1 of https://url.spec.whatwg.org/#query-state
       KJ_IF_SOME(key, trySplit(part, '=')) {
         newQuery.add(
-            kj::Url::QueryParam{percentDecodeQuery(key, err), percentDecodeQuery(part, err)});
+            kj::Url::QueryParam {percentDecodeQuery(key, err), percentDecodeQuery(part, err)});
       } else {
-        newQuery.add(kj::Url::QueryParam{percentDecodeQuery(part, err), nullptr});
+        newQuery.add(kj::Url::QueryParam {percentDecodeQuery(part, err), nullptr});
       }
     }
 
@@ -500,7 +500,7 @@ jsg::Ref<URLSearchParams> URLSearchParams::constructor(
       }
       KJ_CASE_ONEOF(dict, jsg::Dict<kj::String>) {
         searchParams->url->query = KJ_MAP(entry, dict.fields) {
-          return kj::Url::QueryParam{kj::mv(entry.name), kj::mv(entry.value)};
+          return kj::Url::QueryParam {kj::mv(entry.name), kj::mv(entry.value)};
         };
       }
       KJ_CASE_ONEOF(arrayOfArrays, kj::Array<kj::Array<kj::String>>) {
@@ -508,7 +508,7 @@ jsg::Ref<URLSearchParams> URLSearchParams::constructor(
           JSG_REQUIRE(entry.size() == 2, TypeError,
               "To initialize a URLSearchParams object "
               "from an array-of-arrays, each inner array must have exactly two elements.");
-          return kj::Url::QueryParam{kj::mv(entry[0]), kj::mv(entry[1])};
+          return kj::Url::QueryParam {kj::mv(entry[0]), kj::mv(entry[1])};
         };
       }
     }
@@ -518,7 +518,7 @@ jsg::Ref<URLSearchParams> URLSearchParams::constructor(
 }
 
 void URLSearchParams::append(kj::String name, kj::String value) {
-  url->query.add(kj::Url::QueryParam{kj::mv(name), kj::mv(value)});
+  url->query.add(kj::Url::QueryParam {kj::mv(name), kj::mv(value)});
 }
 
 void URLSearchParams::delete_(kj::String name) {
@@ -610,15 +610,15 @@ void URLSearchParams::forEach(jsg::Lock& js,
 }
 
 jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState{JSG_THIS});
+  return jsg::alloc<EntryIterator>(IteratorState {JSG_THIS});
 }
 
 jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock&) {
-  return jsg::alloc<KeyIterator>(IteratorState{JSG_THIS});
+  return jsg::alloc<KeyIterator>(IteratorState {JSG_THIS});
 }
 
 jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
-  return jsg::alloc<ValueIterator>(IteratorState{JSG_THIS});
+  return jsg::alloc<ValueIterator>(IteratorState {JSG_THIS});
 }
 
 kj::String URLSearchParams::toString() {

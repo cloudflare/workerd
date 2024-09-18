@@ -84,7 +84,7 @@ struct MustNotCall<Ret(Args...)> {
 
 auto read(jsg::Lock& js, auto& consumer) {
   auto prp = js.newPromiseAndResolver<ReadResult>();
-  consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+  consumer.read(js, ValueQueue::ReadRequest {.resolver = kj::mv(prp.resolver)});
   return kj::mv(prp.promise);
 }
 
@@ -169,7 +169,7 @@ KJ_TEST("ValueQueue with single consumer") {
     KJ_ASSERT(queue.desiredSize() == 0);
 
     auto prp = js.newPromiseAndResolver<ReadResult>();
-    consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+    consumer.read(js, ValueQueue::ReadRequest {.resolver = kj::mv(prp.resolver)});
 
     MustCall<ReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) -> auto {
       KJ_ASSERT(!result.done);

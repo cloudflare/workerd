@@ -200,12 +200,12 @@ private:
     size_t pos = 0;
     while (pos < input.size()) {
       if (input[pos] == '\n') {
-        return EndOfLine{pos, input.slice(pos + 1)};
+        return EndOfLine {pos, input.slice(pos + 1)};
       } else if (input[pos] == '\r') {
         if (pos + 1 < input.size() && input[pos + 1] == '\n') {
-          return EndOfLine{pos, input.slice(pos + 2)};
+          return EndOfLine {pos, input.slice(pos + 2)};
         }
-        return EndOfLine{pos, input.slice(pos + 1)};
+        return EndOfLine {pos, input.slice(pos + 1)};
       }
       pos++;
     }
@@ -427,7 +427,7 @@ void EventSource::start(jsg::Lock& js) {
   }
 
   fetchImpl(js, kj::mv(fetcher), kj::str(i.url),
-      RequestInitializerDict{
+      RequestInitializerDict {
         .headers = kj::mv(headers),
         .signal = abortController->getSignal(),
       })

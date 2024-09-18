@@ -493,7 +493,7 @@ private:
   // Resolves the module from the inner ModuleRegistry, caching the results.
   kj::Maybe<Entry&> resolveWithCaching(
       Lock& js, const ResolveContext& context) KJ_WARN_UNUSED_RESULT {
-    ResolveContext innerContext{
+    ResolveContext innerContext {
       // The type identifies the resolution context as a bundle, builtin, or builtin-only.
       .type = context.type,
       // The source identifies the method of resolution (static import, dynamic import, etc).
@@ -507,7 +507,7 @@ private:
     };
     KJ_IF_SOME(found, inner.resolve(innerContext)) {
       return kj::Maybe<Entry&>(lookupCache.upsert(
-          Entry{
+          Entry {
             .key = HashableV8Ref<v8::Module>(
                 js.v8Isolate, check(found.getDescriptor(js, getObserver()))),
             // Note that we cache specifically with the passed in context and not the
@@ -695,7 +695,7 @@ IsolateModuleRegistry::IsolateModuleRegistry(
     Lock& js, ModuleRegistry& registry, const CompilationObserver& observer)
     : inner(registry),
       observer(observer),
-      lookupCache(EntryCallbacks{}, ContextCallbacks{}, UrlCallbacks{}) {
+      lookupCache(EntryCallbacks {}, ContextCallbacks {}, UrlCallbacks {}) {
   auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
   KJ_ASSERT(!context.IsEmpty());
@@ -847,7 +847,7 @@ public:
     KJ_IF_SOME(aliased, aliases.find(context.specifier)) {
       // The specifier is registered as an alias. We need to resolve the alias instead.
       // This is set up to allow for recursive aliases.
-      ResolveContext newContext{
+      ResolveContext newContext {
         .type = context.type,
         .source = context.source,
         .specifier = aliased,
@@ -1174,7 +1174,7 @@ kj::Maybe<JsObject> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
     return KJ_ASSERT_NONNULL(ModuleBundle::BundleBuilder::BASE.tryResolve(specifier));
   })();
   auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-  ResolveContext context{
+  ResolveContext context {
     .type = type,
     .source = source,
     .specifier = normalized,
@@ -1323,7 +1323,7 @@ Module::EvaluateCallback Module::newJsonModuleHandler(kj::Array<const char> data
 
 Module::EvaluateCallback Module::newWasmModuleHandler(kj::Array<kj::byte> data) {
   struct Cache final {
-    kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex{};
+    kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex {};
   };
   return [data = kj::mv(data), cache = kj::heap<Cache>()](Lock& js, const Url& specifier,
              const ModuleNamespace& ns, const CompilationObserver& observer) mutable -> bool {

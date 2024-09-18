@@ -51,7 +51,7 @@ public:
         uint subrequestChannel,
         kj::String name,
         kj::Date created)
-        : R2Bucket(featureFlags, subrequestChannel, kj::mv(name), R2Bucket::friend_tag_t{}),
+        : R2Bucket(featureFlags, subrequestChannel, kj::mv(name), R2Bucket::friend_tag_t {}),
           created(created) {}
 
     kj::String getName() const {

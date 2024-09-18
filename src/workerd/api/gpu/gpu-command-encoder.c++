@@ -11,7 +11,7 @@ namespace workerd::api::gpu {
 
 jsg::Ref<GPUCommandBuffer> GPUCommandEncoder::finish(
     jsg::Optional<GPUCommandBufferDescriptor> descriptor) {
-  wgpu::CommandBufferDescriptor desc{};
+  wgpu::CommandBufferDescriptor desc {};
 
   KJ_IF_SOME(d, descriptor) {
     KJ_IF_SOME(label, d.label) {
@@ -24,7 +24,7 @@ jsg::Ref<GPUCommandBuffer> GPUCommandEncoder::finish(
 };
 
 wgpu::ImageCopyTexture parseGPUImageCopyTexture(GPUImageCopyTexture source) {
-  wgpu::ImageCopyTexture src{};
+  wgpu::ImageCopyTexture src {};
   src.texture = *source.texture;
 
   KJ_IF_SOME(mipLevel, source.mipLevel) {
@@ -59,7 +59,7 @@ wgpu::ImageCopyTexture parseGPUImageCopyTexture(GPUImageCopyTexture source) {
 }
 
 wgpu::ImageCopyBuffer parseGPUImageCopyBuffer(GPUImageCopyBuffer destination) {
-  wgpu::ImageCopyBuffer dst{};
+  wgpu::ImageCopyBuffer dst {};
   dst.buffer = *destination.buffer;
 
   KJ_IF_SOME(offset, destination.offset) {
@@ -76,7 +76,7 @@ wgpu::ImageCopyBuffer parseGPUImageCopyBuffer(GPUImageCopyBuffer destination) {
 }
 
 wgpu::Extent3D parseGPUExtent3D(GPUExtent3D copySize) {
-  wgpu::Extent3D size{};
+  wgpu::Extent3D size {};
   KJ_SWITCH_ONEOF(copySize) {
     KJ_CASE_ONEOF(coords, jsg::Sequence<GPUIntegerCoordinate>) {
       // if we have a sequence of coordinates we assume that the order is: width, heigth, depth, if
@@ -158,7 +158,7 @@ void GPUCommandEncoder::clearBuffer(
 jsg::Ref<GPURenderPassEncoder> GPUCommandEncoder::beginRenderPass(
     GPURenderPassDescriptor descriptor) {
 
-  wgpu::RenderPassDescriptor desc{};
+  wgpu::RenderPassDescriptor desc {};
 
   KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
@@ -166,7 +166,7 @@ jsg::Ref<GPURenderPassEncoder> GPUCommandEncoder::beginRenderPass(
 
   kj::Vector<wgpu::RenderPassColorAttachment> colorAttachments;
   for (auto& attach: descriptor.colorAttachments) {
-    wgpu::RenderPassColorAttachment cAttach{};
+    wgpu::RenderPassColorAttachment cAttach {};
     cAttach.view = *attach.view;
     // TODO: depthSlice is not yet supported by dawn
     KJ_IF_SOME(resolveTarget, attach.resolveTarget) {
@@ -198,7 +198,7 @@ jsg::Ref<GPURenderPassEncoder> GPUCommandEncoder::beginRenderPass(
   desc.colorAttachmentCount = colorAttachments.size();
 
   KJ_IF_SOME(depthStencilAttachment, descriptor.depthStencilAttachment) {
-    wgpu::RenderPassDepthStencilAttachment dAttach{};
+    wgpu::RenderPassDepthStencilAttachment dAttach {};
     dAttach.view = *depthStencilAttachment.view;
     KJ_IF_SOME(depthClearValue, depthStencilAttachment.depthClearValue) {
       dAttach.depthClearValue = depthClearValue;
@@ -233,7 +233,7 @@ jsg::Ref<GPURenderPassEncoder> GPUCommandEncoder::beginRenderPass(
   }
 
   KJ_IF_SOME(timestampWrites, descriptor.timestampWrites) {
-    wgpu::RenderPassTimestampWrites t{};
+    wgpu::RenderPassTimestampWrites t {};
     t.querySet = *timestampWrites.querySet;
     KJ_IF_SOME(beginIndex, timestampWrites.beginningOfPassWriteIndex) {
       t.beginningOfPassWriteIndex = beginIndex;
@@ -254,7 +254,7 @@ jsg::Ref<GPURenderPassEncoder> GPUCommandEncoder::beginRenderPass(
 jsg::Ref<GPUComputePassEncoder> GPUCommandEncoder::beginComputePass(
     jsg::Optional<GPUComputePassDescriptor> descriptor) {
 
-  wgpu::ComputePassDescriptor desc{};
+  wgpu::ComputePassDescriptor desc {};
 
   KJ_IF_SOME(d, descriptor) {
     KJ_IF_SOME(label, d.label) {
@@ -262,7 +262,7 @@ jsg::Ref<GPUComputePassEncoder> GPUCommandEncoder::beginComputePass(
     }
 
     KJ_IF_SOME(timestampWrites, d.timestampWrites) {
-      wgpu::ComputePassTimestampWrites t{};
+      wgpu::ComputePassTimestampWrites t {};
       t.querySet = *timestampWrites.querySet;
       KJ_IF_SOME(beginIndex, timestampWrites.beginningOfPassWriteIndex) {
         t.beginningOfPassWriteIndex = beginIndex;

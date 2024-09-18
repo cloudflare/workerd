@@ -273,7 +273,7 @@ private:
   kj::Array<jsg::Ref<QueueMessage>> messages;
   kj::String queueName;
   IoPtr<QueueEventResult> result;
-  CompletionStatus completionStatus = Incomplete{};
+  CompletionStatus completionStatus = Incomplete {};
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visitAll(messages);

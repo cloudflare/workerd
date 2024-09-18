@@ -870,7 +870,7 @@ KJ_TEST("Search params (2)") {
 // ======================================================================================
 
 KJ_TEST("URLPattern - processInit Default") {
-  KJ_SWITCH_ONEOF(UrlPattern::processInit(UrlPattern::Init{})) {
+  KJ_SWITCH_ONEOF(UrlPattern::processInit(UrlPattern::Init {})) {
     KJ_CASE_ONEOF(result, UrlPattern::Init) {
       KJ_ASSERT(result.baseUrl == kj::none);
       KJ_ASSERT(result.protocol == kj::none);
@@ -889,7 +889,7 @@ KJ_TEST("URLPattern - processInit Default") {
 }
 
 KJ_TEST("URLPattern - processInit PATTERN mode") {
-  KJ_SWITCH_ONEOF(UrlPattern::processInit(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::processInit(UrlPattern::Init {
                     // Since we're using PATTERN mode here (the default), the values
                     // for each field will not be canonicalized.
                     .protocol = kj::str("something"),
@@ -920,7 +920,7 @@ KJ_TEST("URLPattern - processInit PATTERN mode") {
 
 KJ_TEST("URLPattern - processInit PATTERN mode") {
   KJ_SWITCH_ONEOF(UrlPattern::processInit(
-                      UrlPattern::Init{
+                      UrlPattern::Init {
                         // Since we're using PATTERN mode here (the default), the values
                         // for each field will not be canonicalized.
                         .protocol = kj::str("something"),
@@ -930,7 +930,7 @@ KJ_TEST("URLPattern - processInit PATTERN mode") {
                         .pathname = kj::str("something"),
                         .hash = kj::str("something"),
                       },
-                      UrlPattern::ProcessInitOptions{
+                      UrlPattern::ProcessInitOptions {
                         .port = "something"_kj,
                         .search = "something"_kj,
                       })) {
@@ -953,7 +953,7 @@ KJ_TEST("URLPattern - processInit PATTERN mode") {
 
 KJ_TEST("URLPattern - processInit base") {
   KJ_SWITCH_ONEOF(UrlPattern::processInit(
-                      UrlPattern::Init{.baseUrl = kj::str("https://example.org")})) {
+                      UrlPattern::Init {.baseUrl = kj::str("https://example.org")})) {
     KJ_CASE_ONEOF(result, UrlPattern::Init) {
       KJ_ASSERT(KJ_ASSERT_NONNULL(result.baseUrl) == "https://example.org");
       KJ_ASSERT(KJ_ASSERT_NONNULL(result.protocol) == "https");
@@ -973,11 +973,11 @@ KJ_TEST("URLPattern - processInit base") {
 
 KJ_TEST("URLPattern - processInit base relative path") {
   KJ_SWITCH_ONEOF(UrlPattern::processInit(
-                      UrlPattern::Init{
+                      UrlPattern::Init {
                         .pathname = kj::str("d"),
                         .baseUrl = kj::str("https://example.org/a/b/c"),
                       },
-                      UrlPattern::ProcessInitOptions{.port = "1234"_kj})) {
+                      UrlPattern::ProcessInitOptions {.port = "1234"_kj})) {
     KJ_CASE_ONEOF(result, UrlPattern::Init) {
       KJ_ASSERT(KJ_ASSERT_NONNULL(result.baseUrl) == "https://example.org/a/b/c");
       KJ_ASSERT(KJ_ASSERT_NONNULL(result.protocol) == "https");
@@ -997,7 +997,7 @@ KJ_TEST("URLPattern - processInit base relative path") {
 
 KJ_TEST("URLPattern - processInit invalid base") {
   KJ_SWITCH_ONEOF(UrlPattern::processInit(
-                      UrlPattern::Init{.baseUrl = kj::str("not a valid url")})) {
+                      UrlPattern::Init {.baseUrl = kj::str("not a valid url")})) {
     KJ_CASE_ONEOF(result, UrlPattern::Init) {
       KJ_FAIL_ASSERT("processInit should have failed");
     }
@@ -1008,8 +1008,8 @@ KJ_TEST("URLPattern - processInit invalid base") {
 }
 
 KJ_TEST("URLPattern - processInit URL mode (default)") {
-  KJ_SWITCH_ONEOF(UrlPattern::processInit(UrlPattern::Init{},
-                      UrlPattern::ProcessInitOptions{
+  KJ_SWITCH_ONEOF(UrlPattern::processInit(UrlPattern::Init {},
+                      UrlPattern::ProcessInitOptions {
                         .mode = UrlPattern::ProcessInitOptions::Mode::URL})) {
     KJ_CASE_ONEOF(result, UrlPattern::Init) {
       KJ_ASSERT(result.protocol == kj::none);
@@ -1022,7 +1022,7 @@ KJ_TEST("URLPattern - processInit URL mode (default)") {
 
 KJ_TEST("URLPattern - processInit URL mode (protocol, fake)") {
   KJ_SWITCH_ONEOF(UrlPattern::processInit(
-                      UrlPattern::Init{
+                      UrlPattern::Init {
                         // The value will be canonicalized
                         .protocol = kj::str(" FaKe"),
                         .username = kj::str("  mE!:  "),
@@ -1034,7 +1034,7 @@ KJ_TEST("URLPattern - processInit URL mode (protocol, fake)") {
                         .hash = kj::str("# "),
                         .baseUrl = kj::str("http://ignored/a/b/c"),
                       },
-                      UrlPattern::ProcessInitOptions{
+                      UrlPattern::ProcessInitOptions {
                         .mode = UrlPattern::ProcessInitOptions::Mode::URL})) {
     KJ_CASE_ONEOF(result, UrlPattern::Init) {
       KJ_ASSERT(KJ_ASSERT_NONNULL(result.protocol) == "fake");
@@ -1054,7 +1054,7 @@ KJ_TEST("URLPattern - processInit URL mode (protocol, fake)") {
 
 KJ_TEST("URLPattern - processInit URL mode (protocol, http)") {
   KJ_SWITCH_ONEOF(UrlPattern::processInit(
-                      UrlPattern::Init{
+                      UrlPattern::Init {
                         .username = kj::str("  mE!:  "),
                         .password = kj::str(" @@@:@@@"),
                         .hostname = kj::str("123"),
@@ -1064,7 +1064,7 @@ KJ_TEST("URLPattern - processInit URL mode (protocol, http)") {
                         .hash = kj::str("# "),
                         .baseUrl = kj::str("http://something/a/b/c"),
                       },
-                      UrlPattern::ProcessInitOptions{
+                      UrlPattern::ProcessInitOptions {
                         .mode = UrlPattern::ProcessInitOptions::Mode::URL})) {
     KJ_CASE_ONEOF(result, UrlPattern::Init) {
       KJ_ASSERT(KJ_ASSERT_NONNULL(result.protocol) == "http");
@@ -1083,7 +1083,7 @@ KJ_TEST("URLPattern - processInit URL mode (protocol, http)") {
 }
 
 KJ_TEST("URLPattern - compile with empty init") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{})) {
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       // In this case, with an empty Init, all of the components should be
       // interpreted as wildcards capable of matching any input.
@@ -1109,7 +1109,7 @@ KJ_TEST("URLPattern - compile with empty init") {
 }
 
 KJ_TEST("URLPattern - compile with all wildcard init") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {
                     .protocol = kj::str("*"),
                     .username = kj::str("*"),
                     .password = kj::str("*"),
@@ -1144,7 +1144,7 @@ KJ_TEST("URLPattern - compile with all wildcard init") {
 }
 
 KJ_TEST("URLPattern - compile with http protocol only") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {
                     .protocol = kj::str("http"),
                   })) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
@@ -1160,7 +1160,7 @@ KJ_TEST("URLPattern - compile with http protocol only") {
 }
 
 KJ_TEST("URLPattern - compile with http{s}? protocol") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {
                     .protocol = kj::str("http{s}?"),
                   })) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
@@ -1176,7 +1176,7 @@ KJ_TEST("URLPattern - compile with http{s}? protocol") {
 }
 
 KJ_TEST("URLPattern - compile with http{s}+ protocol") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {
                     .protocol = kj::str("http{s}+"),
                   })) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
@@ -1192,7 +1192,7 @@ KJ_TEST("URLPattern - compile with http{s}+ protocol") {
 }
 
 KJ_TEST("URLPattern - compile with http{s}* protocol") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {
                     .protocol = kj::str("http{s}*"),
                   })) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
@@ -1208,7 +1208,7 @@ KJ_TEST("URLPattern - compile with http{s}* protocol") {
 }
 
 KJ_TEST("URLPattern - compile with http(s)? protocol") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {
                     .protocol = kj::str("http(.)?"),
                   })) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
@@ -1225,7 +1225,7 @@ KJ_TEST("URLPattern - compile with http(s)? protocol") {
 }
 
 KJ_TEST("URLPattern - compile with :foo:bar protocol") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {
                     .protocol = kj::str(":foo:bar"),
                   })) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
@@ -1243,7 +1243,7 @@ KJ_TEST("URLPattern - compile with :foo:bar protocol") {
 }
 
 KJ_TEST("URLPattern - compile with :foo(http) protocol") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {
                     .protocol = kj::str(":foo(http)"),
                   })) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
@@ -1260,7 +1260,7 @@ KJ_TEST("URLPattern - compile with :foo(http) protocol") {
 }
 
 KJ_TEST("URLPattern - compile with :foo(http{s}?) protocol") {
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init{
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(UrlPattern::Init {
                     .protocol = kj::str(":foo(http[s]?)"),
                   })) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
@@ -1290,7 +1290,7 @@ KJ_TEST("URLPattern - compile from empty string") {
 KJ_TEST("URLPattern - compile from empty string with base") {
   static constexpr auto BASEURL = "http://example.com"_kjc;
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("",
-                      UrlPattern::CompileOptions{
+                      UrlPattern::CompileOptions {
                         .baseUrl = BASEURL,
                       })) {
     KJ_CASE_ONEOF(init, UrlPattern) {
@@ -1363,7 +1363,7 @@ KJ_TEST("URLPattern - MDN example 2 - pathname: '/books/:id'") {
 
 KJ_TEST("URLPattern - MDN example 3 - pathname: '/books/:id(\\d+)' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/books/:id(\\d+)"_kj,
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.com/books/123"_kj));
       auto protocol = url.getProtocol();
@@ -1399,7 +1399,7 @@ KJ_TEST("URLPattern - MDN example 4 - pathname: '/:type(foo|bar)'") {
 
 KJ_TEST("URLPattern - MDN example 5 - '/books/:id(\\d+) with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/books/:id(\\d+)"_kj,
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(
           testPattern(pattern.getPathname().getRegex(), "/books/123"_kj, kj::arr(kj::str("123"))));
@@ -1413,7 +1413,7 @@ KJ_TEST("URLPattern - MDN example 5 - '/books/:id(\\d+) with base") {
 
 KJ_TEST("URLPattern - MDN example 6 - '/books/(\\d+)' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/books/(\\d+)"_kj,
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(
           testPattern(pattern.getPathname().getRegex(), "/books/123"_kj, kj::arr(kj::str("123"))));
@@ -1428,7 +1428,7 @@ KJ_TEST("URLPattern - MDN example 6 - '/books/(\\d+)' with base") {
 
 KJ_TEST("URLPattern - MDN example 7 - '/books/:id?' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/books/:id?",
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(testPattern(pattern.getProtocol().getRegex(), "https"_kj));
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), "example.com"_kj));
@@ -1446,7 +1446,7 @@ KJ_TEST("URLPattern - MDN example 7 - '/books/:id?' with base") {
 
 KJ_TEST("URLPattern - MDN example 8 - '/books/:id+' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/books/:id+",
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(testPattern(pattern.getProtocol().getRegex(), "https"_kj));
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), "example.com"_kj));
@@ -1464,7 +1464,7 @@ KJ_TEST("URLPattern - MDN example 8 - '/books/:id+' with base") {
 
 KJ_TEST("URLPattern - MDN example 9 - '/books/:id*' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/books/:id*",
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(testPattern(pattern.getProtocol().getRegex(), "https"_kj));
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), "example.com"_kj));
@@ -1482,7 +1482,7 @@ KJ_TEST("URLPattern - MDN example 9 - '/books/:id*' with base") {
 
 KJ_TEST("URLPattern - MDN example 10 - '/book{s}?' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/book{s}?",
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(testPattern(pattern.getProtocol().getRegex(), "https"_kj));
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), "example.com"_kj));
@@ -1498,7 +1498,7 @@ KJ_TEST("URLPattern - MDN example 10 - '/book{s}?' with base") {
 
 KJ_TEST("URLPattern - MDN example 11 - '/book{s}' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/book{s}",
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(testPattern(pattern.getProtocol().getRegex(), "https"_kj));
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), "example.com"_kj));
@@ -1531,7 +1531,7 @@ KJ_TEST("URLPattern - MDN example 12 - '/blog/:id(\\d+){-:title}?'") {
 
 KJ_TEST("URLPattern - MDN example 13 - '/books/:id?' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/books/:id?"_kj,
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(testPattern(pattern.getProtocol().getRegex(), "https"_kj));
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), "example.com"_kj));
@@ -1548,7 +1548,7 @@ KJ_TEST("URLPattern - MDN example 13 - '/books/:id?' with base") {
 
 KJ_TEST("URLPattern - MDN example 14 - '/books/:id+' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/books/:id+"_kj,
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com/abc"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com/abc"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(testPattern(pattern.getProtocol().getRegex(), "https"_kj));
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), "example.com"_kj));
@@ -1594,7 +1594,7 @@ KJ_TEST("URLPattern - MDN example 16 - { pathname: '/books/{:id}?' }") {
 
 KJ_TEST("URLPattern - MDN example 17 - '/books/*' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/books/*"_kj,
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(!testPattern(pattern.getPathname().getRegex(), "/books"_kj));
       KJ_ASSERT(testPattern(pattern.getPathname().getRegex(), "/books/"_kj));
@@ -1609,7 +1609,7 @@ KJ_TEST("URLPattern - MDN example 17 - '/books/*' with base") {
 
 KJ_TEST("URLPattern - MDN example 18 - '/books/*' with base") {
   KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/*.png"_kj,
-                      UrlPattern::CompileOptions{.baseUrl = "https://example.com"_kj})) {
+                      UrlPattern::CompileOptions {.baseUrl = "https://example.com"_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(testPattern(pattern.getPathname().getRegex(), "/image.png"_kj));
       KJ_ASSERT(testPattern(pattern.getPathname().getRegex(), "/folder/image.png"_kj));
@@ -1944,7 +1944,7 @@ KJ_TEST("URLPattern - simple fuzzing") {
     }
 
     KJ_SWITCH_ONEOF(UrlPattern::tryCompile(
-                        input.asPtr(), UrlPattern::CompileOptions{.baseUrl = input.asPtr()})) {
+                        input.asPtr(), UrlPattern::CompileOptions {.baseUrl = input.asPtr()})) {
       KJ_CASE_ONEOF(str, kj::String) {
       }
       KJ_CASE_ONEOF(pattern, UrlPattern) {
@@ -1961,36 +1961,36 @@ KJ_TEST("URLPattern - simple fuzzing") {
 KJ_TEST("URLPattern - WPT compile failed") {
   // Per the Web Platform Tests, all of these should fail to compile successfully
 
-  UrlPattern::Init TESTS[] = {UrlPattern::Init{.protocol = kj::str("(café)")},
-    UrlPattern::Init{.protocol = kj::str("(café)")},
-    UrlPattern::Init{.username = kj::str("(café)")},
-    UrlPattern::Init{.password = kj::str("(café)")},
-    UrlPattern::Init{.hostname = kj::str("(café)")},
-    UrlPattern::Init{.pathname = kj::str("(café)")}, UrlPattern::Init{.search = kj::str("(café)")},
-    UrlPattern::Init{.hash = kj::str("(café)")},
-    UrlPattern::Init{.hostname = kj::str("[\\:\\:xY\\::num]")},
-    UrlPattern::Init{.hostname = kj::str("*\\:1]")},
-    UrlPattern::Init{.pathname = kj::str("/:id/:id")},
-    UrlPattern::Init{.pathname = kj::str("/foo"), .baseUrl = kj::str()},
-    UrlPattern::Init{.hostname = kj::str("bad hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad#hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad%hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad/hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad\\:hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad<hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad>hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad?hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad@hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad[hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad]hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad\\\\hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad^hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad|hostname")},
-    UrlPattern::Init{.hostname = kj::str("bad\nhostname")},
-    UrlPattern::Init{.hostname = kj::str("bad\rhostname")},
-    UrlPattern::Init{.hostname = kj::str("bad	hostname")},
-    UrlPattern::Init{.hostname = kj::str("{[\\:\\:fé\\::num]}")},
-    UrlPattern::Init{.hostname = kj::str("{[\\:\\::num\\:fé]}")}};
+  UrlPattern::Init TESTS[] = {UrlPattern::Init {.protocol = kj::str("(café)")},
+    UrlPattern::Init {.protocol = kj::str("(café)")},
+    UrlPattern::Init {.username = kj::str("(café)")},
+    UrlPattern::Init {.password = kj::str("(café)")},
+    UrlPattern::Init {.hostname = kj::str("(café)")},
+    UrlPattern::Init {.pathname = kj::str("(café)")},
+    UrlPattern::Init {.search = kj::str("(café)")}, UrlPattern::Init {.hash = kj::str("(café)")},
+    UrlPattern::Init {.hostname = kj::str("[\\:\\:xY\\::num]")},
+    UrlPattern::Init {.hostname = kj::str("*\\:1]")},
+    UrlPattern::Init {.pathname = kj::str("/:id/:id")},
+    UrlPattern::Init {.pathname = kj::str("/foo"), .baseUrl = kj::str()},
+    UrlPattern::Init {.hostname = kj::str("bad hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad#hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad%hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad/hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad\\:hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad<hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad>hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad?hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad@hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad[hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad]hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad\\\\hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad^hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad|hostname")},
+    UrlPattern::Init {.hostname = kj::str("bad\nhostname")},
+    UrlPattern::Init {.hostname = kj::str("bad\rhostname")},
+    UrlPattern::Init {.hostname = kj::str("bad	hostname")},
+    UrlPattern::Init {.hostname = kj::str("{[\\:\\:fé\\::num]}")},
+    UrlPattern::Init {.hostname = kj::str("{[\\:\\::num\\:fé]}")}};
 
   kj::StringPtr STRING_TESTS[] = {
     "/foo"_kj,
@@ -2005,7 +2005,8 @@ KJ_TEST("URLPattern - WPT compile failed") {
     "https://foo{@example.com"_kj,
   };
 
-  KJ_SWITCH_ONEOF(UrlPattern::tryCompile("/foo"_kj, UrlPattern::CompileOptions{.baseUrl = ""_kj})) {
+  KJ_SWITCH_ONEOF(UrlPattern::tryCompile(
+                      "/foo"_kj, UrlPattern::CompileOptions {.baseUrl = ""_kj})) {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_FAIL_ASSERT("Test case should have failed");
     }
@@ -2039,261 +2040,263 @@ KJ_TEST("URLPattern - WPT compile failed") {
 
 KJ_TEST("URLPattern - WPT compile success") {
   UrlPattern::Init TESTS[] = {
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com")},
-    UrlPattern::Init{
+    UrlPattern::Init {.pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com")},
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar"),
+    UrlPattern::Init {.pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar"),
       .baseUrl = kj::str("https://example.com?otherquery#otherhash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{
+    UrlPattern::Init {
       .pathname = kj::str("/foo/bar"), .baseUrl = kj::str("https://example.com?query#hash")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/([^\\/]+?)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar(.*)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar(.*)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar(.*)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar(.*)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/:bar*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*?")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/*+")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/**")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/**")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/**")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/**")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/**")},
-    UrlPattern::Init{.pathname = kj::str("/foo/(.*)*")},
-    UrlPattern::Init{.pathname = kj::str("/foo/**")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}?")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}?")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}?")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}?")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}+")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}+")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}+")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}+")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}+")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}*")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}*")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}*")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}*")},
-    UrlPattern::Init{.pathname = kj::str("/foo{/bar}*")},
-    UrlPattern::Init{.protocol = kj::str(":café")},
-    UrlPattern::Init{.username = kj::str(":café")},
-    UrlPattern::Init{.password = kj::str(":café")},
-    UrlPattern::Init{.hostname = kj::str(":café")},
-    UrlPattern::Init{.pathname = kj::str("/:café")},
-    UrlPattern::Init{.search = kj::str(":café")},
-    UrlPattern::Init{.hash = kj::str(":café")},
-    UrlPattern::Init{.protocol = kj::str(":℘")},
-    UrlPattern::Init{.username = kj::str(":℘")},
-    UrlPattern::Init{.password = kj::str(":℘")},
-    UrlPattern::Init{.hostname = kj::str(":℘")},
-    UrlPattern::Init{.pathname = kj::str("/:℘")},
-    UrlPattern::Init{.search = kj::str(":℘")},
-    UrlPattern::Init{.hash = kj::str(":℘")},
-    UrlPattern::Init{.protocol = kj::str(":㐀")},
-    UrlPattern::Init{.username = kj::str(":㐀")},
-    UrlPattern::Init{.password = kj::str(":㐀")},
-    UrlPattern::Init{.hostname = kj::str(":㐀")},
-    UrlPattern::Init{.pathname = kj::str("/:㐀")},
-    UrlPattern::Init{.search = kj::str(":㐀")},
-    UrlPattern::Init{.hash = kj::str(":㐀")},
-    UrlPattern::Init{.protocol = kj::str("(.*)")},
-    UrlPattern::Init{.protocol = kj::str("(.*)")},
-    UrlPattern::Init{.protocol = kj::str("foo-bar")},
-    UrlPattern::Init{.username = kj::str("caf%C3%A9")},
-    UrlPattern::Init{.username = kj::str("café")},
-    UrlPattern::Init{.username = kj::str("caf%c3%a9")},
-    UrlPattern::Init{.password = kj::str("caf%C3%A9")},
-    UrlPattern::Init{.password = kj::str("café")},
-    UrlPattern::Init{.password = kj::str("caf%c3%a9")},
-    UrlPattern::Init{.hostname = kj::str("xn--caf-dma.com")},
-    UrlPattern::Init{.hostname = kj::str("café.com")},
-    UrlPattern::Init{},
-    UrlPattern::Init{.protocol = kj::str("http"), .port = kj::str("80")},
-    UrlPattern::Init{.protocol = kj::str("http"), .port = kj::str("80{20}?")},
-    UrlPattern::Init{.port = kj::str("80")},
-    UrlPattern::Init{.protocol = kj::str("http{s}?"), .port = kj::str("80")},
-    UrlPattern::Init{.port = kj::str("80")},
-    UrlPattern::Init{.port = kj::str("(.*)")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/baz")},
-    UrlPattern::Init{.pathname = kj::str("/caf%C3%A9")},
-    UrlPattern::Init{.pathname = kj::str("/café")},
-    UrlPattern::Init{.pathname = kj::str("/caf%c3%a9")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/../bar")},
-    UrlPattern::Init{.pathname = kj::str("./foo/bar"), .baseUrl = kj::str("https://example.com")},
-    UrlPattern::Init{.baseUrl = kj::str("https://example.com")},
-    UrlPattern::Init{.pathname = kj::str("{/bar}"), .baseUrl = kj::str("https://example.com/foo/")},
-    UrlPattern::Init{.pathname = kj::str("\\/bar"), .baseUrl = kj::str("https://example.com/foo/")},
-    UrlPattern::Init{.pathname = kj::str("b"), .baseUrl = kj::str("https://example.com/foo/")},
-    UrlPattern::Init{.pathname = kj::str("foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("foo/bar"), .baseUrl = kj::str("https://example.com")},
-    UrlPattern::Init{.pathname = kj::str(":name.html"), .baseUrl = kj::str("https://example.com")},
-    UrlPattern::Init{.search = kj::str("q=caf%C3%A9")},
-    UrlPattern::Init{.search = kj::str("q=café")},
-    UrlPattern::Init{.search = kj::str("q=caf%c3%a9")},
-    UrlPattern::Init{.hash = kj::str("caf%C3%A9")},
-    UrlPattern::Init{.hash = kj::str("café")},
-    UrlPattern::Init{.hash = kj::str("caf%c3%a9")},
-    UrlPattern::Init{.protocol = kj::str("about"), .pathname = kj::str("(blank|sourcedoc)")},
-    UrlPattern::Init{.protocol = kj::str("data"), .pathname = kj::str(":number([0-9]+)")},
-    UrlPattern::Init{.pathname = kj::str("/foo!")},
-    UrlPattern::Init{.pathname = kj::str("/foo\\:")},
-    UrlPattern::Init{.pathname = kj::str("/foo\\{")},
-    UrlPattern::Init{.pathname = kj::str("/foo\\(")},
-    UrlPattern::Init{.protocol = kj::str("javascript"), .pathname = kj::str("var x = 1;")},
-    UrlPattern::Init{.pathname = kj::str("var x = 1;")},
-    UrlPattern::Init{.protocol = kj::str("javascript"), .pathname = kj::str("var x = 1;")},
-    UrlPattern::Init{.protocol = kj::str("(data|javascript)"), .pathname = kj::str("var x = 1;")},
-    UrlPattern::Init{.protocol = kj::str("(https|javascript)"), .pathname = kj::str("var x = 1;")},
-    UrlPattern::Init{.pathname = kj::str("var x = 1;")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{.pathname = kj::str("*")},
-    UrlPattern::Init{.pathname = kj::str("*")},
-    UrlPattern::Init{.hostname = kj::str("[\\:\\:AB\\::num]")},
-    UrlPattern::Init{.hostname = kj::str("{[\\:\\:ab\\::num]}")},
-    UrlPattern::Init{.hostname = kj::str("{[\\:\\::num\\:1]}")},
-    UrlPattern::Init{.hostname = kj::str("[*\\:1]")},
-    UrlPattern::Init{.pathname = kj::str(":name*")},
-    UrlPattern::Init{.pathname = kj::str(":name+")},
-    UrlPattern::Init{.pathname = kj::str(":name")},
-    UrlPattern::Init{.protocol = kj::str(":name*")},
-    UrlPattern::Init{.protocol = kj::str(":name+")},
-    UrlPattern::Init{.protocol = kj::str(":name")},
-    UrlPattern::Init{.pathname = kj::str("(foo)(.*)")},
-    UrlPattern::Init{.pathname = kj::str("{(foo)bar}(.*)")},
-    UrlPattern::Init{.pathname = kj::str("(foo)?(.*)")},
-    UrlPattern::Init{.pathname = kj::str("{:foo}(.*)")},
-    UrlPattern::Init{.pathname = kj::str("{:foo}(barbaz)")},
-    UrlPattern::Init{.pathname = kj::str("{:foo}{(.*)}")},
-    UrlPattern::Init{.pathname = kj::str("{:foo}{(.*)bar}")},
-    UrlPattern::Init{.pathname = kj::str("{:foo}{bar(.*)}")},
-    UrlPattern::Init{.pathname = kj::str("{:foo}:bar(.*)")},
-    UrlPattern::Init{.pathname = kj::str("{:foo}?(.*)")},
-    UrlPattern::Init{.pathname = kj::str("{:foo\bar}")},
-    UrlPattern::Init{.pathname = kj::str("{:foo\\.bar}")},
-    UrlPattern::Init{.pathname = kj::str("{:foo(foo)bar}")},
-    UrlPattern::Init{.pathname = kj::str("{:foo}bar")},
-    UrlPattern::Init{.pathname = kj::str(":foo\bar")},
-    UrlPattern::Init{.pathname = kj::str(":foo{}(.*)")},
-    UrlPattern::Init{.pathname = kj::str(":foo{}bar")},
-    UrlPattern::Init{.pathname = kj::str(":foo{}?bar")},
-    UrlPattern::Init{.pathname = kj::str("*{}**?")},
-    UrlPattern::Init{.pathname = kj::str(":foo(baz)(.*)")},
-    UrlPattern::Init{.pathname = kj::str(":foo(baz)bar")},
-    UrlPattern::Init{.pathname = kj::str("*/*")},
-    UrlPattern::Init{.pathname = kj::str("*\\/*")},
-    UrlPattern::Init{.pathname = kj::str("*/{*}")},
-    UrlPattern::Init{.pathname = kj::str("*//*")},
-    UrlPattern::Init{.pathname = kj::str("/:foo.")},
-    UrlPattern::Init{.pathname = kj::str("/:foo..")},
-    UrlPattern::Init{.pathname = kj::str("./foo")},
-    UrlPattern::Init{.pathname = kj::str("../foo")},
-    UrlPattern::Init{.pathname = kj::str(":foo./")},
-    UrlPattern::Init{.pathname = kj::str(":foo../")},
-    UrlPattern::Init{.pathname = kj::str("/:foo\bar")},
-    UrlPattern::Init{.pathname = kj::str("/foo/bar")},
-    UrlPattern::Init{
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/([^\\/]+?)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar(.*)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar(.*)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar(.*)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar(.*)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/:bar*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*?")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/*+")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/**")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/**")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/**")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/**")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/**")},
+    UrlPattern::Init {.pathname = kj::str("/foo/(.*)*")},
+    UrlPattern::Init {.pathname = kj::str("/foo/**")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}?")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}?")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}?")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}?")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}+")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}+")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}+")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}+")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}+")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}*")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}*")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}*")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}*")},
+    UrlPattern::Init {.pathname = kj::str("/foo{/bar}*")},
+    UrlPattern::Init {.protocol = kj::str(":café")},
+    UrlPattern::Init {.username = kj::str(":café")},
+    UrlPattern::Init {.password = kj::str(":café")},
+    UrlPattern::Init {.hostname = kj::str(":café")},
+    UrlPattern::Init {.pathname = kj::str("/:café")},
+    UrlPattern::Init {.search = kj::str(":café")},
+    UrlPattern::Init {.hash = kj::str(":café")},
+    UrlPattern::Init {.protocol = kj::str(":℘")},
+    UrlPattern::Init {.username = kj::str(":℘")},
+    UrlPattern::Init {.password = kj::str(":℘")},
+    UrlPattern::Init {.hostname = kj::str(":℘")},
+    UrlPattern::Init {.pathname = kj::str("/:℘")},
+    UrlPattern::Init {.search = kj::str(":℘")},
+    UrlPattern::Init {.hash = kj::str(":℘")},
+    UrlPattern::Init {.protocol = kj::str(":㐀")},
+    UrlPattern::Init {.username = kj::str(":㐀")},
+    UrlPattern::Init {.password = kj::str(":㐀")},
+    UrlPattern::Init {.hostname = kj::str(":㐀")},
+    UrlPattern::Init {.pathname = kj::str("/:㐀")},
+    UrlPattern::Init {.search = kj::str(":㐀")},
+    UrlPattern::Init {.hash = kj::str(":㐀")},
+    UrlPattern::Init {.protocol = kj::str("(.*)")},
+    UrlPattern::Init {.protocol = kj::str("(.*)")},
+    UrlPattern::Init {.protocol = kj::str("foo-bar")},
+    UrlPattern::Init {.username = kj::str("caf%C3%A9")},
+    UrlPattern::Init {.username = kj::str("café")},
+    UrlPattern::Init {.username = kj::str("caf%c3%a9")},
+    UrlPattern::Init {.password = kj::str("caf%C3%A9")},
+    UrlPattern::Init {.password = kj::str("café")},
+    UrlPattern::Init {.password = kj::str("caf%c3%a9")},
+    UrlPattern::Init {.hostname = kj::str("xn--caf-dma.com")},
+    UrlPattern::Init {.hostname = kj::str("café.com")},
+    UrlPattern::Init {},
+    UrlPattern::Init {.protocol = kj::str("http"), .port = kj::str("80")},
+    UrlPattern::Init {.protocol = kj::str("http"), .port = kj::str("80{20}?")},
+    UrlPattern::Init {.port = kj::str("80")},
+    UrlPattern::Init {.protocol = kj::str("http{s}?"), .port = kj::str("80")},
+    UrlPattern::Init {.port = kj::str("80")},
+    UrlPattern::Init {.port = kj::str("(.*)")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/baz")},
+    UrlPattern::Init {.pathname = kj::str("/caf%C3%A9")},
+    UrlPattern::Init {.pathname = kj::str("/café")},
+    UrlPattern::Init {.pathname = kj::str("/caf%c3%a9")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/../bar")},
+    UrlPattern::Init {.pathname = kj::str("./foo/bar"), .baseUrl = kj::str("https://example.com")},
+    UrlPattern::Init {.baseUrl = kj::str("https://example.com")},
+    UrlPattern::Init {
+      .pathname = kj::str("{/bar}"), .baseUrl = kj::str("https://example.com/foo/")},
+    UrlPattern::Init {
+      .pathname = kj::str("\\/bar"), .baseUrl = kj::str("https://example.com/foo/")},
+    UrlPattern::Init {.pathname = kj::str("b"), .baseUrl = kj::str("https://example.com/foo/")},
+    UrlPattern::Init {.pathname = kj::str("foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("foo/bar"), .baseUrl = kj::str("https://example.com")},
+    UrlPattern::Init {.pathname = kj::str(":name.html"), .baseUrl = kj::str("https://example.com")},
+    UrlPattern::Init {.search = kj::str("q=caf%C3%A9")},
+    UrlPattern::Init {.search = kj::str("q=café")},
+    UrlPattern::Init {.search = kj::str("q=caf%c3%a9")},
+    UrlPattern::Init {.hash = kj::str("caf%C3%A9")},
+    UrlPattern::Init {.hash = kj::str("café")},
+    UrlPattern::Init {.hash = kj::str("caf%c3%a9")},
+    UrlPattern::Init {.protocol = kj::str("about"), .pathname = kj::str("(blank|sourcedoc)")},
+    UrlPattern::Init {.protocol = kj::str("data"), .pathname = kj::str(":number([0-9]+)")},
+    UrlPattern::Init {.pathname = kj::str("/foo!")},
+    UrlPattern::Init {.pathname = kj::str("/foo\\:")},
+    UrlPattern::Init {.pathname = kj::str("/foo\\{")},
+    UrlPattern::Init {.pathname = kj::str("/foo\\(")},
+    UrlPattern::Init {.protocol = kj::str("javascript"), .pathname = kj::str("var x = 1;")},
+    UrlPattern::Init {.pathname = kj::str("var x = 1;")},
+    UrlPattern::Init {.protocol = kj::str("javascript"), .pathname = kj::str("var x = 1;")},
+    UrlPattern::Init {.protocol = kj::str("(data|javascript)"), .pathname = kj::str("var x = 1;")},
+    UrlPattern::Init {.protocol = kj::str("(https|javascript)"), .pathname = kj::str("var x = 1;")},
+    UrlPattern::Init {.pathname = kj::str("var x = 1;")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {.pathname = kj::str("*")},
+    UrlPattern::Init {.pathname = kj::str("*")},
+    UrlPattern::Init {.hostname = kj::str("[\\:\\:AB\\::num]")},
+    UrlPattern::Init {.hostname = kj::str("{[\\:\\:ab\\::num]}")},
+    UrlPattern::Init {.hostname = kj::str("{[\\:\\::num\\:1]}")},
+    UrlPattern::Init {.hostname = kj::str("[*\\:1]")},
+    UrlPattern::Init {.pathname = kj::str(":name*")},
+    UrlPattern::Init {.pathname = kj::str(":name+")},
+    UrlPattern::Init {.pathname = kj::str(":name")},
+    UrlPattern::Init {.protocol = kj::str(":name*")},
+    UrlPattern::Init {.protocol = kj::str(":name+")},
+    UrlPattern::Init {.protocol = kj::str(":name")},
+    UrlPattern::Init {.pathname = kj::str("(foo)(.*)")},
+    UrlPattern::Init {.pathname = kj::str("{(foo)bar}(.*)")},
+    UrlPattern::Init {.pathname = kj::str("(foo)?(.*)")},
+    UrlPattern::Init {.pathname = kj::str("{:foo}(.*)")},
+    UrlPattern::Init {.pathname = kj::str("{:foo}(barbaz)")},
+    UrlPattern::Init {.pathname = kj::str("{:foo}{(.*)}")},
+    UrlPattern::Init {.pathname = kj::str("{:foo}{(.*)bar}")},
+    UrlPattern::Init {.pathname = kj::str("{:foo}{bar(.*)}")},
+    UrlPattern::Init {.pathname = kj::str("{:foo}:bar(.*)")},
+    UrlPattern::Init {.pathname = kj::str("{:foo}?(.*)")},
+    UrlPattern::Init {.pathname = kj::str("{:foo\bar}")},
+    UrlPattern::Init {.pathname = kj::str("{:foo\\.bar}")},
+    UrlPattern::Init {.pathname = kj::str("{:foo(foo)bar}")},
+    UrlPattern::Init {.pathname = kj::str("{:foo}bar")},
+    UrlPattern::Init {.pathname = kj::str(":foo\bar")},
+    UrlPattern::Init {.pathname = kj::str(":foo{}(.*)")},
+    UrlPattern::Init {.pathname = kj::str(":foo{}bar")},
+    UrlPattern::Init {.pathname = kj::str(":foo{}?bar")},
+    UrlPattern::Init {.pathname = kj::str("*{}**?")},
+    UrlPattern::Init {.pathname = kj::str(":foo(baz)(.*)")},
+    UrlPattern::Init {.pathname = kj::str(":foo(baz)bar")},
+    UrlPattern::Init {.pathname = kj::str("*/*")},
+    UrlPattern::Init {.pathname = kj::str("*\\/*")},
+    UrlPattern::Init {.pathname = kj::str("*/{*}")},
+    UrlPattern::Init {.pathname = kj::str("*//*")},
+    UrlPattern::Init {.pathname = kj::str("/:foo.")},
+    UrlPattern::Init {.pathname = kj::str("/:foo..")},
+    UrlPattern::Init {.pathname = kj::str("./foo")},
+    UrlPattern::Init {.pathname = kj::str("../foo")},
+    UrlPattern::Init {.pathname = kj::str(":foo./")},
+    UrlPattern::Init {.pathname = kj::str(":foo../")},
+    UrlPattern::Init {.pathname = kj::str("/:foo\bar")},
+    UrlPattern::Init {.pathname = kj::str("/foo/bar")},
+    UrlPattern::Init {
       .protocol = kj::str("http{s}?:"), .search = kj::str("?bar"), .hash = kj::str("#baz")},
-    UrlPattern::Init{.search = kj::str("foo"), .baseUrl = kj::str("https://example.com/a/+/b")},
-    UrlPattern::Init{
+    UrlPattern::Init {.search = kj::str("foo"), .baseUrl = kj::str("https://example.com/a/+/b")},
+    UrlPattern::Init {
       .hash = kj::str("foo"), .baseUrl = kj::str("https://example.com/?q=*&v=?&hmm={}&umm=()")},
   };
 
@@ -2364,7 +2367,7 @@ KJ_TEST("URLPattern - WPT compile success") {
   for (auto& testCase: STRING_TESTS) {
     KJ_IF_SOME(base, testCase.base) {
       KJ_SWITCH_ONEOF(UrlPattern::tryCompile(
-                          testCase.input, UrlPattern::CompileOptions{.baseUrl = base})) {
+                          testCase.input, UrlPattern::CompileOptions {.baseUrl = base})) {
         KJ_CASE_ONEOF(pattern, UrlPattern) {
         }
         KJ_CASE_ONEOF(err, kj::String) {

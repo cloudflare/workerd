@@ -220,17 +220,17 @@ Trace::HibernatableWebSocketEventInfo::Type Trace::HibernatableWebSocketEventInf
   auto type = reader.getType();
   switch (type.which()) {
     case rpc::Trace::HibernatableWebSocketEventInfo::Type::MESSAGE: {
-      return Message{};
+      return Message {};
     }
     case rpc::Trace::HibernatableWebSocketEventInfo::Type::CLOSE: {
       auto close = type.getClose();
-      return Close{
+      return Close {
         .code = close.getCode(),
         .wasClean = close.getWasClean(),
       };
     }
     case rpc::Trace::HibernatableWebSocketEventInfo::Type::ERROR: {
-      return Error{};
+      return Error {};
     }
   }
 }
@@ -545,7 +545,7 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
     if (s.logs.size() >= Span::MAX_LOGS) {
       ++s.droppedLogs;
     } else {
-      s.logs.add(Span::Log{.timestamp = timestamp,
+      s.logs.add(Span::Log {.timestamp = timestamp,
         .tag = {
           .key = kj::mv(key),
           .value = kj::mv(value),
@@ -596,12 +596,12 @@ WorkerTracer::WorkerTracer(
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
-      self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
+      self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer> {}, *this)) {}
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::refcounted<Trace>(
           kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none)),
-      self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
+      self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer> {}, *this)) {}
 
 void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) {
   if (trace->exceededLogLimit) {

@@ -71,7 +71,7 @@ kj::Maybe<kj::Array<kj::byte>> TranscodeDefault(
   auto out = kj::heapArray<kj::byte>(limit);
   char* target = out.asChars().begin();
   const char* source_ = source.asChars().begin();
-  UErrorCode status{};
+  UErrorCode status {};
   ucnv_convertEx(to.conv(), from.conv(), &target, target + limit, &source_, source_ + source.size(),
       nullptr, nullptr, nullptr, nullptr, true, true, &status);
   if (U_SUCCESS(status)) {
@@ -115,7 +115,7 @@ kj::Maybe<kj::Array<kj::byte>> TranscodeFromUTF16(
   JSG_REQUIRE(limit <= ISOLATE_LIMIT, Error, "Buffer is too large to transcode");
 
   auto destbuf = kj::heapArray<UChar>(limit);
-  UErrorCode status{};
+  UErrorCode status {};
   auto len = ucnv_fromUChars(to.conv(), destbuf.asChars().begin(), destbuf.size(),
       utf16_input.begin(), utf16_input.size(), &status);
 

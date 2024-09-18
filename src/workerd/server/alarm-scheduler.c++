@@ -67,7 +67,7 @@ void AlarmScheduler::loadAlarmsFromDb() {
 
     auto ownUniqueKey = kj::str(query.getText(0));
     auto ownActorId = kj::str(query.getText(1));
-    auto actor = kj::attachVal(ActorKey{.uniqueKey = ownUniqueKey, .actorId = ownActorId},
+    auto actor = kj::attachVal(ActorKey {.uniqueKey = ownUniqueKey, .actorId = ownActorId},
         kj::mv(ownUniqueKey), kj::mv(ownActorId));
 
     alarms.insert(*actor, scheduleAlarm(now, kj::mv(actor), date));
@@ -77,7 +77,7 @@ void AlarmScheduler::loadAlarmsFromDb() {
 }
 
 void AlarmScheduler::registerNamespace(kj::StringPtr uniqueKey, GetActorFn getActor) {
-  namespaces.insert(uniqueKey, Namespace{.getActor = kj::mv(getActor)});
+  namespaces.insert(uniqueKey, Namespace {.getActor = kj::mv(getActor)});
 }
 
 kj::Maybe<kj::Date> AlarmScheduler::getAlarm(ActorKey actor) {
@@ -105,10 +105,10 @@ bool AlarmScheduler::setAlarm(ActorKey actor, kj::Date scheduledTime) {
 
     auto ownUniqueKey = kj::str(actor.uniqueKey);
     auto ownActorId = kj::str(actor.actorId);
-    auto ownActor = kj::attachVal(ActorKey{.uniqueKey = ownUniqueKey, .actorId = ownActorId},
+    auto ownActor = kj::attachVal(ActorKey {.uniqueKey = ownUniqueKey, .actorId = ownActorId},
         kj::mv(ownUniqueKey), kj::mv(ownActorId));
 
-    return decltype(alarms)::Entry{
+    return decltype(alarms)::Entry {
       *ownActor, scheduleAlarm(clock.now(), kj::mv(ownActor), scheduledTime)};
   });
 
@@ -152,7 +152,7 @@ kj::Promise<AlarmScheduler::RetryInfo> AlarmScheduler::runAlarm(
   KJ_IF_SOME(ns, namespaces.find(actor.uniqueKey)) {
     auto result = co_await ns.getActor(kj::str(actor.actorId))->runAlarm(scheduledTime, retryCount);
 
-    co_return RetryInfo{.retry = result.outcome != EventOutcome::OK && result.retry,
+    co_return RetryInfo {.retry = result.outcome != EventOutcome::OK && result.retry,
       .retryCountsAgainstLimit = result.retryCountsAgainstLimit};
   } else {
     throw KJ_EXCEPTION(FAILED, "uniqueKey for stored alarm was not registered?");
@@ -163,7 +163,7 @@ AlarmScheduler::ScheduledAlarm AlarmScheduler::scheduleAlarm(
     kj::Date now, kj::Own<ActorKey> actor, kj::Date scheduledTime) {
   auto task = makeAlarmTask(scheduledTime - now, *actor, scheduledTime);
 
-  return ScheduledAlarm{kj::mv(actor), scheduledTime, kj::mv(task)};
+  return ScheduledAlarm {kj::mv(actor), scheduledTime, kj::mv(task)};
 }
 
 kj::Promise<void> AlarmScheduler::checkTimestamp(kj::Duration delay, kj::Date scheduledTime) {
@@ -196,7 +196,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       KJ_LOG(WARNING, exception);
-      co_return RetryInfo{.retry = true,
+      co_return RetryInfo {.retry = true,
 
         // An exception here is "weird", they should normally
         // be turned into AlarmResult statuses in the sandbox

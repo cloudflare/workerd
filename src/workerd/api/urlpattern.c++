@@ -55,16 +55,16 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(jsg::Lock& js,
 
     while (index < length) {
       auto value = array.get(js, index);
-      fields.add(Groups::Field{
+      fields.add(Groups::Field {
         .name = kj::str(nameList[index - 1]),
         .value = value.isUndefined() ? kj::str() : kj::str(value),
       });
       index++;
     }
 
-    return URLPattern::URLPatternComponentResult{
+    return URLPattern::URLPatternComponentResult {
       .input = kj::str(input),
-      .groups = Groups{.fields = fields.releaseAsArray()},
+      .groups = Groups {.fields = fields.releaseAsArray()},
     };
   }
 
@@ -140,10 +140,10 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
     jsg::Optional<kj::String> baseURL,
     jsg::Optional<URLPatternOptions> patternOptions) {
   auto options = patternOptions.orDefault({});
-  KJ_SWITCH_ONEOF(kj::mv(input).orDefault(URLPatternInit{})) {
+  KJ_SWITCH_ONEOF(kj::mv(input).orDefault(URLPatternInit {})) {
     KJ_CASE_ONEOF(str, kj::String) {
       KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(str.asPtr(),
-                          jsg::UrlPattern::CompileOptions{
+                          jsg::UrlPattern::CompileOptions {
                             .baseUrl = baseURL.map([](kj::String& str) { return str.asPtr(); }),
                             .ignoreCase = options.ignoreCase.orDefault(false),
                           })) {
@@ -157,7 +157,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
     }
     KJ_CASE_ONEOF(init, URLPatternInit) {
       KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(init,
-                          jsg::UrlPattern::CompileOptions{
+                          jsg::UrlPattern::CompileOptions {
                             .ignoreCase = options.ignoreCase.orDefault(false),
                           })) {
         KJ_CASE_ONEOF(err, kj::String) {
@@ -216,7 +216,7 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
     KJ_CASE_ONEOF(i, URLPattern::URLPatternInit) {
       JSG_REQUIRE(
           maybeBase == kj::none, TypeError, "A baseURL is not allowed when input is an object.");
-      inputs.add(URLPattern::URLPatternInit{
+      inputs.add(URLPattern::URLPatternInit {
         .protocol = i.protocol.map([](kj::String& str) { return kj::str(str); }),
         .username = i.username.map([](kj::String& str) { return kj::str(str); }),
         .password = i.password.map([](kj::String& str) { return kj::str(str); }),
@@ -277,7 +277,7 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
     return kj::none;
   }
 
-  return URLPattern::URLPatternResult{
+  return URLPattern::URLPatternResult {
     .inputs = inputs.releaseAsArray(),
     .protocol = kj::mv(KJ_REQUIRE_NONNULL(protocolExecResult)),
     .username = kj::mv(KJ_REQUIRE_NONNULL(usernameExecResult)),

@@ -146,17 +146,17 @@ public:
       int wd;
       uint32_t mask = IN_DELETE | IN_MODIFY | IN_MOVE | IN_CREATE;
       KJ_SYSCALL(wd = inotify_add_watch(inotifyFd, pathStr.cStr(), mask));
-      return decltype(watches)::Entry{kj::mv(pathStr), wd};
+      return decltype(watches)::Entry {kj::mv(pathStr), wd};
     });
 
     auto& files =
-        filesWatched.findOrCreate(wd, [&]() { return decltype(filesWatched)::Entry{wd, {}}; });
+        filesWatched.findOrCreate(wd, [&]() { return decltype(filesWatched)::Entry {wd, {}}; });
 
     files.upsert(kj::str(path.basename()[0]), [](auto&&...) {});
   }
 
   kj::Promise<void> onChange() {
-    kj::byte buffer[4096]{};
+    kj::byte buffer[4096] {};
 
     for (;;) {
       ssize_t n;
@@ -575,7 +575,7 @@ private:
 
   ConnectionQueue& getLoopbackQueue(kj::StringPtr name) {
     return *loopbackQueues.findOrCreate(name, [&]() {
-      return decltype(loopbackQueues)::Entry{
+      return decltype(loopbackQueues)::Entry {
         .key = kj::str(name),
         .value = kj::heap<ConnectionQueue>(),
       };
@@ -667,7 +667,7 @@ public:
       auto& exe = *e.file;
       auto size = exe.stat().size;
       KJ_ASSERT(size > sizeof(COMPILED_MAGIC_SUFFIX) + sizeof(uint64_t));
-      kj::byte magic[sizeof(COMPILED_MAGIC_SUFFIX)]{};
+      kj::byte magic[sizeof(COMPILED_MAGIC_SUFFIX)] {};
       exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX), magic);
       if (kj::arrayPtr(magic) == kj::arrayPtr(COMPILED_MAGIC_SUFFIX).asBytes()) {
         // Oh! It appears we are running a compiled binary, it has a config appended to the end.
@@ -1387,7 +1387,7 @@ private:
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
   kj::AsyncIoContext io = kj::setupAsyncIo();
-  NetworkWithLoopback network{io.provider->getNetwork(), *io.provider};
+  NetworkWithLoopback network {io.provider->getNetwork(), *io.provider};
   EntropySourceImpl entropySource;
 
   kj::Vector<kj::Path> importPath;
@@ -1433,7 +1433,7 @@ private:
     // sooooo many arguments, I don't want to deal with it.
     auto parsedPath = fs.getCurrentPath().evalNative(path);
     KJ_IF_SOME(file, fs.getRoot().tryOpenFile(parsedPath)) {
-      return ExeInfo{kj::str(path), kj::mv(file)};
+      return ExeInfo {kj::str(path), kj::mv(file)};
     }
     return kj::none;
   }
@@ -1445,7 +1445,7 @@ private:
     if (fd < 0) {
       return kj::none;
     }
-    return ExeInfo{kj::str(path), kj::newDiskFile(kj::AutoCloseFd(fd))};
+    return ExeInfo {kj::str(path), kj::newDiskFile(kj::AutoCloseFd(fd))};
   }
 #endif
 

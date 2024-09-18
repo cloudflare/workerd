@@ -100,7 +100,7 @@ public:
 
   template <typename TypeWrapper>
   GeneratorImpl(v8::Isolate* isolate, v8::Local<v8::Object> object, TypeWrapper& typeWrapper)
-      : state(Active{
+      : state(Active {
           .maybeNext = tryGetFunction<NextSignature>(isolate, object, "next"_kj, typeWrapper),
           .maybeReturn = tryGetFunction<ReturnSignature>(isolate, object, "return"_kj, typeWrapper),
           .maybeThrow = tryGetFunction<ThrowSignature>(isolate, object, "throw"_kj, typeWrapper)}) {
@@ -591,12 +591,12 @@ public:
         // even if the thing we'd be mapping to can safely handle undefined as
         // a value.
         if (value->IsUndefined()) {
-          return GeneratorNext<T>{
+          return GeneratorNext<T> {
             .done = true,
             .value = kj::none,
           };
         } else {
-          return GeneratorNext<T>{
+          return GeneratorNext<T> {
             .done = true,
             .value = typeWrapper.tryUnwrap(context, value, (T*)nullptr, parentObject),
           };
@@ -604,7 +604,7 @@ public:
       }
 
       KJ_IF_SOME(v, typeWrapper.tryUnwrap(context, value, (T*)nullptr, parentObject)) {
-        return GeneratorNext<T>{
+        return GeneratorNext<T> {
           .done = false,
           .value = kj::mv(v),
         };
@@ -765,9 +765,9 @@ private:
 
   Next nextImpl(Lock& js, NextSignature nextFunc) {
     KJ_IF_SOME(value, nextFunc(js, state)) {
-      return Next{.done = false, .value = kj::mv(value)};
+      return Next {.done = false, .value = kj::mv(value)};
     }
-    return Next{
+    return Next {
       .done = true,
       .value = kj::none,
     };
@@ -862,7 +862,7 @@ public:
   using Next = AsyncIteratorImpl::Next<Type>;
   using Finished = AsyncIteratorImpl::Finished;
 
-  explicit AsyncIteratorBase(State state): state(InnerState{.state = kj::mv(state)}) {}
+  explicit AsyncIteratorBase(State state): state(InnerState {.state = kj::mv(state)}) {}
 
   v8::Local<v8::Object> self(const v8::FunctionCallbackInfo<v8::Value>& info) {
     return info.This();
@@ -925,20 +925,20 @@ private:
   Promise<Next> nextImpl(Lock& js, NextSignature nextFunc) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(finished, Finished) {
-        return js.resolvedPromise(Next{.done = true});
+        return js.resolvedPromise(Next {.done = true});
       }
       KJ_CASE_ONEOF(inner, InnerState) {
         // If return_() has already been called on the async iterator, we just return an immediately
         // resolved promise indicating done, regardless of whether there are still other outstanding
         // next promises or not.
         if (inner.impl.returning) {
-          return js.resolvedPromise(Next{.done = true});
+          return js.resolvedPromise(Next {.done = true});
         }
 
         auto callNext = [this, self = JSG_THIS, nextFunc = kj::mv(nextFunc)](Lock& js) mutable {
           KJ_SWITCH_ONEOF(state) {
             KJ_CASE_ONEOF(finished, Finished) {
-              return js.resolvedPromise(Next{.done = true});
+              return js.resolvedPromise(Next {.done = true});
             }
             KJ_CASE_ONEOF(inner, InnerState) {
               auto promise = nextFunc(js, inner.state);
@@ -946,10 +946,10 @@ private:
               return promise.then(
                   js, [this, self = kj::mv(self)](Lock& js, kj::Maybe<Type> maybeResult) mutable {
                 KJ_IF_SOME(result, maybeResult) {
-                  return js.resolvedPromise(Next{.done = false, .value = kj::mv(result)});
+                  return js.resolvedPromise(Next {.done = false, .value = kj::mv(result)});
                 } else {
                   state.template init<Finished>();
-                  return js.resolvedPromise(Next{.done = true});
+                  return js.resolvedPromise(Next {.done = true});
                 }
               });
             }
@@ -973,7 +973,7 @@ private:
   Promise<Next> returnImpl(Lock& js, Optional<Value> value, ReturnSignature returnFunc) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(finished, Finished) {
-        return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
+        return js.resolvedPromise(Next {.done = true, .value = kj::mv(value)});
       }
       KJ_CASE_ONEOF(inner, InnerState) {
 
@@ -982,7 +982,7 @@ private:
         // promises indicating a done status being returned, regardless of any other promises
         // that may be pending.
         if (inner.impl.returning) {
-          return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
+          return js.resolvedPromise(Next {.done = true, .value = kj::mv(value)});
         }
 
         inner.impl.returning = true;
@@ -991,14 +991,14 @@ private:
                               returnFunc = kj::mv(returnFunc)](Lock& js) mutable {
           KJ_SWITCH_ONEOF(state) {
             KJ_CASE_ONEOF(finished, Finished) {
-              return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
+              return js.resolvedPromise(Next {.done = true, .value = kj::mv(value)});
             }
             KJ_CASE_ONEOF(inner, InnerState) {
               return returnFunc(js, inner.state, value.map([&](Value& v) {
                 return v.addRef(js.v8Isolate);
               })).then(js, [this, self = kj::mv(self), value = kj::mv(value)](Lock& js) mutable {
                 state.template init<Finished>();
-                return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
+                return js.resolvedPromise(Next {.done = true, .value = kj::mv(value)});
               });
             }
           }

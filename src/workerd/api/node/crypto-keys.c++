@@ -26,7 +26,7 @@ public:
     return "secret"_kj;
   }
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
-    return CryptoKey::KeyAlgorithm{.name = "secret"_kj};
+    return CryptoKey::KeyAlgorithm {.name = "secret"_kj};
   }
 
   bool equals(const CryptoKey::Impl& other) const override final {
@@ -107,7 +107,7 @@ CryptoKey::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
 }
 
 kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
-  static const std::map<kj::StringPtr, kj::StringPtr> mapping{
+  static const std::map<kj::StringPtr, kj::StringPtr> mapping {
     {"RSASSA-PKCS1-v1_5", "rsa"},
     {"RSA-PSS", "rsa"},
     {"RSA-OAEP", "rsa"},

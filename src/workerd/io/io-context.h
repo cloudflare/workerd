@@ -1018,7 +1018,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
         }
       };
 
-      RunnableImpl runnable{kj::fwd<Func>(func)};
+      RunnableImpl runnable {kj::fwd<Func>(func)};
       runImpl(runnable, true, lock, kj::mv(inputLock), false);
       KJ_IF_SOME(r, runnable.result) {
         return kj::mv(r);
@@ -1144,7 +1144,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 
     return run(
         [resolver = kj::mv(resolver),
-            funcResultPair = FuncResultPair{kj::fwd<Func>(func), kj::mv(exceptionOrT)},
+            funcResultPair = FuncResultPair {kj::fwd<Func>(func), kj::mv(exceptionOrT)},
             maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
       jsg::Lock& js = lock;

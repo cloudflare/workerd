@@ -682,7 +682,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
   // Add an entry to the timeoutTimes map, to track when the nearest timeout is. Arrange for it
   // to be removed when the promise completes.
-  TimeoutTime timeoutTimesKey{when, timeoutTimesTiebreakerCounter++};
+  TimeoutTime timeoutTimesKey {when, timeoutTimesTiebreakerCounter++};
   timeoutTimes.insert(timeoutTimesKey, kj::mv(paf.fulfiller));
   auto deferredTimeoutTimeRemoval = kj::defer([this, &context, timeoutTimesKey]() {
     // If the promise is being destroyed due to IoContext teardown then IoChannelFactory may
@@ -827,7 +827,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
     return getSubrequestChannelImpl(
         channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
   },
-      SubrequestOptions{
+      SubrequestOptions {
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
         .operationName = kj::mv(operationName),
@@ -843,7 +843,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     return getSubrequestChannelImpl(
         channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
   },
-      SubrequestOptions{
+      SubrequestOptions {
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
         .operationName = kj::mv(operationName),
@@ -855,7 +855,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     kj::Maybe<kj::String> cfBlobJson,
     TraceContext& tracing,
     IoChannelFactory& channelFactory) {
-  IoChannelFactory::SubrequestMetadata metadata{
+  IoChannelFactory::SubrequestMetadata metadata {
     .cfBlobJson = kj::mv(cfBlobJson),
     .tracing = tracing,
     .featureFlagsForFl = worker->getIsolate().getFeatureFlagsForFl(),

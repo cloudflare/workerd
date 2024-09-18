@@ -1026,7 +1026,7 @@ public:
       if constexpr (kj::isSameType<K, kj::String>()) {
         auto strName = convertToUtf8(name);
         const char* cstrName = strName.cStr();
-        builder.add(typename Dict<V, K>::Field{kj::mv(strName),
+        builder.add(typename Dict<V, K>::Field {kj::mv(strName),
           wrapper.template unwrap<V>(
               context, value, TypeErrorContext::dictField(cstrName), object)});
       } else {
@@ -1045,11 +1045,11 @@ public:
           throwTypeError(context->GetIsolate(), TypeErrorContext::dictField(strName.cStr()),
               TypeWrapper::getName((V*)nullptr));
         }
-        builder.add(typename Dict<V, K>::Field{
+        builder.add(typename Dict<V, K>::Field {
           KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue))});
       }
     }
-    return Dict<V, K>{builder.finish()};
+    return Dict<V, K> {builder.finish()};
   }
 };
 
@@ -1130,7 +1130,7 @@ public:
     if constexpr (kj::isSameType<kj::String, T>()) {
       if (!handle->IsString()) return kj::none;
       KJ_IF_SOME(value, wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
-        return NonCoercible<T>{
+        return NonCoercible<T> {
           .value = kj::mv(value),
         };
       }
@@ -1138,14 +1138,14 @@ public:
     } else if constexpr (kj::isSameType<bool, T>()) {
       if (!handle->IsBoolean()) return kj::none;
       return wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject).map([](auto& value) {
-        return NonCoercible<T>{
+        return NonCoercible<T> {
           .value = value,
         };
       });
     } else if constexpr (kj::isSameType<double, T>()) {
       if (!handle->IsNumber()) return kj::none;
       return wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject).map([](auto& value) {
-        return NonCoercible<T>{
+        return NonCoercible<T> {
           .value = value,
         };
       });

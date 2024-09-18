@@ -183,7 +183,7 @@ struct ActorCacheConvenienceWrappers {
   }
   auto put(kj::ArrayPtr<const KeyValuePtr> kvs, ActorCache::WriteOptions options = {}) {
     return target.put(KJ_MAP(kv, kvs) {
-      return ActorCache::KeyValuePair{kj::str(kv.key), kj::heapArray(kv.value.asBytes())};
+      return ActorCache::KeyValuePair {kj::str(kv.key), kj::heapArray(kv.value.asBytes())};
     }, options);
   }
   auto setAlarm(kj::Maybe<kj::Date> newTime, ActorCache::WriteOptions options = {}) {
@@ -4804,7 +4804,7 @@ KJ_TEST("ActorCache list stream cancellation") {
   {
     // We allocate `lru` on the heap to assist valgrind in being able to detect when it is used
     // after free.
-    auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options{options.softLimit,
+    auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options {options.softLimit,
       options.hardLimit, options.staleTimeout, options.dirtyListByteLimit, options.maxKeysPerRpc});
     OutputGate gate;
     ActorCache cache(mockClient, *lru, gate);
@@ -4834,7 +4834,7 @@ KJ_TEST("ActorCache list stream cancellation") {
   {
     // We allocate `lru` on the heap to assist valgrind in being able to detect when it is used
     // after free.
-    auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options{options.softLimit,
+    auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options {options.softLimit,
       options.hardLimit, options.staleTimeout, options.dirtyListByteLimit, options.maxKeysPerRpc});
     OutputGate gate;
     ActorCache cache(mockClient, *lru, gate);
@@ -4864,7 +4864,7 @@ KJ_TEST("ActorCache list stream cancellation") {
   {
     // We allocate `lru` on the heap to assist valgrind in being able to detect when it is used
     // after free.
-    auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options{options.softLimit,
+    auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options {options.softLimit,
       options.hardLimit, options.staleTimeout, options.dirtyListByteLimit, options.maxKeysPerRpc});
     OutputGate gate;
     ActorCache cache(mockClient, *lru, gate);
@@ -5142,7 +5142,7 @@ KJ_TEST("ActorCache can wait for flush") {
       test.put(key, "bar");
       auto secondPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
       KJ_ASSERT(!secondPromise.poll(ws));
-      maybeSecondOperation.emplace(SecondOperation{
+      maybeSecondOperation.emplace(SecondOperation {
         .key = kj::mv(key),
         .scheduledPromise = kj::mv(secondPromise),
       });
@@ -5178,7 +5178,7 @@ KJ_TEST("ActorCache can wait for flush") {
 
     verify(
         [&]() {
-      return InFlightRequest{
+      return InFlightRequest {
         .op = mockStorage->expectCall("put", ws).withParams(
             CAPNP(entries = [(key = "foo", value = "bar")])),
       };
@@ -5194,7 +5194,7 @@ KJ_TEST("ActorCache can wait for flush") {
 
     verify(
         [&]() {
-      return InFlightRequest{
+      return InFlightRequest {
         .op = mockStorage->expectCall("delete", ws).withParams(CAPNP(keys = ["foo"])),
       };
     }, [&](auto req) { kj::mv(req.op).thenReturn(CAPNP(numDeleted = 1)); },
@@ -5205,11 +5205,11 @@ KJ_TEST("ActorCache can wait for flush") {
 
   {
     // Join in on a simple put with allowUnconfirmed.
-    test.put("foo", "baz", ActorCacheWriteOptions{.allowUnconfirmed = true});
+    test.put("foo", "baz", ActorCacheWriteOptions {.allowUnconfirmed = true});
 
     verify(
         [&]() {
-      return InFlightRequest{
+      return InFlightRequest {
         .op = mockStorage->expectCall("put", ws).withParams(
             CAPNP(entries = [(key = "foo", value = "baz")])),
       };
@@ -5221,11 +5221,11 @@ KJ_TEST("ActorCache can wait for flush") {
 
   {
     // Join in on a delete with allowUnconfirmed.
-    test.delete_("foo", ActorCacheWriteOptions{.allowUnconfirmed = true});
+    test.delete_("foo", ActorCacheWriteOptions {.allowUnconfirmed = true});
 
     verify(
         [&]() {
-      return InFlightRequest{
+      return InFlightRequest {
         .op = mockStorage->expectCall("delete", ws).withParams(CAPNP(keys = ["foo"])),
       };
     }, [&](auto req) { kj::mv(req.op).thenReturn(CAPNP(numDeleted = 1)); },
@@ -5240,7 +5240,7 @@ KJ_TEST("ActorCache can wait for flush") {
 
     verify(
         [&]() {
-      return InFlightRequest{
+      return InFlightRequest {
         .op = mockStorage->expectCall("setAlarm", ws).withParams(CAPNP(scheduledTimeMs = 1)),
       };
     }, [&](auto req) { kj::mv(req.op).thenReturn(CAPNP()); },
@@ -5252,11 +5252,11 @@ KJ_TEST("ActorCache can wait for flush") {
   {
     // Join in on a scheduled setAlarm with allowUnconfirmed.
     test.setAlarm(
-        2 * kj::MILLISECONDS + kj::UNIX_EPOCH, ActorCacheWriteOptions{.allowUnconfirmed = true});
+        2 * kj::MILLISECONDS + kj::UNIX_EPOCH, ActorCacheWriteOptions {.allowUnconfirmed = true});
 
     verify(
         [&]() {
-      return InFlightRequest{
+      return InFlightRequest {
         .op = mockStorage->expectCall("setAlarm", ws).withParams(CAPNP(scheduledTimeMs = 2)),
       };
     }, [&](auto req) { kj::mv(req.op).thenReturn(CAPNP()); },
@@ -5267,11 +5267,11 @@ KJ_TEST("ActorCache can wait for flush") {
 
   {
     // Join in on a scheduled deleteAll.
-    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = false});
+    test.cache.deleteAll(ActorCacheWriteOptions {.allowUnconfirmed = false});
 
     verify(
         [&]() {
-      return InFlightRequest{
+      return InFlightRequest {
         .op = mockStorage->expectCall("deleteAll", ws).withParams(CAPNP()),
       };
     }, [&](auto req) { kj::mv(req.op).thenReturn(CAPNP()); },
@@ -5285,11 +5285,11 @@ KJ_TEST("ActorCache can wait for flush") {
 
   {
     // Join in on a scheduled deleteAll with allowUnconfirmed.
-    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = true});
+    test.cache.deleteAll(ActorCacheWriteOptions {.allowUnconfirmed = true});
 
     verify(
         [&]() {
-      return InFlightRequest{
+      return InFlightRequest {
         .op = mockStorage->expectCall("deleteAll", ws).withParams(CAPNP()),
       };
     }, [&](auto req) { kj::mv(req.op).thenReturn(CAPNP()); },
@@ -5368,7 +5368,7 @@ KJ_TEST("ActorCache can shutdown") {
 
   verify([](ActorCacheTest& test) {
     // Do nothing and expect nothing!
-    return BeforeShutdownResult{
+    return BeforeShutdownResult {
       .maybeReq = kj::none,
       .shouldBreakOutputGate = false,
     };
@@ -5382,7 +5382,7 @@ KJ_TEST("ActorCache can shutdown") {
     test.put("foo", "bar", {.allowUnconfirmed = false});
 
     // Expect the put to be cancelled and break the gate.
-    return BeforeShutdownResult{
+    return BeforeShutdownResult {
       .maybeReq = kj::none,
       .shouldBreakOutputGate = true,
     };
@@ -5396,7 +5396,7 @@ KJ_TEST("ActorCache can shutdown") {
     test.put("foo", "bar", {.allowUnconfirmed = true});
 
     // Expect the put to be cancelled and break the gate.
-    return BeforeShutdownResult{
+    return BeforeShutdownResult {
       .maybeReq = kj::none,
       .shouldBreakOutputGate = true,
     };
@@ -5414,9 +5414,9 @@ KJ_TEST("ActorCache can shutdown") {
     auto promise = KJ_REQUIRE_NONNULL(test.cache.onNoPendingFlush());
     KJ_EXPECT(!promise.poll(test.ws));
 
-    return BeforeShutdownResult{
+    return BeforeShutdownResult {
       .maybeReq =
-          InFlightRequest{
+          InFlightRequest {
             .op = kj::mv(op),
             .promise = kj::mv(promise),
           },
@@ -5441,9 +5441,9 @@ KJ_TEST("ActorCache can shutdown") {
     auto promise = KJ_REQUIRE_NONNULL(test.cache.onNoPendingFlush());
     KJ_EXPECT(!promise.poll(test.ws));
 
-    return BeforeShutdownResult{
+    return BeforeShutdownResult {
       .maybeReq =
-          InFlightRequest{
+          InFlightRequest {
             .op = kj::mv(op),
             .promise = kj::mv(promise),
           },

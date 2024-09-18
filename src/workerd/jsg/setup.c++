@@ -53,7 +53,7 @@ public:
   static const PlatformDisposer instance;
 };
 
-const PlatformDisposer PlatformDisposer::instance{};
+const PlatformDisposer PlatformDisposer::instance {};
 
 kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount) {
   return kj::Own<v8::Platform>(
@@ -286,7 +286,7 @@ bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
 namespace {
 std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    v8::CppHeapCreateParams heapParams{{}};
+    v8::CppHeapCreateParams heapParams {{}};
     heapParams.marking_support = cppgc::Heap::MarkingType::kAtomic;
     heapParams.sweeping_support = cppgc::Heap::SweepingType::kAtomic;
     return v8::CppHeap::Create(system, heapParams);
@@ -477,7 +477,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       // Usually CODE_ADDED comes after CODE_END_LINE_INFO_RECORDING, but sometimes it doesn't,
       // particularly in the case of Wasm where it apperas no line info is provided.
       auto& info = codeMap.findOrCreate(
-          startAddr, [&]() { return decltype(self->codeMap)::Entry{startAddr, CodeBlockInfo()}; });
+          startAddr, [&]() { return decltype(self->codeMap)::Entry {startAddr, CodeBlockInfo()}; });
       info.size = event->code_len;
       info.name = kj::str(kj::arrayPtr(event->name.str, event->name.len));
       info.type = event->code_type;
@@ -528,7 +528,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       // STATEMENT_POSITION.
       if (event->line_info.position_type == v8::JitCodeEvent::POSITION) {
         UserData* data = reinterpret_cast<UserData*>(event->user_data);
-        data->mapping.add(CodeBlockInfo::PositionMapping{
+        data->mapping.add(CodeBlockInfo::PositionMapping {
           static_cast<uint>(event->line_info.offset), static_cast<uint>(event->line_info.pos)});
       }
       break;
@@ -547,7 +547,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       // Sometimes CODE_END_LINE_INFO_RECORDING comes after CODE_ADDED, in particular with
       // modules.
       auto& info = codeMap.findOrCreate(
-          startAddr, [&]() { return decltype(self->codeMap)::Entry{startAddr, CodeBlockInfo()}; });
+          startAddr, [&]() { return decltype(self->codeMap)::Entry {startAddr, CodeBlockInfo()}; });
 
       UserData* data = reinterpret_cast<UserData*>(event->user_data);
       info.mapping = data->mapping.releaseAsArray();
@@ -606,7 +606,7 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 #endif
 
   v8::SampleInfo sampleInfo;
-  void* traceSpace[32]{};
+  void* traceSpace[32] {};
   isolate->GetStackSample(state, traceSpace, kj::size(traceSpace), &sampleInfo);
 
   kj::StringPtr vmState = "??";

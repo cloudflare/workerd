@@ -253,7 +253,7 @@ SharedMemoryCache::Use::getWithFallback(const kj::String& key) const {
     // We return a Promise, but we keep the fulfiller. We might fulfill it
     // from a different thread, so we need a cross-thread fulfiller here.
     auto pair = kj::newPromiseAndCrossThreadFulfiller<GetWithFallbackOutcome>();
-    existingInProgress->waiting.push_back(InProgress::Waiter{kj::mv(pair.fulfiller)});
+    existingInProgress->waiting.push_back(InProgress::Waiter {kj::mv(pair.fulfiller)});
     // We have to register a pending event with the I/O context so that the
     // runtime does not detect a hanging promise. Another fallback is in
     // progress and once it settles, we will fulfill the promise that we return
@@ -403,7 +403,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
                       !kj::isNaN(expiration), TypeError, "Expiration time must not be NaN.");
                 }
                 (*callback)(
-                    SharedMemoryCache::Use::FallbackResult{kj::mv(serialized), result.expiration});
+                    SharedMemoryCache::Use::FallbackResult {kj::mv(serialized), result.expiration});
                 return kj::mv(result.value);
               })
                   .catch_(js,

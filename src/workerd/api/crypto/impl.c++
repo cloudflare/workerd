@@ -115,7 +115,7 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
   // we can decipher.
   kj::Vector<kj::String> lines;
   while (unsigned long long error = ERR_get_error()) {
-    char message[1024]{};
+    char message[1024] {};
     ERR_error_string_n(error, message, sizeof(message));
     lines.add(kj::heapString(message));
   }
@@ -150,7 +150,7 @@ kj::Vector<kj::OneOf<kj::StringPtr, OpensslUntranslatedError>> consumeAllOpenssl
           break;
       }
 
-      return OpensslUntranslatedError{
+      return OpensslUntranslatedError {
         .library = ERR_lib_error_string(error),
         .reasonName = ERR_reason_error_string(error),
       };
@@ -185,7 +185,7 @@ kj::String internalDescribeOpensslErrors() {
 }
 
 std::pair<kj::StringPtr, const EVP_MD*> lookupDigestAlgorithm(kj::StringPtr algorithm) {
-  static const std::map<kj::StringPtr, const EVP_MD*, CiLess> registeredAlgorithms{
+  static const std::map<kj::StringPtr, const EVP_MD*, CiLess> registeredAlgorithms {
     {"SHA-1", EVP_sha1()},
     {"SHA-256", EVP_sha256()},
     {"SHA-384", EVP_sha384()},

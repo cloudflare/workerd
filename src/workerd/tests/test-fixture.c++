@@ -296,7 +296,7 @@ public:
 
 using api::pyodide::PythonConfig;
 
-const PythonConfig defaultPythonConfig{.packageDiskCacheRoot = kj::none,
+const PythonConfig defaultPythonConfig {.packageDiskCacheRoot = kj::none,
   .pyodideDiskCacheRoot = kj::none,
   .createSnapshot = false,
   .createBaselineSnapshot = false};
@@ -339,7 +339,7 @@ TestFixture::TestFixture(SetupParams&& params)
           server::WorkerdApi::extractSource(mainModuleName,
               config,
               *errorReporter,
-              capnp::List<server::config::Extension>::Reader{}),
+              capnp::List<server::config::Extension>::Reader {}),
           IsolateObserver::StartType::COLD,
           false,
           nullptr)),

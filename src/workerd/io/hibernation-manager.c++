@@ -81,7 +81,7 @@ HibernationManagerImpl::HibernationManagerImpl(
     kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType)
     : loopback(kj::mv(loopback)),
       hibernationEventType(hibernationEventType),
-      onDisconnect(DisconnectHandler{}),
+      onDisconnect(DisconnectHandler {}),
       readLoopTasks(onDisconnect) {}
 
 HibernationManagerImpl::~HibernationManagerImpl() noexcept(false) {
@@ -123,7 +123,7 @@ void HibernationManagerImpl::acceptWebSocket(
     auto& tagCollection = tagToWs.findOrCreate(*tag, [&tag]() {
       auto item = kj::heap<TagCollection>(
           kj::mv(*tag), kj::heap<kj::List<TagListItem, &TagListItem::link>>());
-      return decltype(tagToWs)::Entry{item->tag, kj::mv(item)};
+      return decltype(tagToWs)::Entry {item->tag, kj::mv(item)};
     });
     // This TagListItem sits in the HibernatableWebSocket's tagItems array.
     auto& tagListItem = refToHibernatable.tagItems[position];
@@ -258,7 +258,7 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
 
     KJ_REQUIRE_NONNULL(params).setTimeout(eventTimeoutMs);
     // Dispatch the event.
-    auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
+    auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata {});
     event = workerInterface
                 ->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
                     hibernationEventType, readLoopTasks, kj::mv(KJ_REQUIRE_NONNULL(params)), *this))
@@ -364,7 +364,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
     params.setTimeout(eventTimeoutMs);
     auto isClose = params.isCloseEvent();
     // Dispatch the event.
-    auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
+    auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata {});
     co_await workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
         hibernationEventType, readLoopTasks, kj::mv(params), *this));
     if (isClose) {

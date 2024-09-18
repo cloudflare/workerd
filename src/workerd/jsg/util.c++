@@ -687,7 +687,7 @@ namespace {
 // This list must be kept in sync with the list of builtins from Node.js.
 // It should be unlikely that anything is ever removed from this list, and
 // adding items to it is considered a semver-major change in Node.js.
-static const std::set<kj::StringPtr> NODEJS_BUILTINS{"_http_agent"_kj, "_http_client"_kj,
+static const std::set<kj::StringPtr> NODEJS_BUILTINS {"_http_agent"_kj, "_http_client"_kj,
   "_http_common"_kj, "_http_incoming"_kj, "_http_outgoing"_kj, "_http_server"_kj,
   "_stream_duplex"_kj, "_stream_passthrough"_kj, "_stream_readable"_kj, "_stream_transform"_kj,
   "_stream_wrap"_kj, "_stream_writable"_kj, "_tls_common"_kj, "_tls_wrap"_kj, "assert"_kj,

@@ -177,7 +177,7 @@ private:
 
 public:
   WebSocketPair(jsg::Ref<WebSocket> first, jsg::Ref<WebSocket> second)
-      : sockets{kj::mv(first), kj::mv(second)} {}
+      : sockets {kj::mv(first), kj::mv(second)} {}
 
   static jsg::Ref<WebSocketPair> constructor();
 

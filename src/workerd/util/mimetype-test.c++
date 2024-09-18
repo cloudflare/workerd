@@ -33,29 +33,29 @@ KJ_TEST("Basic MimeType parsing works") {
       .type = "text"_kj,
       .subtype = "plain"_kj,
       .output = "text/plain;charset=utf-8"_kj,
-      .params = kj::arr(MimeType::MimeParams::Entry{kj::str("charset"), kj::str("utf-8")})},
+      .params = kj::arr(MimeType::MimeParams::Entry {kj::str("charset"), kj::str("utf-8")})},
     {.input = "text/plain; charset=\"utf-8\""_kj,
       .type = "text"_kj,
       .subtype = "plain"_kj,
       .output = "text/plain;charset=utf-8"_kj,
-      .params = kj::arr(MimeType::MimeParams::Entry{kj::str("charset"), kj::str("utf-8")})},
+      .params = kj::arr(MimeType::MimeParams::Entry {kj::str("charset"), kj::str("utf-8")})},
     {.input = "text/plain; charset=\"utf-8\"; \r\n\t"_kj,
       .type = "text"_kj,
       .subtype = "plain"_kj,
       .output = "text/plain;charset=utf-8"_kj,
-      .params = kj::arr(MimeType::MimeParams::Entry{kj::str("charset"), kj::str("utf-8")})},
+      .params = kj::arr(MimeType::MimeParams::Entry {kj::str("charset"), kj::str("utf-8")})},
     {.input = "text/plain; charset=\"utf-8\"; \r\n\ta=b"_kj,
       .type = "text"_kj,
       .subtype = "plain"_kj,
       .output = "text/plain;charset=utf-8;a=b"_kj,
-      .params = kj::arr(MimeType::MimeParams::Entry{kj::str("charset"), kj::str("utf-8")},
-          MimeType::MimeParams::Entry{kj::str("a"), kj::str("b")})},
+      .params = kj::arr(MimeType::MimeParams::Entry {kj::str("charset"), kj::str("utf-8")},
+          MimeType::MimeParams::Entry {kj::str("a"), kj::str("b")})},
     {.input = "text/plain; charset=utf-8; a=b;a=a"_kj,
       .type = "text"_kj,
       .subtype = "plain"_kj,
       .output = "text/plain;charset=utf-8;a=b"_kj,
-      .params = kj::arr(MimeType::MimeParams::Entry{kj::str("charset"), kj::str("utf-8")},
-          MimeType::MimeParams::Entry{kj::str("a"), kj::str("b")})},
+      .params = kj::arr(MimeType::MimeParams::Entry {kj::str("charset"), kj::str("utf-8")},
+          MimeType::MimeParams::Entry {kj::str("a"), kj::str("b")})},
   };
 
   for (auto& test: kTests) {
@@ -439,12 +439,12 @@ KJ_TEST("Extract Mime Type") {
   };
 
   Test tests[] = {
-    Test{
+    Test {
       .input = ", text/plain"_kj,
       .encoding = nullptr,
       .result = "text/plain"_kj,
     },
-    Test{
+    Test {
       .input = "text/plain, "_kj,
       .encoding = nullptr,
       .result = "text/plain"_kj,

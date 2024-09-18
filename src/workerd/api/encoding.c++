@@ -483,7 +483,7 @@ TextEncoder::EncodeIntoResult encodeIntoImpl(
   auto result = input.writeInto(js, buffer.asArrayPtr().asChars(),
       static_cast<jsg::JsString::WriteOptions>(
           jsg::JsString::NO_NULL_TERMINATION | jsg::JsString::REPLACE_INVALID_UTF8));
-  return TextEncoder::EncodeIntoResult{
+  return TextEncoder::EncodeIntoResult {
     .read = result.read,
     .written = result.written,
   };

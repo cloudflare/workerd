@@ -258,8 +258,8 @@ void ReadableStreamBYOBReader::lockToStream(jsg::Lock& js, ReadableStream& strea
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
     v8::Local<v8::ArrayBufferView> byobBuffer,
     jsg::Optional<ReadableStreamBYOBReaderReadOptions> maybeOptions) {
-  static const ReadableStreamBYOBReaderReadOptions defaultOptions{};
-  auto options = ReadableStreamController::ByobOptions{
+  static const ReadableStreamBYOBReaderReadOptions defaultOptions {};
+  auto options = ReadableStreamController::ByobOptions {
     .bufferView = js.v8Ref(byobBuffer),
     .byteOffset = byobBuffer->ByteOffset(),
     .byteLength = byobBuffer->ByteLength(),
@@ -271,7 +271,7 @@ jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::readAtLeast(
     jsg::Lock& js, int minBytes, v8::Local<v8::ArrayBufferView> byobBuffer) {
-  auto options = ReadableStreamController::ByobOptions{
+  auto options = ReadableStreamController::ByobOptions {
     .bufferView = js.v8Ref(byobBuffer),
     .byteOffset = byobBuffer->ByteOffset(),
     .byteLength = byobBuffer->ByteLength(),
@@ -368,8 +368,8 @@ ReadableStream::Reader ReadableStream::getReader(
 
 jsg::Ref<ReadableStream::ReadableStreamAsyncIterator> ReadableStream::values(
     jsg::Lock& js, jsg::Optional<ValuesOptions> options) {
-  static const auto defaultOptions = ValuesOptions{};
-  return jsg::alloc<ReadableStreamAsyncIterator>(AsyncIteratorState{.ioContext = ioContext,
+  static const auto defaultOptions = ValuesOptions {};
+  return jsg::alloc<ReadableStreamAsyncIterator>(AsyncIteratorState {.ioContext = ioContext,
     .reader = ReadableStreamDefaultReader::constructor(js, JSG_THIS),
     .preventCancel = options.orDefault(defaultOptions).preventCancel.orDefault(false)});
 }
@@ -636,10 +636,10 @@ public:
 
   kj::Maybe<Tee> tryTee(uint64_t limit) override {
     return inner->tryTee(limit).map([&](Tee tee) {
-      return Tee{.branches = {
-                   kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[0]), ioctx),
-                   kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[1]), ioctx),
-                 }};
+      return Tee {.branches = {
+                    kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[0]), ioctx),
+                    kj::heap<NoDeferredProxyReadableStream>(kj::mv(tee.branches[1]), ioctx),
+                  }};
     });
   }
 

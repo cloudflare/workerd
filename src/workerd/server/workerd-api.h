@@ -70,7 +70,7 @@ public:
       kj::String text;
 
       Json clone() const {
-        return Json{.text = kj::str(text)};
+        return Json {.text = kj::str(text)};
       }
     };
     struct Fetcher {
@@ -127,7 +127,7 @@ public:
             clonedKeyData = json.clone();
           }
         }
-        return CryptoKey{
+        return CryptoKey {
           .format = kj::str(format),
           .keyData = kj::mv(clonedKeyData),
           .algorithm = algorithm.clone(),
@@ -144,7 +144,7 @@ public:
       uint64_t maxTotalValueSize;
 
       MemoryCache clone() const {
-        return MemoryCache{
+        return MemoryCache {
           .cacheId = cacheId.map([](auto& id) { return kj::str(id); }),
           .maxKeys = maxKeys,
           .maxValueSize = maxValueSize,
@@ -175,7 +175,7 @@ public:
       kj::Array<Global> innerBindings;
 
       Wrapped clone() const {
-        return Wrapped{.moduleName = kj::str(moduleName),
+        return Wrapped {.moduleName = kj::str(moduleName),
           .entrypoint = kj::str(entrypoint),
           .innerBindings = KJ_MAP(b, innerBindings) { return b.clone(); }};
       }
@@ -185,7 +185,7 @@ public:
       kj::String dataset;
       int64_t version;
       AnalyticsEngine clone() const {
-        return AnalyticsEngine{
+        return AnalyticsEngine {
           .subrequestChannel = subrequestChannel, .dataset = kj::str(dataset), .version = version};
       }
     };
@@ -197,7 +197,7 @@ public:
       kj::String scheme;
 
       Hyperdrive clone() const {
-        return Hyperdrive{
+        return Hyperdrive {
           .subrequestChannel = subrequestChannel,
           .database = kj::str(database),
           .user = kj::str(user),

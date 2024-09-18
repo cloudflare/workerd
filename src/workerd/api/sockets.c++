@@ -378,7 +378,7 @@ void Socket::handleProxyStatus(
       // In our implementation we do not expose the local address at all simply
       // because there's no useful value we can provide.
       openedResolver.resolve(js,
-          SocketInfo{
+          SocketInfo {
             .remoteAddress = kj::str(remoteAddress),
             .localAddress = kj::none,
           });
@@ -406,7 +406,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
       // In our implementation we do not expose the local address at all simply
       // because there's no useful value we can provide.
       openedResolver.resolve(js,
-          SocketInfo{
+          SocketInfo {
             .remoteAddress = kj::str(remoteAddress),
             .localAddress = kj::none,
           });

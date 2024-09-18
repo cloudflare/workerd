@@ -183,7 +183,7 @@ kj::Maybe<kj::Own<void>> ActorCache::armAlarmHandler(kj::Date scheduledTime, boo
   }
 
   if (alarmDeleteNeeded) {
-    currentAlarmTime = DeferredAlarmDelete{
+    currentAlarmTime = DeferredAlarmDelete {
       .status = DeferredAlarmDelete::Status::WAITING,
       .timeToDelete = scheduledTime,
       .noCache = noCache,
@@ -195,7 +195,7 @@ kj::Maybe<kj::Own<void>> ActorCache::armAlarmHandler(kj::Date scheduledTime, boo
 
 void ActorCache::cancelDeferredAlarmDeletion() {
   KJ_IF_SOME(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-    currentAlarmTime = KnownAlarmTime{.status = KnownAlarmTime::Status::CLEAN,
+    currentAlarmTime = KnownAlarmTime {.status = KnownAlarmTime::Status::CLEAN,
       .time = deferredDelete.timeToDelete,
       .noCache = deferredDelete.noCache};
   }
@@ -419,7 +419,7 @@ auto ActorCache::getImpl(
     kj::Own<Entry> entry, ReadOptions options) -> kj::Promise<kj::Maybe<Value>> {
   auto response = co_await scheduleStorageRead(
       [key = entry->key.asBytes()](rpc::ActorStorage::Operations::Client client) {
-    auto req = client.getRequest(capnp::MessageSize{4 + key.size() / sizeof(capnp::word), 0});
+    auto req = client.getRequest(capnp::MessageSize {4 + key.size() / sizeof(capnp::word), 0});
     req.setKey(key);
     return req.send().dropPipeline();
   });
@@ -573,7 +573,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   kj::Vector<Key> keysToFetch(keys.size());
   // Keys that were not satisfied from cache.
 
-  capnp::MessageSize sizeHint{4, 1};
+  capnp::MessageSize sizeHint {4, 1};
 
   {
     auto lock = lru.cleanList.lockExclusive();
@@ -679,7 +679,7 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::get
           // by a concurrent getAlarm(), then it should be exactly the same time.
 
           currentAlarmTime =
-              ActorCache::KnownAlarmTime{ActorCache::KnownAlarmTime::Status::CLEAN, result};
+              ActorCache::KnownAlarmTime {ActorCache::KnownAlarmTime::Status::CLEAN, result};
         }
 
         return result;
@@ -1057,7 +1057,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
       [&streamServerRef, streamClient](
           rpc::ActorStorage::Operations::Client client) mutable -> kj::Promise<void> {
     auto req = client.listRequest(
-        capnp::MessageSize{8 + streamServerRef.beginKey.size() / sizeof(capnp::word) +
+        capnp::MessageSize {8 + streamServerRef.beginKey.size() / sizeof(capnp::word) +
               streamServerRef.endKey.map([](KeyPtr k) {
       return k.size() / sizeof(capnp::word);
     }).orDefault(0),
@@ -1401,7 +1401,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
       [&streamServerRef, streamClient](
           rpc::ActorStorage::Operations::Client client) mutable -> kj::Promise<void> {
     auto req = client.listRequest(
-        capnp::MessageSize{8 + streamServerRef.beginKey.size() / sizeof(capnp::word) +
+        capnp::MessageSize {8 + streamServerRef.beginKey.size() / sizeof(capnp::word) +
               streamServerRef.endKey.map([](KeyPtr k) {
       return k.size() / sizeof(capnp::word);
     }).orDefault(0),
@@ -1891,7 +1891,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(
     }
   }
 
-  currentAlarmTime = ActorCache::KnownAlarmTime{
+  currentAlarmTime = ActorCache::KnownAlarmTime {
     ActorCache::KnownAlarmTime::Status::DIRTY, newAlarmTime, options.noCache};
 
   ensureFlushScheduled(options);
@@ -1977,7 +1977,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
   requireNotTerminal();
 
-  kj::Promise<uint> result{(uint)0};
+  kj::Promise<uint> result {(uint)0};
 
   {
     auto lock = lru.cleanList.lockExclusive();
@@ -1998,7 +1998,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
 
     // Insert a dummy entry with an ABSENT key and gapIsKnownEmpty = true to indicate that
     // everything is empty.
-    map.findOrCreate(Key{}, [&]() {
+    map.findOrCreate(Key {}, [&]() {
       Key key;
       auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), EntryValueStatus::ABSENT);
       addToCleanList(lock, *entry);
@@ -2009,7 +2009,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
     if (requestedDeleteAll == kj::none) {
       auto paf = kj::newPromiseAndFulfiller<uint>();
       result = kj::mv(paf.promise);
-      requestedDeleteAll = DeleteAllState{
+      requestedDeleteAll = DeleteAllState {
         .deletedDirty = kj::mv(deletedDirty), .countFulfiller = kj::mv(paf.fulfiller)};
       ensureFlushScheduled(options);
     } else {
@@ -2025,7 +2025,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
     evictOrOomIfNeeded(lock);
   }
 
-  return DeleteAllResults{.backpressure = getBackpressure(), .count = kj::mv(result)};
+  return DeleteAllResults {.backpressure = getBackpressure(), .count = kj::mv(result)};
 }
 
 void ActorCache::putImpl(Lock& lock,
@@ -2152,7 +2152,7 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
       }
       KJ_CASE_ONEOF(deferredDelete, ActorCache::DeferredAlarmDelete) {
         if (deferredDelete.status == DeferredAlarmDelete::Status::READY) {
-          currentAlarmTime = KnownAlarmTime{
+          currentAlarmTime = KnownAlarmTime {
             .status = KnownAlarmTime::Status::CLEAN,
             .time = kj::none,
           };
@@ -2318,11 +2318,11 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
 
     if (batches.empty()) {
       // This is the first one, let's just set up a current batch.
-      batches.add(FlushBatch{});
+      batches.add(FlushBatch {});
     } else if (auto& tailBatch = batches.back(); tailBatch.pairCount >= lru.options.maxKeysPerRpc ||
                ((tailBatch.wordCount + words) > MAX_ACTOR_STORAGE_RPC_WORDS)) {
       // We've filled this batch, add a new one.
-      batches.add(FlushBatch{});
+      batches.add(FlushBatch {});
     }
 
     auto& batch = batches.back();
@@ -2358,7 +2358,7 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
       continue;
     }
 
-    auto& countedDeleteFlush = countedDeleteFlushes.add(CountedDeleteFlush{
+    auto& countedDeleteFlush = countedDeleteFlushes.add(CountedDeleteFlush {
       .countedDelete = kj::addRef(*countedDelete),
     });
     // Now that we've filtered our entries down to only those that need to be deleted,
@@ -2414,20 +2414,20 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
     }
   };
 
-  MaybeAlarmChange maybeAlarmChange = CleanAlarm{};
+  MaybeAlarmChange maybeAlarmChange = CleanAlarm {};
   KJ_SWITCH_ONEOF(currentAlarmTime) {
     KJ_CASE_ONEOF(knownAlarmTime, ActorCache::KnownAlarmTime) {
       if (knownAlarmTime.status == KnownAlarmTime::Status::DIRTY ||
           knownAlarmTime.status == KnownAlarmTime::Status::FLUSHING) {
         knownAlarmTime.status = KnownAlarmTime::Status::FLUSHING;
-        maybeAlarmChange = DirtyAlarm{knownAlarmTime.time};
+        maybeAlarmChange = DirtyAlarm {knownAlarmTime.time};
       }
     }
     KJ_CASE_ONEOF(deferredDelete, ActorCache::DeferredAlarmDelete) {
       if (deferredDelete.status == DeferredAlarmDelete::Status::READY ||
           deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
         deferredDelete.status = DeferredAlarmDelete::Status::FLUSHING;
-        maybeAlarmChange = DirtyAlarm{kj::none};
+        maybeAlarmChange = DirtyAlarm {kj::none};
       }
     }
     KJ_CASE_ONEOF(_, UnknownAlarmTime) {
@@ -2530,7 +2530,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       KJ_CASE_ONEOF(knownAlarmTime, ActorCache::KnownAlarmTime) {
         if (knownAlarmTime.status == KnownAlarmTime::Status::FLUSHING) {
           if (knownAlarmTime.noCache) {
-            currentAlarmTime = UnknownAlarmTime{};
+            currentAlarmTime = UnknownAlarmTime {};
           } else {
             knownAlarmTime.status = KnownAlarmTime::Status::CLEAN;
           }
@@ -2540,9 +2540,9 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
         if (deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
           bool wasDeleted = KJ_ASSERT_NONNULL(deferredDelete.wasDeleted);
           if (deferredDelete.noCache || !wasDeleted) {
-            currentAlarmTime = UnknownAlarmTime{};
+            currentAlarmTime = UnknownAlarmTime {};
           } else {
-            currentAlarmTime = KnownAlarmTime{.status = KnownAlarmTime::Status::CLEAN,
+            currentAlarmTime = KnownAlarmTime {.status = KnownAlarmTime::Status::CLEAN,
               .time = kj::none,
               .noCache = deferredDelete.noCache};
           }
@@ -2659,7 +2659,7 @@ kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
   KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
   KJ_ASSERT(batch.pairCount == putFlush.entries.size());
 
-  auto request = storage.putRequest(capnp::MessageSize{4 + batch.wordCount, 0});
+  auto request = storage.putRequest(capnp::MessageSize {4 + batch.wordCount, 0});
   auto list = request.initEntries(batch.pairCount);
   auto entryIt = putFlush.entries.begin();
   for (auto kv: list) {
@@ -2687,7 +2687,7 @@ kj::Promise<void> ActorCache::flushImplUsingSingleMutedDelete(MutedDeleteFlush m
   KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
   KJ_ASSERT(batch.pairCount == mutedFlush.entries.size());
 
-  auto request = storage.deleteRequest(capnp::MessageSize{4 + batch.wordCount, 0});
+  auto request = storage.deleteRequest(capnp::MessageSize {4 + batch.wordCount, 0});
   auto listBuilder = request.initKeys(batch.pairCount);
   auto entryIt = mutedFlush.entries.begin();
   for (size_t i = 0; i < batch.pairCount; ++i) {
@@ -2715,7 +2715,7 @@ kj::Promise<void> ActorCache::flushImplUsingSingleCountedDelete(CountedDeleteFlu
   KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
   KJ_ASSERT(batch.pairCount == countedDelete->entries.size());
 
-  auto request = storage.deleteRequest(capnp::MessageSize{4 + batch.wordCount, 0});
+  auto request = storage.deleteRequest(capnp::MessageSize {4 + batch.wordCount, 0});
   auto listBuilder = request.initKeys(batch.pairCount);
   auto entryIt = countedDelete->entries.begin();
   for (size_t i = 0; i < batch.pairCount; ++i) {
@@ -2780,7 +2780,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
     MutedDeleteFlush mutedDeleteFlush,
     CountedDeleteFlushes countedDeleteFlushes,
     MaybeAlarmChange maybeAlarmChange) {
-  auto txnProm = storage.txnRequest(capnp::MessageSize{4, 0}).send();
+  auto txnProm = storage.txnRequest(capnp::MessageSize {4, 0}).send();
   auto txn = txnProm.getTransaction();
 
   struct RpcCountedDelete {
@@ -2798,7 +2798,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
     for (auto& batch: flush.batches) {
       KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
 
-      auto request = txn.deleteRequest(capnp::MessageSize{4 + batch.wordCount, 0});
+      auto request = txn.deleteRequest(capnp::MessageSize {4 + batch.wordCount, 0});
       auto listBuilder = request.initKeys(batch.pairCount);
       for (size_t i = 0; i < batch.pairCount; ++i) {
         KJ_ASSERT(entryIt != countedDelete->entries.end());
@@ -2809,7 +2809,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
       rpcDeletes.add(kj::mv(request));
     }
     KJ_ASSERT(entryIt == countedDelete->entries.end());
-    rpcCountedDeletes.add(RpcCountedDelete{
+    rpcCountedDeletes.add(RpcCountedDelete {
       .countedDelete = kj::mv(countedDelete),
       .rpcDeletes = rpcDeletes.releaseAsArray(),
     });
@@ -2821,7 +2821,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
     for (auto& batch: mutedDeleteFlush.batches) {
       KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
 
-      auto request = txn.deleteRequest(capnp::MessageSize{4 + batch.wordCount, 0});
+      auto request = txn.deleteRequest(capnp::MessageSize {4 + batch.wordCount, 0});
       auto listBuilder = request.initKeys(batch.pairCount);
       for (size_t i = 0; i < batch.pairCount; ++i) {
         KJ_ASSERT(entryIt != mutedDeleteFlush.entries.end());
@@ -2840,7 +2840,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
     for (auto& batch: putFlush.batches) {
       KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
 
-      auto request = txn.putRequest(capnp::MessageSize{4 + batch.wordCount, 0});
+      auto request = txn.putRequest(capnp::MessageSize {4 + batch.wordCount, 0});
       auto listBuilder = request.initEntries(batch.pairCount);
       for (auto kv: listBuilder) {
         KJ_ASSERT(entryIt != putFlush.entries.end());
@@ -2954,7 +2954,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
     auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(clock, 1 * kj::SECONDS,
         "storage operation took longer than expected: commit flush transaction");
-    promises.add(txn.commitRequest(capnp::MessageSize{4, 0}).send().ignoreResult());
+    promises.add(txn.commitRequest(capnp::MessageSize {4, 0}).send().ignoreResult());
 
     co_await kj::joinPromises(promises.finish());
     for (auto& rpcCountedDelete: rpcCountedDeletes) {
@@ -2975,7 +2975,7 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
 
   KJ_ASSERT(requestedDeleteAll != kj::none);
 
-  return storage.deleteAllRequest(capnp::MessageSize{2, 0})
+  return storage.deleteAllRequest(capnp::MessageSize {2, 0})
       .send()
       .then(
           [this](capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results)
@@ -3203,7 +3203,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::Transaction::put(
 kj::Maybe<kj::Promise<void>> ActorCache::Transaction::setAlarm(
     kj::Maybe<kj::Date> newTime, WriteOptions options) {
   options.noCache = options.noCache || cache.lru.options.noCache;
-  alarmChange = DirtyAlarmWithOptions{DirtyAlarm{newTime}, options};
+  alarmChange = DirtyAlarmWithOptions {DirtyAlarm {newTime}, options};
 
   return kj::none;
 }
@@ -3303,7 +3303,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
 
 kj::Maybe<ActorCache::KeyPtr> ActorCache::Transaction::putImpl(
     Lock& lock, kj::Own<Entry> entry, const WriteOptions& options, kj::Maybe<uint&> count) {
-  Change change{
+  Change change {
     .entry = kj::mv(entry),
     .options = options,
   };

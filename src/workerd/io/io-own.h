@@ -117,7 +117,7 @@ private:
 // Object which receives possibly-cross-thread deletions of owned objects.
 class DeleteQueue: public kj::AtomicRefcounted {
 public:
-  DeleteQueue(): crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}) {}
+  DeleteQueue(): crossThreadDeleteQueue(State {kj::Vector<OwnedObject*>()}) {}
 
   void scheduleDeletion(OwnedObject* object) const;
 

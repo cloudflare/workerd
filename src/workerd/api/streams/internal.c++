@@ -33,7 +33,7 @@ namespace {
 }
 
 kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output, bool end) {
-  kj::byte buffer[4096]{};
+  kj::byte buffer[4096] {};
 
   while (true) {
     auto amount = co_await input.tryRead(buffer, 1, kj::size(buffer));
@@ -311,7 +311,7 @@ public:
     KJ_IF_SOME(t, inner->tryTee(limit)) {
       auto branch = kj::heap<TeeBranch>(newTeeErrorAdapter(kj::mv(t)));
       auto consumed = kj::heap<TeeBranch>(kj::mv(inner));
-      return Tee{kj::mv(branch), kj::mv(consumed)};
+      return Tee {kj::mv(branch), kj::mv(consumed)};
     }
 
     return kj::none;
@@ -554,12 +554,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           return js.rejectedPromise<ReadResult>(
               js.v8TypeError("Unable to allocate memory for read"_kj));
         }
-        return js.resolvedPromise(ReadResult{
+        return js.resolvedPromise(ReadResult {
           .value = js.v8Ref(v8::Uint8Array::New(theStore, 0, 0).As<v8::Value>()),
           .done = true,
         });
       }
-      return js.resolvedPromise(ReadResult{.done = true});
+      return js.resolvedPromise(ReadResult {.done = true});
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return js.rejectedPromise<ReadResult>(errored.addRef(js));
@@ -619,15 +619,15 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
             // by the ArrayBuffer passed in the options.
             auto u8 = v8::Uint8Array::New(store.getHandle(js), 0, 0);
-            return js.resolvedPromise(ReadResult{
+            return js.resolvedPromise(ReadResult {
               .value = js.v8Ref(u8.As<v8::Value>()),
               .done = true,
             });
           }
-          return js.resolvedPromise(ReadResult{.done = true});
+          return js.resolvedPromise(ReadResult {.done = true});
         }
         // Return a slice so the script can see how many bytes were read.
-        return js.resolvedPromise(ReadResult{
+        return js.resolvedPromise(ReadResult {
           .value = js.v8Ref(
               v8::Uint8Array::New(store.getHandle(js), byteOffset, amount).As<v8::Value>()),
           .done = false});
@@ -721,14 +721,14 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       // Create two closed ReadableStreams.
-      return Tee{
+      return Tee {
         .branch1 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(closed)),
         .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(closed)),
       };
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       // Create two errored ReadableStreams.
-      return Tee{
+      return Tee {
         .branch1 = jsg::alloc<ReadableStream>(
             kj::heap<ReadableStreamInternalController>(errored.addRef(js))),
         .branch2 = jsg::alloc<ReadableStream>(
@@ -745,7 +745,7 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
           b1 = kj::heap<WarnIfUnusedStream>(js, kj::mv(b1), ioContext);
           b2 = kj::heap<WarnIfUnusedStream>(js, kj::mv(b2), ioContext);
         }
-        return Tee{
+        return Tee {
           .branch1 = jsg::alloc<ReadableStream>(ioContext, kj::mv(b1)),
           .branch2 = jsg::alloc<ReadableStream>(ioContext, kj::mv(b2)),
         };
@@ -936,8 +936,8 @@ jsg::Promise<void> WritableStreamInternalController::write(
       auto ptr =
           kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset, byteLength);
       queue.push_back(
-          WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-            .event = Write{
+          WriteEvent {.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
+            .event = Write {
               .promise = kj::mv(prp.resolver),
               .totalBytes = store->ByteLength(),
               .ownBytes = js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(store))),
@@ -1040,8 +1040,8 @@ jsg::Promise<void> WritableStreamInternalController::closeImpl(jsg::Lock& js, bo
         prp.promise.markAsHandled(js);
       }
       queue.push_back(
-          WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-            .event = Close{.promise = kj::mv(prp.resolver)}});
+          WriteEvent {.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
+            .event = Close {.promise = kj::mv(prp.resolver)}});
       ensureWriting(js);
       return kj::mv(prp.promise);
     }
@@ -1097,8 +1097,8 @@ jsg::Promise<void> WritableStreamInternalController::flush(jsg::Lock& js, bool m
         prp.promise.markAsHandled(js);
       }
       queue.push_back(
-          WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-            .event = Flush{.promise = kj::mv(prp.resolver)}});
+          WriteEvent {.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
+            .event = Flush {.promise = kj::mv(prp.resolver)}});
       ensureWriting(js);
       return kj::mv(prp.promise);
     }
@@ -1200,7 +1200,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
       KJ_ASSERT_NONNULL(source->getController().tryPipeLock(KJ_ASSERT_NONNULL(owner).addRef()));
 
   // Let's also acquire the destination pipe lock.
-  writeState = PipeLocked{*source};
+  writeState = PipeLocked {*source};
 
   // If the source has errored, the spec requires us to reject the pipe promise and, if preventAbort
   // is false, error the destination (Propagate error forward). The errored source will be unlocked
@@ -1276,9 +1276,9 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   if (pipeThrough) {
     prp.promise.markAsHandled(js);
   }
-  queue.push_back(WriteEvent{
+  queue.push_back(WriteEvent {
     .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-    .event = Pipe{.parent = *this,
+    .event = Pipe {.parent = *this,
       .source = sourceLock,
       .promise = kj::mv(prp.resolver),
       .preventAbort = preventAbort,
@@ -2358,7 +2358,7 @@ kj::Promise<size_t> IdentityTransformStreamImpl::readHelper(kj::ArrayPtr<kj::byt
       // No outstanding write request, switch to ReadRequest state.
 
       auto paf = kj::newPromiseAndFulfiller<size_t>();
-      state = ReadRequest{bytes, kj::mv(paf.fulfiller)};
+      state = ReadRequest {bytes, kj::mv(paf.fulfiller)};
       return kj::mv(paf.promise);
     }
     KJ_CASE_ONEOF(request, ReadRequest) {
@@ -2403,7 +2403,7 @@ kj::Promise<void> IdentityTransformStreamImpl::writeHelper(kj::ArrayPtr<const kj
       }
 
       auto paf = kj::newPromiseAndFulfiller<void>();
-      state = WriteRequest{bytes, kj::mv(paf.fulfiller)};
+      state = WriteRequest {bytes, kj::mv(paf.fulfiller)};
       return kj::mv(paf.promise);
     }
     KJ_CASE_ONEOF(request, ReadRequest) {
@@ -2444,7 +2444,7 @@ kj::Promise<void> IdentityTransformStreamImpl::writeHelper(kj::ArrayPtr<const kj
       request.fulfiller->fulfill(request.bytes.size());
 
       auto paf = kj::newPromiseAndFulfiller<void>();
-      state = WriteRequest{bytes, kj::mv(paf.fulfiller)};
+      state = WriteRequest {bytes, kj::mv(paf.fulfiller)};
       return kj::mv(paf.promise);
     }
     KJ_CASE_ONEOF(request, WriteRequest) {

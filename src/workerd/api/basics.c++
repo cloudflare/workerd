@@ -34,7 +34,7 @@ bool isSpecialEventType(kj::StringPtr type) {
 EventTarget::NativeHandler::NativeHandler(
     jsg::Lock& js, EventTarget& target, kj::String type, jsg::Function<Signature> func, bool once)
     : type(kj::mv(type)),
-      state(State{
+      state(State {
         .target = target,
         .func = kj::mv(func),
       }),
@@ -276,7 +276,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
     });
 
     auto eventHandler = kj::heap<EventHandler>(
-        EventHandler::JavaScriptHandler{
+        EventHandler::JavaScriptHandler {
           .identity = kj::mv(handler.identity),
           .callback = kj::mv(handlerFn),
           .abortHandler = kj::mv(maybeAbortHandler),
@@ -314,7 +314,7 @@ void EventTarget::addNativeListener(jsg::Lock& js, NativeHandler& handler) {
   auto& set = getOrCreate(handler.type);
 
   auto eventHandler = kj::heap<EventHandler>(
-      EventHandler::NativeHandlerRef{
+      EventHandler::NativeHandlerRef {
         .handler = handler,
       },
       handler.once);
@@ -356,9 +356,9 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
     KJ_IF_SOME(onProp, onEvents.get(js, kj::str("on", event->getType()))) {
       // If the on-event is not a function, we silently ignore it rather than raise an error.
       KJ_IF_SOME(cb, onProp.tryGet<HandlerFunction>()) {
-        callbacks.add(Callback{
+        callbacks.add(Callback {
           .handler =
-              EventHandler::JavaScriptHandler{
+              EventHandler::JavaScriptHandler {
                 .identity = nullptr,  // won't be used below if oldStyle is true and once is false
                 .callback = kj::mv(cb),
               },
@@ -372,16 +372,16 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
       for (auto& handler: handlerSet.handlers.ordered<kj::InsertionOrderIndex>()) {
         KJ_SWITCH_ONEOF(handler->handler) {
           KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-            callbacks.add(Callback{
-              .handler = EventHandler::JavaScriptHandler{.identity = jsh.identity.addRef(js),
+            callbacks.add(Callback {
+              .handler = EventHandler::JavaScriptHandler {.identity = jsh.identity.addRef(js),
                 .callback = jsh.callback.addRef(js)},
               .once = handler->once,
             });
           }
           KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-            callbacks.add(Callback{
+            callbacks.add(Callback {
               .handler =
-                  EventHandler::NativeHandlerRef{
+                  EventHandler::NativeHandlerRef {
                     .handler = native.handler,
                   },
               .once = handler->once,
@@ -624,7 +624,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
           "Unable to create AbortSignal.any handler")};
 
     sig->addEventListener(js, kj::str("abort"), kj::mv(identified),
-        AddEventListenerOptions{// Once the abort is triggered, this handler should remove itself.
+        AddEventListenerOptions {// Once the abort is triggered, this handler should remove itself.
           .once = true,
           // When the signal is triggered, we'll use it to cancel the other registered signals.
           .signal = signal.addRef()});

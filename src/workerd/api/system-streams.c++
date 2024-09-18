@@ -219,7 +219,7 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
   // pump into it, just return an immediately resolved promise. Alternatively
   // we could throw here.
   if (inner.is<Ended>()) {
-    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{kj::READY_NOW});
+    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void> {kj::READY_NOW});
   }
 
   KJ_IF_SOME(nativeInput, kj::dynamicDowncastIfAvailable<EncodedAsyncInputStream>(input)) {
@@ -262,7 +262,7 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
 
     // Since this is a system stream, the pump task is eligible to be deferred past IoContext
     // lifetime!
-    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{kj::mv(promise)});
+    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void> {kj::mv(promise)});
   }
 
   return kj::none;

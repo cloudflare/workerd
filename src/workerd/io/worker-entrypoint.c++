@@ -249,7 +249,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
       kj::String lower = api::toLower(name);
       auto& slot = traceHeaders.findOrCreate(
-          lower, [&]() { return decltype(traceHeaders)::Entry{kj::mv(lower), {}}; });
+          lower, [&]() { return decltype(traceHeaders)::Entry {kj::mv(lower), {}}; });
       slot.add(value);
     });
     auto traceHeadersArray = KJ_MAP(entry, traceHeaders) {
@@ -501,7 +501,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() waitForFinished()");
     auto result = co_await request->finishScheduled();
     bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
-    co_return WorkerInterface::ScheduledResult{.retry = context.shouldRetryScheduled(),
+    co_return WorkerInterface::ScheduledResult {.retry = context.shouldRetryScheduled(),
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU};
   };
 

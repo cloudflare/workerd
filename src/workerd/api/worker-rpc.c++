@@ -63,10 +63,10 @@ public:
     if (table[i] == nullptr) {
       auto paf = kj::newPromiseAndFulfiller<capnp::Capability::Client>();
       table[i] = kj::mv(paf.fulfiller);
-      context.getResults(capnp::MessageSize{4, 1}).setStream(kj::mv(paf.promise));
+      context.getResults(capnp::MessageSize {4, 1}).setStream(kj::mv(paf.promise));
     } else KJ_SWITCH_ONEOF(table[i]) {
       KJ_CASE_ONEOF(stream, capnp::Capability::Client) {
-        context.getResults(capnp::MessageSize{4, 1}).setStream(kj::mv(stream));
+        context.getResults(capnp::MessageSize {4, 1}).setStream(kj::mv(stream));
         table[i] = Consumed();
       }
       KJ_CASE_ONEOF(fulfiller, StreamFulfiller) {
@@ -107,7 +107,7 @@ capnp::Capability::Client RpcSerializerExternalHander::writeStream(BuilderCallba
   }
 
   auto result = ({
-    auto req = streamSinkPtr->startStreamRequest(capnp::MessageSize{4, 0});
+    auto req = streamSinkPtr->startStreamRequest(capnp::MessageSize {4, 0});
     req.setExternalIndex(externals.size());
     req.send().getStream();
   });
@@ -163,7 +163,7 @@ void serializeJsValue(jsg::Lock& js,
   RpcSerializerExternalHander externalHandler(kj::mv(getStreamSinkFunc));
 
   jsg::Serializer serializer(js,
-      jsg::Serializer::Options{
+      jsg::Serializer::Options {
         .version = 15,
         .omitHeader = false,
         .treatClassInstancesAsPlainObjects = false,
@@ -176,7 +176,7 @@ void serializeJsValue(jsg::Lock& js,
       "was: ",
       data.size(), " bytes.");
 
-  capnp::MessageSize hint{0, 0};
+  capnp::MessageSize hint {0, 0};
   hint.wordCount += (data.size() + sizeof(capnp::word) - 1) / sizeof(capnp::word);
   hint.wordCount += capnp::sizeInWords<rpc::JsValue>();
   hint.wordCount += externalHandler.size() * capnp::sizeInWords<rpc::JsValue::External>();
@@ -209,7 +209,7 @@ DeserializeResult deserializeJsValue(
   RpcDeserializerExternalHander externalHandler(reader.getExternals(), *disposalGroup, streamSink);
 
   jsg::Deserializer deserializer(js, reader.getV8Serialized(), kj::none, kj::none,
-      jsg::Deserializer::Options{
+      jsg::Deserializer::Options {
         .version = 15,
         .readHeader = true,
         .externalHandler = externalHandler,
@@ -331,7 +331,7 @@ JsRpcPromise::JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
     IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline)
     : inner(kj::mv(inner)),
       weakRef(kj::mv(weakRefParam)),
-      state(Pending{kj::mv(pipeline)}) {
+      state(Pending {kj::mv(pipeline)}) {
   KJ_REQUIRE(weakRef->ref == kj::none);
   weakRef->ref = *this;
 }
@@ -341,7 +341,7 @@ JsRpcPromise::~JsRpcPromise() noexcept(false) {
 
 void JsRpcPromise::resolve(jsg::Lock& js, jsg::JsValue result) {
   if (state.is<Pending>()) {
-    state = Resolved{
+    state = Resolved {
       .result = jsg::Value(js.v8Isolate, result),
       .ctxCheck = IoContext::current().addObject(*this),
     };
@@ -1283,7 +1283,7 @@ private:
         arguments[i] = args.get(js, i);
       }
 
-      InvocationResult result{
+      InvocationResult result {
         .returnValue =
             jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.data())),
         .streamSink = kj::mv(streamSink),
@@ -1513,7 +1513,7 @@ static MakeCallPipeline::Result makeCallPipeline(jsg::Lock& js, jsg::JsValue val
       // that a new `dispose()` method will always be added on the client side).
       obj.delete_(js, js.symbolDispose());
 
-      return MakeCallPipeline::Object{
+      return MakeCallPipeline::Object {
         .cap = rpc::JsRpcTarget::Client(
             kj::heap<TransientJsRpcTarget>(js, IoContext::current(), obj, maybeDispose, true)),
         .hasDispose = maybeDispose != kj::none};
@@ -1609,7 +1609,7 @@ public:
           "\"cloudflare:workers\".");
     }
 
-    TargetInfo targetInfo{.target = jsg::JsObject(handler->self.getHandle(lock)),
+    TargetInfo targetInfo {.target = jsg::JsObject(handler->self.getHandle(lock)),
       .envCtx = handler->ctx.map([&](jsg::Ref<ExecutionContext>& execCtx) -> EnvCtx {
       return {
         .env = handler->env.getHandle(js),
@@ -1722,7 +1722,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
   // and server as part of this session.
   co_await donePromise.exclusiveJoin(ioctx.onAbort());
 
-  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+  co_return WorkerInterface::CustomEvent::Result {.outcome = EventOutcome::OK};
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::sendRpc(
@@ -1777,7 +1777,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::s
     kj::throwFatalException(kj::mv(e));
   }
 
-  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+  co_return WorkerInterface::CustomEvent::Result {.outcome = EventOutcome::OK};
 }
 
 // =======================================================================================

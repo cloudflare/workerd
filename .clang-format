@@ -100,7 +100,7 @@ SpaceBeforeCtorInitializerColon: false
 SpaceBeforeInheritanceColon: false
 SpaceBeforeParens: ControlStatementsExceptControlMacros
 SpaceBeforeRangeBasedForLoopColon: false
-SpaceBeforeCpp11BracedList: false
+SpaceBeforeCpp11BracedList: true
 SpacesBeforeTrailingComments: 2
 ---
 # Some files with embedded typescript are incorrectly recognized by clang-format as Objective-C

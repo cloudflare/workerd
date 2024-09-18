@@ -81,14 +81,14 @@ KJ_TEST("no actor specified") {
 
 KJ_TEST("actor specified with string id") {
   Worker::Actor::Id id = kj::str("testActorId");
-  TestFixture fixture(TestFixture::SetupParams{.actorId = kj::mv(id)});
+  TestFixture fixture(TestFixture::SetupParams {.actorId = kj::mv(id)});
   runBadDeserializationInIoContext(fixture, "actorId = testActorId;"_kj);
 }
 
 KJ_TEST("actor specified with ActorId object") {
   kj::Own<ActorIdFactory::ActorId> mockActorId = kj::heap<MockActorId>(kj::str("testActorId"));
   Worker::Actor::Id id = kj::mv(mockActorId);
-  TestFixture fixture(TestFixture::SetupParams{
+  TestFixture fixture(TestFixture::SetupParams {
     .actorId = kj::mv(id),
   });
   runBadDeserializationInIoContext(fixture, "actorId = MockActorId<testActorId>;"_kj);

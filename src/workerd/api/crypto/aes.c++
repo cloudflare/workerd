@@ -724,7 +724,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateAes(jsg::
   auto keyDataArray = kj::heapArray<kj::byte>(length / 8);
   IoContext::current().getEntropySource().generate(keyDataArray);
 
-  auto keyAlgorithm = CryptoKey::AesKeyAlgorithm{normalizedName, static_cast<uint16_t>(length)};
+  auto keyAlgorithm = CryptoKey::AesKeyAlgorithm {normalizedName, static_cast<uint16_t>(length)};
 
   kj::Own<CryptoKey::Impl> keyImpl;
 
@@ -841,7 +841,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(jsg::Lock& js,
   auto keySize = keyDataArray.size() * 8;
   KJ_ASSERT(keySize == 128 || keySize == 192 || keySize == 256);
 
-  auto keyAlgorithm = CryptoKey::AesKeyAlgorithm{normalizedName, static_cast<uint16_t>(keySize)};
+  auto keyAlgorithm = CryptoKey::AesKeyAlgorithm {normalizedName, static_cast<uint16_t>(keySize)};
 
   if (normalizedName == "AES-GCM") {
     return kj::heap<AesGcmKey>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages);

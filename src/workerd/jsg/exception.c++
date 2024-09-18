@@ -64,7 +64,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   auto tryExtractError = [](kj::StringPtr msg,
                              Properties properties) -> kj::Maybe<TunneledErrorType> {
     if (msg.startsWith(ERROR_TUNNELED_PREFIX_JSG)) {
-      return TunneledErrorType{
+      return TunneledErrorType {
         .message = msg.slice(ERROR_TUNNELED_PREFIX_JSG.size()),
         .isJsgError = true,
         .isInternal = false,
@@ -73,7 +73,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
       };
     }
     if (msg.startsWith(ERROR_INTERNAL_SOURCE_PREFIX_JSG)) {
-      return TunneledErrorType{
+      return TunneledErrorType {
         .message = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_JSG.size()),
         .isJsgError = true,
         .isInternal = true,
@@ -86,7 +86,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   };
 
   auto makeDefaultError = [](kj::StringPtr msg, Properties properties) {
-    return TunneledErrorType{
+    return TunneledErrorType {
       .message = msg,
       .isJsgError = false,
       .isInternal = true,

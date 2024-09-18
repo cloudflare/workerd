@@ -49,7 +49,7 @@ kj::StringPtr DOMException::getMessage() {
 }
 
 int DOMException::getCode() {
-  static const std::map<kj::StringPtr, int> legacyCodes{
+  static const std::map<kj::StringPtr, int> legacyCodes {
 #define MAP_ENTRY(name, code, friendlyName) {friendlyName, code},
     JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(MAP_ENTRY)
 #undef MAP_ENTRY
