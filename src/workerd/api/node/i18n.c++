@@ -7,6 +7,8 @@
 
 #include "simdutf.h"
 
+#include <workerd/jsg/exception.h>
+
 #include <unicode/putil.h>
 #include <unicode/uchar.h>
 #include <unicode/uclean.h>
@@ -20,7 +22,6 @@
 #include <unicode/utypes.h>
 #include <unicode/uvernum.h>
 #include <unicode/uversion.h>
-#include <workerd/jsg/exception.h>
 
 namespace workerd::api::node {
 

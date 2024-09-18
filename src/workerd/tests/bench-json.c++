@@ -2,9 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <benchmark/benchmark.h>
 #include <workerd/api/r2-api.capnp.h>
 #include <workerd/tests/bench-tools.h>
+
+#include <benchmark/benchmark.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>

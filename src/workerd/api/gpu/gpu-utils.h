@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
+
+#include <webgpu/webgpu_cpp.h>
 
 namespace workerd::api::gpu {
 

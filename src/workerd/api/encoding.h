@@ -4,9 +4,10 @@
 
 #pragma once
 
-#include <unicode/ucnv.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
+
+#include <unicode/ucnv.h>
 
 namespace workerd::api {
 

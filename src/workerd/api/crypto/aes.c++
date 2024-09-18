@@ -4,12 +4,13 @@
 
 #include "impl.h"
 
+#include <workerd/io/io-context.h>
+
 #include <openssl/aes.h>
 #include <openssl/base.h>
 #include <openssl/bn.h>
 #include <openssl/cipher.h>
 #include <openssl/mem.h>
-#include <workerd/io/io-context.h>
 
 #include <algorithm>
 #include <cstdint>

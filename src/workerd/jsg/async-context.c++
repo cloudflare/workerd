@@ -5,8 +5,9 @@
 
 #include "jsg.h"
 
-#include <v8.h>
 #include <workerd/jsg/memory.h>
+
+#include <v8.h>
 
 namespace workerd::jsg {
 

@@ -11,8 +11,9 @@
 
 #include "libplatform/libplatform.h"
 
-#include <v8-cppgc.h>
 #include <workerd/util/uuid.h>
+
+#include <v8-cppgc.h>
 
 #if !_WIN32
 #include <cxxabi.h>

@@ -6,8 +6,6 @@
 
 #include "workerd-api.h"
 
-#include <openssl/bio.h>
-#include <openssl/pem.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/api/pyodide/pyodide.h>
@@ -26,6 +24,9 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
+
+#include <openssl/bio.h>
+#include <openssl/pem.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>

@@ -4,10 +4,6 @@
 
 #include "server.h"
 
-#include <fcntl.h>
-#include <openssl/rand.h>
-#include <pyodide/generated/pyodide_extra.capnp.h>
-#include <sys/stat.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/supported-compatibility-date.capnp.h>
 #include <workerd/jsg/setup.h>
@@ -15,6 +11,11 @@
 #include <workerd/server/workerd-meta.capnp.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
+
+#include <fcntl.h>
+#include <openssl/rand.h>
+#include <pyodide/generated/pyodide_extra.capnp.h>
+#include <sys/stat.h>
 
 #include <capnp/dynamic.h>
 #include <capnp/message.h>

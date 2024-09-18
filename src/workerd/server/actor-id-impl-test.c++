@@ -2,9 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <openssl/hmac.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/server/actor-id-impl.h>
+
+#include <openssl/hmac.h>
 
 #include <kj/debug.h>
 #include <kj/encoding.h>

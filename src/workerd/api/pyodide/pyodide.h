@@ -5,14 +5,15 @@
 
 #include "workerd/util/wait-list.h"
 
-#include <pyodide/generated/pyodide_extra.capnp.h>
-#include <pyodide/pyodide.capnp.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
+
+#include <pyodide/generated/pyodide_extra.capnp.h>
+#include <pyodide/pyodide.capnp.h>
 
 #include <capnp/serialize.h>
 #include <kj/array.h>
