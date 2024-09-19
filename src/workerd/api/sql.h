@@ -33,15 +33,12 @@ public:
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
 
-    // Prepared statement API is experimental-only and deprecated. exec() will automatically
-    // handle caching prepared statements, so apps don't need to worry about it.
     if (flags.getWorkerdExperimental()) {
+      // Prepared statement API is experimental-only and deprecated. exec() will automatically
+      // handle caching prepared statements, so apps don't need to worry about it.
       JSG_METHOD(prepare);
-    }
 
-    // Make sure that the 'ingest' function is still experimental-only if and when
-    // the SQL API becomes publicly available.
-    if (flags.getWorkerdExperimental()) {
+      // 'ingest' functionality is still experimental-only
       JSG_METHOD(ingest);
     }
 
@@ -49,6 +46,10 @@ public:
 
     JSG_NESTED_TYPE(Cursor);
     JSG_NESTED_TYPE(Statement);
+
+    JSG_TS_OVERRIDE({
+      exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: any[]): SqlStorageCursor<T>
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -125,6 +126,12 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(columnNames, getColumnNames);
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsRead, getRowsRead);
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
+
+    JSG_TS_DEFINE(type SqlStorageValue = ArrayBuffer | string | number | null);
+    JSG_TS_OVERRIDE(<T extends Record<string, SqlStorageValue>> {
+      [Symbol.iterator](): IterableIterator<T>;
+      raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
+    });
   }
 
   // One value returned from SQL. Note that we intentionally return StringPtr instead of String
