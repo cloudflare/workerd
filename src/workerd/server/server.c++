@@ -1863,12 +1863,13 @@ public:
           : alarmScheduler(alarmScheduler),
             actor(actor) {}
 
-      kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {
-        KJ_IF_SOME(scheduledTime, newAlarmTime) {
-          alarmScheduler.setAlarm(actor, scheduledTime);
-        } else {
-          alarmScheduler.deleteAlarm(actor);
-        }
+      kj::Promise<void> scheduleRun(kj::Date newAlarmTime) override {
+        alarmScheduler.setAlarm(actor, newAlarmTime);
+        return kj::READY_NOW;
+      }
+
+      kj::Promise<void> cancelRun(kj::Maybe<kj::Date> timeToCancel) override {
+        alarmScheduler.deleteAlarm(actor);
         return kj::READY_NOW;
       }
 

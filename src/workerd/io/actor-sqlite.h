@@ -25,7 +25,12 @@ public:
   public:
     // Makes a request to the alarm manager to run the alarm handler at the given time, returning
     // a promise that resolves when the scheduling has succeeded.
-    virtual kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime);
+    virtual kj::Promise<void> scheduleRun(kj::Date newAlarmTime);
+
+    // Makes a request to the alarm manager to cancel the currently scheduled run.  Does nothing
+    // if there is no currently scheduled run, or if an explicit time is passed, but the currently
+    // scheduled run does not match.
+    virtual kj::Promise<void> cancelRun(kj::Maybe<kj::Date> timeToCancel);
 
     static const Hooks DEFAULT;
   };
@@ -176,8 +181,7 @@ private:
   // We need to track some additional alarm state to guarantee at-least-once alarm delivery:
   // Within an alarm handler, we want the observable alarm state to look like the running alarm
   // was deleted at the start of the handler (when armAlarmHandler() is called), but we don't
-  // actually want to persist that deletion until after the handler has successfully completed
-  // (DeferredAlarmDeleter freed prior to any setAlarm() or cancelDeferredAlarmDeletion() calls).
+  // actually want to persist that deletion until after the handler has successfully completed.
   bool haveDeferredDelete = false;
 
   // Some state only used for tracking calling invariants.

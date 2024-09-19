@@ -63,13 +63,20 @@ struct ActorSqliteTest final {
   public:
     explicit ActorSqliteTestHooks(ActorSqliteTest& parent): parent(parent) {}
 
-    kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {
+    kj::Promise<void> scheduleRun(kj::Date newAlarmTime) override {
       KJ_IF_SOME(h, parent.scheduleRunHandler) {
         return h(newAlarmTime);
       }
-      auto desc = newAlarmTime.map([](auto& t) {
-        return kj::str("scheduleRun(", t, ")");
-      }).orDefault(kj::str("scheduleRun(none)"));
+      auto desc = kj::str("scheduleRun(", newAlarmTime, ")");
+      auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
+      parent.calls.add(Call{kj::mv(desc), kj::mv(fulfiller)});
+      return kj::mv(promise);
+    }
+
+    kj::Promise<void> cancelRun(kj::Maybe<kj::Date> timeToCancel) override {
+      auto desc = timeToCancel.map([](auto& t) {
+        return kj::str("cancelRun(", t, ")");
+      }).orDefault(kj::str("cancelRun(none)"));
       auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
       parent.calls.add(Call{kj::mv(desc), kj::mv(fulfiller)});
       return kj::mv(promise);
@@ -77,7 +84,7 @@ struct ActorSqliteTest final {
 
     ActorSqliteTest& parent;
   };
-  kj::Maybe<kj::Function<kj::Promise<void>(kj::Maybe<kj::Date>)>> scheduleRunHandler;
+  kj::Maybe<kj::Function<kj::Promise<void>(kj::Date)>> scheduleRunHandler;
   ActorSqliteTestHooks hooks = ActorSqliteTestHooks(*this);
 
   ActorSqlite actor;
@@ -199,7 +206,7 @@ KJ_TEST("alarm scheduling starts synchronously before implicit local db commit")
   test.pollAndExpectCalls({});
 
   bool startedScheduleRun = false;
-  test.scheduleRunHandler = [&](kj::Maybe<kj::Date>) -> kj::Promise<void> {
+  test.scheduleRunHandler = [&](kj::Date) -> kj::Promise<void> {
     startedScheduleRun = true;
 
     KJ_EXPECT_THROW_MESSAGE(
@@ -228,7 +235,7 @@ KJ_TEST("alarm scheduling starts synchronously before explicit local db commit")
   test.pollAndExpectCalls({});
 
   bool startedScheduleRun = false;
-  test.scheduleRunHandler = [&](kj::Maybe<kj::Date>) -> kj::Promise<void> {
+  test.scheduleRunHandler = [&](kj::Date) -> kj::Promise<void> {
     startedScheduleRun = true;
 
     // Not sure if there is a good way to detect savepoint presence without mutating the db state,
@@ -274,7 +281,7 @@ KJ_TEST("alarm scheduling does not start synchronously before nested explicit lo
   test.pollAndExpectCalls({});
 
   bool startedScheduleRun = false;
-  test.scheduleRunHandler = [&](kj::Maybe<kj::Date>) -> kj::Promise<void> {
+  test.scheduleRunHandler = [&](kj::Date) -> kj::Promise<void> {
     startedScheduleRun = true;
     return kj::READY_NOW;
   };
@@ -320,7 +327,7 @@ KJ_TEST("synchronous alarm scheduling failure causes local db commit to fail syn
 
   // Override scheduleRun handler with one that throws synchronously.
   bool startedScheduleRun = false;
-  test.scheduleRunHandler = [&](kj::Maybe<kj::Date>) -> kj::Promise<void> {
+  test.scheduleRunHandler = [&](kj::Date) -> kj::Promise<void> {
     startedScheduleRun = true;
     // Must throw synchronously; returning an exception is insufficient.
     kj::throwFatalException(KJ_EXCEPTION(FAILED, "a_sync_fail"));
@@ -354,7 +361,7 @@ KJ_TEST("can clear alarm") {
 
   test.setAlarm(kj::none);
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(none)"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
@@ -489,7 +496,7 @@ KJ_TEST("getAlarm() returns null during handler") {
     KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
   }
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(none)"})[0]->fulfill();
 }
 
 KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
@@ -507,7 +514,7 @@ KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
   }
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(none)"})[0]->fulfill();
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
@@ -566,7 +573,7 @@ KJ_TEST("canceling deferred alarm deletion outside handler has no effect") {
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
   }
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(none)"})[0]->fulfill();
 
   test.actor.cancelDeferredAlarmDeletion();
 
@@ -592,7 +599,7 @@ KJ_TEST("canceling deferred alarm deletion outside handler edge case") {
   }
   test.actor.cancelDeferredAlarmDeletion();
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(none)"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
@@ -917,7 +924,7 @@ KJ_TEST("calling deleteAll() preserves alarm state if alarm is not set") {
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
   test.setAlarm(kj::none);
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(none)"})[0]->fulfill();
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 

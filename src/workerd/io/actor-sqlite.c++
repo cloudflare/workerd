@@ -209,9 +209,11 @@ void ActorSqlite::onWrite() {
 kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime) {
   // Not using coroutines here, because it's important for correctness in workerd that a
   // synchronously thrown exception in scheduleRun() can escape synchronously to the caller.
-  return hooks.scheduleRun(requestedTime).then([this, requestedTime]() {
-    lastConfirmedScheduledAlarm = requestedTime;
-  });
+  KJ_IF_SOME(t, requestedTime) {
+    return hooks.scheduleRun(t).then([this, t]() { lastConfirmedScheduledAlarm = t; });
+  } else {
+    return hooks.cancelRun(kj::none).then([this]() { lastConfirmedScheduledAlarm = kj::none; });
+  }
 }
 
 ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
@@ -601,7 +603,11 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
 
 const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
 
-kj::Promise<void> ActorSqlite::Hooks::scheduleRun(kj::Maybe<kj::Date> newAlarmTime) {
+kj::Promise<void> ActorSqlite::Hooks::scheduleRun(kj::Date newAlarmTime) {
+  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+}
+
+kj::Promise<void> ActorSqlite::Hooks::cancelRun(kj::Maybe<kj::Date> timeToCancel) {
   JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
 }
 
