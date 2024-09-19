@@ -59,6 +59,8 @@ build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated
 build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
 # for some reason tcmalloc uses internal msan-enabled annotation in the code, rather than public one
 build --per_file_copt=external/com_google_tcmalloc@-DANNOTATE_MEMORY_IS_INITIALIZED=ABSL_ANNOTATE_MEMORY_IS_INITIALIZED
+build --per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma
+build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma
 
 # Increasing the optimization level of some portions of V8 significantly speeds up Python tests
 # in GitHub Actions. This is an optional performance hack and shouly only be used in CI.
