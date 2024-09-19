@@ -18,7 +18,7 @@
     "@types/node": "^20.16.5",
     "capnpc-ts": "^0.7.0",
     "chrome-remote-interface": "^0.33.2",
-    "esbuild": "^0.15.18",
+    "esbuild": "^0.21.5",
     "eslint": "^9.10.0",
     "eslint-plugin-import": "^2.30.0",
     "eslint-plugin-prettier": "^5.2.1",
