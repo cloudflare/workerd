@@ -54,11 +54,13 @@ http_archive(
 
 http_archive(
     name = "ssl",
-    sha256 = "57261442e663ad0a0dc5c4eae59322440bfce61f1edc4fe4338179a6abc14034",
-    strip_prefix = "google-boringssl-8ae84b5",
+    integrity = "sha256-fAgiuoIKLTwR0cwrUz6gwiAiSxGsUKtW2XzgtftXswM=",
+    strip_prefix = "google-boringssl-c08ccc9",
     type = "tgz",
-    # from master-with-bazel branch
-    urls = ["https://github.com/google/boringssl/tarball/8ae84b558b3d3af50a323c7e3800998764e77375"],
+    # from main-with-bazel branch. Later boringssl versions have bazel support on the main branch,
+    # so using the custom branch with a different directory structure will no longer be needed in
+    # the future.
+    urls = ["https://github.com/google/boringssl/tarball/c08ccc9ed166a82b92edd70ab215ae1f2501e838"],
 )
 
 http_archive(

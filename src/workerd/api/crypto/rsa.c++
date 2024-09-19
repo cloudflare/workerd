@@ -240,11 +240,16 @@ SubtleCrypto::JsonWebKey Rsa::toJwk(
 
   if (keyType == KeyType::PRIVATE) {
     jwk.d = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(d))));
-    jwk.p = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa->p))));
-    jwk.q = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa->q))));
-    jwk.dp = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa->dmp1))));
-    jwk.dq = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa->dmq1))));
-    jwk.qi = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(rsa->iqmp))));
+    jwk.p =
+        kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_p(rsa)))));
+    jwk.q =
+        kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_q(rsa)))));
+    jwk.dp = kj::encodeBase64Url(
+        KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_dmp1(rsa)))));
+    jwk.dq = kj::encodeBase64Url(
+        KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_dmq1(rsa)))));
+    jwk.qi = kj::encodeBase64Url(
+        KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_iqmp(rsa)))));
   }
 
   return jwk;

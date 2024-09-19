@@ -783,9 +783,9 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
       case EVP_PKEY_RSA: {
         RSA* rsa = EVP_PKEY_get0_RSA(key.get());
         KJ_ASSERT(rsa != nullptr);
-        obj.set(js, "modulus", js.str(getModulusString(bio.get(), rsa->n)));
-        obj.set(js, "bits", js.num(BN_num_bits(rsa->n)));
-        obj.set(js, "exponent", js.str(getExponentString(bio.get(), rsa->e)));
+        obj.set(js, "modulus", js.str(getModulusString(bio.get(), RSA_get0_n(rsa))));
+        obj.set(js, "bits", js.num(RSA_bits(rsa)));
+        obj.set(js, "exponent", js.str(getExponentString(bio.get(), RSA_get0_e(rsa))));
         obj.set(js, "pubkey", jsg::JsValue(js.bytes(getRsaPubKey(rsa)).getHandle(js)));
         break;
       }

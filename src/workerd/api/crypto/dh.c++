@@ -203,29 +203,25 @@ void DiffieHellman::setPublicKey(kj::ArrayPtr<kj::byte> key) {
 }
 
 kj::Array<kj::byte> DiffieHellman::getPublicKey() {
-  const BIGNUM* pub_key;
-  DH_get0_key(dh, &pub_key, nullptr);
+  const BIGNUM* pub_key = DH_get0_pub_key(dh);
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(*pub_key), Error, "Error while retrieving DiffieHellman public key");
 }
 
 kj::Array<kj::byte> DiffieHellman::getPrivateKey() {
-  const BIGNUM* priv_key;
-  DH_get0_key(dh, nullptr, &priv_key);
+  const BIGNUM* priv_key = DH_get0_priv_key(dh);
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(*priv_key), Error, "Error while retrieving DiffieHellman private key");
 }
 
 kj::Array<kj::byte> DiffieHellman::getGenerator() {
-  const BIGNUM* g;
-  DH_get0_pqg(dh, nullptr, nullptr, &g);
+  const BIGNUM* g = DH_get0_g(dh);
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(*g), Error, "Error while retrieving DiffieHellman generator");
 }
 
 kj::Array<kj::byte> DiffieHellman::getPrime() {
-  const BIGNUM* p;
-  DH_get0_pqg(dh, &p, nullptr, nullptr);
+  const BIGNUM* p = DH_get0_p(dh);
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(*p), Error, "Error while retrieving DiffieHellman prime");
 }
@@ -265,8 +261,7 @@ kj::Array<kj::byte> DiffieHellman::computeSecret(kj::ArrayPtr<kj::byte> key) {
 kj::Array<kj::byte> DiffieHellman::generateKeys() {
   ClearErrorOnReturn clear_error_on_return;
   OSSLCALL(DH_generate_key(dh));
-  const BIGNUM* pub_key;
-  DH_get0_key(dh, &pub_key, nullptr);
+  const BIGNUM* pub_key = DH_get0_pub_key(dh);
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(*pub_key), Error, "Error while generating DiffieHellman keys");
 }
