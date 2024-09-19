@@ -1,4 +1,4 @@
-From 4e6144fe190189f10ac3eee21d5d0bb437ba3afb Mon Sep 17 00:00:00 2001
+From 170da0144ed6a6dd5a1e64f531658dd91aef8cdb Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 2 Mar 2024 09:00:18 -0600
 Subject: Add ValueSerializer::SetTreatFunctionsAsHostObjects().
@@ -28,7 +28,7 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 8d4e6dee69b355baaadd3e144c7514e55dd88907..8db94796eb44db416f38fb5488ea4c83eeec1bf0 100644
+index 6e2191ef66d5c04b99f7d314df6fb4b75de3fd7a..ba49cb00633a98262a1218ed09577de5588f4cac 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -3481,6 +3481,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
