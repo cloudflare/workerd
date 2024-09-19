@@ -14,7 +14,7 @@ namespace workerd {
 //
 // The table is named `_cf_METADATA`. The naming is designed so that if the application is allowed to
 // perform direct SQL queries, we can block it from accessing any table prefixed with `_cf_`.
-class SqliteMetadata {
+class SqliteMetadata final: private SqliteDatabase::ResetListener {
 public:
   explicit SqliteMetadata(SqliteDatabase& db);
 
@@ -28,10 +28,7 @@ public:
   void invalidate();
 
 private:
-  struct Uninitialized {
-    SqliteDatabase& db;
-  };
-
+  struct Uninitialized {};
   struct Initialized {
     SqliteDatabase& db;
 
@@ -46,7 +43,8 @@ private:
     Initialized(SqliteDatabase& db): db(db) {}
   };
 
-  kj::OneOf<Uninitialized, Initialized> dbState;
+  bool tableCreated;
+  kj::OneOf<Uninitialized, Initialized> dbState = Uninitialized{};
 
   struct Cache {
     kj::Maybe<kj::Date> alarmTime;
@@ -59,6 +57,9 @@ private:
   Initialized& ensureInitialized();
   // Make sure the metadata table is created and prepared statements are ready. Not called until the
   // first write.
+
+  // ResetListener interface:
+  void beforeSqliteReset() override;
 };
 
 }  // namespace workerd

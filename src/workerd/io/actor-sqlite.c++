@@ -492,9 +492,6 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
   // current alarm state when running under workerd.  Not sure if there's a practical way to avoid
   // this.
 
-  // Reinitialize metadata wrapper, to allow on-demand recreation of metadata table.
-  metadata = SqliteMetadata(*db);
-
   // Reset alarm state, if necessary.  If no alarm is set, OK to just leave metadata table
   // uninitialized.
   if (localAlarmState != kj::none) {

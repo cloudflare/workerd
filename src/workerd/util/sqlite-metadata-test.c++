@@ -38,6 +38,14 @@ KJ_TEST("SQLite-METADATA") {
   // Zero alarm is distinct from unset (probably not important, but just checking)
   metadata.setAlarm(kj::UNIX_EPOCH);
   KJ_EXPECT(metadata.getAlarm() == kj::UNIX_EPOCH);
+
+  // Can recreate table after resetting database
+  metadata.setAlarm(anAlarmTime1);
+  KJ_EXPECT(metadata.getAlarm() == anAlarmTime1);
+  db.reset();
+  KJ_EXPECT(metadata.getAlarm() == kj::none);
+  metadata.setAlarm(anAlarmTime2);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(metadata.getAlarm()) == anAlarmTime2);
 }
 
 }  // namespace

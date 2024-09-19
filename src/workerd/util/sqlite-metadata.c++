@@ -7,17 +7,9 @@
 
 namespace workerd {
 
-SqliteMetadata::SqliteMetadata(SqliteDatabase& db) {
+SqliteMetadata::SqliteMetadata(SqliteDatabase& db): ResetListener(db) {
   auto q = db.run("SELECT name FROM sqlite_master WHERE type='table' AND name='_cf_METADATA'");
-  if (q.isDone()) {
-    // The _cf_METADATA table doesn't exist. Defer initialization.
-    dbState = Uninitialized{db};
-  } else {
-    // The metadata table was initialized in the past. We can go ahead and prepare our statements.
-    // (We don't call ensureInitialized() here because the `CREATE TABLE IF NOT EXISTS` query it
-    // executes would be redundant.)
-    dbState = Initialized(db);
-  }
+  tableCreated = !q.isDone();
 }
 
 kj::Maybe<kj::Date> SqliteMetadata::getAlarm() {
@@ -28,7 +20,6 @@ kj::Maybe<kj::Date> SqliteMetadata::getAlarm() {
 }
 
 void SqliteMetadata::setAlarm(kj::Maybe<kj::Date> currentTime) {
-  // Presumably fine to omit redundant writes
   KJ_IF_SOME(c, cacheState) {
     if (c.alarmTime == currentTime) {
       return;
@@ -43,9 +34,9 @@ void SqliteMetadata::invalidate() {
 }
 
 kj::Maybe<kj::Date> SqliteMetadata::getAlarmUncached() {
-  auto& stmts = KJ_UNWRAP_OR(dbState.tryGet<Initialized>(), return kj::none);
+  if (!tableCreated) { return kj::none; }
 
-  auto query = stmts.stmtGetAlarm.run();
+  auto query = ensureInitialized().stmtGetAlarm.run();
   if (query.isDone() || query.isNull(0)) {
     return kj::none;
   } else {
@@ -64,17 +55,18 @@ void SqliteMetadata::setAlarmUncached(kj::Maybe<kj::Date> currentTime) {
 }
 
 SqliteMetadata::Initialized& SqliteMetadata::ensureInitialized() {
+  if (!tableCreated) {
+    db.run(R"(
+      CREATE TABLE IF NOT EXISTS _cf_METADATA (
+        key INTEGER PRIMARY KEY,
+        value BLOB
+      );
+    )");
+    tableCreated = true;
+  }
+
   KJ_SWITCH_ONEOF(dbState) {
     KJ_CASE_ONEOF(uninitialized, Uninitialized) {
-      auto& db = uninitialized.db;
-
-      db.run(R"(
-        CREATE TABLE IF NOT EXISTS _cf_METADATA (
-          key INTEGER PRIMARY KEY,
-          value BLOB
-        );
-      )");
-
       return dbState.init<Initialized>(db);
     }
     KJ_CASE_ONEOF(initialized, Initialized) {
@@ -82,6 +74,12 @@ SqliteMetadata::Initialized& SqliteMetadata::ensureInitialized() {
     }
   }
   KJ_UNREACHABLE;
+}
+
+void SqliteMetadata::beforeSqliteReset() {
+  // We'll need to recreate the table on the next operation.
+  tableCreated = false;
+  cacheState = kj::none;
 }
 
 }  // namespace workerd
