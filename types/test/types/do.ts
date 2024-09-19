@@ -33,5 +33,12 @@ class TestDOSql extends DurableObject {
     expectTypeOf<number>(cursor.rowsRead);
     expectTypeOf<number>(cursor.rowsWritten);
     expectTypeOf<string[]>(cursor.columnNames);
+
+    expectTypeOf<Record<string, Value>[]>(cursor.toArray());
+    expectTypeOf<Record<string, Value>>(cursor.one());
+    const next = cursor.next();
+    if (!next.done) {
+      expectTypeOf<Record<string, Value>>(next.value);
+    }
   }
 }
