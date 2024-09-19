@@ -16,3 +16,6 @@ f457f19039b82536b35659c1f9cb898a198e6cd1
 # Use clang-format to sort includes.
 faabf00af72bbce956221b40624f8a3d57f82b7c
 b9e9fb144f44494017e77fbe959355e92f10ae69
+
+# Add `AllowShortBlocksOnASingleLine: Empty` to clang-format
+fa2c488219a5e96792e61f3d51838595e2907c8d
