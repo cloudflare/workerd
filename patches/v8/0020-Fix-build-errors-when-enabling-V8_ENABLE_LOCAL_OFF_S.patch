@@ -1,0 +1,28 @@
+From cd408894eb9cdcd7bf6a8cdd4e494f970893175f Mon Sep 17 00:00:00 2001
+From: Yagiz Nizipli <yagiz@cloudflare.com>
+Date: Mon, 23 Sep 2024 10:31:32 -0400
+Subject: [PATCH] Fix build errors when enabling
+ V8_ENABLE_LOCAL_OFF_STACK_CHECK
+
+---
+ include/v8-local-handle.h | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/include/v8-local-handle.h b/include/v8-local-handle.h
+index ef110a083dc..476b80a615e 100644
+--- a/include/v8-local-handle.h
++++ b/include/v8-local-handle.h
+@@ -434,8 +434,9 @@ class V8_TRIVIAL_ABI LocalUnchecked : public Local<T> {
+ #if defined(V8_ENABLE_LOCAL_OFF_STACK_CHECK) && V8_HAS_ATTRIBUTE_TRIVIAL_ABI
+   // In this case, the check is also enforced in the copy constructor and we
+   // need to suppress it.
+-  LocalUnchecked(const LocalUnchecked& other)
+-      : Local<T>(other, Local<T>::do_not_check) noexcept {}
++  LocalUnchecked(
++      const LocalUnchecked& other) noexcept  // NOLINT(runtime/explicit)
++      : Local<T>(other, Local<T>::do_not_check) {}
+   LocalUnchecked& operator=(const LocalUnchecked&) noexcept = default;
+ #endif
+
+--
+2.46.0

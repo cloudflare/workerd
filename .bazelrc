@@ -61,6 +61,9 @@ build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprec
 build --per_file_copt=external/com_google_tcmalloc@-DANNOTATE_MEMORY_IS_INITIALIZED=ABSL_ANNOTATE_MEMORY_IS_INITIALIZED
 build --per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma
 build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma
+# Enables heap allocation debug checks for local handles.
+# Ref: https://chromium-review.googlesource.com/c/v8/v8/+/4905902
+build --copt='-DV8_ENABLE_LOCAL_OFF_STACK_CHECK'
 
 # Increasing the optimization level of some portions of V8 significantly speeds up Python tests
 # in GitHub Actions. This is an optional performance hack and shouly only be used in CI.
