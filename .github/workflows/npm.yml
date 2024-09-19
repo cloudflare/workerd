@@ -117,17 +117,17 @@ jobs:
       - run: mkdir -p npm/workerd/lib
       - run: mkdir -p npm/workerd/bin
       - name: Build node-install
-        run: npx esbuild npm/lib/node-install.ts --outfile=npm/workerd/install.js --bundle --target=node16 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-install.ts --outfile=npm/workerd/install.js --bundle --target=node18 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - name: Build node-shim
-        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node16 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node18 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - name: Build node-path
-        run: npx esbuild npm/lib/node-path.ts --outfile=npm/workerd/lib/main.js --bundle --target=node16 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-path.ts --outfile=npm/workerd/lib/main.js --bundle --target=node18 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
