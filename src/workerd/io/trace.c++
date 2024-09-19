@@ -749,22 +749,14 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
         return;
       }
     }
-    KJ_CASE_ONEOF(_, Trace::JsRpcEventInfo) {
-    }
-    KJ_CASE_ONEOF(_, Trace::ScheduledEventInfo) {
-    }
-    KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {
-    }
-    KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {
-    }
-    KJ_CASE_ONEOF(_, Trace::EmailEventInfo) {
-    }
-    KJ_CASE_ONEOF(_, Trace::TraceEventInfo) {
-    }
-    KJ_CASE_ONEOF(_, Trace::HibernatableWebSocketEventInfo) {
-    }
-    KJ_CASE_ONEOF(_, Trace::CustomEventInfo) {
-    }
+    KJ_CASE_ONEOF(_, Trace::JsRpcEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::ScheduledEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::EmailEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::TraceEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::HibernatableWebSocketEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::CustomEventInfo) {}
   }
   trace->bytesUsed = newSize;
   trace->eventInfo = kj::mv(info);

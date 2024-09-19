@@ -62,8 +62,7 @@ KJ_TEST("ReadableStream read all text (value readable)") {
           c->close(js);
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
       }
       KJ_UNREACHABLE;
     }
@@ -120,8 +119,7 @@ KJ_TEST("ReadableStream read all text, rs ref held (value readable)") {
           c->close(js);
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
       }
       KJ_UNREACHABLE;
     }
@@ -175,8 +173,7 @@ KJ_TEST("ReadableStream read all text (byte readable)") {
           c->close(js);
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
       }
       KJ_UNREACHABLE;
     }
@@ -233,8 +230,7 @@ KJ_TEST("ReadableStream read all bytes (value readable)") {
           c->close(js);
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
       }
       KJ_UNREACHABLE;
     }
@@ -292,8 +288,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable)") {
           c->close(js);
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
       }
       KJ_UNREACHABLE;
     }
@@ -356,8 +351,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, more reads)") {
 
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
       }
       KJ_UNREACHABLE;
     }
@@ -421,8 +415,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, more reads)") {
 
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
       }
       KJ_UNREACHABLE;
     }
@@ -489,8 +482,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, large data)") {
 
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
       }
       KJ_UNREACHABLE;
     }
@@ -554,8 +546,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, wrong type)") {
           checked++;
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
       }
       KJ_UNREACHABLE;
     },
@@ -616,8 +607,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, to many bytes)") {
           checked++;
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
       }
       KJ_UNREACHABLE;
     }
@@ -673,8 +663,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, to many bytes)") {
           checked++;
           return js.resolvedPromise();
         }
-        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-        }
+        KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
       }
       KJ_UNREACHABLE;
     }

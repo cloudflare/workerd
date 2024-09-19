@@ -244,13 +244,11 @@ private:
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(inner);
     KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(pending, Pending) {
-      }
+      KJ_CASE_ONEOF(pending, Pending) {}
       KJ_CASE_ONEOF(resolved, Resolved) {
         visitor.visit(resolved.result);
       }
-      KJ_CASE_ONEOF(disposed, Disposed) {
-      }
+      KJ_CASE_ONEOF(disposed, Disposed) {}
     }
   }
 };

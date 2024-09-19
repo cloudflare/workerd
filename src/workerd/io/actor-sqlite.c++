@@ -67,8 +67,7 @@ void ActorSqlite::ImplicitTxn::rollback() {
 
 ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(actorSqlite) {
   KJ_SWITCH_ONEOF(actorSqlite.currentTxn) {
-    KJ_CASE_ONEOF(_, NoTxn) {
-    }
+    KJ_CASE_ONEOF(_, NoTxn) {}
     KJ_CASE_ONEOF(implicit, ImplicitTxn*) {
       // An implicit transaction is open, commit it now because it would be weird if writes
       // performed before the explicit transaction started were postponed until the transaction

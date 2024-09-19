@@ -104,8 +104,7 @@ private:
       KJ_CASE_ONEOF(b, jsg::Ref<Blob>) {
         visitor.visit(b);
       }
-      KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {
-      }
+      KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {}
     }
   }
 
