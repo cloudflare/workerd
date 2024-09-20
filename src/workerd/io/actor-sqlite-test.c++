@@ -387,10 +387,13 @@ KJ_TEST("setting duplicate alarm is no-op") {
 KJ_TEST("tells alarm handler to cancel when committed alarm is empty") {
   ActorSqliteTest test;
 
-  auto armResult = test.actor.armAlarmHandler(oneMs, false);
-  KJ_ASSERT(
-      KJ_ASSERT_NONNULL(armResult.tryGet<ActorSqlite::CancelAlarmHandler>()).waitBeforeCancel ==
-      kj::none);
+  {
+    auto armResult = test.actor.armAlarmHandler(oneMs, false);
+    KJ_ASSERT(armResult.is<ActorCache::CancelAlarmHandler>());
+    auto waitPromise = kj::mv(armResult.get<ActorCache::CancelAlarmHandler>().waitBeforeCancel);
+    KJ_ASSERT(waitPromise.poll(test.ws));
+    waitPromise.wait(test.ws);
+  }
 }
 
 KJ_TEST("tells alarm handler to cancel when committed alarm is later than handler alarm") {
@@ -407,7 +410,8 @@ KJ_TEST("tells alarm handler to cancel when committed alarm is later than handle
   auto armResult = test.actor.armAlarmHandler(oneMs, false);
   KJ_ASSERT(armResult.is<ActorSqlite::CancelAlarmHandler>());
   auto cancelResult = kj::mv(armResult.get<ActorSqlite::CancelAlarmHandler>());
-  KJ_ASSERT(cancelResult.waitBeforeCancel == kj::none);
+  KJ_ASSERT(cancelResult.waitBeforeCancel.poll(test.ws));
+  cancelResult.waitBeforeCancel.wait(test.ws);
 }
 
 KJ_TEST("tells alarm handler to reschedule when committed alarm is earlier than handler alarm") {
@@ -426,11 +430,12 @@ KJ_TEST("tells alarm handler to reschedule when committed alarm is earlier than 
   auto cancelResult = kj::mv(armResult.get<ActorSqlite::CancelAlarmHandler>());
 
   // Expect rescheduling was requested and that returned promise resolves after fulfillment.
-  auto waitBeforeCancel = kj::mv(KJ_ASSERT_NONNULL(cancelResult.waitBeforeCancel));
+  auto waitBeforeCancel = kj::mv(cancelResult.waitBeforeCancel);
   auto rescheduleFulfiller = kj::mv(test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]);
   KJ_ASSERT(!waitBeforeCancel.poll(test.ws));
   rescheduleFulfiller->fulfill();
   KJ_ASSERT(waitBeforeCancel.poll(test.ws));
+  waitBeforeCancel.wait(test.ws);
 }
 
 KJ_TEST("does not cancel handler when local db alarm state is later than scheduled alarm") {

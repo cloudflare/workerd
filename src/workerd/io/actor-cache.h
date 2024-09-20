@@ -212,8 +212,8 @@ public:
   // Alarm should be canceled without retry (because alarm state has changed such that the
   // requested alarm time is no longer valid).
   struct CancelAlarmHandler {
-    // If set, caller should wait for promise to complete before canceling.
-    kj::Maybe<kj::Promise<void>> waitBeforeCancel;
+    // Caller should wait for this promise to complete before canceling.
+    kj::Promise<void> waitBeforeCancel;
   };
   // Alarm should be run.
   struct RunAlarmHandler {

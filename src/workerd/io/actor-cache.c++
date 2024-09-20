@@ -172,7 +172,7 @@ kj::OneOf<ActorCache::CancelAlarmHandler, ActorCache::RunAlarmHandler> ActorCach
       if (t.status == KnownAlarmTime::Status::CLEAN) {
         // If there's a clean scheduledTime that is different from ours, this run should be
         // canceled.
-        return CancelAlarmHandler{.waitBeforeCancel = kj::none};
+        return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
       } else {
         // There's a alarm write that hasn't been set yet pending for a time different than ours --
         // We won't cancel the alarm because it hasn't been confirmed, but we shouldn't delete

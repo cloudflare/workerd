@@ -4978,9 +4978,10 @@ KJ_TEST("ActorCache alarm get/put") {
   {
     // we have a cached time == nullptr, so we should not attempt to run an alarm
     auto armResult = test.cache.armAlarmHandler(10 * kj::SECONDS + kj::UNIX_EPOCH, false);
-    KJ_ASSERT(
-        KJ_ASSERT_NONNULL(armResult.tryGet<ActorCache::CancelAlarmHandler>()).waitBeforeCancel ==
-        kj::none);
+    KJ_ASSERT(armResult.is<ActorCache::CancelAlarmHandler>());
+    auto cancelResult = kj::mv(armResult.get<ActorCache::CancelAlarmHandler>());
+    KJ_ASSERT(cancelResult.waitBeforeCancel.poll(ws));
+    cancelResult.waitBeforeCancel.wait(ws);
   }
 
   {

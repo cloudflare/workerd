@@ -604,7 +604,7 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         // coalesce with the existing request?
         return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
       } else {
-        return CancelAlarmHandler{.waitBeforeCancel = kj::none};
+        return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
       }
     } else {
       // There's a alarm write that hasn't been set yet pending for a time different than ours --
