@@ -468,6 +468,7 @@ JsRpcPromiseAndPipleine callImpl(jsg::Lock& js,
       // `client` to the specific property / method that we're trying to invoke.
       kj::Vector<kj::StringPtr> path;
       auto client = parent.getClientForOneCall(js, path);
+      KJ_ASSERT(!capnp::ClientHook::from(client)->isNull(), typeid(parent).name());
 
       auto& ioContext = IoContext::current();
 
