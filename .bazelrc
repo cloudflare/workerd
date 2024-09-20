@@ -249,6 +249,9 @@ build:linux --linkopt="-Wl,--gc-sections"
 build:linux --copt="-ffunction-sections" --host_copt="-ffunction-sections"
 build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
+# On Linux, use clang lld.
+build:linux --linkopt="-fuse-ld=lld"
+
 #
 # Windows
 #
