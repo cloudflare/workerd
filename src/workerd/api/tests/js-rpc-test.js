@@ -146,6 +146,13 @@ export class MyService extends WorkerEntrypoint {
     return { foo: 123 + i, counter: new MyCounter(i) };
   }
 
+  async getMap() {
+    let map = new Map();
+    map.set('foo', 123);
+    map.set('bar', 456);
+    return map;
+  }
+
   async fetch(req, x) {
     assert.strictEqual(x, undefined);
     return new Response('method = ' + req.method + ', url = ' + req.url);
@@ -704,6 +711,13 @@ export let namedServiceBinding = {
         'Could not serialize object of type "Object". This type does not support ' +
         'serialization.',
     });
+
+    {
+      let map = await env.MyService.getMap();
+      assert.strictEqual(map.get('foo'), 123);
+      assert.strictEqual(map.get('bar'), 456);
+      assert.strictEqual(map.get('baz'), undefined);
+    }
   },
 };
 
@@ -812,6 +826,16 @@ export let promisePipelining = {
       await env.MyService.getAnObject(5).counter.increment(7),
       12
     );
+
+    assert.rejects(() => env.MyService.oneArgMethod(5).foo(), {
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "foo".',
+    });
+
+    assert.rejects(() => env.MyService.getMap().foo(), {
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "foo".',
+    });
   },
 };
 
