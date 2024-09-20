@@ -23,6 +23,15 @@ public:
   class Statement;
   struct IngestResult;
 
+  // One value returned from SQL. Note that we intentionally return StringPtr instead of String
+  // because we know that the underlying buffer returned by SQLite will be valid long enough to be
+  // converted by JSG into a V8 string. For byte arrays, on the other hand, we pass ownership to
+  // JSG, which does not need to make a copy.
+  using SqlValue = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
+
+  // One row of a SQL query result. This is an Object whose properties correspond to columns.
+  using SqlRow = jsg::Dict<SqlValue, jsg::JsString>;
+
   jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
   IngestResult ingest(jsg::Lock& js, kj::String query);
 
@@ -98,6 +107,19 @@ private:
       return pageSize.emplace(db.run("PRAGMA page_size;").getInt64(0));
     }
   }
+
+  // Utility functions to convert SqlValue, SqlRow, and Array<SqlValue> to JS values. In some
+  // cases we end up having to do this conversion before actually returning, so we can't have
+  // JSG do it. We can't use jsg::TypeHandler because SqlValue contains StringPtr, which doesn't
+  // support unwrapping. We don't actually ever use unwrapping, but requesting a TypeHandler forces
+  // JSG to try to generate the code for unwrapping, leading to compiler errors.
+  //
+  // TODO(cleanup): Think hard about how to make JSG support this better. Part of the problem is
+  //   that we're being too clever with optimizations to avoid copying strings when we don't need
+  //   to.
+  static jsg::JsValue wrapSqlValue(jsg::Lock& js, SqlValue value);
+  static jsg::JsObject wrapSqlRow(jsg::Lock& js, SqlRow row);
+  static jsg::JsArray wrapSqlRowRaw(jsg::Lock& js, kj::Array<SqlValue> row);
 };
 
 class SqlStorage::Cursor final: public jsg::Object {
@@ -121,6 +143,10 @@ public:
 
   kj::Array<jsg::JsRef<jsg::JsString>> getColumnNames(jsg::Lock& js);
   JSG_RESOURCE_TYPE(Cursor) {
+    JSG_METHOD(next);
+    JSG_METHOD(toArray);
+    JSG_METHOD(one);
+
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);
     JSG_READONLY_PROTOTYPE_PROPERTY(columnNames, getColumnNames);
@@ -131,18 +157,18 @@ public:
     JSG_TS_OVERRIDE(<T extends Record<string, SqlStorageValue>> {
       [Symbol.iterator](): IterableIterator<T>;
       raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
+      next(): { done?: false, value: T } | { done: true, value?: never };
+      toArray(): T[];
+      one(): T;
     });
   }
 
-  // One value returned from SQL. Note that we intentionally return StringPtr instead of String
-  // because we know that the underlying buffer returned by SQLite will be valid long enough to be
-  // converted by JSG into a V8 string. For byte arrays, on the other hand, we pass ownership to
-  // JSG, which does not need to make a copy.
-  using Value = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
+  JSG_ITERATOR(RowIterator, rows, SqlRow, jsg::Ref<Cursor>, rowIteratorNext);
+  JSG_ITERATOR(RawIterator, raw, kj::Array<SqlValue>, jsg::Ref<Cursor>, rawIteratorNext);
 
-  using RowDict = jsg::Dict<Value, jsg::JsString>;
-  JSG_ITERATOR(RowIterator, rows, RowDict, jsg::Ref<Cursor>, rowIteratorNext);
-  JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<Cursor>, rawIteratorNext);
+  RowIterator::Next next(jsg::Lock& js);
+  jsg::JsArray toArray(jsg::Lock& js);
+  jsg::JsValue one(jsg::Lock& js);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     if (state != kj::none) {
@@ -229,12 +255,12 @@ private:
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<BindingValue> values);
 
-  static kj::Maybe<RowDict> rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
-  static kj::Maybe<kj::Array<Value>> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
+  static kj::Maybe<SqlRow> rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
+  static kj::Maybe<kj::Array<SqlValue>> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
   template <typename Func>
   static auto iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
       -> kj::Maybe<
-          kj::Array<decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>>;
+          kj::Array<decltype(func(kj::instance<State&>(), uint(), kj::instance<SqlValue&&>()))>>;
 
   friend class Statement;
 };

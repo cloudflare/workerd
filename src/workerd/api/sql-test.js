@@ -61,6 +61,64 @@ async function test(state) {
     assert.equal(result[2]['value'], 3);
   }
 
+  {
+    // Test multiple rows, manual iteration with next().
+    const cursor = sql.exec(
+      'SELECT 1 AS col\n' +
+        'UNION ALL\n' +
+        'SELECT "foo" AS col\n' +
+        'UNION ALL\n' +
+        'SELECT 3 AS col;'
+    );
+    assert.deepEqual(cursor.next(), { done: false, value: { col: 1 } });
+    assert.deepEqual(cursor.next(), { done: false, value: { col: 'foo' } });
+    assert.deepEqual(cursor.next(), { done: false, value: { col: 3 } });
+    assert.deepEqual(cursor.next(), { done: true });
+  }
+
+  {
+    // Test multiple rows using .toArray()
+    const cursor = sql.exec(
+      'SELECT 1 AS value\n' +
+        'UNION ALL\n' +
+        'SELECT "foo" AS value\n' +
+        'UNION ALL\n' +
+        'SELECT 3 AS value;'
+    );
+    assert.deepEqual(cursor.toArray(), [
+      { value: 1 },
+      { value: 'foo' },
+      { value: 3 },
+    ]);
+  }
+
+  {
+    // Test one row with .one()
+    let cursor = sql.exec('SELECT 123 AS foo, "abc" AS bar');
+    assert.deepEqual(cursor.one(), { foo: 123, bar: 'abc' });
+    // Cursor has been consumed.
+    assert.deepEqual([...cursor], []);
+
+    // Multiple results throws.
+    assert.throws(
+      () =>
+        sql
+          .exec(
+            'SELECT 1 AS value\n' + 'UNION ALL\n' + 'SELECT "foo" AS value;'
+          )
+          .one(),
+      /Expected exactly one result from SQL query, but got multiple results/
+    );
+
+    // No results throws.
+    sql.exec('CREATE TABLE IF NOT EXISTS empty (x INTEGER)');
+    assert.throws(
+      () => sql.exec('SELECT * from empty;').one(),
+      /Expected exactly one result from SQL query, but got no results/
+    );
+    sql.exec('DROP TABLE empty');
+  }
+
   // Test partial query ingestion
   assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;    `).remainder, '    ');
   assert.deepEqual(sql.ingest(`SELECT 123; SELECT 456;`).remainder, '');
