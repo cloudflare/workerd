@@ -741,13 +741,6 @@ jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
     (void)(__VA_ARGS__);                    \
   } while (false)
 
-#ifndef DCHECK
-#define DCHECK(condition) assert(condition)
-#endif
-
-#ifndef CHECK
-#define CHECK(condition) assert(condition)
-#endif
 
 void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
@@ -773,10 +766,12 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
         IMMEDIATE_CRASH();
         break;
       case 1:
-        CHECK(false);
+        assert(0);
+        //CHECK(false);
         break;
       case 2:
-        DCHECK(false);
+        assert(0);
+        //DCHECK(false);
         break;
       case 3: {
         // Access an invalid address.
@@ -842,6 +837,7 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
         break;
       }
       default:
+        assert(0);
         break;
     }
   } else if (strcmp(*operation, "FUZZILLI_PRINT") == 0) {
