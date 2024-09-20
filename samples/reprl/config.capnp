@@ -16,6 +16,15 @@ const replServer :Workerd.Worker = (
       name = "secret",
       text = "thisisasecret"
     ),
+    ( name = "CACHE", memoryCache = (
+      id = "abc123",
+      limits = (
+        maxKeys = 10,
+        maxValueSize = 1024,
+        maxTotalValueSize = 1024,
+        ),
+      )
+    )
   ],
   compatibilityDate = "2023-02-28",
   compatibilityFlags = ["nodejs_compat", "experimental", "unsafe_module"]
