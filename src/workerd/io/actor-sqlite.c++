@@ -231,8 +231,22 @@ void ActorSqlite::onWrite() {
 kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime) {
   // Not using coroutines here, because it's important for correctness in workerd that a
   // synchronously thrown exception in scheduleRun() can escape synchronously to the caller.
-  return hooks.scheduleRun(requestedTime).then([this, requestedTime]() {
+
+  bool movingAlarmLater = willFireEarlier(lastConfirmedScheduledAlarm, requestedTime);
+  if (movingAlarmLater) {
+    // Since we are setting the alarm to be later, we can update lastConfirmedScheduledAlarm
+    // immediately and still preserve the invariant that the scheduled alarm time is equal to or
+    // earlier than the persisted db alarm value.  Doing the immediate update ensures that
+    // subsequent invocations of commitImpl() will compare against the correct value in their
+    // precommit alarm checks, even if other later-setting requests are still in-flight, without
+    // needing to wait for them to complete.
     lastConfirmedScheduledAlarm = requestedTime;
+  }
+
+  return hooks.scheduleRun(requestedTime).then([this, movingAlarmLater, requestedTime]() {
+    if (!movingAlarmLater) {
+      lastConfirmedScheduledAlarm = requestedTime;
+    }
   });
 }
 

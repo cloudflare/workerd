@@ -811,6 +811,32 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
   fulfiller3Ms->fulfill();
 }
 
+KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Set alarm to 5ms.  Expect 5ms db commit and scheduling to start.
+  test.setAlarm(fiveMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  auto fulfiller5Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(5ms)"})[0]);
+
+  // While 5ms scheduling is still in-flight, set alarm to 2ms.  Even though the last-confirmed
+  // alarm value was 1ms, we expect that setting the alarm to 2ms will be interpreted as setting
+  // the alarm earlier, so it will issue the schedule request before the commit request.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  auto commit2MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+
+  fulfiller5Ms->fulfill();
+  commit2MsFulfiller->fulfill();
+}
+
 KJ_TEST("rejected alarm scheduling request breaks gate") {
   ActorSqliteTest test({.monitorOutputGate = false});
 
