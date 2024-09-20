@@ -252,14 +252,13 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> request
 
 ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
   PrecommitAlarmState state;
-  state.localAlarmState = metadata.getAlarm();
   if (pendingCommit == kj::none &&
-      willFireEarlier(state.localAlarmState, alarmScheduledNoLaterThan)) {
+      willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
     // Basically, this is the first scheduling request that commitImpl() would make prior to
     // commitCallback().  We start the request separately, ahead of calling sqlite functions that
     // commit to local disk, for correctness in workerd, where alarm scheduling and db commits are
     // both synchronous.
-    state.schedulingPromise = requestScheduledAlarm(state.localAlarmState);
+    state.schedulingPromise = requestScheduledAlarm(metadata.getAlarm());
   }
   return kj::mv(state);
 }
@@ -288,30 +287,28 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // in startPrecommitAlarmScheduling() and is essentially the first iteration of the below
   // while() loop, but needed to be initiated synchronously before the local database commit to
   // ensure correctness in workerd.
-  auto localAlarmState = precommitAlarmState.localAlarmState;
   KJ_IF_SOME(p, precommitAlarmState.schedulingPromise) {
     co_await p;
-    localAlarmState = metadata.getAlarm();
   }
 
   // While the local db state requires an earlier alarm than is known might be scheduled, issue an
   // alarm update request for the earlier time and wait for it to complete.  This helps ensure
   // that the successfully scheduled alarm time is always earlier or equal to the alarm state in
   // the successfully persisted db.
-  while (willFireEarlier(localAlarmState, alarmScheduledNoLaterThan)) {
-    co_await requestScheduledAlarm(localAlarmState);
-    localAlarmState = metadata.getAlarm();
+  while (willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
+    co_await requestScheduledAlarm(metadata.getAlarm());
   }
 
   // Issue the commitCallback() request to persist the db state, then synchronously clear the
   // pending commit so that the next commitImpl() invocation starts its own set of precommit alarm
   // updates and db commit.
+  auto alarmStateForCommit = metadata.getAlarm();
   auto commitCallbackPromise = commitCallback();
   pendingCommit = kj::none;
 
   // Wait for the db to persist.
   co_await commitCallbackPromise;
-  lastConfirmedAlarmDbState = localAlarmState;
+  lastConfirmedAlarmDbState = alarmStateForCommit;
 
   // Notify any merged commitImpl() requests that the db persistence completed.
   fulfiller->fulfill();
@@ -319,8 +316,8 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // If the db state is now later than the in-flight scheduled alarms, issue a request to update
   // it to match the db state.  We don't need to hold open the output gate, so we add the
   // scheduling request to commitTasks.
-  if (willFireEarlier(alarmScheduledNoLaterThan, localAlarmState)) {
-    commitTasks.add(requestScheduledAlarm(localAlarmState));
+  if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
+    commitTasks.add(requestScheduledAlarm(alarmStateForCommit));
   }
 }
 
