@@ -306,7 +306,7 @@ KJ_TEST("alarm scheduling does not start synchronously before nested explicit lo
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
-KJ_TEST("synchronous alarm scheduling failure causes local db commit to fail synchronously") {
+KJ_TEST("synchronous alarm scheduling failure causes local db commit to throw synchronously") {
   ActorSqliteTest test({.monitorOutputGate = false});
   auto promise = test.gate.onBroken();
 
@@ -496,7 +496,33 @@ KJ_TEST("getAlarm() returns null during handler") {
     KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
   }
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({"cancelRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(1ms)"})[0]->fulfill();
+}
+
+KJ_TEST("can attempt to arm alarm handler after handler completion") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  {
+    auto armResult = test.actor.armAlarmHandler(oneMs, false);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    test.pollAndExpectCalls({});
+  }
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(1ms)"})[0]->fulfill();
+
+  {
+    auto armResult = test.actor.armAlarmHandler(oneMs, false);
+    KJ_ASSERT(
+        KJ_ASSERT_NONNULL(armResult.tryGet<ActorSqlite::CancelAlarmHandler>()).waitBeforeCancel ==
+        kj::none);
+  }
 }
 
 KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
@@ -514,7 +540,7 @@ KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
   }
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({"cancelRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(1ms)"})[0]->fulfill();
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
@@ -573,7 +599,7 @@ KJ_TEST("canceling deferred alarm deletion outside handler has no effect") {
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
   }
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({"cancelRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"cancelRun(1ms)"})[0]->fulfill();
 
   test.actor.cancelDeferredAlarmDeletion();
 

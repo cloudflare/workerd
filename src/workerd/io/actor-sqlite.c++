@@ -216,6 +216,12 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> request
   }
 }
 
+kj::Promise<void> ActorSqlite::requestCancelAlarm(kj::Date timeToCancel) {
+  return hooks.cancelRun(timeToCancel).then([this]() {
+    lastConfirmedScheduledAlarm = kj::none;
+  });
+}
+
 ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
   PrecommitAlarmState state;
   state.localAlarmState = metadata.getAlarm();
@@ -265,12 +271,32 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   auto commitCallbackPromise = commitCallback();
   pendingCommit = kj::none;
 
+  // If the set of merged commits included a queued deferred delete, capture its info for the
+  // post-commit alarm deletion.
+  kj::Maybe<DeferredAlarmDelete> deferredAlarmDeleteForCommit;
+  KJ_IF_SOME(d, deferredAlarmDelete) {
+    if (d.deleteOnNextCommit) {
+      deferredAlarmDeleteForCommit = kj::mv(deferredAlarmDelete);
+      deferredAlarmDelete = kj::none;
+    }
+  }
+
   // Wait for the db to persist.
   co_await commitCallbackPromise;
   lastConfirmedAlarmDbState = localAlarmState;
 
   // Notify any merged commitImpl() requests that the db update completed.
   fulfiller->fulfill();
+
+  // If the set of merged commits included a queued deferred delete and the local alarm state is
+  // still in the deleted state, tell the scheduler to delete the alarm for the handler's
+  // scheduled time.
+  KJ_IF_SOME(d, deferredAlarmDeleteForCommit) {
+    if (localAlarmState == kj::none && lastConfirmedScheduledAlarm != kj::none) {
+      commitTasks.add(requestCancelAlarm(d.timeToDelete));
+      co_return;
+    }
+  }
 
   // If the db state is now later than the known-scheduled alarm, issue a request to update it to
   // match the db state.  We don't need to hold open the output gate, so we add the scheduling
@@ -302,7 +328,10 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
   }
   inAlarmHandler = false;
 
-  if (haveDeferredDelete) {
+  KJ_IF_SOME(d, deferredAlarmDelete) {
+    d.deleteOnNextCommit = true;
+    // Update sqlite alarm state to deleted, which will queue the state to be committed in an
+    // evalLater() promise.
     metadata.setAlarm(kj::none);
   }
 }
@@ -336,7 +365,7 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::ge
     ReadOptions options) {
   requireNotBroken();
 
-  if (haveDeferredDelete) {
+  if (deferredAlarmDelete != kj::none) {
     // An alarm handler is currently running, and a new alarm time has not been set yet.
     // We need to return that there is no alarm.
     return kj::Maybe<kj::Date>(kj::none);
@@ -411,7 +440,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
   // TODO(soon): Need special logic to handle case where actor is using alarms without using
   // other storage?
 
-  if (!haveDeferredDelete) {
+  if (deferredAlarmDelete == kj::none) {
     // Skip setting alarm if alarm is already set to the given value.
     //
     // If we're in the alarm handler and haven't set the time yet, we can't perform this
@@ -428,7 +457,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     }
   }
   metadata.setAlarm(newAlarmTime);
-  haveDeferredDelete = false;
+  deferredAlarmDelete = kj::none;
   return kj::none;
 }
 
@@ -548,7 +577,6 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
 
 kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSqlite::
     armAlarmHandler(kj::Date scheduledTime, bool noCache) {
-  KJ_ASSERT(!haveDeferredDelete);
   KJ_ASSERT(!inAlarmHandler);
 
   auto localAlarmState = metadata.getAlarm();
@@ -572,10 +600,10 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
       // There's a alarm write that hasn't been set yet pending for a time different than ours --
       // We won't cancel the alarm because it hasn't been confirmed, but we shouldn't delete
       // the pending write.
-      haveDeferredDelete = false;
+      deferredAlarmDelete = kj::none;
     }
   } else {
-    haveDeferredDelete = true;
+    deferredAlarmDelete = DeferredAlarmDelete{.timeToDelete = scheduledTime};
   }
   inAlarmHandler = true;
 
@@ -588,7 +616,7 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
     // Pretty sure this can't happen.
     LOG_WARNING_ONCE("expected to be in alarm handler when trying to cancel deleted alarm");
   }
-  haveDeferredDelete = false;
+  deferredAlarmDelete = kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {

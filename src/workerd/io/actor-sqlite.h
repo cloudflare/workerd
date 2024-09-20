@@ -182,7 +182,12 @@ private:
   // Within an alarm handler, we want the observable alarm state to look like the running alarm
   // was deleted at the start of the handler (when armAlarmHandler() is called), but we don't
   // actually want to persist that deletion until after the handler has successfully completed.
-  bool haveDeferredDelete = false;
+  struct DeferredAlarmDelete {
+    // Set to a time to pass as `timeToDelete` when making the delete call.
+    kj::Date timeToDelete;
+    bool deleteOnNextCommit = false;
+  };
+  kj::Maybe<DeferredAlarmDelete> deferredAlarmDelete;
 
   // Some state only used for tracking calling invariants.
   bool inAlarmHandler = false;
@@ -204,6 +209,10 @@ private:
   // Issues a request to the alarm scheduler for the given time, returning a promise that resolves
   // when the request is confirmed.
   kj::Promise<void> requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime);
+
+  // Issues a request to the alarm scheduler to cancel an alarm for a specific time, if such an
+  // alarm is currently scheduled.
+  kj::Promise<void> requestCancelAlarm(kj::Date timeToCancel);
 
   struct PrecommitAlarmState {
     // Lets us avoid an extra read of db alarm state:
