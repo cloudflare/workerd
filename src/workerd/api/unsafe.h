@@ -106,6 +106,14 @@ public:
     v8::TryCatch try_catch(js.v8Isolate);
     try_catch.SetVerbose(true);
 
+    /*
+    cov_init_builtins_edges(static_cast<uint32_t>(
+        v8::internal::BasicBlockProfiler::Get()
+            ->GetCoverageBitmap(reinterpret_cast<v8::Isolate*>(js.v8Isolate))
+            .size()));
+    */
+
+
     char helo[] = "HELO";
     if (write(REPRL_CWFD, helo, 4) != 4 || read(REPRL_CRFD, helo, 4) != 4) {
       printf("Invalid HELO response from parent\n");
@@ -161,7 +169,7 @@ public:
         res_val = result.FromJust();
       } catch(jsg::JsExceptionThrown&) {
         if(try_catch.HasCaught()) {
-          status = -1;
+          res_val = -1;
           // auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
           // v8::String::Utf8Value string(js.v8Isolate, str);
           // printf("%s\n",*string);
