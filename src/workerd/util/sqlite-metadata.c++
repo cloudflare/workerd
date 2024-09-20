@@ -34,7 +34,9 @@ void SqliteMetadata::invalidate() {
 }
 
 kj::Maybe<kj::Date> SqliteMetadata::getAlarmUncached() {
-  if (!tableCreated) { return kj::none; }
+  if (!tableCreated) {
+    return kj::none;
+  }
 
   auto query = ensureInitialized().stmtGetAlarm.run();
   if (query.isDone() || query.isNull(0)) {

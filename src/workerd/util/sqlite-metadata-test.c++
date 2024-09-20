@@ -46,6 +46,16 @@ KJ_TEST("SQLite-METADATA") {
   KJ_EXPECT(metadata.getAlarm() == kj::none);
   metadata.setAlarm(anAlarmTime2);
   KJ_EXPECT(KJ_ASSERT_NONNULL(metadata.getAlarm()) == anAlarmTime2);
+
+  // Can invalidate cache after rolling back.
+  metadata.setAlarm(anAlarmTime2);
+  db.run("BEGIN TRANSACTION");
+  metadata.setAlarm(anAlarmTime1);
+  KJ_EXPECT(metadata.getAlarm() == anAlarmTime1);
+  db.run("ROLLBACK TRANSACTION");
+  KJ_EXPECT(metadata.getAlarm() == anAlarmTime1);
+  metadata.invalidate();
+  KJ_EXPECT(metadata.getAlarm() == anAlarmTime2);
 }
 
 }  // namespace
