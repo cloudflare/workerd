@@ -1056,12 +1056,6 @@ export let waitUntilWorks = {
   },
 };
 
-function stripDispose(obj) {
-  assert.deepEqual(!!obj[Symbol.dispose], true);
-  delete obj[Symbol.dispose];
-  return obj;
-}
-
 export let serializeRpcPromiseOrProprety = {
   async test(controller, env, ctx) {
     // What happens if we actually try to serialize a JsRpcPromise or JsRpcProperty? Let's make
@@ -1074,7 +1068,7 @@ export let serializeRpcPromiseOrProprety = {
 
     // If we directly return returning a JsRpcPromise, the system automatically awaits it on the
     // server side because it's a thenable.
-    assert.deepEqual(stripDispose(await env.MyService.getRpcPromise(func)), {
+    assert.deepEqual(await env.MyService.getRpcPromise(func), {
       x: 123,
     });
 
@@ -1110,7 +1104,7 @@ export let serializeRpcPromiseOrProprety = {
     // somewhere along the line V8 says "oh look a thenable" and awaits it, before it can be
     // subject to serialization. That's fine.
     assert.deepEqual(
-      stripDispose(await env.MyService.getRemoteNestedRpcPromise(func).value),
+      await env.MyService.getRemoteNestedRpcPromise(func).value,
       { x: 123 }
     );
     await assert.rejects(
@@ -1122,7 +1116,7 @@ export let serializeRpcPromiseOrProprety = {
     );
 
     // The story is similar for a JsRpcProperty -- though the implementation details differ.
-    assert.deepEqual(stripDispose(await env.MyService.getRpcProperty(func)), {
+    assert.deepEqual(await env.MyService.getRpcProperty(func), {
       x: 456,
     });
     assert.strictEqual(await env.MyService.getRpcProperty(func).x, 456);
@@ -1149,7 +1143,7 @@ export let serializeRpcPromiseOrProprety = {
     );
 
     assert.deepEqual(
-      stripDispose(await env.MyService.getRemoteNestedRpcProperty(func).value),
+      await env.MyService.getRemoteNestedRpcProperty(func).value,
       { x: 456 }
     );
     await assert.rejects(

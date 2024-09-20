@@ -246,7 +246,7 @@ jsg::JsValue deserializeRpcReturnValue(
       v8::Local<v8::Value> func = js.wrapSimpleFunction(js.v8Context(),
           [disposalGroup = kj::mv(disposalGroup)](jsg::Lock&,
               const v8::FunctionCallbackInfo<v8::Value>&) mutable { disposalGroup->disposeAll(); });
-      obj.set(js, js.symbolDispose(), jsg::JsValue(func));
+      obj.setNonEnumerable(js, js.symbolDispose(), jsg::JsValue(func));
     }
   } else {
     // Result wasn't an object, so it must not contain any stubs.

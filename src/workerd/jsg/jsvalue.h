@@ -343,6 +343,7 @@ public:
   void set(Lock& js, const JsValue& name, const JsValue& value);
   void set(Lock& js, kj::StringPtr name, const JsValue& value);
   void setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value);
+  void setNonEnumerable(Lock& js, const JsSymbol& name, const JsValue& value);
   JsValue get(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
   JsValue get(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
 
