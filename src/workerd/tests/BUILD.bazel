@@ -114,4 +114,17 @@ filegroup(
         ":bench-util",
     ],
     visibility = ["//visibility:public"],
+cc_binary(
+    name = "test-reprl",
+    srcs = [
+        "test-reprl.c++",
+        "libreprl/libreprl.c",
+        "libreprl/libreprl.h"
+    ],
+    includes = [
+        "libreprl",
+    ],
+    copts = [
+        "-Ilibreprl",
+    ],
 )
