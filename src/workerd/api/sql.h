@@ -157,7 +157,7 @@ public:
     JSG_TS_OVERRIDE(<T extends Record<string, SqlStorageValue>> {
       [Symbol.iterator](): IterableIterator<T>;
       raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
-      next(): {done: false, value: T} | {done: true};
+      next(): { done?: false, value: T } | { done: true, value?: never };
       toArray(): T[];
       one(): T;
     });
