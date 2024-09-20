@@ -35,10 +35,10 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
   lastConfirmedAlarmDbState = metadata.getAlarm();
 
   // Because we preserve an invariant that scheduled alarms are always at or earlier than
-  // persisted db alarm state, it should be OK to populate our idea of the currently scheduled
-  // alarm using the current db alarm state.  At worst, it may perform one unnecessary scheduling
-  // request in the case where an earlier alarm-state-altering transaction failed.
-  lastConfirmedScheduledAlarm = metadata.getAlarm();
+  // persisted db alarm state, it should be OK to populate our idea of the latest scheduled alarm
+  // using the current db alarm state.  At worst, it may perform one unnecessary scheduling
+  // request in cases where a previous alarm-state-altering transaction failed.
+  alarmScheduledNoLaterThan = metadata.getAlarm();
 }
 
 ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent): parent(parent) {
@@ -232,20 +232,20 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> request
   // Not using coroutines here, because it's important for correctness in workerd that a
   // synchronously thrown exception in scheduleRun() can escape synchronously to the caller.
 
-  bool movingAlarmLater = willFireEarlier(lastConfirmedScheduledAlarm, requestedTime);
+  bool movingAlarmLater = willFireEarlier(alarmScheduledNoLaterThan, requestedTime);
   if (movingAlarmLater) {
-    // Since we are setting the alarm to be later, we can update lastConfirmedScheduledAlarm
+    // Since we are setting the alarm to be later, we can update alarmScheduledNoLaterThan
     // immediately and still preserve the invariant that the scheduled alarm time is equal to or
     // earlier than the persisted db alarm value.  Doing the immediate update ensures that
     // subsequent invocations of commitImpl() will compare against the correct value in their
     // precommit alarm checks, even if other later-setting requests are still in-flight, without
     // needing to wait for them to complete.
-    lastConfirmedScheduledAlarm = requestedTime;
+    alarmScheduledNoLaterThan = requestedTime;
   }
 
   return hooks.scheduleRun(requestedTime).then([this, movingAlarmLater, requestedTime]() {
     if (!movingAlarmLater) {
-      lastConfirmedScheduledAlarm = requestedTime;
+      alarmScheduledNoLaterThan = requestedTime;
     }
   });
 }
@@ -254,7 +254,7 @@ ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
   PrecommitAlarmState state;
   state.localAlarmState = metadata.getAlarm();
   if (pendingCommit == kj::none &&
-      willFireEarlier(state.localAlarmState, lastConfirmedScheduledAlarm)) {
+      willFireEarlier(state.localAlarmState, alarmScheduledNoLaterThan)) {
     // Basically, this is the first scheduling request that commitImpl() would make prior to
     // commitCallback().  We start the request separately, ahead of calling sqlite functions that
     // commit to local disk, for correctness in workerd, where alarm scheduling and db commits are
@@ -275,20 +275,30 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
     co_await pending.addBranch();
     co_return;
   }
+
+  // There are no pending commits in-flight, so we set up a forked promise that other callers can
+  // wait on, to perform the alarm scheduling and database persistence work for all of them.  Note
+  // that the fulfiller is owned by this coroutine context, so if an exception is thrown below,
+  // the fulfiller's destructor will detect that the stack is unwinding and will automatically
+  // propagate the thrown exception to the other waiters.
   auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
   pendingCommit = promise.fork();
 
-  // Wait for the first precommit alarm scheduling request to complete, if any.
+  // Wait for the first precommit alarm scheduling request to complete, if any.  This was set up
+  // in startPrecommitAlarmScheduling() and is essentially the first iteration of the below
+  // while() loop, but needed to be initiated synchronously before the local database commit to
+  // ensure correctness in workerd.
   auto localAlarmState = precommitAlarmState.localAlarmState;
   KJ_IF_SOME(p, precommitAlarmState.schedulingPromise) {
     co_await p;
     localAlarmState = metadata.getAlarm();
   }
 
-  // While the local db state requires an earlier alarm than is known to be scheduled, issue an
-  // alarm update request for the earlier time.  This helps ensure that the successfully scheduled
-  // alarm time is always earlier or equal to the alarm state in the successfully persisted db.
-  while (willFireEarlier(localAlarmState, lastConfirmedScheduledAlarm)) {
+  // While the local db state requires an earlier alarm than is known might be scheduled, issue an
+  // alarm update request for the earlier time and wait for it to complete.  This helps ensure
+  // that the successfully scheduled alarm time is always earlier or equal to the alarm state in
+  // the successfully persisted db.
+  while (willFireEarlier(localAlarmState, alarmScheduledNoLaterThan)) {
     co_await requestScheduledAlarm(localAlarmState);
     localAlarmState = metadata.getAlarm();
   }
@@ -303,13 +313,13 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   co_await commitCallbackPromise;
   lastConfirmedAlarmDbState = localAlarmState;
 
-  // Notify any merged commitImpl() requests that the db update completed.
+  // Notify any merged commitImpl() requests that the db persistence completed.
   fulfiller->fulfill();
 
-  // If the db state is now later than the known-scheduled alarm, issue a request to update it to
-  // match the db state.  We don't need to hold open the output gate, so we add the scheduling
-  // request to commitTasks.
-  if (willFireEarlier(lastConfirmedScheduledAlarm, localAlarmState)) {
+  // If the db state is now later than the in-flight scheduled alarms, issue a request to update
+  // it to match the db state.  We don't need to hold open the output gate, so we add the
+  // scheduling request to commitTasks.
+  if (willFireEarlier(alarmScheduledNoLaterThan, localAlarmState)) {
     commitTasks.add(requestScheduledAlarm(localAlarmState));
   }
 }

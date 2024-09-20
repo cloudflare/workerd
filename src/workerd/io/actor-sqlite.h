@@ -189,9 +189,11 @@ private:
   // The alarm state for which we last received confirmation that the db was durably stored.
   kj::Maybe<kj::Date> lastConfirmedAlarmDbState;
 
-  // The alarm state for which we last received confirmation that the notification was
-  // successfully scheduled.
-  kj::Maybe<kj::Date> lastConfirmedScheduledAlarm;
+  // The latest time we'd expect a scheduled alarm to fire, given the current set of in-flight
+  // scheduling requests, without yet knowing if any of them succeeded or failed.  We use this
+  // value to maintain the invariant that the scheduled alarm is always equal to or earlier than
+  // the alarm value in the persisted database state.
+  kj::Maybe<kj::Date> alarmScheduledNoLaterThan;
 
   // A promise for an in-progress alarm notification update and database commit.
   kj::Maybe<kj::ForkedPromise<void>> pendingCommit;
