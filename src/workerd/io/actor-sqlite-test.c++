@@ -299,7 +299,7 @@ KJ_TEST("alarm scheduling does not start synchronously before nested explicit lo
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
-KJ_TEST("synchronous alarm scheduling failure causes local db commit to fail synchronously") {
+KJ_TEST("synchronous alarm scheduling failure causes local db commit to throw synchronously") {
   ActorSqliteTest test({.monitorOutputGate = false});
   auto promise = test.gate.onBroken();
 
@@ -978,6 +978,129 @@ KJ_TEST("rolling back transaction leaves alarm in expected state") {
     // Dropping transaction without committing; should roll back.
   }
   KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+}
+
+KJ_TEST("rolling back transaction leaves deferred alarm deletion in expected state") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 2ms.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  {
+    auto armResult = test.actor.armAlarmHandler(twoMs, false);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+
+    auto txn = test.actor.startTransaction();
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+    test.setAlarm(oneMs);
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    txn->rollback().wait(test.ws);
+
+    // After rollback, getAlarm() still returns the deferred deletion result.
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+    // After rollback, no changes committed, no change in scheduled alarm.
+    test.pollAndExpectCalls({});
+  }
+
+  // After handler, 2ms alarm is deleted.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+}
+
+KJ_TEST("committing transaction leaves deferred alarm deletion in expected state") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 2ms.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  {
+    auto armResult = test.actor.armAlarmHandler(twoMs, false);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+
+    auto txn = test.actor.startTransaction();
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+    test.setAlarm(oneMs);
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    txn->commit();
+
+    // After commit, getAlarm() returns the committed value.
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+    test.pollAndExpectCalls({"commit"})[0]->fulfill();
+    test.pollAndExpectCalls({});
+  }
+
+  // Alarm not deleted
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("rolling back nested transaction leaves deferred alarm deletion in expected state") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 2ms.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  {
+    auto armResult = test.actor.armAlarmHandler(twoMs, false);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+
+    auto txn1 = test.actor.startTransaction();
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+    {
+      // Rolling back nested transaction change leaves deferred deletion in place.
+      auto txn2 = test.actor.startTransaction();
+      KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+      test.setAlarm(oneMs);
+      KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+      txn2->rollback().wait(test.ws);
+      KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+    }
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+    {
+      // Committing nested transaction changes parent transaction state to dirty.
+      auto txn3 = test.actor.startTransaction();
+      KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+      test.setAlarm(oneMs);
+      KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+      txn3->commit();
+      KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    }
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    {
+      // Nested transaction of dirty transaction is dirty, rollback has no effect.
+      auto txn4 = test.actor.startTransaction();
+      KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+      txn4->rollback().wait(test.ws);
+      KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    }
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    txn1->rollback().wait(test.ws);
+
+    // After root transaction rollback, getAlarm() still returns the deferred deletion result.
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+    // After rollback, no changes committed, no change in scheduled alarm.
+    test.pollAndExpectCalls({});
+  }
+
+  // After handler, 2ms alarm is deleted.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
 }  // namespace

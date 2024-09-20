@@ -100,6 +100,7 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
       parent = kj::addRef(*exp);
       exp->hasChild = true;
       depth = exp->depth + 1;
+      alarmDirty = exp->alarmDirty;
     }
   }
   actorSqlite.currentTxn = this;
@@ -131,6 +132,14 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
   }
 }
 
+bool ActorSqlite::ExplicitTxn::getAlarmDirty() {
+  return alarmDirty;
+}
+
+void ActorSqlite::ExplicitTxn::setAlarmDirty() {
+  alarmDirty = true;
+}
+
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
   KJ_REQUIRE(!hasChild,
       "critical sections should have prevented committing transaction while "
@@ -145,7 +154,15 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
   committed = true;
 
-  if (parent == kj::none) {
+  KJ_IF_SOME(p, parent) {
+    if (alarmDirty) {
+      p->alarmDirty = true;
+    }
+  } else {
+    if (alarmDirty) {
+      actorSqlite.haveDeferredDelete = false;
+    }
+
     // We committed the root transaction, so it's time to signal any replication layer and lock
     // the output gate in the meantime.
     actorSqlite.commitTasks.add(actorSqlite.outputGate.lockWhile(
@@ -170,6 +187,11 @@ void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_savepoint_", depth));
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
   actorSqlite.metadata.invalidate();
+  KJ_IF_SOME(p, parent) {
+    alarmDirty = p->alarmDirty;
+  } else {
+    alarmDirty = false;
+  }
 }
 
 void ActorSqlite::onWrite() {
@@ -334,9 +356,14 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::ge
     ReadOptions options) {
   requireNotBroken();
 
-  if (haveDeferredDelete) {
-    // An alarm handler is currently running, and a new alarm time has not been set yet.
-    // We need to return that there is no alarm.
+  bool transactionAlarmDirty = false;
+  KJ_IF_SOME(exp, currentTxn.tryGet<ExplicitTxn*>()) {
+    transactionAlarmDirty = exp->getAlarmDirty();
+  }
+
+  if (haveDeferredDelete && !transactionAlarmDirty) {
+    // If an alarm handler is currently running, and a new alarm time has not been set yet, We
+    // need to return that there is no alarm.
     return kj::Maybe<kj::Date>(kj::none);
   } else {
     return metadata.getAlarm();
@@ -406,27 +433,17 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
 
-  // TODO(soon): Need special logic to handle case where actor is using alarms without using
-  // other storage?
+  // TODO(someday): When deleting alarm data in an otherwise empty database, clear the database to
+  // free up resources?
 
-  if (!haveDeferredDelete) {
-    // Skip setting alarm if alarm is already set to the given value.
-    //
-    // If we're in the alarm handler and haven't set the time yet, we can't perform this
-    // optimization as the current alarm time may be equal to the requested time but we indicate
-    // to the actor in getAlarm() that there is no alarm set, therefore we need to act like that
-    // in setAlarm().
-    //
-    // After the first write in the handler occurs, the logic here is correct again as the current
-    // alarm time would match what we are reporting to the user from getAlarm().
-    //
-    // TODO(now): optimization no longer useful in sqlite?
-    if (metadata.getAlarm() == newAlarmTime) {
-      return kj::none;
-    }
-  }
   metadata.setAlarm(newAlarmTime);
-  haveDeferredDelete = false;
+
+  KJ_IF_SOME(exp, currentTxn.tryGet<ExplicitTxn*>()) {
+    exp->setAlarmDirty();
+  } else {
+    haveDeferredDelete = false;
+  }
+
   return kj::none;
 }
 
@@ -546,7 +563,6 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
 
 kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSqlite::
     armAlarmHandler(kj::Date scheduledTime, bool noCache) {
-  KJ_ASSERT(!haveDeferredDelete);
   KJ_ASSERT(!inAlarmHandler);
 
   auto localAlarmState = metadata.getAlarm();

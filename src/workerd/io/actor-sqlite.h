@@ -117,6 +117,9 @@ private:
     ~ExplicitTxn() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(ExplicitTxn);
 
+    bool getAlarmDirty();
+    void setAlarmDirty();
+
     kj::Maybe<kj::Promise<void>> commit() override;
     kj::Promise<void> rollback() override;
     // Implements ActorCacheInterface::Transaction.
@@ -145,6 +148,7 @@ private:
     uint depth = 0;
     bool hasChild = false;
     bool committed = false;
+    bool alarmDirty = false;
 
     void rollbackImpl();
   };
@@ -176,8 +180,7 @@ private:
   // We need to track some additional alarm state to guarantee at-least-once alarm delivery:
   // Within an alarm handler, we want the observable alarm state to look like the running alarm
   // was deleted at the start of the handler (when armAlarmHandler() is called), but we don't
-  // actually want to persist that deletion until after the handler has successfully completed
-  // (DeferredAlarmDeleter freed prior to any setAlarm() or cancelDeferredAlarmDeletion() calls).
+  // actually want to persist that deletion until after the handler has successfully completed.
   bool haveDeferredDelete = false;
 
   // Some state only used for tracking calling invariants.
