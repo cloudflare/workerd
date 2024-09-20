@@ -79,8 +79,6 @@ wd_cc_library(
     ],
 )
 
-# Moved out of io library so that it does not depend on lolhtml and the associated rust crates.
-# This reduces the linker input size for tests based on io.
 wd_cc_library(
     name = "html-rewriter",
     srcs = ["html-rewriter.c++"],

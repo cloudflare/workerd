@@ -244,10 +244,6 @@ http_archive(
 # ========================================================================================
 # Rust bootstrap
 #
-# workerd uses some Rust libraries, especially lolhtml for implementing HtmlRewriter.
-# Note that lol_html itself is not included here to avoid dependency duplication and simplify
-# the build process. To update the dependency, update the reference commit in
-# rust-deps/BUILD.bazel and run `bazel run //rust-deps:crates_vendor -- --repin`
 
 git_repository(
     name = "zlib",
@@ -272,7 +268,10 @@ load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencie
 
 crate_universe_dependencies()
 
-load("//rust-deps/crates:crates.bzl", "crate_repositories")
+# Load rust crate dependencies.
+# These could be regenerated from cargo.bzl by using
+# `just update-rust` (consult `just --list` or justfile for more details)
+load("//deps/rust/crates:crates.bzl", "crate_repositories")
 
 crate_repositories()
 
@@ -487,22 +486,11 @@ new_local_repository(
     path = "empty",
 )
 
-# rust-based lolhtml dependency, including the API header. See rust-deps for details.
+# rust-based lolhtml dependency, including the API header.
+# Presented as a separate repository to allow overrides.
 new_local_repository(
     name = "com_cloudflare_lol_html",
-    build_file_content = """cc_library(
-        name = "lolhtml",
-        hdrs = ["@workerd//rust-deps:lol_html_api"],
-        deps = ["@workerd//rust-deps"],
-        # TODO(soon): This workaround appears to be needed when linking the rust library - figure
-        # out why and develop a better approach to address this.
-        linkopts = select({
-          "@platforms//os:windows": ["ntdll.lib"],
-          "//conditions:default": [""],
-        }),
-        include_prefix = "c-api/include",
-        strip_include_prefix = "c-api/include",
-        visibility = ["//visibility:public"],)""",
+    build_file = "@workerd//deps/rust:BUILD.lolhtml",
     path = "empty",
 )
 
@@ -543,7 +531,7 @@ http_file(
 )
 
 FILE_GROUP = """filegroup(
-	name="file", 
+	name="file",
 	srcs=["**/*"])"""
 
 http_archive(
