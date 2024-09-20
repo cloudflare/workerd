@@ -288,61 +288,68 @@ async function assertFetchCacheRejectsError(
 
 export const cacheMode = {
   async test(ctrl, env, ctx) {
+    var failureCases = [
+      'default',
+      'force-cache',
+      'no-cache',
+      'only-if-cached',
+      'reload',
+      'unsupported',
+    ];
     assert.strictEqual('cache' in Request.prototype, env.CACHE_ENABLED);
     {
       const req = new Request('https://example.org', {});
       assert.strictEqual(req.cache, undefined);
     }
     if (!env.CACHE_ENABLED) {
-      await assertRequestCacheThrowsError('no-store');
-      await assertRequestCacheThrowsError('no-cache');
-      await assertRequestCacheThrowsError('no-transform');
-      await assertRequestCacheThrowsError('unsupported');
-      await assertFetchCacheRejectsError('no-store');
-      await assertFetchCacheRejectsError('no-cache');
-      await assertFetchCacheRejectsError('no-transform');
-      await assertFetchCacheRejectsError('unsupported');
+      failureCases.push('no-store');
+      for (const cacheMode in failureCases) {
+        await assertRequestCacheThrowsError(cacheMode);
+        await assertFetchCacheRejectsError(cacheMode);
+      }
     } else {
-      await assertRequestCacheThrowsError(
-        'no-store',
-        'TypeError',
-        'Unsupported cache mode: no-store'
-      );
-      await assertRequestCacheThrowsError(
-        'no-cache',
-        'TypeError',
-        'Unsupported cache mode: no-cache'
-      );
-      await assertRequestCacheThrowsError(
-        'no-transform',
-        'TypeError',
-        'Unsupported cache mode: no-transform'
-      );
-      await assertRequestCacheThrowsError(
-        'unsupported',
-        'TypeError',
-        'Unsupported cache mode: unsupported'
-      );
-      await assertFetchCacheRejectsError(
-        'no-store',
-        'TypeError',
-        'Unsupported cache mode: no-store'
-      );
-      await assertFetchCacheRejectsError(
-        'no-cache',
-        'TypeError',
-        'Unsupported cache mode: no-cache'
-      );
-      await assertFetchCacheRejectsError(
-        'no-transform',
-        'TypeError',
-        'Unsupported cache mode: no-transform'
-      );
-      await assertFetchCacheRejectsError(
-        'unsupported',
-        'TypeError',
-        'Unsupported cache mode: unsupported'
-      );
+      {
+        const req = new Request('https://example.org', { cache: 'no-store' });
+        assert.strictEqual(req.cache, 'no-store');
+      }
+      {
+        const response = await env.SERVICE.fetch(
+          'http://placeholder/not-found',
+          { cache: 'no-store' }
+        );
+        assert.strictEqual(
+          util.inspect(response),
+          `Response {
+  status: 404,
+  statusText: 'Not Found',
+  headers: Headers(0) { [immutable]: true },
+  ok: false,
+  redirected: false,
+  url: 'http://placeholder/not-found',
+  webSocket: null,
+  cf: undefined,
+  body: ReadableStream {
+    locked: false,
+    [state]: 'readable',
+    [supportsBYOB]: true,
+    [length]: 0n
+  },
+  bodyUsed: false
+}`
+        );
+      }
+      for (const cacheMode in failureCases) {
+        await assertRequestCacheThrowsError(
+          cacheMode,
+          'TypeError',
+          'Unsupported cache mode: ' + cacheMode
+        );
+        await assertFetchCacheRejectsError(
+          cacheMode,
+          'TypeError',
+          'Unsupported cache mode: ' + cacheMode
+        );
+      }
     }
   },
 };
