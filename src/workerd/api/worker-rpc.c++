@@ -228,7 +228,11 @@ jsg::JsValue deserializeRpcReturnValue(
     jsg::Lock& js, rpc::JsRpcTarget::CallResults::Reader callResults, StreamSinkImpl& streamSink) {
   auto [value, disposalGroup, _] = deserializeJsValue(js, callResults.getResult(), streamSink);
 
-  if (callResults.hasCallPipeline()) {
+  // If the object had a disposer on the callee side, it will run when we discard the callPipeline,
+  // so attach that to the disposal group on the caller side. If the returned object did NOT have
+  // a disposer then we should discard callPipeline so that we don't hold open the callee's
+  // context for no reason.
+  if (callResults.getHasDisposer()) {
     disposalGroup->setCallPipeline(
         IoContext::current().addObject(kj::heap(callResults.getCallPipeline())));
   }

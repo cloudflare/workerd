@@ -306,6 +306,15 @@ export class MyService extends WorkerEntrypoint {
     };
   }
 
+  async leakButReturnPlainObject(stub) {
+    // Leak the input stub, so it will be disposed when the context is torn down.
+    stub.dup();
+
+    // Return a plain object (one with no stubs and no disposer). This should NOT
+    // hold the context open, so the stub should be dropped promptly.
+    return { foo: 123 };
+  }
+
   async writeToStream(stream) {
     let writer = stream.getWriter();
     let enc = new TextEncoder();
@@ -932,6 +941,20 @@ export let disposal = {
       });
 
       await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+    }
+
+    // Test that a call which returns a plain object does not need to be disposed.
+    // Historically, the callee context would not be torn down promptly.
+    {
+      let counter = new MyCounter(3);
+      await env.MyService.leakButReturnPlainObject(counter);
+
+      // Give a chance for disposal to happen.
+      await scheduler.wait(10);
+
+      // It should have happened! A call that returns a plain object should NOT
+      // require disposal to clean up its context!
       assert.strictEqual(counter.disposed, true);
     }
   },
