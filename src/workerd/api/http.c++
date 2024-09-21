@@ -1203,6 +1203,7 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
       break;
     case CacheMode::NOCACHE:
       ttl = 0;
+      KJ_FALLTHROUGH;
     case CacheMode::NONE:
       KJ_UNREACHABLE;
   }
@@ -1847,6 +1848,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   const auto cacheMode = jsRequest->getCacheMode();
   switch (cacheMode) {
     case Request::CacheMode::NOSTORE:
+      KJ_FALLTHROUGH;
     case Request::CacheMode::NOCACHE:
       if (headers.get(headerIds.cacheControl) == kj::none) {
         headers.set(headerIds.cacheControl, "no-cache");
@@ -1854,6 +1856,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       if (headers.get(headerIds.pragma) == kj::none) {
         headers.set(headerIds.pragma, "no-cache");
       }
+      KJ_FALLTHROUGH;
     case Request::CacheMode::NONE:
       break;
     default:
