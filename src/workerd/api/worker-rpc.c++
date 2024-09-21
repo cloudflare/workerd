@@ -228,7 +228,11 @@ jsg::JsValue deserializeRpcReturnValue(
     jsg::Lock& js, rpc::JsRpcTarget::CallResults::Reader callResults, StreamSinkImpl& streamSink) {
   auto [value, disposalGroup, _] = deserializeJsValue(js, callResults.getResult(), streamSink);
 
-  if (callResults.hasCallPipeline()) {
+  // If the object had a disposer on the callee side, it will run when we discard the callPipeline,
+  // so attach that to the disposal group on the caller side. If the returned object did NOT have
+  // a disposer then we should discard callPipeline so that we don't hold open the callee's
+  // context for no reason.
+  if (callResults.getHasDisposer()) {
     disposalGroup->setCallPipeline(
         IoContext::current().addObject(kj::heap(callResults.getCallPipeline())));
   }
@@ -242,7 +246,7 @@ jsg::JsValue deserializeRpcReturnValue(
       v8::Local<v8::Value> func = js.wrapSimpleFunction(js.v8Context(),
           [disposalGroup = kj::mv(disposalGroup)](jsg::Lock&,
               const v8::FunctionCallbackInfo<v8::Value>&) mutable { disposalGroup->disposeAll(); });
-      obj.set(js, js.symbolDispose(), jsg::JsValue(func));
+      obj.setNonEnumerable(js, js.symbolDispose(), jsg::JsValue(func));
     }
   } else {
     // Result wasn't an object, so it must not contain any stubs.
@@ -901,7 +905,10 @@ struct SingleStub {};
 
 // The value is not a type that supports pipelining. It may still be serializable, and it could
 // even contain stubs (e.g. in a Map).
-struct NonPipelinable {};
+struct NonPipelinable {
+  // callPipeline to return just for error-handling purposes.
+  rpc::JsRpcTarget::Client errorPipeline;
+};
 
 using Result = kj::OneOf<Object, SingleStub, NonPipelinable>;
 };  // namespace MakeCallPipeline
@@ -1038,8 +1045,9 @@ public:
               KJ_ASSERT(external.isRpcTarget());
               results.setCallPipeline(external.getRpcTarget());
             }
-            KJ_CASE_ONEOF(obj, MakeCallPipeline::NonPipelinable) {
-              // No callPipeline is needed.
+            KJ_CASE_ONEOF(nonPipelinable, MakeCallPipeline::NonPipelinable) {
+              results.setCallPipeline(kj::mv(nonPipelinable.errorPipeline));
+              // leave hasDisposer false
             }
           }
 
@@ -1498,8 +1506,14 @@ static rpc::JsRpcTarget::Client makeJsRpcTargetForSingleLoopbackCall(
 
 static MakeCallPipeline::Result makeCallPipeline(jsg::Lock& js, jsg::JsValue value) {
   return js.withinHandleScope([&]() -> MakeCallPipeline::Result {
-    jsg::JsObject obj = KJ_UNWRAP_OR(
-        value.tryCast<jsg::JsObject>(), { return MakeCallPipeline::NonPipelinable(); });
+    jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), {
+      // Primitive value. Return a fake pipeline just so that we get nice errors if someone tries
+      // to pipeline on it. (If we return null, we'll get "called null capability" out of
+      // Cap'n Proto, which will be treated as an internal error.)
+      return (MakeCallPipeline::NonPipelinable{
+        .errorPipeline = rpc::JsRpcTarget::Client(
+            kj::heap<TransientJsRpcTarget>(js, IoContext::current(), js.obj(), kj::none, true))});
+    });
 
     if (obj.getPrototype(js) == js.obj().getPrototype(js)) {
       // It's a plain object.
@@ -1528,9 +1542,12 @@ static MakeCallPipeline::Result makeCallPipeline(jsg::Lock& js, jsg::JsValue val
       return MakeCallPipeline::SingleStub();
     } else {
       // Not an RPC object. Could be a String or other serializable types that derive from Object.
+      // Similar to primitive types, we return a fake pipeline for error-handling reasons.
       // TODO(soon): What if someone returns e.g. a Map with a disposer on it? Should we honor that
       //   disposer?
-      return MakeCallPipeline::NonPipelinable();
+      return MakeCallPipeline::NonPipelinable{
+        .errorPipeline = rpc::JsRpcTarget::Client(
+            kj::heap<TransientJsRpcTarget>(js, IoContext::current(), js.obj(), kj::none, true))};
     }
   });
 }

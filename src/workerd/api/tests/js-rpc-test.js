@@ -146,6 +146,13 @@ export class MyService extends WorkerEntrypoint {
     return { foo: 123 + i, counter: new MyCounter(i) };
   }
 
+  async getMap() {
+    let map = new Map();
+    map.set('foo', 123);
+    map.set('bar', 456);
+    return map;
+  }
+
   async fetch(req, x) {
     assert.strictEqual(x, undefined);
     return new Response('method = ' + req.method + ', url = ' + req.url);
@@ -297,6 +304,15 @@ export class MyService extends WorkerEntrypoint {
         ctx.abort(new RangeError('foo bar abort reason'));
       },
     };
+  }
+
+  async leakButReturnPlainObject(stub) {
+    // Leak the input stub, so it will be disposed when the context is torn down.
+    stub.dup();
+
+    // Return a plain object (one with no stubs and no disposer). This should NOT
+    // hold the context open, so the stub should be dropped promptly.
+    return { foo: 123 };
   }
 
   async writeToStream(stream) {
@@ -704,6 +720,13 @@ export let namedServiceBinding = {
         'Could not serialize object of type "Object". This type does not support ' +
         'serialization.',
     });
+
+    {
+      let map = await env.MyService.getMap();
+      assert.strictEqual(map.get('foo'), 123);
+      assert.strictEqual(map.get('bar'), 456);
+      assert.strictEqual(map.get('baz'), undefined);
+    }
   },
 };
 
@@ -812,6 +835,16 @@ export let promisePipelining = {
       await env.MyService.getAnObject(5).counter.increment(7),
       12
     );
+
+    assert.rejects(() => env.MyService.oneArgMethod(5).foo(), {
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "foo".',
+    });
+
+    assert.rejects(() => env.MyService.getMap().foo(), {
+      name: 'TypeError',
+      message: 'The RPC receiver does not implement the method "foo".',
+    });
   },
 };
 
@@ -908,6 +941,20 @@ export let disposal = {
       });
 
       await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+    }
+
+    // Test that a call which returns a plain object does not need to be disposed.
+    // Historically, the callee context would not be torn down promptly.
+    {
+      let counter = new MyCounter(3);
+      await env.MyService.leakButReturnPlainObject(counter);
+
+      // Give a chance for disposal to happen.
+      await scheduler.wait(10);
+
+      // It should have happened! A call that returns a plain object should NOT
+      // require disposal to clean up its context!
       assert.strictEqual(counter.disposed, true);
     }
   },
@@ -1009,12 +1056,6 @@ export let waitUntilWorks = {
   },
 };
 
-function stripDispose(obj) {
-  assert.deepEqual(!!obj[Symbol.dispose], true);
-  delete obj[Symbol.dispose];
-  return obj;
-}
-
 export let serializeRpcPromiseOrProprety = {
   async test(controller, env, ctx) {
     // What happens if we actually try to serialize a JsRpcPromise or JsRpcProperty? Let's make
@@ -1027,7 +1068,7 @@ export let serializeRpcPromiseOrProprety = {
 
     // If we directly return returning a JsRpcPromise, the system automatically awaits it on the
     // server side because it's a thenable.
-    assert.deepEqual(stripDispose(await env.MyService.getRpcPromise(func)), {
+    assert.deepEqual(await env.MyService.getRpcPromise(func), {
       x: 123,
     });
 
@@ -1063,7 +1104,7 @@ export let serializeRpcPromiseOrProprety = {
     // somewhere along the line V8 says "oh look a thenable" and awaits it, before it can be
     // subject to serialization. That's fine.
     assert.deepEqual(
-      stripDispose(await env.MyService.getRemoteNestedRpcPromise(func).value),
+      await env.MyService.getRemoteNestedRpcPromise(func).value,
       { x: 123 }
     );
     await assert.rejects(
@@ -1075,7 +1116,7 @@ export let serializeRpcPromiseOrProprety = {
     );
 
     // The story is similar for a JsRpcProperty -- though the implementation details differ.
-    assert.deepEqual(stripDispose(await env.MyService.getRpcProperty(func)), {
+    assert.deepEqual(await env.MyService.getRpcProperty(func), {
       x: 456,
     });
     assert.strictEqual(await env.MyService.getRpcProperty(func).x, 456);
@@ -1102,7 +1143,7 @@ export let serializeRpcPromiseOrProprety = {
     );
 
     assert.deepEqual(
-      stripDispose(await env.MyService.getRemoteNestedRpcProperty(func).value),
+      await env.MyService.getRemoteNestedRpcProperty(func).value,
       { x: 456 }
     );
     await assert.rejects(

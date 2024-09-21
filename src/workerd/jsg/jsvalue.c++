@@ -67,6 +67,11 @@ void JsObject::setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value) {
       static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete)));
 }
 
+void JsObject::setNonEnumerable(Lock& js, const JsSymbol& name, const JsValue& value) {
+  check(inner->DefineOwnProperty(
+      js.v8Context(), name.inner, value.inner, v8::PropertyAttribute::DontEnum));
+}
+
 JsValue JsObject::get(Lock& js, const JsValue& name) {
   return JsValue(check(inner->Get(js.v8Context(), name.inner)));
 }
