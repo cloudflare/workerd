@@ -20,6 +20,9 @@ namespace workerd::api {
 
 namespace {
 
+// Maximum DH prime size, adapted from boringssl.
+constexpr int OPENSSL_DH_MAX_MODULUS_BITS = 10000;
+
 // Returns a function that can be used to create an instance of a standardized
 // Diffie-Hellman group.
 BIGNUM* (*findDiffieHellmanGroup(const char* name))(BIGNUM*) {
@@ -100,6 +103,12 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
             }
             return 1;
           };
+          // Operations on an "egregiously large" prime will throw with recent boringssl.
+          // TODO(soon): Convert this and the other invalid parameter warning to user errors if
+          // possible.
+          if (size > OPENSSL_DH_MAX_MODULUS_BITS) {
+            KJ_LOG(WARNING, "DiffieHellman init: requested prime size too large");
+          }
           if (!DH_generate_parameters_ex(dh.get(), size, gen, &cb)) {
             KJ_IF_SOME(outcome, status.status) {
               if (outcome == EventOutcome::EXCEEDED_CPU) {
@@ -111,6 +120,11 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
               }
             }
             JSG_FAIL_REQUIRE(Error, "DiffieHellman init failed: could not generate parameters");
+          }
+          // Boringssl throws on DH with g >= p or g | 2 since g can't be an element of p's
+          // multiplicative group in that case.
+          if (!BN_is_odd(DH_get0_p(dh)) || BN_ucmp(DH_get0_g(dh), DH_get0_p(dh)) >= 0) {
+            KJ_LOG(WARNING, "DiffieHellman init: Invalid generated DH prime");
           }
           return kj::mv(dh);
         }
@@ -125,6 +139,10 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
       JSG_REQUIRE(
           key.size() <= INT32_MAX, RangeError, "DiffieHellman init failed: key is too large");
       JSG_REQUIRE(key.size() > 0, Error, "DiffieHellman init failed: invalid key");
+      // Operations on an "egregiously large" prime will throw with boringssl.
+      if (key.size() > OPENSSL_DH_MAX_MODULUS_BITS / CHAR_BIT) {
+        KJ_LOG(WARNING, "DiffieHellman init: prime too large");
+      }
       auto dh = OSSL_NEW(DH);
 
       // We use a std::unique_ptr here instead of a kj::Own because DH_set0_pqg takes ownership
@@ -155,6 +173,11 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
       UniqueBignum bn_p(toBignumUnowned(key), &BN_clear_free);
       JSG_REQUIRE(bn_p != nullptr, Error,
           "DiffieHellman init failed: could not convert key representation");
+      // Boringssl throws on DH with g >= p or g | 2 since g can't be an element of p's
+      // multiplicative group in that case.
+      if (!BN_is_odd(bn_p.get()) || BN_ucmp(bn_g.get(), bn_p.get()) >= 0) {
+        KJ_LOG(WARNING, "DiffieHellman init: Invalid DH prime generated");
+      }
       JSG_REQUIRE(DH_set0_pqg(dh, bn_p.get(), nullptr, bn_g.get()), Error,
           "DiffieHellman init failed: could not set keys");
       bn_g.release();
