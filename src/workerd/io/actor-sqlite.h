@@ -207,9 +207,6 @@ private:
   kj::Promise<void> requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime);
 
   struct PrecommitAlarmState {
-    // Lets us avoid an extra read of db alarm state:
-    kj::Maybe<kj::Date> localAlarmState;
-
     // Promise for the completion of precommit alarm scheduling
     kj::Maybe<kj::Promise<void>> schedulingPromise;
   };
