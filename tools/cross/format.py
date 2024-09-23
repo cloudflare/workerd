@@ -2,9 +2,11 @@
 
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
+import sys
 from argparse import ArgumentParser, Namespace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -15,7 +17,6 @@ from typing import Callable, Optional
 CLANG_FORMAT = os.environ.get("CLANG_FORMAT", "clang-format")
 PRETTIER = os.environ.get("PRETTIER", "node_modules/.bin/prettier")
 RUFF = os.environ.get("RUFF", "ruff")
-BUILDIFIER = os.environ.get("BUILDIFIER", "buildifier")
 
 
 def parse_args() -> Namespace:
@@ -100,6 +101,33 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
     return any(file.match(glob) for glob in globs)
 
 
+def exec_target() -> str:
+    ALIASES = {"aarch64": "arm64", "x86_64": "amd64", "AMD64": "amd64"}
+
+    machine = platform.machine()
+    return f"{sys.platform}-{ALIASES.get(machine, machine)}"
+
+
+def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProcess:
+    external_dir = Path("external")
+    if not external_dir.exists():
+        # Create a symlink to the bazel external directory
+        bazel_base = Path(
+            subprocess.run(["bazel", "info", "output_base"], capture_output=True)
+            .stdout.decode()
+            .strip()
+        )
+        external_dir.symlink_to(bazel_base / "external")
+
+    tool_target = f"{tool_name}-{exec_target()}"
+    tool_path = Path("external") / tool_target / "file" / "downloaded"
+
+    if not tool_path.exists():
+        subprocess.run(["bazel", "fetch", f"@{tool_target}//file"])
+
+    return subprocess.run([tool_path, *args])
+
+
 def clang_format(files: list[Path], check: bool = False) -> bool:
     cmd = [CLANG_FORMAT]
     if check:
@@ -117,8 +145,8 @@ def prettier(files: list[Path], check: bool = False) -> bool:
 
 
 def buildifier(files: list[Path], check: bool = False) -> bool:
-    cmd = [BUILDIFIER, "--mode=check" if check else "--mode=fix"]
-    result = subprocess.run(cmd + files)
+    cmd = ["--mode=check" if check else "--mode=fix"]
+    result = run_bazel_tool("buildifier", cmd + files)
     return result.returncode == 0
 
 
@@ -189,18 +217,18 @@ FORMATTERS = [
     # FormatConfig(
     #     directory="src/workerd", globs=("*.c++", "*.h"), formatter=clang_format
     # ),
-    # FormatConfig(
-    #     directory="src",
-    #     globs=("*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"),
-    #     formatter=prettier,
-    # ),
-    # FormatConfig(directory="src", globs=("*.json",), formatter=prettier),
+    FormatConfig(
+        directory="src",
+        globs=("*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"),
+        formatter=prettier,
+    ),
+    FormatConfig(directory="src", globs=("*.json",), formatter=prettier),
     # FormatConfig(directory=".", globs=("*.py",), formatter=ruff),
-    # FormatConfig(
-    #     directory=".",
-    #     globs=("*.bzl", "WORKSPACE", "BUILD", "BUILD.*"),
-    #     formatter=buildifier,
-    # ),
+    FormatConfig(
+        directory=".",
+        globs=("*.bzl", "WORKSPACE", "BUILD", "BUILD.*"),
+        formatter=buildifier,
+    ),
 ]
 
 
