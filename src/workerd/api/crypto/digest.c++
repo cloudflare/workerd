@@ -5,6 +5,7 @@
 #include "digest.h"
 
 #include "impl.h"
+#include "util.h"
 
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/io/io-context.h>
@@ -77,7 +78,7 @@ private:
 
       SubtleCrypto::JsonWebKey jwk;
       jwk.kty = kj::str("oct");
-      jwk.k = kj::encodeBase64Url(keyData);
+      jwk.k = fastEncodeBase64Url(keyData);
       jwk.alg = kj::str("HS", keyAlgorithm.hash.name.slice(4));
       jwk.key_ops = getUsages().map([](auto usage) { return kj::str(usage.name()); });
       // I don't know why the spec says:
