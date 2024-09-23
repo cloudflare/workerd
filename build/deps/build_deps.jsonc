@@ -1,0 +1,34 @@
+{
+  "$schema": "deps.schema.json",
+  "repositories": [
+    {
+      "name": "bazel_skylib",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "bazel-skylib",
+      "file_regex": "\\.tar\\.gz$"
+    },
+    {
+      "name": "rules_license",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_license",
+      "file_regex": "\\.tar\\.gz$"
+    },
+    {
+      "name": "rules_python",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_python",
+      "file_regex": "\\.tar\\.gz$"
+    },
+    {
+      // Needed for objc_library starting with bazel 7
+      "name": "build_bazel_apple_support",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "apple_support",
+      "file_regex": "\\.tar\\.gz$"
+    }
+ ]
+}

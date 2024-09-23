@@ -42,3 +42,7 @@ format:
 
 internal-pr:
   ./tools/unix/create-internal-pr.sh
+
+# update dependencies with a given prefix (all by default)
+update-deps prefix="":
+  ./build/deps/update-deps.py {{prefix}}

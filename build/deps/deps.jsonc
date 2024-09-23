@@ -1,0 +1,22 @@
+{
+  "$schema": "deps.schema.json",
+  "repositories": [
+    {
+      "name": "capnp-cpp",
+      "type": "github_tarball",
+      "owner": "capnproto",
+      "repo": "capnproto",
+      "branch": "v2",
+      "extra_strip_prefix": "/c++"
+    },
+    {
+      "name": "ssl",
+      "type": "github_tarball",
+      "owner": "google",
+      "repo": "boringssl",
+      "branch": "master-with-bazel",
+      // todo: head requires a trivial fix
+      "freeze_commit": "c08ccc9ed166a82b92edd70ab215ae1f2501e838"
+    }
+  ]
+}
