@@ -102,6 +102,4 @@ double dateNow();
 
 void maybeWarnIfNotText(jsg::Lock& js, kj::StringPtr str);
 
-kj::String fastEncodeBase64Url(kj::ArrayPtr<const byte> bytes);
-
 }  // namespace workerd::api
