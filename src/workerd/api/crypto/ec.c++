@@ -70,8 +70,8 @@ SubtleCrypto::JsonWebKey Ec::toJwk(KeyType keyType, kj::StringPtr curveName) con
   auto xa = handleBn(*x, groupDegreeInBytes);
   auto ya = handleBn(*y, groupDegreeInBytes);
 
-  jwk.x = fastEncodeBase64Url(xa);
-  jwk.y = fastEncodeBase64Url(ya);
+  jwk.x = kj::encodeBase64Url(xa);
+  jwk.y = kj::encodeBase64Url(ya);
 
   if (keyType == KeyType::PRIVATE) {
     const auto privateKey = getPrivateKey();
@@ -79,7 +79,7 @@ SubtleCrypto::JsonWebKey Ec::toJwk(KeyType keyType, kj::StringPtr curveName) con
         "Error getting private key material for JSON Web Key export",
         internalDescribeOpensslErrors());
     auto pk = handleBn(*privateKey, groupDegreeInBytes);
-    jwk.d = fastEncodeBase64Url(pk);
+    jwk.d = kj::encodeBase64Url(pk);
   }
   return jwk;
 }
@@ -993,7 +993,7 @@ private:
     SubtleCrypto::JsonWebKey jwk;
     jwk.kty = kj::str("OKP");
     jwk.crv = kj::str(getAlgorithmName() == "X25519"_kj ? "X25519"_kj : "Ed25519"_kj);
-    jwk.x = fastEncodeBase64Url(kj::arrayPtr(rawPublicKey, publicKeyLen));
+    jwk.x = kj::encodeBase64Url(kj::arrayPtr(rawPublicKey, publicKeyLen));
     if (getAlgorithmName() == "Ed25519"_kj) {
       jwk.alg = kj::str("EdDSA");
     }
@@ -1011,7 +1011,7 @@ private:
 
       KJ_ASSERT(privateKeyLen == 32, privateKeyLen);
 
-      jwk.d = fastEncodeBase64Url(kj::arrayPtr(rawPrivateKey, privateKeyLen));
+      jwk.d = kj::encodeBase64Url(kj::arrayPtr(rawPrivateKey, privateKeyLen));
     }
 
     return jwk;

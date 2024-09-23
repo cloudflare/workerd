@@ -2,7 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 #include "crypto.h"
-#include "util.h"
 
 #include <workerd/api/crypto/impl.h>
 
@@ -47,7 +46,7 @@ public:
     if (format == "jwk") {
       SubtleCrypto::JsonWebKey jwk;
       jwk.kty = kj::str("oct");
-      jwk.k = fastEncodeBase64Url(keyData);
+      jwk.k = kj::encodeBase64Url(keyData);
       jwk.ext = true;
       return jwk;
     }

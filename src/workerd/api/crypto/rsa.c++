@@ -3,7 +3,6 @@
 #include "impl.h"
 #include "keys.h"
 #include "simdutf.h"
-#include "util.h"
 
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
@@ -236,20 +235,20 @@ SubtleCrypto::JsonWebKey Rsa::toJwk(
     jwk.alg = kj::mv(name);
   }
 
-  jwk.n = fastEncodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(n))));
-  jwk.e = fastEncodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(e))));
+  jwk.n = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(n))));
+  jwk.e = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(e))));
 
   if (keyType == KeyType::PRIVATE) {
-    jwk.d = fastEncodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(d))));
+    jwk.d = kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(d))));
     jwk.p =
-        fastEncodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_p(rsa)))));
+        kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_p(rsa)))));
     jwk.q =
-        fastEncodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_q(rsa)))));
-    jwk.dp = fastEncodeBase64Url(
+        kj::encodeBase64Url(KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_q(rsa)))));
+    jwk.dp = kj::encodeBase64Url(
         KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_dmp1(rsa)))));
-    jwk.dq = fastEncodeBase64Url(
+    jwk.dq = kj::encodeBase64Url(
         KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_dmq1(rsa)))));
-    jwk.qi = fastEncodeBase64Url(
+    jwk.qi = kj::encodeBase64Url(
         KJ_REQUIRE_NONNULL(bignumToArray(KJ_REQUIRE_NONNULL(RSA_get0_iqmp(rsa)))));
   }
 
