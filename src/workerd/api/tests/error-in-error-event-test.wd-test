@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "error-in-error-event-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "error-in-error-event-test.js")
+        ],
+        compatibilityDate = "2024-09-15",
+        compatibilityFlags = ["nodejs_compat_v2"],
+        bindings = [
+          (name = "subrequest", service = "error-in-error-event-test")
+        ],
+      )
+    ),
+  ],
+);

@@ -706,7 +706,28 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, v8::Local<v8::Funct
               return jsg::check(
                   function->Call(js.v8Context(), js.v8Null(), argv.size(), argv.data()));
             }, [&](jsg::Value exception) {
-              reportError(js, jsg::JsValue(exception.getHandle(js)));
+              // The reportError call itself can potentially throw errors. Let's catch
+              // and report them as well.
+              js.tryCatch([&] { reportError(js, jsg::JsValue(exception.getHandle(js))); },
+                  [&](jsg::Value exception) {
+                // An error was thrown by the 'error' event handler. That's unfortunate.
+                // Let's log the error and just continue. It won't be possible to actually
+                // catch or handle this error so logging is really the only way to notify
+                // folks about it.
+                auto val = jsg::JsValue(exception.getHandle(js));
+                // If the value is an object that has a stack propery, log that so we get
+                // the stack trace if it is an exception.
+                KJ_IF_SOME(obj, val.tryCast<jsg::JsObject>()) {
+                auto stack = obj.get(js, "stack"_kj);
+                if (!stack.isUndefined()) {
+                js.reportError(stack);
+                return;
+                }
+                } else {
+                }  // Here to avoid a compile warning
+                // Otherwise just log the stringified value generically.
+                js.reportError(val);
+              });
               return js.v8Undefined();
             });
           }));
@@ -798,6 +819,16 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
         .colno = jsg::check(message->GetStartColumn(js.v8Context())),
         .error = jsg::JsRef(js, error)});
   if (dispatchEventImpl(js, kj::mv(event))) {
+    // If the value is an object that has a stack propery, log that so we get
+    // the stack trace if it is an exception.
+    KJ_IF_SOME(obj, error.tryCast<jsg::JsObject>()) {
+      auto stack = obj.get(js, "stack"_kj);
+      if (!stack.isUndefined()) {
+        js.reportError(stack);
+        return;
+      }
+    }
+    // Otherwise just log the stringified value generically.
     js.reportError(error);
   }
 }
