@@ -7,10 +7,21 @@
 #include "io-gate.h"
 
 #include <workerd/jsg/exception.h>
+#include <workerd/util/sentry.h>
 
 #include <algorithm>
 
 namespace workerd {
+
+namespace {
+
+// Returns true if a given (set or unset) alarm will fire earlier than another.
+static bool willFireEarlier(kj::Maybe<kj::Date> alarm1, kj::Maybe<kj::Date> alarm2) {
+  // Intuitively, an unset alarm is effectively indistinguishable from an alarm set at infinity.
+  return alarm1.orDefault(kj::maxValue) < alarm2.orDefault(kj::maxValue);
+}
+
+}  // namespace
 
 ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
     OutputGate& outputGate,
@@ -21,8 +32,16 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       commitCallback(kj::mv(commitCallback)),
       hooks(hooks),
       kv(*db),
+      metadata(*db),
       commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
+  lastConfirmedAlarmDbState = metadata.getAlarm();
+
+  // Because we preserve an invariant that scheduled alarms are always at or earlier than
+  // persisted db alarm state, it should be OK to populate our idea of the latest scheduled alarm
+  // using the current db alarm state.  At worst, it may perform one unnecessary scheduling
+  // request in cases where a previous alarm-state-altering transaction failed.
+  alarmScheduledNoLaterThan = metadata.getAlarm();
 }
 
 ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent): parent(parent) {
@@ -42,6 +61,7 @@ ActorSqlite::ImplicitTxn::~ImplicitTxn() noexcept(false) {
     // This should only happen in cases of catastrophic error. Since this is rarely actually
     // executed, we don't prepare a statement for it.
     parent.db->run("ROLLBACK TRANSACTION");
+    parent.metadata.invalidate();
   }
 }
 
@@ -62,6 +82,7 @@ void ActorSqlite::ImplicitTxn::rollback() {
     // bother.
     parent.db->run("ROLLBACK TRANSACTION");
     committed = true;
+    parent.metadata.invalidate();
   }
 }
 
@@ -81,6 +102,7 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
       parent = kj::addRef(*exp);
       exp->hasChild = true;
       depth = exp->depth + 1;
+      alarmDirty = exp->alarmDirty;
     }
   }
   actorSqlite.currentTxn = this;
@@ -112,18 +134,41 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
   }
 }
 
+bool ActorSqlite::ExplicitTxn::getAlarmDirty() {
+  return alarmDirty;
+}
+
+void ActorSqlite::ExplicitTxn::setAlarmDirty() {
+  alarmDirty = true;
+}
+
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
   KJ_REQUIRE(!hasChild,
       "critical sections should have prevented committing transaction while "
       "nested txn is outstanding");
 
+  // Start the schedule request before root transaction commit(), for correctness in workerd.
+  kj::Maybe<PrecommitAlarmState> precommitAlarmState;
+  if (parent == kj::none) {
+    precommitAlarmState = actorSqlite.startPrecommitAlarmScheduling();
+  }
+
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
   committed = true;
 
-  if (parent == kj::none) {
+  KJ_IF_SOME(p, parent) {
+    if (alarmDirty) {
+      p->alarmDirty = true;
+    }
+  } else {
+    if (alarmDirty) {
+      actorSqlite.haveDeferredDelete = false;
+    }
+
     // We committed the root transaction, so it's time to signal any replication layer and lock
     // the output gate in the meantime.
-    actorSqlite.commitTasks.add(actorSqlite.outputGate.lockWhile(actorSqlite.commitCallback()));
+    actorSqlite.commitTasks.add(actorSqlite.outputGate.lockWhile(
+        actorSqlite.commitImpl(kj::mv(KJ_ASSERT_NONNULL(precommitAlarmState)))));
   }
 
   // No backpressure for SQLite.
@@ -143,6 +188,12 @@ kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
 void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_savepoint_", depth));
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
+  actorSqlite.metadata.invalidate();
+  KJ_IF_SOME(p, parent) {
+    alarmDirty = p->alarmDirty;
+  } else {
+    alarmDirty = false;
+  }
 }
 
 void ActorSqlite::onWrite() {
@@ -153,6 +204,9 @@ void ActorSqlite::onWrite() {
         kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
+
+      // Start the schedule request before commit(), for correctness in workerd.
+      auto precommitAlarmState = startPrecommitAlarmScheduling();
 
       try {
         txn->commit();
@@ -171,8 +225,101 @@ void ActorSqlite::onWrite() {
       // rather than after the callback.
       { auto drop = kj::mv(txn); }
 
-      return commitCallback();
+      return commitImpl(kj::mv(precommitAlarmState));
     })));
+  }
+}
+
+kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime) {
+  // Not using coroutines here, because it's important for correctness in workerd that a
+  // synchronously thrown exception in scheduleRun() can escape synchronously to the caller.
+
+  bool movingAlarmLater = willFireEarlier(alarmScheduledNoLaterThan, requestedTime);
+  if (movingAlarmLater) {
+    // Since we are setting the alarm to be later, we can update alarmScheduledNoLaterThan
+    // immediately and still preserve the invariant that the scheduled alarm time is equal to or
+    // earlier than the persisted db alarm value.  Doing the immediate update ensures that
+    // subsequent invocations of commitImpl() will compare against the correct value in their
+    // precommit alarm checks, even if other later-setting requests are still in-flight, without
+    // needing to wait for them to complete.
+    alarmScheduledNoLaterThan = requestedTime;
+  }
+
+  return hooks.scheduleRun(requestedTime).then([this, movingAlarmLater, requestedTime]() {
+    if (!movingAlarmLater) {
+      alarmScheduledNoLaterThan = requestedTime;
+    }
+  });
+}
+
+ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
+  PrecommitAlarmState state;
+  if (pendingCommit == kj::none &&
+      willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
+    // Basically, this is the first scheduling request that commitImpl() would make prior to
+    // commitCallback().  We start the request separately, ahead of calling sqlite functions that
+    // commit to local disk, for correctness in workerd, where alarm scheduling and db commits are
+    // both synchronous.
+    state.schedulingPromise = requestScheduledAlarm(metadata.getAlarm());
+  }
+  return kj::mv(state);
+}
+
+kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState precommitAlarmState) {
+  // We assume that exceptions thrown during commit will propagate to the caller, such that they
+  // will ensure cancelDeferredAlarmDeletion() is called, if necessary.
+
+  KJ_IF_SOME(pending, pendingCommit) {
+    // If an earlier commitImpl() invocation is already in the process of updating precommit
+    // alarms but has not yet made the commitCallback() call, it should be OK to wait on it to
+    // perform the precommit alarm update and db commit for this invocation, too.
+    co_await pending.addBranch();
+    co_return;
+  }
+
+  // There are no pending commits in-flight, so we set up a forked promise that other callers can
+  // wait on, to perform the alarm scheduling and database persistence work for all of them.  Note
+  // that the fulfiller is owned by this coroutine context, so if an exception is thrown below,
+  // the fulfiller's destructor will detect that the stack is unwinding and will automatically
+  // propagate the thrown exception to the other waiters.
+  auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
+  pendingCommit = promise.fork();
+
+  // Wait for the first precommit alarm scheduling request to complete, if any.  This was set up
+  // in startPrecommitAlarmScheduling() and is essentially the first iteration of the below
+  // while() loop, but needed to be initiated synchronously before the local database commit to
+  // ensure correctness in workerd.
+  KJ_IF_SOME(p, precommitAlarmState.schedulingPromise) {
+    co_await p;
+  }
+
+  // While the local db state requires an earlier alarm than is known might be scheduled, issue an
+  // alarm update request for the earlier time and wait for it to complete.  This helps ensure
+  // that the successfully scheduled alarm time is always earlier or equal to the alarm state in
+  // the successfully persisted db.
+  while (willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
+    co_await requestScheduledAlarm(metadata.getAlarm());
+  }
+
+  // Issue the commitCallback() request to persist the db state, then synchronously clear the
+  // pending commit so that the next commitImpl() invocation starts its own set of precommit alarm
+  // updates and db commit.
+  auto alarmStateForCommit = metadata.getAlarm();
+  auto commitCallbackPromise = commitCallback();
+  pendingCommit = kj::none;
+
+  // Wait for the db to persist.
+  co_await commitCallbackPromise;
+  lastConfirmedAlarmDbState = alarmStateForCommit;
+
+  // Notify any merged commitImpl() requests that the db persistence completed.
+  fulfiller->fulfill();
+
+  // If the db state is now later than the in-flight scheduled alarms, issue a request to update
+  // it to match the db state.  We don't need to hold open the output gate, so we add the
+  // scheduling request to commitTasks.
+  if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
+    commitTasks.add(requestScheduledAlarm(alarmStateForCommit));
   }
 }
 
@@ -188,6 +335,19 @@ void ActorSqlite::taskFailed(kj::Exception&& exception) {
 void ActorSqlite::requireNotBroken() {
   KJ_IF_SOME(e, broken) {
     kj::throwFatalException(kj::cp(e));
+  }
+}
+
+void ActorSqlite::maybeDeleteDeferredAlarm() {
+  if (!inAlarmHandler) {
+    // Pretty sure this can't happen.
+    LOG_WARNING_ONCE("expected to be in alarm handler when trying to delete alarm");
+  }
+  inAlarmHandler = false;
+
+  if (haveDeferredDelete) {
+    metadata.setAlarm(kj::none);
+    haveDeferredDelete = false;
   }
 }
 
@@ -220,7 +380,19 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::ge
     ReadOptions options) {
   requireNotBroken();
 
-  return hooks.getAlarm();
+  bool transactionAlarmDirty = false;
+  KJ_IF_SOME(exp, currentTxn.tryGet<ExplicitTxn*>()) {
+    transactionAlarmDirty = exp->getAlarmDirty();
+  }
+
+  if (haveDeferredDelete && !transactionAlarmDirty) {
+    // If an alarm handler is currently running, and a new alarm time has not been set yet, We
+    // need to return that there is no alarm.
+    return kj::Maybe<kj::Date>(kj::none);
+  } else {
+    return metadata.getAlarm();
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>> ActorSqlite::
@@ -285,7 +457,18 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
 
-  return hooks.setAlarm(newAlarmTime);
+  // TODO(someday): When deleting alarm data in an otherwise empty database, clear the database to
+  // free up resources?
+
+  metadata.setAlarm(newAlarmTime);
+
+  KJ_IF_SOME(exp, currentTxn.tryGet<ExplicitTxn*>()) {
+    exp->setAlarmDirty();
+  } else {
+    haveDeferredDelete = false;
+  }
+
+  return kj::none;
 }
 
 kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
@@ -296,6 +479,11 @@ kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions options) {
   requireNotBroken();
+
+  // kv.deleteAll() clears the database, so we need to save and possibly restore alarm state in
+  // the metadata table, to try to match the behavior of ActorCache, which preserves the set alarm
+  // when running deleteAll().
+  auto localAlarmState = metadata.getAlarm();
 
   // deleteAll() cannot be part of a transaction because it deletes the database altogether. So,
   // we have to close our transactions or fail.
@@ -325,8 +513,9 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
     }
   }
 
-  if (!deleteAllCommitScheduled) {
-    // We'll want to make sure the commit callback is called for the deleteAll().
+  if (localAlarmState == kj::none && !deleteAllCommitScheduled) {
+    // If we're not going to perform a write to restore alarm state, we'll want to make sure the
+    // commit callback is called for the deleteAll().
     commitTasks.add(outputGate.lockWhile(kj::evalLater([this]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
@@ -338,6 +527,18 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
   }
 
   uint count = kv.deleteAll();
+
+  // TODO(correctness): Since workerd doesn't have a separate durability step, in the unlikely
+  // event of a failure here, between deleteAll() and setAlarm(), we could theoretically lose the
+  // current alarm state when running under workerd.  Not sure if there's a practical way to avoid
+  // this.
+
+  // Reset alarm state, if necessary.  If no alarm is set, OK to just leave metadata table
+  // uninitialized.
+  if (localAlarmState != kj::none) {
+    metadata.setAlarm(localAlarmState);
+  }
+
   return {
     .backpressure = kj::none,
     .count = count,
@@ -386,15 +587,57 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
 
 kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSqlite::
     armAlarmHandler(kj::Date scheduledTime, bool noCache) {
-  KJ_IF_SOME(deferredDelete, hooks.armAlarmHandler(scheduledTime, noCache)) {
-    return RunAlarmHandler{.deferredDelete = kj::mv(deferredDelete)};
-  } else {
-    return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
+  KJ_ASSERT(!inAlarmHandler);
+
+  if (haveDeferredDelete) {
+    // Unlikely to happen, unless caller is starting new alarm handler before previous alarm
+    // handler cleanup has completed.
+    LOG_WARNING_ONCE("expected previous alarm handler to be cleaned up");
   }
+
+  auto localAlarmState = metadata.getAlarm();
+  if (localAlarmState != scheduledTime) {
+    if (localAlarmState == lastConfirmedAlarmDbState) {
+      // If there's a clean db time that differs from the requested handler's scheduled time, this
+      // run should be canceled.
+      if (willFireEarlier(scheduledTime, localAlarmState)) {
+        // If the handler's scheduled time is earlier than the clean scheduled time, we may be
+        // recovering from a failed db commit or scheduling request, so we need to request that
+        // the alarm be rescheduled for the current db time, and tell the caller to wait for
+        // successful rescheduling before cancelling the current handler invocation.
+        //
+        // TODO(perf): If we already have such a rescheduling request in-flight, might want to
+        // coalesce with the existing request?
+        if (localAlarmState == kj::none) {
+          // If clean scheduled time is unset, don't need to reschedule; just cancel the alarm.
+          return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
+        } else {
+          return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
+        }
+      } else {
+        return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
+      }
+    } else {
+      // There's a alarm write that hasn't been set yet pending for a time different than ours --
+      // We won't cancel the alarm because it hasn't been confirmed, but we shouldn't delete
+      // the pending write.
+      haveDeferredDelete = false;
+    }
+  } else {
+    haveDeferredDelete = true;
+  }
+  inAlarmHandler = true;
+
+  static const DeferredAlarmDeleter disposer;
+  return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
 }
 
 void ActorSqlite::cancelDeferredAlarmDeletion() {
-  hooks.cancelDeferredAlarmDeletion();
+  if (!inAlarmHandler) {
+    // Pretty sure this can't happen.
+    LOG_WARNING_ONCE("expected to be in alarm handler when trying to cancel deleted alarm");
+  }
+  haveDeferredDelete = false;
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
@@ -409,20 +652,8 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
 
 const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
 
-kj::Maybe<kj::Own<void>> ActorSqlite::Hooks::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
+kj::Promise<void> ActorSqlite::Hooks::scheduleRun(kj::Maybe<kj::Date> newAlarmTime) {
   JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
-}
-
-void ActorSqlite::Hooks::cancelDeferredAlarmDeletion() {
-  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
-}
-
-kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::Hooks::getAlarm() {
-  JSG_FAIL_REQUIRE(Error, "getAlarm() is not yet implemented for SQLite-backed Durable Objects");
-}
-
-kj::Promise<void> ActorSqlite::Hooks::setAlarm(kj::Maybe<kj::Date>) {
-  JSG_FAIL_REQUIRE(Error, "setAlarm() is not yet implemented for SQLite-backed Durable Objects");
 }
 
 kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>
