@@ -61,6 +61,9 @@ KJ_TEST("context type is exposed in the global scope") {
 
 struct InheritContext: public ContextGlobalObject {
   struct Other: public Object {
+    static jsg::Ref<Other> constructor() {
+      return jsg::alloc<Other>();
+    }
     JSG_RESOURCE_TYPE(Other) {}
   };
 
@@ -112,6 +115,8 @@ KJ_TEST("inheritance") {
   e.expectEval("newExtendedAsBase(123, 'foo') instanceof NumberBox", "boolean", "true");
 
   e.expectEval("newExtendedAsBase(123, 'foo') instanceof ExtendedNumberBox", "boolean", "true");
+
+  e.expectEval("(new Other())[Symbol.toStringTag]", "string", "Other");
 }
 
 // ========================================================================================

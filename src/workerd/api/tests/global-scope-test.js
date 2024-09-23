@@ -723,3 +723,20 @@ export const queueMicrotaskError = {
     await promise;
   },
 };
+
+export const toStringTag = {
+  test() {
+    strictEqual('Response', Response.prototype[Symbol.toStringTag]);
+    strictEqual('Request', Request.prototype[Symbol.toStringTag]);
+    strictEqual('Headers', Headers.prototype[Symbol.toStringTag]);
+    strictEqual(
+      'URLSearchParams',
+      URLSearchParams.prototype[Symbol.toStringTag]
+    );
+    strictEqual('CryptoKey', CryptoKey.prototype[Symbol.toStringTag]);
+    strictEqual(
+      toString.call(new URLSearchParams()),
+      '[object URLSearchParams]'
+    );
+  },
+};
