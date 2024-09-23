@@ -591,7 +591,7 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
     if (localAlarmState == lastConfirmedAlarmDbState) {
       // If there's a clean db time that differs from the requested handler's scheduled time, this
       // run should be canceled.
-      if (willFireEarlier(localAlarmState, scheduledTime)) {
+      if (willFireEarlier(scheduledTime, localAlarmState)) {
         // If the handler's scheduled time is earlier than the clean scheduled time, we may be
         // recovering from a failed db commit or scheduling request, so we need to request that
         // the alarm be rescheduled for the current db time, and tell the caller to wait for
@@ -599,7 +599,12 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         //
         // TODO(perf): If we already have such a rescheduling request in-flight, might want to
         // coalesce with the existing request?
-        return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
+        if (localAlarmState == kj::none) {
+          // If clean scheduled time is unset, don't need to reschedule; just cancel the alarm.
+          return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
+        } else {
+          return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
+        }
       } else {
         return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
       }
