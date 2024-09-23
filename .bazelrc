@@ -201,10 +201,9 @@ build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualif
 build:linux --config=unix
 build:macos --config=unix
 
-# Support macOS 11 as the minimum version. There should be at least a warning when backward
+# Support macOS 13 as the minimum version. There should be at least a warning when backward
 # compatibility is broken as -Wunguarded-availability-new is enabled by default.
-# TODO (cleanup): macOS 11.X is now EOL, bump this to macOS 12.5 soon.
-build:macos --macos_minimum_os=11.5 --host_macos_minimum_os=11.5
+build:macos --macos_minimum_os=13.5 --host_macos_minimum_os=13.5
 
 # Avoid emitting duplicate unwind info where compact unwind info can be used. This reduces the
 # object size by ~5% on average, improving disk space usage and link times. The final binary size
