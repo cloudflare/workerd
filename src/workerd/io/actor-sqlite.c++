@@ -384,8 +384,13 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
   }
 }
 
-kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
-  return hooks.armAlarmHandler(scheduledTime, noCache);
+kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSqlite::
+    armAlarmHandler(kj::Date scheduledTime, bool noCache) {
+  KJ_IF_SOME(deferredDelete, hooks.armAlarmHandler(scheduledTime, noCache)) {
+    return RunAlarmHandler{.deferredDelete = kj::mv(deferredDelete)};
+  } else {
+    return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
+  }
 }
 
 void ActorSqlite::cancelDeferredAlarmDeletion() {

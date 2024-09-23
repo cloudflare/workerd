@@ -385,112 +385,73 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
   auto& context = IoContext::current();
   auto& actor = KJ_ASSERT_NONNULL(context.getActor());
   auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
-  auto maybeDeferredDelete = persistent.armAlarmHandler(scheduledTime);
 
-  KJ_IF_SOME(deferredDelete, maybeDeferredDelete) {
-    auto& handler = KJ_REQUIRE_NONNULL(exportedHandler);
-    if (handler.alarm == kj::none) {
+  KJ_SWITCH_ONEOF(persistent.armAlarmHandler(scheduledTime)) {
+    KJ_CASE_ONEOF(armResult, ActorCacheInterface::RunAlarmHandler) {
+      auto& handler = KJ_REQUIRE_NONNULL(exportedHandler);
+      if (handler.alarm == kj::none) {
 
-      lock.logWarningOnce("Attempted to run a scheduled alarm without a handler, "
-                          "did you remember to export an alarm() function?");
-      return WorkerInterface::AlarmResult{
-        .retry = false, .outcome = EventOutcome::SCRIPT_NOT_FOUND};
-    }
+        lock.logWarningOnce("Attempted to run a scheduled alarm without a handler, "
+                            "did you remember to export an alarm() function?");
+        return WorkerInterface::AlarmResult{
+          .retry = false, .outcome = EventOutcome::SCRIPT_NOT_FOUND};
+      }
 
-    auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
+      auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
 
-    return context
-        .run([exportedHandler, &context, timeout, retryCount, &alarm,
-                 maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](
-                 Worker::Lock& lock) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
-      jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
-      // We want to limit alarm handler walltime to 15 minutes at most. If the timeout promise
-      // completes we want to cancel the alarm handler. If the alarm handler promise completes first
-      // timeout will be canceled.
-      auto timeoutPromise = context.afterLimitTimeout(timeout).then(
-          [&context]() -> kj::Promise<WorkerInterface::AlarmResult> {
-        // We don't want to delete the alarm since we have not successfully completed the alarm
-        // execution.
+      return context
+          .run([exportedHandler, &context, timeout, retryCount, &alarm,
+                   maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](
+                   Worker::Lock& lock) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
+        jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
+        // We want to limit alarm handler walltime to 15 minutes at most. If the timeout promise
+        // completes we want to cancel the alarm handler. If the alarm handler promise completes first
+        // timeout will be canceled.
+        auto timeoutPromise = context.afterLimitTimeout(timeout).then(
+            [&context]() -> kj::Promise<WorkerInterface::AlarmResult> {
+          // We don't want to delete the alarm since we have not successfully completed the alarm
+          // execution.
+          auto& actor = KJ_ASSERT_NONNULL(context.getActor());
+          auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
+          persistent.cancelDeferredAlarmDeletion();
+
+          LOG_NOSENTRY(WARNING, "Alarm exceeded its allowed execution time");
+          // Report alarm handler failure and log it.
+          auto e = KJ_EXCEPTION(OVERLOADED,
+              "broken.dropped; worker_do_not_log; jsg.Error: Alarm exceeded its allowed execution time");
+          context.getMetrics().reportFailure(e);
+
+          // We don't want the handler to keep running after timeout.
+          context.abort(kj::mv(e));
+          // We want timed out alarms to be treated as user errors. As such, we'll mark them as
+          // retriable, and we'll count the retries against the alarm retries limit. This will ensure
+          // that the handler will attempt to run for a number of times before giving up and deleting
+          // the alarm.
+          return WorkerInterface::AlarmResult{
+            .retry = true, .retryCountsAgainstLimit = true, .outcome = EventOutcome::EXCEEDED_CPU};
+        });
+
+        return alarm(lock, jsg::alloc<AlarmInvocationInfo>(retryCount))
+            .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
+          return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
+        }).exclusiveJoin(kj::mv(timeoutPromise));
+      })
+          .catch_([&context, deferredDelete = kj::mv(armResult.deferredDelete)](
+                      kj::Exception&& e) mutable {
         auto& actor = KJ_ASSERT_NONNULL(context.getActor());
         auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
         persistent.cancelDeferredAlarmDeletion();
 
-        LOG_NOSENTRY(WARNING, "Alarm exceeded its allowed execution time");
-        // Report alarm handler failure and log it.
-        auto e = KJ_EXCEPTION(OVERLOADED,
-            "broken.dropped; worker_do_not_log; jsg.Error: Alarm exceeded its allowed execution time");
         context.getMetrics().reportFailure(e);
 
-        // We don't want the handler to keep running after timeout.
-        context.abort(kj::mv(e));
-        // We want timed out alarms to be treated as user errors. As such, we'll mark them as
-        // retriable, and we'll count the retries against the alarm retries limit. This will ensure
-        // that the handler will attempt to run for a number of times before giving up and deleting
-        // the alarm.
-        return WorkerInterface::AlarmResult{
-          .retry = true, .retryCountsAgainstLimit = true, .outcome = EventOutcome::EXCEEDED_CPU};
-      });
+        // This will include the error in inspector/tracers and log to syslog if internal.
+        context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e));
 
-      return alarm(lock, jsg::alloc<AlarmInvocationInfo>(retryCount))
-          .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
-        return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
-      }).exclusiveJoin(kj::mv(timeoutPromise));
-    })
-        .catch_([&context, deferredDelete = kj::mv(deferredDelete)](kj::Exception&& e) mutable {
-      auto& actor = KJ_ASSERT_NONNULL(context.getActor());
-      auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
-      persistent.cancelDeferredAlarmDeletion();
-
-      context.getMetrics().reportFailure(e);
-
-      // This will include the error in inspector/tracers and log to syslog if internal.
-      context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e));
-
-      EventOutcome outcome = EventOutcome::EXCEPTION;
-      KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
-        outcome = status;
-      }
-
-      kj::String actorId;
-      KJ_SWITCH_ONEOF(actor.getId()) {
-        KJ_CASE_ONEOF(f, kj::Own<ActorIdFactory::ActorId>) {
-          actorId = f->toString();
+        EventOutcome outcome = EventOutcome::EXCEPTION;
+        KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
+          outcome = status;
         }
-        KJ_CASE_ONEOF(s, kj::String) {
-          actorId = kj::str(s);
-        }
-      }
 
-      // We only want to retry against limits if it's a user error. By default let's check if the
-      // output gate is broken.
-      auto shouldRetryCountsAgainstLimits = !context.isOutputGateBroken();
-
-      // We want to alert if we aren't going to count this alarm retry against limits
-      if (auto desc = e.getDescription(); !jsg::isTunneledException(desc) &&
-          !jsg::isDoNotLogException(desc) && context.isOutputGateBroken()) {
-        LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", actorId, e);
-      } else if (context.isOutputGateBroken()) {
-        // We don't usually log these messages, but it's useful to know the real reason we failed
-        // to correctly investigate stuck alarms.
-        LOG_NOSENTRY(ERROR,
-            "output lock broke during alarm execution without an interesting error description",
-            actorId, e);
-        if (e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none) {
-          // The handler failed because the user overloaded the object. It's their fault, we'll not
-          // retry forever.
-          shouldRetryCountsAgainstLimits = true;
-        }
-      }
-      return WorkerInterface::AlarmResult{.retry = true,
-        .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
-        .outcome = outcome};
-    })
-        .then(
-            [&context](
-                WorkerInterface::AlarmResult result) -> kj::Promise<WorkerInterface::AlarmResult> {
-      return context.waitForOutputLocks().then(
-          [result]() { return kj::mv(result); }, [&context](kj::Exception&& e) {
-        auto& actor = KJ_ASSERT_NONNULL(context.getActor());
         kj::String actorId;
         KJ_SWITCH_ONEOF(actor.getId()) {
           KJ_CASE_ONEOF(f, kj::Own<ActorIdFactory::ActorId>) {
@@ -500,21 +461,20 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
             actorId = kj::str(s);
           }
         }
-        // We only want to retry against limits if it's a user error. By default let's assume it's our
-        // fault.
-        auto shouldRetryCountsAgainstLimits = false;
-        if (auto desc = e.getDescription();
-            !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
-          if (isInterestingException(e)) {
-            LOG_EXCEPTION("alarmOutputLock"_kj, e);
-          } else {
-            LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", actorId, e);
-          }
-        } else {
+
+        // We only want to retry against limits if it's a user error. By default let's check if the
+        // output gate is broken.
+        auto shouldRetryCountsAgainstLimits = !context.isOutputGateBroken();
+
+        // We want to alert if we aren't going to count this alarm retry against limits
+        if (auto desc = e.getDescription(); !jsg::isTunneledException(desc) &&
+            !jsg::isDoNotLogException(desc) && context.isOutputGateBroken()) {
+          LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", actorId, e);
+        } else if (context.isOutputGateBroken()) {
           // We don't usually log these messages, but it's useful to know the real reason we failed
           // to correctly investigate stuck alarms.
           LOG_NOSENTRY(ERROR,
-              "output lock broke after executing alarm without an interesting error description",
+              "output lock broke during alarm execution without an interesting error description",
               actorId, e);
           if (e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none) {
             // The handler failed because the user overloaded the object. It's their fault, we'll not
@@ -524,12 +484,57 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         }
         return WorkerInterface::AlarmResult{.retry = true,
           .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
-          .outcome = EventOutcome::EXCEPTION};
+          .outcome = outcome};
+      })
+          .then([&context](WorkerInterface::AlarmResult result)
+                    -> kj::Promise<WorkerInterface::AlarmResult> {
+        return context.waitForOutputLocks().then(
+            [result]() { return kj::mv(result); }, [&context](kj::Exception&& e) {
+          auto& actor = KJ_ASSERT_NONNULL(context.getActor());
+          kj::String actorId;
+          KJ_SWITCH_ONEOF(actor.getId()) {
+            KJ_CASE_ONEOF(f, kj::Own<ActorIdFactory::ActorId>) {
+              actorId = f->toString();
+            }
+            KJ_CASE_ONEOF(s, kj::String) {
+              actorId = kj::str(s);
+            }
+          }
+          // We only want to retry against limits if it's a user error. By default let's assume it's our
+          // fault.
+          auto shouldRetryCountsAgainstLimits = false;
+          if (auto desc = e.getDescription();
+              !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
+            if (isInterestingException(e)) {
+              LOG_EXCEPTION("alarmOutputLock"_kj, e);
+            } else {
+              LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", actorId, e);
+            }
+          } else {
+            // We don't usually log these messages, but it's useful to know the real reason we failed
+            // to correctly investigate stuck alarms.
+            LOG_NOSENTRY(ERROR,
+                "output lock broke after executing alarm without an interesting error description",
+                actorId, e);
+            if (e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none) {
+              // The handler failed because the user overloaded the object. It's their fault, we'll not
+              // retry forever.
+              shouldRetryCountsAgainstLimits = true;
+            }
+          }
+          return WorkerInterface::AlarmResult{.retry = true,
+            .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
+            .outcome = EventOutcome::EXCEPTION};
+        });
       });
-    });
-  } else {
-    return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::CANCELED};
+    }
+    KJ_CASE_ONEOF(armResult, ActorCacheInterface::CancelAlarmHandler) {
+      return armResult.waitBeforeCancel.then([]() {
+        return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::CANCELED};
+      });
+    }
   }
+  KJ_UNREACHABLE;
 }
 
 jsg::Promise<void> ServiceWorkerGlobalScope::test(

@@ -76,7 +76,8 @@ public:
   DeleteAllResults deleteAll(WriteOptions options) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
-  kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date scheduledTime, bool noCache = false) override;
+  kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
+      kj::Date scheduledTime, bool noCache = false) override;
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
   // See ActorCacheInterface
