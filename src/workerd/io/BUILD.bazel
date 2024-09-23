@@ -321,6 +321,16 @@ kj_test(
 )
 
 kj_test(
+    src = "actor-sqlite-test.c++",
+    deps = [
+        ":actor",
+        ":io-gate",
+        "//src/workerd/util:test",
+        "//src/workerd/util:test-util",
+    ],
+)
+
+kj_test(
     src = "promise-wrapper-test.c++",
     deps = [":io"],
 )

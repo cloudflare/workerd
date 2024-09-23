@@ -163,7 +163,8 @@ kj::Maybe<kj::Promise<void>> ActorCache::evictStale(kj::Date now) {
   return getBackpressure();
 }
 
-kj::Maybe<kj::Own<void>> ActorCache::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
+kj::OneOf<ActorCache::CancelAlarmHandler, ActorCache::RunAlarmHandler> ActorCache::armAlarmHandler(
+    kj::Date scheduledTime, bool noCache) {
   noCache = noCache || lru.options.noCache;
 
   KJ_ASSERT(!currentAlarmTime.is<DeferredAlarmDelete>());
@@ -173,7 +174,7 @@ kj::Maybe<kj::Own<void>> ActorCache::armAlarmHandler(kj::Date scheduledTime, boo
       if (t.status == KnownAlarmTime::Status::CLEAN) {
         // If there's a clean scheduledTime that is different from ours, this run should be
         // canceled.
-        return kj::none;
+        return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
       } else {
         // There's a alarm write that hasn't been set yet pending for a time different than ours --
         // We won't cancel the alarm because it hasn't been confirmed, but we shouldn't delete
@@ -191,7 +192,7 @@ kj::Maybe<kj::Own<void>> ActorCache::armAlarmHandler(kj::Date scheduledTime, boo
     };
   }
   static const DeferredAlarmDeleter disposer;
-  return kj::Own<void>(this, disposer);
+  return RunAlarmHandler{.deferredDelete = kj::Own<void>(this, disposer)};
 }
 
 void ActorCache::cancelDeferredAlarmDeletion() {
