@@ -345,6 +345,7 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
 
   if (haveDeferredDelete) {
     metadata.setAlarm(kj::none);
+    haveDeferredDelete = false;
   }
 }
 
@@ -585,6 +586,12 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
 kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSqlite::
     armAlarmHandler(kj::Date scheduledTime, bool noCache) {
   KJ_ASSERT(!inAlarmHandler);
+
+  if (haveDeferredDelete) {
+    // Unlikely to happen, unless caller is starting new alarm handler before previous alarm
+    // handler cleanup has completed.
+    LOG_WARNING_ONCE("expected previous alarm handler to be cleaned up");
+  }
 
   auto localAlarmState = metadata.getAlarm();
   if (localAlarmState != scheduledTime) {
