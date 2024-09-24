@@ -131,6 +131,7 @@ def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProce
 
 
 def clang_format(files: list[Path], check: bool = False) -> bool:
+    check_clang_format()
     cmd = [CLANG_FORMAT]
     if check:
         cmd += ["--dry-run", "--Werror"]
@@ -258,7 +259,6 @@ def format(config: FormatConfig, files: list[Path], check: bool) -> tuple[bool, 
 
 def main() -> None:
     options = parse_args()
-    check_clang_format()
     if options.subcommand == "git":
         files = git_get_modified_files(options.target, options.source, options.staged)
     else:
