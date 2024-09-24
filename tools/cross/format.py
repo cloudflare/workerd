@@ -15,7 +15,9 @@ from sys import exit
 from typing import Callable, Optional
 
 CLANG_FORMAT = os.environ.get("CLANG_FORMAT", "clang-format")
-PRETTIER = os.environ.get("PRETTIER", "bazel-bin/node_modules/prettier/bin/prettier.cjs")
+PRETTIER = os.environ.get(
+    "PRETTIER", "bazel-bin/node_modules/prettier/bin/prettier.cjs"
+)
 RUFF = os.environ.get("RUFF", "ruff")
 
 
@@ -139,6 +141,9 @@ def clang_format(files: list[Path], check: bool = False) -> bool:
 
 
 def prettier(files: list[Path], check: bool = False) -> bool:
+    if not Path(PRETTIER).exists():
+        subprocess.run(["bazel", "build", "//:node_modules/prettier"])
+
     cmd = [PRETTIER, "--log-level=warn", "--check" if check else "--write"]
     result = subprocess.run(cmd + files)
     return result.returncode == 0
