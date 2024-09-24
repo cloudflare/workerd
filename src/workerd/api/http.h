@@ -1041,7 +1041,6 @@ public:
     JSG_STRUCT_TS_OVERRIDE(ResponseInit {
       headers?: HeadersInit;
       encodeBody?: "automatic" | "manual";
-      webSocket?: WebSocket;
     });
   };
 
