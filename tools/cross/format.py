@@ -3,7 +3,6 @@
 import logging
 import os
 import platform
-import re
 import subprocess
 import sys
 from argparse import ArgumentParser, Namespace
@@ -13,7 +12,6 @@ from pathlib import Path
 from sys import exit
 from typing import Callable, Optional
 
-CLANG_FORMAT = os.environ.get("CLANG_FORMAT", "clang-format")
 PRETTIER = os.environ.get(
     "PRETTIER", "bazel-bin/node_modules/prettier/bin/prettier.cjs"
 )
@@ -66,25 +64,6 @@ def parse_args() -> Namespace:
         )
         exit(1)
     return options
-
-
-def check_clang_format() -> None:
-    try:
-        # Run clang-format with --version to check its version
-        output = subprocess.check_output([CLANG_FORMAT, "--version"], encoding="utf-8")
-        match = re.search(r"version\s*(\d+)\.(\d+)\.(\d+)", output)
-        if not match:
-            logging.error("unable to read clang version")
-            exit(1)
-
-        major, minor, patch = match.groups()
-        if int(major) != 18 or int(minor) != 1 or int(patch) != 8:
-            logging.error("clang-format version must be 18.1.8")
-            exit(1)
-    except FileNotFoundError:
-        # Clang-format is not in the PATH
-        logging.exception("clang-format not found in the PATH")
-        exit(1)
 
 
 def filter_files_by_globs(
@@ -150,13 +129,11 @@ def run_bazel_tool(
 
 
 def clang_format(files: list[Path], check: bool = False) -> bool:
-    check_clang_format()
-    cmd = [CLANG_FORMAT]
     if check:
-        cmd += ["--dry-run", "--Werror"]
+        cmd = ["--dry-run", "--Werror"]
     else:
-        cmd.append("-i")
-    result = subprocess.run(cmd + files)
+        cmd = ["-i"]
+    result = run_bazel_tool("clang-format", cmd + files)
     return result.returncode == 0
 
 
@@ -230,9 +207,9 @@ class FormatConfig:
 
 
 FORMATTERS = [
-    # FormatConfig(
-    #     directory="src/workerd", globs=("*.c++", "*.h"), formatter=clang_format
-    # ),
+    FormatConfig(
+        directory="src/workerd", globs=("*.c++", "*.h"), formatter=clang_format
+    ),
     FormatConfig(
         directory="src",
         globs=("*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"),
