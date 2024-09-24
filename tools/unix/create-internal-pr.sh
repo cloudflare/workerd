@@ -20,8 +20,7 @@ fi
 if [ $BRANCH_EXISTS -eq 1 ]; then
 	git checkout $SYNC_BRANCH_NAME
 else
-	git checkout master 
-	git checkout -b $SYNC_BRANCH_NAME
+	git checkout -b $SYNC_BRANCH_NAME origin/master
 fi
 
 git -C deps/workerd fetch origin $BRANCH_NAME
