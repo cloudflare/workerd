@@ -1,0 +1,4 @@
+load("//:build/wd_test.bzl", "wd_test")
+load("//src/workerd/api/wpt:generate-tests.bzl", "gen_wpt_tests")
+
+gen_wpt_tests(glob(["**/*.js"]))
