@@ -292,11 +292,14 @@ void maybeWarnIfNotText(jsg::Lock& js, kj::StringPtr str) {
 }
 
 kj::String fastEncodeBase64Url(kj::ArrayPtr<const byte> bytes) {
+  if (KJ_UNLIKELY(bytes.size() == 0)) {
+    return {};
+  }
   auto expected_length = simdutf::base64_length_from_binary(bytes.size(), simdutf::base64_url);
-  auto output = kj::heapArray<char>(expected_length);
+  auto output = kj::heapArray<char>(expected_length + 1);
   auto actual_length = simdutf::binary_to_base64(
       bytes.asChars().begin(), bytes.size(), output.asChars().begin(), simdutf::base64_url);
-  KJ_ASSERT(expected_length == actual_length);
+  output[actual_length] = '\0';
   return kj::String(kj::mv(output));
 }
 
