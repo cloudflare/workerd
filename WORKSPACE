@@ -633,3 +633,46 @@ http_file(
     integrity = "sha256-NwzVdgda0pkwqC9d4TLxod5AhMeEqCUUvU2oDIWs9Kg=",
     url = "https://github.com/bazelbuild/buildtools/releases/download/v7.3.1/buildifier-windows-amd64.exe",
 )
+
+FILE_GROUP = """filegroup(
+	name="file", 
+	srcs=["**/*"])"""
+
+http_archive(
+    name = "ruff-darwin-arm64",
+    build_file_content = FILE_GROUP,
+    integrity = "sha256-KbGnLDXu1bIkD/Nl4fRdB7wMQLkzGhGcK1nMpEwPMi4=",
+    strip_prefix = "ruff-aarch64-apple-darwin",
+    url = "https://github.com/astral-sh/ruff/releases/download/0.6.7/ruff-aarch64-apple-darwin.tar.gz",
+)
+
+http_archive(
+    name = "ruff-darwin-amd64",
+    build_file_content = FILE_GROUP,
+    integrity = "sha256-W3JL0sldkm6kbaB9+mrFVoY32wR0CDhpi7SxkJ2Oug0=",
+    strip_prefix = "ruff-x86_64-apple-darwin",
+    url = "https://github.com/astral-sh/ruff/releases/download/0.6.7/ruff-x86_64-apple-darwin.tar.gz",
+)
+
+http_archive(
+    name = "ruff-linux-arm64",
+    build_file_content = FILE_GROUP,
+    integrity = "sha256-7nBZdr686PdPmCFa2EN65OHgmDCfqB3ygFaXVgUDRuM=",
+    strip_prefix = "ruff-aarch64-unknown-linux-gnu",
+    url = "https://github.com/astral-sh/ruff/releases/download/0.6.7/ruff-aarch64-unknown-linux-gnu.tar.gz",
+)
+
+http_archive(
+    name = "ruff-linux-amd64",
+    build_file_content = FILE_GROUP,
+    integrity = "sha256-Uu1+NMFYCfMT4/jtQoH+Uj5+XwZn57+ZWIhbfm8icKg=",
+    strip_prefix = "ruff-x86_64-unknown-linux-gnu",
+    url = "https://github.com/astral-sh/ruff/releases/download/0.6.7/ruff-x86_64-unknown-linux-gnu.tar.gz",
+)
+
+http_archive(
+    name = "ruff-windows-amd64",
+    build_file_content = FILE_GROUP,
+    integrity = "sha256-H2yX4kuLyNdBrkRPhTr61FQqJRyiKeLq4TnMmKE0t2A=",
+    url = "https://github.com/astral-sh/ruff/releases/download/0.6.7/ruff-x86_64-pc-windows-msvc.zip",
+)

@@ -4,7 +4,6 @@ import logging
 import os
 import platform
 import re
-import shutil
 import subprocess
 import sys
 from argparse import ArgumentParser, Namespace
@@ -18,7 +17,6 @@ CLANG_FORMAT = os.environ.get("CLANG_FORMAT", "clang-format")
 PRETTIER = os.environ.get(
     "PRETTIER", "bazel-bin/node_modules/prettier/bin/prettier.cjs"
 )
-RUFF = os.environ.get("RUFF", "ruff")
 
 
 def parse_args() -> Namespace:
@@ -110,22 +108,43 @@ def exec_target() -> str:
     return f"{sys.platform}-{ALIASES.get(machine, machine)}"
 
 
-def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProcess:
+def init_external_dir() -> Path:
+    # Create a symlink to the bazel external directory
     external_dir = Path("external")
-    if not external_dir.exists():
-        # Create a symlink to the bazel external directory
+
+    # Fast path to avoid calling into bazel
+    if external_dir.exists():
+        return external_dir
+
+    try:
         bazel_base = Path(
             subprocess.run(["bazel", "info", "output_base"], capture_output=True)
             .stdout.decode()
             .strip()
         )
         external_dir.symlink_to(bazel_base / "external")
+    except FileExistsError:
+        # It's possible the link was created while we were working; this is fine
+        pass
 
+    return external_dir
+
+
+def run_bazel_tool(
+    tool_name: str, args: list[str], is_archive: bool = False
+) -> subprocess.CompletedProcess:
     tool_target = f"{tool_name}-{exec_target()}"
-    tool_path = Path("external") / tool_target / "file" / "downloaded"
+
+    if is_archive:
+        tool_path = init_external_dir() / tool_target / tool_name
+    else:
+        tool_path = init_external_dir() / tool_target / "file" / "downloaded"
 
     if not tool_path.exists():
-        subprocess.run(["bazel", "fetch", f"@{tool_target}//file"])
+        fetch_target = (
+            f"@{tool_target}//:file" if is_archive else f"@{tool_target}//file"
+        )
+        subprocess.run(["bazel", "fetch", fetch_target])
 
     return subprocess.run([tool_path, *args])
 
@@ -159,27 +178,18 @@ def buildifier(files: list[Path], check: bool = False) -> bool:
 def ruff(files: list[Path], check: bool = False) -> bool:
     if not files:
         return True
-    if not shutil.which(RUFF):
-        msg = "Cannot find ruff, will not format Python"
-        if check:
-            # In ci, fail.
-            logging.error(msg)
-            return False
-        else:
-            # In a local checkout, let it go. If the user wants Python
-            # formatting they can install ruff and run again.
-            logging.warning(msg)
-            return True
-    # lint
-    cmd = [RUFF, "check"]
+
+    cmd = ["check"]
     if not check:
         cmd.append("--fix")
-    result1 = subprocess.run(cmd + files)
+    result1 = run_bazel_tool("ruff", cmd + files, is_archive=True)
+
     # format
-    cmd = [RUFF, "format"]
+    cmd = ["format"]
     if check:
         cmd.append("--diff")
-    result2 = subprocess.run(cmd + files)
+
+    result2 = run_bazel_tool("ruff", cmd + files, is_archive=True)
     return result1.returncode == 0 and result2.returncode == 0
 
 
@@ -229,7 +239,7 @@ FORMATTERS = [
         formatter=prettier,
     ),
     FormatConfig(directory="src", globs=("*.json",), formatter=prettier),
-    # FormatConfig(directory=".", globs=("*.py",), formatter=ruff),
+    FormatConfig(directory=".", globs=("*.py",), formatter=ruff),
     FormatConfig(
         directory=".",
         globs=("*.bzl", "WORKSPACE", "BUILD", "BUILD.*"),
