@@ -44,7 +44,7 @@ void warnIfBadHeaderString(const jsg::ByteString& byteString) {
         // the wrong thing by UTF-8-encoding their bytes. To help the author understand the issue,
         // we can show the string that they would be putting in the header if we implemented the
         // spec correctly, and the string that is actually going get serialized onto the wire.
-        auto rawHex = kj::strArray(KJ_MAP(b, kj::encodeUtf16(byteString)) {
+        auto rawHex = kj::strArray(KJ_MAP(b, fastEncodeUtf16(byteString.asArray())) {
           KJ_ASSERT(b < 256);  // Guaranteed by StringWrapper having set CONTAINS_EXTENDED_ASCII.
           return kj::str("\\x", kj::hex(kj::byte(b)));
         }, "");
