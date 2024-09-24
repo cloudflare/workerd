@@ -297,6 +297,8 @@ _NORMAL_DEPENDENCIES = {
     "": {
         _COMMON_CONDITION: {
             "anyhow": Label("@crates_vendor__anyhow-1.0.89//:anyhow"),
+            "capnp": Label("@crates_vendor__capnp-0.20.1//:capnp"),
+            "capnpc": Label("@crates_vendor__capnpc-0.20.0//:capnpc"),
             "clang-ast": Label("@crates_vendor__clang-ast-0.1.26//:clang_ast"),
             "flate2": Label("@crates_vendor__flate2-1.0.33//:flate2"),
             "lolhtml": Label("@crates_vendor__lolhtml-1.1.1//:lolhtml"),
@@ -447,6 +449,26 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__capnp-0.20.1",
+        sha256 = "561371d076e2d68725cfdf0e7af11a7609fb2d933b478b56e384e30eafef13ad",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/capnp/0.20.1/download"],
+        strip_prefix = "capnp-0.20.1",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.capnp-0.20.1.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__capnpc-0.20.0",
+        sha256 = "8d13cb6e2643fd1f9fb804ba938323636ef52e07d6e495e372d933ad0cb98207",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/capnpc/0.20.0/download"],
+        strip_prefix = "capnpc-0.20.0",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.capnpc-0.20.0.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__cc-1.1.21",
         sha256 = "07b1695e2c7e8fc85310cde85aeaab7e3097f593c91d209d3f9df76c928100f0",
         type = "tar.gz",
@@ -543,6 +565,16 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/dtoa-short/0.3.5/download"],
         strip_prefix = "dtoa-short-0.3.5",
         build_file = Label("@workerd//deps/rust/crates:BUILD.dtoa-short-0.3.5.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__embedded-io-0.6.1",
+        sha256 = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/embedded-io/0.6.1/download"],
+        strip_prefix = "embedded-io-0.6.1",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.embedded-io-0.6.1.bazel"),
     )
 
     maybe(
@@ -1126,6 +1158,8 @@ def crate_repositories():
 
     return [
         struct(repo = "crates_vendor__anyhow-1.0.89", is_dev_dep = False),
+        struct(repo = "crates_vendor__capnp-0.20.1", is_dev_dep = False),
+        struct(repo = "crates_vendor__capnpc-0.20.0", is_dev_dep = False),
         struct(repo = "crates_vendor__clang-ast-0.1.26", is_dev_dep = False),
         struct(repo = "crates_vendor__flate2-1.0.33", is_dev_dep = False),
         struct(repo = "crates_vendor__lolhtml-1.1.1", is_dev_dep = False),

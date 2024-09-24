@@ -1,6 +1,6 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("//:build/kj_test.bzl", "kj_test")
-load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -136,7 +136,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":util",
-        "//src/workerd/io:compatibility_date_capnp",
+        "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util",
         "@capnp-cpp//src/kj",
@@ -168,17 +168,9 @@ wd_cc_library(
     ],
 )
 
-wd_cc_capnp_library(
-    name = "r2-api_capnp",
-    srcs = ["r2-api.capnp"],
-    visibility = ["//visibility:public"],
-)
+wd_capnp_library(src = "r2-api.capnp")
 
-wd_cc_capnp_library(
-    name = "analytics-engine_capnp",
-    srcs = ["analytics-engine.capnp"],
-    visibility = ["//visibility:public"],
-)
+wd_capnp_library(src = "analytics-engine.capnp")
 
 wd_cc_library(
     name = "url",
@@ -187,7 +179,7 @@ wd_cc_library(
     implementation_deps = [":util"],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/workerd/io:compatibility_date_capnp",
+        "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
     ],

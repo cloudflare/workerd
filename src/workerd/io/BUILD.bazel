@@ -1,7 +1,7 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/kj_test.bzl", "kj_test")
-load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 # Flag to enable WebGPU support via the Dawn library
@@ -84,12 +84,13 @@ wd_cc_library(
         ":actor",
         ":actor-id",
         ":actor-storage_capnp",
-        ":capnp",
+        ":cdp_capnp",
         ":io-channels",
         ":io-gate",
         ":io-helpers",
         ":limit-enforcer",
         ":observer",
+        ":supported-compatibility-date_capnp",
         ":trace",
         ":worker-interface",
         "//src/cloudflare",
@@ -247,71 +248,33 @@ capnp_embed(
     src = ":trimmed-supported-compatibility-date-gen",
 )
 
-# TODO(cleanup): Split this target up further, as many dependents don't need all the files here.
-#   Avoiding the dependency on supported-compatibility-date.capnp is often helpful due to the
-#   transitive dependency on `trimmed-supported-compatibility-date.txt` which is dynamically
-#   generated.
-wd_cc_capnp_library(
-    name = "capnp",
-    srcs = [
-        "cdp.capnp",
-        "supported-compatibility-date.capnp",
-    ],
-    visibility = ["//visibility:public"],
+wd_capnp_library(src = "cdp.capnp")
+
+wd_capnp_library(
+    src = "supported-compatibility-date.capnp",
     deps = [
-        ":compatibility_date_capnp",
-        ":features_capnp",
-        ":outcome_capnp",
-        ":script_version_capnp",
         ":trimmed-supported-compatibility-date",
-        "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
     ],
 )
 
-wd_cc_capnp_library(
-    name = "worker-interface_capnp",
-    srcs = [
-        "worker-interface.capnp",
-    ],
-    visibility = ["//visibility:public"],
+wd_capnp_library(
+    src = "worker-interface.capnp",
     deps = [
         ":outcome_capnp",
-        ":script_version_capnp",
+        ":script-version_capnp",
         "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
     ],
 )
 
-wd_cc_capnp_library(
-    name = "actor-storage_capnp",
-    srcs = [
-        "actor-storage.capnp",
-    ],
-    visibility = ["//visibility:public"],
-)
+wd_capnp_library(src = "actor-storage.capnp")
 
-wd_cc_capnp_library(
-    name = "outcome_capnp",
-    srcs = ["outcome.capnp"],
-    visibility = ["//visibility:public"],
-)
+wd_capnp_library(src = "outcome.capnp")
 
-wd_cc_capnp_library(
-    name = "script_version_capnp",
-    srcs = ["script-version.capnp"],
-    visibility = ["//visibility:public"],
-)
+wd_capnp_library(src = "script-version.capnp")
 
-wd_cc_capnp_library(
-    name = "compatibility_date_capnp",
-    srcs = ["compatibility-date.capnp"],
-    visibility = ["//visibility:public"],
-)
+wd_capnp_library(src = "compatibility-date.capnp")
 
-wd_cc_capnp_library(
-    name = "features_capnp",
-    srcs = ["features.capnp"],
-    visibility = ["//visibility:public"],
-)
+wd_capnp_library(src = "features.capnp")
 
 kj_test(
     src = "io-gate-test.c++",
