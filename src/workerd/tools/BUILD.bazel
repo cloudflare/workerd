@@ -46,8 +46,7 @@ rust_binary(
 # Deliberately not marking this run_binary_target(): The exec configuration compiles with
 # optimization by default, causing it to run markedly faster than the (non-opt) target
 # configuration, where param_extractor would otherwise take several minutes to run. A different
-# approach would be to set `rustc_flags = ["-C", "opt-level=3"],` here, although in this case any
-# dependencies shared with the rust-deps target would still need to be compiled twice.
+# approach would be to set -Copt-level=3 globally, but that's not helpful for debug builds.
 run_binary(
     name = "param_extractor",
     srcs = [

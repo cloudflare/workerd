@@ -138,7 +138,7 @@ build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 # Additional Rust flags (see https://doc.rust-lang.org/rustc/codegen-options/index.html)
 # Need to disable debug-assertions for fastbuild, should be off automatically for opt. As long as
 # rust-level LTO is not enabled, LLVM bitcode is not needed so -C embed-bitcode=n provides a free
-# improvement to build speed and rust-deps code size.
+# improvement to build speed and Rust code size.
 # Using extra_rustc_flag for non-exec flags so they can be overwritten selectively.
 build --@rules_rust//:extra_rustc_flag=-Cembed-bitcode=n
 build --@rules_rust//:extra_rustc_flag=-Cpanic=abort

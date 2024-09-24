@@ -6,9 +6,6 @@
 
 /*.code-workspace
 
-/rust-deps/target
-/rust-deps/Cargo.toml
-
 node_modules
 /npm/*/bin
 /npm/workerd/install.js
