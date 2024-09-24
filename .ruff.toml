@@ -22,6 +22,8 @@ select = [
 ]
 ignore = [
   "E402",  # module import not at top of file
+  "PLR0912", # too many branches
+  "PLR0915", # too many statements
   "PLR2004", # Magic value used in comparison
   "TRY003", # Avoid specifying long messages outside the exception class
   "UP038",  # Use X | Y in isinstance check instead of (X, Y)
