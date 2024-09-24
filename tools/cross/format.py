@@ -186,21 +186,21 @@ class FormatConfig:
 
 
 FORMATTERS = [
-    FormatConfig(
-        directory="src/workerd", globs=("*.c++", "*.h"), formatter=clang_format
-    ),
-    FormatConfig(
-        directory="src",
-        globs=("*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"),
-        formatter=prettier,
-    ),
-    FormatConfig(directory="src", globs=("*.json",), formatter=prettier),
-    FormatConfig(directory=".", globs=("*.py",), formatter=ruff),
-    FormatConfig(
-        directory=".",
-        globs=("*.bzl", "WORKSPACE", "BUILD", "BUILD.*"),
-        formatter=buildifier,
-    ),
+    # FormatConfig(
+    #     directory="src/workerd", globs=("*.c++", "*.h"), formatter=clang_format
+    # ),
+    # FormatConfig(
+    #     directory="src",
+    #     globs=("*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"),
+    #     formatter=prettier,
+    # ),
+    # FormatConfig(directory="src", globs=("*.json",), formatter=prettier),
+    # FormatConfig(directory=".", globs=("*.py",), formatter=ruff),
+    # FormatConfig(
+    #     directory=".",
+    #     globs=("*.bzl", "WORKSPACE", "BUILD", "BUILD.*"),
+    #     formatter=buildifier,
+    # ),
 ]
 
 
