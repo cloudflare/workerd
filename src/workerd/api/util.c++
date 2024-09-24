@@ -303,4 +303,15 @@ kj::String fastEncodeBase64Url(kj::ArrayPtr<const byte> bytes) {
   return kj::String(kj::mv(output));
 }
 
+kj::Array<char16_t> fastEncodeUtf16(kj::ArrayPtr<const char> bytes) {
+  if (KJ_UNLIKELY(bytes.size() == 0)) {
+    return {};
+  }
+  auto expected_length = simdutf::utf16_length_from_utf8(bytes.asChars().begin(), bytes.size());
+  auto output = kj::heapArray<char16_t>(expected_length);
+  auto actual_length =
+      simdutf::convert_utf8_to_utf16(bytes.asChars().begin(), bytes.size(), output.begin());
+  return output.slice(0, actual_length).attach(kj::mv(output));
+}
+
 }  // namespace workerd::api

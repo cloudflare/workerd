@@ -599,8 +599,8 @@ void URLSearchParams::sort() {
   //   🌈  f0 9f 8c 88 |  d83c df08
 
   std::stable_sort(url->query.begin(), url->query.end(), [](const auto& left, const auto& right) {
-    auto leftUtf16 = kj::encodeUtf16(left.name.asArray());
-    auto rightUtf16 = kj::encodeUtf16(right.name.asArray());
+    auto leftUtf16 = fastEncodeUtf16(left.name.asArray());
+    auto rightUtf16 = fastEncodeUtf16(right.name.asArray());
     return std::lexicographical_compare(
         leftUtf16.begin(), leftUtf16.end(), rightUtf16.begin(), rightUtf16.end());
   });
