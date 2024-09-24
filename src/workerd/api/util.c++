@@ -4,6 +4,8 @@
 
 #include "util.h"
 
+#include "simdutf.h"
+
 #include <workerd/io/io-context.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/thread-scopes.h>
@@ -288,4 +290,17 @@ void maybeWarnIfNotText(jsg::Lock& js, kj::StringPtr str) {
           "\". The result will probably be corrupted. Consider "
           "checking the Content-Type header before interpreting entities as text."));
 }
+
+kj::String fastEncodeBase64Url(kj::ArrayPtr<const byte> bytes) {
+  if (KJ_UNLIKELY(bytes.size() == 0)) {
+    return {};
+  }
+  auto expected_length = simdutf::base64_length_from_binary(bytes.size(), simdutf::base64_url);
+  auto output = kj::heapArray<char>(expected_length + 1);
+  auto actual_length = simdutf::binary_to_base64(
+      bytes.asChars().begin(), bytes.size(), output.asChars().begin(), simdutf::base64_url);
+  output[actual_length] = '\0';
+  return kj::String(kj::mv(output));
+}
+
 }  // namespace workerd::api

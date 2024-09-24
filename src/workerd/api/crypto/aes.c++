@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
+#include "util.h"
 
 #include <workerd/io/io-context.h>
 
@@ -166,7 +167,7 @@ private:
 
       SubtleCrypto::JsonWebKey jwk;
       jwk.kty = kj::str("oct");
-      jwk.k = kj::encodeBase64Url(keyData);
+      jwk.k = fastEncodeBase64Url(keyData);
       jwk.alg = kj::str("A", lengthInBytes * 8, aesMode);
       jwk.key_ops = getUsages().map([](auto usage) { return kj::str(usage.name()); });
       // I don't know why the spec says:
