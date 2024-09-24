@@ -1,5 +1,13 @@
 workspace(name = "workerd")
 
+load("@//build/deps:gen/build_deps.bzl", build_deps_gen = "deps_gen")
+
+build_deps_gen()
+
+load("@//build/deps:gen/deps.bzl", "deps_gen")
+
+deps_gen()
+
 # ========================================================================================
 # Bazel basics
 
@@ -8,26 +16,9 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file"
 
 NODE_VERSION = "20.14.0"
 
-http_archive(
-    name = "bazel_skylib",
-    sha256 = "9f38886a40548c6e96c106b752f242130ee11aaa068a56ba7e56f4511f33e4f2",
-    urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.6.1/bazel-skylib-1.6.1.tar.gz",
-        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.6.1/bazel-skylib-1.6.1.tar.gz",
-    ],
-)
-
 load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 
 bazel_skylib_workspace()
-
-# Needed for objc_library starting with bazel 7.
-
-http_archive(
-    name = "build_bazel_apple_support",
-    sha256 = "c31ce8e531b50ef1338392ee29dd3db3689668701ec3237b9c61e26a1937ab07",
-    url = "https://github.com/bazelbuild/apple_support/releases/download/1.16.0/apple_support.1.16.0.tar.gz",
-)
 
 load(
     "@build_bazel_apple_support//lib:repositories.bzl",
@@ -45,25 +36,6 @@ bazel_features_deps()
 # Simple dependencies
 
 http_archive(
-    name = "capnp-cpp",
-    integrity = "sha256-u4TajPQnM3yQIcLUghhNnEUslu0o3q0VdY3jRoPq7yM=",
-    strip_prefix = "capnproto-capnproto-6446b72/c++",
-    type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/6446b721a9860eebccf9d3c73b27610491359b5a"],
-)
-
-http_archive(
-    name = "ssl",
-    integrity = "sha256-fAgiuoIKLTwR0cwrUz6gwiAiSxGsUKtW2XzgtftXswM=",
-    strip_prefix = "google-boringssl-c08ccc9",
-    type = "tgz",
-    # from main-with-bazel branch. Later boringssl versions have bazel support on the main branch,
-    # so using the custom branch with a different directory structure will no longer be needed in
-    # the future.
-    urls = ["https://github.com/google/boringssl/tarball/c08ccc9ed166a82b92edd70ab215ae1f2501e838"],
-)
-
-http_archive(
     name = "sqlite3",
     build_file = "//:build/BUILD.sqlite3",
     patch_args = ["-p1"],
@@ -75,13 +47,6 @@ http_archive(
     sha256 = "ab9aae38a11b931f35d8d1c6d62826d215579892e6ffbf89f20bdce106a9c8c5",
     strip_prefix = "sqlite-src-3440000",
     url = "https://sqlite.org/2023/sqlite-src-3440000.zip",
-)
-
-http_archive(
-    name = "rules_python",
-    integrity = "sha256-d4quqz5s/VbWgcifXBDXrWv40vGnLeneVbIwgbLTFhg=",
-    strip_prefix = "rules_python-0.34.0",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.34.0/rules_python-0.34.0.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")

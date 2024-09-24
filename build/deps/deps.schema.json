@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/product.schema.json",
+  "title": "Dependencies",
+  "description": "Description of external dependencies for the project",
+  "type": "object",
+  "properties": {
+    "repositories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "github_tarball"
+              },
+              "name": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "freeze_commit": {
+                "type": "string"
+              },
+              "freeze_sha256": {
+                "type": "string"
+              },
+              "build_file": {
+                "type": "string"
+              },
+              "build_file_content": {
+                "type": "string"
+              },
+              "patches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "repo_mapping": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "branch": {
+                "type": "string"
+              },
+              "extra_strip_prefix": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "name",
+              "owner",
+              "repo"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "github_release"
+              },
+              "name": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "file_regex": {
+                "type": "string"
+              },
+              "file_type": {
+                "type": "string",
+                "enum": [
+                  "archive",
+                  "executable"
+                ]
+              },
+              "freeze_version": {
+                "type": "string"
+              },
+              "freeze_sha256": {
+                "type": "string"
+              },
+              "strip_prefix": {
+                "type": "string"
+              },
+              "build_file": {
+                "type": "string"
+              },
+              "build_file_content": {
+                "type": "string"
+              },
+              "patches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "repo_mapping": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "name",
+              "owner",
+              "repo",
+              "file_regex"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "git_clone"
+              },
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "build_file": {
+                "type": "string"
+              },
+              "build_file_content": {
+                "type": "string"
+              },
+              "freeze_commit": {
+                "type": "string"
+              },
+              "patches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "repo_mapping": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "name",
+              "url"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "crate"
+              },
+              "name": {
+                "type": "string"
+              },
+              "build_file": {
+                "type": "string"
+              },
+              "freeze_version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "name",
+              "build_file"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "repositories"
+  ]
+}
