@@ -15,7 +15,7 @@ from sys import exit
 from typing import Callable, Optional
 
 CLANG_FORMAT = os.environ.get("CLANG_FORMAT", "clang-format")
-PRETTIER = os.environ.get("PRETTIER", "node_modules/.bin/prettier")
+PRETTIER = os.environ.get("PRETTIER", "bazel-bin/node_modules/prettier/bin/prettier.cjs")
 RUFF = os.environ.get("RUFF", "ruff")
 
 
