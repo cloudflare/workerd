@@ -22,8 +22,9 @@ public:
     return inner.NumberOfWorkerThreads();
   }
 
-  std::shared_ptr<v8::TaskRunner> GetForegroundTaskRunner(v8::Isolate* isolate) override {
-    return inner.GetForegroundTaskRunner(isolate);
+  std::shared_ptr<v8::TaskRunner> GetForegroundTaskRunner(
+      v8::Isolate* isolate, v8::TaskPriority priority) override {
+    return inner.GetForegroundTaskRunner(isolate, priority);
   }
 
   void PostTaskOnWorkerThreadImpl(v8::TaskPriority priority,
