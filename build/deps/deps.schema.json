@@ -115,6 +115,9 @@
                 "additionalProperties": {
                   "type": "string"
                 }
+              },
+              "downloaded_file_path": {
+                "type": "string"
               }
             },
             "required": [

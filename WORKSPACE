@@ -257,63 +257,6 @@ git_repository(
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
-http_file(
-    name = "cargo_bazel_linux_x64",
-    executable = True,
-    sha256 = "87a56511eb592f4f118750043e38ad40814f4be20b30f796506de7634aa2d41e",
-    urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.46.0/cargo-bazel-x86_64-unknown-linux-gnu",
-    ],
-)
-
-http_file(
-    name = "cargo_bazel_linux_arm64",
-    executable = True,
-    sha256 = "490b52bd8407613c3aa69b9e3f52635a2fe7631ccb5c5bea9d8d0bc0adfa6d0f",
-    urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-aarch64-unknown-linux-gnu",
-    ],
-)
-
-http_file(
-    name = "cargo_bazel_macos_x64",
-    executable = True,
-    sha256 = "cf873df6f03c94b95af567f5b9a6ff3e1528052cc89cabbee5a330e7c94b75c9",
-    urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-x86_64-apple-darwin",
-    ],
-)
-
-http_file(
-    name = "cargo_bazel_macos_arm64",
-    executable = True,
-    integrity = "sha256-RJ6t4W3oO4jdtMjea+3SF3OplpGuBY8/TGxTNiHDn0w=",
-    urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.50.0/cargo-bazel-aarch64-apple-darwin",
-    ],
-)
-
-http_file(
-    name = "cargo_bazel_win_x64",
-    downloaded_file_path = "downloaded.exe",  # .exe extension required for Windows to recognise as executable
-    executable = True,
-    sha256 = "dea1f912f7c432cd9f84bd2e7b4ad791e7ccfb0c01a6984ccc6498e0cc8be0a7",
-    urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/cargo-bazel-x86_64-pc-windows-msvc.exe",
-    ],
-)
-
-# TODO(cleanup): Bring rules_rust and cargo_bazel back in sync – rules_rust was stuck at an older
-# version due to linker errors but has been upgraded since. Some version mismatch is acceptable here
-# since cargo_bazel is only used to generate build files.
-http_archive(
-    name = "rules_rust",
-    integrity = "sha256-NE2PXqlFFVnUDR4msCyI3kZtv1y1Io2MCsrlVxsdqI4=",
-    urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.50.0/rules_rust-v0.50.0.tar.gz",
-    ],
-)
-
 load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
 
 rules_rust_dependencies()

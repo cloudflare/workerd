@@ -2,11 +2,23 @@
 
 load("@//build/deps:gen/dep_bazel_skylib.bzl", "dep_bazel_skylib")
 load("@//build/deps:gen/dep_build_bazel_apple_support.bzl", "dep_build_bazel_apple_support")
+load("@//build/deps:gen/dep_cargo_bazel_linux_arm64.bzl", "dep_cargo_bazel_linux_arm64")
+load("@//build/deps:gen/dep_cargo_bazel_linux_x64.bzl", "dep_cargo_bazel_linux_x64")
+load("@//build/deps:gen/dep_cargo_bazel_macos_arm64.bzl", "dep_cargo_bazel_macos_arm64")
+load("@//build/deps:gen/dep_cargo_bazel_macos_x64.bzl", "dep_cargo_bazel_macos_x64")
+load("@//build/deps:gen/dep_cargo_bazel_win_x64.bzl", "dep_cargo_bazel_win_x64")
 load("@//build/deps:gen/dep_rules_license.bzl", "dep_rules_license")
 load("@//build/deps:gen/dep_rules_python.bzl", "dep_rules_python")
+load("@//build/deps:gen/dep_rules_rust.bzl", "dep_rules_rust")
 
 def deps_gen():
     dep_bazel_skylib()
     dep_rules_license()
     dep_rules_python()
     dep_build_bazel_apple_support()
+    dep_rules_rust()
+    dep_cargo_bazel_linux_x64()
+    dep_cargo_bazel_linux_arm64()
+    dep_cargo_bazel_macos_x64()
+    dep_cargo_bazel_macos_arm64()
+    dep_cargo_bazel_win_x64()
