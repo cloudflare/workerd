@@ -2603,3 +2603,22 @@ const PSS_VECTORS_JSON = `{
     ]
   }
 }`;
+
+export const compatFlagTest = {
+  async test(_, env) {
+    const waitForIt = async (test) => {
+      const res = await env[test].fetch('http://example.org');
+      return await res.text();
+    };
+    const results = await Promise.allSettled([
+      waitForIt('compat'),
+      waitForIt('compatv2'),
+      waitForIt('compatNoV2'),
+    ]);
+    assert.deepStrictEqual(results, [
+      { status: 'fulfilled', value: 'true' },
+      { status: 'fulfilled', value: 'true' },
+      { status: 'fulfilled', value: 'true' },
+    ]);
+  },
+};
