@@ -2639,6 +2639,8 @@ public:
   void runMicrotasks();
   void terminateExecution();
 
+  // Logs and reports the error to tail workers (if called within an request),
+  // the inspector (if attached), or to KJ_LOG(Info).
   virtual void reportError(const JsValue& value) = 0;
 
 private:
