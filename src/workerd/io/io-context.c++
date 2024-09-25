@@ -835,6 +835,24 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       });
 }
 
+kj::Own<kj::HttpClient> IoContext::getHttpClientWithCallback(uint channel,
+    bool isInHouse,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::ConstString operationName,
+    kj::FunctionParam<void(TraceContext&)> func) {
+  return asHttpClient(getSubrequest(
+      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
+    func(tracing);
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
+  },
+      SubrequestOptions{
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .operationName = kj::mv(operationName),
+      }));
+}
+
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
