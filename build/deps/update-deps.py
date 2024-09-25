@@ -2,6 +2,7 @@
 """
 Usage: update-deps.py [dep_name]
 """
+
 import datetime
 import hashlib
 import io
@@ -132,11 +133,14 @@ def macro_name(repo):
 class RateLimitedException(Exception):
     pass
 
+
 class AssetsException(Exception):
     pass
 
+
 class UnsupportedException(Exception):
     pass
+
 
 def github_urlopen(url):
     """
