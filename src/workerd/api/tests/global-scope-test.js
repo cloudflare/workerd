@@ -738,5 +738,9 @@ export const toStringTag = {
       toString.call(new URLSearchParams()),
       '[object URLSearchParams]'
     );
+
+    const internalFlag = Symbol.for('cloudflare:internal-class');
+    strictEqual(Headers.prototype[internalFlag], internalFlag);
+    strictEqual(new Headers()[internalFlag], internalFlag);
   },
 };
