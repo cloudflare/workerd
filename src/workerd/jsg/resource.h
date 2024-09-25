@@ -1531,10 +1531,7 @@ private:
 
     instance->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
 
-    auto classname = v8StrIntern(isolate, typeName(typeid(T)));
-
-    prototype->Set(v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
-    constructor->SetClassName(classname);
+    constructor->SetClassName(v8StrIntern(isolate, typeName(typeid(T))));
 
     static_assert(kj::isSameType<typename T::jsgThis, T>(),
         "Name passed to JSG_RESOURCE_TYPE() must be the class's own name.");
