@@ -345,7 +345,7 @@ TestFixture::TestFixture(SetupParams&& params)
             // no bindings, nothing to do
           },
           IsolateObserver::StartType::COLD,
-          nullptr /* parentSpan */,
+          TraceParentContext(nullptr, nullptr), /* spans */
           Worker::LockType(Worker::Lock::TakeSynchronously(kj::none)))),
       errorHandler(kj::heap<DummyErrorHandler>()),
       waitUntilTasks(*errorHandler),

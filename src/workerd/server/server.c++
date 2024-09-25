@@ -3141,7 +3141,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
     return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);
   }, IsolateObserver::StartType::COLD,
-      nullptr,  // systemTracer -- TODO(beta): factor out
+      TraceParentContext(nullptr, nullptr),  // systemTracer -- TODO(beta): factor out
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
 
   {
