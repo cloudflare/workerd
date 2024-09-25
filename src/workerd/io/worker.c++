@@ -1551,7 +1551,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     kj::FunctionParam<void(jsg::Lock& lock, const Api& api, v8::Local<v8::Object> target)>
         compileBindings,
     IsolateObserver::StartType startType,
-    SpanParent parentSpan,
+    TraceParentContext spans,
     LockType lockType,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
     kj::Maybe<kj::Duration&> startupTime)
@@ -1574,7 +1574,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     });
 
     auto maybeMakeSpan = [&](auto operationName) -> SpanBuilder {
-      auto span = parentSpan.newChild(kj::mv(operationName));
+      auto span = spans.parentSpan.newChild(kj::mv(operationName));
       if (span.isObserved()) {
         span.setTag("truncated_script_id"_kjc, truncateScriptId(script->getId()));
       }
@@ -1641,6 +1641,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
             // Execute script.
             currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
+            SpanBuilder currentUserSpan =
+                spans.userParentSpan.newChild("lw:top_level_execution"_kjc);
 
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {

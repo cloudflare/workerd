@@ -25,6 +25,8 @@
 #include <kj/function.h>
 #include <kj/mutex.h>
 
+#include <initializer_list>
+
 namespace workerd {
 class LimitEnforcer;
 }
@@ -696,6 +698,20 @@ public:
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
 
+  // As above, but with list of span tags to add.
+  // TODO(o11y): For now this only supports literal values based on initializer_list constraints.
+  // Add syntactic sugar to kj::vector so that we can pass in a vector more ergonomically and use
+  // that instead to support other value types.
+  struct SpanTagParams {
+    kj::LiteralStringConst key;
+    kj::LiteralStringConst value;
+  };
+  kj::Own<WorkerInterface> getSubrequestChannelSpans(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      kj::ConstString operationName,
+      std::initializer_list<SpanTagParams> tags);
+
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
       bool isInHouse,
@@ -708,6 +724,13 @@ public:
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
+
+  // As above, but with list of span tags to add, analogous to getSubrequestChannelSpans().
+  kj::Own<kj::HttpClient> getHttpClientWithSpans(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      kj::ConstString operationName,
+      std::initializer_list<SpanTagParams> tags);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.
