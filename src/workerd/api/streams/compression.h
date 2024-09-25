@@ -27,7 +27,7 @@ public:
 private:
   struct Allocation {
     kj::Array<kj::byte> data;
-    jsg::ExternalMemoryAdjustment memoryAdjustment;
+    kj::Maybe<jsg::ExternalMemoryAdjustment> memoryAdjustment = kj::none;
   };
   kj::HashMap<void*, Allocation> allocations;
 };

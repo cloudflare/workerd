@@ -30,13 +30,27 @@ void* CompressionAllocator::AllocForBrotli(void* opaque, size_t size) {
   auto* allocator = static_cast<CompressionAllocator*>(opaque);
   auto data = kj::heapArray<kj::byte>(size);
   auto begin = data.begin();
-  auto isolate = v8::Isolate::GetCurrent();
-  KJ_REQUIRE_NONNULL(isolate, "Isolate lock is required"_kj);
-  auto& js = jsg::Lock::from(isolate);
+  auto isolate = v8::Isolate::TryGetCurrent();
+  kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
+  // TODO(soon): Improve this. We want to track external memory allocations
+  // with the v8 isolate so we can account for these as part of the isolate
+  // heap memory limits. However, we don't always have an isolate lock or
+  // current isolate when this is called so we can't just blindly try
+  // grabbing the isolate. For now we'll only be able to account for the
+  // allocations when we actually have an isolate. It's a bit tricky but
+  // we could possibly try implementing a deferred accounting adjustment?
+  // Basically, defer incrementing the memory allocation reported to the
+  // isolate until we have the isolate lock again? But that's a bit tricky
+  // if the adjustment is dropped before that happens. Will have to think
+  // through how best to approach that.
+  if (isolate != nullptr) {
+    auto& js = jsg::Lock::from(isolate);
+    maybeMemoryAdjustment = js.getExternalMemoryAdjustment(size);
+  }
   allocator->allocations.insert(begin,
       {
         .data = kj::mv(data),
-        .memoryAdjustment = js.getExternalMemoryAdjustment(size),
+        .memoryAdjustment = kj::mv(maybeMemoryAdjustment),
       });
   return begin;
 }
