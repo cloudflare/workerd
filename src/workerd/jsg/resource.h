@@ -1534,6 +1534,20 @@ private:
     auto classname = v8StrIntern(isolate, typeName(typeid(T)));
 
     prototype->Set(v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
+
+    // Previously, miniflare would use the lack of a Symbol.toStringTag on a class to
+    // detect a type that came from the runtime. That's obviously a bit problematic because
+    // Symbol.toStringTag is required for full compliance on standard web platform APIs.
+    // To help use cases where it is necessary to detect if a class is a runtime class, we
+    // will add a special symbol to the prototype of the class to indicate. Note that
+    // because this uses the global symbol registry user code could still mark their own
+    // classes with this symbol but that's unlikely to be a problem in any practical case.
+    auto internalMarker =
+        v8::Symbol::For(isolate, v8StrIntern(isolate, "cloudflare:internal-class"));
+    prototype->Set(internalMarker, internalMarker,
+        static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
+            v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
+
     constructor->SetClassName(classname);
 
     static_assert(kj::isSameType<typename T::jsgThis, T>(),
