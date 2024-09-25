@@ -30,6 +30,37 @@ public:
   virtual void receivedMessage(size_t bytes) {};
 };
 
+// Collects metrics on memory cache, like lock wait time.
+class MemoryCacheObserver: public kj::AtomicRefcounted {
+public:
+  virtual void start() {};
+  virtual void end() {};
+};
+// turn into requestobserver
+class MemoryCacheLockTiming {
+public:
+  // Unlikely we'll get to report this without exposing internals of lock
+  //virtual void waitingForLock() {}
+  virtual void start() {}
+  virtual void stop() {}
+  virtual void locked() {}
+};
+
+class MemoryCacheLockRecord {
+public:
+  explicit MemoryCacheLockRecord(kj::Maybe<kj::Own<MemoryCacheObserver>> observer)
+      : memoryCacheObserver(kj::mv(observer)) {
+    KJ_IF_SOME(o, memoryCacheObserver) o.get()->start();
+  }
+  ~MemoryCacheLockRecord() noexcept(false) {
+    KJ_IF_SOME(o, memoryCacheObserver) o.get()->end();
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheLockRecord);
+
+private:
+  kj::Maybe<kj::Own<MemoryCacheObserver>> memoryCacheObserver;
+};
+
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
 //
 // Observing anything is optional. Default implementations of all methods observe nothing.
@@ -113,6 +144,10 @@ public:
   virtual uint64_t clockRead() {
     return 0;
   }
+
+  virtual kj::Maybe<kj::Own<MemoryCacheObserver>> getMemoryCacheObserver() {
+    return kj::none;
+  };
 };
 
 class IsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver {
