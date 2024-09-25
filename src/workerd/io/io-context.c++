@@ -835,6 +835,24 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       });
 }
 
+kj::Own<WorkerInterface> IoContext::getSubrequestChannelSpans(uint channel,
+    bool isInHouse,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::ConstString operationName,
+    kj::FunctionParam<void(TraceContext&)> func) {
+  return getSubrequest(
+      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
+    func(tracing);
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
+  },
+      SubrequestOptions{
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .operationName = kj::mv(operationName),
+      });
+}
+
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
@@ -871,6 +889,14 @@ kj::Own<kj::HttpClient> IoContext::getHttpClient(
     uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
   return asHttpClient(
       getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
+}
+kj::Own<kj::HttpClient> IoContext::getHttpClientSpans(uint channel,
+    bool isInHouse,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::ConstString operationName,
+    kj::FunctionParam<void(TraceContext&)> func) {
+  return asHttpClient(getSubrequestChannelSpans(
+      channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), func));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClientNoChecks(uint channel,
