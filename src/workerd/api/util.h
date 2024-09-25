@@ -95,11 +95,6 @@ kj::String redactUrl(kj::StringPtr url);
 
 // =======================================================================================
 
-// Returns exactly what Date.now() would return.
-double dateNow();
-
-// =======================================================================================
-
 void maybeWarnIfNotText(jsg::Lock& js, kj::StringPtr str);
 
 kj::String fastEncodeBase64Url(kj::ArrayPtr<const byte> bytes);

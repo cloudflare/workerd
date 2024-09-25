@@ -6,9 +6,7 @@
 
 #include "simdutf.h"
 
-#include <workerd/io/io-context.h>
 #include <workerd/util/mimetype.h>
-#include <workerd/util/thread-scopes.h>
 
 #include <kj/encoding.h>
 
@@ -257,15 +255,6 @@ kj::String redactUrl(kj::StringPtr url) {
   redacted.add('\0');
 
   return kj::String(redacted.releaseAsArray());
-}
-
-double dateNow() {
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
-    return (ioContext.now() - kj::UNIX_EPOCH) / kj::MILLISECONDS;
-  }
-
-  return 0.0;
 }
 
 kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(

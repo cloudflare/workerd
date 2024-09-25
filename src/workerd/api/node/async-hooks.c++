@@ -3,8 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "async-hooks.h"
 
-#include <kj/vector.h>
-
 namespace workerd::api::node {
 
 jsg::Ref<AsyncLocalStorage> AsyncLocalStorage::constructor(jsg::Lock& js) {
