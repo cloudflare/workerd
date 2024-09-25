@@ -22,19 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: 3.12
-      - name: Setup Linux
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          wget https://apt.llvm.org/llvm.sh
-          sed -i '/apt-get install/d' llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo apt-get install -y --no-install-recommends clang-format-18
-      - name: Install Ruff
-        run: |
-          pip install ruff
       - name: Lint
         run: |
+          bazel info output_base # Ensure bazel is initialized before procedding
           python3 ./tools/cross/format.py --check
-        env:
-          CLANG_FORMAT: clang-format-18
