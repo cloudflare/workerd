@@ -50,10 +50,8 @@ class KvNamespace: public jsg::Object {
   using GetResult = kj::Maybe<
       kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<byte>, kj::String, jsg::JsRef<jsg::JsValue>>>;
 
-  jsg::Promise<GetResult> get(jsg::Lock& js,
-      kj::String name,
-      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
-      CompatibilityFlags::Reader flags);
+  jsg::Promise<GetResult> get(
+      jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
   struct GetWithMetadataResult {
     GetResult value;
@@ -68,6 +66,10 @@ class KvNamespace: public jsg::Object {
     });
   };
 
+  jsg::Promise<GetWithMetadataResult> getWithMetadataImpl(jsg::Lock& js,
+      kj::String name,
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
+      LimitEnforcer::KvOpType op);
   jsg::Promise<GetWithMetadataResult> getWithMetadata(
       jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
@@ -173,7 +175,8 @@ class KvNamespace: public jsg::Object {
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context,
       kj::HttpHeaders& headers,
       kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrName,
-      kj::StringPtr urlStr);
+      kj::StringPtr urlStr,
+      kj::Maybe<kj::OneOf<ListOptions, kj::OneOf<kj::String, GetOptions>, PutOptions>> options);
 
  private:
   kj::Array<AdditionalHeader> additionalHeaders;
