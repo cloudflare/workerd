@@ -198,6 +198,9 @@ def extra_attributes(repo):
         patches = str(repo["patches"]).replace("'", '"')
         extras += f"\n        patches = {patches},"
         extras += '\n        patch_args = ["-p1"],'
+    if "downloaded_file_path" in repo:
+        p = repo["downloaded_file_path"]
+        extras += f'\n        downloaded_file_path = "{p}",'
 
     return extras
 

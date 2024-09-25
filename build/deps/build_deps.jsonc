@@ -29,6 +29,55 @@
       "owner": "bazelbuild",
       "repo": "apple_support",
       "file_regex": "\\.tar\\.gz$"
+    },
+    // rust
+    {
+      "name": "rules_rust",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_rust",
+      "file_regex": "^rules_rust.*\\.tar\\.gz$"
+    },
+    {
+      "name": "cargo_bazel_linux_x64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_rust",
+      "file_regex": "^cargo-bazel-x86_64-unknown-linux-gnu$",
+      "file_type": "executable"
+    },
+    {
+      "name": "cargo_bazel_linux_arm64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_rust",
+      "file_regex": "^cargo-bazel-aarch64-unknown-linux-gnu$",
+      "file_type": "executable"
+    },
+    {
+      "name": "cargo_bazel_macos_x64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_rust",
+      "file_regex": "^cargo-bazel-x86_64-apple-darwin$",
+      "file_type": "executable"
+    },
+    {
+      "name": "cargo_bazel_macos_arm64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_rust",
+      "file_regex": "^cargo-bazel-aarch64-apple-darwin$",
+      "file_type": "executable"
+    },
+    {
+      "name": "cargo_bazel_win_x64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_rust",
+      "file_regex": "^cargo-bazel-x86_64-pc-windows-msvc.exe$",
+      "file_type": "executable",
+      "downloaded_file_path": "downloaded.exe"
     }
- ]
+  ]
 }
