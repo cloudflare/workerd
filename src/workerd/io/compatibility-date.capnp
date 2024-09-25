@@ -10,8 +10,11 @@ $Cxx.allowCancellation;
 
 struct ImpliedByAfterDate @0x8f8c1b68151b6cff {
   # Annotates a compatibility flag to indicate that it is implied by the enablement
-  # of the named flag after the specified date.
-  name @0 :Text;
+  # of the named flag(s) after the specified date.
+  union {
+    name @0 :Text;
+    names @2 :List(Text);
+  }
   date @1 :Text;
 }
 
@@ -584,10 +587,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   nodeJsZlib @59 :Bool
       $compatEnableFlag("nodejs_zlib")
       $compatDisableFlag("no_nodejs_zlib")
-      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-23");
+      $impliedByAfterDate(names = ["nodeJsCompat", "nodeJsCompatV2"], date = "2024-09-23");
   # Enables node:zlib implementation while it is in-development.
   # Once the node:zlib implementation is complete, this will be automatically enabled when
-  # nodejs_compat is enabled.
+  # nodejs_compat or nodejs_compat_v2 are enabled.
 
   replicaRouting @60 :Bool
       $compatEnableFlag("replica_routing")
