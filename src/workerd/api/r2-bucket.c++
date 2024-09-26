@@ -309,7 +309,15 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_get"_kjc);
+    auto client = context.getHttpClientSpans(
+        clientIndex, true, kj::none, "r2_get"_kjc, [&](TraceContext& tracing) {
+      tracing.limeSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+      tracing.limeSpan.setTag("rpc.method"_kjc, kj::str("GetObject"_kj));
+      tracing.limeSpan.setTag("cloudflare.r2.key"_kjc, kj::str(name));
+      KJ_IF_SOME(b, this->adminBucketName()) {
+        tracing.limeSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+      }
+    });
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -345,7 +353,15 @@ R2Bucket::get(jsg::Lock& js,
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_get"_kjc);
+    auto client = context.getHttpClientSpans(
+        clientIndex, true, kj::none, "r2_get"_kjc, [&](TraceContext& tracing) {
+      tracing.limeSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+      tracing.limeSpan.setTag("rpc.method"_kjc, kj::str("GetObject"_kj));
+      tracing.limeSpan.setTag("cloudflare.r2.key"_kjc, kj::str(name));
+      KJ_IF_SOME(b, this->adminBucketName()) {
+        tracing.limeSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+      }
+    });
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -407,7 +423,15 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     });
 
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_put"_kjc);
+    auto client = context.getHttpClientSpans(
+        clientIndex, true, kj::none, "r2_put"_kjc, [&](TraceContext& tracing) {
+      tracing.limeSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+      tracing.limeSpan.setTag("rpc.method"_kjc, kj::str("PutObject"_kj));
+      tracing.limeSpan.setTag("cloudflare.r2.key"_kjc, kj::str(name));
+      KJ_IF_SOME(b, this->adminBucketName()) {
+        tracing.limeSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+      }
+    });
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -593,8 +617,14 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client =
-        context.getHttpClient(clientIndex, true, kj::none, "r2_createMultipartUpload"_kjc);
+    auto client = context.getHttpClientSpans(
+        clientIndex, true, kj::none, "r2_createMultipartUpload"_kjc, [&](TraceContext& tracing) {
+      tracing.limeSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+      tracing.limeSpan.setTag("rpc.method"_kjc, kj::str("CreateMultipartUpload"_kj));
+      KJ_IF_SOME(b, adminBucket) {
+        tracing.limeSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+      }
+    });
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -687,7 +717,22 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_delete"_kjc);
+    auto client = context.getHttpClientSpans(
+        clientIndex, true, kj::none, "r2_delete"_kjc, [&](TraceContext& tracing) {
+      tracing.limeSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+      tracing.limeSpan.setTag("rpc.method"_kjc, kj::str("DeleteObject"_kj));
+      KJ_SWITCH_ONEOF(keys) {
+        KJ_CASE_ONEOF(ks, kj::Array<kj::String>) {
+          tracing.limeSpan.setTag("cloudflare.r2.delete"_kjc, kj::str(ks));
+        }
+        KJ_CASE_ONEOF(k, kj::String) {
+          tracing.limeSpan.setTag("cloudflare.r2.delete"_kjc, kj::str(k));
+        }
+      }
+      KJ_IF_SOME(b, this->adminBucketName()) {
+        tracing.limeSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+      }
+    });
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -732,7 +777,14 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_list"_kjc);
+    auto client = context.getHttpClientSpans(
+        clientIndex, true, kj::none, "r2_list"_kjc, [&](TraceContext& tracing) {
+      tracing.limeSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+      tracing.limeSpan.setTag("rpc.method"_kjc, kj::str("ListObjects"_kj));
+      KJ_IF_SOME(b, this->adminBucketName()) {
+        tracing.limeSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+      }
+    });
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();

@@ -95,7 +95,10 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     KJ_UNREACHABLE;
   }();
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, operationName);
+  auto client = context.getHttpClientSpans(
+      subrequestChannel, true, kj::none, operationName, [&](TraceContext& tracing) {
+    tracing.limeSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kj));
+  });
   headers.add(FLPROD_405_HEADER, urlStr);
   for (const auto& header: additionalHeaders) {
     headers.add(header.name.asPtr(), header.value.asPtr());
