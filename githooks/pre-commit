@@ -36,7 +36,7 @@ clang_format_check() {
       echo "ERROR: changes staged for commit have lint. Pass '--no-verify' or '-n' to skip."
       echo
       echo "To fix lint:"
-      echo "  python3 ./tools/cross/format.py"
+      echo "  just format"
       echo
       return 1
       ;;
