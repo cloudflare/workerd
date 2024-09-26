@@ -6,7 +6,9 @@
 
 #include <workerd/jsg/jsg.h>
 
-#include <kj/async-io.h>
+namespace kj {
+class AsyncIoStream;
+}
 
 namespace workerd::api {
 

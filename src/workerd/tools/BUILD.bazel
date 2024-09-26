@@ -18,6 +18,7 @@ cc_ast_dump(
     }),
     deps = [
         "//src/workerd/api:html-rewriter",
+        "//src/workerd/api:hyperdrive",
         "//src/workerd/api/node",
         "//src/workerd/io",
         "//src/workerd/jsg",

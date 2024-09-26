@@ -118,6 +118,7 @@ wd_cc_library(
         ":workerd_capnp",
         "//deps/rust:runtime",
         "//src/workerd/api:html-rewriter",
+        "//src/workerd/api:hyperdrive",
         "//src/workerd/api:pyodide",
         "//src/workerd/api:rtti",
         "//src/workerd/api/node",
