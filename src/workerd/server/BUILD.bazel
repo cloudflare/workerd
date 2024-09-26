@@ -49,6 +49,7 @@ wd_cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":server",
+        ":v8-platform-impl",
         ":workerd-meta_capnp",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
@@ -100,12 +101,10 @@ wd_cc_library(
     name = "server",
     srcs = [
         "server.c++",
-        "v8-platform-impl.c++",
         "workerd-api.c++",
     ],
     hdrs = [
         "server.h",
-        "v8-platform-impl.h",
         "workerd-api.h",
     ],
     defines = select({
@@ -127,6 +126,20 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_cc_library(
+    name = "v8-platform-impl",
+    srcs = [
+        "v8-platform-impl.c++",
+    ],
+    hdrs = [
+        "v8-platform-impl.h",
+    ],
+    deps = [
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
     ],
 )
 
