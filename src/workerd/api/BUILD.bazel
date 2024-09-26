@@ -4,61 +4,55 @@ load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
+SRCS_EXCLUDE = [
+    "**/*test*.c++",
+    "data-url.c++",
+    "encoding.c++",
+    "html-rewriter.c++",
+    "pyodide.c++",
+    "pyodide/pyodide.c++",
+    "rtti.c++",
+    "url.c++",
+    "util.c++",
+]
+
+HDRS_EXCLUDE = [
+    "**/*test*.h",
+    "data-url.h",
+    "deferred-proxy.h",
+    "encoding.h",
+    "html-rewriter.h",
+    "modules.h",
+    "rtti.h",
+    "url.h",
+    "util.h",
+]
+
 filegroup(
     name = "srcs",
     srcs = select({
         "//src/workerd/io:set_enable_experimental_webgpu": glob(
             ["**/*.c++"],
-            exclude = [
-                "html-rewriter.c++",
-                "data-url.c++",
-                "encoding.c++",
-                "util.c++",
-                "rtti.c++",
-                "**/*test*.c++",
-                "pyodide.c++",
-                "pyodide/pyodide.c++",
-            ],
+            exclude = SRCS_EXCLUDE,
         ),
         "//conditions:default": glob(
             ["**/*.c++"],
-            exclude = [
-                "html-rewriter.c++",
-                "data-url.c++",
-                "encoding.c++",
-                "util.c++",
-                "rtti.c++",
-                "**/*test*.c++",
-                "pyodide.c++",
-                "pyodide/pyodide.c++",
-                "gpu/*.c++",
-            ],
+            exclude = SRCS_EXCLUDE + ["gpu/*.c++"],
         ),
     }),
     visibility = ["//visibility:public"],
 )
-
-api_header_exclusions = [
-    "html-rewriter.h",
-    "deferred-proxy.h",
-    "data-url.h",
-    "encoding.h",
-    "util.h",
-    "modules.h",
-    "rtti.h",
-    "**/*test*.h",
-]
 
 filegroup(
     name = "hdrs",
     srcs = select({
         "//src/workerd/io:set_enable_experimental_webgpu": glob(
             ["**/*.h"],
-            exclude = api_header_exclusions,
+            exclude = HDRS_EXCLUDE,
         ),
         "//conditions:default": glob(
             ["**/*.h"],
-            exclude = api_header_exclusions + ["gpu/*.h"],
+            exclude = HDRS_EXCLUDE + ["gpu/*.h"],
         ),
     }),
     visibility = ["//visibility:public"],
@@ -188,6 +182,22 @@ wd_cc_capnp_library(
     srcs = ["analytics-engine.capnp"],
     visibility = ["//visibility:public"],
 )
+
+wd_cc_library(
+    name = "url",
+    srcs = ["url.c++"],
+    hdrs = ["url.h"],
+    implementation_deps = [":util"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io:compatibility_date_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+####################################################################################################
+## Tests
 
 [
     kj_test(

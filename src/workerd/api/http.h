@@ -13,7 +13,7 @@
 #include <workerd/api/streams/readable.h>
 #include "form-data.h"
 #include "web-socket.h"
-#include "url.h"
+#include <workerd/api/url.h>
 #include "blob.h"
 #include <workerd/io/compatibility-date.capnp.h>
 #include "worker-rpc.h"
