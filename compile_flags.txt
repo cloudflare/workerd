@@ -21,10 +21,9 @@
 -isystem/usr/include/x86_64-linux-gnu
 -isystem/usr/include
 -isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1
+-isystem/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/16/include
 -isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include
 -isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Kernel.framework/Versions/Current/Headers
--isystemC:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.35.32215\include
--isystemc:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\ucrt
 -isystembazel-bin/_virtual_includes/icudata-embed
 -isystembazel-bin/external/capnp-cpp/src
 -isystembazel-bin/external/capnp-cpp/src/capnp/_virtual_includes/capnp
@@ -123,3 +122,4 @@
 -Wunused-lambda-capture
 -Wunused-variable
 -no-canonical-prefixes
+-fbracket-depth=512
