@@ -615,4 +615,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # compatibility flag we arrange to have such promise continuations scheduled to run
   # in the correct IoContext if it is still alive, or dropped on the floor with a warning
   # if the correct IoContext is not still alive.
+  pythonExternalBundle @63 :Bool
+      $compatEnableFlag("python_external_bundle")
+      $experimental;
+  # Temporary flag to load Python from external capnproto bundle loaded at runtime.
+  # We plan to turn this on always quite soon. It would be an autogate but we need to test
+  # our logic both at upload time and at runtime, and this seemed like the easiest way to
+  # make sure we keep things in sync.
 }

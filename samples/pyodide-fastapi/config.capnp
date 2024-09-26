@@ -13,10 +13,6 @@ const config :Workerd.Config = (
       service = "main"
     ),
   ],
-
-  autogates = [
-    "workerd-autogate-pyodide-load-external",
-  ]
 );
 
 const mainWorker :Workerd.Worker = (
@@ -32,7 +28,7 @@ const mainWorker :Workerd.Worker = (
     ),
   ],
   compatibilityDate = "2023-12-18",
-  compatibilityFlags = ["python_workers"],
+  compatibilityFlags = ["python_workers", "python_external_bundle"],
   # Learn more about compatibility dates at:
   # https://developers.cloudflare.com/workers/platform/compatibility-dates/
 );

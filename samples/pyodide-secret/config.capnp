@@ -17,7 +17,6 @@ const config :Workerd.Config = (
     # Pyodide is included as a builtin wasm module so it requires the
     # corresponding autogate flag.
     "workerd-autogate-builtin-wasm-modules",
-    "workerd-autogate-pyodide-load-external",
   ]
 );
 
@@ -26,7 +25,7 @@ const mainWorker :Workerd.Worker = (
     (name = "worker.py", pythonModule = embed "./worker.py"),
   ],
   compatibilityDate = "2023-12-18",
-  compatibilityFlags = ["python_workers"],
+  compatibilityFlags = ["python_workers", "python_external_bundle"],
   bindings = [
     (
       name = "secret",

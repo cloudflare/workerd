@@ -511,7 +511,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       KJ_REQUIRE(featureFlags.getPythonWorkers(),
           "The python_workers compatibility flag is required to use Python.");
       // Inject Pyodide bundle
-      if (util::Autogate::isEnabled(util::AutogateKey::PYODIDE_LOAD_EXTERNAL)) {
+      if (featureFlags.getPythonExternalBundle()) {
         auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
         auto version = getPythonBundleName(pythonRelease);
         auto bundle = KJ_ASSERT_NONNULL(
