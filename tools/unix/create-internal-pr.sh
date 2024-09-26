@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-if [ -z "$EDGEWORKER_HOME" ]; then
+if [ -z "${EDGEWORKER_HOME+x}" ]; then
 	EDGEWORKER_HOME="$(git rev-parse --show-toplevel)/../edgeworker"
 fi
 
