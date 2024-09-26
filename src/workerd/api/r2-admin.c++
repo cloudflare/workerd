@@ -26,7 +26,7 @@ jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {
 jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(
     jsg::Lock& js, kj::String name, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   auto& context = IoContext::current();
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "r2_delete"_kjc);
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "r2_create"_kjc);
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();
@@ -57,7 +57,7 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
     CompatibilityFlags::Reader flags) {
   auto& context = IoContext::current();
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "r2_delete"_kjc);
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "r2_list"_kjc);
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();
