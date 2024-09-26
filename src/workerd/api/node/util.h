@@ -204,6 +204,16 @@ public:
 
   jsg::JsString getConstructorName(jsg::Lock& js, jsg::JsObject value);
 
+  struct CallSiteEntry {
+    kj::String functionName;
+    kj::String scriptName;
+    int lineNumber;
+    int column;
+
+    JSG_STRUCT(functionName, scriptName, lineNumber, column);
+  };
+  kj::Array<CallSiteEntry> getCallSite(jsg::Lock& js, int frames);
+
 #define V(Type) bool is##Type(jsg::JsValue value);
   JS_UTIL_IS_TYPES(V)
 #undef V
@@ -230,6 +240,7 @@ public:
     JSG_METHOD(getProxyDetails);
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
+    JSG_METHOD(getCallSite);
 
 #define V(Type) JSG_METHOD(is##Type);
     JS_UTIL_IS_TYPES(V)
@@ -247,6 +258,6 @@ public:
       api::node::MIMEType, api::node::MIMEParams, api::node::MIMEParams::EntryIterator,            \
       api::node::MIMEParams::ValueIterator, api::node::MIMEParams::KeyIterator,                    \
       api::node::MIMEParams::EntryIterator::Next, api::node::MIMEParams::ValueIterator::Next,      \
-      api::node::MIMEParams::KeyIterator::Next
+      api::node::MIMEParams::KeyIterator::Next, api::node::UtilModule::CallSiteEntry
 
 }  // namespace workerd::api::node
