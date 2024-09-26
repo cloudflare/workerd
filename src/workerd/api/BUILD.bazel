@@ -73,6 +73,7 @@ wd_cc_library(
         "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/api/node",
+        "//src/workerd/api/pyodide",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
         "//src/workerd/server:workerd_capnp",
@@ -89,33 +90,6 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
-    ],
-)
-
-wd_cc_library(
-    name = "pyodide",
-    srcs = [
-        "pyodide/pyodide.c++",
-    ],
-    hdrs = [
-        "pyodide/pyodide.h",
-        "//src/pyodide:generated/pyodide_extra.capnp.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/pyodide",
-        "//src/pyodide:pyodide_extra_capnp",
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-        "//src/workerd/server:workerd_capnp",
-    ],
-)
-
-kj_test(
-    src = "pyodide/pyodide-test.c++",
-    deps = [
-        ":pyodide",
-        "//src/workerd/tests:test-fixture",
     ],
 )
 
