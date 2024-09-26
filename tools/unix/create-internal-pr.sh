@@ -4,15 +4,19 @@
 
 set -euo pipefail
 
+if [ -z "$EDGEWORKER_HOME" ]; then
+	EDGEWORKER_HOME="$(git rev-parse --show-toplevel)/../edgeworker"
+fi
+
 BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
 SYNC_BRANCH_NAME=sync/$BRANCH_NAME
 
-cd $(git rev-parse --show-toplevel)/../edgeworker
+cd $EDGEWORKER_HOME
 git fetch origin master
 
 if git rev-parse --verify $SYNC_BRANCH_NAME; then
 	BRANCH_EXISTS=1
-else 
+else
 	BRANCH_EXISTS=0
 fi
 
