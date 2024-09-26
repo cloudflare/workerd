@@ -15,7 +15,9 @@
       "owner": "google",
       "repo": "boringssl",
       "branch": "master-with-bazel",
-      // todo: head requires a trivial fix
+      // from main-with-bazel branch. Later boringssl versions have bazel support on the main
+      // branch, so using the custom branch with a different directory structure will no longer be
+      // needed in the future.
       "freeze_commit": "c08ccc9ed166a82b92edd70ab215ae1f2501e838"
     },
     // webgpu deps

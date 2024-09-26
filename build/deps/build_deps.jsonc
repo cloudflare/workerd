@@ -23,7 +23,7 @@
       "file_regex": "\\.tar\\.gz$"
     },
     {
-      // Needed for objc_library starting with bazel 7
+      // Needed for objc_library starting with bazel 7, used to build dawn on macOS
       "name": "build_bazel_apple_support",
       "type": "github_release",
       "owner": "bazelbuild",
