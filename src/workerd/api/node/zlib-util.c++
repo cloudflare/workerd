@@ -5,7 +5,6 @@
 
 #include "zlib-util.h"
 
-#include "nbytes.h"
 #include "util.h"
 
 // The following implementation is adapted from Node.js
