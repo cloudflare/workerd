@@ -132,47 +132,6 @@ filegroup(
 )
 
 # ========================================================================================
-# Dawn
-#
-# WebGPU implementation
-
-git_repository(
-    name = "dawn",
-    build_file = "//:build/BUILD.dawn",
-    commit = "5a26bdd62d0f809626214c8a3448a988bcd25736",
-    remote = "https://dawn.googlesource.com/dawn.git",
-    repo_mapping = {
-        "@abseil_cpp": "@com_google_absl",
-    },
-)
-
-http_archive(
-    name = "vulkan_utility_libraries",
-    build_file = "//:build/BUILD.vulkan_utility_libraries",
-    sha256 = "11a51175598c84ba171fd82ba7f1a109ee4133338684d84f6b3c4bbe9ea52a8d",
-    strip_prefix = "KhronosGroup-Vulkan-Utility-Libraries-5b3147a",
-    type = "tgz",
-    url = "https://github.com/KhronosGroup/Vulkan-Utility-Libraries/tarball/5b3147a535e28a48ae760efacdf97b296d9e8c73",
-)
-
-http_archive(
-    name = "vulkan_headers",
-    build_file = "//:build/BUILD.vulkan_headers",
-    sha256 = "559d4bff13acddb58e08bdd862aa6f7fccfda9a97d1799a7f8592e847c723a03",
-    strip_prefix = "KhronosGroup-Vulkan-Headers-aff5071",
-    type = "tgz",
-    url = "https://github.com/KhronosGroup/Vulkan-Headers/tarball/aff5071d4ee6215c60a91d8d983cad91bb25fb57",
-)
-
-http_archive(
-    name = "spirv_headers",
-    sha256 = "c1ef22607cc34489933d987f55b59ad5b3ef98b1f22fc16b2b603de23950aca6",
-    strip_prefix = "KhronosGroup-SPIRV-Headers-88bc5e3",
-    type = "tgz",
-    url = "https://github.com/KhronosGroup/SPIRV-Headers/tarball/88bc5e321c2839707df8b1ab534e243e00744177",
-)
-
-# ========================================================================================
 # tcmalloc
 
 # tcmalloc requires Abseil.
