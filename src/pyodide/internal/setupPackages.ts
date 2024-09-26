@@ -189,19 +189,26 @@ export function getSitePackagesPath(Module: Module): string {
  * details, so even though we want these directories to be on sys.path, we
  * handle that separately in adjustSysPath.
  */
-export function mountLib(Module: Module, info: TarFSInfo): void {
+export function mountSitePackages(Module: Module, info: TarFSInfo): void {
   const tarFS = createTarFS(Module);
-  const mdFS = createMetadataFS(Module);
   const site_packages = getSitePackagesPath(Module);
   Module.FS.mkdirTree(site_packages);
-  Module.FS.mkdirTree('/session/metadata');
   if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
     // if we are not loading additional wheels, then we're done
     // with site-packages and we can mount it here. Otherwise, we must mount it in
     // loadPackages().
     Module.FS.mount(tarFS, { info }, site_packages);
   }
+}
+
+export function mountWorkerFiles(Module: Module) {
+  Module.FS.mkdirTree('/session/metadata');
+  const mdFS = createMetadataFS(Module);
   Module.FS.mount(mdFS, {}, '/session/metadata');
+  simpleRunPython(
+    Module,
+    `from importlib import invalidate_caches; invalidate_caches(); del invalidate_caches`
+  );
 }
 
 /**

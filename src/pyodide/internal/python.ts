@@ -4,7 +4,8 @@ import {
   TRANSITIVE_REQUIREMENTS,
   SITE_PACKAGES,
   adjustSysPath,
-  mountLib,
+  mountSitePackages,
+  mountWorkerFiles,
 } from 'pyodide-internal:setupPackages';
 import { reportError } from 'pyodide-internal:util';
 import {
@@ -201,7 +202,7 @@ async function instantiateEmscriptenModule(
  */
 async function prepareWasmLinearMemory(Module: Module): Promise<void> {
   // Note: if we are restoring from a snapshot, runtime is not initialized yet.
-  mountLib(Module, SITE_PACKAGES.rootInfo);
+  mountSitePackages(Module, SITE_PACKAGES.rootInfo);
   entropyMountFiles(Module);
   if (SHOULD_RESTORE_SNAPSHOT) {
     restoreSnapshot(Module);
@@ -229,6 +230,9 @@ export async function loadPyodide(
     prepareWasmLinearMemory(Module)
   );
   maybeSetupSnapshotUpload(Module);
+  // Mount worker files after doing snapshot upload so we ensure that data from the files is never
+  // present in snapshot memory.
+  mountWorkerFiles(Module);
 
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
   await enterJaegerSpan('finalize_bootstrap', Module.API.finalizeBootstrap);
