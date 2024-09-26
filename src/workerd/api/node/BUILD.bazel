@@ -17,9 +17,8 @@ wd_cc_library(
         "zlib-util.h",
     ],
     implementation_deps = [
-        "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@nbytes",
         "//src/workerd/io",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -49,7 +48,6 @@ wd_cc_library(
         "util.h",
     ],
     implementation_deps = [
-        "//src/workerd/io",
         "@ada-url",
         "@nbytes",
         "@simdutf",

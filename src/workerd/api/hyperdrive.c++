@@ -4,7 +4,6 @@
 
 #include "hyperdrive.h"
 
-#include "http.h"
 #include "sockets.h"
 
 #include <openssl/rand.h>

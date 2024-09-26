@@ -4,8 +4,6 @@
 
 #include "actor.h"
 
-#include "util.h"
-
 #include <workerd/io/features.h>
 
 #include <capnp/compat/byte-stream.h>
