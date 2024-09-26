@@ -7,8 +7,6 @@
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 
-#include <kj/table.h>
-
 namespace workerd::api::node {
 
 // Implements a subset of the Node.js AsyncLocalStorage API.

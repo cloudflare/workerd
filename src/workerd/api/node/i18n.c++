@@ -9,16 +9,9 @@
 
 #include <workerd/jsg/exception.h>
 
-#include <unicode/putil.h>
-#include <unicode/uchar.h>
-#include <unicode/uclean.h>
 #include <unicode/ucnv.h>
-#include <unicode/udata.h>
 #include <unicode/uidna.h>
 #include <unicode/urename.h>
-#include <unicode/ustring.h>
-#include <unicode/utf16.h>
-#include <unicode/utf8.h>
 #include <unicode/utypes.h>
 #include <unicode/uvernum.h>
 #include <unicode/uversion.h>

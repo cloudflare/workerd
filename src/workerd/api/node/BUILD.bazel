@@ -10,6 +10,7 @@ wd_cc_library(
     ),
     hdrs = glob(["**/*.h"]),
     implementation_deps = [
+        "//src/workerd/io",
         "@ada-url",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
@@ -17,7 +18,6 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/workerd/io",
         "@capnp-cpp//src/kj/compat:kj-brotli",
     ],
 )
