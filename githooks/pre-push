@@ -30,7 +30,7 @@ do
       echo "ERROR: changes in $LOCAL_REF have lint which may fail CI."
       echo
       echo "To fix lint:"
-      echo "  python3 ./tools/cross/format.py"
+      echo "  just format"
       echo
       exit 1
       ;;
