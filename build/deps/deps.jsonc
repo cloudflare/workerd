@@ -17,6 +17,45 @@
       "branch": "master-with-bazel",
       // todo: head requires a trivial fix
       "freeze_commit": "c08ccc9ed166a82b92edd70ab215ae1f2501e838"
+    },
+    // webgpu deps
+    {
+      "name": "dawn",
+      "type": "github_tarball",
+      "owner": "google",
+      "repo": "dawn",
+      "branch": "main",
+      "freeze_commit": "5a26bdd62d0f809626214c8a3448a988bcd25736",
+      "build_file": "//:build/BUILD.dawn",
+      "repo_mapping": {
+        "@abseil_cpp": "@com_google_absl"
+      }
+    },
+    {
+      "name": "vulkan_utility_libraries",
+      "type": "github_tarball",
+      "owner": "KhronosGroup",
+      "repo": "Vulkan-Utility-Libraries",
+      "branch": "main",
+      "build_file": "//:build/BUILD.vulkan_utility_libraries",
+      "freeze_commit": "5b3147a535e28a48ae760efacdf97b296d9e8c73"
+    },
+    {
+      "name": "vulkan_headers",
+      "type": "github_tarball",
+      "owner": "KhronosGroup",
+      "repo": "Vulkan-Headers",
+      "branch": "main",
+      "build_file": "//:build/BUILD.vulkan_headers",
+      "freeze_commit": "aff5071d4ee6215c60a91d8d983cad91bb25fb57"
+    },
+    {
+      "name": "spirv_headers",
+      "type": "github_tarball",
+      "owner": "KhronosGroup",
+      "repo": "SPIRV-Headers",
+      "branch": "main",
+      "freeze_commit": "88bc5e321c2839707df8b1ab534e243e00744177"
     }
   ]
 }
