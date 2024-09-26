@@ -250,6 +250,10 @@ export function deprecate(
   return fn;
 }
 
+export function getCallSite(frames: number = 10) {
+  return utilImpl.getCallSite(frames);
+}
+
 export default {
   types,
   callbackify,
@@ -278,6 +282,7 @@ export default {
   parseArgs,
   transferableAbortController,
   transferableAbortSignal,
+  getCallSite,
 };
 
 // Node.js util APIs we're currently not supporting

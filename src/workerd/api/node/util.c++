@@ -176,6 +176,29 @@ jsg::Name UtilModule::getResourceTypeInspect(jsg::Lock& js) {
   return js.newApiSymbol("kResourceTypeInspect"_kj);
 }
 
+kj::Array<UtilModule::CallSiteEntry> UtilModule::getCallSite(jsg::Lock& js, int frames) {
+  JSG_REQUIRE(
+      frames >= 1 && frames <= 200, Error, "Frame count should be between 1 and 200 inclusive."_kj);
+  auto stack = v8::StackTrace::CurrentStackTrace(js.v8Isolate, frames + 1);
+  const int frameCount = stack->GetFrameCount();
+  auto objects = kj::Vector<CallSiteEntry>();
+  objects.reserve(frameCount - 1);
+
+  // Frame 0 is node:util. It should be skipped.
+  for (int i = 1; i < frameCount; ++i) {
+    auto stack_frame = stack->GetFrame(js.v8Isolate, i);
+
+    objects.add(CallSiteEntry{
+      .functionName = js.toString(stack_frame->GetFunctionName()),
+      .scriptName = js.toString(stack_frame->GetScriptName()),
+      .lineNumber = stack_frame->GetLineNumber(),
+      .column = stack_frame->GetColumn(),
+    });
+  }
+
+  return objects.releaseAsArray();
+}
+
 jsg::JsValue UtilModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
   auto rawSpecifier = kj::str(specifier);
   bool isNode = false;

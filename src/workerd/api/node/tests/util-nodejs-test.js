@@ -4342,3 +4342,15 @@ export const debuglog = {
     console.log = original;
   },
 };
+
+export const getCallSiteTest = {
+  test() {
+    const callSites = util.getCallSite();
+    assert.strictEqual(callSites.length, 1);
+    const [stack] = callSites;
+    assert.strictEqual(stack.functionName, 'test');
+    assert.strictEqual(stack.scriptName, 'worker');
+    assert.strictEqual(typeof stack.lineNumber, 'number');
+    assert.strictEqual(typeof stack.column, 'number');
+  },
+};
