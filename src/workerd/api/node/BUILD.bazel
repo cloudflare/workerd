@@ -4,21 +4,60 @@ load("//:build/wd_test.bzl", "wd_test")
 
 wd_cc_library(
     name = "node",
-    srcs = glob(
-        ["**/*.c++"],
-        exclude = ["**/*-test.c++"],
-    ),
-    hdrs = glob(["**/*.h"]),
+    srcs = [
+        "crypto.c++",
+        "crypto-keys.c++",
+        "diagnostics-channel.c++",
+        "zlib-util.c++",
+    ],
+    hdrs = [
+        "crypto.h",
+        "diagnostics-channel.h",
+        "node.h",
+        "zlib-util.h",
+    ],
+    implementation_deps = [
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@nbytes",
+        "//src/workerd/io",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":node-core",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+    ],
+)
+
+# node source files that don't depend on io.
+wd_cc_library(
+    name = "node-core",
+    srcs = [
+        "async-hooks.c++",
+        "buffer.c++",
+        "i18n.c++",
+        "module.c++",
+        "url.c++",
+        "util.c++",
+    ],
+    hdrs = [
+        "async-hooks.h",
+        "buffer.h",
+        "buffer-string-search.h",
+        "i18n.h",
+        "module.h",
+        "url.h",
+        "util.h",
+    ],
     implementation_deps = [
         "//src/workerd/io",
         "@ada-url",
-        "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
         "@simdutf",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "//src/workerd/io:compatibility_date_capnp",
+        "//src/workerd/jsg",
     ],
 )
 

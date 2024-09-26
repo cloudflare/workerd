@@ -1,14 +1,14 @@
 #pragma once
 
-#include "async-hooks.h"
-#include "buffer.h"
 #include "crypto.h"
 #include "diagnostics-channel.h"
-#include "module.h"
-#include "url.h"
-#include "util.h"
 #include "zlib-util.h"
 
+#include <workerd/api/node/async-hooks.h>
+#include <workerd/api/node/buffer.h>
+#include <workerd/api/node/module.h>
+#include <workerd/api/node/url.h>
+#include <workerd/api/node/util.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
