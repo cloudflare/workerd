@@ -49,6 +49,7 @@ wd_cc_library(
         "hibernation-manager.c++",
         "io-context.c++",
         "io-own.c++",
+        "io-util.c++",
         "worker.c++",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
@@ -57,6 +58,7 @@ wd_cc_library(
         "hibernation-manager.h",
         "io-context.h",
         "io-own.h",
+        "io-util.h",
         "promise-wrapper.h",
         "worker.h",
     ] + ["//src/workerd/api:hdrs"],
@@ -89,6 +91,7 @@ wd_cc_library(
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:data-url",
         "//src/workerd/api:deferred-proxy",
+        "//src/workerd/api:encoding",
         "//src/workerd/api:r2-api_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:autogate",

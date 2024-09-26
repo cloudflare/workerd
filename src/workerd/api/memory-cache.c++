@@ -2,6 +2,7 @@
 
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/io-util.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/util/weak-refs.h>
@@ -29,7 +30,7 @@ static bool hasExpired(const kj::Maybe<double>& expiration, bool allowOutsideIoC
   KJ_IF_SOME(e, expiration) {
     double now = (allowOutsideIoContext && !IoContext::hasCurrent())
         ? getCurrentTimeOutsideIoContext()
-        : api::dateNow();
+        : dateNow();
     return e < now;
   }
   return false;

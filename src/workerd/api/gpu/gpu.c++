@@ -4,8 +4,6 @@
 
 #include "gpu.h"
 
-#include <workerd/jsg/exception.h>
-
 #include <dawn/dawn_proc.h>
 
 namespace workerd::api::gpu {

@@ -11,6 +11,18 @@
 
 namespace workerd::api {
 
+constexpr kj::FixedArray<uint8_t, 256> ascii_whitespace_table = []() consteval {
+  kj::FixedArray<uint8_t, 256> result{};
+  for (uint8_t c: {0x09, 0x0a, 0x0c, 0x0d, 0x20}) {
+    result[c] = true;
+  }
+  return result;
+}();
+
+constexpr bool isAsciiWhitespace(uint8_t c) noexcept {
+  return ascii_whitespace_table[c];
+}
+
 // The encodings listed here are defined as required by the Encoding spec.
 // The first label is enum we use to identify the encoding in code, while
 // the second label is the public identifier.

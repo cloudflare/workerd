@@ -6,10 +6,10 @@
 
 #include "util.h"
 
+#include <workerd/io/io-util.h>
 #include <workerd/util/mimetype.h>
 
 #include <kj/compat/http.h>
-#include <kj/encoding.h>
 #include <kj/parse/char.h>
 #include <kj/vector.h>
 

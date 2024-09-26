@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include <workerd/api/util.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/io/io-util.h>
 #include <workerd/io/trace.h>
 
 #include <kj/debug.h>
@@ -101,7 +101,7 @@ public:
     kj::Maybe<kj::StringPtr> featureFlagsForFl;
 
     // Timestamp for when a subrequest is started. (ms since the Unix Epoch)
-    double startTime = api::dateNow();
+    double startTime = dateNow();
   };
 
   virtual kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) = 0;

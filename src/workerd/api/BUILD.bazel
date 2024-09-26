@@ -12,6 +12,8 @@ filegroup(
             exclude = [
                 "html-rewriter.c++",
                 "data-url.c++",
+                "encoding.c++",
+                "util.c++",
                 "rtti.c++",
                 "**/*test*.c++",
                 "pyodide.c++",
@@ -23,6 +25,8 @@ filegroup(
             exclude = [
                 "html-rewriter.c++",
                 "data-url.c++",
+                "encoding.c++",
+                "util.c++",
                 "rtti.c++",
                 "**/*test*.c++",
                 "pyodide.c++",
@@ -38,6 +42,8 @@ api_header_exclusions = [
     "html-rewriter.h",
     "deferred-proxy.h",
     "data-url.h",
+    "encoding.h",
+    "util.h",
     "modules.h",
     "rtti.h",
     "**/*test*.h",
@@ -120,9 +126,39 @@ kj_test(
 )
 
 wd_cc_library(
+    name = "util",
+    srcs = ["util.c++"],
+    hdrs = ["util.h"],
+    implementation_deps = ["@simdutf"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "//src/workerd/util",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "encoding",
+    srcs = ["encoding.c++"],
+    hdrs = ["encoding.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":util",
+        "//src/workerd/io:compatibility_date_capnp",
+        "//src/workerd/jsg",
+        "//src/workerd/util",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "data-url",
     srcs = ["data-url.c++"],
     hdrs = ["data-url.h"],
+    implementation_deps = [
+        ":encoding",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg:url",
@@ -204,6 +240,7 @@ kj_test(
 kj_test(
     src = "api-rtti-test.c++",
     deps = [
+        ":encoding",
         ":html-rewriter",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
