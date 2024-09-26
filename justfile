@@ -46,3 +46,8 @@ internal-pr:
 # update dependencies with a given prefix (all by default)
 update-deps prefix="":
   ./build/deps/update-deps.py {{prefix}}
+
+# equivalent to `cargo update`; use `workspace` or <package> to limit update scope
+update-rust package="full":
+  bazel run //deps/rust:crates_vendor -- --repin {{package}}
+

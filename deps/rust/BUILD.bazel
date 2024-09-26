@@ -1,0 +1,117 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_rust//crate_universe:defs.bzl", "crates_vendor", "render_config")
+load("@rules_rust//rust:defs.bzl", "rust_static_library")
+load("cargo.bzl", "PACKAGES")
+
+selects.config_setting_group(
+    name = "linux_x64",
+    match_all = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+selects.config_setting_group(
+    name = "linux_arm64",
+    match_all = [
+        "@platforms//os:linux",
+        "@platforms//cpu:aarch64",
+    ],
+)
+
+selects.config_setting_group(
+    name = "macos_x64",
+    match_all = [
+        "@platforms//os:macos",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+selects.config_setting_group(
+    name = "macos_arm64",
+    match_all = [
+        "@platforms//os:macos",
+        "@platforms//cpu:aarch64",
+    ],
+)
+
+selects.config_setting_group(
+    name = "win_x64",
+    match_all = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+CARGO_BAZEL = select({
+    ":linux_x64": "@cargo_bazel_linux_x64//file:downloaded",
+    ":linux_arm64": "@cargo_bazel_linux_arm64//file:downloaded",
+    ":macos_x64": "@cargo_bazel_macos_x64//file:downloaded",
+    ":macos_arm64": "@cargo_bazel_macos_arm64//file:downloaded",
+    ":win_x64": "@cargo_bazel_win_x64//file:downloaded.exe",
+})
+
+# Generates a repository containing all the crates we reference from our
+# rust workspace
+# To repin crates: bazel run //rust-deps:crates_vendor -- --repin
+crates_vendor(
+    name = "crates_vendor",
+    cargo_bazel = CARGO_BAZEL,
+    cargo_lockfile = "//deps/rust:Cargo.lock",
+    generate_binaries = True,
+    mode = "remote",
+    packages = PACKAGES,
+    # Not needed, we have a well-defined set of supported platforms
+    render_config = render_config(generate_target_compatible_with = False),
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
+    ],
+)
+
+# define the path to the lolhtml headers, this is clunky but allows us to avoid cloning the
+# repository twice.
+alias(
+    name = "lol_html_api",
+    actual = "@crates_vendor__lol_html-1.2.1//:c-api/include/lol_html.h",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+# Windows build fixes due to rust libraries missing symbols:
+# https://github.com/bazelbuild/rules_rust/blob/144d34fd/ffi/cc/global_allocator_library/BUILD.bazel#L3
+# `empty_lib` static library will bring all the symbols in.
+cc_library(
+    name = "runtime",
+    linkopts = select({
+        "@platforms//os:windows": ["ntdll.lib"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = select({
+        "@platforms//os:windows": [":empty_lib"],
+        "//conditions:default": [],
+    }),
+)
+
+write_file(
+    name = "lib_rs",
+    out = "lib.rs",
+    tags = ["manual"],
+)
+
+rust_static_library(
+    name = "empty_lib",
+    srcs = [":lib.rs"],
+    # When stamping is enabled this will be replaced by the corresponding
+    # value in ./bazel-out/volatile-status.txt
+    rustc_env = {
+        "WORKERD_VERSION": "{WORKERD_VERSION}",
+    },
+    stamp = -1,  # default to bazel --stamp flag
+    tags = ["manual"],
+)

@@ -117,6 +117,7 @@ wd_cc_library(
         ":actor-id-impl",
         ":alarm-scheduler",
         ":workerd_capnp",
+        "//deps/rust:runtime",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:pyodide",
         "//src/workerd/api:rtti",
