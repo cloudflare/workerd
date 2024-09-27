@@ -99,56 +99,6 @@ public:
     return kj::heapString(res.c_str());
   }
 
-    v8::MaybeLocal<v8::Context> CreateEvaluationContext(jsg::Lock& js) {
-      v8::EscapableHandleScope handle_scope(js.v8Isolate);
-
-      v8::Local<v8::ObjectTemplate> global_template = v8::ObjectTemplate::New(js.v8Isolate);
-
-      v8::Local<v8::Context> context = v8::Context::New(js.v8Isolate, nullptr, global_template);
-      if (context.IsEmpty()) {
-          fprintf(stderr,"Context is empty...");
-          return {};
-      }
-
-      deserializeGlobalObject(js, context);
-
-      return handle_scope.Escape(context);
-  }
-
-  kj::Array<const byte> serializedGlobalObject;
-  void serializeGlobalObject(jsg::Lock& js) {
-    // Create a serializer with default options or customize as necessary.
-    jsg::Serializer serializer(js, jsg::Serializer::Options{
-        .version = 15,  // Custom version number if required
-        .omitHeader = false,
-        .treatClassInstancesAsPlainObjects = false
-    });
-
-    jsg::JsValue globalObject = jsg::JsValue(js.v8Context()->Global());
-    serializer.write(js, globalObject);
-    serializedGlobalObject = serializer.release().data;
-  }
-
-  void deserializeGlobalObject(jsg::Lock& js, v8::Local<v8::Context> context) {
-    if (serializedGlobalObject.size() == 0) {
-        fprintf(stderr, "No serialized global object data available\n");
-        return;
-    }
-
-    // Create deserializer with the stored serialized data
-    jsg::Deserializer deserializer(js, serializedGlobalObject);
-
-    jsg::JsValue deserializedGlobalObject = deserializer.readValue(js);
-    v8::Local<v8::Value> globalValue = deserializedGlobalObject;
-
-    if (!globalValue->IsObject()) {
-        fprintf(stderr, "Deserialized global is not an object\n");
-        return;
-    }
-    context->Global()->SetPrototypeV2(context, globalValue.As<v8::Object>());
-  }
-
-
   void reprl(jsg::Lock& js) {
     js.setAllowEval(true);
 
@@ -173,9 +123,6 @@ public:
       printf("Invalid response from parent\n");
     }
 
-    //snapshot global object:
-    //serializeGlobalObject(js);
-
     do {
       size_t script_size = 0;
       unsigned action = 0;
@@ -189,7 +136,7 @@ public:
 
       CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
 
-      char* script = new char[script_size + 1];
+      char script[script_size+1];
       char* source_buffer_tail = script;
       ssize_t remaining = (ssize_t) script_size;
 
@@ -208,19 +155,6 @@ public:
 
       script[script_size] = '\0';
 
-      //eval the script
-      /*
-      v8::Global<v8::Context> global_context;
-      v8::HandleScope scope(js.v8Isolate);
-      {
-        v8::Local<v8::Context> context;
-        if (!CreateEvaluationContext(js).ToLocal(&context)) {
-          js.v8Isolate->IsExecutionTerminating();
-          break;
-        }
-        global_context.Reset(js.v8Isolate, context);
-      }
-      */
       int status = 0;
       int32_t res_val = 0;
       auto compiled = jsg::NonModuleScript::compile(script, js, "reprl"_kj);
@@ -237,10 +171,10 @@ public:
       } catch(jsg::JsExceptionThrown&) {
         if(try_catch.HasCaught()) {
           res_val = -1;
-          // auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
-          // v8::String::Utf8Value string(js.v8Isolate, str);
-          // printf("%s\n",*string);
-          // fflush(stdout);
+          auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
+          v8::String::Utf8Value string(js.v8Isolate, str);
+          printf("%s\n",*string);
+          fflush(stdout);
         }
       }
 
@@ -250,7 +184,6 @@ public:
       status = (res_val & 0xFF) << 8;
       CHECK(write(REPRL_CWFD, &status, 4) == 4);
       __sanitizer_cov_reset_edgeguards();
-      delete[] script;
     } while(true);
   }
 
@@ -279,7 +212,9 @@ void registerUnsafeModule(Registry& registry) {
       "workerd:unsafe-eval", workerd::jsg::ModuleRegistry::Type::BUILTIN);
 }
 
-#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, api::UnsafeModule
+#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, \
+ api::UnsafeModule, \
+ api::Stdin
 
 template <class Registry> void registerUnsafeModules(Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<UnsafeEval>("internal:unsafe-eval",
