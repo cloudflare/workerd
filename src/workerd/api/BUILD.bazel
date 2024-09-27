@@ -4,57 +4,41 @@ load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
-SRCS_EXCLUDE = [
-    "**/*test*.c++",
-    "data-url.c++",
-    "encoding.c++",
-    "html-rewriter.c++",
-    "pyodide.c++",
-    "pyodide/pyodide.c++",
-    "rtti.c++",
-    "url.c++",
-    "util.c++",
-]
-
-HDRS_EXCLUDE = [
-    "**/*test*.h",
-    "data-url.h",
-    "deferred-proxy.h",
-    "encoding.h",
-    "html-rewriter.h",
-    "modules.h",
-    "rtti.h",
-    "url.h",
-    "util.h",
-]
-
 filegroup(
     name = "srcs",
-    srcs = select({
-        "//src/workerd/io:set_enable_experimental_webgpu": glob(
-            ["**/*.c++"],
-            exclude = SRCS_EXCLUDE,
-        ),
-        "//conditions:default": glob(
-            ["**/*.c++"],
-            exclude = SRCS_EXCLUDE + ["gpu/*.c++"],
-        ),
-    }),
+    srcs = glob(
+        ["**/*.c++"],
+        exclude = [
+            "**/*test*.c++",
+            "data-url.c++",
+            "encoding.c++",
+            "html-rewriter.c++",
+            "pyodide.c++",
+            "pyodide/pyodide.c++",
+            "rtti.c++",
+            "url.c++",
+            "util.c++",
+        ],
+    ),
     visibility = ["//visibility:public"],
 )
 
 filegroup(
     name = "hdrs",
-    srcs = select({
-        "//src/workerd/io:set_enable_experimental_webgpu": glob(
-            ["**/*.h"],
-            exclude = HDRS_EXCLUDE,
-        ),
-        "//conditions:default": glob(
-            ["**/*.h"],
-            exclude = HDRS_EXCLUDE + ["gpu/*.h"],
-        ),
-    }),
+    srcs = glob(
+        ["**/*.h"],
+        exclude = [
+            "**/*test*.h",
+            "data-url.h",
+            "deferred-proxy.h",
+            "encoding.h",
+            "html-rewriter.h",
+            "modules.h",
+            "rtti.h",
+            "url.h",
+            "util.h",
+        ],
+    ),
     visibility = ["//visibility:public"],
 )
 
@@ -539,64 +523,6 @@ wd_test(
     src = "http-test-ts.ts-wd-test",
     args = ["--experimental"],
     data = ["http-test-ts.js"],
-)
-
-# Enable GPU tests if experimental GPU support is enabled. Unfortunately, this depends on the right
-# drivers being available on Linux and macOS, so turn it off by default. Run GPU tests with
-# `bazel test //src/workerd/api:gpu/<test name>`.
-wd_test(
-    src = "gpu/webgpu-buffer-test.gpu-wd-test",
-    args = ["--experimental"],
-    data = ["gpu/webgpu-buffer-test.js"],
-    tags = ["off-by-default"],
-    target_compatible_with = select({
-        "//src/workerd/io:set_enable_experimental_webgpu": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-)
-
-wd_test(
-    src = "gpu/webgpu-compute-test.gpu-wd-test",
-    args = ["--experimental"],
-    data = ["gpu/webgpu-compute-test.js"],
-    tags = ["off-by-default"],
-    target_compatible_with = select({
-        "//src/workerd/io:set_enable_experimental_webgpu": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-)
-
-wd_test(
-    src = "gpu/webgpu-errors-test.gpu-wd-test",
-    args = ["--experimental"],
-    data = ["gpu/webgpu-errors-test.js"],
-    tags = ["off-by-default"],
-    target_compatible_with = select({
-        "//src/workerd/io:set_enable_experimental_webgpu": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-)
-
-wd_test(
-    src = "gpu/webgpu-windowless-test.gpu-wd-test",
-    args = ["--experimental"],
-    data = ["gpu/webgpu-windowless-test.js"],
-    tags = ["off-by-default"],
-    target_compatible_with = select({
-        "//src/workerd/io:set_enable_experimental_webgpu": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-)
-
-wd_test(
-    src = "gpu/webgpu-write-test.gpu-wd-test",
-    args = ["--experimental"],
-    data = ["gpu/webgpu-write-test.js"],
-    tags = ["off-by-default"],
-    target_compatible_with = select({
-        "//src/workerd/io:set_enable_experimental_webgpu": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
 )
 
 wd_test(

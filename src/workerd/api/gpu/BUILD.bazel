@@ -1,0 +1,70 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["*.c++"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "hdrs",
+    srcs = glob(["*.h"]),
+    visibility = ["//visibility:public"],
+)
+
+# Enable GPU tests if experimental GPU support is enabled. Unfortunately, this depends on the right
+# drivers being available on Linux and macOS, so turn it off by default.
+wd_test(
+    src = "webgpu-buffer-test.gpu-wd-test",
+    args = ["--experimental"],
+    data = ["webgpu-buffer-test.js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+wd_test(
+    src = "webgpu-compute-test.gpu-wd-test",
+    args = ["--experimental"],
+    data = ["webgpu-compute-test.js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+wd_test(
+    src = "webgpu-errors-test.gpu-wd-test",
+    args = ["--experimental"],
+    data = ["webgpu-errors-test.js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+wd_test(
+    src = "webgpu-windowless-test.gpu-wd-test",
+    args = ["--experimental"],
+    data = ["webgpu-windowless-test.js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+wd_test(
+    src = "webgpu-write-test.gpu-wd-test",
+    args = ["--experimental"],
+    data = ["webgpu-write-test.js"],
+    tags = ["off-by-default"],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
