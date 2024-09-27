@@ -99,6 +99,56 @@ public:
     return kj::heapString(res.c_str());
   }
 
+    v8::MaybeLocal<v8::Context> CreateEvaluationContext(jsg::Lock& js) {
+      v8::EscapableHandleScope handle_scope(js.v8Isolate);
+
+      v8::Local<v8::ObjectTemplate> global_template = v8::ObjectTemplate::New(js.v8Isolate);
+
+      v8::Local<v8::Context> context = v8::Context::New(js.v8Isolate, nullptr, global_template);
+      if (context.IsEmpty()) {
+          fprintf(stderr,"Context is empty...");
+          return {};
+      }
+
+      deserializeGlobalObject(js, context);
+
+      return handle_scope.Escape(context);
+  }
+
+  kj::Array<const byte> serializedGlobalObject;
+  void serializeGlobalObject(jsg::Lock& js) {
+    // Create a serializer with default options or customize as necessary.
+    jsg::Serializer serializer(js, jsg::Serializer::Options{
+        .version = 15,  // Custom version number if required
+        .omitHeader = false,
+        .treatClassInstancesAsPlainObjects = false
+    });
+
+    jsg::JsValue globalObject = jsg::JsValue(js.v8Context()->Global());
+    serializer.write(js, globalObject);
+    serializedGlobalObject = serializer.release().data;
+  }
+
+  void deserializeGlobalObject(jsg::Lock& js, v8::Local<v8::Context> context) {
+    if (serializedGlobalObject.size() == 0) {
+        fprintf(stderr, "No serialized global object data available\n");
+        return;
+    }
+
+    // Create deserializer with the stored serialized data
+    jsg::Deserializer deserializer(js, serializedGlobalObject);
+
+    jsg::JsValue deserializedGlobalObject = deserializer.readValue(js);
+    v8::Local<v8::Value> globalValue = deserializedGlobalObject;
+
+    if (!globalValue->IsObject()) {
+        fprintf(stderr, "Deserialized global is not an object\n");
+        return;
+    }
+    context->Global()->SetPrototypeV2(context, globalValue.As<v8::Object>());
+  }
+
+
   void reprl(jsg::Lock& js) {
     js.setAllowEval(true);
 
@@ -122,6 +172,9 @@ public:
     if (memcmp(helo, "HELO", 4) != 0) {
       printf("Invalid response from parent\n");
     }
+
+    //snapshot global object:
+    //serializeGlobalObject(js);
 
     do {
       size_t script_size = 0;
@@ -156,11 +209,25 @@ public:
       script[script_size] = '\0';
 
       //eval the script
+      /*
+      v8::Global<v8::Context> global_context;
+      v8::HandleScope scope(js.v8Isolate);
+      {
+        v8::Local<v8::Context> context;
+        if (!CreateEvaluationContext(js).ToLocal(&context)) {
+          js.v8Isolate->IsExecutionTerminating();
+          break;
+        }
+        global_context.Reset(js.v8Isolate, context);
+      }
+      */
       int status = 0;
       int32_t res_val = 0;
       auto compiled = jsg::NonModuleScript::compile(script, js, "reprl"_kj);
       try {
+        //global_context.Get(js.v8Isolate)->Enter();
         auto result = compiled.runAndReturn(js.v8Context())->Int32Value(js.v8Context());
+        //global_context.Get(js.v8Isolate)->Exit();
         if (!result.IsJust()) {
           printf("Result arg is not just...\n");
           fflush(stdout);
@@ -183,6 +250,7 @@ public:
       status = (res_val & 0xFF) << 8;
       CHECK(write(REPRL_CWFD, &status, 4) == 4);
       __sanitizer_cov_reset_edgeguards();
+      delete[] script;
     } while(true);
   }
 

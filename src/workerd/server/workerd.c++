@@ -3,20 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "server.h"
-<<<<<<< HEAD
 #include "workerd-api.h"
-=======
-<<<<<<< HEAD
->>>>>>> c95411bff (reprl seems to work.)
 
-||||||| parent of ccfa791f (reprl seems to work.)
-#include <workerd/jsg/setup.h>
-#include <openssl/rand.h>
-=======
 #include <workerd/jsg/setup.h>
 #include <workerd/api/unsafe.h>
 #include <openssl/rand.h>
->>>>>>> ccfa791f (reprl seems to work.)
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/supported-compatibility-date.embed.h>
@@ -1879,9 +1870,7 @@ extern "C" void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
 //
 
 int main(int argc, char* argv[]) {
-<<<<<<< HEAD
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
-=======
   // TODO: this is reeeeaaally bad
   argc = 4;
   char *new_argv[5];
@@ -1893,7 +1882,6 @@ int main(int argc, char* argv[]) {
   argv = new_argv;
 
   ::kj::TopLevelProcessContext context(argv[0]);
->>>>>>> c95411bff (reprl seems to work.)
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
