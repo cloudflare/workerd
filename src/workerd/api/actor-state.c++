@@ -549,9 +549,9 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
 
     kj::Array<byte> buffer = serializeV8Value(js, field.value);
 
-    units += billingUnits(field.name.size() + buffer.size());
+    units += billingUnits(field.key.size() + buffer.size());
 
-    kvs.add(ActorCacheOps::KeyValuePair{kj::mv(field.name), kj::mv(buffer)});
+    kvs.add(ActorCacheOps::KeyValuePair{kj::mv(field.key), kj::mv(buffer)});
   }
 
   jsg::Promise<void> maybeBackpressure =

@@ -169,7 +169,7 @@ jsg::UrlSearchParams initSearchParams(const URLSearchParams::Initializer& init) 
     KJ_CASE_ONEOF(dict, jsg::Dict<kj::String, kj::String>) {
       jsg::UrlSearchParams params;
       for (auto& item: dict.fields) {
-        params.append(item.name, item.value);
+        params.append(item.key, item.value);
       }
       return kj::mv(params);
     }
@@ -186,7 +186,7 @@ jsg::UrlSearchParams initFromSearch(kj::Maybe<kj::ArrayPtr<const char>>& maybeQu
     return JSG_REQUIRE_NONNULL(
         jsg::UrlSearchParams::tryParse(query), TypeError, "Invalid URL search params string.");
   }
-  return jsg::UrlSearchParams();
+  return {};
 }
 }  // namespace
 

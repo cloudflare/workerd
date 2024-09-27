@@ -85,7 +85,7 @@ jsg::JsObject SqlStorage::wrapSqlRow(jsg::Lock& js, SqlRow row) {
   return jsg::JsObject(js.withinHandleScope([&]() -> v8::Local<v8::Object> {
     jsg::JsObject result = js.obj();
     for (auto& field: row.fields) {
-      result.set(js, field.name, wrapSqlValue(js, kj::mv(field.value)));
+      result.set(js, field.key, wrapSqlValue(js, kj::mv(field.value)));
     }
     return result;
   }));
@@ -225,14 +225,22 @@ jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js
 kj::Maybe<SqlStorage::SqlRow> SqlStorage::Cursor::rowIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   auto names = obj->cachedColumnNames.get();
-  return iteratorImpl(js, obj, [&](State& state, uint i, SqlValue&& value) {
-    return SqlRow::Field{
-      // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
-      // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
-      // which would be relatively slower.
-      .name = names[i].getHandle(js),
-      .value = kj::mv(value)};
-  }).map([&](kj::Array<SqlRow::Field>&& fields) { return SqlRow{.fields = kj::mv(fields)}; });
+  kj::Maybe<kj::Array<kj::Tuple<jsg::JsString, SqlValue>>> maybeItems =
+      iteratorImpl(js, obj, [&](State& state, uint i, SqlValue&& value) {
+    // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
+    // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
+    // which would be relatively slower.
+    return kj::tuple(names[i].getHandle(js), kj::mv(value));
+  });
+
+  KJ_IF_SOME(items, maybeItems) {
+    jsg::Dict<SqlValue, jsg::JsString> result{};
+    for (auto& item: items) {
+      result.fields.insert(kj::mv(kj::get<0>(item)), kj::mv(kj::get<1>(item)));
+    }
+    return kj::mv(result);
+  }
+  return kj::none;
 }
 
 jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {

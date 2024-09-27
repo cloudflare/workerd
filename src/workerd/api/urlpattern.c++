@@ -44,27 +44,23 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(jsg::Lock& js,
     jsg::JsRef<jsg::JsRegExp>& regex,
     kj::ArrayPtr<const kj::String> nameList,
     kj::StringPtr input) {
-  using Groups = jsg::Dict<kj::String, kj::String>;
-
   KJ_IF_SOME(array, regex.getHandle(js)(js, input)) {
     // Starting at 1 here looks a bit odd but it is intentional. The result of the regex
     // is an array and we're skipping the first element.
     uint32_t index = 1;
     uint32_t length = array.size();
-    kj::Vector<Groups::Field> fields(length - 1);
-
+    jsg::Dict<kj::String> dict{};
+    dict.fields.reserve(length);
     while (index < length) {
       auto value = array.get(js, index);
-      fields.add(Groups::Field{
-        .name = kj::str(nameList[index - 1]),
-        .value = value.isUndefined() ? kj::str() : kj::str(value),
-      });
+      dict.fields.insert(
+          kj::str(nameList[index - 1]), value.isUndefined() ? kj::str() : kj::str(value));
       index++;
     }
 
     return URLPattern::URLPatternComponentResult{
       .input = kj::str(input),
-      .groups = Groups{.fields = fields.releaseAsArray()},
+      .groups = kj::mv(dict),
     };
   }
 

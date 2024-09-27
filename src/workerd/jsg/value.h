@@ -986,7 +986,7 @@ public:
       // Set() returns Maybe<bool>. As usual, if the Maybe is null, then there was an exception,
       // but I have no idea what it means if the Maybe was filled in with the boolean value false...
       KJ_ASSERT(check(out->Set(context,
-          static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(field.name)),
+          static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(field.key)),
           static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(field.value)))));
     }
     return handleScope.Escape(out);
@@ -1018,7 +1018,7 @@ public:
     auto object = handle.As<v8::Object>();
     v8::Local<v8::Array> names = check(object->GetOwnPropertyNames(context));
     auto length = names->Length();
-    auto builder = kj::heapArrayBuilder<typename Dict<V, K>::Field>(length);
+    auto builder = Dict<V, K>();
     for (auto i: kj::zeroTo(length)) {
       v8::Local<v8::String> name = check(check(names->Get(context, i))->ToString(context));
       v8::Local<v8::Value> value = check(object->Get(context, name));
@@ -1026,9 +1026,9 @@ public:
       if constexpr (kj::isSameType<K, kj::String>()) {
         auto strName = convertToUtf8(name);
         const char* cstrName = strName.cStr();
-        builder.add(typename Dict<V, K>::Field{kj::mv(strName),
-          wrapper.template unwrap<V>(
-              context, value, TypeErrorContext::dictField(cstrName), object)});
+        builder.fields.insert(kj::mv(strName),
+            wrapper.template unwrap<V>(
+                context, value, TypeErrorContext::dictField(cstrName), object));
       } else {
         // Here we have to be a bit more careful than for the kj::String case. The unwrap<K>() call
         // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
@@ -1045,11 +1045,11 @@ public:
           throwTypeError(context->GetIsolate(), TypeErrorContext::dictField(strName.cStr()),
               TypeWrapper::getName((V*)nullptr));
         }
-        builder.add(typename Dict<V, K>::Field{
-          KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue))});
+        builder.fields.insert(
+            KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue)));
       }
     }
-    return Dict<V, K>{builder.finish()};
+    return builder;
   }
 };
 

@@ -257,14 +257,7 @@ public:
     }
 
     const jsg::Optional<jsg::Dict<kj::String>> getCustomMetadata() const {
-      return customMetadata.map([](const jsg::Dict<kj::String>& m) {
-        return jsg::Dict<kj::String>{
-          .fields =
-              KJ_MAP(f, m.fields) {
-          return jsg::Dict<kj::String>::Field{.name = kj::str(f.name), .value = kj::str(f.value)};
-        },
-        };
-      });
+      return customMetadata;
     }
 
     jsg::Optional<Range> getRange() {

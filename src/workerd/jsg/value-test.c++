@@ -348,18 +348,18 @@ KJ_TEST("OneOf") {
 struct DictContext: public ContextGlobalObject {
   kj::String takeDict(Dict<Ref<NumberBox>> dict) {
     return kj::strArray(
-        KJ_MAP(f, dict.fields) { return kj::str(f.name, ": ", f.value->value); }, ", ");
+        KJ_MAP(f, dict.fields) { return kj::str(f.key, ": ", f.value->value); }, ", ");
   }
   kj::String takeDictOfFunctions(Lock& js, Dict<Function<int()>> dict) {
     return kj::strArray(
-        KJ_MAP(f, dict.fields) { return kj::str(f.name, ": ", f.value(js)); }, ", ");
+        KJ_MAP(f, dict.fields) { return kj::str(f.key, ": ", f.value(js)); }, ", ");
   }
   Dict<Ref<NumberBox>> returnDict() {
-    auto builder = kj::heapArrayBuilder<Dict<Ref<NumberBox>>::Field>(3);
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("foo"), jsg::alloc<NumberBox>(123)});
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("bar"), jsg::alloc<NumberBox>(456)});
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("baz"), jsg::alloc<NumberBox>(789)});
-    return {builder.finish()};
+    auto builder = Dict<Ref<NumberBox>>();
+    builder.fields.insert(kj::str("foo"), jsg::alloc<NumberBox>(123));
+    builder.fields.insert(kj::str("bar"), jsg::alloc<NumberBox>(456));
+    builder.fields.insert(kj::str("baz"), jsg::alloc<NumberBox>(789));
+    return builder;
   }
 
   JSG_RESOURCE_TYPE(DictContext) {
@@ -369,6 +369,7 @@ struct DictContext: public ContextGlobalObject {
     JSG_METHOD(returnDict);
   }
 };
+void DictContext::jsgConfiguration() {}
 JSG_DECLARE_ISOLATE_TYPE(DictIsolate, DictContext, NumberBox);
 
 KJ_TEST("dicts") {

@@ -1636,7 +1636,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         obj.env = lock.v8Ref(bindingsScope.As<v8::Value>());
                         obj.ctx = jsg::alloc<api::ExecutionContext>();
 
-                        impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
+                        impl->namedHandlers.insert(kj::mv(handler.key), kj::mv(obj));
                       }
                       KJ_CASE_ONEOF(cls, EntrypointClass) {
                         js.withinHandleScope([&]() {
@@ -1644,18 +1644,18 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
                           for (;;) {
                             if (handle == entrypointClasses.durableObject) {
-                              impl->actorClasses.insert(kj::mv(handler.name),
+                              impl->actorClasses.insert(kj::mv(handler.key),
                                   Impl::ActorClassInfo{
                                     .cls = kj::mv(cls),
                                     .missingSuperclass = false,
                                   });
                               return;
                             } else if (handle == entrypointClasses.workerEntrypoint) {
-                              impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
+                              impl->statelessClasses.insert(kj::mv(handler.key), kj::mv(cls));
                               return;
                             } else if (handle == entrypointClasses.workflow) {
                               if (features.getWorkerdExperimental()) {
-                                impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
+                                impl->statelessClasses.insert(kj::mv(handler.key), kj::mv(cls));
                               }
                               return;
                             }
@@ -1667,7 +1667,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                               // class if it doesn't inherit anything.
                               // TODO(someday): Log a warning suggesting extending DurableObject.
                               // TODO(someday): Introduce a compat flag that makes this required.
-                              impl->actorClasses.insert(kj::mv(handler.name),
+                              impl->actorClasses.insert(kj::mv(handler.key),
                                   Impl::ActorClassInfo{
                                     .cls = kj::mv(cls),
                                     .missingSuperclass = true,
@@ -2125,8 +2125,8 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         auto dict = js.toDict(handle);
         bool empty = true;
         for (auto& field: dict.fields) {
-          if (!ignoredHandlers.contains(field.name)) {
-            errorReporter.addHandler(name, field.name);
+          if (!ignoredHandlers.contains(field.key)) {
+            errorReporter.addHandler(name, field.key);
             empty = false;
           }
         }

@@ -101,7 +101,7 @@ jsg::Promise<jsg::Ref<GPUDevice>> GPUAdapter::requestDevice(
 
     KJ_IF_SOME(requiredLimits, d.requiredLimits) {
       for (auto& f: requiredLimits.fields) {
-        setLimit(limits, f.name, f.value);
+        setLimit(limits, f.key, f.value);
       }
       desc.requiredLimits = &limits;
     }

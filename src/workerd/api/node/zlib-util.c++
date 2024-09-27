@@ -882,7 +882,7 @@ kj::Array<kj::byte> ZlibUtil::brotliSync(InputSource data, BrotliContext::Option
 
   KJ_IF_SOME(params, opts.params) {
     for (const auto& field: params.fields) {
-      KJ_IF_SOME(err, ctx.setParams(field.name.parseAs<int>(), field.value)) {
+      KJ_IF_SOME(err, ctx.setParams(field.key.parseAs<int>(), field.value)) {
         JSG_FAIL_REQUIRE(Error, err.message);
       }
     }
