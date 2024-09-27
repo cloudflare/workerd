@@ -373,6 +373,15 @@ export const constantsTest = {
   },
 };
 
+// This test makes sure constants can be accessed from the zlib module directly
+// This is supported by NodeJS, but is deprecated.
+export const constantsDirectlyUnderZlibTest = {
+  test() {
+    assert.deepStrictEqual(zlib.Z_NEED_DICT, 2);
+    assert.deepStrictEqual(zlib.Z_OK, 0);
+  },
+};
+
 // Tests are taken from:
 // https://github.com/nodejs/node/blob/561bc87c7607208f0d3db6dcd9231efeb48cfe2f/test/parallel/test-zlib-zero-windowBits.js
 export const testZeroWindowBits = {
