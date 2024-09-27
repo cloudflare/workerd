@@ -789,7 +789,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   SpanBuilder limeSpan = nullptr;
 
   KJ_IF_SOME(n, options.operationName) {
-    // TODO(cleanup): Avoid cloning the string here if possible.
+    // TODO(cleanup): Using kj::Maybe<kj::LiteralStringConst> for operationName instead would remove
+    // a memory allocation here, but there might be use cases for dynamically allocated strings.
     span = makeTraceSpan(kj::ConstString(kj::str(n)));
     limeSpan = makeLimeTraceSpan(kj::ConstString(kj::mv(n)));
   }

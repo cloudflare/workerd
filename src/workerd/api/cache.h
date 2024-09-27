@@ -87,7 +87,7 @@ private:
   kj::Maybe<kj::String> cacheName;
 
   kj::Own<kj::HttpClient> getHttpClient(
-      IoContext& context, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName);
+      IoContext& context, kj::Maybe<kj::String> cfBlobJson, kj::LiteralStringConst operationName);
 };
 
 // =======================================================================================
