@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workerd/io/trace.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
 
@@ -7,6 +8,7 @@
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <kj/table.h>
+#include <kj/timer.h>
 
 #include <set>
 
@@ -150,7 +152,8 @@ public:
 
   SharedMemoryCache(kj::Maybe<const MemoryCacheProvider&> provider,
       kj::StringPtr id,
-      kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler);
+      kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler,
+      const kj::MonotonicClock& timer);
 
   ~SharedMemoryCache() noexcept(false);
 
@@ -160,7 +163,8 @@ public:
 
   static kj::Own<const SharedMemoryCache> create(kj::Maybe<const MemoryCacheProvider&> provider,
       kj::StringPtr id,
-      kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler);
+      kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler,
+      const kj::MonotonicClock& timer);
 
 public:
   // RAII class that attaches itself to a cache, suggests cache limits to the
@@ -176,7 +180,8 @@ public:
     // Returns a cached value for the given key if one exists (and has not
     // expired). If no such value exists, nothing is returned, regardless of any
     // in-progress fallbacks trying to produce such a value.
-    kj::Maybe<kj::Own<CacheValue>> getWithoutFallback(const kj::String& key) const;
+    kj::Maybe<kj::Own<CacheValue>> getWithoutFallback(
+        const kj::String& key, SpanBuilder& span) const;
 
     struct FallbackResult {
       kj::Own<CacheValue> value;
@@ -191,7 +196,7 @@ public:
     //    or to a FallbackDoneCallback. In the latter case, the caller should
     //    invoke the fallback function.
     kj::OneOf<kj::Own<CacheValue>, kj::Promise<GetWithFallbackOutcome>> getWithFallback(
-        const kj::String& key) const;
+        const kj::String& key, SpanBuilder& span) const;
 
   private:
     // Creates a new FallbackDoneCallback associated with the given
@@ -210,6 +215,7 @@ public:
     void handleFallbackFailure(InProgress& inProgress) const;
 
     kj::Own<const SharedMemoryCache> cache;
+    static constexpr auto memoryCachekLockWaitTimeTag = "memory_cache_lock_wait_time_ns"_kjc;
     Limits limits;
   };
 
@@ -453,6 +459,8 @@ private:
   // Same as above, the MemoryCacheProvider owns the actual handler here. Since that is guaranteed
   // to outlive this SharedMemoryCache instance, so is the handler.
   kj::Maybe<AdditionalResizeMemoryLimitHandler&> additionalResizeMemoryLimitHandler;
+
+  const kj::MonotonicClock& timer;
 };
 
 // JavaScript class that allows accessing an in-memory cache.
@@ -488,8 +496,9 @@ private:
 // the in memory cache is being used.
 class MemoryCacheProvider {
 public:
-  MemoryCacheProvider(kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
-                          additionalResizeMemoryLimitHandler = kj::none);
+  MemoryCacheProvider(const kj::MonotonicClock& timer,
+      kj::Maybe<SharedMemoryCache::AdditionalResizeMemoryLimitHandler>
+          additionalResizeMemoryLimitHandler = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(MemoryCacheProvider);
   ~MemoryCacheProvider() noexcept(false);
 
@@ -507,6 +516,8 @@ private:
   // to avoid the use of the bare pointer to SharedMemoryCache* here. When the SharedMemoryCache
   // is destroyed, it will remove itself from this cache by calling removeInstance.
   kj::MutexGuarded<kj::HashMap<kj::String, const SharedMemoryCache*>> caches;
+
+  const kj::MonotonicClock& timer;
 };
 
 // clang-format off

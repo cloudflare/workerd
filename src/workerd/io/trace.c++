@@ -795,4 +795,19 @@ void WorkerTracer::setTrace(rpc::Trace::Reader reader) {
   trace->mergeFrom(reader, pipelineLogLevel);
 }
 
+ScopedDurationTagger::ScopedDurationTagger(
+    SpanBuilder& span, kj::ConstString key, const kj::MonotonicClock& timer)
+    : span(span),
+      key(kj::mv(key)),
+      timer(timer),
+      startTime(timer.now()) {}
+
+ScopedDurationTagger::~ScopedDurationTagger() noexcept(false) {
+  auto duration = timer.now() - startTime;
+  if (isPredictableModeForTest()) {
+    duration = 0 * kj::NANOSECONDS;
+  }
+  span.setTag(kj::mv(key), duration / kj::NANOSECONDS);
+}
+
 }  // namespace workerd
