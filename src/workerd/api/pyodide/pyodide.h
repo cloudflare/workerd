@@ -5,10 +5,8 @@
 
 #include "workerd/util/wait-list.h"
 
-#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/url.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 

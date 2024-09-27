@@ -1,0 +1,30 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_cc_library(
+    name = "pyodide",
+    srcs = [
+        "pyodide.c++",
+    ],
+    hdrs = [
+        "pyodide.h",
+        "//src/pyodide:generated/pyodide_extra.capnp.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/pyodide",
+        "//src/pyodide:pyodide_extra_capnp",
+        "//src/workerd/jsg",
+        "//src/workerd/server:workerd_capnp",
+        "//src/workerd/util:autogate",
+    ],
+)
+
+kj_test(
+    src = "pyodide-test.c++",
+    deps = [
+        ":pyodide",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
