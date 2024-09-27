@@ -545,7 +545,7 @@ http_file(
 http_file(
     name = "clang-format-linux-arm64",
     executable = True,
-    integrity = "sha256-iCbaPg60x60eA9ZIWmSdFva/RD9xOBcJLUwSRK8Gxzk=",
+    integrity = "sha256-No7G08x7VJ+CkjuhyohcTWymPPm0QUE4EZlkp9Of5jM=",
     url = "https://github.com/npaun/bins/releases/download/llvm-18.1.8/llvm-18.1.8-linux-arm64-clang-format",
 )
 
