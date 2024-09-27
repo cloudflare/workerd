@@ -517,8 +517,9 @@ jsg::Promise<bool> Cache::delete_(
 }
 
 kj::Own<kj::HttpClient> Cache::getHttpClient(
-    IoContext& context, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
-  auto span = context.makeTraceSpan(kj::mv(operationName));
+    IoContext& context, kj::Maybe<kj::String> cfBlobJson, kj::LiteralStringConst operationName) {
+  auto span = context.makeTraceSpan(operationName);
+  auto limeSpan = context.makeLimeTraceSpan(operationName);
 
   auto cacheClient = context.getCacheClient();
   auto httpClient = cacheName
