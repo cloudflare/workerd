@@ -344,16 +344,15 @@ jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::
         name.contains("token"_kjc));
   };
 
-  using HeaderDict = jsg::Dict<jsg::ByteString, jsg::ByteString>;
-  auto builder = kj::heapArrayBuilder<HeaderDict::Field>(detail->headers.size());
+  jsg::Dict<jsg::ByteString, jsg::ByteString> dict{};
+  dict.fields.reserve(detail->headers.size());
   for (const auto& header: detail->headers) {
     auto v = (redacted && shouldRedact(header.name)) ? "REDACTED"_kj : header.value;
-    builder.add(
-        HeaderDict::Field{jsg::ByteString(kj::str(header.name)), jsg::ByteString(kj::str(v))});
+    dict.fields.insert(jsg::ByteString(kj::str(header.name)), jsg::ByteString(kj::str(v)));
   }
 
   // TODO(conform): Better to return a frozen JS Object?
-  return HeaderDict{builder.finish()};
+  return dict;
 }
 
 kj::StringPtr TraceItem::FetchEventInfo::Request::getMethod() {

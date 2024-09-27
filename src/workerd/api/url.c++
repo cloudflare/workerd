@@ -520,7 +520,7 @@ jsg::Ref<URLSearchParams> URLSearchParams::constructor(
       }
       KJ_CASE_ONEOF(dict, jsg::Dict<kj::String>) {
         searchParams->url->query = KJ_MAP(entry, dict.fields) {
-          return kj::Url::QueryParam{kj::mv(entry.name), kj::mv(entry.value)};
+          return kj::Url::QueryParam{kj::mv(entry.key), kj::mv(entry.value)};
         };
       }
       KJ_CASE_ONEOF(arrayOfArrays, kj::Array<kj::Array<kj::String>>) {

@@ -99,13 +99,14 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
 
   jsg::Optional<jsg::Dict<kj::String>> customMetadata;
   if (responseReader.hasCustomFields()) {
-    customMetadata = jsg::Dict<kj::String>{.fields =
-                                               KJ_MAP(field, responseReader.getCustomFields()) {
-      jsg::Dict<kj::String>::Field item;
-      item.name = kj::str(field.getK());
-      item.value = kj::str(field.getV());
-      return item;
-    }};
+    customMetadata = jsg::Dict<kj::String>{};
+    KJ_IF_SOME(metadata, customMetadata) {
+      auto customFields = responseReader.getCustomFields();
+      metadata.fields.reserve(customFields.size());
+      for (const auto& field: customFields) {
+        metadata.fields.insert(kj::str(field.getK()), kj::str(field.getV()));
+      }
+    }
   } else if (std::find(expectedOptionalFields.begin(), expectedOptionalFields.end(),
                  OptionalMetadata::Custom) != expectedOptionalFields.end()) {
     // Custom metadata was asked for but the object didn't have anything.
@@ -434,9 +435,11 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       initOnlyIf(js, putBuilder, o);
       KJ_IF_SOME(m, o.customMetadata) {
         auto fields = putBuilder.initCustomFields(m.fields.size());
-        for (size_t i = 0; i < m.fields.size(); i++) {
-          fields[i].setK(m.fields[i].name);
-          fields[i].setV(m.fields[i].value);
+        size_t i = 0;
+        for (const auto& field: m.fields) {
+          fields[i].setK(field.key);
+          fields[i].setV(field.value);
+          i++;
         }
         sentCustomMetadata = kj::mv(m);
       }
@@ -610,9 +613,11 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(m, o.customMetadata) {
         auto fields = createMultipartUploadBuilder.initCustomFields(m.fields.size());
-        for (size_t i = 0; i < m.fields.size(); i++) {
-          fields[i].setK(m.fields[i].name);
-          fields[i].setV(m.fields[i].value);
+        size_t i = 0;
+        for (const auto& field: m.fields) {
+          fields[i].setK(field.key);
+          fields[i].setV(field.value);
+          i++;
         }
       }
       KJ_IF_SOME(m, o.httpMetadata) {
@@ -762,23 +767,21 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
         listBuilder.setStartAfter(d.value);
       }
       KJ_IF_SOME(i, o.include) {
-        using Field = typename jsg::Dict<uint16_t>::Field;
-        static const std::array<Field, 2> fields = {
-          Field{
-            .name = kj::str("httpMetadata"),
-            .value = static_cast<uint16_t>(R2ListRequest::IncludeField::HTTP),
-          },
-          Field{
-            .name = kj::str("customMetadata"),
-            .value = static_cast<uint16_t>(R2ListRequest::IncludeField::CUSTOM),
-          },
-        };
+        static const kj::HashMap<kj::String, uint16_t> fields = []() {
+          auto f = kj::HashMap<kj::String, uint16_t>();
+          f.reserve(2);
+          f.insert(
+              kj::str("httpMetadata"), static_cast<uint16_t>(R2ListRequest::IncludeField::HTTP));
+          f.insert(kj::str("customMetadata"),
+              static_cast<uint16_t>(R2ListRequest::IncludeField::CUSTOM));
+          return f;
+        }();
 
         expectedOptionalFields.clear();
 
         listBuilder.setInclude(KJ_MAP(reqField, i) {
           for (const auto& field: fields) {
-            if (field.name == reqField.value) {
+            if (field.key == reqField.value) {
               expectedOptionalFields.add(static_cast<OptionalMetadata>(field.value));
               return field.value;
             }

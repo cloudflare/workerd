@@ -142,7 +142,7 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
 
 Headers::Headers(jsg::Dict<jsg::ByteString, jsg::ByteString> dict): guard(Guard::NONE) {
   for (auto& field: dict.fields) {
-    append(kj::mv(field.name), kj::mv(field.value));
+    append(kj::mv(field.key), kj::mv(field.value));
   }
 }
 
@@ -252,13 +252,15 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
         // the test fails.
       }
       KJ_CASE_ONEOF(pairs, ByteStringPairs) {
-        auto dict = KJ_MAP(entry, pairs) {
+        StringDict dict{};
+        dict.fields.reserve(pairs.size());
+        for (auto& entry: pairs) {
           JSG_REQUIRE(entry.size() == 2, TypeError,
               "To initialize a Headers object from a sequence, each inner sequence "
               "must have exactly two elements.");
-          return StringDict::Field{kj::mv(entry[0]), kj::mv(entry[1])};
-        };
-        return jsg::alloc<Headers>(StringDict{kj::mv(dict)});
+          dict.fields.insert(kj::mv(entry[0]), kj::mv(entry[1]));
+        }
+        return jsg::alloc<Headers>(kj::mv(dict));
       }
     }
   }

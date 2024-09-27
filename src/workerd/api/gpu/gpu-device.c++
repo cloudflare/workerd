@@ -308,9 +308,10 @@ ParsedRenderPipelineDescriptor parseRenderPipelineDescriptor(
     kj::Vector<wgpu::ConstantEntry> constants;
 
     for (auto& f: cDict.fields) {
-      wgpu::ConstantEntry e;
-      e.key = f.name.cStr();
-      e.value = f.value;
+      wgpu::ConstantEntry e{
+        .key = f.key.cStr(),
+        .value = f.value,
+      };
       constants.add(kj::mv(e));
     }
     auto constantsArray = constants.releaseAsArray();
@@ -432,9 +433,10 @@ ParsedRenderPipelineDescriptor parseRenderPipelineDescriptor(
       kj::Vector<wgpu::ConstantEntry> constants;
 
       for (auto& f: cDict.fields) {
-        wgpu::ConstantEntry e;
-        e.key = f.name.cStr();
-        e.value = f.value;
+        wgpu::ConstantEntry e{
+          .key = f.key.cStr(),
+          .value = f.value,
+        };
         constants.add(kj::mv(e));
       }
       auto constantsArray = constants.releaseAsArray();
@@ -549,9 +551,10 @@ wgpu::ComputePipelineDescriptor parseComputePipelineDescriptor(
   kj::Vector<wgpu::ConstantEntry> constants;
   KJ_IF_SOME(cDict, descriptor.compute.constants) {
     for (auto& f: cDict.fields) {
-      wgpu::ConstantEntry e;
-      e.key = f.name.cStr();
-      e.value = f.value;
+      wgpu::ConstantEntry e{
+        .key = f.key.cStr(),
+        .value = f.value,
+      };
       constants.add(kj::mv(e));
     }
   }

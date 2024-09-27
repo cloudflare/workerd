@@ -1038,24 +1038,11 @@ public:
 // Note: A Dict<V, K> corresponds to a record<K, V> in the Web IDL language.
 template <typename Value, typename Key = kj::String>
 struct Dict {
-  // TODO(someday): Maybe make this a map and not an array? Current use case doesn't care, though.
-
-  // Field of an object.
-  struct Field {
-    Key name;
-    Value value;
-
-    JSG_MEMORY_INFO(Field) {
-      tracker.trackField("name", name);
-      tracker.trackField("value", value);
-    }
-  };
-
-  kj::Array<Field> fields;
+  kj::HashMap<Key, Value> fields;
 
   JSG_MEMORY_INFO(Dict) {
     for (const auto& field: fields) {
-      tracker.trackField(nullptr, field);
+      tracker.trackField(field.key, field.value);
     }
   }
 };

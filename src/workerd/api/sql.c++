@@ -85,7 +85,7 @@ jsg::JsObject SqlStorage::wrapSqlRow(jsg::Lock& js, SqlRow row) {
   return jsg::JsObject(js.withinHandleScope([&]() -> v8::Local<v8::Object> {
     jsg::JsObject result = js.obj();
     for (auto& field: row.fields) {
-      result.set(js, field.name, wrapSqlValue(js, kj::mv(field.value)));
+      result.set(js, field.key, wrapSqlValue(js, kj::mv(field.value)));
     }
     return result;
   }));
@@ -94,6 +94,7 @@ jsg::JsObject SqlStorage::wrapSqlRow(jsg::Lock& js, SqlRow row) {
 jsg::JsArray SqlStorage::wrapSqlRowRaw(jsg::Lock& js, kj::Array<SqlValue> row) {
   return jsg::JsArray(js.withinHandleScope([&]() -> v8::Local<v8::Array> {
     v8::LocalVector<v8::Value> values(js.v8Isolate);
+    values.reserve(row.size());
     for (auto& field: row) {
       values.push_back(wrapSqlValue(js, kj::mv(field)));
     }
@@ -225,14 +226,26 @@ jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js
 kj::Maybe<SqlStorage::SqlRow> SqlStorage::Cursor::rowIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   auto names = obj->cachedColumnNames.get();
+  // TODO(soon): Find a way to avoid creating an unnecessary struct here.
+  struct DictEntry {
+    jsg::JsString key;
+    SqlValue value;
+  };
   return iteratorImpl(js, obj, [&](State& state, uint i, SqlValue&& value) {
-    return SqlRow::Field{
+    return DictEntry{
       // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
       // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
       // which would be relatively slower.
-      .name = names[i].getHandle(js),
+      .key = names[i].getHandle(js),
       .value = kj::mv(value)};
-  }).map([&](kj::Array<SqlRow::Field>&& fields) { return SqlRow{.fields = kj::mv(fields)}; });
+  }).map([&](kj::Array<DictEntry>&& fields) {
+    jsg::Dict<SqlValue, jsg::JsString> result{};
+    result.fields.reserve(fields.size());
+    for (auto& field: fields) {
+      result.fields.insert(kj::mv(field.key), kj::mv(field.value));
+    }
+    return kj::mv(result);
+  });
 }
 
 jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {

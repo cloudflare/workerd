@@ -257,13 +257,13 @@ public:
     }
 
     const jsg::Optional<jsg::Dict<kj::String>> getCustomMetadata() const {
-      return customMetadata.map([](const jsg::Dict<kj::String>& m) {
-        return jsg::Dict<kj::String>{
-          .fields =
-              KJ_MAP(f, m.fields) {
-          return jsg::Dict<kj::String>::Field{.name = kj::str(f.name), .value = kj::str(f.value)};
-        },
-        };
+      return customMetadata.map([](const jsg::Dict<kj::String>& cm) {
+        auto res = jsg::Dict<kj::String>{};
+        res.fields.reserve(cm.fields.size());
+        for (auto& m: cm.fields) {
+          res.fields.insert(kj::str(m.key), kj::str(m.value));
+        }
+        return kj::mv(res);
       });
     }
 
