@@ -97,7 +97,7 @@ public:
       kj::FunctionParam<void(jsg::Lock& lock, const Api& api, v8::Local<v8::Object> target)>
           compileBindings,
       IsolateObserver::StartType startType,
-      SpanParent parentSpan,
+      TraceParentContext spans,
       LockType lockType,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Duration&> startupTime = kj::none);
