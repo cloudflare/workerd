@@ -21,6 +21,7 @@
 
 #include <array>
 #include <cmath>
+#include <regex>
 
 namespace workerd::api::public_beta {
 static bool isWholeNumber(double x) {
@@ -154,10 +155,17 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
     }
   }
 
+  jsg::Optional<kj::String> ssecKeyMd5;
+
+  if (responseReader.hasSsec()) {
+    auto ssecBuilder = responseReader.getSsec();
+    ssecKeyMd5 = kj::str(ssecBuilder.getKeyMd5());
+  }
+
   return jsg::alloc<T>(kj::str(responseReader.getName()), kj::str(responseReader.getVersion()),
       responseReader.getSize(), kj::str(responseReader.getEtag()), kj::mv(checksums), uploaded,
       kj::mv(httpMetadata), kj::mv(customMetadata), range,
-      kj::str(responseReader.getStorageClass()), kj::fwd<Args>(args)...);
+      kj::str(responseReader.getStorageClass()), kj::mv(ssecKeyMd5), kj::fwd<Args>(args)...);
 }
 
 template <HeadResultT T, typename... Args>
@@ -293,6 +301,21 @@ void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
         KJ_IF_SOME(e, h->get(jsg::ByteString(kj::str("range")))) {
           builder.setRangeHeader(kj::str(e));
         }
+      }
+    }
+  }
+  KJ_IF_SOME(ssecKey, o.ssecKey) {
+    auto ssecBuilder = builder.initSsec();
+    KJ_SWITCH_ONEOF(ssecKey) {
+      KJ_CASE_ONEOF(keyString, kj::String) {
+        JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
+            Error, "SSE-C Key has invalid format");
+        JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
+        ssecBuilder.setKey(kj::str(keyString));
+      }
+      KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
+        JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
+        ssecBuilder.setKey(kj::encodeHex(keyBuff));
       }
     }
   }
@@ -559,6 +582,22 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(s, o.storageClass) {
         putBuilder.setStorageClass(s);
       }
+      KJ_IF_SOME(ssecKey, o.ssecKey) {
+        auto ssecBuilder = putBuilder.initSsec();
+        KJ_SWITCH_ONEOF(ssecKey) {
+          KJ_CASE_ONEOF(keyString, kj::String) {
+            JSG_REQUIRE(
+                std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
+                Error, "SSE-C Key has invalid format");
+            JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
+            ssecBuilder.setKey(kj::str(keyString));
+          }
+          KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
+            JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
+            ssecBuilder.setKey(kj::encodeHex(keyBuff));
+          }
+        }
+      }
     }
 
     auto requestJson = json.encode(requestBuilder);
@@ -650,6 +689,22 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
       }
       KJ_IF_SOME(s, o.storageClass) {
         createMultipartUploadBuilder.setStorageClass(s);
+      }
+      KJ_IF_SOME(ssecKey, o.ssecKey) {
+        auto ssecBuilder = createMultipartUploadBuilder.initSsec();
+        KJ_SWITCH_ONEOF(ssecKey) {
+          KJ_CASE_ONEOF(keyString, kj::String) {
+            JSG_REQUIRE(
+                std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
+                Error, "SSE-C Key has invalid format");
+            JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
+            ssecBuilder.setKey(kj::str(keyString));
+          }
+          KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
+            JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
+            ssecBuilder.setKey(kj::encodeHex(keyBuff));
+          }
+        }
       }
     }
 

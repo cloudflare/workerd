@@ -6,6 +6,7 @@
 
 #include "r2-bucket.h"
 #include "r2-rpc.h"
+#include "workerd/jsg/jsg.h"
 
 #include <workerd/api/r2-api.capnp.h>
 #include <workerd/util/http-util.h>
@@ -13,15 +14,16 @@
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
 #include <kj/compat/http.h>
+#include <kj/encoding.h>
 
-#include <array>
-#include <cmath>
+#include <regex>
 
 namespace workerd::api::public_beta {
 
 jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg::Lock& js,
     int partNumber,
     R2PutValue value,
+    jsg::Optional<UploadPartOptions> options,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
@@ -44,6 +46,24 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     uploadPartBuilder.setUploadId(uploadId);
     uploadPartBuilder.setPartNumber(partNumber);
     uploadPartBuilder.setObject(key);
+    KJ_IF_SOME(options, options) {
+      KJ_IF_SOME(ssecKey, options.ssecKey) {
+        auto ssecBuilder = uploadPartBuilder.initSsec();
+        KJ_SWITCH_ONEOF(ssecKey) {
+          KJ_CASE_ONEOF(keyString, kj::String) {
+            JSG_REQUIRE(
+                std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
+                Error, "SSE-C Key has invalid format");
+            JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
+            ssecBuilder.setKey(kj::str(keyString));
+          }
+          KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
+            JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
+            ssecBuilder.setKey(kj::encodeHex(keyBuff));
+          }
+        }
+      }
+    }
 
     auto requestJson = json.encode(requestBuilder);
     auto bucket = this->bucket->adminBucket.map([](auto&& s) { return kj::str(s); });

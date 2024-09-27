@@ -299,6 +299,12 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-test.js"],
+)
+
+wd_test(
     src = "rtti-test.wd-test",
     args = ["--experimental"],
     data = ["rtti-test.js"],
