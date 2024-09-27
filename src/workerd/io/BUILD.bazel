@@ -51,7 +51,10 @@ wd_cc_library(
         "io-own.c++",
         "io-util.c++",
         "worker.c++",
-    ] + ["//src/workerd/api:srcs"],
+    ] + ["//src/workerd/api:srcs"] + select({
+        ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:srcs"],
+        "//conditions:default": [],
+    }),
     hdrs = [
         "compatibility-date.h",
         "features.h",
@@ -61,7 +64,10 @@ wd_cc_library(
         "io-util.h",
         "promise-wrapper.h",
         "worker.h",
-    ] + ["//src/workerd/api:hdrs"],
+    ] + ["//src/workerd/api:hdrs"] + select({
+        ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:hdrs"],
+        "//conditions:default": [],
+    }),
     defines = select({
         ":set_enable_experimental_webgpu": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU"],
         "//conditions:default": [],
