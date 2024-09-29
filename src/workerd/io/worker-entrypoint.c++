@@ -316,15 +316,10 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
     KJ_IF_SOME(p, proxyTask) {
-      if (util::Autogate::isEnabled(util::AutogateKey::RESPONSE_STREAM_DISCONNECTED_STATUS)) {
-        return p.catch_(
-            [metrics = kj::mv(metrics)](kj::Exception&& e) mutable -> kj::Promise<void> {
-          metrics->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
-          return kj::mv(e);
-        });
-      } else {
-        return kj::mv(p);
-      }
+      return p.catch_([metrics = kj::mv(metrics)](kj::Exception&& e) mutable -> kj::Promise<void> {
+        metrics->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
+        return kj::mv(e);
+      });
     } else {
       return kj::READY_NOW;
     }
