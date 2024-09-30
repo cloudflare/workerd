@@ -133,7 +133,7 @@ void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message
   trace->addLog(trace::Log(timestamp, logLevel, kj::mv(message)), isSpan);
 }
 
-void WorkerTracer::addSpan(const Span& span, kj::String spanContext) {
+void WorkerTracer::addSpan(const trace::Span& span, kj::String spanContext) {
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for exceptions vs.
   //   logs.
@@ -164,7 +164,7 @@ void WorkerTracer::addDiagnosticChannelEvent(
       trace::DiagnosticChannelEvent(timestamp, kj::mv(channel), kj::mv(message)));
 }
 
-void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
+void WorkerTracer::setEventInfo(kj::Date timestamp, trace::EventInfo&& info) {
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for event info vs.
   //   logs.
@@ -193,7 +193,7 @@ void WorkerTracer::setWallTime(kj::Duration wallTime) {
   trace->outcomeInfo.wallTime = wallTime;
 }
 
-void WorkerTracer::setFetchResponseInfo(Trace::FetchResponseInfo&& info) {
+void WorkerTracer::setFetchResponseInfo(trace::FetchResponseInfo&& info) {
   // Match the behavior of setEventInfo(). Any resolution of the TODO comments
   // in setEventInfo() that are related to this check while probably also affect
   // this function.

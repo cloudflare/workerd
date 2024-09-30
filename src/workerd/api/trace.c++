@@ -37,7 +37,7 @@ kj::Maybe<double> getTraceTimestamp(const Trace& trace) {
   return (trace.eventTimestamp - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 }
 
-double getTraceLogTimestamp(const Trace::Log& log) {
+double getTraceLogTimestamp(const trace::Log& log) {
   if (isPredictableModeForTest()) {
     return 0;
   } else {
@@ -45,7 +45,7 @@ double getTraceLogTimestamp(const Trace::Log& log) {
   }
 }
 
-double getTraceDiagnosticChannelEventTimestamp(const Trace::DiagnosticChannelEvent& event) {
+double getTraceDiagnosticChannelEventTimestamp(const trace::DiagnosticChannelEvent& event) {
   if (isPredictableModeForTest()) {
     return 0;
   } else {
@@ -53,7 +53,7 @@ double getTraceDiagnosticChannelEventTimestamp(const Trace::DiagnosticChannelEve
   }
 }
 
-kj::String getTraceLogLevel(const Trace::Log& log) {
+kj::String getTraceLogLevel(const trace::Log& log) {
   switch (log.logLevel) {
     case LogLevel::DEBUG_:
       return kj::str("debug");
@@ -69,7 +69,7 @@ kj::String getTraceLogLevel(const Trace::Log& log) {
   KJ_UNREACHABLE;
 }
 
-jsg::V8Ref<v8::Object> getTraceLogMessage(jsg::Lock& js, const Trace::Log& log) {
+jsg::V8Ref<v8::Object> getTraceLogMessage(jsg::Lock& js, const trace::Log& log) {
   return js.parseJson(log.message).cast<v8::Object>(js);
 }
 
@@ -97,7 +97,7 @@ kj::Maybe<ScriptVersion> getTraceScriptVersion(const Trace& trace) {
       [](const auto& version) { return ScriptVersion(*version); });
 }
 
-double getTraceExceptionTimestamp(const Trace::Exception& ex) {
+double getTraceExceptionTimestamp(const trace::Exception& ex) {
   if (isPredictableModeForTest()) {
     return 0;
   } else {
@@ -127,7 +127,7 @@ kj::String enumToStr(const Enum& var) {
 }
 
 kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
-    jsg::Lock& js, const Trace& trace, const Trace::FetchEventInfo& eventInfo) {
+    jsg::Lock& js, const Trace& trace, const trace::FetchEventInfo& eventInfo) {
   const auto getCf = [&]() -> jsg::Optional<jsg::V8Ref<v8::Object>> {
     const auto& cfJson = eventInfo.cfJson;
     if (cfJson.size() > 0) {
@@ -136,9 +136,9 @@ kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
     return kj::none;
   };
 
-  const auto getHeaders = [&]() -> kj::Array<Trace::FetchEventInfo::Header> {
+  const auto getHeaders = [&]() -> kj::Array<trace::FetchEventInfo::Header> {
     return KJ_MAP(header, eventInfo.headers) {
-      return Trace::FetchEventInfo::Header(kj::str(header.name), kj::str(header.value));
+      return trace::FetchEventInfo::Header(kj::str(header.name), kj::str(header.value));
     };
   };
 
@@ -149,43 +149,43 @@ kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
 kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace) {
   KJ_IF_SOME(e, trace.eventInfo) {
     KJ_SWITCH_ONEOF(e) {
-      KJ_CASE_ONEOF(fetch, Trace::FetchEventInfo) {
+      KJ_CASE_ONEOF(fetch, trace::FetchEventInfo) {
         return kj::Maybe(
             jsg::alloc<TraceItem::FetchEventInfo>(js, trace, fetch, trace.fetchResponseInfo));
       }
-      KJ_CASE_ONEOF(jsRpc, Trace::JsRpcEventInfo) {
+      KJ_CASE_ONEOF(jsRpc, trace::JsRpcEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::JsRpcEventInfo>(trace, jsRpc));
       }
-      KJ_CASE_ONEOF(scheduled, Trace::ScheduledEventInfo) {
+      KJ_CASE_ONEOF(scheduled, trace::ScheduledEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::ScheduledEventInfo>(trace, scheduled));
       }
-      KJ_CASE_ONEOF(alarm, Trace::AlarmEventInfo) {
+      KJ_CASE_ONEOF(alarm, trace::AlarmEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::AlarmEventInfo>(trace, alarm));
       }
-      KJ_CASE_ONEOF(queue, Trace::QueueEventInfo) {
+      KJ_CASE_ONEOF(queue, trace::QueueEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::QueueEventInfo>(trace, queue));
       }
-      KJ_CASE_ONEOF(email, Trace::EmailEventInfo) {
+      KJ_CASE_ONEOF(email, trace::EmailEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::EmailEventInfo>(trace, email));
       }
-      KJ_CASE_ONEOF(tracedTrace, Trace::TraceEventInfo) {
+      KJ_CASE_ONEOF(tracedTrace, trace::TraceEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::TailEventInfo>(trace, tracedTrace));
       }
-      KJ_CASE_ONEOF(hibWs, Trace::HibernatableWebSocketEventInfo) {
+      KJ_CASE_ONEOF(hibWs, trace::HibernatableWebSocketEventInfo) {
         KJ_SWITCH_ONEOF(hibWs.type) {
-          KJ_CASE_ONEOF(message, Trace::HibernatableWebSocketEventInfo::Message) {
+          KJ_CASE_ONEOF(message, trace::HibernatableWebSocketEventInfo::Message) {
             return kj::Maybe(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo>(trace, message));
           }
-          KJ_CASE_ONEOF(close, Trace::HibernatableWebSocketEventInfo::Close) {
+          KJ_CASE_ONEOF(close, trace::HibernatableWebSocketEventInfo::Close) {
             return kj::Maybe(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo>(trace, close));
           }
-          KJ_CASE_ONEOF(error, Trace::HibernatableWebSocketEventInfo::Error) {
+          KJ_CASE_ONEOF(error, trace::HibernatableWebSocketEventInfo::Error) {
             return kj::Maybe(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo>(trace, error));
           }
         }
         KJ_UNREACHABLE;
       }
-      KJ_CASE_ONEOF(custom, Trace::CustomEventInfo) {
+      KJ_CASE_ONEOF(custom, trace::CustomEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::CustomEventInfo>(trace, custom));
       }
     }
@@ -306,13 +306,13 @@ uint TraceItem::getWallTime() {
 
 TraceItem::FetchEventInfo::FetchEventInfo(jsg::Lock& js,
     const Trace& trace,
-    const Trace::FetchEventInfo& eventInfo,
-    kj::Maybe<const Trace::FetchResponseInfo&> responseInfo)
+    const trace::FetchEventInfo& eventInfo,
+    kj::Maybe<const trace::FetchResponseInfo&> responseInfo)
     : request(jsg::alloc<Request>(js, trace, eventInfo)),
       response(responseInfo.map([&](auto& info) { return jsg::alloc<Response>(trace, info); })) {}
 
 TraceItem::FetchEventInfo::Request::Detail::Detail(jsg::Optional<jsg::V8Ref<v8::Object>> cf,
-    kj::Array<Trace::FetchEventInfo::Header> headers,
+    kj::Array<trace::FetchEventInfo::Header> headers,
     kj::String method,
     kj::String url)
     : cf(kj::mv(cf)),
@@ -332,7 +332,7 @@ jsg::Optional<jsg::Ref<TraceItem::FetchEventInfo::Response>> TraceItem::FetchEve
 }
 
 TraceItem::FetchEventInfo::Request::Request(
-    jsg::Lock& js, const Trace& trace, const Trace::FetchEventInfo& eventInfo)
+    jsg::Lock& js, const Trace& trace, const trace::FetchEventInfo& eventInfo)
     : detail(getFetchRequestDetail(js, trace, eventInfo)) {}
 
 TraceItem::FetchEventInfo::Request::Request(Detail& detail, bool redacted)
@@ -377,7 +377,7 @@ jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::Request:
 }
 
 TraceItem::FetchEventInfo::Response::Response(
-    const Trace& trace, const Trace::FetchResponseInfo& responseInfo)
+    const Trace& trace, const trace::FetchResponseInfo& responseInfo)
     : status(responseInfo.statusCode) {}
 
 uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
@@ -385,7 +385,7 @@ uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
 }
 
 TraceItem::JsRpcEventInfo::JsRpcEventInfo(
-    const Trace& trace, const Trace::JsRpcEventInfo& eventInfo)
+    const Trace& trace, const trace::JsRpcEventInfo& eventInfo)
     : rpcMethod(kj::str(eventInfo.methodName)) {}
 
 kj::StringPtr TraceItem::JsRpcEventInfo::getRpcMethod() {
@@ -393,7 +393,7 @@ kj::StringPtr TraceItem::JsRpcEventInfo::getRpcMethod() {
 }
 
 TraceItem::ScheduledEventInfo::ScheduledEventInfo(
-    const Trace& trace, const Trace::ScheduledEventInfo& eventInfo)
+    const Trace& trace, const trace::ScheduledEventInfo& eventInfo)
     : scheduledTime(eventInfo.scheduledTime),
       cron(kj::str(eventInfo.cron)) {}
 
@@ -405,7 +405,7 @@ kj::StringPtr TraceItem::ScheduledEventInfo::getCron() {
 }
 
 TraceItem::AlarmEventInfo::AlarmEventInfo(
-    const Trace& trace, const Trace::AlarmEventInfo& eventInfo)
+    const Trace& trace, const trace::AlarmEventInfo& eventInfo)
     : scheduledTime(eventInfo.scheduledTime) {}
 
 kj::Date TraceItem::AlarmEventInfo::getScheduledTime() {
@@ -413,7 +413,7 @@ kj::Date TraceItem::AlarmEventInfo::getScheduledTime() {
 }
 
 TraceItem::QueueEventInfo::QueueEventInfo(
-    const Trace& trace, const Trace::QueueEventInfo& eventInfo)
+    const Trace& trace, const trace::QueueEventInfo& eventInfo)
     : queueName(kj::str(eventInfo.queueName)),
       batchSize(eventInfo.batchSize) {}
 
@@ -426,7 +426,7 @@ uint32_t TraceItem::QueueEventInfo::getBatchSize() {
 }
 
 TraceItem::EmailEventInfo::EmailEventInfo(
-    const Trace& trace, const Trace::EmailEventInfo& eventInfo)
+    const Trace& trace, const trace::EmailEventInfo& eventInfo)
     : mailFrom(kj::str(eventInfo.mailFrom)),
       rcptTo(kj::str(eventInfo.rcptTo)),
       rawSize(eventInfo.rawSize) {}
@@ -444,13 +444,13 @@ uint32_t TraceItem::EmailEventInfo::getRawSize() {
 }
 
 kj::Array<jsg::Ref<TraceItem::TailEventInfo::TailItem>> getConsumedEventsFromEventInfo(
-    const Trace::TraceEventInfo& eventInfo) {
+    const trace::TraceEventInfo& eventInfo) {
   return KJ_MAP(t, eventInfo.traces) -> jsg::Ref<TraceItem::TailEventInfo::TailItem> {
     return jsg::alloc<TraceItem::TailEventInfo::TailItem>(t);
   };
 }
 
-TraceItem::TailEventInfo::TailEventInfo(const Trace& trace, const Trace::TraceEventInfo& eventInfo)
+TraceItem::TailEventInfo::TailEventInfo(const Trace& trace, const trace::TraceEventInfo& eventInfo)
     : consumedEvents(getConsumedEventsFromEventInfo(eventInfo)) {}
 
 kj::Array<jsg::Ref<TraceItem::TailEventInfo::TailItem>> TraceItem::TailEventInfo::
@@ -460,7 +460,7 @@ kj::Array<jsg::Ref<TraceItem::TailEventInfo::TailItem>> TraceItem::TailEventInfo
   };
 }
 
-TraceItem::TailEventInfo::TailItem::TailItem(const Trace::TraceEventInfo::TraceItem& traceItem)
+TraceItem::TailEventInfo::TailItem::TailItem(const trace::TraceEventInfo::TraceItem& traceItem)
     : scriptName(traceItem.scriptName.map([](auto& s) { return kj::str(s); })) {}
 
 kj::Maybe<kj::StringPtr> TraceItem::TailEventInfo::TailItem::getScriptName() {
@@ -468,7 +468,7 @@ kj::Maybe<kj::StringPtr> TraceItem::TailEventInfo::TailItem::getScriptName() {
 }
 
 TraceDiagnosticChannelEvent::TraceDiagnosticChannelEvent(
-    const Trace& trace, const Trace::DiagnosticChannelEvent& eventInfo)
+    const Trace& trace, const trace::DiagnosticChannelEvent& eventInfo)
     : timestamp(getTraceDiagnosticChannelEventTimestamp(eventInfo)),
       channel(kj::heapString(eventInfo.channel)),
       message(kj::heapArray<kj::byte>(eventInfo.message)) {}
@@ -511,19 +511,19 @@ ScriptVersion::ScriptVersion(const ScriptVersion& other)
       message{other.message.map([](const auto& message) { return kj::str(message); })} {}
 
 TraceItem::CustomEventInfo::CustomEventInfo(
-    const Trace& trace, const Trace::CustomEventInfo& eventInfo)
+    const Trace& trace, const trace::CustomEventInfo& eventInfo)
     : eventInfo(eventInfo) {}
 
 TraceItem::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
-    const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Message& eventInfo)
+    const Trace& trace, const trace::HibernatableWebSocketEventInfo::Message& eventInfo)
     : eventType(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo::Message>(trace, eventInfo)) {}
 
 TraceItem::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
-    const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Close& eventInfo)
+    const Trace& trace, const trace::HibernatableWebSocketEventInfo::Close& eventInfo)
     : eventType(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo::Close>(trace, eventInfo)) {}
 
 TraceItem::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
-    const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Error& eventInfo)
+    const Trace& trace, const trace::HibernatableWebSocketEventInfo::Error& eventInfo)
     : eventType(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo::Error>(trace, eventInfo)) {}
 
 TraceItem::HibernatableWebSocketEventInfo::Type TraceItem::HibernatableWebSocketEventInfo::
@@ -550,7 +550,7 @@ bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() {
   return eventInfo.wasClean;
 }
 
-TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const Trace::Log& log)
+TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const trace::Log& log)
     : timestamp(getTraceLogTimestamp(log)),
       level(getTraceLogLevel(log)),
       message(getTraceLogMessage(js, log)) {}
@@ -567,7 +567,7 @@ jsg::V8Ref<v8::Object> TraceLog::getMessage(jsg::Lock& js) {
   return message.addRef(js);
 }
 
-TraceException::TraceException(const Trace& trace, const Trace::Exception& exception)
+TraceException::TraceException(const Trace& trace, const trace::Exception& exception)
     : timestamp(getTraceExceptionTimestamp(exception)),
       name(kj::str(exception.name)),
       message(kj::str(exception.message)),
@@ -606,7 +606,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto& metrics = incomingRequest->getMetrics();
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.now(), Trace::TraceEventInfo(traces));
+    t.setEventInfo(context.now(), trace::TraceEventInfo(traces));
   }
 
   // Add the actual JS as a wait until because the handler may be an event listener which can't

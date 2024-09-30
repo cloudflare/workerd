@@ -202,9 +202,9 @@ kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromTraces(kj::ArrayPtr<kj::O
 
 kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromReader(
     rpc::Trace::TraceEventInfo::Reader reader) {
-  return KJ_MAP(r, reader.getTraces()) -> Trace::TraceEventInfo::TraceItem {
-    return Trace::TraceEventInfo::TraceItem(r);
-  };
+  return KJ_MAP(r,
+             reader
+                 .getTraces()) -> TraceEventInfo::TraceItem { return TraceEventInfo::TraceItem(r); };
 }
 }  // namespace
 
