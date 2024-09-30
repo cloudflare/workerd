@@ -35,25 +35,6 @@ public:
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
-// TODO(cleanup): Use the trace namespace directly and remove these aliases.
-// These can be removed once all references are removed from the internal repo.
-#define DEPRECATED_ALIAS(Name) using Name [[deprecated("Use trace::" #Name)]] = trace::Name;
-  DEPRECATED_ALIAS(FetchEventInfo)
-  DEPRECATED_ALIAS(FetchResponseInfo)
-  DEPRECATED_ALIAS(JsRpcEventInfo)
-  DEPRECATED_ALIAS(ScheduledEventInfo)
-  DEPRECATED_ALIAS(AlarmEventInfo)
-  DEPRECATED_ALIAS(QueueEventInfo)
-  DEPRECATED_ALIAS(EmailEventInfo)
-  DEPRECATED_ALIAS(HibernatableWebSocketEventInfo)
-  DEPRECATED_ALIAS(CustomEventInfo)
-  DEPRECATED_ALIAS(TraceEventInfo)
-  DEPRECATED_ALIAS(EventInfo)
-  DEPRECATED_ALIAS(DiagnosticChannelEvent)
-  DEPRECATED_ALIAS(Log)
-  DEPRECATED_ALIAS(Exception)
-#undef DEPRECATED_ALIAS
-
   // Empty for toplevel worker.
   //  kj::Maybe<kj::String> stableId;
 
