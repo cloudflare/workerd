@@ -75,7 +75,13 @@ public:
 
   kj::Maybe<FetchResponseInfo> fetchResponseInfo;
 
+  void setEventInfo(kj::Date timestamp, Trace::EventInfo&& info);
   void setOutcomeInfo(trace::OutcomeInfo&& outcome);
+  void addLog(Log&& log, bool isSpan = false);
+  void addException(Exception&& exception);
+  void addDiagnosticChannelEvent(DiagnosticChannelEvent&& event);
+  void addSpan(const trace::Span&& span, kj::String spanContext);
+  void setFetchResponseInfo(FetchResponseInfo&& info);
 
   bool truncated = false;
   bool exceededLogLimit = false;
