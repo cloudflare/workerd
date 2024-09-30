@@ -144,6 +144,7 @@ and limitations under the License.
 ***************************************************************************** */
 /* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
+declare var onmessage: never;
 /**
  * An event which takes place in the DOM.
  *
