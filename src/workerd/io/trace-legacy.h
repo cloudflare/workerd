@@ -35,91 +35,18 @@ public:
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
+  // TODO(cleanup): Use the trace namespace directly and remove these aliases
   using FetchEventInfo = trace::FetchEventInfo;
+  using FetchResponseInfo = trace::FetchResponseInfo;
   using JsRpcEventInfo = trace::JsRpcEventInfo;
   using ScheduledEventInfo = trace::ScheduledEventInfo;
   using AlarmEventInfo = trace::AlarmEventInfo;
-
-  class QueueEventInfo {
-  public:
-    explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
-    QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
-
-    kj::String queueName;
-    uint32_t batchSize;
-
-    void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
-  };
-
-  class EmailEventInfo {
-  public:
-    explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
-    EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
-
-    kj::String mailFrom;
-    kj::String rcptTo;
-    uint32_t rawSize;
-
-    void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
-  };
-
-  class TraceEventInfo {
-  public:
-    class TraceItem;
-
-    explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
-    TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
-
-    class TraceItem {
-    public:
-      explicit TraceItem(kj::Maybe<kj::String> scriptName);
-      TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
-
-      kj::Maybe<kj::String> scriptName;
-
-      void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder);
-    };
-
-    kj::Vector<TraceItem> traces;
-
-    void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
-  };
-
-  class HibernatableWebSocketEventInfo {
-  public:
-    struct Message {};
-    struct Close {
-      uint16_t code;
-      bool wasClean;
-    };
-    struct Error {};
-
-    using Type = kj::OneOf<Message, Close, Error>;
-
-    explicit HibernatableWebSocketEventInfo(Type type);
-    HibernatableWebSocketEventInfo(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
-
-    Type type;
-
-    void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder);
-    static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
-  };
-
-  class CustomEventInfo {
-  public:
-    explicit CustomEventInfo() {};
-    CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
-  };
-
-  class FetchResponseInfo {
-  public:
-    explicit FetchResponseInfo(uint16_t statusCode);
-    FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
-
-    uint16_t statusCode;
-
-    void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
-  };
+  using QueueEventInfo = trace::QueueEventInfo;
+  using EmailEventInfo = trace::EmailEventInfo;
+  using HibernatableWebSocketEventInfo = trace::HibernatableWebSocketEventInfo;
+  using CustomEventInfo = trace::CustomEventInfo;
+  using TraceEventInfo = trace::TraceEventInfo;
+  using EventInfo = trace::EventInfo;
 
   class DiagnosticChannelEvent {
   public:
@@ -180,17 +107,7 @@ public:
   // We treat the origin value as "unset".
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
 
-  typedef kj::OneOf<FetchEventInfo,
-      JsRpcEventInfo,
-      ScheduledEventInfo,
-      AlarmEventInfo,
-      QueueEventInfo,
-      EmailEventInfo,
-      TraceEventInfo,
-      HibernatableWebSocketEventInfo,
-      CustomEventInfo>
-      EventInfo;
-  kj::Maybe<EventInfo> eventInfo;
+  kj::Maybe<trace::EventInfo> eventInfo;
   // TODO(someday): Support more event types.
   // TODO(someday): Work out what sort of information we may want to convey about the parent
   // trace, if any.

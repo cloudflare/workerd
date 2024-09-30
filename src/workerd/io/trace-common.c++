@@ -1,5 +1,7 @@
 #include "trace-common.h"
 
+#include "trace-legacy.h"
+
 namespace workerd::trace {
 
 // ======================================================================================
@@ -53,6 +55,17 @@ void FetchEventInfo::Header::copyTo(rpc::Trace::FetchEventInfo::Header::Builder 
 }
 
 // ======================================================================================
+// FetchResponseInfo
+FetchResponseInfo::FetchResponseInfo(uint16_t statusCode): statusCode(statusCode) {}
+
+FetchResponseInfo::FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader)
+    : statusCode(reader.getStatusCode()) {}
+
+void FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder builder) {
+  builder.setStatusCode(statusCode);
+}
+
+// ======================================================================================
 // JsRpcEventInfo
 
 JsRpcEventInfo::JsRpcEventInfo(kj::String methodName): methodName(kj::mv(methodName)) {}
@@ -90,6 +103,132 @@ AlarmEventInfo::AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader)
 
 void AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) {
   builder.setScheduledTimeMs((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+}
+
+// ======================================================================================
+// QueueEventInfo
+
+QueueEventInfo::QueueEventInfo(kj::String queueName, uint32_t batchSize)
+    : queueName(kj::mv(queueName)),
+      batchSize(batchSize) {}
+
+QueueEventInfo::QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader)
+    : queueName(kj::heapString(reader.getQueueName())),
+      batchSize(reader.getBatchSize()) {}
+
+void QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) {
+  builder.setQueueName(queueName);
+  builder.setBatchSize(batchSize);
+}
+
+// ======================================================================================
+// EmailEventInfo
+
+EmailEventInfo::EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize)
+    : mailFrom(kj::mv(mailFrom)),
+      rcptTo(kj::mv(rcptTo)),
+      rawSize(rawSize) {}
+
+EmailEventInfo::EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader)
+    : mailFrom(kj::heapString(reader.getMailFrom())),
+      rcptTo(kj::heapString(reader.getRcptTo())),
+      rawSize(reader.getRawSize()) {}
+
+void EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) {
+  builder.setMailFrom(mailFrom);
+  builder.setRcptTo(rcptTo);
+  builder.setRawSize(rawSize);
+}
+
+// ======================================================================================
+// HibernatableWebSocketEventInfo
+
+HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(Type type): type(type) {}
+
+HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
+    rpc::Trace::HibernatableWebSocketEventInfo::Reader reader)
+    : type(readFrom(reader)) {}
+
+void HibernatableWebSocketEventInfo::copyTo(
+    rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) {
+  auto typeBuilder = builder.initType();
+  KJ_SWITCH_ONEOF(type) {
+    KJ_CASE_ONEOF(_, Message) {
+      typeBuilder.setMessage();
+    }
+    KJ_CASE_ONEOF(close, Close) {
+      auto closeBuilder = typeBuilder.initClose();
+      closeBuilder.setCode(close.code);
+      closeBuilder.setWasClean(close.wasClean);
+    }
+    KJ_CASE_ONEOF(_, Error) {
+      typeBuilder.setError();
+    }
+  }
+}
+
+HibernatableWebSocketEventInfo::Type HibernatableWebSocketEventInfo::readFrom(
+    rpc::Trace::HibernatableWebSocketEventInfo::Reader reader) {
+  auto type = reader.getType();
+  switch (type.which()) {
+    case rpc::Trace::HibernatableWebSocketEventInfo::Type::MESSAGE: {
+      return Message{};
+    }
+    case rpc::Trace::HibernatableWebSocketEventInfo::Type::CLOSE: {
+      auto close = type.getClose();
+      return Close{
+        .code = close.getCode(),
+        .wasClean = close.getWasClean(),
+      };
+    }
+    case rpc::Trace::HibernatableWebSocketEventInfo::Type::ERROR: {
+      return Error{};
+    }
+  }
+}
+
+// ======================================================================================
+// TraceEventInfo
+
+namespace {
+kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromTraces(kj::ArrayPtr<kj::Own<Trace>> traces) {
+  return KJ_MAP(t, traces) -> TraceEventInfo::TraceItem {
+    return TraceEventInfo::TraceItem(
+        t->onsetInfo.scriptName.map([](auto& scriptName) { return kj::str(scriptName); }));
+  };
+}
+
+kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromReader(
+    rpc::Trace::TraceEventInfo::Reader reader) {
+  return KJ_MAP(r, reader.getTraces()) -> Trace::TraceEventInfo::TraceItem {
+    return Trace::TraceEventInfo::TraceItem(r);
+  };
+}
+}  // namespace
+
+TraceEventInfo::TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces)
+    : traces(getTraceItemsFromTraces(traces)) {}
+
+TraceEventInfo::TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader)
+    : traces(getTraceItemsFromReader(reader)) {}
+
+void TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder) {
+  auto list = builder.initTraces(traces.size());
+  for (auto i: kj::indices(traces)) {
+    traces[i].copyTo(list[i]);
+  }
+}
+
+TraceEventInfo::TraceItem::TraceItem(kj::Maybe<kj::String> scriptName)
+    : scriptName(kj::mv(scriptName)) {}
+
+TraceEventInfo::TraceItem::TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader)
+    : scriptName(kj::str(reader.getScriptName())) {}
+
+void TraceEventInfo::TraceItem::copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder) {
+  KJ_IF_SOME(name, scriptName) {
+    builder.setScriptName(name);
+  }
 }
 
 }  // namespace workerd::trace
