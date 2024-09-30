@@ -48,58 +48,9 @@ public:
   using TraceEventInfo = trace::TraceEventInfo;
   using EventInfo = trace::EventInfo;
 
-  class DiagnosticChannelEvent {
-  public:
-    explicit DiagnosticChannelEvent(
-        kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
-    DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader);
-    DiagnosticChannelEvent(DiagnosticChannelEvent&&) = default;
-    KJ_DISALLOW_COPY(DiagnosticChannelEvent);
-
-    kj::Date timestamp;
-    kj::String channel;
-    kj::Array<kj::byte> message;
-
-    void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder);
-  };
-
-  class Log {
-  public:
-    explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
-    Log(rpc::Trace::Log::Reader reader);
-    Log(Log&&) = default;
-    KJ_DISALLOW_COPY(Log);
-    ~Log() noexcept(false) = default;
-
-    // Only as accurate as Worker's Date.now(), for Spectre mitigation.
-    kj::Date timestamp;
-
-    LogLevel logLevel;
-    // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
-    kj::String message;
-
-    void copyTo(rpc::Trace::Log::Builder builder);
-  };
-
-  class Exception {
-  public:
-    explicit Exception(
-        kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
-    Exception(rpc::Trace::Exception::Reader reader);
-    Exception(Exception&&) = default;
-    KJ_DISALLOW_COPY(Exception);
-    ~Exception() noexcept(false) = default;
-
-    // Only as accurate as Worker's Date.now(), for Spectre mitigation.
-    kj::Date timestamp;
-
-    kj::String name;
-    kj::String message;
-
-    kj::Maybe<kj::String> stack;
-
-    void copyTo(rpc::Trace::Exception::Builder builder);
-  };
+  using DiagnosticChannelEvent = trace::DiagnosticChannelEvent;
+  using Log = trace::Log;
+  using Exception = trace::Exception;
 
   // Empty for toplevel worker.
   kj::Maybe<kj::String> stableId;
