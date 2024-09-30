@@ -156,7 +156,7 @@ export type AiTextToImageInput = {
   strength?: number;
   guidance?: number;
 };
-export type AiTextToImageOutput = Uint8Array;
+export type AiTextToImageOutput = ReadableStream<Uint8Array>;
 export declare abstract class BaseAiTextToImage {
   inputs: AiTextToImageInput;
   postProcessedOutputs: AiTextToImageOutput;
