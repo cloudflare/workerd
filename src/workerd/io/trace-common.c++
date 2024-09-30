@@ -10,7 +10,7 @@ namespace workerd::trace {
 // FetchEventInfo
 
 namespace {
-static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
+kj::HttpMethod validateMethod(capnp::HttpMethod method) {
   KJ_REQUIRE(method <= capnp::HttpMethod::UNSUBSCRIBE, "unknown method", method);
   return static_cast<kj::HttpMethod>(method);
 }
