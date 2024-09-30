@@ -4,7 +4,6 @@
 
 #include <workerd/jsg/memory.h>
 
-#include <kj/compat/http.h>
 #include <kj/string.h>
 #include <kj/time.h>
 
