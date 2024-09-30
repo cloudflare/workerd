@@ -35,38 +35,7 @@ public:
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
-  class FetchEventInfo {
-  public:
-    class Header;
-
-    explicit FetchEventInfo(
-        kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
-    FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
-
-    class Header {
-    public:
-      explicit Header(kj::String name, kj::String value);
-      Header(rpc::Trace::FetchEventInfo::Header::Reader reader);
-
-      kj::String name;
-      kj::String value;
-
-      void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder);
-
-      JSG_MEMORY_INFO(Header) {
-        tracker.trackField("name", name);
-        tracker.trackField("value", value);
-      }
-    };
-
-    kj::HttpMethod method;
-    kj::String url;
-    // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
-    kj::String cfJson;
-    kj::Array<Header> headers;
-
-    void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
-  };
+  using FetchEventInfo = trace::FetchEventInfo;
 
   class JsRpcEventInfo {
   public:

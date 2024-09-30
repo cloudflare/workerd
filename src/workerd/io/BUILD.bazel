@@ -147,7 +147,10 @@ wd_cc_library(
 
 wd_cc_library(
     name = "trace",
-    srcs = ["trace.c++"],
+    srcs = [
+        "trace.c++",
+        "trace-common.c++",
+    ],
     hdrs = [
         "trace.h",
         "trace-common.h",

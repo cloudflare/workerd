@@ -23,55 +23,6 @@ static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
 // insufficient, merge smaller spans together or drop smaller spans.
 static constexpr size_t MAX_USER_SPANS = 512;
 
-namespace {
-
-static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
-  KJ_REQUIRE(method <= capnp::HttpMethod::UNSUBSCRIBE, "unknown method", method);
-  return static_cast<kj::HttpMethod>(method);
-}
-
-}  // namespace
-
-Trace::FetchEventInfo::FetchEventInfo(
-    kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers)
-    : method(method),
-      url(kj::mv(url)),
-      cfJson(kj::mv(cfJson)),
-      headers(kj::mv(headers)) {}
-
-Trace::FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader)
-    : method(validateMethod(reader.getMethod())),
-      url(kj::str(reader.getUrl())),
-      cfJson(kj::str(reader.getCfJson())) {
-  kj::Vector<Header> v;
-  v.addAll(reader.getHeaders());
-  headers = v.releaseAsArray();
-}
-
-void Trace::FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) {
-  builder.setMethod(static_cast<capnp::HttpMethod>(method));
-  builder.setUrl(url);
-  builder.setCfJson(cfJson);
-
-  auto list = builder.initHeaders(headers.size());
-  for (auto i: kj::indices(headers)) {
-    headers[i].copyTo(list[i]);
-  }
-}
-
-Trace::FetchEventInfo::Header::Header(kj::String name, kj::String value)
-    : name(kj::mv(name)),
-      value(kj::mv(value)) {}
-
-Trace::FetchEventInfo::Header::Header(rpc::Trace::FetchEventInfo::Header::Reader reader)
-    : name(kj::str(reader.getName())),
-      value(kj::str(reader.getValue())) {}
-
-void Trace::FetchEventInfo::Header::copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder) {
-  builder.setName(name);
-  builder.setValue(value);
-}
-
 Trace::JsRpcEventInfo::JsRpcEventInfo(kj::String methodName): methodName(kj::mv(methodName)) {}
 
 Trace::JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader)

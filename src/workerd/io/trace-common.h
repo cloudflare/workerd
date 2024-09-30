@@ -2,6 +2,10 @@
 
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
+#include <workerd/jsg/memory.h>
+
+#include <kj/compat/http.h>
+#include <kj/string.h>
 
 namespace workerd {
 
@@ -18,7 +22,7 @@ enum class PipelineLogLevel {
 namespace trace {
 
 // Metadata describing the onset of a trace session.
-struct OnsetInfo {
+struct OnsetInfo final {
   kj::Maybe<kj::String> ownerId = kj::none;
   kj::Maybe<kj::String> stableId = kj::none;
   kj::Maybe<kj::String> scriptName = kj::none;
@@ -28,6 +32,38 @@ struct OnsetInfo {
   kj::Array<kj::String> scriptTags = nullptr;
   kj::Maybe<kj::String> entrypoint = kj::none;
   ExecutionModel ExecutionModel;
+};
+
+// Metadata describing the start of a received fetch request.
+struct FetchEventInfo final {
+  struct Header;
+
+  explicit FetchEventInfo(
+      kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
+  FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
+
+  struct Header final {
+    explicit Header(kj::String name, kj::String value);
+    Header(rpc::Trace::FetchEventInfo::Header::Reader reader);
+
+    kj::String name;
+    kj::String value;
+
+    void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder) const;
+
+    JSG_MEMORY_INFO(Header) {
+      tracker.trackField("name", name);
+      tracker.trackField("value", value);
+    }
+  };
+
+  kj::HttpMethod method;
+  kj::String url;
+  // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
+  kj::String cfJson;
+  kj::Array<Header> headers;
+
+  void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
 };
 
 }  // namespace trace
