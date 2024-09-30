@@ -119,11 +119,13 @@ public:
   // after passing a FetchEventInfo to setEventInfo().
   void setFetchResponseInfo(Trace::FetchResponseInfo&&);
 
-  void setOutcome(EventOutcome outcome);
+  void setOutcomeInfo(trace::OutcomeInfo&& info);
 
-  void setCPUTime(kj::Duration cpuTime);
+  [[deprecated("use setOutcomeInfo")]] void setOutcome(EventOutcome outcome);
 
-  void setWallTime(kj::Duration wallTime);
+  [[deprecated("use setOutcomeInfo")]] void setCPUTime(kj::Duration cpuTime);
+
+  [[deprecated("use setOutcomeInfo")]] void setWallTime(kj::Duration wallTime);
 
   // Used only for a Trace in a process sandbox. Copies the content of this tracer's trace to the
   // builder.
