@@ -30,14 +30,7 @@ namespace workerd {
 // Collects trace information about the handling of a worker/pipeline fetch event.
 class Trace final: public kj::Refcounted {
 public:
-  explicit Trace(kj::Maybe<kj::String> stableId,
-      kj::Maybe<kj::String> scriptName,
-      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-      kj::Maybe<kj::String> dispatchNamespace,
-      kj::Maybe<kj::String> scriptId,
-      kj::Array<kj::String> scriptTags,
-      kj::Maybe<kj::String> entrypoint,
-      ExecutionModel executionModel);
+  explicit Trace(trace::OnsetInfo&& onset = {});
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -261,12 +254,7 @@ public:
   // TODO(someday): Work out what sort of information we may want to convey about the parent
   // trace, if any.
 
-  kj::Maybe<kj::String> scriptName;
-  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
-  kj::Maybe<kj::String> dispatchNamespace;
-  kj::Maybe<kj::String> scriptId;
-  kj::Array<kj::String> scriptTags;
-  kj::Maybe<kj::String> entrypoint;
+  trace::OnsetInfo onsetInfo{};
 
   kj::Vector<Log> logs;
   // TODO(o11y): Convert this to actually store spans.
@@ -276,7 +264,6 @@ public:
 
   kj::Vector<DiagnosticChannelEvent> diagnosticChannelEvents;
 
-  ExecutionModel executionModel;
   EventOutcome outcome = EventOutcome::UNKNOWN;
 
   kj::Maybe<FetchResponseInfo> fetchResponseInfo;

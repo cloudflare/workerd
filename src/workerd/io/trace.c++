@@ -136,7 +136,7 @@ kj::Vector<Trace::TraceEventInfo::TraceItem> getTraceItemsFromTraces(
     kj::ArrayPtr<kj::Own<Trace>> traces) {
   return KJ_MAP(t, traces) -> Trace::TraceEventInfo::TraceItem {
     return Trace::TraceEventInfo::TraceItem(
-        t->scriptName.map([](auto& scriptName) { return kj::str(scriptName); }));
+        t->onsetInfo.scriptName.map([](auto& scriptName) { return kj::str(scriptName); }));
   };
 }
 
@@ -256,22 +256,7 @@ Trace::Exception::Exception(
       message(kj::mv(message)),
       stack(kj::mv(stack)) {}
 
-Trace::Trace(kj::Maybe<kj::String> stableId,
-    kj::Maybe<kj::String> scriptName,
-    kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-    kj::Maybe<kj::String> dispatchNamespace,
-    kj::Maybe<kj::String> scriptId,
-    kj::Array<kj::String> scriptTags,
-    kj::Maybe<kj::String> entrypoint,
-    ExecutionModel executionModel)
-    : stableId(kj::mv(stableId)),
-      scriptName(kj::mv(scriptName)),
-      scriptVersion(kj::mv(scriptVersion)),
-      dispatchNamespace(kj::mv(dispatchNamespace)),
-      scriptId(kj::mv(scriptId)),
-      scriptTags(kj::mv(scriptTags)),
-      entrypoint(kj::mv(entrypoint)),
-      executionModel(executionModel) {}
+Trace::Trace(trace::OnsetInfo&& onset): onsetInfo(kj::mv(onset)) {}
 Trace::Trace(rpc::Trace::Reader reader) {
   mergeFrom(reader, PipelineLogLevel::FULL);
 }
@@ -301,28 +286,28 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   builder.setOutcome(outcome);
   builder.setCpuTime(cpuTime / kj::MILLISECONDS);
   builder.setWallTime(wallTime / kj::MILLISECONDS);
-  KJ_IF_SOME(name, scriptName) {
+  KJ_IF_SOME(name, onsetInfo.scriptName) {
     builder.setScriptName(name);
   }
-  KJ_IF_SOME(version, scriptVersion) {
+  KJ_IF_SOME(version, onsetInfo.scriptVersion) {
     builder.setScriptVersion(*version);
   }
-  KJ_IF_SOME(id, scriptId) {
+  KJ_IF_SOME(id, onsetInfo.scriptId) {
     builder.setScriptId(id);
   }
-  KJ_IF_SOME(ns, dispatchNamespace) {
+  KJ_IF_SOME(ns, onsetInfo.dispatchNamespace) {
     builder.setDispatchNamespace(ns);
   }
-  builder.setExecutionModel(executionModel);
+  builder.setExecutionModel(onsetInfo.executionModel);
 
   {
-    auto list = builder.initScriptTags(scriptTags.size());
-    for (auto i: kj::indices(scriptTags)) {
-      list.set(i, scriptTags[i]);
+    auto list = builder.initScriptTags(onsetInfo.scriptTags.size());
+    for (auto i: kj::indices(onsetInfo.scriptTags)) {
+      list.set(i, onsetInfo.scriptTags[i]);
     }
   }
 
-  KJ_IF_SOME(e, entrypoint) {
+  KJ_IF_SOME(e, onsetInfo.entrypoint) {
     builder.setEntrypoint(e);
   }
 
@@ -419,28 +404,28 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   // scriptVersion) are already set and the deserialized value is missing, so
   // we need to be careful not to overwrite the set value.
   if (reader.hasScriptName()) {
-    scriptName = kj::str(reader.getScriptName());
+    onsetInfo.scriptName = kj::str(reader.getScriptName());
   }
 
   if (reader.hasScriptVersion()) {
-    scriptVersion = capnp::clone(reader.getScriptVersion());
+    onsetInfo.scriptVersion = capnp::clone(reader.getScriptVersion());
   }
 
   if (reader.hasScriptId()) {
-    scriptId = kj::str(reader.getScriptId());
+    onsetInfo.scriptId = kj::str(reader.getScriptId());
   }
 
   if (reader.hasDispatchNamespace()) {
-    dispatchNamespace = kj::str(reader.getDispatchNamespace());
+    onsetInfo.dispatchNamespace = kj::str(reader.getDispatchNamespace());
   }
-  executionModel = reader.getExecutionModel();
+  onsetInfo.executionModel = reader.getExecutionModel();
 
   if (auto tags = reader.getScriptTags(); tags.size() > 0) {
-    scriptTags = KJ_MAP(tag, tags) { return kj::str(tag); };
+    onsetInfo.scriptTags = KJ_MAP(tag, tags) { return kj::str(tag); };
   }
 
   if (reader.hasEntrypoint()) {
-    entrypoint = kj::str(reader.getEntrypoint());
+    onsetInfo.entrypoint = kj::str(reader.getEntrypoint());
   }
 
   eventTimestamp = kj::UNIX_EPOCH + reader.getEventTimestampNs() * kj::NANOSECONDS;
@@ -586,9 +571,14 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
     kj::Maybe<kj::String> dispatchNamespace,
     kj::Array<kj::String> scriptTags,
     kj::Maybe<kj::String> entrypoint) {
-  auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
-      kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint),
-      executionModel);
+  auto trace = kj::refcounted<Trace>(trace::OnsetInfo{.stableId = kj::mv(stableId),
+    .scriptName = kj::mv(scriptName),
+    .scriptVersion = kj::mv(scriptVersion),
+    .dispatchNamespace = kj::mv(dispatchNamespace),
+    .scriptId = kj::mv(scriptId),
+    .scriptTags = kj::mv(scriptTags),
+    .entrypoint = kj::mv(entrypoint),
+    .executionModel = executionModel});
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
@@ -605,8 +595,9 @@ WorkerTracer::WorkerTracer(
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
     : pipelineLogLevel(pipelineLogLevel),
-      trace(kj::refcounted<Trace>(
-          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)),
+      trace(kj::refcounted<Trace>(trace::OnsetInfo {
+        .executionModel = executionModel,
+      })),
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 
 void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) {

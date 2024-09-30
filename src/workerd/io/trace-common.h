@@ -15,4 +15,20 @@ enum class PipelineLogLevel {
   FULL
 };
 
+namespace trace {
+
+// Metadata describing the onset of a trace session.
+struct OnsetInfo {
+  kj::Maybe<kj::String> ownerId = kj::none;
+  kj::Maybe<kj::String> stableId = kj::none;
+  kj::Maybe<kj::String> scriptName = kj::none;
+  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion = kj::none;
+  kj::Maybe<kj::String> dispatchNamespace = kj::none;
+  kj::Maybe<kj::String> scriptId = kj::none;
+  kj::Array<kj::String> scriptTags = nullptr;
+  kj::Maybe<kj::String> entrypoint = kj::none;
+  ExecutionModel ExecutionModel;
+};
+
+}  // namespace trace
 }  // namespace workerd
