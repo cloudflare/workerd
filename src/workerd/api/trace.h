@@ -145,7 +145,7 @@ private:
 };
 
 // When adding a new TraceItem eventInfo type, it is important not to
-// try keeping a reference to the Trace and Trace::*EventInfo inputs.
+// try keeping a reference to the Trace and trace::*EventInfo inputs.
 // They are kj heap objects that have a lifespan that is managed independently
 // of the TraceItem object. Each of the implementations here extract the
 // necessary detail on creation and use LAZY instance properties to minimize
@@ -168,8 +168,8 @@ public:
 
   explicit FetchEventInfo(jsg::Lock& js,
       const Trace& trace,
-      const Trace::FetchEventInfo& eventInfo,
-      kj::Maybe<const Trace::FetchResponseInfo&> responseInfo);
+      const trace::FetchEventInfo& eventInfo,
+      kj::Maybe<const trace::FetchResponseInfo&> responseInfo);
 
   jsg::Ref<Request> getRequest();
   jsg::Optional<jsg::Ref<Response>> getResponse();
@@ -191,12 +191,12 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
 public:
   struct Detail: public kj::Refcounted {
     jsg::Optional<jsg::V8Ref<v8::Object>> cf;
-    kj::Array<Trace::FetchEventInfo::Header> headers;
+    kj::Array<trace::FetchEventInfo::Header> headers;
     kj::String method;
     kj::String url;
 
     Detail(jsg::Optional<jsg::V8Ref<v8::Object>> cf,
-        kj::Array<Trace::FetchEventInfo::Header> headers,
+        kj::Array<trace::FetchEventInfo::Header> headers,
         kj::String method,
         kj::String url);
 
@@ -210,7 +210,7 @@ public:
     }
   };
 
-  explicit Request(jsg::Lock& js, const Trace& trace, const Trace::FetchEventInfo& eventInfo);
+  explicit Request(jsg::Lock& js, const Trace& trace, const trace::FetchEventInfo& eventInfo);
 
   // Creates a possibly unredacted instance that shared a ref of the Detail
   explicit Request(Detail& detail, bool redacted = true);
@@ -242,7 +242,7 @@ private:
 
 class TraceItem::FetchEventInfo::Response final: public jsg::Object {
 public:
-  explicit Response(const Trace& trace, const Trace::FetchResponseInfo& responseInfo);
+  explicit Response(const Trace& trace, const trace::FetchResponseInfo& responseInfo);
 
   uint16_t getStatus();
 
@@ -256,7 +256,7 @@ private:
 
 class TraceItem::JsRpcEventInfo final: public jsg::Object {
 public:
-  explicit JsRpcEventInfo(const Trace& trace, const Trace::JsRpcEventInfo& eventInfo);
+  explicit JsRpcEventInfo(const Trace& trace, const trace::JsRpcEventInfo& eventInfo);
 
   // We call this `rpcMethod` to make clear this is an RPC event, since some tail workers rely
   // on duck-typing EventInfo based on the properties present. (`methodName` might be ambiguous
@@ -279,7 +279,7 @@ private:
 
 class TraceItem::ScheduledEventInfo final: public jsg::Object {
 public:
-  explicit ScheduledEventInfo(const Trace& trace, const Trace::ScheduledEventInfo& eventInfo);
+  explicit ScheduledEventInfo(const Trace& trace, const trace::ScheduledEventInfo& eventInfo);
 
   double getScheduledTime();
   kj::StringPtr getCron();
@@ -300,7 +300,7 @@ private:
 
 class TraceItem::AlarmEventInfo final: public jsg::Object {
 public:
-  explicit AlarmEventInfo(const Trace& trace, const Trace::AlarmEventInfo& eventInfo);
+  explicit AlarmEventInfo(const Trace& trace, const trace::AlarmEventInfo& eventInfo);
 
   kj::Date getScheduledTime();
 
@@ -314,7 +314,7 @@ private:
 
 class TraceItem::QueueEventInfo final: public jsg::Object {
 public:
-  explicit QueueEventInfo(const Trace& trace, const Trace::QueueEventInfo& eventInfo);
+  explicit QueueEventInfo(const Trace& trace, const trace::QueueEventInfo& eventInfo);
 
   kj::StringPtr getQueueName();
   uint32_t getBatchSize();
@@ -336,7 +336,7 @@ private:
 
 class TraceItem::EmailEventInfo final: public jsg::Object {
 public:
-  explicit EmailEventInfo(const Trace& trace, const Trace::EmailEventInfo& eventInfo);
+  explicit EmailEventInfo(const Trace& trace, const trace::EmailEventInfo& eventInfo);
 
   kj::StringPtr getMailFrom();
   kj::StringPtr getRcptTo();
@@ -363,7 +363,7 @@ class TraceItem::TailEventInfo final: public jsg::Object {
 public:
   class TailItem;
 
-  explicit TailEventInfo(const Trace& trace, const Trace::TraceEventInfo& eventInfo);
+  explicit TailEventInfo(const Trace& trace, const trace::TraceEventInfo& eventInfo);
 
   kj::Array<jsg::Ref<TailItem>> getConsumedEvents();
 
@@ -379,7 +379,7 @@ private:
 
 class TraceItem::TailEventInfo::TailItem final: public jsg::Object {
 public:
-  explicit TailItem(const Trace::TraceEventInfo::TraceItem& traceItem);
+  explicit TailItem(const trace::TraceEventInfo::TraceItem& traceItem);
 
   kj::Maybe<kj::StringPtr> getScriptName();
 
@@ -402,11 +402,11 @@ public:
   class Error;
 
   explicit HibernatableWebSocketEventInfo(
-      const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Message& eventInfo);
+      const Trace& trace, const trace::HibernatableWebSocketEventInfo::Message& eventInfo);
   explicit HibernatableWebSocketEventInfo(
-      const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Close& eventInfo);
+      const Trace& trace, const trace::HibernatableWebSocketEventInfo::Close& eventInfo);
   explicit HibernatableWebSocketEventInfo(
-      const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Error& eventInfo);
+      const Trace& trace, const trace::HibernatableWebSocketEventInfo::Error& eventInfo);
 
   using Type = kj::OneOf<jsg::Ref<Message>, jsg::Ref<Close>, jsg::Ref<Error>>;
 
@@ -425,7 +425,7 @@ private:
 class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Object {
 public:
   explicit Message(
-      const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Message& eventInfo)
+      const Trace& trace, const trace::HibernatableWebSocketEventInfo::Message& eventInfo)
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "message"_kj;
@@ -438,12 +438,12 @@ public:
   }
 
 private:
-  const Trace::HibernatableWebSocketEventInfo::Message& eventInfo;
+  const trace::HibernatableWebSocketEventInfo::Message& eventInfo;
 };
 
 class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object {
 public:
-  explicit Close(const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Close& eventInfo)
+  explicit Close(const Trace& trace, const trace::HibernatableWebSocketEventInfo::Close& eventInfo)
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "close"_kj;
@@ -461,12 +461,12 @@ public:
   }
 
 private:
-  const Trace::HibernatableWebSocketEventInfo::Close& eventInfo;
+  const trace::HibernatableWebSocketEventInfo::Close& eventInfo;
 };
 
 class TraceItem::HibernatableWebSocketEventInfo::Error final: public jsg::Object {
 public:
-  explicit Error(const Trace& trace, const Trace::HibernatableWebSocketEventInfo::Error& eventInfo)
+  explicit Error(const Trace& trace, const trace::HibernatableWebSocketEventInfo::Error& eventInfo)
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "error"_kj;
@@ -479,23 +479,23 @@ public:
   }
 
 private:
-  const Trace::HibernatableWebSocketEventInfo::Error& eventInfo;
+  const trace::HibernatableWebSocketEventInfo::Error& eventInfo;
 };
 
 class TraceItem::CustomEventInfo final: public jsg::Object {
 public:
-  explicit CustomEventInfo(const Trace& trace, const Trace::CustomEventInfo& eventInfo);
+  explicit CustomEventInfo(const Trace& trace, const trace::CustomEventInfo& eventInfo);
 
   JSG_RESOURCE_TYPE(CustomEventInfo) {}
 
 private:
-  const Trace::CustomEventInfo& eventInfo;
+  const trace::CustomEventInfo& eventInfo;
 };
 
 class TraceDiagnosticChannelEvent final: public jsg::Object {
 public:
   explicit TraceDiagnosticChannelEvent(
-      const Trace& trace, const Trace::DiagnosticChannelEvent& eventInfo);
+      const Trace& trace, const trace::DiagnosticChannelEvent& eventInfo);
 
   double getTimestamp();
   kj::StringPtr getChannel();
@@ -520,7 +520,7 @@ private:
 
 class TraceLog final: public jsg::Object {
 public:
-  TraceLog(jsg::Lock& js, const Trace& trace, const Trace::Log& log);
+  TraceLog(jsg::Lock& js, const Trace& trace, const trace::Log& log);
 
   double getTimestamp();
   kj::StringPtr getLevel();
@@ -545,7 +545,7 @@ private:
 
 class TraceException final: public jsg::Object {
 public:
-  TraceException(const Trace& trace, const Trace::Exception& exception);
+  TraceException(const Trace& trace, const trace::Exception& exception);
 
   double getTimestamp();
   kj::StringPtr getName();

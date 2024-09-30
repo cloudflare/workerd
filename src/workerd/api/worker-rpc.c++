@@ -1671,7 +1671,7 @@ private:
 
   void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
     KJ_IF_SOME(t, tracer) {
-      t->setEventInfo(ioctx.now(), Trace::JsRpcEventInfo(kj::str(methodName)));
+      t->setEventInfo(ioctx.now(), trace::JsRpcEventInfo(kj::str(methodName)));
     }
   }
 };

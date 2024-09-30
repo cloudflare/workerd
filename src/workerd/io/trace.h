@@ -96,7 +96,7 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
   // Sets info about the event that triggered the trace.  Must not be called more than once.
-  void setEventInfo(kj::Date timestamp, Trace::EventInfo&&);
+  void setEventInfo(kj::Date timestamp, trace::EventInfo&&);
 
   // Sets info about the result of this trace. Can be called more than once, overriding the
   // previous detail.
@@ -120,7 +120,7 @@ public:
 
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
-  void setFetchResponseInfo(Trace::FetchResponseInfo&&);
+  void setFetchResponseInfo(trace::FetchResponseInfo&&);
 
   [[deprecated("use setOutcomeInfo")]] void setOutcome(EventOutcome outcome);
 

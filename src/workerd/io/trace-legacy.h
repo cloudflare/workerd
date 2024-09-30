@@ -9,9 +9,10 @@
 
 namespace workerd {
 
-// Provides the implementation of the original Trace Worker Trace API. This version holds
-// the trace data in a limited, in-memory buffer that is sent to the Trace Worker only after
-// the request is fully completed.
+// This is the original implementation of how trace worker data was collected. All of the
+// data is stored in an in-memory structure and delivered as a single unit to the trace
+// worker only when the request is fully completed. The data is held in memory and capped
+// at a specific limit. Once the limit is reached, new data is silently dropped.
 
 // TODO(someday): See if we can merge similar code concepts...  Trace fills a role similar to
 // MetricsCollector::Reporter::StageEvent, and Tracer fills a role similar to
@@ -34,25 +35,27 @@ public:
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
-  // TODO(cleanup): Use the trace namespace directly and remove these aliases
-  using FetchEventInfo = trace::FetchEventInfo;
-  using FetchResponseInfo = trace::FetchResponseInfo;
-  using JsRpcEventInfo = trace::JsRpcEventInfo;
-  using ScheduledEventInfo = trace::ScheduledEventInfo;
-  using AlarmEventInfo = trace::AlarmEventInfo;
-  using QueueEventInfo = trace::QueueEventInfo;
-  using EmailEventInfo = trace::EmailEventInfo;
-  using HibernatableWebSocketEventInfo = trace::HibernatableWebSocketEventInfo;
-  using CustomEventInfo = trace::CustomEventInfo;
-  using TraceEventInfo = trace::TraceEventInfo;
-  using EventInfo = trace::EventInfo;
-
-  using DiagnosticChannelEvent = trace::DiagnosticChannelEvent;
-  using Log = trace::Log;
-  using Exception = trace::Exception;
+// TODO(cleanup): Use the trace namespace directly and remove these aliases.
+// These can be removed once all references are removed from the internal repo.
+#define DEPRECATED_ALIAS(Name) using Name [[deprecated("Use trace::" #Name)]] = trace::Name;
+  DEPRECATED_ALIAS(FetchEventInfo)
+  DEPRECATED_ALIAS(FetchResponseInfo)
+  DEPRECATED_ALIAS(JsRpcEventInfo)
+  DEPRECATED_ALIAS(ScheduledEventInfo)
+  DEPRECATED_ALIAS(AlarmEventInfo)
+  DEPRECATED_ALIAS(QueueEventInfo)
+  DEPRECATED_ALIAS(EmailEventInfo)
+  DEPRECATED_ALIAS(HibernatableWebSocketEventInfo)
+  DEPRECATED_ALIAS(CustomEventInfo)
+  DEPRECATED_ALIAS(TraceEventInfo)
+  DEPRECATED_ALIAS(EventInfo)
+  DEPRECATED_ALIAS(DiagnosticChannelEvent)
+  DEPRECATED_ALIAS(Log)
+  DEPRECATED_ALIAS(Exception)
+#undef DEPRECATED_ALIAS
 
   // Empty for toplevel worker.
-  kj::Maybe<kj::String> stableId;
+  //  kj::Maybe<kj::String> stableId;
 
   // We treat the origin value as "unset".
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
@@ -65,23 +68,23 @@ public:
   trace::OnsetInfo onsetInfo{};
   trace::OutcomeInfo outcomeInfo{};
 
-  kj::Vector<Log> logs;
+  kj::Vector<trace::Log> logs;
   // TODO(o11y): Convert this to actually store spans.
-  kj::Vector<Log> spans;
+  kj::Vector<trace::Log> spans;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
-  kj::Vector<Exception> exceptions;
+  kj::Vector<trace::Exception> exceptions;
 
-  kj::Vector<DiagnosticChannelEvent> diagnosticChannelEvents;
+  kj::Vector<trace::DiagnosticChannelEvent> diagnosticChannelEvents;
 
-  kj::Maybe<FetchResponseInfo> fetchResponseInfo;
+  kj::Maybe<trace::FetchResponseInfo> fetchResponseInfo;
 
-  void setEventInfo(kj::Date timestamp, Trace::EventInfo&& info);
+  void setEventInfo(kj::Date timestamp, trace::EventInfo&& info);
   void setOutcomeInfo(trace::OutcomeInfo&& outcome);
-  void addLog(Log&& log, bool isSpan = false);
-  void addException(Exception&& exception);
-  void addDiagnosticChannelEvent(DiagnosticChannelEvent&& event);
+  void addLog(trace::Log&& log, bool isSpan = false);
+  void addException(trace::Exception&& exception);
+  void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event);
   void addSpan(const trace::Span&& span, kj::String spanContext);
-  void setFetchResponseInfo(FetchResponseInfo&& info);
+  void setFetchResponseInfo(trace::FetchResponseInfo&& info);
 
   bool truncated = false;
   bool exceededLogLimit = false;
