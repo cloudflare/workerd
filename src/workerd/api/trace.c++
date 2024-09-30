@@ -93,7 +93,8 @@ kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> getTraceDiagnosticChannelEvents
 }
 
 kj::Maybe<ScriptVersion> getTraceScriptVersion(const Trace& trace) {
-  return trace.scriptVersion.map([](const auto& version) { return ScriptVersion(*version); });
+  return trace.onsetInfo.scriptVersion.map(
+      [](const auto& version) { return ScriptVersion(*version); });
 }
 
 double getTraceExceptionTimestamp(const Trace::Exception& ex) {
@@ -109,8 +110,8 @@ kj::Array<jsg::Ref<TraceException>> getTraceExceptions(const Trace& trace) {
 }
 
 jsg::Optional<kj::Array<kj::String>> getTraceScriptTags(const Trace& trace) {
-  if (trace.scriptTags.size() > 0) {
-    return KJ_MAP(t, trace.scriptTags) -> kj::String { return kj::str(t); };
+  if (trace.onsetInfo.scriptTags.size() > 0) {
+    return KJ_MAP(t, trace.onsetInfo.scriptTags) -> kj::String { return kj::str(t); };
   } else {
     return kj::none;
   }
@@ -199,10 +200,11 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       logs(getTraceLogs(js, trace)),
       exceptions(getTraceExceptions(trace)),
       diagnosticChannelEvents(getTraceDiagnosticChannelEvents(js, trace)),
-      scriptName(trace.scriptName.map([](auto& name) { return kj::str(name); })),
-      entrypoint(trace.entrypoint.map([](auto& name) { return kj::str(name); })),
+      scriptName(trace.onsetInfo.scriptName.map([](auto& name) { return kj::str(name); })),
+      entrypoint(trace.onsetInfo.entrypoint.map([](auto& name) { return kj::str(name); })),
       scriptVersion(getTraceScriptVersion(trace)),
-      dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
+      dispatchNamespace(
+          trace.onsetInfo.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
       executionModel(enumToStr(trace.executionModel)),
       outcome(enumToStr(trace.outcome)),
