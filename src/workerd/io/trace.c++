@@ -23,36 +23,6 @@ static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
 // insufficient, merge smaller spans together or drop smaller spans.
 static constexpr size_t MAX_USER_SPANS = 512;
 
-Trace::DiagnosticChannelEvent::DiagnosticChannelEvent(
-    kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message)
-    : timestamp(timestamp),
-      channel(kj::mv(channel)),
-      message(kj::mv(message)) {}
-
-Trace::DiagnosticChannelEvent::DiagnosticChannelEvent(
-    rpc::Trace::DiagnosticChannelEvent::Reader reader)
-    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
-      channel(kj::heapString(reader.getChannel())),
-      message(kj::heapArray<kj::byte>(reader.getMessage())) {}
-
-void Trace::DiagnosticChannelEvent::copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder) {
-  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setChannel(channel);
-  builder.setMessage(message);
-}
-
-Trace::Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)
-    : timestamp(timestamp),
-      logLevel(logLevel),
-      message(kj::mv(message)) {}
-
-Trace::Exception::Exception(
-    kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack)
-    : timestamp(timestamp),
-      name(kj::mv(name)),
-      message(kj::mv(message)),
-      stack(kj::mv(stack)) {}
-
 Trace::Trace(trace::OnsetInfo&& onset): onsetInfo(kj::mv(onset)) {}
 Trace::Trace(rpc::Trace::Reader reader) {
   mergeFrom(reader, PipelineLogLevel::FULL);
@@ -166,21 +136,6 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   }
 }
 
-void Trace::Log::copyTo(rpc::Trace::Log::Builder builder) {
-  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setLogLevel(logLevel);
-  builder.setMessage(message);
-}
-
-void Trace::Exception::copyTo(rpc::Trace::Exception::Builder builder) {
-  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setName(name);
-  builder.setMessage(message);
-  KJ_IF_SOME(s, stack) {
-    builder.setStack(s);
-  }
-}
-
 void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLevel) {
   // Sandboxed workers currently record their traces as if the pipeline log level were set to
   // "full", so we may need to filter out the extra data after receiving the traces back.
@@ -267,19 +222,6 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
 
   if (reader.hasResponse()) {
     fetchResponseInfo = FetchResponseInfo(reader.getResponse());
-  }
-}
-
-Trace::Log::Log(rpc::Trace::Log::Reader reader)
-    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
-      logLevel(reader.getLogLevel()),
-      message(kj::str(reader.getMessage())) {}
-Trace::Exception::Exception(rpc::Trace::Exception::Reader reader)
-    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
-      name(kj::str(reader.getName())),
-      message(kj::str(reader.getMessage())) {
-  if (reader.hasStack()) {
-    stack = kj::str(reader.getStack());
   }
 }
 
