@@ -294,16 +294,20 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
   trace->eventInfo = kj::mv(info);
 }
 
+void WorkerTracer::setOutcomeInfo(trace::OutcomeInfo&& info) {
+  trace->setOutcomeInfo(kj::mv(info));
+}
+
 void WorkerTracer::setOutcome(EventOutcome outcome) {
-  trace->outcome = outcome;
+  trace->outcomeInfo.outcome = outcome;
 }
 
 void WorkerTracer::setCPUTime(kj::Duration cpuTime) {
-  trace->cpuTime = cpuTime;
+  trace->outcomeInfo.cpuTime = cpuTime;
 }
 
 void WorkerTracer::setWallTime(kj::Duration wallTime) {
-  trace->wallTime = wallTime;
+  trace->outcomeInfo.wallTime = wallTime;
 }
 
 void WorkerTracer::setFetchResponseInfo(Trace::FetchResponseInfo&& info) {

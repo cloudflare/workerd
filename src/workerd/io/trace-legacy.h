@@ -63,6 +63,7 @@ public:
   // trace, if any.
 
   trace::OnsetInfo onsetInfo{};
+  trace::OutcomeInfo outcomeInfo{};
 
   kj::Vector<Log> logs;
   // TODO(o11y): Convert this to actually store spans.
@@ -72,12 +73,9 @@ public:
 
   kj::Vector<DiagnosticChannelEvent> diagnosticChannelEvents;
 
-  EventOutcome outcome = EventOutcome::UNKNOWN;
-
   kj::Maybe<FetchResponseInfo> fetchResponseInfo;
 
-  kj::Duration cpuTime;
-  kj::Duration wallTime;
+  void setOutcomeInfo(trace::OutcomeInfo&& outcome);
 
   bool truncated = false;
   bool exceededLogLimit = false;
