@@ -2,6 +2,8 @@
 
 #include "trace-legacy.h"
 
+#include <kj/compat/http.h>
+
 namespace workerd::trace {
 
 // ======================================================================================

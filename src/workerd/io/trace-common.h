@@ -4,8 +4,14 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/memory.h>
 
-#include <kj/compat/http.h>
+#include <kj/one-of.h>
 #include <kj/string.h>
+#include <kj/time.h>
+
+namespace kj {
+enum class HttpMethod;
+class EntropySource;
+}  // namespace kj
 
 namespace workerd {
 
