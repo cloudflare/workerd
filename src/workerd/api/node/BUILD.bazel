@@ -54,7 +54,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/workerd/io:compatibility_date_capnp",
+        "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
     ],
 )

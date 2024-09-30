@@ -31,4 +31,6 @@ PACKAGES = RTTI_PACKAGES | {
         git = "https://github.com/cloudflare/lol-html.git",
         rev = "7db3d8d9fa9f3fee6ffe36c3f68f14e160476e07",
     ),
+    "capnp": crate.spec(version = "0.20"),
+    "capnpc": crate.spec(version = "0.20"),
 }

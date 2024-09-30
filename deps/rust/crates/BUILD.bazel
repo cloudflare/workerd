@@ -38,6 +38,18 @@ alias(
 )
 
 alias(
+    name = "capnp",
+    actual = "@crates_vendor__capnp-0.20.1//:capnp",
+    tags = ["manual"],
+)
+
+alias(
+    name = "capnpc",
+    actual = "@crates_vendor__capnpc-0.20.0//:capnpc",
+    tags = ["manual"],
+)
+
+alias(
     name = "clang-ast",
     actual = "@crates_vendor__clang-ast-0.1.26//:clang_ast",
     tags = ["manual"],
@@ -74,6 +86,18 @@ alias(
 )
 
 # Binaries
+alias(
+    name = "capnpc__capnpc-rust",
+    actual = "@crates_vendor__capnpc-0.20.0//:capnpc-rust__bin",
+    tags = ["manual"],
+)
+
+alias(
+    name = "capnpc__capnpc-rust-bootstrap",
+    actual = "@crates_vendor__capnpc-0.20.0//:capnpc-rust-bootstrap__bin",
+    tags = ["manual"],
+)
+
 alias(
     name = "phf_generator__gen_hash_test",
     actual = "@crates_vendor__phf_generator-0.8.0//:gen_hash_test__bin",
