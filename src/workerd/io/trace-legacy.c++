@@ -1,9 +1,22 @@
 #include "trace-legacy.h"
 
+#include <workerd/util/thread-scopes.h>
+
 #include <capnp/message.h>
 #include <capnp/schema.h>
 
 namespace workerd {
+
+namespace {
+// Approximately how much external data we allow in a trace before we start ignoring requests.  We
+// want this number to be big enough to be useful for tracing, but small enough to make it hard to
+// DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request.
+static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
+// Limit spans to at most 512, it could be difficult to fit e.g. 1024 spans within MAX_TRACE_BYTES
+// unless most of the included spans do not include tags. If use cases arise where this amount is
+// insufficient, merge smaller spans together or drop smaller spans.
+static constexpr size_t MAX_USER_SPANS = 512;
+}  // namespace
 
 Trace::Trace(trace::OnsetInfo&& onset): onsetInfo(kj::mv(onset)) {}
 Trace::Trace(rpc::Trace::Reader reader) {
@@ -207,8 +220,151 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   }
 }
 
+void Trace::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
+  KJ_ASSERT(eventInfo == kj::none, "tracer can only be used for a single event");
+  eventTimestamp = timestamp;
+
+  size_t newSize = bytesUsed;
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(fetch, Trace::FetchEventInfo) {
+      newSize += fetch.url.size();
+      for (const auto& header: fetch.headers) {
+        newSize += header.name.size() + header.value.size();
+      }
+      newSize += fetch.cfJson.size();
+      if (newSize > MAX_TRACE_BYTES) {
+        truncated = true;
+        logs.add(timestamp, LogLevel::WARN,
+            kj::str("[\"Trace resource limit exceeded; could not capture event info.\"]"));
+        eventInfo = Trace::FetchEventInfo(fetch.method, {}, {}, {});
+        return;
+      }
+    }
+    KJ_CASE_ONEOF(_, Trace::JsRpcEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::ScheduledEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::EmailEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::TraceEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::HibernatableWebSocketEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::CustomEventInfo) {}
+  }
+  bytesUsed = newSize;
+  eventInfo = kj::mv(info);
+}
+
 void Trace::setOutcomeInfo(trace::OutcomeInfo&& info) {
   outcomeInfo = kj::mv(info);
+}
+
+void Trace::addLog(Log&& log, bool isSpan) {
+  if (exceededLogLimit) {
+    return;
+  }
+  size_t newSize = bytesUsed + sizeof(Trace::Log) + log.message.size();
+  if (newSize > MAX_TRACE_BYTES) {
+    exceededLogLimit = true;
+    truncated = true;
+    // We use a JSON encoded array/string to match other console.log() recordings:
+    logs.add(log.timestamp, LogLevel::WARN,
+        kj::str(
+            "[\"Log size limit exceeded: More than 128KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"));
+    return;
+  }
+  bytesUsed = newSize;
+  if (isSpan) {
+    spans.add(kj::mv(log));
+    numSpans++;
+    return;
+  }
+  logs.add(kj::mv(log));
+}
+
+void Trace::addException(Exception&& exception) {
+  if (exceededExceptionLimit) {
+    return;
+  }
+  size_t newSize =
+      bytesUsed + sizeof(Trace::Exception) + exception.name.size() + exception.message.size();
+  KJ_IF_SOME(s, exception.stack) {
+    newSize += s.size();
+  }
+  if (newSize > MAX_TRACE_BYTES) {
+    exceededExceptionLimit = true;
+    truncated = true;
+    exceptions.add(exception.timestamp, kj::str("Error"),
+        kj::str("Trace resource limit exceeded; subsequent exceptions not recorded."), kj::none);
+    return;
+  }
+  bytesUsed = newSize;
+  exceptions.add(kj::mv(exception));
+}
+
+void Trace::addDiagnosticChannelEvent(DiagnosticChannelEvent&& event) {
+  if (exceededDiagnosticChannelEventLimit) {
+    return;
+  }
+  size_t newSize = bytesUsed + sizeof(Trace::DiagnosticChannelEvent) + event.channel.size() +
+      event.message.size();
+  if (newSize > MAX_TRACE_BYTES) {
+    exceededDiagnosticChannelEventLimit = true;
+    truncated = true;
+    diagnosticChannelEvents.add(
+        event.timestamp, kj::str("workerd.LimitExceeded"), kj::Array<kj::byte>());
+    return;
+  }
+  bytesUsed = newSize;
+  diagnosticChannelEvents.add(kj::mv(event));
+}
+
+void Trace::addSpan(const trace::Span&& span, kj::String spanContext) {
+  // This is where we'll actually encode the span for now.
+  // Drop any spans beyond MAX_USER_SPANS.
+  if (numSpans >= MAX_USER_SPANS) {
+    return;
+  }
+  if (isPredictableModeForTest()) {
+    // Do not emit span duration information in predictable mode.
+    addLog(trace::Log(span.endTime, LogLevel::LOG, kj::str("[\"span: ", span.operationName, "\"]")),
+        true);
+  } else {
+    // Time since Unix epoch in seconds, with millisecond precision
+    double epochSecondsStart = (span.startTime - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1000.0;
+    double epochSecondsEnd = (span.endTime - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1000.0;
+    auto message = kj::str("[\"span: ", span.operationName, " ", kj::mv(spanContext), " ",
+        epochSecondsStart, " ", epochSecondsEnd, "\"]");
+    addLog(trace::Log(span.endTime, LogLevel::LOG, kj::mv(message)), true);
+  }
+
+  // TODO(cleanup): Create a function in kj::OneOf to automatically convert to a given type (i.e
+  // String) to avoid having to handle each type explicitly here.
+  for (const trace::Span::TagMap::Entry& tag: span.tags) {
+    auto value = [&]() {
+      KJ_SWITCH_ONEOF(tag.value) {
+        KJ_CASE_ONEOF(str, kj::String) {
+          return kj::str(str);
+        }
+        KJ_CASE_ONEOF(val, int64_t) {
+          return kj::str(val);
+        }
+        KJ_CASE_ONEOF(val, double) {
+          return kj::str(val);
+        }
+        KJ_CASE_ONEOF(val, bool) {
+          return kj::str(val);
+        }
+      }
+      KJ_UNREACHABLE;
+    }();
+    kj::String message = kj::str("[\"tag: "_kj, tag.key, " => "_kj, value, "\"]");
+    addLog(Log(span.endTime, LogLevel::LOG, kj::mv(message)), true);
+  }
+}
+
+void Trace::setFetchResponseInfo(FetchResponseInfo&& info) {
+  KJ_REQUIRE(KJ_REQUIRE_NONNULL(eventInfo).is<Trace::FetchEventInfo>());
+  KJ_ASSERT(fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
+  fetchResponseInfo = kj::mv(info);
 }
 
 }  // namespace workerd

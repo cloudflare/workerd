@@ -30,7 +30,7 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 
-struct Span;
+using Span = trace::Span;
 
 // =======================================================================================
 
@@ -81,10 +81,9 @@ private:
   friend class WorkerTracer;
 };
 
-// Records a worker stage's trace information into a Trace object.  When all references to the
-// Tracer are released, its Trace is considered complete and ready for submission. If the Trace to
-// write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
-// via extractTrace.
+// Records a worker stage's trace information.  When all references to the Tracer are released,
+// its Trace is considered complete. If the Trace to write to isn't provided (that already exists
+// in a PipelineTracer), the trace must by extracted via extractTrace.
 class WorkerTracer final: public kj::Refcounted {
 public:
   explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
@@ -95,6 +94,13 @@ public:
     self->invalidate();
   }
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
+
+  // Sets info about the event that triggered the trace.  Must not be called more than once.
+  void setEventInfo(kj::Date timestamp, Trace::EventInfo&&);
+
+  // Sets info about the result of this trace. Can be called more than once, overriding the
+  // previous detail.
+  void setOutcomeInfo(trace::OutcomeInfo&& info);
 
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   // The isSpan parameter allows for logging spans, which will be emitted after regular logs. There
@@ -112,14 +118,9 @@ public:
   void addDiagnosticChannelEvent(
       kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
 
-  // Adds info about the event that triggered the trace.  Must not be called more than once.
-  void setEventInfo(kj::Date timestamp, Trace::EventInfo&&);
-
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
   void setFetchResponseInfo(Trace::FetchResponseInfo&&);
-
-  void setOutcomeInfo(trace::OutcomeInfo&& info);
 
   [[deprecated("use setOutcomeInfo")]] void setOutcome(EventOutcome outcome);
 
@@ -177,42 +178,6 @@ inline kj::String truncateScriptId(kj::StringPtr id) {
 
 class SpanBuilder;
 class SpanObserver;
-
-struct Span {
-  // Represents a trace span. `Span` objects are delivered to `SpanObserver`s for recording. To
-  // create a `Span`, use a `SpanBuilder`.
-
-public:
-  using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
-  // TODO(someday): Support binary bytes, too.
-  using TagMap = kj::HashMap<kj::ConstString, TagValue>;
-  using Tag = TagMap::Entry;
-
-  struct Log {
-    kj::Date timestamp;
-    Tag tag;
-  };
-
-  kj::ConstString operationName;
-  kj::Date startTime;
-  kj::Date endTime;
-  TagMap tags;
-  kj::Vector<Log> logs;
-
-  // We set an arbitrary (-ish) cap on log messages for safety. If we drop logs because of this,
-  // we report how many in a final "dropped_logs" log.
-  //
-  // At the risk of being too clever, I chose a limit that is one below a power of two so that
-  // we'll typically have space for one last element available for the "dropped_logs" log without
-  // needing to grow the vector.
-  static constexpr auto MAX_LOGS = 1023;
-  uint droppedLogs = 0;
-
-  explicit Span(kj::ConstString operationName, kj::Date startTime)
-      : operationName(kj::mv(operationName)),
-        startTime(startTime),
-        endTime(startTime) {}
-};
 
 // An opaque token which can be used to create child spans of some parent. This is typically
 // passed down from a caller to a callee when the caller wants to allow the callee to create
