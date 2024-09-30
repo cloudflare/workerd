@@ -75,27 +75,27 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
   auto eventParameters = consumeParams();
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    Trace::HibernatableWebSocketEventInfo::Type type =
-        [&]() -> Trace::HibernatableWebSocketEventInfo::Type {
+    trace::HibernatableWebSocketEventInfo::Type type =
+        [&]() -> trace::HibernatableWebSocketEventInfo::Type {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
         KJ_CASE_ONEOF(_, HibernatableSocketParams::Text) {
-          return Trace::HibernatableWebSocketEventInfo::Message{};
+          return trace::HibernatableWebSocketEventInfo::Message{};
         }
         KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
-          return Trace::HibernatableWebSocketEventInfo::Message{};
+          return trace::HibernatableWebSocketEventInfo::Message{};
         }
         KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
-          return Trace::HibernatableWebSocketEventInfo::Close{
+          return trace::HibernatableWebSocketEventInfo::Close{
             .code = close.code, .wasClean = close.wasClean};
         }
         KJ_CASE_ONEOF(_, HibernatableSocketParams::Error) {
-          return Trace::HibernatableWebSocketEventInfo::Error{};
+          return trace::HibernatableWebSocketEventInfo::Error{};
         }
       }
       KJ_UNREACHABLE;
     }();
 
-    t.setEventInfo(context.now(), Trace::HibernatableWebSocketEventInfo(kj::mv(type)));
+    t.setEventInfo(context.now(), trace::HibernatableWebSocketEventInfo(kj::mv(type)));
   }
 
   try {
