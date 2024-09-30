@@ -148,11 +148,13 @@ wd_cc_library(
         "trace.c++",
         "trace-common.c++",
         "trace-legacy.c++",
+        "trace-streaming.c++",
     ],
     hdrs = [
         "trace.h",
         "trace-common.h",
         "trace-legacy.h",
+        "trace-streaming.h",
     ],
     implementation_deps = [
         "//src/workerd/util:thread-scopes",
