@@ -231,4 +231,71 @@ void TraceEventInfo::TraceItem::copyTo(rpc::Trace::TraceEventInfo::TraceItem::Bu
   }
 }
 
+// ======================================================================================
+// DiagnosticChannelEvent
+
+DiagnosticChannelEvent::DiagnosticChannelEvent(
+    kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message)
+    : timestamp(timestamp),
+      channel(kj::mv(channel)),
+      message(kj::mv(message)) {}
+
+DiagnosticChannelEvent::DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader)
+    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
+      channel(kj::heapString(reader.getChannel())),
+      message(kj::heapArray<kj::byte>(reader.getMessage())) {}
+
+void DiagnosticChannelEvent::copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder) {
+  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setChannel(channel);
+  builder.setMessage(message);
+}
+
+// ======================================================================================
+// Log
+
+Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)
+    : timestamp(timestamp),
+      logLevel(logLevel),
+      message(kj::mv(message)) {}
+
+Log::Log(rpc::Trace::Log::Reader reader)
+    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
+      logLevel(reader.getLogLevel()),
+      message(kj::str(reader.getMessage())) {}
+
+void Log::copyTo(rpc::Trace::Log::Builder builder) {
+  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setLogLevel(logLevel);
+  builder.setMessage(message);
+}
+
+// ======================================================================================
+// Exception
+
+Exception::Exception(
+    kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack)
+    : timestamp(timestamp),
+      name(kj::mv(name)),
+      message(kj::mv(message)),
+      stack(kj::mv(stack)) {}
+
+Exception::Exception(rpc::Trace::Exception::Reader reader)
+    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
+      name(kj::str(reader.getName())),
+      message(kj::str(reader.getMessage())) {
+  if (reader.hasStack()) {
+    stack = kj::str(reader.getStack());
+  }
+}
+
+void Exception::copyTo(rpc::Trace::Exception::Builder builder) {
+  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setName(name);
+  builder.setMessage(message);
+  KJ_IF_SOME(s, stack) {
+    builder.setStack(s);
+  }
+}
+
 }  // namespace workerd::trace
