@@ -696,6 +696,13 @@ public:
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
 
+  // As above, but with callback to add span tags.
+  kj::Own<WorkerInterface> getSubrequestChannelSpans(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      kj::ConstString operationName,
+      kj::FunctionParam<void(TraceContext&)> func);
+
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
       bool isInHouse,
@@ -708,6 +715,12 @@ public:
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
+  // As above, but with callback to add span tags, analogous to getSubrequestChannelSpans().
+  kj::Own<kj::HttpClient> getHttpClientSpans(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      kj::ConstString operationName,
+      kj::FunctionParam<void(TraceContext&)> func);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.

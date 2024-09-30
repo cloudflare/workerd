@@ -28,8 +28,15 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
         "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
     auto& context = IoContext::current();
-    auto client =
-        context.getHttpClient(this->bucket->clientIndex, true, kj::none, "r2_uploadPart"_kjc);
+    auto client = context.getHttpClientSpans(
+        this->bucket->clientIndex, true, kj::none, "r2_uploadPart"_kjc, [&](TraceContext& tracing) {
+      tracing.limeSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+      tracing.limeSpan.setTag("rpc.method"_kjc, kj::str("UploadPart"_kj));
+      tracing.limeSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
+      KJ_IF_SOME(b, this->bucket->adminBucketName()) {
+        tracing.limeSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+      }
+    });
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -75,8 +82,15 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(
-        this->bucket->clientIndex, true, kj::none, "r2_completeMultipartUpload"_kjc);
+    auto client = context.getHttpClientSpans(this->bucket->clientIndex, true, kj::none,
+        "r2_completeMultipartUpload"_kjc, [&](TraceContext& tracing) {
+      tracing.limeSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+      tracing.limeSpan.setTag("rpc.method"_kjc, kj::str("CompleteMultipartUpload"_kj));
+      tracing.limeSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
+      KJ_IF_SOME(b, this->bucket->adminBucketName()) {
+        tracing.limeSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+      }
+    });
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -125,8 +139,15 @@ jsg::Promise<void> R2MultipartUpload::abort(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(
-        this->bucket->clientIndex, true, kj::none, "r2_abortMultipartUpload"_kjc);
+    auto client = context.getHttpClientSpans(this->bucket->clientIndex, true, kj::none,
+        "r2_abortMultipartUpload"_kjc, [&](TraceContext& tracing) {
+      tracing.limeSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+      tracing.limeSpan.setTag("rpc.method"_kjc, kj::str("AbortMultipartUpload"_kj));
+      tracing.limeSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
+      KJ_IF_SOME(b, this->bucket->adminBucketName()) {
+        tracing.limeSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+      }
+    });
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();

@@ -82,6 +82,8 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
         switch (opType) {
           case LimitEnforcer::KvOpType::GET:
             return "kv_get"_kjc;
+          case LimitEnforcer::KvOpType::GET_WITH:
+            return "kv_getWithMetadata"_kjc;
           case LimitEnforcer::KvOpType::PUT:
             return "kv_put"_kjc;
           case LimitEnforcer::KvOpType::LIST:
@@ -95,7 +97,10 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     KJ_UNREACHABLE;
   }();
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, operationName);
+  auto client = context.getHttpClientSpans(
+      subrequestChannel, true, kj::none, operationName, [&](TraceContext& tracing) {
+    tracing.limeSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kj));
+  });
   headers.add(FLPROD_405_HEADER, urlStr);
   for (const auto& header: additionalHeaders) {
     headers.add(header.name.asPtr(), header.value.asPtr());
@@ -147,7 +152,9 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
 
   auto headers = kj::HttpHeaders(context.getHeaderTable());
+  // TODO: Make this KvOpType::GET_WITH if not called via KvNamespace::get.
   auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::GET, urlStr);
+  //auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::GET_WITH, urlStr);
 
   auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
   return context.awaitIo(js, kj::mv(request.response),
