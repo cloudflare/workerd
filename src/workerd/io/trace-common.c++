@@ -52,4 +52,44 @@ void FetchEventInfo::Header::copyTo(rpc::Trace::FetchEventInfo::Header::Builder 
   builder.setValue(value);
 }
 
+// ======================================================================================
+// JsRpcEventInfo
+
+JsRpcEventInfo::JsRpcEventInfo(kj::String methodName): methodName(kj::mv(methodName)) {}
+
+JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader)
+    : methodName(kj::str(reader.getMethodName())) {}
+
+void JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) {
+  builder.setMethodName(methodName);
+}
+
+// ======================================================================================
+// ScheduledEventInfo
+
+ScheduledEventInfo::ScheduledEventInfo(double scheduledTime, kj::String cron)
+    : scheduledTime(scheduledTime),
+      cron(kj::mv(cron)) {}
+
+ScheduledEventInfo::ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader)
+    : scheduledTime(reader.getScheduledTime()),
+      cron(kj::str(reader.getCron())) {}
+
+void ScheduledEventInfo::copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) {
+  builder.setScheduledTime(scheduledTime);
+  builder.setCron(cron);
+}
+
+// ======================================================================================
+// AlarmEventInfo
+
+AlarmEventInfo::AlarmEventInfo(kj::Date scheduledTime): scheduledTime(scheduledTime) {}
+
+AlarmEventInfo::AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader)
+    : scheduledTime(reader.getScheduledTimeMs() * kj::MILLISECONDS + kj::UNIX_EPOCH) {}
+
+void AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) {
+  builder.setScheduledTimeMs((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+}
+
 }  // namespace workerd::trace

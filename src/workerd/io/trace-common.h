@@ -66,5 +66,33 @@ struct FetchEventInfo final {
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
 };
 
+struct JsRpcEventInfo final {
+  explicit JsRpcEventInfo(kj::String methodName);
+  JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
+
+  kj::String methodName;
+
+  void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
+};
+
+struct ScheduledEventInfo final {
+  explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
+  ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
+
+  double scheduledTime;
+  kj::String cron;
+
+  void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder);
+};
+
+struct AlarmEventInfo final {
+  explicit AlarmEventInfo(kj::Date scheduledTime);
+  AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
+
+  kj::Date scheduledTime;
+
+  void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
+};
+
 }  // namespace trace
 }  // namespace workerd
