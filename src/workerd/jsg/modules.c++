@@ -375,7 +375,7 @@ void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
   switch (prom->State()) {
     case v8::Promise::kPending:
       // Let's make sure nobody is depending on pending modules that do not resolve first.
-      KJ_LOG(ERROR, "Async module was not immediately resolved.");
+      KJ_LOG(WARNING, "Async module was not immediately resolved.");
       break;
     case v8::Promise::kRejected:
       // Since we don't actually support I/O when instantiating a worker, we don't return the
