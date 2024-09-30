@@ -207,12 +207,14 @@ kj::Array<kj::String> ArtifactBundler::parsePythonScriptImports(kj::Array<kj::St
 
     int i = 0;
     while (i < file.size()) {
-      auto keywordToParse = file[i] == 'i' ? "import"_kj : "from"_kj;
       switch (file[i]) {
         case 'i':
-        case 'f':
+        case 'f': {
+          auto keywordToParse = file[i] == 'i' ? "import"_kj : "from"_kj;
           if (!parseKeyword(file, keywordToParse, i)) {
-            i += skipUntil(file, {'\n', '\r'}, i);
+            // We cannot simply skip the current char here, doing so would mean that
+            // `iimport x` would be parsed as a valid import.
+            i += skipUntil(file, {'\n', '\r', '"', '\''}, i);
             continue;
           }
           i += keywordToParse.size();  // skip "import" or "from"
@@ -256,9 +258,41 @@ kj::Array<kj::String> ArtifactBundler::parsePythonScriptImports(kj::Array<kj::St
             }
           }
           break;
+        }
+        case '"':
+        case '\'': {
+          char quote = file[i];
+          // Detect multi-line string literals `"""` and skip until the corresponding ending `"""`.
+          if (i + 2 < file.size() && file[i + 1] == quote && file[i + 2] == quote) {
+            i += 3;  // skip start quotes.
+            // skip until terminating quotes.
+            while (i + 2 < file.size() && file[i + 1] != quote && file[i + 2] != quote) {
+              i += skipUntil(file, {quote}, i);
+            }
+            i += 3;  // skip terminating quotes.
+          } else if (i + 2 < file.size() && file[i + 1] == '\\' &&
+              (file[i + 2] == '\n' || file[i + 2] == '\r')) {
+            // Detect string literal with backslash.
+            i += 3;  // skip `"\<NL>`
+            // skip until quote, but ignore `\"`.
+            while (file[i] != quote && file[i - 1] != '\\') {
+              i += skipUntil(file, {quote}, i);
+            }
+            i += 1;  // skip quote.
+          } else {
+            i += 1;  // skip quote.
+          }
+
+          // skip until EOL so that we don't mistakenly parse and capture `"import x`.
+          i += skipUntil(file, {'\n', '\r', '"', '\''}, i);
+          break;
+        }
         default:
-          // Skip to the next line.
-          i += skipUntil(file, {'\n', '\r'}, i);
+          // Skip to the next line or " or '
+          i += skipUntil(file, {'\n', '\r', '"', '\''}, i);
+          if (file[i] == '"' || file[i] == '\'') {
+            continue;  // Allow the quotes to be handled above.
+          }
           if (file[i] != '\0') {
             i += skipChar(file, {'\n', '\r'}, i);  // skip newline.
           }

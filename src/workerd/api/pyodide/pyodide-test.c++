@@ -115,5 +115,77 @@ KJ_TEST("supports backslash") {
   KJ_REQUIRE(result[5] == "c");
 }
 
+KJ_TEST("multiline-strings ignored") {
+  auto files = kj::heapArrayBuilder<kj::String>(4);
+  files.add(kj::str(R"SCRIPT(
+FOO="""
+import x
+from y import z
+"""
+)SCRIPT"));
+  files.add(kj::str(R"SCRIPT(
+FOO='''
+import f
+from g import z
+'''
+)SCRIPT"));
+  files.add(kj::str(R"SCRIPT(FOO = "\
+import b \
+")SCRIPT"));
+  files.add(kj::str("FOO=\"\"\"  \n", R"SCRIPT(import x
+from y import z
+""")SCRIPT"));
+  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  KJ_REQUIRE(result.size() == 0);
+}
+
+KJ_TEST("multiline-strings with imports in-between") {
+  auto files = kj::heapArrayBuilder<kj::String>(1);
+  files.add(kj::str(
+      R"SCRIPT(FOO="""
+import x
+from y import z
+"""import q
+import w
+BAR="""
+import e
+"""
+from t import u)SCRIPT"));
+  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  KJ_REQUIRE(result.size() == 2);
+  KJ_REQUIRE(result[0] == "w");
+  KJ_REQUIRE(result[1] == "t");
+}
+
+KJ_TEST("import after string literal") {
+  auto files = kj::heapArrayBuilder<kj::String>(1);
+  files.add(kj::str(R"SCRIPT(import a
+"import b)SCRIPT"));
+  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "a");
+}
+
+KJ_TEST("import after `i`") {
+  auto files = kj::heapArrayBuilder<kj::String>(1);
+  files.add(kj::str(R"SCRIPT(import a
+iimport b)SCRIPT"));
+  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "a");
+}
+
+KJ_TEST("langchain import") {
+  auto files = kj::heapArrayBuilder<kj::String>(1);
+  files.add(kj::str(R"SCRIPT(from js import Response, console, URL
+from langchain.chat_models import ChatOpenAI
+import openai)SCRIPT"));
+  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  KJ_REQUIRE(result.size() == 3);
+  KJ_REQUIRE(result[0] == "js");
+  KJ_REQUIRE(result[1] == "langchain.chat_models");
+  KJ_REQUIRE(result[2] == "openai");
+}
+
 }  // namespace
 }  // namespace workerd::api
