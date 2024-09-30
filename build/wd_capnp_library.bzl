@@ -15,10 +15,13 @@ def wd_capnp_library(
     """
     base_name = src.removesuffix(".capnp")
 
+    # json.capnp is available implicitly for c++ targets
+    cc_deps = [dep for dep in deps if dep != "@capnp-cpp//src/capnp/compat:json_capnp"]
+
     wd_cc_capnp_library(
         name = base_name + "_capnp",
         visibility = visibility,
-        deps = deps,
+        deps = cc_deps,
         srcs = [src],
         tags = ["manual"] + tags,
         target_compatible_with = target_compatible_with,
