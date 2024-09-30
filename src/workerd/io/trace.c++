@@ -23,76 +23,6 @@ static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
 // insufficient, merge smaller spans together or drop smaller spans.
 static constexpr size_t MAX_USER_SPANS = 512;
 
-Trace::QueueEventInfo::QueueEventInfo(kj::String queueName, uint32_t batchSize)
-    : queueName(kj::mv(queueName)),
-      batchSize(batchSize) {}
-
-Trace::QueueEventInfo::QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader)
-    : queueName(kj::heapString(reader.getQueueName())),
-      batchSize(reader.getBatchSize()) {}
-
-void Trace::QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) {
-  builder.setQueueName(queueName);
-  builder.setBatchSize(batchSize);
-}
-
-Trace::EmailEventInfo::EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize)
-    : mailFrom(kj::mv(mailFrom)),
-      rcptTo(kj::mv(rcptTo)),
-      rawSize(rawSize) {}
-
-Trace::EmailEventInfo::EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader)
-    : mailFrom(kj::heapString(reader.getMailFrom())),
-      rcptTo(kj::heapString(reader.getRcptTo())),
-      rawSize(reader.getRawSize()) {}
-
-void Trace::EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) {
-  builder.setMailFrom(mailFrom);
-  builder.setRcptTo(rcptTo);
-  builder.setRawSize(rawSize);
-}
-
-kj::Vector<Trace::TraceEventInfo::TraceItem> getTraceItemsFromTraces(
-    kj::ArrayPtr<kj::Own<Trace>> traces) {
-  return KJ_MAP(t, traces) -> Trace::TraceEventInfo::TraceItem {
-    return Trace::TraceEventInfo::TraceItem(
-        t->onsetInfo.scriptName.map([](auto& scriptName) { return kj::str(scriptName); }));
-  };
-}
-
-Trace::TraceEventInfo::TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces)
-    : traces(getTraceItemsFromTraces(traces)) {}
-
-kj::Vector<Trace::TraceEventInfo::TraceItem> getTraceItemsFromReader(
-    rpc::Trace::TraceEventInfo::Reader reader) {
-  return KJ_MAP(r, reader.getTraces()) -> Trace::TraceEventInfo::TraceItem {
-    return Trace::TraceEventInfo::TraceItem(r);
-  };
-}
-
-Trace::TraceEventInfo::TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader)
-    : traces(getTraceItemsFromReader(reader)) {}
-
-void Trace::TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder) {
-  auto list = builder.initTraces(traces.size());
-  for (auto i: kj::indices(traces)) {
-    traces[i].copyTo(list[i]);
-  }
-}
-
-Trace::TraceEventInfo::TraceItem::TraceItem(kj::Maybe<kj::String> scriptName)
-    : scriptName(kj::mv(scriptName)) {}
-
-Trace::TraceEventInfo::TraceItem::TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader)
-    : scriptName(kj::str(reader.getScriptName())) {}
-
-void Trace::TraceEventInfo::TraceItem::copyTo(
-    rpc::Trace::TraceEventInfo::TraceItem::Builder builder) {
-  KJ_IF_SOME(name, scriptName) {
-    builder.setScriptName(name);
-  }
-}
-
 Trace::DiagnosticChannelEvent::DiagnosticChannelEvent(
     kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message)
     : timestamp(timestamp),
@@ -109,59 +39,6 @@ void Trace::DiagnosticChannelEvent::copyTo(rpc::Trace::DiagnosticChannelEvent::B
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setChannel(channel);
   builder.setMessage(message);
-}
-
-Trace::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(Type type): type(type) {}
-
-Trace::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
-    rpc::Trace::HibernatableWebSocketEventInfo::Reader reader)
-    : type(readFrom(reader)) {}
-
-void Trace::HibernatableWebSocketEventInfo::copyTo(
-    rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) {
-  auto typeBuilder = builder.initType();
-  KJ_SWITCH_ONEOF(type) {
-    KJ_CASE_ONEOF(_, Message) {
-      typeBuilder.setMessage();
-    }
-    KJ_CASE_ONEOF(close, Close) {
-      auto closeBuilder = typeBuilder.initClose();
-      closeBuilder.setCode(close.code);
-      closeBuilder.setWasClean(close.wasClean);
-    }
-    KJ_CASE_ONEOF(_, Error) {
-      typeBuilder.setError();
-    }
-  }
-}
-
-Trace::HibernatableWebSocketEventInfo::Type Trace::HibernatableWebSocketEventInfo::readFrom(
-    rpc::Trace::HibernatableWebSocketEventInfo::Reader reader) {
-  auto type = reader.getType();
-  switch (type.which()) {
-    case rpc::Trace::HibernatableWebSocketEventInfo::Type::MESSAGE: {
-      return Message{};
-    }
-    case rpc::Trace::HibernatableWebSocketEventInfo::Type::CLOSE: {
-      auto close = type.getClose();
-      return Close{
-        .code = close.getCode(),
-        .wasClean = close.getWasClean(),
-      };
-    }
-    case rpc::Trace::HibernatableWebSocketEventInfo::Type::ERROR: {
-      return Error{};
-    }
-  }
-}
-
-Trace::FetchResponseInfo::FetchResponseInfo(uint16_t statusCode): statusCode(statusCode) {}
-
-Trace::FetchResponseInfo::FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader)
-    : statusCode(reader.getStatusCode()) {}
-
-void Trace::FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder builder) {
-  builder.setStatusCode(statusCode);
 }
 
 Trace::Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)

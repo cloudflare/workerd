@@ -19,6 +19,9 @@ enum class PipelineLogLevel {
   FULL
 };
 
+// A legacy in-memory accumulated Trace
+class Trace;
+
 namespace trace {
 
 // Metadata describing the onset of a trace session.
@@ -66,6 +69,15 @@ struct FetchEventInfo final {
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
 };
 
+struct FetchResponseInfo final {
+  explicit FetchResponseInfo(uint16_t statusCode);
+  FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
+
+  uint16_t statusCode;
+
+  void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
+};
+
 struct JsRpcEventInfo final {
   explicit JsRpcEventInfo(kj::String methodName);
   JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
@@ -93,6 +105,81 @@ struct AlarmEventInfo final {
 
   void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
 };
+
+struct QueueEventInfo final {
+  explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
+  QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
+
+  kj::String queueName;
+  uint32_t batchSize;
+
+  void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
+};
+
+struct EmailEventInfo final {
+  explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
+  EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
+
+  kj::String mailFrom;
+  kj::String rcptTo;
+  uint32_t rawSize;
+
+  void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
+};
+
+struct HibernatableWebSocketEventInfo final {
+  struct Message {};
+  struct Close {
+    uint16_t code;
+    bool wasClean;
+  };
+  struct Error {};
+
+  using Type = kj::OneOf<Message, Close, Error>;
+
+  explicit HibernatableWebSocketEventInfo(Type type);
+  HibernatableWebSocketEventInfo(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
+
+  Type type;
+
+  void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder);
+  static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
+};
+
+struct CustomEventInfo {
+  explicit CustomEventInfo() {};
+  CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
+};
+
+struct TraceEventInfo final {
+  struct TraceItem;
+
+  explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
+  TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
+
+  struct TraceItem {
+    explicit TraceItem(kj::Maybe<kj::String> scriptName);
+    TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
+
+    kj::Maybe<kj::String> scriptName;
+
+    void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder);
+  };
+
+  kj::Vector<TraceItem> traces;
+
+  void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
+};
+
+using EventInfo = kj::OneOf<FetchEventInfo,
+    JsRpcEventInfo,
+    ScheduledEventInfo,
+    AlarmEventInfo,
+    QueueEventInfo,
+    EmailEventInfo,
+    TraceEventInfo,
+    HibernatableWebSocketEventInfo,
+    CustomEventInfo>;
 
 }  // namespace trace
 }  // namespace workerd
