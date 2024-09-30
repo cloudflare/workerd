@@ -120,7 +120,7 @@ jsg::Optional<kj::Array<kj::String>> getTraceScriptTags(const Trace& trace) {
 kj::String getTraceOutcome(const Trace& trace) {
   // TODO(cleanup): Add to enumToStr() to capnp?
   auto enums = capnp::Schema::from<EventOutcome>().getEnumerants();
-  uint i = static_cast<uint>(trace.outcome);
+  uint i = static_cast<uint>(trace.outcomeInfo.outcome);
   KJ_ASSERT(i < enums.size(), "invalid outcome");
   return kj::str(enums[i].getProto().getName());
 }
@@ -206,8 +206,8 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
           trace.onsetInfo.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
       outcome(getTraceOutcome(trace)),
-      cpuTime(trace.cpuTime / kj::MILLISECONDS),
-      wallTime(trace.wallTime / kj::MILLISECONDS),
+      cpuTime(trace.outcomeInfo.cpuTime / kj::MILLISECONDS),
+      wallTime(trace.outcomeInfo.wallTime / kj::MILLISECONDS),
       truncated(trace.truncated) {}
 
 kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {

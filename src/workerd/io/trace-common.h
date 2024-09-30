@@ -41,6 +41,12 @@ struct OnsetInfo final {
   kj::Maybe<kj::String> entrypoint = kj::none;
 };
 
+struct OutcomeInfo final {
+  EventOutcome outcome = EventOutcome::UNKNOWN;
+  kj::Duration cpuTime;
+  kj::Duration wallTime;
+};
+
 // Metadata describing the start of a received fetch request.
 struct FetchEventInfo final {
   struct Header;
