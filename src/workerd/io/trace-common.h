@@ -43,6 +43,12 @@ struct OnsetInfo final {
   ExecutionModel ExecutionModel;
 };
 
+struct OutcomeInfo final {
+  EventOutcome outcome = EventOutcome::UNKNOWN;
+  kj::Duration cpuTime;
+  kj::Duration wallTime;
+};
+
 // Metadata describing the start of a received fetch request.
 struct FetchEventInfo final {
   struct Header;

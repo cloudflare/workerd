@@ -32,9 +32,9 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   }
 
   builder.setTruncated(truncated);
-  builder.setOutcome(outcome);
-  builder.setCpuTime(cpuTime / kj::MILLISECONDS);
-  builder.setWallTime(wallTime / kj::MILLISECONDS);
+  builder.setOutcome(outcomeInfo.outcome);
+  builder.setCpuTime(outcomeInfo.cpuTime / kj::MILLISECONDS);
+  builder.setWallTime(outcomeInfo.wallTime / kj::MILLISECONDS);
   KJ_IF_SOME(name, onsetInfo.scriptName) {
     builder.setScriptName(name);
   }
@@ -128,9 +128,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   }
 
   truncated = reader.getTruncated();
-  outcome = reader.getOutcome();
-  cpuTime = reader.getCpuTime() * kj::MILLISECONDS;
-  wallTime = reader.getWallTime() * kj::MILLISECONDS;
+  outcomeInfo.outcome = reader.getOutcome();
+  outcomeInfo.cpuTime = reader.getCpuTime() * kj::MILLISECONDS;
+  outcomeInfo.wallTime = reader.getWallTime() * kj::MILLISECONDS;
 
   // mergeFrom() is called both when deserializing traces from a sandboxed
   // worker and when deserializing traces sent to a sandboxed trace worker. In
@@ -205,6 +205,10 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   if (reader.hasResponse()) {
     fetchResponseInfo = FetchResponseInfo(reader.getResponse());
   }
+}
+
+void Trace::setOutcomeInfo(trace::OutcomeInfo&& info) {
+  outcomeInfo = kj::mv(info);
 }
 
 }  // namespace workerd
