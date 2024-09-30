@@ -36,37 +36,9 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
   using FetchEventInfo = trace::FetchEventInfo;
-
-  class JsRpcEventInfo {
-  public:
-    explicit JsRpcEventInfo(kj::String methodName);
-    JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
-
-    kj::String methodName;
-
-    void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
-  };
-
-  class ScheduledEventInfo {
-  public:
-    explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
-    ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
-
-    double scheduledTime;
-    kj::String cron;
-
-    void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder);
-  };
-
-  class AlarmEventInfo {
-  public:
-    explicit AlarmEventInfo(kj::Date scheduledTime);
-    AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
-
-    kj::Date scheduledTime;
-
-    void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
-  };
+  using JsRpcEventInfo = trace::JsRpcEventInfo;
+  using ScheduledEventInfo = trace::ScheduledEventInfo;
+  using AlarmEventInfo = trace::AlarmEventInfo;
 
   class QueueEventInfo {
   public:
