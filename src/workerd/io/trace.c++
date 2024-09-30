@@ -23,37 +23,6 @@ static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
 // insufficient, merge smaller spans together or drop smaller spans.
 static constexpr size_t MAX_USER_SPANS = 512;
 
-Trace::JsRpcEventInfo::JsRpcEventInfo(kj::String methodName): methodName(kj::mv(methodName)) {}
-
-Trace::JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader)
-    : methodName(kj::str(reader.getMethodName())) {}
-
-void Trace::JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) {
-  builder.setMethodName(methodName);
-}
-
-Trace::ScheduledEventInfo::ScheduledEventInfo(double scheduledTime, kj::String cron)
-    : scheduledTime(scheduledTime),
-      cron(kj::mv(cron)) {}
-
-Trace::ScheduledEventInfo::ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader)
-    : scheduledTime(reader.getScheduledTime()),
-      cron(kj::str(reader.getCron())) {}
-
-void Trace::ScheduledEventInfo::copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) {
-  builder.setScheduledTime(scheduledTime);
-  builder.setCron(cron);
-}
-
-Trace::AlarmEventInfo::AlarmEventInfo(kj::Date scheduledTime): scheduledTime(scheduledTime) {}
-
-Trace::AlarmEventInfo::AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader)
-    : scheduledTime(reader.getScheduledTimeMs() * kj::MILLISECONDS + kj::UNIX_EPOCH) {}
-
-void Trace::AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) {
-  builder.setScheduledTimeMs((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
-}
-
 Trace::QueueEventInfo::QueueEventInfo(kj::String queueName, uint32_t batchSize)
     : queueName(kj::mv(queueName)),
       batchSize(batchSize) {}
