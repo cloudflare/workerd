@@ -6,6 +6,9 @@
 
 namespace workerd::jsg {
 
+template <typename T>
+concept Codepoint = std::is_same_v<T, uint8_t> || std::is_same_v<T, kj::byte>;
+
 inline void requireOnStack(void* self) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(self, "JsValue types must be allocated on stack");
@@ -250,7 +253,7 @@ public:
     REPLACE_INVALID_UTF8 = v8::String::REPLACE_INVALID_UTF8,
   };
 
-  template <typename T>
+  template <Codepoint T>
   kj::Array<T> toArray(
       Lock& js, WriteOptions options = WriteOptions::NONE) const KJ_WARN_UNUSED_RESULT;
 
@@ -425,16 +428,27 @@ inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
   return kj::Maybe<T&>(*static_cast<T*>(value.inner.As<v8::External>()->Value()));
 }
 
-template <typename T>
+template <Codepoint T>
 inline kj::Array<T> JsString::toArray(Lock& js, WriteOptions options) const {
+  v8::String::ValueView view(js.v8Isolate, inner);
   if constexpr (kj::isSameType<T, kj::byte>()) {
-    KJ_ASSERT(inner->ContainsOnlyOneByte());
     auto buf = kj::heapArray<kj::byte>(inner->Length());
-    inner->WriteOneByte(js.v8Isolate, buf.begin(), 0, buf.size(), options);
+    // If the underlying storage is one-byte, we can just copy the data.
+    if (view.is_one_byte()) {
+      memcpy(buf.begin(), view.data8(), view.length());
+    } else if (inner->ContainsOnlyOneByte()) {
+      // If the underlying storage is two-bytes, but contains only one byte,
+      // let V8 do the conversion.
+      inner->WriteOneByte(js.v8Isolate, buf.begin(), 0, buf.size(), options);
+    }
     return kj::mv(buf);
   } else {
-    auto buf = kj::heapArray<uint16_t>(inner->Length());
-    inner->Write(js.v8Isolate, buf.begin(), 0, buf.size(), options);
+    auto buf = kj::heapArray<uint16_t>(view.length());
+    if (view.is_one_byte()) {
+      memcpy(buf.begin(), view.data8(), view.length());
+    } else {
+      memcpy(buf.begin(), view.data16(), view.length());
+    }
     return kj::mv(buf);
   }
 }
