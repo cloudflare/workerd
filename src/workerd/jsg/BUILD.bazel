@@ -52,7 +52,6 @@ wd_cc_library(
         "web-idl.h",
         "wrappable.h",
     ],
-    implementation_deps = ["@simdutf"],
     visibility = ["//visibility:public"],
     deps = [
         ":exception",
@@ -65,6 +64,7 @@ wd_cc_library(
         "//src/workerd/util:thread-scopes",
         "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj",
+        "@simdutf",
         "@workerd-v8//:v8",
     ],
 )
