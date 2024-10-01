@@ -10,6 +10,7 @@ import {
   SHOULD_SNAPSHOT_TO_DISK,
   IS_CREATING_BASELINE_SNAPSHOT,
   MEMORY_SNAPSHOT_READER,
+  REQUIREMENTS,
 } from 'pyodide-internal:metadata';
 import { reportError, simpleRunPython } from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
@@ -258,6 +259,13 @@ function memorySnapshotDoImports(Module: Module): Array<string> {
   simpleRunPython(Module, `del ${toDelete}`);
   if (IS_CREATING_BASELINE_SNAPSHOT) {
     // We've done all the imports for the baseline snapshot.
+    return [];
+  }
+
+  if (REQUIREMENTS.length == 0) {
+    // Don't attempt to scan for package imports if the Worker has specified no package
+    // requirements, as this means their code isn't going to be importing any modules that we need
+    // to include in a snapshot.
     return [];
   }
 
