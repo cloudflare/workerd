@@ -372,9 +372,9 @@ http_archive(
         "//:patches/perfetto/0001-Rename-ui-build-to-ui-build.sh-to-allow-bazel-build-.patch",
     ],
     repo_mapping = {"@perfetto_dep_zlib": "@zlib"},
-    sha256 = "241cbaddc9ff4e5d1de2d28497fef40b5510e9ca60808815bf4944d0d2f026db",
-    strip_prefix = "perfetto-39.0",
-    url = "https://github.com/google/perfetto/archive/refs/tags/v39.0.tar.gz",
+    sha256 = "9bbd38a0f074038bde6ccbcf5f2ff32587eb60faec254932268ecb6f17f18186",
+    strip_prefix = "perfetto-47.0",
+    url = "https://github.com/google/perfetto/archive/refs/tags/v47.0.tar.gz",
 )
 
 # For use with perfetto
