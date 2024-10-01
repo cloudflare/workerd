@@ -25,15 +25,6 @@ namespace {
 // An isolate has a 128mb memory limit.
 const int ISOLATE_LIMIT = 134217728;
 
-struct ConverterDisposer: public kj::Disposer {
-  static const ConverterDisposer INSTANCE;
-  void disposeImpl(void* pointer) const override {
-    ucnv_close(reinterpret_cast<UConverter*>(pointer));
-  }
-};
-
-const ConverterDisposer ConverterDisposer::INSTANCE;
-
 const char* getEncodingName(Encoding input) {
   switch (input) {
     case Encoding::ASCII:
@@ -174,7 +165,7 @@ Converter::Converter(Encoding encoding, kj::StringPtr substitute) {
   auto name = getEncodingName(encoding);
   auto conv = ucnv_open(name, &status);
   JSG_REQUIRE(U_SUCCESS(status), Error, "Failed to initialize converter");
-  conv_ = kj::Own<UConverter>(conv, ConverterDisposer::INSTANCE);
+  conv_ = kj::disposeWith<ucnv_close>(conv);
   setSubstituteChars(substitute);
 }
 
