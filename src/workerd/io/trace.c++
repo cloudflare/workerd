@@ -97,14 +97,9 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
     kj::Maybe<kj::String> dispatchNamespace,
     kj::Array<kj::String> scriptTags,
     kj::Maybe<kj::String> entrypoint) {
-  auto trace = kj::refcounted<Trace>(trace::OnsetInfo{.stableId = kj::mv(stableId),
-    .scriptName = kj::mv(scriptName),
-    .scriptVersion = kj::mv(scriptVersion),
-    .dispatchNamespace = kj::mv(dispatchNamespace),
-    .scriptId = kj::mv(scriptId),
-    .scriptTags = kj::mv(scriptTags),
-    .entrypoint = kj::mv(entrypoint),
-    .executionModel = executionModel});
+  auto trace = kj::refcounted<Trace>(trace::Onset(kj::none,  // TODO(now): Pass the account id
+      kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion), kj::mv(dispatchNamespace),
+      kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint)), executionModel);
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
@@ -177,20 +172,8 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, trace::EventInfo&& info) {
   trace->setEventInfo(timestamp, kj::mv(info));
 }
 
-void WorkerTracer::setOutcomeInfo(trace::OutcomeInfo&& info) {
-  trace->setOutcomeInfo(kj::mv(info));
-}
-
-void WorkerTracer::setOutcome(EventOutcome outcome) {
-  trace->outcomeInfo.outcome = outcome;
-}
-
-void WorkerTracer::setCPUTime(kj::Duration cpuTime) {
-  trace->outcomeInfo.cpuTime = cpuTime;
-}
-
-void WorkerTracer::setWallTime(kj::Duration wallTime) {
-  trace->outcomeInfo.wallTime = wallTime;
+void WorkerTracer::setOutcomeInfo(trace::Outcome&& info) {
+  trace->setOutcome(kj::mv(info));
 }
 
 void WorkerTracer::setFetchResponseInfo(trace::FetchResponseInfo&& info) {
