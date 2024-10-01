@@ -100,7 +100,7 @@ public:
 
   // Sets info about the result of this trace. Can be called more than once, overriding the
   // previous detail.
-  void setOutcomeInfo(trace::OutcomeInfo&& info);
+  void setOutcomeInfo(trace::Outcome&& info);
 
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   // The isSpan parameter allows for logging spans, which will be emitted after regular logs. There
@@ -121,12 +121,6 @@ public:
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
   void setFetchResponseInfo(trace::FetchResponseInfo&&);
-
-  [[deprecated("use setOutcomeInfo")]] void setOutcome(EventOutcome outcome);
-
-  [[deprecated("use setOutcomeInfo")]] void setCPUTime(kj::Duration cpuTime);
-
-  [[deprecated("use setOutcomeInfo")]] void setWallTime(kj::Duration wallTime);
 
   // Used only for a Trace in a process sandbox. Copies the content of this tracer's trace to the
   // builder.

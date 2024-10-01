@@ -1,3 +1,6 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
 #include "trace-common.h"
@@ -28,9 +31,9 @@ namespace workerd {
 // TODO(cleanup) - worth separating into immutable Trace vs. mutable TraceBuilder?
 
 // Collects trace information about the handling of a worker/pipeline fetch event.
-class Trace final: public kj::Refcounted {
+class Trace final: public kj::Refcounted, public trace::TraceBase {
 public:
-  explicit Trace(trace::OnsetInfo&& onset = {});
+  explicit Trace(trace::Onset&& onset = trace::Onset());
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -46,8 +49,8 @@ public:
   // TODO(someday): Work out what sort of information we may want to convey about the parent
   // trace, if any.
 
-  trace::OnsetInfo onsetInfo{};
-  trace::OutcomeInfo outcomeInfo{};
+  trace::Onset onsetInfo;
+  trace::Outcome outcomeInfo{};
 
   kj::Vector<trace::Log> logs;
   // TODO(o11y): Convert this to actually store spans.
@@ -59,13 +62,37 @@ public:
 
   kj::Maybe<trace::FetchResponseInfo> fetchResponseInfo;
 
+  // ====================================================================================
+  // trace::TraceBase implementation
+
   void setEventInfo(kj::Date timestamp, trace::EventInfo&& info);
-  void setOutcomeInfo(trace::OutcomeInfo&& outcome);
-  void addLog(trace::Log&& log, bool isSpan = false);
-  void addException(trace::Exception&& exception);
-  void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event);
-  void addSpan(const trace::Span&& span, kj::String spanContext);
+  void setOutcome(trace::Outcome&& outcome);
   void setFetchResponseInfo(trace::FetchResponseInfo&& info);
+  void addSpan(const trace::Span&& span, kj::String spanContext);
+  void addLog(trace::Log&& log, bool isSpan = false);
+
+  void addException(trace::Exception&& exception) override;
+  void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event) override;
+
+  void addMark(trace::Mark&& mark) override {
+    // These are currently ignored for legacy traces.
+  }
+
+  void addMetrics(trace::Metrics&& metrics) override {
+    // These are currently ignored for legacy traces.
+  }
+
+  void addSubrequest(trace::Subrequest&& subrequest) override {
+    // These are currently ignored for legacy traces.
+  }
+
+  void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) override {
+    // These are currently ignored for legacy traces.
+  }
+
+  void addCustom(trace::Tags&& tags) override {
+    // These are currently ignored for legacy traces.
+  }
 
   bool truncated = false;
   bool exceededLogLimit = false;
