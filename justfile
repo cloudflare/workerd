@@ -51,3 +51,6 @@ update-deps prefix="":
 update-rust package="full":
   bazel run //deps/rust:crates_vendor -- --repin {{package}}
 
+# example: just bench mimetype
+bench path:
+  bazel run //src/workerd/tests:bench-{{path}}
