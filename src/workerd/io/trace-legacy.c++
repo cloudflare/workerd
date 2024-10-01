@@ -1,3 +1,6 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 #include "trace-legacy.h"
 
 #include <workerd/util/thread-scopes.h>
@@ -18,7 +21,7 @@ static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
 static constexpr size_t MAX_USER_SPANS = 512;
 }  // namespace
 
-Trace::Trace(trace::OnsetInfo&& onset): onsetInfo(kj::mv(onset)) {}
+Trace::Trace(trace::Onset&& onset): onsetInfo(kj::mv(onset)) {}
 Trace::Trace(rpc::Trace::Reader reader) {
   mergeFrom(reader, PipelineLogLevel::FULL);
 }
@@ -253,7 +256,7 @@ void Trace::setEventInfo(kj::Date timestamp, trace::EventInfo&& info) {
   eventInfo = kj::mv(info);
 }
 
-void Trace::setOutcomeInfo(trace::OutcomeInfo&& info) {
+void Trace::setOutcome(trace::Outcome&& info) {
   outcomeInfo = kj::mv(info);
 }
 

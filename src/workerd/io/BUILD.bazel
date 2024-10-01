@@ -168,6 +168,7 @@ wd_cc_library(
         "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util",
         "//src/workerd/util:own-util",
+        "//src/workerd/util:uuid",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/kj:kj-async",
@@ -335,5 +336,23 @@ kj_test(
     deps = [
         ":observer",
         "@capnp-cpp//src/capnp:capnpc",
+    ],
+)
+
+kj_test(
+    src = "trace-streaming-test.c++",
+    deps = [
+        ":trace",
+        "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+kj_test(
+    src = "trace-common-test.c++",
+    deps = [
+        ":trace",
+        "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
