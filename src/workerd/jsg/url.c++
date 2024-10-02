@@ -614,8 +614,10 @@ kj::Maybe<kj::String> canonicalizeOpaquePathname(
   // @see https://wicg.github.io/urlpattern/#canonicalize-an-opaque-pathname
   if (pathname.size() == 0) return kj::str();
   auto str = kj::str("fake:", pathname);
-  auto url = KJ_ASSERT_NONNULL(Url::tryParse(str.asPtr()));
-  return kj::str(url.getPathname());
+  KJ_IF_SOME(url, Url::tryParse(str.asPtr())) {
+    return kj::str(url.getPathname());
+  }
+  return kj::none;
 }
 
 kj::Maybe<kj::String> canonicalizeSearch(
@@ -2151,8 +2153,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         auto str = kj::str(protocol, "://fake-url");
         return KJ_ASSERT_NONNULL(Url::tryParse(str.asPtr()));
       } else {
-        auto str = kj::str("fake://fake-url");
-        return KJ_ASSERT_NONNULL(Url::tryParse(str.asPtr()));
+        return KJ_ASSERT_NONNULL(Url::tryParse("fake://fake-url"_kj));
       }
     }
   })();
