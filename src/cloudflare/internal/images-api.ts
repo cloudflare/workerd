@@ -15,7 +15,7 @@ type RawInfoResponse =
       height: number;
     };
 
-class TransformationResultImpl implements TransformationResult {
+class TransformationResultImpl implements ImageTransformationResult {
   public constructor(private readonly bindingsResponse: Response) {}
 
   public contentType(): string {
@@ -52,7 +52,7 @@ async function streamToBlob(stream: ReadableStream<Uint8Array>): Promise<Blob> {
 }
 
 class ImageTransformerImpl implements ImageTransformer {
-  private transforms: Transform[];
+  private transforms: ImageTransform[];
   private consumed: boolean;
 
   public constructor(
@@ -63,12 +63,14 @@ class ImageTransformerImpl implements ImageTransformer {
     this.consumed = false;
   }
 
-  public transform(transform: Transform): this {
+  public transform(transform: ImageTransform): this {
     this.transforms.push(transform);
     return this;
   }
 
-  public async output(options: OutputOptions): Promise<TransformationResult> {
+  public async output(
+    options: ImageOutputOptions
+  ): Promise<ImageTransformationResult> {
     if (this.consumed) {
       throw new ImagesErrorImpl(
         'IMAGES_TRANSFORM_ERROR 9525: ImageTransformer consumed; you may only call .output() once',
@@ -107,7 +109,9 @@ class ImageTransformerImpl implements ImageTransformer {
 class ImagesBindingImpl implements ImagesBinding {
   public constructor(private readonly fetcher: Fetcher) {}
 
-  public async info(stream: ReadableStream<Uint8Array>): Promise<InfoResponse> {
+  public async info(
+    stream: ReadableStream<Uint8Array>
+  ): Promise<ImageInfoResponse> {
     const body = new FormData();
     body.append('image', await streamToBlob(stream));
 

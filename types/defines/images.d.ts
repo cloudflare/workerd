@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-type InfoResponse =
-  | { format: "image/svg+xml" }
+type ImageInfoResponse =
+  | { format: 'image/svg+xml' }
   | {
       format: string;
       fileSize: number;
@@ -11,21 +11,21 @@ type InfoResponse =
       height: number;
     };
 
-type Transform = {
-  fit?: "scale-down" | "contain" | "pad" | "squeeze" | "cover" | "crop";
+type ImageTransform = {
+  fit?: 'scale-down' | 'contain' | 'pad' | 'squeeze' | 'cover' | 'crop';
   gravity?:
-    | "left"
-    | "right"
-    | "top"
-    | "bottom"
-    | "center"
-    | "auto"
-    | "entropy"
-    | "face"
+    | 'left'
+    | 'right'
+    | 'top'
+    | 'bottom'
+    | 'center'
+    | 'auto'
+    | 'entropy'
+    | 'face'
     | {
         x?: number;
         y?: number;
-        mode: "remainder" | "box-center";
+        mode: 'remainder' | 'box-center';
       };
   trim?: {
     top?: number;
@@ -62,15 +62,15 @@ type Transform = {
   zoom?: number;
 };
 
-type OutputOptions = {
+type ImageOutputOptions = {
   format:
-    | "image/jpeg"
-    | "image/png"
-    | "image/gif"
-    | "image/webp"
-    | "image/avif"
-    | "rgb"
-    | "rgba";
+    | 'image/jpeg'
+    | 'image/png'
+    | 'image/gif'
+    | 'image/webp'
+    | 'image/avif'
+    | 'rgb'
+    | 'rgba';
   quality?: number;
   background?: string;
 };
@@ -81,7 +81,7 @@ interface ImagesBinding {
    * @throws {@link ImagesError} with code 9412 if input is not an image
    * @param stream The image bytes
    */
-  info(stream: ReadableStream<Uint8Array>): Promise<InfoResponse>;
+  info(stream: ReadableStream<Uint8Array>): Promise<ImageInfoResponse>;
   /**
    * Begin applying a series of transformations to an image
    * @param stream The image bytes
@@ -96,16 +96,16 @@ interface ImageTransformer {
    * You can then apply more transformations or retrieve the output.
    * @param transform
    */
-  transform(transform: Transform): ImageTransformer;
+  transform(transform: ImageTransform): ImageTransformer;
   /**
    * Retrieve the image that results from applying the transforms to the
    * provided input
    * @param options Options that apply to the output e.g. output format
    */
-  output(options: OutputOptions): Promise<TransformationResult>;
+  output(options: ImageOutputOptions): Promise<ImageTransformationResult>;
 }
 
-interface TransformationResult {
+interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
    */
