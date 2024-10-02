@@ -394,6 +394,25 @@ IsolateBase::~IsolateBase() noexcept(false) {
   });
 }
 
+IsolateBase::IsolateBase(IsolateBase&& other) :
+  system(kj::mv(other.system)),
+  cppHeap(kj::mv(other.cppHeap)),
+  ptr(std::exchange(other.ptr, nullptr)),
+  uuid(kj::mv(other.uuid)),
+  evalAllowed(other.evalAllowed),
+  captureThrowsAsRejections(other.captureThrowsAsRejections),
+  exportCommonJsDefault(other.exportCommonJsDefault),
+  asyncContextTrackingEnabled(other.asyncContextTrackingEnabled),
+  nodeJsCompatEnabled(other.nodeJsCompatEnabled),
+  maybeLogger(kj::mv(other.maybeLogger)),
+  maybeErrorReporter(kj::mv(other.maybeErrorReporter)),
+  maybeModuleFallbackCallback(kj::mv(other.maybeModuleFallbackCallback)),
+  opaqueTemplate(kj::mv(opaqueTemplate)),
+  symbolAsyncDispose(kj::mv(symbolAsyncDispose)),
+  codeMap(kj::mv(codeMap)),
+  heapTracer(kj::mv(heapTracer)),
+  observer(kj::mv(observer)) {}
+
 v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isolate) {
   return reinterpret_cast<IsolateBase*>(isolate->GetData(0))->opaqueTemplate.Get(isolate);
 }

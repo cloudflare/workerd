@@ -14,7 +14,9 @@
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <workerd/jsg/observer.h>
-
+#include <atomic>
+#include <memory>
+#include <utility>
 namespace workerd::jsg {
 
 // Construct a default V8 platform, with the given background thread pool size.
@@ -67,6 +69,8 @@ private:
 // bloat.
 class IsolateBase {
 public:
+  IsolateBase(IsolateBase&& other);
+
   static IsolateBase& from(v8::Isolate* isolate);
 
   // Unwraps a JavaScript exception as a kj::Exception.
@@ -272,7 +276,8 @@ private:
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer);
   ~IsolateBase() noexcept(false);
-  KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
+  // KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
+  KJ_DISALLOW_COPY(IsolateBase);
 
   void dropWrappers(kj::Own<void> typeWrapperInstance);
 
@@ -386,6 +391,15 @@ public:
         wrapper(wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration))) {
     wrapper->initTypeWrapper();
   }
+
+  template <typename MetaConfiguration, typename OtherTypeWrapper>
+  Isolate(Isolate<OtherTypeWrapper>&& other,
+      MetaConfiguration&& configuration)
+      : IsolateBase(static_cast<IsolateBase&&>(other)),
+        wrapper(wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration))) {
+    wrapper->initTypeWrapper();
+  }
+
 
   // Use this constructor when no wrappers have any required configuration.
   explicit Isolate(const V8System& system,
