@@ -1194,6 +1194,31 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
                   v8::Local<v8::Value> argument)> callback) -> v8::Maybe<void> {
         try {
           auto& js = jsg::Lock::from(isolate);
+
+          {
+            // TODO(soon): Hopefully this logging is temporary. We want to get an idea
+            // of where the cross request promises are being resolved just in general.
+            // To do so we need to try to capture a stack. We do so by creating an error
+            // object and logging it.
+            v8::HandleScope handleScope(isolate);
+            auto err =
+                v8::Exception::Error(js.str("Cross Request Promise Resolve"_kj)).As<v8::Object>();
+            jsg::check(err->Set(js.v8Context(), js.str("name"_kj), js.str("Warning"_kj)));
+            auto stack = jsg::check(err->Get(js.v8Context(), js.str("stack"_kj)));
+            auto msg = kj::str("NOSENTRY ", stack);
+            if (msg != "NOSENTRY Warning: Cross Request Promise Resolve") {
+              LOG_PERIODICALLY(WARNING, msg);
+            } else {
+              // If we get here, it means we don't have a useful JS stack trace.
+              // Either the stack trace limit was set to zero for some reason or
+              // this resolve/reject originated from inside the runtime where a
+              // JS stack trace is not available. Let's emit the warning with a
+              // C++ stack instead.
+              // TODO(review): Is this worthwhile? Does it give us enough useful signal?
+              LOG_PERIODICALLY(WARNING, kj::str(msg, "\n", kj::getStackTrace()));
+            }
+          }
+
           // The promise tag is generally opaque except for right here. The tag
           // wraps an instanceof kj::Own<IoCrossContextExecutor>, which wraps an atomically
           // refcounted pointer to the DeleteQueue for the correct isolate.
