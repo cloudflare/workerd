@@ -42,7 +42,7 @@ export function simpleRunPython(
     for (const line of err.split('\n')) {
       console.warn(line);
     }
-    throw new Error('Failed');
+    throw new Error('Failed to run Python code: ' + err);
   }
   return err;
 }
