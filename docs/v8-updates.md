@@ -72,7 +72,8 @@ from the V8 directory.
 
     The `integrity` check needs to be updated to the new value. You can get the new value in
     bazel's preferred format just by looking into the mismatch error while trying to compile
-    workerd using the newer V8 version.
+    workerd using the newer V8 version or by running
+    `openssl dgst -sha256 -binary <tarball_filename> | openssl base64 -A`
 
     See [V8 http_archive in WORKSPACE](https://github.com/cloudflare/workerd/blob/587ad90dd1e91d2660c271018056f4189fca3501/WORKSPACE#L408)
 
