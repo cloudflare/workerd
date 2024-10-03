@@ -440,8 +440,14 @@ export default <ExportedHandler<Env>>{
       expectTypeOf(s.objectProperty.z(false)).toEqualTypeOf<Promise<number>>(); // (pipelining)
 
       expectTypeOf(s.everySerializable).not.toBeNever();
-      expectTypeOf(s.nonSerializable1).toBeNever();
-      expectTypeOf(s.nonSerializable2).returns.toBeNever();
+
+      // These are _not_ serializable, but will nevertheless not be typed as `never`. This
+      // is because TS can't distinguish between a class instance and an interface. At runtime,
+      // using an RPC method like this will throw:
+      //   "Could not serialize object. This type does not support serialization.""
+      expectTypeOf(s.nonSerializable1).not.toBeNever();
+      expectTypeOf(s.nonSerializable2).returns.not.toBeNever();
+
       expectTypeOf(s.nonSerializable3).returns.toBeNever();
 
       // Verify serializable objects without any stubs are still disposable
