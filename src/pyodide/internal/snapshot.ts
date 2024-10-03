@@ -275,12 +275,17 @@ function memorySnapshotDoImports(Module: Module): Array<string> {
   const localModulePaths: Set<string> = new Set<string>(
     MetadataReader.getNames()
   );
+  const SNAPSHOT_IMPORTS_SET = new Set(SNAPSHOT_IMPORTS);
   const importedModules: Array<string> = ArtifactBundler.constructor
     // @ts-ignore parsePythonScriptImports is a static method.
     .parsePythonScriptImports(MetadataReader.getWorkerFiles('py'))
     .filter((module: string) => {
       const moduleFilename = module.replace('.', '/') + '.py';
-      return !localModulePaths.has(moduleFilename) && module != 'js';
+      return (
+        !localModulePaths.has(moduleFilename) &&
+        module != 'js' &&
+        !SNAPSHOT_IMPORTS_SET.has(module)
+      );
     });
 
   const deduplicatedModules = [...new Set(importedModules)];
