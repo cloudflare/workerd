@@ -288,8 +288,16 @@ public:
     return *metrics;
   }
 
+  inline IsolateObserver& getMetrics() {
+    return *metrics;
+  }
+
   inline kj::StringPtr getId() const {
     return id;
+  }
+
+  inline void setId(kj::String newId)  {
+    id = kj::mv(newId);
   }
 
   // Parses the given code to create a new script object and returns it.
@@ -303,7 +311,15 @@ public:
     return *limitEnforcer;
   }
 
+  inline IsolateLimitEnforcer& getLimitEnforcer() {
+    return *limitEnforcer;
+  }
+
   inline const Api& getApi() const {
+    return *api;
+  }
+
+  inline Api& getApi()  {
     return *api;
   }
 
