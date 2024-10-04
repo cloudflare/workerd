@@ -9,6 +9,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
@@ -1446,6 +1447,141 @@ void Server::InspectorServiceIsolateRegistrar::registerIsolate(
 
 // =======================================================================================
 
+namespace {
+class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
+public:
+  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer): tracer(kj::mv(tracer)) {}
+  ~RequestObserverWithTracer() noexcept(false) {
+    KJ_IF_SOME(t, tracer) {
+      if (fetchStatus != 0) {
+        t->setFetchResponseInfo(trace::FetchResponseInfo(fetchStatus));
+      }
+      t->setOutcomeInfo(trace::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+    }
+  }
+
+  WorkerInterface& wrapWorkerInterface(WorkerInterface& worker) override {
+    if (tracer != kj::none) {
+      inner = worker;
+      return *this;
+    }
+    return worker;
+  }
+
+  void reportFailure(const kj::Exception& exception, FailureSource source) override {
+    outcome = EventOutcome::EXCEPTION;
+  }
+
+  class ResponseObserver final: public kj::HttpService::Response {
+  public:
+    ResponseObserver(kj::HttpService::Response& response): inner(response) {}
+
+    kj::Own<kj::AsyncOutputStream> send(uint statusCode,
+        kj::StringPtr statusText,
+        const kj::HttpHeaders& headers,
+        kj::Maybe<uint64_t> expectedBodySize) override {
+      this->statusCode = statusCode;
+      return inner.send(statusCode, statusText, headers, expectedBodySize);
+    }
+
+    kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+      return inner.acceptWebSocket(headers);
+    }
+
+    uint getStatusCode() const {
+      return statusCode;
+    }
+
+  private:
+    kj::HttpService::Response& inner;
+    uint statusCode;
+  };
+
+  // WorkerInterface
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    try {
+      ResponseObserver responseWrapper(response);
+      co_await KJ_ASSERT_NONNULL(inner).request(method, url, headers, requestBody, responseWrapper);
+      fetchStatus = responseWrapper.getStatusCode();
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      reportFailure(exception, FailureSource::OTHER);
+      fetchStatus = 500;
+      throw exception;
+    }
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    try {
+      co_return co_await KJ_ASSERT_NONNULL(inner).connect(
+          host, headers, connection, response, settings);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      reportFailure(exception, FailureSource::OTHER);
+      throw exception;
+    }
+  }
+
+  void prewarm(kj::StringPtr url) override {
+    try {
+      KJ_ASSERT_NONNULL(inner).prewarm(url);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      reportFailure(exception, FailureSource::OTHER);
+      throw exception;
+    }
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    try {
+      co_return co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      reportFailure(exception, FailureSource::OTHER);
+      throw exception;
+    }
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    try {
+      co_return co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      reportFailure(exception, FailureSource::OTHER);
+      throw exception;
+    }
+  }
+
+  kj::Promise<bool> test() override {
+    try {
+      co_return co_await KJ_ASSERT_NONNULL(inner).test();
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      reportFailure(exception, FailureSource::OTHER);
+      throw exception;
+    }
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    return KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+  }
+
+private:
+  kj::Maybe<kj::Own<WorkerTracer>> tracer;
+  kj::Maybe<WorkerInterface&> inner;
+  EventOutcome outcome = EventOutcome::OK;
+  int fetchStatus = 0;
+};
+}  // namespace
+
 class Server::WorkerService final: public Service,
                                    private kj::TaskSet::ErrorHandler,
                                    private IoChannelFactory,
@@ -1464,6 +1600,8 @@ public:
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
   using AbortActorsCallback = kj::Function<void()>;
+  using LookupServiceCallback =
+      kj::Function<Service&(config::ServiceDesignator::Reader, kj::StringPtr)>;
 
   WorkerService(ThreadContext& threadContext,
       kj::Own<const Worker> worker,
@@ -1471,13 +1609,19 @@ public:
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypointsParam,
       const kj::HashMap<kj::String, ActorConfig>& actorClasses,
       LinkCallback linkCallback,
-      AbortActorsCallback abortActorsCallback)
+      AbortActorsCallback abortActorsCallback,
+      kj::Maybe<kj::Own<PipelineTracer>> maybeTracer,
+      kj::Array<kj::Own<config::ServiceDesignator::Reader>> loggingServices,
+      LookupServiceCallback lookupService)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
         waitUntilTasks(*this),
-        abortActorsCallback(kj::mv(abortActorsCallback)) {
+        abortActorsCallback(kj::mv(abortActorsCallback)),
+        maybeTracer(kj::mv(maybeTracer)),
+        loggingServices(kj::mv(loggingServices)),
+        lookupService(kj::mv(lookupService)) {
 
     namedEntrypoints.reserve(namedEntrypointsParam.size());
     for (auto& ep: namedEntrypointsParam) {
@@ -1535,15 +1679,38 @@ public:
       kj::Maybe<kj::StringPtr> entrypointName,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none) {
     TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
+    kj::Maybe<kj::Own<WorkerTracer>> maybeWorkerTracer = kj::none;
+    KJ_IF_SOME(tracer, maybeTracer) {
+      auto childTracer = kj::refcounted<PipelineTracer>(kj::addRef(*tracer));
+      maybeWorkerTracer = childTracer->makeWorkerTracer(PipelineLogLevel::FULL, kj::none, kj::none,
+          kj::none, kj::none, kj::none, nullptr, kj::none);
+
+      kj::Vector<kj::Own<WorkerInterface>> tailWorkers;
+      for (auto& svc: loggingServices) {
+        auto& service = lookupService(*svc, "looking logging service");
+        KJ_ASSERT(&service != this, "A worker currently cannot log to itself");
+        tailWorkers.add(service.startRequest({}));
+      }
+      waitUntilTasks.add(childTracer->onComplete().then(
+          [this, tailWorkers = kj::mv(tailWorkers)](
+              kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
+        for (auto& worker: tailWorkers) {
+          auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
+              workerd::api::TraceCustomEventImpl::TYPE, waitUntilTasks, mapAddRef(traces));
+          co_return co_await worker->customEvent(kj::mv(event)).ignoreResult();
+        }
+        co_return;
+      }));
+    };
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
         {},  // ioContextDependency
         kj::Own<IoChannelFactory>(this, kj::NullDisposer::instance),
-        kj::refcounted<RequestObserver>(),  // default observer makes no observations
+        kj::refcounted<RequestObserverWithTracer>(
+            mapAddRef(maybeWorkerTracer)),  // default observer makes no observations
         waitUntilTasks,
-        true,      // tunnelExceptions
-        kj::none,  // workerTracer
-        kj::mv(metadata.cfBlobJson));
+        true,  // tunnelExceptions
+        kj::mv(maybeWorkerTracer), kj::mv(metadata.cfBlobJson));
   }
 
   class ActorNamespace final {
@@ -2064,6 +2231,9 @@ private:
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
+  kj::Maybe<kj::Own<PipelineTracer>> maybeTracer;
+  kj::Array<kj::Own<config::ServiceDesignator::Reader>> loggingServices;
+  LookupServiceCallback lookupService;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
   public:
@@ -3068,9 +3238,35 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     return result;
   };
 
+  kj::Vector<kj::Own<config::ServiceDesignator::Reader>> loggingServices;
+  auto maybeMakeTracer = [conf, &loggingServices]() -> kj::Maybe<kj::Own<PipelineTracer>> {
+    auto logging = conf.getLogging();
+    switch (logging.which()) {
+      case config::Worker::Logging::Which::NONE:
+        return kj::none;
+      case config::Worker::Logging::Which::TO_SERVICE: {
+        loggingServices.add(capnp::clone(logging.getToService()));
+        break;
+      }
+      case config::Worker::Logging::Which::TO_SERVICES: {
+        for (auto svc: logging.getToServices()) {
+          loggingServices.add(capnp::clone(svc));
+        }
+        break;
+      }
+    }
+
+    return kj::refcounted<PipelineTracer>(kj::none);
+  };
+  auto tracer = maybeMakeTracer();
+
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      localActorConfigs, kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors));
+      localActorConfigs, kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors),
+      kj::mv(tracer), loggingServices.releaseAsArray(),
+      [this](const config::ServiceDesignator::Reader& service, kj::StringPtr context) -> Service& {
+    return lookupService(service, kj::str(context));
+  });
 }
 
 // =======================================================================================

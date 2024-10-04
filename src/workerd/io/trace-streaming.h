@@ -147,7 +147,7 @@ public:
   // to be used directly. Use the static create(...) method instead.
   explicit StreamingTrace(kj::Own<const IdFactory::Id> id,
       trace::Onset&& onset,
-      Delegate delegatem,
+      Delegate delegate,
       const TimeProvider& timeProvider);
   ~StreamingTrace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(StreamingTrace);

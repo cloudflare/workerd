@@ -623,6 +623,8 @@ public:
     return typeId;
   }
 
+  static constexpr uint16_t TYPE = 2;
+
 private:
   uint16_t typeId;
   kj::Array<kj::Own<workerd::Trace>> traces;
