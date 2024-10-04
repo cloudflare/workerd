@@ -525,7 +525,7 @@ http_file(
 http_archive(
     name = "wpt",
     build_file = "//:build/BUILD.wpt",
-    integrity = "sha256-pJPjzEf1mkkyljFnePpT9MRV1jcfRJg3k9a45CEGxuo=",
-    strip_prefix = "wpt-merge_pr_47718",
-    url = "https://github.com/web-platform-tests/wpt/archive/refs/tags/merge_pr_47718.tar.gz",
+    integrity = "sha256-qSEOTIhox20EBQBFsBhvvqNHISNV2COHrz6ozmQfd3k=",
+    strip_prefix = "wpt-native-glob",
+    url = "https://github.com/npaun/wpt/archive/refs/tags/native-glob.tar.gz",
 )
