@@ -524,7 +524,6 @@ http_file(
 
 http_archive(
     name = "wpt",
-    build_file = "//:build/BUILD.wpt",
     integrity = "sha256-qSEOTIhox20EBQBFsBhvvqNHISNV2COHrz6ozmQfd3k=",
     strip_prefix = "wpt-native-glob",
     url = "https://github.com/npaun/wpt/archive/refs/tags/native-glob.tar.gz",
