@@ -1028,6 +1028,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
 
     lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
     lock->setCommonJsExportDefault(features.getExportCommonJsDefaultNamespace());
+    if (features.getSetToStringTag()) {
+      lock->setToStringTag();
+    }
     if (features.getNodeJsCompatV2()) {
       lock->setNodeJsCompatEnabled();
     }

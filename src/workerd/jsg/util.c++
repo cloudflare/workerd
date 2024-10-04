@@ -29,6 +29,11 @@ bool getCommonJsExportDefault(v8::Isolate* isolate) {
   return jsgIsolate.getCommonJsExportDefault();
 }
 
+bool getShouldSetToStringTag(v8::Isolate* isolate) {
+  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+  return jsgIsolate.shouldSetToStringTag();
+}
+
 #if _WIN32
 kj::String fullyQualifiedTypeName(const std::type_info& type) {
   // type.name() returns a human-readable name on Windows:

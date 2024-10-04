@@ -622,4 +622,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # We plan to turn this on always quite soon. It would be an autogate but we need to test
   # our logic both at upload time and at runtime, and this seemed like the easiest way to
   # make sure we keep things in sync.
+
+  setToStringTag @64 :Bool
+      $compatEnableFlag("set_tostring_tag")
+      $compatDisableFlag("do_not_set_tostring_tag")
+      $compatEnableDate("2024-09-26");
+  # A change was made that set the Symbol.toStringTag on all jsg::Objects in order to
+  # fix several spec compliance bugs. Unfortunately it turns out that was more breaking
+  # than expected. This flag restores the original behavior for compat dates before
+  # 2024-09-26
 }

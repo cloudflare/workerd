@@ -45,6 +45,7 @@ private:
 
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
 bool getCommonJsExportDefault(v8::Isolate* isolate);
+bool getShouldSetToStringTag(v8::Isolate* isolate);
 
 kj::String fullyQualifiedTypeName(const std::type_info& type);
 kj::String typeName(const std::type_info& type);
