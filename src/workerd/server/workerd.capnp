@@ -630,6 +630,11 @@ struct Worker {
 
   moduleFallback @13 :Text;
 
+  logging :union {
+    none @14 :Void;
+    toService @15 :ServiceDesignator;
+    toServices @16 :List(ServiceDesignator);
+  }
 }
 
 struct ExternalServer {
