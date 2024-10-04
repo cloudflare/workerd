@@ -1533,7 +1533,10 @@ private:
 
     auto classname = v8StrIntern(isolate, typeName(typeid(T)));
 
-    prototype->Set(v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
+    if (getShouldSetToStringTag(isolate)) {
+      prototype->Set(
+          v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
+    }
 
     // Previously, miniflare would use the lack of a Symbol.toStringTag on a class to
     // detect a type that came from the runtime. That's obviously a bit problematic because

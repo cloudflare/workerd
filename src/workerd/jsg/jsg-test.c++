@@ -115,8 +115,6 @@ KJ_TEST("inheritance") {
   e.expectEval("newExtendedAsBase(123, 'foo') instanceof NumberBox", "boolean", "true");
 
   e.expectEval("newExtendedAsBase(123, 'foo') instanceof ExtendedNumberBox", "boolean", "true");
-
-  e.expectEval("(new Other())[Symbol.toStringTag]", "string", "Other");
 }
 
 // ========================================================================================

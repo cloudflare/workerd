@@ -2514,6 +2514,7 @@ public:
   void setCommonJsExportDefault(bool exportDefault);
 
   void setNodeJsCompatEnabled();
+  void setToStringTag();
 
   using Logger = void(Lock&, kj::StringPtr);
   void setLoggerCallback(kj::Function<Logger>&& logger);

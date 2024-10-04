@@ -143,6 +143,14 @@ public:
     return nodeJsCompatEnabled;
   }
 
+  inline bool shouldSetToStringTag() const {
+    return setToStringTag;
+  }
+
+  void enableSetToStringTag() {
+    setToStringTag = true;
+  }
+
   // The logger will be optionally set by the isolate setup logic if there is anywhere
   // for the log to go (for instance, if debug logging is enabled or the inspector is
   // being used).
@@ -229,6 +237,7 @@ private:
   bool exportCommonJsDefault = false;
   bool asyncContextTrackingEnabled = false;
   bool nodeJsCompatEnabled = false;
+  bool setToStringTag = false;
 
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
