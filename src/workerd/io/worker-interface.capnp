@@ -140,6 +140,10 @@ struct Trace @0x8e8d911203762d34 {
   # Indicates that the trace was truncated due to reaching the maximum size limit.
 }
 
+struct SendTracesRun @0xde913ebe8e1b82a5 {
+  outcome @0 :EventOutcome;
+}
+
 struct ScheduledRun @0xd98fc1ae5c8095d0 {
   outcome @0 :EventOutcome;
 
@@ -404,7 +408,7 @@ interface EventDispatcher @0xf20697475ec1752d {
   getHttpService @0 () -> (http :HttpService) $Cxx.allowCancellation;
   # Gets the HTTP interface to this worker (to trigger FetchEvents).
 
-  sendTraces @1 (traces :List(Trace)) $Cxx.allowCancellation;
+  sendTraces @1 (traces :List(Trace)) -> (result :SendTracesRun) $Cxx.allowCancellation;
   # Deliver a trace event to a trace worker. This always completes immediately; the trace handler
   # runs as a "waitUntil" task.
 

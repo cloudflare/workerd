@@ -611,7 +611,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
       auto handler = lock.getExportedHandler(entrypointName, context.getActor());
-      lock.getGlobalScope().sendTraces(traces, lock, handler);
+      return lock.getGlobalScope().sendTraces(traces, lock, handler);
     });
   } catch (kj::Exception e) {
     // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
@@ -654,11 +654,10 @@ auto TraceCustomEventImpl::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFac
     traces[i]->copyTo(out[i]);
   }
 
-  waitUntilTasks.add(req.send().ignoreResult());
-
-  // As long as we sent it, we consider the result to be okay.
-  co_return Result{
-    .outcome = workerd::EventOutcome::OK,
+  auto resp = co_await req.send();
+  auto respResult = resp.getResult();
+  co_return WorkerInterface::CustomEvent::Result{
+    .outcome = respResult.getOutcome(),
   };
 }
 
