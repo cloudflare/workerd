@@ -32,6 +32,27 @@ struct Trace @0x8e8d911203762d34 {
     message @2 :Text;
   }
 
+  # Streaming tail workers support an expanded version of Log that supports arbitrary
+  # v8 serialized data or a text message. We define this as a separate new
+  # struct in order to avoid any possible non-backwards compatible disruption to anything
+  # using the existing Log struct in the original trace worker impl. The two structs are
+  # virtually identical with the exception that the message field can be v8 serialized data.
+  struct LogV2 {
+    timestampNs @0 :Int64;
+    logLevel @1 :Log.Level;
+    message :union {
+      # When data is used, the LogV2 message is expected to be a v8 serialized value.
+      data @2 :Data;
+      text @3 :Text;
+    }
+    tags @4 :List(Tag);
+    # A Log entry might be truncated if it exceeds the maximum size limit configured
+    # for the process. Truncation should occur before the data is serialized so it
+    # should always be possible to deserialize the data field successfully, regardless
+    # of the specific format of the data.
+    truncated @5 :Bool;
+  }
+
   exceptions @1 :List(Exception);
   struct Exception {
     timestampNs @0 :Int64;
@@ -189,15 +210,13 @@ struct Trace @0x8e8d911203762d34 {
   }
 
   # The Outcome struct is always sent as the last event in any trace stream. It
-  # contains the final outcome of the trace includig the CPU and wall time for
+  # contains the final outcome of the trace including the CPU and wall time for
   # the entire trace steam.
   struct Outcome {
     outcome @0 :EventOutcome;
-    cpuTime @1 :UInt64;
-    wallTime @2 :UInt64;
 
     # Any additional arbitrary metadata that should be associated with the outcome.
-    tags @3 :List(Tag);
+    tags @1 :List(Tag);
   }
 
   # An outcome information object that describes additional detail about the outcome
@@ -210,23 +229,10 @@ struct Trace @0x8e8d911203762d34 {
     tags @0 :List(Tag);
   }
 
-  # Streaming tail workers support an expanded version of Log that supports arbitrary
-  # v8 serialized data rather than a text message. We define this as a separate new
-  # struct in order to avoid any possible non-backwards compatible disruption to anything
-  # using the existing Log struct in the original trace worker impl. The two structs are
-  # virtually identical with the exception that the message field here will always be
-  # v8 serialized data.
-  struct LogV2 {
-    timestampNs @0 :Int64;
-    logLevel @1 :Log.Level;
-    data @2 :Data;
-    tags @3 :List(Tag);
-  }
-
   # A detail event indicating a subrequest that was made during a request. This
   # can be a fetch subrequest, an RPC subrequest, a call out to a KV namespace,
   # etc.
-  # TODO(now): This needs to be flushed out more.
+  # TODO(streaming-trace): This needs to be flushed out more.
   struct Subrequest {
     # A monotonic sequence number that is unique within the tail. The id is
     # used primarily to correlate with the SubrequestOutcome.

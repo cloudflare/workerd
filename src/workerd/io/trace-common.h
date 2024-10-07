@@ -51,7 +51,7 @@ concept IsEnum = std::is_enum<T>::value;
 // a double, a string, or an arbitrary byte array. When a byte array is used, the
 // specific format is specific to the tag key. No general assumptions can be made
 // about the value without knowledge of the specific key.
-struct Tag {
+struct Tag final {
   using TagValue = kj::OneOf<bool, int64_t, uint64_t, double, kj::String, kj::Array<kj::byte>>;
   using TagKey = kj::OneOf<kj::String, uint32_t>;
   TagKey key;
@@ -75,7 +75,9 @@ struct Tag {
 };
 using Tags = kj::Array<Tag>;
 
-// Metadata describing the onset of a trace session.
+// Metadata describing the onset of a trace session. The first event in any trace session
+// will always be an Onset event. It details information about which worker, script, etc
+// is being traced. Every trace session will have exactly one Onset event.
 struct Onset final {
   explicit Onset() = default;
   Onset(kj::Maybe<uint32_t> accountId,
@@ -93,6 +95,8 @@ struct Onset final {
   Onset& operator=(Onset&&) = default;
   KJ_DISALLOW_COPY(Onset);
 
+  // Note that all of these fields could be represented by tags but are kept
+  // as separate fields for legacy reasons.
   kj::Maybe<uint32_t> accountId = kj::none;
   kj::Maybe<kj::String> stableId = kj::none;
   kj::Maybe<kj::String> scriptName = kj::none;
@@ -145,6 +149,10 @@ struct FetchEventInfo final {
   FetchEventInfo clone() const;
 };
 
+// The ActorFlushInfo struct is used to attach additional detail about the termination
+// of an actor. It is to be included in a closing Span event. The ActorFlushInfo is not
+// an event on it's own. This can be used, for instance, to communicate when an actor
+// is broken and for what reason.
 struct ActorFlushInfo final {
   explicit ActorFlushInfo(Tags tags = nullptr);
   ActorFlushInfo(rpc::Trace::ActorFlushInfo::Reader reader);
@@ -160,6 +168,9 @@ struct ActorFlushInfo final {
   ActorFlushInfo clone() const;
 };
 
+// The FetchResponseInfo struct is used to attach additional detail about the conclusion
+// of fetch request. It is to be included in a closing Span event. The FetchResponseInfo
+// is not an event on it's own.
 struct FetchResponseInfo final {
   explicit FetchResponseInfo(uint16_t statusCode);
   FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
@@ -173,6 +184,7 @@ struct FetchResponseInfo final {
   FetchResponseInfo clone() const;
 };
 
+// Metadata describing the start of a JS RPC event
 struct JsRpcEventInfo final {
   explicit JsRpcEventInfo(kj::String methodName);
   JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
@@ -186,6 +198,7 @@ struct JsRpcEventInfo final {
   JsRpcEventInfo clone() const;
 };
 
+// Metadata describing the start of a scheduled worker event (cron workers).
 struct ScheduledEventInfo final {
   explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
   ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
@@ -200,6 +213,7 @@ struct ScheduledEventInfo final {
   ScheduledEventInfo clone() const;
 };
 
+// Metadata describing the start of an alarm event.
 struct AlarmEventInfo final {
   explicit AlarmEventInfo(kj::Date scheduledTime);
   AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
@@ -213,6 +227,7 @@ struct AlarmEventInfo final {
   AlarmEventInfo clone() const;
 };
 
+// Metadata describing the start of a queue event.
 struct QueueEventInfo final {
   explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
   QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
@@ -227,6 +242,7 @@ struct QueueEventInfo final {
   QueueEventInfo clone() const;
 };
 
+// Metadata describing the start of an email event.
 struct EmailEventInfo final {
   explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
   EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
@@ -242,6 +258,7 @@ struct EmailEventInfo final {
   EmailEventInfo clone() const;
 };
 
+// Metadata describing the start of a hibernatable web socket event.
 struct HibernatableWebSocketEventInfo final {
   struct Message {};
   struct Close {
@@ -265,7 +282,9 @@ struct HibernatableWebSocketEventInfo final {
   HibernatableWebSocketEventInfo clone() const;
 };
 
-struct CustomEventInfo {
+// Metadata describing the start of a custom event (currently unused) but here
+// to support legacy trace use cases.
+struct CustomEventInfo final {
   explicit CustomEventInfo() {};
   CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
   CustomEventInfo(CustomEventInfo&&) = default;
@@ -277,6 +296,8 @@ struct CustomEventInfo {
   }
 };
 
+// Metadata describing the start of a legacy tail event (that is, the event
+// that delivers collected traces to a legacy tail worker)
 struct TraceEventInfo final {
   struct TraceItem;
 
@@ -306,6 +327,10 @@ struct TraceEventInfo final {
   TraceEventInfo clone() const;
 };
 
+// The set of structs that make up the EventInfo union all represent trigger
+// events for worker requests... That is, for instance, when a worker receives
+// a fetch request, a FetchEventInfo will be emitted; if the worker receives a
+// JS RPC request, a JsRpcEventInfo will be emitted; and so on.
 using EventInfo = kj::OneOf<FetchEventInfo,
     JsRpcEventInfo,
     ScheduledEventInfo,
@@ -316,23 +341,23 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     HibernatableWebSocketEventInfo,
     CustomEventInfo>;
 
-// Used to describe the final outcome of the trace.
+// Used to describe the final outcome of the trace. Every trace session should
+// have at most a single Outcome event that is the final event in the stream.
 struct Outcome final {
   Outcome() = default;
-  explicit Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
+  explicit Outcome(EventOutcome outcome);
   Outcome(rpc::Trace::Outcome::Reader reader);
   Outcome(Outcome&&) = default;
   Outcome& operator=(Outcome&&) = default;
   KJ_DISALLOW_COPY(Outcome);
 
   EventOutcome outcome = EventOutcome::UNKNOWN;
-  kj::Duration cpuTime;
-  kj::Duration wallTime;
 
   void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
 };
 
+// Describes an event caused by use of the Node.js diagnostics-channel API.
 struct DiagnosticChannelEvent final {
   explicit DiagnosticChannelEvent(
       kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
@@ -349,6 +374,9 @@ struct DiagnosticChannelEvent final {
   DiagnosticChannelEvent clone() const;
 };
 
+// The Log struct is used by the legacy tracing (v1 tail workers) model and
+// is unchanged for treaming traces. This is the struct that is used, for
+// instance, to carry console.log outputs into the trace.
 struct Log final {
   explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
   Log(rpc::Trace::Log::Reader reader);
@@ -366,9 +394,19 @@ struct Log final {
   Log clone() const;
 };
 
+// The LogV2 struct is used by the streaming trace model. It serves the same
+// purpose as the Log struct above but allows for v8 serialized binary data
+// as an alternative to plain text and allows for additional metadata tags
+// to be added. It is separated out into a new struct in order to prevent
+// introducing any backwards compat issues with the original legacy trace
+// implementation.
+// TODO(soon): Coallesce Log and LogV2
 struct LogV2 final {
-  explicit LogV2(
-      kj::Date timestamp, LogLevel logLevel, kj::Array<kj::byte> data, Tags tags = nullptr);
+  explicit LogV2(kj::Date timestamp,
+      LogLevel logLevel,
+      kj::OneOf<kj::Array<kj::byte>, kj::String> message,
+      Tags tags = nullptr,
+      bool truncated = false);
   LogV2(rpc::Trace::LogV2::Reader reader);
   LogV2(LogV2&&) = default;
   LogV2& operator=(LogV2&&) = default;
@@ -378,17 +416,30 @@ struct LogV2 final {
   kj::Date timestamp;
 
   LogLevel logLevel;
-  kj::Array<kj::byte> data;
+  kj::OneOf<kj::Array<kj::byte>, kj::String> message;
   Tags tags = nullptr;
+  bool truncated = false;
 
   void copyTo(rpc::Trace::LogV2::Builder builder) const;
   LogV2 clone() const;
 };
 
+// Describes metadata of an Exception that is added to the trace.
 struct Exception final {
+  // The Detail here is additional, optional information about the exception.
+  // Intende to provide additional context when appropriate. Not every error
+  // will have a Detail.
   struct Detail {
+    // If the JS Error object has a cause property, then it will be serialized
+    // into it's own Exception instance and attached here.
     kj::Maybe<kj::Own<Exception>> cause = kj::none;
+    // If the JS Error object is an AggregateError or SuppressedError, or if
+    // it has an errors property like those standard types, then those errors
+    // will be serialized into their own Exception instances and attached here.
     kj::Array<kj::Own<Exception>> errors = nullptr;
+
+    // These flags match the additional workers-specific properties that we
+    // add to errors. See makeInternalError in jsg/util.c++.
     bool remote = false;
     bool retryable = false;
     bool overloaded = false;
@@ -420,6 +471,8 @@ struct Exception final {
   Exception clone() const;
 };
 
+// Describes the start (and kind) of a subrequest initiated during the trace.
+// For instance, a fetch request or a JS RPC call.
 struct Subrequest final {
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo>;
   explicit Subrequest(uint32_t id, kj::Maybe<Info> info);
@@ -435,6 +488,9 @@ struct Subrequest final {
   Subrequest clone() const;
 };
 
+// Describes the results of a subrequest initiated during the trace. The id
+// must match a previously emitted Subrequest event, and the info (if provided)
+// should correlate to the kind of subrequest that was made.
 struct SubrequestOutcome final {
   using Info = kj::OneOf<FetchResponseInfo, Tags>;
   explicit SubrequestOutcome(
@@ -446,37 +502,57 @@ struct SubrequestOutcome final {
 
   uint32_t id;
   kj::Maybe<Info> info;
+
+  // A subrequest is a technically a special form of span, and therefore can
+  // have a Span outcome.
   rpc::Trace::Span::SpanOutcome outcome;
 
   void copyTo(rpc::Trace::SubrequestOutcome::Builder builder) const;
   SubrequestOutcome clone() const;
 };
 
-struct SpanEvent final {
+// The span struct identifies the *close* of a span in the stream. A span is
+// a logical grouping of events. Spans can be nested.
+struct Span final {
   using Outcome = rpc::Trace::Span::SpanOutcome;
   using Info = kj::OneOf<FetchResponseInfo, ActorFlushInfo, Tags>;
-  explicit SpanEvent(uint32_t id,
+  explicit Span(uint32_t id,
       uint32_t parentId,
       rpc::Trace::Span::SpanOutcome outcome,
       bool transactional = false,
       kj::Maybe<Info> maybeInfo = kj::none,
       Tags tags = nullptr);
-  SpanEvent(rpc::Trace::Span::Reader reader);
-  SpanEvent(SpanEvent&&) = default;
-  SpanEvent& operator=(SpanEvent&&) = default;
-  KJ_DISALLOW_COPY(SpanEvent);
+  Span(rpc::Trace::Span::Reader reader);
+  Span(Span&&) = default;
+  Span& operator=(Span&&) = default;
+  KJ_DISALLOW_COPY(Span);
 
+  // The id of the span being closed. This value should always be a value > 0.
   uint32_t id;
+
+  // Identifies the parent span (if any).
   uint32_t parent;
+
   rpc::Trace::Span::SpanOutcome outcome;
+
+  // If a span is transactional, it means that any events occurring within that
+  // span should be considered invalid if the span outcome is canceled or errored.
   bool transactional;
+
+  // When the span is initiated with an opening EventInfo event, then the closing
+  // span event should include an info field that matches the kind of event that
+  // started the span. For instance, if the span was started with a FetchEventInfo
+  // event, then the span should be closed with a FetchResponseInfo included in the
+  // Span event.
   kj::Maybe<Info> info;
   Tags tags;
 
   void copyTo(rpc::Trace::Span::Builder builder) const;
-  SpanEvent clone() const;
+  Span clone() const;
 };
 
+// A Mark is a simple event that can be used to mark a significant point in the
+// trace. This currently has no analog in the current tail workers model.
 struct Mark final {
   explicit Mark(kj::String name);
   Mark(rpc::Trace::Mark::Reader reader);
@@ -490,10 +566,19 @@ struct Mark final {
   Mark clone() const;
 };
 
+// A Metric is a key-value pair that can be emitted as part of the trace. Metrics
+// include things like CPU time, Wall time, isolate heap memory usage, etc. The
+// structure is left intentionally flexible to allow for a wide range of possible
+// metrics to be emitted. This is a new feature in the streaming trace model.
 struct Metric final {
   using Key = kj::OneOf<kj::String, uint32_t>;
   using Value = kj::OneOf<double, int64_t, uint64_t>;
   using Type = rpc::Trace::Metric::Type;
+
+  enum class Common {
+    CPU_TIME,
+    WALL_TIME,
+  };
 
   explicit Metric(Type type, Key key, Value value);
 
@@ -519,9 +604,22 @@ struct Metric final {
 
   void copyTo(rpc::Trace::Metric::Builder builder) const;
   Metric clone() const;
+
+  static inline Metric forWallTime(kj::Duration duration) {
+    return Metric(Type::COUNTER, Common::WALL_TIME, duration / kj::MILLISECONDS);
+  }
+
+  static Metric forCpuTime(kj::Duration duration) {
+    return Metric(Type::COUNTER, Common::CPU_TIME, duration / kj::MILLISECONDS);
+  }
 };
 using Metrics = kj::Array<Metric>;
 
+// A Dropped event can be used to indicate that a specific range of events were
+// dropped from the stream. This would typically be used in cases where the process
+// may be too overloaded to successfully deliver all events to the tail worker.
+// The start/end values are inclusive and indicate the range of events (by sequence
+// number) that were dropped.
 struct Dropped final {
   explicit Dropped(uint32_t start, uint32_t end);
   Dropped(rpc::Trace::Dropped::Reader reader);
@@ -535,7 +633,8 @@ struct Dropped final {
   void copyTo(rpc::Trace::Dropped::Builder builder) const;
   Dropped clone() const;
 };
-
+// The EventDetail union identifies types of events that happen *within* a span.
+// They may occur any number of times within the span and are never terminal.
 using EventDetail = kj::OneOf<LogV2,
     Exception,
     DiagnosticChannelEvent,
@@ -544,41 +643,6 @@ using EventDetail = kj::OneOf<LogV2,
     Subrequest,
     SubrequestOutcome,
     Tags>;
-
-// ======================================================================================
-// Represents a trace span. `Span` objects are delivered to `SpanObserver`s for recording. To
-// create a `Span`, use a `SpanBuilder`. (Used in the legacy trace api)
-struct Span {
-  using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
-  // TODO(someday): Support binary bytes, too.
-  using TagMap = kj::HashMap<kj::ConstString, TagValue>;
-  using Tag = TagMap::Entry;
-
-  struct Log {
-    kj::Date timestamp;
-    Tag tag;
-  };
-
-  kj::ConstString operationName;
-  kj::Date startTime;
-  kj::Date endTime;
-  TagMap tags;
-  kj::Vector<Log> logs;
-
-  // We set an arbitrary (-ish) cap on log messages for safety. If we drop logs because of this,
-  // we report how many in a final "dropped_logs" log.
-  //
-  // At the risk of being too clever, I chose a limit that is one below a power of two so that
-  // we'll typically have space for one last element available for the "dropped_logs" log without
-  // needing to grow the vector.
-  static constexpr auto MAX_LOGS = 1023;
-  uint droppedLogs = 0;
-
-  explicit Span(kj::ConstString operationName, kj::Date startTime)
-      : operationName(kj::mv(operationName)),
-        startTime(startTime),
-        endTime(startTime) {}
-};
 
 // ======================================================================================
 // The base class for both the original legacy Trace (defined in trace-legacy.h)

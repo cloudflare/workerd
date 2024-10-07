@@ -16,6 +16,7 @@ namespace workerd::trace {
 namespace {
 Tags getTagsFromReader(const capnp::List<rpc::Trace::Tag>::Reader& tags) {
   kj::Vector<Tag> results;
+  results.reserve(tags.size());
   for (auto tag: tags) {
     results.add(Tag(tag));
   }
@@ -278,24 +279,16 @@ Onset Onset::clone() const {
 // ======================================================================================
 // Outcome
 
-Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)
-    : outcome(outcome),
-      cpuTime(cpuTime),
-      wallTime(wallTime) {}
+Outcome::Outcome(EventOutcome outcome): outcome(outcome) {}
 
-Outcome::Outcome(rpc::Trace::Outcome::Reader reader)
-    : outcome(reader.getOutcome()),
-      cpuTime(reader.getCpuTime() * kj::MILLISECONDS),
-      wallTime(reader.getWallTime() * kj::MILLISECONDS) {}
+Outcome::Outcome(rpc::Trace::Outcome::Reader reader): outcome(reader.getOutcome()) {}
 
 void Outcome::copyTo(rpc::Trace::Outcome::Builder builder) const {
   builder.setOutcome(outcome);
-  builder.setCpuTime(cpuTime / kj::MILLISECONDS);
-  builder.setWallTime(wallTime / kj::MILLISECONDS);
 }
 
 Outcome Outcome::clone() const {
-  return Outcome{outcome, cpuTime, wallTime};
+  return Outcome{outcome};
 }
 
 // ======================================================================================
@@ -553,10 +546,8 @@ kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromTraces(kj::ArrayPtr<kj::O
 kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromReader(
     rpc::Trace::TraceEventInfo::Reader reader) {
   auto traces = reader.getTraces();
-  kj::Vector<TraceEventInfo::TraceItem> results(traces.size());
-  for (size_t n = 0; n < traces.size(); n++) {
-    results.add(TraceEventInfo::TraceItem(traces[n]));
-  }
+  kj::Vector<TraceEventInfo::TraceItem> results;
+  results.addAll(traces);
   return results.releaseAsArray();
 }
 }  // namespace
@@ -628,6 +619,22 @@ DiagnosticChannelEvent DiagnosticChannelEvent::clone() const {
 // ======================================================================================
 // Log
 
+namespace {
+kj::OneOf<kj::Array<kj::byte>, kj::String> getMessageForLog(
+    const rpc::Trace::LogV2::Reader& reader) {
+  auto message = reader.getMessage();
+  switch (message.which()) {
+    case rpc::Trace::LogV2::Message::Which::TEXT: {
+      return kj::str(message.getText());
+    }
+    case rpc::Trace::LogV2::Message::Which::DATA: {
+      return kj::heapArray<kj::byte>(message.getData());
+    }
+  }
+  KJ_UNREACHABLE;
+}
+}  // namespace
+
 Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)
     : timestamp(timestamp),
       logLevel(logLevel),
@@ -648,21 +655,35 @@ Log Log::clone() const {
   return Log(timestamp, logLevel, kj::str(message));
 }
 
-LogV2::LogV2(kj::Date timestamp, LogLevel logLevel, kj::Array<kj::byte> data, Tags tags)
+LogV2::LogV2(kj::Date timestamp,
+    LogLevel logLevel,
+    kj::OneOf<kj::Array<kj::byte>, kj::String> message,
+    Tags tags,
+    bool truncated)
     : timestamp(timestamp),
       logLevel(logLevel),
-      data(kj::mv(data)),
-      tags(kj::mv(tags)) {}
+      message(kj::mv(message)),
+      tags(kj::mv(tags)),
+      truncated(truncated) {}
 
 LogV2::LogV2(rpc::Trace::LogV2::Reader reader)
     : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
       logLevel(reader.getLogLevel()),
-      data(kj::heapArray<kj::byte>(reader.getData())) {}
+      message(getMessageForLog(reader)),
+      truncated(reader.getTruncated()) {}
 
 void LogV2::copyTo(rpc::Trace::LogV2::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setLogLevel(logLevel);
-  builder.setData(data);
+  KJ_SWITCH_ONEOF(message) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      builder.initMessage().setText(str);
+    }
+    KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+      builder.initMessage().setData(data);
+    }
+  }
+  builder.setTruncated(truncated);
   auto outTags = builder.initTags(tags.size());
   for (size_t n = 0; n < tags.size(); n++) {
     tags[n].copyTo(outTags[n]);
@@ -674,7 +695,18 @@ LogV2 LogV2::clone() const {
   for (auto& tag: tags) {
     newTags.add(tag.clone());
   }
-  return LogV2(timestamp, logLevel, kj::heapArray<kj::byte>(data), newTags.releaseAsArray());
+  auto newMessage = ([&]() -> kj::OneOf<kj::Array<kj::byte>, kj::String> {
+    KJ_SWITCH_ONEOF(message) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        return kj::str(str);
+      }
+      KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+        return kj::heapArray<kj::byte>(data);
+      }
+    }
+    KJ_UNREACHABLE;
+  })();
+  return LogV2(timestamp, logLevel, kj::mv(newMessage), newTags.releaseAsArray(), truncated);
 }
 
 // ======================================================================================
@@ -946,10 +978,10 @@ SubrequestOutcome SubrequestOutcome::clone() const {
 }
 
 // ======================================================================================
-// SpanEvent
+// Span
 
 namespace {
-kj::Maybe<SpanEvent::Info> maybeGetInfo(const rpc::Trace::Span::Reader& reader) {
+kj::Maybe<Span::Info> maybeGetInfo(const rpc::Trace::Span::Reader& reader) {
   //  if (!reader.hasInfo()) return kj::none;
   auto info = reader.getInfo();
   switch (info.which()) {
@@ -975,7 +1007,7 @@ kj::Maybe<SpanEvent::Info> maybeGetInfo(const rpc::Trace::Span::Reader& reader) 
 }
 }  // namespace
 
-SpanEvent::SpanEvent(uint32_t id,
+Span::Span(uint32_t id,
     uint32_t parent,
     rpc::Trace::Span::SpanOutcome outcome,
     bool transactional,
@@ -988,7 +1020,7 @@ SpanEvent::SpanEvent(uint32_t id,
       info(kj::mv(maybeInfo)),
       tags(kj::mv(tags)) {}
 
-SpanEvent::SpanEvent(rpc::Trace::Span::Reader reader)
+Span::Span(rpc::Trace::Span::Reader reader)
     : id(reader.getId()),
       parent(reader.getParent()),
       outcome(reader.getOutcome()),
@@ -996,7 +1028,7 @@ SpanEvent::SpanEvent(rpc::Trace::Span::Reader reader)
       info(maybeGetInfo(reader)),
       tags(maybeGetTags(reader)) {}
 
-void SpanEvent::copyTo(rpc::Trace::Span::Builder builder) const {
+void Span::copyTo(rpc::Trace::Span::Builder builder) const {
   builder.setId(id);
   builder.setParent(parent);
   builder.setOutcome(outcome);
@@ -1024,7 +1056,7 @@ void SpanEvent::copyTo(rpc::Trace::Span::Builder builder) const {
   }
 }
 
-SpanEvent SpanEvent::clone() const {
+Span Span::clone() const {
   auto newInfo = ([&]() -> kj::Maybe<Info> {
     KJ_IF_SOME(i, info) {
       KJ_SWITCH_ONEOF(i) {
@@ -1045,7 +1077,7 @@ SpanEvent SpanEvent::clone() const {
     }
     return kj::none;
   })();
-  return SpanEvent(
+  return Span(
       id, parent, outcome, transactional, kj::mv(newInfo),
       KJ_MAP(tag, tags) { return tag.clone(); });
 }

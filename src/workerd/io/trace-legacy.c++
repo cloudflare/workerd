@@ -49,8 +49,8 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
 
   builder.setTruncated(truncated);
   builder.setOutcome(outcomeInfo.outcome);
-  builder.setCpuTime(outcomeInfo.cpuTime / kj::MILLISECONDS);
-  builder.setWallTime(outcomeInfo.wallTime / kj::MILLISECONDS);
+  builder.setCpuTime(cpuTime / kj::MILLISECONDS);
+  builder.setWallTime(wallTime / kj::MILLISECONDS);
   KJ_IF_SOME(name, onsetInfo.scriptName) {
     builder.setScriptName(name);
   }
@@ -145,8 +145,8 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
 
   truncated = reader.getTruncated();
   outcomeInfo.outcome = reader.getOutcome();
-  outcomeInfo.cpuTime = reader.getCpuTime() * kj::MILLISECONDS;
-  outcomeInfo.wallTime = reader.getWallTime() * kj::MILLISECONDS;
+  cpuTime = reader.getCpuTime() * kj::MILLISECONDS;
+  wallTime = reader.getWallTime() * kj::MILLISECONDS;
 
   // mergeFrom() is called both when deserializing traces from a sandboxed
   // worker and when deserializing traces sent to a sandboxed trace worker. In
@@ -320,7 +320,7 @@ void Trace::addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event) {
   diagnosticChannelEvents.add(kj::mv(event));
 }
 
-void Trace::addSpan(const trace::Span&& span, kj::String spanContext) {
+void Trace::addSpan(const Span&& span, kj::String spanContext) {
   // This is where we'll actually encode the span for now.
   // Drop any spans beyond MAX_USER_SPANS.
   if (numSpans >= MAX_USER_SPANS) {
@@ -341,7 +341,7 @@ void Trace::addSpan(const trace::Span&& span, kj::String spanContext) {
 
   // TODO(cleanup): Create a function in kj::OneOf to automatically convert to a given type (i.e
   // String) to avoid having to handle each type explicitly here.
-  for (const trace::Span::TagMap::Entry& tag: span.tags) {
+  for (const Span::TagMap::Entry& tag: span.tags) {
     auto value = [&]() {
       KJ_SWITCH_ONEOF(tag.value) {
         KJ_CASE_ONEOF(str, kj::String) {
@@ -368,6 +368,24 @@ void Trace::setFetchResponseInfo(trace::FetchResponseInfo&& info) {
   KJ_REQUIRE(KJ_REQUIRE_NONNULL(eventInfo).is<trace::FetchEventInfo>());
   KJ_ASSERT(fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
   fetchResponseInfo = kj::mv(info);
+}
+
+void Trace::addMetrics(trace::Metrics&& metrics) {
+  for (auto& metric: metrics) {
+    if (metric.keyMatches(trace::Metric::Common::CPU_TIME)) {
+      // The CPU_TIME metric will always be a int64_t converted from a kj::Duration
+      // If it's not, we'll ignore it.
+      KJ_IF_SOME(i, metric.value.tryGet<int64_t>()) {
+        cpuTime = i * kj::MILLISECONDS;
+      }
+    } else if (metric.keyMatches(trace::Metric::Common::WALL_TIME)) {
+      // The WALL_TIME metric will always be a int64_t converted from a kj::Duration
+      // If it's not, we'll ignore it.
+      KJ_IF_SOME(i, metric.value.tryGet<int64_t>()) {
+        wallTime = i * kj::MILLISECONDS;
+      }
+    }
+  }
 }
 
 }  // namespace workerd

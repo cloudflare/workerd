@@ -97,9 +97,11 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
     kj::Maybe<kj::String> dispatchNamespace,
     kj::Array<kj::String> scriptTags,
     kj::Maybe<kj::String> entrypoint) {
-  auto trace = kj::refcounted<Trace>(trace::Onset(kj::none,  // TODO(now): Pass the account id
-      kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion), kj::mv(dispatchNamespace),
-      kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint)), executionModel);
+  // TODO(streaming-trace): Pass the account id
+  auto trace = kj::refcounted<Trace>(
+      trace::Onset(kj::none, kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
+          kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint)),
+          executionModel);
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
@@ -128,7 +130,7 @@ void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message
   trace->addLog(trace::Log(timestamp, logLevel, kj::mv(message)), isSpan);
 }
 
-void WorkerTracer::addSpan(const trace::Span& span, kj::String spanContext) {
+void WorkerTracer::addSpan(const Span& span, kj::String spanContext) {
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for exceptions vs.
   //   logs.
@@ -170,6 +172,10 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, trace::EventInfo&& info) {
   }
 
   trace->setEventInfo(timestamp, kj::mv(info));
+}
+
+void WorkerTracer::addMetrics(trace::Metrics&& metrics) {
+  trace->addMetrics(kj::mv(metrics));
 }
 
 void WorkerTracer::setOutcomeInfo(trace::Outcome&& info) {
