@@ -13,13 +13,15 @@ namespace workerd {
 //
 // The streaming trace itself is considered the root span, whose span ID is always 0. The
 // root span will always start with an Onset event that communicates basic metadata about
-// the worker being traced; and always ends with an Outcome event that communicates the
-// final disposition of the traced worker.
+// the worker being traced (for instance, script ID, script version, etc); and always ends
+// with an Outcome event that communicates the final disposition of the traced worker.
 //
 // The root span may have zero or more "Stage Spans". These represent pipeline stages.
 // There is no requirement that a streaming trace will cover multiple stages in a worker
 // pipeline but the design allows for it. Generally speaking there should be at least
-// one stage span per streaming trace.
+// one stage span per streaming trace. This model allows for a single trace to cover
+// multiple stages of a pipeline but in actual practice we're most likely to see only
+// a single request per trace, even with durable objects.
 //
 // A stage span will never be transactional and will always have the root span as its
 // parent. It should always start with an "Info" event that describes the trigger event
@@ -56,7 +58,8 @@ namespace workerd {
 // ======================================================================================
 // StreamEvent
 
-// All events on the streaming trace are StreamEvents.
+// All events on the streaming trace are StreamEvents. A StreamEvent is essentialy
+// just an envelope for the actual event data.
 struct StreamEvent final {
   // The ID of the streaming trace session. This is used to correlate all events
   // occurring within the same trace session.
@@ -79,8 +82,7 @@ struct StreamEvent final {
 
   using Info = trace::EventInfo;
   using Detail = trace::EventDetail;
-  using Event =
-      kj::OneOf<trace::Onset, trace::Outcome, trace::Dropped, trace::SpanEvent, Info, Detail>;
+  using Event = kj::OneOf<trace::Onset, trace::Outcome, trace::Dropped, trace::Span, Info, Detail>;
   Event event;
 
   explicit StreamEvent(
@@ -134,8 +136,6 @@ public:
   // to abstract exactly how the trace gets current time.
   struct TimeProvider {
     virtual kj::Date getNow() const = 0;
-    virtual kj::Duration getCpuTime() const = 0;
-    virtual kj::Duration getWallTime() const = 0;
   };
 
   static kj::Own<StreamingTrace> create(IdFactory& idFactory,
@@ -185,7 +185,7 @@ public:
     virtual ~Span() noexcept(false);
 
     void setOutcome(rpc::Trace::Span::SpanOutcome outcome,
-        kj::Maybe<trace::SpanEvent::Info> maybeInfo = kj::none,
+        kj::Maybe<trace::Span::Info> maybeInfo = kj::none,
         trace::Tags tags = nullptr);
 
     void addLog(trace::LogV2&& log);

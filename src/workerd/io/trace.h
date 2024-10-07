@@ -30,8 +30,6 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 
-using Span = trace::Span;
-
 // =======================================================================================
 
 class WorkerTracer;
@@ -97,6 +95,9 @@ public:
 
   // Sets info about the event that triggered the trace.  Must not be called more than once.
   void setEventInfo(kj::Date timestamp, trace::EventInfo&&);
+
+  // Add metrics to the trace. Can be called more than once.
+  void addMetrics(trace::Metrics&& metrics);
 
   // Sets info about the result of this trace. Can be called more than once, overriding the
   // previous detail.

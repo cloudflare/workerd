@@ -1456,7 +1456,7 @@ public:
       if (fetchStatus != 0) {
         t->setFetchResponseInfo(trace::FetchResponseInfo(fetchStatus));
       }
-      t->setOutcomeInfo(trace::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+      t->setOutcomeInfo(trace::Outcome(outcome));
     }
   }
 
@@ -1530,9 +1530,9 @@ public:
     }
   }
 
-  void prewarm(kj::StringPtr url) override {
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
     try {
-      KJ_ASSERT_NONNULL(inner).prewarm(url);
+      co_return co_await KJ_ASSERT_NONNULL(inner).prewarm(url);
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
@@ -1571,7 +1571,13 @@ public:
   }
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
-    return KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+    try {
+      co_return co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      reportFailure(exception, FailureSource::OTHER);
+      throw exception;
+    }
   }
 
 private:
@@ -1692,15 +1698,15 @@ public:
         tailWorkers.add(service.startRequest({}));
       }
       waitUntilTasks.add(childTracer->onComplete().then(
-          [this, tailWorkers = kj::mv(tailWorkers)](
-              kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
+          kj::coCapture([this, tailWorkers = kj::mv(tailWorkers)](
+                            kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
         for (auto& worker: tailWorkers) {
           auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
-              workerd::api::TraceCustomEventImpl::TYPE, waitUntilTasks, mapAddRef(traces));
-          co_return co_await worker->customEvent(kj::mv(event)).ignoreResult();
+              workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
+          co_await worker->customEvent(kj::mv(event)).ignoreResult();
         }
         co_return;
-      }));
+      })));
     };
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),

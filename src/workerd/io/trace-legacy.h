@@ -12,6 +12,46 @@
 
 namespace workerd {
 
+// ======================================================================================
+// Represents a trace span. `Span` objects are delivered to `SpanObserver`s for recording. To
+// create a `Span`, use a `SpanBuilder`. (Used in the legacy trace api)
+// Note that this is not the same thing as a trace::Span. This class is part of the legacy
+// API for representing spans using log messages instead.
+struct Span final {
+  using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
+  // TODO(someday): Support binary bytes, too.
+  using TagMap = kj::HashMap<kj::ConstString, TagValue>;
+  using Tag = TagMap::Entry;
+
+  struct Log {
+    kj::Date timestamp;
+    Tag tag;
+  };
+
+  kj::ConstString operationName;
+  kj::Date startTime;
+  kj::Date endTime;
+  TagMap tags;
+  kj::Vector<Log> logs;
+
+  // We set an arbitrary (-ish) cap on log messages for safety. If we drop logs because of this,
+  // we report how many in a final "dropped_logs" log.
+  //
+  // At the risk of being too clever, I chose a limit that is one below a power of two so that
+  // we'll typically have space for one last element available for the "dropped_logs" log without
+  // needing to grow the vector.
+  static constexpr uint16_t MAX_LOGS = 1023;
+  kj::uint droppedLogs = 0;
+
+  explicit Span(kj::ConstString operationName, kj::Date startTime)
+      : operationName(kj::mv(operationName)),
+        startTime(startTime),
+        endTime(startTime) {}
+  Span(Span&&) = default;
+  Span& operator=(Span&&) = default;
+  KJ_DISALLOW_COPY(Span);
+};
+
 // This is the original implementation of how trace worker data was collected. All of the
 // data is stored in an in-memory structure and delivered as a single unit to the trace
 // worker only when the request is fully completed. The data is held in memory and capped
@@ -51,6 +91,8 @@ public:
 
   trace::Onset onsetInfo;
   trace::Outcome outcomeInfo{};
+  kj::Duration cpuTime;
+  kj::Duration wallTime;
 
   kj::Vector<trace::Log> logs;
   // TODO(o11y): Convert this to actually store spans.
@@ -68,7 +110,7 @@ public:
   void setEventInfo(kj::Date timestamp, trace::EventInfo&& info);
   void setOutcome(trace::Outcome&& outcome);
   void setFetchResponseInfo(trace::FetchResponseInfo&& info);
-  void addSpan(const trace::Span&& span, kj::String spanContext);
+  void addSpan(const Span&& span, kj::String spanContext);
   void addLog(trace::Log&& log, bool isSpan = false);
 
   void addException(trace::Exception&& exception) override;
@@ -78,9 +120,7 @@ public:
     // These are currently ignored for legacy traces.
   }
 
-  void addMetrics(trace::Metrics&& metrics) override {
-    // These are currently ignored for legacy traces.
-  }
+  void addMetrics(trace::Metrics&& metrics) override;
 
   void addSubrequest(trace::Subrequest&& subrequest) override {
     // These are currently ignored for legacy traces.
