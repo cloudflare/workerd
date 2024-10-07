@@ -35,8 +35,6 @@ import {
   newReadableWritablePairFromDuplex,
 } from 'node-internal:streams_adapters';
 
-import { createDeferredPromise } from 'node-internal:internal_utils';
-
 import * as process from 'node-internal:process';
 
 import {
@@ -365,7 +363,7 @@ function duplexify(body, name) {
 }
 
 function fromAsyncGen(fn) {
-  let { promise, resolve } = createDeferredPromise();
+  let { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
   const signal = ac.signal;
   const value = fn(
@@ -380,7 +378,7 @@ function fromAsyncGen(fn) {
           throw new AbortError(undefined, {
             cause: signal.reason,
           });
-        ({ promise, resolve } = createDeferredPromise());
+        ({ promise, resolve } = Promise.withResolvers());
         yield chunk;
       }
     })(),

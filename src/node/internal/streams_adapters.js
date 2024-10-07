@@ -49,10 +49,7 @@ import {
   AbortError,
 } from 'node-internal:internal_errors';
 
-import {
-  createDeferredPromise,
-  normalizeEncoding,
-} from 'node-internal:internal_utils';
+import { normalizeEncoding } from 'node-internal:internal_utils';
 
 import { validateBoolean, validateObject } from 'node-internal:validators';
 
@@ -144,7 +141,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
 
       async write(chunk) {
         if (streamWritable.writableNeedDrain || !streamWritable.write(chunk)) {
-          backpressurePromise = createDeferredPromise();
+          backpressurePromise = Promise.withResolvers();
           return backpressurePromise.promise.finally(() => {
             backpressurePromise = undefined;
           });
@@ -157,7 +154,7 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
 
       close() {
         if (closed === undefined && !isWritableEnded(streamWritable)) {
-          closed = createDeferredPromise();
+          closed = Promise.withResolvers();
           streamWritable.end();
           return closed.promise;
         }

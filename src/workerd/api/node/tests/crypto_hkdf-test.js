@@ -35,19 +35,6 @@ import {
   getHashes,
 } from 'node:crypto';
 
-function deferredPromise() {
-  let resolve, reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return {
-    promise,
-    resolve,
-    reject,
-  };
-}
-
 export const hkdf_error_tests = {
   async test(ctrl, env, ctx) {
     assert.throws(() => hkdf(), {
@@ -130,7 +117,7 @@ export const hkdf_error_tests = {
     );
 
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       hkdf('unknown', 'a', '', '', 10, (err, asyncResult) => {
         if (err) {
           return p.reject(err);
@@ -151,7 +138,7 @@ export const hkdf_error_tests = {
     });
 
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       hkdf('sha512', 'a', '', '', 64 * 255 + 1, (err, asyncResult) => {
         if (err) {
           return p.reject(err);
@@ -171,7 +158,7 @@ async function hkdfTestAlg([hash, secret, salt, info, length]) {
     const syncResult = hkdfSync(hash, secret, salt, info, length);
     assert.ok(syncResult instanceof ArrayBuffer);
     let is_async = false;
-    const p = deferredPromise();
+    const p = Promise.withResolvers();
 
     hkdf(hash, secret, salt, info, length, (err, asyncResult) => {
       if (err) return p.reject(err);
@@ -190,7 +177,7 @@ async function hkdfTestAlg([hash, secret, salt, info, length]) {
     const buf_secret = Buffer.from(secret);
     const buf_salt = Buffer.from(salt);
     const buf_info = Buffer.from(info);
-    const p = deferredPromise();
+    const p = Promise.withResolvers();
 
     const syncResult = hkdfSync(hash, buf_secret, buf_salt, buf_info, length);
     hkdf(hash, buf_secret, buf_salt, buf_info, length, (err, asyncResult) => {
@@ -206,7 +193,7 @@ async function hkdfTestAlg([hash, secret, salt, info, length]) {
   //   const key_secret = createSecretKey(Buffer.from(secret));
   //   const buf_salt = Buffer.from(salt);
   //   const buf_info = Buffer.from(info);
-  //   const p = deferredPromise();
+  //   const p = Promise.withResolvers();
   //
   //   const syncResult = hkdfSync(hash, key_secret, buf_salt, buf_info, length);
   //   hkdf(hash, key_secret, buf_salt, buf_info, length, (err, asyncResult) => {
@@ -218,7 +205,7 @@ async function hkdfTestAlg([hash, secret, salt, info, length]) {
   // }
 
   {
-    const p = deferredPromise();
+    const p = Promise.withResolvers();
     const ta_secret = new Uint8Array(Buffer.from(secret));
     const ta_salt = new Uint16Array(Buffer.from(salt));
     const ta_info = new Uint32Array(Buffer.from(info));
@@ -242,7 +229,7 @@ async function hkdfTestAlg([hash, secret, salt, info, length]) {
   }
 
   {
-    const p = deferredPromise();
+    const p = Promise.withResolvers();
     const ta_secret = new Uint8Array(Buffer.from(secret));
     const a_salt = new ArrayBuffer(0);
     const a_info = new ArrayBuffer(1);

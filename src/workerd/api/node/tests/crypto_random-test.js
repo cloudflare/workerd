@@ -10,19 +10,6 @@ import {
 
 import { Buffer } from 'node:buffer';
 
-function deferredPromise() {
-  let resolve, reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return {
-    promise,
-    resolve,
-    reject,
-  };
-}
-
 export const test = {
   async test(ctrl, env, ctx) {
     [1, 'hello', {}, []].forEach((i) => {
@@ -141,7 +128,7 @@ export const test = {
     }
 
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       generatePrime(80, (err, prime) => {
         ok(checkPrimeSync(prime));
         checkPrime(prime, (err, result) => {
@@ -155,7 +142,7 @@ export const test = {
     ok(checkPrimeSync(generatePrimeSync(80)));
 
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       generatePrime(80, {}, (err, prime) => {
         if (err) return p.reject(err);
         ok(checkPrimeSync(prime));
@@ -167,7 +154,7 @@ export const test = {
     ok(checkPrimeSync(generatePrimeSync(80, {})));
 
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       generatePrime(32, { safe: true }, (err, prime) => {
         if (err) return p.reject(err);
         ok(checkPrimeSync(prime));
@@ -197,7 +184,7 @@ export const test = {
     const rem_buf = Buffer.from([rem]);
 
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       generatePrime(32, { add: add_buf, rem: rem_buf }, (err, prime) => {
         if (err) return p.reject(err);
         ok(checkPrimeSync(prime));
@@ -229,7 +216,7 @@ export const test = {
     }
 
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       generatePrime(
         128,
         {
@@ -244,7 +231,7 @@ export const test = {
       await rejects(p.promise);
     }
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       generatePrime(
         128,
         {
@@ -383,7 +370,7 @@ export const test = {
       strictEqual(typeof prime, 'bigint');
       strictEqual(prime, 7n);
       ok(checkPrimeSync(prime));
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       checkPrime(prime, (err, result) => {
         if (err) return p.reject(err);
         p.resolve(result);
@@ -392,7 +379,7 @@ export const test = {
     }
 
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       generatePrime(3, { bigint: true }, (err, prime) => {
         if (err) return p.reject(err);
         strictEqual(typeof prime, 'bigint');

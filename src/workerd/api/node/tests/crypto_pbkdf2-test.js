@@ -28,19 +28,6 @@
 import * as assert from 'node:assert';
 import * as crypto from 'node:crypto';
 
-function deferredPromise() {
-  let resolve, reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return {
-    promise,
-    resolve,
-    reject,
-  };
-}
-
 function mustNotCall() {
   return () => {};
 }
@@ -54,7 +41,7 @@ async function runPBKDF2(password, salt, iterations, keylen, hash) {
     hash
   );
 
-  const p = deferredPromise();
+  const p = Promise.withResolvers();
   crypto.pbkdf2(
     password,
     salt,
@@ -211,7 +198,7 @@ export const empty_pwd_test = {
   async test(ctrl, env, ctx) {
     // Should not get FATAL ERROR with empty password and salt
     // https://github.com/nodejs/node/issues/8571
-    const p = deferredPromise();
+    const p = Promise.withResolvers();
     crypto.pbkdf2('', '', 1, 32, 'sha256', (err, prime) => {
       p.resolve();
     });
@@ -310,7 +297,7 @@ export const TypedArray_tests = {
 export const invalid_digest_tests = {
   async test(ctrl, env, ctx) {
     {
-      const p = deferredPromise();
+      const p = Promise.withResolvers();
       crypto.pbkdf2('pass', 'salt', 8, 8, 'md55', (err, prime) => {
         if (err) return p.reject(err);
       });
