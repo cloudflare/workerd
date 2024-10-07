@@ -224,16 +224,11 @@ public:
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
   ArtifactBundler(kj::Maybe<const PyodidePackageManager&> packageManager,
-      kj::Maybe<kj::Array<kj::byte>> existingSnapshot)
+      kj::Maybe<kj::Array<const kj::byte>> existingSnapshot,
+      bool isValidating = false)
       : packageManager(packageManager),
         storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
-        isValidating(false) {};
-
-  ArtifactBundler(bool isValidating = false)
-      : packageManager(kj::none),
-        storedSnapshot(kj::none),
-        existingSnapshot(kj::none),
         isValidating(isValidating) {};
 
   void storeMemorySnapshot(jsg::Lock& js, MemorySnapshotResult snapshot) {
@@ -306,6 +301,13 @@ public:
   //
   // Package relative imports are ignored.
   static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
+  // Takes in a list of imported modules and filters them in such a way to avoid local imports and
+  // redundant imports in the package snapshot list.
+  static kj::Array<kj::String> filterPythonScriptImports(
+      kj::HashSet<kj::String> locals, kj::Array<kj::String> imports);
+  static kj::Array<kj::String> filterPythonScriptImportsJs(
+      kj::Array<kj::String> locals, kj::Array<kj::String> imports);
+  static kj::Array<kj::StringPtr> getSnapshotImports();
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(hasMemorySnapshot);
@@ -317,12 +319,14 @@ public:
     JSG_METHOD(isEnabled);
     JSG_METHOD(getPackage);
     JSG_STATIC_METHOD(parsePythonScriptImports);
+    JSG_STATIC_METHOD(filterPythonScriptImportsJs);
+    JSG_STATIC_METHOD(getSnapshotImports);
   }
 
 private:
   // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
   // up cold starts.
-  kj::Maybe<kj::Array<kj::byte>> existingSnapshot;
+  kj::Maybe<kj::Array<const kj::byte>> existingSnapshot;
   bool isValidating;
 };
 

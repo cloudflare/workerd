@@ -300,13 +300,76 @@ kj::Array<kj::String> ArtifactBundler::parsePythonScriptImports(kj::Array<kj::St
     }
   }
 
-  // XXX: jsg doesn't support kj::Vector return types, so this seems to be the only way to do this.
-  auto builder = kj::heapArrayBuilder<kj::String>(result.size());
-  for (auto i = 0; i < result.size(); i++) {
-    builder.add(kj::mv(result[i]));
+  return result.releaseAsArray();
+}
+
+// This is equivalent to `pkgImport.replace('.', '/') + ".py"`.
+kj::String importToModuleFilename(kj::StringPtr pkgImport) {
+  auto result = kj::heapString(pkgImport.size() + 3);
+  for (auto i = 0; i < pkgImport.size(); i++) {
+    if (pkgImport[i] == '.') {
+      result[i] = '/';
+    } else {
+      result[i] = pkgImport[i];
+    }
   }
 
-  return builder.finish();
+  result[pkgImport.size()] = '.';
+  result[pkgImport.size() + 1] = 'p';
+  result[pkgImport.size() + 2] = 'y';
+  return result;
+}
+
+kj::Array<kj::String> ArtifactBundler::filterPythonScriptImports(
+    kj::HashSet<kj::String> locals, kj::Array<kj::String> imports) {
+  kj::HashSet<kj::StringPtr> snapshotImportsSet;
+  for (auto& pkgImport: ArtifactBundler::getSnapshotImports()) {
+    snapshotImportsSet.insert(kj::mv(pkgImport));
+  }
+
+  kj::HashSet<kj::String> filteredImports;
+  for (auto& pkgImport: imports) {
+    if (filteredImports.contains(pkgImport)) [[unlikely]] {
+      continue;  // Skip duplicates.
+    }
+
+    auto moduleFilename = importToModuleFilename(pkgImport);
+    if (!locals.contains(moduleFilename) && pkgImport != "js" &&
+        !snapshotImportsSet.contains(pkgImport)) {
+      filteredImports.insert(kj::mv(pkgImport));
+    }
+  }
+
+  kj::Vector<kj::String> filteredImportsVec;
+  for (auto& pkgImport: filteredImports) {
+    filteredImportsVec.add(kj::mv(pkgImport));
+  }
+
+  return filteredImportsVec.releaseAsArray();
+}
+
+kj::Array<kj::String> ArtifactBundler::filterPythonScriptImportsJs(
+    kj::Array<kj::String> locals, kj::Array<kj::String> imports) {
+  kj::HashSet<kj::String> localsSet;
+  for (auto& local: locals) {
+    localsSet.insert(kj::mv(local));
+  }
+  return ArtifactBundler::filterPythonScriptImports(kj::mv(localsSet), kj::mv(imports));
+}
+
+kj::Array<kj::StringPtr> ArtifactBundler::getSnapshotImports() {
+  kj::StringPtr imports[] = {"_pyodide.docstring"_kj, "_pyodide._core_docs"_kj, "traceback"_kj,
+    "collections.abc"_kj,
+    // Asyncio is the really slow one here. In native Python on my machine, `import asyncio` takes ~50
+    // ms.
+    "asyncio"_kj, "inspect"_kj, "tarfile"_kj, "importlib.metadata"_kj, "re"_kj, "shutil"_kj,
+    "sysconfig"_kj, "importlib.machinery"_kj, "pathlib"_kj, "site"_kj, "tempfile"_kj, "typing"_kj,
+    "zipfile"_kj};
+  kj::Vector<kj::StringPtr> result;
+  for (auto pkgImport: imports) {
+    result.add(pkgImport);
+  }
+  return result.releaseAsArray();
 }
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(

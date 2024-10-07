@@ -208,27 +208,10 @@ function recordDsoHandles(Module: Module): DylinkInfo {
 // the linear memory snapshot has them already initialized.
 // Can get this list by starting Python and filtering sys.modules for modules
 // whose importer is not FrozenImporter or BuiltinImporter.
-const SNAPSHOT_IMPORTS = [
-  '_pyodide.docstring',
-  '_pyodide._core_docs',
-  'traceback',
-  'collections.abc',
-  // Asyncio is the really slow one here. In native Python on my machine, `import asyncio` takes ~50
-  // ms.
-  'asyncio',
-  'inspect',
-  'tarfile',
-  'importlib.metadata',
-  're',
-  'shutil',
-  'sysconfig',
-  'importlib.machinery',
-  'pathlib',
-  'site',
-  'tempfile',
-  'typing',
-  'zipfile',
-];
+//
+const SNAPSHOT_IMPORTS: string[] =
+  // @ts-ignore getSnapshotImports is a static method.
+  ArtifactBundler.constructor.getSnapshotImports();
 
 /**
  * Python modules do a lot of work the first time they are imported. The memory
@@ -272,21 +255,14 @@ function memorySnapshotDoImports(Module: Module): Array<string> {
   // The `importedModules` list will contain all modules that have been imported, including local
   // modules, the usual `js` and other stdlib modules. We want to filter out local imports, so we
   // grab them and put them into a set for fast filtering.
-  const localModulePaths: Set<string> = new Set<string>(
-    MetadataReader.getNames()
-  );
-  const SNAPSHOT_IMPORTS_SET = new Set(SNAPSHOT_IMPORTS);
-  const importedModules: Array<string> = ArtifactBundler.constructor
-    // @ts-ignore parsePythonScriptImports is a static method.
-    .parsePythonScriptImports(MetadataReader.getWorkerFiles('py'))
-    .filter((module: string) => {
-      const moduleFilename = module.replace('.', '/') + '.py';
-      return (
-        !localModulePaths.has(moduleFilename) &&
-        module != 'js' &&
-        !SNAPSHOT_IMPORTS_SET.has(module)
-      );
-    });
+  const importedModules: Array<string> =
+    // @ts-ignore filterPythonScriptImportsJs is a static method.
+    ArtifactBundler.constructor.filterPythonScriptImportsJs(
+      MetadataReader.getNames(),
+      ArtifactBundler.constructor
+        // @ts-ignore parsePythonScriptImports is a static method.
+        .parsePythonScriptImports(MetadataReader.getWorkerFiles('py'))
+    );
 
   const deduplicatedModules = [...new Set(importedModules)];
 
