@@ -29,7 +29,6 @@ wd_cc_library(
 wd_cc_library(
     name = "util",
     srcs = [
-        "mimetype.c++",
         "stream-utils.c++",
         "wait-list.c++",
     ],
@@ -43,10 +42,7 @@ wd_cc_library(
         "color-util.h",
         "duration-exceeded-logger.h",
         "http-util.h",
-        "mimetype.h",
         "stream-utils.h",
-        "string-buffer.h",
-        "strings.h",
         "uncaught-exception-source.h",
         "wait-list.h",
         "weak-refs.h",
@@ -57,6 +53,36 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
     ],
+)
+
+wd_cc_library(
+    name = "mimetype",
+    srcs = ["mimetype.c++"],
+    hdrs = ["mimetype.h"],
+    implementation_deps = [
+        ":string-buffer",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg:memory-tracker",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+wd_cc_library(
+    name = "strings",
+    srcs = [],
+    hdrs = ["strings.h"],
+    visibility = ["//visibility:public"],
+    deps = [],
+)
+
+wd_cc_library(
+    name = "string-buffer",
+    hdrs = ["string-buffer.h"],
+    visibility = ["//visibility:public"],
+    deps = [":strings"],
 )
 
 wd_cc_library(
@@ -184,12 +210,24 @@ exports_files(["autogate.h"])
     )
     for f in [
         "batch-queue-test.c++",
-        "mimetype-test.c++",
         "wait-list-test.c++",
         "duration-exceeded-logger-test.c++",
-        "string-buffer-test.c++",
     ]
 ]
+
+kj_test(
+    src = "string-buffer-test.c++",
+    deps = [
+        ":string-buffer",
+    ],
+)
+
+kj_test(
+    src = "mimetype-test.c++",
+    deps = [
+        ":mimetype",
+    ],
+)
 
 kj_test(
     src = "sqlite-test.c++",
