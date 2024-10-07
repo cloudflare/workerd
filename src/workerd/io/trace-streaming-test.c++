@@ -12,20 +12,14 @@ struct MockTimeProvider final: public StreamingTrace::TimeProvider {
   kj::Date getNow() const override {
     return 0 * kj::MILLISECONDS + kj::UNIX_EPOCH;
   }
-  kj::Duration getCpuTime() const override {
-    return 0 * kj::MILLISECONDS;
-  }
-  kj::Duration getWallTime() const override {
-    return 0 * kj::MILLISECONDS;
-  }
 };
 MockTimeProvider mockTimeProvider;
 
-KJ_TEST("We can create a simple, empty streaming trace session with implicit canceled outcome") {
+KJ_TEST("We can create a simple, empty streaming trace session with implicit unknown outcome") {
   trace::Onset onset;
   // In this test we are creating a simple trace with no events or spans.
   // The delegate should be called exactly twice, once with the onset and
-  // once with an implicit cancele outcome (since we're not explicitly calling
+  // once with an implicit unknown outcome (since we're not explicitly calling
   // setOutcome ourselves)
   int callCount = 0;
   kj::String id = nullptr;
@@ -49,7 +43,7 @@ KJ_TEST("We can create a simple, empty streaming trace session with implicit can
           KJ_EXPECT(event.sequence == 1, "the sequence should have been incremented");
           auto& outcome = KJ_ASSERT_NONNULL(
               event.event.tryGet<trace::Outcome>(), "the event should be an outcome event");
-          KJ_EXPECT(outcome.outcome == EventOutcome::CANCELED, "the outcome should be canceled");
+          KJ_EXPECT(outcome.outcome == EventOutcome::UNKNOWN, "the outcome should be unknown");
           break;
         }
       }
@@ -62,8 +56,7 @@ KJ_TEST("We can create a simple, empty streaming trace session with expicit canc
   trace::Onset onset;
   // In this test we are creating a simple trace with no events or spans.
   // The delegate should be called exactly twice, once with the onset and
-  // once with an implicit cancele outcome (since we're not explicitly calling
-  // setOutcome ourselves)
+  // once with an explicit canceled outcome.
   int callCount = 0;
   kj::String id = nullptr;
   auto streamingTrace = workerd::StreamingTrace::create(
@@ -89,18 +82,15 @@ KJ_TEST("We can create a simple, empty streaming trace session with expicit canc
       }
     }
   }, mockTimeProvider);
-  streamingTrace->setOutcome(
-      trace::Outcome(EventOutcome::CANCELED, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+  streamingTrace->setOutcome(trace::Outcome(EventOutcome::CANCELED));
   KJ_EXPECT(callCount == 2);
 }
 
 KJ_TEST(
-    "We can create a simple, streaming trace session with a single implicitly canceled stage span") {
+    "We can create a simple, streaming trace session with a single implicitly unknown stage span") {
   trace::Onset onset;
   // In this test we are creating a simple trace with no events or spans.
-  // The delegate should be called exactly twice, once with the onset and
-  // once with an implicit cancele outcome (since we're not explicitly calling
-  // setOutcome ourselves)
+  // The delegate should be called exactly four times.
   int callCount = 0;
   kj::String id = nullptr;
   {
@@ -135,8 +125,8 @@ KJ_TEST(
           KJ_EXPECT(event.span.transactional == false, "the root span should not be transactional");
           KJ_EXPECT(event.id == id);
           auto& span = KJ_ASSERT_NONNULL(
-              event.event.tryGet<trace::SpanEvent>(), "the event should be a span event");
-          KJ_EXPECT(span.outcome == rpc::Trace::Span::SpanOutcome::CANCELED);
+              event.event.tryGet<trace::Span>(), "the event should be a span event");
+          KJ_EXPECT(span.outcome == rpc::Trace::Span::SpanOutcome::UNKNOWN);
           break;
         }
         case 3: {
@@ -147,7 +137,7 @@ KJ_TEST(
           KJ_EXPECT(event.sequence == 3, "the sequence should have been incremented");
           auto& outcome = KJ_ASSERT_NONNULL(
               event.event.tryGet<trace::Outcome>(), "the event should be an outcome event");
-          KJ_EXPECT(outcome.outcome == EventOutcome::CANCELED, "the outcome should be canceled");
+          KJ_EXPECT(outcome.outcome == EventOutcome::UNKNOWN, "the outcome should be canceled");
           break;
         }
       }
@@ -164,9 +154,7 @@ KJ_TEST(
 KJ_TEST("We can create a simple, streaming trace session with a single explicitly canceled trace") {
   trace::Onset onset;
   // In this test we are creating a simple trace with no events or spans.
-  // The delegate should be called exactly twice, once with the onset and
-  // once with an implicit cancele outcome (since we're not explicitly calling
-  // setOutcome ourselves)
+  // The delegate should be called exactly five times.
   int callCount = 0;
   kj::String id = nullptr;
   {
@@ -214,7 +202,7 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
           KJ_EXPECT(event.sequence, 3);
           KJ_EXPECT(event.id == id);
           auto& span = KJ_ASSERT_NONNULL(
-              event.event.tryGet<trace::SpanEvent>(), "the event should be a span event");
+              event.event.tryGet<trace::Span>(), "the event should be a span event");
           KJ_EXPECT(span.outcome == rpc::Trace::Span::SpanOutcome::CANCELED);
           break;
         }
@@ -237,8 +225,7 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
             kj::HttpMethod::GET, kj::str("http://example.com"), kj::String(), {}));
     stage->addMark(trace::Mark(kj::str("bar")));
     // Intentionally not calling setOutcome on the stage span or the trace itself.
-    streamingTrace->setOutcome(
-        trace::Outcome(EventOutcome::CANCELED, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+    streamingTrace->setOutcome(trace::Outcome(EventOutcome::CANCELED));
 
     // Once the outcome is set, no more events should be emitted but calling the methods on
     // the span shouldn't crash or error.

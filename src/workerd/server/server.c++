@@ -1451,7 +1451,7 @@ public:
       if (fetchStatus != 0) {
         t->setFetchResponseInfo(trace::FetchResponseInfo(fetchStatus));
       }
-      t->setOutcomeInfo(trace::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+      t->setOutcomeInfo(trace::Outcome(outcome));
     }
   }
 
@@ -1692,7 +1692,7 @@ public:
         for (auto& worker: tailWorkers) {
           auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
               workerd::api::TraceCustomEventImpl::TYPE, waitUntilTasks, mapAddRef(traces));
-          co_return co_await worker->customEvent(kj::mv(event)).ignoreResult();
+          co_await worker->customEvent(kj::mv(event)).ignoreResult();
         }
         co_return;
       }));

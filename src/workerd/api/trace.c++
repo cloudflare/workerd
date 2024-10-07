@@ -206,8 +206,8 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
           trace.onsetInfo.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
       outcome(getTraceOutcome(trace)),
-      cpuTime(trace.outcomeInfo.cpuTime / kj::MILLISECONDS),
-      wallTime(trace.outcomeInfo.wallTime / kj::MILLISECONDS),
+      cpuTime(trace.cpuTime / kj::MILLISECONDS),
+      wallTime(trace.wallTime / kj::MILLISECONDS),
       truncated(trace.truncated) {}
 
 kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {

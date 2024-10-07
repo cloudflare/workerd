@@ -10,6 +10,10 @@ namespace workerd {
 // ======================================================================================
 // TailIDs
 namespace {
+// The UuidId implementation is really intended only for testing and local development.
+// In production, it likely makes more sense to use a RayID or something that can be
+// better correlated to other diagnostic and tracing mechanisms, and that can be better
+// guaranteed to be sufficiently unique across the entire production environment.
 class UuidId final: public StreamingTrace::IdFactory::Id {
 public:
   UuidId(): uuid(randomUUID(kj::none)) {}
@@ -48,6 +52,8 @@ kj::Own<StreamingTrace::IdFactory> StreamingTrace::IdFactory::newUuidIdFactory()
 
 kj::Own<const StreamingTrace::IdFactory::Id> StreamingTrace::IdFactory::newIdFromString(
     kj::StringPtr str) {
+  // This is cheating a bit. We're not actually creating a UUID here but the UuidId class
+  // is really just a wrapper around a string so we can safely use it here.
   return kj::heap<const UuidId>(kj::str(str));
 }
 
@@ -83,20 +89,6 @@ constexpr rpc::Trace::Span::SpanOutcome eventOutcomeToSpanOutcome(const EventOut
   KJ_UNREACHABLE;
 }
 }  // namespace
-
-// When the StreamingTrace is created it will need to be passed an RPC Client to forward
-// traces on to. The initial onset event will be forwarded as part of the initial request.
-// The StreamingTrace will then be responsible for forwarding all subsequent trace events
-// to the RPC Client. To prevent too many small requests, the StreamingTrace will need to
-// buffer events until a certain threshold is reached, at which point it will forward the
-// buffered events to the RPC Client.
-//
-// The threshold be the combined size of the events in the queue coupled with a timeout.
-// Whichever condition is met first will trigger the forwarding of the events.
-//
-// The setEventInfo(...) *MUST* be called first.
-// The setOutoutcomeInfo(...) *MUST* be called last. Once called, no other events can be
-// emitted by the StreamingTrace.
 
 struct StreamingTrace::Impl {
   kj::Own<const IdFactory::Id> id;
@@ -136,9 +128,10 @@ StreamingTrace::StreamingTrace(kj::Own<const IdFactory::Id> id,
 }
 
 StreamingTrace::~StreamingTrace() noexcept(false) {
-  KJ_IF_SOME(i, impl) {
-    setOutcome(trace::Outcome(
-        EventOutcome::CANCELED, i->timeProvider.getCpuTime(), i->timeProvider.getWallTime()));
+  if (impl != kj::none) {
+    // If the streaming tracing is dropped without having an outcome explicitly
+    // specified, the outcome is explicitly set to unknown.
+    setOutcome(trace::Outcome(EventOutcome::UNKNOWN));
   }
   // Stage spans should be closed by calling setOutcome above
   KJ_ASSERT(spans.empty(), "all stage spans must be closed before the trace is destroyed");
@@ -242,8 +235,8 @@ struct StreamingTrace::Span::Impl {
         traceImpl->timeProvider.getNow(), trace.getNextSequence(), kj::mv(payload));
   }
 
-  StreamEvent makeSpanEvent(rpc::Trace::Span::SpanOutcome outcome,
-      kj::Maybe<trace::SpanEvent::Info> maybeInfo,
+  StreamEvent makeSpan(rpc::Trace::Span::SpanOutcome outcome,
+      kj::Maybe<trace::Span::Info> maybeInfo,
       trace::Tags tags) {
     auto& tailId = KJ_ASSERT_NONNULL(trace.getId(), "the streaming trace is closed");
     auto& traceImpl = KJ_ASSERT_NONNULL(trace.impl);
@@ -254,7 +247,7 @@ struct StreamingTrace::Span::Impl {
           .transactional = (options & Options::TRANSACTIONAL) == Options::TRANSACTIONAL,
         },
         traceImpl->timeProvider.getNow(), trace.getNextSequence(),
-        trace::SpanEvent(id, parentSpan, outcome,
+        trace::Span(id, parentSpan, outcome,
             (options & Options::TRANSACTIONAL) == Options::TRANSACTIONAL, kj::mv(maybeInfo),
             kj::mv(tags)));
   }
@@ -270,20 +263,20 @@ StreamingTrace::Span::Span(kj::List<Span, &Span::link>& parentSpans,
 }
 
 void StreamingTrace::Span::setOutcome(rpc::Trace::Span::SpanOutcome outcome,
-    kj::Maybe<trace::SpanEvent::Info> maybeInfo,
+    kj::Maybe<trace::Span::Info> maybeInfo,
     trace::Tags tags) {
   KJ_IF_SOME(i, impl) {  // Then close out the stream by destroying the impl
     for (auto& span: spans) {
       span.setOutcome(outcome);
     }
     KJ_ASSERT(spans.empty(), "all child spans must be closed before the parent span is closed");
-    i->trace.addStreamEvent(i->makeSpanEvent(outcome, kj::mv(maybeInfo), kj::mv(tags)));
+    i->trace.addStreamEvent(i->makeSpan(outcome, kj::mv(maybeInfo), kj::mv(tags)));
     impl = kj::none;
   }
 }
 
 StreamingTrace::Span::~Span() noexcept(false) {
-  setOutcome(rpc::Trace::Span::SpanOutcome::CANCELED);
+  setOutcome(rpc::Trace::Span::SpanOutcome::UNKNOWN);
   KJ_ASSERT(spans.empty(), "all schild spans must be closed before the trace is destroyed");
 }
 
@@ -377,7 +370,7 @@ StreamEvent::Event getEvent(const rpc::Trace::StreamEvent::Reader& reader) {
       return trace::Dropped(event.getDropped());
     }
     case rpc::Trace::StreamEvent::Event::Which::SPAN: {
-      return trace::SpanEvent(event.getSpan());
+      return trace::Span(event.getSpan());
     }
     case rpc::Trace::StreamEvent::Event::Which::INFO: {
       auto info = event.getInfo();
@@ -494,7 +487,7 @@ void StreamEvent::copyTo(rpc::Trace::StreamEvent::Builder builder) const {
     KJ_CASE_ONEOF(dropped, trace::Dropped) {
       dropped.copyTo(builder.getEvent().getDropped());
     }
-    KJ_CASE_ONEOF(span, trace::SpanEvent) {
+    KJ_CASE_ONEOF(span, trace::Span) {
       span.copyTo(builder.getEvent().getSpan());
     }
     KJ_CASE_ONEOF(info, Info) {
@@ -582,7 +575,7 @@ StreamEvent StreamEvent::clone() const {
       KJ_CASE_ONEOF(dropped, trace::Dropped) {
         return dropped.clone();
       }
-      KJ_CASE_ONEOF(span, trace::SpanEvent) {
+      KJ_CASE_ONEOF(span, trace::Span) {
         return span.clone();
       }
       KJ_CASE_ONEOF(info, Info) {
