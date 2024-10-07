@@ -88,7 +88,7 @@ private:
 
 class MIMEType final: public jsg::Object {
 public:
-  MIMEType(MimeType inner);
+  explicit MIMEType(MimeType inner);
   ~MIMEType() noexcept(false);
   static jsg::Ref<MIMEType> constructor(kj::String input);
 
@@ -107,12 +107,6 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(params, getParams);
     JSG_METHOD(toString);
     JSG_METHOD_NAMED(toJSON, toString);
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    // TODO(cleanup): Better to have jsg::MimeType be a MemoryRetainer directly
-    tracker.trackFieldWithSize("mimeType", inner.toString().size());
-    tracker.trackField("params", params);
   }
 
 private:

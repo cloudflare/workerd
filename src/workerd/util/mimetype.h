@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
+#include <workerd/jsg/memory.h>
+
 #include <kj/common.h>
 #include <kj/exception.h>
 #include <kj/map.h>
@@ -101,6 +103,12 @@ public:
   // per the algorithm defined in the fetch spec:
   // https://fetch.spec.whatwg.org/#concept-header-extract-mime-type
   static kj::Maybe<MimeType> extract(kj::StringPtr input);
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackFieldWithSize("type", type_.size());
+    tracker.trackFieldWithSize("subtype", subtype_.size());
+    tracker.trackFieldWithSize("params", params_.size());
+  }
 
 private:
   kj::String type_;

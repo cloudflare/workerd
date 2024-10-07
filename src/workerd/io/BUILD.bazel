@@ -74,6 +74,7 @@ wd_cc_library(
     }),
     implementation_deps = [
         "//src/workerd/util:perfetto",
+        "//src/workerd/util:string-buffer",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",

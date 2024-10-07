@@ -98,6 +98,7 @@ wd_cc_library(
         "pyodide/pyodide.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],
+    implementation_deps = ["//src/workerd/util:string-buffer"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide",
@@ -125,6 +126,7 @@ wd_cc_library(
     deps = [
         "//src/workerd/jsg",
         "//src/workerd/util",
+        "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -154,6 +156,7 @@ wd_cc_library(
     deps = [
         "//src/workerd/jsg:url",
         "//src/workerd/util",
+        "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
 )
