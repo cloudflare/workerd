@@ -46,7 +46,7 @@ public:
   // to be invoked.
   //
   // If prewarm() has to do anything asynchronous, it should use "waitUntil" tasks.
-  virtual void prewarm(kj::StringPtr url) = 0;
+  virtual kj::Promise<void> prewarm(kj::StringPtr url) = 0;
 
   struct ScheduledResult {
     bool retry = true;
@@ -147,10 +147,7 @@ private:
 
 // Given a Promise for a WorkerInterface, return a WorkerInterface whose methods will first wait
 // for the promise, then invoke the destination object.
-kj::Own<WorkerInterface> newPromisedWorkerInterface(
-    kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<WorkerInterface>> promise);
-// TODO(cleanup): `waitUntilTasks` is only needed to handle `prewarm` since they
-//   don't return promises. We should maybe change them to return promises?
+kj::Own<WorkerInterface> newPromisedWorkerInterface(kj::Promise<kj::Own<WorkerInterface>> promise);
 
 // Adapts WorkerInterface to HttpClient, including taking ownership.
 //
@@ -184,7 +181,7 @@ public:
       ConnectResponse& tunnel,
       kj::HttpConnectSettings settings) override;
 
-  void prewarm(kj::StringPtr url) override;
+  kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
