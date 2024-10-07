@@ -11,15 +11,6 @@ import {
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-function deferredPromise() {
-  let resolve, reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
 export const test_basics = {
   async test(ctrl, env, ctx) {
     ok(!hasSubscribers('foo'));
@@ -28,7 +19,7 @@ export const test_basics = {
     strictEqual(channel1, channel2);
     ok(channel1 instanceof Channel);
 
-    const messagePromise = deferredPromise();
+    const messagePromise = Promise.withResolvers();
 
     const listener = (message) => {
       try {
@@ -66,11 +57,11 @@ export const test_tracing = {
     tc.start.bindStore(als);
 
     const promises = [
-      deferredPromise(),
-      deferredPromise(),
-      deferredPromise(),
-      deferredPromise(),
-      deferredPromise(),
+      Promise.withResolvers(),
+      Promise.withResolvers(),
+      Promise.withResolvers(),
+      Promise.withResolvers(),
+      Promise.withResolvers(),
     ];
 
     const context = {};

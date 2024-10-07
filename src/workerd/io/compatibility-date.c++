@@ -127,6 +127,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
   }
 
   kj::HashSet<kj::String> flagSet;
+  flagSet.reserve(compatFlags.size());
   for (auto flag: compatFlags) {
     flagSet.upsert(kj::str(flag), [&](auto& existing, auto&& newValue) {
       errorReporter.addError(kj::str("Compatibility flag specified multiple times: ", flag));
@@ -291,7 +292,7 @@ kj::Array<kj::StringPtr> decompileCompatibilityFlagsForFl(CompatibilityFlags::Re
       makeFieldTable(capnp::Schema::from<CompatibilityFlags>().getFields());
 
   kj::Vector<kj::StringPtr> enableFlags;
-
+  enableFlags.reserve(fieldTable.size());
   for (auto field: fieldTable) {
     if (capnp::toDynamic(input).get(field.field).as<bool>()) {
       enableFlags.add(field.enableFlag);

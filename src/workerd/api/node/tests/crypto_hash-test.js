@@ -264,22 +264,9 @@ export const hash_copy_test = {
   },
 };
 
-function deferredPromise() {
-  let resolve, reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return {
-    promise,
-    resolve,
-    reject,
-  };
-}
-
 export const hash_pipe_test = {
   async test(ctrl, env, ctx) {
-    const p = deferredPromise();
+    const p = Promise.withResolvers();
 
     const s = new stream.PassThrough();
     const h = crypto.createHash('sha512');

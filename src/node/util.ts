@@ -179,8 +179,7 @@ export const TextDecoder = globalThis.TextDecoder;
 export const TextEncoder = globalThis.TextEncoder;
 
 export function toUSVString(input: any) {
-  // TODO(cleanup): Apparently the typescript types for this aren't available yet?
-  return (`${input}` as any).toWellFormed();
+  return input.toWellFormed();
 }
 
 function pad(n: any): string {
@@ -231,8 +230,7 @@ export async function aborted(signal: AbortSignal, resource: object) {
     allowFunction: true,
   });
   if (signal.aborted) return Promise.resolve();
-  // TODO(cleanup): Apparently withResolvers isn't part of type defs we use yet
-  const { promise, resolve } = (Promise as any).withResolvers();
+  const { promise, resolve } = Promise.withResolvers();
   const opts = { __proto__: null, once: true };
   signal.addEventListener('abort', resolve, opts);
   return promise;
