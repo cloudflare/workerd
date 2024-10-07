@@ -9,15 +9,7 @@
 import { default as entropyPatches } from 'pyodide-internal:topLevelEntropy/entropy_patches.py';
 import { default as entropyImportContext } from 'pyodide-internal:topLevelEntropy/entropy_import_context.py';
 import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
-import { LOADED_SNAPSHOT_VERSION } from 'pyodide-internal:snapshot';
 import { simpleRunPython } from 'pyodide-internal:util';
-
-// Disable entropy gating when we've restored a snapshot of version 1. Version 1 snapshots were
-// created without entropy gating and will crash if they are used with it. If we are creating a new
-// snapshot or using one of version at least 2 we should gate.
-// TODO: When we've updated all the snapshots, remove this.
-const SHOULD_GATE_ENTROPY =
-  LOADED_SNAPSHOT_VERSION !== 0 && LOADED_SNAPSHOT_VERSION !== 1;
 
 let allowed_entropy_calls_addr: number;
 
@@ -40,9 +32,6 @@ function setupShouldAllowBadEntropy(Module: Module) {
 }
 
 function shouldAllowBadEntropy(Module: Module) {
-  if (!SHOULD_GATE_ENTROPY) {
-    return true;
-  }
   const val = Module.HEAP8[allowed_entropy_calls_addr];
   if (val) {
     Module.HEAP8[allowed_entropy_calls_addr]--;
@@ -122,9 +111,6 @@ export function entropyAfterRuntimeInit(Module: Module) {
  * so it doesn't need to be called when restoring from snapshot.
  */
 export function entropyBeforeTopLevel(Module: Module) {
-  if (!SHOULD_GATE_ENTROPY) {
-    return;
-  }
   simpleRunPython(
     Module,
     `
@@ -146,29 +132,12 @@ export function entropyBeforeRequest(Module: Module) {
   }
   IN_REQUEST_CONTEXT = true;
   isReady = true;
-  if (SHOULD_GATE_ENTROPY) {
-    simpleRunPython(
-      Module,
-      `
+  simpleRunPython(
+    Module,
+    `
 from _cloudflare.entropy_patches import before_first_request
 before_first_request()
 del before_first_request
-    `
-    );
-  } else {
-    // If we shouldn't gate entropy, we just need to reseed_rng. We first have
-    // to call invalidate_caches b/c the snapshot doesn't know about
-    // _cloudflare.entropy_patches.
-    simpleRunPython(
-      Module,
-      `
-from importlib import invalidate_caches
-invalidate_caches()
-del invalidate_caches
-from _cloudflare.entropy_patches import reseed_rng
-reseed_rng()
-del reseed_rng
-    `
-    );
-  }
+  `
+  );
 }
