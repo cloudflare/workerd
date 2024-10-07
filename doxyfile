@@ -1214,6 +1214,9 @@ CLANG_OPTIONS          = -std=c++20     \
                          -Iexternal/com_google_benchmark/include/ \
                          -Iexternal/dawn/include \
                          -Iexternal/ada-url/ \
+                         -Iexternal/simdutf/ \
+                         -Iexternal/nbytes/ \
+                         -Iexternal/ssl/src/include/ \
                          -I/usr/include \
                          -I/usr/include/c++/11 \
                          -I/usr/include/c++/11/bits \
@@ -1838,7 +1841,7 @@ EXTRA_SEARCH_MAPPINGS  =
 # If the GENERATE_LATEX tag is set to YES, doxygen will generate LaTeX output.
 # The default value is: YES.
 
-GENERATE_LATEX         = YES
+GENERATE_LATEX         = NO
 
 # The LATEX_OUTPUT tag is used to specify where the LaTeX docs will be put. If a
 # relative path is entered the value of OUTPUT_DIRECTORY will be put in front of
