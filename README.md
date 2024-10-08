@@ -69,7 +69,7 @@ On other platforms, you may have to do tinkering to make things work.
 
 To build `workerd`, you need:
 
-* [Bazel](https://bazel.build/)
+* Bazel
   * If you use [Bazelisk](https://github.com/bazelbuild/bazelisk) (recommended), it will automatically download and use the right version of Bazel for building workerd.
 * On Linux:
   * We use the clang/LLVM toolchain to build workerd and support version 16 and higher. Earlier versions of clang may still work, but are not officially supported.
@@ -85,7 +85,7 @@ To build `workerd`, you need:
   * Install [App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget)
     from the Microsoft Store for the `winget` package manager and then run
     [install-deps.bat](tools/windows/install-deps.bat) from an administrator prompt to install
-    bazel, LLVM, and other dependencies required to build workerd on Windows.
+    bazelisk, LLVM, and other dependencies required to build workerd on Windows.
   * Add `startup --output_user_root=C:/tmp` to the `.bazelrc` file in your user directory.
   * When developing at the command-line, run [bazel-env.bat](tools/windows/bazel-env.bat) in your shell first
     to select tools and Windows SDK versions before running bazel.
