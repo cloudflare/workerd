@@ -1,22 +1,14 @@
-From 0815526f4a4f533ef4ce76d763db568e50811dfd Mon Sep 17 00:00:00 2001
+From 80b4aff91f274adfaddc8acdee4318764e92a065 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 675c36f7784409f10b28b6fca93d4fd39f69a17d..634faf34baceefc8a08f953777eecdabfa9d1b73 100644
+index 55eaca3189c6b9464c2a0a795efea9bdc83ab8da..4a831b0d190ea85eebb7796a1bc9bb5eae3a13ea 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1359,6 +1359,7 @@ filegroup(
-         "src/builtins/constants-table-builder.cc",
-         "src/builtins/constants-table-builder.h",
-         "src/builtins/data-view-ops.h",
-+        "src/builtins/profile-data-reader.cc",
-         "src/builtins/profile-data-reader.h",
-         "src/codegen/aligned-slot-allocator.cc",
-         "src/codegen/aligned-slot-allocator.h",
-@@ -1539,7 +1540,6 @@ filegroup(
+@@ -1542,7 +1542,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
@@ -24,52 +16,28 @@ index 675c36f7784409f10b28b6fca93d4fd39f69a17d..634faf34baceefc8a08f953777eecdab
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3040,7 +3040,6 @@ filegroup(
- filegroup(
-     name = "v8_compiler_files",
-     srcs = [
--        "src/builtins/profile-data-reader.h",
-         "src/compiler/access-builder.cc",
-         "src/compiler/access-builder.h",
-         "src/compiler/access-info.cc",
-@@ -3616,8 +3615,6 @@ filegroup(
-         "src/builtins/growable-fixed-array-gen.cc",
-         "src/builtins/growable-fixed-array-gen.h",
-         "src/builtins/number-builtins-reducer-inl.h",
--        "src/builtins/profile-data-reader.cc",
--        "src/builtins/profile-data-reader.h",
-         "src/builtins/setup-builtins-internal.cc",
-         "src/builtins/torque-csa-header-includes.h",
-         "src/codegen/turboshaft-builtins-assembler-inl.h",
-@@ -3891,6 +3888,7 @@ filegroup(
+@@ -3860,6 +3859,10 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
++        # file moved here to make dynamic linkage possible. Keeping it in the v8 base causes issues
++        # with dynamic linking as it depends on symbols only defined in the snapshot (or through a
++        # placeholder when building the snapshot itself).
 +        "src/execution/isolate.cc",
      ],
  )
  
-@@ -4003,6 +4001,10 @@ filegroup(
-     name = "noicu/snapshot_files",
+@@ -4315,6 +4318,8 @@ v8_library(
+     name = "v8",
      srcs = [
-         "src/init/setup-isolate-deserialize.cc",
-+        # Not a snapshot file per se, but depends on symbols only present in the snapshot (or
-+        # through a placeholder when building the snapshot itself); having it here makes using
-+        # shared linkage for the main v8 target possible.
+         ":v8_inspector_files",
++        # file moved here to make dynamic linkage possible.
 +        "src/execution/isolate.cc",
      ] + select({
-         "@v8//bazel/config:v8_target_arm": [
-             "google3/snapshots/arm/noicu/embedded.S",
-@@ -4020,6 +4022,7 @@ filegroup(
-     name = "icu/snapshot_files",
-     srcs = [
-         "src/init/setup-isolate-deserialize.cc",
-+        "src/execution/isolate.cc",
-     ] + select({
-         "@v8//bazel/config:v8_target_arm": [
-             "google3/snapshots/arm/icu/embedded.S",
+         ":is_not_v8_enable_turbofan": [
+             # With Turbofan disabled, we only include the stubbed-out API.
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 658b44b7deca596ef8ea5b178b2d51b0d06820d3..7181784539ecc548cacc09eab33f168fec9f1116 100644
+index bb75ea080ed4a4e441e212b067c27b6d9316f81c..78079ecf921f9eb22dda8ce6c208e9a510e8a224 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -297,7 +297,6 @@ def v8_library(

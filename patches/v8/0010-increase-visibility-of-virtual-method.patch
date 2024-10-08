@@ -1,4 +1,4 @@
-From 0d83a2f696b4390a0f32d11acf3108c924faa421 Mon Sep 17 00:00:00 2001
+From c7028cbc6d345c18d120224177c1017db74a1eaa Mon Sep 17 00:00:00 2001
 From: Mike Aizatsky <maizatskyi@cloudflare.com>
 Date: Tue, 6 Feb 2024 12:55:07 -0800
 Subject: increase visibility of virtual method
@@ -7,10 +7,10 @@ Methods were marked as protected, which conflicts with
 v8-platform-wrapper.h implementation.
 
 diff --git a/include/v8-platform.h b/include/v8-platform.h
-index a3a939729c9b14b76ae70d6b9f8b8d4501047e89..d422ebf72bce3ceda0c8ee94c7e7fdf8ba06d816 100644
+index 5110f432077dce9770319373aec4988be1eaff59..6fb67c8c77b0d6adcc6b294230d4488a0fef9bc5 100644
 --- a/include/v8-platform.h
 +++ b/include/v8-platform.h
-@@ -1314,7 +1314,7 @@ class Platform {
+@@ -1308,7 +1308,7 @@ class Platform {
      return &default_observer;
    }
  
