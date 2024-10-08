@@ -708,6 +708,14 @@ static const std::set<kj::StringPtr> NODEJS_BUILTINS{"_http_agent"_kj, "_http_cl
 }  // namespace
 
 kj::Maybe<kj::String> checkNodeSpecifier(kj::StringPtr specifier) {
+  // The sys module was renamed to 'util'. This shim remains to keep old programs
+  // working. `sys` is deprecated and shouldn't be used.
+  // Note to maintainers: Although this module has been deprecated for a while
+  // Node.js do not plan to remove it.
+  // See: https://github.com/nodejs/node/pull/35407#issuecomment-700693439
+  if (specifier == "sys" || specifier == "node:sys") [[unlikely]] {
+    return kj::str("node:util");
+  }
   if (NODEJS_BUILTINS.contains(specifier)) {
     return kj::str("node:", specifier);
   } else if (specifier.startsWith("node:")) {
