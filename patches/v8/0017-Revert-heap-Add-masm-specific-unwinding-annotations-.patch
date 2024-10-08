@@ -1,4 +1,4 @@
-From 8f3298d94672b411e5d7337714593d01b980bfc7 Mon Sep 17 00:00:00 2001
+From 59ac8a1956fa4f6afbc56d39d0e399ab20d17bdd Mon Sep 17 00:00:00 2001
 From: Harris Hancock <harris@cloudflare.com>
 Date: Wed, 3 Jul 2024 15:46:43 +0100
 Subject: Revert "heap: Add masm-specific unwinding annotations to GC
@@ -9,10 +9,10 @@ This reverts commit 42bc7bfdf56cc7a8cd7757d96aa70b83ce82d9ff.
 This commit broke our build, because we patch V8 to build push_registers_asm.cc with clang-cl on Windows, and this commit makes it an error to compile that file on Windows with any compiler. Maybe clang-cl and masm can be used together? I'm not sure. In the meantime, I'm reverting this commit in the hope of getting our V8 upgrade unblocked.
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 87b212921bb8d51fd5457a7b4d61ee956589c282..33a97f8a8b5b0ba482b7bb3d1d0528e3b0ec7f76 100644
+index 19e0d2b584790eed3f633152f25665aa333d6f4a..3fd262bd0184d0e9b1c9df7ac2b9ae717ba0482a 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4271,8 +4271,8 @@ v8_header_set("v8_internal_headers") {
+@@ -4240,8 +4240,8 @@ v8_header_set("v8_internal_headers") {
      "src/third_party/siphash/halfsiphash.h",
      "src/third_party/utf8-decoder/utf8-decoder.h",
      "src/torque/runtime-macro-shims.h",
@@ -22,7 +22,7 @@ index 87b212921bb8d51fd5457a7b4d61ee956589c282..33a97f8a8b5b0ba482b7bb3d1d0528e3
      "src/tracing/traced-value.h",
      "src/tracing/tracing-category-observer.h",
      "src/utils/address-map.h",
-@@ -6924,12 +6924,7 @@ v8_source_set("v8_heap_base") {
+@@ -6940,12 +6940,7 @@ v8_source_set("v8_heap_base") {
  
    if (is_clang || !is_win) {
      if (current_cpu == "x64") {
