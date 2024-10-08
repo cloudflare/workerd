@@ -116,7 +116,6 @@ public:
     // Forward the event over RPC.
     virtual kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         capnp::ByteStreamFactory& byteStreamFactory,
-        kj::TaskSet& waitUntilTasks,
         rpc::EventDispatcher::Client dispatcher) = 0;
 
     // Get the type for this event for logging / metrics purposes. This is intended for use by the
@@ -166,7 +165,6 @@ class RpcWorkerInterface: public WorkerInterface {
 public:
   RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
-      kj::TaskSet& waitUntilTasks,
       rpc::EventDispatcher::Client dispatcher);
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -189,7 +187,6 @@ public:
 private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
-  kj::TaskSet& waitUntilTasks;
   rpc::EventDispatcher::Client dispatcher;
 };
 
