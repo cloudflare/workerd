@@ -216,6 +216,13 @@ public:
 
   jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
 
+  // This is used in the implementation of process.exit(...). Contrary
+  // to what the name suggests, it does not actually exit the process.
+  // Instead, it will cause the IoContext, if any, and will stop javascript
+  // from further executing in that request. If there is no active IoContext,
+  // then it becomes a non-op.
+  void processExitImpl(jsg::Lock& js, int code);
+
   JSG_RESOURCE_TYPE(UtilModule) {
     JSG_NESTED_TYPE(MIMEType);
     JSG_NESTED_TYPE(MIMEParams);
@@ -243,6 +250,7 @@ public:
     JSG_METHOD(isBoxedPrimitive);
 
     JSG_METHOD(getBuiltinModule);
+    JSG_METHOD(processExitImpl);
   }
 };
 
