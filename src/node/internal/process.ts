@@ -88,8 +88,13 @@ export function getBuiltinModule(id: string): any {
   return utilImpl.getBuiltinModule(id);
 }
 
+export function exit(code: number) {
+  utilImpl.processExitImpl(code);
+}
+
 export default {
   nextTick,
   env,
+  exit,
   getBuiltinModule,
 };

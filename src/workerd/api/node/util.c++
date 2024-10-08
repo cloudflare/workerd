@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "util.h"
 
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/vector.h>
@@ -238,6 +239,54 @@ jsg::JsValue UtilModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
   }
 
   return js.undefined();
+}
+
+namespace {
+[[noreturn]] void handleProcessExit(jsg::Lock& js, int code) {
+  // There are a few things happening here. First, we abort the current IoContext
+  // in order to shut down this specific request....
+  auto message =
+      kj::str("The Node.js process.exit(", code, ") API was called. Canceling the request.");
+  auto& ioContext = IoContext::current();
+  // If we have a tail worker, let's report the error.
+  KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+    // Why create the error like this in tracing? Because we're adding the exception
+    // to the trace and ideally we'd have the JS stack attached to it. Just using
+    // JSG_KJ_EXCEPTION would not give us that, and we only want to incur the cost
+    // of creating and capturing the stack when we actually need it.
+    auto ex = KJ_ASSERT_NONNULL(js.error(message).tryCast<jsg::JsObject>());
+    tracer.addException(ioContext.now(), ex.get(js, "name"_kj).toString(js),
+        ex.get(js, "message"_kj).toString(js), ex.get(js, "stack"_kj).toString(js));
+    ioContext.abort(js.exceptionToKj(ex));
+  } else {
+    ioContext.abort(JSG_KJ_EXCEPTION(FAILED, Error, kj::mv(message)));
+  }
+  // ...then we tell the isolate to terminate the current JavaScript execution.
+  // Oddly however, this does not appear to *actually* terminate the thread of
+  // execution unless we trigger the Isolate to handle the intercepts, which
+  // calling v8::JSON::Stringify does. Weird... but ok? As long as it works
+  // TODO(soon): Investigate if there is a better approach to triggering the
+  // interrupt handling.
+  js.v8Isolate->TerminateExecution();
+  jsg::check(v8::JSON::Stringify(js.v8Context(), js.str()));
+  // This should be unreachable here as we expect the isolate to terminate and
+  // an exception to have been thrown.
+  KJ_UNREACHABLE;
+}
+}  // namespace
+
+void UtilModule::processExitImpl(jsg::Lock& js, int code) {
+  if (IoContext::hasCurrent()) {
+    handleProcessExit(js, code);
+  }
+
+  // Create an error object so we can easily capture the stack where the
+  // process.exit call was made.
+  auto err = KJ_ASSERT_NONNULL(
+      js.error("process.exit(...) called without a current request context. Ignoring.")
+          .tryCast<jsg::JsObject>());
+  err.set(js, "name"_kj, js.str());
+  js.logWarning(kj::str(err.get(js, "stack"_kj)));
 }
 
 }  // namespace workerd::api::node
