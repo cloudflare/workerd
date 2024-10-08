@@ -456,8 +456,14 @@ async function test(state) {
   );
 
   // Can't start transactions or savepoints.
-  assert.throws(() => sql.exec('BEGIN TRANSACTION'), /not authorized/);
-  assert.throws(() => sql.exec('SAVEPOINT foo'), /not authorized/);
+  assert.throws(
+    () => sql.exec('BEGIN TRANSACTION'),
+    /please use the state.storage.transaction\(\) or state.storage.transactionSync\(\) APIs/
+  );
+  assert.throws(
+    () => sql.exec('SAVEPOINT foo'),
+    /please use the state.storage.transaction\(\) or state.storage.transactionSync\(\) APIs/
+  );
 
   // Virtual tables
   // Only fts5 and fts5vocab modules are allowed

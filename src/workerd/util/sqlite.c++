@@ -571,7 +571,23 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(
     sqlite3_stmt* result;
     const char* tail;
 
-    SQLITE_CALL(sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail));
+    auto prepareResult =
+        sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail);
+
+    // If we had an auth error specifically, check if we recorded a better error message during
+    // the authorizor callback.
+    if (prepareResult == SQLITE_AUTH) {
+      KJ_IF_SOME(error, parseContext.authError) {
+        // Throw the tailored auth error.
+        kj::throwFatalException(kj::mv(error));
+      }
+      // we don't have a better error, so fall back to SQLITE_CALL_FAILED below
+    }
+
+    if (prepareResult != SQLITE_OK) {
+      SQLITE_CALL_FAILED("sqlite3_prepare_v3", prepareResult);
+    }
+
     SQLITE_REQUIRE(result != nullptr, kj::none, "SQL code did not contain a statement.", sqlCode);
     auto ownResult = ownSqlite(result);
 
@@ -1044,8 +1060,13 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
           ? SQLITE_OK
           : SQLITE_DENY;
     } catch (kj::Exception& e) {
-      // We'll crash if we throw to SQLite. Instead, log the error and deny.
-      KJ_LOG(ERROR, e);
+      // We'll crash if we throw to SQLite. Instead, shove the error into the parse context and
+      // report authorization denied. We'll pull it back out later.
+      KJ_IF_SOME(context, reinterpret_cast<SqliteDatabase*>(userdata)->currentParseContext) {
+        context.authError = kj::mv(e);
+      } else {
+        KJ_LOG(ERROR, e);
+      }
       return SQLITE_DENY;
     }
   },

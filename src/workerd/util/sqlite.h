@@ -67,8 +67,11 @@ public:
 
   // Class which regulates a SQL query, especially to control how queries created in JavaScript
   // application code are handled.
+  //
+  // Note that any of the methods that check if actions are allowed my throw an exception instead
+  // of returning false. If they do, this exception will pass through to the caller in place of
+  // a generic "not authorized" exception.
   class Regulator {
-
   public:
     // Returns whether the given name (which may be a table, index, view, etc.) is allowed to be
     // accessed. Typically, this is used to deny access to names containing special prefixes
@@ -340,7 +343,10 @@ private:
     // What kind of state change does this statement cause, if any?
     StateChange stateChange = NoChange();
 
-    // TODO(soon): We could also use this to generate better errors.
+    // If the parse fails because the authorizer rejects it, it may fill in `authError` to provide
+    // a more friendly error message. This error will be thrown by the overal query. Otherwise,
+    // a generic "not authorized" error is thrown.
+    kj::Maybe<kj::Exception> authError;
   };
 };
 

@@ -52,14 +52,12 @@ void SqlStorage::onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) 
 }
 
 bool SqlStorage::allowTransactions() const {
-  if (IoContext::hasCurrent()) {
-    IoContext::current().logWarningOnce(
-        "To execute a transaction, please use the state.storage.transaction() API instead of the "
-        "SQL BEGIN TRANSACTION or SAVEPOINT statements. The JavaScript API is safer because it "
-        "will automatically roll back on exceptions, and because it interacts correctly with "
-        "Durable Objects' automatic atomic write coalescing.");
-  }
-  return false;
+  JSG_FAIL_REQUIRE(Error,
+      "To execute a transaction, please use the state.storage.transaction() or "
+      "state.storage.transactionSync() APIs instead of the SQL BEGIN TRANSACTION or SAVEPOINT "
+      "statements. The JavaScript API is safer because it will automatically roll back on "
+      "exceptions, and because it interacts correctly with Durable Objects' automatic atomic "
+      "write coalescing.");
 }
 
 jsg::JsValue SqlStorage::wrapSqlValue(jsg::Lock& js, SqlValue value) {
