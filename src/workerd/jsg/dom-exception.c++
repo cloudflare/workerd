@@ -40,15 +40,15 @@ Ref<DOMException> DOMException::constructor(const v8::FunctionCallbackInfo<v8::V
       kj::mv(errMessage), kj::mv(name).orDefault([] { return kj::str("Error"); }));
 }
 
-kj::StringPtr DOMException::getName() {
+kj::StringPtr DOMException::getName() const {
   return name;
 }
 
-kj::StringPtr DOMException::getMessage() {
+kj::StringPtr DOMException::getMessage() const {
   return message;
 }
 
-int DOMException::getCode() {
+int DOMException::getCode() const {
   static const std::map<kj::StringPtr, int> legacyCodes{
 #define MAP_ENTRY(name, code, friendlyName) {friendlyName, code},
     JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(MAP_ENTRY)
@@ -101,8 +101,9 @@ jsg::Ref<DOMException> DOMException::deserialize(
           KJ_ASSERT_NONNULL(errorForStack.get(js, "stack").tryCast<JsString>()).toString(js);
       return js.domException(kj::mv(message), kj::mv(name), kj::mv(stack));
     }
+    default:
+      KJ_UNREACHABLE;
   }
-  KJ_UNREACHABLE;
 }
 
 }  // namespace workerd::jsg
