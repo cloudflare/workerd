@@ -891,5 +891,40 @@ KJ_TEST("SQLite observer addQueryStats") {
   KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == 1);
 }
 
+KJ_TEST("SQLite failed statement reset") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(R"(
+    CREATE TABLE things (
+      id INTEGER PRIMARY KEY
+    );
+  )");
+
+  auto stmt = db.prepare("INSERT INTO things VALUES (?)");
+
+  // Run the statement a couple times.
+  stmt.run(1);
+  stmt.run(2);
+
+  // Now run it with a duplicate value, should fail.
+  KJ_EXPECT_THROW_MESSAGE("UNIQUE constraint failed: things.id", stmt.run(1));
+
+  // The statement shouldn't be left broken. Run it again with a non-duplicate.
+  stmt.run(3);
+
+  // Same as above but with ValuePtrs, since these use a different path.
+  using ValuePtr = SqliteDatabase::Query::ValuePtr;
+  ValuePtr value = int64_t(1);
+  KJ_EXPECT_THROW_MESSAGE(
+      "UNIQUE constraint failed: things.id", stmt.run(kj::arrayPtr<const ValuePtr>(value)));
+  value = int64_t(4);
+  stmt.run(kj::arrayPtr<const ValuePtr>(value));
+
+  // Sanity check that those queries were doing something.
+  KJ_EXPECT(db.run("SELECT COUNT(*) FROM things").getInt(0) == 4);
+}
+
 }  // namespace
 }  // namespace workerd

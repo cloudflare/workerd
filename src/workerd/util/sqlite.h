@@ -430,6 +430,10 @@ private:
         regulator(regulator),
         maybeStatement(statement) {
     resetRowCounters();
+
+    // If we throw from the constructor, the destructor won't run. Need to call destroy()
+    // explicitly.
+    KJ_ON_SCOPE_FAILURE(destroy());
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   template <typename... Params>
@@ -438,12 +442,16 @@ private:
         regulator(regulator),
         ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
         maybeStatement(ownStatement) {
+    // If we throw from the constructor, the destructor won't run. Need to call destroy()
+    // explicitly.
+    KJ_ON_SCOPE_FAILURE(destroy());
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
 
   void checkRequirements(size_t size);
 
   void init(kj::ArrayPtr<const ValuePtr> bindings);
+  void destroy();
   void resetRowCounters();
 
   void bind(uint column, ValuePtr value);

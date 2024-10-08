@@ -976,6 +976,9 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
   // If the statement was used for a previous query, then its row counters contain data from that
   // query's execution. Reset them to zero.
   resetRowCounters();
+
+  // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
+  KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
 }
 
@@ -987,10 +990,16 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
       regulator(regulator),
       ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
       maybeStatement(ownStatement) {
+  // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
+  KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
 }
 
 SqliteDatabase::Query::~Query() noexcept(false) {
+  destroy();
+}
+
+void SqliteDatabase::Query::destroy() {
   //Update the db stats that we have collected for the query
   db.sqliteObserver.addQueryStats(rowsRead, rowsWritten);
 
