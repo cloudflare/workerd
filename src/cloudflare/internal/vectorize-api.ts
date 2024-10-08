@@ -19,7 +19,7 @@ enum Operation {
 type VectorizeVersion = 'v1' | 'v2';
 
 function toNdJson(arr: object[]) {
-  return arr.map((o) => JSON.stringify(o)).join('\n');
+  return arr.reduce((acc, o) => acc + JSON.stringify(o) + '\n', '').trim();
 }
 
 /*
@@ -33,7 +33,7 @@ class VectorizeIndexImpl implements Vectorize {
     private readonly indexId: string,
     private readonly indexVersion: VectorizeVersion,
     private readonly useNdJson: boolean
-  ) {}
+  ) { }
 
   public async describe(): Promise<VectorizeIndexInfo> {
     const endpoint =
@@ -235,10 +235,9 @@ class VectorizeIndexImpl implements Vectorize {
       try {
         const errResponse = (await res.json()) as VectorizeError;
         err = new Error(
-          `${Operation[operation]}_ERROR${
-            typeof errResponse.code === 'number'
-              ? ` (code = ${errResponse.code})`
-              : ''
+          `${Operation[operation]}_ERROR${typeof errResponse.code === 'number'
+            ? ` (code = ${errResponse.code})`
+            : ''
           }: ${errResponse.error}`,
           {
             cause: new Error(errResponse.error),
@@ -278,10 +277,9 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
     return JSON.parse(body) as T;
   } catch {
     throw new Error(
-      `Failed to parse body as JSON, got: ${
-        body.length > maxBodyLogChars
-          ? `${body.slice(0, maxBodyLogChars)}…`
-          : body
+      `Failed to parse body as JSON, got: ${body.length > maxBodyLogChars
+        ? `${body.slice(0, maxBodyLogChars)}…`
+        : body
       }`
     );
   }
