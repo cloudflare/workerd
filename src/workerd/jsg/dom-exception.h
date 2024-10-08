@@ -51,9 +51,9 @@ public:
       Optional<kj::String> message,
       Optional<kj::String> name);
 
-  kj::StringPtr getName();
-  kj::StringPtr getMessage();
-  int getCode();
+  kj::StringPtr getName() const;
+  kj::StringPtr getMessage() const;
+  int getCode() const;
 
 #define JSG_DOM_EXCEPTION_CONSTANT_CXX(name, code, friendlyName) static constexpr int name = code;
 #define JSG_DOM_EXCEPTION_CONSTANT_JS(name, code, friendlyName) JSG_STATIC_CONSTANT(name);
@@ -95,8 +95,8 @@ public:
   // depend on directly here because we cannot introduce the dependency into JSG.
   // Therefore we have to set it manually. A better solution long term is to actually
   // move DOMException into workerd/api, but we'll do that separately.
-  static const uint SERIALIZATION_TAG = 7;
-  static const uint SERIALIZATION_TAG_V2 = 8;
+  static constexpr uint SERIALIZATION_TAG = 7;
+  static constexpr uint SERIALIZATION_TAG_V2 = 8;
   JSG_SERIALIZABLE(SERIALIZATION_TAG_V2, SERIALIZATION_TAG);
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
