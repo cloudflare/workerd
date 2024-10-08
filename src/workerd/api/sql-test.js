@@ -1266,6 +1266,28 @@ export class DurableObjectExample extends DurableObject {
     // Now try to put to KV again. This will create the `_cf_KV` table again.
     await this.state.storage.put('foo', 456);
   }
+
+  async testRollbackAlarmInit() {
+    // Much like testRollbackKvInit() but for alarms.
+
+    try {
+      this.state.storage.transactionSync(() => {
+        // Cause KV table to be initialized.
+        this.state.storage.setAlarm(Date.now() + 86400 * 365);
+
+        // Roll back the transaction by throwing.
+        throw new Error('bar');
+      });
+      throw new Error('expected error');
+    } catch (err) {
+      if (err.message != 'bar') throw err;
+    }
+
+    assert.strictEqual(await this.state.storage.getAlarm(), null);
+    await this.state.storage.setAlarm(Date.now() + 86400 * 365);
+  }
+
+  async alarm() {}
 }
 
 export default {
@@ -1348,6 +1370,7 @@ export let testRollbackKvInit = {
   async test(ctrl, env, ctx) {
     let stub = env.ns.get(env.ns.idFromName('rollback-kv-test'));
     await stub.testRollbackKvInit();
+    await stub.testRollbackAlarmInit();
   },
 };
 

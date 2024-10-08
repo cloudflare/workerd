@@ -24,9 +24,6 @@ public:
   // Sets current alarm time, or none.
   void setAlarm(kj::Maybe<kj::Date> currentTime);
 
-  // Invalidates cached values.  Needs to be called when rolling back db state.
-  void invalidate();
-
 private:
   struct Uninitialized {};
   struct Initialized {
