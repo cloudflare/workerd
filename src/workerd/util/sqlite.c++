@@ -973,10 +973,6 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     : ResetListener(db),
       regulator(regulator),
       maybeStatement(statement) {
-  // If the statement was used for a previous query, then its row counters contain data from that
-  // query's execution. Reset them to zero.
-  resetRowCounters();
-
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
@@ -1014,6 +1010,10 @@ void SqliteDatabase::Query::destroy() {
       // sqlite3_clear_bindings() returns int, but there is no documentation on how the return code
       // should be interpreted, so we ignore it.
       sqlite3_clear_bindings(&statement);
+
+      // Reset the rows read/written counters.
+      sqlite3_stmt_status(&statement, LIBSQL_STMTSTATUS_ROWS_READ, 1);
+      sqlite3_stmt_status(&statement, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 1);
     }
   }
 }
@@ -1074,12 +1074,6 @@ uint64_t SqliteDatabase::Query::getRowsRead() {
 uint64_t SqliteDatabase::Query::getRowsWritten() {
   sqlite3_stmt* statement = getStatement();
   return sqlite3_stmt_status(statement, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 0);
-}
-
-void SqliteDatabase::Query::resetRowCounters() {
-  sqlite3_stmt* statement = getStatement();
-  sqlite3_stmt_status(statement, LIBSQL_STMTSTATUS_ROWS_READ, 1);
-  sqlite3_stmt_status(statement, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 1);
 }
 
 void SqliteDatabase::Query::bind(uint i, kj::ArrayPtr<const byte> value) {

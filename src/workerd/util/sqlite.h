@@ -429,8 +429,6 @@ private:
       : ResetListener(db),
         regulator(regulator),
         maybeStatement(statement) {
-    resetRowCounters();
-
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
@@ -452,7 +450,6 @@ private:
 
   void init(kj::ArrayPtr<const ValuePtr> bindings);
   void destroy();
-  void resetRowCounters();
 
   void bind(uint column, ValuePtr value);
   void bind(uint column, kj::ArrayPtr<const byte> value);
