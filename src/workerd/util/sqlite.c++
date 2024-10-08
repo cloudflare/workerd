@@ -466,13 +466,104 @@ kj::StringPtr SqliteDatabase::getCurrentQueryForDebug() {
   }
 }
 
+void SqliteDatabase::applyChange(const StateChange& change) {
+  KJ_SWITCH_ONEOF(change) {
+    KJ_CASE_ONEOF(none, NoChange) {
+      // Nothing.
+    }
+
+    KJ_CASE_ONEOF(begin, BeginTxn) {
+      KJ_IF_SOME(name, begin.savepointName) {
+        savepoints.add(
+            Savepoint{.name = kj::str(name), .rollbackCallbackIndex = rollbackCallbacks.size()});
+      } else {
+        KJ_ASSERT(savepoints.empty(),
+            "BEGIN TRANSACTION should have failed when savepoints are present?");
+        KJ_ASSERT(
+            !inTransaction, "BEGIN TRANSACTION should have failed when already in a transaction?");
+        KJ_ASSERT(rollbackCallbacks.empty(),
+            "we shouldn't have been keeping rollback callbacks with no transaction open!");
+        inTransaction = true;
+      }
+    }
+
+    KJ_CASE_ONEOF(commit, CommitTxn) {
+      KJ_IF_SOME(name, commit.savepointName) {
+        // According to https://www.sqlite.org/lang_savepoint.html, releasing a savepoint also
+        // releases all later savepoints. In theory it seems like savepoints shouldn't need to
+        // be LIFO like this, but the docs say they are!
+        for (;;) {
+          KJ_ASSERT(!savepoints.empty(), "released a savepoint that didn't exist?");
+          auto sp = kj::mv(savepoints.back());
+          savepoints.removeLast();
+          if (sp.name == name) break;
+        }
+      } else {
+        KJ_ASSERT(inTransaction, "COMMIT TRANSACTION without BEGIN TRANSACTION?");
+
+        // Since BEGIN TRANSACTION cannot be nested within a savepoint, this must have released
+        // all savepoints implicitly.
+        savepoints.clear();
+        inTransaction = false;
+      }
+
+      if (savepoints.empty() && !inTransaction) {
+        // Transaction stack is empty, so the transaction is committed. We can release the rollback
+        // callbacks.
+        rollbackCallbacks.clear();
+      }
+    }
+
+    KJ_CASE_ONEOF(rollback, RollbackTxn) {
+      KJ_IF_SOME(name, rollback.savepointName) {
+        for (;;) {
+          KJ_ASSERT(!savepoints.empty(), "released a savepoint that didn't exist?");
+          if (savepoints.back().name == name) {
+            // Found the savepoint.
+            // Call all rollback callbacks later than the savepoint.
+            size_t index = savepoints.back().rollbackCallbackIndex;
+            KJ_ASSERT(rollbackCallbacks.size() >= index);
+            while (rollbackCallbacks.size() > index) {
+              rollbackCallbacks.back()();
+              rollbackCallbacks.removeLast();
+            }
+
+            // NOTE: Rolling back to a savepoint does not actually release the savepoint. Hence
+            //   we save this savepoint as the last item in `savepoints`. It must be released
+            //   separately.
+            break;
+          }
+
+          savepoints.removeLast();
+        }
+      } else {
+        KJ_ASSERT(inTransaction, "ROLLBACK TRANSACTION without BEGIN TRANSACTION?");
+
+        savepoints.clear();
+        inTransaction = false;
+
+        while (!rollbackCallbacks.empty()) {
+          rollbackCallbacks.back()();
+          rollbackCallbacks.removeLast();
+        }
+      }
+    }
+  }
+}
+
 // Set up the regulator that will be used for authorizer callbacks while preparing this
 // statement.
 SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(
     const Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
   sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 
-  KJ_ASSERT(currentRegulator == kj::none, "recursive prepareSql()?");
+  ParseContext parseContext;
+  KJ_ASSERT(currentParseContext == kj::none, "recursive prepareSql()?");
+  KJ_DEFER(currentParseContext = kj::none);
+  currentParseContext = parseContext;
+
+  KJ_ASSERT(currentRegulator == kj::none,
+      "can't prepare statements inside executeWithRegulator() callback");
   KJ_DEFER(currentRegulator = kj::none);
   currentRegulator = regulator;
 
@@ -523,6 +614,12 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(
             SQLITE_CALL_FAILED("sqlite3_step()", err);
           }
 
+          // Apply any state changes from executing the statement.
+          applyChange(parseContext.stateChange);
+
+          // Reset parse context for next statement.
+          parseContext = {};
+
           // Reduce `sqlCode` to include only what we haven't already executed.
           sqlCode = kj::StringPtr(tail, sqlCode.end());
           continue;
@@ -530,9 +627,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(
         break;
     }
 
-    return {
-      .statement = kj::mv(ownResult),
-    };
+    return {.statement = kj::mv(ownResult), .stateChange = kj::mv(parseContext.stateChange)};
   }
 }
 
@@ -580,6 +675,10 @@ void SqliteDatabase::executeWithRegulator(
 
 void SqliteDatabase::reset() {
   KJ_REQUIRE(!readOnly, "can't reset() read-only database");
+
+  // If transactions are open during reset(), whatever had the transaction open is going to get
+  // confused at best, or lose data at worst. Let's just not allow this.
+  KJ_REQUIRE(!inTransaction && savepoints.empty(), "can't reset() a database during a transaction");
 
   // Temporarily disable the on-write callback while resetting.
   auto writeCb = kj::mv(onWriteCallback);
@@ -659,8 +758,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     }
   }
 
-  if (&regulator == &TRUSTED) {
-    // Everything is allowed for trusted queries.
+  if (&regulator == &TRUSTED && actionCode != SQLITE_TRANSACTION &&
+      actionCode != SQLITE_SAVEPOINT) {
+    // Everything is allowed for trusted queries. (But transactions and savepoints need special
+    // handling below.)
     return true;
   }
 
@@ -702,20 +803,52 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
     case SQLITE_TRANSACTION: /* Operation       NULL            */
     {
-      // Verify param1 is one of the values we expect.
+      if (!regulator.allowTransactions()) {
+        return false;
+      }
+
       kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
-      KJ_ASSERT(op == "BEGIN" || op == "ROLLBACK" || op == "COMMIT", op);
-    }
+      StateChange change;
+      if (op == "BEGIN") {
+        change = BeginTxn{kj::none};
+      } else if (op == "COMMIT") {
+        change = CommitTxn{kj::none};
+      } else if (op == "ROLLBACK") {
+        change = RollbackTxn{kj::none};
+      } else {
+        KJ_FAIL_ASSERT("unknown SQLITE_TRANSACTION op", op);
+      }
+      KJ_IF_SOME(ctx, currentParseContext) {
+        ctx.stateChange = kj::mv(change);
+      }
+
       KJ_ASSERT(param2 == nullptr);
-      return regulator.allowTransactions();
+      return true;
+    }
 
     case SQLITE_SAVEPOINT: /* Operation       Savepoint Name  */
     {
-      // Verify param1 is one of the values we expect.
-      kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
-      KJ_ASSERT(op == "BEGIN" || op == "ROLLBACK" || op == "RELEASE", op);
+      kj::String name = kj::str(KJ_ASSERT_NONNULL(param2));
+      if (!regulator.allowTransactions() || !regulator.isAllowedName(name)) {
+        return false;
+      }
 
-      return regulator.allowTransactions() && regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
+      kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
+      StateChange change;
+      if (op == "BEGIN") {
+        change = BeginTxn{kj::mv(name)};
+      } else if (op == "RELEASE") {
+        change = CommitTxn{kj::mv(name)};
+      } else if (op == "ROLLBACK") {
+        change = RollbackTxn{kj::mv(name)};
+      } else {
+        KJ_FAIL_ASSERT("unknown SQLITE_TRANSACTION op", op);
+      }
+      KJ_IF_SOME(ctx, currentParseContext) {
+        ctx.stateChange = kj::mv(change);
+      }
+
+      return true;
     }
 
     case SQLITE_PRAGMA: /* Pragma Name     1st arg or NULL */
@@ -1043,7 +1176,7 @@ void SqliteDatabase::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
     bind(i, bindings[i]);
   }
 
-  nextRow();
+  nextRow(/*first=*/true);
 }
 
 void SqliteDatabase::Query::bind(uint i, ValuePtr value) {
@@ -1104,7 +1237,7 @@ void SqliteDatabase::Query::bind(uint i, decltype(nullptr)) {
   SQLITE_CALL(sqlite3_bind_null(statement, i + 1));
 }
 
-void SqliteDatabase::Query::nextRow() {
+void SqliteDatabase::Query::nextRow(bool first) {
   auto& statementAndEffect = getStatementAndEffect();
   sqlite3_stmt* statement = statementAndEffect.statement;
 
@@ -1127,6 +1260,11 @@ void SqliteDatabase::Query::nextRow() {
     done = true;
   } else if (err != SQLITE_ROW) {
     SQLITE_CALL_FAILED("sqlite3_step()", err);
+  }
+
+  if (first) {
+    // A statement's effect is applied on the first step.
+    db.applyChange(statementAndEffect.stateChange);
   }
 }
 

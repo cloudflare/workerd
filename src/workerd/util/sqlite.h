@@ -222,6 +222,25 @@ public:
     afterResetCallback = kj::mv(callback);
   }
 
+  // Register a callback which shall be called if the current transaction is rolled back. If the
+  // current transaction commits, then the callback is discarded without invoking it.
+  //
+  // This method correctly handles savepoint stacks. The callback is invoked if any savepoint
+  // currently in the stack ends up being rolled back.
+  //
+  // This is useful when implementing any sort of in-memory caching which must stay in sync with
+  // the database state. The callback can be used to invalidate the cache, or even revert it to
+  // a previous value.
+  //
+  // When a rollback occurs, callbacks are invoked in the reverse of the order in which they were
+  // registered. The database content is rolled back first, before invoking any callbacks.
+  // Callbacks may read from the database, but must not write to it.
+  void onRollback(kj::Function<void()> callback) {
+    if (inTransaction || !savepoints.empty()) {
+      rollbackCallbacks.add(kj::mv(callback));
+    }
+  }
+
 private:
   const Vfs& vfs;
   kj::Path path;
@@ -234,6 +253,12 @@ private:
   // Set while a query is compiling.
   kj::Maybe<const Regulator&> currentRegulator;
 
+  // Set during the *first* time a statement is being compiled, to capture information about it
+  // from the authorizer callback. It is assumed that if the statement must be re-parsed later,
+  // the same data would be gathered, so `currentParseContext` is left null on re-parse.
+  struct ParseContext;
+  kj::Maybe<ParseContext&> currentParseContext;
+
   // Set while a statement is executing.
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
@@ -242,13 +267,49 @@ private:
 
   kj::List<ResetListener, &ResetListener::link> resetListeners;
 
+  // Callbacks registered with onRollback that haven't been committed nor rolled back yet.
+  kj::Vector<kj::Function<void()>> rollbackCallbacks;
+
+  struct Savepoint {
+    kj::String name;
+
+    // Size of `rollbackCallbackIndex` when this savepoint was created.
+    size_t rollbackCallbackIndex;
+  };
+
+  // Savepoints that haven't been committed nor rolled back yet.
+  kj::Vector<Savepoint> savepoints;
+
+  // True if in a BEGIN TRANSACTION transaction.
+  bool inTransaction = false;
+
   void init(kj::Maybe<kj::WriteMode> maybeMode);
+
+  // Describes various kinds of interesting state changes which a statement might apply, which we
+  // need to track to implement the SqliteDatabse interface. In particular, we must track
+  // transactions to implement the onRollback() method.
+  struct NoChange {};
+  struct BeginTxn {
+    kj::Maybe<kj::String> savepointName;
+  };
+  struct CommitTxn {
+    kj::Maybe<kj::String> savepointName;
+  };
+  struct RollbackTxn {
+    kj::Maybe<kj::String> savepointName;
+  };
+  using StateChange = kj::OneOf<NoChange, BeginTxn, CommitTxn, RollbackTxn>;
+
+  // Called immediately after a statement executes, to update our understanding of the current
+  // state.
+  void applyChange(const StateChange& change);
 
   enum Multi { SINGLE, MULTI };
 
+  // A pair of a complied statement, and a description of the interesting state changes it applies.
   struct StatementAndEffect {
     kj::Own<sqlite3_stmt> statement;
-    // TOOD(now): Add effect.
+    StateChange stateChange;
   };
 
   // Helper to call sqlite3_prepare_v3().
@@ -274,6 +335,13 @@ private:
       const Regulator& regulator);
 
   void setupSecurity(sqlite3* db);
+
+  struct ParseContext {
+    // What kind of state change does this statement cause, if any?
+    StateChange stateChange = NoChange();
+
+    // TODO(soon): We could also use this to generate better errors.
+  };
 };
 
 // Represents a prepared SQL statement, which can be executed many times.
@@ -343,7 +411,9 @@ public:
   uint changeCount();
 
   // Advance to the next row.
-  void nextRow();
+  void nextRow() {
+    return nextRow(/*first=*/false);
+  }
 
   // How many columns does each row of the result have?
   uint columnCount();
@@ -486,7 +556,7 @@ private:
   void bindAll(std::index_sequence<i...>, T&&... value) {
     checkRequirements(sizeof...(T));
     (bind(i, value), ...);
-    nextRow();
+    nextRow(/*first=*/true);
   }
 
   StatementAndEffect& getStatementAndEffect();
@@ -495,6 +565,8 @@ private:
   }
 
   void beforeSqliteReset() override;
+
+  void nextRow(bool first);
 };
 
 // Options affecting SqliteDatabase::Vfs onstructor.
