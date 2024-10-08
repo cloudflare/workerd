@@ -1,4 +1,4 @@
-From 82285442872541dd260bca65115158d971ec9cf2 Mon Sep 17 00:00:00 2001
+From 6c6d8355d7070125e930f1ff0b1533572916076c Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Wed, 21 Aug 2024 16:29:43 +0200
 Subject: Implement Promise Context Tagging
@@ -247,7 +247,7 @@ index f81666ddd2f513a9a1f39b9e486b451bf3c7574d..9e0969460fd33d8cc893e04d3418e1cb
  Tagged<Object> Isolate::VerifyBuiltinsResult(Tagged<Object> result) {
    if (is_execution_terminating() && !v8_flags.strict_termination_checks) {
 diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
-index f3316f4083da22baa5f561c333ec5bb5bc69a261..94194d59bae04905139f6e37cd19cd9b5d0537ae 100644
+index 40303fb7ecfee5fd84462c80da715d923a90efdf..dab3359645835636a4ab0f1a1fc35706b1aa3d3c 100644
 --- a/src/execution/isolate.cc
 +++ b/src/execution/isolate.cc
 @@ -593,6 +593,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
@@ -259,7 +259,7 @@ index f3316f4083da22baa5f561c333ec5bb5bc69a261..94194d59bae04905139f6e37cd19cd9b
  
    for (v8::TryCatch* block = thread->try_catch_handler_; block != nullptr;
         block = block->next_) {
-@@ -5550,6 +5552,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+@@ -5575,6 +5577,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
      shared_heap_object_cache_.push_back(ReadOnlyRoots(this).undefined_value());
    }
  
@@ -267,7 +267,7 @@ index f3316f4083da22baa5f561c333ec5bb5bc69a261..94194d59bae04905139f6e37cd19cd9b
    InitializeThreadLocal();
  
    // Profiler has to be created after ThreadLocal is initialized
-@@ -7422,5 +7425,39 @@ void Isolate::InitializeBuiltinJSDispatchTable() {
+@@ -7447,5 +7450,39 @@ void Isolate::InitializeBuiltinJSDispatchTable() {
  #endif
  }
  
@@ -308,10 +308,10 @@ index f3316f4083da22baa5f561c333ec5bb5bc69a261..94194d59bae04905139f6e37cd19cd9b
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/execution/isolate.h b/src/execution/isolate.h
-index c573cf1076af066f529bc56591de18f8ed8be494..59926e68e97a459e7300492a9972b0c02af5b8fa 100644
+index 7be3714d23d84241128aa08059a741fc593012a0..c12c69fcc193ae2622d1698cf79704d58d939231 100644
 --- a/src/execution/isolate.h
 +++ b/src/execution/isolate.h
-@@ -2244,6 +2244,14 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2250,6 +2250,14 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
                                         v8::ExceptionContext callback_kind);
    void SetExceptionPropagationCallback(ExceptionPropagationCallback callback);
  
@@ -326,7 +326,7 @@ index c573cf1076af066f529bc56591de18f8ed8be494..59926e68e97a459e7300492a9972b0c0
  #ifdef V8_ENABLE_WASM_SIMD256_REVEC
    void set_wasm_revec_verifier_for_test(
        compiler::turboshaft::WasmRevecVerifier* verifier) {
-@@ -2755,12 +2763,19 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2761,12 +2769,19 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
    int current_thread_counter_ = 0;
  #endif
  

@@ -329,7 +329,7 @@ npm_repositories()
 
 http_archive(
     name = "v8",
-    integrity = "sha256-oOgRa4akl02v8tcMbpmbHu21VL1qOYBjerq1CzekLxc=",
+    integrity = "sha256-OTr3bwOCu50VAtMUd7d1kZXIkT1OoF9+zo9g3E7Vyvo=",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -352,8 +352,8 @@ http_archive(
         "//:patches/v8/0018-Update-illegal-invocation-error-message-in-v8.patch",
         "//:patches/v8/0019-Implement-cross-request-context-promise-resolve-hand.patch",
     ],
-    strip_prefix = "v8-12.9.202.13",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.9.202.13.tar.gz",
+    strip_prefix = "v8-12.9.202.27",
+    url = "https://github.com/v8/v8/archive/refs/tags/12.9.202.27.tar.gz",
 )
 
 git_repository(
