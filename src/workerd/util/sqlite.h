@@ -246,13 +246,18 @@ private:
 
   enum Multi { SINGLE, MULTI };
 
+  struct StatementAndEffect {
+    kj::Own<sqlite3_stmt> statement;
+    // TOOD(now): Add effect.
+  };
+
   // Helper to call sqlite3_prepare_v3().
   //
   // In SINGLE mode, an exception is thrown if `sqlCode` contains multiple statements.
   //
   // In MULTI mode, if `sqlCode` contains multiple statements, each statement before the last one
   // is executed immediately. The returned object represents the last statement.
-  kj::Own<sqlite3_stmt> prepareSql(
+  StatementAndEffect prepareSql(
       const Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
 
   // Implements SQLite authorizer callback, see sqlite3_set_authorizer().
@@ -289,18 +294,22 @@ public:
   Query run(Params&&... bindings);
 
   // Convert to sqlite3_stmt, creating it on-demand if needed.
-  operator sqlite3_stmt*();
+  operator sqlite3_stmt*() {
+    return getStatementAndEffect().statement;
+  }
 
 private:
   const Regulator& regulator;
-  kj::OneOf<kj::String, kj::Own<sqlite3_stmt>> stmt;
+  kj::OneOf<kj::String, StatementAndEffect> stmt;
 
-  Statement(SqliteDatabase& db, const Regulator& regulator, kj::Own<sqlite3_stmt> stmt)
+  Statement(SqliteDatabase& db, const Regulator& regulator, StatementAndEffect stmt)
       : ResetListener(db),
         regulator(regulator),
         stmt(kj::mv(stmt)) {}
 
   void beforeSqliteReset() override;
+
+  StatementAndEffect& getStatementAndEffect();
 
   friend class SqliteDatabase;
 };
@@ -404,8 +413,8 @@ public:
 
 private:
   const Regulator& regulator;
-  kj::Own<sqlite3_stmt> ownStatement;       // for one-off queries
-  kj::Maybe<sqlite3_stmt&> maybeStatement;  // null if database was reset
+  StatementAndEffect ownStatement;                // for one-off queries
+  kj::Maybe<StatementAndEffect&> maybeStatement;  // null if database was reset
   bool done = false;
 
   // Storing the rowsRead and rowsWritten here to use in cases where a DB is reset.
@@ -428,7 +437,7 @@ private:
   Query(SqliteDatabase& db, const Regulator& regulator, Statement& statement, Params&&... bindings)
       : ResetListener(db),
         regulator(regulator),
-        maybeStatement(statement) {
+        maybeStatement(statement.getStatementAndEffect()) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
@@ -480,7 +489,10 @@ private:
     nextRow();
   }
 
-  sqlite3_stmt* getStatement();
+  StatementAndEffect& getStatementAndEffect();
+  sqlite3_stmt* getStatement() {
+    return getStatementAndEffect().statement;
+  }
 
   void beforeSqliteReset() override;
 };

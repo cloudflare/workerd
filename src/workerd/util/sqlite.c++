@@ -468,7 +468,7 @@ kj::StringPtr SqliteDatabase::getCurrentQueryForDebug() {
 
 // Set up the regulator that will be used for authorizer callbacks while preparing this
 // statement.
-kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
+SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(
     const Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
   sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 
@@ -530,7 +530,9 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
         break;
     }
 
-    return ownResult;
+    return {
+      .statement = kj::mv(ownResult),
+    };
   }
 }
 
@@ -712,8 +714,9 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       // Verify param1 is one of the values we expect.
       kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
       KJ_ASSERT(op == "BEGIN" || op == "ROLLBACK" || op == "RELEASE", op);
-    }
+
       return regulator.allowTransactions() && regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
+    }
 
     case SQLITE_PRAGMA: /* Pragma Name     1st arg or NULL */
       // We currently only permit a few pragmas.
@@ -949,20 +952,20 @@ SqliteDatabase::Statement SqliteDatabase::prepare(
       *this, regulator, prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
 
-SqliteDatabase::Statement::operator sqlite3_stmt*() {
+SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::getStatementAndEffect() {
   KJ_IF_SOME(sqlCode, stmt.tryGet<kj::String>()) {
     // Database was reset. Recompile the statement against the new database. (This could throw,
     // of course, if the statement depends on tables that haven't been recreated yet.)
     stmt = db.prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE);
   }
 
-  return KJ_ASSERT_NONNULL(stmt.tryGet<kj::Own<sqlite3_stmt>>()).get();
+  return KJ_ASSERT_NONNULL(stmt.tryGet<StatementAndEffect>());
 }
 
 void SqliteDatabase::Statement::beforeSqliteReset() {
-  KJ_IF_SOME(prepared, stmt.tryGet<kj::Own<sqlite3_stmt>>()) {
+  KJ_IF_SOME(prepared, stmt.tryGet<StatementAndEffect>()) {
     // Pull the original SQL code out of the statement and store it.
-    stmt = kj::str(sqlite3_sql(prepared));
+    stmt = kj::str(sqlite3_sql(prepared.statement));
   }
 }
 
@@ -972,7 +975,7 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
       regulator(regulator),
-      maybeStatement(statement) {
+      maybeStatement(statement.getStatementAndEffect()) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
@@ -1001,19 +1004,19 @@ void SqliteDatabase::Query::destroy() {
 
   // We only need to reset the statement if we don't own it. If we own it, it's about to be
   // destroyed anyway.
-  if (ownStatement.get() == nullptr) {
+  if (ownStatement.statement.get() == nullptr) {
     KJ_IF_SOME(statement, maybeStatement) {
       // The error code returned by sqlite3_reset() actually represents the last error encountered
       // when stepping the statement. This doesn't mean that the reset failed.
-      sqlite3_reset(&statement);
+      sqlite3_reset(statement.statement);
 
       // sqlite3_clear_bindings() returns int, but there is no documentation on how the return code
       // should be interpreted, so we ignore it.
-      sqlite3_clear_bindings(&statement);
+      sqlite3_clear_bindings(statement.statement);
 
       // Reset the rows read/written counters.
-      sqlite3_stmt_status(&statement, LIBSQL_STMTSTATUS_ROWS_READ, 1);
-      sqlite3_stmt_status(&statement, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 1);
+      sqlite3_stmt_status(statement.statement, LIBSQL_STMTSTATUS_ROWS_READ, 1);
+      sqlite3_stmt_status(statement.statement, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 1);
     }
   }
 }
@@ -1102,7 +1105,8 @@ void SqliteDatabase::Query::bind(uint i, decltype(nullptr)) {
 }
 
 void SqliteDatabase::Query::nextRow() {
-  sqlite3_stmt* statement = getStatement();
+  auto& statementAndEffect = getStatementAndEffect();
+  sqlite3_stmt* statement = statementAndEffect.statement;
 
   KJ_ASSERT(db.currentStatement == kj::none, "recursive nextRow()?");
   KJ_DEFER(db.currentStatement = kj::none);
@@ -1192,8 +1196,8 @@ bool SqliteDatabase::Query::isNull(uint column) {
   return sqlite3_column_type(statement, column) == SQLITE_NULL;
 }
 
-sqlite3_stmt* SqliteDatabase::Query::getStatement() {
-  return &KJ_UNWRAP_OR(maybeStatement, {
+SqliteDatabase::StatementAndEffect& SqliteDatabase::Query::getStatementAndEffect() {
+  return KJ_UNWRAP_OR(maybeStatement, {
     regulator.onError(kj::none, "SQLite query was canceled because the database was deleted.");
     KJ_FAIL_REQUIRE("query canceled because reset() was called on the database");
   });
@@ -1204,7 +1208,7 @@ void SqliteDatabase::Query::beforeSqliteReset() {
   // here. Luckily, we don't need to reset it or anything because the statement will be destroyed
   // by Statement::beforeSqliteReset().
   maybeStatement = kj::none;
-  ownStatement = nullptr;
+  ownStatement = {};
 }
 
 // =======================================================================================
