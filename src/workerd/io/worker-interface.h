@@ -46,7 +46,7 @@ public:
   // to be invoked.
   //
   // If prewarm() has to do anything asynchronous, it should use "waitUntil" tasks.
-  virtual kj::Promise<void> prewarm(kj::StringPtr url) = 0;
+  virtual void prewarm(kj::StringPtr url) = 0;
 
   struct ScheduledResult {
     bool retry = true;
@@ -116,6 +116,7 @@ public:
     // Forward the event over RPC.
     virtual kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         capnp::ByteStreamFactory& byteStreamFactory,
+        kj::TaskSet& waitUntilTasks,
         rpc::EventDispatcher::Client dispatcher) = 0;
 
     // Get the type for this event for logging / metrics purposes. This is intended for use by the
@@ -146,7 +147,10 @@ private:
 
 // Given a Promise for a WorkerInterface, return a WorkerInterface whose methods will first wait
 // for the promise, then invoke the destination object.
-kj::Own<WorkerInterface> newPromisedWorkerInterface(kj::Promise<kj::Own<WorkerInterface>> promise);
+kj::Own<WorkerInterface> newPromisedWorkerInterface(
+    kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<WorkerInterface>> promise);
+// TODO(cleanup): `waitUntilTasks` is only needed to handle `prewarm` since they
+//   don't return promises. We should maybe change them to return promises?
 
 // Adapts WorkerInterface to HttpClient, including taking ownership.
 //
@@ -165,6 +169,7 @@ class RpcWorkerInterface: public WorkerInterface {
 public:
   RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
+      kj::TaskSet& waitUntilTasks,
       rpc::EventDispatcher::Client dispatcher);
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -179,7 +184,7 @@ public:
       ConnectResponse& tunnel,
       kj::HttpConnectSettings settings) override;
 
-  kj::Promise<void> prewarm(kj::StringPtr url) override;
+  void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
@@ -187,6 +192,7 @@ public:
 private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
+  kj::TaskSet& waitUntilTasks;
   rpc::EventDispatcher::Client dispatcher;
 };
 

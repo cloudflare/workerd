@@ -261,7 +261,7 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
     auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
     event = workerInterface
                 ->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
-                    hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this))
+                    hibernationEventType, readLoopTasks, kj::mv(KJ_REQUIRE_NONNULL(params)), *this))
                 .ignoreResult()
                 .attach(kj::mv(workerInterface));
   }
@@ -366,7 +366,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
     // Dispatch the event.
     auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
     co_await workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
-        hibernationEventType, kj::mv(params), *this));
+        hibernationEventType, readLoopTasks, kj::mv(params), *this));
     if (isClose) {
       co_return;
     }

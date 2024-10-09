@@ -550,9 +550,7 @@ private:
     co_await kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(io_stream));
   }
 
-  kj::Promise<void> prewarm(kj::StringPtr url) override {
-    return kj::READY_NOW;
-  }
+  void prewarm(kj::StringPtr url) override {}
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     throwUnsupported();
   }
@@ -689,9 +687,7 @@ private:
       return parent.serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
     }
 
-    kj::Promise<void> prewarm(kj::StringPtr url) override {
-      return kj::READY_NOW;
-    }
+    void prewarm(kj::StringPtr url) override {}
     kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
       throwUnsupported();
     }
@@ -705,7 +701,8 @@ private:
       auto dispatcher =
           bootstrap.startEventRequest(capnp::MessageSize{4, 0}).send().getDispatcher();
       return event
-          ->sendRpc(parent.httpOverCapnpFactory, parent.byteStreamFactory, kj::mv(dispatcher))
+          ->sendRpc(parent.httpOverCapnpFactory, parent.byteStreamFactory, parent.waitUntilTasks,
+              kj::mv(dispatcher))
           .attach(kj::mv(event));
     }
 
@@ -865,9 +862,7 @@ private:
     return serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
   }
 
-  kj::Promise<void> prewarm(kj::StringPtr url) override {
-    return kj::READY_NOW;
-  }
+  void prewarm(kj::StringPtr url) override {}
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     throwUnsupported();
   }
@@ -1145,9 +1140,7 @@ private:
       kj::HttpConnectSettings settings) override {
     throwUnsupported();
   }
-  kj::Promise<void> prewarm(kj::StringPtr url) override {
-    return kj::READY_NOW;
-  }
+  void prewarm(kj::StringPtr url) override {}
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     throwUnsupported();
   }
@@ -1582,7 +1575,8 @@ public:
 
     kj::Own<WorkerInterface> getActor(
         kj::String id, IoChannelFactory::SubrequestMetadata metadata) {
-      return newPromisedWorkerInterface(getActorThenStartRequest(kj::mv(id), kj::mv(metadata)));
+      return newPromisedWorkerInterface(
+          service.waitUntilTasks, getActorThenStartRequest(kj::mv(id), kj::mv(metadata)));
     }
 
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {

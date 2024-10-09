@@ -64,7 +64,7 @@ public:
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override;
-  kj::Promise<void> prewarm(kj::StringPtr url) override;
+  void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<bool> test() override;
@@ -446,7 +446,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   JSG_FAIL_REQUIRE(TypeError, "Incoming CONNECT on a worker not supported");
 }
 
-kj::Promise<void> WorkerEntrypoint::prewarm(kj::StringPtr url) {
+void WorkerEntrypoint::prewarm(kj::StringPtr url) {
   // Nothing to do, the worker is already loaded.
   TRACE_EVENT("workerd", "WorkerEntrypoint::prewarm()", "url", url.cStr());
   auto incomingRequest =
@@ -458,7 +458,6 @@ kj::Promise<void> WorkerEntrypoint::prewarm(kj::StringPtr url) {
   // TODO(someday): Ideally, middleware workers would forward prewarm() to the next stage. At
   //   present we don't have a good way to decide what stage that is, especially given that we'll
   //   be switching to `next` being a binding in the future.
-  return kj::READY_NOW;
 }
 
 kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(

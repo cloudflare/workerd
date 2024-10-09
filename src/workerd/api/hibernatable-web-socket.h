@@ -59,10 +59,13 @@ class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::Custom
                                                   public kj::Refcounted {
 public:
   HibernatableWebSocketCustomEventImpl(uint16_t typeId,
+      kj::TaskSet& waitUntilTasks,
       kj::Own<HibernationReader> params,
       kj::Maybe<Worker::Actor::HibernationManager&> manager = kj::none);
-  HibernatableWebSocketCustomEventImpl(
-      uint16_t typeId, HibernatableSocketParams params, Worker::Actor::HibernationManager& manager);
+  HibernatableWebSocketCustomEventImpl(uint16_t typeId,
+      kj::TaskSet& waitUntilTasks,
+      HibernatableSocketParams params,
+      Worker::Actor::HibernationManager& manager);
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -70,6 +73,7 @@ public:
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
+      kj::TaskSet& waitUntilTasks,
       rpc::EventDispatcher::Client dispatcher) override;
 
   uint16_t getType() override {
