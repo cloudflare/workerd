@@ -6,13 +6,14 @@ alias st := stream-test
 default:
   @just --list
 
+pwd := `pwd`
 clang_version := "18"
 
 prepare:
   cargo install gen-compile-commands
 
 compile-commands:
-  rm -f compile_commands.json | gen-compile-commands --root . --compile-flags compile_flags.txt --out compile_commands.json --src-dir ./src
+  rm -f compile_commands.json | gen-compile-commands --root {{pwd}} --compile-flags compile_flags.txt --out compile_commands.json --src-dir {{pwd}}/src
 
 clean:
   rm -f compile_commands.json
