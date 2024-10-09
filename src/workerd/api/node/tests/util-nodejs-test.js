@@ -4354,3 +4354,17 @@ export const getCallSiteTest = {
     assert.strictEqual(typeof stack.column, 'number');
   },
 };
+
+export const isDeepStrictEqual = {
+  test() {
+    util.isDeepStrictEqual(1, 1);
+    util.isDeepStrictEqual(['hello', 'world'], ['hello', 'world']);
+  },
+};
+
+export const isArray = {
+  test() {
+    assert.ok(util.isArray([]));
+    assert.ok(!util.isArray('hello world'));
+  },
+};
