@@ -101,6 +101,7 @@ public:
   jsg::Optional<ScriptVersion> getScriptVersion();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
+  kj::StringPtr getExecutionModel();
   kj::StringPtr getOutcome();
 
   uint getCpuTime();
@@ -119,6 +120,7 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(dispatchNamespace, getDispatchNamespace);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(outcome, getOutcome);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(executionModel, getExecutionModel);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(truncated, getTruncated);
   }
 
@@ -135,6 +137,7 @@ private:
   kj::Maybe<ScriptVersion> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
+  kj::String executionModel;
   kj::String outcome;
   uint cpuTime;
   uint wallTime;

@@ -262,14 +262,16 @@ Trace::Trace(kj::Maybe<kj::String> stableId,
     kj::Maybe<kj::String> dispatchNamespace,
     kj::Maybe<kj::String> scriptId,
     kj::Array<kj::String> scriptTags,
-    kj::Maybe<kj::String> entrypoint)
+    kj::Maybe<kj::String> entrypoint,
+    ExecutionModel executionModel)
     : stableId(kj::mv(stableId)),
       scriptName(kj::mv(scriptName)),
       scriptVersion(kj::mv(scriptVersion)),
       dispatchNamespace(kj::mv(dispatchNamespace)),
       scriptId(kj::mv(scriptId)),
       scriptTags(kj::mv(scriptTags)),
-      entrypoint(kj::mv(entrypoint)) {}
+      entrypoint(kj::mv(entrypoint)),
+      executionModel(executionModel) {}
 Trace::Trace(rpc::Trace::Reader reader) {
   mergeFrom(reader, PipelineLogLevel::FULL);
 }
@@ -311,6 +313,7 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   KJ_IF_SOME(ns, dispatchNamespace) {
     builder.setDispatchNamespace(ns);
   }
+  builder.setExecutionModel(executionModel);
 
   {
     auto list = builder.initScriptTags(scriptTags.size());
@@ -430,6 +433,7 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   if (reader.hasDispatchNamespace()) {
     dispatchNamespace = kj::str(reader.getDispatchNamespace());
   }
+  executionModel = reader.getExecutionModel();
 
   if (auto tags = reader.getScriptTags(); tags.size() > 0) {
     scriptTags = KJ_MAP(tag, tags) { return kj::str(tag); };
@@ -574,6 +578,7 @@ kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
 }
 
 kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
+    ExecutionModel executionModel,
     kj::Maybe<kj::String> scriptId,
     kj::Maybe<kj::String> stableId,
     kj::Maybe<kj::String> scriptName,
@@ -582,7 +587,8 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
     kj::Array<kj::String> scriptTags,
     kj::Maybe<kj::String> entrypoint) {
   auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
-      kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint));
+      kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint),
+      executionModel);
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
@@ -597,10 +603,10 @@ WorkerTracer::WorkerTracer(
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
-WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel)
+WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::refcounted<Trace>(
-          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none)),
+          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)),
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 
 void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) {
