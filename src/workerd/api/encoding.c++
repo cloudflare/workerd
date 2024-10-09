@@ -7,6 +7,7 @@
 #include "util.h"
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/strings.h>
 
 #include <unicode/ucnv.h>
 #include <unicode/utf8.h>
