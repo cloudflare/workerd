@@ -53,6 +53,7 @@ export class Ai {
   private logs: Array<string> = [];
   private options: AiOptions = {};
   public lastRequestId: string | null = null;
+  public aiGatewayLogId: string | null = null;
 
   public constructor(fetcher: Fetcher) {
     this.fetcher = fetcher;
@@ -104,6 +105,7 @@ export class Ai {
     );
 
     this.lastRequestId = res.headers.get('cf-ai-req-id');
+    this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
 
     if (inputs['stream']) {
       if (!res.ok) {
