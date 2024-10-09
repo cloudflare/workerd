@@ -39,6 +39,9 @@ struct PythonSnapshotRelease @0x89c66fb883cb6975 {
   # For example "2024-02-18".
   backport @3 :Int64;
   # A number that is incremented each time we need to backport a fix to an existing Python release.
+  baselineSnapshotHash @4 :Text;
+  # A sha256 checksum hash of the baseline/universal memory snapshot to use for Python Workers using
+  # this release.
 }
 
 
@@ -427,7 +430,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers @43 :Bool
       $compatEnableFlag("python_workers")
       $pythonSnapshotRelease(pyodide = "0.26.0a2", pyodideRevision = "2024-03-01",
-          packages = "2024-03-01", backport = 3)
+          packages = "2024-03-01", backport = 3,
+          baselineSnapshotHash = "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5")
       $impliedByAfterDate(name = "pythonWorkersDevPyodide", date = "2000-01-01");
   # Enables Python Workers. Access to this flag is not restricted, instead bundles containing
   # Python modules are restricted in EWC.
@@ -580,9 +584,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkersDevPyodide @58 :Bool
     $compatEnableFlag("python_workers_development")
     $pythonSnapshotRelease(pyodide = "dev", pyodideRevision = "dev",
-          packages = "2024-03-01", backport = 0)
+          packages = "2024-03-01", backport = 0,
+          baselineSnapshotHash = "92859211804cd350f9e14010afad86e584bdd017dc7acfd94709a87f3220afae")
     $experimental;
   # Enables Python Workers and uses the bundle from the Pyodide source directory directly. For testing only.
+  #
+  # Note that the baseline snapshot hash here refers to the one used in
+  # `baseline-from-gcs.ew-test-bin.c++`. We don't intend to ever load it in production.
 
   nodeJsZlib @59 :Bool
       $compatEnableFlag("nodejs_zlib")
