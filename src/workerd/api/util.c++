@@ -7,6 +7,7 @@
 #include "simdutf.h"
 
 #include <workerd/util/mimetype.h>
+#include <workerd/util/strings.h>
 
 #include <kj/encoding.h>
 
@@ -216,7 +217,6 @@ kj::String redactUrl(kj::StringPtr url) {
     bool isUpper = ('A' <= c && c <= 'Z');
     bool isLower = ('a' <= c && c <= 'z');
     bool isDigit = ('0' <= c && c <= '9');
-    bool isHexDigit = (isDigit || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f'));
     bool isSep = (c == '+' || c == '-' || c == '_');
     // These extra characters are used in the regular and url-safe versions of
     // base64, but might also be used for GUID-style separators in hex ids.
@@ -225,10 +225,10 @@ kj::String redactUrl(kj::StringPtr url) {
     // character.
 
     if (isUpper || isLower || isDigit || isSep) {
-      if (isHexDigit) {
+      if (isHexDigit(c)) {
         hexDigitCount++;
       }
-      if (!isHexDigit && !isSep) {
+      if (!isHexDigit(c) && !isSep) {
         sawNonHexChar = true;
       }
       if (isUpper) {

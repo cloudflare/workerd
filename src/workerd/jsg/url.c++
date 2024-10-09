@@ -1,5 +1,7 @@
 #include "url.h"
 
+#include <workerd/util/strings.h>
+
 #include <kj/hash.h>
 
 extern "C" {
@@ -487,11 +489,6 @@ constexpr auto MODIFIER_ONE_OR_MORE = "+"_kjc;
 inline bool isAsciiDigit(char c) {
   return c >= '0' && c <= '9';
 };
-
-inline bool isHexDigit(char c) {
-  // Check if `c` is the ASCII code of a hexadecimal digit.
-  return isAsciiDigit(c) || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F');
-}
 
 inline bool isAscii(char codepoint) {
   return codepoint >= 0x00 && codepoint <= 0x7f;

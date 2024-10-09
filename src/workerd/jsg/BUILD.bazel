@@ -92,6 +92,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":memory-tracker",
+        "//src/workerd/util:strings",
         "@capnp-cpp//src/kj",
     ],
 )
