@@ -11,4 +11,10 @@
         "BAZEL_VC" : "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC",
         "BAZEL_WINSDK_FULL_VERSION" : "10.0.22000.0",
     },
+    "clangd.arguments": [
+        "--background-index",
+        "--header-insertion=never",
+        "--compile-commands-dir=${workspaceFolder}/",
+        "--query-driver=**"
+    ],
 }
