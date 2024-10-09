@@ -345,11 +345,9 @@ kj::Own<WorkerInterface> WorkerInterface::fromException(kj::Exception&& e) {
 
 RpcWorkerInterface::RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
-    kj::TaskSet& waitUntilTasks,
     rpc::EventDispatcher::Client dispatcher)
     : httpOverCapnpFactory(httpOverCapnpFactory),
       byteStreamFactory(byteStreamFactory),
-      waitUntilTasks(waitUntilTasks),
       dispatcher(kj::mv(dispatcher)) {}
 
 kj::Promise<void> RpcWorkerInterface::request(kj::HttpMethod method,
@@ -405,8 +403,7 @@ kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(
 
 kj::Promise<WorkerInterface::CustomEvent::Result> RpcWorkerInterface::customEvent(
     kj::Own<CustomEvent> event) {
-  return event->sendRpc(httpOverCapnpFactory, byteStreamFactory, waitUntilTasks, dispatcher)
-      .attach(kj::mv(event));
+  return event->sendRpc(httpOverCapnpFactory, byteStreamFactory, dispatcher).attach(kj::mv(event));
 }
 
 // ======================================================================================

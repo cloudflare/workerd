@@ -705,8 +705,7 @@ private:
       auto dispatcher =
           bootstrap.startEventRequest(capnp::MessageSize{4, 0}).send().getDispatcher();
       return event
-          ->sendRpc(parent.httpOverCapnpFactory, parent.byteStreamFactory, parent.waitUntilTasks,
-              kj::mv(dispatcher))
+          ->sendRpc(parent.httpOverCapnpFactory, parent.byteStreamFactory, kj::mv(dispatcher))
           .attach(kj::mv(event));
     }
 
