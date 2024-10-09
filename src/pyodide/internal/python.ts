@@ -16,7 +16,9 @@ import {
   entropyMountFiles,
   entropyAfterRuntimeInit,
   entropyBeforeTopLevel,
+  getRandomValues,
 } from 'pyodide-internal:topLevelEntropy/lib';
+import { default as UnsafeEval } from 'internal:unsafe-eval';
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -42,7 +44,11 @@ import pyodideWasmModule from 'pyodide-internal:generated/pyodide.asm.wasm';
  * in this zip file to initialize their runtime state.
  */
 import pythonStdlib from 'pyodide-internal:generated/python_stdlib.zip';
-import { instantiateEmscriptenModule } from 'pyodide-internal:emscriptenSetup';
+import {
+  instantiateEmscriptenModule,
+  setUnsafeEval,
+  setGetRandomValues,
+} from 'pyodide-internal:emscriptenSetup';
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -83,6 +89,8 @@ export async function loadPyodide(
       pyodideWasmModule
     )
   );
+  setUnsafeEval(UnsafeEval);
+  setGetRandomValues(getRandomValues);
   await enterJaegerSpan('prepare_wasm_linear_memory', () =>
     prepareWasmLinearMemory(Module)
   );
