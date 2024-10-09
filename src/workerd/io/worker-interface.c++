@@ -16,10 +16,8 @@ namespace {
 // interface the promise resolved to.
 class PromisedWorkerInterface final: public kj::Refcounted, public WorkerInterface {
 public:
-  PromisedWorkerInterface(
-      kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<WorkerInterface>> promise)
-      : waitUntilTasks(waitUntilTasks),
-        promise(promise.then([this](kj::Own<WorkerInterface> result) { worker = kj::mv(result); })
+  PromisedWorkerInterface(kj::Promise<kj::Own<WorkerInterface>> promise)
+      : promise(promise.then([this](kj::Own<WorkerInterface> result) { worker = kj::mv(result); })
                     .fork()) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -49,18 +47,12 @@ public:
     }
   }
 
-  void prewarm(kj::StringPtr url) override {
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
     KJ_IF_SOME(w, worker) {
-      w.get()->prewarm(url);
+      co_return co_await w.get()->prewarm(url);
     } else {
-      static auto constexpr handlePrewarm =
-          [](kj::Promise<void> promise, kj::String url,
-              kj::Own<PromisedWorkerInterface> self) -> kj::Promise<void> {
-        co_await promise;
-        KJ_ASSERT_NONNULL(self->worker)->prewarm(url);
-      };
-
-      waitUntilTasks.add(handlePrewarm(promise.addBranch(), kj::str(url), kj::addRef(*this)));
+      co_await promise;
+      co_return co_await KJ_ASSERT_NONNULL(worker)->prewarm(url);
     }
   }
 
@@ -92,15 +84,13 @@ public:
   }
 
 private:
-  kj::TaskSet& waitUntilTasks;
   kj::ForkedPromise<void> promise;
   kj::Maybe<kj::Own<WorkerInterface>> worker;
 };
 }  // namespace
 
-kj::Own<WorkerInterface> newPromisedWorkerInterface(
-    kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<WorkerInterface>> promise) {
-  return kj::refcounted<PromisedWorkerInterface>(waitUntilTasks, kj::mv(promise));
+kj::Own<WorkerInterface> newPromisedWorkerInterface(kj::Promise<kj::Own<WorkerInterface>> promise) {
+  return kj::refcounted<PromisedWorkerInterface>(kj::mv(promise));
 }
 
 kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface) {
@@ -238,7 +228,7 @@ public:
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override;
-  void prewarm(kj::StringPtr url) override;
+  kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
@@ -273,8 +263,8 @@ RevocableWebSocketWorkerInterface::RevocableWebSocketWorkerInterface(
     : worker(worker),
       revokeProm(revokeProm.fork()) {}
 
-void RevocableWebSocketWorkerInterface::prewarm(kj::StringPtr url) {
-  worker.prewarm(url);
+kj::Promise<void> RevocableWebSocketWorkerInterface::prewarm(kj::StringPtr url) {
+  return worker.prewarm(url);
 }
 
 kj::Promise<WorkerInterface::ScheduledResult> RevocableWebSocketWorkerInterface::runScheduled(
@@ -324,8 +314,9 @@ public:
     kj::throwFatalException(kj::mv(exception));
   }
 
-  void prewarm(kj::StringPtr url) override {
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
     // ignore
+    return kj::READY_NOW;
   }
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
@@ -354,11 +345,9 @@ kj::Own<WorkerInterface> WorkerInterface::fromException(kj::Exception&& e) {
 
 RpcWorkerInterface::RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
-    kj::TaskSet& waitUntilTasks,
     rpc::EventDispatcher::Client dispatcher)
     : httpOverCapnpFactory(httpOverCapnpFactory),
       byteStreamFactory(byteStreamFactory),
-      waitUntilTasks(waitUntilTasks),
       dispatcher(kj::mv(dispatcher)) {}
 
 kj::Promise<void> RpcWorkerInterface::request(kj::HttpMethod method,
@@ -381,10 +370,10 @@ kj::Promise<void> RpcWorkerInterface::connect(kj::StringPtr host,
   return promise.attach(kj::mv(inner));
 }
 
-void RpcWorkerInterface::prewarm(kj::StringPtr url) {
+kj::Promise<void> RpcWorkerInterface::prewarm(kj::StringPtr url) {
   auto req = dispatcher.prewarmRequest(capnp::MessageSize{url.size() / sizeof(capnp::word) + 4, 0});
   req.setUrl(url);
-  waitUntilTasks.add(req.send().ignoreResult());
+  return req.send().ignoreResult();
 }
 
 kj::Promise<WorkerInterface::ScheduledResult> RpcWorkerInterface::runScheduled(
@@ -414,8 +403,7 @@ kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(
 
 kj::Promise<WorkerInterface::CustomEvent::Result> RpcWorkerInterface::customEvent(
     kj::Own<CustomEvent> event) {
-  return event->sendRpc(httpOverCapnpFactory, byteStreamFactory, waitUntilTasks, dispatcher)
-      .attach(kj::mv(event));
+  return event->sendRpc(httpOverCapnpFactory, byteStreamFactory, dispatcher).attach(kj::mv(event));
 }
 
 // ======================================================================================
