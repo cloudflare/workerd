@@ -23,13 +23,10 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* todo: the following is adopted code, enabling linting one day */
 import { Buffer } from 'node-internal:internal_buffer';
 
 export async function blob(stream) {
-  const chunks = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  return new Blob(chunks);
+  return new Blob(await Array.fromAsync(stream));
 }
 
 export async function arrayBuffer(stream) {
