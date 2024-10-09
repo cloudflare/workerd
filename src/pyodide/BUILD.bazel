@@ -3,6 +3,7 @@ load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
+load("//:build/js_file.bzl", "js_file")
 load("//:build/pyodide_bucket.bzl", "PYODIDE_PACKAGE_BUCKET_URL")
 load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle_capnp")
 
@@ -143,6 +144,12 @@ expand_template(
     out = "generated/pyodide.asm.js",
     substitutions = dict(REPLACEMENTS),
     template = "@pyodide//:pyodide/pyodide.asm.js",
+)
+
+js_file(
+    name = "pyodide.asm.js@rule_js",
+    srcs = ["generated/pyodide.asm.js"],
+    deps = ["pyodide.asm.js@rule"],
 )
 
 data = wd_ts_bundle_capnp(
