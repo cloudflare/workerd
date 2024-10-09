@@ -116,11 +116,12 @@ jsg::Optional<kj::Array<kj::String>> getTraceScriptTags(const Trace& trace) {
   }
 }
 
-kj::String getTraceOutcome(const Trace& trace) {
-  // TODO(cleanup): Add to enumToStr() to capnp?
-  auto enums = capnp::Schema::from<EventOutcome>().getEnumerants();
-  uint i = static_cast<uint>(trace.outcome);
-  KJ_ASSERT(i < enums.size(), "invalid outcome");
+template <typename Enum>
+kj::String enumToStr(const Enum& var) {
+  // TODO(cleanup): Port this to capnproto.
+  auto enums = capnp::Schema::from<Enum>().getEnumerants();
+  uint i = static_cast<uint>(var);
+  KJ_ASSERT(i < enums.size(), "invalid enum value");
   return kj::str(enums[i].getProto().getName());
 }
 
@@ -203,7 +204,8 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       scriptVersion(getTraceScriptVersion(trace)),
       dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
-      outcome(getTraceOutcome(trace)),
+      executionModel(enumToStr(trace.executionModel)),
+      outcome(enumToStr(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
       wallTime(trace.wallTime / kj::MILLISECONDS),
       truncated(trace.truncated) {}
@@ -278,6 +280,10 @@ jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
 jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
   return scriptTags.map(
       [](kj::Array<kj::String>& tags) { return KJ_MAP(t, tags) -> kj::StringPtr { return t; }; });
+}
+
+kj::StringPtr TraceItem::getExecutionModel() {
+  return executionModel;
 }
 
 kj::StringPtr TraceItem::getOutcome() {

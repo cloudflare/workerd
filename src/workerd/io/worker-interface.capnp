@@ -138,6 +138,15 @@ struct Trace @0x8e8d911203762d34 {
 
   truncated @24 :Bool;
   # Indicates that the trace was truncated due to reaching the maximum size limit.
+
+  enum ExecutionModel {
+    stateless @0;
+    durableObject @1;
+    workflow @2;
+  }
+  executionModel @25 :ExecutionModel;
+  # the execution model of the worker being traced. Can be stateless for a regular worker,
+  # durableObject for a DO worker or workflow for the upcoming Workflows feature.
 }
 
 struct SendTracesRun @0xde913ebe8e1b82a5 {

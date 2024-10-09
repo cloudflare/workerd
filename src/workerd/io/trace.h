@@ -29,6 +29,7 @@ using kj::byte;
 using kj::uint;
 
 typedef rpc::Trace::Log::Level LogLevel;
+typedef rpc::Trace::ExecutionModel ExecutionModel;
 
 enum class PipelineLogLevel {
   // WARNING: This must be kept in sync with PipelineDef::LogLevel (which is not in the OSS
@@ -61,7 +62,8 @@ public:
       kj::Maybe<kj::String> dispatchNamespace,
       kj::Maybe<kj::String> scriptId,
       kj::Array<kj::String> scriptTags,
-      kj::Maybe<kj::String> entrypoint);
+      kj::Maybe<kj::String> entrypoint,
+      ExecutionModel executionModel);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -300,6 +302,7 @@ public:
 
   kj::Vector<DiagnosticChannelEvent> diagnosticChannelEvents;
 
+  ExecutionModel executionModel;
   EventOutcome outcome = EventOutcome::UNKNOWN;
 
   kj::Maybe<FetchResponseInfo> fetchResponseInfo;
@@ -352,6 +355,7 @@ public:
 
   // Makes a tracer for a worker stage.
   kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
+      ExecutionModel executionModel,
       kj::Maybe<kj::String> scriptId,
       kj::Maybe<kj::String> stableId,
       kj::Maybe<kj::String> scriptName,
@@ -382,7 +386,7 @@ public:
   explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel);
-  explicit WorkerTracer(PipelineLogLevel pipelineLogLevel);
+  explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
   ~WorkerTracer() {
     self->invalidate();
   }
