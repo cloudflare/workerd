@@ -144,6 +144,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEventImpl::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
+    kj::TaskSet& waitUntilTasks,
     rpc::EventDispatcher::Client dispatcher) {
   auto req = dispatcher.castAs<rpc::HibernatableWebSocketEventDispatcher>()
                  .hibernatableWebSocketEventRequest();
@@ -193,12 +194,15 @@ HibernatableWebSocketEvent::ItemsForRelease::ItemsForRelease(
       tags(kj::mv(tags)) {}
 
 HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(uint16_t typeId,
+    kj::TaskSet& waitUntilTasks,
     kj::Own<HibernationReader> params,
     kj::Maybe<Worker::Actor::HibernationManager&> manager)
     : typeId(typeId),
       params(kj::mv(params)) {}
-HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(
-    uint16_t typeId, HibernatableSocketParams params, Worker::Actor::HibernationManager& manager)
+HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(uint16_t typeId,
+    kj::TaskSet& waitUntilTasks,
+    HibernatableSocketParams params,
+    Worker::Actor::HibernationManager& manager)
     : typeId(typeId),
       params(kj::mv(params)),
       manager(manager) {}
