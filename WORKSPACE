@@ -312,6 +312,17 @@ load("@npm//:repositories.bzl", "npm_repositories")
 
 npm_repositories()
 
+load("@aspect_rules_esbuild//esbuild:dependencies.bzl", "rules_esbuild_dependencies")
+
+rules_esbuild_dependencies()
+
+load("@aspect_rules_esbuild//esbuild:repositories.bzl", "esbuild_register_toolchains")
+
+esbuild_register_toolchains(
+    name = "esbuild",
+    esbuild_version = "0.23.0",
+)
+
 # ========================================================================================
 # V8 and its dependencies
 #

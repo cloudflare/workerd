@@ -16,7 +16,7 @@ import { _createPyodideModule } from 'pyodide-internal:generated/pyodide.asm';
 export {
   setUnsafeEval,
   setGetRandomValues,
-} from 'pyodide-internal:builtin_wrappers';
+} from 'pyodide-internal:pool/builtin_wrappers';
 
 /**
  * A preRun hook. Make sure environment variables are visible at runtime.
