@@ -3968,7 +3968,7 @@ public:
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& tunnel,
       kj::HttpConnectSettings settings) override;
-  void prewarm(kj::StringPtr url) override;
+  kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
@@ -4189,8 +4189,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::connect(kj::StringPtr host,
 }
 
 // TODO(someday): Log other kinds of subrequests?
-void Worker::Isolate::SubrequestClient::prewarm(kj::StringPtr url) {
-  inner->prewarm(url);
+kj::Promise<void> Worker::Isolate::SubrequestClient::prewarm(kj::StringPtr url) {
+  return inner->prewarm(url);
 }
 kj::Promise<WorkerInterface::ScheduledResult> Worker::Isolate::SubrequestClient::runScheduled(
     kj::Date scheduledTime, kj::StringPtr cron) {
