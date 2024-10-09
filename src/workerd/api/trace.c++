@@ -202,6 +202,7 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       entrypoint(trace.entrypoint.map([](auto& name) { return kj::str(name); })),
       scriptVersion(getTraceScriptVersion(trace)),
       dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
+      isActor(trace.isActor.map([](auto& actor) { return actor; })),
       scriptTags(getTraceScriptTags(trace)),
       outcome(getTraceOutcome(trace)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
@@ -273,6 +274,10 @@ jsg::Optional<ScriptVersion> TraceItem::getScriptVersion() {
 
 jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
   return dispatchNamespace.map([](auto& ns) -> kj::StringPtr { return ns; });
+}
+
+jsg::Optional<bool> TraceItem::getIsActor() {
+  return isActor.map([](auto& actor) -> bool { return actor; });
 }
 
 jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {

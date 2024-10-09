@@ -100,6 +100,7 @@ public:
   jsg::Optional<kj::StringPtr> getEntrypoint();
   jsg::Optional<ScriptVersion> getScriptVersion();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
+  jsg::Optional<bool> getIsActor();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
   kj::StringPtr getOutcome();
 
@@ -120,6 +121,8 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(outcome, getOutcome);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(truncated, getTruncated);
+    // TODO: verify this is backwards compatible/can be removed again
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(isActor, getIsActor);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -134,6 +137,7 @@ private:
   kj::Maybe<kj::String> entrypoint;
   kj::Maybe<ScriptVersion> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
+  kj::Maybe<bool> isActor;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
   kj::String outcome;
   uint cpuTime;

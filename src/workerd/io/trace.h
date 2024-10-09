@@ -59,6 +59,7 @@ public:
       kj::Maybe<kj::String> scriptName,
       kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
       kj::Maybe<kj::String> dispatchNamespace,
+      kj::Maybe<bool> isActor,
       kj::Maybe<kj::String> scriptId,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint);
@@ -288,6 +289,7 @@ public:
   kj::Maybe<kj::String> scriptName;
   kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
+  kj::Maybe<bool> isActor;
   kj::Maybe<kj::String> scriptId;
   kj::Array<kj::String> scriptTags;
   kj::Maybe<kj::String> entrypoint;
@@ -357,6 +359,7 @@ public:
       kj::Maybe<kj::String> scriptName,
       kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
       kj::Maybe<kj::String> dispatchNamespace,
+      kj::Maybe<bool> isActor,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint);
 
@@ -382,7 +385,7 @@ public:
   explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel);
-  explicit WorkerTracer(PipelineLogLevel pipelineLogLevel);
+  explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, bool isActor);
   ~WorkerTracer() {
     self->invalidate();
   }

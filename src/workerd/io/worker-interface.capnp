@@ -125,6 +125,7 @@ struct Trace @0x8e8d911203762d34 {
   wallTime @11 :UInt64;
 
   dispatchNamespace @12 :Text;
+  isActor @25 :Bool;
   scriptTags @14 :List(Text);
 
   entrypoint @22 :Text;
