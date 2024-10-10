@@ -103,7 +103,7 @@ class WorkflowImpl {
     return new InstanceImpl(result.instanceId, this.fetcher);
   }
 
-  public async create(id: string, params: object): Promise<Instance> {
+  public async create(id: string, params?: unknown): Promise<Instance> {
     const result = await callFetcher<{ instanceId: string }>(
       this.fetcher,
       '/create',
