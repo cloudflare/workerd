@@ -242,6 +242,7 @@ declare module "cloudflare:workers" {
         ) => Promise<T>);
 
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
+    sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
   };
 
   export abstract class WorkflowEntrypoint<
