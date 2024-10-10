@@ -1,6 +1,6 @@
 declare namespace _default {
   class WorkerEntrypoint {}
-  class Workflow {}
+  class WorkflowEntrypoint {}
   class DurableObject {}
   class RpcPromise {}
   class RpcProperty {}

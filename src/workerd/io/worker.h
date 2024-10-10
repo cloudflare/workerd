@@ -483,8 +483,8 @@ public:
     // Class constructor for DurableObject (aka api::DurableObjectBase).
     jsg::JsObject durableObject;
 
-    // Class constructor for Workflow.
-    jsg::JsObject workflow;
+    // Class constructor for WorkflowEntrypoint
+    jsg::JsObject workflowEntrypoint;
   };
 
   // Get the constructors for classes from which entrypoint classes may inherit.
