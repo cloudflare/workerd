@@ -14,7 +14,7 @@ namespace workerd {
 namespace {
 // A WorkerInterface that delays requests until some promise resolves, then forwards them to the
 // interface the promise resolved to.
-class PromisedWorkerInterface final: public kj::Refcounted, public WorkerInterface {
+class PromisedWorkerInterface final: public WorkerInterface {
 public:
   PromisedWorkerInterface(kj::Promise<kj::Own<WorkerInterface>> promise)
       : promise(promise.then([this](kj::Own<WorkerInterface> result) { worker = kj::mv(result); })
@@ -26,7 +26,7 @@ public:
       kj::AsyncInputStream& requestBody,
       Response& response) override {
     KJ_IF_SOME(w, worker) {
-      co_await w.get()->request(method, url, headers, requestBody, response);
+      co_await w->request(method, url, headers, requestBody, response);
     } else {
       co_await promise;
       co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
@@ -39,7 +39,7 @@ public:
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
     KJ_IF_SOME(w, worker) {
-      co_await w.get()->connect(host, headers, connection, response, kj::mv(settings));
+      co_await w->connect(host, headers, connection, response, kj::mv(settings));
     } else {
       co_await promise;
       co_await KJ_ASSERT_NONNULL(worker)->connect(
@@ -49,7 +49,7 @@ public:
 
   kj::Promise<void> prewarm(kj::StringPtr url) override {
     KJ_IF_SOME(w, worker) {
-      co_return co_await w.get()->prewarm(url);
+      co_return co_await w->prewarm(url);
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->prewarm(url);
@@ -58,7 +58,7 @@ public:
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     KJ_IF_SOME(w, worker) {
-      co_return co_await w.get()->runScheduled(scheduledTime, cron);
+      co_return co_await w->runScheduled(scheduledTime, cron);
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
@@ -67,7 +67,7 @@ public:
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     KJ_IF_SOME(w, worker) {
-      co_return co_await w.get()->runAlarm(scheduledTime, retryCount);
+      co_return co_await w->runAlarm(scheduledTime, retryCount);
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->runAlarm(scheduledTime, retryCount);
@@ -76,7 +76,7 @@ public:
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     KJ_IF_SOME(w, worker) {
-      co_return co_await w.get()->customEvent(kj::mv(event));
+      co_return co_await w->customEvent(kj::mv(event));
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->customEvent(kj::mv(event));
@@ -90,7 +90,7 @@ private:
 }  // namespace
 
 kj::Own<WorkerInterface> newPromisedWorkerInterface(kj::Promise<kj::Own<WorkerInterface>> promise) {
-  return kj::refcounted<PromisedWorkerInterface>(kj::mv(promise));
+  return kj::heap<PromisedWorkerInterface>(kj::mv(promise));
 }
 
 kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface) {
