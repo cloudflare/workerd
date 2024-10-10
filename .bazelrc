@@ -219,12 +219,7 @@ build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
 # an effect. On macOS we build some ObjC as part of Dawn, set this flag to an empty string so we
 # can set the right configuration flags.
 # TODO(soon): File a bazel issue for the flag so we can drop this.
-build:macos --experimental_objc_fastbuild_options=''
-
-# Unfortunately experimental_objc_fastbuild_options does not respect options set before and
-# overwrites them. This causes mysterious binary size bloat for fastbuild-based configurations on
-# macOS when enabling some optimizations. Turn it in into a no-op.
-build:mac --experimental_objc_fastbuild_options=""
+build:macos --experimental_objc_fastbuild_options=""
 
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
 # macOS links with dynamic libc++ by default, which has good backwards compatibility.
