@@ -96,9 +96,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           sudo xcode-select -s "/Applications/Xcode_15.1.app"
-          # Install lld and link it to /usr/local/bin.
+          # Install lld and link it to /usr/local/bin. We overwrite any existing link, which may
+          # exist from an older pre-installed LLVM version on the runner image.
           brew install lld
-          sudo ln -s $HOMEBREW_PREFIX/bin/ld64.lld /usr/local/bin/ld64.lld
+          sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
           # Enable lld identical code folding to significantly reduce binary size.
           echo "build:macos --config=macos_lld_icf" >> .bazelrc
       - name: Setup Windows
