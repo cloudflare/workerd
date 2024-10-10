@@ -604,8 +604,7 @@ public:
 
 class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
 public:
-  TraceCustomEventImpl(
-      uint16_t typeId, kj::TaskSet& waitUntilTasks, kj::Array<kj::Own<Trace>> traces)
+  TraceCustomEventImpl(uint16_t typeId, kj::Array<kj::Own<Trace>> traces)
       : typeId(typeId),
         traces(kj::mv(traces)) {}
 
@@ -615,7 +614,6 @@ public:
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
-      kj::TaskSet& waitUntilTasks,
       rpc::EventDispatcher::Client dispatcher) override;
 
   uint16_t getType() override {
