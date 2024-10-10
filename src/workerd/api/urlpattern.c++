@@ -57,7 +57,7 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(jsg::Lock& js,
       auto value = array.get(js, index);
       fields.add(Groups::Field{
         .name = kj::str(nameList[index - 1]),
-        .value = value.isUndefined() ? kj::str() : kj::str(value),
+        .value = value.isUndefined() ? kj::String() : kj::str(value),
       });
       index++;
     }
@@ -182,14 +182,14 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
   auto input = kj::mv(maybeInput).orDefault(URLPattern::URLPatternInit());
   kj::Vector<URLPattern::URLPatternInput> inputs(2);
 
-  kj::String protocol = kj::str();
-  kj::String username = kj::str();
-  kj::String password = kj::str();
-  kj::String hostname = kj::str();
-  kj::String port = kj::str();
-  kj::String pathname = kj::str();
-  kj::String search = kj::str();
-  kj::String hash = kj::str();
+  kj::String protocol = nullptr;
+  kj::String username = nullptr;
+  kj::String password = nullptr;
+  kj::String hostname = nullptr;
+  kj::String port = nullptr;
+  kj::String pathname = nullptr;
+  kj::String search = nullptr;
+  kj::String hash = nullptr;
 
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(string, kj::String) {
@@ -197,14 +197,14 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
         return s.asPtr();
       }))) {
         auto p = url.getProtocol();
-        protocol = kj::str(p.slice(0, p.size() - 1));
+        protocol = kj::str(p.first(p.size() - 1));
         username = kj::str(url.getUsername());
         password = kj::str(url.getPassword());
         hostname = kj::str(url.getHostname());
         port = kj::str(url.getPort());
         pathname = kj::str(url.getPathname());
-        search = url.getSearch().size() > 0 ? kj::str(url.getSearch().slice(1)) : kj::str();
-        hash = url.getHash().size() > 0 ? kj::str(url.getHash().slice(1)) : kj::str();
+        search = url.getSearch().size() > 0 ? kj::str(url.getSearch().slice(1)) : kj::String();
+        hash = url.getHash().size() > 0 ? kj::str(url.getHash().slice(1)) : kj::String();
       } else {
         return kj::none;
       }
@@ -248,14 +248,14 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
           JSG_FAIL_REQUIRE(TypeError, kj::mv(err));
         }
         KJ_CASE_ONEOF(init, jsg::UrlPattern::Init) {
-          protocol = kj::mv(init.protocol).orDefault(kj::str());
-          username = kj::mv(init.username).orDefault(kj::str());
-          password = kj::mv(init.password).orDefault(kj::str());
-          hostname = kj::mv(init.hostname).orDefault(kj::str());
-          port = kj::mv(init.port).orDefault(kj::str());
-          pathname = kj::mv(init.pathname).orDefault(kj::str());
-          search = kj::mv(init.search).orDefault(kj::str());
-          hash = kj::mv(init.hash).orDefault(kj::str());
+          protocol = kj::mv(init.protocol).orDefault(kj::String());
+          username = kj::mv(init.username).orDefault(kj::String());
+          password = kj::mv(init.password).orDefault(kj::String());
+          hostname = kj::mv(init.hostname).orDefault(kj::String());
+          port = kj::mv(init.port).orDefault(kj::String());
+          pathname = kj::mv(init.pathname).orDefault(kj::String());
+          search = kj::mv(init.search).orDefault(kj::String());
+          hash = kj::mv(init.hash).orDefault(kj::String());
         }
       }
     }

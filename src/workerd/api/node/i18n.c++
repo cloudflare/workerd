@@ -60,7 +60,7 @@ kj::Maybe<kj::Array<kj::byte>> TranscodeDefault(
   ucnv_convertEx(to.conv(), from.conv(), &target, target + limit, &source_, source_ + source.size(),
       nullptr, nullptr, nullptr, nullptr, true, true, &status);
   if (U_SUCCESS(status)) {
-    return out.slice(0, target - out.asChars().begin()).attach(kj::mv(out));
+    return out.first(target - out.asChars().begin()).attach(kj::mv(out));
   }
 
   return kj::none;
@@ -82,7 +82,7 @@ kj::Maybe<kj::Array<kj::byte>> TranscodeLatin1ToUTF16(
     return kj::none;
   }
 
-  return destbuf.slice(0, actual_length).asBytes().attach(kj::mv(destbuf));
+  return destbuf.first(actual_length).asBytes().attach(kj::mv(destbuf));
 }
 
 kj::Maybe<kj::Array<kj::byte>> TranscodeFromUTF16(
@@ -105,7 +105,7 @@ kj::Maybe<kj::Array<kj::byte>> TranscodeFromUTF16(
       utf16_input.begin(), utf16_input.size(), &status);
 
   if (U_SUCCESS(status)) {
-    return destbuf.slice(0, len).asBytes().attach(kj::mv(destbuf));
+    return destbuf.first(len).asBytes().attach(kj::mv(destbuf));
   }
 
   return kj::none;

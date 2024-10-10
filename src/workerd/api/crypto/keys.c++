@@ -255,7 +255,7 @@ kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::sign(
 
   KJ_ASSERT(signatureSize <= signature.size());
   if (signatureSize < signature.size()) {
-    signature = kj::heapArray<kj::byte>(signature.slice(0, signatureSize));
+    signature = kj::heapArray<kj::byte>(signature.first(signatureSize));
   }
 
   return signatureSslToWebCrypto(kj::mv(signature));

@@ -50,7 +50,7 @@ kj::String errorsToString(
         return e;
       }
       KJ_CASE_ONEOF(e, OpensslUntranslatedError) {
-        return kj::StringPtr(e.reasonName);
+        return e.reasonName;
       }
     }
     KJ_UNREACHABLE;

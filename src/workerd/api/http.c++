@@ -21,6 +21,7 @@
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
+#include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <capnp/compat/http-over-capnp.capnp.h>
@@ -84,7 +85,7 @@ jsg::ByteString normalizeHeaderValue(jsg::ByteString value) {
     slice = slice.slice(1, slice.size());
   }
   while (slice.size() > 0 && isHttpWhitespace(slice.back())) {
-    slice = slice.slice(0, slice.size() - 1);
+    slice = slice.first(slice.size() - 1);
   }
   if (slice.size() == value.size()) {
     return kj::mv(value);
@@ -268,7 +269,7 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
 
 kj::Maybe<jsg::ByteString> Headers::get(jsg::ByteString name) {
   requireValidHeaderName(name);
-  auto iter = headers.find(toLower(kj::mv(name)));
+  auto iter = headers.find(jsg::ByteString(toLower(kj::mv(name))));
   if (iter == headers.end()) {
     return kj::none;
   } else {
@@ -300,7 +301,7 @@ kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
 
 bool Headers::has(jsg::ByteString name) {
   requireValidHeaderName(name);
-  return headers.find(toLower(kj::mv(name))) != headers.end();
+  return headers.find(jsg::ByteString(toLower(kj::mv(name)))) != headers.end();
 }
 
 void Headers::set(jsg::ByteString name, jsg::ByteString value) {
@@ -310,7 +311,7 @@ void Headers::set(jsg::ByteString name, jsg::ByteString value) {
 
 void Headers::setUnguarded(jsg::ByteString name, jsg::ByteString value) {
   requireValidHeaderName(name);
-  auto key = toLower(name);
+  auto key = jsg::ByteString(toLower(name));
   value = normalizeHeaderValue(kj::mv(value));
   requireValidHeaderValue(value);
   auto [iter, emplaced] = headers.try_emplace(key, kj::mv(key), kj::mv(name), kj::mv(value));
@@ -324,7 +325,7 @@ void Headers::setUnguarded(jsg::ByteString name, jsg::ByteString value) {
 void Headers::append(jsg::ByteString name, jsg::ByteString value) {
   checkGuard();
   requireValidHeaderName(name);
-  auto key = toLower(name);
+  auto key = jsg::ByteString(toLower(name));
   value = normalizeHeaderValue(kj::mv(value));
   requireValidHeaderValue(value);
   auto [iter, emplaced] = headers.try_emplace(key, kj::mv(key), kj::mv(name), kj::mv(value));
@@ -336,7 +337,7 @@ void Headers::append(jsg::ByteString name, jsg::ByteString value) {
 void Headers::delete_(jsg::ByteString name) {
   checkGuard();
   requireValidHeaderName(name);
-  headers.erase(toLower(kj::mv(name)));
+  headers.erase(jsg::ByteString(toLower(kj::mv(name))));
 }
 
 // There are a couple implementation details of the Headers iterators worth calling out.

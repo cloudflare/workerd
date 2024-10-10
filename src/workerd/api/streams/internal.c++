@@ -163,7 +163,7 @@ private:
           // In which case we want to add that subset to the parts list here before we exit
           // the loop.
           if (amount > 0) {
-            parts.add(bytes.slice(0, amount).attach(kj::mv(bytes)));
+            parts.add(bytes.first(amount).attach(kj::mv(bytes)));
           }
           break;
         }

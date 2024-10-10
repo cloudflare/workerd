@@ -3,8 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <kj/debug.h>
 #include <kj/string.h>
+
+#include <cstdint>
 
 namespace workerd {
 
@@ -75,20 +76,17 @@ constexpr bool isAlphaLower(const kj::byte c) noexcept {
   return kCharLookupTable[c] & CharAttributeFlag::LOWER_CASE;
 }
 
-inline kj::String toLowerCopy(kj::StringPtr ptr) {
-  auto str = kj::str(ptr);
-  for (char& c: str) {
-    if (isAlphaUpper(c)) c += 0x20;
-  }
-  return kj::mv(str);
-}
+// Convert ASCII alpha characters in the given string to lowercase in place.
+kj::String toLower(kj::String&& str);
 
-inline kj::String toLowerCopy(kj::ArrayPtr<const char> ptr) {
-  auto str = kj::str(ptr);
-  for (char& c: str) {
-    if (isAlphaUpper(c)) c += 0x20;
-  }
-  return kj::mv(str);
-}
+// Convert ASCII alpha characters in the given string to uppercase in place.
+kj::String toUpper(kj::String&& str);
+
+// Copy the input and convert ASCII alpha characters in the given string to lowercase.
+kj::String toLower(kj::ArrayPtr<const char> ptr);
+
+kj::ArrayPtr<const char> trimLeadingAndTrailingWhitespace(kj::ArrayPtr<const char> ptr);
+kj::ArrayPtr<const char> trimTailingWhitespace(kj::ArrayPtr<const char> ptr);
+kj::Array<kj::byte> stripInnerWhitespace(kj::ArrayPtr<kj::byte> input);
 
 }  // namespace workerd

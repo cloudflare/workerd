@@ -1367,8 +1367,7 @@ KJ_TEST("URLPattern - MDN example 3 - pathname: '/books/:id(\\d+)' with base") {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.com/books/123"_kj));
       auto protocol = url.getProtocol();
-      KJ_ASSERT(
-          testPattern(pattern.getProtocol().getRegex(), protocol.slice(0, protocol.size() - 1)));
+      KJ_ASSERT(testPattern(pattern.getProtocol().getRegex(), protocol.first(protocol.size() - 1)));
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), url.getHostname()));
       KJ_ASSERT(testPattern(
           pattern.getPathname().getRegex(), url.getPathname(), kj::arr(kj::str("123"))));
@@ -1520,7 +1519,7 @@ KJ_TEST("URLPattern - MDN example 12 - '/blog/:id(\\d+){-:title}?'") {
       KJ_ASSERT(testPattern(pattern.getPathname().getRegex(), "/blog/123-my-blog"_kj),
           kj::arr(kj::str("123"), kj::str("my-blog")));
       KJ_ASSERT(testPattern(pattern.getPathname().getRegex(), "/blog/123"_kj),
-          kj::arr(kj::str("123"), kj::str()));
+          kj::arr(kj::str("123"), kj::String()));
       KJ_ASSERT(!testPattern(pattern.getPathname().getRegex(), "/blog/my-blog"_kj));
     }
     KJ_CASE_ONEOF(err, kj::String) {
@@ -1537,7 +1536,7 @@ KJ_TEST("URLPattern - MDN example 13 - '/books/:id?' with base") {
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), "example.com"_kj));
       KJ_ASSERT(
           testPattern(pattern.getPathname().getRegex(), "/books/123"_kj), kj::arr(kj::str("123")));
-      KJ_ASSERT(testPattern(pattern.getPathname().getRegex(), "/books"_kj), kj::arr(kj::str()));
+      KJ_ASSERT(testPattern(pattern.getPathname().getRegex(), "/books"_kj), kj::arr(kj::String()));
       KJ_ASSERT(!testPattern(pattern.getPathname().getRegex(), "/books/"_kj));
     }
     KJ_CASE_ONEOF(err, kj::String) {
@@ -1818,7 +1817,8 @@ KJ_TEST("URLPattern - MDN example 32") {
 
       KJ_ASSERT(testPattern(
           pattern.getPathname().getRegex(), "/product/bar"_kj, kj::arr(kj::str("bar"))));
-      KJ_ASSERT(testPattern(pattern.getPathname().getRegex(), "/product"_kj, kj::arr(kj::str())));
+      KJ_ASSERT(
+          testPattern(pattern.getPathname().getRegex(), "/product"_kj, kj::arr(kj::String())));
     }
     KJ_CASE_ONEOF(err, kj::String) {
       KJ_FAIL_ASSERT("URL Pattern compile failed", err);
@@ -1870,7 +1870,8 @@ KJ_TEST("URLPattern - MDN example 35b") {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       KJ_ASSERT(testPattern(
           pattern.getPathname().getRegex(), "/product/view"_kj, kj::arr(kj::str("view"))));
-      KJ_ASSERT(testPattern(pattern.getPathname().getRegex(), "/product"_kj, kj::arr(kj::str())));
+      KJ_ASSERT(
+          testPattern(pattern.getPathname().getRegex(), "/product"_kj, kj::arr(kj::String())));
       KJ_ASSERT(pattern.getPathname().getNames()[0] == "action");
     }
     KJ_CASE_ONEOF(err, kj::String) {
@@ -1920,7 +1921,7 @@ KJ_TEST("URLPattern - simple fuzzing") {
     kj::Array<kj::byte> bufs = kj::heapArray<kj::byte>(9 * n);
     RAND_bytes(bufs.begin(), 9 * n);
     // We don't care if the compiling passes or fails, we just don't want crashes.
-    KJ_SWITCH_ONEOF(UrlPattern::tryCompile({.protocol = kj::str(bufs.slice(0, n)),
+    KJ_SWITCH_ONEOF(UrlPattern::tryCompile({.protocol = kj::str(bufs.first(n)),
                       .username = kj::str(bufs.slice(n, n * 2)),
                       .password = kj::str(bufs.slice(n * 2, n * 3)),
                       .hostname = kj::str(bufs.slice(n * 3, n * 4)),
@@ -1965,7 +1966,7 @@ KJ_TEST("URLPattern - WPT compile failed") {
     UrlPattern::Init{.hostname = kj::str("[\\:\\:xY\\::num]")},
     UrlPattern::Init{.hostname = kj::str("*\\:1]")},
     UrlPattern::Init{.pathname = kj::str("/:id/:id")},
-    UrlPattern::Init{.pathname = kj::str("/foo"), .baseUrl = kj::str()},
+    UrlPattern::Init{.pathname = kj::str("/foo"), .baseUrl = kj::String()},
     UrlPattern::Init{.hostname = kj::str("bad hostname")},
     UrlPattern::Init{.hostname = kj::str("bad#hostname")},
     UrlPattern::Init{.hostname = kj::str("bad%hostname")},
@@ -2380,26 +2381,26 @@ KJ_TEST("Minimal URL Parse") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse 2") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org/"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Username") {
@@ -2407,12 +2408,12 @@ KJ_TEST("Minimal URL Parse - Username") {
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
   KJ_ASSERT(url.getUsername() == "abc"_kj);
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Username and Password") {
@@ -2422,244 +2423,244 @@ KJ_TEST("Minimal URL Parse - Username and Password") {
   KJ_ASSERT(url.getUsername() == "abc"_kj);
   KJ_ASSERT(url.getPassword() == "xyz"_kj);
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Password, no Username") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://:xyz@example.org/"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
   KJ_ASSERT(url.getPassword() == "xyz"_kj);
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Port (non-default)") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org:123/"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org:123"_kj);
   KJ_ASSERT(url.getHostname() == "example.org"_kj);
   KJ_ASSERT(url.getPort() == "123"_kj);
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Port (default)") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org:443/"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Port delimiter with no port)") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org:/"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - One path segment") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org/abc"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/abc"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Leading single dot segment") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org/./abc"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/abc"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Multiple single dot segment") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org/././././abc"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/abc"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Leading double dot segment") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org/../abc"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/abc"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Leading mixed dot segment") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org/../.././.././abc"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/abc"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Three path segments") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org/a/b/c"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/a/b/c"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Three path segments with double dot") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org/a/b/../c"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/a/c"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Three path segments with single dot") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org/a/b/./c"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/a/b/c"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Query present but empty") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org?"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Query minimal") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org?123"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
   KJ_ASSERT(url.getSearch() == "?123"_kj);
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Query minimal after missing port") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org:?123"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
   KJ_ASSERT(url.getSearch() == "?123"_kj);
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Query minimal after missing port and empty path") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org:/?123"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
   KJ_ASSERT(url.getSearch() == "?123"_kj);
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Fragment present but empty") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org#"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
-  KJ_ASSERT(url.getHash() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
+  KJ_ASSERT(url.getHash() == kj::String());
 }
 
 KJ_TEST("Minimal URL Parse - Fragment minimal") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org#123"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
   KJ_ASSERT(url.getHash() == "#123"_kj);
 }
 
@@ -2667,12 +2668,12 @@ KJ_TEST("Minimal URL Parse - Fragment minimal") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org?#123"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
-  KJ_ASSERT(url.getSearch() == kj::str());
+  KJ_ASSERT(url.getSearch() == kj::String());
   KJ_ASSERT(url.getHash() == "#123"_kj);
 }
 
@@ -2680,10 +2681,10 @@ KJ_TEST("Minimal URL Parse - Fragment minimal") {
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.org?abc#123"_kj));
 
   KJ_ASSERT(url.getProtocol() == "https:"_kj);
-  KJ_ASSERT(url.getUsername() == kj::str());
-  KJ_ASSERT(url.getPassword() == kj::str());
+  KJ_ASSERT(url.getUsername() == kj::String());
+  KJ_ASSERT(url.getPassword() == kj::String());
   KJ_ASSERT(url.getHost() == "example.org"_kj);
-  KJ_ASSERT(url.getPort() == kj::str());
+  KJ_ASSERT(url.getPort() == kj::String());
   KJ_ASSERT(url.getPathname() == "/"_kj);
   KJ_ASSERT(url.getSearch() == "?abc"_kj);
   KJ_ASSERT(url.getHash() == "#123"_kj);
@@ -2943,14 +2944,14 @@ KJ_TEST("blob: URLS") {
 KJ_TEST("Relative URLs") {
   {
     auto url = KJ_ASSERT_NONNULL(
-        Url::tryParse(kj::str(), "https://abc:def@example.org:81/a/b/c?query#fragment"_kj));
+        Url::tryParse(kj::String(), "https://abc:def@example.org:81/a/b/c?query#fragment"_kj));
     KJ_ASSERT(url.getProtocol() == "https:"_kj);
     KJ_ASSERT(url.getUsername() == "abc"_kj);
     KJ_ASSERT(url.getPassword() == "def"_kj);
     KJ_ASSERT(url.getHost() == "example.org:81"_kj);
     KJ_ASSERT(url.getPathname() == "/a/b/c"_kj);
     KJ_ASSERT(url.getSearch() == "?query"_kj);
-    KJ_ASSERT(url.getHash() == kj::str());
+    KJ_ASSERT(url.getHash() == kj::String());
   }
 
   {
@@ -2961,8 +2962,8 @@ KJ_TEST("Relative URLs") {
     KJ_ASSERT(url.getPassword() == "def"_kj);
     KJ_ASSERT(url.getHost() == "example.org:81"_kj);
     KJ_ASSERT(url.getPathname() == "/xyz"_kj);
-    KJ_ASSERT(url.getSearch() == kj::str());
-    KJ_ASSERT(url.getHash() == kj::str());
+    KJ_ASSERT(url.getSearch() == kj::String());
+    KJ_ASSERT(url.getHash() == kj::String());
   }
 
   {

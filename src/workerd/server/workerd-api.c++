@@ -480,7 +480,7 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
           kj::str("https://pyodide.runtime-playground.workers.dev/pyodide-capnp-bin/pyodide_",
               version, ".capnp.bin");
 
-      auto req = client->request(kj::HttpMethod::GET, kj::StringPtr(url), headers);
+      auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
 
       auto res = req.response.wait(io.waitScope);
       auto body = res.body->readAllBytes().wait(io.waitScope);

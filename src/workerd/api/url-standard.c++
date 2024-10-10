@@ -191,7 +191,7 @@ jsg::UrlSearchParams initFromSearch(kj::Maybe<kj::ArrayPtr<const char>>& maybeQu
 }  // namespace
 
 jsg::Ref<URLSearchParams> URLSearchParams::constructor(jsg::Optional<Initializer> init) {
-  return jsg::alloc<URLSearchParams>(kj::mv(init).orDefault(kj::str()));
+  return jsg::alloc<URLSearchParams>(kj::mv(init).orDefault(kj::String()));
 }
 
 URLSearchParams::URLSearchParams(Initializer initializer): inner(initSearchParams(initializer)) {}

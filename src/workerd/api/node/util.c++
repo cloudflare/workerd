@@ -47,7 +47,7 @@ kj::String MIMEParams::toString() {
   KJ_IF_SOME(inner, mimeType) {
     return inner.paramsToString();
   }
-  return kj::str();
+  return kj::String();
 }
 
 jsg::Ref<MIMEParams::EntryIterator> MIMEParams::entries(jsg::Lock&) {
