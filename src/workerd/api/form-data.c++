@@ -33,10 +33,6 @@ kj::ArrayPtr<const char> splitAtSubString(kj::ArrayPtr<const char>& text, kj::St
   return result;
 }
 
-bool startsWith(kj::ArrayPtr<const char> bytes, kj::StringPtr prefix) {
-  return bytes.size() >= prefix.size() && bytes.slice(0, prefix.size()) == prefix;
-}
-
 struct FormDataHeaderTable {
   kj::HttpHeaderId contentDispositionId;
   kj::Own<kj::HttpHeaderTable> table;
@@ -90,11 +86,11 @@ void parseFormData(kj::Maybe<jsg::Lock&> js,
   const auto done = [](kj::ArrayPtr<const char>& body) {
     // Consume any (CR)LF characters that trailed the boundary and indicate continuation, or consume
     // the terminal "--" characters and indicate termination, or throw an error.
-    if (startsWith(body, "\n"_kj)) {
+    if (body.startsWith("\n"_kj)) {
       body = body.slice(1, body.size());
-    } else if (startsWith(body, "\r\n"_kj)) {
+    } else if (body.startsWith("\r\n"_kj)) {
       body = body.slice(2, body.size());
-    } else if (startsWith(body, "--"_kj)) {
+    } else if (body.startsWith("--"_kj)) {
       // We're done!
       return true;
     } else {
