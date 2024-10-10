@@ -7,6 +7,7 @@
 
 import { default as internalTypes } from 'node-internal:internal_types';
 import { default as utilImpl } from 'node-internal:util';
+import { isDeepStrictEqual as _isDeepStrictEqual } from 'node-internal:internal_comparisons';
 
 import {
   validateFunction,
@@ -252,6 +253,14 @@ export function getCallSite(frames: number = 10) {
   return utilImpl.getCallSite(frames);
 }
 
+export function isDeepStrictEqual(a: unknown, b: unknown): boolean {
+  return _isDeepStrictEqual(a, b);
+}
+
+export function isArray(a: unknown): boolean {
+  return Array.isArray(a);
+}
+
 export default {
   types,
   callbackify,
@@ -281,18 +290,23 @@ export default {
   transferableAbortController,
   transferableAbortSignal,
   getCallSite,
+  isDeepStrictEqual,
+  isArray,
 };
 
 // Node.js util APIs we're currently not supporting
+//
+// The following functions doesn't make sense for Workerd to support in runtime.
 //   * util._errnoException
 //   * util._exceptionWithHostPort
 //   * util.getSystemErrorMap
 //   * util.getSystemErrorName
-//   * util.isArray
+//   * util.parseEnv
+// The following functions are removed from Node.js, and only supported using
+// a polyfill.
 //   * util.isBoolean
 //   * util.isBuffer
 //   * util.isDate
-//   * util.isDeepStrictEqual
 //   * util.isError
 //   * util.isFunction
 //   * util.isNull
@@ -304,3 +318,5 @@ export default {
 //   * util.isString
 //   * util.isSymbol
 //   * util.isUndefined
+// TODO:
+//   * util.styleText
