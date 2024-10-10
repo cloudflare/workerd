@@ -54,6 +54,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/workerd/io",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:mimetype",
@@ -206,4 +207,10 @@ wd_test(
     src = "tests/module-create-require-test.wd-test",
     args = ["--experimental"],
     data = ["tests/module-create-require-test.js"],
+)
+
+wd_test(
+    src = "tests/process-exit-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/process-exit-test.js"],
 )
