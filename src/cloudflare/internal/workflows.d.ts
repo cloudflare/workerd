@@ -33,10 +33,10 @@ declare abstract class Workflow {
   /**
    * Create a new instance and return a handle to it. If a provided id exists, an error will be thrown.
    * @param id Id to create the instance of this Workflow with
-   * @param params The payload to send over to this instance
+   * @param params Optional params to send over to this instance
    * @returns A promise that resolves with a handle for the Instance
    */
-  public create(id: string, params: object): Promise<Instance>;
+  public create(id: string, params?: unknown): Promise<Instance>;
 }
 
 type InstanceStatus = {
