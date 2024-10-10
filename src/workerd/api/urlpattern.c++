@@ -197,7 +197,7 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
         return s.asPtr();
       }))) {
         auto p = url.getProtocol();
-        protocol = kj::str(p.slice(0, p.size() - 1));
+        protocol = kj::str(p.first(p.size() - 1));
         username = kj::str(url.getUsername());
         password = kj::str(url.getPassword());
         hostname = kj::str(url.getHostname());

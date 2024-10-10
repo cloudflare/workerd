@@ -1010,7 +1010,7 @@ jsg::JsValue deserializeV8Value(
       kj::String actorId = getCurrentActorId().orDefault([]() { return kj::String(); });
       KJ_FAIL_ASSERT("actor storage deserialization failed", "failed to deserialize stored value",
           actorId, exception.getHandle(js), key, buf.size(),
-          buf.slice(0, std::min(static_cast<size_t>(3), buf.size())));
+          buf.first(std::min(static_cast<size_t>(3), buf.size())));
     });
   } catch (jsg::JsExceptionThrown&) {
     // We can occasionally hit an isolate termination here -- we prefix the error with jsg to avoid

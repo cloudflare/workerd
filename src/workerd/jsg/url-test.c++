@@ -1367,8 +1367,7 @@ KJ_TEST("URLPattern - MDN example 3 - pathname: '/books/:id(\\d+)' with base") {
     KJ_CASE_ONEOF(pattern, UrlPattern) {
       auto url = KJ_ASSERT_NONNULL(Url::tryParse("https://example.com/books/123"_kj));
       auto protocol = url.getProtocol();
-      KJ_ASSERT(
-          testPattern(pattern.getProtocol().getRegex(), protocol.slice(0, protocol.size() - 1)));
+      KJ_ASSERT(testPattern(pattern.getProtocol().getRegex(), protocol.first(protocol.size() - 1)));
       KJ_ASSERT(testPattern(pattern.getHostname().getRegex(), url.getHostname()));
       KJ_ASSERT(testPattern(
           pattern.getPathname().getRegex(), url.getPathname(), kj::arr(kj::str("123"))));
@@ -1922,7 +1921,7 @@ KJ_TEST("URLPattern - simple fuzzing") {
     kj::Array<kj::byte> bufs = kj::heapArray<kj::byte>(9 * n);
     RAND_bytes(bufs.begin(), 9 * n);
     // We don't care if the compiling passes or fails, we just don't want crashes.
-    KJ_SWITCH_ONEOF(UrlPattern::tryCompile({.protocol = kj::str(bufs.slice(0, n)),
+    KJ_SWITCH_ONEOF(UrlPattern::tryCompile({.protocol = kj::str(bufs.first(n)),
                       .username = kj::str(bufs.slice(n, n * 2)),
                       .password = kj::str(bufs.slice(n * 2, n * 3)),
                       .hostname = kj::str(bufs.slice(n * 3, n * 4)),

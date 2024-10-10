@@ -19,7 +19,7 @@ kj::ArrayPtr<const char> split(kj::ArrayPtr<const char>& text, char c) {
 
   for (auto i: kj::indices(text)) {
     if (text[i] == c) {
-      kj::ArrayPtr<const char> result = text.slice(0, i);
+      kj::ArrayPtr<const char> result = text.first(i);
       text = text.slice(i + 1, text.size());
       return result;
     }
@@ -235,7 +235,7 @@ kj::Array<char16_t> fastEncodeUtf16(kj::ArrayPtr<const char> bytes) {
   auto output = kj::heapArray<char16_t>(expected_length);
   auto actual_length =
       simdutf::convert_utf8_to_utf16(bytes.asChars().begin(), bytes.size(), output.begin());
-  return output.slice(0, actual_length).attach(kj::mv(output));
+  return output.first(actual_length).attach(kj::mv(output));
 }
 
 }  // namespace workerd::api

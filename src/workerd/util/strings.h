@@ -5,6 +5,8 @@
 
 #include <kj/string.h>
 
+#include <cstdint>
+
 namespace workerd {
 
 enum CharAttributeFlag : uint8_t {

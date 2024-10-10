@@ -40,7 +40,7 @@ kj::Array<byte> decodeHexTruncated(kj::ArrayPtr<kj::byte> text, bool strict = fa
     if (strict) {
       JSG_FAIL_REQUIRE(TypeError, "The text is not valid hex");
     }
-    text = text.slice(0, text.size() - 1);
+    text = text.first(text.size() - 1);
   }
   auto vec = kj::Vector<kj::byte>(text.size() / 2);
 
@@ -159,7 +159,7 @@ kj::Array<kj::byte> decodeStringImpl(
       auto len = result.written;
       auto dest = kj::heapArray<kj::byte>(nbytes::Base64DecodedSize(buf.begin(), len));
       len = nbytes::Base64Decode(dest.asChars().begin(), dest.size(), buf.begin(), buf.size());
-      return dest.slice(0, len).attach(kj::mv(dest));
+      return dest.first(len).attach(kj::mv(dest));
     }
     case Encoding::HEX: {
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);

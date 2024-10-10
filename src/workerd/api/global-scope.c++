@@ -675,7 +675,7 @@ jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsValue data) {
   auto result = kj::heapArray<kj::byte>(expected_length);
   auto written = simdutf::binary_to_base64(
       strArray.asChars().begin(), strArray.size(), result.asChars().begin());
-  return js.str(result.slice(0, written).attach(kj::mv(result)));
+  return js.str(result.first(written).attach(kj::mv(result)));
 }
 jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   auto decoded = kj::decodeBase64(data.asArray());

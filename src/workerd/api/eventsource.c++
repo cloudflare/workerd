@@ -48,7 +48,7 @@ public:
       KJ_IF_SOME(found, findEndOfLine(input)) {
         auto prefix = kept.releaseAsArray();
         // Feed the line into the processor.
-        feed(kj::str(prefix, input.slice(0, found.pos)));
+        feed(kj::str(prefix, input.first(found.pos)));
         input = found.remaining;
         // If we've reached the end of the input, input will == nullptr here.
       } else {
@@ -168,7 +168,7 @@ private:
       };
 
       KJ_IF_SOME(pos, line.findFirst(':')) {
-        handle(*this, line.slice(0, pos), line.slice(pos + 1));
+        handle(*this, line.first(pos), line.slice(pos + 1));
       } else {
         handle(*this, line, ""_kjc);
       }

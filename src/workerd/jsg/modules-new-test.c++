@@ -754,11 +754,11 @@ KJ_TEST("Attaching a module registry works") {
     ModuleBundle::BundleBuilder bundleBuilder;
     kj::String source = kj::str("export default 123; export const m = 'abc';");
     // Done this way to avoid including the nullptr at the end...
-    bundleBuilder.addEsmModule("main", source.slice(0, source.size()).attach(kj::mv(source)));
+    bundleBuilder.addEsmModule("main", source.first(source.size()).attach(kj::mv(source)));
 
     kj::String mainSource = kj::str("import foo from 'main'; export default foo;");
     bundleBuilder.addEsmModule("worker1",
-        mainSource.slice(0, mainSource.size()).attach(kj::mv(mainSource)), Module::Flags::MAIN);
+        mainSource.first(mainSource.size()).attach(kj::mv(mainSource)), Module::Flags::MAIN);
 
     registryBuilder.add(bundleBuilder.finish());
 
@@ -814,7 +814,7 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
 
     auto json = kj::str("{\"foo\":123}");
     bundleBuilder.addSyntheticModule(
-        "json", Module::newJsonModuleHandler(json.slice(0, json.size()).attach(kj::mv(json))));
+        "json", Module::newJsonModuleHandler(json.first(json.size()).attach(kj::mv(json))));
 
     auto wasm = kj::heapArray<kj::byte>({
       0x00,
@@ -868,7 +868,7 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
                                      "export { default as wasm2 } from 'wasm?a';");
 
     bundleBuilder.addEsmModule("worker",
-        mainSource2.slice(0, mainSource2.size()).attach(kj::mv(mainSource2)), Module::Flags::MAIN);
+        mainSource2.first(mainSource2.size()).attach(kj::mv(mainSource2)), Module::Flags::MAIN);
 
     registryBuilder.add(bundleBuilder.finish());
 
@@ -949,7 +949,7 @@ KJ_TEST("compileEvalFunction in synthetic module works") {
 
     auto source = kj::str("import 'abc'");
     bundleBuilder.addEsmModule(
-        "main", source.slice(0, source.size()).attach(kj::mv(source)), Module::Flags::MAIN);
+        "main", source.first(source.size()).attach(kj::mv(source)), Module::Flags::MAIN);
 
     auto registry = ModuleRegistry::Builder(resolveObserver).add(bundleBuilder.finish()).finish();
 
@@ -971,10 +971,10 @@ KJ_TEST("import.meta works as expected") {
 
     ModuleBundle::BundleBuilder bundleBuilder;
     auto foo = kj::str("export default import.meta");
-    bundleBuilder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
     auto bar = kj::str("export default import.meta");
     bundleBuilder.addEsmModule(
-        "foo/././././bar", bar.slice(0, bar.size()).attach(kj::mv(bar)), Module::Flags::MAIN);
+        "foo/././././bar", bar.first(bar.size()).attach(kj::mv(bar)), Module::Flags::MAIN);
     auto registry = ModuleRegistry::Builder(ResolveObserver).add(bundleBuilder.finish()).finish();
 
     auto attached = registry->attachToIsolate(js, compilationObserver);
@@ -1040,7 +1040,7 @@ KJ_TEST("import specifiers with query params and hash fragments work") {
 
     ModuleBundle::BundleBuilder bundleBuilder;
     auto foo = kj::str("export default import.meta");
-    bundleBuilder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
 
     auto registry = ModuleRegistry::Builder(ResolveObserver).add(bundleBuilder.finish()).finish();
 
@@ -1084,7 +1084,7 @@ KJ_TEST("Previously resolved modules not found with incompatible resolve context
     const auto foo = "foo:bar"_url;
 
     auto source = "export default 123;"_kjc;
-    builtinBuilder.addEsm(foo, source.slice(0, source.size()).attach(kj::mv(source)));
+    builtinBuilder.addEsm(foo, source.first(source.size()).attach(kj::mv(source)));
 
     ModuleBundle::BundleBuilder bundleBuilder;
     bundleBuilder.addSyntheticModule(
@@ -1138,10 +1138,10 @@ KJ_TEST("Awaiting top-level dynamic import in synchronous require works as expec
 
     ModuleBundle::BundleBuilder bundleBuilder;
     auto foo = kj::str("export default (await import('bar')).default;");
-    bundleBuilder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
 
     auto bar = kj::str("export default 123;");
-    bundleBuilder.addEsmModule("bar", bar.slice(0, bar.size()).attach(kj::mv(bar)));
+    bundleBuilder.addEsmModule("bar", bar.first(bar.size()).attach(kj::mv(bar)));
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
@@ -1160,7 +1160,7 @@ KJ_TEST("Awaiting a never resolved promise in synchronous require fails as expec
 
     ModuleBundle::BundleBuilder bundleBuilder;
     auto foo = kj::str("const p = new Promise(() => {}); await p;");
-    bundleBuilder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
@@ -1188,7 +1188,7 @@ KJ_TEST("Throwing an exception inside a ESM module works as expected") {
 
     ModuleBundle::BundleBuilder bundleBuilder;
     auto foo = kj::str("throw new Error('foo');");
-    bundleBuilder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
@@ -1214,7 +1214,7 @@ KJ_TEST("Syntax error in ESM module is properly reported") {
     ModuleBundle::BundleBuilder bundleBuilder;
 
     auto foo = kj::str("export default 123; syntax error");
-    bundleBuilder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
@@ -1264,11 +1264,11 @@ KJ_TEST("Invalid JSON syntax module throws exception as expected") {
     ModuleBundle::BundleBuilder bundleBuilder;
     auto json = kj::str("not valid json");
     bundleBuilder.addSyntheticModule(
-        "foo", Module::newJsonModuleHandler(json.slice(0, json.size()).attach(kj::mv(json))));
+        "foo", Module::newJsonModuleHandler(json.first(json.size()).attach(kj::mv(json))));
 
     auto esm = kj::str("import foo from 'foo'");
     bundleBuilder.addEsmModule(
-        "bar", esm.slice(0, esm.size()).attach(kj::mv(esm)), Module::Flags::MAIN);
+        "bar", esm.first(esm.size()).attach(kj::mv(esm)), Module::Flags::MAIN);
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
@@ -1313,7 +1313,7 @@ KJ_TEST("Recursive import works or fails as expected") {
 
     // A recursive import with an ESM works just fine...
     auto foo = kj::str("import foo from 'foo'; export default 123;");
-    bundleBuilder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
 
     // A CommonJS-style module, however, does not allow recursive evaluation.
     bundleBuilder.addSyntheticModule("bar",
@@ -1354,7 +1354,7 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (d
             kj::str("exports = require('bar');"), kj::str("foo")));
 
     auto bar = kj::str("export default 123; await import('foo');");
-    bundleBuilder.addEsmModule("bar", bar.slice(0, bar.size()).attach(kj::mv(bar)));
+    bundleBuilder.addEsmModule("bar", bar.first(bar.size()).attach(kj::mv(bar)));
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
@@ -1390,7 +1390,7 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (s
             kj::str("exports = require('bar');"), kj::str("foo")));
 
     auto bar = kj::str("export default 123; import bar from 'foo';");
-    bundleBuilder.addEsmModule("bar", bar.slice(0, bar.size()).attach(kj::mv(bar)));
+    bundleBuilder.addEsmModule("bar", bar.first(bar.size()).attach(kj::mv(bar)));
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
 
@@ -1428,7 +1428,7 @@ KJ_TEST("Resolution occurs relative to the referrer") {
                      "export * as ghi from '../bar';"        // file:///bar
                      "export * as jkl from '/bar';"          // file:///bar
                      "export * as lmn from '../foo/bar';");  // file:///foo/bar
-  builder.addEsmModule("foo/", bar.slice(0, bar.size()).attach(kj::mv(bar)));
+  builder.addEsmModule("foo/", bar.first(bar.size()).attach(kj::mv(bar)));
 
   auto registry = registryBuilder.add(builder.finish()).finish();
 
@@ -1580,7 +1580,7 @@ KJ_TEST("Using a registry from multiple threads works") {
 
   ModuleBundle::BundleBuilder bundleBuilder;
   auto foo = kj::str("export default 123; for (let n = 0; n < 1000000; n++) {}");
-  bundleBuilder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+  bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
   ResolveObserver resolveObserver;
   auto registry = ModuleRegistry::Builder(resolveObserver).add(bundleBuilder.finish()).finish();
 
@@ -1716,7 +1716,7 @@ KJ_TEST("Percent-encoding in specifiers is normalized properly") {
                      "export { default as def } from 'foo/bar';"
                      "export { default as ghi } from '%66oo/bar';"
                      "export { default as jkl } from '%66oo%2fbar';");
-  builder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+  builder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
 
   auto registry = ModuleRegistry::Builder(resolveObserver).add(builder.finish()).finish();
 
@@ -1763,7 +1763,7 @@ KJ_TEST("Aliased modules (import maps) work") {
 
   auto src = kj::str("export { default as abc } from 'bar';"
                      "export { default as def } from 'http://example/%66oo';");
-  builder.addEsmModule("qux", src.slice(0, src.size()).attach(kj::mv(src)));
+  builder.addEsmModule("qux", src.first(src.size()).attach(kj::mv(src)));
 
   auto registry = ModuleRegistry::Builder(resolveObserver).add(builder.finish()).finish();
 
@@ -1812,7 +1812,7 @@ KJ_TEST("Import attributes are currently unsupported") {
   ModuleBundle::BundleBuilder builder;
 
   auto foo = kj::str("import abc from 'foo' with { type: 'json' };");
-  builder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+  builder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
 
   auto registry = ModuleRegistry::Builder(resolveObserver).add(builder.finish()).finish();
 
@@ -1836,7 +1836,7 @@ KJ_TEST("Using a deferred eval callback works") {
   ModuleBundle::BundleBuilder builder;
 
   auto foo = kj::str("export default 1;");
-  builder.addEsmModule("foo", foo.slice(0, foo.size()).attach(kj::mv(foo)));
+  builder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
 
   bool called = false;
   auto registry = ModuleRegistry::Builder(resolveObserver)

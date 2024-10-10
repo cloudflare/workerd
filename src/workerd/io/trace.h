@@ -449,7 +449,7 @@ private:
 // Helper function used when setting "truncated_script_id" tags. Truncates the scriptId to 10
 // characters.
 inline kj::String truncateScriptId(kj::StringPtr id) {
-  auto truncatedId = id.slice(0, kj::min(id.size(), 10));
+  auto truncatedId = id.first(kj::min(id.size(), 10));
   return kj::str(truncatedId);
 }
 

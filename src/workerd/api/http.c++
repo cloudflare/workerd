@@ -85,7 +85,7 @@ jsg::ByteString normalizeHeaderValue(jsg::ByteString value) {
     slice = slice.slice(1, slice.size());
   }
   while (slice.size() > 0 && isHttpWhitespace(slice.back())) {
-    slice = slice.slice(0, slice.size() - 1);
+    slice = slice.first(slice.size() - 1);
   }
   if (slice.size() == value.size()) {
     return kj::mv(value);

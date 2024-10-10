@@ -168,7 +168,7 @@ kj::Array<kj::byte> Rsa::sign(const kj::ArrayPtr<const kj::byte> data) const {
     // We did not fill the entire buffer, let's make sure we zero
     // out the rest of it so we don't leak any uninitialized data.
     signature.slice(signatureSize).fill(0);
-    return signature.slice(0, signatureSize).attach(kj::mv(signature));
+    return signature.first(signatureSize).attach(kj::mv(signature));
   }
 
   return kj::mv(signature);

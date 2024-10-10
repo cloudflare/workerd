@@ -2654,7 +2654,7 @@ public:
   jsg::Promise<kj::String> allText(jsg::Lock& js) {
     return loop(js).then(js, [this](auto& js, PartList&& partPtrs) {
       auto out = kj::heapArray<char>(runningTotal + 1);
-      copyInto(out.slice(0, out.size() - 1).asBytes(), kj::mv(partPtrs));
+      copyInto(out.first(out.size() - 1).asBytes(), kj::mv(partPtrs));
       out.back() = '\0';
       return kj::String(kj::mv(out));
     });

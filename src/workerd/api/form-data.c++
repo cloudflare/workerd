@@ -122,7 +122,7 @@ void parseFormData(kj::Maybe<jsg::Lock&> js,
     //
     // TODO(soon): Read the Content-Type to support files.
 
-    auto headersText = kj::str(body.slice(0, match[0].second - body.begin()));
+    auto headersText = kj::str(body.first(match[0].second - body.begin()));
     body = body.slice(match[0].second - body.begin(), body.size());
 
     kj::HttpHeaders headers(*formDataHeaderTable.table);
@@ -163,7 +163,7 @@ void parseFormData(kj::Maybe<jsg::Lock&> js,
 
     if (message.size() > 0) {
       // If we skipped a CR, we must avoid including it in the message data.
-      message = message.slice(0, message.size() - uint(message.back() == '\r'));
+      message = message.first(message.size() - uint(message.back() == '\r'));
     }
 
     if (filename == kj::none || convertFilesToStrings) {

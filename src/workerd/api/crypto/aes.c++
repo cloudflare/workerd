@@ -300,7 +300,7 @@ private:
       plainSize = 0;
     }
 
-    auto actualCipherText = cipherText.slice(0, cipherText.size() - tagLength / 8);
+    auto actualCipherText = cipherText.first(cipherText.size() - tagLength / 8);
     auto tagText = cipherText.slice(actualCipherText.size(), cipherText.size());
 
     auto plainText = kj::heapArray<kj::byte>(actualCipherText.size());
@@ -513,7 +513,7 @@ protected:
     // counter portion of the block back to zero.
     auto inputSizePart1 = BN_get_word(numBlocksUntilReset.get()) * AES_BLOCK_SIZE;
 
-    process(&cipher, data.slice(0, inputSizePart1), counter, result.asPtr());
+    process(&cipher, data.first(inputSizePart1), counter, result.asPtr());
 
     // Zero the counter bits of the block. Chromium creates a copy but we own our buffer.
     {

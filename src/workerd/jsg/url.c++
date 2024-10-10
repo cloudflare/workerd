@@ -539,7 +539,7 @@ kj::Maybe<kj::String> canonicalizeProtocol(
   auto input = kj::str(protocol, "://dummy.test");
   KJ_IF_SOME(url, Url::tryParse(input.asPtr())) {
     auto result = url.getProtocol();
-    return kj::str(result.slice(0, result.size() - 1));
+    return kj::str(result.first(result.size() - 1));
   }
   return kj::none;
 }
@@ -644,7 +644,7 @@ kj::Maybe<kj::String> chooseStr(kj::Maybe<kj::String> str, kj::Maybe<kj::StringP
 
 kj::String stripSuffixFromProtocol(kj::ArrayPtr<const char> data) {
   if (data.back() == ':') {
-    return kj::str(data.slice(0, data.size() - 1));
+    return kj::str(data.first(data.size() - 1));
   }
   return kj::str(data);
 }
@@ -2079,7 +2079,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         KJ_IF_SOME(url, maybeBaseUrl) {
           auto basePathname = url.getPathname();
           KJ_IF_SOME(index, basePathname.findLast('/')) {
-            result.pathname = kj::str(basePathname.slice(0, index + 1), pathname);
+            result.pathname = kj::str(basePathname.first(index + 1), pathname);
           } else {
             result.pathname = kj::str(basePathname);
           }
