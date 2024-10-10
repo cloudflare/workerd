@@ -40,7 +40,7 @@ kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
   static const auto strip = [](auto label) {
     auto result = kj::heapArray<kj::byte>(label.size());
     size_t len = 0;
-    for (const char c: label) {
+    for (const kj::byte c: label) {
       if (!isAsciiWhitespace(c)) {
         result[len++] = c;
       }
