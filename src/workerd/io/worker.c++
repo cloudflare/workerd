@@ -1655,7 +1655,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
                   auto& api = script->isolate->getApi();
                   auto handlers = api.unwrapExports(lock, ns);
-                  auto features = api.getFeatureFlags();
                   auto entrypointClasses = api.getEntrypointClasses(lock);
 
                   for (auto& handler: handlers.fields) {
@@ -1682,9 +1681,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                               impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
                               return;
                             } else if (handle == entrypointClasses.workflowEntrypoint) {
-                              if (features.getWorkerdExperimental()) {
-                                impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
-                              }
+                              impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
                               return;
                             }
 
