@@ -9,13 +9,6 @@
       "file_regex": "\\.tar\\.gz$"
     },
     {
-      "name": "rules_license",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "rules_license",
-      "file_regex": "\\.tar\\.gz$"
-    },
-    {
       "name": "rules_python",
       "type": "github_release",
       "owner": "bazelbuild",
@@ -94,6 +87,35 @@
       "owner": "bazelbuild",
       "repo": "rules_pkg",
       "file_regex": "\\.tar\\.gz$"
+    },
+    {
+      // Needed for aspect_rules_js, build fails on Windows if it is not fetched explicitly.
+      // rules_js 2.1.0 uses a fixed version, once we update to that version this can be dropped.
+      "name": "aspect_bazel_lib",
+      "type": "github_release",
+      "owner": "bazel-contrib",
+      "repo": "bazel-lib",
+      "file_regex": "^bazel-lib-"
+    },
+    {
+      "name": "aspect_rules_js",
+      "type": "github_release",
+      "owner": "aspect-build",
+      "repo": "rules_js",
+      "file_regex": "^rules_js-",
+      // TODO(cleanup): On latest version, Windows build fails with `tar.exe: Error opening archive:
+      // Can't initialize filter; unable to run program "gzip -d"`, likely due to
+      // https://github.com/aspect-build/rules_js/pull/1905/files. Develop a workaround.
+      "freeze_version": "v2.0.1"
+    },
+    {
+      "name": "aspect_rules_ts",
+      "type": "github_release",
+      "owner": "aspect-build",
+      "repo": "rules_ts",
+      "file_regex": "^rules_ts-",
+      // TODO(cleanup): Unpinning causes http-test@ts_project_typecheck_test to fail on Windows
+      "freeze_version": "v3.1.0"
     }
   ]
 }
