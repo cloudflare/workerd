@@ -1136,5 +1136,26 @@ KJ_TEST("rolling back nested transaction leaves deferred alarm deletion in expec
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
+KJ_TEST("database write operations check for brokenness") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  auto promise = test.gate.onBroken();
+
+  // Break gate
+  test.put("foo", "bar");
+  test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "a_rejected_commit"));
+
+  KJ_EXPECT_THROW_MESSAGE("a_rejected_commit", promise.wait(test.ws));
+
+  // We don't actually set ActorSqlite's brokenness until the taskFailed handler runs...
+  test.ws.poll();
+
+  // Try making a write operation to the database, expecting it to throw the broken message via
+  // the onWrite handler:
+  KJ_EXPECT_THROW_MESSAGE(
+      "a_rejected_commit", test.db.run("CREATE TABLE IF NOT EXISTS counter (count INTEGER)"));
+  test.pollAndExpectCalls({});
+}
+
 }  // namespace
 }  // namespace workerd
