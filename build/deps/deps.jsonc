@@ -59,14 +59,13 @@
       "branch": "main",
       "freeze_commit": "88bc5e321c2839707df8b1ab534e243e00744177"
     },
+    // protobuf for use with perfetto
     {
-      "name": "aspect_rules_esbuild",
       "type": "github_release",
-      "owner": "aspect-build",
-      "repo": "rules_esbuild",
-      "file_regex": "\\.tar\\.gz$",
-      // All releases are marked as prerelease, so github_last_release() fails.
-      "freeze_version": "v0.21.0"
+      "name": "com_google_protobuf",
+      "owner": "protocolbuffers",
+      "repo": "protobuf",
+      "file_regex": "protobuf-.*\\.tar\\.gz"
     }
   ]
 }

@@ -78,6 +78,22 @@
       "file_regex": "^cargo-bazel-x86_64-pc-windows-msvc.exe$",
       "file_type": "executable",
       "downloaded_file_path": "downloaded.exe"
+    },
+    {
+      "name": "aspect_rules_esbuild",
+      "type": "github_release",
+      "owner": "aspect-build",
+      "repo": "rules_esbuild",
+      "file_regex": "\\.tar\\.gz$",
+      // All releases are marked as prerelease, so github_last_release() fails.
+      "freeze_version": "v0.21.0"
+    },
+    {
+      "name": "rules_pkg",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_pkg",
+      "file_regex": "\\.tar\\.gz$"
     }
   ]
 }
