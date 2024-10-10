@@ -26,10 +26,10 @@ public:
         bucket(kj::mv(bucket)) {}
 
   kj::StringPtr getKey() const {
-    return kj::StringPtr(key);
+    return key;
   }
   kj::StringPtr getUploadId() const {
-    return kj::StringPtr(uploadId);
+    return uploadId;
   }
 
   jsg::Promise<UploadedPart> uploadPart(jsg::Lock& js,

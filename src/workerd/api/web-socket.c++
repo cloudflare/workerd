@@ -1190,7 +1190,7 @@ kj::Array<kj::StringPtr> WebSocket::Accepted::WrappedWebSocket::getHibernatableT
       // We have the array already, let's copy it and return.
       auto cpy = kj::heapArray<kj::StringPtr>(arr.size());
       for (auto& i: kj::indices(arr)) {
-        cpy[i] = kj::StringPtr(arr[i]);
+        cpy[i] = arr[i].asPtr();
       }
       return cpy;
     }

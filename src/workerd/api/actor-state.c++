@@ -1007,7 +1007,7 @@ jsg::JsValue deserializeV8Value(
       // include the key (to help find the data in the database if it hasn't been deleted), the
       // length of the value, and the first three bytes of the value (which is just the v8-internal
       // version header and the tag that indicates the type of the value, but not its contents).
-      kj::String actorId = getCurrentActorId().orDefault([]() { return kj::str(); });
+      kj::String actorId = getCurrentActorId().orDefault([]() { return kj::String(); });
       KJ_FAIL_ASSERT("actor storage deserialization failed", "failed to deserialize stored value",
           actorId, exception.getHandle(js), key, buf.size(),
           buf.slice(0, std::min(static_cast<size_t>(3), buf.size())));
