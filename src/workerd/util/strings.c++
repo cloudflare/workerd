@@ -63,4 +63,35 @@ kj::String toLower(kj::ArrayPtr<const char> ptr) {
   return toLower(kj::str(ptr));
 }
 
+kj::ArrayPtr<const char> trimLeadingAndTrailingWhitespace(kj::ArrayPtr<const char> ptr) {
+  size_t start = 0;
+  auto end = ptr.size();
+  while (start < end && isAsciiWhitespace(ptr[start])) {
+    start++;
+  }
+  while (end > start && isAsciiWhitespace(ptr[end - 1])) {
+    end--;
+  }
+  return ptr.slice(start, end).asChars();
+}
+
+kj::ArrayPtr<const char> trimTailingWhitespace(kj::ArrayPtr<const char> ptr) {
+  auto end = ptr.size();
+  while (end > 0 && isAsciiWhitespace(ptr[end - 1])) {
+    end--;
+  }
+  return ptr.first(end).asChars();
+}
+
+kj::Array<kj::byte> stripInnerWhitespace(kj::ArrayPtr<kj::byte> input) {
+  auto result = kj::heapArray<kj::byte>(input.size());
+  size_t len = 0;
+  for (const kj::byte c: input) {
+    if (!isAsciiWhitespace(c)) {
+      result[len++] = c;
+    }
+  }
+  return result.first(len).attach(kj::mv(result));
+};
+
 }  // namespace workerd

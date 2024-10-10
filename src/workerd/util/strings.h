@@ -83,4 +83,8 @@ kj::String toUpper(kj::String&& str);
 // Copy the input and convert ASCII alpha characters in the given string to lowercase.
 kj::String toLower(kj::ArrayPtr<const char> ptr);
 
+kj::ArrayPtr<const char> trimLeadingAndTrailingWhitespace(kj::ArrayPtr<const char> ptr);
+kj::ArrayPtr<const char> trimTailingWhitespace(kj::ArrayPtr<const char> ptr);
+kj::Array<kj::byte> stripInnerWhitespace(kj::ArrayPtr<kj::byte> input);
+
 }  // namespace workerd
