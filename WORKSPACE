@@ -389,14 +389,6 @@ http_archive(
 )
 
 # For use with perfetto
-http_archive(
-    name = "com_google_protobuf",
-    sha256 = "6adf73fd7f90409e479d6ac86529ade2d45f50494c5c10f539226693cb8fe4f7",
-    strip_prefix = "protobuf-3.10.1",
-    url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.10.1.tar.gz",
-)
-
-# For use with perfetto
 new_local_repository(
     name = "perfetto_cfg",
     build_file_content = "",
