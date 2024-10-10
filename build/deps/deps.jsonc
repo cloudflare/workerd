@@ -20,6 +20,24 @@
       // needed in the future.
       "freeze_commit": "c08ccc9ed166a82b92edd70ab215ae1f2501e838"
     },
+    {
+      "name": "ada-url",
+      "type": "github_release",
+      "owner": "ada-url",
+      "repo": "ada",
+      "file_regex": "singleheader.zip",
+      "strip_prefix": "",
+      "build_file": "//:build/BUILD.ada-url"
+    },
+    {
+      "name": "simdutf",
+      "type": "github_release",
+      "owner": "simdutf",
+      "repo": "simdutf",
+      "file_regex": "singleheader.zip",
+      "strip_prefix": "",
+      "build_file": "//:build/BUILD.simdutf"
+    },
     // webgpu deps
     {
       "name": "dawn",

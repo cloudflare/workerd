@@ -73,27 +73,11 @@ http_archive(
 )
 
 http_archive(
-    name = "ada-url",
-    build_file = "//:build/BUILD.ada-url",
-    sha256 = "30d4f4cccbd8b0455a71a2180da95f3a38d085e4a440eb931da94c7272705edc",
-    type = "zip",
-    url = "https://github.com/ada-url/ada/releases/download/v2.9.1/singleheader.zip",
-)
-
-http_archive(
     name = "nbytes",
     build_file = "//:build/BUILD.nbytes",
     sha256 = "34be48071c86add2f8d14fd4a238c47230965fd743a51b8a1dd0b2f0210f0171",
     strip_prefix = "nbytes-0.1.1",
     url = "https://github.com/nodejs/nbytes/archive/refs/tags/v0.1.1.tar.gz",
-)
-
-http_archive(
-    name = "simdutf",
-    build_file = "//:build/BUILD.simdutf",
-    sha256 = "7867c118a11bb7ccaea0f999a28684b06040027506b424b706146cc912b80ff6",
-    type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v5.2.8/singleheader.zip",
 )
 
 http_archive(
@@ -242,37 +226,6 @@ rust_analyzer_dependencies()
 # Node.js bootstrap
 #
 # workerd uses Node.js scripts for generating TypeScript types.
-
-# TODO(soon): rules_js depends on bazel-lib, which broke on Windows after a dependency binary was
-# deleted. There is a fix available at https://github.com/bazel-contrib/bazel-lib/pull/940, but it
-# is based off of a commit where WORKSPACE dependencies appear to be broken. Create a patch for the
-# latest release build instead. Remove this ASAP once the fix has been merged and rules_js has been
-# updated with the fixed version.
-http_archive(
-    name = "aspect_bazel_lib",
-    patch_args = ["-p1"],
-    patches = [
-        # based on https://github.com/bazel-contrib/bazel-lib/pull/940.
-        "//:patches/bazel-lib/0001-chore-deps-upgrade-to-newest-bsdtar.patch",
-    ],
-    sha256 = "688354ee6beeba7194243d73eb0992b9a12e8edeeeec5b6544f4b531a3112237",
-    strip_prefix = "bazel-lib-2.8.1",
-    url = "https://github.com/aspect-build/bazel-lib/releases/download/v2.8.1/bazel-lib-v2.8.1.tar.gz",
-)
-
-http_archive(
-    name = "aspect_rules_js",
-    sha256 = "6b7e73c35b97615a09281090da3645d9f03b2a09e8caa791377ad9022c88e2e6",
-    strip_prefix = "rules_js-2.0.0",
-    url = "https://github.com/aspect-build/rules_js/releases/download/v2.0.0/rules_js-v2.0.0.tar.gz",
-)
-
-http_archive(
-    name = "aspect_rules_ts",
-    sha256 = "ee7dcc35faef98f3050df9cf26f2a72ef356cab8ad927efb1c4dc119ac082a19",
-    strip_prefix = "rules_ts-3.0.0",
-    url = "https://github.com/aspect-build/rules_ts/releases/download/v3.0.0/rules_ts-v3.0.0.tar.gz",
-)
 
 load("@aspect_rules_js//js:repositories.bzl", "rules_js_dependencies")
 

@@ -9,13 +9,6 @@
       "file_regex": "\\.tar\\.gz$"
     },
     {
-      "name": "rules_license",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "rules_license",
-      "file_regex": "\\.tar\\.gz$"
-    },
-    {
       "name": "rules_python",
       "type": "github_release",
       "owner": "bazelbuild",
@@ -78,6 +71,20 @@
       "file_regex": "^cargo-bazel-x86_64-pc-windows-msvc.exe$",
       "file_type": "executable",
       "downloaded_file_path": "downloaded.exe"
+    },
+    {
+      "name": "aspect_rules_js",
+      "type": "github_release",
+      "owner": "aspect-build",
+      "repo": "rules_js",
+      "file_regex": "^rules_js-"
+    },
+    {
+      "name": "aspect_rules_ts",
+      "type": "github_release",
+      "owner": "aspect-build",
+      "repo": "rules_ts",
+      "file_regex": "^rules_ts-"
     }
   ]
 }
