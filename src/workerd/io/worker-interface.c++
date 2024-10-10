@@ -28,7 +28,7 @@ public:
       kj::AsyncInputStream& requestBody,
       Response& response) override {
     KJ_IF_SOME(w, worker) {
-      co_await w.get()->request(method, url, headers, requestBody, response);
+      co_await w->request(method, url, headers, requestBody, response);
     } else {
       co_await promise;
       co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
@@ -392,11 +392,9 @@ kj::Promise<WorkerInterface::ScheduledResult> RpcWorkerInterface::runScheduled(
   auto req = dispatcher.runScheduledRequest();
   req.setScheduledTime((scheduledTime - kj::UNIX_EPOCH) / kj::SECONDS);
   req.setCron(cron);
-  return req.send().then([](auto resp) {
-    auto respResult = resp.getResult();
-    return WorkerInterface::ScheduledResult{
-      .retry = respResult.getRetry(), .outcome = respResult.getOutcome()};
-  });
+  auto resp = co_await req.send();
+  auto respResult = resp.getResult();
+  co_return ScheduledResult{.retry = respResult.getRetry(), .outcome = respResult.getOutcome()};
 }
 
 kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(
@@ -404,12 +402,11 @@ kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(
   auto req = dispatcher.runAlarmRequest();
   req.setScheduledTime((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
   req.setRetryCount(retryCount);
-  return req.send().then([](auto resp) {
-    auto respResult = resp.getResult();
-    return WorkerInterface::AlarmResult{.retry = respResult.getRetry(),
-      .retryCountsAgainstLimit = respResult.getRetryCountsAgainstLimit(),
-      .outcome = respResult.getOutcome()};
-  });
+  auto resp = co_await req.send();
+  auto respResult = resp.getResult();
+  co_return AlarmResult{.retry = respResult.getRetry(),
+    .retryCountsAgainstLimit = respResult.getRetryCountsAgainstLimit(),
+    .outcome = respResult.getOutcome()};
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> RpcWorkerInterface::customEvent(
