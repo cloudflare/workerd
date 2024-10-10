@@ -7,6 +7,7 @@
 #include "simdutf.h"
 
 #include <workerd/util/mimetype.h>
+#include <workerd/util/strings.h>
 
 #include <kj/encoding.h>
 
@@ -213,28 +214,30 @@ kj::String redactUrl(kj::StringPtr url) {
   };
 
   for (const char& c: url) {
-    bool isUpper = ('A' <= c && c <= 'Z');
-    bool isLower = ('a' <= c && c <= 'z');
-    bool isDigit = ('0' <= c && c <= '9');
-    bool isHexDigit = (isDigit || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f'));
-    bool isSep = (c == '+' || c == '-' || c == '_');
+    uint8_t lookup = kCharLookupTable[c];
+    bool isSep = lookup & CharAttributeFlag::SEPARATOR;
+    bool isAlphaUpper = lookup & CharAttributeFlag::UPPER_CASE;
+    bool isAlphaLower = lookup & CharAttributeFlag::LOWER_CASE;
+    bool isDigit = lookup & CharAttributeFlag::DIGIT;
+    bool isHex = lookup & CharAttributeFlag::HEX;
+
     // These extra characters are used in the regular and url-safe versions of
     // base64, but might also be used for GUID-style separators in hex ids.
     // Regular base64 also includes '/', which we don't try to match here due
     // to its prevalence in URLs.  Likewise, we ignore the base64 "=" padding
     // character.
 
-    if (isUpper || isLower || isDigit || isSep) {
-      if (isHexDigit) {
+    if (isAlphaUpper || isAlphaLower || isDigit || isSep) {
+      if (isHex) {
         hexDigitCount++;
       }
-      if (!isHexDigit && !isSep) {
+      if (!isHex && !isSep) {
         sawNonHexChar = true;
       }
-      if (isUpper) {
+      if (isAlphaUpper) {
         upperCount++;
       }
-      if (isLower) {
+      if (isAlphaLower) {
         lowerCount++;
       }
       if (isDigit) {

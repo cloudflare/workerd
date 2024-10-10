@@ -1,6 +1,7 @@
 #include "data-url.h"
 
 #include <workerd/api/encoding.h>
+#include <workerd/util/strings.h>
 
 #include <kj/encoding.h>
 
@@ -39,7 +40,7 @@ kj::Maybe<DataUrl> DataUrl::from(const jsg::Url& url) {
   static const auto strip = [](auto label) {
     auto result = kj::heapArray<kj::byte>(label.size());
     size_t len = 0;
-    for (auto c: label) {
+    for (const kj::byte c: label) {
       if (!isAsciiWhitespace(c)) {
         result[len++] = c;
       }

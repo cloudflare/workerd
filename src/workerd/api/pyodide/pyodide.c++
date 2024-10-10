@@ -4,6 +4,7 @@
 #include "pyodide.h"
 
 #include <workerd/util/string-buffer.h>
+#include <workerd/util/strings.h>
 
 #include <kj/array.h>
 #include <kj/common.h>
@@ -190,13 +191,13 @@ kj::Array<kj::String> ArtifactBundler::parsePythonScriptImports(kj::Array<kj::St
       // We also accept `.` because import idents can contain it.
       // TODO: We don't currently support unicode, but if we see packages that utilise it we will
       // implement that support.
-      if (std::isdigit(str[start])) {
+      if (isDigit(str[start])) {
         return 0;
       }
       int i = 0;
       for (; start + i < str.size(); i++) {
         char c = str[start + i];
-        bool validIdentChar = std::isalpha(c) || std::isdigit(c) || c == '_' || c == '.';
+        bool validIdentChar = isAlpha(c) || isDigit(c) || c == '_' || c == '.';
         if (!validIdentChar) {
           return i;
         }
