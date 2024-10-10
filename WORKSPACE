@@ -220,7 +220,10 @@ rust_register_toolchains(
     edition = "2021",
     # Rust registers wasm targets by default which we don't need, workerd is only built for its native platform.
     extra_target_triples = [],
-    versions = ["1.81.0"],  # LLVM 18
+    versions = [
+        "1.81.0",  # LLVM 18
+        "nightly/2024-09-05",
+    ],
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
