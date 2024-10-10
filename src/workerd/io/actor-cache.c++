@@ -3357,4 +3357,8 @@ kj::Promise<kj::String> ActorCacheInterface::onNextSessionRestoreBookmark(kj::St
       Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
 }
 
+kj::Promise<void> ActorCacheInterface::ensureReplicas() {
+  JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not support replication.");
+}
+
 }  // namespace workerd
