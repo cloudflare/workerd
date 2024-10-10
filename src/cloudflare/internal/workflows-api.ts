@@ -66,8 +66,8 @@ class InstanceImpl implements Instance {
     });
   }
 
-  public async abort(): Promise<void> {
-    await callFetcher(this.fetcher, '/abort', {
+  public async terminate(): Promise<void> {
+    await callFetcher(this.fetcher, '/terminate', {
       id: this.id,
     });
   }

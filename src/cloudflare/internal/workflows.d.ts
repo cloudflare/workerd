@@ -71,9 +71,9 @@ declare abstract class Instance {
   public resume(): Promise<void>;
 
   /**
-   * Abort the instance. If it is errored, terminated or complete, an error will be thrown.
+   * Terminate the instance. If it is errored, terminated or complete, an error will be thrown.
    */
-  public abort(): Promise<void>;
+  public terminate(): Promise<void>;
 
   /**
    * Restart the instance.
