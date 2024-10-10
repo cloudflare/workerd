@@ -247,8 +247,8 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
 }
 
 MimeType::MimeType(kj::StringPtr type, kj::StringPtr subtype, kj::Maybe<MimeParams> params)
-    : type_(toLowerCopy(type)),
-      subtype_(toLowerCopy(subtype)) {
+    : type_(toLower(type)),
+      subtype_(toLower(subtype)) {
   KJ_IF_SOME(p, params) {
     params_ = kj::mv(p);
   }
@@ -260,7 +260,7 @@ kj::StringPtr MimeType::type() const {
 
 bool MimeType::setType(kj::StringPtr type) {
   if (type.size() == 0 || hasInvalidCodepoints(type, isTokenChar)) return false;
-  type_ = toLowerCopy(type);
+  type_ = toLower(type);
   return true;
 }
 
@@ -270,7 +270,7 @@ kj::StringPtr MimeType::subtype() const {
 
 bool MimeType::setSubtype(kj::StringPtr type) {
   if (type.size() == 0 || hasInvalidCodepoints(type, isTokenChar)) return false;
-  subtype_ = toLowerCopy(type);
+  subtype_ = toLower(type);
   return true;
 }
 
@@ -283,12 +283,12 @@ bool MimeType::addParam(kj::ArrayPtr<const char> name, kj::ArrayPtr<const char> 
       hasInvalidCodepoints(value, isQuotedStringTokenChar)) {
     return false;
   }
-  params_.upsert(toLowerCopy(name), kj::str(value), [](auto&, auto&&) {});
+  params_.upsert(toLower(name), kj::str(value), [](auto&, auto&&) {});
   return true;
 }
 
 void MimeType::eraseParam(kj::StringPtr name) {
-  params_.erase(toLowerCopy(name));
+  params_.erase(toLower(name));
 }
 
 kj::String MimeType::essence() const {

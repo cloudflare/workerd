@@ -72,10 +72,12 @@ wd_cc_library(
 
 wd_cc_library(
     name = "strings",
-    srcs = [],
+    srcs = ["strings.c++"],
     hdrs = ["strings.h"],
     visibility = ["//visibility:public"],
-    deps = [],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(
