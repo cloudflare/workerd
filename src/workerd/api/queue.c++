@@ -11,6 +11,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/strings.h>
 
 #include <kj/encoding.h>
 

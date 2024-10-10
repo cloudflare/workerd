@@ -338,7 +338,7 @@ public:
       return nullptr;
     }
 
-    auto r = signature.slice(0, rsSize);
+    auto r = signature.first(rsSize);
     auto s = signature.slice(rsSize, signature.size());
 
     // Trim leading zeros.

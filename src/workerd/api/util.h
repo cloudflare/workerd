@@ -14,9 +14,6 @@
 
 namespace workerd::api {
 
-// Convert `str` to lower-case (e.g. to canonicalize a header name).
-jsg::ByteString toLower(kj::StringPtr str);
-
 // =======================================================================================
 
 #if _MSC_VER
@@ -29,11 +26,6 @@ struct CiLess {
     return strcasecmp(lhs.begin(), rhs.begin()) < 0;
   }
 };
-
-// Mutate `str` with all alphabetic ASCII characters lowercased. Returns `str`.
-kj::String toLower(kj::String&& str);
-// Mutate `str` with all alphabetic ASCII characters uppercased. Returns `str`.
-kj::String toUpper(kj::String&& str);
 
 // Parse `rawText` as application/x-www-form-urlencoded name/value pairs and store in `query`. If
 // `skipLeadingQuestionMark` is true, any initial '?' will be ignored. Otherwise, it will be

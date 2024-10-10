@@ -69,11 +69,11 @@ void normalizePort(kj::Url& url) {
   KJ_IF_SOME(colon, url.host.findFirst(':')) {
     if (url.host.size() == colon + 1) {
       // Remove trailing ':'.
-      url.host = kj::str(url.host.slice(0, colon));
+      url.host = kj::str(url.host.first(colon));
     } else KJ_IF_SOME(defaultPort, defaultPortForScheme(url.scheme)) {
       if (defaultPort == url.host.slice(colon + 1)) {
         // Remove scheme-default port.
-        url.host = kj::str(url.host.slice(0, colon));
+        url.host = kj::str(url.host.first(colon));
       }
     }
   }
@@ -84,7 +84,7 @@ kj::Maybe<kj::ArrayPtr<const char>> trySplit(kj::ArrayPtr<const char>& text, cha
 
   for (auto i: kj::indices(text)) {
     if (text[i] == c) {
-      kj::ArrayPtr<const char> result = text.slice(0, i);
+      kj::ArrayPtr<const char> result = text.first(i);
       text = text.slice(i + 1, text.size());
       return result;
     }
@@ -97,7 +97,7 @@ kj::ArrayPtr<const char> split(kj::StringPtr& text, const kj::parse::CharGroup_&
 
   for (auto i: kj::indices(text)) {
     if (chars.contains(text[i])) {
-      kj::ArrayPtr<const char> result = text.slice(0, i);
+      kj::ArrayPtr<const char> result = text.first(i);
       text = text.slice(i);
       return result;
     }
@@ -239,7 +239,7 @@ kj::String URL::getProtocol() {
 }
 void URL::setProtocol(kj::String value) {
   KJ_IF_SOME(colon, value.findFirst(':')) {
-    value = kj::str(value.slice(0, colon));
+    value = kj::str(value.first(colon));
   }
 
   auto copy = url->clone();
@@ -333,14 +333,14 @@ void URL::setHost(kj::String value) {
 
 kj::String URL::getHostname() {
   KJ_IF_SOME(colon, url->host.findFirst(':')) {
-    return kj::str(url->host.slice(0, colon));
+    return kj::str(url->host.first(colon));
   }
   return kj::str(url->host);
 }
 void URL::setHostname(kj::String value) {
   // In contrast to the host setter, the hostname setter explicitly ignores any new port. We take
   // the hostname from the new value and the port from the old value.
-  auto hostnameString = value.slice(0, value.findFirst(':').orDefault(value.size()));
+  auto hostnameString = value.first(value.findFirst(':').orDefault(value.size()));
   auto portString = url->host.slice(url->host.findFirst(':').orDefault(url->host.size()));
 
   url->host = kj::str(hostnameString, portString);
@@ -355,7 +355,7 @@ kj::String URL::getPort() {
 void URL::setPort(kj::String value) {
   KJ_IF_SOME(colon, url->host.findFirst(':')) {
     // Our url's host already has a port. Replace it.
-    value = kj::str(url->host.slice(0, colon + 1), kj::mv(value));
+    value = kj::str(url->host.first(colon + 1), kj::mv(value));
   } else {
     value = kj::str(url->host, ':', kj::mv(value));
   }

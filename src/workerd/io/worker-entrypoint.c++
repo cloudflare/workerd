@@ -10,6 +10,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/use-perfetto-categories.h>
@@ -247,7 +248,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     //   headers.)
     kj::TreeMap<kj::String, kj::Vector<kj::StringPtr>> traceHeaders;
     headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
-      kj::String lower = api::toLower(name);
+      kj::String lower = toLower(name);
       auto& slot = traceHeaders.findOrCreate(
           lower, [&]() { return decltype(traceHeaders)::Entry{kj::mv(lower), {}}; });
       slot.add(value);

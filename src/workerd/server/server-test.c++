@@ -71,7 +71,7 @@ kj::String operator"" _blockquote(const char* str, size_t n) {
   while (text != nullptr) {
     // Add data from this line.
     auto nl = text.findFirst('\n').orDefault(text.size() - 1) + 1;
-    result.addAll(text.slice(0, nl));
+    result.addAll(text.first(nl));
     text = text.slice(nl);
 
     // Skip indent of next line, up to the expected indent size.

@@ -79,7 +79,7 @@ kj::ArrayPtr<const char> skipWhitespace(kj::ArrayPtr<const char> str) {
 kj::ArrayPtr<const char> trimWhitespace(kj::ArrayPtr<const char> str) {
   auto ptr = str.end();
   while (ptr > str.begin() && isWhitespace(*(ptr - 1))) --ptr;
-  return str.slice(0, str.size() - (str.end() - ptr));
+  return str.first(str.size() - (str.end() - ptr));
 }
 
 constexpr bool hasInvalidCodepoints(kj::ArrayPtr<const char> str, auto predicate) {
@@ -103,7 +103,7 @@ kj::String unescape(kj::ArrayPtr<const char> str) {
   auto result = kj::strTree();
   while (str.size() > 0) {
     KJ_IF_SOME(pos, str.findFirst('\\')) {
-      result = kj::strTree(kj::mv(result), str.slice(0, pos));
+      result = kj::strTree(kj::mv(result), str.first(pos));
       str = str.slice(pos + 1, str.size());
     } else {
       // No more backslashes
@@ -132,7 +132,7 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
   kj::Maybe<kj::String> maybeType;
   // Let's try to find the solidus that separates the type and subtype
   KJ_IF_SOME(n, input.findFirst('/')) {
-    auto typeCandidate = input.slice(0, n);
+    auto typeCandidate = input.first(n);
     if (typeCandidate.size() == 0 || hasInvalidCodepoints(typeCandidate, isTokenChar)) {
       return kj::none;
     }
@@ -151,7 +151,7 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
   KJ_IF_SOME(n, input.findFirst(';')) {
     // If a semi-colon is found, the subtype is everything up to that point
     // minus trailing whitespace.
-    auto subtypeCandidate = trimWhitespace(input.slice(0, n));
+    auto subtypeCandidate = trimWhitespace(input.first(n));
     if (subtypeCandidate.size() == 0 || hasInvalidCodepoints(subtypeCandidate, isTokenChar)) {
       return kj::none;
     }
@@ -182,7 +182,7 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
           continue;
         }
         KJ_ASSERT(input[n] == '=');
-        auto nameCandidate = input.slice(0, n);
+        auto nameCandidate = input.first(n);
         input = input.slice(n + 1);
         if (nameCandidate.size() == 0 || hasInvalidCodepoints(nameCandidate, isTokenChar)) {
           // The name is invalid, try skipping to the next...
@@ -200,7 +200,7 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
           // Our parameter value is quoted. Next we'll scan up until the next
           // quote or until the end of the string.
           KJ_IF_SOME(p, input.findFirst('"')) {
-            auto valueCandidate = input.slice(0, p);
+            auto valueCandidate = input.first(p);
             input = input.slice(p + 1);
             if (hasInvalidCodepoints(valueCandidate, isQuotedStringTokenChar)) {
               continue;
@@ -217,7 +217,7 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
         } else {
           // The parameter is not quoted. Let's scan ahead for the next semi-colon.
           KJ_IF_SOME(p, input.findFirst(';')) {
-            auto valueCandidate = trimWhitespace(input.slice(0, p));
+            auto valueCandidate = trimWhitespace(input.first(p));
             input = input.slice(p + 1);
             if (valueCandidate.size() > 0 &&
                 !hasInvalidCodepoints(valueCandidate, isQuotedStringTokenChar)) {
@@ -247,8 +247,8 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
 }
 
 MimeType::MimeType(kj::StringPtr type, kj::StringPtr subtype, kj::Maybe<MimeParams> params)
-    : type_(toLowerCopy(type)),
-      subtype_(toLowerCopy(subtype)) {
+    : type_(toLower(type)),
+      subtype_(toLower(subtype)) {
   KJ_IF_SOME(p, params) {
     params_ = kj::mv(p);
   }
@@ -260,7 +260,7 @@ kj::StringPtr MimeType::type() const {
 
 bool MimeType::setType(kj::StringPtr type) {
   if (type.size() == 0 || hasInvalidCodepoints(type, isTokenChar)) return false;
-  type_ = toLowerCopy(type);
+  type_ = toLower(type);
   return true;
 }
 
@@ -270,7 +270,7 @@ kj::StringPtr MimeType::subtype() const {
 
 bool MimeType::setSubtype(kj::StringPtr type) {
   if (type.size() == 0 || hasInvalidCodepoints(type, isTokenChar)) return false;
-  subtype_ = toLowerCopy(type);
+  subtype_ = toLower(type);
   return true;
 }
 
@@ -283,12 +283,12 @@ bool MimeType::addParam(kj::ArrayPtr<const char> name, kj::ArrayPtr<const char> 
       hasInvalidCodepoints(value, isQuotedStringTokenChar)) {
     return false;
   }
-  params_.upsert(toLowerCopy(name), kj::str(value), [](auto&, auto&&) {});
+  params_.upsert(toLower(name), kj::str(value), [](auto&, auto&&) {});
   return true;
 }
 
 void MimeType::eraseParam(kj::StringPtr name) {
-  params_.erase(toLowerCopy(name));
+  params_.erase(toLower(name));
 }
 
 kj::String MimeType::essence() const {
@@ -313,7 +313,7 @@ void MimeType::paramsToString(MimeType::ToStringBuffer& buffer) const {
       buffer.append("\"");
       while (view.size() > 0) {
         KJ_IF_SOME(pos, view.findFirst('"')) {
-          buffer.append(view.slice(0, pos), "\\\"");
+          buffer.append(view.first(pos), "\\\"");
           view = view.slice(pos + 1);
         } else {
           buffer.append(view);
@@ -461,7 +461,7 @@ kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
 
   while (input.size() > 0) {
     KJ_IF_SOME(pos, findNextSeparator(input)) {
-      auto part = input.slice(0, pos);
+      auto part = input.first(pos);
       input = input.slice(pos + 1);
       KJ_IF_SOME(parsed, processPart(mimeType, part)) {
         mimeType = kj::mv(parsed);

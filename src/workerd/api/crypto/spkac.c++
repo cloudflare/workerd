@@ -4,22 +4,13 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/strings.h>
 
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
 namespace workerd::api {
 namespace {
-kj::ArrayPtr<const kj::byte> trim(kj::ArrayPtr<const kj::byte> input) {
-  size_t length = input.size();
-  for (auto i = length - 1; i >= 0; --i) {
-    if (input[i] != ' ' && input[i] != '\n' && input[i] != '\r' && input[i] != '\t') {
-      break;
-    }
-  }
-  return input.first(length);
-}
-
 kj::Array<kj::byte> toArray(BIO* bio) {
   BUF_MEM* bptr;
   BIO_get_mem_ptr(bio, &bptr);
@@ -32,8 +23,8 @@ kj::Array<kj::byte> toArray(BIO* bio) {
 kj::Maybe<kj::Own<NETSCAPE_SPKI>> tryGetSpki(kj::ArrayPtr<const kj::byte> input) {
   static constexpr int32_t kMaxLength = kj::maxValue;
   JSG_REQUIRE(input.size() <= kMaxLength, RangeError, "spkac is too large");
-  input = trim(input);
-  auto ptr = NETSCAPE_SPKI_b64_decode(input.asChars().begin(), input.size());
+  auto trimmed = trimTailingWhitespace(input.asChars());
+  auto ptr = NETSCAPE_SPKI_b64_decode(trimmed.begin(), trimmed.size());
   if (!ptr) return kj::none;
   return kj::disposeWith<NETSCAPE_SPKI_free>(ptr);
 }

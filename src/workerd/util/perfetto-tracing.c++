@@ -68,7 +68,7 @@ kj::Array<kj::ArrayPtr<const char>> PerfettoSession::parseCategories(kj::StringP
   kj::Vector<kj::ArrayPtr<const char>> results;
   while (categories.size() > 0) {
     KJ_IF_SOME(pos, categories.findFirst(',')) {
-      results.add(categories.slice(0, pos));
+      results.add(categories.first(pos));
       categories = categories.slice(pos + 1);
     } else {
       results.add(categories);

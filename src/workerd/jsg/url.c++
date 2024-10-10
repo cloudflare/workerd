@@ -535,11 +535,11 @@ using Canonicalizer = kj::Maybe<kj::String>(kj::StringPtr, kj::Maybe<kj::StringP
 kj::Maybe<kj::String> canonicalizeProtocol(
     kj::StringPtr protocol, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-protocol
-  if (protocol.size() == 0) return kj::str();
+  if (protocol.size() == 0) return kj::String();
   auto input = kj::str(protocol, "://dummy.test");
   KJ_IF_SOME(url, Url::tryParse(input.asPtr())) {
     auto result = url.getProtocol();
-    return kj::str(result.slice(0, result.size() - 1));
+    return kj::str(result.first(result.size() - 1));
   }
   return kj::none;
 }
@@ -547,7 +547,7 @@ kj::Maybe<kj::String> canonicalizeProtocol(
 kj::Maybe<kj::String> canonicalizeUsername(
     kj::StringPtr username, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-username
-  if (username.size() == 0) return kj::str();
+  if (username.size() == 0) return kj::String();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
   if (!url.setUsername(username)) return kj::none;
   return kj::str(url.getUsername());
@@ -556,7 +556,7 @@ kj::Maybe<kj::String> canonicalizeUsername(
 kj::Maybe<kj::String> canonicalizePassword(
     kj::StringPtr password, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-password
-  if (password.size() == 0) return kj::str();
+  if (password.size() == 0) return kj::String();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
   if (!url.setPassword(password)) return kj::none;
   return kj::str(url.getPassword());
@@ -565,7 +565,7 @@ kj::Maybe<kj::String> canonicalizePassword(
 kj::Maybe<kj::String> canonicalizeHostname(
     kj::StringPtr hostname, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-hostname
-  if (hostname.size() == 0) return kj::str();
+  if (hostname.size() == 0) return kj::String();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
   if (!isValidHostnameInput(hostname)) return kj::none;
   if (!url.setHostname(hostname)) return kj::none;
@@ -584,7 +584,7 @@ kj::Maybe<kj::String> canonicalizeIpv6Hostname(
 
 kj::Maybe<kj::String> canonicalizePort(kj::StringPtr port, kj::Maybe<kj::StringPtr> protocol) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-port
-  if (port.size() == 0) return kj::str();
+  if (port.size() == 0) return kj::String();
   auto input = kj::str(protocol.orDefault("fake"_kj), "://dummy.test");
   KJ_IF_SOME(url, Url::tryParse(input.asPtr())) {
     if (!url.setPort(kj::Maybe(port))) return kj::none;
@@ -596,7 +596,7 @@ kj::Maybe<kj::String> canonicalizePort(kj::StringPtr port, kj::Maybe<kj::StringP
 kj::Maybe<kj::String> canonicalizePathname(
     kj::StringPtr pathname, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-pathname
-  if (pathname.size() == 0) return kj::str();
+  if (pathname.size() == 0) return kj::String();
   bool leadingSlash = pathname[0] == '/';
   auto input = kj::str("fake://fake-url", leadingSlash ? "" : "/-", pathname);
   KJ_IF_SOME(url, Url::tryParse(input.asPtr())) {
@@ -609,7 +609,7 @@ kj::Maybe<kj::String> canonicalizePathname(
 kj::Maybe<kj::String> canonicalizeOpaquePathname(
     kj::StringPtr pathname, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-an-opaque-pathname
-  if (pathname.size() == 0) return kj::str();
+  if (pathname.size() == 0) return kj::String();
   auto str = kj::str("fake:", pathname);
   KJ_IF_SOME(url, Url::tryParse(str.asPtr())) {
     return kj::str(url.getPathname());
@@ -620,18 +620,18 @@ kj::Maybe<kj::String> canonicalizeOpaquePathname(
 kj::Maybe<kj::String> canonicalizeSearch(
     kj::StringPtr search, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-search
-  if (search.size() == 0) return kj::str();
+  if (search.size() == 0) return kj::String();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
   url.setSearch(kj::Maybe(search));
-  return url.getSearch().size() > 0 ? kj::str(url.getSearch().slice(1)) : kj::str();
+  return url.getSearch().size() > 0 ? kj::str(url.getSearch().slice(1)) : kj::String();
 }
 
 kj::Maybe<kj::String> canonicalizeHash(kj::StringPtr hash, kj::Maybe<kj::StringPtr> = kj::none) {
   // @see https://wicg.github.io/urlpattern/#canonicalize-a-hash
-  if (hash.size() == 0) return kj::str();
+  if (hash.size() == 0) return kj::String();
   auto url = KJ_ASSERT_NONNULL(Url::tryParse("fake://dummy.test"_kj));
   url.setHash(kj::Maybe(hash));
-  return url.getHash().size() > 0 ? kj::str(url.getHash().slice(1)) : kj::str();
+  return url.getHash().size() > 0 ? kj::str(url.getHash().slice(1)) : kj::String();
 }
 
 kj::Maybe<kj::String> chooseStr(kj::Maybe<kj::String> str, kj::Maybe<kj::StringPtr> other) {
@@ -644,7 +644,7 @@ kj::Maybe<kj::String> chooseStr(kj::Maybe<kj::String> str, kj::Maybe<kj::StringP
 
 kj::String stripSuffixFromProtocol(kj::ArrayPtr<const char> data) {
   if (data.back() == ':') {
-    return kj::str(data.slice(0, data.size() - 1));
+    return kj::str(data.first(data.size() - 1));
   }
   return kj::str(data);
 }
@@ -1248,7 +1248,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
       }
       return kj::none;
     }
-    auto regexValue = kj::str();
+    auto regexValue = kj::String();
     KJ_IF_SOME(token, regexOrWildcardToken) {
       if (token.type == Token::Type::ASTERISK) {
         regexValue = kj::str(".*");
@@ -1261,12 +1261,12 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
     auto type = Part::Type::REGEXP;
     if (regexValue == segmentWildcardRegex) {
       type = Part::Type::SEGMENT_WILDCARD;
-      regexValue = kj::str();
+      regexValue = kj::String();
     } else if (regexValue == ".*") {
       type = Part::Type::FULL_WILDCARD;
-      regexValue = kj::str();
+      regexValue = kj::String();
     }
-    auto name = kj::str();
+    auto name = kj::String();
     KJ_IF_SOME(token, nameToken) {
       name = kj::String(token);
     } else if (regexOrWildcardToken != kj::none) {
@@ -1425,10 +1425,10 @@ RegexAndNameList generateRegexAndNameList(
 
     auto escapedPrefix = part.prefix.map([](kj::String& str) {
       return escapeRegexString(str);
-    }).orDefault(kj::str());
+    }).orDefault(kj::String());
     auto escapedSuffix = part.suffix.map([](kj::String& str) {
       return escapeRegexString(str);
-    }).orDefault(kj::str());
+    }).orDefault(kj::String());
 
     if (part.modifier == Part::Modifier::NONE || part.modifier == Part::Modifier::OPTIONAL) {
       regex = kj::strTree(kj::mv(regex), "(?:", escapedPrefix, "(", value, ")", escapedSuffix, ")");
@@ -1797,11 +1797,11 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
           changeState(State::HASH, 1);
         } else if (isSearchPrefix()) {
           changeState(State::SEARCH, 1);
-          result.hash = kj::str();
+          result.hash = kj::String();
         } else {
           changeState(State::PATHNAME, 0);
-          result.search = kj::str();
-          result.hash = kj::str();
+          result.search = kj::String();
+          result.hash = kj::String();
         }
         // Since we called rewind and we know that sets inc to zero,
         // and we know that nothing else here changed inc, there's no
@@ -1835,13 +1835,13 @@ UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
     switch (state) {
       case State::INIT: {
         if (isProtocolSuffix()) {
-          result.username = kj::str();
-          result.password = kj::str();
-          result.hostname = kj::str();
-          result.port = kj::str();
-          result.pathname = kj::str();
-          result.search = kj::str();
-          result.hash = kj::str();
+          result.username = kj::String();
+          result.password = kj::String();
+          result.hostname = kj::String();
+          result.port = kj::String();
+          result.pathname = kj::String();
+          result.search = kj::String();
+          result.hash = kj::String();
           rewind(State::PROTOCOL);
         }
         break;
@@ -2036,12 +2036,12 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
       if (url.getSearch().size() > 0) {
         result.search = escapePatternString(url.getSearch().slice(1));
       } else {
-        result.search = kj::str();
+        result.search = kj::String();
       }
       if (url.getHash().size() > 0) {
         result.hash = escapePatternString(url.getHash().slice(1));
       } else {
-        result.hash = kj::str();
+        result.hash = kj::String();
       }
       result.baseUrl = kj::mv(base);
       maybeBaseUrl = kj::mv(url);
@@ -2079,7 +2079,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         KJ_IF_SOME(url, maybeBaseUrl) {
           auto basePathname = url.getPathname();
           KJ_IF_SOME(index, basePathname.findLast('/')) {
-            result.pathname = kj::str(basePathname.slice(0, index + 1), pathname);
+            result.pathname = kj::str(basePathname.first(index + 1), pathname);
           } else {
             result.pathname = kj::str(basePathname);
           }
@@ -2226,7 +2226,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         if (url.getSearch().size() > 0) {
           result.search = kj::str(url.getSearch().slice(1));
         } else {
-          result.search = kj::str();
+          result.search = kj::String();
         }
       }
       KJ_IF_SOME(hash, chooseStr(kj::mv(init.hash), options.hash)) {
@@ -2236,7 +2236,7 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         if (url.getHash().size() > 0) {
           result.hash = kj::str(url.getHash().slice(1));
         } else {
-          result.hash = kj::str();
+          result.hash = kj::String();
         }
       }
       return result;

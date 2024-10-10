@@ -72,7 +72,7 @@ private:
 
     if (format == "jwk") {
       // This assert enforces that the slice logic to fill in `.alg` below is safe.
-      JSG_REQUIRE(keyAlgorithm.hash.name.slice(0, 4) == "SHA-"_kj, DOMNotSupportedError,
+      JSG_REQUIRE(keyAlgorithm.hash.name.first(4) == "SHA-"_kj, DOMNotSupportedError,
           "Unimplemented JWK key export format for key algorithm \"", keyAlgorithm.hash.name,
           "\".");
 

@@ -84,7 +84,7 @@ kj::String typeName(const std::type_info& type) {
   //
   // TODO(someday): Maybe just strip namespaces from each arg?
   KJ_IF_SOME(pos, result.findFirst('<')) {
-    result = kj::str(result.slice(0, pos));
+    result = kj::str(result.first(pos));
   }
 
   return kj::mv(result);
@@ -204,7 +204,7 @@ DecodedException decodeTunneledException(
         // Check for closing brace
         KJ_IF_SOME(closeParen, errorType.findFirst(')')) {
           auto& js = Lock::from(isolate);
-          auto errorName = kj::str(errorType.slice(0, closeParen));
+          auto errorName = kj::str(errorType.first(closeParen));
           auto message = appMessage(errorType.slice(1 + closeParen));
           auto exception = js.domException(kj::mv(errorName), kj::str(message));
           result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));

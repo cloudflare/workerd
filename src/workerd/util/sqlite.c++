@@ -166,7 +166,7 @@ static kj::Path getPathFromWin32Handle(HANDLE handle) {
       KJ_FAIL_WIN32("GetFinalPathNameByHandleW", GetLastError());
     }
     if (len < temp.size()) {
-      return kj::Path::parseWin32Api(temp.slice(0, len));
+      return kj::Path::parseWin32Api(temp.first(len));
     }
     // Try again with new length.
     tryLen = len;
@@ -660,7 +660,7 @@ SqliteDatabase::IngestResult SqliteDatabase::ingestSql(
     if (!statementLength) break;
 
     // Slice off the next valid statement SQL
-    auto nextStatement = kj::str(sqlCode.slice(0, statementLength));
+    auto nextStatement = kj::str(sqlCode.first(statementLength));
     // Create a Query object, which will prepare & execute it
     auto q = Query(*this, regulator, nextStatement);
 

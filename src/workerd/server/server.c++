@@ -101,36 +101,36 @@ static kj::String httpTime(kj::Date date) {
   return kj::heapString(buf, n);
 }
 
-static kj::Vector<char> escapeJsonString(kj::StringPtr text) {
+static kj::String escapeJsonString(kj::StringPtr text) {
   static const char HEXDIGITS[] = "0123456789abcdef";
   kj::Vector<char> escaped(text.size() + 1);
 
   for (char c: text) {
     switch (c) {
-      case '\"':
-        escaped.addAll(kj::StringPtr("\\\""));
+      case '"':
+        escaped.addAll("\\\""_kj);
         break;
       case '\\':
-        escaped.addAll(kj::StringPtr("\\\\"));
+        escaped.addAll("\\\\"_kj);
         break;
       case '\b':
-        escaped.addAll(kj::StringPtr("\\b"));
+        escaped.addAll("\\b"_kj);
         break;
       case '\f':
-        escaped.addAll(kj::StringPtr("\\f"));
+        escaped.addAll("\\f"_kj);
         break;
       case '\n':
-        escaped.addAll(kj::StringPtr("\\n"));
+        escaped.addAll("\\n"_kj);
         break;
       case '\r':
-        escaped.addAll(kj::StringPtr("\\r"));
+        escaped.addAll("\\r"_kj);
         break;
       case '\t':
-        escaped.addAll(kj::StringPtr("\\t"));
+        escaped.addAll("\\t"_kj);
         break;
       default:
         if (static_cast<uint8_t>(c) < 0x20) {
-          escaped.addAll(kj::StringPtr("\\u00"));
+          escaped.addAll("\\u00"_kj);
           uint8_t c2 = c;
           escaped.add(HEXDIGITS[c2 / 16]);
           escaped.add(HEXDIGITS[c2 % 16]);
@@ -141,7 +141,7 @@ static kj::Vector<char> escapeJsonString(kj::StringPtr text) {
     }
   }
 
-  return escaped;
+  return kj::str("\"", escaped.releaseAsArray(), "\"");
 }
 
 // TODO(now): Temporary
@@ -1079,10 +1079,8 @@ private:
                   break;
               }
 
-              jsonEntries.add(kj::str("{\"name\":\"", escapeJsonString(entry.name),
-                  "\","
-                  "\"type\":\"",
-                  type, "\"}"));
+              jsonEntries.add(
+                  kj::str("{\"name\":", escapeJsonString(entry.name), ",\"type\":\"", type, "\"}"));
             };
 
             auto content = kj::str('[', kj::strArray(jsonEntries, ","), ']');
@@ -2422,8 +2420,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       auto algorithmConf = keyConf.getAlgorithm();
       switch (algorithmConf.which()) {
         case config::Worker::Binding::CryptoKey::Algorithm::NAME:
-          keyGlobal.algorithm =
-              Global::Json{kj::str('"', escapeJsonString(algorithmConf.getName()), '"')};
+          keyGlobal.algorithm = Global::Json{escapeJsonString(algorithmConf.getName())};
           goto validAlgorithm;
         case config::Worker::Binding::CryptoKey::Algorithm::JSON:
           keyGlobal.algorithm = Global::Json{kj::str(algorithmConf.getJson())};
@@ -3182,7 +3179,7 @@ public:
         }
 
         KJ_IF_SOME(remote, kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
-          cfBlobJson = kj::str("{\"clientIp\": \"", escapeJsonString(remote.toString()), "\"}");
+          cfBlobJson = kj::str("{\"clientIp\": ", escapeJsonString(remote.toString()), "}");
         } else KJ_IF_SOME(local, kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
           auto creds = local.getCredentials();
 

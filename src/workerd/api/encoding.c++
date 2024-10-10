@@ -264,22 +264,10 @@ kj::StringPtr getEncodingId(Encoding encoding) {
 }
 
 Encoding getEncodingForLabel(kj::StringPtr label) {
-  kj::String labelInsensitive = toLower(label);
-  const auto trim = [](kj::StringPtr label) {
-    size_t start = 0;
-    auto end = label.size();
-    while (start < end && isAsciiWhitespace(label[start])) {
-      start++;
-    }
-    while (end > start && isAsciiWhitespace(label[end - 1])) {
-      end--;
-    }
-    return label.slice(start, end).asChars();
-  };
-
-  auto trimmed = trim(labelInsensitive);
+  auto lower = toLower(label);
+  auto trimmed = trimLeadingAndTrailingWhitespace(lower);
 #define V(label, key)                                                                              \
-  if (trimmed == label##_kj) return Encoding::key;
+  if (trimmed == label##_kjb) return Encoding::key;
   EW_ENCODING_LABELS(V)
 #undef V
   return Encoding::INVALID;

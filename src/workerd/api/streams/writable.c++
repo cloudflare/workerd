@@ -469,7 +469,7 @@ public:
         KJ_DASSERT(ptr.size() > 0);
         KJ_DASSERT(piece.size() <= ptr.size());
         if (piece.size() == 0) continue;
-        ptr.slice(0, piece.size()).copyFrom(piece);
+        ptr.first(piece.size()).copyFrom(piece);
         ptr = ptr.slice(piece.size());
       }
 

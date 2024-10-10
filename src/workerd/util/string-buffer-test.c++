@@ -11,7 +11,7 @@ namespace {
 
 KJ_TEST("append StringPtr") {
   StringBuffer<100> buffer(100);
-  buffer.append(kj::StringPtr("abcdef"));
+  buffer.append("abcdef"_kj);
   KJ_EXPECT("abcdef"_kj == buffer.toString());
 }
 

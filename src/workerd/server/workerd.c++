@@ -903,7 +903,7 @@ public:
   };
   Override parseOverride(kj::StringPtr str) {
     auto equalPos = KJ_UNWRAP_OR(str.findFirst('='), CLI_ERROR("Expected <name>=<value>"));
-    return {kj::str(str.slice(0, equalPos)), str.slice(equalPos + 1)};
+    return {kj::str(str.first(equalPos)), str.slice(equalPos + 1)};
   }
 
   void overrideSocketAddr(kj::StringPtr param) {
@@ -1094,7 +1094,7 @@ public:
 
     for (;;) {
       auto dotPos = KJ_UNWRAP_OR(name.findFirst('.'), break);
-      auto parentName = name.slice(0, dotPos);
+      auto parentName = name.first(dotPos);
       parent = KJ_UNWRAP_OR(parent.findNested(kj::str(parentName)),
           CLI_ERROR("No such constant is defined in the config file (the parent scope '",
               parentName, "' does not exist)."));
@@ -1122,7 +1122,7 @@ public:
 
     for (;;) {
       KJ_IF_SOME(pos, filter.findFirst(':')) {
-        parts.add(kj::str(filter.slice(0, pos)));
+        parts.add(kj::str(filter.first(pos)));
         filter = filter.slice(pos + 1);
       } else {
         parts.add(kj::str(filter));
@@ -1217,7 +1217,7 @@ public:
         static_assert(sizeof(uint64_t) + sizeof(COMPILED_MAGIC_SUFFIX) == sizeof(capnp::word) * 3);
         auto words = kj::heapArray<capnp::word>(size + 3);
         words.asBytes().fill(0);
-        capnp::copyToUnchecked(config, words.slice(0, size));
+        capnp::copyToUnchecked(config, words.first(size));
 
         memcpy(&words[words.size() - 3], &size, sizeof(size));
         memcpy(&words[words.size() - 2], COMPILED_MAGIC_SUFFIX, sizeof(COMPILED_MAGIC_SUFFIX));

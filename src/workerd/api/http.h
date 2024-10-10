@@ -293,7 +293,7 @@ public:
         : ownBytes(kj::refcounted<RefcountedBytes>(string.releaseArray().releaseAsBytes())),
           view([this] {
             auto bytesIncludingNull = ownBytes.get<kj::Own<RefcountedBytes>>()->bytes.asPtr();
-            return bytesIncludingNull.slice(0, bytesIncludingNull.size() - 1);
+            return bytesIncludingNull.first(bytesIncludingNull.size() - 1);
           }()) {}
     Buffer(jsg::Ref<Blob> blob)
         : ownBytes(kj::mv(blob)),
