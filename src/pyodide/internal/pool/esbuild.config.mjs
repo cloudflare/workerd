@@ -1,13 +1,13 @@
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'url';
 
 const pyodideRootDir = dirname(
-  dirname(dirname(new URL(import.meta.url).pathname))
+  dirname(dirname(fileURLToPath(import.meta.url)))
 );
 
 let resolvePlugin = {
-  name: 'example',
+  name: 'pyodide-internal',
   setup(build) {
     // Redirect all paths starting with "images/" to "./public/images/"
     build.onResolve({ filter: /pyodide-internal:.*/ }, (args) => {
