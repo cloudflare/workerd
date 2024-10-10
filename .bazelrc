@@ -314,13 +314,13 @@ build:release_macos --linkopt="-Wl,-no_data_in_code_info"
 build:release_macos --linkopt="-Wl,-no_function_starts"
 
 # On macOS, optionally compile using LLD (19 or higher is compatible with the default flags added by
-# apple_support). Requires Homebrew's lld package to be installed. This is less CPU intensive than
-# the system linker, but also slightly slower in terms of wall time since it is less parallel. More
-# importantly, it allows us to enable LLD's ICF pass, which significantly decreases binary sizes.
-# We could use Xcode 16's -Wl,-deduplicate option instead, but LLD's ICF appears to be superior.
-# We also want to enable ICF for Linux, but there it causes warnings when dynamically linking with
-# libc++.
-build:macos_lld -fuse-ld=lld --ld-path=ld64.lld
+# apple_support). Requires Homebrew's lld package to be installed and symlinked into /usr/local/bin.
+# This is less CPU intensive than the system linker, but also slightly slower in terms of wall time
+# since it is less parallel. More importantly, it allows us to enable LLD's ICF pass, which
+# significantly decreases binary sizes. We could use Xcode 16's -Wl,-deduplicate option instead, but
+# LLD's ICF appears to be superior. We also want to enable ICF for Linux, but there it causes
+# warnings when dynamically linking with libc++.
+build:macos_lld --linkopt=-fuse-ld=lld --linkopt=--ld-path=ld64.lld
 build:macos_lld_icf --config=macos_lld
 build:macos_lld_icf --linkopt="-Wl,--icf=safe"
 
