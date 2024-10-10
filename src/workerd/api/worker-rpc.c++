@@ -1829,7 +1829,8 @@ jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
   return jsg::alloc<DurableObjectBase>();
 }
 
-jsg::Ref<Workflow> Workflow::constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
+jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(
+    const v8::FunctionCallbackInfo<v8::Value>& args,
     jsg::Ref<ExecutionContext> ctx,
     jsg::JsObject env) {
   // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
@@ -1840,7 +1841,7 @@ jsg::Ref<Workflow> Workflow::constructor(const v8::FunctionCallbackInfo<v8::Valu
   jsg::JsObject self(args.This());
   self.set(js, "ctx", jsg::JsValue(args[0]));
   self.set(js, "env", jsg::JsValue(args[1]));
-  return jsg::alloc<Workflow>();
+  return jsg::alloc<WorkflowEntrypoint>();
 }
 
 };  // namespace workerd::api

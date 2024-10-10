@@ -497,23 +497,23 @@ public:
 // When the worker's top-level module exports a class that extends this class, it means that it
 // is a Workflow.
 //
-//     import {Workflow} from "cloudflare:workers";
-//     export class MyWorkflow extends Workflow {
+//     import { WorkflowEntrypoint } from "cloudflare:workers";
+//     export class MyWorkflow extends WorkflowEntrypoint {
 //       async run(batch, fns) { ... }
 //     }
 //
 // `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
 // define a constructor.
-class Workflow: public jsg::Object {
+class WorkflowEntrypoint: public jsg::Object {
 public:
-  static jsg::Ref<Workflow> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
+  static jsg::Ref<WorkflowEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
       jsg::Ref<ExecutionContext> ctx,
       jsg::JsObject env);
 
-  JSG_RESOURCE_TYPE(Workflow) {}
+  JSG_RESOURCE_TYPE(WorkflowEntrypoint) {}
 };
 
-// The "cloudflare:workers" module, which exposes the WorkerEntrypoint and DurableObject types
+// The "cloudflare:workers" module, which exposes the WorkerEntrypoint, WorkflowEntrypoint and DurableObject types
 // for extending.
 class EntrypointsModule: public jsg::Object {
 public:
@@ -522,7 +522,7 @@ public:
 
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
-    JSG_NESTED_TYPE(Workflow);
+    JSG_NESTED_TYPE(WorkflowEntrypoint);
     JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
     JSG_NESTED_TYPE_NAMED(JsRpcPromise, RpcPromise);
     JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
@@ -533,7 +533,7 @@ public:
 
 #define EW_WORKER_RPC_ISOLATE_TYPES                                                                \
   api::JsRpcPromise, api::JsRpcProperty, api::JsRpcStub, api::JsRpcTarget, api::WorkerEntrypoint,  \
-      api::Workflow, api::DurableObjectBase, api::EntrypointsModule
+      api::WorkflowEntrypoint, api::DurableObjectBase, api::EntrypointsModule
 
 template <class Registry>
 void registerRpcModules(Registry& registry, CompatibilityFlags::Reader flags) {

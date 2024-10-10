@@ -12,7 +12,7 @@ export class WorkerEntrypoint {
   public env: unknown;
 }
 
-export class Workflow {
+export class WorkflowEntrypoint {
   public constructor(ctx: unknown, env: unknown);
 
   public ctx: unknown;

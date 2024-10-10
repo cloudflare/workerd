@@ -11,4 +11,4 @@ export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;
 export const RpcStub = entrypoints.RpcStub;
 export const RpcTarget = entrypoints.RpcTarget;
-export const Workflow = entrypoints.Workflow;
+export const WorkflowEntrypoint = entrypoints.WorkflowEntrypoint;

@@ -1681,7 +1681,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                             } else if (handle == entrypointClasses.workerEntrypoint) {
                               impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
                               return;
-                            } else if (handle == entrypointClasses.workflow) {
+                            } else if (handle == entrypointClasses.workflowEntrypoint) {
                               if (features.getWorkerdExperimental()) {
                                 impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
                               }
