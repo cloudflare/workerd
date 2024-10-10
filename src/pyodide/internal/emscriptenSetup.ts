@@ -13,6 +13,11 @@ import { reportError } from 'pyodide-internal:util';
  */
 import { _createPyodideModule } from 'pyodide-internal:generated/pyodide.asm';
 
+export {
+  setUnsafeEval,
+  setGetRandomValues,
+} from 'pyodide-internal:builtin_wrappers';
+
 /**
  * A preRun hook. Make sure environment variables are visible at runtime.
  */

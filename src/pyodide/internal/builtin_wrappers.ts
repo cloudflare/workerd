@@ -1,5 +1,21 @@
-import { default as UnsafeEval } from 'internal:unsafe-eval';
-export { getRandomValues } from 'pyodide-internal:topLevelEntropy/lib';
+import type { getRandomValues as getRandomValuesType } from 'pyodide-internal:topLevelEntropy/lib';
+import type { default as UnsafeEvalType } from 'internal:unsafe-eval';
+
+let getRandomValuesInner: typeof getRandomValuesType;
+export function setGetRandomValues(func: typeof getRandomValuesType) {
+  getRandomValuesInner = func;
+}
+
+export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
+  return getRandomValuesInner(Module, arr);
+}
+
+// We can't import UnsafeEval directly here because it isn't available when setting up Python pool.
+// Thus, we inject it from outside via this function.
+let UnsafeEval: typeof UnsafeEvalType;
+export function setUnsafeEval(mod: typeof UnsafeEvalType) {
+  UnsafeEval = mod;
+}
 
 let lastTime: number;
 let lastDelta = 0;
