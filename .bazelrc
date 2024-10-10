@@ -320,7 +320,7 @@ build:release_macos --linkopt="-Wl,-no_function_starts"
 # We could use Xcode 16's -Wl,-deduplicate option instead, but LLD's ICF appears to be superior.
 # We also want to enable ICF for Linux, but there it causes warnings when dynamically linking with
 # libc++.
-build:macos_lld --linkopt="-fuse-ld=/opt/homebrew/bin/ld64.lld"
+build:macos_lld -fuse-ld=lld --ld-path=ld64.lld
 build:macos_lld_icf --config=macos_lld
 build:macos_lld_icf --linkopt="-Wl,--icf=safe"
 
