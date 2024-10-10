@@ -50,6 +50,10 @@ SqliteKv::Initialized& SqliteKv::ensureInitialized() {
     )");
 
     tableCreated = true;
+
+    // If we're in a transaction and it gets rolled back, we better mark that the table is actually
+    // not created anymore.
+    db.onRollback([this]() { tableCreated = false; });
   }
 
   KJ_SWITCH_ONEOF(state) {

@@ -642,6 +642,11 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     uint depth = transactionSyncDepth++;
     KJ_DEFER(--transactionSyncDepth);
 
+    // TODO(perf): SQLite actually allows multiple savepoints with the same name. The name refers
+    //   to the most-recent of these savepoints. This means we don't actually have to append the
+    //   depth to each savepoint name like I originally thought. We should refactor this -- and use
+    //   prepared statements.
+
     sqlite.run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
     return js.tryCatch([&]() {
       auto result = callback(js);
@@ -649,6 +654,7 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
       sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
+      sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
       js.throwException(kj::mv(exception));
     });
   } else {

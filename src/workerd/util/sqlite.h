@@ -67,8 +67,11 @@ public:
 
   // Class which regulates a SQL query, especially to control how queries created in JavaScript
   // application code are handled.
+  //
+  // Note that any of the methods that check if actions are allowed my throw an exception instead
+  // of returning false. If they do, this exception will pass through to the caller in place of
+  // a generic "not authorized" exception.
   class Regulator {
-
   public:
     // Returns whether the given name (which may be a table, index, view, etc.) is allowed to be
     // accessed. Typically, this is used to deny access to names containing special prefixes
@@ -222,6 +225,25 @@ public:
     afterResetCallback = kj::mv(callback);
   }
 
+  // Register a callback which shall be called if the current transaction is rolled back. If the
+  // current transaction commits, then the callback is discarded without invoking it.
+  //
+  // This method correctly handles savepoint stacks. The callback is invoked if any savepoint
+  // currently in the stack ends up being rolled back.
+  //
+  // This is useful when implementing any sort of in-memory caching which must stay in sync with
+  // the database state. The callback can be used to invalidate the cache, or even revert it to
+  // a previous value.
+  //
+  // When a rollback occurs, callbacks are invoked in the reverse of the order in which they were
+  // registered. The database content is rolled back first, before invoking any callbacks.
+  // Callbacks may read from the database, but must not write to it.
+  void onRollback(kj::Function<void()> callback) {
+    if (inTransaction || !savepoints.empty()) {
+      rollbackCallbacks.add(kj::mv(callback));
+    }
+  }
+
 private:
   const Vfs& vfs;
   kj::Path path;
@@ -234,6 +256,12 @@ private:
   // Set while a query is compiling.
   kj::Maybe<const Regulator&> currentRegulator;
 
+  // Set during the *first* time a statement is being compiled, to capture information about it
+  // from the authorizer callback. It is assumed that if the statement must be re-parsed later,
+  // the same data would be gathered, so `currentParseContext` is left null on re-parse.
+  struct ParseContext;
+  kj::Maybe<ParseContext&> currentParseContext;
+
   // Set while a statement is executing.
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
@@ -242,9 +270,50 @@ private:
 
   kj::List<ResetListener, &ResetListener::link> resetListeners;
 
+  // Callbacks registered with onRollback that haven't been committed nor rolled back yet.
+  kj::Vector<kj::Function<void()>> rollbackCallbacks;
+
+  struct Savepoint {
+    kj::String name;
+
+    // Size of `rollbackCallbackIndex` when this savepoint was created.
+    size_t rollbackCallbackIndex;
+  };
+
+  // Savepoints that haven't been committed nor rolled back yet.
+  kj::Vector<Savepoint> savepoints;
+
+  // True if in a BEGIN TRANSACTION transaction.
+  bool inTransaction = false;
+
   void init(kj::Maybe<kj::WriteMode> maybeMode);
 
+  // Describes various kinds of interesting state changes which a statement might apply, which we
+  // need to track to implement the SqliteDatabse interface. In particular, we must track
+  // transactions to implement the onRollback() method.
+  struct NoChange {};
+  struct BeginTxn {
+    kj::Maybe<kj::String> savepointName;
+  };
+  struct CommitTxn {
+    kj::Maybe<kj::String> savepointName;
+  };
+  struct RollbackTxn {
+    kj::Maybe<kj::String> savepointName;
+  };
+  using StateChange = kj::OneOf<NoChange, BeginTxn, CommitTxn, RollbackTxn>;
+
+  // Called immediately after a statement executes, to update our understanding of the current
+  // state.
+  void applyChange(const StateChange& change);
+
   enum Multi { SINGLE, MULTI };
+
+  // A pair of a complied statement, and a description of the interesting state changes it applies.
+  struct StatementAndEffect {
+    kj::Own<sqlite3_stmt> statement;
+    StateChange stateChange;
+  };
 
   // Helper to call sqlite3_prepare_v3().
   //
@@ -252,7 +321,7 @@ private:
   //
   // In MULTI mode, if `sqlCode` contains multiple statements, each statement before the last one
   // is executed immediately. The returned object represents the last statement.
-  kj::Own<sqlite3_stmt> prepareSql(
+  StatementAndEffect prepareSql(
       const Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
 
   // Implements SQLite authorizer callback, see sqlite3_set_authorizer().
@@ -269,6 +338,16 @@ private:
       const Regulator& regulator);
 
   void setupSecurity(sqlite3* db);
+
+  struct ParseContext {
+    // What kind of state change does this statement cause, if any?
+    StateChange stateChange = NoChange();
+
+    // If the parse fails because the authorizer rejects it, it may fill in `authError` to provide
+    // a more friendly error message. This error will be thrown by the overal query. Otherwise,
+    // a generic "not authorized" error is thrown.
+    kj::Maybe<kj::Exception> authError;
+  };
 };
 
 // Represents a prepared SQL statement, which can be executed many times.
@@ -289,18 +368,22 @@ public:
   Query run(Params&&... bindings);
 
   // Convert to sqlite3_stmt, creating it on-demand if needed.
-  operator sqlite3_stmt*();
+  operator sqlite3_stmt*() {
+    return getStatementAndEffect().statement;
+  }
 
 private:
   const Regulator& regulator;
-  kj::OneOf<kj::String, kj::Own<sqlite3_stmt>> stmt;
+  kj::OneOf<kj::String, StatementAndEffect> stmt;
 
-  Statement(SqliteDatabase& db, const Regulator& regulator, kj::Own<sqlite3_stmt> stmt)
+  Statement(SqliteDatabase& db, const Regulator& regulator, StatementAndEffect stmt)
       : ResetListener(db),
         regulator(regulator),
         stmt(kj::mv(stmt)) {}
 
   void beforeSqliteReset() override;
+
+  StatementAndEffect& getStatementAndEffect();
 
   friend class SqliteDatabase;
 };
@@ -334,7 +417,9 @@ public:
   uint changeCount();
 
   // Advance to the next row.
-  void nextRow();
+  void nextRow() {
+    return nextRow(/*first=*/false);
+  }
 
   // How many columns does each row of the result have?
   uint columnCount();
@@ -404,8 +489,8 @@ public:
 
 private:
   const Regulator& regulator;
-  kj::Own<sqlite3_stmt> ownStatement;       // for one-off queries
-  kj::Maybe<sqlite3_stmt&> maybeStatement;  // null if database was reset
+  StatementAndEffect ownStatement;                // for one-off queries
+  kj::Maybe<StatementAndEffect&> maybeStatement;  // null if database was reset
   bool done = false;
 
   // Storing the rowsRead and rowsWritten here to use in cases where a DB is reset.
@@ -428,8 +513,10 @@ private:
   Query(SqliteDatabase& db, const Regulator& regulator, Statement& statement, Params&&... bindings)
       : ResetListener(db),
         regulator(regulator),
-        maybeStatement(statement) {
-    resetRowCounters();
+        maybeStatement(statement.getStatementAndEffect()) {
+    // If we throw from the constructor, the destructor won't run. Need to call destroy()
+    // explicitly.
+    KJ_ON_SCOPE_FAILURE(destroy());
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   template <typename... Params>
@@ -438,13 +525,16 @@ private:
         regulator(regulator),
         ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
         maybeStatement(ownStatement) {
+    // If we throw from the constructor, the destructor won't run. Need to call destroy()
+    // explicitly.
+    KJ_ON_SCOPE_FAILURE(destroy());
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
 
   void checkRequirements(size_t size);
 
   void init(kj::ArrayPtr<const ValuePtr> bindings);
-  void resetRowCounters();
+  void destroy();
 
   void bind(uint column, ValuePtr value);
   void bind(uint column, kj::ArrayPtr<const byte> value);
@@ -472,12 +562,17 @@ private:
   void bindAll(std::index_sequence<i...>, T&&... value) {
     checkRequirements(sizeof...(T));
     (bind(i, value), ...);
-    nextRow();
+    nextRow(/*first=*/true);
   }
 
-  sqlite3_stmt* getStatement();
+  StatementAndEffect& getStatementAndEffect();
+  sqlite3_stmt* getStatement() {
+    return getStatementAndEffect().statement;
+  }
 
   void beforeSqliteReset() override;
+
+  void nextRow(bool first);
 };
 
 // Options affecting SqliteDatabase::Vfs onstructor.

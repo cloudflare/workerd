@@ -27,11 +27,8 @@ void SqliteMetadata::setAlarm(kj::Maybe<kj::Date> currentTime) {
     }
   }
   setAlarmUncached(currentTime);
+  db.onRollback([this, oldCacheState = cacheState]() { cacheState = oldCacheState; });
   cacheState = Cache{.alarmTime = currentTime};
-}
-
-void SqliteMetadata::invalidate() {
-  cacheState = kj::none;
 }
 
 kj::Maybe<kj::Date> SqliteMetadata::getAlarmUncached() {
@@ -66,6 +63,7 @@ SqliteMetadata::Initialized& SqliteMetadata::ensureInitialized() {
       );
     )");
     tableCreated = true;
+    db.onRollback([this]() { tableCreated = false; });
   }
 
   KJ_SWITCH_ONEOF(dbState) {

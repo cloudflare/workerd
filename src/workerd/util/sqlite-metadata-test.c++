@@ -54,8 +54,6 @@ KJ_TEST("SQLite-METADATA") {
   metadata.setAlarm(anAlarmTime1);
   KJ_EXPECT(metadata.getAlarm() == anAlarmTime1);
   db.run("ROLLBACK TRANSACTION");
-  KJ_EXPECT(metadata.getAlarm() == anAlarmTime1);
-  metadata.invalidate();
   KJ_EXPECT(metadata.getAlarm() == anAlarmTime2);
 }
 

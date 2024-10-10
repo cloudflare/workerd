@@ -61,7 +61,6 @@ ActorSqlite::ImplicitTxn::~ImplicitTxn() noexcept(false) {
     // This should only happen in cases of catastrophic error. Since this is rarely actually
     // executed, we don't prepare a statement for it.
     parent.db->run("ROLLBACK TRANSACTION");
-    parent.metadata.invalidate();
   }
 }
 
@@ -82,7 +81,6 @@ void ActorSqlite::ImplicitTxn::rollback() {
     // bother.
     parent.db->run("ROLLBACK TRANSACTION");
     committed = true;
-    parent.metadata.invalidate();
   }
 }
 
@@ -188,7 +186,6 @@ kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
 void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_savepoint_", depth));
   actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
-  actorSqlite.metadata.invalidate();
   KJ_IF_SOME(p, parent) {
     alarmDirty = p->alarmDirty;
   } else {

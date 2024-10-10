@@ -891,5 +891,190 @@ KJ_TEST("SQLite observer addQueryStats") {
   KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == 1);
 }
 
+KJ_TEST("SQLite failed statement reset") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(R"(
+    CREATE TABLE things (
+      id INTEGER PRIMARY KEY
+    );
+  )");
+
+  auto stmt = db.prepare("INSERT INTO things VALUES (?)");
+
+  // Run the statement a couple times.
+  stmt.run(1);
+  stmt.run(2);
+
+  // Now run it with a duplicate value, should fail.
+  KJ_EXPECT_THROW_MESSAGE("UNIQUE constraint failed: things.id", stmt.run(1));
+
+  // The statement shouldn't be left broken. Run it again with a non-duplicate.
+  stmt.run(3);
+
+  // Same as above but with ValuePtrs, since these use a different path.
+  using ValuePtr = SqliteDatabase::Query::ValuePtr;
+  ValuePtr value = int64_t(1);
+  KJ_EXPECT_THROW_MESSAGE(
+      "UNIQUE constraint failed: things.id", stmt.run(kj::arrayPtr<const ValuePtr>(value)));
+  value = int64_t(4);
+  stmt.run(kj::arrayPtr<const ValuePtr>(value));
+
+  // Sanity check that those queries were doing something.
+  KJ_EXPECT(db.run("SELECT COUNT(*) FROM things").getInt(0) == 4);
+}
+
+class MockRollbackCallback {
+public:
+  kj::Function<void()> create() {
+    KJ_ASSERT(!created);
+    created = true;
+    return [this, destructor = kj::defer([this]() { destroyed = true; })]() {
+      KJ_ASSERT(!called, "callback called multiple times?");
+      called = true;
+    };
+  }
+
+  bool isStillLive() {
+    return !destroyed && !called;
+  }
+  bool wasRolledBack() {
+    return called && destroyed;
+  }
+  bool wasCommitted() {
+    return !called && destroyed;
+  }
+
+private:
+  bool created = false;
+  bool called = false;
+  bool destroyed = false;
+};
+
+KJ_TEST("SQLite onRollback") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // With no transactions open, the callback is dropped immediately.
+  {
+    MockRollbackCallback cb;
+    db.onRollback(cb.create());
+    KJ_EXPECT(cb.wasCommitted());
+  }
+
+  // Committed transactions drop the callback without invoking it.
+  {
+    db.run("BEGIN TRANSACTION");
+
+    MockRollbackCallback cb;
+    db.onRollback(cb.create());
+    KJ_EXPECT(cb.isStillLive());
+
+    db.run("COMMIT TRANSACTION");
+
+    KJ_EXPECT(cb.wasCommitted());
+  }
+
+  {
+    db.run("SAVEPOINT foo");
+
+    MockRollbackCallback cb;
+    db.onRollback(cb.create());
+    KJ_EXPECT(cb.isStillLive());
+
+    db.run("RELEASE SAVEPOINT foo");
+
+    KJ_EXPECT(cb.wasCommitted());
+  }
+
+  // Rollbacks invoke the callback.
+  {
+    db.run("BEGIN TRANSACTION");
+
+    MockRollbackCallback cb;
+    db.onRollback(cb.create());
+    KJ_EXPECT(cb.isStillLive());
+
+    db.run("ROLLBACK TRANSACTION");
+
+    KJ_EXPECT(cb.wasRolledBack());
+  }
+
+  {
+    db.run("SAVEPOINT foo");
+
+    MockRollbackCallback cb;
+    db.onRollback(cb.create());
+    KJ_EXPECT(cb.isStillLive());
+
+    db.run("ROLLBACK TO SAVEPOINT foo");
+    KJ_EXPECT(cb.wasRolledBack());
+
+    // The savepoint still exists until we release it...
+    db.run("RELEASE SAVEPOINT foo");
+  }
+
+  // Prepared statements work.
+  {
+    auto begin = db.prepare("BEGIN TRANSACTION");
+    auto commit = db.prepare("COMMIT TRANSACTION");
+
+    // No transactions are open yet (we only prepared some statements, we didn't execute them), so
+    // the callback is dropped immediately.
+    MockRollbackCallback cb1;
+    db.onRollback(cb1.create());
+    KJ_EXPECT(cb1.wasCommitted());
+
+    begin.run();
+
+    // Now a transaction is actually open.
+    MockRollbackCallback cb2;
+    db.onRollback(cb2.create());
+    KJ_EXPECT(cb2.isStillLive());
+
+    commit.run();
+
+    KJ_EXPECT(cb2.wasCommitted());
+  }
+
+  // Make a whole stack, do partial rollbacks...
+  {
+    db.run("BEGIN TRANSACTION");
+
+    MockRollbackCallback cb1;
+    db.onRollback(cb1.create());
+
+    db.run("SAVEPOINT foo");
+    db.run("SAVEPOINT bar");
+
+    MockRollbackCallback cb2;
+    db.onRollback(cb2.create());
+
+    db.run("RELEASE bar");
+
+    KJ_EXPECT(cb1.isStillLive());
+    KJ_EXPECT(cb2.isStillLive());
+
+    db.run("SAVEPOINT baz");
+    db.run("ROLLBACK TO baz");
+
+    KJ_EXPECT(cb1.isStillLive());
+    KJ_EXPECT(cb2.isStillLive());
+
+    db.run("SAVEPOINT qux");
+    db.run("ROLLBACK TO foo");
+
+    KJ_EXPECT(cb1.isStillLive());
+    KJ_EXPECT(cb2.wasRolledBack());
+
+    db.run("COMMIT TRANSACTION");
+
+    KJ_EXPECT(cb1.wasCommitted());
+  }
+}
+
 }  // namespace
 }  // namespace workerd
