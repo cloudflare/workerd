@@ -49,9 +49,11 @@ async function callFetcher<T>(
 class InstanceImpl implements Instance {
   private readonly fetcher: Fetcher;
   public readonly id: string;
+  public readonly name: string;
 
-  public constructor(id: string, fetcher: Fetcher) {
+  public constructor(id: string, name: string, fetcher: Fetcher) {
     this.id = id;
+    this.name = name;
     this.fetcher = fetcher;
   }
 
@@ -93,24 +95,30 @@ class WorkflowImpl {
     this.fetcher = fetcher;
   }
 
-  public async get(id: string): Promise<Instance> {
-    const result = await callFetcher<{ instanceId: string }>(
-      this.fetcher,
-      '/get',
-      { id }
-    );
+  public async get(name: string): Promise<Instance> {
+    const result = await callFetcher<{
+      instanceId: string;
+      instanceName: string;
+    }>(this.fetcher, '/get', { name });
 
-    return new InstanceImpl(result.instanceId, this.fetcher);
+    return new InstanceImpl(
+      result.instanceId,
+      result.instanceName,
+      this.fetcher
+    );
   }
 
-  public async create(id: string, params: object): Promise<Instance> {
-    const result = await callFetcher<{ instanceId: string }>(
-      this.fetcher,
-      '/create',
-      { id, params }
-    );
+  public async create(name: string, params: object): Promise<Instance> {
+    const result = await callFetcher<{
+      instanceId: string;
+      instanceName: string;
+    }>(this.fetcher, '/create', { name, params });
 
-    return new InstanceImpl(result.instanceId, this.fetcher);
+    return new InstanceImpl(
+      result.instanceId,
+      result.instanceName,
+      this.fetcher
+    );
   }
 }
 

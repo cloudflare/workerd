@@ -9,13 +9,13 @@ export const tests = {
     {
       // Test create instance
       const instance = await env.workflow.create('foo', { bar: 'baz' });
-      assert.deepStrictEqual(instance.id, 'foo');
+      assert.deepStrictEqual(instance.name, 'foo');
     }
 
     {
       // Test get instance
       const instance = await env.workflow.get('bar');
-      assert.deepStrictEqual(instance.id, 'bar');
+      assert.deepStrictEqual(instance.name, 'bar');
     }
   },
 };

@@ -15,18 +15,18 @@ declare module "cloudflare:workflows" {
 declare abstract class Workflow {
   /**
    * Get a handle to an existing instance of the Workflow.
-   * @param id Id for the instance of this Workflow
+   * @param name Name of the instance of this Workflow
    * @returns A promise that resolves with a handle for the Instance
    */
-  public get(id: string): Promise<Instance>;
+  public get(name: string): Promise<Instance>;
 
   /**
-   * Create a new instance and return a handle to it. If a provided id exists, an error will be thrown.
-   * @param id Id to create the instance of this Workflow with
+   * Create a new instance and return a handle to it. If a provided instance name exists, an error will be thrown.
+   * @param name Name to create the instance of this Workflow with
    * @param params The payload to send over to this instance
    * @returns A promise that resolves with a handle for the Instance
    */
-  public create(id: string, params: object): Promise<Instance>;
+  public create(name: string, params: object): Promise<Instance>;
 }
 
 type InstanceStatus = {
@@ -49,6 +49,7 @@ interface WorkflowError {
 
 declare abstract class Instance {
   public id: string;
+  public name: string;
 
   /**
    * Pause the instance.
