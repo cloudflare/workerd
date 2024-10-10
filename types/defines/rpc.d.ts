@@ -230,10 +230,7 @@ declare module "cloudflare:workers" {
       callback: () => Promise<T>,
       config?: WorkflowStepConfig
     ) => Promise<T>;
-    sleep: (
-      name: string,
-      duration: WorkflowSleepDuration
-    ) => void | Promise<void>;
+    sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
   };
 
   export abstract class Workflow<
