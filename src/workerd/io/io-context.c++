@@ -13,6 +13,7 @@
 #include <kj/debug.h>
 
 #include <map>
+#include <cmath>
 
 namespace workerd {
 
