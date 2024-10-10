@@ -48,7 +48,7 @@ import {
   instantiateEmscriptenModule,
   setUnsafeEval,
   setGetRandomValues,
-} from 'pyodide-internal:emscriptenSetup';
+} from 'pyodide-internal:generated/emscriptenSetup';
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C

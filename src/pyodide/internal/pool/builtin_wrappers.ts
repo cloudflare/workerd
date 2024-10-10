@@ -111,7 +111,7 @@ function prepareStackTrace(_error: Error, stack: StackItem[]): boolean {
   try {
     const funcName = stack[2].getFunctionName();
     const fileName = stack[2].getFileName();
-    if (fileName !== 'pyodide-internal:generated/pyodide.asm') {
+    if (fileName !== 'pyodide-internal:generated/emscriptenSetup') {
       return false;
     }
     return ['loadModule', 'convertJsFunctionToWasm'].includes(funcName);
