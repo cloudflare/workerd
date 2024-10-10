@@ -219,12 +219,7 @@ build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
 # an effect. On macOS we build some ObjC as part of Dawn, set this flag to an empty string so we
 # can set the right configuration flags.
 # TODO(soon): File a bazel issue for the flag so we can drop this.
-build:macos --experimental_objc_fastbuild_options=''
-
-# Unfortunately experimental_objc_fastbuild_options does not respect options set before and
-# overwrites them. This causes mysterious binary size bloat for fastbuild-based configurations on
-# macOS when enabling some optimizations. Turn it in into a no-op.
-build:mac --experimental_objc_fastbuild_options=""
+build:macos --experimental_objc_fastbuild_options=""
 
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
 # macOS links with dynamic libc++ by default, which has good backwards compatibility.
@@ -317,6 +312,17 @@ build:release_macos --config=release_unix
 # data in releases.
 build:release_macos --linkopt="-Wl,-no_data_in_code_info"
 build:release_macos --linkopt="-Wl,-no_function_starts"
+
+# On macOS, optionally compile using LLD (19 or higher is compatible with the default flags added by
+# apple_support). Requires Homebrew's lld package to be installed. This is less CPU intensive than
+# the system linker, but also slightly slower in terms of wall time since it is less parallel. More
+# importantly, it allows us to enable LLD's ICF pass, which significantly decreases binary sizes.
+# We could use Xcode 16's -Wl,-deduplicate option instead, but LLD's ICF appears to be superior.
+# We also want to enable ICF for Linux, but there it causes warnings when dynamically linking with
+# libc++.
+build:macos_lld --linkopt="-fuse-ld=/opt/homebrew/bin/ld64.lld"
+build:macos_lld_icf --config=macos_lld
+build:macos_lld_icf --linkopt="-Wl,--icf=safe"
 
 build:release_windows --config=release
 # Windows uses /O2 as its preferred optimization setting and enabled by bazel in the opt

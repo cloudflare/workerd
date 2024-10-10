@@ -19,16 +19,16 @@ jobs:
   fixup:
     if: github.event_name == 'pull_request'
     uses: ./.github/workflows/fixup.yml
-  labels:    
+  labels:
     if: github.event_name == 'pull_request'
-    uses: ./.github/workflows/labels.yml 
+    uses: ./.github/workflows/labels.yml
   test:
     strategy:
       matrix:
         os:
           [
             { name : linux, image : ubuntu-20.04 },
-            { name : macOS, image : macos-13 },
+            { name : macOS, image : macos-15 },
             { name : windows, image : windows-2022 }
           ]
         config:
@@ -62,7 +62,7 @@ jobs:
             config: { suffix: -debug, bazel-args: --config=debug }
           # due to resource constraints, exclude the macOS-debug runner for now. linux-debug and
           # linux-asan should provide sufficient coverage for building in the debug configuration.
-          - os:     { name : macOS, image : macos-13 }
+          - os:     { name : macOS, image : macos-15 }
             config: { suffix: -debug, bazel-args: --config=debug }
       fail-fast: false
     runs-on: ${{ matrix.os.image }}
@@ -103,17 +103,15 @@ jobs:
           sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-16/bin/llvm-symbolizer%" .bazelrc
       - name: Setup macOS
         if: matrix.os.name == 'macOS'
-        # TODO: We want to symbolize stacks for crashes on CI. Xcode is currently based on LLVM 16
-        # but the macos-13 image has llvm@15 installed:
-        # https://github.com/actions/runner-images/blob/main/images/macos/macos-13-Readme.md
+        # TODO: We want to symbolize stacks for crashes on CI. Xcode is currently based on LLVM 17
+        # but the macos-15 image has llvm@18 installed:
+        # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md
         #
         # Not enabled because symbolication does not work on workerd macOS builds yet and running
         # llvm-symbolizer in the currently broken state causes some tests to time out on the
         # runner.
-        # Use latest available Xcode version – runner still defaults to 15.0.1.
         run: |
-          sudo xcode-select -s "/Applications/Xcode_15.1.app"
-          # export LLVM_SYMBOLIZER=$(brew --prefix llvm@15)/bin/llvm-symbolizer
+          # export LLVM_SYMBOLIZER=$(brew --prefix llvm@18)/bin/llvm-symbolizer
           # sed -i -e "s%llvm-symbolizer%${LLVM_SYMBOLIZER}%" .bazelrc
       - name: Setup Windows
         if: matrix.os.name == 'windows'
