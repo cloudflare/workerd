@@ -613,9 +613,11 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(
           KJ_IF_SOME(cb, onWriteCallback) {
             if (!sqlite3_stmt_readonly(result)) {
               // The callback is allowed to invoke queries of its own, so we have to un-set the
-              // regulator while we call it.
+              // regulator and parse context while we call it.
               currentRegulator = kj::none;
               KJ_DEFER(currentRegulator = regulator);
+              currentParseContext = kj::none;
+              KJ_DEFER(currentParseContext = parseContext);
               cb();
             }
           }
