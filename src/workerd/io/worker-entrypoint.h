@@ -34,6 +34,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+    SpanParent spanParent,
     kj::Maybe<kj::String> cfBlobJson);
 
 }  // namespace workerd

@@ -52,6 +52,7 @@ public:
       kj::TaskSet& waitUntilTasks,
       bool tunnelExceptions,
       kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+      SpanParent spanParent,
       kj::Maybe<kj::String> cfBlobJson);
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -95,7 +96,8 @@ private:
       kj::Own<void> ioContextDependency,
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
-      kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
+      kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+      SpanParent spanParent);
 
   template <typename T>
   kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
@@ -157,12 +159,13 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+    SpanParent spanParent,
     kj::Maybe<kj::String> cfBlobJson) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, tunnelExceptions, entrypointName, kj::mv(cfBlobJson));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
-      kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer));
+      kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer), kj::mv(spanParent));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -185,7 +188,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<void> ioContextDependency,
     kj::Own<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> metrics,
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer) {
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+    SpanParent spanParent) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -714,10 +718,11 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+    SpanParent spanParent,
     kj::Maybe<kj::String> cfBlobJson) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency), kj::mv(ioChannelFactory),
-      kj::mv(metrics), waitUntilTasks, tunnelExceptions, kj::mv(workerTracer), kj::mv(cfBlobJson));
+      kj::mv(metrics), waitUntilTasks, tunnelExceptions, kj::mv(workerTracer), kj::mv(spanParent), kj::mv(cfBlobJson));
 }
 
 }  // namespace workerd
