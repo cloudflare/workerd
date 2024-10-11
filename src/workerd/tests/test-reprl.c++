@@ -12,8 +12,26 @@ struct reprl_context* ctx;
 bool execute(const char* code) {
   uint64_t exec_time;
   const uint64_t SECONDS = 1000000;  // Timeout is in microseconds.
-  int status =
-      reprl_execute(ctx, code, strlen(code), 1 * SECONDS, &exec_time, 0);
+
+  int status = reprl_execute(ctx, code, strlen(code), 1 * SECONDS, &exec_time, 0);
+
+  const char* fuzzout = reprl_fetch_fuzzout(ctx);
+  printf("Fuzzout stdout:\n%s\n", fuzzout);
+  fflush(stdout);
+
+  const char* stdout_output = reprl_fetch_stdout(ctx);
+  printf("Workerd stdout:\n%s\n", stdout_output);
+
+  const char* stdout_err = reprl_fetch_stderr(ctx);
+  printf("Workerd stderr:\n%s\n", stdout_err);
+
+  if (RIFSIGNALED(status)) {
+    printf("Process was terminated by signal %d\n", RTERMSIG(status));
+  }
+  fflush(stdout);
+  fflush(stderr);
+
+  // Check if the process exited successfully
   return RIFEXITED(status) && REXITSTATUS(status) == 0;
 }
 
@@ -34,7 +52,7 @@ void expect_failure(const char* code) {
 int main(int argc, char** argv) {
   ctx = reprl_create_context();
 
-  const char* env[] = {nullptr};
+  const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-16",nullptr};
   const char* workerd_path = argc > 1 ? argv[1] : nullptr;
 
   if(workerd_path == nullptr) {
@@ -50,14 +68,14 @@ int main(int argc, char** argv) {
 
   // Basic functionality test
   if (!execute("let greeting = \"Hello World!\";")) {
-    printf("Script execution failed");
+    printf("Script execution failed\n");
     return -1;
   }
 
   // Verify that runtime exceptions can be detected
   expect_failure("throw 'failure';");
 
-  // Verify that existing state is property reset between executions
+  // Verify that existing state is properly reset between executions
   expect_success("globalProp = 42; Object.prototype.foo = \"bar\";");
   expect_success("if (typeof(globalProp) !== 'undefined') throw 'failure'");
   expect_success("if (typeof(({}).foo) !== 'undefined') throw 'failure'");
