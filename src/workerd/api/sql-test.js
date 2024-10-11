@@ -1294,6 +1294,40 @@ export class DurableObjectExample extends DurableObject {
   }
 
   async alarm() {}
+
+  async testMultiStatement() {
+    // Performing this PRAGMA will cause sqlite to invalidate prepared statements and re-compile
+    // them the next time they are executed. (Probably, many other pragmas would have the same
+    // effect, but this is the one that we observed causing issues.)
+    //
+    // In particular, the prepared statement ActorSqlite::beginTxn, which is simply
+    // `BEGIN TRANSACTION`, will be invalidated and recomplied on the next invocation.
+    //
+    // When we perform our multi-statement exec below, the first line will invoke the
+    // `ActorSqlite::onWrite` callback, which will invoke `beginTxn`. Because `BEGIN TRANSACTION`
+    // must be recompiled, the SQLite authorizer callback will be invoked to check if it is
+    // authorized. But we use the authorizer callback to detect when SQLite has parsed a statement
+    // as a transaction statement. At one point, we had a bug where we incorrectly thought that
+    // the authorizer was being called on behalf of the statement we were trying to parse and
+    // execute, namely, `CREATE TABLE items...`. We therefore incorrectly made note that this
+    // statement was beginning a transaction. This led the transaction state tracking to become
+    // all wrong!
+    //
+    // This only turned out to be an issue when performing a multi-statement exec(), because in
+    // this case all statements except the last are executed inside the parse loop, which is why
+    // we misinterpreted the authorizer callback.
+    this.state.storage.sql.exec('PRAGMA case_sensitive_like = TRUE');
+
+    let cursor = this.state.storage.sql.exec(`
+      CREATE TABLE items(i INTEGER, s TEXT);
+      CREATE INDEX itemsIdx ON items(s);
+      INSERT INTO items VALUES (123, "abc");
+      INSERT INTO items VALUES (456, "def");
+      SELECT i FROM items WHERE s = "abc";
+    `);
+
+    assert.deepEqual([...cursor], [{ i: 123 }]);
+  }
 }
 
 export default {
@@ -1377,6 +1411,13 @@ export let testRollbackKvInit = {
     let stub = env.ns.get(env.ns.idFromName('rollback-kv-test'));
     await stub.testRollbackKvInit();
     await stub.testRollbackAlarmInit();
+  },
+};
+
+export let testMultiStatement = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('multi-statement-test'));
+    await stub.testMultiStatement();
   },
 };
 
