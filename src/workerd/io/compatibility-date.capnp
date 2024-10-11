@@ -639,4 +639,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # fix several spec compliance bugs. Unfortunately it turns out that was more breaking
   # than expected. This flag restores the original behavior for compat dates before
   # 2024-09-26
+
+  upperCaseAllHttpMethods @65 :Bool
+      $compatEnableFlag("upper_case_all_http_methods")
+      $compatDisableFlag("no_upper_case_all_http_methods")
+      $compatEnableDate("2024-10-14");
+  # HTTP methods are expected to be upper-cased. Per the fetch spec, if the methods
+  # is specified as `get`, `post`, `put`, `delete`, `head`, or `options`, implementations
+  # are expected to uppercase the method. All other method names would generally be
+  # expected to throw as unrecognized (e.g. `patch` would be an error while `PATCH` is
+  # accepted). This is a bit restrictive, even if it is in the spec. This flag modifies
+  # the behavior to uppercase all methods prior to parsing to that the method is always
+  # recognized if it is a known method.
 }
