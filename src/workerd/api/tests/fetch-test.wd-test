@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fetch-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "fetch-test.js")
+        ],
+        compatibilityDate = "2024-10-01",
+        compatibilityFlags = ["nodejs_compat", "upper_case_all_http_methods"],
+      )
+    ),
+  ],
+);

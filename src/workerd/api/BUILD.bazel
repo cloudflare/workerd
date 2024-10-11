@@ -556,3 +556,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/no-to-string-tag-test.js"],
 )
+
+wd_test(
+    src = "tests/fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fetch-test.js"],
+)
