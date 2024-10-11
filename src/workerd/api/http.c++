@@ -1002,11 +1002,10 @@ jsg::Ref<Request> Request::constructor(
         }
 
         KJ_IF_SOME(m, initDict.method) {
-          auto originalMethod = kj::str(m);
           KJ_IF_SOME(code, tryParseHttpMethod(m)) {
             method = code;
           } else {
-            KJ_IF_SOME(code, kj::tryParseHttpMethod(toUpper(kj::mv(m)))) {
+            KJ_IF_SOME(code, kj::tryParseHttpMethod(toUpper(m))) {
               method = code;
               switch (method) {
                 case kj::HttpMethod::GET:
@@ -1017,11 +1016,10 @@ jsg::Ref<Request> Request::constructor(
                 case kj::HttpMethod::OPTIONS:
                   break;
                 default:
-                  JSG_FAIL_REQUIRE(
-                      TypeError, kj::str("Invalid HTTP method string: ", originalMethod));
+                  JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
               }
             } else {
-              JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", originalMethod));
+              JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
             }
           }
         }

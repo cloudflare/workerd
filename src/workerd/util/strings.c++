@@ -63,6 +63,10 @@ kj::String toLower(kj::ArrayPtr<const char> ptr) {
   return toLower(kj::str(ptr));
 }
 
+kj::String toUpper(kj::ArrayPtr<const char> ptr) {
+  return toUpper(kj::str(ptr));
+}
+
 kj::ArrayPtr<const char> trimLeadingAndTrailingWhitespace(kj::ArrayPtr<const char> ptr) {
   size_t start = 0;
   auto end = ptr.size();
