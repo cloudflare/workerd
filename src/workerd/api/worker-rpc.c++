@@ -1745,7 +1745,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
-    kj::TaskSet& waitUntilTasks,
     rpc::EventDispatcher::Client dispatcher) {
   // We arrange to revoke all capabilities in this session as soon as `sendRpc()` completes or is
   // canceled. Normally, the server side doesn't return if any capabilities still exist, so this
