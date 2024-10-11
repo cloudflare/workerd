@@ -47,7 +47,7 @@ KJ_TEST("Onset works") {
   uint32_t a = 1;
   auto tags = kj::arr(trace::Tag(kj::str("a"), static_cast<uint64_t>(1)));
   trace::Onset onset(a, kj::str("foo"), kj::str("bar"), kj::none, kj::str("baz"), kj::str("qux"),
-      kj::arr(kj::str("quux")), kj::str("corge"), kj::mv(tags));
+      kj::arr(kj::str("quux")), kj::str("corge"), ExecutionModel::STATELESS, kj::mv(tags));
 
   capnp::MallocMessageBuilder message;
   auto builder = message.initRoot<rpc::Trace::Onset>();
@@ -76,6 +76,7 @@ KJ_TEST("Onset works") {
   "scriptId": "qux",
   "scriptTags": ["quux"],
   "entrypoint": "corge",
+  "executionModel": "stateless",
   "tags": [{"key": {"text": "a"}, "value": {"uint64": "1"}}] })";
 
   KJ_EXPECT(encoded == check);

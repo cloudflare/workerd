@@ -200,13 +200,15 @@ struct Trace @0x8e8d911203762d34 {
     scriptId @5 :Text;
     scriptTags @6 :List(Text);
     entrypoint @7 :Text;
+    executionModel @8 :ExecutionModel;
+
     # Any additional arbitrary metadata that should be associated with the onset.
     # These are different from the tags that appear in the StreamEvent structure
     # in that those are considered unique for each event in the stream, whereas
     # these are considered part of the onset metadata itself, just like any of
     # the fields above. The goal is to make Onset extensible without requiring
     # schema changes.
-    tags @8 :List(Tag);
+    tags @9 :List(Tag);
   }
 
   # The Outcome struct is always sent as the last event in any trace stream. It
