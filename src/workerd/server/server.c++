@@ -1688,8 +1688,11 @@ public:
     kj::Maybe<kj::Own<WorkerTracer>> maybeWorkerTracer = kj::none;
     KJ_IF_SOME(tracer, maybeTracer) {
       auto childTracer = kj::refcounted<PipelineTracer>(kj::addRef(*tracer));
-      maybeWorkerTracer = childTracer->makeWorkerTracer(PipelineLogLevel::FULL, kj::none, kj::none,
-          kj::none, kj::none, kj::none, nullptr, kj::none);
+      // TODO(streaming-trace): Make sure the execution model here accurately reflects reality.
+      // e.g. this might be a durable object, or eventually a workflow.
+      maybeWorkerTracer =
+          childTracer->makeWorkerTracer(PipelineLogLevel::FULL, ExecutionModel::STATELESS, kj::none,
+              kj::none, kj::none, kj::none, kj::none, nullptr, kj::none);
 
       kj::Vector<kj::Own<WorkerInterface>> tailWorkers;
       for (auto& svc: loggingServices) {
@@ -1698,7 +1701,7 @@ public:
         tailWorkers.add(service.startRequest({}));
       }
       waitUntilTasks.add(childTracer->onComplete().then(
-          kj::coCapture([this, tailWorkers = kj::mv(tailWorkers)](
+          kj::coCapture([tailWorkers = kj::mv(tailWorkers)](
                             kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
         for (auto& worker: tailWorkers) {
           auto event = kj::heap<workerd::api::TraceCustomEventImpl>(

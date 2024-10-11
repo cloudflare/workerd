@@ -271,8 +271,7 @@ Onset Onset::clone() const {
       dispatchNamespace.map([](const kj::String& s) { return kj::str(s); }),
       scriptId.map([](const kj::String& s) { return kj::str(s); }),
       KJ_MAP(tag, scriptTags) { return kj::str(tag); },
-      entrypoint.map([](const kj::String& s) { return kj::str(s); }),
-      executionModel,
+      entrypoint.map([](const kj::String& s) { return kj::str(s); }), executionModel,
       KJ_MAP(tag, tags) { return tag.clone(); });
 }
 
