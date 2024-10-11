@@ -13,8 +13,8 @@ import {
   transcode,
 } from 'node-internal:internal_buffer';
 
-const atob = globalThis.atob;
-const btoa = globalThis.btoa;
+const atob = globalThis.atob.bind(globalThis);
+const btoa = globalThis.btoa.bind(globalThis);
 const Blob = globalThis.Blob;
 const File = globalThis.File;
 

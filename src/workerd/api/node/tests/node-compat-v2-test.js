@@ -83,9 +83,11 @@ export const nodeJsBufferExports = {
     // Expected node:buffer exports should be present
     const { atob, btoa, Blob } = await import('node:buffer');
     assert.notEqual(atob, undefined);
-    assert.strictEqual(atob, globalThis.atob);
     assert.notEqual(btoa, undefined);
-    assert.strictEqual(btoa, globalThis.btoa);
+    // We cannot do strictEqual with atob and globalThis.atob
+    // since, buffer module exports them with `.bind(globalThis)`
+    assert.strictEqual(typeof atob, 'function');
+    assert.strictEqual(typeof btoa, 'function');
     assert.notEqual(Blob, undefined);
     assert.strictEqual(Blob, globalThis.Blob);
   },
