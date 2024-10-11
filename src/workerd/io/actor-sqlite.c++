@@ -194,6 +194,7 @@ void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
 }
 
 void ActorSqlite::onWrite() {
+  requireNotBroken();
   if (currentTxn.is<NoTxn>()) {
     auto txn = kj::heap<ImplicitTxn>(*this);
 
