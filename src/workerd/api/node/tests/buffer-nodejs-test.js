@@ -6157,3 +6157,15 @@ export const sliceOffsetLimits = {
     strictEqual(Buffer.from('abcd').utf8Slice(1, 0).toString(), '');
   },
 };
+
+// Ref: https://github.com/unjs/unenv/pull/325
+// Without `.bind(globalThis)` the following tests fail.
+export const invalidThisTests = {
+  async test() {
+    const bufferModule = await import('node:buffer');
+    strictEqual(bufferModule.btoa('hello'), 'aGVsbG8=');
+    strictEqual(bufferModule.atob('aGVsbG8='), 'hello');
+    ok(new bufferModule.File([], 'file'));
+    ok(new bufferModule.Blob([]));
+  },
+};
