@@ -64,7 +64,9 @@ const customInspectSymbol =
     ? Symbol['for']('nodejs.util.inspect.custom')
     : null;
 
-const INSPECT_MAX_BYTES = 50;
+// One difference between Node.js and workerd is that, workerd
+// doesn't expose a setter for this, whereas Node.js does.
+export const INSPECT_MAX_BYTES = 50;
 
 export const constants = {
   MAX_LENGTH: kMaxLength,
@@ -2691,6 +2693,10 @@ export function transcode(
   );
 }
 
+export function resolveObjectURL(_id: string): unknown {
+  throw new Error('resolveObjectURL is not implemented');
+}
+
 export default {
   Buffer,
   constants,
@@ -2699,4 +2705,7 @@ export default {
   SlowBuffer,
   isAscii,
   isUtf8,
+  INSPECT_MAX_BYTES,
+  transcode,
+  resolveObjectURL,
 };

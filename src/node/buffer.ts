@@ -11,6 +11,8 @@ import {
   isAscii,
   isUtf8,
   transcode,
+  INSPECT_MAX_BYTES,
+  resolveObjectURL,
 } from 'node-internal:internal_buffer';
 
 const atob = globalThis.atob.bind(globalThis);
@@ -31,6 +33,8 @@ export {
   isAscii,
   isUtf8,
   transcode,
+  INSPECT_MAX_BYTES,
+  resolveObjectURL,
 };
 
 export default {
@@ -46,4 +50,6 @@ export default {
   isAscii,
   isUtf8,
   transcode,
+  INSPECT_MAX_BYTES,
+  resolveObjectURL,
 };
