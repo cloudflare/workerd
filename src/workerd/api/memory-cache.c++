@@ -383,7 +383,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
   }
 
   auto readSpan = IoContext::current().makeTraceSpan("memory_cache_read"_kjc);
-  auto limeReadSpan = IoContext::current().makeLimeTraceSpan("memory_cache_read"_kjc);
+  auto userReadSpan = IoContext::current().makeUserTraceSpan("memory_cache_read"_kjc);
 
   KJ_IF_SOME(fallback, optionalFallback) {
     KJ_SWITCH_ONEOF(cacheUse.getWithFallback(key.value, readSpan)) {
@@ -395,7 +395,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
       KJ_CASE_ONEOF(promise, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>) {
         return IoContext::current().awaitIo(js, kj::mv(promise),
             [fallback = kj::mv(fallback), key = kj::str(key.value), span = kj::mv(readSpan),
-                limeSpan = kj::mv(limeReadSpan)](
+                userSpan = kj::mv(userReadSpan)](
                 jsg::Lock& js, SharedMemoryCache::Use::GetWithFallbackOutcome cacheResult) mutable
             -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
           KJ_SWITCH_ONEOF(cacheResult) {

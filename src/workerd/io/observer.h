@@ -99,7 +99,7 @@ public:
   virtual SpanParent getSpan() {
     return nullptr;
   }
-  virtual SpanParent getLimeSpan() {
+  virtual SpanParent getUserSpan() {
     return nullptr;
   }
 

@@ -751,13 +751,13 @@ public:
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
   SpanParent getCurrentTraceSpan();
-  SpanParent getCurrentLimeTraceSpan();
+  SpanParent getCurrentUserTraceSpan();
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.
   SpanBuilder makeTraceSpan(kj::ConstString operationName);
-  SpanBuilder makeLimeTraceSpan(kj::ConstString operationName);
+  SpanBuilder makeUserTraceSpan(kj::ConstString operationName);
 
   // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
   // request and get a possibly wrapped stream back.
