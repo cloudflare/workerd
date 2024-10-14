@@ -787,16 +787,16 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
   SpanBuilder span = nullptr;
-  SpanBuilder limeSpan = nullptr;
+  SpanBuilder userSpan = nullptr;
 
   KJ_IF_SOME(n, options.operationName) {
     // TODO(cleanup): Using kj::Maybe<kj::LiteralStringConst> for operationName instead would remove
     // a memory allocation here, but there might be use cases for dynamically allocated strings.
     span = makeTraceSpan(kj::ConstString(kj::str(n)));
-    limeSpan = makeLimeTraceSpan(kj::ConstString(kj::mv(n)));
+    userSpan = makeUserTraceSpan(kj::ConstString(kj::mv(n)));
   }
 
-  TraceContext tracing(kj::mv(span), kj::mv(limeSpan));
+  TraceContext tracing(kj::mv(span), kj::mv(userSpan));
   auto ret = func(tracing, getIoChannelFactory());
 
   if (options.wrapMetrics) {
@@ -809,8 +809,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   if (tracing.span.isObserved()) {
     ret = ret.attach(kj::mv(tracing.span));
   }
-  if (tracing.limeSpan.isObserved()) {
-    ret = ret.attach(kj::mv(tracing.limeSpan));
+  if (tracing.userSpan.isObserved()) {
+    ret = ret.attach(kj::mv(tracing.userSpan));
   }
 
   return kj::mv(ret);
@@ -925,18 +925,18 @@ SpanParent IoContext::getCurrentTraceSpan() {
   return getMetrics().getSpan();
 }
 
-SpanParent IoContext::getCurrentLimeTraceSpan() {
+SpanParent IoContext::getCurrentUserTraceSpan() {
   // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
   // context, as with Jaeger spans.
-  return getMetrics().getLimeSpan();
+  return getMetrics().getUserSpan();
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
   return getCurrentTraceSpan().newChild(kj::mv(operationName));
 }
 
-SpanBuilder IoContext::makeLimeTraceSpan(kj::ConstString operationName) {
-  return getCurrentLimeTraceSpan().newChild(kj::mv(operationName));
+SpanBuilder IoContext::makeUserTraceSpan(kj::ConstString operationName) {
+  return getCurrentUserTraceSpan().newChild(kj::mv(operationName));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

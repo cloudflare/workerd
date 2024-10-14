@@ -21,7 +21,7 @@ static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
 // Limit spans to at most 512, it could be difficult to fit e.g. 1024 spans within MAX_TRACE_BYTES
 // unless most of the included spans do not include tags. If use cases arise where this amount is
 // insufficient, merge smaller spans together or drop smaller spans.
-static constexpr size_t MAX_LIME_SPANS = 512;
+static constexpr size_t MAX_USER_SPANS = 512;
 
 namespace {
 
@@ -637,8 +637,8 @@ void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message
 
 void WorkerTracer::addSpan(const Span& span, kj::String spanContext) {
   // This is where we'll actually encode the span for now.
-  // Drop any spans beyond MAX_LIME_SPANS.
-  if (trace->numSpans >= MAX_LIME_SPANS) {
+  // Drop any spans beyond MAX_USER_SPANS.
+  if (trace->numSpans >= MAX_USER_SPANS) {
     return;
   }
   if (isPredictableModeForTest()) {

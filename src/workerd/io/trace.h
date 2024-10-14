@@ -394,7 +394,7 @@ public:
 
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   // The isSpan parameter allows for logging spans, which will be emitted after regular logs. There
-  // can be at most MAX_LIME_SPANS spans in a trace.
+  // can be at most MAX_USER_SPANS spans in a trace.
   void log(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan = false);
   // Add a span, which will be represented as a log.
   void addSpan(const Span& span, kj::String spanContext);
@@ -670,42 +670,42 @@ inline SpanBuilder SpanBuilder::newChild(kj::ConstString operationName, kj::Date
 }
 
 // TraceContext to keep track of user tracing/existing tracing better
-// TODO(o11y): When creating lime child spans, verify that operationName is within a set of
+// TODO(o11y): When creating user child spans, verify that operationName is within a set of
 // supported operations. This is important to avoid adding spans to the wrong tracing system.
 
-// Interface to track trace context including both Jaeger and Lime spans.
+// Interface to track trace context including both Jaeger and User spans.
 // TODO(o11y): Consider fleshing this out to make it a proper class, support adding tags/child spans
-// to both,... We expect that tracking lime spans will not needed in all places where we have the
+// to both,... We expect that tracking user spans will not needed in all places where we have the
 // existing spans, so synergies will likely be limited.
 struct TraceContext {
-  TraceContext(SpanBuilder span, SpanBuilder limeSpan)
+  TraceContext(SpanBuilder span, SpanBuilder userSpan)
       : span(kj::mv(span)),
-        limeSpan(kj::mv(limeSpan)) {}
+        userSpan(kj::mv(userSpan)) {}
   TraceContext(TraceContext&& other) = default;
   TraceContext& operator=(TraceContext&& other) = default;
   KJ_DISALLOW_COPY(TraceContext);
 
   SpanBuilder span;
-  SpanBuilder limeSpan;
+  SpanBuilder userSpan;
 };
 
 // TraceContext variant tracking span parents instead. This is useful for code interacting with
 // IoChannelFactory::SubrequestMetadata, which often needs to pass through both spans together
-// without modifying them. In particular, add functions like newLimeChild() here to make it easier
+// without modifying them. In particular, add functions like newUserChild() here to make it easier
 // to add a span for the right parent.
 struct TraceParentContext {
   TraceParentContext(TraceContext& tracing)
       : parentSpan(tracing.span),
-        limeParentSpan(tracing.limeSpan) {}
-  TraceParentContext(SpanParent span, SpanParent limeSpan)
+        userParentSpan(tracing.userSpan) {}
+  TraceParentContext(SpanParent span, SpanParent userSpan)
       : parentSpan(kj::mv(span)),
-        limeParentSpan(kj::mv(limeSpan)) {}
+        userParentSpan(kj::mv(userSpan)) {}
   TraceParentContext(TraceParentContext&& other) = default;
   TraceParentContext& operator=(TraceParentContext&& other) = default;
   KJ_DISALLOW_COPY(TraceParentContext);
 
   SpanParent parentSpan;
-  SpanParent limeParentSpan;
+  SpanParent userParentSpan;
 };
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a
