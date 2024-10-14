@@ -45,5 +45,9 @@ export function baseConfig({ tsconfigRootDir }) {
       },
     },
     prettierPlugin,
+    {
+      files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
+      ...tseslint.configs.disableTypeChecked,
+    },
   )
 }
