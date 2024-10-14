@@ -1089,6 +1089,16 @@ void IoContext::runImpl(Runnable& runnable,
         // Check if we hit a limit.
         limitEnforcer->requireLimitsNotExceeded();
 
+        // If we were terminated because abort() was called, then it's not an unknown
+        // reason...
+        if (!abortFulfiller->isWaiting()) {
+          // Nothing to do here. Do not log anything. The assumption is that we've
+          // terminated because the IoContext was aborted and isolate->TerminateExection()
+          // was called (likely because of someone using process.exit(...) in Node.js
+          // compat mode).
+          return;
+        }
+
         // That should have thrown, so we shouldn't get here.
         KJ_FAIL_ASSERT("script terminated for unknown reasons");
       } else {
