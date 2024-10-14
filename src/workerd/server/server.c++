@@ -560,7 +560,7 @@ private:
     throwUnsupported();
   }
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
-    throwUnsupported();
+    return event->notSupported();
   }
 
   [[noreturn]] void throwUnsupported() {
@@ -875,7 +875,7 @@ private:
     throwUnsupported();
   }
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
-    throwUnsupported();
+    return event->notSupported();
   }
 
   [[noreturn]] void throwUnsupported() {
@@ -1153,7 +1153,7 @@ private:
     throwUnsupported();
   }
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
-    throwUnsupported();
+    return event->notSupported();
   }
 
   [[noreturn]] void throwUnsupported() {
