@@ -23,7 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* eslint-disable */
 import { default as diagnosticsChannel } from 'node-internal:diagnostics_channel';
 
 import type {
@@ -94,69 +93,69 @@ export class TracingChannel {
     );
   }
 
-  public get start(): ChannelType {
-    return this[kStart]!;
+  public get start(): ChannelType | undefined {
+    return this[kStart];
   }
-  public get end(): ChannelType {
-    return this[kEnd]!;
+  public get end(): ChannelType | undefined {
+    return this[kEnd];
   }
-  public get asyncStart(): ChannelType {
-    return this[kAsyncStart]!;
+  public get asyncStart(): ChannelType | undefined {
+    return this[kAsyncStart];
   }
-  public get asyncEnd(): ChannelType {
-    return this[kAsyncEnd]!;
+  public get asyncEnd(): ChannelType | undefined {
+    return this[kAsyncEnd];
   }
-  public get error(): ChannelType {
-    return this[kError]!;
-  }
-
-  public subscribe(subscriptions: TracingChannelSubscriptions) {
-    if (subscriptions.start !== undefined)
-      this[kStart]!.subscribe(subscriptions.start);
-    if (subscriptions.end !== undefined)
-      this[kEnd]!.subscribe(subscriptions.end);
-    if (subscriptions.asyncStart !== undefined)
-      this[kAsyncStart]!.subscribe(subscriptions.asyncStart);
-    if (subscriptions.asyncEnd !== undefined)
-      this[kAsyncEnd]!.subscribe(subscriptions.asyncEnd);
-    if (subscriptions.error !== undefined)
-      this[kError]!.subscribe(subscriptions.error);
+  public get error(): ChannelType | undefined {
+    return this[kError];
   }
 
-  public unsubscribe(subscriptions: TracingChannelSubscriptions) {
+  public subscribe(subscriptions: TracingChannelSubscriptions): void {
     if (subscriptions.start !== undefined)
-      this[kStart]!.unsubscribe(subscriptions.start);
+      this[kStart]?.subscribe(subscriptions.start);
     if (subscriptions.end !== undefined)
-      this[kEnd]!.unsubscribe(subscriptions.end);
+      this[kEnd]?.subscribe(subscriptions.end);
     if (subscriptions.asyncStart !== undefined)
-      this[kAsyncStart]!.unsubscribe(subscriptions.asyncStart);
+      this[kAsyncStart]?.subscribe(subscriptions.asyncStart);
     if (subscriptions.asyncEnd !== undefined)
-      this[kAsyncEnd]!.unsubscribe(subscriptions.asyncEnd);
+      this[kAsyncEnd]?.subscribe(subscriptions.asyncEnd);
     if (subscriptions.error !== undefined)
-      this[kError]!.unsubscribe(subscriptions.error);
+      this[kError]?.subscribe(subscriptions.error);
+  }
+
+  public unsubscribe(subscriptions: TracingChannelSubscriptions): void {
+    if (subscriptions.start !== undefined)
+      this[kStart]?.unsubscribe(subscriptions.start);
+    if (subscriptions.end !== undefined)
+      this[kEnd]?.unsubscribe(subscriptions.end);
+    if (subscriptions.asyncStart !== undefined)
+      this[kAsyncStart]?.unsubscribe(subscriptions.asyncStart);
+    if (subscriptions.asyncEnd !== undefined)
+      this[kAsyncEnd]?.unsubscribe(subscriptions.asyncEnd);
+    if (subscriptions.error !== undefined)
+      this[kError]?.unsubscribe(subscriptions.error);
   }
 
   public traceSync(
-    fn: (...args: any[]) => any,
-    context: unknown = {},
-    thisArg: any = globalThis,
-    ...args: any[]
-  ): any {
+    fn: (...args: unknown[]) => unknown,
+    context: Record<string, unknown> = {},
+    thisArg: unknown = globalThis,
+    ...args: unknown[]
+  ): unknown {
     const { start, end, error } = this;
 
-    return start.runStores(
+    return start?.runStores(
       context,
       () => {
         try {
           const result = Reflect.apply(fn, thisArg, args);
-          (context as any).result = result;
+          context.result = result;
           return result;
         } catch (err) {
-          (context as any).error = err;
-          error.publish(context);
+          context.error = err;
+          error?.publish(context);
           throw err;
         } finally {
-          end.publish(context);
+          end?.publish(context);
         }
       },
       thisArg
@@ -164,44 +163,45 @@ export class TracingChannel {
   }
 
   public tracePromise(
-    fn: (...args: any[]) => any,
-    context: unknown = {},
-    thisArg: any = globalThis,
-    ...args: any[]
-  ): any {
+    fn: (...args: unknown[]) => unknown,
+    context: Record<string, unknown> = {},
+    thisArg: unknown = globalThis,
+    ...args: unknown[]
+  ): unknown {
     const { start, end, asyncStart, asyncEnd, error } = this;
 
-    function reject(err: any) {
-      (context as any).error = err;
-      error.publish(context);
-      asyncStart.publish(context);
-      asyncEnd.publish(context);
+    function reject(err: Error): Promise<unknown> {
+      context.error = err;
+      error?.publish(context);
+      asyncStart?.publish(context);
+      asyncEnd?.publish(context);
       return Promise.reject(err);
     }
 
-    function resolve(result: any) {
-      (context as any).result = result;
-      asyncStart.publish(context);
-      asyncEnd.publish(context);
+    function resolve(result: unknown): unknown {
+      context.result = result;
+      asyncStart?.publish(context);
+      asyncEnd?.publish(context);
       return result;
     }
 
-    return start.runStores(
+    return start?.runStores(
       context,
       () => {
         try {
-          let promise = Reflect.apply(fn, thisArg, args);
+          let promise = Reflect.apply(fn, thisArg, args) as Promise<unknown>;
           // Convert thenables to native promises
           if (!(promise instanceof Promise)) {
             promise = Promise.resolve(promise);
           }
+          // eslint-disable-next-line @typescript-eslint/use-unknown-in-catch-callback-variable
           return promise.then(resolve, reject);
         } catch (err) {
-          (context as any).error = err;
-          error.publish(context);
+          context.error = err;
+          error?.publish(context);
           throw err;
         } finally {
-          end.publish(context);
+          end?.publish(context);
         }
       },
       thisArg
@@ -209,55 +209,56 @@ export class TracingChannel {
   }
 
   public traceCallback(
-    fn: (...args: any[]) => any,
+    fn: (...args: unknown[]) => unknown,
     position = -1,
-    context: unknown = {},
-    thisArg: any = globalThis,
-    ...args: any[]
-  ): any {
+    context: Record<string, unknown> = {},
+    thisArg: unknown = globalThis,
+    ...args: unknown[]
+  ): unknown {
     const { start, end, asyncStart, asyncEnd, error } = this;
 
-    function wrappedCallback(this: any, err: any, res: any) {
+    function wrappedCallback(this: unknown, err: unknown, res: unknown): void {
       if (err) {
-        (context as any).error = err;
-        error.publish(context);
+        context.error = err;
+        error?.publish(context);
       } else {
-        (context as any).result = res;
+        context.result = res;
       }
 
       // Using runStores here enables manual context failure recovery
-      asyncStart.runStores(
+      asyncStart?.runStores(
         context,
         () => {
           try {
             if (callback) {
-              return Reflect.apply(callback, this, arguments);
+              // eslint-disable-next-line prefer-rest-params
+              Reflect.apply(callback, this, arguments);
             }
           } finally {
-            asyncEnd.publish(context);
+            asyncEnd?.publish(context);
           }
         },
         thisArg
       );
     }
 
-    const callback = args[position];
+    const callback = args[position] as VoidFunction | undefined;
     if (typeof callback !== 'function') {
       throw new ERR_INVALID_ARG_TYPE('callback', ['function'], callback);
     }
     args.splice(position, 1, wrappedCallback);
 
-    return start.runStores(
+    return start?.runStores(
       context,
       () => {
         try {
           return Reflect.apply(fn, thisArg, args);
         } catch (err) {
-          (context as any).error = err;
-          error.publish(context);
+          context.error = err;
+          error?.publish(context);
           throw err;
         } finally {
-          end.publish(context);
+          end?.publish(context);
         }
       },
       thisArg
@@ -265,11 +266,11 @@ export class TracingChannel {
   }
 }
 
-function validateChannel(channel: any, name: string) {
+function validateChannel(channel: unknown, name: string): ChannelType {
   if (!(channel instanceof Channel)) {
     throw new ERR_INVALID_ARG_TYPE(name, 'Channel', channel);
   }
-  return channel as ChannelType;
+  return channel;
 }
 
 export function tracingChannel(
@@ -278,12 +279,11 @@ export function tracingChannel(
   return Reflect.construct(
     function (this: TracingChannel) {
       if (typeof nameOrChannels === 'string') {
-        const name = nameOrChannels as string;
-        this[kStart] = channel(`tracing:${name}:start`);
-        this[kEnd] = channel(`tracing:${name}:end`);
-        this[kAsyncStart] = channel(`tracing:${name}:asyncStart`);
-        this[kAsyncEnd] = channel(`tracing:${name}:asyncEnd`);
-        this[kError] = channel(`tracing:${name}:error`);
+        this[kStart] = channel(`tracing:${nameOrChannels}:start`);
+        this[kEnd] = channel(`tracing:${nameOrChannels}:end`);
+        this[kAsyncStart] = channel(`tracing:${nameOrChannels}:asyncStart`);
+        this[kAsyncEnd] = channel(`tracing:${nameOrChannels}:asyncEnd`);
+        this[kError] = channel(`tracing:${nameOrChannels}:error`);
       } else {
         validateObject(nameOrChannels, 'channels', {});
         const channels = nameOrChannels as TracingChannels;
