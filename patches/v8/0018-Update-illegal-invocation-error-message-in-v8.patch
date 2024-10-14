@@ -1,4 +1,4 @@
-From c4887f798d55850a858fbb046a526194cf267c11 Mon Sep 17 00:00:00 2001
+From d4a346b3e78b297b9b433ef5fd6db12facb1ca3b Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Tue, 9 Jul 2024 08:37:05 -0700
 Subject: Update illegal invocation error message in v8

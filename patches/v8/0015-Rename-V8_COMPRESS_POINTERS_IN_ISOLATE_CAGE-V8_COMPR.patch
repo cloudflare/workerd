@@ -1,4 +1,4 @@
-From f37963c8d6060af1c39af2d1ef87d29cf42b9f3f Mon Sep 17 00:00:00 2001
+From 4feea4cc9a36e678d03566f0e2890c093f702fa5 Mon Sep 17 00:00:00 2001
 From: Jon Phillips <jphillips@cloudflare.com>
 Date: Thu, 9 May 2024 23:36:43 +0100
 Subject: Rename V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE ->
@@ -9,7 +9,7 @@ this rename elsewhere:
 https://chromium-review.googlesource.com/c/v8/v8/+/5279595.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index f4e21615946d33c24a818cfee3ec4551ee908aac..bbbd4e3ef1d2f8de13b3ef52422481c8c4106c79 100644
+index 349d523252347b5314950228b1ca0b558c2ac4cb..ca6c577276afd26290dd05f0829d3ad64e9b6d1c 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -327,10 +327,10 @@ selects.config_setting_group(

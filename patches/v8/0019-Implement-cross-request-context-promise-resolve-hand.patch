@@ -1,4 +1,4 @@
-From 31758ba9e6c5583ca38f77fca62a28f872872a83 Mon Sep 17 00:00:00 2001
+From 5065e34454ff23a4434e373e11d4d46579f65f0e Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Mon, 16 Sep 2024 09:56:04 -0700
 Subject: Implement cross-request context promise resolve handling
@@ -158,7 +158,7 @@ index 9e0969460fd33d8cc893e04d3418e1cbed01d6a0..aa2b1cea6b7b6c0c91108776e79b04cc
  Tagged<Object> Isolate::VerifyBuiltinsResult(Tagged<Object> result) {
    if (is_execution_terminating() && !v8_flags.strict_termination_checks) {
 diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
-index 20f371a3cd2717eee242d3faab8ddf040b0ec034..8615381c5e2249b504fcc899e95309fccc096497 100644
+index d093aad3a30c8a6c04e1c7cf2b2ea0d8afc03e5b..4f094be2cc98be530b219fecfe6c3e9da81ef29d 100644
 --- a/src/execution/isolate.cc
 +++ b/src/execution/isolate.cc
 @@ -599,8 +599,6 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
@@ -170,7 +170,7 @@ index 20f371a3cd2717eee242d3faab8ddf040b0ec034..8615381c5e2249b504fcc899e95309fc
  
    for (v8::TryCatch* block = thread->try_catch_handler_; block != nullptr;
         block = block->next_) {
-@@ -7509,5 +7507,27 @@ MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(Handle<NativeCont
+@@ -7516,5 +7514,27 @@ MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(Handle<NativeCont
    return v8::Utils::OpenHandle(*result);
  }
  

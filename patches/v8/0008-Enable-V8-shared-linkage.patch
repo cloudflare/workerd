@@ -1,4 +1,4 @@
-From 0815526f4a4f533ef4ce76d763db568e50811dfd Mon Sep 17 00:00:00 2001
+From 8a0dac59e1c400174e3c124765b964f042f2906b Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage

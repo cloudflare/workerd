@@ -1,4 +1,4 @@
-From 0d366ecab2c5c6044c8d4670ddbf7011c3307f50 Mon Sep 17 00:00:00 2001
+From 5b14b1eabca3bb98274fccd6a4a39407b0e7fcd5 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 2 Mar 2024 09:00:18 -0600
 Subject: Add ValueSerializer::SetTreatFunctionsAsHostObjects().

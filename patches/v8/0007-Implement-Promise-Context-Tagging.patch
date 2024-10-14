@@ -1,4 +1,4 @@
-From c0e541c6f29fc25fc4641f6e182db277f62702c7 Mon Sep 17 00:00:00 2001
+From a68963663c21262b676410b5e1577df39f4e40c3 Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Wed, 21 Aug 2024 16:29:43 +0200
 Subject: Implement Promise Context Tagging
@@ -204,7 +204,7 @@ index c8b5eade2b55ac6f09c49bdef24553e0a1dd57d6..180a510241685b469ca25f59ce4b2d2f
         offset < JSPromise::kSizeWithEmbedderFields; offset += kTaggedSize) {
      a.Store(AccessBuilder::ForJSObjectOffset(offset),
 diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index ebf2796dde4fdcc1d5a12feec6cdb3b70a98bf44..d98914e3297a79769800d0652329fb6a582e8e6a 100644
+index c5155e859d37ddd9510d4129e4307dc027f959b3..21a7b74cf03164901ca08fa9e17ae7d8ac207b35 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
 @@ -846,6 +846,7 @@ void JSPromise::JSPromisePrint(std::ostream& os) {
@@ -247,7 +247,7 @@ index f81666ddd2f513a9a1f39b9e486b451bf3c7574d..9e0969460fd33d8cc893e04d3418e1cb
  Tagged<Object> Isolate::VerifyBuiltinsResult(Tagged<Object> result) {
    if (is_execution_terminating() && !v8_flags.strict_termination_checks) {
 diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
-index 92913cf54d576fff94cad992b12a72698edc7788..20f371a3cd2717eee242d3faab8ddf040b0ec034 100644
+index 8aa0766efb27b6e5f4212c4ba489ad58fe00be56..d093aad3a30c8a6c04e1c7cf2b2ea0d8afc03e5b 100644
 --- a/src/execution/isolate.cc
 +++ b/src/execution/isolate.cc
 @@ -599,6 +599,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
@@ -259,7 +259,7 @@ index 92913cf54d576fff94cad992b12a72698edc7788..20f371a3cd2717eee242d3faab8ddf04
  
    for (v8::TryCatch* block = thread->try_catch_handler_; block != nullptr;
         block = block->next_) {
-@@ -5581,6 +5583,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+@@ -5588,6 +5590,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
      shared_heap_object_cache_.push_back(ReadOnlyRoots(this).undefined_value());
    }
  
@@ -267,7 +267,7 @@ index 92913cf54d576fff94cad992b12a72698edc7788..20f371a3cd2717eee242d3faab8ddf04
    InitializeThreadLocal();
  
    // Profiler has to be created after ThreadLocal is initialized
-@@ -7472,5 +7475,39 @@ void Isolate::InitializeBuiltinJSDispatchTable() {
+@@ -7479,5 +7482,39 @@ void Isolate::InitializeBuiltinJSDispatchTable() {
  #endif
  }
  

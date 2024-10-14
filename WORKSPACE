@@ -300,7 +300,7 @@ esbuild_register_toolchains(
 
 http_archive(
     name = "v8",
-    integrity = "sha256-xrrRWhvzf0Kl9FVZ8xO7zb07gefU3sx6uLiPdQ6VV0E=",
+    integrity = "sha256-2jQHW96t3jpEsjOlv9yyjgUem3kKNnpDAIDR4PPFSnw=",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -324,8 +324,8 @@ http_archive(
         "//:patches/v8/0019-Implement-cross-request-context-promise-resolve-hand.patch",
         "//:patches/v8/0020-Modify-where-to-look-for-fast_float-dependency.patch",
     ],
-    strip_prefix = "v8-13.0.245.1",
-    url = "https://github.com/v8/v8/archive/refs/tags/13.0.245.1.tar.gz",
+    strip_prefix = "v8-13.0.245.16",
+    url = "https://github.com/v8/v8/archive/refs/tags/13.0.245.16.tar.gz",
 )
 
 git_repository(
