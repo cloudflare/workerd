@@ -233,26 +233,12 @@ declare module "cloudflare:workers" {
     timestamp: Date;
   };
 
-  export type WorkflowStep = {
-    do:
-      | (<T extends Rpc.Serializable<T>>(
-          name: string,
-          callback: () => Promise<T>
-        ) => Promise<T>)
-      | (<T extends Rpc.Serializable<T>>(
-          name: string,
-          config: WorkflowStepConfig,
-          callback: () => Promise<T>
-        ) => Promise<T>)
-      | (<T extends Rpc.Serializable<T>>(
-          name: string,
-          config: WorkflowStepConfig | (() => Promise<T>),
-          callback?: () => Promise<T>
-        ) => Promise<T>);
-
+  export abstract class WorkflowStep {
+    do<T extends Rpc.Serializable<T>>(name: string, callback: () => Promise<T>): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(name: string, config: WorkflowStepConfig, callback: () => Promise<T>): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
-  };
+  }
 
   export abstract class WorkflowEntrypoint<
     Env = unknown,
