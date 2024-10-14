@@ -432,6 +432,10 @@ public:
     return result;
   }
 
+  kj::Promise<Result> notSupported() override {
+    JSG_FAIL_REQUIRE(TypeError, "The receiver is not an RPC object");
+  }
+
   // Event ID for jsRpcSession.
   //
   // Similar to WebSocket hibernation, we define this event ID in the internal codebase, but since
