@@ -32,7 +32,10 @@ declare namespace Rpc {
   export type Stubable = RpcTargetBranded | ((...args: any[]) => any);
 
   // Types that can be passed over RPC
-  type Serializable =
+  // The reason for using a generic type here is to build a serializable subset of structured
+  //   cloneable composite types. This allows types defined with the "interface" keyword to pass the
+  //   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
+  type Serializable<T> =
     // Structured cloneables
     | void
     | undefined
@@ -48,10 +51,15 @@ declare namespace Rpc {
     | Error
     | RegExp
     // Structured cloneable composites
-    | Map<Serializable, Serializable>
-    | Set<Serializable>
-    | ReadonlyArray<Serializable>
-    | { [key: string | number]: Serializable }
+    | Map<
+        T extends Map<infer U, unknown> ? Serializable<U> : never,
+        T extends Map<unknown, infer U> ? Serializable<U> : never
+      >
+    | Set<T extends Set<infer U> ? Serializable<U> : never>
+    | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
+    | {
+        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
+      }
     // Special types
     | ReadableStream<Uint8Array>
     | WritableStream<Uint8Array>
@@ -78,7 +86,8 @@ declare namespace Rpc {
     : T extends Set<infer V> ? Set<Stubify<V>>
     : T extends Array<infer V> ? Array<Stubify<V>>
     : T extends ReadonlyArray<infer V> ? ReadonlyArray<Stubify<V>>
-    : T extends { [key: string | number]: unknown } ? { [K in keyof T]: Stubify<T[K]> }
+    // When using "unknown" instead of "any", interfaces are not stubified.
+    : T extends { [key: string | number]: any } ? { [K in keyof T]: Stubify<T[K]> }
     : T;
 
   // Recursively rewrite all `Stub<T>`s with the corresponding `T`s.
@@ -110,7 +119,7 @@ declare namespace Rpc {
   // prettier-ignore
   type Result<R> =
     R extends Stubable ? Promise<Stub<R>> & Provider<R>
-    : R extends Serializable ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
+    : R extends Serializable<R> ? Promise<Stubify<R> & MaybeDisposable<R>> & MaybeProvider<R>
     : never;
 
   // Type for method or property on an RPC interface.
@@ -226,16 +235,16 @@ declare module "cloudflare:workers" {
 
   export type WorkflowStep = {
     do:
-      | (<T extends Rpc.Serializable>(
+      | (<T extends Rpc.Serializable<T>>(
           name: string,
           callback: () => Promise<T>
         ) => Promise<T>)
-      | (<T extends Rpc.Serializable>(
+      | (<T extends Rpc.Serializable<T>>(
           name: string,
           config: WorkflowStepConfig,
           callback: () => Promise<T>
         ) => Promise<T>)
-      | (<T extends Rpc.Serializable>(
+      | (<T extends Rpc.Serializable<T>>(
           name: string,
           config: WorkflowStepConfig | (() => Promise<T>),
           callback?: () => Promise<T>
@@ -247,7 +256,7 @@ declare module "cloudflare:workers" {
 
   export abstract class WorkflowEntrypoint<
     Env = unknown,
-    T extends Rpc.Serializable | unknown = unknown,
+    T extends Rpc.Serializable<T> | unknown = unknown,
   > implements Rpc.WorkflowEntrypointBranded
   {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
