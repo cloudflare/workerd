@@ -26,6 +26,17 @@ py_wd_test(
 )
 
 py_wd_test(
+    src = "sdk/sdk.wd-test",
+    args = ["--experimental"],
+    data = glob(
+        [
+            "sdk/*",
+        ],
+        exclude = ["**/*.wd-test"],
+    ),
+)
+
+py_wd_test(
     src = "env-param/env.wd-test",
     args = ["--experimental"],
     data = glob(
