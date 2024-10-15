@@ -350,8 +350,7 @@ struct Trace @0x8e8d911203762d34 {
     }
     type @2 :Type;
     value @3 :Float64;
-    unit @4 :Text;
-    tags @5 :List(Tag);
+    tags @4 :List(Tag);
   }
 
   struct Dropped {
