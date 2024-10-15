@@ -97,10 +97,9 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
     kj::Maybe<kj::String> dispatchNamespace,
     kj::Array<kj::String> scriptTags,
     kj::Maybe<kj::String> entrypoint) {
-  // TODO(streaming-trace): Pass the account id
-  auto trace = kj::refcounted<Trace>(trace::Onset(kj::none, kj::mv(stableId), kj::mv(scriptName),
-      kj::mv(scriptVersion), kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags),
-      kj::mv(entrypoint), executionModel));
+  auto trace = kj::refcounted<Trace>(
+      trace::Onset(kj::mv(scriptName), kj::mv(scriptVersion), kj::mv(dispatchNamespace),
+          kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint), executionModel));
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
@@ -117,15 +116,8 @@ WorkerTracer::WorkerTracer(
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
     : pipelineLogLevel(pipelineLogLevel),
-      trace(kj::refcounted<Trace>(trace::Onset(kj::none,
-          kj::none,
-          kj::none,
-          kj::none,
-          kj::none,
-          kj::none,
-          nullptr,
-          kj::none,
-          executionModel))),
+      trace(kj::refcounted<Trace>(
+          trace::Onset(kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel))),
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 
 void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) {

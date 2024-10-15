@@ -44,9 +44,8 @@ KJ_TEST("Tags work") {
 }
 
 KJ_TEST("Onset works") {
-  uint32_t a = 1;
   auto tags = kj::arr(trace::Tag(kj::str("a"), static_cast<uint64_t>(1)));
-  trace::Onset onset(a, kj::str("foo"), kj::str("bar"), kj::none, kj::str("baz"), kj::str("qux"),
+  trace::Onset onset(kj::str("bar"), kj::none, kj::str("baz"), kj::str("qux"),
       kj::arr(kj::str("quux")), kj::str("corge"), ExecutionModel::STATELESS, kj::mv(tags));
 
   capnp::MallocMessageBuilder message;
@@ -55,8 +54,6 @@ KJ_TEST("Onset works") {
 
   auto reader = builder.asReader();
   trace::Onset onset2(reader);
-  KJ_EXPECT(onset.accountId == a);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(onset.stableId) == "foo"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset.scriptName) == "bar"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset.dispatchNamespace) == "baz"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset.scriptId) == "qux"_kj);
@@ -69,9 +66,7 @@ KJ_TEST("Onset works") {
   capnp::JsonCodec json;
   json.setPrettyPrint(true);
   auto encoded = json.encode(builder);
-  auto check = R"({ "accountId": 1,
-  "stableId": "foo",
-  "scriptName": "bar",
+  auto check = R"({ "scriptName": "bar",
   "dispatchNamespace": "baz",
   "scriptId": "qux",
   "scriptTags": ["quux"],
@@ -82,8 +77,6 @@ KJ_TEST("Onset works") {
   KJ_EXPECT(encoded == check);
 
   auto onset3 = onset.clone();
-  KJ_EXPECT(onset3.accountId == a);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(onset3.stableId) == "foo"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset3.scriptName) == "bar"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset3.dispatchNamespace) == "baz"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset3.scriptId) == "qux"_kj);

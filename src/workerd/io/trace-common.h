@@ -80,9 +80,7 @@ using Tags = kj::Array<Tag>;
 // is being traced. Every trace session will have exactly one Onset event.
 struct Onset final {
   explicit Onset() = default;
-  Onset(kj::Maybe<uint32_t> accountId,
-      kj::Maybe<kj::String> stableId,
-      kj::Maybe<kj::String> scriptName,
+  Onset(kj::Maybe<kj::String> scriptName,
       kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
       kj::Maybe<kj::String> dispatchNamespace,
       kj::Maybe<kj::String> scriptId,
@@ -97,8 +95,6 @@ struct Onset final {
 
   // Note that all of these fields could be represented by tags but are kept
   // as separate fields for legacy reasons.
-  kj::Maybe<uint32_t> accountId = kj::none;
-  kj::Maybe<kj::String> stableId = kj::none;
   kj::Maybe<kj::String> scriptName = kj::none;
   kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion = kj::none;
   kj::Maybe<kj::String> dispatchNamespace = kj::none;

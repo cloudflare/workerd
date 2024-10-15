@@ -1690,9 +1690,10 @@ public:
       auto childTracer = kj::refcounted<PipelineTracer>(kj::addRef(*tracer));
       // TODO(streaming-trace): Make sure the execution model here accurately reflects reality.
       // e.g. this might be a durable object, or eventually a workflow.
-      maybeWorkerTracer =
-          childTracer->makeWorkerTracer(PipelineLogLevel::FULL, ExecutionModel::STATELESS, kj::none,
-              kj::none, kj::none, kj::none, kj::none, nullptr, kj::none);
+      maybeWorkerTracer = childTracer->makeWorkerTracer(PipelineLogLevel::FULL,
+          ExecutionModel::STATELESS, kj::none /* scriptId */, kj::none /* stableId */,
+          kj::none /* scriptName */, kj::none /* scriptVersion */, kj::none /* dispatchNamespace */,
+          nullptr /* scriptTags */, kj::none /* entrypoint */);
 
       kj::Vector<kj::Own<WorkerInterface>> tailWorkers;
       for (auto& svc: loggingServices) {
