@@ -32,25 +32,30 @@ struct Trace @0x8e8d911203762d34 {
     message @2 :Text;
   }
 
-  # Streaming tail workers support an expanded version of Log that supports arbitrary
-  # v8 serialized data or a text message. We define this as a separate new
-  # struct in order to avoid any possible non-backwards compatible disruption to anything
-  # using the existing Log struct in the original trace worker impl. The two structs are
-  # virtually identical with the exception that the message field can be v8 serialized data.
   struct LogV2 {
+    # Streaming tail workers support an expanded version of Log that supports arbitrary
+    # v8 serialized data or a text message. We define this as a separate new
+    # struct in order to avoid any possible non-backwards compatible disruption to anything
+    # using the existing Log struct in the original trace worker impl. The two structs are
+    # virtually identical with the exception that the message field can be v8 serialized data.
     timestampNs @0 :Int64;
     logLevel @1 :Log.Level;
     message :union {
-      # When data is used, the LogV2 message is expected to be a v8 serialized value.
       data @2 :Data;
+      # When data is used, the LogV2 message is expected to be a v8 serialized value.
       text @3 :Text;
+      # Text would be used, for instance, for simple string outputs (e.g. from things
+      # like console.log(...))
     }
     tags @4 :List(Tag);
+    # Additional bits of information that are not known to workerd but may be injected
+    # by workerd embedders (such as the Cloudflare production environment) or structured
+    # logging mechanisms (so called "wide events").
+    truncated @5 :Bool;
     # A Log entry might be truncated if it exceeds the maximum size limit configured
     # for the process. Truncation should occur before the data is serialized so it
     # should always be possible to deserialize the data field successfully, regardless
     # of the specific format of the data.
-    truncated @5 :Bool;
   }
 
   exceptions @1 :List(Exception);
@@ -60,22 +65,26 @@ struct Trace @0x8e8d911203762d34 {
     message @2 :Text;
     stack @3 :Text;
 
-    # Additional optional detail accompanying the exception event.
     detail :group {
-      # If the exception has a cause property, it is serialized here.
+      # Additional optional detail accompanying the exception event.
       cause @4 :Exception;
+      # If the exception has a cause property, it is serialized here.
 
+      errors @5 :List(Exception);
       # If the exception represents an AggregateError or SupressedError, the
       # errors are serialized here.
-      errors @5 :List(Exception);
 
-      # Additional metadata fields that are set on some errors originating
-      # from the runtime.
       remote @6 :Bool;
       retryable @7 :Bool;
       overloaded @8 :Bool;
       durableObjectReset @9 :Bool;
       tags @10 :List(Tag);
+      # Additional metadata fields that are set on some errors originating
+      # from the runtime. The remote, retryable, overloaded, and durableObjectReset
+      # fields *could* be defined as tags but those are already known to workerd
+      # and will be common enough to just represent those separately. If/when new
+      # fields are introduced that are not known to workerd, they would be added
+      # as tags rather than distinct fields.
     }
   }
 
@@ -189,9 +198,9 @@ struct Trace @0x8e8d911203762d34 {
 
   # The following structs are used only in Streaming Traces.
 
-  # The Onset struct is always sent as the first event in any trace stream. It
-  # contains general metadata about the pipeline that is being traced.
   struct Onset {
+    # The Onset struct is always sent as the first event in any trace stream. It
+    # contains general metadata about the pipeline that is being traced.
     accountId @0 :UInt32;
     stableId @1 :Text;
     scriptName @2 :Text;
@@ -202,28 +211,28 @@ struct Trace @0x8e8d911203762d34 {
     entrypoint @7 :Text;
     executionModel @8 :ExecutionModel;
 
+    tags @9 :List(Tag);
     # Any additional arbitrary metadata that should be associated with the onset.
     # These are different from the tags that appear in the StreamEvent structure
     # in that those are considered unique for each event in the stream, whereas
     # these are considered part of the onset metadata itself, just like any of
     # the fields above. The goal is to make Onset extensible without requiring
     # schema changes.
-    tags @9 :List(Tag);
   }
 
-  # The Outcome struct is always sent as the last event in any trace stream. It
-  # contains the final outcome of the trace including the CPU and wall time for
-  # the entire trace steam.
   struct Outcome {
+    # The Outcome struct is always sent as the last event in any trace stream. It
+    # contains the final outcome of the trace including the CPU and wall time for
+    # the entire trace steam.
     outcome @0 :EventOutcome;
 
-    # Any additional arbitrary metadata that should be associated with the outcome.
     tags @1 :List(Tag);
+    # Any additional arbitrary metadata that should be associated with the outcome.
   }
 
-  # An outcome information object that describes additional detail about the outcome
-  # of an Actor/Durable object. Used primarily to identify the ActorFlushReason.
   struct ActorFlushInfo {
+    # An outcome information object that describes additional detail about the outcome
+    # of an Actor/Durable object. Used primarily to identify the ActorFlushReason.
     enum Common {
       reason @0;
       broken @1;
@@ -231,14 +240,14 @@ struct Trace @0x8e8d911203762d34 {
     tags @0 :List(Tag);
   }
 
-  # A detail event indicating a subrequest that was made during a request. This
-  # can be a fetch subrequest, an RPC subrequest, a call out to a KV namespace,
-  # etc.
-  # TODO(streaming-trace): This needs to be flushed out more.
   struct Subrequest {
+    # A detail event indicating a subrequest that was made during a request. This
+    # can be a fetch subrequest, an RPC subrequest, a call out to a KV namespace,
+    # etc.
+    # TODO(streaming-trace): This needs to be flushed out more.
+    id @0 :UInt32;
     # A monotonic sequence number that is unique within the tail. The id is
     # used primarily to correlate with the SubrequestOutcome.
-    id @0 :UInt32;
     info :union {
       none @1 :Void;
       fetch @2 :FetchEventInfo;
@@ -253,35 +262,35 @@ struct Trace @0x8e8d911203762d34 {
       fetch @2 :FetchResponseInfo;
       custom @3 :List(Tag);
     }
+    outcome @4 :Span.SpanOutcome;
     # A Subrequest is really a specialist kind of span, so it can have an outcome.
     # just like a span. Unlike regular spans tho, they cannot be transactional,
     # and are not part of the normal span stack.
-    outcome @4 :Span.SpanOutcome;
   }
 
-  # A span event is sent only at the completion of a span, and includes markers
-  # for the start and end times, as well as the start and end sequence numbers.
-  # A span event always occurs in the scope of the parent span (or the null span
-  # if there is no current). So, for example:
-  #
-  #  Event 0 - Onset (null span)
-  #  Event 1 - Info (null span)
-  #  Event 2 - Log (Span 1)  (new span implicitly started)
-  #  Event 3 - Log (Span 2)  (new span implicitly started)
-  #  Event 4 - Span 2 (Span 1)  (span 2 is complete, span 1 is still open)
-  #  Event 5 - Span 1 (null span)  (span 1 is complete)
-  #  Event 6 - Outcome (null span)
-  #
-  # Note that the Span 2 event occurs within Span 1
   struct Span {
+    # A span event is sent only at the completion of a span, and includes markers
+    # for the start and end times, as well as the start and end sequence numbers.
+    # A span event always occurs in the scope of the parent span (or the null span
+    # if there is no current). So, for example:
+    #
+    #  Event 0 - Onset (null span)
+    #  Event 1 - Info (null span)
+    #  Event 2 - Log (Span 1)  (new span implicitly started)
+    #  Event 3 - Log (Span 2)  (new span implicitly started)
+    #  Event 4 - Span 2 (Span 1)  (span 2 is complete, span 1 is still open)
+    #  Event 5 - Span 1 (null span)  (span 1 is complete)
+    #  Event 6 - Outcome (null span)
+    #
+    # Note that the Span 2 event occurs within Span 1
     id @0 :UInt32;
     parent @1 :UInt32;
     transactional @2 :Bool;
 
-    # A span event may have an outcome field. If, for instance, the span represents
-    # events occuring while an output gate is open, and the output gate fails indicating
-    # that the events are not longer valid, the outcome field will be used to signal.
     enum SpanOutcome {
+      # A span event may have an outcome field. If, for instance, the span represents
+      # events occuring while an output gate is open, and the output gate fails indicating
+      # that the events are not longer valid, the outcome field will be used to signal.
       unknown @0;
       ok @1;
       exception @2;
@@ -290,54 +299,56 @@ struct Trace @0x8e8d911203762d34 {
 
     outcome @3 :SpanOutcome;
 
-    # The info field is used to provide additional information about the outcome.
-    # These are often dependent on the type of info event that started the span.
-    # This is most typically only used for stage spans.
-    # For instance, a fetch event will have a fetchResponse info field in the outcome.
     info :union {
+      # The info field is used to provide additional information about the outcome.
+      # These are often dependent on the type of info event that started the span.
+      # This is most typically only used for stage spans.
+      # For instance, a fetch event will have a fetchResponse info field in the outcome.
       none @4 :Void;
       fetch @5 :FetchResponseInfo;
       actorFlush @6 :ActorFlushInfo;
       custom @7 :List(Tag);
     }
 
-    # Any additional metadata specific to the span itself.
     tags @8 :List(Tag);
+    # Any additional metadata specific to the span itself.
   }
 
-  # A mark is a special event that simply marks a point of interest in the trace.
   struct Mark {
+    # A mark is a special event that simply marks a point of interest in the trace.
     name @0 :Text;
   }
 
-  # A metric is a special event that represents a metric value of some form injected
-  # into the trace. A metric can be used, for instance, to communicate the current
-  # isolate memory usage at a given point in time.
   struct Metric {
-    # The key field can be either arbitrary text or a numeric ID. The ID field is used
-    # to identify commonly used metrics defined and injected by the runtime. There is no
-    # enum definition for these here as it is expected the actual definitions will
-    # come from the internal project and not workerd.
-    # Metrics with the same name can appear multiple times, in which case the calculated
-    # logical value is the concatenation of all values into a collection. So, for
-    # instance, if a metric with name "foo" appears with value 1 and then again with
-    # value 2, the logical value of the "foo" metric is [1, 2]. The ordering of such
-    # metrics is significant.
-    # Multiple appearances of the same metric with the same key can be of different
-    # types and units.
+    # A metric is a special event that represents a metric value of some form injected
+    # into the trace. A metric can be used, for instance, to communicate the current
+    # isolate memory usage at a given point in time.
+
     key :union {
+      # The key field can be either arbitrary text or a numeric ID. The ID field is used
+      # to identify commonly used metrics defined and injected by the runtime. There is no
+      # enum definition for these here as it is expected the actual definitions will
+      # come from the internal project and not workerd.
+      # Metrics with the same name can appear multiple times, in which case the calculated
+      # logical value is the concatenation of all values into a collection. So, for
+      # instance, if a metric with name "foo" appears with value 1 and then again with
+      # value 2, the logical value of the "foo" metric is [1, 2]. The ordering of such
+      # metrics is significant.
+      # Multiple appearances of the same metric with the same key can be of different
+      # types and units.
       text @0 :Text;
       id @1 :UInt32;
     }
     enum Type {
+      counter @0;
       # A counter metric, for instance, the number of times a given event has occurred,
       # the number of requests processed, etc. Counters nearly aways represent a conceptually
       # monotonically increasing value (conceptually because in reality the value may not
       # be strictly increasing unit-by-unit due to sampling frequency, etc).
-      counter @0;
+
+      gauge @1;
       # A gauge metric, for instance, the current memory heap size, etc. Gauges represent
       # a snapshot of a value at a given point in time and therefore may increase or decrease.
-      gauge @1;
     }
     type @2 :Type;
     value :union {
@@ -349,26 +360,27 @@ struct Trace @0x8e8d911203762d34 {
     tags @7 :List(Tag);
   }
 
-  # The Dropped struct is used to indicate that a trace has dropped a given number of
-  # events in the sequence. A Dropped events sequence number must always be greater
-  # than the sequence number specified by the end field.
   struct Dropped {
+    # The Dropped struct is used to indicate that a trace has dropped a given number of
+    # events in the sequence. A Dropped events sequence number must always be greater
+    # than the sequence number specified by the end field.
     start @0 :UInt32;
     end @1 :UInt32;
   }
 
-  # A Tag is an additional piece of information that can added to each event in a trace.
   struct Tag {
-    # The key field can be either arbitrary text or a numeric ID. The ID field is used
-    # to identify commonly used tags defined and injected by the runtime. There is no
-    # enum definition for these here as it is expected the actual definitions will
-    # come from the internal project and not workerd.
-    # Tags with the same key can appear multiple times, in which case the calculated
-    # logical value is the concatenation of all values into a collection. So, for
-    # instance, if a tag with key "foo" appears with value "bar" and then again with
-    # value "baz", the logical value of the "foo" tag is ["bar", "baz"]. The ordering
-    # of such tags is significant.
+    # A Tag is an additional piece of information that can added to each event in a trace.
+
     key :union {
+      # The key field can be either arbitrary text or a numeric ID. The ID field is used
+      # to identify commonly used tags defined and injected by the runtime. There is no
+      # enum definition for these here as it is expected the actual definitions will
+      # come from the internal project and not workerd.
+      # Tags with the same key can appear multiple times, in which case the calculated
+      # logical value is the concatenation of all values into a collection. So, for
+      # instance, if a tag with key "foo" appears with value "bar" and then again with
+      # value "baz", the logical value of the "foo" tag is ["bar", "baz"]. The ordering
+      # of such tags is significant.
       text @0 :Text;
       id @1 :UInt32;
     }
@@ -383,47 +395,51 @@ struct Trace @0x8e8d911203762d34 {
   }
 
   struct StreamEvent {
+    id @0 :Text;
     # A unique identifier used to correlate traces across multiple events
     # in a single tail session. Typically this will correlate to a top-level
     # pipeline or specific pipeline stage.
-    id @0 :Text;
 
     span :group {
       id @1 :UInt32;
       parent @2 :UInt32;
+      transactional @3 :Bool;
       # Some spans may be transactional, meaning that they represent a single
       # atomic operation that may succeed or fail as a whole. When the span
       # event occurs, the span outcome will indicate if the span was successful
       # or failed. If a transaction span outcome indicates failure, then all events
       # within that span should be considered invalidated.
-      transactional @3 :Bool;
     }
     timestampNs @4 :Int64;
+    sequence @5 :UInt32;
     # The sequence order for this event. This is a strictly monotonically
     # increasing sequence number that is unique within the tail. The onset
     # event sequence number will always be 0. The purpose of the sequence
     # is to make it possible to reconstruct the specific ordering of events
     # in the stream.
-    sequence @5 :UInt32;
 
     event :union {
+      onset @6 :Onset;
       # When a tail stream is first created, the first event will always be
       # an onset event.
-      onset @6 :Onset;
+
+      outcome @7 :Outcome;
       # The final event in every successfully completed stream be will an outcome
       # event.
-      outcome @7 :Outcome;
+
+      dropped @8 :Dropped;
       # The dropped event is used to identify events that have been dropped from
       # the stream. The start field indicates the sequence number of the first
       # event dropped, and the end field indicates the sequence number of the
       # last event dropped.
-      dropped @8 :Dropped;
-      # Span events mark the ending and outcome of a span.
+
       span @9 :Span;
-      # Info events are used at the start of a stage span to identify the kind
-      # of trigger that started the span. For instance, a fetch event will have
-      # a fetch info event at the start of the span.
+      # Span events mark the ending and outcome of a span.
+
       info :union {
+        # Info events are used at the start of a stage span to identify the kind
+        # of trigger that started the span. For instance, a fetch event will have
+        # a fetch info event at the start of the span.
         fetch @10 :FetchEventInfo;
         jsRpc @11 :JsRpcEventInfo;
         scheduled @12 :ScheduledEventInfo;
@@ -432,15 +448,16 @@ struct Trace @0x8e8d911203762d34 {
         email @15 :EmailEventInfo;
         trace @16 :TraceEventInfo;
         hibernatableWebSocket @17 :HibernatableWebSocketEventInfo;
+        custom @18 :List(Tag);
         # A custom info event is used to enable arbitrary, non-typed extension
         # events to be injected. It is most useful as a way of extending
         # the event stream with new types of events without modifying the
         # schema. This is a tradeoff. Using a custom event is more flexible
         # but there's no schema to verify the data.
-        custom @18 :List(Tag);
       }
-      # Detail events occur throughout a span and may occur many times.
+
       detail :union {
+        # Detail events occur throughout a span and may occur many times.
         log @19 :LogV2;
         exception @20 :Exception;
         diagnosticChannel @21 :DiagnosticChannelEvent;
@@ -448,12 +465,12 @@ struct Trace @0x8e8d911203762d34 {
         metrics @23 :List(Metric);
         subrequest @24 :Subrequest;
         subrequestOutcome @25 :SubrequestOutcome;
+        custom @26 :List(Tag);
         # A custom detail event is used to enable arbitrary, non-typed extension
         # events to be injected. It is most useful as a way of extending
         # the event stream with new types of events without modifying the
         # schema. This is a tradeoff. Using a custom event is more flexible
         # but there's no schema to verify the data.
-        custom @26 :List(Tag);
       }
     }
   }
