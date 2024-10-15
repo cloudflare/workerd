@@ -193,7 +193,8 @@ export type BaseAiTextToImageModels =
   | "@cf/runwayml/stable-diffusion-v1-5-inpainting"
   | "@cf/runwayml/stable-diffusion-v1-5-img2img"
   | "@cf/lykon/dreamshaper-8-lcm"
-  | "@cf/bytedance/stable-diffusion-xl-lightning";
+  | "@cf/bytedance/stable-diffusion-xl-lightning"
+  | "@cf/black-forest-labs/flux-1-schnell";
 export type BaseAiTextEmbeddingsModels =
   | "@cf/baai/bge-small-en-v1.5"
   | "@cf/baai/bge-base-en-v1.5"
@@ -205,7 +206,14 @@ export type BaseAiSpeechRecognitionModels =
 export type BaseAiImageClassificationModels = "@cf/microsoft/resnet-50";
 export type BaseAiObjectDetectionModels = "@cf/facebook/detr-resnet-50";
 export type BaseAiTextGenerationModels =
+  | "@cf/meta/llama-3.2-11b-vision-instruct"
+  | "@cf/meta/llama-3.2-3b-instruct"
+  | "@cf/meta/llama-3.2-1b-instruct"
+  | "@cf/meta/llama-3.1-70b-instruct"
   | "@cf/meta/llama-3.1-8b-instruct"
+  | "@cf/meta/llama-3.1-8b-instruct-awq"
+  | "@cf/meta/llama-3.1-8b-instruct-fast"
+  | "@cf/meta/llama-3.1-8b-instruct-fp8"
   | "@cf/meta/llama-3-8b-instruct"
   | "@cf/meta/llama-3-8b-instruct-awq"
   | "@cf/meta/llama-2-7b-chat-int8"
