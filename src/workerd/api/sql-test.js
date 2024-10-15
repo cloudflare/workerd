@@ -1379,7 +1379,7 @@ export default {
     // Test defer_foreign_keys (explodes the DO)
     await assert.rejects(async () => {
       await doReq('sql-test-foreign-keys');
-    }, /Error: internal error/);
+    }, /constraints were violated: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT/);
 
     // Some increments.
     assert.equal(await doReq('increment'), 1);
