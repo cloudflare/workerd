@@ -128,6 +128,12 @@ REPLACEMENTS = [
         "crypto.getRandomValues(",
         "getRandomValues(Module, ",
     ],
+    [
+        # Direct eval disallowed in esbuild, see:
+        # https://esbuild.github.io/content-types/#direct-eval
+        "eval(",
+        "(0, eval)(",
+    ],
 ]
 
 PYODIDE_BUCKET_MODULE = json.encode({
@@ -174,6 +180,7 @@ esbuild(
         "child_process",
     ],
     format = "esm",
+    minify = True,
     output = "generated/emscriptenSetup.js",
     target = "esnext",
     deps = ["pyodide.asm.js@rule_js"],
