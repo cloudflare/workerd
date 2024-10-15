@@ -287,7 +287,7 @@ struct Trace @0x8e8d911203762d34 {
 
     enum SpanOutcome {
       # A span event may have an outcome field. If, for instance, the span represents
-      # events occuring while an output gate is open, and the output gate fails indicating
+      # events occuring while an output gate is closed, and the output gate fails indicating
       # that the events are not longer valid, the outcome field will be used to signal.
       unknown @0;
       ok @1;
