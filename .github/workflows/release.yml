@@ -62,12 +62,18 @@ jobs:
             os: ubuntu-20.04
             bazel-config: release_linux
             target-arch: X64
+          # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
+          # release binaries on the macos-15 runner.
           - os-name: macOS
             # This configuration is used for cross-compiling – macos-15 is Apple Silicon-based but
             # we use it to compile the x64 release.
             os: macos-15
             bazel-config: release_macos
             target-arch: X64
+          - os-name: macOS-arm64
+            os: macos-15
+            bazel-config: release_macos
+            target-arch: ARM64
           - os-name: windows
             os: windows-2022
             bazel-config: release_windows
@@ -104,10 +110,13 @@ jobs:
           # exist from an older pre-installed LLVM version on the runner image.
           brew install lld
           sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
-          # Cross-compile so that we can use the latest Xcode version for the Intel Mac binary
-          echo "build:macos --config=macos-cross-x86_64" >> .bazelrc
           # Enable lld identical code folding to significantly reduce binary size.
           echo "build:macos --config=macos_lld_icf" >> .bazelrc
+      - name: Setup macOS (cross)
+        if: ${{ matrix.os-name }} == 'macOS'
+        run: |
+          # Cross-compile so that we can use the latest Xcode version for the Intel Mac binary
+          echo "build:macos --config=macos-cross-x86_64" >> .bazelrc
       - name: Setup Windows
         if: runner.os == 'Windows'
         run: |
@@ -146,6 +155,11 @@ jobs:
             name: Linux-X64
           - arch: darwin-64
             name: macOS-X64
+          # TODO(soon): After verifying that Apple Silicon artifacts are being built and uploaded
+          # properly, decommission the internal build and add them to the tagged release instead of
+          # using the internal build.
+          # - arch: darwin-arm64
+          #   name: macOS-ARM64
           - arch: windows-64
             name: Windows-X64
     steps:
