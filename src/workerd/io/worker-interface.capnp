@@ -349,13 +349,9 @@ struct Trace @0x8e8d911203762d34 {
       # a snapshot of a value at a given point in time and therefore may increase or decrease.
     }
     type @2 :Type;
-    value :union {
-      float64 @3 :Float64;
-      int64 @4 :Int64;
-      uint64 @5 :UInt64;
-    }
-    unit @6 :Text;
-    tags @7 :List(Tag);
+    value @3 :Float64;
+    unit @4 :Text;
+    tags @5 :List(Tag);
   }
 
   struct Dropped {

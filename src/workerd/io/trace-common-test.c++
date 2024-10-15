@@ -499,7 +499,7 @@ KJ_TEST("Metric works") {
   trace::Metric metric(trace::Metric::Type::COUNTER, kj::str("foo"), 1.0);
   KJ_EXPECT(metric.type == trace::Metric::Type::COUNTER);
   KJ_EXPECT(KJ_ASSERT_NONNULL(metric.key.tryGet<kj::String>()) == "foo"_kj);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(metric.value.tryGet<double>()) == 1.0);
+  KJ_EXPECT(metric.value == 1.0);
   KJ_EXPECT(metric.keyMatches("foo"_kj));
 
   enum class Foo { A };
@@ -513,12 +513,12 @@ KJ_TEST("Metric works") {
   trace::Metric metric2(reader);
   KJ_EXPECT(metric2.type == trace::Metric::Type::COUNTER);
   KJ_EXPECT(KJ_ASSERT_NONNULL(metric2.key.tryGet<kj::String>()) == "foo"_kj);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(metric2.value.tryGet<double>()) == 1.0);
+  KJ_EXPECT(metric2.value == 1.0);
 
   auto metric3 = metric.clone();
   KJ_EXPECT(metric3.type == trace::Metric::Type::COUNTER);
   KJ_EXPECT(KJ_ASSERT_NONNULL(metric3.key.tryGet<kj::String>()) == "foo"_kj);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(metric3.value.tryGet<double>()) == 1.0);
+  KJ_EXPECT(metric3.value == 1.0);
 }
 
 KJ_TEST("Dropped works") {

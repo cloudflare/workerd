@@ -375,15 +375,11 @@ void Trace::addMetrics(trace::Metrics&& metrics) {
     if (metric.keyMatches(trace::Metric::Common::CPU_TIME)) {
       // The CPU_TIME metric will always be a int64_t converted from a kj::Duration
       // If it's not, we'll ignore it.
-      KJ_IF_SOME(i, metric.value.tryGet<int64_t>()) {
-        cpuTime = i * kj::MILLISECONDS;
-      }
+      cpuTime = static_cast<int64_t>(metric.value) * kj::MILLISECONDS;
     } else if (metric.keyMatches(trace::Metric::Common::WALL_TIME)) {
       // The WALL_TIME metric will always be a int64_t converted from a kj::Duration
       // If it's not, we'll ignore it.
-      KJ_IF_SOME(i, metric.value.tryGet<int64_t>()) {
-        wallTime = i * kj::MILLISECONDS;
-      }
+      wallTime = static_cast<int64_t>(metric.value) * kj::MILLISECONDS;
     }
   }
 }
