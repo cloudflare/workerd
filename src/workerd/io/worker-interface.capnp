@@ -201,17 +201,15 @@ struct Trace @0x8e8d911203762d34 {
   struct Onset {
     # The Onset struct is always sent as the first event in any trace stream. It
     # contains general metadata about the pipeline that is being traced.
-    accountId @0 :UInt32;
-    stableId @1 :Text;
-    scriptName @2 :Text;
-    scriptVersion @3 :ScriptVersion;
-    dispatchNamespace @4 :Text;
-    scriptId @5 :Text;
-    scriptTags @6 :List(Text);
-    entrypoint @7 :Text;
-    executionModel @8 :ExecutionModel;
+    scriptName @0 :Text;
+    scriptVersion @1 :ScriptVersion;
+    dispatchNamespace @2 :Text;
+    scriptId @3 :Text;
+    scriptTags @4 :List(Text);
+    entrypoint @5 :Text;
+    executionModel @6 :ExecutionModel;
 
-    tags @9 :List(Tag);
+    tags @7 :List(Tag);
     # Any additional arbitrary metadata that should be associated with the onset.
     # These are different from the tags that appear in the StreamEvent structure
     # in that those are considered unique for each event in the stream, whereas

@@ -159,10 +159,6 @@ bool Tag::keyMatches(kj::OneOf<kj::StringPtr, uint32_t> check) {
 // Onset
 
 namespace {
-kj::Maybe<kj::String> maybeGetStableId(const rpc::Trace::Onset::Reader& reader) {
-  if (!reader.hasStableId()) return kj::none;
-  return kj::str(reader.getStableId());
-}
 kj::Maybe<kj::String> maybeGetScriptName(const rpc::Trace::Onset::Reader& reader) {
   if (!reader.hasScriptName()) return kj::none;
   return kj::str(reader.getScriptName());
@@ -193,9 +189,7 @@ kj::Maybe<kj::String> maybeGetEntrypoint(const rpc::Trace::Onset::Reader& reader
 }
 }  // namespace
 
-Onset::Onset(kj::Maybe<uint32_t> accountId,
-    kj::Maybe<kj::String> stableId,
-    kj::Maybe<kj::String> scriptName,
+Onset::Onset(kj::Maybe<kj::String> scriptName,
     kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
     kj::Maybe<kj::String> dispatchNamespace,
     kj::Maybe<kj::String> scriptId,
@@ -203,9 +197,7 @@ Onset::Onset(kj::Maybe<uint32_t> accountId,
     kj::Maybe<kj::String> entrypoint,
     ExecutionModel executionModel,
     Tags tags)
-    : accountId(kj::mv(accountId)),
-      stableId(kj::mv(stableId)),
-      scriptName(kj::mv(scriptName)),
+    : scriptName(kj::mv(scriptName)),
       scriptVersion(kj::mv(scriptVersion)),
       dispatchNamespace(kj::mv(dispatchNamespace)),
       scriptId(kj::mv(scriptId)),
@@ -215,9 +207,7 @@ Onset::Onset(kj::Maybe<uint32_t> accountId,
       tags(kj::mv(tags)) {}
 
 Onset::Onset(rpc::Trace::Onset::Reader reader)
-    : accountId(reader.getAccountId()),
-      stableId(maybeGetStableId(reader)),
-      scriptName(maybeGetScriptName(reader)),
+    : scriptName(maybeGetScriptName(reader)),
       scriptVersion(maybeGetScriptVersion(reader)),
       dispatchNamespace(maybeGetDispatchNamespace(reader)),
       scriptId(maybeGetScriptId(reader)),
@@ -227,12 +217,6 @@ Onset::Onset(rpc::Trace::Onset::Reader reader)
       tags(maybeGetTags(reader)) {}
 
 void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
-  KJ_IF_SOME(id, accountId) {
-    builder.setAccountId(id);
-  }
-  KJ_IF_SOME(id, stableId) {
-    builder.setStableId(id);
-  }
   KJ_IF_SOME(name, scriptName) {
     builder.setScriptName(name);
   }
@@ -264,9 +248,7 @@ void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
 }
 
 Onset Onset::clone() const {
-  return Onset(accountId.map([](uint32_t s) { return s; }),
-      stableId.map([](const kj::String& s) { return kj::str(s); }),
-      scriptName.map([](const kj::String& s) { return kj::str(s); }),
+  return Onset(scriptName.map([](const kj::String& s) { return kj::str(s); }),
       scriptVersion.map([](const kj::Own<ScriptVersion::Reader>& s) { return capnp::clone(*s); }),
       dispatchNamespace.map([](const kj::String& s) { return kj::str(s); }),
       scriptId.map([](const kj::String& s) { return kj::str(s); }),
