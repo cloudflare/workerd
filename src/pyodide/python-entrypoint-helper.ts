@@ -93,6 +93,11 @@ export async function setupPackages(pyodide: Pyodide): Promise<void> {
     const pymajor = pyodide._module._py_version_major();
     const pyminor = pyodide._module._py_version_minor();
     pyodide.site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
+
+    // Inject modules that enable JS features to be used idiomatically from Python.
+    pyodide.FS.mkdir(`${pyodide.site_packages}/cloudflare`);
+    await injectSitePackagesModule(pyodide, 'workers', 'cloudflare/workers');
+
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
       await applyPatch(pyodide, 'aiohttp');
@@ -142,9 +147,17 @@ function makeHandler(pyHandlerName: string): Handler {
         'prep_python',
         async () => await preparePython()
       );
-      return await enterJaegerSpan('python_code', () => {
+
+      const result = await enterJaegerSpan('python_code', () => {
         return mainModule[pyHandlerName].callRelaxed(...args);
       });
+
+      // Support returning a pyodide.ffi.FetchResponse.
+      if (result && result.js_response !== undefined) {
+        return result.js_response;
+      } else {
+        return result;
+      }
     } catch (e) {
       console.warn('Error in makeHandler');
       reportError(e);
