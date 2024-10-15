@@ -1093,25 +1093,9 @@ Metric::Key getMetricKey(const rpc::Trace::Metric::Reader& reader) {
   }
   KJ_UNREACHABLE;
 }
-
-Metric::Value getMetricValue(const rpc::Trace::Metric::Reader& reader) {
-  auto value = reader.getValue();
-  switch (value.which()) {
-    case rpc::Trace::Metric::Value::Which::FLOAT64: {
-      return value.getFloat64();
-    }
-    case rpc::Trace::Metric::Value::Which::INT64: {
-      return value.getInt64();
-    }
-    case rpc::Trace::Metric::Value::Which::UINT64: {
-      return value.getUint64();
-    }
-  }
-  KJ_UNREACHABLE;
-}
 }  // namespace
 
-Metric::Metric(Type type, Key key, Value value)
+Metric::Metric(Type type, Key key, double value)
     : type(type),
       key(kj::mv(key)),
       value(kj::mv(value)) {}
@@ -1119,7 +1103,7 @@ Metric::Metric(Type type, Key key, Value value)
 Metric::Metric(rpc::Trace::Metric::Reader reader)
     : type(reader.getType()),
       key(getMetricKey(reader)),
-      value(getMetricValue(reader)) {}
+      value(reader.getValue()) {}
 
 void Metric::copyTo(rpc::Trace::Metric::Builder builder) const {
   builder.setType(type);
@@ -1131,17 +1115,7 @@ void Metric::copyTo(rpc::Trace::Metric::Builder builder) const {
       builder.getKey().setId(id);
     }
   }
-  KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(d, double) {
-      builder.getValue().setFloat64(d);
-    }
-    KJ_CASE_ONEOF(i, int64_t) {
-      builder.getValue().setInt64(i);
-    }
-    KJ_CASE_ONEOF(u, uint64_t) {
-      builder.getValue().setUint64(u);
-    }
-  }
+  builder.setValue(value);
 }
 
 Metric Metric::clone() const {
@@ -1156,21 +1130,7 @@ Metric Metric::clone() const {
     }
     KJ_UNREACHABLE;
   })();
-  auto newValue = ([&]() -> Value {
-    KJ_SWITCH_ONEOF(value) {
-      KJ_CASE_ONEOF(d, double) {
-        return d;
-      }
-      KJ_CASE_ONEOF(i, int64_t) {
-        return i;
-      }
-      KJ_CASE_ONEOF(u, uint64_t) {
-        return u;
-      }
-    }
-    KJ_UNREACHABLE;
-  })();
-  return Metric(type, kj::mv(newKey), kj::mv(newValue));
+  return Metric(type, kj::mv(newKey), value);
 }
 
 bool Metric::keyMatches(kj::OneOf<kj::StringPtr, uint32_t> check) {

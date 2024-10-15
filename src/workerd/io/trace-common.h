@@ -568,7 +568,6 @@ struct Mark final {
 // metrics to be emitted. This is a new feature in the streaming trace model.
 struct Metric final {
   using Key = kj::OneOf<kj::String, uint32_t>;
-  using Value = kj::OneOf<double, int64_t, uint64_t>;
   using Type = rpc::Trace::Metric::Type;
 
   enum class Common {
@@ -576,11 +575,11 @@ struct Metric final {
     WALL_TIME,
   };
 
-  explicit Metric(Type type, Key key, Value value);
+  explicit Metric(Type type, Key key, double value);
 
   template <IsEnum K>
-  explicit Metric(Type type, K key, Value value)
-      : Metric(type, static_cast<uint32_t>(key), kj::mv(value)) {}
+  explicit Metric(Type type, K key, double value)
+      : Metric(type, static_cast<uint32_t>(key), value) {}
 
   Metric(rpc::Trace::Metric::Reader reader);
   Metric(Metric&&) = default;
@@ -589,7 +588,7 @@ struct Metric final {
 
   Type type;
   Key key;
-  Value value;
+  double value;
 
   bool keyMatches(kj::OneOf<kj::StringPtr, uint32_t> key);
 
