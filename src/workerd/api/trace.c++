@@ -147,7 +147,7 @@ kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
 }
 
 kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace) {
-  KJ_IF_SOME(e, trace.eventInfo) {
+  KJ_IF_SOME(e, trace.onsetInfo.info) {
     KJ_SWITCH_ONEOF(e) {
       KJ_CASE_ONEOF(fetch, trace::FetchEventInfo) {
         return kj::Maybe(

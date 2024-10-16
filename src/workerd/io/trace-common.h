@@ -39,7 +39,7 @@ namespace trace {
 template <typename T>
 concept IsEnum = std::is_enum<T>::value;
 
-// A Trace Tag is a key-value pair that can be attached to multiple types of objects
+// A trace::Tag is a key-value pair that can be attached to multiple types of objects
 // as an extension field. They can be used to provide additional context, extend
 // types, etc.
 //
@@ -74,39 +74,6 @@ struct Tag final {
   Tag clone() const;
 };
 using Tags = kj::Array<Tag>;
-
-// Metadata describing the onset of a trace session. The first event in any trace session
-// will always be an Onset event. It details information about which worker, script, etc
-// is being traced. Every trace session will have exactly one Onset event.
-struct Onset final {
-  explicit Onset() = default;
-  Onset(kj::Maybe<kj::String> scriptName,
-      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-      kj::Maybe<kj::String> dispatchNamespace,
-      kj::Maybe<kj::String> scriptId,
-      kj::Array<kj::String> scriptTags,
-      kj::Maybe<kj::String> entrypoint,
-      ExecutionModel executionModel,
-      Tags tags = nullptr);
-  Onset(rpc::Trace::Onset::Reader reader);
-  Onset(Onset&&) = default;
-  Onset& operator=(Onset&&) = default;
-  KJ_DISALLOW_COPY(Onset);
-
-  // Note that all of these fields could be represented by tags but are kept
-  // as separate fields for legacy reasons.
-  kj::Maybe<kj::String> scriptName = kj::none;
-  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion = kj::none;
-  kj::Maybe<kj::String> dispatchNamespace = kj::none;
-  kj::Maybe<kj::String> scriptId = kj::none;
-  kj::Array<kj::String> scriptTags = nullptr;
-  kj::Maybe<kj::String> entrypoint = kj::none;
-  ExecutionModel executionModel;
-  Tags tags = nullptr;
-
-  void copyTo(rpc::Trace::Onset::Builder builder) const;
-  Onset clone() const;
-};
 
 // Metadata describing the start of a fetch request.
 struct FetchEventInfo final {
@@ -143,25 +110,6 @@ struct FetchEventInfo final {
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
 
   FetchEventInfo clone() const;
-};
-
-// The ActorFlushInfo struct is used to attach additional detail about the termination
-// of an actor. It is to be included in a closing Span event. The ActorFlushInfo is not
-// an event on it's own. This can be used, for instance, to communicate when an actor
-// is broken and for what reason.
-struct ActorFlushInfo final {
-  explicit ActorFlushInfo(Tags tags = nullptr);
-  ActorFlushInfo(rpc::Trace::ActorFlushInfo::Reader reader);
-  ActorFlushInfo(ActorFlushInfo&&) = default;
-  ActorFlushInfo& operator=(ActorFlushInfo&&) = default;
-  KJ_DISALLOW_COPY(ActorFlushInfo);
-
-  using CommonTags = rpc::Trace::ActorFlushInfo::Common;
-
-  Tags tags;
-
-  void copyTo(rpc::Trace::ActorFlushInfo::Builder builder) const;
-  ActorFlushInfo clone() const;
 };
 
 // The FetchResponseInfo struct is used to attach additional detail about the conclusion
@@ -337,11 +285,46 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     HibernatableWebSocketEventInfo,
     CustomEventInfo>;
 
+// Metadata describing the onset of a trace session. The first event in any trace session
+// will always be an Onset event. It details information about which worker, script, etc
+// is being traced. Every trace session will have exactly one Onset event.
+struct Onset final {
+  explicit Onset() = default;
+  Onset(kj::Maybe<kj::String> scriptName,
+      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
+      kj::Maybe<kj::String> dispatchNamespace,
+      kj::Maybe<kj::String> scriptId,
+      kj::Array<kj::String> scriptTags,
+      kj::Maybe<kj::String> entrypoint,
+      ExecutionModel executionModel,
+      Tags tags = nullptr);
+  Onset(rpc::Trace::Onset::Reader reader);
+  Onset(Onset&&) = default;
+  Onset& operator=(Onset&&) = default;
+  KJ_DISALLOW_COPY(Onset);
+
+  // Note that all of these fields could be represented by tags but are kept
+  // as separate fields for legacy reasons.
+  kj::Maybe<kj::String> scriptName = kj::none;
+  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion = kj::none;
+  kj::Maybe<kj::String> dispatchNamespace = kj::none;
+  kj::Maybe<kj::String> scriptId = kj::none;
+  kj::Array<kj::String> scriptTags = nullptr;
+  kj::Maybe<kj::String> entrypoint = kj::none;
+  ExecutionModel executionModel;
+  kj::Maybe<EventInfo> info = kj::none;
+  Tags tags = nullptr;
+
+  void copyTo(rpc::Trace::Onset::Builder builder) const;
+  Onset clone() const;
+};
+
 // Used to describe the final outcome of the trace. Every trace session should
 // have at most a single Outcome event that is the final event in the stream.
 struct Outcome final {
+  using Info = kj::OneOf<FetchResponseInfo, Tags>;
   Outcome() = default;
-  explicit Outcome(EventOutcome outcome);
+  explicit Outcome(EventOutcome outcome, kj::Maybe<Info> info = kj::none);
   Outcome(rpc::Trace::Outcome::Reader reader);
   Outcome(Outcome&&) = default;
   Outcome& operator=(Outcome&&) = default;
@@ -349,8 +332,30 @@ struct Outcome final {
 
   EventOutcome outcome = EventOutcome::UNKNOWN;
 
+  // The closing outcome event should include an info field that matches the kind of
+  // event that started the span. For instance, if the span was started with a
+  // FetchEventInfo event, then the outcome should be closed with a FetchResponseInfo.
+  kj::Maybe<Info> info;
+
   void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
+};
+
+// The SpanClose struct identifies the *close* of a span in the stream. A span is
+// a logical grouping of events. Spans can be nested.
+struct SpanClose final {
+  using Outcome = rpc::Trace::SpanClose::SpanOutcome;
+  explicit SpanClose(Outcome outcome, Tags tags = nullptr);
+  SpanClose(rpc::Trace::SpanClose::Reader reader);
+  SpanClose(SpanClose&&) = default;
+  SpanClose& operator=(SpanClose&&) = default;
+  KJ_DISALLOW_COPY(SpanClose);
+
+  Outcome outcome;
+  Tags tags;
+
+  void copyTo(rpc::Trace::SpanClose::Builder builder) const;
+  SpanClose clone() const;
 };
 
 // Describes an event caused by use of the Node.js diagnostics-channel API.
@@ -489,8 +494,7 @@ struct Subrequest final {
 // should correlate to the kind of subrequest that was made.
 struct SubrequestOutcome final {
   using Info = kj::OneOf<FetchResponseInfo, Tags>;
-  explicit SubrequestOutcome(
-      uint32_t id, kj::Maybe<Info> info, rpc::Trace::Span::SpanOutcome outcome);
+  explicit SubrequestOutcome(uint32_t id, kj::Maybe<Info> info, SpanClose::Outcome outcome);
   SubrequestOutcome(rpc::Trace::SubrequestOutcome::Reader reader);
   SubrequestOutcome(SubrequestOutcome&&) = default;
   SubrequestOutcome& operator=(SubrequestOutcome&&) = default;
@@ -501,50 +505,10 @@ struct SubrequestOutcome final {
 
   // A subrequest is a technically a special form of span, and therefore can
   // have a Span outcome.
-  rpc::Trace::Span::SpanOutcome outcome;
+  SpanClose::Outcome outcome;
 
   void copyTo(rpc::Trace::SubrequestOutcome::Builder builder) const;
   SubrequestOutcome clone() const;
-};
-
-// The span struct identifies the *close* of a span in the stream. A span is
-// a logical grouping of events. Spans can be nested.
-struct Span final {
-  using Outcome = rpc::Trace::Span::SpanOutcome;
-  using Info = kj::OneOf<FetchResponseInfo, ActorFlushInfo, Tags>;
-  explicit Span(uint32_t id,
-      uint32_t parentId,
-      rpc::Trace::Span::SpanOutcome outcome,
-      bool transactional = false,
-      kj::Maybe<Info> maybeInfo = kj::none,
-      Tags tags = nullptr);
-  Span(rpc::Trace::Span::Reader reader);
-  Span(Span&&) = default;
-  Span& operator=(Span&&) = default;
-  KJ_DISALLOW_COPY(Span);
-
-  // The id of the span being closed. This value should always be a value > 0.
-  uint32_t id;
-
-  // Identifies the parent span (if any).
-  uint32_t parent;
-
-  rpc::Trace::Span::SpanOutcome outcome;
-
-  // If a span is transactional, it means that any events occurring within that
-  // span should be considered invalid if the span outcome is canceled or errored.
-  bool transactional;
-
-  // When the span is initiated with an opening EventInfo event, then the closing
-  // span event should include an info field that matches the kind of event that
-  // started the span. For instance, if the span was started with a FetchEventInfo
-  // event, then the span should be closed with a FetchResponseInfo included in the
-  // Span event.
-  kj::Maybe<Info> info;
-  Tags tags;
-
-  void copyTo(rpc::Trace::Span::Builder builder) const;
-  Span clone() const;
 };
 
 // A Mark is a simple event that can be used to mark a significant point in the
@@ -646,7 +610,7 @@ class TraceBase {
 public:
   virtual void addException(trace::Exception&& exception) = 0;
   virtual void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event) = 0;
-  virtual void addMark(trace::Mark&& mark) = 0;
+  virtual void addMark(kj::StringPtr mark) = 0;
   virtual void addMetrics(trace::Metrics&& metrics) = 0;
   virtual void addSubrequest(trace::Subrequest&& subrequest) = 0;
   virtual void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) = 0;

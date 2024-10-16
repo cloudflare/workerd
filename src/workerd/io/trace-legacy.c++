@@ -79,7 +79,7 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   builder.setEventTimestampNs((eventTimestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
 
   auto eventInfoBuilder = builder.initEventInfo();
-  KJ_IF_SOME(e, eventInfo) {
+  KJ_IF_SOME(e, onsetInfo.info) {
     KJ_SWITCH_ONEOF(e) {
       KJ_CASE_ONEOF(fetch, trace::FetchEventInfo) {
         auto fetchBuilder = eventInfoBuilder.initFetch();
@@ -181,39 +181,39 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   eventTimestamp = kj::UNIX_EPOCH + reader.getEventTimestampNs() * kj::NANOSECONDS;
 
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
-    eventInfo = kj::none;
+    onsetInfo.info = kj::none;
   } else {
     auto e = reader.getEventInfo();
     switch (e.which()) {
       case rpc::Trace::EventInfo::Which::FETCH:
-        eventInfo = trace::FetchEventInfo(e.getFetch());
+        onsetInfo.info = trace::FetchEventInfo(e.getFetch());
         break;
       case rpc::Trace::EventInfo::Which::JS_RPC:
-        eventInfo = trace::JsRpcEventInfo(e.getJsRpc());
+        onsetInfo.info = trace::JsRpcEventInfo(e.getJsRpc());
         break;
       case rpc::Trace::EventInfo::Which::SCHEDULED:
-        eventInfo = trace::ScheduledEventInfo(e.getScheduled());
+        onsetInfo.info = trace::ScheduledEventInfo(e.getScheduled());
         break;
       case rpc::Trace::EventInfo::Which::ALARM:
-        eventInfo = trace::AlarmEventInfo(e.getAlarm());
+        onsetInfo.info = trace::AlarmEventInfo(e.getAlarm());
         break;
       case rpc::Trace::EventInfo::Which::QUEUE:
-        eventInfo = trace::QueueEventInfo(e.getQueue());
+        onsetInfo.info = trace::QueueEventInfo(e.getQueue());
         break;
       case rpc::Trace::EventInfo::Which::EMAIL:
-        eventInfo = trace::EmailEventInfo(e.getEmail());
+        onsetInfo.info = trace::EmailEventInfo(e.getEmail());
         break;
       case rpc::Trace::EventInfo::Which::TRACE:
-        eventInfo = trace::TraceEventInfo(e.getTrace());
+        onsetInfo.info = trace::TraceEventInfo(e.getTrace());
         break;
       case rpc::Trace::EventInfo::Which::HIBERNATABLE_WEB_SOCKET:
-        eventInfo = trace::HibernatableWebSocketEventInfo(e.getHibernatableWebSocket());
+        onsetInfo.info = trace::HibernatableWebSocketEventInfo(e.getHibernatableWebSocket());
         break;
       case rpc::Trace::EventInfo::Which::CUSTOM:
-        eventInfo = trace::CustomEventInfo(e.getCustom());
+        onsetInfo.info = trace::CustomEventInfo(e.getCustom());
         break;
       case rpc::Trace::EventInfo::Which::NONE:
-        eventInfo = kj::none;
+        onsetInfo.info = kj::none;
         break;
     }
   }
@@ -224,7 +224,7 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
 }
 
 void Trace::setEventInfo(kj::Date timestamp, trace::EventInfo&& info) {
-  KJ_ASSERT(eventInfo == kj::none, "tracer can only be used for a single event");
+  KJ_ASSERT(onsetInfo.info == kj::none, "tracer can only be used for a single event");
   eventTimestamp = timestamp;
 
   size_t newSize = bytesUsed;
@@ -239,7 +239,7 @@ void Trace::setEventInfo(kj::Date timestamp, trace::EventInfo&& info) {
         truncated = true;
         logs.add(timestamp, LogLevel::WARN,
             kj::str("[\"Trace resource limit exceeded; could not capture event info.\"]"));
-        eventInfo = trace::FetchEventInfo(fetch.method, {}, {}, {});
+        onsetInfo.info = trace::FetchEventInfo(fetch.method, {}, {}, {});
         return;
       }
     }
@@ -253,7 +253,7 @@ void Trace::setEventInfo(kj::Date timestamp, trace::EventInfo&& info) {
     KJ_CASE_ONEOF(_, trace::CustomEventInfo) {}
   }
   bytesUsed = newSize;
-  eventInfo = kj::mv(info);
+  onsetInfo.info = kj::mv(info);
 }
 
 void Trace::setOutcome(trace::Outcome&& info) {
@@ -365,7 +365,7 @@ void Trace::addSpan(const Span&& span, kj::String spanContext) {
 }
 
 void Trace::setFetchResponseInfo(trace::FetchResponseInfo&& info) {
-  KJ_REQUIRE(KJ_REQUIRE_NONNULL(eventInfo).is<trace::FetchEventInfo>());
+  KJ_REQUIRE(KJ_REQUIRE_NONNULL(onsetInfo.info).is<trace::FetchEventInfo>());
   KJ_ASSERT(fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
   fetchResponseInfo = kj::mv(info);
 }
