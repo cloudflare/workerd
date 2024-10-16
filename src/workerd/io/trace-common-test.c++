@@ -1,5 +1,7 @@
 #include "trace-common.h"
 
+#include <workerd/jsg/jsg-test.h>
+
 #include <capnp/message.h>
 #include <kj/compat/http.h>
 #include <kj/test.h>
@@ -511,6 +513,332 @@ KJ_TEST("Dropped works") {
   auto dropped3 = dropped.clone();
   KJ_EXPECT(dropped3.start == a);
   KJ_EXPECT(dropped3.end == b);
+}
+
+// ======================================================================================
+
+jsg::V8System v8System;
+
+struct TestContext: public jsg::Object, public jsg::ContextGlobal {
+  JSG_RESOURCE_TYPE(TestContext) {}
+};
+JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
+
+static kj::Maybe<kj::StringPtr> nullNameProvider(uint32_t, trace::NameProviderContext) {
+  return kj::none;
+}
+
+KJ_TEST("JS Serialization of Dropped") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::Dropped dropped(1, 2);
+      auto obj = dropped.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"dropped\",\"start\":1,\"end\":2}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of Mark") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::Mark mark(kj::str("foo"));
+      auto obj = mark.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"mark\",\"name\":\"foo\"}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of SubrequestOutcome") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::SubrequestOutcome outcome(1, kj::none, trace::SpanClose::Outcome::OK);
+      auto obj = outcome.toObject(js, nullNameProvider);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"subrequest-outcome\",\"id\":1,\"outcome\":\"ok\"}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of Subrequest") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::Subrequest subrequest(1,
+          trace::Subrequest::Info(trace::FetchEventInfo(
+              kj::HttpMethod::GET, kj::str("http://example.org"), kj::String(), nullptr)));
+      auto obj = subrequest.toObject(js, nullNameProvider);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser ==
+          "{\"type\":\"subrequest\",\"id\":1,\"info\":{\"type\":\"fetch\",\"method\":\"GET\",\"url\":\"http://example.org\",\"cfJson\":\"\"}}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of Exception") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::Exception exception(
+          0 * kj::MILLISECONDS + kj::UNIX_EPOCH, kj::str("foo"), kj::str("bar"), kj::none);
+      auto obj = exception.toObject(js, nullNameProvider);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser ==
+          "{\"type\":\"exception\",\"timestamp\":\"1970-01-01T00:00:00.000Z\",\"name\":\"foo\",\"message\":\"bar\",\"remote\":false,\"retryable\":false,\"overloaded\":false,\"durableObjectReset\":false,\"tags\":{}}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of LogV2") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      jsg::Serializer ser(js);
+      ser.write(js, js.num(1));
+      auto data = ser.release();
+      trace::LogV2 log(0 * kj::MILLISECONDS + kj::UNIX_EPOCH, LogLevel::INFO, kj::mv(data.data));
+      auto obj = log.toObject(js, nullNameProvider);
+      auto res = js.serializeJson(obj);
+      KJ_EXPECT(res ==
+          "{\"type\":\"log\",\"timestamp\":\"1970-01-01T00:00:00.000Z\",\"logLevel\":\"info\",\"message\":1,\"truncated\":false,\"tags\":{}}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of DiagnosticChannelEvent") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      jsg::Serializer ser(js);
+      ser.write(js, js.num(1));
+      auto data = ser.release();
+      trace::DiagnosticChannelEvent event(
+          0 * kj::MILLISECONDS + kj::UNIX_EPOCH, kj::str("foo"), kj::mv(data.data));
+      auto obj = event.toObject(js);
+      auto res = js.serializeJson(obj);
+      KJ_EXPECT(res ==
+          "{\"type\":\"diagnostic-channel\",\"timestamp\":\"1970-01-01T00:00:00.000Z\",\"channel\":\"foo\",\"message\":1}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of SpanClose") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::SpanClose event(trace::SpanClose::Outcome::OK, nullptr);
+      auto obj = event.toObject(js, nullNameProvider);
+      auto res = js.serializeJson(obj);
+      KJ_EXPECT(res == "{\"type\":\"span\",\"outcome\":\"ok\",\"tags\":{}}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of Outcome") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::FetchResponseInfo info(200);
+      trace::Outcome outcome(EventOutcome::OK, kj::Maybe(kj::mv(info)));
+      auto obj = outcome.toObject(js, nullNameProvider);
+      auto res = js.serializeJson(obj);
+      KJ_EXPECT(res ==
+          "{\"type\":\"outcome\",\"outcome\":\"ok\",\"info\":{\"type\":\"fetch\",\"statusCode\":200}}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of Onset") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::Onset onset(kj::str("foo"), kj::none, kj::str("bar"), kj::str("baz"), nullptr,
+          kj::str("qux"), ExecutionModel::STATELESS, nullptr);
+
+      auto obj = onset.toObject(js, nullNameProvider);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser ==
+          "{\"type\":\"onset\",\"scriptName\":\"foo\",\"dispatchNamespace\":\"bar\",\"scriptId\":\"baz\",\"scriptTags\":[],\"entrypoint\":\"qux\",\"executionModel\":\"stateless\"}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of HibernatableWebSocketEventInfo") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::HibernatableWebSocketEventInfo info(trace::HibernatableWebSocketEventInfo::Message{});
+      auto obj = info.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"hibernatable-websocket\",\"kind\":\"message\"}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of TraceEventInfo") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::TraceEventInfo info(kj::arr(trace::TraceEventInfo::TraceItem(kj::str("foo"))));
+      auto obj = info.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"trace\",\"traces\":[\"foo\"]}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of EmailEventInfo") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::EmailEventInfo info(kj::str("foo"), kj::str("bar"), 1);
+      auto obj = info.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(
+          ser == "{\"type\":\"email\",\"mailFrom\":\"foo\",\"rcptTo\":\"bar\",\"rawSize\":1}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of QueueEventInfo") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::QueueEventInfo info(kj::str("foo"), 1);
+      auto obj = info.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"queue\",\"queueName\":\"foo\",\"batchSize\":1}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of AlarmEventInfo") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::AlarmEventInfo info(1 * kj::MILLISECONDS + kj::UNIX_EPOCH);
+      auto obj = info.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"alarm\",\"scheduledTime\":\"1970-01-01T00:00:00.001Z\"}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of ScheduledEventInfo") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::ScheduledEventInfo info(1.0, kj::String());
+      auto obj = info.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"scheduled\",\"scheduledTime\":1,\"cron\":\"\"}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of JsRpcEventInfo") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::JsRpcEventInfo info(kj::str("foo"));
+      auto obj = info.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"jsrpc\",\"methodName\":\"foo\"}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of FetchResponseInfo") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::FetchResponseInfo info(200);
+      auto obj = info.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"fetch\",\"statusCode\":200}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of FetchEventInfo") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      trace::FetchEventInfo info(kj::HttpMethod::GET, kj::str("http://example.org"), kj::String(),
+          kj::arr(trace::FetchEventInfo::Header(kj::str("a"), kj::str("b"))));
+      auto obj = info.toObject(js);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser ==
+          "{\"type\":\"fetch\",\"method\":\"GET\",\"url\":\"http://example.org\",\"cfJson\":\"\",\"headers\":{\"a\":\"b\"}}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of Metrics") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      kj::Vector<trace::Metric> metrics;
+      metrics.add(trace::Metric(trace::Metric::Type::COUNTER, kj::str("foo"), 1.0));
+      metrics.add(trace::Metric(trace::Metric::Type::GAUGE, (uint32_t)1, 2.0));
+      auto obj = trace::Metric::toObject(js, metrics.asPtr(),
+          [](uint32_t id, trace::NameProviderContext context) -> kj::Maybe<kj::StringPtr> {
+        KJ_EXPECT(context == trace::NameProviderContext::METRIC);
+        return "bar"_kj;
+      });
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"metrics\",\"counters\":{\"foo\":1},\"gauges\":{\"bar\":2}}");
+    });
+  });
+}
+
+KJ_TEST("JS Serialization of Tags") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    auto context = isolateLock.newContext<TestContext>().getHandle(isolateLock);
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock, context, [&](jsg::Lock& js) {
+      kj::Vector<trace::Tag> tags;
+      tags.add(trace::Tag(kj::str("foo"), true));
+      tags.add(trace::Tag((uint32_t)1, kj::str("baz")));
+      auto obj = trace::Tag::toObject(js, tags.asPtr(),
+          [](uint32_t id, trace::NameProviderContext context) -> kj::Maybe<kj::StringPtr> {
+        KJ_EXPECT(context == trace::NameProviderContext::TAG);
+        return "bar"_kj;
+      });
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser == "{\"type\":\"custom\",\"tags\":{\"foo\":true,\"bar\":\"baz\"}}");
+
+      auto obj2 = trace::Tag::toObject(js, tags.asPtr(),
+          [](uint32_t id, auto) -> kj::Maybe<kj::StringPtr> { return "bar"_kj; },
+          trace::Tag::ToObjectOptions::UNWRAPPED);
+      auto ser2 = js.serializeJson(obj2);
+      KJ_EXPECT(ser2 == "{\"foo\":true,\"bar\":\"baz\"}");
+    });
+  });
 }
 
 }  // namespace

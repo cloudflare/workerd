@@ -74,6 +74,7 @@ struct StreamEvent final {
 
   void copyTo(rpc::Trace::StreamEvent::Builder builder) const;
   StreamEvent clone() const;
+  jsg::JsObject toObject(jsg::Lock&, trace::NameProvider) const;
 };
 
 // ======================================================================================
@@ -114,7 +115,7 @@ public:
     // random UUIDs. This should generally only be used in local development
     // or standalone uses of workerd.
     static kj::Own<IdFactory> newUuidIdFactory();
-    static kj::Own<const IdFactory::Id> newIdFromString(kj::StringPtr str);
+    static kj::Own<IdFactory::Id> newIdFromString(kj::StringPtr str);
   };
 
   // The delegate is the piece that actually handles the output of the stream events

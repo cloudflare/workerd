@@ -5,6 +5,8 @@
 
 #include "trace-legacy.h"
 
+#include <workerd/jsg/jsg.h>
+
 #include <capnp/message.h>
 #include <capnp/schema.h>
 #include <kj/compat/http.h>
@@ -155,6 +157,75 @@ bool Tag::keyMatches(kj::OneOf<kj::StringPtr, uint32_t> check) {
   return false;
 }
 
+jsg::JsObject Tag::toObject(jsg::Lock& js,
+    kj::ArrayPtr<const Tag> tags,
+    NameProvider nameProvider,
+    ToObjectOptions options) {
+  auto const getTags = [&] {
+    auto tagObj = js.obj();
+    for (auto& tag: tags) {
+      auto maybeName = ([&]() -> kj::Maybe<kj::StringPtr> {
+        KJ_SWITCH_ONEOF(tag.key) {
+          KJ_CASE_ONEOF(name, kj::String) {
+            return name.asPtr();
+          }
+          KJ_CASE_ONEOF(id, uint32_t) {
+            return nameProvider(id, NameProviderContext::TAG);
+          }
+        }
+        KJ_UNREACHABLE;
+      })();
+
+      KJ_IF_SOME(name, maybeName) {
+        auto value = ([&]() -> jsg::JsValue {
+          KJ_SWITCH_ONEOF(tag.value) {
+            KJ_CASE_ONEOF(b, bool) {
+              return js.boolean(b);
+            }
+            KJ_CASE_ONEOF(i, int64_t) {
+              return js.bigInt(i);
+            }
+            KJ_CASE_ONEOF(u, uint64_t) {
+              return js.bigInt(u);
+            }
+            KJ_CASE_ONEOF(d, double) {
+              return js.num(d);
+            }
+            KJ_CASE_ONEOF(s, kj::String) {
+              return js.str(s);
+            }
+            KJ_CASE_ONEOF(a, kj::Array<kj::byte>) {
+              return jsg::JsValue(js.bytes(kj::heapArray<kj::byte>(a)).getHandle(js));
+            }
+          }
+          KJ_UNREACHABLE;
+        })();
+
+        if (tagObj.has(js, name)) {
+          auto existing = tagObj.get(js, name);
+          KJ_IF_SOME(arr, existing.tryCast<jsg::JsArray>()) {
+            arr.add(js, value);
+          } else {
+            tagObj.set(js, name, js.arr(existing, value));
+          }
+        } else {
+          tagObj.set(js, name, value);
+        }
+      }
+    };
+    return tagObj;
+  };
+
+  auto tagsObj = getTags();
+  if (options == ToObjectOptions::WRAPPED) {
+    auto obj = js.obj();
+    obj.set(js, "type", js.str("custom"_kj));
+    obj.set(js, "tags", tagsObj);
+    return obj;
+  }
+  return tagsObj;
+}
+
 // ======================================================================================
 // Onset
 
@@ -217,8 +288,12 @@ kj::Maybe<EventInfo> maybeGetEventInfo(const rpc::Trace::Onset::Reader& reader) 
       return kj::Maybe(HibernatableWebSocketEventInfo(info.getHibernatableWebSocket()));
     }
     case rpc::Trace::Onset::Info::Which::CUSTOM: {
-      // TODO(streaming-trace): Implement correctly
-      return kj::Maybe(CustomEventInfo());
+      auto custom = info.getCustom();
+      kj::Vector<Tag> results(custom.size());
+      for (auto c: custom) {
+        results.add(Tag(c));
+      }
+      return kj::Maybe(results.releaseAsArray());
     }
   }
   KJ_UNREACHABLE;
@@ -254,6 +329,13 @@ kj::Maybe<EventInfo> cloneEventInfo(const kj::Maybe<EventInfo>& other) {
       KJ_CASE_ONEOF(custom, CustomEventInfo) {
         // TODO(streaming-trace): Implement correctly
         return kj::Maybe(CustomEventInfo());
+      }
+      KJ_CASE_ONEOF(custom, Tags) {
+        kj::Vector<Tag> newTags(custom.size());
+        for (auto& tag: custom) {
+          newTags.add(tag.clone());
+        }
+        return kj::Maybe(newTags.releaseAsArray());
       }
     }
   }
@@ -340,8 +422,16 @@ void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
       KJ_CASE_ONEOF(hibWs, HibernatableWebSocketEventInfo) {
         hibWs.copyTo(infoBuilder.initHibernatableWebSocket());
       }
+      KJ_CASE_ONEOF(custom, Tags) {
+        auto list = infoBuilder.initCustom(custom.size());
+        for (auto i: kj::indices(custom)) {
+          custom[i].copyTo(list[i]);
+        }
+      }
       KJ_CASE_ONEOF(custom, CustomEventInfo) {
-        // TODO(streaming-trace): Implement correctly
+        // We don't use the empty CustomEventInfo with the streaming trace.
+        // So this should never be called.
+        KJ_UNREACHABLE;
       }
     }
   }
@@ -364,6 +454,90 @@ Onset Onset::clone() const {
       KJ_MAP(tag, tags) { return tag.clone(); });
   onset.info = cloneEventInfo(info);
   return kj::mv(onset);
+}
+
+jsg::JsObject Onset::toObject(jsg::Lock& js, NameProvider nameProvider) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("onset"_kj));
+
+  KJ_IF_SOME(name, scriptName) {
+    obj.set(js, "scriptName", js.str(name));
+  }
+  KJ_IF_SOME(version, scriptVersion) {
+    obj.set(js, "scriptVersion", js.str(kj::str(version)));
+  }
+  KJ_IF_SOME(ns, dispatchNamespace) {
+    obj.set(js, "dispatchNamespace", js.str(ns));
+  }
+  KJ_IF_SOME(id, scriptId) {
+    obj.set(js, "scriptId", js.str(id));
+  }
+  kj::Vector<jsg::JsValue> vec(scriptTags.size());
+  for (auto& tag: scriptTags) {
+    vec.add(js.str(tag));
+  }
+  obj.set(js, "scriptTags", js.arr(vec.releaseAsArray()));
+  KJ_IF_SOME(e, entrypoint) {
+    obj.set(js, "entrypoint", js.str(e));
+  }
+
+  switch (executionModel) {
+    case ExecutionModel::DURABLE_OBJECT: {
+      obj.set(js, "executionModel", js.str("durable-object"_kj));
+      break;
+    }
+    case ExecutionModel::STATELESS: {
+      obj.set(js, "executionModel", js.str("stateless"_kj));
+      break;
+    }
+    case ExecutionModel::WORKFLOW: {
+      obj.set(js, "executionModel", js.str("workflow"_kj));
+      break;
+    }
+  }
+
+  KJ_IF_SOME(i, info) {
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+        obj.set(js, "info", fetch.toObject(js));
+      }
+      KJ_CASE_ONEOF(jsRpc, JsRpcEventInfo) {
+        obj.set(js, "info", jsRpc.toObject(js));
+      }
+      KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
+        obj.set(js, "info", scheduled.toObject(js));
+      }
+      KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
+        obj.set(js, "info", alarm.toObject(js));
+      }
+      KJ_CASE_ONEOF(queue, QueueEventInfo) {
+        obj.set(js, "info", queue.toObject(js));
+      }
+      KJ_CASE_ONEOF(email, EmailEventInfo) {
+        obj.set(js, "info", email.toObject(js));
+      }
+      KJ_CASE_ONEOF(trace, TraceEventInfo) {
+        obj.set(js, "info", trace.toObject(js));
+      }
+      KJ_CASE_ONEOF(hibWs, HibernatableWebSocketEventInfo) {
+        obj.set(js, "info", hibWs.toObject(js));
+      }
+      KJ_CASE_ONEOF(custom, CustomEventInfo) {
+        auto obj = js.obj();
+        obj.set(js, "type", js.str("custom"_kj));
+        obj.set(js, "info", obj);
+      }
+      KJ_CASE_ONEOF(custom, Tags) {
+        obj.set(js, "info", Tag::toObject(js, custom, nameProvider));
+      }
+    }
+  }
+
+  if (tags.size() > 0) {
+    obj.set(js, "tags", Tag::toObject(js, tags, nameProvider, Tag::ToObjectOptions::UNWRAPPED));
+  }
+
+  return obj;
 }
 
 // ======================================================================================
@@ -441,6 +615,60 @@ Outcome Outcome::clone() const {
   return Outcome{outcome, cloneInfo(info)};
 }
 
+jsg::JsObject Outcome::toObject(jsg::Lock& js, NameProvider nameProvider) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("outcome"_kj));
+
+  switch (outcome) {
+    case EventOutcome::UNKNOWN:
+      obj.set(js, "outcome", js.str("unknown"_kj));
+      break;
+    case EventOutcome::OK:
+      obj.set(js, "outcome", js.str("ok"_kj));
+      break;
+    case EventOutcome::EXCEPTION:
+      obj.set(js, "outcome", js.str("exception"_kj));
+      break;
+    case EventOutcome::EXCEEDED_CPU:
+      obj.set(js, "outcome", js.str("exceeded-cpu"_kj));
+      break;
+    case EventOutcome::KILL_SWITCH:
+      obj.set(js, "outcome", js.str("kill-switch"_kj));
+      break;
+    case EventOutcome::DAEMON_DOWN:
+      obj.set(js, "outcome", js.str("daemon-down"_kj));
+      break;
+    case EventOutcome::SCRIPT_NOT_FOUND:
+      obj.set(js, "outcome", js.str("script-not-found"_kj));
+      break;
+    case EventOutcome::CANCELED:
+      obj.set(js, "outcome", js.str("canceled"_kj));
+      break;
+    case EventOutcome::EXCEEDED_MEMORY:
+      obj.set(js, "outcome", js.str("exceeded-memory"_kj));
+      break;
+    case EventOutcome::LOAD_SHED:
+      obj.set(js, "outcome", js.str("load-shed"_kj));
+      break;
+    case EventOutcome::RESPONSE_STREAM_DISCONNECTED:
+      obj.set(js, "outcome", js.str("response-stream-disconnected"_kj));
+      break;
+  }
+
+  KJ_IF_SOME(i, info) {
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(fetch, FetchResponseInfo) {
+        obj.set(js, "info", fetch.toObject(js));
+      }
+      KJ_CASE_ONEOF(tags, Tags) {
+        obj.set(js, "info", Tag::toObject(js, tags, nameProvider));
+      }
+    }
+  }
+
+  return obj;
+}
+
 // ======================================================================================
 // FetchEventInfo
 
@@ -500,6 +728,25 @@ FetchEventInfo FetchEventInfo::clone() const {
   return FetchEventInfo(method, kj::str(url), kj::str(cfJson), newHeaders.releaseAsArray());
 }
 
+jsg::JsObject FetchEventInfo::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("fetch"_kj));
+
+  obj.set(js, "method", js.str(kj::str(method)));
+  obj.set(js, "url", js.str(url));
+  obj.set(js, "cfJson", js.str(cfJson));
+
+  if (headers.size() > 0) {
+    auto headersObj = js.objNoProto();
+    for (auto& header: headers) {
+      headersObj.set(js, header.name, js.str(header.value));
+    }
+    obj.set(js, "headers", headersObj);
+  }
+
+  return obj;
+}
+
 // ======================================================================================
 // FetchResponseInfo
 FetchResponseInfo::FetchResponseInfo(uint16_t statusCode): statusCode(statusCode) {}
@@ -513,6 +760,13 @@ void FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder builder) c
 
 FetchResponseInfo FetchResponseInfo::clone() const {
   return FetchResponseInfo(statusCode);
+}
+
+jsg::JsObject FetchResponseInfo::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("fetch"_kj));
+  obj.set(js, "statusCode", js.num(statusCode));
+  return obj;
 }
 
 // ======================================================================================
@@ -529,6 +783,13 @@ void JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) const {
 
 JsRpcEventInfo JsRpcEventInfo::clone() const {
   return JsRpcEventInfo(kj::str(methodName));
+}
+
+jsg::JsObject JsRpcEventInfo::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("jsrpc"_kj));
+  obj.set(js, "methodName", js.str(methodName));
+  return obj;
 }
 
 // ======================================================================================
@@ -551,6 +812,14 @@ ScheduledEventInfo ScheduledEventInfo::clone() const {
   return ScheduledEventInfo(scheduledTime, kj::str(cron));
 }
 
+jsg::JsObject ScheduledEventInfo::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("scheduled"_kj));
+  obj.set(js, "scheduledTime", js.num(scheduledTime));
+  obj.set(js, "cron", js.str(cron));
+  return obj;
+}
+
 // ======================================================================================
 // AlarmEventInfo
 
@@ -565,6 +834,13 @@ void AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) const {
 
 AlarmEventInfo AlarmEventInfo::clone() const {
   return AlarmEventInfo(scheduledTime);
+}
+
+jsg::JsObject AlarmEventInfo::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("alarm"_kj));
+  obj.set(js, "scheduledTime", js.date(scheduledTime));
+  return obj;
 }
 
 // ======================================================================================
@@ -585,6 +861,14 @@ void QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) const {
 
 QueueEventInfo QueueEventInfo::clone() const {
   return QueueEventInfo(kj::str(queueName), batchSize);
+}
+
+jsg::JsObject QueueEventInfo::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("queue"_kj));
+  obj.set(js, "queueName", js.str(queueName));
+  obj.set(js, "batchSize", js.num(batchSize));
+  return obj;
 }
 
 // ======================================================================================
@@ -608,6 +892,15 @@ void EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) const {
 
 EmailEventInfo EmailEventInfo::clone() const {
   return EmailEventInfo(kj::str(mailFrom), kj::str(rcptTo), rawSize);
+}
+
+jsg::JsObject EmailEventInfo::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("email"_kj));
+  obj.set(js, "mailFrom", js.str(mailFrom));
+  obj.set(js, "rcptTo", js.str(rcptTo));
+  obj.set(js, "rawSize", js.num(rawSize));
+  return obj;
 }
 
 // ======================================================================================
@@ -673,6 +966,28 @@ HibernatableWebSocketEventInfo HibernatableWebSocketEventInfo::clone() const {
     KJ_UNREACHABLE;
   })();
   return HibernatableWebSocketEventInfo(kj::mv(newType));
+}
+
+jsg::JsObject HibernatableWebSocketEventInfo::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("hibernatable-websocket"_kj));
+
+  KJ_SWITCH_ONEOF(type) {
+    KJ_CASE_ONEOF(_, Message) {
+      obj.set(js, "kind", js.str("message"_kj));
+    }
+    KJ_CASE_ONEOF(close, Close) {
+      auto closeObj = js.obj();
+      closeObj.set(js, "code", js.num(close.code));
+      closeObj.set(js, "wasClean", js.boolean(close.wasClean));
+      obj.set(js, "kind", closeObj);
+    }
+    KJ_CASE_ONEOF(_, Error) {
+      obj.set(js, "kind", js.str("error"_kj));
+    }
+  }
+
+  return obj;
 }
 
 // ======================================================================================
@@ -742,6 +1057,23 @@ TraceEventInfo TraceEventInfo::clone() const {
   return TraceEventInfo(newTraces.releaseAsArray());
 }
 
+jsg::JsObject TraceEventInfo::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("trace"_kj));
+
+  kj::Vector<jsg::JsValue> vec(traces.size());
+  for (auto& trace: traces) {
+    KJ_IF_SOME(name, trace.scriptName) {
+      vec.add(js.str(name));
+    } else {
+      vec.add(js.str("<unknown>"_kj));
+    }
+  }
+  obj.set(js, "traces", js.arr(vec.releaseAsArray()));
+
+  return obj;
+}
+
 // ======================================================================================
 // DiagnosticChannelEvent
 
@@ -764,6 +1096,17 @@ void DiagnosticChannelEvent::copyTo(rpc::Trace::DiagnosticChannelEvent::Builder 
 
 DiagnosticChannelEvent DiagnosticChannelEvent::clone() const {
   return DiagnosticChannelEvent(timestamp, kj::str(channel), kj::heapArray<kj::byte>(message));
+}
+
+jsg::JsObject DiagnosticChannelEvent::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("diagnostic-channel"_kj));
+  obj.set(js, "timestamp", js.date(timestamp));
+  obj.set(js, "channel", js.str(channel));
+
+  jsg::Deserializer deser(js, message);
+  obj.set(js, "message", deser.readValue(js));
+  return obj;
 }
 
 // ======================================================================================
@@ -857,6 +1200,43 @@ LogV2 LogV2::clone() const {
     KJ_UNREACHABLE;
   })();
   return LogV2(timestamp, logLevel, kj::mv(newMessage), newTags.releaseAsArray(), truncated);
+}
+
+jsg::JsObject LogV2::toObject(jsg::Lock& js, NameProvider nameProvider) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("log"_kj));
+  obj.set(js, "timestamp", js.date(timestamp));
+
+  switch (logLevel) {
+    case LogLevel::DEBUG_:
+      obj.set(js, "logLevel", js.str("debug"_kj));
+      break;
+    case LogLevel::INFO:
+      obj.set(js, "logLevel", js.str("info"_kj));
+      break;
+    case LogLevel::WARN:
+      obj.set(js, "logLevel", js.str("warn"_kj));
+      break;
+    case LogLevel::ERROR:
+      obj.set(js, "logLevel", js.str("error"_kj));
+      break;
+    case LogLevel::LOG:
+      obj.set(js, "logLevel", js.str("log"_kj));
+      break;
+  }
+
+  KJ_SWITCH_ONEOF(message) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      obj.set(js, "message", js.str(str));
+    }
+    KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+      jsg::Deserializer deser(js, data);
+      obj.set(js, "message", deser.readValue(js));
+    }
+  }
+  obj.set(js, "truncated", js.boolean(truncated));
+  obj.set(js, "tags", Tag::toObject(js, tags, nameProvider, Tag::ToObjectOptions::UNWRAPPED));
+  return obj;
 }
 
 // ======================================================================================
@@ -975,6 +1355,26 @@ Exception Exception::clone() const {
       stack.map([](const kj::String& s) { return kj::str(s); }), detail.clone());
 }
 
+jsg::JsObject Exception::toObject(jsg::Lock& js, NameProvider nameProvider) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("exception"_kj));
+  obj.set(js, "timestamp", js.date(timestamp));
+  obj.set(js, "name", js.str(name));
+  obj.set(js, "message", js.str(message));
+  KJ_IF_SOME(s, stack) {
+    obj.set(js, "stack", js.str(s));
+  }
+
+  obj.set(js, "remote", js.boolean(detail.remote));
+  obj.set(js, "retryable", js.boolean(detail.retryable));
+  obj.set(js, "overloaded", js.boolean(detail.overloaded));
+  obj.set(js, "durableObjectReset", js.boolean(detail.durableObjectReset));
+  obj.set(
+      js, "tags", Tag::toObject(js, detail.tags, nameProvider, Tag::ToObjectOptions::UNWRAPPED));
+
+  return obj;
+}
+
 // ======================================================================================
 // Subrequest
 namespace {
@@ -990,6 +1390,14 @@ kj::Maybe<Subrequest::Info> maybeGetSubrequestInfo(const rpc::Trace::Subrequest:
     case rpc::Trace::Subrequest::Info::Which::JS_RPC: {
       return kj::Maybe(JsRpcEventInfo(info.getJsRpc()));
     }
+    case rpc::Trace::Subrequest::Info::Which::CUSTOM: {
+      auto custom = info.getCustom();
+      kj::Vector<Tag> tags(custom.size());
+      for (auto c: custom) {
+        tags.add(Tag(c));
+      }
+      return kj::Maybe(tags.releaseAsArray());
+    }
   }
   KJ_UNREACHABLE;
 }
@@ -1003,14 +1411,20 @@ Subrequest::Subrequest(rpc::Trace::Subrequest::Reader reader)
 
 void Subrequest::copyTo(rpc::Trace::Subrequest::Builder builder) const {
   builder.setId(id);
+  auto infoBuilder = builder.initInfo();
   KJ_IF_SOME(i, info) {
     KJ_SWITCH_ONEOF(i) {
       KJ_CASE_ONEOF(fetch, FetchEventInfo) {
-        fetch.copyTo(builder.getInfo().initFetch());
+        fetch.copyTo(infoBuilder.initFetch());
       }
       KJ_CASE_ONEOF(jsRpc, JsRpcEventInfo) {
-        builder.getInfo().which();
-        jsRpc.copyTo(builder.getInfo().initJsRpc());
+        jsRpc.copyTo(infoBuilder.initJsRpc());
+      }
+      KJ_CASE_ONEOF(custom, Tags) {
+        auto customBuilder = infoBuilder.initCustom(custom.size());
+        for (size_t n = 0; n < custom.size(); n++) {
+          custom[n].copyTo(customBuilder[n]);
+        }
       }
     }
   }
@@ -1026,12 +1440,41 @@ Subrequest Subrequest::clone() const {
         KJ_CASE_ONEOF(jsRpc, JsRpcEventInfo) {
           return kj::Maybe(jsRpc.clone());
         }
+        KJ_CASE_ONEOF(custom, Tags) {
+          kj::Vector<Tag> newTags(custom.size());
+          for (auto& tag: custom) {
+            newTags.add(tag.clone());
+          }
+          return kj::Maybe(newTags.releaseAsArray());
+        }
       }
       KJ_UNREACHABLE;
     }
     return kj::none;
   })();
   return Subrequest(id, kj::mv(newInfo));
+}
+
+jsg::JsObject Subrequest::toObject(jsg::Lock& js, NameProvider nameProvider) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("subrequest"_kj));
+  obj.set(js, "id", js.num(id));
+
+  KJ_IF_SOME(i, info) {
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+        obj.set(js, "info", fetch.toObject(js));
+      }
+      KJ_CASE_ONEOF(jsRpc, JsRpcEventInfo) {
+        obj.set(js, "info", jsRpc.toObject(js));
+      }
+      KJ_CASE_ONEOF(tags, Tags) {
+        obj.set(js, "info", Tag::toObject(js, tags, nameProvider));
+      }
+    }
+  }
+
+  return obj;
 }
 
 // ======================================================================================
@@ -1103,6 +1546,40 @@ SubrequestOutcome SubrequestOutcome::clone() const {
   return SubrequestOutcome(id, kj::mv(newInfo), outcome);
 }
 
+jsg::JsObject SubrequestOutcome::toObject(jsg::Lock& js, NameProvider nameProvider) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("subrequest-outcome"_kj));
+  obj.set(js, "id", js.num(id));
+
+  switch (outcome) {
+    case SpanClose::Outcome::OK:
+      obj.set(js, "outcome", js.str("ok"_kj));
+      break;
+    case SpanClose::Outcome::EXCEPTION:
+      obj.set(js, "outcome", js.str("exception"_kj));
+      break;
+    case SpanClose::Outcome::CANCELED:
+      obj.set(js, "outcome", js.str("canceled"_kj));
+      break;
+    case SpanClose::Outcome::UNKNOWN:
+      obj.set(js, "outcome", js.str("unknown"_kj));
+      break;
+  }
+
+  KJ_IF_SOME(i, info) {
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(fetch, FetchResponseInfo) {
+        obj.set(js, "info", fetch.toObject(js));
+      }
+      KJ_CASE_ONEOF(tags, Tags) {
+        obj.set(js, "info", Tag::toObject(js, tags, nameProvider));
+      }
+    }
+  }
+
+  return obj;
+}
+
 // ======================================================================================
 // SpanClose
 
@@ -1124,6 +1601,29 @@ SpanClose SpanClose::clone() const {
   return SpanClose(outcome, KJ_MAP(tag, tags) { return tag.clone(); });
 }
 
+jsg::JsObject SpanClose::toObject(jsg::Lock& js, NameProvider nameProvider) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("span"_kj));
+
+  switch (outcome) {
+    case Outcome::OK:
+      obj.set(js, "outcome", js.str("ok"_kj));
+      break;
+    case Outcome::EXCEPTION:
+      obj.set(js, "outcome", js.str("exception"_kj));
+      break;
+    case Outcome::CANCELED:
+      obj.set(js, "outcome", js.str("canceled"_kj));
+      break;
+    case Outcome::UNKNOWN:
+      obj.set(js, "outcome", js.str("unknown"_kj));
+      break;
+  }
+
+  obj.set(js, "tags", Tag::toObject(js, tags, nameProvider, Tag::ToObjectOptions::UNWRAPPED));
+  return obj;
+}
+
 // ======================================================================================
 // Mark
 
@@ -1137,6 +1637,13 @@ void Mark::copyTo(rpc::Trace::Mark::Builder builder) const {
 
 Mark Mark::clone() const {
   return Mark(kj::str(name));
+}
+
+jsg::JsObject Mark::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("mark"_kj));
+  obj.set(js, "name", js.str(name));
+  return obj;
 }
 
 // ======================================================================================
@@ -1210,6 +1717,50 @@ bool Metric::keyMatches(kj::OneOf<kj::StringPtr, uint32_t> check) {
   return false;
 }
 
+jsg::JsObject Metric::toObject(
+    jsg::Lock& js, kj::ArrayPtr<const Metric> metrics, NameProvider nameProvider) {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("metrics"_kj));
+
+  auto counters = js.obj();
+  auto gauges = js.obj();
+  obj.set(js, "counters", counters);
+  obj.set(js, "gauges", gauges);
+
+  for (auto& metric: metrics) {
+    auto maybeName = ([&]() -> kj::Maybe<kj::StringPtr> {
+      KJ_SWITCH_ONEOF(metric.key) {
+        KJ_CASE_ONEOF(str, kj::String) {
+          return str.asPtr();
+        }
+        KJ_CASE_ONEOF(id, uint32_t) {
+          return nameProvider(id, NameProviderContext::METRIC);
+        }
+      }
+      return kj::none;
+    })();
+
+    auto container = metric.type == Type::COUNTER ? counters : gauges;
+
+    auto value = js.num(metric.value);
+    KJ_IF_SOME(name, maybeName) {
+      if (container.has(js, name)) {
+        auto existing = container.get(js, name);
+        KJ_IF_SOME(arr, existing.tryCast<jsg::JsArray>()) {
+          arr.add(js, value);
+        } else {
+          container.set(js, name, js.arr(existing, value));
+        }
+      } else {
+        // The name does not currently exist in the object.
+        container.set(js, name, value);
+      }
+    }
+  }
+
+  return obj;
+}
+
 // ======================================================================================
 // Dropped
 
@@ -1226,6 +1777,14 @@ void Dropped::copyTo(rpc::Trace::Dropped::Builder builder) const {
 
 Dropped Dropped::clone() const {
   return Dropped(start, end);
+}
+
+jsg::JsObject Dropped::toObject(jsg::Lock& js) const {
+  auto obj = js.obj();
+  obj.set(js, "type", js.str("dropped"_kj));
+  obj.set(js, "start", js.num(start));
+  obj.set(js, "end", js.num(end));
+  return obj;
 }
 
 }  // namespace workerd::trace
