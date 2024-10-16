@@ -8,7 +8,7 @@
 namespace workerd {
 
 // The Streaming Trace model is designed around the idea of spans. A span is a logical
-// grouping of events. Spans can be nested, they have outcomes, and they can be transactional.
+// grouping of events. Spans can be nested and have outcomes.
 // All events always occur within the context of a span.
 //
 // The streaming trace itself is considered the root span, whose span ID is always 0. The
@@ -27,19 +27,6 @@ namespace workerd {
 // if those are not already closed. If a span is dropped without setting the outcome, and the
 // streaming trace is still alive, the span will be implicitly canceled.
 //
-// If a span is transactional, then a final span outcome of canceled or exception should
-// indicate that all events with the span should be considered invalid and be discarded.
-// For instance, an open output gate should be traced as a transactional span. If the
-// output gate fails then all events occuring while the gate was open become invalid.
-//
-// Example session:
-//
-//   Span 0 - Onset Event (fetch)
-//   Span 1 - Log (in outgate gate)
-//   Span 1 - Span Event (exception, output gate failed)
-//   Span 0 - Log
-//   Span 0 - Outcome Event (ok)
-//
 // Currently the StreamingTrace implementation is not thread-safe. It is expected that
 // the StreamingTrace and all Spans are used by a single-thread.
 
@@ -56,7 +43,6 @@ struct StreamEvent final {
   struct Span {
     uint32_t id = 0;
     uint32_t parent = 0;
-    bool transactional = false;
   };
   // The span in which this event has occurred.
   Span span;
@@ -87,13 +73,6 @@ struct StreamEvent final {
 class SpanBase: public trace::TraceBase {
 public:
   virtual void addLog(trace::LogV2&& log) = 0;
-
-  enum class Options {
-    NONE,
-    // If a span is transactional, an unsuccessful outcome may indicate that
-    // all events within the span should be discarded.
-    TRANSACTIONAL,
-  };
 };
 
 class StreamingTrace final: public SpanBase {
@@ -183,8 +162,7 @@ public:
     void addSubrequest(trace::Subrequest&& subrequest) override;
     void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) override;
     void addCustom(trace::Tags&& tags) override;
-    kj::Maybe<kj::Own<Span>> newChildSpan(
-        trace::Tags tags = nullptr, Options options = Options::NONE);
+    kj::Maybe<kj::Own<Span>> newChildSpan(trace::Tags tags = nullptr);
 
     // Setting the outcome of the span explicitly closes the span, after which
     // no further events can be emitted.
@@ -207,8 +185,7 @@ public:
     Span(kj::List<Span, &Span::link>& spans,
         StreamingTrace& trace,
         uint32_t parentSpan = 0,
-        trace::Tags tags = nullptr,
-        Options options = Options::NONE);
+        trace::Tags tags = nullptr);
   };
 
   // Set the EventInfo for the Onset event. If the Onset already has event
@@ -233,8 +210,7 @@ public:
   void addSubrequest(trace::Subrequest&& subrequest) override;
   void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) override;
   void addCustom(trace::Tags&& tags) override;
-  kj::Maybe<kj::Own<Span>> newChildSpan(
-      trace::Tags tags = nullptr, Options options = Options::NONE);
+  kj::Maybe<kj::Own<Span>> newChildSpan(trace::Tags tags = nullptr);
 
 private:
   struct Impl;
@@ -249,15 +225,5 @@ private:
   friend class StageSpan;
   friend struct Span::Impl;
 };
-
-constexpr static StreamingTrace::SpanBase::Options operator|(
-    const StreamingTrace::SpanBase::Options& a, const StreamingTrace::SpanBase::Options& b) {
-  return static_cast<StreamingTrace::SpanBase::Options>(static_cast<int>(a) | static_cast<int>(b));
-}
-
-constexpr static StreamingTrace::SpanBase::Options operator&(
-    const StreamingTrace::SpanBase::Options& a, const StreamingTrace::SpanBase::Options& b) {
-  return static_cast<StreamingTrace::SpanBase::Options>(static_cast<int>(a) & static_cast<int>(b));
-}
 
 }  // namespace workerd

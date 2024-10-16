@@ -172,11 +172,10 @@ void StreamingTrace::addDropped(uint32_t start, uint32_t end) {
   }
 }
 
-kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::newChildSpan(
-    trace::Tags tags, Options options) {
+kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::newChildSpan(trace::Tags tags) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    return kj::heap<StreamingTrace::Span>(spans, *this, 0, kj::mv(tags), options);
+    return kj::heap<StreamingTrace::Span>(spans, *this, 0, kj::mv(tags));
   }
   return kj::none;
 }
@@ -285,21 +284,18 @@ struct StreamingTrace::Span::Impl {
   uint32_t id;
   uint32_t parentSpan;
   trace::Tags tags;
-  Options options;
   bool eventInfoSet = false;
   Impl(StreamingTrace::Span& self,
       kj::List<Span, &Span::link>& spans,
       StreamingTrace& trace,
       uint32_t parentSpan,
-      trace::Tags tags,
-      Options options)
+      trace::Tags tags)
       : self(self),
         spans(spans),
         trace(trace),
         id(this->trace.getNextSpanId()),
         parentSpan(parentSpan),
-        tags(kj::mv(tags)),
-        options(options) {
+        tags(kj::mv(tags)) {
     spans.add(self);
   }
   KJ_DISALLOW_COPY_AND_MOVE(Impl);
@@ -315,7 +311,6 @@ struct StreamingTrace::Span::Impl {
         StreamEvent::Span{
           .id = id,
           .parent = parentSpan,
-          .transactional = (options & Options::TRANSACTIONAL) == Options::TRANSACTIONAL,
         },
         traceImpl->timeProvider.getNow(), trace.getNextSequence(), kj::mv(payload));
   }
@@ -324,9 +319,8 @@ struct StreamingTrace::Span::Impl {
 StreamingTrace::Span::Span(kj::List<Span, &Span::link>& parentSpans,
     StreamingTrace& trace,
     uint32_t parentSpan,
-    trace::Tags tags,
-    Options options)
-    : impl(kj::heap<Impl>(*this, parentSpans, trace, parentSpan, kj::mv(tags), options)) {
+    trace::Tags tags)
+    : impl(kj::heap<Impl>(*this, parentSpans, trace, parentSpan, kj::mv(tags))) {
   KJ_DASSERT(this, link.isLinked());
 }
 
@@ -394,10 +388,9 @@ void StreamingTrace::Span::addCustom(trace::Tags&& tags) {
   }
 }
 
-kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::Span::newChildSpan(
-    trace::Tags tags, Options options) {
+kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::Span::newChildSpan(trace::Tags tags) {
   KJ_IF_SOME(i, impl) {
-    return kj::heap<Span>(spans, i->trace, i->id, kj::mv(tags), options);
+    return kj::heap<Span>(spans, i->trace, i->id, kj::mv(tags));
   }
   return kj::none;
 }
@@ -411,7 +404,6 @@ StreamEvent::Span getSpan(const rpc::Trace::StreamEvent::Reader& reader) {
   return StreamEvent::Span{
     .id = span.getId(),
     .parent = span.getParent(),
-    .transactional = span.getTransactional(),
   };
 }
 
@@ -497,7 +489,6 @@ void StreamEvent::copyTo(rpc::Trace::StreamEvent::Builder builder) const {
   auto spanBuilder = builder.initSpan();
   spanBuilder.setId(span.id);
   spanBuilder.setParent(span.parent);
-  spanBuilder.setTransactional(span.transactional);
   builder.setTimestampNs((timestampNs - kj::UNIX_EPOCH) / kj::MILLISECONDS);
   builder.setSequence(sequence);
 
@@ -554,7 +545,7 @@ void StreamEvent::copyTo(rpc::Trace::StreamEvent::Builder builder) const {
 StreamEvent StreamEvent::clone() const {
   Span maybeNewSpan{
     .id = span.id,
-    .transactional = span.transactional,
+    .parent = span.parent,
   };
 
   Event newEvent = ([&]() -> Event {
