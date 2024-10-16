@@ -210,9 +210,9 @@ struct Trace @0x8e8d911203762d34 {
     executionModel @6 :ExecutionModel;
 
     info :union {
-      # Info events are used at the start of a stage span to identify the kind
-      # of trigger that started the span. For instance, a fetch event will have
-      # a fetch info event at the start of the span.
+      # Info structs are used at the start of a stream to identify the kind
+      # of trigger that started the stream. For instance, a fetch event will have
+      # a fetch info event at the start of the stream.
       none @7 :Void;
       fetch @8 :FetchEventInfo;
       jsRpc @9 :JsRpcEventInfo;
@@ -282,15 +282,9 @@ struct Trace @0x8e8d911203762d34 {
   }
 
   struct SpanClose {
-    # A SpanClose is sent only at the completion of a span, and includes markers
-    # for the start and end times, as well as the start and end sequence numbers.
-    # A span event always occurs in the scope of the parent span (or the null span
-    # if there is no current).
+    # A SpanClose is sent only at the completion of a span.
 
     enum SpanOutcome {
-      # A span event may have an outcome field. If, for instance, the span represents
-      # events occuring while an output gate is closed, and the output gate fails indicating
-      # that the events are not longer valid, the outcome field will be used to signal.
       unknown @0;
       ok @1;
       exception @2;
@@ -413,22 +407,19 @@ struct Trace @0x8e8d911203762d34 {
       spanClose @8 :SpanClose;
       # Span events mark the ending and outcome of a span.
 
-      detail :union {
-        # Detail events occur throughout a span and may occur many times.
-        log @9 :LogV2;
-        exception @10 :Exception;
-        diagnosticChannel @11 :DiagnosticChannelEvent;
-        mark @12 :Mark;
-        metrics @13 :List(Metric);
-        subrequest @14 :Subrequest;
-        subrequestOutcome @15 :SubrequestOutcome;
-        custom @16 :List(Tag);
-        # A custom detail event is used to enable arbitrary, non-typed extension
-        # events to be injected. It is most useful as a way of extending
-        # the event stream with new types of events without modifying the
-        # schema. This is a tradeoff. Using a custom event is more flexible
-        # but there's no schema to verify the data.
-      }
+      log @9 :LogV2;
+      exception @10 :Exception;
+      diagnosticChannel @11 :DiagnosticChannelEvent;
+      mark @12 :Mark;
+      metrics @13 :List(Metric);
+      subrequest @14 :Subrequest;
+      subrequestOutcome @15 :SubrequestOutcome;
+      custom @16 :List(Tag);
+      # A custom event is used to enable arbitrary, non-typed extension
+      # events to be injected. It is most useful as a way of extending
+      # the event stream with new types of events without modifying the
+      # schema. This is a tradeoff. Using a custom event is more flexible
+      # but there's no schema to verify the data.
     }
   }
 }

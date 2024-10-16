@@ -118,8 +118,7 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
           KJ_EXPECT(event.span.parent == 0, "the parent span should be the root span");
           KJ_EXPECT(event.id == id);
           KJ_EXPECT(event.sequence == 1);
-          auto& detail = KJ_ASSERT_NONNULL(event.event.tryGet<StreamEvent::Detail>());
-          auto& mark = KJ_ASSERT_NONNULL(detail.tryGet<trace::Mark>());
+          auto& mark = KJ_ASSERT_NONNULL(event.event.tryGet<trace::Mark>());
           KJ_EXPECT(mark.name == "bar"_kj);
           break;
         }

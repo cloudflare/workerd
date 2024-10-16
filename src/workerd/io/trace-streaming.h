@@ -54,9 +54,18 @@ struct StreamEvent final {
   // on the receiving end.
   uint32_t sequence;
 
-  using Info = trace::EventInfo;
-  using Detail = trace::EventDetail;
-  using Event = kj::OneOf<trace::Onset, trace::Outcome, trace::Dropped, trace::SpanClose, Detail>;
+  using Event = kj::OneOf<trace::Onset,
+      trace::Outcome,
+      trace::Dropped,
+      trace::SpanClose,
+      trace::LogV2,
+      trace::Exception,
+      trace::DiagnosticChannelEvent,
+      trace::Mark,
+      trace::Metrics,
+      trace::Subrequest,
+      trace::SubrequestOutcome,
+      trace::Tags>;
   Event event;
 
   explicit StreamEvent(
