@@ -128,6 +128,20 @@ REPLACEMENTS = [
         "crypto.getRandomValues(",
         "getRandomValues(Module, ",
     ],
+    [
+        # Direct eval disallowed in esbuild, see:
+        # https://esbuild.github.io/content-types/#direct-eval
+        "eval(func)",
+        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
+    [
+        "eval(data)",
+        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
+    [
+        "eval(UTF8ToString(ptr))",
+        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
 ]
 
 PYODIDE_BUCKET_MODULE = json.encode({
