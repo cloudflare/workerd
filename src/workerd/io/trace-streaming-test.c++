@@ -154,8 +154,7 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
 
     streamingTrace->setEventInfo(trace::FetchEventInfo(
         kj::HttpMethod::GET, kj::str("http://example.com"), kj::String(), {}));
-    auto span =
-        KJ_ASSERT_NONNULL(streamingTrace->newChildSpan(0 * kj::MILLISECONDS + kj::UNIX_EPOCH));
+    auto span = KJ_ASSERT_NONNULL(streamingTrace->newChildSpan());
     span->addMark("bar");
     // Intentionally not calling setOutcome on the span.
     streamingTrace->setOutcome(trace::Outcome(EventOutcome::CANCELED));

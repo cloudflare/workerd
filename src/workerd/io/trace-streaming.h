@@ -184,7 +184,7 @@ public:
     void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) override;
     void addCustom(trace::Tags&& tags) override;
     kj::Maybe<kj::Own<Span>> newChildSpan(
-        kj::Date timestamp, trace::Tags tags = nullptr, Options options = Options::NONE);
+        trace::Tags tags = nullptr, Options options = Options::NONE);
 
     // Setting the outcome of the span explicitly closes the span, after which
     // no further events can be emitted.
@@ -234,7 +234,7 @@ public:
   void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) override;
   void addCustom(trace::Tags&& tags) override;
   kj::Maybe<kj::Own<Span>> newChildSpan(
-      kj::Date timestamp, trace::Tags tags = nullptr, Options options = Options::NONE);
+      trace::Tags tags = nullptr, Options options = Options::NONE);
 
 private:
   struct Impl;
