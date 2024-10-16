@@ -187,6 +187,78 @@ kj::Maybe<kj::String> maybeGetEntrypoint(const rpc::Trace::Onset::Reader& reader
   if (!reader.hasEntrypoint()) return kj::none;
   return kj::str(reader.getEntrypoint());
 }
+kj::Maybe<EventInfo> maybeGetEventInfo(const rpc::Trace::Onset::Reader& reader) {
+  auto info = reader.getInfo();
+  switch (info.which()) {
+    case rpc::Trace::Onset::Info::Which::NONE:
+      return kj::none;
+    case rpc::Trace::Onset::Info::Which::FETCH: {
+      return kj::Maybe(FetchEventInfo(info.getFetch()));
+    }
+    case rpc::Trace::Onset::Info::Which::JS_RPC: {
+      return kj::Maybe(JsRpcEventInfo(info.getJsRpc()));
+    }
+    case rpc::Trace::Onset::Info::Which::SCHEDULED: {
+      return kj::Maybe(ScheduledEventInfo(info.getScheduled()));
+    }
+    case rpc::Trace::Onset::Info::Which::ALARM: {
+      return kj::Maybe(AlarmEventInfo(info.getAlarm()));
+    }
+    case rpc::Trace::Onset::Info::Which::QUEUE: {
+      return kj::Maybe(QueueEventInfo(info.getQueue()));
+    }
+    case rpc::Trace::Onset::Info::Which::EMAIL: {
+      return kj::Maybe(EmailEventInfo(info.getEmail()));
+    }
+    case rpc::Trace::Onset::Info::Which::TRACE: {
+      return kj::Maybe(TraceEventInfo(info.getTrace()));
+    }
+    case rpc::Trace::Onset::Info::Which::HIBERNATABLE_WEB_SOCKET: {
+      return kj::Maybe(HibernatableWebSocketEventInfo(info.getHibernatableWebSocket()));
+    }
+    case rpc::Trace::Onset::Info::Which::CUSTOM: {
+      // TODO(streaming-trace): Implement correctly
+      return kj::Maybe(CustomEventInfo());
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<EventInfo> cloneEventInfo(const kj::Maybe<EventInfo>& other) {
+  KJ_IF_SOME(e, other) {
+    KJ_SWITCH_ONEOF(e) {
+      KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+        return kj::Maybe(fetch.clone());
+      }
+      KJ_CASE_ONEOF(jsRpc, JsRpcEventInfo) {
+        return kj::Maybe(jsRpc.clone());
+      }
+      KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
+        return kj::Maybe(scheduled.clone());
+      }
+      KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
+        return kj::Maybe(alarm.clone());
+      }
+      KJ_CASE_ONEOF(queue, QueueEventInfo) {
+        return kj::Maybe(queue.clone());
+      }
+      KJ_CASE_ONEOF(email, EmailEventInfo) {
+        return kj::Maybe(email.clone());
+      }
+      KJ_CASE_ONEOF(trace, TraceEventInfo) {
+        return kj::Maybe(trace.clone());
+      }
+      KJ_CASE_ONEOF(hibWs, HibernatableWebSocketEventInfo) {
+        return kj::Maybe(hibWs.clone());
+      }
+      KJ_CASE_ONEOF(custom, CustomEventInfo) {
+        // TODO(streaming-trace): Implement correctly
+        return kj::Maybe(CustomEventInfo());
+      }
+    }
+  }
+  return kj::none;
+}
 }  // namespace
 
 Onset::Onset(kj::Maybe<kj::String> scriptName,
@@ -214,6 +286,7 @@ Onset::Onset(rpc::Trace::Onset::Reader reader)
       scriptTags(maybeGetScriptTags(reader)),
       entrypoint(maybeGetEntrypoint(reader)),
       executionModel(reader.getExecutionModel()),
+      info(maybeGetEventInfo(reader)),
       tags(maybeGetTags(reader)) {}
 
 void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
@@ -239,6 +312,40 @@ void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
     builder.setEntrypoint(e);
   }
   builder.setExecutionModel(executionModel);
+
+  KJ_IF_SOME(i, info) {
+    auto infoBuilder = builder.initInfo();
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+        fetch.copyTo(infoBuilder.initFetch());
+      }
+      KJ_CASE_ONEOF(jsRpc, JsRpcEventInfo) {
+        jsRpc.copyTo(infoBuilder.initJsRpc());
+      }
+      KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
+        scheduled.copyTo(infoBuilder.initScheduled());
+      }
+      KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
+        alarm.copyTo(infoBuilder.initAlarm());
+      }
+      KJ_CASE_ONEOF(queue, QueueEventInfo) {
+        queue.copyTo(infoBuilder.initQueue());
+      }
+      KJ_CASE_ONEOF(email, EmailEventInfo) {
+        email.copyTo(infoBuilder.initEmail());
+      }
+      KJ_CASE_ONEOF(trace, TraceEventInfo) {
+        trace.copyTo(infoBuilder.initTrace());
+      }
+      KJ_CASE_ONEOF(hibWs, HibernatableWebSocketEventInfo) {
+        hibWs.copyTo(infoBuilder.initHibernatableWebSocket());
+      }
+      KJ_CASE_ONEOF(custom, CustomEventInfo) {
+        // TODO(streaming-trace): Implement correctly
+      }
+    }
+  }
+
   if (tags.size() > 0) {
     auto list = builder.initTags(tags.size());
     for (auto i: kj::indices(tags)) {
@@ -248,28 +355,90 @@ void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
 }
 
 Onset Onset::clone() const {
-  return Onset(scriptName.map([](const kj::String& s) { return kj::str(s); }),
+  Onset onset(scriptName.map([](const kj::String& s) { return kj::str(s); }),
       scriptVersion.map([](const kj::Own<ScriptVersion::Reader>& s) { return capnp::clone(*s); }),
       dispatchNamespace.map([](const kj::String& s) { return kj::str(s); }),
       scriptId.map([](const kj::String& s) { return kj::str(s); }),
       KJ_MAP(tag, scriptTags) { return kj::str(tag); },
       entrypoint.map([](const kj::String& s) { return kj::str(s); }), executionModel,
       KJ_MAP(tag, tags) { return tag.clone(); });
+  onset.info = cloneEventInfo(info);
+  return kj::mv(onset);
 }
 
 // ======================================================================================
 // Outcome
 
-Outcome::Outcome(EventOutcome outcome): outcome(outcome) {}
+namespace {
+kj::Maybe<Outcome::Info> maybeGetInfo(const rpc::Trace::Outcome::Reader& reader) {
+  //  if (!reader.hasInfo()) return kj::none;
+  auto info = reader.getInfo();
+  switch (info.which()) {
+    case rpc::Trace::Outcome::Info::Which::NONE: {
+      return kj::none;
+    }
+    case rpc::Trace::Outcome::Info::Which::FETCH: {
+      return kj::Maybe(FetchResponseInfo(info.getFetch()));
+    }
+    case rpc::Trace::Outcome::Info::Which::CUSTOM: {
+      auto custom = info.getCustom();
+      kj::Vector<Tag> tags(custom.size());
+      for (size_t n = 0; n < custom.size(); n++) {
+        tags.add(Tag(custom[n]));
+      }
+      return kj::Maybe(tags.releaseAsArray());
+    }
+  }
+  KJ_UNREACHABLE;
+}
 
-Outcome::Outcome(rpc::Trace::Outcome::Reader reader): outcome(reader.getOutcome()) {}
+kj::Maybe<Outcome::Info> cloneInfo(const kj::Maybe<Outcome::Info>& other) {
+  KJ_IF_SOME(o, other) {
+    KJ_SWITCH_ONEOF(o) {
+      KJ_CASE_ONEOF(fetch, FetchResponseInfo) {
+        return kj::Maybe(fetch.clone());
+      }
+      KJ_CASE_ONEOF(tags, Tags) {
+        kj::Vector<Tag> newTags(tags.size());
+        for (auto& tag: tags) {
+          newTags.add(tag.clone());
+        }
+        return kj::Maybe(newTags.releaseAsArray());
+      }
+    }
+  }
+  return kj::none;
+}
+}  // namespace
+
+Outcome::Outcome(EventOutcome outcome, kj::Maybe<Info> info)
+    : outcome(outcome),
+      info(kj::mv(info)) {}
+
+Outcome::Outcome(rpc::Trace::Outcome::Reader reader)
+    : outcome(reader.getOutcome()),
+      info(maybeGetInfo(reader)) {}
 
 void Outcome::copyTo(rpc::Trace::Outcome::Builder builder) const {
   builder.setOutcome(outcome);
+  KJ_IF_SOME(i, info) {
+    auto infoBuilder = builder.getInfo();
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(fetch, FetchResponseInfo) {
+        fetch.copyTo(infoBuilder.initFetch());
+      }
+      KJ_CASE_ONEOF(tags, Tags) {
+        auto list = infoBuilder.initCustom(tags.size());
+        for (auto i: kj::indices(tags)) {
+          tags[i].copyTo(list[i]);
+        }
+      }
+    }
+  }
 }
 
 Outcome Outcome::clone() const {
-  return Outcome{outcome};
+  return Outcome{outcome, cloneInfo(info)};
 }
 
 // ======================================================================================
@@ -807,29 +976,6 @@ Exception Exception::clone() const {
 }
 
 // ======================================================================================
-// ActorFlushInfo
-
-ActorFlushInfo::ActorFlushInfo(Tags tags): tags(kj::mv(tags)) {}
-
-ActorFlushInfo::ActorFlushInfo(rpc::Trace::ActorFlushInfo::Reader reader)
-    : tags(maybeGetTags(reader)) {}
-
-void ActorFlushInfo::copyTo(rpc::Trace::ActorFlushInfo::Builder builder) const {
-  auto outTags = builder.initTags(tags.size());
-  for (size_t n = 0; n < tags.size(); n++) {
-    tags[n].copyTo(outTags[n]);
-  }
-}
-
-ActorFlushInfo ActorFlushInfo::clone() const {
-  kj::Vector<Tag> newTags(tags.size());
-  for (auto& tag: tags) {
-    newTags.add(tag.clone());
-  }
-  return ActorFlushInfo(newTags.releaseAsArray());
-}
-
-// ======================================================================================
 // Subrequest
 namespace {
 kj::Maybe<Subrequest::Info> maybeGetSubrequestInfo(const rpc::Trace::Subrequest::Reader& reader) {
@@ -908,8 +1054,7 @@ kj::Maybe<SubrequestOutcome::Info> maybeGetSubrequestOutcome(
   KJ_UNREACHABLE;
 }
 }  // namespace
-SubrequestOutcome::SubrequestOutcome(
-    uint32_t id, kj::Maybe<Info> info, rpc::Trace::Span::SpanOutcome outcome)
+SubrequestOutcome::SubrequestOutcome(uint32_t id, kj::Maybe<Info> info, SpanClose::Outcome outcome)
     : id(id),
       info(kj::mv(info)),
       outcome(outcome) {}
@@ -959,108 +1104,24 @@ SubrequestOutcome SubrequestOutcome::clone() const {
 }
 
 // ======================================================================================
-// Span
+// SpanClose
 
-namespace {
-kj::Maybe<Span::Info> maybeGetInfo(const rpc::Trace::Span::Reader& reader) {
-  //  if (!reader.hasInfo()) return kj::none;
-  auto info = reader.getInfo();
-  switch (info.which()) {
-    case rpc::Trace::Span::Info::Which::NONE: {
-      return kj::none;
-    }
-    case rpc::Trace::Span::Info::Which::FETCH: {
-      return kj::Maybe(FetchResponseInfo(info.getFetch()));
-    }
-    case rpc::Trace::Span::Info::Which::ACTOR_FLUSH: {
-      return kj::Maybe(ActorFlushInfo(info.getActorFlush()));
-    }
-    case rpc::Trace::Span::Info::Which::CUSTOM: {
-      auto custom = info.getCustom();
-      kj::Vector<Tag> tags(custom.size());
-      for (size_t n = 0; n < custom.size(); n++) {
-        tags.add(Tag(custom[n]));
-      }
-      return kj::Maybe(tags.releaseAsArray());
-    }
-  }
-  KJ_UNREACHABLE;
-}
-}  // namespace
+SpanClose::SpanClose(Outcome outcome, Tags tags): outcome(outcome), tags(kj::mv(tags)) {}
 
-Span::Span(uint32_t id,
-    uint32_t parent,
-    rpc::Trace::Span::SpanOutcome outcome,
-    bool transactional,
-    kj::Maybe<Info> maybeInfo,
-    Tags tags)
-    : id(id),
-      parent(parent),
-      outcome(outcome),
-      transactional(transactional),
-      info(kj::mv(maybeInfo)),
-      tags(kj::mv(tags)) {}
-
-Span::Span(rpc::Trace::Span::Reader reader)
-    : id(reader.getId()),
-      parent(reader.getParent()),
-      outcome(reader.getOutcome()),
-      transactional(reader.getTransactional()),
-      info(maybeGetInfo(reader)),
+SpanClose::SpanClose(rpc::Trace::SpanClose::Reader reader)
+    : outcome(reader.getOutcome()),
       tags(maybeGetTags(reader)) {}
 
-void Span::copyTo(rpc::Trace::Span::Builder builder) const {
-  builder.setId(id);
-  builder.setParent(parent);
+void SpanClose::copyTo(rpc::Trace::SpanClose::Builder builder) const {
   builder.setOutcome(outcome);
-  builder.setTransactional(transactional);
   auto outTags = builder.initTags(tags.size());
   for (size_t n = 0; n < tags.size(); n++) {
     tags[n].copyTo(outTags[n]);
   }
-  KJ_IF_SOME(i, info) {
-    auto info = builder.initInfo();
-    KJ_SWITCH_ONEOF(i) {
-      KJ_CASE_ONEOF(fetch, FetchResponseInfo) {
-        fetch.copyTo(info.getFetch());
-      }
-      KJ_CASE_ONEOF(actorFlush, ActorFlushInfo) {
-        actorFlush.copyTo(info.getActorFlush());
-      }
-      KJ_CASE_ONEOF(tags, Tags) {
-        auto custom = info.initCustom(tags.size());
-        for (size_t n = 0; n < tags.size(); n++) {
-          tags[n].copyTo(custom[n]);
-        }
-      }
-    }
-  }
 }
 
-Span Span::clone() const {
-  auto newInfo = ([&]() -> kj::Maybe<Info> {
-    KJ_IF_SOME(i, info) {
-      KJ_SWITCH_ONEOF(i) {
-        KJ_CASE_ONEOF(fetch, FetchResponseInfo) {
-          return kj::Maybe(fetch.clone());
-        }
-        KJ_CASE_ONEOF(actorFlush, ActorFlushInfo) {
-          return kj::Maybe(actorFlush.clone());
-        }
-        KJ_CASE_ONEOF(tags, Tags) {
-          kj::Vector<Tag> newTags(tags.size());
-          for (auto& tag: tags) {
-            newTags.add(tag.clone());
-          }
-          return kj::Maybe(newTags.releaseAsArray());
-        }
-      }
-    }
-    return kj::none;
-  })();
-  return Span(
-      id, parent, outcome, transactional, kj::mv(newInfo),
-      KJ_MAP(tag, tags) { return tag.clone(); });
+SpanClose SpanClose::clone() const {
+  return SpanClose(outcome, KJ_MAP(tag, tags) { return tag.clone(); });
 }
 
 // ======================================================================================

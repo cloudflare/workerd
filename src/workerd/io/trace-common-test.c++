@@ -1,6 +1,5 @@
 #include "trace-common.h"
 
-#include <capnp/compat/json.h>
 #include <capnp/message.h>
 #include <kj/compat/http.h>
 #include <kj/test.h>
@@ -48,33 +47,33 @@ KJ_TEST("Onset works") {
   trace::Onset onset(kj::str("bar"), kj::none, kj::str("baz"), kj::str("qux"),
       kj::arr(kj::str("quux")), kj::str("corge"), ExecutionModel::STATELESS, kj::mv(tags));
 
+  trace::FetchEventInfo info(kj::HttpMethod::GET, kj::str("http://example.org"), kj::String(),
+      kj::arr(trace::FetchEventInfo::Header(kj::str("a"), kj::str("b"))));
+  onset.info = kj::mv(info);
+
   capnp::MallocMessageBuilder message;
   auto builder = message.initRoot<rpc::Trace::Onset>();
   onset.copyTo(builder);
 
   auto reader = builder.asReader();
   trace::Onset onset2(reader);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(onset.scriptName) == "bar"_kj);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(onset.dispatchNamespace) == "baz"_kj);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(onset.scriptId) == "qux"_kj);
-  KJ_EXPECT(onset.scriptTags.size() == 1);
-  KJ_EXPECT(onset.scriptTags[0] == "quux"_kj);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(onset.entrypoint) == "corge"_kj);
-  KJ_EXPECT(onset.tags.size() == 1);
-  KJ_EXPECT(onset.tags[0].keyMatches("a"_kj));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(onset2.scriptName) == "bar"_kj);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(onset2.dispatchNamespace) == "baz"_kj);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(onset2.scriptId) == "qux"_kj);
+  KJ_EXPECT(onset2.scriptTags.size() == 1);
+  KJ_EXPECT(onset2.scriptTags[0] == "quux"_kj);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(onset2.entrypoint) == "corge"_kj);
+  KJ_EXPECT(onset2.tags.size() == 1);
+  KJ_EXPECT(onset2.tags[0].keyMatches("a"_kj));
 
-  capnp::JsonCodec json;
-  json.setPrettyPrint(true);
-  auto encoded = json.encode(builder);
-  auto check = R"({ "scriptName": "bar",
-  "dispatchNamespace": "baz",
-  "scriptId": "qux",
-  "scriptTags": ["quux"],
-  "entrypoint": "corge",
-  "executionModel": "stateless",
-  "tags": [{"key": {"text": "a"}, "value": {"uint64": "1"}}] })";
-
-  KJ_EXPECT(encoded == check);
+  auto& onset2Info = KJ_ASSERT_NONNULL(onset2.info);
+  auto& onset2Fetch = KJ_ASSERT_NONNULL(onset2Info.tryGet<trace::FetchEventInfo>());
+  KJ_EXPECT(onset2Fetch.method == kj::HttpMethod::GET);
+  KJ_EXPECT(onset2Fetch.url == "http://example.org"_kj);
+  KJ_EXPECT(onset2Fetch.cfJson == "");
+  KJ_EXPECT(onset2Fetch.headers.size() == 1);
+  KJ_EXPECT(onset2Fetch.headers[0].name == "a"_kj);
+  KJ_EXPECT(onset2Fetch.headers[0].value == "b"_kj);
 
   auto onset3 = onset.clone();
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset3.scriptName) == "bar"_kj);
@@ -85,6 +84,15 @@ KJ_TEST("Onset works") {
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset3.entrypoint) == "corge"_kj);
   KJ_EXPECT(onset3.tags.size() == 1);
   KJ_EXPECT(onset3.tags[0].keyMatches("a"_kj));
+
+  auto& onset3Info = KJ_ASSERT_NONNULL(onset3.info);
+  auto& onset3Fetch = KJ_ASSERT_NONNULL(onset3Info.tryGet<trace::FetchEventInfo>());
+  KJ_EXPECT(onset3Fetch.method == kj::HttpMethod::GET);
+  KJ_EXPECT(onset3Fetch.url == "http://example.org"_kj);
+  KJ_EXPECT(onset3Fetch.cfJson == "");
+  KJ_EXPECT(onset3Fetch.headers.size() == 1);
+  KJ_EXPECT(onset3Fetch.headers[0].name == "a"_kj);
+  KJ_EXPECT(onset3Fetch.headers[0].value == "b"_kj);
 }
 
 KJ_TEST("FetchEventInfo works") {
@@ -115,34 +123,6 @@ KJ_TEST("FetchEventInfo works") {
   KJ_EXPECT(info3.url == "http://example.org"_kj);
   KJ_EXPECT(info3.cfJson == "");
   KJ_EXPECT(info3.headers.size() == 1);
-}
-
-KJ_TEST("ActorFlushInfo works") {
-  auto tags =
-      kj::arr(trace::Tag(trace::ActorFlushInfo::CommonTags::REASON, static_cast<uint64_t>(1)),
-          trace::Tag(trace::ActorFlushInfo::CommonTags::BROKEN, true));
-  trace::ActorFlushInfo info(kj::mv(tags));
-
-  capnp::MallocMessageBuilder message;
-  auto builder = message.initRoot<rpc::Trace::ActorFlushInfo>();
-  info.copyTo(builder);
-
-  auto reader = builder.asReader();
-  trace::ActorFlushInfo info2(reader);
-  KJ_EXPECT(info2.tags.size() == 2);
-  KJ_EXPECT(info2.tags[0].keyMatches(trace::ActorFlushInfo::CommonTags::REASON));
-  KJ_EXPECT(info2.tags[1].keyMatches(trace::ActorFlushInfo::CommonTags::BROKEN));
-
-  capnp::JsonCodec json;
-  json.setPrettyPrint(true);
-  auto encoded = json.encode(builder);
-  KJ_EXPECT(encoded ==
-      R"({"tags": [{"key": {"id": 0}, "value": {"uint64": "1"}}, {"key": {"id": 1}, "value": {"bool": true}}]})");
-
-  auto info3 = info.clone();
-  KJ_EXPECT(info3.tags.size() == 2);
-  KJ_EXPECT(info3.tags[0].keyMatches(trace::ActorFlushInfo::CommonTags::REASON));
-  KJ_EXPECT(info3.tags[1].keyMatches(trace::ActorFlushInfo::CommonTags::BROKEN));
 }
 
 KJ_TEST("FetchResponseInfo works") {
@@ -291,8 +271,11 @@ KJ_TEST("TraceEventInfo works") {
 }
 
 KJ_TEST("Outcome works") {
-  trace::Outcome outcome(EventOutcome::OK);
+  trace::FetchResponseInfo info(200);
+
+  trace::Outcome outcome(EventOutcome::OK, kj::Maybe(kj::mv(info)));
   KJ_EXPECT(outcome.outcome == EventOutcome::OK);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome.info).is<trace::FetchResponseInfo>());
 
   capnp::MallocMessageBuilder message;
   auto builder = message.initRoot<rpc::Trace::Outcome>();
@@ -301,9 +284,11 @@ KJ_TEST("Outcome works") {
   auto reader = builder.asReader();
   trace::Outcome outcome2(reader);
   KJ_EXPECT(outcome2.outcome == EventOutcome::OK);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome2.info).is<trace::FetchResponseInfo>());
 
   auto outcome3 = outcome.clone();
   KJ_EXPECT(outcome3.outcome == EventOutcome::OK);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome3.info).is<trace::FetchResponseInfo>());
 }
 
 KJ_TEST("DiagnosticChannelEvent works") {
@@ -428,9 +413,9 @@ KJ_TEST("Subrequest works") {
 
 KJ_TEST("SubrequestOutcome works") {
   uint32_t a = 1;
-  trace::SubrequestOutcome outcome(a, kj::none, trace::Span::Outcome::OK);
+  trace::SubrequestOutcome outcome(a, kj::none, trace::SpanClose::Outcome::OK);
   KJ_EXPECT(outcome.id == a);
-  KJ_EXPECT(outcome.outcome == trace::Span::Outcome::OK);
+  KJ_EXPECT(outcome.outcome == trace::SpanClose::Outcome::OK);
 
   capnp::MallocMessageBuilder message;
   auto builder = message.initRoot<rpc::Trace::SubrequestOutcome>();
@@ -439,43 +424,29 @@ KJ_TEST("SubrequestOutcome works") {
   auto reader = builder.asReader();
   trace::SubrequestOutcome outcome2(reader);
   KJ_EXPECT(outcome2.id == a);
-  KJ_EXPECT(outcome2.outcome == trace::Span::Outcome::OK);
+  KJ_EXPECT(outcome2.outcome == trace::SpanClose::Outcome::OK);
 
   auto outcome3 = outcome.clone();
   KJ_EXPECT(outcome3.id == a);
-  KJ_EXPECT(outcome3.outcome == trace::Span::Outcome::OK);
+  KJ_EXPECT(outcome3.outcome == trace::SpanClose::Outcome::OK);
 }
 
-KJ_TEST("Span works") {
-  uint32_t a = 1;
-  uint32_t b = 0;
-  trace::Span event(a, b, trace::Span::Outcome::OK, false, kj::none, nullptr);
-  KJ_EXPECT(event.id == a);
-  KJ_EXPECT(event.parent == b);
-  KJ_EXPECT(event.outcome == trace::Span::Outcome::OK);
-  KJ_EXPECT(event.transactional == false);
-  KJ_EXPECT(event.info == kj::none);
+KJ_TEST("SpanClose works") {
+  trace::SpanClose event(trace::SpanClose::Outcome::OK, nullptr);
+  KJ_EXPECT(event.outcome == trace::SpanClose::Outcome::OK);
   KJ_EXPECT(event.tags.size() == 0);
 
   capnp::MallocMessageBuilder message;
-  auto builder = message.initRoot<rpc::Trace::Span>();
+  auto builder = message.initRoot<rpc::Trace::SpanClose>();
   event.copyTo(builder);
 
   auto reader = builder.asReader();
-  trace::Span event2(reader);
-  KJ_EXPECT(event2.id == a);
-  KJ_EXPECT(event2.parent == b);
-  KJ_EXPECT(event2.outcome == trace::Span::Outcome::OK);
-  KJ_EXPECT(event2.transactional == false);
-  KJ_EXPECT(event2.info == kj::none);
+  trace::SpanClose event2(reader);
+  KJ_EXPECT(event2.outcome == trace::SpanClose::Outcome::OK);
   KJ_EXPECT(event2.tags.size() == 0);
 
   auto event3 = event.clone();
-  KJ_EXPECT(event3.id == a);
-  KJ_EXPECT(event3.parent == b);
-  KJ_EXPECT(event3.outcome == trace::Span::Outcome::OK);
-  KJ_EXPECT(event3.transactional == false);
-  KJ_EXPECT(event3.info == kj::none);
+  KJ_EXPECT(event3.outcome == trace::SpanClose::Outcome::OK);
   KJ_EXPECT(event3.tags.size() == 0);
 }
 

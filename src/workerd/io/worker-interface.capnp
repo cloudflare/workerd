@@ -209,7 +209,28 @@ struct Trace @0x8e8d911203762d34 {
     entrypoint @5 :Text;
     executionModel @6 :ExecutionModel;
 
-    tags @7 :List(Tag);
+    info :union {
+      # Info events are used at the start of a stage span to identify the kind
+      # of trigger that started the span. For instance, a fetch event will have
+      # a fetch info event at the start of the span.
+      none @7 :Void;
+      fetch @8 :FetchEventInfo;
+      jsRpc @9 :JsRpcEventInfo;
+      scheduled @10 :ScheduledEventInfo;
+      alarm @11 :AlarmEventInfo;
+      queue @12 :QueueEventInfo;
+      email @13 :EmailEventInfo;
+      trace @14 :TraceEventInfo;
+      hibernatableWebSocket @15 :HibernatableWebSocketEventInfo;
+      custom @16 :List(Tag);
+      # A custom info event is used to enable arbitrary, non-typed extension
+      # events to be injected. It is most useful as a way of extending
+      # the event stream with new types of events without modifying the
+      # schema. This is a tradeoff. Using a custom event is more flexible
+      # but there's no schema to verify the data.
+    }
+
+    tags @17 :List(Tag);
     # Any additional arbitrary metadata that should be associated with the onset.
     # These are different from the tags that appear in the StreamEvent structure
     # in that those are considered unique for each event in the stream, whereas
@@ -220,22 +241,17 @@ struct Trace @0x8e8d911203762d34 {
 
   struct Outcome {
     # The Outcome struct is always sent as the last event in any trace stream. It
-    # contains the final outcome of the trace including the CPU and wall time for
-    # the entire trace steam.
+    # contains the final outcome of the trace.
     outcome @0 :EventOutcome;
 
-    tags @1 :List(Tag);
-    # Any additional arbitrary metadata that should be associated with the outcome.
-  }
-
-  struct ActorFlushInfo {
-    # An outcome information object that describes additional detail about the outcome
-    # of an Actor/Durable object. Used primarily to identify the ActorFlushReason.
-    enum Common {
-      reason @0;
-      broken @1;
+    info :union {
+      none @1 :Void;
+      fetch @2 :FetchResponseInfo;
+      custom @3 :List(Tag);
     }
-    tags @0 :List(Tag);
+
+    tags @4 :List(Tag);
+    # Any additional arbitrary metadata that should be associated with the outcome.
   }
 
   struct Subrequest {
@@ -260,30 +276,17 @@ struct Trace @0x8e8d911203762d34 {
       fetch @2 :FetchResponseInfo;
       custom @3 :List(Tag);
     }
-    outcome @4 :Span.SpanOutcome;
+    outcome @4 :SpanClose.SpanOutcome;
     # A Subrequest is really a specialist kind of span, so it can have an outcome.
     # just like a span. Unlike regular spans tho, they cannot be transactional,
     # and are not part of the normal span stack.
   }
 
-  struct Span {
-    # A span event is sent only at the completion of a span, and includes markers
+  struct SpanClose {
+    # A SpanClose is sent only at the completion of a span, and includes markers
     # for the start and end times, as well as the start and end sequence numbers.
     # A span event always occurs in the scope of the parent span (or the null span
-    # if there is no current). So, for example:
-    #
-    #  Event 0 - Onset (null span)
-    #  Event 1 - Info (null span)
-    #  Event 2 - Log (Span 1)  (new span implicitly started)
-    #  Event 3 - Log (Span 2)  (new span implicitly started)
-    #  Event 4 - Span 2 (Span 1)  (span 2 is complete, span 1 is still open)
-    #  Event 5 - Span 1 (null span)  (span 1 is complete)
-    #  Event 6 - Outcome (null span)
-    #
-    # Note that the Span 2 event occurs within Span 1
-    id @0 :UInt32;
-    parent @1 :UInt32;
-    transactional @2 :Bool;
+    # if there is no current).
 
     enum SpanOutcome {
       # A span event may have an outcome field. If, for instance, the span represents
@@ -294,21 +297,9 @@ struct Trace @0x8e8d911203762d34 {
       exception @2;
       canceled @3;
     }
+    outcome @0 :SpanOutcome;
 
-    outcome @3 :SpanOutcome;
-
-    info :union {
-      # The info field is used to provide additional information about the outcome.
-      # These are often dependent on the type of info event that started the span.
-      # This is most typically only used for stage spans.
-      # For instance, a fetch event will have a fetchResponse info field in the outcome.
-      none @4 :Void;
-      fetch @5 :FetchResponseInfo;
-      actorFlush @6 :ActorFlushInfo;
-      custom @7 :List(Tag);
-    }
-
-    tags @8 :List(Tag);
+    tags @1 :List(Tag);
     # Any additional metadata specific to the span itself.
   }
 
@@ -426,39 +417,19 @@ struct Trace @0x8e8d911203762d34 {
       # event dropped, and the end field indicates the sequence number of the
       # last event dropped.
 
-      span @9 :Span;
+      spanClose @9 :SpanClose;
       # Span events mark the ending and outcome of a span.
-
-      info :union {
-        # Info events are used at the start of a stage span to identify the kind
-        # of trigger that started the span. For instance, a fetch event will have
-        # a fetch info event at the start of the span.
-        fetch @10 :FetchEventInfo;
-        jsRpc @11 :JsRpcEventInfo;
-        scheduled @12 :ScheduledEventInfo;
-        alarm @13 :AlarmEventInfo;
-        queue @14 :QueueEventInfo;
-        email @15 :EmailEventInfo;
-        trace @16 :TraceEventInfo;
-        hibernatableWebSocket @17 :HibernatableWebSocketEventInfo;
-        custom @18 :List(Tag);
-        # A custom info event is used to enable arbitrary, non-typed extension
-        # events to be injected. It is most useful as a way of extending
-        # the event stream with new types of events without modifying the
-        # schema. This is a tradeoff. Using a custom event is more flexible
-        # but there's no schema to verify the data.
-      }
 
       detail :union {
         # Detail events occur throughout a span and may occur many times.
-        log @19 :LogV2;
-        exception @20 :Exception;
-        diagnosticChannel @21 :DiagnosticChannelEvent;
-        mark @22 :Mark;
-        metrics @23 :List(Metric);
-        subrequest @24 :Subrequest;
-        subrequestOutcome @25 :SubrequestOutcome;
-        custom @26 :List(Tag);
+        log @10 :LogV2;
+        exception @11 :Exception;
+        diagnosticChannel @12 :DiagnosticChannelEvent;
+        mark @13 :Mark;
+        metrics @14 :List(Metric);
+        subrequest @15 :Subrequest;
+        subrequestOutcome @16 :SubrequestOutcome;
+        custom @17 :List(Tag);
         # A custom detail event is used to enable arbitrary, non-typed extension
         # events to be injected. It is most useful as a way of extending
         # the event stream with new types of events without modifying the
