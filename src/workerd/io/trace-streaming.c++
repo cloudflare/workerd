@@ -183,8 +183,8 @@ kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::newChildSpan(trace::Tag
 void StreamingTrace::addLog(trace::LogV2&& log) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
-        StreamEvent::Detail(kj::mv(log)));
+    StreamEvent event(
+        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(log));
     addStreamEvent(kj::mv(event));
   }
 }
@@ -192,8 +192,8 @@ void StreamingTrace::addLog(trace::LogV2&& log) {
 void StreamingTrace::addException(trace::Exception&& exception) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
-        StreamEvent::Detail(kj::mv(exception)));
+    StreamEvent event(
+        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(exception));
     addStreamEvent(kj::mv(event));
   }
 }
@@ -201,8 +201,8 @@ void StreamingTrace::addException(trace::Exception&& exception) {
 void StreamingTrace::addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& dce) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
-        StreamEvent::Detail(kj::mv(dce)));
+    StreamEvent event(
+        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(dce));
     addStreamEvent(kj::mv(event));
   }
 }
@@ -211,7 +211,7 @@ void StreamingTrace::addMark(kj::StringPtr mark) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
     StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
-        StreamEvent::Detail(trace::Mark(kj::str(mark))));
+        trace::Mark(kj::str(mark)));
     addStreamEvent(kj::mv(event));
   }
 }
@@ -219,8 +219,8 @@ void StreamingTrace::addMark(kj::StringPtr mark) {
 void StreamingTrace::addMetrics(trace::Metrics&& metrics) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
-        StreamEvent::Detail(kj::mv(metrics)));
+    StreamEvent event(
+        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(metrics));
     addStreamEvent(kj::mv(event));
   }
 }
@@ -228,8 +228,8 @@ void StreamingTrace::addMetrics(trace::Metrics&& metrics) {
 void StreamingTrace::addSubrequest(trace::Subrequest&& subrequest) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
-        StreamEvent::Detail(kj::mv(subrequest)));
+    StreamEvent event(
+        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(subrequest));
     addStreamEvent(kj::mv(event));
   }
 }
@@ -237,8 +237,8 @@ void StreamingTrace::addSubrequest(trace::Subrequest&& subrequest) {
 void StreamingTrace::addSubrequestOutcome(trace::SubrequestOutcome&& outcome) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
-        StreamEvent::Detail(kj::mv(outcome)));
+    StreamEvent event(
+        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(outcome));
     addStreamEvent(kj::mv(event));
   }
 }
@@ -246,8 +246,8 @@ void StreamingTrace::addSubrequestOutcome(trace::SubrequestOutcome&& outcome) {
 void StreamingTrace::addCustom(trace::Tags&& tags) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
-        StreamEvent::Detail(kj::mv(tags)));
+    StreamEvent event(
+        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(tags));
     addStreamEvent(kj::mv(event));
   }
 }
@@ -342,49 +342,49 @@ StreamingTrace::Span::~Span() noexcept(false) {
 
 void StreamingTrace::Span::addLog(trace::LogV2&& log) {
   KJ_IF_SOME(i, impl) {
-    i->trace.addStreamEvent(i->makeStreamEvent(StreamEvent::Detail(kj::mv(log))));
+    i->trace.addStreamEvent(i->makeStreamEvent(kj::mv(log)));
   }
 }
 
 void StreamingTrace::Span::addException(trace::Exception&& exception) {
   KJ_IF_SOME(i, impl) {
-    i->trace.addStreamEvent(i->makeStreamEvent(StreamEvent::Detail(kj::mv(exception))));
+    i->trace.addStreamEvent(i->makeStreamEvent(kj::mv(exception)));
   }
 }
 
 void StreamingTrace::Span::addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event) {
   KJ_IF_SOME(i, impl) {
-    i->trace.addStreamEvent(i->makeStreamEvent(StreamEvent::Detail(kj::mv(event))));
+    i->trace.addStreamEvent(i->makeStreamEvent(kj::mv(event)));
   }
 }
 
 void StreamingTrace::Span::addMark(kj::StringPtr mark) {
   KJ_IF_SOME(i, impl) {
-    i->trace.addStreamEvent(i->makeStreamEvent(StreamEvent::Detail(trace::Mark(kj::str(mark)))));
+    i->trace.addStreamEvent(i->makeStreamEvent(trace::Mark(kj::str(mark))));
   }
 }
 
 void StreamingTrace::Span::addMetrics(trace::Metrics&& metrics) {
   KJ_IF_SOME(i, impl) {
-    i->trace.addStreamEvent(i->makeStreamEvent(StreamEvent::Detail(kj::mv(metrics))));
+    i->trace.addStreamEvent(i->makeStreamEvent(kj::mv(metrics)));
   }
 }
 
 void StreamingTrace::Span::addSubrequest(trace::Subrequest&& subrequest) {
   KJ_IF_SOME(i, impl) {
-    i->trace.addStreamEvent(i->makeStreamEvent(StreamEvent::Detail(kj::mv(subrequest))));
+    i->trace.addStreamEvent(i->makeStreamEvent(kj::mv(subrequest)));
   }
 }
 
 void StreamingTrace::Span::addSubrequestOutcome(trace::SubrequestOutcome&& outcome) {
   KJ_IF_SOME(i, impl) {
-    i->trace.addStreamEvent(i->makeStreamEvent(StreamEvent::Detail(kj::mv(outcome))));
+    i->trace.addStreamEvent(i->makeStreamEvent(kj::mv(outcome)));
   }
 }
 
 void StreamingTrace::Span::addCustom(trace::Tags&& tags) {
   KJ_IF_SOME(i, impl) {
-    i->trace.addStreamEvent(i->makeStreamEvent(StreamEvent::Detail(kj::mv(tags))));
+    i->trace.addStreamEvent(i->makeStreamEvent(kj::mv(tags)));
   }
 }
 
@@ -422,47 +422,41 @@ StreamEvent::Event getEvent(const rpc::Trace::StreamEvent::Reader& reader) {
     case rpc::Trace::StreamEvent::Event::Which::SPAN_CLOSE: {
       return trace::SpanClose(event.getSpanClose());
     }
-    case rpc::Trace::StreamEvent::Event::Which::DETAIL: {
-      auto detail = event.getDetail();
-      switch (detail.which()) {
-        case rpc::Trace::StreamEvent::Event::Detail::Which::LOG: {
-          return StreamEvent::Detail(trace::LogV2(detail.getLog()));
-        }
-        case rpc::Trace::StreamEvent::Event::Detail::Which::EXCEPTION: {
-          return StreamEvent::Detail(trace::Exception(detail.getException()));
-        }
-        case rpc::Trace::StreamEvent::Event::Detail::Which::DIAGNOSTIC_CHANNEL: {
-          return StreamEvent::Detail(trace::DiagnosticChannelEvent(detail.getDiagnosticChannel()));
-        }
-        case rpc::Trace::StreamEvent::Event::Detail::Which::MARK: {
-          return StreamEvent::Detail(trace::Mark(detail.getMark()));
-        }
-        case rpc::Trace::StreamEvent::Event::Detail::Which::METRICS: {
-          auto metrics = detail.getMetrics();
-          kj::Vector<trace::Metric> vec(metrics.size());
-          for (size_t i = 0; i < metrics.size(); i++) {
-            trace::Metric metric(metrics[i]);
-            vec.add(kj::mv(metric));
-          }
-          return StreamEvent::Detail(vec.releaseAsArray());
-        }
-        case rpc::Trace::StreamEvent::Event::Detail::Which::SUBREQUEST: {
-          return StreamEvent::Detail(trace::Subrequest(detail.getSubrequest()));
-        }
-        case rpc::Trace::StreamEvent::Event::Detail::Which::SUBREQUEST_OUTCOME: {
-          return StreamEvent::Detail(trace::SubrequestOutcome(detail.getSubrequestOutcome()));
-        }
-        case rpc::Trace::StreamEvent::Event::Detail::Which::CUSTOM: {
-          auto custom = detail.getCustom();
-          kj::Vector<trace::Tag> vec(custom.size());
-          for (size_t i = 0; i < custom.size(); i++) {
-            trace::Tag tag(custom[i]);
-            vec.add(kj::mv(tag));
-          }
-          return StreamEvent::Detail(vec.releaseAsArray());
-        }
+    case rpc::Trace::StreamEvent::Event::Which::LOG: {
+      return trace::LogV2(event.getLog());
+    }
+    case rpc::Trace::StreamEvent::Event::Which::EXCEPTION: {
+      return trace::Exception(event.getException());
+    }
+    case rpc::Trace::StreamEvent::Event::Which::DIAGNOSTIC_CHANNEL: {
+      return trace::DiagnosticChannelEvent(event.getDiagnosticChannel());
+    }
+    case rpc::Trace::StreamEvent::Event::Which::MARK: {
+      return trace::Mark(event.getMark());
+    }
+    case rpc::Trace::StreamEvent::Event::Which::METRICS: {
+      auto metrics = event.getMetrics();
+      kj::Vector<trace::Metric> vec(metrics.size());
+      for (size_t i = 0; i < metrics.size(); i++) {
+        trace::Metric metric(metrics[i]);
+        vec.add(kj::mv(metric));
       }
-      KJ_UNREACHABLE;
+      return vec.releaseAsArray();
+    }
+    case rpc::Trace::StreamEvent::Event::Which::SUBREQUEST: {
+      return trace::Subrequest(event.getSubrequest());
+    }
+    case rpc::Trace::StreamEvent::Event::Which::SUBREQUEST_OUTCOME: {
+      return trace::SubrequestOutcome(event.getSubrequestOutcome());
+    }
+    case rpc::Trace::StreamEvent::Event::Which::CUSTOM: {
+      auto custom = event.getCustom();
+      kj::Vector<trace::Tag> vec(custom.size());
+      for (size_t i = 0; i < custom.size(); i++) {
+        trace::Tag tag(custom[i]);
+        vec.add(kj::mv(tag));
+      }
+      return vec.releaseAsArray();
     }
   }
   KJ_UNREACHABLE;
@@ -492,51 +486,48 @@ void StreamEvent::copyTo(rpc::Trace::StreamEvent::Builder builder) const {
   builder.setTimestampNs((timestampNs - kj::UNIX_EPOCH) / kj::MILLISECONDS);
   builder.setSequence(sequence);
 
+  auto eventBuilder = builder.initEvent();
   KJ_SWITCH_ONEOF(event) {
     KJ_CASE_ONEOF(onset, trace::Onset) {
-      onset.copyTo(builder.getEvent().getOnset());
+      onset.copyTo(eventBuilder.getOnset());
     }
     KJ_CASE_ONEOF(outcome, trace::Outcome) {
-      outcome.copyTo(builder.getEvent().getOutcome());
+      outcome.copyTo(eventBuilder.getOutcome());
     }
     KJ_CASE_ONEOF(dropped, trace::Dropped) {
-      dropped.copyTo(builder.getEvent().getDropped());
+      dropped.copyTo(eventBuilder.getDropped());
     }
     KJ_CASE_ONEOF(span, trace::SpanClose) {
-      span.copyTo(builder.getEvent().getSpanClose());
+      span.copyTo(eventBuilder.getSpanClose());
     }
-    KJ_CASE_ONEOF(detail, Detail) {
-      KJ_SWITCH_ONEOF(detail) {
-        KJ_CASE_ONEOF(log, trace::LogV2) {
-          log.copyTo(builder.getEvent().getDetail().getLog());
-        }
-        KJ_CASE_ONEOF(exception, trace::Exception) {
-          exception.copyTo(builder.getEvent().getDetail().getException());
-        }
-        KJ_CASE_ONEOF(diagnosticChannelEvent, trace::DiagnosticChannelEvent) {
-          diagnosticChannelEvent.copyTo(builder.getEvent().getDetail().getDiagnosticChannel());
-        }
-        KJ_CASE_ONEOF(mark, trace::Mark) {
-          mark.copyTo(builder.getEvent().getDetail().getMark());
-        }
-        KJ_CASE_ONEOF(metrics, trace::Metrics) {
-          auto metricsBuilder = builder.getEvent().getDetail().initMetrics(metrics.size());
-          for (size_t i = 0; i < metrics.size(); i++) {
-            metrics[i].copyTo(metricsBuilder[i]);
-          }
-        }
-        KJ_CASE_ONEOF(subrequest, trace::Subrequest) {
-          subrequest.copyTo(builder.getEvent().getDetail().getSubrequest());
-        }
-        KJ_CASE_ONEOF(subrequestOutcome, trace::SubrequestOutcome) {
-          subrequestOutcome.copyTo(builder.getEvent().getDetail().getSubrequestOutcome());
-        }
-        KJ_CASE_ONEOF(tags, trace::Tags) {
-          auto tagsBuilder = builder.getEvent().getDetail().initCustom(tags.size());
-          for (size_t i = 0; i < tags.size(); i++) {
-            tags[i].copyTo(tagsBuilder[i]);
-          }
-        }
+    KJ_CASE_ONEOF(log, trace::LogV2) {
+      log.copyTo(eventBuilder.getLog());
+    }
+    KJ_CASE_ONEOF(exception, trace::Exception) {
+      exception.copyTo(eventBuilder.getException());
+    }
+    KJ_CASE_ONEOF(diagnosticChannelEvent, trace::DiagnosticChannelEvent) {
+      diagnosticChannelEvent.copyTo(eventBuilder.getDiagnosticChannel());
+    }
+    KJ_CASE_ONEOF(mark, trace::Mark) {
+      mark.copyTo(eventBuilder.getMark());
+    }
+    KJ_CASE_ONEOF(metrics, trace::Metrics) {
+      auto metricsBuilder = eventBuilder.initMetrics(metrics.size());
+      for (size_t i = 0; i < metrics.size(); i++) {
+        metrics[i].copyTo(metricsBuilder[i]);
+      }
+    }
+    KJ_CASE_ONEOF(subrequest, trace::Subrequest) {
+      subrequest.copyTo(eventBuilder.getSubrequest());
+    }
+    KJ_CASE_ONEOF(subrequestOutcome, trace::SubrequestOutcome) {
+      subrequestOutcome.copyTo(eventBuilder.getSubrequestOutcome());
+    }
+    KJ_CASE_ONEOF(tags, trace::Tags) {
+      auto tagsBuilder = eventBuilder.initCustom(tags.size());
+      for (size_t i = 0; i < tags.size(); i++) {
+        tags[i].copyTo(tagsBuilder[i]);
       }
     }
   }
@@ -562,42 +553,37 @@ StreamEvent StreamEvent::clone() const {
       KJ_CASE_ONEOF(span, trace::SpanClose) {
         return span.clone();
       }
-      KJ_CASE_ONEOF(detail, Detail) {
-        KJ_SWITCH_ONEOF(detail) {
-          KJ_CASE_ONEOF(log, trace::LogV2) {
-            return Detail(log.clone());
-          }
-          KJ_CASE_ONEOF(exception, trace::Exception) {
-            return Detail(exception.clone());
-          }
-          KJ_CASE_ONEOF(diagnosticChannelEvent, trace::DiagnosticChannelEvent) {
-            return Detail(diagnosticChannelEvent.clone());
-          }
-          KJ_CASE_ONEOF(mark, trace::Mark) {
-            return Detail(mark.clone());
-          }
-          KJ_CASE_ONEOF(metric, trace::Metrics) {
-            kj::Vector<trace::Metric> newMetrics(metric.size());
-            for (auto& m: metric) {
-              newMetrics.add(m.clone());
-            }
-            return Detail(newMetrics.releaseAsArray());
-          }
-          KJ_CASE_ONEOF(subrequest, trace::Subrequest) {
-            return Detail(subrequest.clone());
-          }
-          KJ_CASE_ONEOF(subrequestOutcome, trace::SubrequestOutcome) {
-            return Detail(subrequestOutcome.clone());
-          }
-          KJ_CASE_ONEOF(tags, trace::Tags) {
-            kj::Vector<trace::Tag> newTags(tags.size());
-            for (auto& tag: tags) {
-              newTags.add(tag.clone());
-            }
-            return Detail(newTags.releaseAsArray());
-          }
+      KJ_CASE_ONEOF(log, trace::LogV2) {
+        return log.clone();
+      }
+      KJ_CASE_ONEOF(exception, trace::Exception) {
+        return exception.clone();
+      }
+      KJ_CASE_ONEOF(diagnosticChannelEvent, trace::DiagnosticChannelEvent) {
+        return diagnosticChannelEvent.clone();
+      }
+      KJ_CASE_ONEOF(mark, trace::Mark) {
+        return mark.clone();
+      }
+      KJ_CASE_ONEOF(metric, trace::Metrics) {
+        kj::Vector<trace::Metric> newMetrics(metric.size());
+        for (auto& m: metric) {
+          newMetrics.add(m.clone());
         }
-        KJ_UNREACHABLE;
+        return newMetrics.releaseAsArray();
+      }
+      KJ_CASE_ONEOF(subrequest, trace::Subrequest) {
+        return subrequest.clone();
+      }
+      KJ_CASE_ONEOF(subrequestOutcome, trace::SubrequestOutcome) {
+        return subrequestOutcome.clone();
+      }
+      KJ_CASE_ONEOF(tags, trace::Tags) {
+        kj::Vector<trace::Tag> newTags(tags.size());
+        for (auto& tag: tags) {
+          newTags.add(tag.clone());
+        }
+        return newTags.releaseAsArray();
       }
     }
     KJ_UNREACHABLE;

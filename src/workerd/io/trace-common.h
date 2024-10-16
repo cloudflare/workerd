@@ -592,16 +592,6 @@ struct Dropped final {
   void copyTo(rpc::Trace::Dropped::Builder builder) const;
   Dropped clone() const;
 };
-// The EventDetail union identifies types of events that happen *within* a span.
-// They may occur any number of times within the span and are never terminal.
-using EventDetail = kj::OneOf<LogV2,
-    Exception,
-    DiagnosticChannelEvent,
-    Mark,
-    Metrics,
-    Subrequest,
-    SubrequestOutcome,
-    Tags>;
 
 // ======================================================================================
 // The base class for both the original legacy Trace (defined in trace-legacy.h)
