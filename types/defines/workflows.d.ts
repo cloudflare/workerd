@@ -1,13 +1,9 @@
-/**
- * NonRetryableError allows for a user to throw a fatal error
- * that makes a Workflow instance fail immediately without triggering a retry
- */
 declare module "cloudflare:workflows" {
-  export abstract class NonRetryableError extends Error {
-    /**
-     * `__brand` is used to differentiate between `NonRetryableError` and `Error`
-     * and is omitted from the constructor because users should not set it
-     */
+  /**
+   * NonRetryableError allows for a user to throw a fatal error
+   * that makes a Workflow instance fail immediately without triggering a retry
+   */
+  export class NonRetryableError extends Error {
     public constructor(message: string, name?: string);
   }
 }
