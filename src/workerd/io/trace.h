@@ -40,20 +40,13 @@ class WorkerTracer;
 class PipelineTracer final: public kj::Refcounted {
 public:
   // Creates a pipeline tracer (with a possible parent).
-  explicit PipelineTracer(kj::Maybe<kj::Own<PipelineTracer>> parentPipeline = kj::none)
-      : parentTracer(kj::mv(parentPipeline)) {}
-
+  explicit PipelineTracer() = default;
   ~PipelineTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
 
   // Returns a promise that fulfills when traces are complete.  Only one such promise can
   // exist at a time.
   kj::Promise<kj::Array<kj::Own<Trace>>> onComplete();
-
-  // Makes a tracer for a subpipeline.
-  kj::Own<PipelineTracer> makePipelineSubtracer() {
-    return kj::refcounted<PipelineTracer>(kj::addRef(*this));
-  }
 
   // Makes a tracer for a worker stage.
   kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
@@ -70,11 +63,11 @@ public:
   // to the host where tracing was initiated.
   void addTrace(rpc::Trace::Reader reader);
 
+  void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
+
 private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
-
-  kj::Maybe<kj::Own<PipelineTracer>> parentTracer;
 
   friend class WorkerTracer;
 };

@@ -70,13 +70,14 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
 }
 
 PipelineTracer::~PipelineTracer() noexcept(false) {
-  KJ_IF_SOME(p, parentTracer) {
-    for (auto& t: traces) {
-      p->traces.add(kj::addRef(*t));
-    }
-  }
   KJ_IF_SOME(f, completeFulfiller) {
     f.get()->fulfill(traces.releaseAsArray());
+  }
+}
+
+void PipelineTracer::addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces) {
+  for (auto& t: traces) {
+    this->traces.add(kj::addRef(*t));
   }
 }
 

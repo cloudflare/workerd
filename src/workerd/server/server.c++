@@ -1616,7 +1616,6 @@ public:
       const kj::HashMap<kj::String, ActorConfig>& actorClasses,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
-      kj::Maybe<kj::Own<PipelineTracer>> maybeTracer,
       kj::Array<kj::Own<config::ServiceDesignator::Reader>> loggingServices,
       LookupServiceCallback lookupService)
       : threadContext(threadContext),
@@ -1625,7 +1624,6 @@ public:
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
-        maybeTracer(kj::mv(maybeTracer)),
         loggingServices(kj::mv(loggingServices)),
         lookupService(kj::mv(lookupService)) {
 
@@ -1685,33 +1683,34 @@ public:
       kj::Maybe<kj::StringPtr> entrypointName,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none) {
     TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
-    kj::Maybe<kj::Own<WorkerTracer>> maybeWorkerTracer = kj::none;
-    KJ_IF_SOME(tracer, maybeTracer) {
-      auto childTracer = kj::refcounted<PipelineTracer>(kj::addRef(*tracer));
-      // TODO(streaming-trace): Make sure the execution model here accurately reflects reality.
-      // e.g. this might be a durable object, or eventually a workflow.
-      maybeWorkerTracer = childTracer->makeWorkerTracer(PipelineLogLevel::FULL,
-          ExecutionModel::STATELESS, kj::none /* scriptId */, kj::none /* stableId */,
-          kj::none /* scriptName */, kj::none /* scriptVersion */, kj::none /* dispatchNamespace */,
-          nullptr /* scriptTags */, kj::none /* entrypoint */);
 
-      kj::Vector<kj::Own<WorkerInterface>> tailWorkers;
-      for (auto& svc: loggingServices) {
-        auto& service = lookupService(*svc, "looking logging service");
-        KJ_ASSERT(&service != this, "A worker currently cannot log to itself");
-        tailWorkers.add(service.startRequest({}));
-      }
-      waitUntilTasks.add(childTracer->onComplete().then(
-          kj::coCapture([tailWorkers = kj::mv(tailWorkers)](
-                            kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
-        for (auto& worker: tailWorkers) {
-          auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
-              workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
-          co_await worker->customEvent(kj::mv(event)).ignoreResult();
-        }
-        co_return;
-      })));
-    };
+    // We'll create a WorkerTracer if, and only if, there are tail workers configured.
+    auto maybeWorkerTracer = ([&]() -> kj::Maybe<kj::Own<WorkerTracer>> {
+      if (loggingServices.size() > 0) {
+        auto tracer = kj::refcounted<PipelineTracer>();
+
+        waitUntilTasks.add(dispatchTraces(tracer->onComplete(), KJ_MAP(svc, loggingServices) {
+          auto& service = lookupService(*svc, "resolving logging service");
+          KJ_ASSERT(&service != this, "A worker currently cannot log to itself");
+          return service.startRequest({});
+        }));
+
+        // The PipelineTracer is a kj::Refcounted. The call to makeWorkerTracer
+        // will cause the created WorkerTracer to retain a strong reference to
+        // the PipelineTracer so we don't need to arrange for it to stay alive.
+        // The instance will be dropped when the WorkerTracer is dropped, causing
+        // the onComplete promise to be fulfilled, allowing the collected traces
+        // to be dispatched.
+
+        // TODO(streaming-trace): Make sure the execution model here accurately reflects reality.
+        // e.g. this might be a durable object, or eventually a workflow.
+        return tracer->makeWorkerTracer(PipelineLogLevel::FULL, ExecutionModel::STATELESS, kj::none,
+            kj::none, kj::none, kj::none, kj::none, nullptr, kj::none);
+      };
+
+      return kj::none;
+    })();
+
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
         {},  // ioContextDependency
@@ -2208,6 +2207,16 @@ public:
   };
 
 private:
+  kj::Promise<void> dispatchTraces(kj::Promise<kj::Array<kj::Own<Trace>>> promise,
+      kj::Array<kj::Own<WorkerInterface>> tailWorkers) {
+    auto traces = co_await promise;
+    for (auto& worker: tailWorkers) {
+      auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
+          workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
+      co_await worker->customEvent(kj::mv(event)).ignoreResult();
+    }
+  }
+
   class EntrypointService final: public Service {
   public:
     EntrypointService(
@@ -2241,7 +2250,6 @@ private:
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
-  kj::Maybe<kj::Own<PipelineTracer>> maybeTracer;
   kj::Array<kj::Own<config::ServiceDesignator::Reader>> loggingServices;
   LookupServiceCallback lookupService;
 
@@ -3249,31 +3257,27 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   };
 
   kj::Vector<kj::Own<config::ServiceDesignator::Reader>> loggingServices;
-  auto maybeMakeTracer = [conf, &loggingServices]() -> kj::Maybe<kj::Own<PipelineTracer>> {
-    auto logging = conf.getLogging();
-    switch (logging.which()) {
-      case config::Worker::Logging::Which::NONE:
-        return kj::none;
-      case config::Worker::Logging::Which::TO_SERVICE: {
-        loggingServices.add(capnp::clone(logging.getToService()));
-        break;
-      }
-      case config::Worker::Logging::Which::TO_SERVICES: {
-        for (auto svc: logging.getToServices()) {
-          loggingServices.add(capnp::clone(svc));
-        }
-        break;
-      }
+  auto logging = conf.getLogging();
+  switch (conf.getLogging().which()) {
+    case config::Worker::Logging::Which::NONE:
+      // Nothing to do here.
+      break;
+    case config::Worker::Logging::Which::TO_SERVICE: {
+      loggingServices.add(capnp::clone(logging.getToService()));
+      break;
     }
-
-    return kj::refcounted<PipelineTracer>(kj::none);
-  };
-  auto tracer = maybeMakeTracer();
+    case config::Worker::Logging::Which::TO_SERVICES: {
+      for (auto svc: logging.getToServices()) {
+        loggingServices.add(capnp::clone(svc));
+      }
+      break;
+    }
+  }
 
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
       localActorConfigs, kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors),
-      kj::mv(tracer), loggingServices.releaseAsArray(),
+      loggingServices.releaseAsArray(),
       [this](const config::ServiceDesignator::Reader& service, kj::StringPtr context) -> Service& {
     return lookupService(service, kj::str(context));
   });
