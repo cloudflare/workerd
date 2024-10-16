@@ -1,4 +1,4 @@
-From 31ac377576eeee7470b00342543bb8627607d7c4 Mon Sep 17 00:00:00 2001
+From 2b99ae2cbe2f3e4db6f6fcac18a389d245143534 Mon Sep 17 00:00:00 2001
 From: Harris Hancock <harris@cloudflare.com>
 Date: Fri, 28 Jun 2024 14:19:25 +0100
 Subject: Revert TracedReference deref API removal
@@ -6,10 +6,10 @@ Subject: Revert TracedReference deref API removal
 This previously-deprecated API was removed in 7cd2b0c434bd5ea7bd253a97958c7348557fd72e, but we don't know how to safely replace our usage of it yet.
 
 diff --git a/include/v8-traced-handle.h b/include/v8-traced-handle.h
-index 28fe6cf5ae3ad0dadafcc0942bda6d9148d5d58f..0e39bdf79ab0770df0fac97ee95c2ba2effdb874 100644
+index 04752c4f2aeed025364326fb0a0d85c03ba3347c..f1a41b1d8cd756358b536ee90ca9bd8c6b601e69 100644
 --- a/include/v8-traced-handle.h
 +++ b/include/v8-traced-handle.h
-@@ -134,6 +134,17 @@ class BasicTracedReference : public TracedReferenceBase {
+@@ -135,6 +135,17 @@ class BasicTracedReference : public TracedReferenceBase {
          const_cast<BasicTracedReference<T>&>(*this));
    }
  
