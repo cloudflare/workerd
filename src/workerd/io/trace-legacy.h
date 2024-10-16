@@ -78,16 +78,8 @@ public:
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
-  // Empty for toplevel worker.
-  //  kj::Maybe<kj::String> stableId;
-
   // We treat the origin value as "unset".
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
-
-  kj::Maybe<trace::EventInfo> eventInfo;
-  // TODO(someday): Support more event types.
-  // TODO(someday): Work out what sort of information we may want to convey about the parent
-  // trace, if any.
 
   trace::Onset onsetInfo;
   trace::Outcome outcomeInfo{};
@@ -116,7 +108,7 @@ public:
   void addException(trace::Exception&& exception) override;
   void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event) override;
 
-  void addMark(trace::Mark&& mark) override {
+  void addMark(kj::StringPtr mark) override {
     // These are currently ignored for legacy traces.
   }
 
