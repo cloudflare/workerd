@@ -1092,11 +1092,13 @@ void IoContext::runImpl(Runnable& runnable,
         // If we were terminated because abort() was called, then it's not an unknown
         // reason...
         if (!abortFulfiller->isWaiting()) {
-          // Nothing to do here. Do not log anything. The assumption is that we've
-          // terminated because the IoContext was aborted and isolate->TerminateExection()
-          // was called (likely because of someone using process.exit(...) in Node.js
-          // compat mode).
-          return;
+          // The assumption is that we've terminated because the IoContext was aborted and
+          // isolate->TerminateExection() was called (likely because of someone using
+          // process.exit(...) in Node.js compat mode).
+
+          // TODO(later): If this ends up being too spammy in sentry that we'll need to
+          // revisit, but for now... log the assert and move on.
+          KJ_FAIL_ASSERT("request terminated because it was aborted");
         }
 
         // That should have thrown, so we shouldn't get here.
