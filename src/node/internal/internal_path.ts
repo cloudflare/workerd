@@ -1071,19 +1071,35 @@ const posix = {
   resolve(...args: string[]): string {
     let resolvedPath = '';
     let resolvedAbsolute = false;
+    let slashCheck = false;
 
-    for (let i = args.length - 1; i >= -1 && !resolvedAbsolute; i--) {
-      const path = i >= 0 ? args[i] : '/';
-
-      validateString(path, 'path');
+    for (let i = args.length - 1; i >= 0 && !resolvedAbsolute; i--) {
+      const path = args[i];
+      validateString(path, `paths[${i}]`);
 
       // Skip empty entries
       if (path.length === 0) {
         continue;
       }
+      if (
+        i === args.length - 1 &&
+        isPosixPathSeparator(path.charCodeAt(path.length - 1))
+      ) {
+        slashCheck = true;
+      }
 
-      resolvedPath = `${path}/${resolvedPath}`;
+      if (resolvedPath.length !== 0) {
+        resolvedPath = `${path}/${resolvedPath}`;
+      } else {
+        resolvedPath = path;
+      }
       resolvedAbsolute = path.charCodeAt(0) === CHAR_FORWARD_SLASH;
+    }
+
+    if (!resolvedAbsolute) {
+      const cwd = '/';
+      resolvedPath = `${cwd}/${resolvedPath}`;
+      resolvedAbsolute = cwd.charCodeAt(0) === CHAR_FORWARD_SLASH;
     }
 
     // At this point the path should be resolved to a full absolute path, but
@@ -1097,10 +1113,20 @@ const posix = {
       isPosixPathSeparator
     );
 
-    if (resolvedAbsolute) {
-      return `/${resolvedPath}`;
+    if (!resolvedAbsolute) {
+      if (resolvedPath.length === 0) {
+        return '.';
+      }
+      if (slashCheck) {
+        return `${resolvedPath}/`;
+      }
+      return resolvedPath;
     }
-    return resolvedPath.length > 0 ? resolvedPath : '.';
+
+    if (resolvedPath.length === 0 || resolvedPath === '/') {
+      return '/';
+    }
+    return slashCheck ? `/${resolvedPath}/` : `/${resolvedPath}`;
   },
 
   /**
@@ -1173,11 +1199,41 @@ const posix = {
 
     if (from === to) return '';
 
-    const fromStart = 1;
-    const fromEnd = from.length;
+    // Trim any leading slashes
+    let fromStart = 0;
+    while (
+      fromStart < from.length &&
+      from.charCodeAt(fromStart) === CHAR_FORWARD_SLASH
+    ) {
+      fromStart++;
+    }
+    // Trim trailing slashes
+    let fromEnd = from.length;
+    while (
+      fromEnd - 1 > fromStart &&
+      from.charCodeAt(fromEnd - 1) === CHAR_FORWARD_SLASH
+    ) {
+      fromEnd--;
+    }
     const fromLen = fromEnd - fromStart;
-    const toStart = 1;
-    const toLen = to.length - toStart;
+
+    // Trim any leading slashes
+    let toStart = 0;
+    while (
+      toStart < to.length &&
+      to.charCodeAt(toStart) === CHAR_FORWARD_SLASH
+    ) {
+      toStart++;
+    }
+    // Trim trailing slashes
+    let toEnd = to.length;
+    while (
+      toEnd - 1 > toStart &&
+      to.charCodeAt(toEnd - 1) === CHAR_FORWARD_SLASH
+    ) {
+      toEnd--;
+    }
+    const toLen = toEnd - toStart;
 
     // Compare paths to find the longest common path from root
     const length = fromLen < toLen ? fromLen : toLen;

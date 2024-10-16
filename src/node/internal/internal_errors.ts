@@ -550,6 +550,36 @@ export class ERR_ZLIB_INITIALIZATION_FAILED extends NodeError {
   }
 }
 
+export class ERR_INVALID_URL extends NodeError {
+  input: string;
+
+  constructor(url: string) {
+    super('ERR_INVALID_URL', 'Invalid URL');
+    this.input = url;
+  }
+}
+
+export class ERR_INVALID_URL_SCHEME extends NodeError {
+  constructor(scheme: string) {
+    super('ERR_INVALID_URL_SCHEME', `The URL must be of scheme ${scheme}`);
+  }
+}
+
+export class ERR_INVALID_FILE_URL_HOST extends NodeError {
+  constructor(input: string) {
+    super(
+      'ERR_INVALID_FILE_URL_HOST',
+      `File URL host must be "localhost" or empty on ${input}`
+    );
+  }
+}
+
+export class ERR_INVALID_FILE_URL_PATH extends NodeError {
+  constructor(input: string) {
+    super('ERR_INVALID_FILE_URL_PATH', `File URL path ${input}`);
+  }
+}
+
 export function aggregateTwoErrors(innerError: any, outerError: any) {
   if (innerError && outerError && innerError !== outerError) {
     if (Array.isArray(outerError.errors)) {

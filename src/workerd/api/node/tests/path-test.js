@@ -100,17 +100,18 @@ export const test_path_zero_length_strings = {
   },
 };
 
+// Ref: https://github.com/nodejs/node/blob/4d6d7d644be4f10f90e5c9c66563736112fffbff/test/parallel/test-path-resolve.js
 export const test_path_resolve = {
   test(ctrl, env, ctx) {
     const failures = [];
     const posixyCwd = '/';
 
     const resolveTests = [
-      [['/var/lib', '../', 'file/'], '/var/file'],
-      [['/var/lib', '/../', 'file/'], '/file'],
+      [['/var/lib', '../', 'file/'], '/var/file/'],
+      [['/var/lib', '/../', 'file/'], '/file/'],
       [['a/b/c/', '../../..'], posixyCwd],
       [['.'], posixyCwd],
-      [['/some/dir', '.', '/absolute/'], '/absolute'],
+      [['/some/dir', '.', '/absolute/'], '/absolute/'],
       [['/foo/tmp.3/', '../tmp.3/cycles/root.js'], '/foo/tmp.3/cycles/root.js'],
     ];
     resolveTests.forEach(([test, expected]) => {
@@ -124,6 +125,7 @@ export const test_path_resolve = {
   },
 };
 
+// Ref: https://github.com/nodejs/node/blob/4d6d7d644be4f10f90e5c9c66563736112fffbff/test/parallel/test-path-relative.js
 export const test_path_relative = {
   test(ctrl, env, ctx) {
     const failures = [];
