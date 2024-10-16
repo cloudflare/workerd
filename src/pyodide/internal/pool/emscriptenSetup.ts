@@ -117,12 +117,11 @@ function getInstantiateWasm(
  * This isn't public API of Pyodide so it's a bit fiddly.
  */
 function getEmscriptenSettings(
-  lockfile: PackageLock,
-  indexURL: string,
+  isWorkerd: boolean,
   pythonStdlib: Uint8Array,
   pyodideWasmModule: WebAssembly.Module
 ): EmscriptenSettings {
-  const config = {
+  const config: PyodideConfig = {
     // jsglobals is used for the js module.
     jsglobals: globalThis,
     // environment variables go here
@@ -133,11 +132,13 @@ function getEmscriptenSettings(
       // discussion in topLevelEntropy/entropy_patches.py
       PYTHONHASHSEED: '111',
     },
-    // This is the index that we use as the base URL to fetch the wheels.
-    indexURL,
   };
-  // loadPackage initializes its state using lockFilePromise.
-  const lockFilePromise = lockfile ? Promise.resolve(lockfile) : undefined;
+  let lockFilePromise;
+  if (isWorkerd) {
+    lockFilePromise = new Promise(
+      (res) => (config.resolveLockFilePromise = res)
+    );
+  }
   const API = { config, lockFilePromise };
   let resolveReadyPromise: (mod: Module) => void;
   const readyPromise: Promise<Module> = new Promise(
@@ -191,14 +192,12 @@ function* featureDetectionMonkeyPatchesContextManager() {
  * Returns the instantiated emscriptenModule object.
  */
 export async function instantiateEmscriptenModule(
-  lockfile: PackageLock,
-  indexURL: string,
+  isWorkerd: boolean,
   pythonStdlib: Uint8Array,
   wasmModule: WebAssembly.Module
 ): Promise<Module> {
   const emscriptenSettings = getEmscriptenSettings(
-    lockfile,
-    indexURL,
+    isWorkerd,
     pythonStdlib,
     wasmModule
   );

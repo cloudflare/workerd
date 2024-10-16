@@ -37,7 +37,7 @@ function getPyodide(): Promise<Pyodide> {
     if (pyodidePromise) {
       return pyodidePromise;
     }
-    pyodidePromise = loadPyodide(LOCKFILE, WORKERD_INDEX_URL);
+    pyodidePromise = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL);
     return pyodidePromise;
   });
 }

@@ -78,17 +78,17 @@ async function prepareWasmLinearMemory(Module: Module): Promise<void> {
 }
 
 export async function loadPyodide(
+  isWorkerd: boolean,
   lockfile: PackageLock,
   indexURL: string
 ): Promise<Pyodide> {
   const Module = await enterJaegerSpan('instantiate_emscripten', () =>
-    instantiateEmscriptenModule(
-      lockfile,
-      indexURL,
-      pythonStdlib,
-      pyodideWasmModule
-    )
+    instantiateEmscriptenModule(isWorkerd, pythonStdlib, pyodideWasmModule)
   );
+  if (isWorkerd) {
+    Module.API.config.indexURL = indexURL;
+    Module.API.config.resolveLockFilePromise!(lockfile);
+  }
   setUnsafeEval(UnsafeEval);
   setGetRandomValues(getRandomValues);
   await enterJaegerSpan('prepare_wasm_linear_memory', () =>
