@@ -161,6 +161,16 @@ public:
 
   jsg::Name getResourceTypeInspect(jsg::Lock& js);
 
+#ifdef _WIN32
+  static constexpr kj::StringPtr processPlatform = "win32"_kj;
+#elif defined(__linux__)
+  static constexpr kj::StringPtr processPlatform = "linux"_kj;
+#elif defined(__APPLE__)
+  static constexpr kj::StringPtr processPlatform = "darwin"_kj;
+#else
+  static constexpr kj::StringPtr processPlatform = "unsupported-platform"_kj;
+#endif
+
   // `getOwnNonIndexProperties()` `filter`s
   static constexpr int ALL_PROPERTIES = jsg::PropertyFilter::ALL_PROPERTIES;
   static constexpr int ONLY_ENUMERABLE = jsg::PropertyFilter::ONLY_ENUMERABLE;
@@ -223,6 +233,12 @@ public:
   // then it becomes a non-op.
   void processExitImpl(jsg::Lock& js, int code);
 
+  // IMPORTANT: This function will always return "linux" on production.
+  // This is only added for Node.js compatibility and running OS specific tests
+  kj::StringPtr getProcessPlatform() const {
+    return processPlatform;
+  }
+
   JSG_RESOURCE_TYPE(UtilModule) {
     JSG_NESTED_TYPE(MIMEType);
     JSG_NESTED_TYPE(MIMEParams);
@@ -251,6 +267,7 @@ public:
 
     JSG_METHOD(getBuiltinModule);
     JSG_METHOD(processExitImpl);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(processPlatform, getProcessPlatform);
   }
 };
 

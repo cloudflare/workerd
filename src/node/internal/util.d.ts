@@ -123,3 +123,4 @@ export function isBoxedPrimitive(
 export function getBuiltinModule(id: string): any;
 export function getCallSite(frames: number): Record<string, string>[];
 export function processExitImpl(code: number): void;
+export const processPlatform: string;
