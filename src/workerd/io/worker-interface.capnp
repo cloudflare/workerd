@@ -278,8 +278,7 @@ struct Trace @0x8e8d911203762d34 {
     }
     outcome @4 :SpanClose.SpanOutcome;
     # A Subrequest is really a specialist kind of span, so it can have an outcome.
-    # just like a span. Unlike regular spans tho, they cannot be transactional,
-    # and are not part of the normal span stack.
+    # just like a span.
   }
 
   struct SpanClose {
@@ -387,15 +386,9 @@ struct Trace @0x8e8d911203762d34 {
     span :group {
       id @1 :UInt32;
       parent @2 :UInt32;
-      transactional @3 :Bool;
-      # Some spans may be transactional, meaning that they represent a single
-      # atomic operation that may succeed or fail as a whole. When the span
-      # event occurs, the span outcome will indicate if the span was successful
-      # or failed. If a transaction span outcome indicates failure, then all events
-      # within that span should be considered invalidated.
     }
-    timestampNs @4 :Int64;
-    sequence @5 :UInt32;
+    timestampNs @3 :Int64;
+    sequence @4 :UInt32;
     # The sequence order for this event. This is a strictly monotonically
     # increasing sequence number that is unique within the tail. The onset
     # event sequence number will always be 0. The purpose of the sequence
@@ -403,33 +396,33 @@ struct Trace @0x8e8d911203762d34 {
     # in the stream.
 
     event :union {
-      onset @6 :Onset;
+      onset @5 :Onset;
       # When a tail stream is first created, the first event will always be
       # an onset event.
 
-      outcome @7 :Outcome;
+      outcome @6 :Outcome;
       # The final event in every successfully completed stream be will an outcome
       # event.
 
-      dropped @8 :Dropped;
+      dropped @7 :Dropped;
       # The dropped event is used to identify events that have been dropped from
       # the stream. The start field indicates the sequence number of the first
       # event dropped, and the end field indicates the sequence number of the
       # last event dropped.
 
-      spanClose @9 :SpanClose;
+      spanClose @8 :SpanClose;
       # Span events mark the ending and outcome of a span.
 
       detail :union {
         # Detail events occur throughout a span and may occur many times.
-        log @10 :LogV2;
-        exception @11 :Exception;
-        diagnosticChannel @12 :DiagnosticChannelEvent;
-        mark @13 :Mark;
-        metrics @14 :List(Metric);
-        subrequest @15 :Subrequest;
-        subrequestOutcome @16 :SubrequestOutcome;
-        custom @17 :List(Tag);
+        log @9 :LogV2;
+        exception @10 :Exception;
+        diagnosticChannel @11 :DiagnosticChannelEvent;
+        mark @12 :Mark;
+        metrics @13 :List(Metric);
+        subrequest @14 :Subrequest;
+        subrequestOutcome @15 :SubrequestOutcome;
+        custom @16 :List(Tag);
         # A custom detail event is used to enable arbitrary, non-typed extension
         # events to be injected. It is most useful as a way of extending
         # the event stream with new types of events without modifying the
