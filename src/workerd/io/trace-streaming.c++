@@ -173,7 +173,7 @@ void StreamingTrace::addDropped(uint32_t start, uint32_t end) {
 }
 
 kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::newChildSpan(
-    kj::Date timestamp, trace::Tags tags, Options options) {
+    trace::Tags tags, Options options) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
     return kj::heap<StreamingTrace::Span>(spans, *this, 0, kj::mv(tags), options);
@@ -395,7 +395,7 @@ void StreamingTrace::Span::addCustom(trace::Tags&& tags) {
 }
 
 kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::Span::newChildSpan(
-    kj::Date timestamp, trace::Tags tags, Options options) {
+    trace::Tags tags, Options options) {
   KJ_IF_SOME(i, impl) {
     return kj::heap<Span>(spans, i->trace, i->id, kj::mv(tags), options);
   }
