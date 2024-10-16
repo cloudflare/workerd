@@ -1,11 +1,17 @@
 interface ENV {
   HOME: string;
+  [k: string]: string;
+}
+
+interface PyodideConfig {
+  env: ENV;
+  jsglobals: any;
+  resolveLockFilePromise?: (lockfile: PackageLock) => void;
+  indexURL?: string;
 }
 
 interface API {
-  config: {
-    env: ENV;
-  };
+  config: PyodideConfig;
   finalizeBootstrap: () => void;
   public_api: Pyodide;
   rawRun: (code: string) => [status: number, err: string];
