@@ -518,3 +518,14 @@ http_file(
     integrity = "sha256-4V2KXVoX5Ny1J7ABfVRx0nAHpAGegykhzac7zW3nK0k=",
     url = "https://github.com/npaun/bins/releases/download/llvm-18.1.8/llvm-18.1.8-windows-amd64-clang-format.exe",
 )
+
+# ========================================================================================
+# Web Platform Tests
+
+http_archive(
+    name = "wpt",
+    build_file = "//:build/BUILD.wpt",
+    integrity = "sha256-6mp9wOEkWuACXvSDmf1pL2Dlj5ruukYwQzwkNgcpCdI=",
+    strip_prefix = "wpt-merge_pr_47718",
+    url = "https://github.com/web-platform-tests/wpt/archive/refs/tags/merge_pr_47718.tar.gz",
+)
