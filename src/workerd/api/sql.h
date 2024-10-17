@@ -83,6 +83,30 @@ private:
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaPageCount;
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaGetMaxPageCount;
 
+  // Helper class to cache column names for a query so that we don't have to recreate the V8
+  // strings for every row.
+  class CachedColumnNames {
+    // TODO(perf): Can we further cache the V8 object layout information for a row?
+  public:
+    // Get the cached names. ensureInitialized() must have been called previously.
+    kj::ArrayPtr<jsg::JsRef<jsg::JsString>> get() {
+      return KJ_REQUIRE_NONNULL(names);
+    }
+
+    void ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source);
+
+    JSG_MEMORY_INFO(CachedColumnNames) {
+      KJ_IF_SOME(list, names) {
+        for (const auto& name: list) {
+          tracker.trackField(nullptr, name);
+        }
+      }
+    }
+
+  private:
+    kj::Maybe<kj::Array<jsg::JsRef<jsg::JsString>>> names;
+  };
+
   template <size_t size, typename... Params>
   SqliteDatabase::Query execMemoized(SqliteDatabase& db,
       kj::Maybe<IoOwn<SqliteDatabase::Statement>>& slot,
@@ -123,8 +147,6 @@ private:
 };
 
 class SqlStorage::Cursor final: public jsg::Object {
-  class CachedColumnNames;
-
 public:
   template <typename... Params>
   Cursor(Params&&... params)
@@ -173,30 +195,6 @@ public:
   }
 
 private:
-  // Helper class to cache column names for a query so that we don't have to recreate the V8
-  // strings for every row.
-  class CachedColumnNames {
-    // TODO(perf): Can we further cache the V8 object layout information for a row?
-  public:
-    // Get the cached names. ensureInitialized() must have been called previously.
-    kj::ArrayPtr<jsg::JsRef<jsg::JsString>> get() {
-      return KJ_REQUIRE_NONNULL(names);
-    }
-
-    void ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source);
-
-    JSG_MEMORY_INFO(CachedColumnNames) {
-      KJ_IF_SOME(list, names) {
-        for (const auto& name: list) {
-          tracker.trackField(nullptr, name);
-        }
-      }
-    }
-
-  private:
-    kj::Maybe<kj::Array<jsg::JsRef<jsg::JsString>>> names;
-  };
-
   struct State {
     // The bindings that were used to construct `query`. We have to keep these alive until the query
     // is done since it might contain pointers into strings and blobs.
