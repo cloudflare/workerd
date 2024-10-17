@@ -117,7 +117,7 @@ SqlStorage::Cursor::~Cursor() noexcept(false) {
   }
 }
 
-void SqlStorage::Cursor::CachedColumnNames::ensureInitialized(
+void SqlStorage::CachedColumnNames::ensureInitialized(
     jsg::Lock& js, SqliteDatabase::Query& source) {
   if (names == kj::none) {
     js.withinHandleScope([&] {
