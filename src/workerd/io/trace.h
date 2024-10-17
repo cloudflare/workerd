@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "trace-legacy.h"
+
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/memory.h>
@@ -27,306 +29,6 @@ namespace workerd {
 
 using kj::byte;
 using kj::uint;
-
-typedef rpc::Trace::Log::Level LogLevel;
-typedef rpc::Trace::ExecutionModel ExecutionModel;
-
-enum class PipelineLogLevel {
-  // WARNING: This must be kept in sync with PipelineDef::LogLevel (which is not in the OSS
-  //   release).
-  NONE,
-  FULL
-};
-
-struct Span;
-
-// TODO(someday): See if we can merge similar code concepts...  Trace fills a role similar to
-// MetricsCollector::Reporter::StageEvent, and Tracer fills a role similar to
-// MetricsCollector::Request.  Currently, the major differences are:
-//
-//   - MetricsCollector::Request uses its destructor to measure a IoContext's wall time, so
-//     it needs to live exactly as long as its IoContext.  Tracer currently needs to live as
-//     long as both the IoContext and those of any subrequests.
-//   - Due to the difference in lifetimes, results of each become available in a different order,
-//     and intermediate values can be freed at different times.
-//   - Request builds a vector of results, while Tracer builds a tree.
-
-// TODO(cleanup) - worth separating into immutable Trace vs. mutable TraceBuilder?
-
-// Collects trace information about the handling of a worker/pipeline fetch event.
-class Trace final: public kj::Refcounted {
-public:
-  explicit Trace(kj::Maybe<kj::String> stableId,
-      kj::Maybe<kj::String> scriptName,
-      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-      kj::Maybe<kj::String> dispatchNamespace,
-      kj::Maybe<kj::String> scriptId,
-      kj::Array<kj::String> scriptTags,
-      kj::Maybe<kj::String> entrypoint,
-      ExecutionModel executionModel);
-  Trace(rpc::Trace::Reader reader);
-  ~Trace() noexcept(false);
-  KJ_DISALLOW_COPY_AND_MOVE(Trace);
-
-  class FetchEventInfo {
-  public:
-    class Header;
-
-    explicit FetchEventInfo(
-        kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
-    FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
-
-    class Header {
-    public:
-      explicit Header(kj::String name, kj::String value);
-      Header(rpc::Trace::FetchEventInfo::Header::Reader reader);
-
-      kj::String name;
-      kj::String value;
-
-      void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder);
-
-      JSG_MEMORY_INFO(Header) {
-        tracker.trackField("name", name);
-        tracker.trackField("value", value);
-      }
-    };
-
-    kj::HttpMethod method;
-    kj::String url;
-    // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
-    kj::String cfJson;
-    kj::Array<Header> headers;
-
-    void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
-  };
-
-  class JsRpcEventInfo {
-  public:
-    explicit JsRpcEventInfo(kj::String methodName);
-    JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
-
-    kj::String methodName;
-
-    void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
-  };
-
-  class ScheduledEventInfo {
-  public:
-    explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
-    ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
-
-    double scheduledTime;
-    kj::String cron;
-
-    void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder);
-  };
-
-  class AlarmEventInfo {
-  public:
-    explicit AlarmEventInfo(kj::Date scheduledTime);
-    AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
-
-    kj::Date scheduledTime;
-
-    void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
-  };
-
-  class QueueEventInfo {
-  public:
-    explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
-    QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
-
-    kj::String queueName;
-    uint32_t batchSize;
-
-    void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
-  };
-
-  class EmailEventInfo {
-  public:
-    explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
-    EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
-
-    kj::String mailFrom;
-    kj::String rcptTo;
-    uint32_t rawSize;
-
-    void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
-  };
-
-  class TraceEventInfo {
-  public:
-    class TraceItem;
-
-    explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
-    TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
-
-    class TraceItem {
-    public:
-      explicit TraceItem(kj::Maybe<kj::String> scriptName);
-      TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
-
-      kj::Maybe<kj::String> scriptName;
-
-      void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder);
-    };
-
-    kj::Vector<TraceItem> traces;
-
-    void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
-  };
-
-  class HibernatableWebSocketEventInfo {
-  public:
-    struct Message {};
-    struct Close {
-      uint16_t code;
-      bool wasClean;
-    };
-    struct Error {};
-
-    using Type = kj::OneOf<Message, Close, Error>;
-
-    explicit HibernatableWebSocketEventInfo(Type type);
-    HibernatableWebSocketEventInfo(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
-
-    Type type;
-
-    void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder);
-    static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
-  };
-
-  class CustomEventInfo {
-  public:
-    explicit CustomEventInfo() {};
-    CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
-  };
-
-  class FetchResponseInfo {
-  public:
-    explicit FetchResponseInfo(uint16_t statusCode);
-    FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
-
-    uint16_t statusCode;
-
-    void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
-  };
-
-  class DiagnosticChannelEvent {
-  public:
-    explicit DiagnosticChannelEvent(
-        kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
-    DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader);
-    DiagnosticChannelEvent(DiagnosticChannelEvent&&) = default;
-    KJ_DISALLOW_COPY(DiagnosticChannelEvent);
-
-    kj::Date timestamp;
-    kj::String channel;
-    kj::Array<kj::byte> message;
-
-    void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder);
-  };
-
-  class Log {
-  public:
-    explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
-    Log(rpc::Trace::Log::Reader reader);
-    Log(Log&&) = default;
-    KJ_DISALLOW_COPY(Log);
-    ~Log() noexcept(false) = default;
-
-    // Only as accurate as Worker's Date.now(), for Spectre mitigation.
-    kj::Date timestamp;
-
-    LogLevel logLevel;
-    // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
-    kj::String message;
-
-    void copyTo(rpc::Trace::Log::Builder builder);
-  };
-
-  class Exception {
-  public:
-    explicit Exception(
-        kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
-    Exception(rpc::Trace::Exception::Reader reader);
-    Exception(Exception&&) = default;
-    KJ_DISALLOW_COPY(Exception);
-    ~Exception() noexcept(false) = default;
-
-    // Only as accurate as Worker's Date.now(), for Spectre mitigation.
-    kj::Date timestamp;
-
-    kj::String name;
-    kj::String message;
-
-    kj::Maybe<kj::String> stack;
-
-    void copyTo(rpc::Trace::Exception::Builder builder);
-  };
-
-  // Empty for toplevel worker.
-  kj::Maybe<kj::String> stableId;
-
-  // We treat the origin value as "unset".
-  kj::Date eventTimestamp = kj::UNIX_EPOCH;
-
-  typedef kj::OneOf<FetchEventInfo,
-      JsRpcEventInfo,
-      ScheduledEventInfo,
-      AlarmEventInfo,
-      QueueEventInfo,
-      EmailEventInfo,
-      TraceEventInfo,
-      HibernatableWebSocketEventInfo,
-      CustomEventInfo>
-      EventInfo;
-  kj::Maybe<EventInfo> eventInfo;
-  // TODO(someday): Support more event types.
-  // TODO(someday): Work out what sort of information we may want to convey about the parent
-  // trace, if any.
-
-  kj::Maybe<kj::String> scriptName;
-  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
-  kj::Maybe<kj::String> dispatchNamespace;
-  kj::Maybe<kj::String> scriptId;
-  kj::Array<kj::String> scriptTags;
-  kj::Maybe<kj::String> entrypoint;
-
-  kj::Vector<Log> logs;
-  // TODO(o11y): Convert this to actually store spans.
-  kj::Vector<Log> spans;
-  // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
-  kj::Vector<Exception> exceptions;
-
-  kj::Vector<DiagnosticChannelEvent> diagnosticChannelEvents;
-
-  ExecutionModel executionModel;
-  EventOutcome outcome = EventOutcome::UNKNOWN;
-
-  kj::Maybe<FetchResponseInfo> fetchResponseInfo;
-
-  kj::Duration cpuTime;
-  kj::Duration wallTime;
-
-  bool truncated = false;
-  bool exceededLogLimit = false;
-  bool exceededExceptionLimit = false;
-  bool exceededDiagnosticChannelEventLimit = false;
-  // Trace data is recorded outside of the JS heap.  To avoid DoS, we keep an estimate of trace
-  // data size, and we stop recording if too much is used.
-  size_t bytesUsed = 0;
-  size_t numSpans = 0;
-
-  // Copy content from this trace into `builder`.
-  void copyTo(rpc::Trace::Builder builder);
-
-  // Adds all content from `reader` to this `Trace`. (Typically this trace is empty before the
-  // call.)  Also applies filtering to the trace as if it were recorded with the given
-  // pipelineLogLevel.
-  void mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLevel);
-};
 
 // =======================================================================================
 
@@ -377,10 +79,9 @@ private:
   friend class WorkerTracer;
 };
 
-// Records a worker stage's trace information into a Trace object.  When all references to the
-// Tracer are released, its Trace is considered complete and ready for submission. If the Trace to
-// write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
-// via extractTrace.
+// Records a worker stage's trace information.  When all references to the Tracer are released,
+// its Trace is considered complete. If the Trace to write to isn't provided (that already exists
+// in a PipelineTracer), the trace must by extracted via extractTrace.
 class WorkerTracer final: public kj::Refcounted {
 public:
   explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
@@ -391,6 +92,16 @@ public:
     self->invalidate();
   }
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
+
+  // Sets info about the event that triggered the trace.  Must not be called more than once.
+  void setEventInfo(kj::Date timestamp, trace::EventInfo&&);
+
+  // Add metrics to the trace. Can be called more than once.
+  void addMetrics(trace::Metrics&& metrics);
+
+  // Sets info about the result of this trace. Can be called more than once, overriding the
+  // previous detail.
+  void setOutcomeInfo(trace::Outcome&& info);
 
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   // The isSpan parameter allows for logging spans, which will be emitted after regular logs. There
@@ -408,18 +119,9 @@ public:
   void addDiagnosticChannelEvent(
       kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
 
-  // Adds info about the event that triggered the trace.  Must not be called more than once.
-  void setEventInfo(kj::Date timestamp, Trace::EventInfo&&);
-
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
-  void setFetchResponseInfo(Trace::FetchResponseInfo&&);
-
-  void setOutcome(EventOutcome outcome);
-
-  void setCPUTime(kj::Duration cpuTime);
-
-  void setWallTime(kj::Duration wallTime);
+  void setFetchResponseInfo(trace::FetchResponseInfo&&);
 
   // Used only for a Trace in a process sandbox. Copies the content of this tracer's trace to the
   // builder.
@@ -471,42 +173,6 @@ inline kj::String truncateScriptId(kj::StringPtr id) {
 
 class SpanBuilder;
 class SpanObserver;
-
-struct Span {
-  // Represents a trace span. `Span` objects are delivered to `SpanObserver`s for recording. To
-  // create a `Span`, use a `SpanBuilder`.
-
-public:
-  using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
-  // TODO(someday): Support binary bytes, too.
-  using TagMap = kj::HashMap<kj::ConstString, TagValue>;
-  using Tag = TagMap::Entry;
-
-  struct Log {
-    kj::Date timestamp;
-    Tag tag;
-  };
-
-  kj::ConstString operationName;
-  kj::Date startTime;
-  kj::Date endTime;
-  TagMap tags;
-  kj::Vector<Log> logs;
-
-  // We set an arbitrary (-ish) cap on log messages for safety. If we drop logs because of this,
-  // we report how many in a final "dropped_logs" log.
-  //
-  // At the risk of being too clever, I chose a limit that is one below a power of two so that
-  // we'll typically have space for one last element available for the "dropped_logs" log without
-  // needing to grow the vector.
-  static constexpr auto MAX_LOGS = 1023;
-  uint droppedLogs = 0;
-
-  explicit Span(kj::ConstString operationName, kj::Date startTime)
-      : operationName(kj::mv(operationName)),
-        startTime(startTime),
-        endTime(startTime) {}
-};
 
 // An opaque token which can be used to create child spans of some parent. This is typically
 // passed down from a caller to a callee when the caller wants to allow the callee to create
