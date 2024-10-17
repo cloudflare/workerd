@@ -22,6 +22,7 @@
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2-admin.h>
 #include <workerd/api/r2.h>
@@ -111,6 +112,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
     EW_WEBGPU_ISOLATE_TYPES,
 #endif
+    EW_SETUP_EMSCRIPTEN_ISOLATE_TYPES,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -167,7 +169,20 @@ struct WorkerdApi::Impl final {
         jsgIsolate(
             v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
         memoryCacheProvider(memoryCacheProvider),
-        pythonConfig(pythonConfig) {}
+        pythonConfig(pythonConfig) {
+    // if (featuresParam.getPythonWorkers()) {
+    //   jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
+    //     js.withinHandleScope([&]() -> auto {
+    //       v8::Local<v8::Context> ctx = v8::Context::New(js.v8Isolate);
+    //       KJ_ASSERT(!ctx.IsEmpty(), "unable to enter invalid v8::Context");
+    //       v8::Context::Scope scope(ctx);
+    //       // Init emscripten syncronously, the python script will import setup-emscripten and
+    //       // call setEmscriptenModele
+    //       api::pyodide::initializeEmscriptenRuntime(lock);
+    //     });
+    //   });
+    // }
+  }
 
   static v8::Local<v8::String> compileTextGlobal(
       JsgWorkerdIsolate::Lock& lock, capnp::Text::Reader reader) {
