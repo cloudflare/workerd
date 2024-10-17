@@ -227,6 +227,14 @@ public:
   // by calling state.abort() or by throwing from a blockConcurrencyWhile() callback.
   kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::String bookmark);
 
+  // Wait until the database has been updated to the state represented by `bookmark`.
+  //
+  // `waitForBookmark` is useful synchronizing requests across replicas of the same database.  On
+  // primary databases, `waitForBookmark` will resolve immediately.  On replica databases,
+  // `waitForBookmark` will resolve when the replica has been updated to a point at or after
+  // `bookmark`.
+  kj::Promise<void> waitForBookmark(kj::String bookmark);
+
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
@@ -245,6 +253,7 @@ public:
     JSG_METHOD(getCurrentBookmark);
     JSG_METHOD(getBookmarkForTime);
     JSG_METHOD(onNextSessionRestoreBookmark);
+    JSG_METHOD(waitForBookmark);
 
     JSG_TS_OVERRIDE({
       get<T = unknown>(key: string, options?: DurableObjectGetOptions): Promise<T | undefined>;
