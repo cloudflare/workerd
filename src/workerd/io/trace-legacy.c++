@@ -372,11 +372,11 @@ void Trace::setFetchResponseInfo(trace::FetchResponseInfo&& info) {
 
 void Trace::addMetrics(trace::Metrics&& metrics) {
   for (auto& metric: metrics) {
-    if (metric.keyMatches(trace::Metric::Common::CPU_TIME)) {
+    if (metric.key == "cpuTime"_kj) {
       // The CPU_TIME metric will always be a int64_t converted from a kj::Duration
       // If it's not, we'll ignore it.
       cpuTime = static_cast<int64_t>(metric.value) * kj::MILLISECONDS;
-    } else if (metric.keyMatches(trace::Metric::Common::WALL_TIME)) {
+    } else if (metric.key == "wallTime"_kj) {
       // The WALL_TIME metric will always be a int64_t converted from a kj::Duration
       // If it's not, we'll ignore it.
       wallTime = static_cast<int64_t>(metric.value) * kj::MILLISECONDS;

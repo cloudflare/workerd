@@ -15,8 +15,7 @@ namespace workerd::trace {
 // Tag
 namespace {
 Tags getTagsFromReader(const capnp::List<rpc::Trace::Tag>::Reader& tags) {
-  kj::Vector<Tag> results;
-  results.reserve(tags.size());
+  kj::Vector<Tag> results(tags.size());
   for (auto tag: tags) {
     results.add(Tag(tag));
   }
@@ -48,40 +47,19 @@ Tag::TagValue getTagValue(const rpc::Trace::Tag::Reader& reader) {
   KJ_UNREACHABLE;
 }
 
-Tag::TagKey getTagKey(const rpc::Trace::Tag::Reader& reader) {
-  auto key = reader.getKey();
-  switch (key.which()) {
-    case rpc::Trace::Tag::Key::Which::TEXT: {
-      return kj::str(key.getText());
-    }
-    case rpc::Trace::Tag::Key::Which::ID: {
-      return key.getId();
-    }
-  }
-  KJ_UNREACHABLE;
-}
 Tags maybeGetTags(const auto& reader) {
   if (!reader.hasTags()) return nullptr;
   return getTagsFromReader(reader.getTags());
 }
 }  // namespace
 
-Tag::Tag(TagKey key, TagValue value): key(kj::mv(key)), value(kj::mv(value)) {}
+Tag::Tag(kj::String key, TagValue value): key(kj::mv(key)), value(kj::mv(value)) {}
 
-Tag::Tag(rpc::Trace::Tag::Reader reader): key(getTagKey(reader)), value(getTagValue(reader)) {}
+Tag::Tag(rpc::Trace::Tag::Reader reader)
+    : key(kj::str(reader.getKey())),
+      value(getTagValue(reader)) {}
 
 Tag Tag::clone() const {
-  TagKey newKey = ([&]() -> TagKey {
-    KJ_SWITCH_ONEOF(key) {
-      KJ_CASE_ONEOF(id, uint32_t) {
-        return id;
-      }
-      KJ_CASE_ONEOF(name, kj::String) {
-        return kj::str(name);
-      }
-    }
-    KJ_UNREACHABLE;
-  })();
   TagValue newValue = ([&]() -> TagValue {
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(b, bool) {
@@ -105,18 +83,11 @@ Tag Tag::clone() const {
     }
     KJ_UNREACHABLE;
   })();
-  return Tag(kj::mv(newKey), kj::mv(newValue));
+  return Tag(kj::str(key), kj::mv(newValue));
 }
 
 void Tag::copyTo(rpc::Trace::Tag::Builder builder) const {
-  KJ_SWITCH_ONEOF(key) {
-    KJ_CASE_ONEOF(id, uint32_t) {
-      builder.getKey().setId(id);
-    }
-    KJ_CASE_ONEOF(name, kj::String) {
-      builder.getKey().setText(name);
-    }
-  }
+  builder.setKey(key);
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(b, bool) {
       builder.getValue().setBool(b);
@@ -137,22 +108,6 @@ void Tag::copyTo(rpc::Trace::Tag::Builder builder) const {
       builder.getValue().setData(a);
     }
   }
-}
-
-bool Tag::keyMatches(kj::OneOf<kj::StringPtr, uint32_t> check) {
-  KJ_SWITCH_ONEOF(check) {
-    KJ_CASE_ONEOF(c, kj::StringPtr) {
-      KJ_IF_SOME(k, key.tryGet<kj::String>()) {
-        return k == c;
-      }
-    }
-    KJ_CASE_ONEOF(u, uint32_t) {
-      KJ_IF_SOME(k, key.tryGet<uint32_t>()) {
-        return k == u;
-      }
-    }
-  }
-  return false;
 }
 
 // ======================================================================================
@@ -1141,73 +1096,24 @@ Mark Mark::clone() const {
 
 // ======================================================================================
 // Metric
-namespace {
-Metric::Key getMetricKey(const rpc::Trace::Metric::Reader& reader) {
-  auto key = reader.getKey();
-  switch (key.which()) {
-    case rpc::Trace::Metric::Key::Which::TEXT: {
-      return kj::str(key.getText());
-    }
-    case rpc::Trace::Metric::Key::Which::ID: {
-      return key.getId();
-    }
-  }
-  KJ_UNREACHABLE;
-}
-}  // namespace
-
-Metric::Metric(Type type, Key key, double value)
+Metric::Metric(Type type, kj::String key, double value)
     : type(type),
       key(kj::mv(key)),
       value(kj::mv(value)) {}
 
 Metric::Metric(rpc::Trace::Metric::Reader reader)
     : type(reader.getType()),
-      key(getMetricKey(reader)),
+      key(kj::str(reader.getKey())),
       value(reader.getValue()) {}
 
 void Metric::copyTo(rpc::Trace::Metric::Builder builder) const {
   builder.setType(type);
-  KJ_SWITCH_ONEOF(key) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      builder.getKey().setText(str);
-    }
-    KJ_CASE_ONEOF(id, uint32_t) {
-      builder.getKey().setId(id);
-    }
-  }
+  builder.setKey(key);
   builder.setValue(value);
 }
 
 Metric Metric::clone() const {
-  auto newKey = ([&]() -> Key {
-    KJ_SWITCH_ONEOF(key) {
-      KJ_CASE_ONEOF(str, kj::String) {
-        return kj::str(str);
-      }
-      KJ_CASE_ONEOF(id, uint32_t) {
-        return id;
-      }
-    }
-    KJ_UNREACHABLE;
-  })();
-  return Metric(type, kj::mv(newKey), value);
-}
-
-bool Metric::keyMatches(kj::OneOf<kj::StringPtr, uint32_t> check) {
-  KJ_SWITCH_ONEOF(check) {
-    KJ_CASE_ONEOF(c, kj::StringPtr) {
-      KJ_IF_SOME(k, key.tryGet<kj::String>()) {
-        return k == c;
-      }
-    }
-    KJ_CASE_ONEOF(u, uint32_t) {
-      KJ_IF_SOME(k, key.tryGet<uint32_t>()) {
-        return k == u;
-      }
-    }
-  }
-  return false;
+  return Metric(type, kj::str(key), value);
 }
 
 // ======================================================================================

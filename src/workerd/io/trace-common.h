@@ -53,22 +53,12 @@ concept IsEnum = std::is_enum<T>::value;
 // about the value without knowledge of the specific key.
 struct Tag final {
   using TagValue = kj::OneOf<bool, int64_t, uint64_t, double, kj::String, kj::Array<kj::byte>>;
-  using TagKey = kj::OneOf<kj::String, uint32_t>;
-  TagKey key;
+  kj::String key;
   TagValue value;
-  explicit Tag(TagKey key, TagValue value);
-
-  template <IsEnum Key>
-  explicit Tag(Key key, TagValue value): Tag(static_cast<uint32_t>(key), kj::mv(value)) {}
+  explicit Tag(kj::String key, TagValue value);
+  explicit Tag(kj::StringPtr key, TagValue value): Tag(kj::str(key), kj::mv(value)) {}
 
   Tag(rpc::Trace::Tag::Reader reader);
-
-  bool keyMatches(kj::OneOf<kj::StringPtr, uint32_t> key);
-
-  template <IsEnum Key>
-  inline bool keyMatches(Key key) {
-    return keyMatches(static_cast<uint32_t>(key));
-  }
 
   void copyTo(rpc::Trace::Tag::Builder builder) const;
   Tag clone() const;
@@ -531,45 +521,28 @@ struct Mark final {
 // structure is left intentionally flexible to allow for a wide range of possible
 // metrics to be emitted. This is a new feature in the streaming trace model.
 struct Metric final {
-  using Key = kj::OneOf<kj::String, uint32_t>;
   using Type = rpc::Trace::Metric::Type;
 
-  enum class Common {
-    CPU_TIME,
-    WALL_TIME,
-  };
-
-  explicit Metric(Type type, Key key, double value);
-
-  template <IsEnum K>
-  explicit Metric(Type type, K key, double value)
-      : Metric(type, static_cast<uint32_t>(key), value) {}
-
+  explicit Metric(Type type, kj::String key, double value);
+  explicit Metric(Type type, kj::StringPtr key, double value): Metric(type, kj::str(key), value) {}
   Metric(rpc::Trace::Metric::Reader reader);
   Metric(Metric&&) = default;
   Metric& operator=(Metric&&) = default;
   KJ_DISALLOW_COPY(Metric);
 
   Type type;
-  Key key;
+  kj::String key;
   double value;
-
-  bool keyMatches(kj::OneOf<kj::StringPtr, uint32_t> key);
-
-  template <IsEnum Key>
-  inline bool keyMatches(Key key) {
-    return keyMatches(static_cast<uint32_t>(key));
-  }
 
   void copyTo(rpc::Trace::Metric::Builder builder) const;
   Metric clone() const;
 
   static inline Metric forWallTime(kj::Duration duration) {
-    return Metric(Type::COUNTER, Common::WALL_TIME, duration / kj::MILLISECONDS);
+    return Metric(Type::COUNTER, kj::str("wallTime"), duration / kj::MILLISECONDS);
   }
 
   static Metric forCpuTime(kj::Duration duration) {
-    return Metric(Type::COUNTER, Common::CPU_TIME, duration / kj::MILLISECONDS);
+    return Metric(Type::COUNTER, kj::str("cpuTime"), duration / kj::MILLISECONDS);
   }
 };
 using Metrics = kj::Array<Metric>;

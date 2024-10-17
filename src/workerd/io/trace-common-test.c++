@@ -9,12 +9,10 @@ namespace {
 
 KJ_TEST("Tags work") {
   {
-    trace::Tag tag(kj::str("a"), static_cast<uint64_t>(1));
-    auto& key = KJ_ASSERT_NONNULL(tag.key.tryGet<kj::String>());
+    trace::Tag tag("a", static_cast<uint64_t>(1));
     auto& value = KJ_ASSERT_NONNULL(tag.value.tryGet<uint64_t>());
-    KJ_EXPECT(key == "a");
+    KJ_EXPECT(tag.key == "a");
     KJ_EXPECT(value == static_cast<uint64_t>(1));
-    KJ_EXPECT(tag.keyMatches("a"_kj));
 
     capnp::MallocMessageBuilder message;
     auto builder = message.initRoot<rpc::Trace::Tag>();
@@ -23,27 +21,17 @@ KJ_TEST("Tags work") {
     // Round trip serialization works
     auto reader = builder.asReader();
     trace::Tag tag2(reader);
-    auto& key2 = KJ_ASSERT_NONNULL(tag.key.tryGet<kj::String>());
     auto& value2 = KJ_ASSERT_NONNULL(tag.value.tryGet<uint64_t>());
-    KJ_EXPECT(key == key2);
+    KJ_EXPECT(tag.key == tag2.key);
     KJ_EXPECT(value == value2);
 
     auto tag3 = tag.clone();
-    KJ_EXPECT(tag3.keyMatches("a"_kj));
-  }
-
-  {
-    // The key can be a uint32_t
-    uint32_t a = 1;
-    trace::Tag tag(a, 2.0);
-    auto key = KJ_ASSERT_NONNULL(tag.key.tryGet<uint32_t>());
-    KJ_EXPECT(key == a);
-    KJ_EXPECT(tag.keyMatches(a));
+    KJ_EXPECT(tag.key == tag3.key);
   }
 }
 
 KJ_TEST("Onset works") {
-  auto tags = kj::arr(trace::Tag(kj::str("a"), static_cast<uint64_t>(1)));
+  auto tags = kj::arr(trace::Tag("a", static_cast<uint64_t>(1)));
   trace::Onset onset(kj::str("bar"), kj::none, kj::str("baz"), kj::str("qux"),
       kj::arr(kj::str("quux")), kj::str("corge"), ExecutionModel::STATELESS, kj::mv(tags));
 
@@ -64,7 +52,7 @@ KJ_TEST("Onset works") {
   KJ_EXPECT(onset2.scriptTags[0] == "quux"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset2.entrypoint) == "corge"_kj);
   KJ_EXPECT(onset2.tags.size() == 1);
-  KJ_EXPECT(onset2.tags[0].keyMatches("a"_kj));
+  KJ_EXPECT(onset2.tags[0].key == "a"_kj);
 
   auto& onset2Info = KJ_ASSERT_NONNULL(onset2.info);
   auto& onset2Fetch = KJ_ASSERT_NONNULL(onset2Info.tryGet<trace::FetchEventInfo>());
@@ -83,7 +71,7 @@ KJ_TEST("Onset works") {
   KJ_EXPECT(onset3.scriptTags[0] == "quux"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset3.entrypoint) == "corge"_kj);
   KJ_EXPECT(onset3.tags.size() == 1);
-  KJ_EXPECT(onset3.tags[0].keyMatches("a"_kj));
+  KJ_EXPECT(onset3.tags[0].key == "a"_kj);
 
   auto& onset3Info = KJ_ASSERT_NONNULL(onset3.info);
   auto& onset3Fetch = KJ_ASSERT_NONNULL(onset3Info.tryGet<trace::FetchEventInfo>());
@@ -467,14 +455,10 @@ KJ_TEST("Mark works") {
 }
 
 KJ_TEST("Metric works") {
-  trace::Metric metric(trace::Metric::Type::COUNTER, kj::str("foo"), 1.0);
+  trace::Metric metric(trace::Metric::Type::COUNTER, "foo", 1.0);
   KJ_EXPECT(metric.type == trace::Metric::Type::COUNTER);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(metric.key.tryGet<kj::String>()) == "foo"_kj);
+  KJ_EXPECT(metric.key == "foo"_kj);
   KJ_EXPECT(metric.value == 1.0);
-  KJ_EXPECT(metric.keyMatches("foo"_kj));
-
-  enum class Foo { A };
-  KJ_EXPECT(!metric.keyMatches(Foo::A));
 
   capnp::MallocMessageBuilder message;
   auto builder = message.initRoot<rpc::Trace::Metric>();
@@ -483,12 +467,12 @@ KJ_TEST("Metric works") {
   auto reader = builder.asReader();
   trace::Metric metric2(reader);
   KJ_EXPECT(metric2.type == trace::Metric::Type::COUNTER);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(metric2.key.tryGet<kj::String>()) == "foo"_kj);
+  KJ_EXPECT(metric2.key == metric.key);
   KJ_EXPECT(metric2.value == 1.0);
 
   auto metric3 = metric.clone();
   KJ_EXPECT(metric3.type == trace::Metric::Type::COUNTER);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(metric3.key.tryGet<kj::String>()) == "foo"_kj);
+  KJ_EXPECT(metric3.key == metric.key);
   KJ_EXPECT(metric3.value == 1.0);
 }
 
