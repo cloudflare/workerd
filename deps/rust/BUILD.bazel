@@ -73,15 +73,6 @@ crates_vendor(
     ],
 )
 
-# define the path to the lolhtml headers, this is clunky but allows us to avoid cloning the
-# repository twice.
-alias(
-    name = "lol_html_api",
-    actual = "@crates_vendor__lol_html-1.2.1//:c-api/include/lol_html.h",
-    tags = ["manual"],
-    visibility = ["//visibility:public"],
-)
-
 # Windows build fixes due to rust libraries missing symbols:
 # https://github.com/bazelbuild/rules_rust/blob/144d34fd/ffi/cc/global_allocator_library/BUILD.bazel#L3
 # `empty_lib` static library will bring all the symbols in.

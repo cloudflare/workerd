@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "v2.9.1"
-URL = "https://github.com/bazel-contrib/bazel-lib/releases/download/v2.9.1/bazel-lib-v2.9.1.tar.gz"
-STRIP_PREFIX = "bazel-lib-2.9.1"
-SHA256 = "f93d386d8d0b0149031175e81df42a488be4267c3ca2249ba5321c23c60bc1f0"
+TAG_NAME = "v2.9.2"
+URL = "https://github.com/bazel-contrib/bazel-lib/releases/download/v2.9.2/bazel-lib-v2.9.2.tar.gz"
+STRIP_PREFIX = "bazel-lib-2.9.2"
+SHA256 = "0e31778f1fd574d2c05d238bfc4c785fa4b7e50a5ef38b506e01cfd8ec2fccb3"
 TYPE = "tgz"
 
 def dep_aspect_bazel_lib():

@@ -814,7 +814,6 @@ public:
   }
 
   void assertCanSetAlarm();
-  kj::Promise<void> makeAlarmTaskForPreview(kj::Date scheduledTime);
 
   // If there is a scheduled or running alarm with the given `scheduledTime`, return a promise to
   // its result. This allows use to de-dupe multiple requests to a single `IoContext::run()`.
