@@ -36,8 +36,10 @@ def acquire_js_buffer(pybuffer):
 
 def request_to_scope(req, env, ws=False):
     from js import URL
-
-    headers = [tuple(x) for x in req.headers]
+    # @app.get("/example")
+    # async def example(request: Request):
+    #     request.headers.get("content-type") # this will error if header is not "bytes" as in ASGI spec.
+    headers = [(k.lower().encode(), v.encode()) for k, v in req.headers]
     url = URL.new(req.url)
     assert url.protocol[-1] == ":"
     scheme = url.protocol[:-1]
@@ -126,7 +128,8 @@ async def process_request(app, req, env):
         nonlocal headers
         if got["type"] == "http.response.start":
             status = got["status"]
-            headers = got["headers"]
+            # Like above, we need to convert byte-pairs into string explicitly.
+            headers = [(k.decode(), v.decode()) for k, v in got["headers"]]
         if got["type"] == "http.response.body":
             # intentionally leak body to avoid a copy
             #
