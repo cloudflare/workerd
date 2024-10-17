@@ -306,21 +306,6 @@ struct Trace @0x8e8d911203762d34 {
     # into the trace. A metric can be used, for instance, to communicate the current
     # isolate memory usage at a given point in time.
 
-    key :union {
-      # The key field can be either arbitrary text or a numeric ID. The ID field is used
-      # to identify commonly used metrics defined and injected by the runtime. There is no
-      # enum definition for these here as it is expected the actual definitions will
-      # come from the internal project and not workerd.
-      # Metrics with the same name can appear multiple times, in which case the calculated
-      # logical value is the concatenation of all values into a collection. So, for
-      # instance, if a metric with name "foo" appears with value 1 and then again with
-      # value 2, the logical value of the "foo" metric is [1, 2]. The ordering of such
-      # metrics is significant.
-      # Multiple appearances of the same metric with the same key can be of different
-      # types and units.
-      text @0 :Text;
-      id @1 :UInt32;
-    }
     enum Type {
       counter @0;
       # A counter metric, for instance, the number of times a given event has occurred,
@@ -332,9 +317,10 @@ struct Trace @0x8e8d911203762d34 {
       # A gauge metric, for instance, the current memory heap size, etc. Gauges represent
       # a snapshot of a value at a given point in time and therefore may increase or decrease.
     }
-    type @2 :Type;
-    value @3 :Float64;
-    tags @4 :List(Tag);
+
+    type @0 :Type;
+    key @1 :Text;
+    value @2 :Float64;
   }
 
   struct Dropped {
@@ -348,26 +334,14 @@ struct Trace @0x8e8d911203762d34 {
   struct Tag {
     # A Tag is an additional piece of information that can added to each event in a trace.
 
-    key :union {
-      # The key field can be either arbitrary text or a numeric ID. The ID field is used
-      # to identify commonly used tags defined and injected by the runtime. There is no
-      # enum definition for these here as it is expected the actual definitions will
-      # come from the internal project and not workerd.
-      # Tags with the same key can appear multiple times, in which case the calculated
-      # logical value is the concatenation of all values into a collection. So, for
-      # instance, if a tag with key "foo" appears with value "bar" and then again with
-      # value "baz", the logical value of the "foo" tag is ["bar", "baz"]. The ordering
-      # of such tags is significant.
-      text @0 :Text;
-      id @1 :UInt32;
-    }
+    key @0 :Text;
     value :union {
-      bool @2 :Bool;
-      int64 @3 :Int64;
-      uint64 @4 :UInt64;
-      float64 @5 :Float64;
-      text @6 :Text;
-      data @7 :Data;
+      bool @1 :Bool;
+      int64 @2 :Int64;
+      uint64 @3 :UInt64;
+      float64 @4 :Float64;
+      text @5 :Text;
+      data @6 :Data;
     }
   }
 
