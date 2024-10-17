@@ -114,6 +114,45 @@ class VectorizeIndexImpl implements Vectorize {
     }
   }
 
+  public async queryById(
+    vectorId: string,
+    options?: VectorizeQueryOptions
+  ): Promise<VectorizeMatches> {
+    if (this.indexVersion === 'v1') {
+      throw new Error(`QueryById operation is not supported for v1 indexes.`);
+    } else {
+      if (options?.returnMetadata) {
+        if (
+          typeof options.returnMetadata !== 'boolean' &&
+          !isVectorizeMetadataRetrievalLevel(options.returnMetadata)
+        ) {
+          throw new Error(
+            `Invalid returnMetadata option. Expected: true, false, "none", "indexed" or "all"; got: ${options.returnMetadata}`
+          );
+        }
+
+        if (typeof options.returnMetadata === 'boolean') {
+          // Allow boolean returnMetadata for backward compatibility. true converts to 'all' and false converts to 'none'
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          options.returnMetadata = options.returnMetadata ? 'all' : 'none';
+        }
+      }
+      const res = await this._send(Operation.VECTOR_QUERY, `query`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...options,
+          vectorId,
+        }),
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+      });
+
+      return await toJson<VectorizeMatches>(res);
+    }
+  }
+
   public async insert(
     vectors: VectorizeVector[]
   ): Promise<VectorizeAsyncMutation> {
