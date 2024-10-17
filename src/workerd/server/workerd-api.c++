@@ -22,6 +22,7 @@
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2-admin.h>
 #include <workerd/api/r2.h>
@@ -536,11 +537,24 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     if (hasPythonModules(confModules)) {
       KJ_REQUIRE(featureFlags.getPythonWorkers(),
           "The python_workers compatibility flag is required to use Python.");
-      // Inject Pyodide bundle
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
       auto version = getPythonBundleName(pythonRelease);
       auto bundle = KJ_ASSERT_NONNULL(
           fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+      // Inject SetupEmscripten module
+      {
+        auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
+        auto context = lock.newContext<api::ServiceWorkerGlobalScope>({}, lock.v8Isolate);
+        v8::Context::Scope scope(context.getHandle(lock));
+        // Init emscripten synchronously, the python script will import setup-emscripten and
+        // call setEmscriptenModele
+        auto emscriptenRuntime = api::pyodide::EmscriptenRuntime::initialize(lock, true, bundle);
+        modules->addBuiltinModule("internal:setup-emscripten",
+            jsg::alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
+            workerd::jsg::ModuleRegistry::Type::INTERNAL);
+      }
+
+      // Inject Pyodide bundle
       modules->addBuiltinBundle(bundle, kj::none);
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
       {
