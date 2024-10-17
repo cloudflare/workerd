@@ -20,49 +20,8 @@ import {
 } from 'pyodide-internal:topLevelEntropy/lib';
 import { default as SetupEmscripten } from 'internal:setup-emscripten';
 
-// import { default as UnsafeEval } from 'internal:unsafe-eval';
+import { default as UnsafeEval } from 'internal:unsafe-eval';
 
-// /**
-//  * This file is a simplified version of the Pyodide loader:
-//  * https://github.com/pyodide/pyodide/blob/main/src/js/pyodide.ts
-//  *
-//  * In particular, it drops the package lock, which disables
-//  * `pyodide.loadPackage`. In trade we add memory snapshots here.
-//  */
-
-// /**
-//  * _createPyodideModule and pyodideWasmModule together are produced by the
-//  * Emscripten linker
-//  */
-// import pyodideWasmModule from 'pyodide-internal:generated/pyodide.asm.wasm';
-
-// /**
-//  * The Python and Pyodide stdlib zipped together. The zip format is convenient
-//  * because Python has a "ziploader" that allows one to import directly from a
-//  * zip file.
-//  *
-//  * The ziploader solves bootstrapping problems around unpacking: Python comes
-//  * with a bunch of C libs to unpack various archive formats, but they need stuff
-//  * in this zip file to initialize their runtime state.
-//  */
-// import pythonStdlib from 'pyodide-internal:generated/python_stdlib.zip';
-import {
-  instantiateEmscriptenModule,
-  setUnsafeEval,
-  setGetRandomValues,
-} from 'pyodide-internal:generated/emscriptenSetup';
-
-// We can't import UnsafeEval directly here because it isn't available when setting up Python pool.
-// Thus, we inject it from outside via this function.
-let UnsafeEval: typeof UnsafeEvalType;
-function setUnsafeEval(mod: typeof UnsafeEvalType) {
-  UnsafeEval = mod;
-}
-
-let getRandomValuesInner: typeof getRandomValuesType;
-function setGetRandomValues(func: typeof getRandomValuesType) {
-  getRandomValuesInner = func;
-}
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
  * APIs, we call this function. If `MEMORY` is defined, then we will have passed
@@ -95,13 +54,13 @@ export async function loadPyodide(
   lockfile: PackageLock,
   indexURL: string
 ): Promise<Pyodide> {
-  const Module = await SetupEmscripten.getModule();
+  const Module = SetupEmscripten.getModule();
   if (isWorkerd) {
     Module.API.config.indexURL = indexURL;
     Module.API.config.resolveLockFilePromise!(lockfile);
   }
-  setUnsafeEval(UnsafeEval);
-  setGetRandomValues(getRandomValues);
+  Module.setUnsafeEval(UnsafeEval);
+  Module.setGetRandomValues(getRandomValues);
   await enterJaegerSpan('prepare_wasm_linear_memory', () =>
     prepareWasmLinearMemory(Module)
   );

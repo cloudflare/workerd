@@ -14,13 +14,14 @@ import {
 import {
   IS_TRACING,
   IS_WORKERD,
+  LOCKFILE,
   MAIN_MODULE_NAME,
+  WORKERD_INDEX_URL,
 } from 'pyodide-internal:metadata';
 import { reportError } from 'pyodide-internal:util';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
 import { loadPackages } from 'pyodide-internal:loadPackage';
-import type { default as UnsafeEvalType } from 'internal:unsafe-eval';
 
 function pyimportMainModule(pyodide: Pyodide): PyModule {
   if (!MAIN_MODULE_NAME.endsWith('.py')) {

@@ -1,5 +1,5 @@
 declare namespace SetupEmscripten {
-  const getModule: () => Promise<Module>;
+  const getModule: () => Module;
 }
 
 export default SetupEmscripten;
