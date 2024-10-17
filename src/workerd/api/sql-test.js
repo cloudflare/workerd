@@ -294,14 +294,12 @@ async function test(state) {
   assert.equal(resultPrepared.length, 1);
   assert.equal(resultPrepared[0]['789'], 789);
 
-  // Running the same query twice invalidates the previous cursor.
+  // Running the same query twice, overlapping, works just fine.
   let result1 = prepared();
   let result2 = prepared();
+  // Iterate result2 before result1.
   assert.equal([...result2][0]['789'], 789);
-  assert.throws(
-    () => [...result1],
-    'SQL cursor was closed because the same statement was executed again.'
-  );
+  assert.equal([...result1][0]['789'], 789);
 
   // That said if a cursor was already done before the statement was re-run, it's not considered
   // canceled.
@@ -331,9 +329,7 @@ async function test(state) {
   }
 
   // Prepared statement with multiple statements
-  assert.throws(() => {
-    sql.prepare('SELECT 1; SELECT 2;');
-  }, /A prepared SQL statement must contain only one statement./);
+  assert.deepEqual([...sql.prepare('SELECT 1; SELECT 2;')()], [{ 2: 2 }]);
 
   // Accessing a hidden _cf_ table
   assert.throws(

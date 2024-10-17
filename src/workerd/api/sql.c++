@@ -15,9 +15,9 @@ SqlStorage::SqlStorage(jsg::Ref<DurableObjectStorage> storage): storage(kj::mv(s
 SqlStorage::~SqlStorage() {}
 
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
-    jsg::Lock& js, kj::String querySql, jsg::Arguments<BindingValue> bindings) {
+    jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
   SqliteDatabase::Regulator& regulator = *this;
-  return jsg::alloc<Cursor>(getDb(js), regulator, querySql, kj::mv(bindings));
+  return jsg::alloc<Cursor>(getDb(js), regulator, js.toString(querySql), kj::mv(bindings));
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
@@ -27,8 +27,8 @@ SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) 
       kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }
 
-jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, kj::String query) {
-  return jsg::alloc<Statement>(getDb(js).prepare(*this, query));
+jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString query) {
+  return jsg::alloc<Statement>(js, JSG_THIS, query);
 }
 
 double SqlStorage::getDatabaseSize(jsg::Lock& js) {
@@ -98,12 +98,6 @@ jsg::JsArray SqlStorage::wrapSqlRowRaw(jsg::Lock& js, kj::Array<SqlValue> row) {
     return v8::Array::New(js.v8Isolate, values.data(), values.size());
   }));
 }
-
-SqlStorage::Cursor::State::State(kj::RefcountedWrapper<SqliteDatabase::Statement>& statement,
-    kj::Array<BindingValue> bindingsParam)
-    : dependency(statement.addWrappedRef()),
-      bindings(kj::mv(bindingsParam)),
-      query(statement.getWrapped().run(mapBindings(bindings).asPtr())) {}
 
 SqlStorage::Cursor::State::State(SqliteDatabase& db,
     SqliteDatabase::Regulator& regulator,
@@ -320,10 +314,6 @@ auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func
   return results.finish();
 }
 
-SqlStorage::Statement::Statement(SqliteDatabase::Statement&& statement)
-    : statement(IoContext::current().addObject(
-          kj::refcountedWrapper<SqliteDatabase::Statement>(kj::mv(statement)))) {}
-
 kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings(
     kj::ArrayPtr<BindingValue> values) {
   return KJ_MAP(value, values) -> SqliteDatabase::Query::ValuePtr {
@@ -346,32 +336,9 @@ kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings
   };
 }
 
-jsg::Ref<SqlStorage::Cursor> SqlStorage::Statement::run(jsg::Arguments<BindingValue> bindings) {
-  auto& statementRef = *statement;  // validate we're in the right IoContext
-
-  KJ_IF_SOME(c, currentCursor) {
-    // Invalidate previous cursor if it's still running. We have to do this because SQLite only
-    // allows one execution of a statement at a time.
-    //
-    // If this is a problem, we could consider a scheme where we dynamically instantiate copies of
-    // the statement as needed. However, that risks wasting memory if the app commonly leaves
-    // cursors open and the GC doesn't run proactively enough.
-    KJ_IF_SOME(s, c.state) {
-      c.canceled = !s->query.isDone();
-      c.state = kj::none;
-    }
-    c.selfRef = kj::none;
-    c.statement = kj::none;
-    currentCursor = kj::none;
-  }
-
-  auto result = jsg::alloc<Cursor>(cachedColumnNames, statementRef, kj::mv(bindings));
-  result->statement = JSG_THIS;
-
-  result->selfRef = currentCursor;
-  currentCursor = *result;
-
-  return result;
+jsg::Ref<SqlStorage::Cursor> SqlStorage::Statement::run(
+    jsg::Lock& js, jsg::Arguments<BindingValue> bindings) {
+  return sqlStorage->exec(js, jsg::JsString(query.getHandle(js)), kj::mv(bindings));
 }
 
 void SqlStorage::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
