@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "trace-streaming.h"
 
+#include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
 
 namespace workerd {
@@ -50,11 +51,11 @@ kj::Own<StreamingTrace::IdFactory> StreamingTrace::IdFactory::newUuidIdFactory()
   return kj::Own<UuidIdFactory>(&uuidIdFactory, kj::NullDisposer::instance);
 }
 
-kj::Own<const StreamingTrace::IdFactory::Id> StreamingTrace::IdFactory::newIdFromString(
+kj::Own<StreamingTrace::IdFactory::Id> StreamingTrace::IdFactory::newIdFromString(
     kj::StringPtr str) {
   // This is cheating a bit. We're not actually creating a UUID here but the UuidId class
   // is really just a wrapper around a string so we can safely use it here.
-  return kj::heap<const UuidId>(kj::str(str));
+  return kj::heap<UuidId>(kj::str(str));
 }
 
 // ======================================================================================
@@ -590,6 +591,58 @@ StreamEvent StreamEvent::clone() const {
   })();
 
   return StreamEvent(kj::str(id), kj::mv(maybeNewSpan), timestampNs, sequence, kj::mv(newEvent));
+}
+
+jsg::JsObject StreamEvent::toObject(jsg::Lock& js, trace::NameProvider nameProvider) const {
+  auto obj = js.obj();
+  obj.set(js, "id", js.str(id));
+
+  auto spanObj = js.obj();
+  spanObj.set(js, "id", js.num(span.id));
+  spanObj.set(js, "parent", js.num(span.parent));
+  obj.set(js, "span", spanObj);
+  obj.set(js, "timestampNs", js.date(timestampNs));
+  obj.set(js, "sequence", js.num(sequence));
+
+  KJ_SWITCH_ONEOF(event) {
+    KJ_CASE_ONEOF(onset, trace::Onset) {
+      obj.set(js, "event", onset.toObject(js, nameProvider));
+    }
+    KJ_CASE_ONEOF(outcome, trace::Outcome) {
+      obj.set(js, "event", outcome.toObject(js, nameProvider));
+    }
+    KJ_CASE_ONEOF(dropped, trace::Dropped) {
+      obj.set(js, "event", dropped.toObject(js));
+    }
+    KJ_CASE_ONEOF(span, trace::SpanClose) {
+      obj.set(js, "event", span.toObject(js, nameProvider));
+    }
+    KJ_CASE_ONEOF(log, trace::LogV2) {
+      obj.set(js, "event", log.toObject(js, nameProvider));
+    }
+    KJ_CASE_ONEOF(exception, trace::Exception) {
+      obj.set(js, "event", exception.toObject(js, nameProvider));
+    }
+    KJ_CASE_ONEOF(diagnosticChannelEvent, trace::DiagnosticChannelEvent) {
+      obj.set(js, "event", diagnosticChannelEvent.toObject(js));
+    }
+    KJ_CASE_ONEOF(mark, trace::Mark) {
+      obj.set(js, "event", mark.toObject(js));
+    }
+    KJ_CASE_ONEOF(metrics, trace::Metrics) {
+      obj.set(js, "event", trace::Metric::toObject(js, metrics, nameProvider));
+    }
+    KJ_CASE_ONEOF(subrequest, trace::Subrequest) {
+      obj.set(js, "event", subrequest.toObject(js, nameProvider));
+    }
+    KJ_CASE_ONEOF(subrequestOutcome, trace::SubrequestOutcome) {
+      obj.set(js, "event", subrequestOutcome.toObject(js, nameProvider));
+    }
+    KJ_CASE_ONEOF(tags, trace::Tags) {
+      obj.set(js, "event", trace::Tag::toObject(js, tags, nameProvider));
+    }
+  }
+  return obj;
 }
 
 }  // namespace workerd

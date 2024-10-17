@@ -162,6 +162,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":worker-interface_capnp",
+        "//src/workerd/jsg",
         "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util",
         "//src/workerd/util:own-util",

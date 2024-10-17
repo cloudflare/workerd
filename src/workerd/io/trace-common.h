@@ -17,6 +17,10 @@ enum class HttpMethod;
 }  // namespace kj
 
 namespace workerd {
+namespace jsg {
+class Lock;
+class JsObject;
+}  // namespace jsg
 
 // trace-commmon.h defines the common data structures used by both the legacy and streaming trace
 // models. These are primarily structs adapting the capnp schema definitions of the types.
@@ -31,10 +35,15 @@ enum class PipelineLogLevel {
   FULL
 };
 
-// A legacy in-memory accumulated Trace
 class Trace;
 
 namespace trace {
+
+enum class NameProviderContext {
+  TAG,
+  METRIC,
+};
+using NameProvider = kj::FunctionParam<kj::Maybe<kj::StringPtr>(uint32_t, NameProviderContext)>;
 
 template <typename T>
 concept IsEnum = std::is_enum<T>::value;
@@ -72,6 +81,16 @@ struct Tag final {
 
   void copyTo(rpc::Trace::Tag::Builder builder) const;
   Tag clone() const;
+
+  enum class ToObjectOptions {
+    WRAPPED,
+    UNWRAPPED,
+  };
+
+  static jsg::JsObject toObject(jsg::Lock&,
+      kj::ArrayPtr<const Tag> tags,
+      NameProvider nameProvider,
+      ToObjectOptions options = ToObjectOptions::WRAPPED);
 };
 using Tags = kj::Array<Tag>;
 
@@ -108,8 +127,8 @@ struct FetchEventInfo final {
   kj::Array<Header> headers;
 
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
-
   FetchEventInfo clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // The FetchResponseInfo struct is used to attach additional detail about the conclusion
@@ -126,6 +145,7 @@ struct FetchResponseInfo final {
 
   void copyTo(rpc::Trace::FetchResponseInfo::Builder builder) const;
   FetchResponseInfo clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // Metadata describing the start of a JS RPC event
@@ -140,6 +160,7 @@ struct JsRpcEventInfo final {
 
   void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) const;
   JsRpcEventInfo clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // Metadata describing the start of a scheduled worker event (cron workers).
@@ -155,6 +176,7 @@ struct ScheduledEventInfo final {
 
   void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) const;
   ScheduledEventInfo clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // Metadata describing the start of an alarm event.
@@ -169,6 +191,7 @@ struct AlarmEventInfo final {
 
   void copyTo(rpc::Trace::AlarmEventInfo::Builder builder) const;
   AlarmEventInfo clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // Metadata describing the start of a queue event.
@@ -184,6 +207,7 @@ struct QueueEventInfo final {
 
   void copyTo(rpc::Trace::QueueEventInfo::Builder builder) const;
   QueueEventInfo clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // Metadata describing the start of an email event.
@@ -200,6 +224,7 @@ struct EmailEventInfo final {
 
   void copyTo(rpc::Trace::EmailEventInfo::Builder builder) const;
   EmailEventInfo clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // Metadata describing the start of a hibernatable web socket event.
@@ -224,6 +249,7 @@ struct HibernatableWebSocketEventInfo final {
   void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) const;
   static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
   HibernatableWebSocketEventInfo clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // Metadata describing the start of a custom event (currently unused) but here
@@ -238,6 +264,7 @@ struct CustomEventInfo final {
   CustomEventInfo clone() const {
     return CustomEventInfo();
   }
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // Metadata describing the start of a legacy tail event (that is, the event
@@ -269,6 +296,7 @@ struct TraceEventInfo final {
 
   void copyTo(rpc::Trace::TraceEventInfo::Builder builder) const;
   TraceEventInfo clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // The set of structs that make up the EventInfo union all represent trigger
@@ -283,7 +311,8 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     EmailEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
-    CustomEventInfo>;
+    CustomEventInfo,
+    Tags>;
 
 // Metadata describing the onset of a trace session. The first event in any trace session
 // will always be an Onset event. It details information about which worker, script, etc
@@ -317,6 +346,7 @@ struct Onset final {
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;
+  jsg::JsObject toObject(jsg::Lock&, NameProvider nameProvider) const;
 };
 
 // Used to describe the final outcome of the trace. Every trace session should
@@ -339,6 +369,7 @@ struct Outcome final {
 
   void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
+  jsg::JsObject toObject(jsg::Lock&, NameProvider nameProvider) const;
 };
 
 // The SpanClose struct identifies the *close* of a span in the stream. A span is
@@ -356,6 +387,7 @@ struct SpanClose final {
 
   void copyTo(rpc::Trace::SpanClose::Builder builder) const;
   SpanClose clone() const;
+  jsg::JsObject toObject(jsg::Lock&, NameProvider nameProvider) const;
 };
 
 // Describes an event caused by use of the Node.js diagnostics-channel API.
@@ -373,6 +405,7 @@ struct DiagnosticChannelEvent final {
 
   void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder) const;
   DiagnosticChannelEvent clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // The Log struct is used by the legacy tracing (v1 tail workers) model and
@@ -423,6 +456,7 @@ struct LogV2 final {
 
   void copyTo(rpc::Trace::LogV2::Builder builder) const;
   LogV2 clone() const;
+  jsg::JsObject toObject(jsg::Lock&, NameProvider nameProvider) const;
 };
 
 // Describes metadata of an Exception that is added to the trace.
@@ -470,12 +504,13 @@ struct Exception final {
 
   void copyTo(rpc::Trace::Exception::Builder builder) const;
   Exception clone() const;
+  jsg::JsObject toObject(jsg::Lock&, NameProvider nameProvider) const;
 };
 
 // Describes the start (and kind) of a subrequest initiated during the trace.
 // For instance, a fetch request or a JS RPC call.
 struct Subrequest final {
-  using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo>;
+  using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, Tags>;
   explicit Subrequest(uint32_t id, kj::Maybe<Info> info);
   Subrequest(rpc::Trace::Subrequest::Reader reader);
   Subrequest(Subrequest&&) = default;
@@ -487,6 +522,7 @@ struct Subrequest final {
 
   void copyTo(rpc::Trace::Subrequest::Builder builder) const;
   Subrequest clone() const;
+  jsg::JsObject toObject(jsg::Lock&, NameProvider nameProvider) const;
 };
 
 // Describes the results of a subrequest initiated during the trace. The id
@@ -509,6 +545,7 @@ struct SubrequestOutcome final {
 
   void copyTo(rpc::Trace::SubrequestOutcome::Builder builder) const;
   SubrequestOutcome clone() const;
+  jsg::JsObject toObject(jsg::Lock&, NameProvider nameProvider) const;
 };
 
 // A Mark is a simple event that can be used to mark a significant point in the
@@ -524,6 +561,7 @@ struct Mark final {
 
   void copyTo(rpc::Trace::Mark::Builder builder) const;
   Mark clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // A Metric is a key-value pair that can be emitted as part of the trace. Metrics
@@ -571,6 +609,9 @@ struct Metric final {
   static Metric forCpuTime(kj::Duration duration) {
     return Metric(Type::COUNTER, Common::CPU_TIME, duration / kj::MILLISECONDS);
   }
+
+  static jsg::JsObject toObject(
+      jsg::Lock&, kj::ArrayPtr<const Metric> metrics, NameProvider nameProvider);
 };
 using Metrics = kj::Array<Metric>;
 
@@ -591,6 +632,7 @@ struct Dropped final {
 
   void copyTo(rpc::Trace::Dropped::Builder builder) const;
   Dropped clone() const;
+  jsg::JsObject toObject(jsg::Lock&) const;
 };
 
 // ======================================================================================

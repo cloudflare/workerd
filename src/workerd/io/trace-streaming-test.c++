@@ -1,5 +1,7 @@
 #include "trace-streaming.h"
 
+#include <workerd/jsg/jsg-test.h>
+
 #include <kj/compat/http.h>
 #include <kj/test.h>
 
@@ -157,6 +159,38 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
     span->addMark("foo");
   }
   KJ_EXPECT(callCount == 4);
+}
+
+// ======================================================================================
+
+jsg::V8System v8System;
+
+struct TestContext: public jsg::Object, public jsg::ContextGlobal {
+  JSG_RESOURCE_TYPE(TestContext) {}
+};
+JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
+
+static kj::Maybe<kj::StringPtr> nullNameProvider(uint32_t, trace::NameProviderContext) {
+  return kj::none;
+}
+
+KJ_TEST("JS Serialization of StreamEvent") {
+  jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](TestIsolate::Lock& isolateLock) {
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<TestContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      StreamEvent streamEvent(kj::str("foo"),
+          StreamEvent::Span{
+            .id = 1,
+            .parent = 2,
+          },
+          0 * kj::MILLISECONDS + kj::UNIX_EPOCH, 0, trace::Onset());
+      auto obj = streamEvent.toObject(js, nullNameProvider);
+      auto ser = js.serializeJson(obj);
+      KJ_EXPECT(ser ==
+          "{\"id\":\"foo\",\"span\":{\"id\":1,\"parent\":2},\"timestampNs\":\"1970-01-01T00:00:00.000Z\",\"sequence\":0,\"event\":{\"type\":\"onset\",\"scriptTags\":[],\"executionModel\":\"stateless\"}}");
+    });
+  });
 }
 
 }  // namespace

@@ -188,6 +188,10 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
       KJ_CASE_ONEOF(custom, trace::CustomEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::CustomEventInfo>(trace, custom));
       }
+      KJ_CASE_ONEOF(custome, trace::Tags) {
+        // The legacy trace format does not support trace::Tags in the Trace.
+        return kj::Maybe(jsg::alloc<TraceItem::CustomEventInfo>(trace, trace::CustomEventInfo{}));
+      }
     }
   }
   return kj::none;

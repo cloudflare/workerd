@@ -116,6 +116,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
       KJ_CASE_ONEOF(custom, trace::CustomEventInfo) {
         eventInfoBuilder.initCustom();
       }
+      KJ_CASE_ONEOF(custom, trace::Tags) {
+        // The legacy trace format does not support tags in the Trace.
+        eventInfoBuilder.initCustom();
+      }
     }
   } else {
     eventInfoBuilder.setNone();
@@ -251,6 +255,7 @@ void Trace::setEventInfo(kj::Date timestamp, trace::EventInfo&& info) {
     KJ_CASE_ONEOF(_, trace::TraceEventInfo) {}
     KJ_CASE_ONEOF(_, trace::HibernatableWebSocketEventInfo) {}
     KJ_CASE_ONEOF(_, trace::CustomEventInfo) {}
+    KJ_CASE_ONEOF(_, trace::Tags) {}
   }
   bytesUsed = newSize;
   onsetInfo.info = kj::mv(info);

@@ -266,6 +266,7 @@ struct Trace @0x8e8d911203762d34 {
       none @1 :Void;
       fetch @2 :FetchEventInfo;
       jsRpc @3 :JsRpcEventInfo;
+      custom @4 :List(Tag);
     }
   }
 
