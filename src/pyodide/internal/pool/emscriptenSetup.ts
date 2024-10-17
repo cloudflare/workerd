@@ -210,6 +210,7 @@ export async function instantiateEmscriptenModule(
 
     // Wait until we've executed all the preRun hooks before proceeding
     const emscriptenModule = await emscriptenSettings.readyPromise;
+    ems
     return emscriptenModule;
   } catch (e) {
     console.warn('Error in instantiateEmscriptenModule');

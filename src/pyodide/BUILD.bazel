@@ -197,7 +197,9 @@ data = wd_ts_bundle_capnp(
     name = "pyodide.capnp",
     eslintrc_json = "eslint.config.mjs",
     import_name = "pyodide",
-    internal_data_modules = ["generated/python_stdlib.zip"] + glob([
+    internal_data_modules = [
+        # "generated/python_stdlib.zip"
+    ] + glob([
         "internal/*.py",
         "internal/patches/*.py",
         "internal/topLevelEntropy/*.py",
@@ -207,25 +209,25 @@ data = wd_ts_bundle_capnp(
         "generated/pyodide-bucket.json",
     ],
     internal_modules = [
-        "generated/emscriptenSetup.js",
+        # "generated/emscriptenSetup.js",
     ] + glob(
         [
             "internal/*.ts",
             "internal/topLevelEntropy/*.ts",
             # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-            "internal/pool/*.ts",
+            # "internal/pool/*.ts",
             "types/*.ts",
             "types/*/*.ts",
         ],
         allow_empty = True,
     ),
-    internal_wasm_modules = ["generated/pyodide.asm.wasm"],
+    # internal_wasm_modules = ["generated/pyodide.asm.wasm"],
     js_deps = [
-        "generated/emscriptenSetup",
-        "pyodide.asm.js@rule",
-        "pyodide.asm.wasm@rule",
+        # "generated/emscriptenSetup",
+        # "pyodide.asm.js@rule",
+        # "pyodide.asm.wasm@rule",
         "pyodide-lock.js@rule",
-        "python_stdlib.zip@rule",
+        # "python_stdlib.zip@rule",
         "pyodide-bucket.json@rule",
     ],
     lint = False,
@@ -260,6 +262,33 @@ genrule(
         "$(location :pyodide.capnp)",
         "pyodideBundle",
         "-I $$INCLUDE",
+        "-o binary",
+        "> $@",
+    ]),
+    tools = ["@capnp-cpp//src/capnp:capnp_tool"],
+    visibility = ["//visibility:public"],
+)
+
+copy_file(
+    name = "emscripten_setup_capnp_file",
+    src = "emscripten_setup.capnp",
+    out = "generated/emscripten_setup.capnp",
+)
+
+genrule(
+    name = "emscripten_setup.capnp.bin@rule",
+    srcs = [
+        ":generated/emscripten_setup.capnp",
+        ":generated/emscriptenSetup.js",
+        ":generated/python_stdlib.zip",
+        ":generated/pyodide.asm.wasm",
+    ],
+    outs = ["emscripten_setup.capnp.bin"],
+    cmd = " ".join([
+        "$(execpath @capnp-cpp//src/capnp:capnp_tool)",
+        "eval",
+        "$(location generated/emscripten_setup.capnp)",
+        "emscriptenSetup",
         "-o binary",
         "> $@",
     ]),
