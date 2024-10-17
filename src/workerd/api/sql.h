@@ -107,6 +107,60 @@ private:
     kj::Maybe<kj::Array<jsg::JsRef<jsg::JsString>>> names;
   };
 
+  // A statement in the statement cache.
+  struct CachedStatement: public kj::Refcounted {
+    jsg::HashableV8Ref<v8::String> query;
+    size_t statementSize;
+    SqliteDatabase::Statement statement;
+    CachedColumnNames cachedColumnNames;
+    kj::ListLink<CachedStatement> lruLink;
+
+    CachedStatement(jsg::Lock& js,
+        SqlStorage& sqlStorage,
+        SqliteDatabase& db,
+        jsg::JsString jsQuery,
+        kj::String kjQuery)
+        : query(js.v8Isolate, jsQuery),
+          statementSize(kjQuery.size()),
+          statement(db.prepareMulti(sqlStorage, kj::mv(kjQuery))) {}
+  };
+
+  class StatementCacheCallbacks {
+  public:
+    inline const jsg::HashableV8Ref<v8::String>& keyForRow(
+        const kj::Rc<CachedStatement>& entry) const {
+      return entry->query;
+    }
+
+    inline bool matches(const kj::Rc<CachedStatement>& entry, jsg::JsString key) const {
+      return entry->query == key;
+    }
+    inline bool matches(
+        const kj::Rc<CachedStatement>& entry, const jsg::HashableV8Ref<v8::String>& key) const {
+      return entry->query == key;
+    }
+
+    inline auto hashCode(jsg::JsString key) const {
+      return key.hashCode();
+    }
+    inline auto hashCode(const jsg::HashableV8Ref<v8::String>& key) const {
+      return key.hashCode();
+    }
+  };
+
+  // We can't quite just use kj::HashMap here because we want the table key to be
+  // `CachedStatement::query`, which is a member of the refcounted object.
+  using StatementMap = kj::Table<kj::Rc<CachedStatement>, kj::HashIndex<StatementCacheCallbacks>>;
+
+  struct StatementCache {
+    StatementMap map;
+    kj::List<CachedStatement, &CachedStatement::lruLink> lru;
+    size_t totalSize = 0;
+
+    ~StatementCache() noexcept(false);
+  };
+  IoOwn<StatementCache> statementCache;
+
   template <size_t size, typename... Params>
   SqliteDatabase::Query execMemoized(SqliteDatabase& db,
       kj::Maybe<IoOwn<SqliteDatabase::Statement>>& slot,
@@ -196,6 +250,8 @@ public:
 
 private:
   struct State {
+    kj::Maybe<kj::Rc<CachedStatement>> cachedStatement;
+
     // The bindings that were used to construct `query`. We have to keep these alive until the query
     // is done since it might contain pointers into strings and blobs.
     kj::Array<BindingValue> bindings;
@@ -208,6 +264,8 @@ private:
         SqliteDatabase::Regulator& regulator,
         kj::StringPtr sqlCode,
         kj::Array<BindingValue> bindings);
+
+    State(kj::Rc<CachedStatement> cachedStatement, kj::Array<BindingValue> bindings);
   };
 
   // Nulled out when query is done or canceled.

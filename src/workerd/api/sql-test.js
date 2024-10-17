@@ -19,6 +19,10 @@ async function test(state) {
   assert.equal(resultNumberRaw[0].length, 1);
   assert.equal(resultNumberRaw[0][0], 123);
 
+  sql.exec('SELECT 123');
+  sql.exec('SELECT 123');
+  sql.exec('SELECT 123');
+
   // Test string results
   const resultStr = [...sql.exec("SELECT 'hello'")];
   assert.equal(resultStr.length, 1);

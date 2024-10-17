@@ -10,14 +10,60 @@
 
 namespace workerd::api {
 
-SqlStorage::SqlStorage(jsg::Ref<DurableObjectStorage> storage): storage(kj::mv(storage)) {}
+// Maximum total size of all cached statements (measured in size of the SQL code). If cached
+// statements exceed this, we remove the LRU statement(s).
+//
+// Hopefully most apps don't ever hit this, but it's important to have a limit in case of
+// queries containing dynamic content or excessively large one-off queries.
+static constexpr uint SQL_STATEMENT_CACHE_MAX_SIZE = 1024 * 1024;
+
+SqlStorage::SqlStorage(jsg::Ref<DurableObjectStorage> storage)
+    : storage(kj::mv(storage)),
+      statementCache(IoContext::current().addObject(kj::heap<StatementCache>())) {}
 
 SqlStorage::~SqlStorage() {}
 
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
-  SqliteDatabase::Regulator& regulator = *this;
-  return jsg::alloc<Cursor>(getDb(js), regulator, js.toString(querySql), kj::mv(bindings));
+  auto& db = getDb(js);
+  auto& statementCache = *this->statementCache;
+
+  kj::Rc<CachedStatement>& slot = statementCache.map.findOrCreate(querySql, [&]() {
+    auto result = kj::rc<CachedStatement>(js, *this, db, querySql, js.toString(querySql));
+    statementCache.totalSize += result->statementSize;
+    return result;
+  });
+
+  // Move cached statement to end of LRU queue.
+  if (slot->lruLink.isLinked()) {
+    statementCache.lru.remove(*slot.get());
+  }
+  statementCache.lru.add(*slot.get());
+
+  if (slot->isShared()) {
+    // Oops, this CachedStatement is currently in-use (presumably by a Cursor).
+    //
+    // SQLite only allows one instance of a statement to run at a time, so we will have to compile
+    // the statement again as a one-off.
+    //
+    // In theory we could try to cache multiple copies of the statement, but as this is probably
+    // exceedingly rare, it is not worth the added code complexity.
+    SqliteDatabase::Regulator& regulator = *this;
+    return jsg::alloc<Cursor>(db, regulator, js.toString(querySql), kj::mv(bindings));
+  }
+
+  auto result = jsg::alloc<Cursor>(slot.addRef(), kj::mv(bindings));
+
+  // If the statement cache grew too big, drop the least-recently-used entry.
+  while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
+    auto& toRemove = *statementCache.lru.begin();
+    auto oldQuery = jsg::JsString(toRemove.query.getHandle(js));
+    statementCache.totalSize -= toRemove.statementSize;
+    statementCache.lru.remove(toRemove);
+    KJ_ASSERT(statementCache.map.eraseMatch(oldQuery));
+  }
+
+  return result;
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
@@ -58,6 +104,12 @@ bool SqlStorage::allowTransactions() const {
       "statements. The JavaScript API is safer because it will automatically roll back on "
       "exceptions, and because it interacts correctly with Durable Objects' automatic atomic "
       "write coalescing.");
+}
+
+SqlStorage::StatementCache::~StatementCache() noexcept(false) {
+  for (auto& entry: lru) {
+    lru.remove(entry);
+  }
 }
 
 jsg::JsValue SqlStorage::wrapSqlValue(jsg::Lock& js, SqlValue value) {
@@ -105,6 +157,12 @@ SqlStorage::Cursor::State::State(SqliteDatabase& db,
     kj::Array<BindingValue> bindingsParam)
     : bindings(kj::mv(bindingsParam)),
       query(db.run(regulator, sqlCode, mapBindings(bindings).asPtr())) {}
+
+SqlStorage::Cursor::State::State(
+    kj::Rc<CachedStatement> cachedStatementParam, kj::Array<BindingValue> bindingsParam)
+    : bindings(kj::mv(bindingsParam)),
+      query(cachedStatement.emplace(kj::mv(cachedStatementParam))
+                ->statement.run(mapBindings(bindings).asPtr())) {}
 
 SqlStorage::Cursor::~Cursor() noexcept(false) {
   // If this Cursor was created from a Statement, clear the Statement's currentCursor weak ref.
