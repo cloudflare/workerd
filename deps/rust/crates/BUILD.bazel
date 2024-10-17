@@ -39,7 +39,7 @@ alias(
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.20.1//:capnp",
+    actual = "@crates_vendor__capnp-0.20.2//:capnp",
     tags = ["manual"],
 )
 
@@ -57,7 +57,7 @@ alias(
 
 alias(
     name = "flate2",
-    actual = "@crates_vendor__flate2-1.0.33//:flate2",
+    actual = "@crates_vendor__flate2-1.0.34//:flate2",
     tags = ["manual"],
 )
 
@@ -81,7 +81,7 @@ alias(
 
 alias(
     name = "serde_json",
-    actual = "@crates_vendor__serde_json-1.0.128//:serde_json",
+    actual = "@crates_vendor__serde_json-1.0.129//:serde_json",
     tags = ["manual"],
 )
 

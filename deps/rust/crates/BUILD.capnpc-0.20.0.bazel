@@ -46,7 +46,7 @@ rust_library(
     ],
     version = "0.20.0",
     deps = [
-        "@crates_vendor__capnp-0.20.1//:capnp",
+        "@crates_vendor__capnp-0.20.2//:capnp",
     ],
 )
 
@@ -83,7 +83,7 @@ rust_binary(
     version = "0.20.0",
     deps = [
         ":capnpc",
-        "@crates_vendor__capnp-0.20.1//:capnp",
+        "@crates_vendor__capnp-0.20.2//:capnp",
     ],
 )
 
@@ -120,6 +120,6 @@ rust_binary(
     version = "0.20.0",
     deps = [
         ":capnpc",
-        "@crates_vendor__capnp-0.20.1//:capnp",
+        "@crates_vendor__capnp-0.20.2//:capnp",
     ],
 )

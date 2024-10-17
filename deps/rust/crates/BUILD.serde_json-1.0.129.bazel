@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "proc_macro2",
+    name = "serde_json",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -31,7 +31,7 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "proc-macro",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -40,15 +40,18 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.86",
+    version = "1.0.129",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.86//:build_script_build",
-        "@crates_vendor__unicode-ident-1.0.13//:unicode_ident",
+        "@crates_vendor__itoa-1.0.11//:itoa",
+        "@crates_vendor__memchr-2.7.4//:memchr",
+        "@crates_vendor__ryu-1.0.18//:ryu",
+        "@crates_vendor__serde-1.0.210//:serde",
+        "@crates_vendor__serde_json-1.0.129//:build_script_build",
     ],
 )
 
@@ -73,7 +76,7 @@ cargo_build_script(
     ),
     crate_features = [
         "default",
-        "proc-macro",
+        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -90,18 +93,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "proc-macro2",
+    pkg_name = "serde_json",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.86",
+    version = "1.0.129",
     visibility = ["//visibility:private"],
 )
 
