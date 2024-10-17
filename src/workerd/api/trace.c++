@@ -607,17 +607,24 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
     tracer->setEventInfo(context.now(), Trace::TraceEventInfo(traces));
   }
 
+  auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));
+  for (auto& trace: traces) {
+    if (trace->eventInfo != kj::none) {
+      nonEmptyTraces.add(kj::mv(trace));
+    }
+  }
+
   // Add the actual JS as a wait until because the handler may be an event listener which can't
   // wait around for async resolution. We're relying on `drain()` below to persist `incomingRequest`
   // and its members until this task completes.
   auto entrypointName = entrypointNamePtr.map([](auto s) { return kj::str(s); });
   try {
-    co_await context.run([&context, traces = mapAddRef(traces),
+    co_await context.run([&context, nonEmptyTraces = kj::mv(nonEmptyTraces),
                              entrypointName = kj::mv(entrypointName)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
       auto handler = lock.getExportedHandler(entrypointName, context.getActor());
-      return lock.getGlobalScope().sendTraces(traces, lock, handler);
+      return lock.getGlobalScope().sendTraces(nonEmptyTraces.asPtr(), lock, handler);
     });
   } catch (kj::Exception e) {
     // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
