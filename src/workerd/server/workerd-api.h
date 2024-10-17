@@ -12,7 +12,8 @@ namespace workerd {
 namespace api {
 namespace pyodide {
 struct PythonConfig;
-}
+struct EmscriptenRuntime;
+}  // namespace pyodide
 }  // namespace api
 }  // namespace workerd
 namespace workerd {
@@ -55,6 +56,7 @@ public:
       jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;
+  const kj::Maybe<api::pyodide::EmscriptenRuntime>& getEmscriptenRuntime() const override;
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,

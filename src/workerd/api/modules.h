@@ -6,6 +6,7 @@
 
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/unsafe.h>
@@ -21,6 +22,7 @@ template <class Registry>
 void registerModules(Registry& registry, auto featureFlags) {
   node::registerNodeJsCompatModules(registry, featureFlags);
   if (featureFlags.getPythonWorkers()) {
+    pyodide::registerSetupEmscriptenModule(registry, featureFlags);
     pyodide::registerPyodideModules(registry, featureFlags);
   }
   registerUnsafeModules(registry, featureFlags);
@@ -48,6 +50,7 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
   }
 
   if (featureFlags.getPythonWorkers()) {
+    builder.add(pyodide::getInternalSetupEmscriptenModuleBundle<TypeWrapper>(featureFlags));
     builder.add(pyodide::getExternalPyodideModuleBundle(featureFlags));
     builder.add(pyodide::getInternalPyodideModuleBundle(featureFlags));
   }

@@ -41,6 +41,9 @@ class Socket;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class ExecutionContext;
+namespace pyodide {
+struct EmscriptenRuntime;
+}
 }  // namespace api
 
 class ThreadContext;
@@ -516,6 +519,8 @@ public:
   // params.
   virtual jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
+
+  virtual const kj::Maybe<api::pyodide::EmscriptenRuntime>& getEmscriptenRuntime() const = 0;
 
   // Set the module fallback service callback, if any.
   using ModuleFallbackCallback = kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(

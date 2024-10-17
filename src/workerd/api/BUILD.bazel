@@ -16,6 +16,7 @@ filegroup(
             "pyodide/pyodide.c++",
             "memory-cache.c++",
             "r2*.c++",
+            "pyodide/setup-emscripten.c++",
             "rtti.c++",
             "url.c++",
             "util.c++",
@@ -126,15 +127,19 @@ wd_cc_library(
     name = "pyodide",
     srcs = [
         "pyodide/pyodide.c++",
+        "pyodide/setup-emscripten.c++",
     ],
     hdrs = [
         "pyodide/pyodide.h",
+        "pyodide/setup-emscripten.h",
+        "//src/pyodide:generated/emscripten_setup.capnp.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],
     implementation_deps = ["//src/workerd/util:string-buffer"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide",
+        "//src/pyodide:emscripten_setup_capnp",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/io",
         "//src/workerd/jsg",

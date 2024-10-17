@@ -13,7 +13,7 @@ import { reportError } from 'pyodide-internal:util';
  */
 import { _createPyodideModule } from 'pyodide-internal:generated/pyodide.asm';
 
-export {
+import {
   setUnsafeEval,
   setGetRandomValues,
 } from 'pyodide-internal:pool/builtin_wrappers';
@@ -56,7 +56,7 @@ function getWaitForDynlibs(resolveReadyPromise: PreRunHook): PreRunHook {
  * This is a simplified version of the `prepareFileSystem` function here:
  * https://github.com/pyodide/pyodide/blob/main/src/js/module.ts
  */
-function getPrepareFileSystem(pythonStdlib: Uint8Array): PreRunHook {
+function getPrepareFileSystem(pythonStdlib: ArrayBuffer): PreRunHook {
   return function prepareFileSystem(Module: Module): void {
     try {
       const pymajor = Module._py_version_major();
@@ -118,7 +118,7 @@ function getInstantiateWasm(
  */
 function getEmscriptenSettings(
   isWorkerd: boolean,
-  pythonStdlib: Uint8Array,
+  pythonStdlib: ArrayBuffer,
   pyodideWasmModule: WebAssembly.Module
 ): EmscriptenSettings {
   const config: PyodideConfig = {
@@ -193,7 +193,7 @@ function* featureDetectionMonkeyPatchesContextManager() {
  */
 export async function instantiateEmscriptenModule(
   isWorkerd: boolean,
-  pythonStdlib: Uint8Array,
+  pythonStdlib: ArrayBuffer,
   wasmModule: WebAssembly.Module
 ): Promise<Module> {
   const emscriptenSettings = getEmscriptenSettings(
@@ -210,6 +210,8 @@ export async function instantiateEmscriptenModule(
 
     // Wait until we've executed all the preRun hooks before proceeding
     const emscriptenModule = await emscriptenSettings.readyPromise;
+    emscriptenModule.setUnsafeEval = setUnsafeEval;
+    emscriptenModule.setGetRandomValues = setGetRandomValues;
     return emscriptenModule;
   } catch (e) {
     console.warn('Error in instantiateEmscriptenModule');

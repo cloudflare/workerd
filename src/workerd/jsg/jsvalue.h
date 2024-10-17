@@ -498,7 +498,7 @@ public:
   JsRef& operator=(JsRef<T>& other) = delete;
   JsRef& operator=(JsRef<T>&& other) = default;
 
-  T getHandle(Lock& js) KJ_WARN_UNUSED_RESULT {
+  T getHandle(Lock& js) const KJ_WARN_UNUSED_RESULT {
     JsValue handle(value.getHandle(js));
     return KJ_ASSERT_NONNULL(handle.tryCast<T>());
   }

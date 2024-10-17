@@ -197,7 +197,7 @@ data = wd_ts_bundle_capnp(
     name = "pyodide.capnp",
     eslintrc_json = "eslint.config.mjs",
     import_name = "pyodide",
-    internal_data_modules = ["generated/python_stdlib.zip"] + glob([
+    internal_data_modules = glob([
         "internal/*.py",
         "internal/patches/*.py",
         "internal/topLevelEntropy/*.py",
@@ -206,26 +206,17 @@ data = wd_ts_bundle_capnp(
         "generated/pyodide-lock.json",
         "generated/pyodide-bucket.json",
     ],
-    internal_modules = [
-        "generated/emscriptenSetup.js",
-    ] + glob(
+    internal_modules = glob(
         [
             "internal/*.ts",
             "internal/topLevelEntropy/*.ts",
-            # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-            "internal/pool/*.ts",
             "types/*.ts",
             "types/*/*.ts",
         ],
         allow_empty = True,
     ),
-    internal_wasm_modules = ["generated/pyodide.asm.wasm"],
     js_deps = [
-        "generated/emscriptenSetup",
-        "pyodide.asm.js@rule",
-        "pyodide.asm.wasm@rule",
         "pyodide-lock.js@rule",
-        "python_stdlib.zip@rule",
         "pyodide-bucket.json@rule",
     ],
     lint = False,
@@ -265,4 +256,67 @@ genrule(
     ]),
     tools = ["@capnp-cpp//src/capnp:capnp_tool"],
     visibility = ["//visibility:public"],
+)
+
+copy_file(
+    name = "emscripten_setup_capnp_file",
+    src = "emscripten_setup.capnp",
+    out = "generated/emscripten_setup.capnp",
+)
+
+genrule(
+    name = "emscripten_setup.capnp.bin@rule",
+    srcs = [
+        ":generated/emscripten_setup.capnp",
+        ":generated/emscriptenSetup.js",
+        ":generated/python_stdlib.zip",
+        ":generated/pyodide.asm.wasm",
+    ],
+    outs = ["emscripten_setup.capnp.bin"],
+    cmd = " ".join([
+        "$(execpath @capnp-cpp//src/capnp:capnp_tool)",
+        "eval",
+        "$(location generated/emscripten_setup.capnp)",
+        "emscriptenSetup",
+        "-o binary",
+        "> $@",
+    ]),
+    tools = ["@capnp-cpp//src/capnp:capnp_tool"],
+    visibility = ["//visibility:public"],
+)
+
+capnp_embed(
+    name = "emscripten_setup_capnp_file_embed",
+    src = "generated/emscripten_setup.capnp",
+    deps = ["emscripten_setup_capnp_file"],
+)
+
+capnp_embed(
+    name = "emscripten_setup_js_file_embed",
+    src = "generated/emscriptenSetup.js",
+    deps = ["generated/emscriptenSetup"],
+)
+
+capnp_embed(
+    name = "python_stdlib_zip_file_embed",
+    src = "generated/python_stdlib.zip",
+    deps = ["python_stdlib.zip@rule"],
+)
+
+capnp_embed(
+    name = "pyodide_asm_wasm_file_embed",
+    src = "generated/pyodide.asm.wasm",
+    deps = ["pyodide.asm.wasm@rule"],
+)
+
+cc_capnp_library(
+    name = "emscripten_setup_capnp",
+    srcs = ["generated/emscripten_setup.capnp"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":emscripten_setup_capnp_file_embed",
+        ":emscripten_setup_js_file_embed",
+        ":pyodide_asm_wasm_file_embed",
+        ":python_stdlib_zip_file_embed",
+    ],
 )

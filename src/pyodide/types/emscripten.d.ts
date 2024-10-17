@@ -68,4 +68,8 @@ interface Module {
   addRunDependency(x: string): void;
   removeRunDependency(x: string): void;
   noInitialRun: boolean;
+  setUnsafeEval(mod: typeof import('internal:unsafe-eval').default): void;
+  setGetRandomValues(
+    func: typeof import('pyodide-internal:topLevelEntropy/lib').getRandomValues
+  ): void;
 }

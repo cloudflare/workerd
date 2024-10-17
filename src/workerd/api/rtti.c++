@@ -65,6 +65,7 @@
   F("unsafe", EW_UNSAFE_ISOLATE_TYPES)                                                             \
   F("memory-cache", EW_MEMORY_CACHE_ISOLATE_TYPES)                                                 \
   F("pyodide", EW_PYODIDE_ISOLATE_TYPES)                                                           \
+  F("emscripten", EW_SETUP_EMSCRIPTEN_ISOLATE_TYPES)                                               \
   F("kv", EW_KV_ISOLATE_TYPES)                                                                     \
   F("queue", EW_QUEUE_ISOLATE_TYPES)                                                               \
   F("r2-admin", EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES)                                             \
