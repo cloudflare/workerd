@@ -623,6 +623,10 @@ public:
     return typeId;
   }
 
+  kj::Promise<Result> notSupported() override {
+    KJ_UNIMPLEMENTED("trace event not supported");
+  }
+
 private:
   uint16_t typeId;
   kj::Array<kj::Own<workerd::Trace>> traces;
