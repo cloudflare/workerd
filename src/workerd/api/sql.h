@@ -32,10 +32,10 @@ public:
   // One row of a SQL query result. This is an Object whose properties correspond to columns.
   using SqlRow = jsg::Dict<SqlValue, jsg::JsString>;
 
-  jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
+  jsg::Ref<Cursor> exec(jsg::Lock& js, jsg::JsString query, jsg::Arguments<BindingValue> bindings);
   IngestResult ingest(jsg::Lock& js, kj::String query);
 
-  jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
+  jsg::Ref<Statement> prepare(jsg::Lock& js, jsg::JsString query);
 
   double getDatabaseSize(jsg::Lock& js);
 
@@ -131,11 +131,6 @@ public:
       : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))),
         ownCachedColumnNames(kj::none),  // silence bogus Clang warning on next line
         cachedColumnNames(ownCachedColumnNames.emplace()) {}
-
-  template <typename... Params>
-  Cursor(CachedColumnNames& cachedColumnNames, Params&&... params)
-      : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))),
-        cachedColumnNames(cachedColumnNames) {}
   ~Cursor() noexcept(false);
 
   double getRowsRead();
@@ -174,8 +169,7 @@ public:
     if (state != kj::none) {
       tracker.trackFieldWithSize("IoOwn<State>", sizeof(IoOwn<State>));
     }
-    tracker.trackField("statement", statement);
-    tracker.trackField("cachedColumnNames", ownCachedColumnNames);
+    tracker.trackField("cachedColumnNames", cachedColumnNames);
   }
 
 private:
@@ -191,7 +185,7 @@ private:
 
     void ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source);
 
-    JSG_MEMORY_INFO(cachedColumnNames) {
+    JSG_MEMORY_INFO(CachedColumnNames) {
       KJ_IF_SOME(list, names) {
         for (const auto& name: list) {
           tracker.trackField(nullptr, name);
@@ -204,9 +198,6 @@ private:
   };
 
   struct State {
-    // Refcount on the SqliteDatabase::Statement underlying the query, if any.
-    kj::Own<void> dependency;
-
     // The bindings that were used to construct `query`. We have to keep these alive until the query
     // is done since it might contain pointers into strings and blobs.
     kj::Array<BindingValue> bindings;
@@ -215,8 +206,6 @@ private:
 
     bool isFirst = true;
 
-    State(kj::RefcountedWrapper<SqliteDatabase::Statement>& statement,
-        kj::Array<BindingValue> bindings);
     State(SqliteDatabase& db,
         SqliteDatabase::Regulator& regulator,
         kj::StringPtr sqlCode,
@@ -235,9 +224,6 @@ private:
   // executed again.
   kj::Maybe<kj::Maybe<Cursor&>&> selfRef;
 
-  // If this cursor was created from a prepared statement, this keeps the statement object alive.
-  kj::Maybe<jsg::Ref<Statement>> statement;
-
   // Row IO counts. These are updated as the query runs. We keep these outside the State so they
   // remain available even after the query is done or canceled.
   uint64_t rowsRead = 0;
@@ -247,10 +233,6 @@ private:
 
   kj::Maybe<CachedColumnNames> ownCachedColumnNames;
   CachedColumnNames& cachedColumnNames;
-
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(statement);
-  }
 
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<BindingValue> values);
@@ -265,31 +247,30 @@ private:
   friend class Statement;
 };
 
+// The prepared statement API is supported only for backwards compatibility for certain early
+// internal users of SQLite-backed DOs. This API was not released because we chose instead to
+// implement automatic prepared statement caching via the simple `exec()` API. Since this is
+// a compatibility shim only, to simplify things, it is acutally just a wrapper around `exec()`.
 class SqlStorage::Statement final: public jsg::Object {
 public:
-  Statement(SqliteDatabase::Statement&& statement);
+  Statement(jsg::Lock& js, jsg::Ref<SqlStorage> sqlStorage, jsg::JsString query)
+      : sqlStorage(kj::mv(sqlStorage)),
+        query(js.v8Isolate, query) {}
 
-  jsg::Ref<Cursor> run(jsg::Arguments<BindingValue> bindings);
+  jsg::Ref<Cursor> run(jsg::Lock& js, jsg::Arguments<BindingValue> bindings);
 
   JSG_RESOURCE_TYPE(Statement) {
     JSG_CALLABLE(run);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackFieldWithSize("IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>>",
-        sizeof(IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>>));
-    tracker.trackField("cachedColumnNames", cachedColumnNames);
+    tracker.trackField("sqlStorage", sqlStorage);
+    tracker.trackField("query", query);
   }
 
 private:
-  IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>> statement;
-
-  // Weak reference to the Cursor that is currently using this statement.
-  kj::Maybe<Cursor&> currentCursor;
-
-  // All queries from the same prepared statement have the same column names, so we can cache them
-  // on the statement.
-  Cursor::CachedColumnNames cachedColumnNames;
+  jsg::Ref<SqlStorage> sqlStorage;
+  jsg::V8Ref<v8::String> query;
 
   friend class Cursor;
 };
