@@ -18,6 +18,10 @@ enum Operation {
 
 type VectorizeVersion = 'v1' | 'v2';
 
+type QueryImplV2Params =
+  | { vector: VectorFloatArray | number[]; vectorId?: undefined }
+  | { vector?: undefined; vectorId: string };
+
 function toNdJson(arr: object[]): string {
   return arr.reduce((acc, o) => acc + JSON.stringify(o) + '\n', '').trim();
 }
@@ -50,35 +54,10 @@ class VectorizeIndexImpl implements Vectorize {
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches> {
     if (this.indexVersion === 'v2') {
-      if (options?.returnMetadata) {
-        if (
-          typeof options.returnMetadata !== 'boolean' &&
-          !isVectorizeMetadataRetrievalLevel(options.returnMetadata)
-        ) {
-          throw new Error(
-            `Invalid returnMetadata option. Expected: true, false, "none", "indexed" or "all"; got: ${options.returnMetadata}`
-          );
-        }
-
-        if (typeof options.returnMetadata === 'boolean') {
-          // Allow boolean returnMetadata for backward compatibility. true converts to 'all' and false converts to 'none'
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          options.returnMetadata = options.returnMetadata ? 'all' : 'none';
-        }
-      }
-      const res = await this._send(Operation.VECTOR_QUERY, `query`, {
-        method: 'POST',
-        body: JSON.stringify({
-          ...options,
-          vector: Array.isArray(vector) ? vector : Array.from(vector),
-        }),
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-        },
-      });
-
-      return await toJson<VectorizeMatches>(res);
+      return await this.queryImplV2(
+        { vector: Array.isArray(vector) ? vector : Array.from(vector) },
+        options
+      );
     } else {
       if (
         options &&
@@ -111,6 +90,17 @@ class VectorizeIndexImpl implements Vectorize {
       );
 
       return await toJson<VectorizeMatches>(res);
+    }
+  }
+
+  public async queryById(
+    vectorId: string,
+    options?: VectorizeQueryOptions
+  ): Promise<VectorizeMatches> {
+    if (this.indexVersion === 'v1') {
+      throw new Error(`QueryById operation is not supported for v1 indexes.`);
+    } else {
+      return await this.queryImplV2({ vectorId }, options);
     }
   }
 
@@ -261,6 +251,43 @@ class VectorizeIndexImpl implements Vectorize {
     }
 
     return res;
+  }
+
+  private async queryImplV2(
+    vectorParams: QueryImplV2Params,
+    options?: VectorizeQueryOptions
+  ): Promise<VectorizeMatches> {
+    if (options?.returnMetadata) {
+      if (
+        typeof options.returnMetadata !== 'boolean' &&
+        !isVectorizeMetadataRetrievalLevel(options.returnMetadata)
+      ) {
+        throw new Error(
+          `Invalid returnMetadata option. Expected: true, false, "none", "indexed" or "all"; got: ${options.returnMetadata}`
+        );
+      }
+
+      if (typeof options.returnMetadata === 'boolean') {
+        // Allow boolean returnMetadata for backward compatibility. true converts to 'all' and false converts to 'none'
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        options.returnMetadata = options.returnMetadata ? 'all' : 'none';
+      }
+    }
+    const res = await this._send(Operation.VECTOR_QUERY, `query`, {
+      method: 'POST',
+      body: JSON.stringify({
+        ...options,
+        ...(vectorParams.vector
+          ? { vector: vectorParams.vector }
+          : { vectorId: vectorParams.vectorId }),
+      }),
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+    });
+
+    return await toJson<VectorizeMatches>(res);
   }
 }
 
