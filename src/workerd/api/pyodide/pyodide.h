@@ -425,7 +425,8 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
 template <class Registry>
 void registerPyodideModules(Registry& registry, auto featureFlags) {
   // We add `pyodide:` packages here including python-entrypoint-helper.js.
-  if (!featureFlags.getPythonExternalBundle()) {
+  if (!featureFlags.getPythonExternalBundle() &&
+      !util::Autogate::isEnabled(util::AutogateKey::PYTHON_EXTERNAL_BUNDLE)) {
     registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
   }
   registry.template addBuiltinModule<PackagesTarReader>(
@@ -435,7 +436,8 @@ void registerPyodideModules(Registry& registry, auto featureFlags) {
 kj::Own<jsg::modules::ModuleBundle> getInternalPyodideModuleBundle(auto featureFlags) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
-  if (!featureFlags.getPythonExternalBundle()) {
+  if (!featureFlags.getPythonExternalBundle() &&
+      !util::Autogate::isEnabled(util::AutogateKey::PYTHON_EXTERNAL_BUNDLE)) {
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
   }
   return builder.finish();
@@ -444,7 +446,8 @@ kj::Own<jsg::modules::ModuleBundle> getInternalPyodideModuleBundle(auto featureF
 kj::Own<jsg::modules::ModuleBundle> getExternalPyodideModuleBundle(auto featureFlags) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
-  if (!featureFlags.getPythonExternalBundle()) {
+  if (!featureFlags.getPythonExternalBundle() &&
+      !util::Autogate::isEnabled(util::AutogateKey::PYTHON_EXTERNAL_BUNDLE)) {
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
   }
   return builder.finish();
