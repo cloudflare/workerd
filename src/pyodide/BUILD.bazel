@@ -211,27 +211,27 @@ INTERNAL_DATA_MODULES = glob([
     "internal/*.py",
     "internal/patches/*.py",
     "internal/topLevelEntropy/*.py",
-])
+]) + [
+    "generated/python_stdlib.zip",
+    "generated/pyodide.asm.wasm",
+    "generated/emscriptenSetup.js",
+]
 
 wd_ts_bundle(
     name = "pyodide",
     eslintrc_json = "eslint.config.mjs",
     import_name = "pyodide",
-    internal_data_modules = ["generated/python_stdlib.zip"] + INTERNAL_DATA_MODULES,
+    internal_data_modules = INTERNAL_DATA_MODULES,
     internal_json_modules = [
         "generated/pyodide-lock.json",
         "generated/pyodide-bucket.json",
     ],
-    internal_modules = [
-        "generated/emscriptenSetup.js",
-    ] + INTERNAL_MODULES,
-    internal_wasm_modules = ["generated/pyodide.asm.wasm"],
+    internal_modules = INTERNAL_MODULES,
     js_deps = [
         "generated/emscriptenSetup",
-        "pyodide.asm.js@rule",
         "pyodide.asm.wasm@rule",
-        "pyodide-lock.js@rule",
         "python_stdlib.zip@rule",
+        "pyodide-lock.js@rule",
         "pyodide-bucket.json@rule",
     ],
     lint = False,
@@ -264,7 +264,7 @@ genrule(
         for m in INTERNAL_DATA_MODULES
         if m.endswith(".py")
     ] + [
-        ":pyodide-internal_generated_emscriptenSetup",
+        ":pyodide-internal_generated_emscriptenSetup.js",
         ":pyodide-internal_generated_pyodide.asm.wasm",
         ":pyodide-internal_generated_python_stdlib.zip",
         ":pyodide-internal_generated_pyodide-lock.json",

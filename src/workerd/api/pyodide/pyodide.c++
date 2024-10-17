@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "pyodide.h"
 
+#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/util/string-buffer.h>
 #include <workerd/util/strings.h>
 
@@ -481,6 +482,15 @@ void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   } else {
     return;
   }
+}
+
+jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
+  js.v8Context()->SetSecurityToken(emscriptenRuntime.contextToken.getHandle(js));
+  return emscriptenRuntime.emscriptenRuntime.getHandle(js);
+}
+
+void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(emscriptenRuntime.emscriptenRuntime);
 }
 
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules) {
