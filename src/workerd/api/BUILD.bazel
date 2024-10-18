@@ -520,8 +520,9 @@ wd_test(
 ts_project(
     name = "http-test@ts_project",
     srcs = ["http-test-ts.ts"],
-    allow_js = True,
     composite = True,
+    # The declarations here are not being used anywhere, but this is needed due to https://github.com/aspect-build/rules_ts/issues/128
+    declaration = True,
     source_map = True,
     tsconfig = "tsconfig.json",
     deps = ["//src/node:node.capnp@tsproject"],

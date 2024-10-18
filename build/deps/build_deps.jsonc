@@ -113,9 +113,7 @@
       "type": "github_release",
       "owner": "aspect-build",
       "repo": "rules_ts",
-      "file_regex": "^rules_ts-",
-      // TODO(cleanup): Unpinning causes http-test@ts_project_typecheck_test to fail on Windows
-      "freeze_version": "v3.1.0"
+      "file_regex": "^rules_ts-"
     }
   ]
 }

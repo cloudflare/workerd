@@ -1,9 +1,0 @@
-{
-  "extends": "../../../tsconfig.json",
-  "compilerOptions": {
-    "checkJs": true,
-    "noEmit": true
-  },
-  "include": ["*.ts", "*.js"],
-  "files": ["../../../../../types/defines/vectorize.d.ts"]
-}
