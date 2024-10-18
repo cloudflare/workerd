@@ -1,8 +1,16 @@
-filegroup(
-    name = "url",
-    srcs = glob(
-        include = ["url/**/*"],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
+directories = glob(
+    ["*"],
+    exclude = glob(
+        ["*"],
+        exclude_directories = 1,
+    ) + [
+        ".*",
+    ],
+    exclude_directories = 0,
 )
+
+[filegroup(
+    name = dir,
+    srcs = glob(["{}/**/*".format(dir)]),
+    visibility = ["//visibility:public"],
+) for dir in directories]
