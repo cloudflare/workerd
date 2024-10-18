@@ -220,3 +220,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/process-nodejs-test.js"],
 )
+
+wd_test(
+    src = "tests/querystring-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/querystring-nodejs-test.js"],
+)
