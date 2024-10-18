@@ -229,7 +229,7 @@ declare module "cloudflare:workers" {
   };
 
   export type WorkflowEvent<T> = {
-    payload: T;
+    payload: Readonly<T>;
     timestamp: Date;
   };
 
@@ -250,6 +250,6 @@ declare module "cloudflare:workers" {
     protected ctx: ExecutionContext;
     protected env: Env;
 
-    run(event: WorkflowEvent<T>, step: WorkflowStep): Promise<unknown>;
+    run(event: Readonly<WorkflowEvent<T>>, step: WorkflowStep): Promise<unknown>;
   }
 }
