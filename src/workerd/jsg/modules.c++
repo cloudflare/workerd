@@ -23,13 +23,37 @@ namespace {
 // we'd likely need to have find return an atomic refcount or something similar.
 class CompileCache {
 public:
-  void add(const void* key, std::unique_ptr<v8::ScriptCompiler::CachedData> cached) const {
-    cache.lockExclusive()->upsert(key, kj::mv(cached), [](auto&, auto&&) {});
+  class Data {
+  public:
+    Data(): data(nullptr), length(0), owningPtr(nullptr) {};
+    explicit Data(std::shared_ptr<v8::ScriptCompiler::CachedData> cached_data)
+        : data(cached_data->data),
+          length(cached_data->length),
+          owningPtr(cached_data) {};
+
+    std::unique_ptr<v8::ScriptCompiler::CachedData> AsCachedData() {
+      return std::make_unique<v8::ScriptCompiler::CachedData>(
+          data, length, v8::ScriptCompiler::CachedData::BufferNotOwned);
+    }
+
+    const uint8_t* data;
+    size_t length;
+
+  private:
+    std::shared_ptr<void> owningPtr;
+  };
+
+  void add(kj::StringPtr key, std::shared_ptr<v8::ScriptCompiler::CachedData> cached) const {
+    cache.lockExclusive()->upsert(kj::str(key), Data(kj::mv(cached)), [](auto&, auto&&) {});
   }
 
-  kj::Maybe<v8::ScriptCompiler::CachedData&> find(const void* key) const {
-    return cache.lockShared()->find(key).map(
-        [](auto& data) -> v8::ScriptCompiler::CachedData& { return *data; });
+  kj::Maybe<Data&> find(kj::StringPtr key) const {
+    KJ_IF_SOME(value, cache.lockExclusive()->find(key)) {
+      if (value.data != nullptr) {
+        return value;
+      }
+    }
+    return kj::none;
   }
 
   static const CompileCache& get() {
@@ -39,7 +63,7 @@ public:
 
 private:
   // The key is the address of the static global that was compiled to produce the CachedData.
-  kj::MutexGuarded<kj::HashMap<const void*, std::unique_ptr<v8::ScriptCompiler::CachedData>>> cache;
+  kj::MutexGuarded<kj::HashMap<kj::String, Data>> cache;
 };
 
 // Implementation of `v8::Module::ResolveCallback`.
@@ -429,25 +453,19 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
     // may need to revisit that to import built-ins as UTF-16 (two-byte).
     contentStr = jsg::newExternalOneByteString(js, content);
 
-    // TODO(bug): The cache is failing under certain conditions. Disabling this logic
-    // for now until it can be debugged.
-    // const auto& compileCache = CompileCache::get();
-    // KJ_IF_SOME(cached, compileCache.find(content.begin())) {
-    //   v8::ScriptCompiler::Source source(contentStr, origin, &cached);
-    //   v8::ScriptCompiler::CompileOptions options = v8::ScriptCompiler::kConsumeCodeCache;
-    //   KJ_DEFER(if (source.GetCachedData()->rejected) {
-    //     KJ_LOG(ERROR, kj::str("Failed to load module '", name ,"' using compile cache"));
-    //     js.throwException(KJ_EXCEPTION(FAILED, "jsg.Error: Internal error"));
-    //   });
-    //   return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options));
-    // }
+    const auto& compileCache = CompileCache::get();
+    KJ_IF_SOME(cached, compileCache.find(name)) {
+      auto options = v8::ScriptCompiler::kConsumeCodeCache;
+      v8::ScriptCompiler::Source script_source(contentStr, origin, cached.AsCachedData().release());
+      return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &script_source, options));
+    }
 
     v8::ScriptCompiler::Source source(contentStr, origin);
     auto module = jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
 
-    auto cachedData = std::unique_ptr<v8::ScriptCompiler::CachedData>(
+    auto cachedData = std::shared_ptr<v8::ScriptCompiler::CachedData>(
         v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
-    // compileCache.add(content.begin(), kj::mv(cachedData));
+    compileCache.add(name, kj::mv(cachedData));
     return module;
   }
 
