@@ -76,6 +76,10 @@ public:
     return typeId;
   }
 
+  kj::Promise<Result> notSupported() override {
+    KJ_UNIMPLEMENTED("hibernatable web socket event not supported");
+  }
+
 private:
   // Returns `params`, but if we have a HibernationReader we convert it to a
   // HibernatableSocketParams first.
