@@ -146,7 +146,7 @@ kj::String redactUrl(kj::StringPtr url) {
   };
 
   for (const char& c: url) {
-    uint8_t lookup = kCharLookupTable[c];
+    uint8_t lookup = kCharLookupTable[static_cast<const kj::byte>(c)];
     bool isSep = lookup & CharAttributeFlag::SEPARATOR;
     bool isAlphaUpper = lookup & CharAttributeFlag::UPPER_CASE;
     bool isAlphaLower = lookup & CharAttributeFlag::LOWER_CASE;
