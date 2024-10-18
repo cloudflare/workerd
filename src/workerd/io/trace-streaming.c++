@@ -14,32 +14,13 @@ namespace {
 // In production, it likely makes more sense to use a RayID or something that can be
 // better correlated to other diagnostic and tracing mechanisms, and that can be better
 // guaranteed to be sufficiently unique across the entire production environment.
-class UuidId final: public StreamingTrace::IdFactory::Id {
-public:
-  UuidId(): uuid(randomUUID(kj::none)) {}
-  UuidId(kj::String value): uuid(kj::mv(value)) {}
-  KJ_DISALLOW_COPY_AND_MOVE(UuidId);
-
-  kj::String toString() const override {
-    return kj::str(uuid);
-  }
-
-  bool equals(const Id& other) const override {
-    return uuid == other.toString();
-  }
-
-  kj::Own<Id> clone() const override {
-    return kj::heap<UuidId>(toString());
-  }
-
-private:
-  kj::String uuid;
-};
-
 class UuidIdFactory final: public StreamingTrace::IdFactory {
 public:
-  kj::Own<Id> newId() override {
-    return kj::heap<UuidId>();
+  kj::String newTraceId() override {
+    return randomUUID(kj::none);
+  }
+  kj::String newSpanId() override {
+    return randomUUID(kj::none);
   }
 };
 
@@ -50,47 +31,45 @@ kj::Own<StreamingTrace::IdFactory> StreamingTrace::IdFactory::newUuidIdFactory()
   return kj::Own<UuidIdFactory>(&uuidIdFactory, kj::NullDisposer::instance);
 }
 
-kj::Own<const StreamingTrace::IdFactory::Id> StreamingTrace::IdFactory::newIdFromString(
-    kj::StringPtr str) {
-  // This is cheating a bit. We're not actually creating a UUID here but the UuidId class
-  // is really just a wrapper around a string so we can safely use it here.
-  return kj::heap<const UuidId>(kj::str(str));
-}
-
 // ======================================================================================
 // StreamingTrace
 
 struct StreamingTrace::Impl {
-  kj::Own<const IdFactory::Id> id;
+  kj::String id;
   trace::Onset onsetInfo;
   StreamingTrace::Delegate delegate;
   const StreamingTrace::TimeProvider& timeProvider;
   uint32_t spanCounter = 0;
   uint32_t sequenceCounter = 0;
+  StreamingTrace::IdFactory& idFactory;
 
-  Impl(kj::Own<const IdFactory::Id> id,
+  Impl(kj::String id,
       trace::Onset&& onset,
       StreamingTrace::Delegate delegate,
-      const TimeProvider& timeProvider)
+      const TimeProvider& timeProvider,
+      StreamingTrace::IdFactory& idFactory)
       : id(kj::mv(id)),
         onsetInfo(kj::mv(onset)),
         delegate(kj::mv(delegate)),
-        timeProvider(timeProvider) {}
+        timeProvider(timeProvider),
+        idFactory(idFactory) {}
 };
 
 kj::Own<StreamingTrace> StreamingTrace::create(IdFactory& idFactory,
     trace::Onset&& onset,
     Delegate delegate,
     const TimeProvider& timeProvider) {
-  return kj::heap<StreamingTrace>(idFactory.newId(), kj::mv(onset), kj::mv(delegate), timeProvider);
+  return kj::heap<StreamingTrace>(
+      idFactory.newTraceId(), kj::mv(onset), kj::mv(delegate), timeProvider, idFactory);
 }
 
-StreamingTrace::StreamingTrace(kj::Own<const IdFactory::Id> id,
+StreamingTrace::StreamingTrace(kj::String id,
     trace::Onset&& onset,
     Delegate delegate,
-    const TimeProvider& timeProvider)
+    const TimeProvider& timeProvider,
+    IdFactory& idFactory)
     : impl(kj::heap<StreamingTrace::Impl>(
-          kj::mv(id), kj::mv(onset), kj::mv(delegate), timeProvider)) {}
+          kj::mv(id), kj::mv(onset), kj::mv(delegate), timeProvider, idFactory)) {}
 
 StreamingTrace::~StreamingTrace() noexcept(false) {
   for (auto& span: spans) {
@@ -103,28 +82,23 @@ StreamingTrace::~StreamingTrace() noexcept(false) {
 }
 
 kj::Own<StreamingTrace::Span> StreamingTrace::openRootSpan(trace::EventInfo&& eventInfo) {
-  auto& i = KJ_ASSERT_NONNULL(impl, "the streaming trace is closed");
-  KJ_ASSERT(i->onsetInfo.info == kj::none, "the root span can only be opened once");
-  i->onsetInfo.info = kj::mv(eventInfo);
-  // TODO(streaming-trace): Root span needs an id
-  StreamEvent event(i->id->toString(), {.id = kj::str(0), .parent = kj::str(0)},
-      i->timeProvider.getNow(), getNextSequence(), i->onsetInfo.clone());
+  auto& i = *KJ_ASSERT_NONNULL(impl, "the streaming trace is closed");
+  KJ_ASSERT(i.onsetInfo.info == kj::none, "the root span can only be opened once");
+  i.onsetInfo.info = kj::mv(eventInfo);
+  auto spanId = i.idFactory.newSpanId();
+  StreamEvent event(kj::str(i.id), {.id = kj::str(spanId), .parent = kj::str(spanId)},
+      i.timeProvider.getNow(), getNextSequence(), i.onsetInfo.clone());
   addStreamEvent(kj::mv(event));
-  return kj::heap<StreamingTrace::Span>(spans, *this, i->id->toString());
+  return kj::heap<StreamingTrace::Span>(spans, *this, kj::str(spanId), spanId);
 }
 
 void StreamingTrace::addDropped(uint32_t start, uint32_t end) {
   KJ_IF_SOME(i, impl) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
+    StreamEvent event(kj::str(i->id), {}, i->timeProvider.getNow(), getNextSequence(),
         trace::Dropped{start, end});
     addStreamEvent(kj::mv(event));
   }
-}
-
-uint32_t StreamingTrace::getNextSpanId() {
-  auto& i = KJ_ASSERT_NONNULL(impl, "the streaming trace is closed");
-  return ++i->spanCounter;
 }
 
 uint32_t StreamingTrace::getNextSequence() {
@@ -138,9 +112,9 @@ void StreamingTrace::addStreamEvent(StreamEvent&& event) {
   }
 }
 
-kj::Maybe<const StreamingTrace::IdFactory::Id&> StreamingTrace::getId() const {
+kj::Maybe<kj::StringPtr> StreamingTrace::getId() const {
   KJ_IF_SOME(i, impl) {
-    return *i->id;
+    return i->id.asPtr();
   }
   return kj::none;
 }
@@ -157,12 +131,12 @@ struct StreamingTrace::Span::Impl {
   Impl(StreamingTrace::Span& self,
       kj::List<Span, &Span::link>& spans,
       StreamingTrace& trace,
+      kj::String id,
       kj::StringPtr parentSpan)
       : self(self),
         spans(spans),
         trace(trace),
-        // TODO(streaming-trace): Span id will be a generated string rather than a number
-        id(kj::str(this->trace.getNextSpanId())),
+        id(kj::mv(id)),
         parentSpan(kj::str(parentSpan)) {
     spans.add(self);
   }
@@ -173,9 +147,9 @@ struct StreamingTrace::Span::Impl {
   }
 
   StreamEvent makeStreamEvent(auto payload) const {
-    auto& tailId = KJ_ASSERT_NONNULL(trace.getId(), "the streaming trace is closed");
+    auto tailId = KJ_ASSERT_NONNULL(trace.getId(), "the streaming trace is closed");
     auto& traceImpl = KJ_ASSERT_NONNULL(trace.impl);
-    return StreamEvent(tailId.toString(),
+    return StreamEvent(kj::str(tailId),
         StreamEvent::Span{
           .id = kj::str(id),
           .parent = kj::str(parentSpan),
@@ -184,9 +158,11 @@ struct StreamingTrace::Span::Impl {
   }
 };
 
-StreamingTrace::Span::Span(
-    kj::List<Span, &Span::link>& parentSpans, StreamingTrace& trace, kj::StringPtr parentSpan)
-    : impl(kj::heap<Impl>(*this, parentSpans, trace, parentSpan)) {
+StreamingTrace::Span::Span(kj::List<Span, &Span::link>& spans,
+    StreamingTrace& trace,
+    kj::String id,
+    kj::StringPtr parentSpan)
+    : impl(kj::heap<Impl>(*this, spans, trace, kj::mv(id), parentSpan)) {
   KJ_DASSERT(this, link.isLinked());
 }
 
@@ -238,7 +214,8 @@ void StreamingTrace::Span::addSubrequest(trace::Subrequest&& subrequest) {
 
 kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::Span::newChildSpan() {
   KJ_IF_SOME(i, impl) {
-    return kj::heap<Span>(spans, i->trace, i->id);
+    return kj::heap<Span>(
+        spans, i->trace, KJ_ASSERT_NONNULL(i->trace.impl)->idFactory.newSpanId(), i->id);
   }
   return kj::none;
 }

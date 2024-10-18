@@ -92,20 +92,13 @@ public:
   // within a single tail stream will share the same Id
   class IdFactory {
   public:
-    class Id {
-    public:
-      virtual kj::String toString() const = 0;
-      virtual bool equals(const Id& other) const = 0;
-      virtual kj::Own<Id> clone() const = 0;
-    };
-
-    virtual kj::Own<Id> newId() = 0;
+    virtual kj::String newTraceId() = 0;
+    virtual kj::String newSpanId() = 0;
 
     // An IdFactory implementation that generates Ids that are simply
     // random UUIDs. This should generally only be used in local development
     // or standalone uses of workerd.
     static kj::Own<IdFactory> newUuidIdFactory();
-    static kj::Own<const IdFactory::Id> newIdFromString(kj::StringPtr str);
   };
 
   // The delegate is the piece that actually handles the output of the stream events
@@ -124,10 +117,11 @@ public:
 
   // The constructor is public only to support use of kj::heap. It is not intended
   // to be used directly. Use the static create(...) method instead.
-  explicit StreamingTrace(kj::Own<const IdFactory::Id> id,
+  explicit StreamingTrace(kj::String id,
       trace::Onset&& onset,
       Delegate delegate,
-      const TimeProvider& timeProvider);
+      const TimeProvider& timeProvider,
+      IdFactory& idFactory);
   ~StreamingTrace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(StreamingTrace);
 
@@ -179,24 +173,26 @@ public:
 
   public:
     // Public only to support use of kj::heap. Not intended to be called directly.
-    Span(kj::List<Span, &Span::link>& spans, StreamingTrace& trace, kj::StringPtr parentSpan);
+    Span(kj::List<Span, &Span::link>& spans,
+        StreamingTrace& trace,
+        kj::String id,
+        kj::StringPtr parent);
   };
 
   // Notify the streaming trace that events in the sequence range (start:end) have been dropped.
   void addDropped(uint32_t start, uint32_t end);
 
-  kj::Maybe<const IdFactory::Id&> getId() const;
-
   // Opens the root span associated with this streaming trace.
   // This can only be called once.
   kj::Own<Span> openRootSpan(trace::EventInfo&& eventInfo);
+
+  kj::Maybe<kj::StringPtr> getId() const;
 
 private:
   struct Impl;
   kj::Maybe<kj::Own<Impl>> impl;
   kj::List<Span, &Span::link> spans;
 
-  uint32_t getNextSpanId();
   uint32_t getNextSequence();
   void addStreamEvent(StreamEvent&& event);
 
