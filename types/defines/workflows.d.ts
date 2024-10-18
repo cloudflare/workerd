@@ -27,12 +27,14 @@ declare abstract class Workflow {
 
 type InstanceStatus = {
   status:
-    | "queued"
+    | "queued" // means that instance is waiting to be started (see concurrency limits)
     | "running"
     | "paused"
     | "errored"
-    | "terminated"
+    | "terminated" // user terminated the instance while it was running
     | "complete"
+    | "waiting" // instance is hibernating and waiting for sleep or event to finish
+    | "waitingForPause" // instance is finishing the current work to pause
     | "unknown";
   error?: string;
   output?: object;
