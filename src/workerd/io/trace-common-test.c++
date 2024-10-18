@@ -379,26 +379,5 @@ KJ_TEST("Metric works") {
   KJ_EXPECT(metric3.value == 1.0);
 }
 
-KJ_TEST("Dropped works") {
-  uint32_t a = 1;
-  uint32_t b = 2;
-  trace::Dropped dropped(a, b);
-  KJ_EXPECT(dropped.start == a);
-  KJ_EXPECT(dropped.end == b);
-
-  capnp::MallocMessageBuilder message;
-  auto builder = message.initRoot<rpc::Trace::Dropped>();
-  dropped.copyTo(builder);
-
-  auto reader = builder.asReader();
-  trace::Dropped dropped2(reader);
-  KJ_EXPECT(dropped2.start == a);
-  KJ_EXPECT(dropped2.end == b);
-
-  auto dropped3 = dropped.clone();
-  KJ_EXPECT(dropped3.start == a);
-  KJ_EXPECT(dropped3.end == b);
-}
-
 }  // namespace
 }  // namespace workerd

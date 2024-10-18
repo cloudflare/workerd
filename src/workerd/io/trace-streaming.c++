@@ -92,15 +92,6 @@ kj::Own<StreamingTrace::Span> StreamingTrace::openRootSpan(trace::EventInfo&& ev
   return kj::heap<StreamingTrace::Span>(spans, *this, kj::str(spanId), spanId);
 }
 
-void StreamingTrace::addDropped(uint32_t start, uint32_t end) {
-  KJ_IF_SOME(i, impl) {
-    KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(kj::str(i->id), {}, i->timeProvider.getNow(), getNextSequence(),
-        trace::Dropped{start, end});
-    addStreamEvent(kj::mv(event));
-  }
-}
-
 uint32_t StreamingTrace::getNextSequence() {
   auto& i = KJ_ASSERT_NONNULL(impl, "the streaming trace is closed");
   return i->sequenceCounter++;
@@ -243,9 +234,6 @@ StreamEvent::Event getEvent(const rpc::Trace::StreamEvent::Reader& reader) {
     case rpc::Trace::StreamEvent::Event::Which::ONSET: {
       return trace::Onset(event.getOnset());
     }
-    case rpc::Trace::StreamEvent::Event::Which::DROPPED: {
-      return trace::Dropped(event.getDropped());
-    }
     case rpc::Trace::StreamEvent::Event::Which::SPAN_CLOSE: {
       return trace::SpanClose(event.getSpanClose());
     }
@@ -303,9 +291,6 @@ void StreamEvent::copyTo(rpc::Trace::StreamEvent::Builder builder) const {
     KJ_CASE_ONEOF(onset, trace::Onset) {
       onset.copyTo(eventBuilder.getOnset());
     }
-    KJ_CASE_ONEOF(dropped, trace::Dropped) {
-      dropped.copyTo(eventBuilder.getDropped());
-    }
     KJ_CASE_ONEOF(span, trace::SpanClose) {
       span.copyTo(eventBuilder.getSpanClose());
     }
@@ -340,9 +325,6 @@ StreamEvent StreamEvent::clone() const {
     KJ_SWITCH_ONEOF(event) {
       KJ_CASE_ONEOF(onset, trace::Onset) {
         return onset.clone();
-      }
-      KJ_CASE_ONEOF(dropped, trace::Dropped) {
-        return dropped.clone();
       }
       KJ_CASE_ONEOF(span, trace::SpanClose) {
         return span.clone();

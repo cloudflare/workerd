@@ -55,7 +55,6 @@ struct StreamEvent final {
   uint32_t sequence;
 
   using Event = kj::OneOf<trace::Onset,
-      trace::Dropped,
       trace::SpanClose,
       trace::LogV2,
       trace::Exception,
@@ -176,9 +175,6 @@ public:
         kj::String id,
         kj::StringPtr parent);
   };
-
-  // Notify the streaming trace that events in the sequence range (start:end) have been dropped.
-  void addDropped(uint32_t start, uint32_t end);
 
   // Opens the root span associated with this streaming trace.
   // This can only be called once.

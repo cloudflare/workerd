@@ -242,14 +242,6 @@ struct Trace @0x8e8d911203762d34 {
     value @2 :Float64;
   }
 
-  struct Dropped {
-    # The Dropped struct is used to indicate that a trace has dropped a given number of
-    # events in the sequence. A Dropped events sequence number must always be greater
-    # than the sequence number specified by the end field.
-    start @0 :UInt32;
-    end @1 :UInt32;
-  }
-
   struct StreamEvent {
     id @0 :Text;
     # A unique identifier used to correlate traces across multiple events
@@ -273,20 +265,14 @@ struct Trace @0x8e8d911203762d34 {
       # When a tail stream is first created, the first event will always be
       # an onset event.
 
-      dropped @6 :Dropped;
-      # The dropped event is used to identify events that have been dropped from
-      # the stream. The start field indicates the sequence number of the first
-      # event dropped, and the end field indicates the sequence number of the
-      # last event dropped.
-
-      spanClose @7 :SpanClose;
+      spanClose @6 :SpanClose;
       # Span events mark the ending and outcome of a span.
 
-      log @8 :LogV2;
-      exception @9 :Exception;
-      diagnosticChannel @10 :DiagnosticChannelEvent;
-      metrics @11 :List(Metric);
-      subrequest @12 :Subrequest;
+      log @7 :LogV2;
+      exception @8 :Exception;
+      diagnosticChannel @9 :DiagnosticChannelEvent;
+      metrics @10 :List(Metric);
+      subrequest @11 :Subrequest;
     }
   }
 }

@@ -429,24 +429,5 @@ struct Metric final {
 };
 using Metrics = kj::Array<Metric>;
 
-// A Dropped event can be used to indicate that a specific range of events were
-// dropped from the stream. This would typically be used in cases where the process
-// may be too overloaded to successfully deliver all events to the tail worker.
-// The start/end values are inclusive and indicate the range of events (by sequence
-// number) that were dropped.
-struct Dropped final {
-  explicit Dropped(uint32_t start, uint32_t end);
-  Dropped(rpc::Trace::Dropped::Reader reader);
-  Dropped(Dropped&&) = default;
-  Dropped& operator=(Dropped&&) = default;
-  KJ_DISALLOW_COPY(Dropped);
-
-  uint32_t start;
-  uint32_t end;
-
-  void copyTo(rpc::Trace::Dropped::Builder builder) const;
-  Dropped clone() const;
-};
-
 }  // namespace trace
 }  // namespace workerd

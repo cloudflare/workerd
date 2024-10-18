@@ -750,22 +750,4 @@ Metric Metric::clone() const {
   return Metric(type, kj::str(key), value);
 }
 
-// ======================================================================================
-// Dropped
-
-Dropped::Dropped(uint32_t start, uint32_t end): start(start), end(end) {}
-
-Dropped::Dropped(rpc::Trace::Dropped::Reader reader)
-    : start(reader.getStart()),
-      end(reader.getEnd()) {}
-
-void Dropped::copyTo(rpc::Trace::Dropped::Builder builder) const {
-  builder.setStart(start);
-  builder.setEnd(end);
-}
-
-Dropped Dropped::clone() const {
-  return Dropped(start, end);
-}
-
 }  // namespace workerd::trace
